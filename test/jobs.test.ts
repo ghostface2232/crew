@@ -190,6 +190,45 @@ test('jobs left running by a previous bridge are restored as failed but resumabl
   assert.equal(restored.project, repo);
 });
 
+test('the history limit does not hide old worktrees or undelivered jobs after a restart', async () => {
+  const repo = tempRepo();
+  const first = harness((ctl) => ctl.done('ok'));
+  const job = await settled(first.jobs, await first.jobs.create({ kind: 'delegate', cwd: repo, task: 'x' }));
+  const worktree = job.worktree!;
+  first.jobs.markDelivered(job.id, job.seq);
+  first.jobs.jobs.set('unread', { ...job, id: 'unread', worktree: null, delivered: 0 });
+  for (let i = 0; i < 201; i++) {
+    const id = `history-${i}`;
+    first.jobs.jobs.set(id, { ...job, id, worktree: null, createdAt: job.createdAt + i + 1 });
+  }
+  first.jobs.flush();
+  const second = new Jobs(first.home, config, {} as never, { onEvent: () => {}, onJob: () => {}, onAttention: () => {} });
+  assert.equal(second.list().length, 202);
+  assert.equal(second.get('unread').delivered, 0);
+  await second.discard(job.id);
+  assert.equal(fs.existsSync(worktree.path), false);
+  assert.equal(execFileSync('git', ['branch', '--list', worktree.branch], { cwd: repo }).toString(), '');
+});
+
+test('discard can resume after worktree removal succeeds and branch removal fails', async () => {
+  const repo = tempRepo();
+  const { jobs } = harness((ctl) => ctl.done('ok'));
+  const job = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'x' }));
+  const worktree = job.worktree!;
+  const lock = path.join(repo, '.git', 'refs', 'heads', `${worktree.branch}.lock`);
+  fs.writeFileSync(lock, '');
+  try {
+    await assert.rejects(jobs.discard(job.id), /git branch/);
+    assert.equal(fs.existsSync(worktree.path), false);
+    assert.equal(job.worktree, worktree);
+  } finally {
+    fs.unlinkSync(lock);
+  }
+  await jobs.discard(job.id);
+  assert.equal(job.worktree, null);
+  assert.equal(execFileSync('git', ['branch', '--list', worktree.branch], { cwd: repo }).toString(), '');
+});
+
 test('a worktree can be created when the repository already has a branch named crew', async () => {
   const repo = tempRepo();
   execFileSync('git', ['branch', 'crew'], { cwd: repo });

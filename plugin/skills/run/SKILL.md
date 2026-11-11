@@ -37,7 +37,7 @@ Launch the `crew:self-reviewer` subagent on the combined change. It has none of 
 
 ## 4. Cross-review (Codex)
 
-Call `review` on the change (target `uncommitted`, or `branch` with the base). Give a `focus` naming the decisions and assumptions you are least sure about.
+Call `review` on the change (target `uncommitted`, or `branch` with the base). Pass the acceptance criteria as `done_when` and use `focus` for decisions and assumptions you are least sure about.
 
 ## 5. Fix (you)
 
@@ -51,7 +51,7 @@ Accept the result only if every changed line is wording. Reject the whole diff i
 
 ## 7. Final check and merge (you)
 
-Run the project's tests and checks on the combined result. Report what changed, what each agent contributed, what was verified, and anything skipped. Commit or merge to the user's branch only if they asked for that.
+Run the project's tests and checks on the combined result. If failures need comparison with the base, run the same checks on the base and compare the reported failing test IDs. Keep the base results for any follow-up runs. Report what changed, what each agent contributed, what was verified, and anything skipped. Commit or merge to the user's branch only if they asked for that.
 
 ## When an agent is unavailable
 

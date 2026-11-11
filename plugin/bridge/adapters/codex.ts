@@ -1,17 +1,28 @@
 import { spawn } from 'node:child_process';
+import { setTimeout as delay } from 'node:timers/promises';
 import { agentEnv, VERSION } from '../config.ts';
 import type { Config } from '../config.ts';
 import { isTerminal } from '../jobs.ts';
 import type { Adapter, JobCtl } from '../jobs.ts';
-import { RpcError, RpcPeer } from '../rpc.ts';
+import { RPC_TIMEOUT_MS, RpcError, RpcPeer, RpcTimeoutError } from '../rpc.ts';
+
+type Answer = { approve: boolean; message?: string };
+interface Pending {
+  id: string | number;
+  threadId: string;
+  type: 'approval' | 'question';
+  reason: string;
+  resolve(answer: Answer | null): void;
+}
 
 interface Run {
   ctl: JobCtl;
   /** Id of the turn in flight, or null between turns. */
   turnId: string | null;
+  awaitingTurn: boolean;
+  interrupt: ReturnType<typeof Promise.withResolvers<void>> | null;
   message: string;
-  /** Resolves the server request that put the job in the waiting state. */
-  pending: ((answer: { approve: boolean; message?: string }) => void) | null;
+  pending: Pending[];
 }
 
 export interface CodexLimits {
@@ -51,18 +62,19 @@ export class CodexAdapter implements Adapter {
 
   async start(ctl: JobCtl): Promise<void> {
     const peer = await this.ensure();
-    const res = await peer.request('thread/start', this.threadParams(ctl));
+    if (isTerminal(ctl.job)) return;
+    const res = await peer.request('thread/start', this.threadParams(ctl), RPC_TIMEOUT_MS);
+    if (isTerminal(ctl.job)) return;
     const threadId: string = res.thread.id;
-    const run: Run = { ctl, turnId: null, message: '', pending: null };
-    this.runs.set(threadId, run);
+    const run = this.openRun(ctl, threadId);
     this.loaded.add(threadId);
     ctl.session(threadId);
     // Makes the thread recognizable in the Codex app and `codex resume`.
-    peer.request('thread/name/set', { threadId, name: `Crew · ${ctl.job.title}` }).catch(() => {});
+    peer.request('thread/name/set', { threadId, name: `Crew · ${ctl.job.title}` }, RPC_TIMEOUT_MS).catch(() => {});
 
     if (ctl.job.nativeReview) {
       const target = ctl.job.nativeReview;
-      await peer.request('review/start', { threadId, target: target.type === 'commit' ? { ...target, title: null } : target });
+      await this.sendTurn(peer, run, 'review/start', { threadId, target: target.type === 'commit' ? { ...target, title: null } : target });
     } else {
       await this.startTurn(peer, run, ctl.job.prompt);
     }
@@ -72,16 +84,14 @@ export class CodexAdapter implements Adapter {
     const peer = await this.ensure();
     const threadId = ctl.job.sessionId!;
     if (!this.loaded.has(threadId)) {
-      await peer.request('thread/resume', { threadId, ...this.threadParams(ctl), excludeTurns: true });
+      await peer.request('thread/resume', { threadId, ...this.threadParams(ctl), excludeTurns: true }, RPC_TIMEOUT_MS);
       this.loaded.add(threadId);
     }
-    let run = this.runs.get(threadId);
-    if (!run) {
-      run = { ctl, turnId: null, message: '', pending: null };
-      this.runs.set(threadId, run);
-    }
+    if (isTerminal(ctl.job)) return;
+    const run = this.runs.get(threadId) ?? this.openRun(ctl, threadId);
+    if (run.awaitingTurn || run.interrupt) throw new Error('Codex has not confirmed the turn status. Check the job before sending another message.');
     if (run.turnId) {
-      await peer.request('turn/steer', { threadId, input: [textInput(message)], expectedTurnId: run.turnId });
+      await peer.request('turn/steer', { threadId, input: [textInput(message)], expectedTurnId: run.turnId }, RPC_TIMEOUT_MS);
     } else {
       await this.startTurn(peer, run, message);
     }
@@ -89,16 +99,28 @@ export class CodexAdapter implements Adapter {
 
   async answer(ctl: JobCtl, approve: boolean, message?: string): Promise<void> {
     const run = this.runs.get(ctl.job.sessionId ?? '');
-    if (!run?.pending) throw new Error('The request this job was waiting on is no longer pending.');
-    run.pending({ approve, message });
+    if (!run?.pending.length) throw new Error('The request this job was waiting on is no longer pending.');
+    this.settleRequest(run, 0, { approve, message });
   }
 
   async cancel(ctl: JobCtl): Promise<void> {
     const threadId = ctl.job.sessionId;
     const run = threadId ? this.runs.get(threadId) : undefined;
     if (!run) return;
-    run.pending?.({ approve: false });
-    if (run.turnId && this.peer) await this.peer.request('turn/interrupt', { threadId, turnId: run.turnId });
+    if (run.awaitingTurn) throw new Error('Codex has not confirmed the start of the turn. The job is still active.');
+    if (!run.turnId || !this.peer) return;
+    if (run.interrupt) throw new Error('Cancellation is already in progress.');
+    const interrupt = Promise.withResolvers<void>();
+    run.interrupt = interrupt;
+    for (const request of run.pending.splice(0)) request.resolve({ approve: false });
+    run.ctl.resumed();
+    try {
+      await this.peer.request('turn/interrupt', { threadId, turnId: run.turnId }, RPC_TIMEOUT_MS);
+      const stopped = await Promise.race([interrupt.promise.then(() => true), delay(5_000, false, { ref: false })]);
+      if (!stopped) throw new Error('Codex did not confirm cancellation. The job is still active.');
+    } finally {
+      run.interrupt = null;
+    }
   }
 
   shutdown(): void {
@@ -118,15 +140,38 @@ export class CodexAdapter implements Adapter {
     };
   }
 
-  private async startTurn(peer: RpcPeer, run: Run, text: string): Promise<void> {
-    run.message = '';
+  private openRun(ctl: JobCtl, threadId: string): Run {
+    const run: Run = { ctl, turnId: null, awaitingTurn: false, interrupt: null, message: '', pending: [] };
+    this.runs.set(threadId, run);
+    return run;
+  }
+
+  private startTurn(peer: RpcPeer, run: Run, text: string): Promise<void> {
     const { job } = run.ctl;
-    const res = await peer.request('turn/start', {
+    return this.sendTurn(peer, run, 'turn/start', {
       threadId: job.sessionId,
       input: [textInput(text)],
       effort: job.effort ?? this.config.codex.effort ?? null,
     });
-    run.turnId = res.turn.id;
+  }
+
+  private async sendTurn(peer: RpcPeer, run: Run, method: string, params: unknown): Promise<void> {
+    run.message = '';
+    run.awaitingTurn = true;
+    try {
+      const res = await peer.request(method, params, RPC_TIMEOUT_MS);
+      if (run.awaitingTurn) {
+        run.turnId = res.turn.id;
+        run.awaitingTurn = false;
+      }
+    } catch (err) {
+      if (err instanceof RpcTimeoutError) {
+        if (run.awaitingTurn) run.ctl.note(`${err.message}. The turn may have started. Check the worker session before retrying.`);
+        return;
+      }
+      run.awaitingTurn = false;
+      throw err;
+    }
   }
 
   private ensure(): Promise<RpcPeer> {
@@ -142,23 +187,24 @@ export class CodexAdapter implements Adapter {
     const child = spawn(this.config.codex.bin, ['app-server'], { env: agentEnv(), stdio: ['pipe', 'pipe', 'pipe'] });
     const peer = new RpcPeer(child, {
       onNotification: (method, params) => this.onNotification(method, params),
-      onRequest: (method, params) => this.onRequest(method, params),
+      onRequest: (method, params, id) => this.onRequest(method, params, id),
       onExit: (reason) => {
         if (this.peer === peer) this.peer = null;
         this.loaded.clear();
         this.children.clear();
         for (const run of this.runs.values()) {
           run.turnId = null;
-          run.pending = null;
+          run.interrupt?.resolve();
+          for (const request of run.pending.splice(0)) request.resolve(null);
           run.ctl.fail(`codex app-server ${reason}`);
         }
         this.runs.clear();
       },
     });
-    await peer.request('initialize', { clientInfo: { name: 'crew', title: 'Crew', version: VERSION }, capabilities: null });
+    await peer.initialize({ clientInfo: { name: 'crew', title: 'Crew', version: VERSION }, capabilities: null });
     peer.notify('initialized');
     this.peer = peer;
-    peer.request('account/rateLimits/read').then((res) => this.setLimits(res.rateLimits), () => {});
+    peer.request('account/rateLimits/read', undefined, RPC_TIMEOUT_MS).then((res) => this.setLimits(res.rateLimits), () => {});
     return peer;
   }
 
@@ -185,6 +231,12 @@ export class CodexAdapter implements Adapter {
     }
     const threadId: string | undefined = p?.threadId;
     if (!threadId) return;
+    if (method === 'serverRequest/resolved') {
+      const owner = this.runs.get(threadId) ?? this.children.get(threadId);
+      const index = owner?.pending.findIndex((request) => request.threadId === threadId && request.id === p.requestId) ?? -1;
+      if (owner && index >= 0) this.settleRequest(owner, index, null);
+      return;
+    }
     const run = this.runs.get(threadId);
     if (!run) {
       // Sub-agent work only proves the job is alive; its turns must not end the parent job.
@@ -197,6 +249,7 @@ export class CodexAdapter implements Adapter {
     switch (method) {
       case 'turn/started':
         run.turnId = p.turn.id;
+        run.awaitingTurn = false;
         run.message = '';
         ctl.phase('working');
         break;
@@ -217,22 +270,19 @@ export class CodexAdapter implements Adapter {
       case 'error':
         if (p.willRetry) ctl.progress(`retrying: ${p.error.message}`);
         break;
-      case 'serverRequest/resolved':
-        // Resolved on the server side (e.g. the turn was interrupted) while we were still waiting.
-        if (run.pending) {
-          run.pending = null;
-          ctl.resumed();
-        }
-        break;
       case 'turn/completed': {
         run.turnId = null;
+        run.awaitingTurn = false;
+        for (const request of run.pending.splice(0)) request.resolve(null);
+        for (const [child, owner] of this.children) if (owner === run) this.children.delete(child);
         const turn = p.turn;
-        if (turn.status === 'completed') ctl.done(run.message);
-        else if (turn.status === 'interrupted') ctl.cancelled();
+        if (run.interrupt || turn.status === 'interrupted') ctl.cancelled();
+        else if (turn.status === 'completed') ctl.done(run.message);
         else {
           const info = turn.error?.codexErrorInfo;
           ctl.fail(turn.error?.message ?? 'turn failed', { limit: typeof info === 'string' && LIMIT_ERRORS.includes(info) });
         }
+        run.interrupt?.resolve();
         break;
       }
       default:
@@ -287,42 +337,60 @@ export class CodexAdapter implements Adapter {
     ctl.activity();
   }
 
-  private async onRequest(method: string, p: any): Promise<unknown> {
-    const run = this.runs.get(p?.threadId);
+  private settleRequest(run: Run, index: number, answer: Answer | null): void {
+    const [request] = run.pending.splice(index, 1);
+    request.resolve(answer);
+    if (index !== 0) return;
+    const next = run.pending[0];
+    if (next) run.ctl.waiting(next.type, next.reason);
+    else run.ctl.resumed();
+  }
+
+  private async onRequest(method: string, p: any, id: string | number): Promise<unknown> {
+    const threadId = p?.threadId;
+    const run = this.runs.get(threadId) ?? this.children.get(threadId);
     const ask = (type: 'approval' | 'question', reason: string) => {
-      if (!run) return Promise.resolve({ approve: false, message: undefined as string | undefined });
-      run.ctl.waiting(type, reason);
-      return new Promise<{ approve: boolean; message?: string }>((resolve) => {
-        run.pending = (answer) => {
-          run.pending = null;
-          run.ctl.resumed();
-          resolve(answer);
-        };
+      if (!run || run.interrupt || isTerminal(run.ctl.job)) return Promise.resolve<Answer>({ approve: false });
+      if (this.children.has(threadId)) reason = `Sub-agent request\n${reason}`;
+      return new Promise<Answer | null>((resolve) => {
+        run.pending.push({ id, threadId, type, reason, resolve });
+        if (run.pending.length === 1) run.ctl.waiting(type, reason);
       });
     };
-    const why = p?.reason ? ` (${p.reason})` : '';
+    const why = p?.reason ? `\nReason: ${p.reason}` : '';
 
     switch (method) {
       case 'item/commandExecution/requestApproval': {
-        const { approve } = await ask('approval', `run: ${shortCommand(p.command ?? 'command')}${why}`);
-        return { decision: approve ? 'accept' : 'decline' };
+        const deny = p.availableDecisions && !p.availableDecisions.includes('decline') ? 'cancel' : 'decline';
+        if (p.availableDecisions && !p.availableDecisions.includes('accept')) return { decision: deny };
+        const command = p.command ? `Run:\n${p.command}` : '';
+        const network = p.networkApprovalContext ? `Network access: ${JSON.stringify(p.networkApprovalContext)}` : '';
+        if (!command && !network) {
+          run?.ctl.note('The bridge declined a command approval that omitted the command.');
+          return { decision: deny };
+        }
+        const cwd = p.cwd ? `Working directory: ${p.cwd}` : '';
+        const permissions = p.additionalPermissions ? `Additional permissions: ${JSON.stringify(p.additionalPermissions)}` : '';
+        const answer = await ask('approval', [command, cwd, network, permissions].filter(Boolean).join('\n') + why);
+        return answer ? { decision: answer.approve ? 'accept' : deny } : undefined;
       }
       case 'item/fileChange/requestApproval': {
-        const { approve } = await ask('approval', `write files${p.grantRoot ? ` under ${p.grantRoot}` : ''}${why}`);
-        return { decision: approve ? 'accept' : 'decline' };
+        const answer = await ask('approval', `write files${p.grantRoot ? ` under ${p.grantRoot}` : ''}${why}`);
+        return answer ? { decision: answer.approve ? 'accept' : 'decline' } : undefined;
       }
       case 'item/permissions/requestApproval': {
-        const wants = [p.permissions?.network && 'network access', p.permissions?.fileSystem && 'extra file access'].filter(Boolean).join(' and ');
-        const { approve } = await ask('approval', `grant ${wants || 'extra permissions'}${why}`);
+        const answer = await ask('approval', `Grant permissions:\n${JSON.stringify(p.permissions ?? {}, null, 2)}${why}`);
+        if (!answer) return;
         const granted: Record<string, unknown> = {};
-        if (approve && p.permissions?.network) granted.network = p.permissions.network;
-        if (approve && p.permissions?.fileSystem) granted.fileSystem = p.permissions.fileSystem;
+        if (answer.approve && p.permissions?.network) granted.network = p.permissions.network;
+        if (answer.approve && p.permissions?.fileSystem) granted.fileSystem = p.permissions.fileSystem;
         return { permissions: granted, scope: 'turn' };
       }
       case 'item/tool/requestUserInput': {
         const questions: any[] = p.questions ?? [];
-        const { approve, message } = await ask('question', questions.map((q) => q.question).join(' / ') || 'the worker asked a question');
-        const text = message ?? (approve ? 'Yes.' : 'No.');
+        const answer = await ask('question', questions.map((q) => q.question).join(' / ') || 'the worker asked a question');
+        if (!answer) return;
+        const text = answer.message ?? (answer.approve ? 'Yes.' : 'No.');
         return { answers: Object.fromEntries(questions.map((q) => [q.id, { answers: [text] }])) };
       }
       case 'mcpServer/elicitation/request':

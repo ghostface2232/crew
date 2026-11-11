@@ -28,13 +28,15 @@ export function describe(job: JobView, waitingHint?: string): string {
     lines.push('Still working. You are notified when it ends; call wait to block on it instead.');
   }
   if (job.state === 'waiting') {
-    lines.push(`NEEDS A DECISION: ${job.waiting!.reason}`);
+    lines.push(`NEEDS A DECISION (request ${job.waiting!.seq}):\n${job.waiting!.reason}`);
     lines.push(waitingHint ?? `This is the user's call, not yours. Call wait with job id "${job.id}" so they are asked in the app; use reply only to pass on a decision they already gave you (decision "approve" or "deny"${job.waiting!.type === 'question' ? ', or a message with the answer' : ''}).`);
+    lines.push(`When forwarding the answer, pass request_seq: ${job.waiting!.seq}.`);
   }
   if (job.error) {
     lines.push(`error: ${job.error.message}`);
     if (job.error.limit) lines.push(`${AGENT_NAMES[job.agent]} is out of usage for now. Do this piece yourself, and tell the user the ${job.kind === 'review' ? 'cross-review was skipped' : 'work was not delegated'}.`);
   }
+  if (job.tokens !== null) lines.push(`tokens: ${job.tokens.toLocaleString('en-US')}`);
   if (job.worktree) lines.push(`worktree: ${job.worktree.path} (branch ${job.worktree.branch}, base ${job.worktree.base.slice(0, 8)})`);
   if (job.result) {
     lines.push(`changes: ${job.result.stat || 'none'}${job.result.commit ? ` · commit ${job.result.commit}` : ''}`);

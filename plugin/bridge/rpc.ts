@@ -11,12 +11,16 @@ export class RpcError extends Error {
   }
 }
 
+export class RpcTimeoutError extends Error {}
+
 export interface RpcHandlers {
   onNotification(method: string, params: any): void;
-  /** Return a result, or throw RpcError. Unhandled methods should throw RpcError(-32601). */
-  onRequest(method: string, params: any): Promise<unknown>;
+  /** Return a result, or undefined if the server has already withdrawn the request. */
+  onRequest(method: string, params: any, id: string | number): Promise<unknown>;
   onExit(reason: string): void;
 }
+
+export const RPC_TIMEOUT_MS = 30_000;
 
 /**
  * Newline-delimited JSON-RPC 2.0 over a child's stdio. Both `codex app-server`
@@ -50,11 +54,18 @@ export class RpcPeer {
     return !this.closed;
   }
 
-  request<T = any>(method: string, params?: unknown): Promise<T> {
+  request<T = any>(method: string, params?: unknown, timeoutMs?: number): Promise<T> {
     if (this.closed) return Promise.reject(new Error('process is not running'));
     const id = this.nextId++;
     return new Promise<T>((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      const timer = timeoutMs === undefined ? undefined : setTimeout(() => {
+        this.pending.delete(id);
+        reject(new RpcTimeoutError(`${method} timed out after ${timeoutMs / 1000}s`));
+      }, timeoutMs);
+      this.pending.set(id, {
+        resolve: (result) => { clearTimeout(timer); resolve(result); },
+        reject: (err) => { clearTimeout(timer); reject(err); },
+      });
       this.write({ jsonrpc: '2.0', id, method, params });
     });
   }
@@ -63,8 +74,19 @@ export class RpcPeer {
     if (!this.closed) this.write({ jsonrpc: '2.0', method, params });
   }
 
+  async initialize(params: unknown): Promise<any> {
+    try {
+      return await this.request('initialize', params, RPC_TIMEOUT_MS);
+    } catch (err) {
+      this.close();
+      throw err;
+    }
+  }
+
   close(): void {
-    if (!this.closed) this.child.kill();
+    if (this.closed) return;
+    this.child.kill();
+    this.onClose('was closed');
   }
 
   private write(message: unknown): void {
@@ -78,14 +100,18 @@ export class RpcPeer {
     } catch {
       return; // Not protocol output (stray log line).
     }
+    if (this.closed || !msg || typeof msg !== 'object') return;
     if (typeof msg.method === 'string') {
       if (msg.id === undefined || msg.id === null) {
         this.handlers.onNotification(msg.method, msg.params);
         return;
       }
-      this.handlers.onRequest(msg.method, msg.params).then(
-        (result) => this.write({ jsonrpc: '2.0', id: msg.id, result: result ?? {} }),
+      this.handlers.onRequest(msg.method, msg.params, msg.id).then(
+        (result) => {
+          if (!this.closed && result !== undefined) this.write({ jsonrpc: '2.0', id: msg.id, result });
+        },
         (err) => {
+          if (this.closed) return;
           const code = err instanceof RpcError ? err.code : -32603;
           this.write({ jsonrpc: '2.0', id: msg.id, error: { code, message: String(err?.message ?? err) } });
         },

@@ -54,8 +54,9 @@ function jobCard(job) {
   }
   const callout = job.state === 'waiting'
     ? `<div class="callout"><p>${esc(job.waiting.reason)}</p><div class="actions">
-        <button class="primary" data-act="approve">${job.waiting.type === 'approval' ? 'Approve' : 'Yes'}</button>
-        <button data-act="deny">${job.waiting.type === 'approval' ? 'Deny' : 'No'}</button></div></div>`
+        <button class="primary" data-act="approve" data-request="${job.waiting.seq}">${job.waiting.type === 'approval' ? 'Approve' : 'Yes'}</button>
+        <button data-act="deny" data-request="${job.waiting.seq}">${job.waiting.type === 'approval' ? 'Deny' : 'No'}</button>
+        <span class="timer" data-from="${job.waiting.since}" data-suffix=" waiting"></span></div></div>`
     : '';
   const command = `${job.agent === 'codex' ? 'codex resume' : 'agy --conversation'} ${job.sessionId}`;
   const resume = job.sessionId && !active
@@ -75,6 +76,7 @@ function jobCard(job) {
       ${detail}${callout}
       <div class="row foot">
         <span class="id">${esc(job.id)}</span>
+        ${!active && job.tokens != null ? `<span>${job.tokens.toLocaleString()} tokens</span>` : ''}
         ${job.project ? `<span class="branch" title="${esc(job.project)}">${esc(shortPath(job.project))}</span>` : ''}
         <span class="actions">${resume}${cancel}</span>
       </div>`,
@@ -141,7 +143,7 @@ function countMeta(active) {
 
 function render() {
   const order = { waiting: 0, working: 1, error: 2, idle: 3 };
-  const claude = [...sessions.values()].sort((a, b) => order[a.state] - order[b.state] || b.activeAt - a.activeAt);
+  const claude = [...sessions.values()].sort((a, b) => order[a.state] - order[b.state] || b.startedAt - a.startedAt || a.id.localeCompare(b.id));
   renderLane('claude', claude.map(sessionCard), countMeta(claude.filter((s) => s.state !== 'idle').length));
 
   for (const agent of ['codex', 'antigravity']) {
@@ -191,7 +193,7 @@ document.addEventListener('click', async (e) => {
   button.disabled = true;
   try {
     if (act === 'cancel') await post(`/api/jobs/${id}/cancel`);
-    else await post(`/api/jobs/${id}/reply`, { decision: act });
+    else await post(`/api/jobs/${id}/reply`, { decision: act, request_seq: Number(button.dataset.request) });
   } catch (err) {
     button.disabled = false;
     button.textContent = `${button.textContent} — ${err.message}`;

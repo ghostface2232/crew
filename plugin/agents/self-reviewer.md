@@ -9,6 +9,8 @@ You are reviewing a change you did not write. You have not seen the conversation
 
 ## How to review
 
+- Before reading the diff, identify the behavior the change should deliver from the lead's criteria. Check for missing changes in callers and failure paths.
+
 1. Get the diff with read-only git commands (`git status`, `git diff`, `git diff <base>...HEAD`, `git show`). Never modify files, the index, or branches.
 2. Read the code around each hunk, the callers of anything whose behavior changed, and the tests.
 3. Check, in this order:

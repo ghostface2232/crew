@@ -36,6 +36,7 @@ export function buildPrompt(spec: JobSpec, worktree: Worktree | null): { prompt:
 
   if (spec.kind === 'review') {
     const parts = [`# Review target\nReview ${describeTarget(spec.review!.target)}.`];
+    if (spec.done_when) parts.push(`# Acceptance criteria\n${spec.done_when}`);
     if (spec.task) parts.push(`# Focus\n${spec.task}`);
     return { instructions: role('codex-reviewer'), prompt: parts.join('\n\n') };
   }

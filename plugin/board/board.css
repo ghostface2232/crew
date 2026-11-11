@@ -117,6 +117,7 @@ h1 { font-size: 18px; font-weight: 650; letter-spacing: -0.01em; }
 
 /* Inner radius = card radius - card padding would be 0, so the callout keeps the control radius as its own surface. */
 .callout { display: grid; gap: 8px; padding: 10px; background: var(--sunken); border-radius: var(--radius-control); font-size: 13px; overflow-wrap: anywhere; }
+.callout p { white-space: pre-wrap; }
 .actions { display: flex; flex-wrap: wrap; gap: 6px; }
 
 .foot { color: var(--muted); font-size: 12px; }

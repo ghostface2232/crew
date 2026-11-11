@@ -73,6 +73,7 @@ const TOOLS = [
         commit: { type: 'string', description: 'Commit SHA for target "commit".' },
         focus: { type: 'string', description: 'What to scrutinize: the design decisions, assumptions or risks you are least sure about.' },
         mode: { type: 'string', enum: ['adversarial', 'standard'], description: 'adversarial (default): challenges design and assumptions. standard: Codex\'s built-in code review.' },
+        done_when: { type: 'string', description: 'Acceptance criteria to verify in adversarial mode.' },
         ...codexProps,
         ...common,
       },
@@ -124,6 +125,7 @@ const TOOLS = [
         job_id: { type: 'string' },
         message: { type: 'string', description: 'Follow-up instruction, or the answer to the worker\'s question.' },
         decision: { type: 'string', enum: ['approve', 'deny'], description: 'The user\'s decision for a job waiting on approval.' },
+        request_seq: { type: 'number', description: 'Request number from the job status when forwarding the user\'s answer.' },
         background: common.background,
       },
       required: ['job_id'],
@@ -153,7 +155,7 @@ let canElicit = false;
  */
 const dismissed = new Set<string>();
 const failed = new Map<string, string>();
-const promptKey = (job: JobView) => `${job.id}:${job.seq}`;
+const promptKey = (job: JobView) => `${job.id}:${job.waiting?.seq}`;
 
 const APPROVAL_FORM = {
   type: 'object',
@@ -178,22 +180,23 @@ function oneAtATime<T>(ask: () => Promise<T>): Promise<T> {
  * answer to the worker.
  */
 async function askUser(job: JobView, signal: AbortSignal): Promise<'settled' | 'dismissed' | 'failed'> {
+  const waiting = job.waiting!;
   // While queued behind another prompt, this request may have been answered on the board, or the call cancelled.
   const current: JobView = await api('GET', `/api/jobs/${job.id}`);
-  if (signal.aborted || current.state !== 'waiting' || current.seq !== job.seq) return 'settled';
+  if (signal.aborted || current.waiting?.seq !== waiting.seq) return 'settled';
 
-  const approval = job.waiting!.type === 'approval';
+  const approval = waiting.type === 'approval';
   const prompt = request('elicitation/create', {
-    message: `${AGENT_NAMES[job.agent]} (${job.title}) ${approval ? 'asks for approval to' : 'asks:'} ${job.waiting!.reason}`,
+    message: `${AGENT_NAMES[job.agent]} (${job.title}) ${approval ? 'requests approval' : 'asks a question'}\n\n${waiting.reason}`,
     requestedSchema: approval ? APPROVAL_FORM : ANSWER_FORM,
   });
 
   // The same request can be answered on the status board, or the call can be cancelled; then the prompt is moot.
   let open = true;
   const moot = (async () => {
-    let latest = job;
-    while (open && !signal.aborted && latest.state === 'waiting' && latest.seq === job.seq) {
-      latest = (await api('GET', `/api/jobs/${job.id}/wait?after=${job.seq}&timeout=5`)).job;
+    let latest = current;
+    while (open && !signal.aborted && latest.waiting?.seq === waiting.seq) {
+      latest = (await api('GET', `/api/jobs/${job.id}/wait?after=${latest.seq}&timeout=5`)).job;
     }
   })().then(
     () => null,
@@ -221,7 +224,7 @@ async function askUser(job: JobView, signal: AbortSignal): Promise<'settled' | '
     : typeof answer?.answer === 'string' && answer.answer.trim() && { message: answer.answer };
   if (!body) return 'dismissed';
   // Already answered elsewhere in the meantime is fine: the worker has its decision.
-  await api('POST', `/api/jobs/${job.id}/reply`, body).catch(() => {});
+  await api('POST', `/api/jobs/${job.id}/reply`, { ...body, request_seq: waiting.seq }).catch(() => {});
   return 'settled';
 }
 
@@ -312,7 +315,7 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       const target = kind === 'branch' ? { type: 'baseBranch' as const, branch: args.base } : kind === 'commit' ? { type: 'commit' as const, sha: args.commit } : { type: 'uncommittedChanges' as const };
       // The focus can be long; the board title only needs to say what is under review.
       const title = `Review of ${kind === 'branch' ? `the branch against ${args.base}` : kind === 'commit' ? `commit ${args.commit.slice(0, 8)}` : 'uncommitted changes'}`;
-      return runJob({ kind: 'review', cwd, title, task: args.focus, review: { target, mode: args.mode ?? 'adversarial' }, model: args.model, effort: args.effort }, Boolean(args.background), ctx);
+      return runJob({ kind: 'review', cwd, title, task: args.focus, done_when: args.done_when, review: { target, mode: args.mode ?? 'adversarial' }, model: args.model, effort: args.effort }, Boolean(args.background), ctx);
     }
     case 'polish':
       return runJob({ kind: 'polish', cwd, title: args.title ?? `Polish ${args.targets.join(', ')}`, task: args.guidance, targets: args.targets, base: args.base, isolation: args.isolation }, Boolean(args.background), ctx);
@@ -348,7 +351,7 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       return parts.join('\n\n────────\n\n');
     }
     case 'reply': {
-      await api('POST', `/api/jobs/${args.job_id}/reply`, { message: args.message, decision: args.decision });
+      await api('POST', `/api/jobs/${args.job_id}/reply`, { message: args.message, decision: args.decision, request_seq: args.request_seq });
       return args.background ? describe(await api('GET', `/api/jobs/${args.job_id}`)) : followOne(args.job_id, ctx);
     }
     case 'cancel': {

@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { constants, existsSync, realpathSync } from 'node:fs';
+import { constants, existsSync, lstatSync, realpathSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -42,14 +42,18 @@ export async function dirtyCount(root: string): Promise<number> {
  */
 export async function createWorktree(root: string, id: string, baseRef: string, home: string): Promise<Worktree> {
   const base = await git(root, ['rev-parse', '--verify', `${baseRef}^{commit}`]);
-  // The hash keeps two repositories with the same folder name apart.
-  const repoKey = `${path.basename(root)}-${createHash('sha256').update(root).digest('hex').slice(0, 8)}`;
-  const wtPath = path.join(home, 'worktrees', repoKey, id);
+  const wtPath = worktreePath(root, id, home);
   await fs.mkdir(path.dirname(wtPath), { recursive: true });
   // Flat rather than `crew/<id>`: a repository with a branch named `crew` cannot also have `crew/...`.
   const branch = `crew-${id}`;
   await git(root, ['worktree', 'add', '-b', branch, wtPath, base]);
   return { path: wtPath, branch, base };
+}
+
+function worktreePath(root: string, id: string, home: string): string {
+  // The hash keeps two repositories with the same folder name apart.
+  const repoKey = `${path.basename(root)}-${createHash('sha256').update(root).digest('hex').slice(0, 8)}`;
+  return path.join(home, 'worktrees', repoKey, id);
 }
 
 /**
@@ -131,7 +135,30 @@ export async function changesSince(wt: string, base: string): Promise<{ files: s
   return { files: names ? names.split('\n') : [], stat };
 }
 
-export async function removeWorktree(root: string, wt: Worktree): Promise<void> {
-  await git(root, ['worktree', 'remove', '--force', wt.path]);
-  await git(root, ['branch', '-D', wt.branch]);
+export async function removeWorktree(root: string, wt: Worktree, id: string, home: string): Promise<void> {
+  const worktrees = path.join(home, 'worktrees');
+  if (!/^(cx|ag)-[0-9a-f]{6}$/.test(id) || wt.branch !== `crew-${id}`
+      || path.resolve(wt.path) !== path.resolve(worktreePath(root, id, home))
+      || !isInside(worktrees, wt.path) || !isInside(home, worktrees)) {
+    throw new Error('Refusing to remove a worktree outside the Crew worktree directory.');
+  }
+  const entries = (await git(root, ['worktree', 'list', '--porcelain', '-z'])).split('\0\0');
+  const registered = entries.map((entry) => entry.split('\0')).find(
+    ([dir]) => dir.startsWith('worktree ') && realpath(dir.slice(9)) === realpath(wt.path),
+  );
+  const dir = lstatSync(wt.path, { throwIfNoEntry: false });
+  if (registered) {
+    if (dir && (!dir.isDirectory() || !lstatSync(path.join(wt.path, '.git'), { throwIfNoEntry: false })?.isFile())) {
+      throw new Error(`Refusing to remove ${wt.path}: it is no longer a linked worktree.`);
+    }
+    if (!registered.includes(`branch refs/heads/${wt.branch}`)) {
+      throw new Error(`Refusing to remove ${wt.path}: Git lists it under a different branch.`);
+    }
+    await git(root, ['worktree', 'remove', '--force', wt.path]);
+  } else if (dir) {
+    throw new Error(`Refusing to remove ${wt.path}: Git no longer lists it as a worktree.`);
+  }
+  if (await git(root, ['branch', '--list', '--format=%(refname:short)', wt.branch])) {
+    await git(root, ['branch', '-D', wt.branch]);
+  }
 }

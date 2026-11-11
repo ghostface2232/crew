@@ -76,7 +76,7 @@ export interface Job {
   endedAt: number | null;
   turns: number;
   stalled: boolean;
-  waiting: { type: 'approval' | 'question'; reason: string } | null;
+  waiting: { type: 'approval' | 'question'; reason: string; seq: number; since: number } | null;
   /** The worker's final message for the latest turn. */
   report: string;
   result: { files: string[]; stat: string; commit: string | null; outOfScope: string[] } | null;
@@ -139,6 +139,8 @@ export class Jobs {
   private seq = 0;
   private waiters = new Map<string, Set<() => void>>();
   private touchedFiles = new Map<string, Set<string>>();
+  private discarding = new Set<string>();
+  private finalizing = new Set<string>();
   private saveTimer: NodeJS.Timeout | null = null;
   private home: string;
   private config: Config;
@@ -236,6 +238,7 @@ export class Jobs {
     };
     this.jobs.set(id, job);
     this.event(job, 'started', `${spec.kind}: ${title}`);
+    if (worktree) this.flush();
 
     const ctl = this.ctl(job);
     // Session setup can take seconds; the caller gets the job id right away and follows via wait.
@@ -243,17 +246,26 @@ export class Jobs {
     return job;
   }
 
-  async reply(id: string, input: { message?: string; decision?: 'approve' | 'deny' }): Promise<Job> {
+  async reply(id: string, input: { message?: string; decision?: 'approve' | 'deny'; request_seq?: number }): Promise<Job> {
     const job = this.get(id);
+    if (this.discarding.has(id)) throw new Error(`Job ${id} is being discarded.`);
+    if (this.finalizing.has(id)) throw new Error(`Job ${id} is collecting its result. Wait for it to finish.`);
     const ctl = this.ctl(job);
     const adapter = this.adapters[job.agent];
+    if (input.request_seq !== undefined && input.request_seq !== job.waiting?.seq) {
+      throw new Error('That request is no longer pending. Check the current job before answering.');
+    }
+    if (input.decision !== undefined && input.decision !== 'approve' && input.decision !== 'deny') {
+      throw new Error('Pass decision "approve" or "deny".');
+    }
     if (job.waiting) {
       // A message alone must never count as approval: the lead may only be asking the worker why.
       if (job.waiting.type === 'approval' && !input.decision) throw new Error(`Job ${id} is waiting for approval (${job.waiting.reason}). Pass decision "approve" or "deny".`);
-      if (!input.decision && !input.message) throw new Error(`Job ${id} asked a question (${job.waiting.reason}). Pass a message with the answer, or a decision.`);
+      if (!input.decision && !input.message?.trim()) throw new Error(`Job ${id} asked a question (${job.waiting.reason}). Pass a message with the answer, or a decision.`);
       await adapter.answer(ctl, input.decision !== 'deny', input.message);
       return job;
     }
+    if (input.decision !== undefined) throw new Error(`Job ${id} is not waiting for a decision.`);
     if (!input.message) throw new Error(`Job ${id} is not waiting for a decision. Pass a message to send a follow-up.`);
     if (!job.sessionId) throw new Error(`Job ${id} never opened a session, so there is nothing to continue. Start a new job instead.`);
     if (!isTerminal(job)) {
@@ -262,6 +274,7 @@ export class Jobs {
       return job;
     }
     job.state = 'running';
+    job.phase = 'starting';
     job.endedAt = null;
     job.error = null;
     job.turns += 1;
@@ -274,9 +287,9 @@ export class Jobs {
   async cancel(id: string): Promise<Job> {
     const job = this.get(id);
     if (isTerminal(job)) return job;
+    if (this.finalizing.has(id)) throw new Error(`Job ${id} is collecting its result. Wait for it to finish.`);
     const ctl = this.ctl(job);
-    await this.adapters[job.agent].cancel(ctl).catch(() => {});
-    // Adapters confirm through ctl.cancelled(); this covers a worker that never answers.
+    await this.adapters[job.agent].cancel(ctl);
     ctl.cancelled();
     return job;
   }
@@ -285,11 +298,18 @@ export class Jobs {
   async discard(id: string): Promise<Job> {
     const job = this.get(id);
     if (!isTerminal(job)) throw new Error(`Job ${id} is still ${job.state}; cancel it first.`);
+    if (this.discarding.has(id)) throw new Error(`Job ${id} is already being discarded.`);
     if (job.worktree && job.repo) {
-      await removeWorktree(job.repo, job.worktree);
-      job.worktree = null;
-      job.notes.push('Worktree and branch removed.');
-      this.changed(job);
+      this.discarding.add(id);
+      try {
+        await removeWorktree(job.repo, job.worktree, job.id, this.home);
+        job.worktree = null;
+        job.notes.push('Worktree and branch removed.');
+        this.changed(job);
+        this.flush();
+      } finally {
+        this.discarding.delete(id);
+      }
     }
     return job;
   }
@@ -325,6 +345,7 @@ export class Jobs {
     return {
       job,
       activity: () => {
+        if (!live()) return;
         job.activeAt = Date.now();
         if (job.stalled) {
           job.stalled = false;
@@ -367,7 +388,8 @@ export class Jobs {
       waiting: (type, reason) => {
         if (!live()) return;
         job.state = 'waiting';
-        job.waiting = { type, reason };
+        job.stalled = false;
+        job.waiting = { type, reason, seq: this.seq + 1, since: Date.now() };
         job.phase = type === 'approval' ? 'needs approval' : 'has a question';
         this.event(job, 'waiting', reason);
         this.hooks.onAttention(job, 'waiting', reason);
@@ -381,16 +403,20 @@ export class Jobs {
         this.event(job, 'progress', 'resumed');
       },
       done: (report) => {
-        if (!live()) return;
-        this.finalize(job, report).catch((err) => this.fail(job, `could not collect the result: ${err.message}`, false));
+        if (!live() || this.finalizing.has(job.id)) return;
+        this.finalizing.add(job.id);
+        this.finalize(job, report)
+          .catch((err) => { if (live()) this.fail(job, `could not collect the result: ${err.message}`, false); })
+          .finally(() => this.finalizing.delete(job.id));
       },
       fail: (message, opts) => {
-        if (live()) this.fail(job, message, opts?.limit ?? false);
+        if (live() && !this.finalizing.has(job.id)) this.fail(job, message, opts?.limit ?? false);
       },
       cancelled: () => {
         if (!live()) return;
         job.state = 'cancelled';
         job.waiting = null;
+        job.stalled = false;
         job.endedAt = Date.now();
         job.phase = 'cancelled';
         this.event(job, 'cancelled', 'cancelled');
@@ -418,6 +444,7 @@ export class Jobs {
     job.result = result;
     job.state = 'done';
     job.waiting = null;
+    job.stalled = false;
     job.endedAt = Date.now();
     job.phase = 'done';
     this.event(job, 'done', result?.stat || headline(report) || 'finished');
@@ -427,6 +454,7 @@ export class Jobs {
   private fail(job: Job, message: string, limit: boolean): void {
     job.state = 'failed';
     job.waiting = null;
+    job.stalled = false;
     job.endedAt = Date.now();
     job.error = { message, limit };
     job.phase = limit ? 'usage limit reached' : 'failed';
@@ -475,7 +503,10 @@ export class Jobs {
   }
 
   private save(): void {
-    const keep = this.list().slice(0, KEEP_JOBS);
+    let history = 0;
+    const keep = this.list().filter((job) =>
+      job.worktree || !isTerminal(job) || job.seq > job.delivered || history++ < KEEP_JOBS,
+    );
     const file = path.join(this.home, 'jobs.json');
     fs.writeFileSync(`${file}.tmp`, JSON.stringify({ seq: this.seq, jobs: keep }));
     fs.renameSync(`${file}.tmp`, file);
@@ -504,7 +535,8 @@ export class Jobs {
         job.waiting = null;
         job.endedAt = Date.now();
         job.phase = 'failed';
-        job.error = { message: 'The bridge restarted while this job was running. Use reply to continue the same session.', limit: false };
+        const next = job.sessionId ? 'Use reply to continue the same session.' : 'Start a new job.';
+        job.error = { message: `The bridge restarted while this job was running. ${next}`, limit: false };
       }
       this.jobs.set(job.id, job);
     }

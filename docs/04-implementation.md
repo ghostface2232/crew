@@ -39,6 +39,67 @@ plugin/bridge/mcp.ts ──HTTP──▶ Crew Daemon (127.0.0.1:47615)
 - Although the daemon is shared across sessions, each job belongs to the project of the session that started it. Argument-less `wait` and `status` listings filter to the caller's project, while the status board and `crew status` show all projects.
 - Workers do not commit—and cannot, because the worktree's git metadata sits outside their sandbox. When a job finishes, the bridge commits to the job branch, and the lead inspects the diff to merge or reject it.
 
+### 2.1 Role assignments
+
+Each tool is a role, and `roles` in `~/.crew/config.json` names the agent that holds it. With no `roles` entry the defaults apply, which are the original fixed roles (requirement R3).
+
+```json
+{
+  "roles": {
+    "delegate": { "agent": "codex" },
+    "review": { "agent": "codex", "effort": "high" },
+    "polish": { "agent": "antigravity" }
+  }
+}
+```
+
+- `agent` is `codex` or `antigravity`. `model` and `effort` are optional and override the agent's own settings for that role; a `model` or `effort` passed to the tool overrides both. Antigravity has no effort setting.
+- The table is read when a job starts, so an edit applies to the next job without a restart. A table that is not exactly valid (unknown role or setting, wrong type, unknown agent) fails that job with the reason; it never falls back to the defaults or the previous assignments. Other settings are still read when the daemon starts.
+- The role text (`plugin/roles/engineer.md`, `reviewer.md`, `polisher.md`) names no agent. Codex receives it as `developerInstructions`; Antigravity receives it at the top of the first prompt, because ACP has no instruction channel.
+- The lead's tool titles and server instructions name the role holders as of session start. `status` and every job result name the agent that actually ran.
+- The board shows the roles each agent holds and updates when the file changes.
+
+What each agent may do in each role:
+
+| Role | Codex | Antigravity |
+| --- | --- | --- |
+| `delegate` | `workspace-write` sandbox; approvals follow `codex.approvalPolicy` | Reads anywhere, edits inside the worktree. Every other action (commands, deletes, moves, network) is put to the user as an approval, unless the request omits its input, in which case it is refused |
+| `review` | `read-only` sandbox, never prompts. `mode: "standard"` uses Codex's built-in review | Reads only. Edits and commands are refused and listed in the job's notes. Because it cannot run git, the bridge saves the diff to `~/.crew/reviews/<job id>.diff` for it (removed when the review ends) and the job notes say that no tests or checks were run. `mode: "standard"` falls back to the prompted review, also noted. Needs a git repository |
+| `polish` | `workspace-write` sandbox. Scope is checked after the fact: files outside `targets` are reported as out of scope | Reads anywhere, edits inside the worktree. Everything else is refused |
+
+Antigravity approvals follow the same rules as Codex approvals (section 5.1): the user answers, the prompt shows the whole request (every input field, not only the command) and the job workspace, requests are answered one at a time in arrival order, and the bridge only ever answers "allow once". A denial is sent as "reject once" whenever that is offered. Cancelling the job, the end of the turn, or the server exiting answers any open request as cancelled. No role may switch Antigravity's mode, because "accept-edits" skips the per-edit path check (section 10).
+
+Verified on 2026-11-12 with Codex CLI 0.167.0 and Antigravity CLI 1.5.5, in a throwaway repository on a separate daemon, with the roles swapped:
+
+| Run | Result |
+| --- | --- |
+| Antigravity as `delegate` | Edited two files in its worktree, then asked to run the tests. The approval showed the whole request: Antigravity sends the command as `rawInput.CommandLine` alongside other fields, so the prompt prints the full input as JSON. After approval the tests ran, and the bridge committed the result on the job branch |
+| Antigravity as `review` | Reviewed uncommitted changes from the saved diff, including an untracked file, found the planted defect, and listed the test run under "Not verified". Both notes were attached, and the diff file was removed when the job ended |
+| Codex as `polish` | Rewrote the one target file and nothing else; no approval was requested. It used about 166,000 tokens for a three-line README |
+
+Not exercised against the real services: denying an Antigravity request, a request without `rawInput`, and a mode switch. These are covered by protocol stubs only.
+
+### 2.2 Shared instructions
+
+Instructions written once reach every agent (requirement R9).
+
+| File | Applies to |
+| --- | --- |
+| `~/.crew/instructions.md` | Every project |
+| `.crew/instructions.md` at the repository root | That project. Read last, so it can refine the global file |
+
+- Workers: both files are read when a job starts and appended to the job's instructions after the role text, with a preface saying they apply within the role and do not widen it. Codex receives them in `developerInstructions`, Antigravity at the top of its first prompt. `status` lists the files a job was given.
+- Claude: a `SessionStart` and `SubagentStart` command hook (`bridge/context.ts`) prints them as `additionalContext`, so the lead and its subagents have them too. It runs again after compaction. The text tells the lead that workers already have the instructions, so delegated tasks need not repeat them.
+- The project file is looked up in the repository's main working tree, for a worker job and a Claude session alike, even when either starts inside a linked worktree or a subdirectory. An uncommitted edit therefore applies to the next job. Outside a repository, the session's project directory is used.
+- Nothing is written to any service's own instruction files (`AGENTS.md`, `CLAUDE.md`, rules folders).
+- A missing or empty file means none. A file that exists but cannot be read fails the job with the reason. The hook reports any failure of its own (unreadable file, git error, malformed input) in the session instead of exiting quietly.
+- Claude Code replaces hook context over 10,000 characters with a 2,000-character preview. A file that would take the total past 9,000 characters is replaced by its path, with a statement that none of it is in context until read; files that fit are still sent whole. A cut-off copy is never sent, because it would look complete. Workers have no such limit in the bridge.
+- A project file is part of the repository, so it is trusted to the same degree as that repository's `AGENTS.md` or `CLAUDE.md`, and may have been written by someone other than the user. Each part is therefore headed by where it comes from. It cannot widen a role: what a role may do is enforced by the bridge and the sandbox, not by the text. It can still steer an agent within its role, and because it is read last it can contradict the global file.
+
+Verified on 2026-11-12 with marker instructions in both files (write in English, end with a fixed line, use a given word in the first sentence): a Codex review, an Antigravity polish, and a headless Claude Code 2.1.321 session each followed or quoted both. The Codex report came back in English although the same setup had reported in Korean before, so shared instructions took precedence over the user's own Codex defaults in that run.
+
+Not verified: whether `SubagentStart` context reaches a real subagent (the hook's output for that event was only checked by running the script), whether Claude Code counts the 10,000-character cap per hook or across all hooks of an event, and whether Codex's built-in review mode honors `developerInstructions`.
+
 ## 3. Changes from the plan
 
 | Area | Document 02 | Implementation | Reason |
@@ -160,3 +221,5 @@ Not yet verified:
   - Backfilled the repository path as the owning project when loading jobs saved before project tracking existed.
   - Insulated bridge delivery commits from the user's git commit config by disabling commit signing and falling back to `Crew <crew@localhost>` when git user identity is unset, preventing background daemon commits from hanging on an invisible GPG/SSH passphrase prompt.
   - Renamed job branches from `crew/<job id>` to `crew-<job id>`, because git cannot create `crew/...` refs if a branch named `crew` already exists in the repository.
+- 2026-11-12: Added shared instructions (section 2.2, roadmap item A2).
+- 2026-11-12: Roles are no longer fixed in code (section 2.1, roadmap item A1). Requirement R3 changed from fixed roles to default roles the user can reassign. The row "Antigravity role enforcement" in section 3 now describes only the editor role; the bridge decides permission requests by the role of the job.

@@ -1,5 +1,5 @@
 {
-  "description": "Reports this session's activity to the Crew status board, and wakes the lead when a background job ends.",
+  "description": "Reports this session's activity to the Crew status board, gives the session the user's shared crew instructions, and wakes the lead when a background job ends.",
   "hooks": {
     "SessionStart": [
       {
@@ -8,6 +8,14 @@
             "type": "command",
             "command": "curl -s -m 2 -o /dev/null -X POST -H 'content-type: application/json' --data-binary @- http://127.0.0.1:47615/api/hooks/claude || true",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/bridge/context.ts"
+            ],
+            "timeout": 10
           }
         ]
       }
@@ -77,6 +85,14 @@
             "type": "http",
             "url": "http://127.0.0.1:47615/api/hooks/claude",
             "timeout": 2
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/bridge/context.ts"
+            ],
+            "timeout": 10
           }
         ]
       }

@@ -1,6 +1,6 @@
 ---
 name: self-reviewer
-description: Reviews the lead's own change with fresh eyes, before the Codex cross-review. Starts without the conversation's context, so it sees the diff the way a new reader would. Tell it what to review (uncommitted changes, a branch against its base, or a commit) and what the change is meant to do.
+description: Reviews the lead's own change with fresh eyes, before the cross-review. Starts without the conversation's context, so it sees the diff the way a new reader would. Tell it what to review (uncommitted changes, a branch against its base, or a commit) and what the change is meant to do.
 tools: Read, Grep, Glob, Bash
 color: blue
 ---

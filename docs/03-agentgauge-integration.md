@@ -180,7 +180,7 @@ Input: `tool`, `account`, `detail` (error text), `observed_at`. Called immediate
 | Claude `tight` | Shift more implementation slices to Codex while Claude focuses on planning and merge decisions |
 | Claude nearing exhaustion | Write a handoff note and run `/codex:transfer` to hand the session to a Codex thread, making Codex temporary lead |
 
-Antigravity is never promoted to implementation or code review; R3 restricts it to wording and documentation cleanup.
+Routing never promotes Antigravity to implementation or code review. Its default role under R3 is wording and documentation cleanup, and only the user can assign it another.
 
 ### 8.3 Watchdog
 

@@ -3,7 +3,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { agentEnv, VERSION } from '../config.ts';
 import type { Config } from '../config.ts';
 import { isTerminal } from '../jobs.ts';
-import type { Adapter, JobCtl } from '../jobs.ts';
+import type { Adapter, JobCtl, JobKind } from '../jobs.ts';
 import { isInside } from '../git.ts';
 import { RPC_TIMEOUT_MS, RpcError, RpcPeer } from '../rpc.ts';
 
@@ -15,10 +15,12 @@ interface Run {
   message: string;
   /** Last non-empty text before that, in case the turn ends right after a tool call. */
   earlier: string;
+  /** Permission requests waiting on the user, in arrival order. The first is the one shown. */
+  pending: { reason: string; resolve: (approve: boolean | null) => void }[];
 }
 
-/** ACP tool kinds the editor role may use. Everything else (execute, delete, move, fetch, ...) is refused. */
-const ALLOWED_KINDS = ['read', 'edit', 'search', 'think'];
+/** ACP tool kinds that cannot change anything. */
+const PASSIVE_KINDS = ['read', 'search', 'think'];
 const LIMIT_PATTERN = /quota|rate.?limit|resource.?exhausted|\b429\b|credits? balance/i;
 const IDLE_SHUTDOWN_MS = 10 * 60_000;
 
@@ -52,7 +54,7 @@ export class AntigravityAdapter implements Adapter {
     const res = await peer.request('session/new', { cwd: ctl.job.cwd, mcpServers: [] }, RPC_TIMEOUT_MS);
     if (isTerminal(ctl.job)) return;
     const sessionId: string = res.sessionId;
-    const run: Run = { ctl, prompting: null, cancelling: false, message: '', earlier: '' };
+    const run: Run = { ctl, prompting: null, cancelling: false, message: '', earlier: '', pending: [] };
     this.runs.set(sessionId, run);
     this.loaded.add(sessionId);
     ctl.session(sessionId);
@@ -62,7 +64,8 @@ export class AntigravityAdapter implements Adapter {
     const model = ctl.job.model ?? this.config.antigravity.model;
     if (model) await peer.request('session/set_config_option', { sessionId, configId: 'model', value: model }, RPC_TIMEOUT_MS);
 
-    if (!isTerminal(ctl.job)) this.prompt(peer, run, ctl.job.prompt);
+    // ACP has no separate instruction channel, so the role travels with the first prompt.
+    if (!isTerminal(ctl.job)) this.prompt(peer, run, `${ctl.job.instructions}\n\n${ctl.job.prompt}`);
   }
 
   async reply(ctl: JobCtl, message: string): Promise<void> {
@@ -76,16 +79,21 @@ export class AntigravityAdapter implements Adapter {
     if (isTerminal(ctl.job)) return;
     let run = this.runs.get(sessionId);
     if (!run) {
-      run = { ctl, prompting: null, cancelling: false, message: '', earlier: '' };
+      run = { ctl, prompting: null, cancelling: false, message: '', earlier: '', pending: [] };
       this.runs.set(sessionId, run);
     }
     if (run.prompting) throw new Error('Antigravity is still working on the previous message. Wait for it to finish, or cancel first.');
     this.prompt(peer, run, message);
   }
 
-  async answer(): Promise<void> {
-    // Permission requests are decided by role policy in onRequest, so this adapter never waits.
-    throw new Error('Antigravity jobs do not wait for decisions.');
+  async answer(ctl: JobCtl, approve: boolean): Promise<void> {
+    const run = this.runs.get(ctl.job.sessionId ?? '');
+    const request = run?.pending.shift();
+    if (!run || !request) throw new Error('The request this job was waiting on is no longer pending.');
+    request.resolve(approve);
+    const next = run.pending[0];
+    if (next) ctl.waiting('approval', next.reason);
+    else ctl.resumed();
   }
 
   async cancel(ctl: JobCtl): Promise<void> {
@@ -95,6 +103,9 @@ export class AntigravityAdapter implements Adapter {
     const peer = this.peer;
     if (!run?.prompting || !peer) return;
     run.cancelling = true;
+    drop(run);
+    // Whether or not the agent confirms the cancel, nothing is waiting on the user any more.
+    ctl.resumed();
     try {
       peer.notify('session/cancel', { sessionId });
       const stopped = await Promise.race([run.prompting.then(() => true), delay(5_000, false, { ref: false })]);
@@ -137,6 +148,8 @@ export class AntigravityAdapter implements Adapter {
       )
       .finally(() => {
         run.prompting = null;
+        // The turn is over, so nothing it asked for can still be granted.
+        drop(run);
       });
   }
 
@@ -159,6 +172,7 @@ export class AntigravityAdapter implements Adapter {
         if (this.peer === peer) this.peer = null;
         this.loaded.clear();
         // In-flight prompts reject through the peer and fail their jobs there.
+        for (const run of this.runs.values()) drop(run);
         this.runs.clear();
       },
     });
@@ -219,33 +233,80 @@ export class AntigravityAdapter implements Adapter {
 
   private async onRequest(method: string, p: any): Promise<unknown> {
     if (method !== 'session/request_permission') throw new RpcError(-32601, `${method} is not supported by Crew`);
+    const cancelled = { outcome: { outcome: 'cancelled' } };
     const run = this.runs.get(p.sessionId);
-    if (run && (run.cancelling || isTerminal(run.ctl.job))) return { outcome: { outcome: 'cancelled' } };
-    const refusal = run ? refuse(run.ctl.job.cwd, p.toolCall ?? {}) : 'unknown session';
-    // Never "always": each edit must come back here so its path is checked.
-    const wanted = refusal ? ['reject_once', 'reject_always'] : ['allow_once'];
-    const option = (p.options ?? []).find((o: any) => wanted.includes(o.kind));
-    if (refusal && run) {
-      const what = `${refusal}: ${p.toolCall?.title ?? 'tool call'}`;
-      run.ctl.progress(`refused (${what})`);
-      run.ctl.note(`The bridge refused an action outside the editor role (${what}).`);
+    // Outside a turn there is nobody to act on an answer, and a queued request would never be settled.
+    if (run && (run.cancelling || !run.prompting || isTerminal(run.ctl.job))) return cancelled;
+    const toolCall = p.toolCall ?? {};
+    const verdict = run ? decide(run.ctl.job.kind, run.ctl.job.cwd, toolCall) : { refuse: 'unknown session' };
+
+    let allow = verdict === 'allow';
+    if (run && verdict === 'ask') {
+      const reason = describeRequest(toolCall, run.ctl.job.cwd);
+      const answer = await new Promise<boolean | null>((resolve) => {
+        run.pending.push({ reason, resolve });
+        if (run.pending.length === 1) run.ctl.waiting('approval', reason);
+      });
+      if (answer === null) return cancelled;
+      allow = answer;
     }
-    return option ? { outcome: { outcome: 'selected', optionId: option.optionId } } : { outcome: { outcome: 'cancelled' } };
+    if (run && typeof verdict === 'object') {
+      const what = `${verdict.refuse}: ${toolCall.title ?? 'tool call'}`;
+      run.ctl.progress(`refused (${what})`);
+      run.ctl.note(`The bridge refused an action outside the ${ROLE_NAMES[run.ctl.job.kind]} role (${what}).`);
+    }
+    // Never "always": each action must come back here so its path is checked and the user sees every command.
+    // A refusal is for this request only, so "reject always" is used just when it is the only way to say no.
+    const options: any[] = p.options ?? [];
+    const option = (allow ? ['allow_once'] : ['reject_once', 'reject_always']).map((kind) => options.find((o) => o.kind === kind)).find(Boolean);
+    if (run && allow && !option) run.ctl.note(`An allowed action was not carried out because Antigravity offered no one-time approval: ${toolCall.title ?? 'tool call'}.`);
+    // Without a matching option the answer is "cancelled", which grants nothing.
+    return option ? { outcome: { outcome: 'selected', optionId: option.optionId } } : cancelled;
   }
 }
 
+/** Unblocks permission requests that can no longer be answered. */
+function drop(run: Run): void {
+  for (const request of run.pending.splice(0)) request.resolve(null);
+}
+
+const ROLE_NAMES: Record<JobKind, string> = { delegate: 'engineer', review: 'reviewer', polish: 'editor' };
+
 /**
- * Role policy for a permission request: the reason to refuse it, or null to allow.
- * Reading is allowed anywhere; editing only inside the job's workspace.
+ * Role policy for a permission request.
+ * - Reading, searching, and thinking are allowed for every role.
+ * - Edits are refused in a review, and otherwise allowed only inside the job's workspace.
+ * - Switching mode is refused: "accept-edits" was measured to apply edits outside the workspace without asking.
+ * - Anything else (execute, delete, move, fetch, unknown kinds) is refused for a reviewer or editor. For an engineer it is
+ *   the user's call, provided the request says exactly what it will do.
  */
-export function refuse(cwd: string, toolCall: { kind?: string; locations?: { path?: string }[] }): string | null {
+export function decide(role: JobKind, cwd: string, toolCall: { kind?: string; locations?: { path?: string }[]; rawInput?: unknown }): 'allow' | 'ask' | { refuse: string } {
   const kind = toolCall.kind ?? 'other';
-  if (!ALLOWED_KINDS.includes(kind)) return kind;
-  if (kind !== 'edit') return null;
+  if (PASSIVE_KINDS.includes(kind)) return 'allow';
+  if (kind === 'switch_mode') return { refuse: kind };
+  if (kind !== 'edit') {
+    if (role !== 'delegate') return { refuse: kind };
+    // A title alone may be a shortened form; the user must not approve what they cannot see in full.
+    return toolCall.rawInput == null || toolCall.rawInput === '' ? { refuse: `${kind} request without its input` } : 'ask';
+  }
+  if (role === 'review') return { refuse: 'edit during a read-only review' };
   const paths = (toolCall.locations ?? []).map((l) => l.path).filter((f): f is string => Boolean(f));
   // An edit that does not say where it writes cannot be shown to stay inside.
-  if (paths.length === 0) return 'edit without a path';
-  return paths.every((f) => isInside(cwd, f)) ? null : 'edit outside the workspace';
+  if (paths.length === 0) return { refuse: 'edit without a path' };
+  return paths.every((f) => isInside(cwd, f)) ? 'allow' : { refuse: 'edit outside the workspace' };
+}
+
+/** What the user is asked to approve: the whole request, never a shortened form. */
+function describeRequest(toolCall: any, cwd: string): string {
+  const lines = [`${toolCall.kind ?? 'other'}: ${toolCall.title ?? 'tool call'}`];
+  const input = toolCall.rawInput;
+  // A lone command reads best as itself; anything with more fields is shown entire, so no argument is hidden.
+  const bare = input && typeof input === 'object' && Object.keys(input).length === 1 && typeof input.command === 'string';
+  lines.push(typeof input === 'string' ? input : bare ? input.command : JSON.stringify(input, null, 2));
+  const paths = (toolCall.locations ?? []).map((l: any) => l.path).filter(Boolean);
+  if (paths.length) lines.push(`Paths: ${paths.join(', ')}`);
+  lines.push(`Job workspace: ${cwd}`);
+  return lines.join('\n');
 }
 
 const VERBS: Record<string, string> = { read: 'reading', edit: 'editing', search: 'searching', execute: 'running', delete: 'deleting', move: 'moving', fetch: 'fetching' };

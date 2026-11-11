@@ -46,7 +46,8 @@ When a worker asks for approval or has a question, an input dialog pops up in th
 - Gitignored files that workers need to run tests (such as `node_modules` or `.env`) are copied into the worktree when listed in `.worktreeinclude` at the repository root. It uses `.gitignore` syntax and shares the same file as Claude Code's native worktrees.
 - Codex runs via `codex app-server` and Antigravity runs via `agy acp`. Crew executes only the official binaries and never reads authentication files or tokens.
 - When a background job finishes or needs a decision, the lead session wakes up automatically.
-- Configuration lives in `~/.crew/config.json` (stall timeout, notifications, Codex approval policy, and whether Antigravity is enabled).
+- Instructions for every agent go in `~/.crew/instructions.md` (all projects) and `.crew/instructions.md` at the repository root (that project). Workers get them with each job and Claude sessions at start; no service's own instruction files are touched.
+- Configuration lives in `~/.crew/config.json` (stall timeout, notifications, Codex approval policy, whether Antigravity is enabled, and which agent holds each role).
 
 Using Antigravity carries a Terms of Service risk; read [docs/04-implementation.md](docs/04-implementation.md) section 6 before enabling it.
 
@@ -56,7 +57,7 @@ Using Antigravity carries a Terms of Service risk; read [docs/04-implementation.
 | --- | --- |
 | `plugin/bridge/` | Daemon, MCP server, agent adapters, CLI (TypeScript, no build step) |
 | `plugin/board/` | Status board (static HTML/CSS/JS) |
-| `plugin/roles/` | Role instructions injected into Codex and Antigravity on every job |
+| `plugin/roles/` | Role instructions (engineer, reviewer, editor) injected into whichever agent holds the role, on every job |
 | `plugin/skills/`, `plugin/agents/`, `plugin/hooks/` | `/crew:run`, `/crew:board`, self-reviewer subagent, hooks |
 | `test/` | Unit tests (`npm test`) |
 
@@ -64,7 +65,7 @@ Using Antigravity carries a Terms of Service risk; read [docs/04-implementation.
 
 | Document | Contents |
 | --- | --- |
-| [docs/01-requirements.md](docs/01-requirements.md) | Original requirements, numbered requirements (R1–R8), tensions and interpretations, acceptance criteria |
+| [docs/01-requirements.md](docs/01-requirements.md) | Goal, current requirements (R1–R13), defaults and priorities, acceptance criteria |
 | [docs/02-implementation-plan.md](docs/02-implementation-plan.md) | Architecture decisions, connection methods, roles and workflow, status display, rejected alternatives, risks, build phases |
 | [docs/03-agentgauge-integration.md](docs/03-agentgauge-integration.md) | Current state of AgentGauge, integration gaps, phased integration plan, MCP tool spec, routing policy |
 | [docs/04-implementation.md](docs/04-implementation.md) | Implemented architecture, changes from the plan and why, desktop app visibility findings, verification log |
@@ -73,9 +74,10 @@ Using Antigravity carries a Terms of Service risk; read [docs/04-implementation.
 
 ## Current status
 
-The bridge (Phase 1) and status board (Phase 2) are implemented. AgentGauge integration (Phase 3) is not yet implemented.
+The bridge (Phase 1) and status board (Phase 2) are implemented, roles can be reassigned in `~/.crew/config.json`, and shared instructions reach every agent ([docs/04-implementation.md](docs/04-implementation.md) sections 2.1 and 2.2). AgentGauge integration (Phase 3) is not yet implemented. What comes next is in [docs/06-roadmap.md](docs/06-roadmap.md).
 
 ## Updating the documentation
 
 - Attach a verification date to facts about external tools. Because protocols and policies across all three services have shifted every few months, re-verify the sources at the end of document 02 before building.
-- When reversing a recorded decision, do not delete it—append the reason and date to that document's revision log.
+- Document 01 always states the current goals and is rewritten when they change; its history is in git.
+- In the other documents, when reversing a recorded decision, do not delete it—append the reason and date to that document's revision log.

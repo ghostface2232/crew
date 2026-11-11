@@ -5,7 +5,8 @@ import path from 'node:path';
 import { AntigravityAdapter } from './adapters/antigravity.ts';
 import { CodexAdapter } from './adapters/codex.ts';
 import { ClaudeSessions } from './claude.ts';
-import { HOME, installed, loadConfig, PLUGIN_ROOT, PORT, VERSION } from './config.ts';
+import { HOME, installed, loadConfig, PLUGIN_ROOT, PORT, VERSION, WORKERS } from './config.ts';
+import type { Config } from './config.ts';
 import { Jobs } from './jobs.ts';
 import type { EventKind, Job } from './jobs.ts';
 
@@ -28,7 +29,7 @@ function broadcast(type: string, data: unknown): void {
   for (const res of streams) res.write(frame);
 }
 
-const AGENT_NAMES = { claude: 'Claude', codex: 'Codex', antigravity: 'Antigravity' };
+const AGENT_NAMES = { claude: 'Claude', codex: WORKERS.codex.name, antigravity: WORKERS.antigravity.name };
 const NOTIFY_TITLES: Partial<Record<EventKind, string>> = {
   waiting: 'needs a decision',
   error: 'failed',
@@ -50,15 +51,29 @@ function view(job: Job) {
   return rest;
 }
 
+/** For display only: the config on disk, or the one the daemon started with while the file is invalid. */
+function liveConfig(): Config {
+  try {
+    return loadConfig();
+  } catch {
+    return config;
+  }
+}
+
 const codex = new CodexAdapter(config);
 const antigravity = new AntigravityAdapter(config);
 codex.onLimits = (limits) => broadcast('limits', { codex: limits });
 
-const jobs = new Jobs(HOME, config, { codex, antigravity }, {
+// Roles are read per job, so a change to config.json applies to the next one, and an invalid file fails
+// that job with the reason instead of silently running old roles. Adapters keep the settings they started with.
+const jobs = new Jobs(HOME, loadConfig, { codex, antigravity }, {
   onEvent: (event) => broadcast('event', event),
   onJob: (job) => broadcast('job', view(job)),
   onAttention: (job, kind, detail) => notify(job.agent, kind, job.title, detail),
 });
+
+// The board shows who holds each role, so it must hear about edits to the role table.
+fs.watchFile(path.join(HOME, 'config.json'), { interval: 2000 }, () => broadcast('roles', liveConfig().roles));
 
 const claude = new ClaudeSessions(config.stallSeconds, {
   onSession: (session, removed) => broadcast('claude', { session, removed: Boolean(removed) }),
@@ -67,6 +82,7 @@ const claude = new ClaudeSessions(config.stallSeconds, {
 });
 
 function state() {
+  const live = liveConfig();
   return {
     version: VERSION,
     now: Date.now(),
@@ -74,7 +90,11 @@ function state() {
     jobs: jobs.list().map(view),
     claude: [...claude.sessions.values()],
     limits: { codex: codex.limits },
-    agents: { antigravity: { enabled: config.antigravity.enabled } },
+    agents: {
+      codex: { ...WORKERS.codex, enabled: true },
+      antigravity: { ...WORKERS.antigravity, enabled: live.antigravity.enabled },
+    },
+    roles: live.roles,
     events: jobs.recent.slice(-200),
   };
 }

@@ -1,13 +1,13 @@
+import { WORKERS } from './config.ts';
 import type { Job } from './jobs.ts';
 
 /** Text renderings of a job, shared by the MCP tools, the wake hook, and the CLI. */
 
 export type JobView = Omit<Job, 'prompt' | 'instructions'>;
-export const AGENT_NAMES = { codex: 'Codex', antigravity: 'Antigravity' };
 
 /** Command that reopens the worker's session in its own CLI, for the user to take over by hand. */
 export function resumeCommand(job: JobView): string {
-  return job.agent === 'codex' ? `codex resume ${job.sessionId}` : `agy --conversation ${job.sessionId}`;
+  return `${WORKERS[job.agent].resume} ${job.sessionId}`;
 }
 
 export function duration(ms: number): string {
@@ -21,7 +21,7 @@ export const needsLead = (job: JobView) => job.state !== 'running';
 /** `waitingHint` replaces the default advice on how to settle a waiting job. */
 export function describe(job: JobView, waitingHint?: string): string {
   const elapsed = duration((job.endedAt ?? Date.now()) - job.createdAt);
-  const lines = [`[${job.id}] ${AGENT_NAMES[job.agent]} · ${job.kind} · ${job.state.toUpperCase()} (${elapsed}) — ${job.title}`];
+  const lines = [`[${job.id}] ${WORKERS[job.agent].name} · ${job.kind} · ${job.state.toUpperCase()} (${elapsed}) — ${job.title}`];
 
   if (job.state === 'running') {
     lines.push(`now: ${job.phase}${job.stalled ? ' — no activity for a while, may be stuck' : ''}`);
@@ -34,7 +34,7 @@ export function describe(job: JobView, waitingHint?: string): string {
   }
   if (job.error) {
     lines.push(`error: ${job.error.message}`);
-    if (job.error.limit) lines.push(`${AGENT_NAMES[job.agent]} is out of usage for now. Do this piece yourself, and tell the user the ${job.kind === 'review' ? 'cross-review was skipped' : 'work was not delegated'}.`);
+    if (job.error.limit) lines.push(`${WORKERS[job.agent].name} is out of usage for now. Do this piece yourself, and tell the user the ${job.kind === 'review' ? 'cross-review was skipped' : 'work was not delegated'}.`);
   }
   if (job.tokens != null) lines.push(`tokens: ${job.tokens.toLocaleString('en-US')}`);
   if (job.worktree) lines.push(`worktree: ${job.worktree.path} (branch ${job.worktree.branch}, base ${job.worktree.base.slice(0, 8)})`);
@@ -44,6 +44,7 @@ export function describe(job: JobView, waitingHint?: string): string {
     if (job.result.files.length > 40) lines.push(`  … and ${job.result.files.length - 40} more`);
     if (job.result.outOfScope.length) lines.push(`OUT OF SCOPE — changed but not in the allowed targets: ${job.result.outOfScope.join(', ')}`);
   }
+  if (job.shared?.length) lines.push(`shared instructions: ${job.shared.join(', ')}`);
   for (const note of job.notes) lines.push(`note: ${note}`);
   if (job.sessionId) lines.push(`session: ${resumeCommand(job)}`);
   if (job.report) lines.push('', '--- report ---', job.report);
@@ -65,5 +66,5 @@ export function describe(job: JobView, waitingHint?: string): string {
 export function summarize(job: JobView): string {
   const tail = job.state === 'running' ? job.phase : job.state === 'waiting' ? `needs a decision: ${job.waiting!.reason}` : (job.error?.message ?? job.result?.stat ?? '');
   const unread = job.endedAt && job.seq > job.delivered ? ' (result not read yet)' : '';
-  return `[${job.id}] ${AGENT_NAMES[job.agent]} · ${job.kind} · ${job.state} (${duration((job.endedAt ?? Date.now()) - job.createdAt)}) — ${job.title}${tail ? ` — ${tail}` : ''}${unread}`;
+  return `[${job.id}] ${WORKERS[job.agent].name} · ${job.kind} · ${job.state} (${duration((job.endedAt ?? Date.now()) - job.createdAt)}) — ${job.title}${tail ? ` — ${tail}` : ''}${unread}`;
 }

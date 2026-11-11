@@ -1,54 +1,62 @@
 # 01. Requirements
 
-Written 2026-11-11. Sourced from the initial prompt and follow-up message in the conversation on the same day.
+Current as of 2026-11-12. This document states what Crew is for and what it must do now. It is rewritten when the goals change; earlier versions, including the original request text, are in the git history.
 
-## 1. Initial request (translated from original)
+## 1. Goal
 
-> I use Claude, Codex, and Antigravity, and I want you to think through and evaluate the best way to connect them so they divide roles and collaborate. Feel free to research and analyze whatever information you need and look for similar implementations.
->
-> What I want:
->
-> 1. They can be connected via CLI or any other mechanism in the background, as long as the frontend looks clean.
-> 2. We can use the lead model's own app directly, or build a new frontend page or a lightweight web-app wrapper. Design the best approach you can envision.
-> 3. Claude should act as the lead collaborating with Codex and as the self-reviewer; Codex as the supporting engineer and reviewer; and Antigravity should only handle UX writing checks and cleaning up comments and documentation for readability.
-> 4. Every service's features—subagents, inter-session messaging, Remote Control, computer use, built-in or background headless browsers, Chrome integration, side chat, MCP, compact sessions, and so on—should remain fully usable.
-> 5. What each agent is doing should be visible in real time or near real time (so I can tell when work stops because of a stall, usage limit, or error).
-> 6. Even better if sessions started here also show up in each service's desktop app.
-> 7. Clean, intuitive, snappy, and smooth operation.
+One person directs several coding agents from a clean surface: gives a command, sees how it was split and who has each part, follows progress, answers only what needs a decision, and judges the result. The agents can work as a crew with divided roles, or be directed one at a time.
 
-## 2. Follow-up request (translated from original)
+The supported agents are Claude, Codex, and Antigravity. Cursor is to be added.
 
-> Since I already built AgentGauge, how about connecting it to this setup like an MCP server or API? A tool where the agent is connected, checks its own usage and the other services' usage, and automatically routes work to the right tool—while sticking to the original role assignments whenever all of them have plenty of capacity.
+## 2. Requirements
 
-## 3. Numbered requirements
+IDs R1 to R8 keep the meaning other documents refer to. R9 to R13 were added on 2026-11-12.
 
 | ID | Requirement | Kind |
 | --- | --- | --- |
-| R1 | Any background connection method (CLI or otherwise) is fine, but the user-facing surface must stay clean and uncluttered | Required |
-| R2 | Either use the lead model's own app, or build a new frontend or thin web-app wrapper—pick whichever works best | Choice |
-| R3 | Fixed roles: Claude is lead and self-reviewer, Codex is supporting engineer and reviewer, Antigravity only checks UX copy and cleans up comments and docs for readability | Required |
-| R4 | Subagents, inter-session communication, Remote Control, computer use, built-in or headless browsers, Chrome use, side chat, MCP, and session compaction across the services must remain usable | Required |
-| R5 | Each agent's activity must be visible in near real time, including stalls, exhausted usage limits, and error stops | Required |
-| R6 | Sessions started here should ideally appear in each service's desktop app as well | Nice to have |
-| R7 | Operation must be intuitive, fast, and seamless | Required |
-| R8 | Connect AgentGauge via MCP or API so the agent checks its own and other services' usage and routes tasks to the right tool, falling back to the original R3 roles when all have sufficient capacity | Required (follow-up) |
+| R1 | Agents may be connected by any background mechanism, but the user-facing surface stays clean and uncluttered | Required |
+| R2 | Claude Desktop as the lead's app is the primary mode. Crew's own screen grows out of the status board alongside it | Required |
+| R3 | Each role has a default agent: Claude leads and self-reviews, Codex implements separable pieces and cross-reviews, Antigravity checks UX copy and tidies comments and docs. The user can reassign any role, including Antigravity's | Required |
+| R4 | In Claude Desktop lead mode, the services' own features stay usable: subagents, inter-session messaging, Remote Control, computer use, built-in and headless browsers, Chrome, side chat, MCP, compaction | Required |
+| R5 | Each agent's activity is visible in near real time, including stalls, exhausted usage limits, and error stops | Required |
+| R6 | Sessions started through Crew also appear in each service's desktop app where the service allows it | Nice to have |
+| R7 | Operation is intuitive, fast, and smooth, with nothing to carry by hand between stages | Required |
+| R8 | AgentGauge reports each service's remaining usage, and work is routed by it. When every service has capacity, the role assignments in effect are followed | Required |
+| R9 | Shared custom instructions are written once and reach every agent | Required |
+| R10 | The board shows each command as a unit: how it was split, which agent has each part, and how far each part has progressed. Its elements are clickable, and approvals, questions, and follow-ups are answered in place | Required |
+| R11 | Model and reasoning effort are selectable per role and per service | Required |
+| R12 | Cursor is supported as an agent | Required |
+| R13 | Crew can run with a lead other than Claude Code, from its own main screen, and can dispatch a command to a single agent without a lead | Long term |
 
-## 4. Tensions between requirements and how they are resolved
+## 3. Defaults and priorities
 
-- The wrapper option in R2 conflicts with R4 and R6. Side chat, computer use, and the built-in browser pane are features of each vendor's desktop app and are unavailable in a custom frontend wrapping headless runtimes. Desktop app visibility (R6) is also most reliable when the lead runs inside its own desktop app. R2 is therefore resolved in favor of using the lead's native app.
-- Fixed roles in R3 conflict with usage-based rerouting in R8. The last sentence of R8 sets the priority: follow R3 under normal conditions, and reroute only when a service runs low on quota. Promoting Antigravity into an engineering role is never requested and is not done.
-- Real-time visibility in R5 must be weighed alongside the clean frontend in R1. Tiling multiple terminal windows satisfies R5 but fails R1. A separate view that aggregates and summarizes events is needed.
-- The scope of R4 differs between the lead and the workers. The lead (Claude) uses every feature of its desktop app. While running in the background, workers (Codex, Antigravity) keep their runtime subagents, MCP servers, and compaction, but cannot use desktop-only UI features on the worker side. Their assigned roles do not need those features.
+- **Defaults are the original setup.** With no configuration, roles are the R3 defaults and the lead is Claude in Claude Desktop. Anything else happens only because the user set it.
+- **Only the user changes a role.** Automatic routing (R8) moves work between agents when a service runs low, following [03-agentgauge-integration.md](03-agentgauge-integration.md) section 8. It does not give Antigravity engineering or review work; that requires an explicit assignment by the user.
+- **Claude Desktop lead mode comes first.** Work on R9 to R12 targets this mode. R13 is built after it and never replaces it.
+- **R4 and R6 are scoped to the lead's app.** Workers running in the background keep their runtime's subagents, MCP servers, and compaction, but not their desktop-only features. Under R13, a lead outside Claude Desktop loses those features too, and the screen says which ones are unavailable.
+- **Visibility must not cost cleanliness.** R5 and R10 are met by one view that aggregates and summarizes, not by tiled terminals (R1).
+- **The surface stays small.** New agents, roles, and views are added only where a requirement above needs them. Orchestration for its own sake is out ([05-related-work.md](05-related-work.md) section 6).
 
-## 5. Acceptance criteria
+## 4. Acceptance criteria
 
-| ID | What counts as met |
+| ID | Met when |
 | --- | --- |
-| R1 | In normal use, the user only looks at Claude Code Desktop and a single status board, without opening a terminal |
-| R2 | Document 02 records the chosen approach, the rejected alternatives, and the reasons behind both |
-| R3 | Role rules live in each agent's instruction files, and the lead rejects out-of-scope changes |
-| R4 | All listed features work in the lead session; workers use their configured MCP servers and subagents as-is |
-| R5 | Each of the three agents shows its current stage, last event, and wait reason; quota exhaustion, errors, and stalls trigger a notification within a configured timeout |
-| R6 | Claude sessions appear in Desktop and mobile; Codex and Antigravity sessions can be resumed in their respective tools (see document 02 section 6 for visibility limits) |
-| R7 | No manual copy-pasting is needed between delegation, review, and polish stages |
-| R8 | The lead calls the routing tool at stage boundaries and delegates according to the returned assignee and reason; handoff begins before the lead's own quota runs out |
+| R1 | In normal use the user looks at Claude Desktop and one board, and never opens a terminal |
+| R2 | Every pipeline step can be run from a Claude Desktop session, and the board opens in its browser pane |
+| R3 | An unconfigured install runs the default roles. Changing one role is a single setting, and the next job uses it. The lead rejects work outside the assigned role |
+| R4 | Every listed feature works in the lead session. Workers use their configured MCP servers and subagents as they are |
+| R5 | Each agent shows its current stage, last event, and reason for waiting. Limits, errors, and stalls raise a notification within the configured time |
+| R6 | Claude sessions appear in Desktop and mobile. Worker sessions can be resumed in their own tools |
+| R7 | Nothing is copied by hand between delegation, review, and polish |
+| R8 | The board shows usage for every agent. The lead asks for routing at stage boundaries and follows the returned assignee and reason. Handoff starts before the lead's limit runs out |
+| R9 | Editing one instructions file changes what every agent receives on its next job, without writing to any service's own instruction files |
+| R10 | For any command, the board answers "what was it split into, who has each part, and what stage is each in" without opening a session. A waiting item can be answered from the board |
+| R11 | Model and effort can be set per role and per service, and a job shows which ones it ran with |
+| R12 | A job can be assigned to Cursor and appears on the board like any other |
+| R13 | A command can be started, followed, and merged without a Claude Code session |
+
+## 5. Not required
+
+- Automatic switching between accounts of the same service.
+- Remote or multi-user access. Crew is local and single-user.
+- Agents beyond the four named above.

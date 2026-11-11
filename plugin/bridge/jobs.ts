@@ -1,14 +1,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomBytes, randomUUID } from 'node:crypto';
-import type { Config } from './config.ts';
-import { changesSince, commitAll, copyIncluded, createWorktree, dirtyCount, isInside, removeWorktree, repoRoot } from './git.ts';
+import { WORKERS } from './config.ts';
+import type { Config, Role, WorkerAgent } from './config.ts';
+import { changesSince, commitAll, copyIncluded, createWorktree, dirtyCount, isInside, projectRoot, removeWorktree, repoRoot, reviewDiff } from './git.ts';
 import type { Worktree } from './git.ts';
+import { sharedInstructions } from './instructions.ts';
 import { buildPrompt } from './prompts.ts';
 
-export type WorkerAgent = 'codex' | 'antigravity';
+export type { WorkerAgent };
 export type Agent = 'claude' | WorkerAgent;
-export type JobKind = 'delegate' | 'review' | 'polish';
+export type JobKind = Role;
 export type JobState = 'running' | 'waiting' | 'done' | 'failed' | 'cancelled';
 export type EventKind = 'started' | 'progress' | 'waiting' | 'error' | 'limit' | 'stalled' | 'done' | 'cancelled';
 
@@ -63,6 +65,8 @@ export interface Job {
   sandbox: 'read-only' | 'workspace-write';
   prompt: string;
   instructions: string;
+  /** Files of shared instructions the worker was given; absent on jobs saved before they existed. */
+  shared?: string[];
   /** Set when the review should use the agent's native review mode instead of a prompted turn. */
   nativeReview: ReviewTarget | null;
   targets: string[];
@@ -144,13 +148,17 @@ export class Jobs {
   private cancelling = new Set<string>();
   private saveTimer: NodeJS.Timeout | null = null;
   private home: string;
-  private config: Config;
+  private readConfig: () => Config;
+  /** Settings as of startup, for timers that must not fail on a config edit. */
+  private settings: Config;
   private adapters: Record<WorkerAgent, Adapter>;
   private hooks: JobsHooks;
 
-  constructor(home: string, config: Config, adapters: Record<WorkerAgent, Adapter>, hooks: JobsHooks) {
+  /** `config` is called again for each new job, so role assignments can change without a restart. */
+  constructor(home: string, config: () => Config, adapters: Record<WorkerAgent, Adapter>, hooks: JobsHooks) {
     this.home = home;
-    this.config = config;
+    this.readConfig = config;
+    this.settings = config();
     this.adapters = adapters;
     this.hooks = hooks;
     this.load();
@@ -173,14 +181,18 @@ export class Jobs {
   }
 
   async create(spec: JobSpec): Promise<Job> {
-    const agent: WorkerAgent = spec.kind === 'polish' ? 'antigravity' : 'codex';
-    if (agent === 'antigravity' && !this.config.antigravity.enabled) {
-      throw new Error('Antigravity is disabled in ~/.crew/config.json (antigravity.enabled).');
+    const config = this.readConfig();
+    const role = config.roles[spec.kind];
+    const { agent } = role;
+    if (agent === 'antigravity' && !config.antigravity.enabled) {
+      throw new Error(`${spec.kind} is assigned to Antigravity, which is disabled in ~/.crew/config.json (antigravity.enabled).`);
     }
     if (!fs.existsSync(spec.cwd)) throw new Error(`cwd does not exist: ${spec.cwd}`);
 
-    const id = `${agent === 'codex' ? 'cx' : 'ag'}-${randomBytes(3).toString('hex')}`;
+    const id = `${WORKERS[agent].idPrefix}-${randomBytes(3).toString('hex')}`;
     const repo = await repoRoot(spec.cwd);
+    // Read from the main working tree even when the job starts inside a worktree, so an uncommitted edit applies to the next job.
+    const shared = sharedInstructions(this.home, (await projectRoot(spec.cwd)) ?? spec.project ?? spec.cwd);
     const notes: string[] = [];
     let worktree: Worktree | null = null;
     let cwd = spec.cwd;
@@ -198,6 +210,16 @@ export class Jobs {
       const dirty = await dirtyCount(repo);
       if (dirty > 0) notes.push(`${dirty} uncommitted path(s) in the main tree are not in this worktree, which starts from ${base} (${worktree.base.slice(0, 8)}). Commit first if the worker needs them.`);
     }
+
+    let diffFile: string | null = null;
+    if (spec.kind === 'review' && !WORKERS[agent].reviewerRunsGit) {
+      if (!repo) throw new Error(`review is assigned to ${WORKERS[agent].name}, which has to be handed the diff, and ${spec.cwd} is not inside a git repository.`);
+      diffFile = this.diffFile(id);
+      fs.mkdirSync(path.dirname(diffFile), { recursive: true });
+      fs.writeFileSync(diffFile, await reviewDiff(repo, spec.review!.target));
+      notes.push(`${WORKERS[agent].name} cannot run commands as a reviewer: it was given the diff as a file and could not run tests or checks.`);
+    }
+    if (spec.review?.mode === 'standard' && agent !== 'codex') notes.push(`The standard review mode is Codex's own; ${WORKERS[agent].name} ran the adversarial review instead.`);
 
     // Diffs name files relative to the repo root, so scope targets must be too.
     const targetRoot = repo ?? spec.cwd;
@@ -217,11 +239,13 @@ export class Jobs {
       cwd,
       worktree,
       sandbox: spec.kind === 'review' ? 'read-only' : 'workspace-write',
-      ...buildPrompt(spec, worktree),
-      nativeReview: spec.review?.mode === 'standard' ? spec.review.target : null,
+      ...buildPrompt(spec, worktree, diffFile, shared.text),
+      shared: shared.sources,
+      // Only Codex has a built-in review mode; other agents get the prompted review.
+      nativeReview: agent === 'codex' && spec.review?.mode === 'standard' ? spec.review.target : null,
       targets: spec.targets ?? [],
-      model: spec.model,
-      effort: spec.effort,
+      model: spec.model ?? role.model,
+      effort: spec.effort ?? role.effort,
       sessionId: null,
       createdAt: now,
       activeAt: now,
@@ -460,7 +484,7 @@ export class Jobs {
     job.endedAt = Date.now();
     job.phase = 'done';
     this.event(job, 'done', result?.stat || headline(report) || 'finished');
-    if (this.config.notifyOnDone) this.hooks.onAttention(job, 'done', job.title);
+    if (this.settings.notifyOnDone) this.hooks.onAttention(job, 'done', job.title);
   }
 
   private fail(job: Job, message: string, limit: boolean): void {
@@ -476,7 +500,7 @@ export class Jobs {
   }
 
   private checkStalls(): void {
-    const limit = this.config.stallSeconds * 1000;
+    const limit = this.settings.stallSeconds * 1000;
     for (const job of this.jobs.values()) {
       if (job.state !== 'running' || job.stalled || Date.now() - job.activeAt < limit) continue;
       job.stalled = true;
@@ -496,12 +520,18 @@ export class Jobs {
     return event;
   }
 
+  private diffFile(id: string): string {
+    return path.join(this.home, 'reviews', `${id}.diff`);
+  }
+
   eventsFor(id: string, after: number): CrewEvent[] {
     return this.recent.filter((e) => e.job_id === id && e.seq > after);
   }
 
   private event(job: Job, kind: EventKind, detail: string): void {
     job.seq = this.record(job.agent, job.sessionId, kind, detail, job.id).seq;
+    // The saved diff describes the tree as it was; a follow-up turn must not review from it.
+    if (isTerminal(job) && job.kind === 'review') fs.rm(this.diffFile(job.id), { force: true }, () => {});
     this.changed(job);
     for (const wake of [...(this.waiters.get(job.id) ?? [])]) wake();
   }

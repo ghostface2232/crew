@@ -4,6 +4,9 @@
 const jobs = new Map();
 const sessions = new Map();
 let limits = { codex: null };
+/** Worker agents and the roles assigned to them, as configured on the server. */
+let agents = {};
+let roles = {};
 /** Server clock minus local clock, so timers are right even if the two drift. */
 let clockSkew = 0;
 
@@ -11,6 +14,7 @@ const FINISHED_SHOWN = 4;
 const FEED_SHOWN = 60;
 const AGENT_NAMES = { claude: 'Claude', codex: 'Codex', antigravity: 'Antigravity' };
 const KIND_NAMES = { delegate: 'Implementation', review: 'Review', polish: 'Polish' };
+const ROLE_NAMES = { delegate: 'Engineer', review: 'Cross-review', polish: 'UX writing · docs' };
 const EVENT_TONES = { waiting: 'waiting', stalled: 'waiting', error: 'failed', limit: 'failed', done: 'done' };
 
 const esc = (text) => String(text ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -58,8 +62,8 @@ function jobCard(job) {
         <button data-act="deny" data-request="${esc(job.waiting.id)}">${job.waiting.type === 'approval' ? 'Deny' : 'No'}</button>
         <span class="timer" data-from="${job.waiting.since}" data-suffix=" waiting"></span></div></div>`
     : '';
-  const command = `${job.agent === 'codex' ? 'codex resume' : 'agy --conversation'} ${job.sessionId}`;
-  const resume = job.sessionId && !active
+  const command = `${agents[job.agent]?.resume} ${job.sessionId}`;
+  const resume = job.sessionId && !active && agents[job.agent]
     ? `<button class="quiet" data-act="copy" data-copy="${esc(command)}" title="Copies the command that reopens this session in its own CLI">Copy resume command</button>`
     : '';
   const cancel = active ? '<button class="quiet" data-act="cancel">Cancel</button>' : '';
@@ -147,6 +151,8 @@ function render() {
   renderLane('claude', claude.map(sessionCard), countMeta(claude.filter((s) => s.state !== 'idle').length));
 
   for (const agent of ['codex', 'antigravity']) {
+    const assigned = Object.keys(ROLE_NAMES).filter((role) => roles[role]?.agent === agent).map((role) => ROLE_NAMES[role]);
+    document.querySelector(`.lane[data-agent="${agent}"] [data-role]`).textContent = assigned.join(' · ') || 'No role assigned';
     const mine = [...jobs.values()].filter((j) => j.agent === agent).sort((a, b) => b.createdAt - a.createdAt);
     const active = mine.filter((j) => !j.endedAt).sort((a, b) => (a.state === 'waiting' ? -1 : 0) - (b.state === 'waiting' ? -1 : 0));
     const finished = mine.filter((j) => j.endedAt).slice(0, FINISHED_SHOWN);
@@ -207,6 +213,9 @@ stream.addEventListener('state', (e) => {
   const state = JSON.parse(e.data);
   clockSkew = state.now - Date.now();
   limits = state.limits;
+  // A daemon from before roles were configurable sends neither.
+  agents = state.agents ?? {};
+  roles = state.roles ?? {};
   jobs.clear();
   sessions.clear();
   for (const job of state.jobs) jobs.set(job.id, job);
@@ -228,6 +237,10 @@ stream.addEventListener('claude', (e) => {
   const { session, removed } = JSON.parse(e.data);
   if (removed) sessions.delete(session.id);
   else sessions.set(session.id, session);
+  render();
+});
+stream.addEventListener('roles', (e) => {
+  roles = JSON.parse(e.data);
   render();
 });
 stream.addEventListener('limits', (e) => {

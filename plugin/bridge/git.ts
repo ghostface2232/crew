@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { constants, existsSync, lstatSync, realpathSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import type { ReviewTarget } from './jobs.ts';
 
 export function git(cwd: string, args: string[], stdin?: string): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -14,12 +15,38 @@ export function git(cwd: string, args: string[], stdin?: string): Promise<string
   });
 }
 
+/** The change under review as text, for a reviewer that cannot run git itself. */
+export async function reviewDiff(root: string, target: ReviewTarget): Promise<string> {
+  if (target.type === 'baseBranch') return git(root, ['diff', `${target.branch}...HEAD`]);
+  if (target.type === 'commit') return git(root, ['show', target.sha]);
+  const diff = await git(root, ['diff', 'HEAD']);
+  const untracked = await git(root, ['ls-files', '--others', '--exclude-standard']);
+  return untracked ? `${diff}\n\nUntracked files, not in the diff above; read each one in full:\n${untracked}` : diff;
+}
+
 export async function repoRoot(cwd: string): Promise<string | null> {
   try {
     return await git(cwd, ['rev-parse', '--show-toplevel']);
   } catch {
     return null;
   }
+}
+
+/**
+ * The main working tree of the repository `cwd` is in, even when `cwd` is inside a linked worktree,
+ * or null outside a repository. Project-wide files are looked up here so every worktree shares them.
+ * Unlike `repoRoot`, a git failure throws: "could not tell" must not read as "no project".
+ */
+export async function projectRoot(cwd: string): Promise<string | null> {
+  let list: string;
+  try {
+    list = await git(cwd, ['worktree', 'list', '--porcelain']);
+  } catch (err) {
+    if (/not a git repository/i.test((err as Error).message)) return null;
+    throw err;
+  }
+  // The main working tree is always listed first.
+  return /^worktree (.+)$/m.exec(list)?.[1] ?? null;
 }
 
 export interface Worktree {

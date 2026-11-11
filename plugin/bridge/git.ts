@@ -1,13 +1,16 @@
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { constants, existsSync, realpathSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-export function git(cwd: string, args: string[]): Promise<string> {
+export function git(cwd: string, args: string[], stdin?: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile('git', args, { cwd, maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => {
+    const child = execFile('git', args, { cwd, maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) reject(new Error(`git ${args[0]}: ${(stderr || err.message).trim()}`));
       else resolve(stdout.trim());
     });
+    if (stdin !== undefined) child.stdin?.end(stdin);
   });
 }
 
@@ -32,23 +35,71 @@ export async function dirtyCount(root: string): Promise<number> {
   return out ? out.split('\n').length : 0;
 }
 
-export async function createWorktree(root: string, id: string, baseRef: string): Promise<Worktree> {
+/**
+ * Worktrees live outside the repository. Inside it, anything that walks the
+ * tree (test discovery, tsc, linters, file watchers) would also pick up the
+ * worktree copies.
+ */
+export async function createWorktree(root: string, id: string, baseRef: string, home: string): Promise<Worktree> {
   const base = await git(root, ['rev-parse', '--verify', `${baseRef}^{commit}`]);
-  await excludeCrewDir(root);
-  const wtPath = path.join(root, '.crew', 'worktrees', id);
+  // The hash keeps two repositories with the same folder name apart.
+  const repoKey = `${path.basename(root)}-${createHash('sha256').update(root).digest('hex').slice(0, 8)}`;
+  const wtPath = path.join(home, 'worktrees', repoKey, id);
+  await fs.mkdir(path.dirname(wtPath), { recursive: true });
   const branch = `crew/${id}`;
   await git(root, ['worktree', 'add', '-b', branch, wtPath, base]);
   return { path: wtPath, branch, base };
 }
 
-/** Keeps `.crew/` out of `git status` without touching the tracked .gitignore. */
-async function excludeCrewDir(root: string): Promise<void> {
-  const common = path.resolve(root, await git(root, ['rev-parse', '--git-common-dir']));
-  const file = path.join(common, 'info', 'exclude');
-  const current = await fs.readFile(file, 'utf8').catch(() => '');
-  if (current.split('\n').some((line) => line.trim() === '.crew/')) return;
-  await fs.mkdir(path.dirname(file), { recursive: true });
-  await fs.appendFile(file, `${current && !current.endsWith('\n') ? '\n' : ''}.crew/\n`);
+/**
+ * Copies the gitignored files named in the repository's `.worktreeinclude`
+ * (the convention Claude Code uses for its own worktrees) into a new worktree,
+ * so a worker can run tests without reinstalling dependencies. Copies rather
+ * than links: tools write caches into `node_modules`, and a link would send
+ * those writes to the main tree.
+ */
+export async function copyIncluded(root: string, wt: string): Promise<{ copied: string[]; failed: string[] }> {
+  const result = { copied: [] as string[], failed: [] as string[] };
+  if (!(await fs.stat(path.join(root, '.worktreeinclude')).catch(() => null))) return result;
+  // Let git apply the patterns, so the syntax is exactly .gitignore's.
+  const matched = await git(root, ['ls-files', '--others', '--ignored', '--exclude-from=.worktreeinclude', '--directory']);
+  if (!matched) return result;
+  // Only ignored paths are copied: an untracked, unignored file would end up in the worker's commit.
+  const ignored = await git(root, ['check-ignore', '--stdin'], matched).catch(() => '');
+  for (const entry of ignored.split('\n').filter(Boolean)) {
+    const rel = entry.replace(/\/$/, '');
+    try {
+      await fs.cp(path.join(root, rel), path.join(wt, rel), {
+        recursive: true,
+        errorOnExist: false,
+        force: false,
+        verbatimSymlinks: true,
+        // Copy-on-write clone where the filesystem supports it (APFS), so large trees are cheap.
+        mode: constants.COPYFILE_FICLONE,
+      });
+      result.copied.push(entry);
+    } catch (err) {
+      result.failed.push(`${entry} (${(err as Error).message})`);
+    }
+  }
+  return result;
+}
+
+/** True when `file` is `root` or inside it, after resolving symlinks. */
+export function isInside(root: string, file: string): boolean {
+  const rel = path.relative(realpath(root), realpath(path.resolve(root, file)));
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
+}
+
+/** Resolves symlinks for the part of the path that exists; the rest may be a file not created yet. */
+function realpath(target: string): string {
+  let existing = target;
+  const rest: string[] = [];
+  while (!existsSync(existing) && path.dirname(existing) !== existing) {
+    rest.unshift(path.basename(existing));
+    existing = path.dirname(existing);
+  }
+  return path.join(realpathSync(existing), ...rest);
 }
 
 /**

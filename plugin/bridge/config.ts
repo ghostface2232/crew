@@ -23,6 +23,11 @@ export interface Config {
     bin: string;
     /** Approval policy for delegated implementation work. Reviews always run with "never". */
     approvalPolicy: 'never' | 'on-request' | 'untrusted';
+    /**
+     * Who answers Codex's approval requests. Unset inherits ~/.codex/config.toml, where an
+     * automatic reviewer may be configured; "user" always brings them to the lead session.
+     */
+    approvalsReviewer?: 'user' | 'auto_review' | 'guardian_subagent';
     model?: string;
     effort?: string;
   };

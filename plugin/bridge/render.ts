@@ -18,7 +18,8 @@ export function duration(ms: number): string {
 /** True once the job is no longer just running: it ended, or it is waiting on the lead. */
 export const needsLead = (job: JobView) => job.state !== 'running';
 
-export function describe(job: JobView): string {
+/** `waitingHint` replaces the default advice on how to settle a waiting job. */
+export function describe(job: JobView, waitingHint?: string): string {
   const elapsed = duration((job.endedAt ?? Date.now()) - job.createdAt);
   const lines = [`[${job.id}] ${AGENT_NAMES[job.agent]} · ${job.kind} · ${job.state.toUpperCase()} (${elapsed}) — ${job.title}`];
 
@@ -28,7 +29,7 @@ export function describe(job: JobView): string {
   }
   if (job.state === 'waiting') {
     lines.push(`NEEDS A DECISION: ${job.waiting!.reason}`);
-    lines.push(`Answer with reply (job_id "${job.id}", decision "approve" or "deny"${job.waiting!.type === 'question' ? ', or a message' : ''}).`);
+    lines.push(waitingHint ?? `This is the user's call, not yours. Call wait with job id "${job.id}" so they are asked in the app; use reply only to pass on a decision they already gave you (decision "approve" or "deny"${job.waiting!.type === 'question' ? ', or a message with the answer' : ''}).`);
   }
   if (job.error) {
     lines.push(`error: ${job.error.message}`);

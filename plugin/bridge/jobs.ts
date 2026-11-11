@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import type { Config } from './config.ts';
-import { changesSince, commitAll, createWorktree, dirtyCount, removeWorktree, repoRoot } from './git.ts';
+import { changesSince, commitAll, copyIncluded, createWorktree, dirtyCount, isInside, removeWorktree, repoRoot } from './git.ts';
 import type { Worktree } from './git.ts';
 import { buildPrompt } from './prompts.ts';
 
@@ -30,6 +30,8 @@ export type ReviewTarget =
 export interface JobSpec {
   kind: JobKind;
   cwd: string;
+  /** Project directory of the session that started the job. */
+  project?: string;
   title?: string;
   /** delegate: what to build. polish: extra guidance. review: what to focus on. */
   task?: string;
@@ -53,6 +55,8 @@ export interface Job {
   /** What the worker is doing right now; overwritten freely, not logged. */
   phase: string;
   repo: string | null;
+  /** Project of the lead session that owns the job; sessions only wait on and list their own project's jobs. */
+  project: string;
   /** Directory the worker runs in: the worktree when isolated, else the caller's cwd. */
   cwd: string;
   worktree: Worktree | null;
@@ -94,6 +98,8 @@ export interface JobCtl {
   progress(detail: string): void;
   session(id: string): void;
   touched(file: string): void;
+  /** Adds a line to the result that the lead should see, such as a refused action. */
+  note(text: string): void;
   tokens(total: number): void;
   waiting(type: 'approval' | 'question', reason: string): void;
   resumed(): void;
@@ -152,6 +158,11 @@ export class Jobs {
     return [...this.jobs.values()].sort((a, b) => b.createdAt - a.createdAt);
   }
 
+  /** Number of jobs that would be lost if the daemon stopped now. */
+  get activeCount(): number {
+    return [...this.jobs.values()].filter((job) => !isTerminal(job)).length;
+  }
+
   get(id: string): Job {
     const job = this.jobs.get(id);
     if (!job) throw new Error(`No job with id "${id}". Call status to list jobs.`);
@@ -176,8 +187,11 @@ export class Jobs {
         throw new Error(`${spec.cwd} is not inside a git repository, so there is no worktree to isolate the worker in. Pass isolation: "in_place" to let it edit that directory directly.`);
       }
       const base = spec.base ?? 'HEAD';
-      worktree = await createWorktree(repo, id, base);
+      worktree = await createWorktree(repo, id, base, this.home);
       cwd = worktree.path;
+      const included = await copyIncluded(repo, worktree.path);
+      if (included.copied.length) notes.push(`Copied from .worktreeinclude: ${included.copied.join(', ')}`);
+      if (included.failed.length) notes.push(`Could not copy from .worktreeinclude: ${included.failed.join('; ')}`);
       const dirty = await dirtyCount(repo);
       if (dirty > 0) notes.push(`${dirty} uncommitted path(s) in the main tree are not in this worktree, which starts from ${base} (${worktree.base.slice(0, 8)}). Commit first if the worker needs them.`);
     }
@@ -196,6 +210,7 @@ export class Jobs {
       state: 'running',
       phase: 'starting',
       repo,
+      project: spec.project ?? repo ?? spec.cwd,
       cwd,
       worktree,
       sandbox: spec.kind === 'review' ? 'read-only' : 'workspace-write',
@@ -341,6 +356,11 @@ export class Jobs {
         this.touchedFiles.set(job.id, set);
         set.add(file);
       },
+      note: (text) => {
+        if (job.notes.includes(text)) return;
+        job.notes.push(text);
+        this.changed(job);
+      },
       tokens: (total) => {
         job.tokens = total;
       },
@@ -383,7 +403,9 @@ export class Jobs {
     if (job.worktree) {
       const commit = await commitAll(job.worktree.path, `crew(${job.agent}): ${job.title}`);
       const { files, stat } = await changesSince(job.worktree.path, job.worktree.base);
-      result = { files, stat, commit, outOfScope: outOfScope(files, job.targets) };
+      // The diff only covers the worktree; edits the worker reported elsewhere are violations too.
+      const escaped = [...(this.touchedFiles.get(job.id) ?? [])].filter((f) => !isInside(job.cwd, f));
+      result = { files, stat, commit, outOfScope: [...outOfScope(files, job.targets), ...escaped] };
     } else if (job.kind === 'review') {
       result = null;
     } else {

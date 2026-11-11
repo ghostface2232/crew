@@ -77,8 +77,55 @@ test('delegate runs in a worktree and commits the result on its branch', async (
   assert.equal(fs.existsSync(path.join(repo, 'new.js')), false);
   assert.equal(execFileSync('git', ['status', '--porcelain'], { cwd: repo }).toString(), '');
 
+  // Outside the repository, so tools that walk the repo never see the copy.
+  const worktree = job.worktree!.path;
+  assert.equal(worktree.startsWith(repo), false);
   await jobs.discard(job.id);
-  assert.equal(fs.existsSync(path.join(repo, '.crew', 'worktrees', job.id)), false);
+  assert.equal(fs.existsSync(worktree), false);
+});
+
+test('gitignored files listed in .worktreeinclude are copied into the worktree, and stay out of the commit', async () => {
+  const repo = tempRepo();
+  fs.writeFileSync(path.join(repo, '.gitignore'), 'node_modules/\n.env\n');
+  fs.writeFileSync(path.join(repo, '.worktreeinclude'), '# deps and secrets\nnode_modules/\n.env\nnotes.txt\n');
+  execFileSync('git', ['add', '-A'], { cwd: repo });
+  execFileSync('git', ['commit', '-qm', 'ignore'], { cwd: repo });
+  fs.mkdirSync(path.join(repo, 'node_modules', 'pkg'), { recursive: true });
+  fs.writeFileSync(path.join(repo, 'node_modules', 'pkg', 'index.js'), 'module.exports = 1;\n');
+  fs.writeFileSync(path.join(repo, '.env'), 'KEY=1\n');
+  // Listed but not gitignored: copying it would put it in the worker's commit.
+  fs.writeFileSync(path.join(repo, 'notes.txt'), 'scratch\n');
+
+  let seen: string[] = [];
+  const { jobs } = harness((ctl) => {
+    seen = ['node_modules/pkg/index.js', '.env', 'notes.txt'].filter((f) => fs.existsSync(path.join(ctl.job.cwd, f)));
+    ctl.done('ok');
+  });
+  const job = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'x' }));
+  assert.deepEqual(seen, ['node_modules/pkg/index.js', '.env']);
+  assert.deepEqual(job.result?.files, []);
+  assert.match(job.notes.join(' '), /Copied from \.worktreeinclude: .*node_modules/);
+});
+
+test('an edit the worker reports outside its worktree is listed as out of scope', async () => {
+  const repo = tempRepo();
+  const { jobs } = harness((ctl) => {
+    ctl.touched(path.join(ctl.job.cwd, 'README.md'));
+    ctl.touched(path.join(repo, 'app.js'));
+    ctl.done('done');
+  });
+  const job = await settled(jobs, await jobs.create({ kind: 'polish', cwd: repo, targets: ['README.md'] }));
+  assert.deepEqual(job.result?.outOfScope, [path.join(repo, 'app.js')]);
+});
+
+test('a job belongs to the project of the session that started it', async () => {
+  const repo = tempRepo();
+  const { jobs } = harness((ctl) => ctl.done('ok'));
+  const review = { target: { type: 'uncommittedChanges' as const }, mode: 'adversarial' as const };
+  const own = await jobs.create({ kind: 'review', cwd: repo, project: '/work/site', review });
+  const fallback = await jobs.create({ kind: 'review', cwd: repo, review });
+  assert.equal(own.project, '/work/site');
+  assert.equal(fallback.project, repo);
 });
 
 test('polish reports files changed outside the allowed targets', async () => {

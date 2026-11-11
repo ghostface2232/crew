@@ -75,7 +75,7 @@ function jobCard(job) {
       ${detail}${callout}
       <div class="row foot">
         <span class="id">${esc(job.id)}</span>
-        ${job.worktree ? `<span class="branch">${esc(job.worktree.branch)}</span>` : ''}
+        ${job.project ? `<span class="branch" title="${esc(job.project)}">${esc(shortPath(job.project))}</span>` : ''}
         <span class="actions">${resume}${cancel}</span>
       </div>`,
   };

@@ -112,6 +112,7 @@ export class CodexAdapter implements Adapter {
       sandbox: job.sandbox,
       // A review must never block on a prompt; it has nothing to approve in a read-only sandbox.
       approvalPolicy: job.kind === 'review' ? 'never' : this.config.codex.approvalPolicy,
+      approvalsReviewer: this.config.codex.approvalsReviewer ?? null,
       developerInstructions: job.instructions,
       model: job.model ?? this.config.codex.model ?? null,
     };

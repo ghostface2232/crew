@@ -134,7 +134,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       fs.createReadStream(path.join(PLUGIN_ROOT, 'board', asset[0])).pipe(res);
       return undefined;
     }
-    if (pathname === '/api/health') return { name: 'crew', version: VERSION, pid: process.pid };
+    if (pathname === '/api/health') return { name: 'crew', version: VERSION, pid: process.pid, active: jobs.activeCount };
     if (pathname === '/api/state') return state();
     if (pathname === '/api/stream') {
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });

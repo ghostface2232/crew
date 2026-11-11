@@ -2,7 +2,7 @@ import readline from 'node:readline';
 import { api, ensureDaemon } from './client.ts';
 import { BASE_URL, VERSION } from './config.ts';
 import type { CrewEvent, JobSpec } from './jobs.ts';
-import { describe, needsLead, summarize } from './render.ts';
+import { AGENT_NAMES, describe, needsLead, summarize } from './render.ts';
 import type { JobView } from './render.ts';
 
 /**
@@ -21,9 +21,9 @@ Roles (fixed):
 - Antigravity — editor. \`polish\` has it improve UI strings, comments, and docs. It must not change logic or structure.
 
 How jobs work:
-- delegate and polish run in their own git worktree and branch (crew/<job id>) created from HEAD, so commit anything the worker needs first. The bridge commits the worker's changes on that branch; you inspect the diff and merge or reject it. Nothing reaches your branch unless you merge it.
+- delegate and polish run in their own git worktree and branch (crew/<job id>) created from HEAD, so commit anything the worker needs first. Gitignored files it needs (node_modules, .env) are copied in if the repository lists them in .worktreeinclude. The bridge commits the worker's changes on that branch; you inspect the diff and merge or reject it. Nothing reaches your branch unless you merge it.
 - By default a call blocks until the worker finishes or needs you. Pass background: true to keep working in parallel; you are notified when the job ends, or call \`wait\`.
-- A job in the "waiting" state needs a decision: use \`reply\`. Approve a sandbox escape only if the command is clearly needed for the task and safe.
+- A worker's approval request or question is for the user to answer, not you. While you block on a job, the app asks them directly. If you are told a job is waiting (for example when a background job wakes you), call \`wait\` on it so they are asked. Use \`reply\` with a decision only to pass on one the user gave you in the conversation.
 - \`reply\` with a message continues the same worker session, e.g. to request fixes.
 - Reject worker changes that go beyond what was asked. For polish, any file listed as out of scope, or any non-text change, is grounds to reject.
 - If a worker fails on a usage limit, do that piece yourself and say that the cross-check was skipped.
@@ -104,7 +104,7 @@ const TOOLS = [
   {
     name: 'wait',
     title: 'Wait for workers',
-    description: 'Block until one of the given jobs finishes, fails, or needs a decision, then return its result. With no ids, waits on every active job.',
+    description: 'Block until one of the given jobs finishes or fails, then return its result. If a job needs an approval or an answer meanwhile, the user is asked in the app and the wait continues. With no ids, waits on every active job of this project.',
     annotations: { readOnlyHint: true },
     inputSchema: {
       type: 'object',
@@ -117,13 +117,13 @@ const TOOLS = [
   {
     name: 'reply',
     title: 'Reply to a worker',
-    description: 'Answer a waiting job (decision: approve or deny), or send a follow-up message that continues the same worker session, e.g. to request fixes after reviewing its diff.',
+    description: 'Send a follow-up message that continues the same worker session, e.g. to request fixes after reviewing its diff. Also passes on a decision the user gave you for a waiting job (decision: approve or deny); to have the user asked, call wait instead.',
     inputSchema: {
       type: 'object',
       properties: {
         job_id: { type: 'string' },
         message: { type: 'string', description: 'Follow-up instruction, or the answer to the worker\'s question.' },
-        decision: { type: 'string', enum: ['approve', 'deny'], description: 'For a job waiting on approval.' },
+        decision: { type: 'string', enum: ['approve', 'deny'], description: 'The user\'s decision for a job waiting on approval.' },
         background: common.background,
       },
       required: ['job_id'],
@@ -142,10 +142,69 @@ const TOOLS = [
 ];
 
 const DEFAULT_WAIT_SECONDS = 1800;
+/** The daemon is shared by every session; a session only lists and waits on its own project's jobs. */
+const PROJECT = process.env.CLAUDE_PROJECT_DIR ?? process.cwd();
+
+/** Set from the client's initialize request: whether it can show the user a form on our behalf. */
+let canElicit = false;
+/** Waiting states (`<job id>:<seq>`) the user was asked about and dismissed; these go back to the lead. */
+const dismissed = new Set<string>();
+
+const APPROVAL_FORM = {
+  type: 'object',
+  // A plain enum is the one choice schema every protocol version with elicitation accepts.
+  properties: { decision: { type: 'string', title: 'Decision', enum: ['approve', 'deny'] } },
+  required: ['decision'],
+};
+const ANSWER_FORM = { type: 'object', properties: { answer: { type: 'string', title: 'Answer' } }, required: ['answer'] };
 
 /**
- * Follows jobs until one stops running (finished, failed, or waiting on the lead),
- * the time budget runs out, or the call is cancelled.
+ * Puts a worker's approval request or question to the user through MCP
+ * elicitation, which the app renders as its own prompt, and forwards the
+ * answer to the worker. Returns false if the user dismissed the prompt.
+ */
+async function askUser(job: JobView, signal: AbortSignal): Promise<boolean> {
+  const approval = job.waiting!.type === 'approval';
+  const prompt = request('elicitation/create', {
+    message: `${AGENT_NAMES[job.agent]} (${job.title}) ${approval ? 'asks for approval to' : 'asks:'} ${job.waiting!.reason}`,
+    requestedSchema: approval ? APPROVAL_FORM : ANSWER_FORM,
+  });
+
+  // The same request can be answered on the status board, or the call can be cancelled; then the prompt is moot.
+  let open = true;
+  const moot = (async () => {
+    let current = job;
+    while (open && !signal.aborted && current.state === 'waiting' && current.seq === job.seq) {
+      current = (await api('GET', `/api/jobs/${job.id}/wait?after=${job.seq}&timeout=5`)).job;
+    }
+  })();
+  let result: any;
+  try {
+    result = await Promise.race([prompt.response, moot.then(() => null)]);
+  } catch {
+    // The client advertised elicitation but could not serve it; stop offering it.
+    canElicit = false;
+    return false;
+  } finally {
+    open = false;
+  }
+  if (result === null) {
+    prompt.cancel();
+    return true;
+  }
+  const answer = result.action === 'accept' ? result.content : null;
+  const body = approval
+    ? (answer?.decision === 'approve' || answer?.decision === 'deny') && { decision: answer.decision }
+    : typeof answer?.answer === 'string' && answer.answer.trim() && { message: answer.answer };
+  if (!body) return false;
+  // Already answered elsewhere in the meantime is fine: the worker has its decision.
+  await api('POST', `/api/jobs/${job.id}/reply`, body).catch(() => {});
+  return true;
+}
+
+/**
+ * Follows jobs until one needs the lead (finished, failed, or waiting with no way
+ * to ask the user), the time budget runs out, or the call is cancelled.
  */
 async function follow(ids: string[], seconds: number, onEvent: (e: CrewEvent) => void, signal: AbortSignal): Promise<JobView[]> {
   const latest = new Map<string, JobView>();
@@ -154,16 +213,24 @@ async function follow(ids: string[], seconds: number, onEvent: (e: CrewEvent) =>
   signal.addEventListener('abort', () => (stop = true));
 
   const watch = async (id: string) => {
-    const first: JobView = await api('GET', `/api/jobs/${id}`);
-    latest.set(id, first);
+    let job: JobView = await api('GET', `/api/jobs/${id}`);
+    latest.set(id, job);
     // Start from the present: earlier events were already reported by a previous call.
-    let after = needsLead(first) ? first.seq : Math.max(first.seq - 1, 0);
-    while (!stop && !needsLead(latest.get(id)!) && Date.now() < deadline) {
+    let after = needsLead(job) ? job.seq : Math.max(job.seq - 1, 0);
+    while (!stop && Date.now() < deadline) {
+      if (job.state === 'waiting' && canElicit && !dismissed.has(`${id}:${job.seq}`)) {
+        if (!(await askUser(job, signal))) dismissed.add(`${id}:${job.seq}`);
+        job = await api('GET', `/api/jobs/${id}`);
+        latest.set(id, job);
+        continue;
+      }
+      if (needsLead(job)) break;
       const res = await api('GET', `/api/jobs/${id}/wait?after=${after}&timeout=25`);
-      latest.set(id, res.job);
+      job = res.job;
+      latest.set(id, job);
       for (const event of res.events as CrewEvent[]) if (!stop) onEvent(event);
       // Advance even when the event buffer no longer holds these events, so the poll cannot spin.
-      after = Math.max(after, res.job.seq);
+      after = Math.max(after, job.seq);
     }
   };
   // Resolves as soon as any one job needs the lead; the other watchers wind down on their next poll.
@@ -181,17 +248,26 @@ interface CallContext {
 }
 
 async function runJob(spec: JobSpec, background: boolean, ctx: CallContext): Promise<string> {
-  const job: JobView = await api('POST', '/api/jobs', spec);
+  const job: JobView = await api('POST', '/api/jobs', { ...spec, project: PROJECT });
   return background ? describe(job) : followOne(job.id, ctx);
 }
 
 async function followOne(id: string, ctx: CallContext): Promise<string> {
   const [job] = await follow([id], DEFAULT_WAIT_SECONDS, (e) => ctx.progress(e.detail), ctx.signal);
-  return describe(job);
+  return render(job);
+}
+
+/** `describe`, plus what the lead should do about a waiting job that could not be settled in the app. */
+function render(job: JobView): string {
+  if (job.state !== 'waiting') return describe(job);
+  const hint = dismissed.has(`${job.id}:${job.seq}`)
+    ? 'The user was asked in the app and dismissed the prompt without deciding. Do not decide for them: ask what they want, then pass it on with reply.'
+    : 'This client cannot show the prompt itself. Ask the user in the conversation, then pass their decision on with reply.';
+  return describe(job, hint);
 }
 
 async function callTool(name: string, args: any, ctx: CallContext): Promise<string> {
-  const cwd: string = args.cwd ?? process.env.CLAUDE_PROJECT_DIR ?? process.cwd();
+  const cwd: string = args.cwd ?? PROJECT;
   switch (name) {
     case 'delegate':
       return runJob({ kind: 'delegate', cwd, title: args.title, task: args.task, done_when: args.done_when, base: args.base, isolation: args.isolation, model: args.model, effort: args.effort }, Boolean(args.background), ctx);
@@ -213,10 +289,12 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
         return describe(job);
       }
       const state = await api('GET', '/api/state');
-      const jobs: JobView[] = state.jobs;
+      const jobs: JobView[] = state.jobs.filter((j: JobView) => j.project === PROJECT);
       const active = jobs.filter((j) => !j.endedAt);
       const recent = jobs.filter((j) => j.endedAt).slice(0, 8);
       const lines = [active.length ? 'Active:' : 'No active jobs.', ...active.map(summarize)];
+      const elsewhere = state.jobs.filter((j: JobView) => j.project !== PROJECT && !j.endedAt).length;
+      if (elsewhere) lines.push(`(${elsewhere} active job(s) belong to other projects; they are on the board.)`);
       if (recent.length) lines.push('', 'Recent:', ...recent.map(summarize));
       const windows = state.limits.codex?.windows ?? [];
       if (windows.length) lines.push('', `Codex usage: ${windows.map((w: any) => `${Math.round(w.usedPercent)}% of the ${w.minutes >= 1440 ? `${Math.round(w.minutes / 1440)}-day` : `${Math.round(w.minutes / 60)}-hour`} window`).join(', ')}`);
@@ -226,12 +304,12 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
     case 'wait': {
       let ids: string[] = args.job_ids ?? [];
       // Besides active jobs, pick up background jobs that ended without the lead having seen the result.
-      if (!ids.length) ids = ((await api('GET', '/api/state')).jobs as JobView[]).filter((j) => !j.endedAt || j.seq > j.delivered).map((j) => j.id);
+      if (!ids.length) ids = ((await api('GET', '/api/state')).jobs as JobView[]).filter((j) => j.project === PROJECT && (!j.endedAt || j.seq > j.delivered)).map((j) => j.id);
       if (!ids.length) return 'No active jobs, and no finished job is waiting to be read.';
       const jobs = await follow(ids, args.timeout_seconds ?? DEFAULT_WAIT_SECONDS, (e) => ctx.progress(`${e.job_id}: ${e.detail}`), ctx.signal);
       const ready = jobs.filter(needsLead);
       const running = jobs.filter((j) => !needsLead(j));
-      const parts = ready.map(describe);
+      const parts = ready.map(render);
       if (running.length) parts.push(`${ready.length ? 'Still running' : 'Timed out waiting; still running'}:\n${running.map(summarize).join('\n')}`);
       return parts.join('\n\n────────\n\n');
     }
@@ -258,12 +336,29 @@ function send(message: unknown): void {
   process.stdout.write(JSON.stringify(message) + '\n');
 }
 
+let nextRequest = 1;
+const awaiting = new Map<string, { resolve: (result: any) => void; reject: (err: Error) => void }>();
+
+/** Sends a request to the client. `cancel` withdraws it if it is still open. */
+function request(method: string, params: unknown): { response: Promise<any>; cancel(): void } {
+  const id = `crew-${nextRequest++}`;
+  const response = new Promise<any>((resolve, reject) => awaiting.set(id, { resolve, reject }));
+  send({ jsonrpc: '2.0', id, method, params });
+  return {
+    response,
+    cancel: () => {
+      if (awaiting.delete(id)) send({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: id, reason: 'answered elsewhere' } });
+    },
+  };
+}
+
 async function handle(msg: any): Promise<void> {
   const { id, method, params } = msg;
   const reply = (result: unknown) => send({ jsonrpc: '2.0', id, result });
 
   switch (method) {
     case 'initialize':
+      canElicit = Boolean(params?.capabilities?.elicitation);
       return reply({
         protocolVersion: PROTOCOL_VERSIONS.includes(params?.protocolVersion) ? params.protocolVersion : PROTOCOL_VERSIONS[1],
         capabilities: { tools: {} },
@@ -312,7 +407,13 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
   } catch {
     return send({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } });
   }
-  if (typeof msg.method === 'string') void handle(msg);
+  if (typeof msg.method === 'string') return void handle(msg);
+  // Otherwise it is the client's response to one of our requests.
+  const waiter = awaiting.get(msg.id);
+  if (!waiter) return;
+  awaiting.delete(msg.id);
+  if (msg.error) waiter.reject(new Error(msg.error.message ?? 'request failed'));
+  else waiter.resolve(msg.result);
 });
 
 // Start the daemon with the session so the board and hooks work before the first tool call.

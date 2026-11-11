@@ -23,9 +23,11 @@ If nothing separates cleanly, do it all yourself. Do not invent work to delegate
 
 ## 2. Implement (you and Codex, in parallel)
 
-Workers start from `HEAD` in their own worktree, so commit anything they need first.
+Workers start from `HEAD` in their own worktree, so commit anything they need first. Gitignored files such as `node_modules` and `.env` are copied in only if the repository's `.worktreeinclude` lists them; if a worker reports that it could not run the tests for lack of dependencies, tell the user to add them there.
 
 Call `delegate` with `background: true` for each Codex piece. Write the task for someone who has not seen this conversation: goal, files and interfaces involved, constraints, and a concrete `done_when`. Then do your own part while Codex works. You are notified when a job ends; call `wait` if you finish first.
+
+If a worker asks for approval or has a question, the user answers it in the app; do not decide for them. If you are told a job is waiting, call `wait` on it so they are asked.
 
 When a job is done, read its diff before merging (`git diff <base>..crew/<job id>`). Merge what is right. Use `reply` with a message to have Codex fix what is not, and reject anything beyond the task. After merging or rejecting, `cancel` with `discard: true` removes the worktree.
 

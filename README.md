@@ -36,11 +36,14 @@ crew status
 crew board
 ```
 
-상태 보드 주소는 http://127.0.0.1:47615 이다. 승인 대기 중인 잡은 보드에서 바로 승인하거나 거절할 수 있다.
+상태 보드 주소는 http://127.0.0.1:47615 이다.
+
+워커가 승인을 요청하거나 질문하면 Claude 앱에 입력 창이 뜬다. 보드의 승인·거절 버튼으로 답해도 된다. Codex에 자동 리뷰어를 설정해 뒀다면 요청이 Codex 안에서 처리돼 창이 뜨지 않는다([docs/04-implementation.md](docs/04-implementation.md) 5.1절).
 
 ## 동작 방식
 
-- 구현과 문구 정리 잡은 각각 전용 git worktree와 `crew/<잡 id>` 브랜치에서 돈다. 리드가 diff를 보고 병합하기 전에는 작업 브랜치에 아무것도 들어오지 않는다.
+- 구현과 문구 정리 잡은 각각 전용 git worktree(`~/.crew/worktrees/` 아래)와 `crew/<잡 id>` 브랜치에서 돈다. 리드가 diff를 보고 병합하기 전에는 작업 브랜치에 아무것도 들어오지 않는다.
+- 워커가 테스트를 돌리는 데 필요한 gitignore 파일(`node_modules`, `.env` 등)은 저장소 루트의 `.worktreeinclude`에 적어두면 worktree로 복사된다. `.gitignore` 문법이고 Claude Code의 worktree와 같은 파일을 쓴다.
 - Codex는 `codex app-server`로, Antigravity는 `agy acp`로 실행한다. 공식 바이너리만 실행하고 인증 정보는 읽지 않는다.
 - 백그라운드로 맡긴 잡이 끝나거나 결정을 요구하면 리드 세션이 자동으로 깨어난다.
 - 설정은 `~/.crew/config.json`에 둔다(무응답 판정 시간, 알림, Codex 승인 정책, Antigravity 사용 여부).

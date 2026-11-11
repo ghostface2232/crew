@@ -14,11 +14,11 @@ export async function api<T = any>(method: 'GET' | 'POST', route: string, body?:
   return data;
 }
 
-export async function health(): Promise<{ version: string; pid: number } | null> {
+export async function health(): Promise<{ version: string; pid: number; active: number } | null> {
   try {
     const res = await fetch(`${BASE_URL}/api/health`, { signal: AbortSignal.timeout(1000) });
     const data: any = await res.json();
-    return data.name === 'crew' ? data : null;
+    return data.name === 'crew' ? { ...data, active: data.active ?? 0 } : null;
   } catch {
     return null;
   }
@@ -35,7 +35,7 @@ async function waitFor(check: () => Promise<boolean>, ms: number): Promise<boole
 
 let ensuring: Promise<void> | null = null;
 
-/** Starts the daemon if it is not running, and replaces one left over from an older plugin version. */
+/** Starts the daemon if it is not running, and upgrades an idle one left over from an older plugin version. */
 export function ensureDaemon(): Promise<void> {
   // Concurrent callers share one attempt, so a cold start spawns a single daemon.
   ensuring ??= startDaemon().finally(() => {
@@ -44,11 +44,22 @@ export function ensureDaemon(): Promise<void> {
   return ensuring;
 }
 
+/** Compares dotted numeric versions. */
+export function isNewer(candidate: string, current: string): boolean {
+  const a = candidate.split('.').map(Number);
+  const b = current.split('.').map(Number);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) > (b[i] ?? 0);
+  }
+  return false;
+}
+
 async function startDaemon(): Promise<void> {
   const running = await health();
-  if (running?.version === VERSION) return;
   if (running) {
-    // Jobs are persisted and their sessions can be continued, so an upgrade restart loses no work.
+    // Only ever upgrade: if two installs of different versions each replaced the other's daemon,
+    // they would take turns killing it. And never under running jobs, which a restart would fail.
+    if (!isNewer(VERSION, running.version) || running.active > 0) return;
     await api('POST', '/api/shutdown', {}).catch(() => {});
     await waitFor(async () => (await health()) === null, 5000);
   }

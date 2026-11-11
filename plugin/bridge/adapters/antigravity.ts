@@ -3,12 +3,16 @@ import { agentEnv, VERSION } from '../config.ts';
 import type { Config } from '../config.ts';
 import { isTerminal } from '../jobs.ts';
 import type { Adapter, JobCtl } from '../jobs.ts';
+import { isInside } from '../git.ts';
 import { RpcError, RpcPeer } from '../rpc.ts';
 
 interface Run {
   ctl: JobCtl;
   prompting: boolean;
+  /** Text since the last tool call. */
   message: string;
+  /** Last non-empty text before that, in case the turn ends right after a tool call. */
+  earlier: string;
 }
 
 /** ACP tool kinds the editor role may use. Everything else (execute, delete, move, fetch, ...) is refused. */
@@ -42,13 +46,13 @@ export class AntigravityAdapter implements Adapter {
     const peer = await this.ensure();
     const res = await peer.request('session/new', { cwd: ctl.job.cwd, mcpServers: [] });
     const sessionId: string = res.sessionId;
-    const run: Run = { ctl, prompting: false, message: '' };
+    const run: Run = { ctl, prompting: false, message: '', earlier: '' };
     this.runs.set(sessionId, run);
     this.loaded.add(sessionId);
     ctl.session(sessionId);
 
-    // Workspace edits apply without a prompt; everything else still asks, and onRequest refuses it.
-    await peer.request('session/set_mode', { sessionId, modeId: 'accept-edits' });
+    // Stay in the default mode, where every edit asks first and onRequest decides it.
+    // "accept-edits" was measured to apply edits outside the workspace without asking.
     const model = ctl.job.model ?? this.config.antigravity.model;
     if (model) await peer.request('session/set_config_option', { sessionId, configId: 'model', value: model });
 
@@ -64,7 +68,7 @@ export class AntigravityAdapter implements Adapter {
     }
     let run = this.runs.get(sessionId);
     if (!run) {
-      run = { ctl, prompting: false, message: '' };
+      run = { ctl, prompting: false, message: '', earlier: '' };
       this.runs.set(sessionId, run);
     }
     if (run.prompting) throw new Error('Antigravity is still working on the previous message. Wait for it to finish, or cancel first.');
@@ -89,13 +93,14 @@ export class AntigravityAdapter implements Adapter {
     const { ctl } = run;
     run.prompting = true;
     run.message = '';
+    run.earlier = '';
     ctl.phase('working');
     peer
       .request('session/prompt', { sessionId: ctl.job.sessionId, prompt: [{ type: 'text', text }] })
       .then(
         (res) => {
           if (res.stopReason === 'cancelled') ctl.cancelled();
-          else if (res.stopReason === 'end_turn') ctl.done(plainLinks(run.message.trim()));
+          else if (res.stopReason === 'end_turn') ctl.done(plainLinks(run.message.trim() || run.earlier));
           else ctl.fail(`Antigravity stopped early: ${res.stopReason}`);
         },
         (err) => {
@@ -157,6 +162,7 @@ export class AntigravityAdapter implements Adapter {
         break;
       case 'tool_call':
         // Text before a tool call is narration; the report is what follows the last one.
+        if (run.message.trim()) run.earlier = run.message.trim();
         run.message = '';
         ctl.progress(describeCall(update));
         break;
@@ -180,13 +186,31 @@ export class AntigravityAdapter implements Adapter {
   private async onRequest(method: string, p: any): Promise<unknown> {
     if (method !== 'session/request_permission') throw new RpcError(-32601, `${method} is not supported by Crew`);
     const run = this.runs.get(p.sessionId);
-    const kind: string = p.toolCall?.kind ?? 'other';
-    const allow = ALLOWED_KINDS.includes(kind);
-    const wanted = allow ? ['allow_once', 'allow_always'] : ['reject_once', 'reject_always'];
+    const refusal = run ? refuse(run.ctl.job.cwd, p.toolCall ?? {}) : 'unknown session';
+    // Never "always": each edit must come back here so its path is checked.
+    const wanted = refusal ? ['reject_once', 'reject_always'] : ['allow_once'];
     const option = (p.options ?? []).find((o: any) => wanted.includes(o.kind));
-    if (!allow) run?.ctl.progress(`refused (${kind}): ${p.toolCall?.title ?? 'tool call'}`);
+    if (refusal && run) {
+      const what = `${refusal}: ${p.toolCall?.title ?? 'tool call'}`;
+      run.ctl.progress(`refused (${what})`);
+      run.ctl.note(`The bridge refused an action outside the editor role (${what}).`);
+    }
     return option ? { outcome: { outcome: 'selected', optionId: option.optionId } } : { outcome: { outcome: 'cancelled' } };
   }
+}
+
+/**
+ * Role policy for a permission request: the reason to refuse it, or null to allow.
+ * Reading is allowed anywhere; editing only inside the job's workspace.
+ */
+export function refuse(cwd: string, toolCall: { kind?: string; locations?: { path?: string }[] }): string | null {
+  const kind = toolCall.kind ?? 'other';
+  if (!ALLOWED_KINDS.includes(kind)) return kind;
+  if (kind !== 'edit') return null;
+  const paths = (toolCall.locations ?? []).map((l) => l.path).filter((f): f is string => Boolean(f));
+  // An edit that does not say where it writes cannot be shown to stay inside.
+  if (paths.length === 0) return 'edit without a path';
+  return paths.every((f) => isInside(cwd, f)) ? null : 'edit outside the workspace';
 }
 
 const VERBS: Record<string, string> = { read: 'reading', edit: 'editing', search: 'searching', execute: 'running', delete: 'deleting', move: 'moving', fetch: 'fetching' };

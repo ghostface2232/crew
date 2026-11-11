@@ -1,10 +1,10 @@
 # Crew
 
-Claude, Codex, Antigravity 세 에이전트에 역할을 나눠 협업시키는 Claude Code 플러그인이다. Claude가 리드와 셀프 리뷰를, Codex가 구현 보조와 교차 리뷰를, Antigravity가 UX 문구와 주석·문서 정리를 맡는다. 세 에이전트가 지금 무엇을 하는지는 상태 보드에서 실시간으로 본다.
+A Claude Code plugin that divides roles across Claude, Codex, and Antigravity so they collaborate as a three-agent crew. Claude acts as the lead and self-reviewer, Codex handles supporting implementation and cross-review, and Antigravity polishes UX copy, comments, and documentation. A live status board shows what all three agents are doing in real time.
 
-## 시작하기
+## Getting started
 
-필요한 것: Node.js 22.18 이상, git, 로그인된 `claude`, `codex`, `agy` CLI.
+Requirements: Node.js 22.18+, git, and authenticated `claude`, `codex`, and `agy` CLIs.
 
 ```bash
 node plugin/bridge/cli.ts install
@@ -14,19 +14,19 @@ node plugin/bridge/cli.ts install
 crew doctor
 ```
 
-`install`은 이 폴더를 Claude Code 마켓플레이스로 등록하고 `crew` 플러그인을 설치한 뒤 `crew` 명령을 `~/.local/bin`에 건다. 설치 후 Claude Code 세션을 새로 열면(Desktop 포함) 적용된다.
+`install` registers this folder as a Claude Code marketplace, installs the `crew` plugin, and links the `crew` command into `~/.local/bin`. Open a new Claude Code session (including Desktop) after installing for it to take effect.
 
-## 쓰는 법
+## Usage
 
-Claude Code 세션에서:
+Inside a Claude Code session:
 
-| 입력 | 동작 |
+| Input | What happens |
 | --- | --- |
-| `/crew:run <작업>` | 계획, 병렬 구현, 셀프 리뷰, 교차 리뷰, 수정, 문구 정리, 최종 확인을 순서대로 진행 |
-| `/crew:board` | 상태 보드 열기. Desktop에서는 브라우저 패널에 뜬다 |
-| "이 부분은 Codex한테 맡겨줘", "Codex 리뷰 받아줘" 같은 평소 말 | 리드가 `delegate`, `review`, `polish` 도구를 직접 호출 |
+| `/crew:run <task>` | Runs planning, parallel implementation, self-review, cross-review, fixes, wording polish, and final verification in order |
+| `/crew:board` | Opens the status board (inside the browser pane in Claude Desktop) |
+| Natural prompts like "Have Codex build this part" or "Get a Codex review on this" | The lead calls `delegate`, `review`, or `polish` directly |
 
-터미널에서:
+From a terminal:
 
 ```bash
 crew status
@@ -36,44 +36,46 @@ crew status
 crew board
 ```
 
-상태 보드 주소는 http://127.0.0.1:47615 이다.
+The status board runs at http://127.0.0.1:47615.
 
-워커가 승인을 요청하거나 질문하면 Claude 앱에 입력 창이 뜬다. 보드의 승인·거절 버튼으로 답해도 된다. Codex에 자동 리뷰어를 설정해 뒀다면 요청이 Codex 안에서 처리돼 창이 뜨지 않는다([docs/04-implementation.md](docs/04-implementation.md) 5.1절).
+When a worker asks for approval or has a question, an input dialog pops up in the Claude app. You can also answer using the approve/deny buttons on the status board. If you have configured Codex's built-in auto-reviewer, Codex handles its own approvals internally without prompting ([docs/04-implementation.md](docs/04-implementation.md) section 5.1).
 
-## 동작 방식
+## How it works
 
-- 구현과 문구 정리 잡은 각각 전용 git worktree(`~/.crew/worktrees/` 아래)와 `crew-<잡 id>` 브랜치에서 돈다. 리드가 diff를 보고 병합하기 전에는 작업 브랜치에 아무것도 들어오지 않는다.
-- 워커가 테스트를 돌리는 데 필요한 gitignore 파일(`node_modules`, `.env` 등)은 저장소 루트의 `.worktreeinclude`에 적어두면 worktree로 복사된다. `.gitignore` 문법이고 Claude Code의 worktree와 같은 파일을 쓴다.
-- Codex는 `codex app-server`로, Antigravity는 `agy acp`로 실행한다. 공식 바이너리만 실행하고 인증 정보는 읽지 않는다.
-- 백그라운드로 맡긴 잡이 끝나거나 결정을 요구하면 리드 세션이 자동으로 깨어난다.
-- 설정은 `~/.crew/config.json`에 둔다(무응답 판정 시간, 알림, Codex 승인 정책, Antigravity 사용 여부).
+- Each implementation or polish job runs in its own isolated git worktree (under `~/.crew/worktrees/`) on a `crew-<job id>` branch. Nothing touches your working branch until the lead inspects the diff and merges it.
+- Gitignored files that workers need to run tests (such as `node_modules` or `.env`) are copied into the worktree when listed in `.worktreeinclude` at the repository root. It uses `.gitignore` syntax and shares the same file as Claude Code's native worktrees.
+- Codex runs via `codex app-server` and Antigravity runs via `agy acp`. Crew executes only the official binaries and never reads authentication files or tokens.
+- When a background job finishes or needs a decision, the lead session wakes up automatically.
+- Configuration lives in `~/.crew/config.json` (stall timeout, notifications, Codex approval policy, and whether Antigravity is enabled).
 
-Antigravity 연동에는 약관상 위험이 있다. 쓰기 전에 [docs/04-implementation.md](docs/04-implementation.md) 6절을 읽는다.
+Using Antigravity carries a Terms of Service risk; read [docs/04-implementation.md](docs/04-implementation.md) section 6 before enabling it.
 
-## 폴더
+## Directory layout
 
-| 경로 | 내용 |
+| Path | Contents |
 | --- | --- |
-| `plugin/bridge/` | 데몬, MCP 서버, 에이전트 어댑터, CLI (TypeScript, 빌드 없음) |
-| `plugin/board/` | 상태 보드 (정적 HTML/CSS/JS) |
-| `plugin/roles/` | Codex와 Antigravity에 매 잡마다 주입하는 역할 지침 |
-| `plugin/skills/`, `plugin/agents/`, `plugin/hooks/` | `/crew:run`, `/crew:board`, 셀프 리뷰 서브에이전트, 훅 |
-| `test/` | 단위 테스트 (`npm test`) |
+| `plugin/bridge/` | Daemon, MCP server, agent adapters, CLI (TypeScript, no build step) |
+| `plugin/board/` | Status board (static HTML/CSS/JS) |
+| `plugin/roles/` | Role instructions injected into Codex and Antigravity on every job |
+| `plugin/skills/`, `plugin/agents/`, `plugin/hooks/` | `/crew:run`, `/crew:board`, self-reviewer subagent, hooks |
+| `test/` | Unit tests (`npm test`) |
 
-## 문서
+## Documentation
 
-| 문서 | 내용 |
+| Document | Contents |
 | --- | --- |
-| [docs/01-requirements.md](docs/01-requirements.md) | 최초 요구사항 원문, 요구사항 번호(R1-R8), 요구 간 충돌과 해석, 충족 기준 |
-| [docs/02-implementation-plan.md](docs/02-implementation-plan.md) | 구성 결정, 연결 방식, 역할과 작업 순서, 상태 표시, 배제한 대안, 위험, 구축 단계 |
-| [docs/03-agentgauge-integration.md](docs/03-agentgauge-integration.md) | AgentGauge 현황, 연동에 빠진 것, 단계별 연동 계획, MCP 도구 명세, 배분 정책 |
-| [docs/04-implementation.md](docs/04-implementation.md) | 구현된 구성, 계획에서 달라진 점과 이유, 데스크톱 앱 노출 확인 결과, 검증 내역 |
+| [docs/01-requirements.md](docs/01-requirements.md) | Original requirements, numbered requirements (R1–R8), tensions and interpretations, acceptance criteria |
+| [docs/02-implementation-plan.md](docs/02-implementation-plan.md) | Architecture decisions, connection methods, roles and workflow, status display, rejected alternatives, risks, build phases |
+| [docs/03-agentgauge-integration.md](docs/03-agentgauge-integration.md) | Current state of AgentGauge, integration gaps, phased integration plan, MCP tool spec, routing policy |
+| [docs/04-implementation.md](docs/04-implementation.md) | Implemented architecture, changes from the plan and why, desktop app visibility findings, verification log |
+| [docs/05-related-work.md](docs/05-related-work.md) | Survey of related projects, adoption candidates vs. current code, UX gaps |
+| [docs/06-roadmap.md](docs/06-roadmap.md) | Near-term rework, long-term expansion, control UI concept, open items |
 
-## 현재 단계
+## Current status
 
-브리지(Phase 1)와 상태 보드(Phase 2)가 구현돼 있다. AgentGauge 연동(Phase 3)은 아직이다.
+The bridge (Phase 1) and status board (Phase 2) are implemented. AgentGauge integration (Phase 3) is not yet implemented.
 
-## 문서를 고칠 때
+## Updating the documentation
 
-- 외부 도구에 관한 사실에는 확인 날짜를 붙인다. 세 서비스 모두 프로토콜과 정책이 몇 달 단위로 바뀌었으므로, 구현 전에 02 문서 말미의 확인 근거를 다시 확인한다.
-- 결정을 뒤집으면 지우지 말고 해당 문서의 번복 기록에 사유와 날짜를 남긴다.
+- Attach a verification date to facts about external tools. Because protocols and policies across all three services have shifted every few months, re-verify the sources at the end of document 02 before building.
+- When reversing a recorded decision, do not delete it—append the reason and date to that document's revision log.

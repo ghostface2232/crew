@@ -1,54 +1,54 @@
-# 01. 요구사항
+# 01. Requirements
 
-작성일 2026-11-11. 요구사항의 출처는 같은 날 대화의 첫 메시지와 후속 메시지다.
+Written 2026-11-11. Sourced from the initial prompt and follow-up message in the conversation on the same day.
 
-## 1. 최초 요구사항 원문
+## 1. Initial request (translated from original)
 
-> 내가 Claude, Codex, Antigravity를 다 사용하는데 얘네한테 역할 분담하고 협업하도록 연결할 최적의 방안에 대해 고민하고 검토해 줘. 필요한 정보 있으면 충분히 조사 및 분석해도 좋고 유사 구현 사례를 찾아봐도 됨.
+> I use Claude, Codex, and Antigravity, and I want you to think through and evaluate the best way to connect them so they divide roles and collaborate. Feel free to research and analyze whatever information you need and look for similar implementations.
 >
-> 원하는 것
+> What I want:
 >
-> 1. 백그라운드에서는 CLI나 다른 방식으로 연결되어도 좋지만 프론트에서는 깔끔하게 보이면 좋겠음.
-> 2. 또한 주도 리더 모델의 앱 자체를 사용해도 되고 새로운 프론트엔드 페이지나 간단한 웹앱 Wrapper를 하나 만들어도 됨. 상상 가능한 최적 방식으로 구상해줄 것.
-> 3. Claude는 Codex와 협업하는 리드 및 셀프 리뷰어, Codex는 보조 엔지니어 및 리뷰어, 안티그래비티는 UX Writing 점검 및 주석/문서 더 읽기 좋게 정리 정도의 역할만 맡으면 좋겠음.
-> 4. 각 모델 서비스의 서브에이전트, 세션 간 대화, 리모트 컨트롤, 컴퓨터 유즈, 자체 브라우저나 백그라운드 헤드리스 브라우저, 크롬 사용, 사이드챗, MCP, 컴팩트 세션 등의 기능을 전부 사용할 수 있으면 좋겠음.
-> 5. 그리고 각자가 뭐 하고 있는지 실시간 혹은 실시간에 가깝게 보이면 좋겠음 (멈추거나 사용량, 오류 등 때문에 작업 중단되면 알 수 있게).
-> 6. 여기서 실행한 세션은 개별 서비스 데스크톱 앱에서도 보이면 더 좋음.
-> 7. 깔끔하고 직관적이며 빠릿하고 부드럽게 유려한 동작.
+> 1. They can be connected via CLI or any other mechanism in the background, as long as the frontend looks clean.
+> 2. We can use the lead model's own app directly, or build a new frontend page or a lightweight web-app wrapper. Design the best approach you can envision.
+> 3. Claude should act as the lead collaborating with Codex and as the self-reviewer; Codex as the supporting engineer and reviewer; and Antigravity should only handle UX writing checks and cleaning up comments and documentation for readability.
+> 4. Every service's features—subagents, inter-session messaging, Remote Control, computer use, built-in or background headless browsers, Chrome integration, side chat, MCP, compact sessions, and so on—should remain fully usable.
+> 5. What each agent is doing should be visible in real time or near real time (so I can tell when work stops because of a stall, usage limit, or error).
+> 6. Even better if sessions started here also show up in each service's desktop app.
+> 7. Clean, intuitive, snappy, and smooth operation.
 
-## 2. 후속 요구 원문
+## 2. Follow-up request (translated from original)
 
-> 이미 내가 개발했던 AgentGauge가 있으니 이 새로운 구상의 MCP나 API처럼 연결하면 어때? 에이전트가 연결되어서 스스로와 다른 서비스의 사용량을 확인하고 알아서 적당한 도구에 일을 배분하는 도구인 거지. 다 사용량이 충분하면 원래 역할대로 분배하고.
+> Since I already built AgentGauge, how about connecting it to this setup like an MCP server or API? A tool where the agent is connected, checks its own usage and the other services' usage, and automatically routes work to the right tool—while sticking to the original role assignments whenever all of them have plenty of capacity.
 
-## 3. 요구사항 번호
+## 3. Numbered requirements
 
-| 번호 | 요구 | 성격 |
+| ID | Requirement | Kind |
 | --- | --- | --- |
-| R1 | 뒤에서는 CLI 등 어떤 방식으로 연결해도 되지만 프론트는 정돈돼 보여야 한다 | 필수 |
-| R2 | 리드 모델의 앱을 그대로 쓰거나, 새 프론트 또는 얇은 웹앱 래퍼를 만들어도 된다. 가장 나은 방식을 고른다 | 선택지 |
-| R3 | 역할 고정. Claude는 리드 겸 셀프 리뷰어, Codex는 보조 엔지니어 겸 리뷰어, Antigravity는 UX 문구 점검과 주석·문서 가독성 정리만 | 필수 |
-| R4 | 각 서비스의 서브에이전트, 세션 간 대화, 리모트 컨트롤, 컴퓨터 유즈, 자체 또는 헤드리스 브라우저, Chrome 사용, 사이드챗, MCP, 컴팩트 세션을 전부 쓸 수 있어야 한다 | 필수 |
-| R5 | 각 에이전트가 하는 일이 실시간에 가깝게 보여야 한다. 멈춤, 사용량 소진, 오류로 인한 중단을 알 수 있어야 한다 | 필수 |
-| R6 | 여기서 실행한 세션이 각 서비스의 데스크톱 앱에서도 보이면 더 좋다 | 희망 |
-| R7 | 동작이 직관적이고 빠르며 매끄러워야 한다 | 필수 |
-| R8 | AgentGauge를 MCP 또는 API로 붙여, 에이전트가 자신과 다른 서비스의 사용량을 확인하고 작업을 적절한 도구에 배분한다. 모두 여유 있으면 R3의 원래 역할대로 배분한다 | 필수(후속) |
+| R1 | Any background connection method (CLI or otherwise) is fine, but the user-facing surface must stay clean and uncluttered | Required |
+| R2 | Either use the lead model's own app, or build a new frontend or thin web-app wrapper—pick whichever works best | Choice |
+| R3 | Fixed roles: Claude is lead and self-reviewer, Codex is supporting engineer and reviewer, Antigravity only checks UX copy and cleans up comments and docs for readability | Required |
+| R4 | Subagents, inter-session communication, Remote Control, computer use, built-in or headless browsers, Chrome use, side chat, MCP, and session compaction across the services must remain usable | Required |
+| R5 | Each agent's activity must be visible in near real time, including stalls, exhausted usage limits, and error stops | Required |
+| R6 | Sessions started here should ideally appear in each service's desktop app as well | Nice to have |
+| R7 | Operation must be intuitive, fast, and seamless | Required |
+| R8 | Connect AgentGauge via MCP or API so the agent checks its own and other services' usage and routes tasks to the right tool, falling back to the original R3 roles when all have sufficient capacity | Required (follow-up) |
 
-## 4. 요구 간 충돌과 해석
+## 4. Tensions between requirements and how they are resolved
 
-- R2의 래퍼 선택지와 R4, R6이 충돌한다. 사이드챗, 컴퓨터 유즈, 내장 브라우저 패널은 각 회사 데스크톱 앱의 기능이라서, 헤드리스 런타임을 감싼 자체 프론트에서는 쓸 수 없다. 데스크톱 앱 노출(R6)도 리드가 그 앱 안에서 돌 때 가장 확실하다. 그래서 R2는 리드 앱을 그대로 쓰는 쪽으로 정했다.
-- R3의 역할 고정과 R8의 사용량 기반 재배분이 충돌한다. R8의 마지막 문장이 우선순위를 정해준다. 평상시에는 R3을 따르고, 특정 서비스의 한도가 부족할 때만 재배분한다. Antigravity를 엔지니어링 역할로 올리는 재배분은 요구에 없으므로 하지 않는다.
-- R5의 실시간 가시성은 R1의 정돈된 프론트와 함께 봐야 한다. 터미널 여러 개를 나란히 띄우는 방식은 R5를 충족해도 R1에 못 미친다. 이벤트를 모아 요약해 보여주는 별도 표시가 필요하다.
-- R4의 범위는 리드와 워커가 다르다. 리드(Claude)는 데스크톱 앱 기능 전부를 쓴다. 워커(Codex, Antigravity)는 뒤에서 도는 동안 자기 런타임의 서브에이전트, MCP, 컴팩션을 그대로 쓰지만 워커 쪽 데스크톱 전용 기능은 쓰지 못한다. 맡긴 역할에는 그 기능들이 필요하지 않다.
+- The wrapper option in R2 conflicts with R4 and R6. Side chat, computer use, and the built-in browser pane are features of each vendor's desktop app and are unavailable in a custom frontend wrapping headless runtimes. Desktop app visibility (R6) is also most reliable when the lead runs inside its own desktop app. R2 is therefore resolved in favor of using the lead's native app.
+- Fixed roles in R3 conflict with usage-based rerouting in R8. The last sentence of R8 sets the priority: follow R3 under normal conditions, and reroute only when a service runs low on quota. Promoting Antigravity into an engineering role is never requested and is not done.
+- Real-time visibility in R5 must be weighed alongside the clean frontend in R1. Tiling multiple terminal windows satisfies R5 but fails R1. A separate view that aggregates and summarizes events is needed.
+- The scope of R4 differs between the lead and the workers. The lead (Claude) uses every feature of its desktop app. While running in the background, workers (Codex, Antigravity) keep their runtime subagents, MCP servers, and compaction, but cannot use desktop-only UI features on the worker side. Their assigned roles do not need those features.
 
-## 5. 충족 기준
+## 5. Acceptance criteria
 
-| 번호 | 충족으로 보는 상태 |
+| ID | What counts as met |
 | --- | --- |
-| R1 | 사용자가 평소에 보는 화면이 Claude Code Desktop 하나와 상태 보드 하나로 끝난다. 터미널을 직접 열 일이 없다 |
-| R2 | 02 문서에 선택한 방식과 배제한 방식의 근거가 기록돼 있다 |
-| R3 | 역할 규칙이 각 에이전트의 지시 파일에 적혀 있고, 범위를 벗어난 변경을 리드가 반려한다 |
-| R4 | 리드 세션에서 열거된 기능이 전부 동작한다. 워커는 자기 설정의 MCP와 서브에이전트를 그대로 쓴다 |
-| R5 | 세 에이전트 각각에 대해 현재 단계, 마지막 이벤트, 대기 사유가 보인다. 한도 소진, 오류, 무응답이 발생하면 정해진 시간 안에 알림이 온다 |
-| R6 | Claude 세션은 Desktop과 모바일에서 보인다. Codex와 Antigravity 세션은 각 앱에서 이어받을 수 있다(노출의 한계는 02 문서 6절) |
-| R7 | 위임, 리뷰, 정리 단계 사이에 사용자가 수동으로 옮겨줄 것이 없다 |
-| R8 | 리드가 단계 경계에서 배분 도구를 호출하고, 반환된 담당자와 근거대로 위임한다. 리드의 한도가 바닥나기 전에 인계가 시작된다 |
+| R1 | In normal use, the user only looks at Claude Code Desktop and a single status board, without opening a terminal |
+| R2 | Document 02 records the chosen approach, the rejected alternatives, and the reasons behind both |
+| R3 | Role rules live in each agent's instruction files, and the lead rejects out-of-scope changes |
+| R4 | All listed features work in the lead session; workers use their configured MCP servers and subagents as-is |
+| R5 | Each of the three agents shows its current stage, last event, and wait reason; quota exhaustion, errors, and stalls trigger a notification within a configured timeout |
+| R6 | Claude sessions appear in Desktop and mobile; Codex and Antigravity sessions can be resumed in their respective tools (see document 02 section 6 for visibility limits) |
+| R7 | No manual copy-pasting is needed between delegation, review, and polish stages |
+| R8 | The lead calls the routing tool at stage boundaries and delegates according to the returned assignee and reason; handoff begins before the lead's own quota runs out |

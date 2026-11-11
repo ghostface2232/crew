@@ -187,7 +187,7 @@ The tables above describe the initial audit. The follow-up used temporary Git re
 
 | Finding | Follow-up |
 | --- | --- |
-| A-1, A-1b, A-6 | Child-thread requests reach the parent job. Each job presents requests in arrival order. Board and app replies carry the displayed request number, so a stale response cannot settle the next request. Approval text includes the entire command, the working directory if supplied, and any requested additional permissions. Actual Codex approval traffic was simulated. |
+| A-1, A-1b, A-6 | Child-thread requests reach the parent job, including on later turns. Each job presents requests in arrival order. Every answer requires the request ID, which stays unique across daemon restarts. Approval text includes the entire command, the working directory if supplied, and any requested additional permissions. Actual Codex approval traffic was simulated. |
 | A-2 | The 200-record limit applies to delivered, finished history without worktrees. Active jobs, unread results, and records that own worktrees survive restarts. Worktrees already orphaned by the old limit require separate recovery. |
 | A-3 | Deleting the directory alone was already recoverable. A separate failure was reproduced by locking the branch ref after worktree creation. Discard now retries after partial removal and checks the registered path and branch before deleting. |
 | A-4 | Worker initialization and session setup have a 30-second RPC deadline. A failed handshake closes the worker process. A lost turn-start acknowledgement leaves the job active because the prompt may have reached the worker. |
@@ -195,7 +195,7 @@ The tables above describe the initial audit. The follow-up used temporary Git re
 | B-1 | The installed Codex schema and ACP permission response offer no field for a denial reason. |
 | B-2 | Claude cards keep their position within each status group when tool activity updates the timestamp. |
 
-Antigravity restores sessions using advertised ACP capabilities. Cancellation waits for a worker response, with a negotiated ACP session close as a fallback. The review prompt accepts explicit acceptance criteria and asks for evidence from checks. The board and job details show recorded Codex tokens.
+Antigravity restores sessions using advertised ACP capabilities. Cancellation blocks new permissions and waits for the worker to stop, with a negotiated ACP session close as a fallback. The review prompt accepts explicit acceptance criteria and asks for evidence from checks. The board and job details show recorded Codex tokens.
 
 The optional proposals for a job cap, trash, hooks, and additional board views remain open. Repository-wide worktree locking, abrupt daemon termination, and parent turns that finish while child turns are still active need separate evidence.
 

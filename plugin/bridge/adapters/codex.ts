@@ -6,7 +6,7 @@ import { isTerminal } from '../jobs.ts';
 import type { Adapter, JobCtl } from '../jobs.ts';
 import { RPC_TIMEOUT_MS, RpcError, RpcPeer, RpcTimeoutError } from '../rpc.ts';
 
-type Answer = { approve: boolean; message?: string };
+type Answer = { approve: boolean; message?: string; cancelled?: boolean };
 interface Pending {
   id: string | number;
   threadId: string;
@@ -112,11 +112,12 @@ export class CodexAdapter implements Adapter {
     if (run.interrupt) throw new Error('Cancellation is already in progress.');
     const interrupt = Promise.withResolvers<void>();
     run.interrupt = interrupt;
-    for (const request of run.pending.splice(0)) request.resolve({ approve: false });
+    for (const request of run.pending.splice(0)) request.resolve({ approve: false, cancelled: true });
     run.ctl.resumed();
     try {
-      await this.peer.request('turn/interrupt', { threadId, turnId: run.turnId }, RPC_TIMEOUT_MS);
-      const stopped = await Promise.race([interrupt.promise.then(() => true), delay(5_000, false, { ref: false })]);
+      const ended = interrupt.promise.then(() => true);
+      const ack = this.peer.request('turn/interrupt', { threadId, turnId: run.turnId }, RPC_TIMEOUT_MS);
+      const stopped = await Promise.race([ended, ack.then(() => ended), delay(5_000, false, { ref: false })]);
       if (!stopped) throw new Error('Codex did not confirm cancellation. The job is still active.');
     } finally {
       run.interrupt = null;
@@ -176,6 +177,7 @@ export class CodexAdapter implements Adapter {
 
   private ensure(): Promise<RpcPeer> {
     this.lastUsed = Date.now();
+    if (this.starting) return this.starting;
     if (this.peer?.alive) return Promise.resolve(this.peer);
     this.starting ??= this.launch().finally(() => {
       this.starting = null;
@@ -201,9 +203,9 @@ export class CodexAdapter implements Adapter {
         this.runs.clear();
       },
     });
+    this.peer = peer;
     await peer.initialize({ clientInfo: { name: 'crew', title: 'Crew', version: VERSION }, capabilities: null });
     peer.notify('initialized');
-    this.peer = peer;
     peer.request('account/rateLimits/read', undefined, RPC_TIMEOUT_MS).then((res) => this.setLimits(res.rateLimits), () => {});
     return peer;
   }
@@ -231,6 +233,16 @@ export class CodexAdapter implements Adapter {
     }
     const threadId: string | undefined = p?.threadId;
     if (!threadId) return;
+    if (method === 'thread/closed') {
+      const owner = this.children.get(threadId);
+      if (owner) {
+        for (let index = owner.pending.length - 1; index >= 0; index--) {
+          if (owner.pending[index].threadId === threadId) this.settleRequest(owner, index, null);
+        }
+        this.children.delete(threadId);
+        return;
+      }
+    }
     if (method === 'serverRequest/resolved') {
       const owner = this.runs.get(threadId) ?? this.children.get(threadId);
       const index = owner?.pending.findIndex((request) => request.threadId === threadId && request.id === p.requestId) ?? -1;
@@ -274,7 +286,6 @@ export class CodexAdapter implements Adapter {
         run.turnId = null;
         run.awaitingTurn = false;
         for (const request of run.pending.splice(0)) request.resolve(null);
-        for (const [child, owner] of this.children) if (owner === run) this.children.delete(child);
         const turn = p.turn;
         if (run.interrupt || turn.status === 'interrupted') ctl.cancelled();
         else if (turn.status === 'completed') ctl.done(run.message);
@@ -350,7 +361,8 @@ export class CodexAdapter implements Adapter {
     const threadId = p?.threadId;
     const run = this.runs.get(threadId) ?? this.children.get(threadId);
     const ask = (type: 'approval' | 'question', reason: string) => {
-      if (!run || run.interrupt || isTerminal(run.ctl.job)) return Promise.resolve<Answer>({ approve: false });
+      if (!run || isTerminal(run.ctl.job)) return Promise.resolve<Answer>({ approve: false });
+      if (run.interrupt) return Promise.resolve<Answer>({ approve: false, cancelled: true });
       if (this.children.has(threadId)) reason = `Sub-agent request\n${reason}`;
       return new Promise<Answer | null>((resolve) => {
         run.pending.push({ id, threadId, type, reason, resolve });
@@ -372,11 +384,13 @@ export class CodexAdapter implements Adapter {
         const cwd = p.cwd ? `Working directory: ${p.cwd}` : '';
         const permissions = p.additionalPermissions ? `Additional permissions: ${JSON.stringify(p.additionalPermissions)}` : '';
         const answer = await ask('approval', [command, cwd, network, permissions].filter(Boolean).join('\n') + why);
-        return answer ? { decision: answer.approve ? 'accept' : deny } : undefined;
+        if (!answer) return;
+        const cancel = !p.availableDecisions || p.availableDecisions.includes('cancel') ? 'cancel' : deny;
+        return { decision: answer.cancelled ? cancel : answer.approve ? 'accept' : deny };
       }
       case 'item/fileChange/requestApproval': {
         const answer = await ask('approval', `write files${p.grantRoot ? ` under ${p.grantRoot}` : ''}${why}`);
-        return answer ? { decision: answer.approve ? 'accept' : 'decline' } : undefined;
+        return answer ? { decision: answer.cancelled ? 'cancel' : answer.approve ? 'accept' : 'decline' } : undefined;
       }
       case 'item/permissions/requestApproval': {
         const answer = await ask('approval', `Grant permissions:\n${JSON.stringify(p.permissions ?? {}, null, 2)}${why}`);
@@ -390,6 +404,7 @@ export class CodexAdapter implements Adapter {
         const questions: any[] = p.questions ?? [];
         const answer = await ask('question', questions.map((q) => q.question).join(' / ') || 'the worker asked a question');
         if (!answer) return;
+        if (answer.cancelled) return { answers: {} };
         const text = answer.message ?? (answer.approve ? 'Yes.' : 'No.');
         return { answers: Object.fromEntries(questions.map((q) => [q.id, { answers: [text] }])) };
       }

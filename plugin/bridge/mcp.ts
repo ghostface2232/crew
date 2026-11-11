@@ -125,7 +125,7 @@ const TOOLS = [
         job_id: { type: 'string' },
         message: { type: 'string', description: 'Follow-up instruction, or the answer to the worker\'s question.' },
         decision: { type: 'string', enum: ['approve', 'deny'], description: 'The user\'s decision for a job waiting on approval.' },
-        request_seq: { type: 'number', description: 'Request number from the job status when forwarding the user\'s answer.' },
+        request_id: { type: 'string', description: 'Required when forwarding an answer. Use the request ID shown in the job status.' },
         background: common.background,
       },
       required: ['job_id'],
@@ -150,12 +150,11 @@ const PROJECT = process.env.CLAUDE_PROJECT_DIR ?? process.cwd();
 /** Set from the client's initialize request: whether it can show the user a form on our behalf. */
 let canElicit = false;
 /**
- * Waiting states (`<job id>:<seq>`) that go back to the lead instead of being asked again:
+ * Waiting requests that go back to the lead instead of being asked again:
  * those the user dismissed, and those the app failed to show (with the error).
  */
 const dismissed = new Set<string>();
 const failed = new Map<string, string>();
-const promptKey = (job: JobView) => `${job.id}:${job.waiting?.seq}`;
 
 const APPROVAL_FORM = {
   type: 'object',
@@ -183,7 +182,7 @@ async function askUser(job: JobView, signal: AbortSignal): Promise<'settled' | '
   const waiting = job.waiting!;
   // While queued behind another prompt, this request may have been answered on the board, or the call cancelled.
   const current: JobView = await api('GET', `/api/jobs/${job.id}`);
-  if (signal.aborted || current.waiting?.seq !== waiting.seq) return 'settled';
+  if (signal.aborted || current.waiting?.id !== waiting.id) return 'settled';
 
   const approval = waiting.type === 'approval';
   const prompt = request('elicitation/create', {
@@ -195,7 +194,7 @@ async function askUser(job: JobView, signal: AbortSignal): Promise<'settled' | '
   let open = true;
   const moot = (async () => {
     let latest = current;
-    while (open && !signal.aborted && latest.waiting?.seq === waiting.seq) {
+    while (open && !signal.aborted && latest.waiting?.id === waiting.id) {
       latest = (await api('GET', `/api/jobs/${job.id}/wait?after=${latest.seq}&timeout=5`)).job;
     }
   })().then(
@@ -209,7 +208,7 @@ async function askUser(job: JobView, signal: AbortSignal): Promise<'settled' | '
   try {
     result = await Promise.race([prompt.response, moot, withdrawn]);
   } catch (err) {
-    failed.set(promptKey(job), String((err as Error).message ?? err));
+    failed.set(waiting.id, String((err as Error).message ?? err));
     return 'failed';
   } finally {
     open = false;
@@ -224,7 +223,7 @@ async function askUser(job: JobView, signal: AbortSignal): Promise<'settled' | '
     : typeof answer?.answer === 'string' && answer.answer.trim() && { message: answer.answer };
   if (!body) return 'dismissed';
   // Already answered elsewhere in the meantime is fine: the worker has its decision.
-  await api('POST', `/api/jobs/${job.id}/reply`, { ...body, request_seq: waiting.seq }).catch(() => {});
+  await api('POST', `/api/jobs/${job.id}/reply`, { ...body, request_id: waiting.id }).catch(() => {});
   return 'settled';
 }
 
@@ -250,8 +249,8 @@ async function follow(ids: string[], seconds: number, onEvent: (e: CrewEvent) =>
     // Start from the present: earlier events were already reported by a previous call.
     let after = needsLead(job) ? job.seq : Math.max(job.seq - 1, 0);
     while (!stop && Date.now() < deadline) {
-      const key = promptKey(job);
-      if (job.state === 'waiting' && canElicit && !dismissed.has(key) && !failed.has(key)) {
+      const key = job.waiting?.id;
+      if (key && canElicit && !dismissed.has(key) && !failed.has(key)) {
         const asked = job;
         if ((await oneAtATime(() => askUser(asked, done.signal))) === 'dismissed') dismissed.add(key);
         job = await api('GET', `/api/jobs/${id}`);
@@ -294,7 +293,7 @@ async function followOne(id: string, ctx: CallContext): Promise<string> {
 /** `describe`, plus what the lead should do about a waiting job that could not be settled in the app. */
 function render(job: JobView): string {
   if (job.state !== 'waiting') return describe(job);
-  const key = promptKey(job);
+  const key = job.waiting!.id;
   const error = failed.get(key);
   let hint: string | undefined;
   if (error !== undefined) hint = `The app could not show the prompt to the user (${error}). Ask them in the conversation, then pass their decision on with reply.`;
@@ -351,7 +350,7 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       return parts.join('\n\n────────\n\n');
     }
     case 'reply': {
-      await api('POST', `/api/jobs/${args.job_id}/reply`, { message: args.message, decision: args.decision, request_seq: args.request_seq });
+      await api('POST', `/api/jobs/${args.job_id}/reply`, { message: args.message, decision: args.decision, request_id: args.request_id });
       return args.background ? describe(await api('GET', `/api/jobs/${args.job_id}`)) : followOne(args.job_id, ctx);
     }
     case 'cancel': {

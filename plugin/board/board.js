@@ -54,8 +54,8 @@ function jobCard(job) {
   }
   const callout = job.state === 'waiting'
     ? `<div class="callout"><p>${esc(job.waiting.reason)}</p><div class="actions">
-        <button class="primary" data-act="approve" data-request="${job.waiting.seq}">${job.waiting.type === 'approval' ? 'Approve' : 'Yes'}</button>
-        <button data-act="deny" data-request="${job.waiting.seq}">${job.waiting.type === 'approval' ? 'Deny' : 'No'}</button>
+        <button class="primary" data-act="approve" data-request="${esc(job.waiting.id)}">${job.waiting.type === 'approval' ? 'Approve' : 'Yes'}</button>
+        <button data-act="deny" data-request="${esc(job.waiting.id)}">${job.waiting.type === 'approval' ? 'Deny' : 'No'}</button>
         <span class="timer" data-from="${job.waiting.since}" data-suffix=" waiting"></span></div></div>`
     : '';
   const command = `${job.agent === 'codex' ? 'codex resume' : 'agy --conversation'} ${job.sessionId}`;
@@ -193,7 +193,7 @@ document.addEventListener('click', async (e) => {
   button.disabled = true;
   try {
     if (act === 'cancel') await post(`/api/jobs/${id}/cancel`);
-    else await post(`/api/jobs/${id}/reply`, { decision: act, request_seq: Number(button.dataset.request) });
+    else await post(`/api/jobs/${id}/reply`, { decision: act, request_id: button.dataset.request });
   } catch (err) {
     button.disabled = false;
     button.textContent = `${button.textContent} — ${err.message}`;

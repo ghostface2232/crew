@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import type { Config } from './config.ts';
 import { changesSince, commitAll, copyIncluded, createWorktree, dirtyCount, isInside, removeWorktree, repoRoot } from './git.ts';
 import type { Worktree } from './git.ts';
@@ -76,7 +76,7 @@ export interface Job {
   endedAt: number | null;
   turns: number;
   stalled: boolean;
-  waiting: { type: 'approval' | 'question'; reason: string; seq: number; since: number } | null;
+  waiting: { type: 'approval' | 'question'; reason: string; id: string; since: number } | null;
   /** The worker's final message for the latest turn. */
   report: string;
   result: { files: string[]; stat: string; commit: string | null; outOfScope: string[] } | null;
@@ -141,6 +141,7 @@ export class Jobs {
   private touchedFiles = new Map<string, Set<string>>();
   private discarding = new Set<string>();
   private finalizing = new Set<string>();
+  private cancelling = new Set<string>();
   private saveTimer: NodeJS.Timeout | null = null;
   private home: string;
   private config: Config;
@@ -246,19 +247,21 @@ export class Jobs {
     return job;
   }
 
-  async reply(id: string, input: { message?: string; decision?: 'approve' | 'deny'; request_seq?: number }): Promise<Job> {
+  async reply(id: string, input: { message?: string; decision?: 'approve' | 'deny'; request_id?: string }): Promise<Job> {
     const job = this.get(id);
     if (this.discarding.has(id)) throw new Error(`Job ${id} is being discarded.`);
+    if (this.cancelling.has(id)) throw new Error(`Job ${id} is being cancelled.`);
     if (this.finalizing.has(id)) throw new Error(`Job ${id} is collecting its result. Wait for it to finish.`);
     const ctl = this.ctl(job);
     const adapter = this.adapters[job.agent];
-    if (input.request_seq !== undefined && input.request_seq !== job.waiting?.seq) {
+    if (input.request_id !== undefined && input.request_id !== job.waiting?.id) {
       throw new Error('That request is no longer pending. Check the current job before answering.');
     }
     if (input.decision !== undefined && input.decision !== 'approve' && input.decision !== 'deny') {
       throw new Error('Pass decision "approve" or "deny".');
     }
     if (job.waiting) {
+      if (!input.request_id) throw new Error('Pass the request_id shown in the current job status.');
       // A message alone must never count as approval: the lead may only be asking the worker why.
       if (job.waiting.type === 'approval' && !input.decision) throw new Error(`Job ${id} is waiting for approval (${job.waiting.reason}). Pass decision "approve" or "deny".`);
       if (!input.decision && !input.message?.trim()) throw new Error(`Job ${id} asked a question (${job.waiting.reason}). Pass a message with the answer, or a decision.`);
@@ -286,17 +289,24 @@ export class Jobs {
 
   async cancel(id: string): Promise<Job> {
     const job = this.get(id);
+    if (this.cancelling.has(id)) throw new Error(`Job ${id} is already being cancelled.`);
     if (isTerminal(job)) return job;
     if (this.finalizing.has(id)) throw new Error(`Job ${id} is collecting its result. Wait for it to finish.`);
     const ctl = this.ctl(job);
-    await this.adapters[job.agent].cancel(ctl);
-    ctl.cancelled();
+    this.cancelling.add(id);
+    try {
+      await this.adapters[job.agent].cancel(ctl);
+      ctl.cancelled();
+    } finally {
+      this.cancelling.delete(id);
+    }
     return job;
   }
 
   /** Removes the worktree and branch of a finished job. */
   async discard(id: string): Promise<Job> {
     const job = this.get(id);
+    if (this.cancelling.has(id)) throw new Error(`Job ${id} is being cancelled.`);
     if (!isTerminal(job)) throw new Error(`Job ${id} is still ${job.state}; cancel it first.`);
     if (this.discarding.has(id)) throw new Error(`Job ${id} is already being discarded.`);
     if (job.worktree && job.repo) {
@@ -389,7 +399,7 @@ export class Jobs {
         if (!live()) return;
         job.state = 'waiting';
         job.stalled = false;
-        job.waiting = { type, reason, seq: this.seq + 1, since: Date.now() };
+        job.waiting = { type, reason, id: randomUUID(), since: Date.now() };
         job.phase = type === 'approval' ? 'needs approval' : 'has a question';
         this.event(job, 'waiting', reason);
         this.hooks.onAttention(job, 'waiting', reason);
@@ -405,15 +415,16 @@ export class Jobs {
       done: (report) => {
         if (!live() || this.finalizing.has(job.id)) return;
         this.finalizing.add(job.id);
-        this.finalize(job, report)
-          .catch((err) => { if (live()) this.fail(job, `could not collect the result: ${err.message}`, false); })
-          .finally(() => this.finalizing.delete(job.id));
+        this.finalize(job, report).catch((err) => {
+          this.finalizing.delete(job.id);
+          if (live()) this.fail(job, `could not collect the result: ${err.message}`, false);
+        });
       },
       fail: (message, opts) => {
         if (live() && !this.finalizing.has(job.id)) this.fail(job, message, opts?.limit ?? false);
       },
       cancelled: () => {
-        if (!live()) return;
+        if (!live() || this.finalizing.has(job.id)) return;
         job.state = 'cancelled';
         job.waiting = null;
         job.stalled = false;
@@ -439,7 +450,8 @@ export class Jobs {
       const files = [...(this.touchedFiles.get(job.id) ?? [])].map((f) => path.relative(root, f));
       result = { files, stat: `${files.length} file(s) edited in place`, commit: null, outOfScope: outOfScope(files, job.targets) };
     }
-    if (isTerminal(job)) return; // Cancelled while committing.
+    this.finalizing.delete(job.id);
+    if (isTerminal(job)) return;
     job.report = report;
     job.result = result;
     job.state = 'done';

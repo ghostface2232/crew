@@ -52,7 +52,7 @@ function harness(onStart: (ctl: JobCtl) => void) {
     onJob: () => {},
     onAttention: (_job, kind) => attention.push(kind),
   });
-  return { jobs, calls, events, attention, home };
+  return { adapter, jobs, calls, events, attention, home };
 }
 
 async function settled(jobs: Jobs, job: Job): Promise<Job> {
@@ -146,7 +146,7 @@ test('a waiting job resumes on a decision and reports the limit kind on failure'
   await waiting.jobs.wait(job.id, 0, 2000);
   assert.equal(job.state, 'waiting');
   assert.deepEqual(waiting.attention, ['waiting']);
-  await waiting.jobs.reply(job.id, { decision: 'approve' });
+  await waiting.jobs.reply(job.id, { decision: 'approve', request_id: job.waiting!.id });
   await settled(waiting.jobs, job);
   assert.equal(job.state, 'done');
   assert.deepEqual(waiting.calls, ['answer:true']);
@@ -169,6 +169,20 @@ test('a finished job can be continued, and delivery is claimed once', async () =
   assert.deepEqual(calls, ['reply:also check the tests']);
   assert.equal(job.report, 'second report');
   assert.equal(job.turns, 2);
+});
+
+test('a worktree job can be continued as soon as its result is published', async () => {
+  const repo = tempRepo();
+  let worker!: JobCtl;
+  const { jobs, calls } = harness((ctl) => { worker = ctl; });
+  const job = await jobs.create({ kind: 'delegate', cwd: repo, task: 'x' });
+  const published = jobs.wait(job.id, job.seq, 2000);
+  worker.done('first report');
+  await published;
+  assert.equal(job.state, 'done');
+  await jobs.reply(job.id, { message: 'follow up' });
+  await settled(jobs, job);
+  assert.deepEqual(calls, ['reply:follow up']);
 });
 
 test('jobs left running by a previous bridge are restored as failed but resumable', async () => {
@@ -208,6 +222,29 @@ test('the history limit does not hide old worktrees or undelivered jobs after a 
   await second.discard(job.id);
   assert.equal(fs.existsSync(worktree.path), false);
   assert.equal(execFileSync('git', ['branch', '--list', worktree.branch], { cwd: repo }).toString(), '');
+});
+
+test('an approval from before a restart cannot settle a new request at the same event sequence', async () => {
+  const repo = tempRepo();
+  let worker!: JobCtl;
+  const first = harness((ctl) => { worker = ctl; });
+  const job = await first.jobs.create({ kind: 'delegate', cwd: repo, isolation: 'in_place', task: 'x' });
+  first.jobs.flush();
+  worker.progress('checking');
+  worker.waiting('approval', 'echo before restart');
+  const stale = job.waiting!;
+  const adapter = { ...first.adapter, reply: async (ctl: JobCtl) => ctl.waiting('approval', 'echo after restart') };
+  const second = new Jobs(first.home, config, { codex: adapter, antigravity: adapter }, {
+    onEvent: () => {}, onJob: () => {}, onAttention: () => {},
+  });
+  const resumed = await second.reply(job.id, { message: 'continue' });
+  assert.equal(resumed.seq, job.seq);
+  await assert.rejects(second.reply(job.id, { decision: 'approve', request_id: stale.id }), /no longer pending/);
+  assert.equal(resumed.state, 'waiting');
+  await second.reply(job.id, { decision: 'deny', request_id: resumed.waiting!.id });
+  assert.deepEqual(first.calls, ['answer:false']);
+  first.jobs.flush();
+  second.flush();
 });
 
 test('discard can resume after worktree removal succeeds and branch removal fails', async () => {

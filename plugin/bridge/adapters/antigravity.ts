@@ -10,7 +10,7 @@ import { RPC_TIMEOUT_MS, RpcError, RpcPeer } from '../rpc.ts';
 interface Run {
   ctl: JobCtl;
   prompting: Promise<void> | null;
-  closing: boolean;
+  cancelling: boolean;
   /** Text since the last tool call. */
   message: string;
   /** Last non-empty text before that, in case the turn ends right after a tool call. */
@@ -52,7 +52,7 @@ export class AntigravityAdapter implements Adapter {
     const res = await peer.request('session/new', { cwd: ctl.job.cwd, mcpServers: [] }, RPC_TIMEOUT_MS);
     if (isTerminal(ctl.job)) return;
     const sessionId: string = res.sessionId;
-    const run: Run = { ctl, prompting: null, closing: false, message: '', earlier: '' };
+    const run: Run = { ctl, prompting: null, cancelling: false, message: '', earlier: '' };
     this.runs.set(sessionId, run);
     this.loaded.add(sessionId);
     ctl.session(sessionId);
@@ -76,7 +76,7 @@ export class AntigravityAdapter implements Adapter {
     if (isTerminal(ctl.job)) return;
     let run = this.runs.get(sessionId);
     if (!run) {
-      run = { ctl, prompting: null, closing: false, message: '', earlier: '' };
+      run = { ctl, prompting: null, cancelling: false, message: '', earlier: '' };
       this.runs.set(sessionId, run);
     }
     if (run.prompting) throw new Error('Antigravity is still working on the previous message. Wait for it to finish, or cancel first.');
@@ -94,20 +94,20 @@ export class AntigravityAdapter implements Adapter {
     const run = this.runs.get(sessionId);
     const peer = this.peer;
     if (!run?.prompting || !peer) return;
-    peer.notify('session/cancel', { sessionId });
-    const stopped = await Promise.race([run.prompting.then(() => true), delay(5_000, false, { ref: false })]);
-    if (stopped) return;
-    if (!this.canClose) throw new Error('Antigravity did not confirm cancellation. The job is still active.');
-    run.closing = true;
+    run.cancelling = true;
     try {
-      await peer.request('session/close', { sessionId }, RPC_TIMEOUT_MS);
-    } catch (err) {
-      if (!(err instanceof RpcError && err.code === -32002)) throw err;
+      peer.notify('session/cancel', { sessionId });
+      const stopped = await Promise.race([run.prompting.then(() => true), delay(5_000, false, { ref: false })]);
+      if (stopped) return;
+      if (!this.canClose) throw new Error('Antigravity did not confirm cancellation. The job is still active.');
+      await peer.request('session/close', { sessionId }, RPC_TIMEOUT_MS).catch((err) => {
+        if (!(err instanceof RpcError && err.code === -32002)) throw err;
+      });
+      this.runs.delete(sessionId);
+      this.loaded.delete(sessionId);
     } finally {
-      run.closing = false;
+      run.cancelling = false;
     }
-    this.runs.delete(sessionId);
-    this.loaded.delete(sessionId);
   }
 
   shutdown(): void {
@@ -125,7 +125,7 @@ export class AntigravityAdapter implements Adapter {
       .then(
         (res) => {
           if (this.runs.get(ctl.job.sessionId!) !== run) return;
-          if (res.stopReason === 'cancelled' || run.closing) ctl.cancelled();
+          if (res.stopReason === 'cancelled' || run.cancelling) ctl.cancelled();
           else if (res.stopReason === 'end_turn') ctl.done(plainLinks(run.message.trim() || run.earlier));
           else ctl.fail(`Antigravity stopped early: ${res.stopReason}`);
         },
@@ -142,6 +142,7 @@ export class AntigravityAdapter implements Adapter {
 
   private ensure(): Promise<RpcPeer> {
     this.lastUsed = Date.now();
+    if (this.starting) return this.starting;
     if (this.peer?.alive) return Promise.resolve(this.peer);
     this.starting ??= this.launch().finally(() => {
       this.starting = null;
@@ -161,6 +162,7 @@ export class AntigravityAdapter implements Adapter {
         this.runs.clear();
       },
     });
+    this.peer = peer;
     // No fs or terminal capabilities: the agent uses its own tools, gated by request_permission.
     const { agentCapabilities } = await peer.initialize({
       protocolVersion: 1,
@@ -172,7 +174,6 @@ export class AntigravityAdapter implements Adapter {
       : agentCapabilities?.loadSession === true ? 'session/load' : null;
     const close = agentCapabilities?.sessionCapabilities?.close;
     this.canClose = Boolean(close && typeof close === 'object');
-    this.peer = peer;
     return peer;
   }
 
@@ -219,7 +220,7 @@ export class AntigravityAdapter implements Adapter {
   private async onRequest(method: string, p: any): Promise<unknown> {
     if (method !== 'session/request_permission') throw new RpcError(-32601, `${method} is not supported by Crew`);
     const run = this.runs.get(p.sessionId);
-    if (run && (run.closing || isTerminal(run.ctl.job))) return { outcome: { outcome: 'cancelled' } };
+    if (run && (run.cancelling || isTerminal(run.ctl.job))) return { outcome: { outcome: 'cancelled' } };
     const refusal = run ? refuse(run.ctl.job.cwd, p.toolCall ?? {}) : 'unknown session';
     // Never "always": each edit must come back here so its path is checked.
     const wanted = refusal ? ['reject_once', 'reject_always'] : ['allow_once'];

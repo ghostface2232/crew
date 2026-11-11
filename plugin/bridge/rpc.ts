@@ -78,14 +78,14 @@ export class RpcPeer {
     try {
       return await this.request('initialize', params, RPC_TIMEOUT_MS);
     } catch (err) {
-      this.close();
+      this.close('SIGKILL');
       throw err;
     }
   }
 
-  close(): void {
+  close(signal: NodeJS.Signals = 'SIGTERM'): void {
     if (this.closed) return;
-    this.child.kill();
+    this.child.kill(signal);
     this.onClose('was closed');
   }
 

@@ -17,11 +17,16 @@ const ask = (id, threadId, command) => send({
   id, method: 'item/commandExecution/requestApproval',
   params: { threadId, turnId: threadId + '-turn', cwd: '/tmp', command },
 });
+let childStarted = false;
+let interrupted = false;
 readline.createInterface({ input: process.stdin }).on('line', (line) => {
   const msg = JSON.parse(line);
   if (msg.method === 'turn/start') {
     send({ id: msg.id, result: { turn: { id: 'parent-turn' } } });
-    notify('thread/started', { thread: { id: 'child', parentThreadId: 'parent' } });
+    if (!childStarted) {
+      notify('thread/started', { thread: { id: 'child', parentThreadId: 'parent' } });
+      childStarted = true;
+    }
     ask('a', 'child', ${JSON.stringify(command)});
     ask('b', 'parent', 'echo second');
     return;
@@ -30,7 +35,13 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
     send({ id: msg.id, result: { thread: { id: 'parent' } } });
     return;
   }
+  if (msg.method === 'turn/interrupt') {
+    interrupted = true;
+    notify('turn/completed', { threadId: 'parent', turn: { id: 'parent-turn', status: 'interrupted' } });
+    return;
+  }
   if (msg.method && msg.id != null) send({ id: msg.id, result: {} });
+  if (interrupted) return;
   if (msg.id === 'a') {
     notify('serverRequest/resolved', { threadId: 'child', requestId: 'a' });
     notify('item/started', { threadId: 'parent', item: { type: 'commandExecution', command: 'echo progress' } });
@@ -70,14 +81,19 @@ test('routes a child approval and preserves overlapping approvals and the full c
   const first = await waiting();
   assert.ok(first.reason.includes(command));
   assert.ok(first.reason.includes('/tmp'));
-  await jobs.reply(job.id, { decision: 'approve', request_seq: first.seq });
+  await jobs.reply(job.id, { decision: 'approve', request_id: first.id });
   const second = await waiting();
   assert.match(second.reason, /echo second/);
-  await assert.rejects(jobs.reply(job.id, { decision: 'approve', request_seq: first.seq }), /no longer pending/);
+  await assert.rejects(jobs.reply(job.id, { decision: 'approve', request_id: first.id }), /no longer pending/);
+  await assert.rejects(jobs.reply(job.id, { decision: 'approve' }), /Pass the request_id/);
   assert.equal(job.waiting, second);
-  await jobs.reply(job.id, { decision: 'deny', request_seq: second.seq });
+  await jobs.reply(job.id, { decision: 'deny', request_id: second.id });
   while (!job.endedAt) await jobs.wait(job.id, job.seq, 1000);
   assert.equal(job.report, 'decline');
+  await jobs.reply(job.id, { message: 'send the same child another task' });
+  assert.ok((await waiting()).reason.includes(command));
+  await jobs.cancel(job.id);
+  assert.equal(job.state, 'cancelled');
 });
 
 test('a hung initialize fails the job and the next job can start a fresh server', { timeout: 5000 }, async (t) => {
@@ -106,7 +122,14 @@ test('Antigravity uses the advertised restore method and waits for cancellation'
       else if (method === 'session/new') result(id, { sessionId: 'saved' });
       else if (method === 'session/load') result(id, {});
       else if (method === 'session/prompt') promptId = id;
-      else if (method === 'session/cancel') setTimeout(() => result(promptId, { stopReason: 'cancelled' }), 50);
+      else if (method === 'session/cancel') console.log(JSON.stringify({
+        jsonrpc: '2.0', id: 'late-permission', method: 'session/request_permission',
+        params: { sessionId: 'saved', toolCall: { kind: 'read' }, options: [{ kind: 'allow_once', optionId: 'read' }] },
+      }));
+      else if (id === 'late-permission') {
+        const { outcome } = JSON.parse(line).result.outcome;
+        result(promptId, { stopReason: outcome === 'cancelled' ? 'cancelled' : 'refusal' });
+      }
       else console.log(JSON.stringify({ jsonrpc: '2.0', id, error: { code: -32601, message: method } }));
     });
   `, 'antigravity');

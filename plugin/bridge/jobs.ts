@@ -1,0 +1,501 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { randomBytes } from 'node:crypto';
+import type { Config } from './config.ts';
+import { changesSince, commitAll, createWorktree, dirtyCount, removeWorktree, repoRoot } from './git.ts';
+import type { Worktree } from './git.ts';
+import { buildPrompt } from './prompts.ts';
+
+export type WorkerAgent = 'codex' | 'antigravity';
+export type Agent = 'claude' | WorkerAgent;
+export type JobKind = 'delegate' | 'review' | 'polish';
+export type JobState = 'running' | 'waiting' | 'done' | 'failed' | 'cancelled';
+export type EventKind = 'started' | 'progress' | 'waiting' | 'error' | 'limit' | 'stalled' | 'done' | 'cancelled';
+
+export interface CrewEvent {
+  seq: number;
+  ts: string;
+  agent: Agent;
+  session_id: string | null;
+  job_id?: string;
+  kind: EventKind;
+  detail: string;
+}
+
+export type ReviewTarget =
+  | { type: 'uncommittedChanges' }
+  | { type: 'baseBranch'; branch: string }
+  | { type: 'commit'; sha: string };
+
+export interface JobSpec {
+  kind: JobKind;
+  cwd: string;
+  title?: string;
+  /** delegate: what to build. polish: extra guidance. review: what to focus on. */
+  task?: string;
+  done_when?: string;
+  /** polish: files or directories the worker may touch. */
+  targets?: string[];
+  /** Ref the worktree is created from (delegate, polish). */
+  base?: string;
+  isolation?: 'worktree' | 'in_place';
+  review?: { target: ReviewTarget; mode: 'adversarial' | 'standard' };
+  model?: string;
+  effort?: string;
+}
+
+export interface Job {
+  id: string;
+  kind: JobKind;
+  agent: WorkerAgent;
+  title: string;
+  state: JobState;
+  /** What the worker is doing right now; overwritten freely, not logged. */
+  phase: string;
+  repo: string | null;
+  /** Directory the worker runs in: the worktree when isolated, else the caller's cwd. */
+  cwd: string;
+  worktree: Worktree | null;
+  sandbox: 'read-only' | 'workspace-write';
+  prompt: string;
+  instructions: string;
+  /** Set when the review should use the agent's native review mode instead of a prompted turn. */
+  nativeReview: ReviewTarget | null;
+  targets: string[];
+  model?: string;
+  effort?: string;
+  /** Codex thread id or ACP session id; lets the user continue the session in the vendor's own app. */
+  sessionId: string | null;
+  createdAt: number;
+  /** Last sign of life from the worker. */
+  activeAt: number;
+  endedAt: number | null;
+  turns: number;
+  stalled: boolean;
+  waiting: { type: 'approval' | 'question'; reason: string } | null;
+  /** The worker's final message for the latest turn. */
+  report: string;
+  result: { files: string[]; stat: string; commit: string | null; outOfScope: string[] } | null;
+  notes: string[];
+  error: { message: string; limit: boolean } | null;
+  tokens: number | null;
+  /** Seq of the latest event about this job. */
+  seq: number;
+  /** Seq up to which the lead has already been told; stops the wake hook from repeating it. */
+  delivered: number;
+}
+
+/** What an adapter may do to the job it is running. */
+export interface JobCtl {
+  readonly job: Job;
+  /** Worker is alive; resets the stall timer. */
+  activity(): void;
+  phase(text: string): void;
+  progress(detail: string): void;
+  session(id: string): void;
+  touched(file: string): void;
+  tokens(total: number): void;
+  waiting(type: 'approval' | 'question', reason: string): void;
+  resumed(): void;
+  done(report: string): void;
+  fail(message: string, opts?: { limit?: boolean }): void;
+  cancelled(): void;
+}
+
+export interface Adapter {
+  /** Starts the first turn. Resolves once the worker has accepted it. */
+  start(ctl: JobCtl): Promise<void>;
+  /** Sends a follow-up message, steering the active turn or starting a new one. */
+  reply(ctl: JobCtl, message: string): Promise<void>;
+  /** Resolves the pending approval or question. */
+  answer(ctl: JobCtl, approve: boolean, message?: string): Promise<void>;
+  cancel(ctl: JobCtl): Promise<void>;
+  shutdown(): void;
+}
+
+export interface JobsHooks {
+  onEvent(event: CrewEvent): void;
+  onJob(job: Job): void;
+  onAttention(job: Job, kind: EventKind, detail: string): void;
+}
+
+const TERMINAL: JobState[] = ['done', 'failed', 'cancelled'];
+const KEEP_JOBS = 200;
+const KEEP_EVENTS = 5000;
+
+export function isTerminal(job: Job): boolean {
+  return TERMINAL.includes(job.state);
+}
+
+export class Jobs {
+  readonly jobs = new Map<string, Job>();
+  readonly recent: CrewEvent[] = [];
+  private seq = 0;
+  private waiters = new Map<string, Set<() => void>>();
+  private touchedFiles = new Map<string, Set<string>>();
+  private saveTimer: NodeJS.Timeout | null = null;
+  private home: string;
+  private config: Config;
+  private adapters: Record<WorkerAgent, Adapter>;
+  private hooks: JobsHooks;
+
+  constructor(home: string, config: Config, adapters: Record<WorkerAgent, Adapter>, hooks: JobsHooks) {
+    this.home = home;
+    this.config = config;
+    this.adapters = adapters;
+    this.hooks = hooks;
+    this.load();
+    setInterval(() => this.checkStalls(), 15_000).unref();
+  }
+
+  list(): Job[] {
+    return [...this.jobs.values()].sort((a, b) => b.createdAt - a.createdAt);
+  }
+
+  get(id: string): Job {
+    const job = this.jobs.get(id);
+    if (!job) throw new Error(`No job with id "${id}". Call status to list jobs.`);
+    return job;
+  }
+
+  async create(spec: JobSpec): Promise<Job> {
+    const agent: WorkerAgent = spec.kind === 'polish' ? 'antigravity' : 'codex';
+    if (agent === 'antigravity' && !this.config.antigravity.enabled) {
+      throw new Error('Antigravity is disabled in ~/.crew/config.json (antigravity.enabled).');
+    }
+    if (!fs.existsSync(spec.cwd)) throw new Error(`cwd does not exist: ${spec.cwd}`);
+
+    const id = `${agent === 'codex' ? 'cx' : 'ag'}-${randomBytes(3).toString('hex')}`;
+    const repo = await repoRoot(spec.cwd);
+    const notes: string[] = [];
+    let worktree: Worktree | null = null;
+    let cwd = spec.cwd;
+
+    if (spec.kind !== 'review' && (spec.isolation ?? 'worktree') === 'worktree') {
+      if (!repo) {
+        throw new Error(`${spec.cwd} is not inside a git repository, so there is no worktree to isolate the worker in. Pass isolation: "in_place" to let it edit that directory directly.`);
+      }
+      const base = spec.base ?? 'HEAD';
+      worktree = await createWorktree(repo, id, base);
+      cwd = worktree.path;
+      const dirty = await dirtyCount(repo);
+      if (dirty > 0) notes.push(`${dirty} uncommitted path(s) in the main tree are not in this worktree, which starts from ${base} (${worktree.base.slice(0, 8)}). Commit first if the worker needs them.`);
+    }
+
+    // Diffs name files relative to the repo root, so scope targets must be too.
+    const targetRoot = repo ?? spec.cwd;
+    spec.targets = spec.targets?.map((t) => path.relative(targetRoot, path.resolve(spec.cwd, t)));
+
+    const title = (spec.title ?? spec.task ?? spec.targets?.join(', ') ?? spec.kind).split('\n')[0].slice(0, 80);
+    const now = Date.now();
+    const job: Job = {
+      id,
+      kind: spec.kind,
+      agent,
+      title,
+      state: 'running',
+      phase: 'starting',
+      repo,
+      cwd,
+      worktree,
+      sandbox: spec.kind === 'review' ? 'read-only' : 'workspace-write',
+      ...buildPrompt(spec, worktree),
+      nativeReview: spec.review?.mode === 'standard' ? spec.review.target : null,
+      targets: spec.targets ?? [],
+      model: spec.model,
+      effort: spec.effort,
+      sessionId: null,
+      createdAt: now,
+      activeAt: now,
+      endedAt: null,
+      turns: 1,
+      stalled: false,
+      waiting: null,
+      report: '',
+      result: null,
+      notes,
+      error: null,
+      tokens: null,
+      seq: 0,
+      delivered: 0,
+    };
+    this.jobs.set(id, job);
+    this.event(job, 'started', `${spec.kind}: ${title}`);
+
+    const ctl = this.ctl(job);
+    // Session setup can take seconds; the caller gets the job id right away and follows via wait.
+    this.adapters[agent].start(ctl).catch((err) => ctl.fail(String(err?.message ?? err)));
+    return job;
+  }
+
+  async reply(id: string, input: { message?: string; decision?: 'approve' | 'deny' }): Promise<Job> {
+    const job = this.get(id);
+    const ctl = this.ctl(job);
+    const adapter = this.adapters[job.agent];
+    if (job.waiting) {
+      // A message alone must never count as approval: the lead may only be asking the worker why.
+      if (job.waiting.type === 'approval' && !input.decision) throw new Error(`Job ${id} is waiting for approval (${job.waiting.reason}). Pass decision "approve" or "deny".`);
+      if (!input.decision && !input.message) throw new Error(`Job ${id} asked a question (${job.waiting.reason}). Pass a message with the answer, or a decision.`);
+      await adapter.answer(ctl, input.decision !== 'deny', input.message);
+      return job;
+    }
+    if (!input.message) throw new Error(`Job ${id} is not waiting for a decision. Pass a message to send a follow-up.`);
+    if (!job.sessionId) throw new Error(`Job ${id} never opened a session, so there is nothing to continue. Start a new job instead.`);
+    if (!isTerminal(job)) {
+      // Steering a live turn: a rejected message is the caller's problem, not a reason to fail the job.
+      await adapter.reply(ctl, input.message);
+      return job;
+    }
+    job.state = 'running';
+    job.endedAt = null;
+    job.error = null;
+    job.turns += 1;
+    job.activeAt = Date.now();
+    this.event(job, 'started', `follow-up: ${input.message.split('\n')[0].slice(0, 80)}`);
+    await adapter.reply(ctl, input.message).catch((err) => ctl.fail(String(err?.message ?? err)));
+    return job;
+  }
+
+  async cancel(id: string): Promise<Job> {
+    const job = this.get(id);
+    if (isTerminal(job)) return job;
+    const ctl = this.ctl(job);
+    await this.adapters[job.agent].cancel(ctl).catch(() => {});
+    // Adapters confirm through ctl.cancelled(); this covers a worker that never answers.
+    ctl.cancelled();
+    return job;
+  }
+
+  /** Removes the worktree and branch of a finished job. */
+  async discard(id: string): Promise<Job> {
+    const job = this.get(id);
+    if (!isTerminal(job)) throw new Error(`Job ${id} is still ${job.state}; cancel it first.`);
+    if (job.worktree && job.repo) {
+      await removeWorktree(job.repo, job.worktree);
+      job.worktree = null;
+      job.notes.push('Worktree and branch removed.');
+      this.changed(job);
+    }
+    return job;
+  }
+
+  /** Resolves when the job has an event newer than `after`, or after `timeoutMs`. */
+  wait(id: string, after: number, timeoutMs: number): Promise<void> {
+    const job = this.get(id);
+    if (job.seq > after) return Promise.resolve();
+    return new Promise((resolve) => {
+      const set = this.waiters.get(id) ?? new Set();
+      this.waiters.set(id, set);
+      const finish = () => {
+        clearTimeout(timer);
+        set.delete(finish);
+        resolve();
+      };
+      const timer = setTimeout(finish, timeoutMs);
+      set.add(finish);
+    });
+  }
+
+  /** Records that the lead has seen the job up to `seq`. Returns false if it already had. */
+  markDelivered(id: string, seq: number): boolean {
+    const job = this.jobs.get(id);
+    if (!job || seq <= job.delivered) return false;
+    job.delivered = seq;
+    this.changed(job);
+    return true;
+  }
+
+  private ctl(job: Job): JobCtl {
+    const live = () => !isTerminal(job);
+    return {
+      job,
+      activity: () => {
+        job.activeAt = Date.now();
+        if (job.stalled) {
+          job.stalled = false;
+          this.event(job, 'progress', 'active again');
+        }
+      },
+      phase: (text) => {
+        if (!live()) return;
+        job.activeAt = Date.now();
+        job.stalled = false;
+        if (job.phase !== text) {
+          job.phase = text;
+          this.changed(job);
+        }
+      },
+      progress: (detail) => {
+        if (!live()) return;
+        job.activeAt = Date.now();
+        job.stalled = false;
+        job.phase = detail;
+        this.event(job, 'progress', detail);
+      },
+      session: (id) => {
+        job.sessionId = id;
+        this.changed(job);
+      },
+      touched: (file) => {
+        const set = this.touchedFiles.get(job.id) ?? new Set();
+        this.touchedFiles.set(job.id, set);
+        set.add(file);
+      },
+      tokens: (total) => {
+        job.tokens = total;
+      },
+      waiting: (type, reason) => {
+        if (!live()) return;
+        job.state = 'waiting';
+        job.waiting = { type, reason };
+        job.phase = type === 'approval' ? 'needs approval' : 'has a question';
+        this.event(job, 'waiting', reason);
+        this.hooks.onAttention(job, 'waiting', reason);
+      },
+      resumed: () => {
+        if (job.state !== 'waiting') return;
+        job.state = 'running';
+        job.waiting = null;
+        job.phase = 'working';
+        job.activeAt = Date.now();
+        this.event(job, 'progress', 'resumed');
+      },
+      done: (report) => {
+        if (!live()) return;
+        this.finalize(job, report).catch((err) => this.fail(job, `could not collect the result: ${err.message}`, false));
+      },
+      fail: (message, opts) => {
+        if (live()) this.fail(job, message, opts?.limit ?? false);
+      },
+      cancelled: () => {
+        if (!live()) return;
+        job.state = 'cancelled';
+        job.waiting = null;
+        job.endedAt = Date.now();
+        job.phase = 'cancelled';
+        this.event(job, 'cancelled', 'cancelled');
+      },
+    };
+  }
+
+  private async finalize(job: Job, report: string): Promise<void> {
+    let result: Job['result'];
+    if (job.worktree) {
+      const commit = await commitAll(job.worktree.path, `crew(${job.agent}): ${job.title}`);
+      const { files, stat } = await changesSince(job.worktree.path, job.worktree.base);
+      result = { files, stat, commit, outOfScope: outOfScope(files, job.targets) };
+    } else if (job.kind === 'review') {
+      result = null;
+    } else {
+      const root = job.repo ?? job.cwd;
+      const files = [...(this.touchedFiles.get(job.id) ?? [])].map((f) => path.relative(root, f));
+      result = { files, stat: `${files.length} file(s) edited in place`, commit: null, outOfScope: outOfScope(files, job.targets) };
+    }
+    if (isTerminal(job)) return; // Cancelled while committing.
+    job.report = report;
+    job.result = result;
+    job.state = 'done';
+    job.waiting = null;
+    job.endedAt = Date.now();
+    job.phase = 'done';
+    this.event(job, 'done', result?.stat || headline(report) || 'finished');
+    if (this.config.notifyOnDone) this.hooks.onAttention(job, 'done', job.title);
+  }
+
+  private fail(job: Job, message: string, limit: boolean): void {
+    job.state = 'failed';
+    job.waiting = null;
+    job.endedAt = Date.now();
+    job.error = { message, limit };
+    job.phase = limit ? 'usage limit reached' : 'failed';
+    const kind: EventKind = limit ? 'limit' : 'error';
+    this.event(job, kind, message);
+    this.hooks.onAttention(job, kind, message);
+  }
+
+  private checkStalls(): void {
+    const limit = this.config.stallSeconds * 1000;
+    for (const job of this.jobs.values()) {
+      if (job.state !== 'running' || job.stalled || Date.now() - job.activeAt < limit) continue;
+      job.stalled = true;
+      const detail = `no activity for ${Math.round(limit / 60_000)} min (last: ${job.phase})`;
+      this.event(job, 'stalled', detail);
+      this.hooks.onAttention(job, 'stalled', detail);
+    }
+  }
+
+  /** Appends to the event log. Also used for Claude session events, which have no job. */
+  record(agent: Agent, sessionId: string | null, kind: EventKind, detail: string, jobId?: string): CrewEvent {
+    const event: CrewEvent = { seq: ++this.seq, ts: new Date().toISOString(), agent, session_id: sessionId, job_id: jobId, kind, detail };
+    this.recent.push(event);
+    if (this.recent.length > KEEP_EVENTS) this.recent.splice(0, this.recent.length - KEEP_EVENTS);
+    fs.appendFile(path.join(this.home, 'events.jsonl'), JSON.stringify(event) + '\n', () => {});
+    this.hooks.onEvent(event);
+    return event;
+  }
+
+  eventsFor(id: string, after: number): CrewEvent[] {
+    return this.recent.filter((e) => e.job_id === id && e.seq > after);
+  }
+
+  private event(job: Job, kind: EventKind, detail: string): void {
+    job.seq = this.record(job.agent, job.sessionId, kind, detail, job.id).seq;
+    this.changed(job);
+    for (const wake of [...(this.waiters.get(job.id) ?? [])]) wake();
+  }
+
+  private changed(job: Job): void {
+    this.hooks.onJob(job);
+    this.saveTimer ??= setTimeout(() => {
+      this.saveTimer = null;
+      this.save();
+    }, 500);
+  }
+
+  private save(): void {
+    const keep = this.list().slice(0, KEEP_JOBS);
+    const file = path.join(this.home, 'jobs.json');
+    fs.writeFileSync(`${file}.tmp`, JSON.stringify({ seq: this.seq, jobs: keep }));
+    fs.renameSync(`${file}.tmp`, file);
+  }
+
+  flush(): void {
+    if (this.saveTimer) clearTimeout(this.saveTimer);
+    this.saveTimer = null;
+    this.save();
+  }
+
+  private load(): void {
+    let saved: { seq: number; jobs: Job[] };
+    try {
+      saved = JSON.parse(fs.readFileSync(path.join(this.home, 'jobs.json'), 'utf8'));
+    } catch {
+      return;
+    }
+    this.seq = saved.seq;
+    for (const job of saved.jobs) {
+      if (!isTerminal(job)) {
+        // The worker process died with the previous bridge; its session can still be continued with reply.
+        job.state = 'failed';
+        job.waiting = null;
+        job.endedAt = Date.now();
+        job.phase = 'failed';
+        job.error = { message: 'The bridge restarted while this job was running. Use reply to continue the same session.', limit: false };
+      }
+      this.jobs.set(job.id, job);
+    }
+  }
+}
+
+/** First line of a report that says something, skipping markdown headings. */
+function headline(report: string): string {
+  const line = report.split('\n').find((l) => l.trim() && !l.startsWith('#')) ?? '';
+  return line.trim().slice(0, 140);
+}
+
+/** Files changed outside the paths the worker was told it may touch. */
+export function outOfScope(files: string[], targets: string[]): string[] {
+  if (targets.length === 0) return [];
+  const allowed = targets.map((t) => t.replace(/^\.\//, '').replace(/\/+$/, ''));
+  return files.filter((file) => !allowed.some((t) => file === t || file.startsWith(`${t}/`) || path.matchesGlob(file, t)));
+}

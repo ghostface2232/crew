@@ -1,0 +1,182 @@
+:root {
+  --bg: oklch(0.975 0.003 260);
+  --surface: oklch(1 0 0);
+  --sunken: oklch(0.955 0.004 260);
+  --text: oklch(0.24 0.01 260);
+  --muted: oklch(0.5 0.012 260);
+  --line: oklch(0 0 0 / 0.08);
+  --shadow: 0 0 0 1px oklch(0 0 0 / 0.06), 0 1px 2px oklch(0 0 0 / 0.05), 0 2px 6px oklch(0 0 0 / 0.04);
+
+  --working: oklch(0.55 0.17 255);
+  --waiting: oklch(0.6 0.15 65);
+  --done: oklch(0.55 0.13 155);
+  --failed: oklch(0.56 0.2 25);
+  --idle: oklch(0.62 0.01 260);
+
+  --radius-card: 12px;
+  --radius-control: 8px;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: oklch(0.17 0.006 260);
+    --surface: oklch(0.215 0.007 260);
+    --sunken: oklch(0.255 0.008 260);
+    --text: oklch(0.93 0.005 260);
+    --muted: oklch(0.68 0.012 260);
+    --line: oklch(1 0 0 / 0.09);
+    --shadow: 0 0 0 1px oklch(1 0 0 / 0.07), 0 1px 2px oklch(0 0 0 / 0.3);
+
+    --working: oklch(0.72 0.14 255);
+    --waiting: oklch(0.78 0.14 75);
+    --done: oklch(0.74 0.14 155);
+    --failed: oklch(0.7 0.17 25);
+    --idle: oklch(0.6 0.01 260);
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 20px 16px 40px;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+h1, h2, p, ul, ol { margin: 0; padding: 0; }
+ul, ol { list-style: none; }
+
+.top, .lanes, .feed { max-width: 1180px; margin-inline: auto; }
+
+.top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+h1 { font-size: 18px; font-weight: 650; letter-spacing: -0.01em; }
+
+.connection { color: var(--muted); font-size: 12.5px; }
+.connection[data-state="lost"] { color: var(--failed); }
+
+/* Lanes: side by side when there is room, stacked in a narrow pane. */
+.lanes { display: grid; gap: 20px 16px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); align-items: start; }
+
+.lane-head {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: baseline;
+  gap: 0 8px;
+  padding: 0 4px 10px;
+}
+.lane-head h2 { font-size: 15px; font-weight: 650; }
+.role { grid-column: 1; color: var(--muted); font-size: 12.5px; }
+.lane-meta { grid-column: 2; grid-row: 1 / span 2; align-self: center; color: var(--muted); font-size: 12.5px; text-align: end; font-variant-numeric: tabular-nums; }
+
+.cards { display: grid; gap: 8px; }
+
+.empty { color: var(--muted); font-size: 13px; padding: 14px; border: 1px dashed var(--line); border-radius: var(--radius-card); text-wrap: pretty; }
+.cards:not(:empty) + .empty, .feed-list:not(:empty) + .empty { display: none; }
+
+.card {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  background: var(--surface);
+  /* The transparent border keeps an edge in forced-colors mode, where box-shadow is dropped. */
+  border: 1px solid transparent;
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow);
+}
+.card[data-quiet] { background: transparent; box-shadow: 0 0 0 1px var(--line); }
+
+.row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+
+.pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--tone); white-space: nowrap; }
+.pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--tone); }
+[data-tone="working"] { --tone: var(--working); }
+[data-tone="waiting"] { --tone: var(--waiting); }
+[data-tone="done"] { --tone: var(--done); }
+[data-tone="failed"] { --tone: var(--failed); }
+[data-tone="idle"] { --tone: var(--idle); }
+
+.kind { color: var(--muted); font-size: 12.5px; white-space: nowrap; }
+.timer { margin-inline-start: auto; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.title { font-weight: 550; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.detail { color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.detail[data-wrap] { white-space: normal; overflow-wrap: anywhere; }
+.detail[data-tone] { color: var(--tone); }
+
+/* Inner radius = card radius - card padding would be 0, so the callout keeps the control radius as its own surface. */
+.callout { display: grid; gap: 8px; padding: 10px; background: var(--sunken); border-radius: var(--radius-control); font-size: 13px; overflow-wrap: anywhere; }
+.actions { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.foot { color: var(--muted); font-size: 12px; }
+.foot .id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; }
+.foot .branch { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.foot .actions { margin-inline-start: auto; flex-wrap: nowrap; }
+
+button {
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 550;
+  min-height: 28px;
+  padding: 0 10px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  transition-property: scale, background-color, opacity;
+  transition-duration: 150ms;
+  transition-timing-function: ease-out;
+}
+.callout button { background: var(--bg); }
+button.primary { color: var(--surface); background: var(--text); border-color: transparent; }
+button.quiet { border-color: transparent; background: transparent; color: var(--muted); }
+button:disabled { opacity: 0.5; cursor: default; }
+button:focus-visible { outline: 2px solid var(--working); outline-offset: 2px; }
+@media (hover: hover) {
+  button:not(:disabled):hover { background: var(--sunken); }
+  button.primary:not(:disabled):hover { background: var(--text); opacity: 0.86; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  button:not(:disabled):active { scale: 0.96; }
+}
+
+.meter { display: inline-block; vertical-align: middle; width: 44px; height: 4px; margin-inline-end: 6px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.meter > i { display: block; height: 100%; width: calc(var(--used) * 1%); background: var(--muted); border-radius: inherit; }
+.meter[data-high] > i { background: var(--failed); }
+
+.feed { margin-top: 28px; }
+.feed h2 { font-size: 13px; font-weight: 600; color: var(--muted); padding: 0 4px 8px; }
+.feed-list { display: grid; }
+.feed-list li { display: grid; grid-template-columns: 64px 92px 1fr; gap: 10px; padding: 6px 4px; border-top: 1px solid var(--line); font-size: 12.5px; }
+.feed-list time { color: var(--muted); font-variant-numeric: tabular-nums; }
+.feed-list .who { font-weight: 550; }
+.feed-list .what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.feed-list .what[data-tone] { color: var(--tone); }
+@media (max-width: 420px) {
+  .feed-list li { grid-template-columns: 56px 1fr; }
+  .feed-list .what { grid-column: 1 / -1; }
+}
+
+/* One-shot entrance for cards that arrive after the first paint. */
+@keyframes enter {
+  from { opacity: 0; translate: 0 6px; }
+}
+@keyframes fade {
+  from { opacity: 0; }
+}
+.ready .card.enter, .ready .feed-list li.enter { animation: fade 200ms ease-out both; }
+@media (prefers-reduced-motion: no-preference) {
+  .ready .card.enter { animation: enter 300ms var(--ease) both; }
+}

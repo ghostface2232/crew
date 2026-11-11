@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Crew</title>
+<link rel="stylesheet" href="/board.css">
+</head>
+<body>
+<header class="top">
+  <h1>Crew</h1>
+  <p id="connection" class="connection" role="status">Connecting…</p>
+</header>
+
+<main class="lanes">
+  <section class="lane" data-agent="claude" aria-labelledby="lane-claude">
+    <header class="lane-head">
+      <h2 id="lane-claude">Claude</h2>
+      <p class="role">Lead · self-review</p>
+      <p class="lane-meta" data-meta></p>
+    </header>
+    <ul class="cards" data-cards></ul>
+    <p class="empty" data-empty>No Claude session is reporting yet. Sessions appear here once the Crew plugin is loaded.</p>
+  </section>
+
+  <section class="lane" data-agent="codex" aria-labelledby="lane-codex">
+    <header class="lane-head">
+      <h2 id="lane-codex">Codex</h2>
+      <p class="role">Engineer · cross-review</p>
+      <p class="lane-meta" data-meta></p>
+    </header>
+    <ul class="cards" data-cards></ul>
+    <p class="empty" data-empty>Idle. Jobs appear when the lead delegates work or asks for a review.</p>
+  </section>
+
+  <section class="lane" data-agent="antigravity" aria-labelledby="lane-antigravity">
+    <header class="lane-head">
+      <h2 id="lane-antigravity">Antigravity</h2>
+      <p class="role">UX writing · docs</p>
+      <p class="lane-meta" data-meta></p>
+    </header>
+    <ul class="cards" data-cards></ul>
+    <p class="empty" data-empty>Idle. Jobs appear when the lead asks for a polish pass.</p>
+  </section>
+</main>
+
+<section class="feed" aria-labelledby="feed-title">
+  <h2 id="feed-title">Activity</h2>
+  <ol id="feed" class="feed-list"></ol>
+  <p id="feed-empty" class="empty">Nothing has happened yet.</p>
+</section>
+
+<script src="/board.js"></script>
+</body>
+</html>

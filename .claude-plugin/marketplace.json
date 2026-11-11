@@ -1,0 +1,13 @@
+{
+  "name": "crew",
+  "owner": {
+    "name": "baemingwan"
+  },
+  "plugins": [
+    {
+      "name": "crew",
+      "source": "./plugin",
+      "description": "Lead a Claude + Codex + Antigravity crew from Claude Code."
+    }
+  ]
+}

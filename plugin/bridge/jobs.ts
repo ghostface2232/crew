@@ -496,6 +496,8 @@ export class Jobs {
     }
     this.seq = saved.seq;
     for (const job of saved.jobs) {
+      // Jobs saved before ownership was recorded; their repository is the closest stand-in.
+      job.project ??= job.repo ?? job.cwd;
       if (!isTerminal(job)) {
         // The worker process died with the previous bridge; its session can still be continued with reply.
         job.state = 'failed';

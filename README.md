@@ -42,7 +42,7 @@ crew board
 
 ## 동작 방식
 
-- 구현과 문구 정리 잡은 각각 전용 git worktree(`~/.crew/worktrees/` 아래)와 `crew/<잡 id>` 브랜치에서 돈다. 리드가 diff를 보고 병합하기 전에는 작업 브랜치에 아무것도 들어오지 않는다.
+- 구현과 문구 정리 잡은 각각 전용 git worktree(`~/.crew/worktrees/` 아래)와 `crew-<잡 id>` 브랜치에서 돈다. 리드가 diff를 보고 병합하기 전에는 작업 브랜치에 아무것도 들어오지 않는다.
 - 워커가 테스트를 돌리는 데 필요한 gitignore 파일(`node_modules`, `.env` 등)은 저장소 루트의 `.worktreeinclude`에 적어두면 worktree로 복사된다. `.gitignore` 문법이고 Claude Code의 worktree와 같은 파일을 쓴다.
 - Codex는 `codex app-server`로, Antigravity는 `agy acp`로 실행한다. 공식 바이너리만 실행하고 인증 정보는 읽지 않는다.
 - 백그라운드로 맡긴 잡이 끝나거나 결정을 요구하면 리드 세션이 자동으로 깨어난다.

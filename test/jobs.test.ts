@@ -72,7 +72,7 @@ test('delegate runs in a worktree and commits the result on its branch', async (
   assert.equal(job.report, 'built it');
   assert.deepEqual(job.result?.files, ['new.js']);
   assert.ok(job.result?.commit);
-  assert.equal(job.worktree?.branch, `crew/${job.id}`);
+  assert.equal(job.worktree?.branch, `crew-${job.id}`);
   // The main tree is untouched until the lead merges.
   assert.equal(fs.existsSync(path.join(repo, 'new.js')), false);
   assert.equal(execFileSync('git', ['status', '--porcelain'], { cwd: repo }).toString(), '');
@@ -177,11 +177,52 @@ test('jobs left running by a previous bridge are restored as failed but resumabl
   const job = await first.jobs.create({ kind: 'review', cwd: repo, review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } });
   await first.jobs.wait(job.id, 0, 100);
   first.jobs.flush();
+  // As saved by a bridge from before jobs recorded their project.
+  const file = path.join(first.home, 'jobs.json');
+  const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+  delete saved.jobs[0].project;
+  fs.writeFileSync(file, JSON.stringify(saved));
 
   const second = new Jobs(first.home, config, {} as never, { onEvent: () => {}, onJob: () => {}, onAttention: () => {} });
   const restored = second.get(job.id);
   assert.equal(restored.state, 'failed');
   assert.equal(restored.sessionId, 'session-1');
+  assert.equal(restored.project, repo);
+});
+
+test('a worktree can be created when the repository already has a branch named crew', async () => {
+  const repo = tempRepo();
+  execFileSync('git', ['branch', 'crew'], { cwd: repo });
+  const { jobs } = harness((ctl) => ctl.done('ok'));
+  const job = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'x' }));
+  assert.equal(job.state, 'done');
+});
+
+test('the bridge commit works without a git identity and ignores signing settings', async () => {
+  const repo = tempRepo();
+  execFileSync('git', ['config', '--unset', 'user.name'], { cwd: repo });
+  execFileSync('git', ['config', '--unset', 'user.email'], { cwd: repo });
+  // Signing would need a key and a passphrase prompt; with useConfigOnly, git refuses to guess an identity.
+  execFileSync('git', ['config', 'commit.gpgsign', 'true'], { cwd: repo });
+  const env = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'user.useConfigOnly', GIT_CONFIG_VALUE_0: 'true' };
+  const saved = Object.fromEntries(Object.keys(env).map((k) => [k, process.env[k]]));
+  Object.assign(process.env, env);
+  try {
+    const { jobs } = harness((ctl) => {
+      fs.writeFileSync(path.join(ctl.job.cwd, 'new.js'), 'export const y = 2;\n');
+      ctl.done('ok');
+    });
+    const job = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'x' }));
+    assert.equal(job.state, 'done', job.error?.message);
+    assert.ok(job.result?.commit);
+    const author = execFileSync('git', ['log', '-1', '--format=%an <%ae>', job.worktree!.branch], { cwd: repo }).toString().trim();
+    assert.equal(author, 'Crew <crew@localhost>');
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
 });
 
 test('delegate outside a git repository explains how to proceed', async () => {

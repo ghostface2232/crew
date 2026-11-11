@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { api, ensureDaemon, health } from './client.ts';
-import { agentEnv, BASE_URL, HOME, loadConfig, PLUGIN_ROOT, VERSION } from './config.ts';
+import { agentEnv, BASE_URL, HOME, installed, loadConfig, PLUGIN_ROOT, VERSION } from './config.ts';
 import { describe, summarize } from './render.ts';
 import type { JobView } from './render.ts';
 
@@ -72,7 +72,11 @@ async function doctor(): Promise<void> {
 
   try {
     await ensureDaemon();
-    checks.push(['Crew daemon', true, `${BASE_URL} (v${(await health())?.version})`]);
+    const running = await health();
+    const stale = running?.build !== installed().build;
+    // Not a failure: the daemon switches to the installed code once its running jobs are done.
+    const detail = `${BASE_URL} (v${running?.version}${stale ? `, older code than installed; it restarts once ${running?.active} running job(s) finish, or run \`crew daemon restart\`` : ''})`;
+    checks.push(['Crew daemon', true, detail]);
   } catch (err) {
     checks.push(['Crew daemon', false, String((err as Error).message)]);
   }

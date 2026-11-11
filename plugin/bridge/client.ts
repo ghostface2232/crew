@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { agentEnv, BASE_URL, HOME, VERSION } from './config.ts';
+import { agentEnv, BASE_URL, HOME, installed, PLUGIN_ROOT } from './config.ts';
 
 export async function api<T = any>(method: 'GET' | 'POST', route: string, body?: unknown): Promise<T> {
   const res = await fetch(`${BASE_URL}${route}`, {
@@ -14,7 +14,17 @@ export async function api<T = any>(method: 'GET' | 'POST', route: string, body?:
   return data;
 }
 
-export async function health(): Promise<{ version: string; pid: number; active: number } | null> {
+export interface Health {
+  version: string;
+  /** Code fingerprint; absent on daemons from before it was reported. */
+  build?: string;
+  /** Plugin folder the daemon runs from; absent on daemons from before it was reported. */
+  root?: string;
+  pid: number;
+  active: number;
+}
+
+export async function health(): Promise<Health | null> {
   try {
     const res = await fetch(`${BASE_URL}/api/health`, { signal: AbortSignal.timeout(1000) });
     const data: any = await res.json();
@@ -35,7 +45,7 @@ async function waitFor(check: () => Promise<boolean>, ms: number): Promise<boole
 
 let ensuring: Promise<void> | null = null;
 
-/** Starts the daemon if it is not running, and upgrades an idle one left over from an older plugin version. */
+/** Starts the daemon if it is not running, and replaces an idle one that runs code other than what is installed. */
 export function ensureDaemon(): Promise<void> {
   // Concurrent callers share one attempt, so a cold start spawns a single daemon.
   ensuring ??= startDaemon().finally(() => {
@@ -54,12 +64,25 @@ export function isNewer(candidate: string, current: string): boolean {
   return false;
 }
 
+/**
+ * Whether a running daemon should be replaced by one spawned from `root`.
+ * Never while jobs run: a restart would fail them.
+ */
+export function shouldReplace(running: Health, disk: { version: string; build: string }, root: string): boolean {
+  if (running.build === disk.build) return false;
+  // Another install owns the daemon. Only a newer version takes over; otherwise two installs
+  // with different code would take turns replacing each other's daemon.
+  const foreign = running.root !== undefined && running.root !== root;
+  if (foreign && !isNewer(disk.version, running.version)) return false;
+  return running.active === 0;
+}
+
 async function startDaemon(): Promise<void> {
   const running = await health();
   if (running) {
-    // Only ever upgrade: if two installs of different versions each replaced the other's daemon,
-    // they would take turns killing it. And never under running jobs, which a restart would fail.
-    if (!isNewer(VERSION, running.version) || running.active > 0) return;
+    // Compare with the code on disk, not the code this process loaded: a long-lived session
+    // still running old code must not keep restarting a daemon that is already current.
+    if (!shouldReplace(running, installed(), PLUGIN_ROOT)) return;
     await api('POST', '/api/shutdown', {}).catch(() => {});
     await waitFor(async () => (await health()) === null, 5000);
   }

@@ -21,7 +21,7 @@ Roles (fixed):
 - Antigravity — editor. \`polish\` has it improve UI strings, comments, and docs. It must not change logic or structure.
 
 How jobs work:
-- delegate and polish run in their own git worktree and branch (crew/<job id>) created from HEAD, so commit anything the worker needs first. Gitignored files it needs (node_modules, .env) are copied in if the repository lists them in .worktreeinclude. The bridge commits the worker's changes on that branch; you inspect the diff and merge or reject it. Nothing reaches your branch unless you merge it.
+- delegate and polish run in their own git worktree and branch (crew-<job id>) created from HEAD, so commit anything the worker needs first. Gitignored files it needs (node_modules, .env) are copied in if the repository lists them in .worktreeinclude. The bridge commits the worker's changes on that branch; you inspect the diff and merge or reject it. Nothing reaches your branch unless you merge it.
 - By default a call blocks until the worker finishes or needs you. Pass background: true to keep working in parallel; you are notified when the job ends, or call \`wait\`.
 - A worker's approval request or question is for the user to answer, not you. While you block on a job, the app asks them directly. If you are told a job is waiting (for example when a background job wakes you), call \`wait\` on it so they are asked. Use \`reply\` with a decision only to pass on one the user gave you in the conversation.
 - \`reply\` with a message continues the same worker session, e.g. to request fixes.
@@ -47,7 +47,7 @@ const TOOLS = [
   {
     name: 'delegate',
     title: 'Delegate to Codex',
-    description: 'Hand a separable piece of implementation to Codex, the supporting engineer. It works in its own git worktree and reports back; its changes land on a crew/<job id> branch for you to review and merge.',
+    description: 'Hand a separable piece of implementation to Codex, the supporting engineer. It works in its own git worktree and reports back; its changes land on a crew-<job id> branch for you to review and merge.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -147,8 +147,13 @@ const PROJECT = process.env.CLAUDE_PROJECT_DIR ?? process.cwd();
 
 /** Set from the client's initialize request: whether it can show the user a form on our behalf. */
 let canElicit = false;
-/** Waiting states (`<job id>:<seq>`) the user was asked about and dismissed; these go back to the lead. */
+/**
+ * Waiting states (`<job id>:<seq>`) that go back to the lead instead of being asked again:
+ * those the user dismissed, and those the app failed to show (with the error).
+ */
 const dismissed = new Set<string>();
+const failed = new Map<string, string>();
+const promptKey = (job: JobView) => `${job.id}:${job.seq}`;
 
 const APPROVAL_FORM = {
   type: 'object',
@@ -158,12 +163,25 @@ const APPROVAL_FORM = {
 };
 const ANSWER_FORM = { type: 'object', properties: { answer: { type: 'string', title: 'Answer' } }, required: ['answer'] };
 
+let promptQueue: Promise<unknown> = Promise.resolve();
+
+/** Several jobs can wait at once; ask about them one after another rather than stacking prompts in the app. */
+function oneAtATime<T>(ask: () => Promise<T>): Promise<T> {
+  const turn = promptQueue.then(ask, ask);
+  promptQueue = turn.catch(() => {});
+  return turn;
+}
+
 /**
  * Puts a worker's approval request or question to the user through MCP
  * elicitation, which the app renders as its own prompt, and forwards the
- * answer to the worker. Returns false if the user dismissed the prompt.
+ * answer to the worker.
  */
-async function askUser(job: JobView, signal: AbortSignal): Promise<boolean> {
+async function askUser(job: JobView, signal: AbortSignal): Promise<'settled' | 'dismissed' | 'failed'> {
+  // While queued behind another prompt, this request may have been answered on the board, or the call cancelled.
+  const current: JobView = await api('GET', `/api/jobs/${job.id}`);
+  if (signal.aborted || current.state !== 'waiting' || current.seq !== job.seq) return 'settled';
+
   const approval = job.waiting!.type === 'approval';
   const prompt = request('elicitation/create', {
     message: `${AGENT_NAMES[job.agent]} (${job.title}) ${approval ? 'asks for approval to' : 'asks:'} ${job.waiting!.reason}`,
@@ -173,33 +191,38 @@ async function askUser(job: JobView, signal: AbortSignal): Promise<boolean> {
   // The same request can be answered on the status board, or the call can be cancelled; then the prompt is moot.
   let open = true;
   const moot = (async () => {
-    let current = job;
-    while (open && !signal.aborted && current.state === 'waiting' && current.seq === job.seq) {
-      current = (await api('GET', `/api/jobs/${job.id}/wait?after=${job.seq}&timeout=5`)).job;
+    let latest = job;
+    while (open && !signal.aborted && latest.state === 'waiting' && latest.seq === job.seq) {
+      latest = (await api('GET', `/api/jobs/${job.id}/wait?after=${job.seq}&timeout=5`)).job;
     }
-  })();
+  })().then(
+    () => null,
+    // An unreachable bridge is not the app's failure; the next poll reports it.
+    () => null,
+  );
+  // The tool call returning, for any reason, withdraws the prompt at once.
+  const withdrawn = new Promise<null>((resolve) => signal.addEventListener('abort', () => resolve(null), { once: true }));
   let result: any;
   try {
-    result = await Promise.race([prompt.response, moot.then(() => null)]);
-  } catch {
-    // The client advertised elicitation but could not serve it; stop offering it.
-    canElicit = false;
-    return false;
+    result = await Promise.race([prompt.response, moot, withdrawn]);
+  } catch (err) {
+    failed.set(promptKey(job), String((err as Error).message ?? err));
+    return 'failed';
   } finally {
     open = false;
   }
   if (result === null) {
     prompt.cancel();
-    return true;
+    return 'settled';
   }
   const answer = result.action === 'accept' ? result.content : null;
   const body = approval
     ? (answer?.decision === 'approve' || answer?.decision === 'deny') && { decision: answer.decision }
     : typeof answer?.answer === 'string' && answer.answer.trim() && { message: answer.answer };
-  if (!body) return false;
+  if (!body) return 'dismissed';
   // Already answered elsewhere in the meantime is fine: the worker has its decision.
   await api('POST', `/api/jobs/${job.id}/reply`, body).catch(() => {});
-  return true;
+  return 'settled';
 }
 
 /**
@@ -210,7 +233,13 @@ async function follow(ids: string[], seconds: number, onEvent: (e: CrewEvent) =>
   const latest = new Map<string, JobView>();
   let stop = false;
   const deadline = Date.now() + seconds * 1000;
-  signal.addEventListener('abort', () => (stop = true));
+  // Ends when the call is cancelled or this follow returns, so no prompt outlives the call.
+  const done = new AbortController();
+  const quit = () => {
+    stop = true;
+    done.abort();
+  };
+  signal.addEventListener('abort', quit, { once: true });
 
   const watch = async (id: string) => {
     let job: JobView = await api('GET', `/api/jobs/${id}`);
@@ -218,8 +247,10 @@ async function follow(ids: string[], seconds: number, onEvent: (e: CrewEvent) =>
     // Start from the present: earlier events were already reported by a previous call.
     let after = needsLead(job) ? job.seq : Math.max(job.seq - 1, 0);
     while (!stop && Date.now() < deadline) {
-      if (job.state === 'waiting' && canElicit && !dismissed.has(`${id}:${job.seq}`)) {
-        if (!(await askUser(job, signal))) dismissed.add(`${id}:${job.seq}`);
+      const key = promptKey(job);
+      if (job.state === 'waiting' && canElicit && !dismissed.has(key) && !failed.has(key)) {
+        const asked = job;
+        if ((await oneAtATime(() => askUser(asked, done.signal))) === 'dismissed') dismissed.add(key);
         job = await api('GET', `/api/jobs/${id}`);
         latest.set(id, job);
         continue;
@@ -235,7 +266,7 @@ async function follow(ids: string[], seconds: number, onEvent: (e: CrewEvent) =>
   };
   // Resolves as soon as any one job needs the lead; the other watchers wind down on their next poll.
   await Promise.race(ids.map(watch));
-  stop = true;
+  quit();
 
   const jobs = ids.map((id) => latest.get(id)).filter((j): j is JobView => Boolean(j));
   await Promise.all(jobs.filter(needsLead).map((j) => api('POST', `/api/jobs/${j.id}/delivered`, { seq: j.seq }).catch(() => {})));
@@ -260,9 +291,12 @@ async function followOne(id: string, ctx: CallContext): Promise<string> {
 /** `describe`, plus what the lead should do about a waiting job that could not be settled in the app. */
 function render(job: JobView): string {
   if (job.state !== 'waiting') return describe(job);
-  const hint = dismissed.has(`${job.id}:${job.seq}`)
-    ? 'The user was asked in the app and dismissed the prompt without deciding. Do not decide for them: ask what they want, then pass it on with reply.'
-    : 'This client cannot show the prompt itself. Ask the user in the conversation, then pass their decision on with reply.';
+  const key = promptKey(job);
+  const error = failed.get(key);
+  let hint: string | undefined;
+  if (error !== undefined) hint = `The app could not show the prompt to the user (${error}). Ask them in the conversation, then pass their decision on with reply.`;
+  else if (dismissed.has(key)) hint = 'The user was asked in the app and dismissed the prompt without deciding. Do not decide for them: ask what they want, then pass it on with reply.';
+  else if (!canElicit) hint = 'This client cannot show the prompt itself. Ask the user in the conversation, then pass their decision on with reply.';
   return describe(job, hint);
 }
 
@@ -347,7 +381,7 @@ function request(method: string, params: unknown): { response: Promise<any>; can
   return {
     response,
     cancel: () => {
-      if (awaiting.delete(id)) send({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: id, reason: 'answered elsewhere' } });
+      if (awaiting.delete(id)) send({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: id, reason: 'no longer needed' } });
     },
   };
 }

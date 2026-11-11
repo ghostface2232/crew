@@ -5,7 +5,7 @@ import path from 'node:path';
 import { AntigravityAdapter } from './adapters/antigravity.ts';
 import { CodexAdapter } from './adapters/codex.ts';
 import { ClaudeSessions } from './claude.ts';
-import { HOME, loadConfig, PLUGIN_ROOT, PORT, VERSION } from './config.ts';
+import { HOME, installed, loadConfig, PLUGIN_ROOT, PORT, VERSION } from './config.ts';
 import { Jobs } from './jobs.ts';
 import type { EventKind, Job } from './jobs.ts';
 
@@ -18,6 +18,8 @@ import type { EventKind, Job } from './jobs.ts';
 
 fs.mkdirSync(HOME, { recursive: true });
 const config = loadConfig();
+/** Fingerprint of the code this process loaded; clients compare it with what is on disk now. */
+const BUILD = installed().build;
 const log = (...args: unknown[]) => console.log(new Date().toISOString(), ...args);
 
 const streams = new Set<http.ServerResponse>();
@@ -134,7 +136,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       fs.createReadStream(path.join(PLUGIN_ROOT, 'board', asset[0])).pipe(res);
       return undefined;
     }
-    if (pathname === '/api/health') return { name: 'crew', version: VERSION, pid: process.pid, active: jobs.activeCount };
+    if (pathname === '/api/health') return { name: 'crew', version: VERSION, build: BUILD, root: PLUGIN_ROOT, pid: process.pid, active: jobs.activeCount };
     if (pathname === '/api/state') return state();
     if (pathname === '/api/stream') {
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
@@ -211,8 +213,8 @@ server.on('error', (err: NodeJS.ErrnoException) => {
 });
 
 server.listen(PORT, '127.0.0.1', () => {
-  fs.writeFileSync(path.join(HOME, 'daemon.json'), JSON.stringify({ pid: process.pid, port: PORT, version: VERSION }));
-  log(`crew daemon ${VERSION} listening on http://127.0.0.1:${PORT}`);
+  fs.writeFileSync(path.join(HOME, 'daemon.json'), JSON.stringify({ pid: process.pid, port: PORT, version: VERSION, build: BUILD, root: PLUGIN_ROOT }));
+  log(`crew daemon ${VERSION} (${BUILD}) listening on http://127.0.0.1:${PORT}`);
 });
 
 // Keeps idle SSE connections from being dropped by intermediaries and detects dead ones.

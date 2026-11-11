@@ -46,7 +46,8 @@ export async function createWorktree(root: string, id: string, baseRef: string, 
   const repoKey = `${path.basename(root)}-${createHash('sha256').update(root).digest('hex').slice(0, 8)}`;
   const wtPath = path.join(home, 'worktrees', repoKey, id);
   await fs.mkdir(path.dirname(wtPath), { recursive: true });
-  const branch = `crew/${id}`;
+  // Flat rather than `crew/<id>`: a repository with a branch named `crew` cannot also have `crew/...`.
+  const branch = `crew-${id}`;
   await git(root, ['worktree', 'add', '-b', branch, wtPath, base]);
   return { path: wtPath, branch, base };
 }
@@ -105,13 +106,22 @@ function realpath(target: string): string {
 /**
  * Commits whatever the worker left in its worktree. Workers cannot commit
  * themselves: the worktree's git metadata lives outside their sandbox.
+ *
+ * This is a transport commit the lead squashes or picks, so the user's
+ * settings for their own commits must not make it fail: hooks are skipped,
+ * signing (which can block on a passphrase prompt nobody sees) is off, and a
+ * missing identity falls back to Crew's.
  */
 export async function commitAll(wt: string, message: string): Promise<string | null> {
   await git(wt, ['add', '-A']);
   const staged = await git(wt, ['diff', '--cached', '--name-only']);
   if (!staged) return null;
-  // The user's commit hooks are meant for their own commits, not this transport commit.
-  await git(wt, ['commit', '--no-verify', '-m', message]);
+  const settings = ['-c', 'commit.gpgsign=false'];
+  const name = await git(wt, ['config', 'user.name']).catch(() => '');
+  const email = await git(wt, ['config', 'user.email']).catch(() => '');
+  if (!name) settings.push('-c', 'user.name=Crew');
+  if (!email) settings.push('-c', 'user.email=crew@localhost');
+  await git(wt, [...settings, 'commit', '--no-verify', '-m', message]);
   return git(wt, ['rev-parse', '--short', 'HEAD']);
 }
 

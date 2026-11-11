@@ -29,7 +29,7 @@ Call `delegate` with `background: true` for each Codex piece. Write the task for
 
 If a worker asks for approval or has a question, the user answers it in the app; do not decide for them. If you are told a job is waiting, call `wait` on it so they are asked.
 
-When a job is done, read its diff before merging (`git diff <base>..crew/<job id>`). Merge what is right. Use `reply` with a message to have Codex fix what is not, and reject anything beyond the task. After merging or rejecting, `cancel` with `discard: true` removes the worktree.
+When a job is done, read its diff before merging (`git diff <base>..crew-<job id>`). Merge what is right. Use `reply` with a message to have Codex fix what is not, and reject anything beyond the task. After merging or rejecting, `cancel` with `discard: true` removes the worktree.
 
 ## 3. Self-review (you, with fresh eyes)
 

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,6 +8,21 @@ export const PLUGIN_ROOT = path.resolve(import.meta.dirname, '..');
 export const VERSION: string = JSON.parse(
   fs.readFileSync(path.join(PLUGIN_ROOT, '.claude-plugin', 'plugin.json'), 'utf8'),
 ).version;
+
+/**
+ * Version and code fingerprint of the bridge as it is on disk now, which is
+ * what a newly spawned daemon would run. A local-path install runs from the
+ * source folder, so code can change without the version changing.
+ * Roles and board files are read from disk on use and need no fingerprint.
+ */
+export function installed(): { version: string; build: string } {
+  const version: string = JSON.parse(fs.readFileSync(path.join(PLUGIN_ROOT, '.claude-plugin', 'plugin.json'), 'utf8')).version;
+  const dir = path.join(PLUGIN_ROOT, 'bridge');
+  const hash = createHash('sha256');
+  const files = (fs.readdirSync(dir, { recursive: true }) as string[]).filter((f) => f.endsWith('.ts')).sort();
+  for (const file of files) hash.update(file).update('\0').update(fs.readFileSync(path.join(dir, file))).update('\0');
+  return { version, build: hash.digest('hex').slice(0, 12) };
+}
 
 export const HOME = process.env.CREW_HOME ?? path.join(os.homedir(), '.crew');
 export const PORT = Number(process.env.CREW_PORT ?? 47615);

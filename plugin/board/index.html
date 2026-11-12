@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="light dark">
+<meta name="color-scheme" content="light">
 <title>Crew</title>
 <link rel="stylesheet" href="/board.css">
 </head>
@@ -11,31 +11,15 @@
 <header class="top">
   <h1>Crew</h1>
   <div id="projects" class="segmented" role="group" aria-label="Project" hidden></div>
+  <div id="agents" class="agents" aria-label="Agents"></div>
   <p id="connection" class="connection" role="status">Connecting…</p>
   <button id="open-settings" class="quiet">Settings</button>
 </header>
 
 <p id="notice" class="notice" role="alert" hidden></p>
-<p id="needs" class="needs" role="status" hidden></p>
+<ul id="needs" class="needs" aria-label="Needs you" hidden></ul>
 
 <main class="board">
-  <div class="heads">
-    <header class="lane-head" data-agent="claude">
-      <h2>Claude</h2>
-      <p class="role">Lead · self-review</p>
-      <p class="lane-meta" data-meta></p>
-    </header>
-    <header class="lane-head" data-agent="codex">
-      <h2>Codex</h2>
-      <p class="role" data-role>Engineer · cross-review</p>
-      <p class="lane-meta" data-meta></p>
-    </header>
-    <header class="lane-head" data-agent="antigravity">
-      <h2>Antigravity</h2>
-      <p class="role" data-role>UX writing · docs</p>
-      <p class="lane-meta" data-meta></p>
-    </header>
-  </div>
   <div id="groups" class="groups"></div>
 </main>
 

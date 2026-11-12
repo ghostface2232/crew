@@ -91,3 +91,25 @@ test('a save response cannot overwrite or unlock an instructions editor being re
   assert.equal(h.button.disabled, false);
   assert.equal(h.dirty(), false);
 });
+
+test('states combine by urgency and times read as coarse labels', () => {
+  const context = vm.createContext({
+    document: { getElementById: () => ({ addEventListener() {}, dataset: {} }), addEventListener() {}, querySelectorAll: () => [] },
+    window: { addEventListener() {} }, localStorage: { getItem: () => null }, setInterval() {}, EventSource: class { addEventListener() {} },
+  });
+  vm.runInContext(fs.readFileSync(new URL('../plugin/board/board.js', import.meta.url), 'utf8'), context);
+  const run = (code: string) => vm.runInContext(code, context);
+  // Folded, a stop shows the state that most needs the user.
+  assert.equal(run(`together(['done', 'working', 'waiting'])`), 'waiting');
+  assert.equal(run(`together(['done', 'stalled', 'working'])`), 'stalled');
+  assert.equal(run(`together(['done', 'idle'])`), 'done');
+  assert.equal(run(`together([])`), '');
+  assert.equal(run(`jobMark({ state: 'running', stalled: true })`), 'stalled');
+  assert.equal(run(`jobMark({ state: 'waiting', stalled: true })`), 'waiting');
+  assert.equal(run(`jobMark({ state: 'cancelled' })`), 'idle');
+  assert.equal(run(`[brief(42_000), brief(7 * 60_000 + 59_000), brief(3_780_000)].join(', ')`), '42s, 7m, 1h 3m');
+  assert.equal(run(`timeLabel({ state: 'failed', createdAt: 0, endedAt: 660_000 })`), 'stopped after 11m');
+  // The two reviews share one stop, and a job sits at the stop of its kind.
+  assert.equal(run(`STOP_OF_STAGE['self-review']`), run(`STOP_OF_STAGE['cross-review']`));
+  assert.match(run(`trackOf([{ id: 'cx-1', kind: 'review', state: 'done', agent: 'codex', title: 'R', createdAt: 0, endedAt: 1000 }], 2, true, false).html`), /data-pos="now"><p class="stop-name"><i class="node"><\/i><span>Review<\/span><\/p><ul class="items">/);
+});

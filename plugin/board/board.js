@@ -1,5 +1,9 @@
 // Live status board. State arrives over one SSE stream; cards are keyed by id
 // and patched in place so timers, focus, and anything being typed survive updates.
+//
+// The board is organized by command, not by agent: each command is a track of stops, and the jobs
+// started under it sit at the stop they belong to. Color and shape mean state, never agent. Time is
+// only ever a label on the thing it describes; nothing is laid out along a time axis.
 
 const jobs = new Map();
 const sessions = new Map();
@@ -35,6 +39,12 @@ const CLAUDE_CONTEXT_LIMIT = 9000;
 const STAGES = ['plan', 'implement', 'self-review', 'cross-review', 'fix', 'polish', 'final'];
 const STAGE_NAMES = { plan: 'Planning', implement: 'Implementing', 'self-review': 'Self-review', 'cross-review': 'Cross-review', fix: 'Fixing', polish: 'Polish', final: 'Final check' };
 const MISSIONS_FINISHED_SHOWN = 2;
+/** Stops on a command's track. The lead reports seven stages; the two reviews share one stop. */
+const STOPS = ['Plan', 'Build', 'Review', 'Fix', 'Polish', 'Final'];
+const STOP_OF_STAGE = { plan: 0, implement: 1, 'self-review': 2, 'cross-review': 2, fix: 3, polish: 4, final: 5 };
+const STOP_OF_KIND = { delegate: 1, review: 2, polish: 4 };
+/** Commands the user folded or unfolded by hand; without an entry, an open command is unfolded and an ended one folded. */
+const folded = new Map();
 const EVENT_TONES = { waiting: 'waiting', stalled: 'waiting', error: 'failed', limit: 'failed', done: 'done' };
 
 const esc = (text) => String(text ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -44,6 +54,19 @@ function elapsed(ms) {
   if (s < 60) return `${s}s`;
   if (s < 3600) return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`;
   return `${Math.floor(s / 3600)}h ${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}m`;
+}
+
+/** A duration as a label: coarse, because it is read at a glance and not compared. */
+function brief(ms) {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
+}
+
+function compact(n) {
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  return n >= 1e3 ? `${Math.round(n / 1e3)}K` : String(n);
 }
 
 /** The last two segments identify a project; the full path is in the tooltip. */
@@ -151,56 +174,41 @@ function resumeButton(job) {
   return `<button class="quiet" data-act="copy" data-copy="${esc(command)}" title="Copies the command that reopens this session in its own CLI">Copy resume command</button>`;
 }
 
-function jobCard(job) {
-  const tone = jobTone(job);
-  const active = !job.endedAt;
-  let detail = '';
-  if (job.state === 'running') detail = `<p class="detail">${esc(job.phase)}</p>`;
-  else if (job.state === 'failed') detail = `<p class="detail" data-wrap data-tone="failed">${esc(job.error?.message)}</p>`;
-  else if (job.state === 'done') {
-    const scope = job.result?.outOfScope?.length ? ` · ${job.result.outOfScope.length} out of scope` : '';
-    detail = `<p class="detail">${esc(job.result?.stat || 'Report ready for the lead')}${esc(scope)}</p>`;
-  }
-  // The resume command lives in the drawer; a finished card's footer has no room for it on a narrow lane.
-  const cancel = active ? '<button class="quiet" data-act="cancel">Cancel</button>' : '';
-  return {
-    key: job.id,
-    quiet: !active,
-    html: `
-      <div class="row">
-        <span class="pill" data-tone="${tone}">${esc(jobLabel(job))}</span>
-        <span class="kind">${KIND_NAMES[job.kind]}${job.runsApp ? ' · runs the app' : ''}${job.exclusive ? ' · runs alone' : ''}</span>
-        <span class="timer" data-from="${esc(job.createdAt)}" data-to="${esc(job.endedAt ?? '')}"></span>
-      </div>
-      <p class="title"><button class="link" data-act="open" title="Open details">${esc(job.title)}</button></p>
-      ${detail}${callout(job)}
-      <div class="row foot">
-        <span class="id">${esc(job.id)}</span>
-        ${!active && job.tokens != null ? `<span>${job.tokens.toLocaleString()} tokens</span>` : ''}
-        ${job.project ? `<span class="branch" title="${esc(job.project)}">${esc(shortPath(job.project))}</span>` : ''}
-        <span class="actions">${cancel}</span>
-      </div>`,
-  };
+/** How a job reads on a track. The state decides both the color and the shape of its mark. */
+function jobMark(job) {
+  if (job.state === 'waiting') return 'waiting';
+  if (job.stalled) return 'stalled';
+  if (job.state === 'running') return 'working';
+  if (job.state === 'done') return 'done';
+  return job.state === 'failed' ? 'failed' : 'idle';
 }
 
-function sessionCard(s) {
-  const stuck = s.stalled;
-  const tone = stuck || s.state === 'waiting' ? 'waiting' : s.state === 'working' ? 'working' : s.state === 'error' ? 'failed' : 'idle';
-  const label = stuck ? 'May be stuck' : { working: 'Working', waiting: 'Needs input', idle: 'Idle', error: 'Stopped on an error' }[s.state];
-  const detail = s.state === 'waiting' ? s.waitingFor : s.phase;
-  return {
-    key: s.id,
-    quiet: s.state === 'idle',
-    html: `
-      <div class="row">
-        <span class="pill" data-tone="${tone}">${esc(label)}</span>
-        <span class="timer" data-from="${esc(s.activeAt)}" data-suffix=" ago"></span>
-      </div>
-      <p class="title">${esc(s.title)}</p>
-      ${detail ? `<p class="detail"${s.state === 'waiting' ? ' data-wrap' : ''}>${esc(detail)}</p>` : ''}
-      <div class="row foot"><span class="branch" title="${esc(s.cwd)}">${esc(shortPath(s.cwd))}</span></div>`,
-  };
+/** How long a job took, or how long it has been in the state it is in. */
+function timeLabel(job) {
+  const live = (from, attrs) => `<span class="time" data-from="${esc(from)}" data-brief ${attrs}></span>`;
+  if (job.state === 'waiting') return live(job.waiting.since, 'data-prefix="waiting "');
+  if (job.stalled) return live(job.activeAt, 'data-prefix="quiet for "');
+  if (job.state === 'running') return live(job.createdAt, 'data-suffix=" so far"');
+  const took = brief(job.endedAt - job.createdAt);
+  return job.state === 'failed' ? `stopped after ${took}` : job.state === 'cancelled' ? `cancelled after ${took}` : took;
 }
+
+/** One job on a track. The whole item opens its details. */
+function item(job) {
+  const agent = agents[job.agent]?.name ?? AGENT_NAMES[job.agent];
+  const flags = [job.runsApp && 'runs the app', job.exclusive && 'runs alone'].filter(Boolean).map((flag) => ` · ${flag}`).join('');
+  const now = job.state === 'running' ? job.phase : job.state === 'failed' ? job.error?.message : '';
+  return `<li><button class="item" data-state="${jobMark(job)}" data-act="open" data-job="${esc(job.id)}" title="${esc(jobLabel(job))}">
+      <span class="mark"></span><span class="what">${esc(job.title)}</span>
+      <span class="sub">${esc(agent)} · ${timeLabel(job)}${flags}</span>
+      ${now ? `<span class="now">${esc(now)}</span>` : ''}
+    </button></li>`;
+}
+
+const SESSION_STATES = { working: 'working', waiting: 'waiting', error: 'failed', idle: 'idle' };
+const SESSION_LABELS = { working: 'Working', waiting: 'Needs input', idle: 'Idle', error: 'Stopped on an error' };
+const sessionMark = (s) => (s.stalled ? 'stalled' : SESSION_STATES[s.state]);
+const sessionLabel = (s) => (s.stalled ? 'May be stuck' : SESSION_LABELS[s.state]);
 
 /** Reconciles a list against the wanted items: reuse by key, patch changed markup, keep the given order, drop the rest. */
 function reconcile(list, items, create) {
@@ -223,24 +231,10 @@ function renderCards(list, cards) {
     key: card.key,
     update: (el) => {
       patch(el, card.html);
-      el.toggleAttribute('data-quiet', card.quiet);
+      el.toggleAttribute('data-quiet', Boolean(card.quiet));
+      el.toggleAttribute('data-closed', Boolean(card.closed));
     },
   })), () => Object.assign(document.createElement('li'), { className: 'card enter' }));
-}
-
-function usageMeta() {
-  const windows = limits.codex?.windows ?? [];
-  return windows
-    .map((w) => {
-      const name = w.minutes >= 1440 ? `${Math.round(w.minutes / 1440)}-day` : `${Math.round(w.minutes / 60)}-hour`;
-      const used = Math.round(w.usedPercent);
-      return `<span title="Codex ${name} limit"><span class="meter"${used >= 90 ? ' data-high' : ''} style="--used:${used}"><i></i></span>${used}% of ${name} limit</span>`;
-    })
-    .join('<br>');
-}
-
-function countMeta(active) {
-  return active ? `${active} active` : '';
 }
 
 /** Short, distinct names for projects: the folder name, or more of the path when two share one. */
@@ -284,83 +278,131 @@ function renderProjects(dirs, names) {
 }
 
 const WORKERS_SHOWN = ['codex', 'antigravity'];
-const EMPTY = {
-  claude: 'No Claude session is reporting yet. Sessions appear here once the Crew plugin is loaded.',
-  codex: 'Idle. Jobs appear when the lead gives this agent work.',
-  antigravity: 'Idle. Jobs appear when the lead gives this agent work.',
-};
 const SESSION_ORDER = { waiting: 0, working: 1, error: 2, idle: 3 };
+const URGENCY = ['waiting', 'failed', 'stalled', 'working'];
 
-/** The cards of one project, per agent. With `dir` empty, everything on the board. */
-function groupCards(dir) {
-  const mine = (item) => !dir || projectOf(item) === dir;
-  const claude = [...sessions.values()].filter(mine).sort((a, b) => SESSION_ORDER[a.state] - SESSION_ORDER[b.state] || b.startedAt - a.startedAt || a.id.localeCompare(b.id));
-  const cells = { claude: claude.map(sessionCard) };
-  let active = claude.filter((s) => s.state !== 'idle').length;
-  for (const agent of WORKERS_SHOWN) {
-    const all = [...jobs.values()].filter((j) => j.agent === agent && mine(j)).sort((a, b) => b.createdAt - a.createdAt);
-    const running = all.filter((j) => !j.endedAt).sort((a, b) => (isWaiting(a) ? -1 : 0) - (isWaiting(b) ? -1 : 0));
-    cells[agent] = [...running, ...all.filter((j) => j.endedAt).slice(0, FINISHED_SHOWN)].map(jobCard);
-    active += running.length;
-  }
-  const waiting = [...jobs.values(), ...sessions.values()].filter((item) => mine(item) && isWaiting(item)).length;
-  return { cells, active, waiting };
+/** The state a group of things shows as one: the most urgent among them, done when all are over, else nothing. */
+function together(marks) {
+  return URGENCY.find((mark) => marks.includes(mark)) ?? (marks.length && marks.every((mark) => mark === 'done' || mark === 'idle') ? 'done' : '');
 }
 
-/** One command as a unit: where the lead is in the pipeline, and each job started under it with its state. */
-function missionCard(mission) {
-  const mine = [...jobs.values()].filter((j) => j.mission === mission.id).sort((a, b) => a.createdAt - b.createdAt);
+/**
+ * A track: the stops in order, each with the jobs that belong to it. `at` is the stop the command has
+ * reached, or -1 for jobs that belong to no command, which have no position to show.
+ */
+function trackOf(list, at, active, finished, lead = '') {
+  const byStop = STOPS.map((_, stop) => list.filter((job) => STOP_OF_KIND[job.kind] === stop));
+  const pos = (stop) => (finished || stop < at ? 'past' : stop === at && active ? 'now' : 'todo');
+  const html = `<ol class="track">${STOPS.map((name, stop) => {
+    const rows = (stop === at ? lead : '') + byStop[stop].map(item).join('');
+    return `<li class="stop" data-pos="${pos(stop)}"><p class="stop-name"><i class="node"></i><span>${name}</span></p>${rows ? `<ul class="items">${rows}</ul>` : ''}</li>`;
+  }).join('')}</ol>`;
+  // Folded, each stop is one square: its jobs' state if it has any, else whether the command has passed it.
+  const mini = `<span class="mini" aria-hidden="true">${STOPS.map((_, stop) =>
+    `<i data-state="${together(byStop[stop].map(jobMark)) || { past: 'done', now: 'working', todo: '' }[pos(stop)]}"></i>`).join('')}</span>`;
+  return { html, mini };
+}
+
+function commandHead(key, title, closed, mini, meta, action = '') {
+  return `<div class="cmd-head">
+      <button class="cmd-toggle" data-act="toggle" data-command="${esc(key)}" aria-expanded="${!closed}"><i class="chev"></i><span class="cmd-title">${esc(title)}</span></button>
+      ${mini}<span class="cmd-meta">${meta}</span>${action}
+    </div>`;
+}
+
+/** One command as a unit: the stop the lead has reached, and each job started under it at the stop it belongs to. */
+function commandCard(mission) {
+  const mine = [...jobs.values()].filter((job) => job.mission === mission.id).sort((a, b) => a.createdAt - b.createdAt);
   const active = mission.state === 'active';
+  const at = STOP_OF_STAGE[mission.stage];
+  // The lead's own work is not a job. It is shown when the session that opened the command is known.
+  const session = active ? sessions.get(mission.owner) : null;
+  const lead = session
+    ? `<li><div class="item" data-state="${sessionMark(session)}" title="${esc(sessionLabel(session))}">
+        <span class="mark"></span><span class="what">${STAGE_NAMES[mission.stage]}</span>
+        <span class="sub">Claude · lead</span>${session.state === 'waiting' && session.waitingFor ? `<span class="now">${esc(session.waitingFor)}</span>` : session.phase ? `<span class="now">${esc(session.phase)}</span>` : ''}
+      </div></li>`
+    : '';
+  const { html, mini } = trackOf(mine, at, active, mission.state === 'done', lead);
+  const tokens = mine.reduce((sum, job) => sum + (job.tokens ?? 0), 0);
   const waiting = mine.some(isWaiting);
-  const at = STAGES.indexOf(mission.stage);
-  const label = active ? (waiting ? 'Waiting on you' : STAGE_NAMES[mission.stage]) : mission.state === 'done' ? 'Done' : 'Abandoned';
-  const tone = !active ? (mission.state === 'done' ? 'done' : 'idle') : waiting ? 'waiting' : 'working';
-  const finished = mine.filter((j) => j.endedAt).length;
-  const progress = [active && `Step ${at + 1} of ${STAGES.length}`, mine.length && `${finished} of ${mine.length} job${mine.length === 1 ? '' : 's'} finished`].filter(Boolean).join(' · ');
-  // A finished mission has passed every stage; an abandoned one stops where it was.
-  const reached = mission.state === 'done' ? STAGES.length : at;
-  const track = STAGES.map((stage, i) => `<li data-step="${i < reached ? 'done' : i === reached && active ? 'now' : 'todo'}" title="${STAGE_NAMES[stage]}"></li>`).join('');
-  const strands = mine.map((job) => `<li>
-      <span class="who">${esc(agents[job.agent]?.name ?? AGENT_NAMES[job.agent])}</span>
-      <button class="link" data-act="open" data-job="${esc(job.id)}" title="Open details">${esc(job.title)}</button>
-      <span class="pill" data-tone="${jobTone(job)}">${esc(jobLabel(job))}</span>
-    </li>`).join('');
+  const meta = [
+    active ? (waiting ? '<span data-tone="waiting">Waiting on you</span>' : '') : mission.state === 'done' ? 'Done' : 'Abandoned',
+    `<span class="time" data-from="${esc(mission.createdAt)}" data-to="${esc(mission.endedAt ?? '')}" data-brief></span>`,
+    tokens ? `${compact(tokens)} tokens` : '',
+  ].filter(Boolean).join(' · ');
+  const closed = folded.get(mission.id) ?? !active;
+  const dismiss = active ? `<button class="quiet" data-act="dismiss" data-mission="${esc(mission.id)}" title="Closes this command on the board. Its jobs keep running.">Dismiss</button>` : '';
   return {
     key: mission.id,
     quiet: !active,
-    html: `
-      <div class="row">
-        <span class="pill" data-tone="${tone}">${label}</span>
-        <span class="kind">${progress}</span>
-        <span class="timer" data-from="${esc(mission.createdAt)}" data-to="${esc(mission.endedAt ?? '')}"></span>
-      </div>
-      <p class="title">${esc(mission.title)}</p>
-      <ol class="track" aria-label="${active ? `${STAGE_NAMES[mission.stage]}, step ${at + 1} of ${STAGES.length}` : label}">${track}</ol>
-      ${strands ? `<ul class="strands">${strands}</ul>` : ''}
-      ${mission.outcome ? `<p class="detail" data-wrap>${esc(mission.outcome)}</p>` : ''}
-      ${active ? `<div class="row foot"><span class="id">${esc(mission.id)}</span><span class="actions"><button class="quiet" data-act="dismiss" data-mission="${esc(mission.id)}" title="Closes this command on the board. Its jobs keep running.">Dismiss</button></span></div>` : ''}`,
+    closed,
+    html: `${commandHead(mission.id, mission.title, closed, mini, meta, dismiss)}
+      <div class="cmd-body">${html}${mission.outcome ? `<p class="outcome">${esc(mission.outcome)}</p>` : ''}</div>`,
   };
 }
 
-/** Everything waiting on the user, in one line above the board, so it is found without scanning every project. */
+/** Jobs started outside any command, kept together so they are not lost between the commands. */
+function looseCard(dir, list) {
+  const running = list.filter((job) => !job.endedAt);
+  const shown = [...running, ...list.filter((job) => job.endedAt).sort((a, b) => b.endedAt - a.endedAt).slice(0, FINISHED_SHOWN)].sort((a, b) => a.createdAt - b.createdAt);
+  const key = `loose:${dir}`;
+  const { html, mini } = trackOf(shown, -1, false, false);
+  const closed = folded.get(key) ?? running.length === 0;
+  return { key, quiet: running.length === 0, closed, html: `${commandHead(key, 'Jobs outside a command', closed, mini, running.length ? `${running.length} active` : 'Nothing running')}<div class="cmd-body">${html}</div>` };
+}
+
+/**
+ * Everything waiting on the user, above the board, so it is found without scanning every project.
+ * Each request is shown in full with the controls that answer it.
+ */
 function renderNeeds() {
-  const el = document.getElementById('needs');
   const names = projectNames(knownProjects());
-  const where = (item) => (names.size > 1 ? ` · ${esc(names.get(projectOf(item)) ?? '')}` : '');
-  const items = [
-    ...[...jobs.values()].filter(isWaiting).sort((a, b) => a.waiting.since - b.waiting.since).map((job) =>
-      `<button data-act="open" data-job="${esc(job.id)}">${esc(agents[job.agent]?.name ?? AGENT_NAMES[job.agent])}${where(job)} — ${esc(job.title)}</button>`),
-    ...[...sessions.values()].filter(isWaiting).map((s) => `<span>Claude${where(s)} — ${esc(s.waitingFor || s.title)}</span>`),
+  const where = (it) => (names.size > 1 ? ` · ${esc(names.get(projectOf(it)) ?? '')}` : '');
+  const cards = [
+    ...[...jobs.values()].filter(isWaiting).sort((a, b) => a.waiting.since - b.waiting.since).map((job) => ({
+      key: job.id,
+      html: `<p class="need-label"><span class="mark"></span>${job.waiting.type === 'approval' ? 'Approval' : 'Question'}<span class="need-who">${esc(agents[job.agent]?.name ?? AGENT_NAMES[job.agent])} · ${esc(job.title)}${where(job)}</span></p>${callout(job)}`,
+    })),
+    ...[...sessions.values()].filter(isWaiting).map((s) => ({
+      key: `session:${s.id}`,
+      html: `<p class="need-label"><span class="mark"></span>Claude needs input<span class="need-who">${esc(s.title)}${where(s)}</span></p><div class="callout"><p>${esc(s.waitingFor || 'Answer it in the Claude app.')}</p></div>`,
+    })),
   ];
-  el.hidden = items.length === 0;
-  patch(el, items.length ? `<strong>Needs you</strong>${items.join('')}` : '');
+  const el = document.getElementById('needs');
+  el.hidden = cards.length === 0;
+  reconcile(el, cards.map((card) => ({ key: card.key, update: (li) => patch(li, card.html) })), () => Object.assign(document.createElement('li'), { className: 'card need' }));
+}
+
+/** The agents as resources: what each is doing and how much of its allowance is used. They are not what the board is organized by. */
+function renderAgents(visible) {
+  const windows = limits.codex?.windows ?? [];
+  const top = windows.reduce((max, w) => Math.max(max, Math.round(w.usedPercent)), 0);
+  const usage = windows.length
+    ? `<span class="meter"${top >= 90 ? ' data-high' : ''} style="--used:${top}"><i></i></span><span class="pct">${top}%</span>`
+    : '';
+  const usageTitle = windows.map((w) => `${Math.round(w.usedPercent)}% of the ${w.minutes >= 1440 ? `${Math.round(w.minutes / 1440)}-day` : `${Math.round(w.minutes / 60)}-hour`} limit`).join(', ');
+  const chips = [
+    { agent: 'claude', marks: [...sessions.values()].filter(visible).map(sessionMark), role: 'Lead' },
+    ...WORKERS_SHOWN.map((agent) => ({
+      agent,
+      marks: [...jobs.values()].filter((job) => job.agent === agent && !job.endedAt && visible(job)).map(jobMark),
+      role: Object.keys(ROLE_NAMES).filter((role) => roles[role]?.agent === agent).map((role) => ROLE_NAMES[role]).join(' · ') || 'No role',
+    })),
+  ];
+  patch(document.getElementById('agents'), chips.map(({ agent, marks, role }) => {
+    const busy = marks.filter((mark) => mark !== 'idle' && mark !== 'done').length;
+    const state = URGENCY.find((mark) => marks.includes(mark)) ?? 'idle';
+    const extra = agent === 'codex' ? usage : '';
+    return `<span class="agent" data-state="${state}" title="${esc([busy ? `${busy} active` : 'Idle', agent === 'codex' && usageTitle].filter(Boolean).join(' · '))}">
+        <span class="mark"></span><b>${esc(agents[agent]?.name ?? AGENT_NAMES[agent])}</b><span class="role">${esc(role)}</span>${extra}</span>`;
+  }).join(''));
 }
 
 function groupElement() {
   const el = document.createElement('section');
   el.className = 'group';
-  el.innerHTML = `<header class="group-head"></header><ul class="missions" data-missions></ul><div class="cells">${['claude', ...WORKERS_SHOWN].map((agent) =>
-    `<div class="cell" data-agent="${agent}"><p class="cell-label">${AGENT_NAMES[agent]}</p><ul class="cards" data-cards></ul><p class="empty">${EMPTY[agent]}</p></div>`).join('')}</div>`;
+  el.innerHTML = '<header class="group-head"></header><ul class="sessions" data-sessions></ul><ul class="commands" data-commands></ul><p class="empty">Nothing here yet. Commands appear when a Claude session with the Crew plugin starts one with /crew:run.</p>';
   return el;
 }
 
@@ -368,42 +410,43 @@ function render() {
   const dirs = knownProjects();
   const names = projectNames(dirs);
   const only = activeProject();
-  // One group per project when there are several; otherwise one unnamed group, which looks like plain lanes.
-  // With nothing on the board there is still one group, so the columns have their empty states.
+  // With nothing on the board there is still one group, so there is somewhere to say so.
   const shown = only ? [only] : dirs.length ? dirs : [''];
   const groups = document.getElementById('groups');
-  groups.toggleAttribute('data-multi', shown.length > 1);
   // Alphabetical and fixed: a project must not change place because one of its agents did something.
   reconcile(groups, shown.map((dir) => ({
     key: dir,
     update: (el) => {
-      const { cells, active, waiting } = groupCards(dir);
+      const mine = (it) => !dir || projectOf(it) === dir;
+      const own = { sessions: [...sessions.values()].filter(mine), jobs: [...jobs.values()].filter(mine), missions: [...missions.values()].filter(mine) };
+      const active = own.sessions.filter((s) => s.state !== 'idle').length + own.jobs.filter((job) => !job.endedAt).length;
+      const waiting = [...own.jobs, ...own.sessions].filter(isWaiting).length;
       const summary = [active && `${active} active`, waiting && `${waiting} waiting on you`].filter(Boolean).join(' · ') || 'Nothing running';
-      patch(el.querySelector('.group-head'), `<h3><button class="link" data-project="${esc(dir)}" title="Show only this project">${esc(names.get(dir) ?? '')}</button></h3>
-        <span class="branch" title="${esc(dir)}">${esc(shortPath(dir))}</span><span class="group-meta"${waiting ? ' data-tone="waiting"' : ''}>${summary}</span>`);
-      const own = [...missions.values()].filter((m) => projectOf(m) === dir);
-      const open = own.filter((m) => m.state === 'active').sort((a, b) => b.createdAt - a.createdAt);
+      const head = el.querySelector('.group-head');
+      head.hidden = !dir;
+      patch(head, `<h2><button class="link" data-project="${esc(dir)}" title="Show only this project">${esc(names.get(dir) ?? '')}</button></h2>
+        <span class="path" title="${esc(dir)}">${esc(shortPath(dir))}</span><span class="group-meta"${waiting ? ' data-tone="waiting"' : ''}>${summary}</span>`);
+
+      own.sessions.sort((a, b) => SESSION_ORDER[a.state] - SESSION_ORDER[b.state] || b.startedAt - a.startedAt || a.id.localeCompare(b.id));
+      reconcile(el.querySelector('[data-sessions]'), own.sessions.map((s) => ({
+        key: s.id,
+        update: (li) => {
+          const detail = s.state === 'waiting' ? s.waitingFor : s.phase;
+          li.dataset.state = sessionMark(s);
+          li.title = s.cwd;
+          patch(li, `<span class="mark"></span><span class="what">${esc(s.title)}</span><span class="sub">Claude · ${esc(sessionLabel(s))}${detail ? ` · ${esc(detail)}` : ''}</span>`);
+        },
+      })), () => Object.assign(document.createElement('li'), { className: 'session' }));
+
+      const open = own.missions.filter((m) => m.state === 'active').sort((a, b) => b.createdAt - a.createdAt);
       // The ones that ended last, whenever they began: a long command must not vanish the moment it finishes.
-      const ended = own.filter((m) => m.state !== 'active').sort((a, b) => b.endedAt - a.endedAt).slice(0, MISSIONS_FINISHED_SHOWN);
-      renderCards(el.querySelector('[data-missions]'), [...open, ...ended].map(missionCard));
-      for (const cell of el.querySelectorAll('.cell')) renderCards(cell.querySelector('[data-cards]'), cells[cell.dataset.agent]);
+      const ended = own.missions.filter((m) => m.state !== 'active').sort((a, b) => b.endedAt - a.endedAt).slice(0, MISSIONS_FINISHED_SHOWN);
+      const loose = own.jobs.filter((job) => !missions.has(job.mission));
+      renderCards(el.querySelector('[data-commands]'), [...open.map(commandCard), ...(loose.length ? [looseCard(dir, loose)] : []), ...ended.map(commandCard)]);
     },
   })), groupElement);
 
-  const visible = (item) => !only || projectOf(item) === only;
-  const activeJobs = (agent) => [...jobs.values()].filter((j) => j.agent === agent && !j.endedAt && visible(j)).length;
-  const meta = {
-    claude: countMeta([...sessions.values()].filter((s) => s.state !== 'idle' && visible(s)).length),
-    codex: usageMeta() || countMeta(activeJobs('codex')),
-    antigravity: countMeta(activeJobs('antigravity')),
-  };
-  for (const head of document.querySelectorAll('.lane-head')) {
-    const agent = head.dataset.agent;
-    head.querySelector('[data-meta]').innerHTML = meta[agent];
-    const role = head.querySelector('[data-role]');
-    if (role) role.textContent = Object.keys(ROLE_NAMES).filter((r) => roles[r]?.agent === agent).map((r) => ROLE_NAMES[r]).join(' · ') || 'No role assigned';
-  }
-
+  renderAgents((it) => !only || projectOf(it) === only);
   renderProjects(dirs, names);
   renderNeeds();
   // Counted across every project: the tab title is what is seen when the board is not.
@@ -414,9 +457,9 @@ function render() {
 
 function tick() {
   const now = Date.now() + clockSkew;
-  for (const el of document.querySelectorAll('.timer')) {
-    const to = el.dataset.to ? Number(el.dataset.to) : now;
-    el.textContent = elapsed(to - Number(el.dataset.from)) + (el.dataset.suffix ?? '');
+  for (const el of document.querySelectorAll('[data-from]')) {
+    const span = (el.dataset.to ? Number(el.dataset.to) : now) - Number(el.dataset.from);
+    el.textContent = (el.dataset.prefix ?? '') + ('brief' in el.dataset ? brief(span) : elapsed(span)) + (el.dataset.suffix ?? '');
   }
 }
 setInterval(tick, 1000);
@@ -508,6 +551,8 @@ function drawerParts(job) {
       </section>`
     : '';
   const notes = job.notes?.length ? `<section class="section"><h3>Notes</h3><ul class="notes">${job.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul></section>` : '';
+  const refusals = (job.refusals ?? []).filter((r) => r.turn === job.turns);
+  const refused = refusals.length ? `<section class="section"><h3>Refused by the automatic reviewer</h3><ul class="notes">${refusals.map((r) => `<li data-tone="failed"><code>${esc(r.action)}</code> — ${esc(r.reason)}</li>`).join('')}</ul>${job.retrying ? '<p class="hint">Sent back once with your approval.</p>' : ''}</section>` : '';
   const report = job.report ? `<section class="section"><h3>Report</h3><pre class="prose">${esc(job.report)}</pre></section>` : '';
   const key = esc(job.id);
 
@@ -523,7 +568,7 @@ function drawerParts(job) {
       <h2 id="drawer-title">${esc(job.title)}</h2>`,
     state: `${job.state === 'running' ? `<p class="detail" data-wrap>${esc(job.phase)}</p>` : ''}${job.error ? `<p class="detail" data-wrap data-tone="failed">${esc(job.error.message)}</p>` : ''}${callout(job)}`,
     facts: `<dl class="facts">${facts}</dl>`,
-    result: `${result}${notes}${report}`,
+    result: `${result}${refused}${notes}${report}`,
     // A waiting job is answered through its request above; a follow-up would be refused.
     // Keyed by job, so what is typed for one job cannot be sent to another.
     followup: job.sessionId && job.state !== 'waiting'
@@ -807,6 +852,11 @@ document.addEventListener('click', async (e) => {
   }
   const act = button.dataset.act;
   const id = button.dataset.job ?? card?.dataset.key;
+  if (act === 'toggle') {
+    folded.set(button.dataset.command, button.getAttribute('aria-expanded') === 'true');
+    render();
+    return;
+  }
   if (act === 'open') {
     await openDrawer(id);
     return;

@@ -88,13 +88,19 @@ async function startDaemon(): Promise<void> {
   }
   fs.mkdirSync(HOME, { recursive: true });
   const out = fs.openSync(path.join(HOME, 'daemon.log'), 'a');
-  const child = spawn(process.execPath, [path.join(import.meta.dirname, 'daemon.ts')], {
+  const child = spawn(process.execPath, [path.join(import.meta.dirname, `daemon${path.extname(import.meta.filename)}`)], {
     detached: true,
     stdio: ['ignore', out, out],
-    env: agentEnv(),
+    env: { ...agentEnv(), ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}) },
   });
+  let spawnError: Error | undefined;
+  child.on('error', (error) => { spawnError = error; });
   child.unref();
-  if (!(await waitFor(async () => (await health()) !== null, 8000))) {
+  fs.closeSync(out);
+  if (!(await waitFor(async () => {
+    if (spawnError) throw new Error(`Could not start the Crew daemon: ${spawnError.message}`);
+    return (await health()) !== null;
+  }, 8000))) {
     throw new Error(`The Crew daemon did not start. See ${path.join(HOME, 'daemon.log')}.`);
   }
 }

@@ -19,7 +19,7 @@ export function installed(): { version: string; build: string } {
   const version: string = JSON.parse(fs.readFileSync(path.join(PLUGIN_ROOT, '.claude-plugin', 'plugin.json'), 'utf8')).version;
   const dir = path.join(PLUGIN_ROOT, 'bridge');
   const hash = createHash('sha256');
-  const files = (fs.readdirSync(dir, { recursive: true }) as string[]).filter((f) => f.endsWith('.ts')).sort();
+  const files = (fs.readdirSync(dir, { recursive: true }) as string[]).filter((f) => /\.(ts|js)$/.test(f)).sort();
   for (const file of files) hash.update(file).update('\0').update(fs.readFileSync(path.join(dir, file))).update('\0');
   return { version, build: hash.digest('hex').slice(0, 12) };
 }
@@ -150,5 +150,7 @@ export function agentEnv(): NodeJS.ProcessEnv {
   const extra = [path.join(home, '.local', 'bin'), '/opt/homebrew/bin', '/usr/local/bin', path.dirname(process.execPath)];
   const current = (process.env.PATH ?? '').split(path.delimiter).filter(Boolean);
   const merged = [...current, ...extra.filter((p) => !current.includes(p))];
-  return { ...process.env, PATH: merged.join(path.delimiter) };
+  const env: NodeJS.ProcessEnv = { ...process.env, PATH: merged.join(path.delimiter) };
+  delete env.ELECTRON_RUN_AS_NODE;
+  return env;
 }

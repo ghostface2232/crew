@@ -41,6 +41,32 @@ test('permission prompts and rate limits surface as waiting and limit', () => {
   assert.deepEqual(attention, ['limit']);
 });
 
+test('repeated input requests have distinct identities even between desktop polls', () => {
+  const { sessions, hook } = tracker();
+  const prompt = { notification_type: 'permission_prompt', message: 'Claude needs your permission to use Bash' };
+  hook('Notification', prompt);
+  const first = structuredClone(sessions.sessions.get('s1')!);
+  assert.ok(first.waitingId);
+
+  hook('Notification', prompt);
+  assert.equal(sessions.sessions.get('s1')!.waitingId, first.waitingId);
+
+  hook('PreToolUse', { tool_name: 'Bash' });
+  assert.equal(sessions.sessions.get('s1')!.waitingId, undefined);
+  hook('Notification', prompt);
+  const second = structuredClone(sessions.sessions.get('s1')!);
+  assert.equal(second.waitingFor, first.waitingFor);
+  assert.ok(second.waitingId);
+  assert.notEqual(second.waitingId, first.waitingId);
+
+  hook('Notification', { ...prompt, message: 'Allow another command?' });
+  assert.notEqual(sessions.sessions.get('s1')!.waitingId, second.waitingId);
+
+  hook('SessionEnd');
+  hook('Notification', prompt);
+  assert.notEqual(sessions.sessions.get('s1')!.waitingId, second.waitingId);
+});
+
 test('sub-agent tool calls do not change the main loop tool state, and SessionEnd forgets the session', () => {
   const { sessions, hook } = tracker();
   hook('PreToolUse', { tool_name: 'mcp__plugin_crew_crew__wait', tool_input: {} });

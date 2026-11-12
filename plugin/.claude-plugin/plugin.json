@@ -1,6 +1,8 @@
 {
   "name": "crew",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Lead a three-agent crew from Claude Code: Codex as supporting engineer and cross-reviewer, Antigravity as UX-writing and docs editor, with a live status board.",
-  "author": { "name": "baemingwan" }
+  "author": {
+    "name": "baemingwan"
+  }
 }

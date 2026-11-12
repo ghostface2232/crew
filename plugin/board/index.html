@@ -1,100 +1,13 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="light">
-<title>Crew</title>
-<link rel="stylesheet" href="/board.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Crew</title>
 </head>
-<body data-loading>
-<aside id="side" class="side" aria-labelledby="side-title" hidden>
-  <div class="side-head"><p id="side-title" class="side-title">Projects</p><button class="quiet side-close" data-act="close-side" aria-label="Close projects">Close</button></div>
-  <div id="projects" class="projects" role="group" aria-labelledby="side-title"></div>
-</aside>
-
-<div id="side-scrim" class="side-scrim" data-act="close-side" aria-hidden="true"></div>
-
-<div class="main">
-<header class="top">
-  <button id="open-side" class="side-toggle" data-act="open-side" aria-controls="side" aria-expanded="false" aria-label="Projects" title="Projects" hidden><i aria-hidden="true"></i></button>
-  <h1><i class="logo" aria-hidden="true"></i>Crew</h1>
-  <p id="connection" class="connection" role="status">Connecting…</p>
-  <button id="open-settings">Settings</button>
-</header>
-
-<p id="notice" class="notice" role="alert" hidden></p>
-
-<section class="hero" aria-label="Overview">
-  <div id="summary" class="summary"></div>
-  <div class="stats" role="group" aria-label="Jobs by state">
-    <ul id="stats" class="stats-legend"></ul>
-    <div id="stats-bar" class="stats-bar" aria-hidden="true"></div>
-  </div>
-  <ul id="agents" class="tiles" aria-label="Agents"></ul>
-</section>
-
-<div class="layout">
-  <main class="board">
-    <div id="groups" class="groups"></div>
-  </main>
-
-  <section class="feed" aria-labelledby="feed-title">
-    <div class="feed-head">
-      <h2 id="feed-title">Activity</h2>
-      <p id="pulse-read" class="pulse-read"></p>
-      <div id="pulse" class="pulse" aria-hidden="true"></div>
-    </div>
-    <ol id="feed" class="feed-list"></ol>
-    <p id="feed-empty" class="empty">Nothing has happened yet.</p>
-  </section>
-</div>
-
-</div>
-
-<section id="dock" class="dock" aria-label="Needs you" hidden>
-  <button id="dock-pill" class="dock-pill" data-act="answer" data-state="waiting"></button>
-  <ul id="needs" class="needs"></ul>
-</section>
-
-<dialog id="drawer" class="sheet" aria-labelledby="drawer-title">
-  <div id="drawer-body" class="sheet-body"></div>
-</dialog>
-
-<dialog id="settings" class="sheet" aria-labelledby="settings-title">
-  <div class="sheet-body">
-    <header class="sheet-head">
-      <h2 id="settings-title">Settings</h2>
-      <button class="quiet" data-close aria-label="Close settings">Close</button>
-    </header>
-
-    <form id="roles-form" class="section">
-      <h3>Roles</h3>
-      <p class="hint">Who takes each kind of job. Applies to the next job; leave model and effort empty to use the agent's own.</p>
-      <div id="roles-rows" class="roles"></div>
-      <div class="actions">
-        <button class="primary" type="submit">Save roles</button>
-        <span class="status" role="status" data-status></span>
-      </div>
-    </form>
-
-    <form id="instructions-form" class="section">
-      <h3>Shared instructions</h3>
-      <p class="hint">Written once, given to every agent with its next job and to Claude sessions when they start.</p>
-      <label class="field">
-        <span>Applies to</span>
-        <select id="instructions-scope"></select>
-      </label>
-      <textarea id="instructions-text" rows="12" spellcheck="false" aria-label="Shared instructions" placeholder="Prefer the smallest change that fully solves the task."></textarea>
-      <p class="hint" id="instructions-file"></p>
-      <div class="actions">
-        <button class="primary" type="submit">Save instructions</button>
-        <span class="status" role="status" data-status></span>
-      </div>
-    </form>
-  </div>
-</dialog>
-
-<script src="/board.js"></script>
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.tsx"></script>
 </body>
 </html>

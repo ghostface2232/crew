@@ -222,3 +222,5 @@ Items based only on secondary sources (recheck against primary sources before im
   - Replaced WebSocket with SSE for event delivery, and replaced `claude agents --json` polling with hooks for Claude status.
   - Added `wait` and `reply` to the bridge tools.
 - 2026-11-11: Proposed and then withdrew merging the status board into the AgentGauge popover. It conflicted with the recorded direction of the AgentGauge repo (depth over breadth, and no scanning of local agent processes). Reverted to keeping the status board on the bridge side.
+
+- 2026-11-12: The user chose React and Electron for the control board and desktop app. This supersedes the earlier Tauri preference for the implemented client; daemon/worker ownership stays unchanged. See [07-desktop-and-react.md](07-desktop-and-react.md) for the measured tradeoffs.

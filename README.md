@@ -1,12 +1,14 @@
 # Crew
 
-A Claude Code plugin that divides roles across Claude, Codex, and Antigravity so they collaborate as a three-agent crew. Claude acts as the lead and self-reviewer, Codex handles supporting implementation and cross-review, and Antigravity polishes UX copy, comments, and documentation. A live status board shows what all three agents are doing in real time.
+A Claude Code plugin that divides roles across Claude, Codex, and Antigravity so they collaborate as a three-agent crew. Claude acts as the lead and self-reviewer, Codex handles supporting implementation and cross-review, and Antigravity polishes UX copy, comments, and documentation. A React control board shows what all three agents are doing in real time, in a browser or the Crew Electron app.
 
 ## Getting started
 
 Requirements: Node.js 22.18+, git, and authenticated `claude`, `codex`, and `agy` CLIs.
 
 ```bash
+npm ci
+npm run build:board
 node plugin/bridge/cli.ts install
 ```
 
@@ -40,6 +42,16 @@ The status board runs at http://127.0.0.1:47615. Each command run with `/crew:ru
 
 When a worker asks for approval or has a question, an input dialog pops up in the Claude app. You can also answer on the status board: approve or deny, or type an answer to a question. Codex's built-in automatic reviewer answers its approval requests first, so you are asked only about what it refuses twice ([docs/04-implementation.md](docs/04-implementation.md) section 5.1).
 
+## Desktop app
+
+```bash
+npm run desktop
+```
+
+Build a local app bundle with `npm run package:desktop`. On Apple Silicon macOS it is written to `release/Crew-darwin-arm64/Crew.app`. Closing the window hides it to the tray; quitting the app leaves jobs running. The app restores its window and opens approval notifications at the relevant job. The web board stays available.
+
+The board can send implementation, read-only review, and wording jobs directly through the configured roles. Full missions still begin in the Claude lead session. See [the desktop implementation and verification notes](docs/07-desktop-and-react.md) for development, tests, resource measurements and distribution limits.
+
 ## How it works
 
 - Each implementation or polish job runs in its own isolated git worktree (under `~/.crew/worktrees/`) on a `crew-<job id>` branch. Nothing touches your working branch until the lead inspects the diff and merges it.
@@ -57,10 +69,11 @@ Using Antigravity carries a Terms of Service risk; read [docs/04-implementation.
 | Path | Contents |
 | --- | --- |
 | `plugin/bridge/` | Daemon, MCP server, agent adapters, CLI (TypeScript, no build step) |
-| `plugin/board/` | Status board (static HTML/CSS/JS) |
+| `plugin/board/` | React + TypeScript board, shared CSS tokens and Vite output |
+| `desktop/`, `scripts/` | Electron shell, build/packaging and desktop verification |
 | `plugin/roles/` | Role instructions (engineer, reviewer, editor) injected into whichever agent holds the role, on every job |
 | `plugin/skills/`, `plugin/agents/`, `plugin/hooks/` | `/crew:run`, `/crew:board`, self-reviewer subagent, hooks |
-| `test/` | Unit tests (`npm test`) |
+| `test/` | Unit tests (`npm test`) and Playwright regressions (`npm run test:e2e`) |
 
 ## Documentation
 
@@ -72,6 +85,7 @@ Using Antigravity carries a Terms of Service risk; read [docs/04-implementation.
 | [docs/04-implementation.md](docs/04-implementation.md) | Implemented architecture, changes from the plan and why, desktop app visibility findings, verification log |
 | [docs/05-related-work.md](docs/05-related-work.md) | Survey of related projects, adoption candidates vs. current code, UX gaps |
 | [docs/06-roadmap.md](docs/06-roadmap.md) | Near-term rework, long-term expansion, control UI concept, open items |
+| [docs/07-desktop-and-react.md](docs/07-desktop-and-react.md) | React migration, Electron architecture, dependencies, verification and packaging |
 
 ## Current status
 

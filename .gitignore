@@ -1,1 +1,6 @@
 node_modules/
+plugin/board/dist/
+desktop/build/
+release/
+test-results/
+playwright-report/

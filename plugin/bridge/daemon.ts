@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import { boardAsset, BOARD_CSP } from './assets.ts';
 import { AntigravityAdapter } from './adapters/antigravity.ts';
 import { CodexAdapter } from './adapters/codex.ts';
 import { ClaudeSessions } from './claude.ts';
@@ -44,8 +45,10 @@ const NOTIFY_TITLES: Partial<Record<EventKind, string>> = {
   done: 'finished',
 };
 
+let desktopSeenAt = 0;
+
 function notify(agent: keyof typeof AGENT_NAMES, kind: EventKind, subject: string, detail: string): void {
-  if (!config.notify || process.platform !== 'darwin') return;
+  if (!config.notify || process.platform !== 'darwin' || (kind === 'waiting' && Date.now() - desktopSeenAt < 15_000)) return;
   const quote = (s: string) => `"${s.replace(/[\\"]/g, '\\$&').slice(0, 200)}"`;
   const script = `display notification ${quote(detail)} with title ${quote(`${AGENT_NAMES[agent]} ${NOTIFY_TITLES[kind] ?? kind}`)} subtitle ${quote(subject)}`;
   execFile('osascript', ['-e', script], () => {});
@@ -124,6 +127,7 @@ function state() {
   const live = liveConfig();
   return {
     version: VERSION,
+    notifications: { enabled: config.notify, onDone: config.notifyOnDone },
     now: Date.now(),
     stallSeconds: config.stallSeconds,
     jobs: jobs.list().map(view),
@@ -167,13 +171,6 @@ async function sharedFile(project: string | null): Promise<string> {
   // The same lookup a job uses, so the board edits the file the agents are given.
   return instructionsFile(HOME, (await projectRoot(project)) ?? project);
 }
-
-const STATIC: Record<string, [file: string, type: string]> = {
-  '/': ['index.html', 'text/html; charset=utf-8'],
-  '/board.css': ['board.css', 'text/css; charset=utf-8'],
-  '/board.js': ['board.js', 'text/javascript; charset=utf-8'],
-  '/inter.woff2': ['inter.woff2', 'font/woff2'],
-};
 
 class HttpError extends Error {
   status: number;
@@ -220,12 +217,13 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
   const method = req.method ?? 'GET';
 
   if (method === 'GET') {
-    const asset = STATIC[pathname];
+    const asset = boardAsset(PLUGIN_ROOT, pathname);
     if (asset) {
-      res.writeHead(200, { 'content-type': asset[1], 'cache-control': 'no-cache' });
-      fs.createReadStream(path.join(PLUGIN_ROOT, 'board', asset[0])).pipe(res);
+      res.writeHead(200, { 'content-type': asset.type, 'cache-control': asset.immutable ? 'public, max-age=31536000, immutable' : 'no-cache', 'content-security-policy': BOARD_CSP, 'x-content-type-options': 'nosniff' });
+      fs.createReadStream(asset.file).on('error', () => res.destroy()).pipe(res);
       return undefined;
     }
+    if (pathname === '/') throw new HttpError(503, 'Board assets are missing. Run npm install and npm run build:board in the Crew folder.');
     const font = /^\/fonts\/([\w.-]+\.woff2)$/.exec(pathname);
     if (font) {
       // Optional fonts the user keeps beside the plugin; the board falls back to its own when they are absent.
@@ -301,6 +299,10 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
   }
 
   if (method === 'POST') {
+    if (pathname === '/api/desktop/heartbeat') {
+      desktopSeenAt = Date.now();
+      return {};
+    }
     if (pathname === '/api/missions') {
       const body = await readJson(req);
       if (typeof body.project !== 'string' || !body.project) throw new HttpError(400, 'project must be the lead session\'s project directory');

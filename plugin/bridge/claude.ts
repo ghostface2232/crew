@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import type { EventKind } from './jobs.ts';
 
 export interface ClaudeSession {
@@ -10,6 +11,8 @@ export interface ClaudeSession {
   state: 'working' | 'waiting' | 'idle' | 'error';
   phase: string;
   waitingFor: string | null;
+  /** Identifies a waiting episode even if desktop polling misses the intervening work. */
+  waitingId?: string;
   /** Inside a tool call; silence here is the tool running, not a stall. */
   inTool: boolean;
   stalled: boolean;
@@ -93,8 +96,10 @@ export class ClaudeSessions {
         if (type === 'idle_prompt') {
           s.state = 'idle';
         } else if (type === 'permission_prompt' || type === 'agent_needs_input' || type === 'elicitation_dialog') {
+          const message = oneLine(p.message ?? 'needs input');
+          if (s.state !== 'waiting' || s.waitingFor !== message || !s.waitingId) s.waitingId = randomUUID();
           s.state = 'waiting';
-          s.waitingFor = oneLine(p.message ?? 'needs input');
+          s.waitingFor = message;
           this.hooks.onEvent(s, 'waiting', s.waitingFor);
         }
         break;
@@ -122,6 +127,7 @@ export class ClaudeSessions {
         this.hooks.onSession(s, true);
         return;
     }
+    if (s.state !== 'waiting') delete s.waitingId;
     this.hooks.onSession(s);
   }
 

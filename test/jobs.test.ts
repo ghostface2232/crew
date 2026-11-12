@@ -8,7 +8,7 @@ import { resolveConfig } from '../plugin/bridge/config.ts';
 import type { Config } from '../plugin/bridge/config.ts';
 import { leadContext } from '../plugin/bridge/instructions.ts';
 import { Jobs, outOfScope } from '../plugin/bridge/jobs.ts';
-import type { Adapter, CrewEvent, Job, JobCtl } from '../plugin/bridge/jobs.ts';
+import type { Adapter, CrewEvent, Job, JobCtl, ReviewTarget } from '../plugin/bridge/jobs.ts';
 
 const config = resolveConfig({ notify: false, codex: { bin: 'codex', approvalPolicy: 'never' } });
 
@@ -172,6 +172,95 @@ test('a finished job can be continued, and delivery is claimed once', async () =
   assert.deepEqual(calls, ['reply:also check the tests']);
   assert.equal(job.report, 'second report');
   assert.equal(job.turns, 2);
+});
+
+for (const type of ['uncommittedChanges', 'baseBranch', 'commit'] as const) {
+  test(`Antigravity refreshes ${type} review diffs on reply, including after a restart`, async () => {
+    const repo = tempRepo();
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: repo }).toString().trim();
+    git('branch', 'review-base');
+    fs.writeFileSync(path.join(repo, 'README.md'), 'first change\n');
+    if (type !== 'uncommittedChanges') {
+      git('commit', '-qam', 'first change');
+    }
+    const target: ReviewTarget = type === 'baseBranch' ? { type, branch: 'review-base' }
+      : type === 'commit' ? { type, sha: git('rev-parse', 'HEAD') } : { type };
+    const reviewConfig = resolveConfig({ roles: { review: { agent: 'antigravity' } } });
+    let worker!: JobCtl;
+    const h = harness((ctl) => { worker = ctl; }, () => reviewConfig);
+    const job = await h.jobs.create({ kind: 'review', cwd: repo, review: { target, mode: 'adversarial' } });
+    const firstFile = path.join(h.home, 'reviews', `${job.id}.diff`);
+    assert.match(fs.readFileSync(firstFile, 'utf8'), /\+first change/);
+    let previousFile = firstFile;
+    let expected = 'second change';
+    h.adapter.reply = async (ctl, message) => {
+      assert.match(message, /^Review again\.\n\n/);
+      const file = /refreshed at `([^`]+)`/.exec(message)?.[1];
+      assert.ok(file, message);
+      assert.notEqual(file, previousFile);
+      // Give cleanup from the previous turn a chance to run before reading the new artifact.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      const diff = fs.readFileSync(file, 'utf8');
+      assert.ok(diff.includes(`+${type === 'commit' ? 'first change' : expected}`), diff);
+      if (type === 'commit') assert.ok(!diff.includes(expected), diff);
+      previousFile = file;
+      ctl.done('reviewed');
+    };
+    fs.writeFileSync(path.join(repo, 'README.md'), `${expected}\n`);
+    if (type !== 'uncommittedChanges') git('commit', '-qam', expected);
+    worker.done('first report');
+    await h.jobs.reply(job.id, { message: 'Review again.' });
+    assert.equal(job.state, 'done');
+    h.jobs.flush();
+
+    // The saved job keeps its original target and agent even if role assignments change.
+    const restored = new Jobs(h.home, () => config, { codex: h.adapter, antigravity: h.adapter }, {
+      onEvent: () => {}, onJob: () => {}, onAttention: () => {},
+    });
+    assert.deepEqual(restored.get(job.id).reviewTarget, target);
+    assert.equal(restored.get(job.id).agent, 'antigravity');
+    expected = 'third change';
+    fs.writeFileSync(path.join(repo, 'README.md'), `${expected}\n`);
+    if (type !== 'uncommittedChanges') git('commit', '-qam', expected);
+    await restored.reply(job.id, { message: 'Review again.' });
+    assert.equal(restored.get(job.id).state, 'done');
+    assert.equal(restored.get(job.id).turns, 3);
+    restored.flush();
+  });
+}
+
+test('an unavailable review target fails before sending a follow-up, and old jobs require a new review', async () => {
+  const repo = tempRepo();
+  execFileSync('git', ['branch', 'review-base'], { cwd: repo });
+  const h = harness((ctl) => ctl.done('reviewed'), () => resolveConfig({ roles: { review: { agent: 'antigravity' } } }));
+  const job = await h.jobs.create({ kind: 'review', cwd: repo, review: { target: { type: 'baseBranch', branch: 'review-base' }, mode: 'adversarial' } });
+  execFileSync('git', ['branch', '-D', 'review-base'], { cwd: repo });
+  await h.jobs.reply(job.id, { message: 'Review again.' });
+  assert.equal(job.state, 'failed');
+  assert.match(job.error!.message, /git diff:/);
+  assert.deepEqual(h.calls, []);
+
+  delete job.reviewTarget;
+  h.jobs.flush();
+  const restored = new Jobs(h.home, () => config, { codex: h.adapter, antigravity: h.adapter }, {
+    onEvent: () => {}, onJob: () => {}, onAttention: () => {},
+  });
+  await assert.rejects(restored.reply(job.id, { message: 'Review again.' }), /Start a new review instead/);
+  assert.equal(restored.get(job.id).state, 'failed');
+  assert.deepEqual(h.calls, []);
+});
+
+test('preparing a review diff rejects overlapping replies and cancellation prevents the follow-up', async () => {
+  const repo = tempRepo();
+  const h = harness((ctl) => ctl.done('reviewed'), () => resolveConfig({ roles: { review: { agent: 'antigravity' } } }));
+  const job = await h.jobs.create({ kind: 'review', cwd: repo, review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } });
+  const pending = h.jobs.reply(job.id, { message: 'Review again.' });
+  await assert.rejects(h.jobs.reply(job.id, { message: 'Another review.' }), /preparing its review diff/);
+  await h.jobs.cancel(job.id);
+  await pending;
+  assert.equal(job.state, 'cancelled');
+  assert.deepEqual(h.calls, ['cancel']);
+  assert.equal(fs.existsSync(path.join(h.home, 'reviews', `${job.id}-2.diff`)), false);
 });
 
 test('a worktree job can be continued as soon as its result is published', async () => {

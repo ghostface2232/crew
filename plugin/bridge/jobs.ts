@@ -69,6 +69,8 @@ export interface Job {
   shared?: string[];
   /** Set when the review should use the agent's native review mode instead of a prompted turn. */
   nativeReview: ReviewTarget | null;
+  /** Preserved for refreshed review diffs; absent on older saved jobs. */
+  reviewTarget?: ReviewTarget;
   targets: string[];
   model?: string;
   effort?: string;
@@ -146,6 +148,7 @@ export class Jobs {
   private discarding = new Set<string>();
   private finalizing = new Set<string>();
   private cancelling = new Set<string>();
+  private preparingReviews = new Set<string>();
   private saveTimer: NodeJS.Timeout | null = null;
   private home: string;
   private readConfig: () => Config;
@@ -243,6 +246,7 @@ export class Jobs {
       shared: shared.sources,
       // Only Codex has a built-in review mode; other agents get the prompted review.
       nativeReview: agent === 'codex' && spec.review?.mode === 'standard' ? spec.review.target : null,
+      reviewTarget: spec.review?.target,
       targets: spec.targets ?? [],
       model: spec.model ?? role.model,
       effort: spec.effort ?? role.effort,
@@ -275,6 +279,7 @@ export class Jobs {
     const job = this.get(id);
     if (this.discarding.has(id)) throw new Error(`Job ${id} is being discarded.`);
     if (this.cancelling.has(id)) throw new Error(`Job ${id} is being cancelled.`);
+    if (this.preparingReviews.has(id)) throw new Error(`Job ${id} is preparing its review diff. Wait for it to finish.`);
     if (this.finalizing.has(id)) throw new Error(`Job ${id} is collecting its result. Wait for it to finish.`);
     const ctl = this.ctl(job);
     const adapter = this.adapters[job.agent];
@@ -300,6 +305,10 @@ export class Jobs {
       await adapter.reply(ctl, input.message);
       return job;
     }
+    const refreshDiff = job.kind === 'review' && !WORKERS[job.agent].reviewerRunsGit;
+    if (refreshDiff && (!job.reviewTarget || !job.repo)) {
+      throw new Error(`Job ${id} has no saved review target or repository. Start a new review instead.`);
+    }
     job.state = 'running';
     job.phase = 'starting';
     job.endedAt = null;
@@ -307,7 +316,25 @@ export class Jobs {
     job.turns += 1;
     job.activeAt = Date.now();
     this.event(job, 'started', `follow-up: ${input.message.split('\n')[0].slice(0, 80)}`);
-    await adapter.reply(ctl, input.message).catch((err) => ctl.fail(String(err?.message ?? err)));
+    try {
+      let message = input.message;
+      if (refreshDiff) {
+        this.preparingReviews.add(id);
+        const diffFile = this.diffFile(id, job.turns);
+        try {
+          const diff = await reviewDiff(job.repo!, job.reviewTarget!);
+          if (isTerminal(job)) return job;
+          fs.mkdirSync(path.dirname(diffFile), { recursive: true });
+          fs.writeFileSync(diffFile, diff);
+          message += `\n\nThe review diff has been refreshed at \`${diffFile}\` for the original review target. Read this file before reviewing; it replaces the previous diff.`;
+        } finally {
+          this.preparingReviews.delete(id);
+        }
+      }
+      await adapter.reply(ctl, message);
+    } catch (err) {
+      ctl.fail(String((err as Error)?.message ?? err));
+    }
     return job;
   }
 
@@ -520,8 +547,8 @@ export class Jobs {
     return event;
   }
 
-  private diffFile(id: string): string {
-    return path.join(this.home, 'reviews', `${id}.diff`);
+  private diffFile(id: string, turn = 1): string {
+    return path.join(this.home, 'reviews', `${id}${turn === 1 ? '' : `-${turn}`}.diff`);
   }
 
   eventsFor(id: string, after: number): CrewEvent[] {
@@ -530,8 +557,8 @@ export class Jobs {
 
   private event(job: Job, kind: EventKind, detail: string): void {
     job.seq = this.record(job.agent, job.sessionId, kind, detail, job.id).seq;
-    // The saved diff describes the tree as it was; a follow-up turn must not review from it.
-    if (isTerminal(job) && job.kind === 'review') fs.rm(this.diffFile(job.id), { force: true }, () => {});
+    // Each turn has its own file, so delayed cleanup cannot delete a follow-up's fresh diff.
+    if (isTerminal(job) && job.kind === 'review') fs.rm(this.diffFile(job.id, job.turns), { force: true }, () => {});
     this.changed(job);
     for (const wake of [...(this.waiters.get(job.id) ?? [])]) wake();
   }

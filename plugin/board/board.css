@@ -304,11 +304,11 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 
 .tiles { grid-area: agents; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 12px; }
 .tile { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: auto auto 1fr auto; gap: 0 12px; align-items: start; min-width: 0; padding: 20px; border: 1px solid transparent; border-radius: var(--radius-tile); background: var(--surface); box-shadow: var(--shadow); }
-/* Who it is, in a well one tone off the card: the agent's mark when its file is there, else its initial. */
+/* Who it is: the agent's mark, bare, when its file is there, else its initial. */
 /* Bottom-aligned, so it centers on the label and name rather than on the taller chip row. */
-.agent-well { grid-column: 1; grid-row: 1 / span 2; align-self: end; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: var(--bg); }
-.agent-well .agent-icon { width: 22px; height: 22px; }
-.agent-well b { font-family: var(--rounded); font-size: 17px; font-weight: 500; color: var(--muted); }
+.agent-well { grid-column: 1; grid-row: 1 / span 2; align-self: end; display: grid; place-items: center; width: 32px; height: 44px; color: var(--text); }
+.agent-well .agent-icon { width: 28px; height: 28px; }
+.agent-well b { font-family: var(--rounded); font-size: 24px; font-weight: 500; color: var(--muted); }
 .icon-claude .agent-well[data-agent="claude"] b, .icon-codex .agent-well[data-agent="codex"] b, .icon-antigravity .agent-well[data-agent="antigravity"] b { display: none; }
 /* The state holds the top corner and the usage the foot, so neither moves when the other comes or goes. */
 .tile > .chip { grid-column: 3; grid-row: 1; }

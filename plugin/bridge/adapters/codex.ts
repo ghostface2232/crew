@@ -3,7 +3,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { agentEnv, VERSION } from '../config.ts';
 import type { Config } from '../config.ts';
 import { isTerminal } from '../jobs.ts';
-import type { Adapter, JobCtl } from '../jobs.ts';
+import type { Adapter, Job, JobCtl } from '../jobs.ts';
 import { RPC_TIMEOUT_MS, RpcError, RpcPeer, RpcTimeoutError } from '../rpc.ts';
 
 type Answer = { approve: boolean; message?: string; cancelled?: boolean };
@@ -133,12 +133,18 @@ export class CodexAdapter implements Adapter {
     return {
       cwd: job.cwd,
       sandbox: job.sandbox,
-      // A review must never block on a prompt; it has nothing to approve in a read-only sandbox.
-      approvalPolicy: job.kind === 'review' ? 'never' : this.config.codex.approvalPolicy,
-      approvalsReviewer: this.config.codex.approvalsReviewer ?? null,
+      // A static review must never block on a prompt; it has nothing to approve in a read-only sandbox.
+      approvalPolicy: job.kind === 'review' && !job.runsApp ? 'never' : this.config.codex.approvalPolicy,
+      approvalsReviewer: this.reviewer(job),
+      // Without network access the sandbox refuses to bind even a local port.
+      config: job.runsApp ? { sandbox_workspace_write: { network_access: true } } : null,
       developerInstructions: job.instructions,
       model: job.model ?? this.config.codex.model ?? null,
     };
+  }
+
+  private reviewer(job: Job) {
+    return job.asksUser ? 'user' : this.config.codex.approvalsReviewer;
   }
 
   private openRun(ctl: JobCtl, threadId: string): Run {
@@ -153,6 +159,8 @@ export class CodexAdapter implements Adapter {
       threadId: job.sessionId,
       input: [textInput(text)],
       effort: job.effort ?? this.config.codex.effort ?? null,
+      // Sent with every turn: an override stays on the thread until the next one replaces it.
+      approvalsReviewer: this.reviewer(job),
     });
   }
 
@@ -247,6 +255,15 @@ export class CodexAdapter implements Adapter {
       const owner = this.runs.get(threadId) ?? this.children.get(threadId);
       const index = owner?.pending.findIndex((request) => request.threadId === threadId && request.id === p.requestId) ?? -1;
       if (owner && index >= 0) this.settleRequest(owner, index, null);
+      return;
+    }
+    if (method === 'item/autoApprovalReview/completed') {
+      // An aborted review ended with its turn; only a verdict against the action is a refusal.
+      const status = p.review?.status;
+      if (status === 'denied' || status === 'timedOut') {
+        const reason = p.review.rationale ?? (status === 'timedOut' ? 'the review timed out' : 'no reason given');
+        (this.runs.get(threadId) ?? this.children.get(threadId))?.ctl.refused(reviewedAction(p.action), reason);
+      }
       return;
     }
     const run = this.runs.get(threadId);
@@ -413,6 +430,24 @@ export class CodexAdapter implements Adapter {
       default:
         throw new RpcError(-32601, `${method} is not supported by Crew`);
     }
+  }
+}
+
+/** The action an automatic review was about, in full: it may be sent back for approval as written. */
+function reviewedAction(action: any): string {
+  switch (action?.type) {
+    case 'command':
+      return action.command;
+    case 'execve':
+      return [action.program, ...(action.argv ?? [])].join(' ');
+    case 'applyPatch':
+      return `write files: ${(action.files ?? []).join(', ')}`;
+    case 'networkAccess':
+      return `network access to ${action.target}`;
+    case 'mcpToolCall':
+      return `tool ${action.server}.${action.toolName}`;
+    default:
+      return JSON.stringify(action ?? {});
   }
 }
 

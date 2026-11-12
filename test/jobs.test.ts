@@ -9,8 +9,9 @@ import type { Config } from '../plugin/bridge/config.ts';
 import { leadContext } from '../plugin/bridge/instructions.ts';
 import { Jobs, outOfScope } from '../plugin/bridge/jobs.ts';
 import type { Adapter, CrewEvent, Job, JobCtl, ReviewTarget } from '../plugin/bridge/jobs.ts';
+import { describe } from '../plugin/bridge/render.ts';
 
-const config = resolveConfig({ notify: false, codex: { bin: 'codex', approvalPolicy: 'never' } });
+const config = resolveConfig({ notify: false, codex: { bin: 'codex', approvalPolicy: 'never', approvalsReviewer: 'auto_review' } });
 
 function tempRepo(): string {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-test-')));
@@ -683,4 +684,92 @@ test('every worker is given the shared-machine rules, and a review is told to st
   const handed = await settled(other.jobs, await other.jobs.create({ kind: 'review', cwd: repo, review: { target, mode: 'adversarial' } }));
   assert.match(handed.instructions, /# Static review\nReview by reading\. You cannot run anything in this role/);
   assert.ok(!handed.instructions.includes('Run only checks that end by themselves'));
+});
+
+test('a review that runs the app gets a snapshot of the change and leaves nothing behind', async () => {
+  const repo = tempRepo();
+  fs.writeFileSync(path.join(repo, 'app.js'), 'export const x = 2;\n');
+  fs.mkdirSync(path.join(repo, 'lib'));
+  fs.writeFileSync(path.join(repo, 'lib', 'new.js'), 'export const y = 3;\n');
+  const seen: Record<string, string> = {};
+  const { jobs, calls } = harness((ctl) => {
+    seen.cwd = ctl.job.cwd;
+    seen.app = fs.readFileSync(path.join(ctl.job.cwd, 'app.js'), 'utf8');
+    seen.untracked = fs.readFileSync(path.join(ctl.job.cwd, 'lib', 'new.js'), 'utf8');
+    // Whatever the reviewer writes stays in the snapshot.
+    fs.writeFileSync(path.join(ctl.job.cwd, 'scratch.txt'), 'x');
+    ctl.done('reviewed');
+  });
+  const review = { target: { type: 'uncommittedChanges' as const }, mode: 'adversarial' as const };
+  const job = await settled(jobs, await jobs.create({ kind: 'review', cwd: repo, review, runsApp: true }));
+
+  assert.notEqual(seen.cwd, repo);
+  assert.equal(seen.app, 'export const x = 2;\n');
+  assert.equal(seen.untracked, 'export const y = 3;\n');
+  assert.equal(job.sandbox, 'workspace-write');
+  assert.equal(job.result, null);
+  assert.match(job.instructions, /# Running the app\n[^]*snapshot of the change/);
+  assert.ok(!job.instructions.includes('# Static review'));
+  while (job.worktree) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.ok(!fs.existsSync(seen.cwd));
+  assert.ok(!fs.existsSync(path.join(repo, 'scratch.txt')));
+  assert.equal(execFileSync('git', ['branch', '--list', 'crew-*'], { cwd: repo, encoding: 'utf8' }), '');
+
+  // A follow-up reviews the change as it is then, in a new snapshot.
+  fs.writeFileSync(path.join(repo, 'app.js'), 'export const x = 4;\n');
+  jobs.reply(job.id, { message: 'look again' });
+  while (!calls.length) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.match(calls[0], /look again\n\nThe snapshot has been refreshed/);
+  await settled(jobs, job);
+  while (job.worktree) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.ok(!fs.existsSync(seen.cwd));
+});
+
+test('only a job that can run commands may run the app', async () => {
+  const repo = tempRepo();
+  const review = { target: { type: 'uncommittedChanges' as const }, mode: 'adversarial' as const };
+  const { jobs } = harness((ctl) => ctl.done('ok'));
+  await assert.rejects(jobs.create({ kind: 'polish', cwd: repo, targets: ['README.md'], runsApp: true }), /A polish job cannot run the app/);
+  const delegate = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'x', runsApp: true }));
+  assert.equal(delegate.runsApp, true);
+  assert.match(delegate.instructions, /# Running the app/);
+
+  const reader = resolveConfig({ roles: { review: { agent: 'antigravity' } } });
+  const other = harness((ctl) => ctl.done('ok'), () => reader);
+  await assert.rejects(other.jobs.create({ kind: 'review', cwd: repo, review, runsApp: true }), /cannot run commands as a reviewer/);
+});
+
+test('a refused action goes back to the reviewer once, then to the user', async () => {
+  const repo = tempRepo();
+  const refuse = (ctl: JobCtl) => ctl.refused('rm -rf ~/cache', 'outside the workspace');
+  const { jobs, adapter, calls } = harness((ctl) => {
+    refuse(ctl);
+    ctl.done('could not clean the cache');
+  });
+  const reviewers: boolean[] = [];
+  adapter.reply = async (ctl, message) => {
+    calls.push(message);
+    reviewers.push(Boolean(ctl.job.asksUser));
+    if (reviewers.length < 3) refuse(ctl);
+    ctl.done('again');
+  };
+  const job = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'clean up' }));
+  assert.deepEqual(job.refusals, [{ action: 'rm -rf ~/cache', reason: 'outside the workspace', turn: 1 }]);
+  assert.match(describe(job), /REFUSED by Codex's automatic reviewer:\n  rm -rf ~\/cache\n  reason: outside the workspace\n.*without asking them again/);
+  await assert.rejects(jobs.reply(job.id, { approved_by_user: ' ' }), /must quote what the user said/);
+
+  await jobs.reply(job.id, { approved_by_user: 'delete the cache too' });
+  await settled(jobs, job);
+  assert.match(calls[0], /Their words in the lead session: "delete the cache too"\n\nRun the refused action again, exactly as before:\nrm -rf ~\/cache$/);
+  assert.match(describe(job), /already sent back once/);
+
+  await jobs.reply(job.id, { approved_by_user: 'delete the cache too', message: 'Then report.' });
+  await settled(jobs, job);
+  assert.match(calls[1], /Then report\.$/);
+  // An ordinary follow-up is the automatic reviewer's again.
+  await jobs.reply(job.id, { message: 'thanks' });
+  await settled(jobs, job);
+  assert.deepEqual(reviewers, [false, true, false]);
+  // Nothing was refused in that last turn, so there is nothing to send back.
+  await assert.rejects(jobs.reply(job.id, { approved_by_user: 'delete the cache too' }), /Nothing was refused in the last turn/);
 });

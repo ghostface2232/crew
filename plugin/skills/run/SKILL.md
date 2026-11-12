@@ -33,6 +33,10 @@ Call `delegate` with `background: true` for each delegated piece. Write the task
 
 If a worker asks for approval or has a question, the user answers it in the app; do not decide for them. If you are told a job is waiting, call `wait` on it so they are asked.
 
+Codex's own automatic reviewer answers most of its approval requests. When a result lists an action it refused and the user's request clearly covers that action, call `reply` with `approved_by_user` quoting their words, without asking them again. If it is refused once more, make the same call again: the user is then asked directly. If their request does not cover the action, tell them and let them decide.
+
+If a delegated piece can only be done or verified by starting the app, pass `runs_app: true`: the worker's sandbox then has the network access a local server needs.
+
 When a job is done, read its diff before merging (`git diff <base>..crew-<job id>`). Merge what is right. Use `reply` with a message to have the worker fix what is not, and reject anything beyond the task. After merging or rejecting, `cancel` with `discard: true` removes the worktree.
 
 ## 3 and 4. Self-review and cross-review (at the same time)
@@ -42,7 +46,7 @@ Start both in one step, then wait for both. Change nothing in the working tree u
 - **Self-review**: launch the `crew:self-reviewer` subagent on the combined change. It has none of this conversation's context, which is the point: rereading your own diff in the same context does not count as review.
 - **Cross-review**: call `review` with `background: true` on the change (target `uncommitted`, or `branch` with the base). Pass the acceptance criteria as `done_when` and use `focus` for decisions and assumptions you are least sure about.
 
-The cross-review is always static: the worker reads files and runs checks that finish on their own. If the change can only be judged by running the app, tell the self-reviewer it may run the app in its own isolated instance; otherwise tell it to review statically too. Report this combined step to `mission` as `self-review`.
+Both reviews are static by default: read the change and run checks that finish on their own. If the change can only be judged by running the app, exactly one of them runs it. Either tell the self-reviewer it may run the app in its own isolated instance, or pass `runs_app: true` to `review`, which then runs in a snapshot of the change, and tell the self-reviewer to stay static. Report this combined step to `mission` as `self-review`.
 
 ## 5. Fix (you)
 

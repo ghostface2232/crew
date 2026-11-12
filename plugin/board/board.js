@@ -169,7 +169,7 @@ function jobCard(job) {
     html: `
       <div class="row">
         <span class="pill" data-tone="${tone}">${esc(jobLabel(job))}</span>
-        <span class="kind">${KIND_NAMES[job.kind]}${job.exclusive ? ' · runs alone' : ''}</span>
+        <span class="kind">${KIND_NAMES[job.kind]}${job.runsApp ? ' · runs the app' : ''}${job.exclusive ? ' · runs alone' : ''}</span>
         <span class="timer" data-from="${esc(job.createdAt)}" data-to="${esc(job.endedAt ?? '')}"></span>
       </div>
       <p class="title"><button class="link" data-act="open" title="Open details">${esc(job.title)}</button></p>

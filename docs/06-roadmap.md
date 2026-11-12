@@ -15,6 +15,7 @@ The requirements are in [01-requirements.md](01-requirements.md). This roadmap c
 | R8 (AgentGauge) | C1, L3 |
 | R12 (Cursor) | C2 |
 | R14 (no collisions between agents) | Implemented 2026-11-12, [04-implementation.md](04-implementation.md) section 5.4 |
+| R15 (approvals with little user involvement) | Implemented 2026-11-12 for Codex, [04-implementation.md](04-implementation.md) section 5.1 |
 | R13 (other leads, own main screen, direct dispatch) | L1, L2 |
 
 Near-term work targets Claude Desktop lead mode, as 01 section 3 sets out.

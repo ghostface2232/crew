@@ -40,11 +40,12 @@ Roles (assigned by the user in ~/.crew/config.json; each tool goes to the agent 
 How jobs work:
 - delegate and polish run in their own git worktree and branch (crew-<job id>) created from HEAD, so commit anything the worker needs first. Gitignored files it needs (node_modules, .env) are copied in if the repository lists them in .worktreeinclude. The bridge commits the worker's changes on that branch; you inspect the diff and merge or reject it. Nothing reaches your branch unless you merge it.
 - By default a call blocks until the worker finishes or needs you. Pass background: true to keep working in parallel; you are notified when the job ends, or call \`wait\`.
+- Codex's approval requests go to its own automatic reviewer first; only what reaches you as a waiting job is for the user. If a result lists an action the reviewer REFUSED and the user's request in this conversation clearly covers it, send it back yourself with \`reply\` and approved_by_user, quoting their words; do not ask them again. If it is refused a second time, the same call has the user asked directly. If their request does not cover it, tell them and let them decide.
 - A worker's approval request or question is for the user to answer, not you. While you block on a job, the app asks them directly. If you are told a job is waiting (for example when a background job wakes you), call \`wait\` on it so they are asked. Use \`reply\` with a decision only to pass on one the user gave you in the conversation.
 - \`reply\` with a message continues the same worker session, e.g. to request fixes.
 - Reject worker changes that go beyond what was asked. For polish, any file listed as out of scope, or any non-text change, is grounds to reject.
 - If a worker fails on a usage limit, do that piece yourself and say that the cross-check was skipped.
-- This machine is shared. Workers are told to start their own isolated instance of anything they run (free port, own data directory, headless browser) and to measure nothing unless the job runs alone. A worker's review is always static; if the app has to be run to check a change, that is for you or your self-review subagent, one at a time. A delegate job that measures performance takes exclusive: it is refused while other jobs are active, so wait for them first.
+- This machine is shared. Workers are told to start their own isolated instance of anything they run (free port, own data directory, headless browser) and to measure nothing unless the job runs alone. A job that has to start the app takes runs_app: its sandbox then has network access, and a review runs in a snapshot of the change. Without it a worker's review is static. Only one reviewer of a change runs the app: if the cross-review does, tell your self-review subagent to stay static, and the other way round. A delegate job that measures performance takes exclusive: it is refused while other jobs are active, so wait for them first.
 - When you take a user's command through several steps, call \`mission\` with its title first, with the stage as you move on, and with done at the end. The board then shows the command as one unit with its jobs under it. Skip it for a single delegated job.
 
 The user can watch every agent live on the status board at ${BASE_URL}.`;
@@ -60,6 +61,9 @@ const worktreeProps = {
 const aloneProp = {
   exclusive: { type: 'boolean', description: 'The job measures performance (benchmark, profile, load test) and must have the machine to itself. It is refused while any other job runs, and no other job can start until it ends: wait for running jobs first, and start nothing alongside it.' },
 };
+const runsAppProp = (what: string) => ({
+  runs_app: { type: 'boolean', description: `The job has to start the app (a server, a headless browser) to ${what}. Its sandbox gets network access for that; without this a worker cannot bind a port. Pass it only when running the app is needed.` },
+});
 const modelProps = {
   model: { type: 'string', description: 'Model override for this job. Omit to use the model configured for the role, or the agent\'s own default.' },
   effort: { type: 'string', description: 'Reasoning effort override (e.g. low, medium, high). Ignored by agents without an effort setting.' },
@@ -78,6 +82,7 @@ const TOOLS = [
         done_when: { type: 'string', description: 'Concrete completion criteria, e.g. tests that must pass.' },
         ...worktreeProps,
         ...modelProps,
+        ...runsAppProp('do or verify the work'),
         ...aloneProp,
         ...common,
       },
@@ -87,7 +92,7 @@ const TOOLS = [
   {
     name: 'review',
     title: `Review by ${holder('review')}`,
-    description: `Ask the cross-reviewer (${holder('review')}) for a read-only review of changes in this repository. It is a static review: the worker reads the change and runs checks that end by themselves, never the app. Start it together with your own self-review, once per step; do not loop reviews.`,
+    description: `Ask the cross-reviewer (${holder('review')}) for a read-only review of changes in this repository. By default it is static: the worker reads the change and runs checks that end by themselves. Start it together with your own self-review, once per step; do not loop reviews.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -97,6 +102,7 @@ const TOOLS = [
         focus: { type: 'string', description: 'What to scrutinize: the design decisions, assumptions or risks you are least sure about.' },
         mode: { type: 'string', enum: ['adversarial', 'standard'], description: 'adversarial (default): challenges design and assumptions. standard: Codex\'s built-in code review; other agents run the adversarial review instead.' },
         done_when: { type: 'string', description: 'Acceptance criteria to verify in adversarial mode.' },
+        ...runsAppProp('judge the change. The review then runs in a snapshot worktree holding the change, and your own self-review must stay static'),
         ...modelProps,
         ...common,
       },
@@ -156,7 +162,7 @@ const TOOLS = [
   {
     name: 'reply',
     title: 'Reply to a worker',
-    description: 'Send a follow-up message that continues the same worker session, e.g. to request fixes after reviewing its diff. Also passes on a decision the user gave you for a waiting job (decision: approve or deny); to have the user asked, call wait instead.',
+    description: 'Send a follow-up message that continues the same worker session, e.g. to request fixes after reviewing its diff. Also passes on a decision the user gave you for a waiting job (decision: approve or deny); to have the user asked, call wait instead. With approved_by_user it sends back an action the worker\'s automatic reviewer refused.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -164,6 +170,7 @@ const TOOLS = [
         message: { type: 'string', description: 'Follow-up instruction, or the answer to the worker\'s question.' },
         decision: { type: 'string', enum: ['approve', 'deny'], description: 'The user\'s decision for a job waiting on approval.' },
         request_id: { type: 'string', description: 'Required when forwarding an answer. Use the request ID shown in the job status.' },
+        approved_by_user: { type: 'string', description: 'For a finished job whose result lists a REFUSED action: the user\'s own words from this conversation that cover it. The worker runs the action again and the automatic reviewer judges it with that approval. Use it without asking the user when their request clearly covers the action. A second use on the same job sends each request to the user to answer.' },
         background: common.background,
       },
       required: ['job_id'],
@@ -412,7 +419,7 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
   const cwd: string = args.cwd ?? PROJECT;
   switch (name) {
     case 'delegate':
-      return runJob({ kind: 'delegate', cwd, title: args.title, task: args.task, done_when: args.done_when, base: args.base, isolation: args.isolation, model: args.model, effort: args.effort, exclusive: Boolean(args.exclusive) }, Boolean(args.background), ctx);
+      return runJob({ kind: 'delegate', cwd, title: args.title, task: args.task, done_when: args.done_when, base: args.base, isolation: args.isolation, model: args.model, effort: args.effort, exclusive: Boolean(args.exclusive), runsApp: Boolean(args.runs_app) }, Boolean(args.background), ctx);
     case 'review': {
       const kind = args.target ?? 'uncommitted';
       if (kind === 'branch' && !args.base) throw new Error('target "branch" needs base (the branch to compare against, e.g. main).');
@@ -420,7 +427,7 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       const target = kind === 'branch' ? { type: 'baseBranch' as const, branch: args.base } : kind === 'commit' ? { type: 'commit' as const, sha: args.commit } : { type: 'uncommittedChanges' as const };
       // The focus can be long; the board title only needs to say what is under review.
       const title = `Review of ${kind === 'branch' ? `the branch against ${args.base}` : kind === 'commit' ? `commit ${args.commit.slice(0, 8)}` : 'uncommitted changes'}`;
-      return runJob({ kind: 'review', cwd, title, task: args.focus, done_when: args.done_when, review: { target, mode: args.mode ?? 'adversarial' }, model: args.model, effort: args.effort }, Boolean(args.background), ctx);
+      return runJob({ kind: 'review', cwd, title, task: args.focus, done_when: args.done_when, review: { target, mode: args.mode ?? 'adversarial' }, model: args.model, effort: args.effort, runsApp: Boolean(args.runs_app) }, Boolean(args.background), ctx);
     }
     case 'polish':
       if (args.exclusive) throw new Error('polish cannot run alone: an editor measures nothing. Drop exclusive.');
@@ -461,7 +468,7 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       return parts.join('\n\n────────\n\n');
     }
     case 'reply': {
-      await api('POST', `/api/jobs/${args.job_id}/reply`, { message: args.message, decision: args.decision, request_id: args.request_id });
+      await api('POST', `/api/jobs/${args.job_id}/reply`, { message: args.message, decision: args.decision, request_id: args.request_id, approved_by_user: args.approved_by_user });
       return args.background ? describe(await api('GET', `/api/jobs/${args.job_id}`)) : followOne(args.job_id, ctx);
     }
     case 'cancel': {

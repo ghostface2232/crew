@@ -38,7 +38,7 @@ crew board
 
 The status board runs at http://127.0.0.1:47615. Each command run with `/crew:run` appears as a single unit with its jobs grouped under it, and a line at the top lists anything waiting on you. Click a job to read its report, changed files, and activity, or to send it a follow-up. Settings on the board edits roles and shared instructions.
 
-When a worker asks for approval or has a question, an input dialog pops up in the Claude app. You can also answer on the status board: approve or deny, or type an answer to a question. If you have configured Codex's built-in auto-reviewer, Codex handles its own approvals internally without prompting ([docs/04-implementation.md](docs/04-implementation.md) section 5.1).
+When a worker asks for approval or has a question, an input dialog pops up in the Claude app. You can also answer on the status board: approve or deny, or type an answer to a question. Codex's built-in automatic reviewer answers its approval requests first, so you are asked only about what it refuses twice ([docs/04-implementation.md](docs/04-implementation.md) section 5.1).
 
 ## How it works
 
@@ -46,7 +46,7 @@ When a worker asks for approval or has a question, an input dialog pops up in th
 - Gitignored files that workers need to run tests (such as `node_modules` or `.env`) are copied into the worktree when listed in `.worktreeinclude` at the repository root. It uses `.gitignore` syntax and shares the same file as Claude Code's native worktrees.
 - Codex runs via `codex app-server` and Antigravity runs via `agy acp`. Crew executes only the official binaries and never reads authentication files or tokens.
 - When a background job finishes or needs a decision, the lead session wakes up automatically.
-- Agents share the machine without colliding: each starts an isolated instance of any service it runs, worker reviews stay static without launching the app, and performance-measuring jobs run alone ([docs/04-implementation.md](docs/04-implementation.md) section 5.4).
+- Agents share the machine without colliding: each starts an isolated instance of any service it runs, only one reviewer of a change launches the app, and a worker that does gets network access and its own snapshot of the change, and performance-measuring jobs run alone ([docs/04-implementation.md](docs/04-implementation.md) section 5.4).
 - Instructions for every agent go in `~/.crew/instructions.md` (all projects) and `.crew/instructions.md` at the repository root (that project). Workers get them with each job and Claude sessions at start; no service's own instruction files are touched.
 - Configuration lives in `~/.crew/config.json` (stall timeout, notifications, Codex approval policy, whether Antigravity is enabled, and which agent holds each role).
 

@@ -3,46 +3,58 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="light dark">
+<meta name="color-scheme" content="light">
 <title>Crew</title>
 <link rel="stylesheet" href="/board.css">
 </head>
-<body>
+<body data-loading>
+<aside id="side" class="side" aria-labelledby="side-title" hidden>
+  <div class="side-head"><p id="side-title" class="side-title">Projects</p><button class="quiet side-close" data-act="close-side" aria-label="Close projects">Close</button></div>
+  <div id="projects" class="projects" role="group" aria-labelledby="side-title"></div>
+</aside>
+
+<div id="side-scrim" class="side-scrim" data-act="close-side" aria-hidden="true"></div>
+
+<div class="main">
 <header class="top">
-  <h1>Crew</h1>
-  <div id="projects" class="segmented" role="group" aria-label="Project" hidden></div>
+  <button id="open-side" class="side-toggle" data-act="open-side" aria-controls="side" aria-expanded="false" aria-label="Projects" title="Projects" hidden><i aria-hidden="true"></i></button>
+  <h1><i class="logo" aria-hidden="true"></i>Crew</h1>
   <p id="connection" class="connection" role="status">Connecting…</p>
-  <button id="open-settings" class="quiet">Settings</button>
+  <button id="open-settings">Settings</button>
 </header>
 
 <p id="notice" class="notice" role="alert" hidden></p>
-<p id="needs" class="needs" role="status" hidden></p>
 
-<main class="board">
-  <div class="heads">
-    <header class="lane-head" data-agent="claude">
-      <h2>Claude</h2>
-      <p class="role">Lead · self-review</p>
-      <p class="lane-meta" data-meta></p>
-    </header>
-    <header class="lane-head" data-agent="codex">
-      <h2>Codex</h2>
-      <p class="role" data-role>Engineer · cross-review</p>
-      <p class="lane-meta" data-meta></p>
-    </header>
-    <header class="lane-head" data-agent="antigravity">
-      <h2>Antigravity</h2>
-      <p class="role" data-role>UX writing · docs</p>
-      <p class="lane-meta" data-meta></p>
-    </header>
+<section class="hero" aria-label="Overview">
+  <div id="summary" class="summary"></div>
+  <div class="stats" role="group" aria-label="Jobs by state">
+    <ul id="stats" class="stats-legend"></ul>
+    <div id="stats-bar" class="stats-bar" aria-hidden="true"></div>
   </div>
-  <div id="groups" class="groups"></div>
-</main>
+  <ul id="agents" class="tiles" aria-label="Agents"></ul>
+</section>
 
-<section class="feed" aria-labelledby="feed-title">
-  <h2 id="feed-title">Activity</h2>
-  <ol id="feed" class="feed-list"></ol>
-  <p id="feed-empty" class="empty">Nothing has happened yet.</p>
+<div class="layout">
+  <main class="board">
+    <div id="groups" class="groups"></div>
+  </main>
+
+  <section class="feed" aria-labelledby="feed-title">
+    <div class="feed-head">
+      <h2 id="feed-title">Activity</h2>
+      <p id="pulse-read" class="pulse-read"></p>
+      <div id="pulse" class="pulse" aria-hidden="true"></div>
+    </div>
+    <ol id="feed" class="feed-list"></ol>
+    <p id="feed-empty" class="empty">Nothing has happened yet.</p>
+  </section>
+</div>
+
+</div>
+
+<section id="dock" class="dock" aria-label="Needs you" hidden>
+  <button id="dock-pill" class="dock-pill" data-act="answer" data-state="waiting"></button>
+  <ul id="needs" class="needs"></ul>
 </section>
 
 <dialog id="drawer" class="sheet" aria-labelledby="drawer-title">

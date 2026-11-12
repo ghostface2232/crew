@@ -172,6 +172,7 @@ const STATIC: Record<string, [file: string, type: string]> = {
   '/': ['index.html', 'text/html; charset=utf-8'],
   '/board.css': ['board.css', 'text/css; charset=utf-8'],
   '/board.js': ['board.js', 'text/javascript; charset=utf-8'],
+  '/inter.woff2': ['inter.woff2', 'font/woff2'],
 };
 
 class HttpError extends Error {
@@ -223,6 +224,24 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     if (asset) {
       res.writeHead(200, { 'content-type': asset[1], 'cache-control': 'no-cache' });
       fs.createReadStream(path.join(PLUGIN_ROOT, 'board', asset[0])).pipe(res);
+      return undefined;
+    }
+    const font = /^\/fonts\/([\w.-]+\.woff2)$/.exec(pathname);
+    if (font) {
+      // Optional fonts the user keeps beside the plugin; the board falls back to its own when they are absent.
+      const file = path.join(PLUGIN_ROOT, '..', 'public', 'fonts', font[1]);
+      if (!fs.existsSync(file)) throw new HttpError(404, 'not found');
+      res.writeHead(200, { 'content-type': 'font/woff2', 'cache-control': 'max-age=86400' });
+      fs.createReadStream(file).pipe(res);
+      return undefined;
+    }
+    const icon = /^\/icons\/([\w.-]+\.svg)$/.exec(pathname);
+    if (icon) {
+      // Optional agent marks kept beside the plugin, like the fonts; without them the board shows names alone.
+      const file = path.join(PLUGIN_ROOT, '..', 'public', 'icons', icon[1]);
+      if (!fs.existsSync(file)) throw new HttpError(404, 'not found');
+      res.writeHead(200, { 'content-type': 'image/svg+xml', 'cache-control': 'max-age=86400' });
+      fs.createReadStream(file).pipe(res);
       return undefined;
     }
     if (pathname === '/api/health') return { name: 'crew', version: VERSION, build: BUILD, root: PLUGIN_ROOT, pid: process.pid, active: jobs.activeCount };

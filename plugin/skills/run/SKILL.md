@@ -12,6 +12,8 @@ You are the lead. Take the task through the steps below, using the `crew` MCP to
 
 The user assigns each role to an agent: `delegate` goes to the engineer, `review` to the cross-reviewer, `polish` to the editor. The tool titles and each job's result name the agent. Role assignments are the user's; do not route a role's work to a different agent yourself.
 
+Before step 1, call `mission` with the task as `title` so the board groups this command and its jobs as one unit. At the start of each later step, call `mission` with that step's `stage` (`implement`, `self-review`, `cross-review`, `fix`, `polish`, `final`). When finished, call `mission` with `done: true` and a one-line `outcome` (or `abandoned: true` if the task is dropped). Each is one short call.
+
 Skip a step only when it has nothing to act on (for example, no separable piece to delegate, or no user-facing text to polish), and say that you skipped it.
 
 ## 1. Plan (you)
@@ -31,19 +33,36 @@ Call `delegate` with `background: true` for each delegated piece. Write the task
 
 If a worker asks for approval or has a question, the user answers it in the app; do not decide for them. If you are told a job is waiting, call `wait` on it so they are asked.
 
+Codex's own automatic reviewer answers most of its approval requests. When a result lists an action it refused and the user's request clearly covers that action, call `reply` with `approved_by_user` quoting their words, without asking them again. If it is refused once more, make the same call again: the user is then asked directly. If their request does not cover the action, tell them and let them decide.
+
+If a delegated piece can only be done or verified by starting the app, pass `runs_app: true`: the worker's sandbox then has the network access a local server needs.
+
 When a job is done, read its diff before merging (`git diff <base>..crew-<job id>`). Merge what is right. Use `reply` with a message to have the worker fix what is not, and reject anything beyond the task. After merging or rejecting, `cancel` with `discard: true` removes the worktree.
 
-## 3. Self-review (you, with fresh eyes)
+## 3 and 4. Review
 
-Launch the `crew:self-reviewer` subagent on the combined change. It has none of this conversation's context, which is the point: rereading your own diff in the same context does not count as review. Fix what it finds.
+How much review depends on where the work is going, not on how many instructions it took.
 
-## 4. Cross-review
+| When | Review |
+| --- | --- |
+| A substantial piece of implementation has reached a stopping point | One review: the self-review or the cross-review, whichever suits the change |
+| The work is about to be pushed or opened as a pull request | Both, in parallel, on everything going out that has not yet had both |
+| A small fix, a wording change, or a follow-up to a review | None beyond your own checks |
 
-Call `review` on the change (target `uncommitted`, or `branch` with the base). Pass the acceptance criteria as `done_when` and use `focus` for decisions and assumptions you are least sure about.
+If the user asks for a review, or for none, do that instead.
+
+- **Self-review**: launch the `crew:self-reviewer` subagent on the change. It has none of this conversation's context, which is the point: rereading your own diff in the same context does not count as review. For a broad change, launch several at once, each with its own area.
+- **Cross-review**: call `review` on the change (target `uncommitted`, or `branch` with the base). Pass the acceptance criteria as `done_when` and use `focus` for decisions and assumptions you are least sure about.
+
+For the single review, prefer the self-review for most changes, and the cross-review where a second model's view matters most: security, concurrency, data loss, or a design you are unsure of.
+
+Whenever more than one reviewer runs, start them in one step (`review` with `background: true`), then wait for all of them. Change nothing in the working tree until all have reported: a reviewer that sees files change underneath it loses its footing. Parallel reviewers are static by default: they read the change and run checks that finish on their own. If the change can only be judged by running the app, exactly one of them runs it, and each brief says who. Either tell one self-reviewer it may run the app in its own isolated instance, or pass `runs_app: true` to `review`, which then runs in a snapshot of the change. None of them measures performance.
+
+Report the step to `mission` as `self-review` or `cross-review`, whichever ran; as `self-review` when both did.
 
 ## 5. Fix (you)
 
-Address the findings you agree with, and tell the user about any you decline and why. One review round is the default. Run a second only if the fixes were substantial; never more than two, because review loops burn both agents' usage limits.
+Take the reports together and fix once. Address the findings you agree with, and tell the user about any you decline and why. One review round is the default. Run a second only if the fixes were substantial; never more than two, because review loops burn both agents' usage limits.
 
 ## 6. Polish
 
@@ -53,7 +72,15 @@ Accept the result only if every changed line is wording. Reject the whole diff i
 
 ## 7. Final check and merge (you)
 
-Run the project's tests and checks on the combined result. If failures need comparison with the base, run the same checks on the base and compare the reported failing test IDs. Keep the base results for any follow-up runs. Report what changed, what each agent contributed, what was verified, and anything skipped. Commit or merge to the user's branch only if they asked for that.
+Run the project's tests and checks on the combined result. If failures need comparison with the base, run the same checks on the base and compare the reported failing test IDs. Keep the base results for any follow-up runs. Report what changed, what each agent contributed, what was verified, and anything skipped. Commit or merge to the user's branch only if they asked for that. If they asked you to push or open a pull request, run both reviews first as step 3 sets out, and fix what they find before it goes out.
+
+## Sharing the machine
+
+The user and every agent work on one computer. Workers receive these rules with each job; you and your subagents follow the same ones.
+
+- **Isolated instances.** Anything you or a subagent starts (the app, a server, a headless browser) must use a free port chosen by the system and its own data and profile directory under a temporary directory, and must be stopped afterwards. Never use the app's default port or the instance the user is running. Give each subagent this rule in its brief.
+- **One browser pane.** There is only one browser pane in the app, shared with the user. Only you may use it. Subagents and workers must use their own headless browsers.
+- **Measure alone.** Timings taken while other work runs are meaningless. Before you benchmark, profile, or load-test, wait until `status` shows no active job and no subagent of yours is running, and start nothing else until the measurement ends. To have a worker measure, pass `exclusive: true` to `delegate`: the bridge refuses the job while other jobs run and refuses other jobs until it ends, across every session. Never run two measurements at once.
 
 ## When an agent is unavailable
 

@@ -101,6 +101,26 @@ h1 { font-size: 18px; font-weight: 650; letter-spacing: -0.01em; }
 
 .notice { max-width: 1180px; margin: 0 auto 12px; padding: 8px 12px; border-radius: var(--radius-control); background: var(--sunken); color: var(--failed); font-size: 13px; overflow-wrap: anywhere; }
 .notice[hidden] { display: none; }
+/* What waits on the user, across every project. */
+.needs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; max-width: 1180px; margin: 0 auto 14px; padding: 8px 12px; border-radius: var(--radius-card); background: var(--surface); box-shadow: var(--shadow); font-size: 13px; }
+.needs[hidden] { display: none; }
+.needs strong { margin-inline-end: 4px; color: var(--waiting); font-weight: 650; }
+.needs button, .needs span { max-width: 44ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.needs span { padding: 0 10px; color: var(--muted); }
+
+/* Commands: one full-width card per command, above the agents' columns, so it reads as spanning them rather than as one agent's card. */
+.missions { display: grid; gap: 8px; }
+.missions:empty { display: none; }
+.track { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 3px; }
+.track li { height: 4px; border-radius: 2px; background: var(--line); }
+.track li[data-step="done"] { background: var(--done); }
+.track li[data-step="now"] { background: var(--working); }
+.strands { display: grid; gap: 2px 24px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); font-size: 13px; }
+.strands li { display: grid; grid-template-columns: 84px minmax(0, 1fr) auto; gap: 8px; align-items: baseline; }
+.strands .who { color: var(--muted); font-size: 12.5px; }
+.strands button.link { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.strands .pill { font-weight: 550; }
+
 .heads { margin-bottom: 4px; }
 .lane-head {
   display: grid;

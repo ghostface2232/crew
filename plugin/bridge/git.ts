@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { constants, existsSync, lstatSync, realpathSync } from 'node:fs';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import type { ReviewTarget } from './jobs.ts';
 
@@ -75,6 +76,28 @@ export async function createWorktree(root: string, id: string, baseRef: string, 
   const branch = `crew-${id}`;
   await git(root, ['worktree', 'add', '-b', branch, wtPath, base]);
   return { path: wtPath, branch, base };
+}
+
+/**
+ * Copies the main tree's uncommitted changes into a worktree created from HEAD, so a reviewer can run the
+ * change under review without touching the user's files. Ignored files are left to `copyIncluded`.
+ */
+export async function carryUncommitted(root: string, wt: string): Promise<void> {
+  // Through a file: `git()` trims its output, and a patch can end in a blank context line.
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'crew-snapshot-'));
+  try {
+    const patch = path.join(dir, 'changes.patch');
+    // The user's diff settings (no prefix, an external tool, textconv) would produce a patch `git apply` cannot read.
+    await git(root, ['diff', 'HEAD', '--binary', '--no-ext-diff', '--no-textconv', '--src-prefix=a/', '--dst-prefix=b/', `--output=${patch}`]);
+    if ((await fs.stat(patch)).size) await git(wt, ['apply', '--whitespace=nowarn', patch]);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+  const untracked = (await git(root, ['ls-files', '--others', '--exclude-standard', '-z'])).split('\0').filter(Boolean);
+  for (const file of untracked) {
+    await fs.mkdir(path.dirname(path.join(wt, file)), { recursive: true });
+    await fs.cp(path.join(root, file), path.join(wt, file), { recursive: true, verbatimSymlinks: true });
+  }
 }
 
 function worktreePath(root: string, id: string, home: string): string {

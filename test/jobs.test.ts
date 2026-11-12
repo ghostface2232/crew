@@ -9,8 +9,9 @@ import type { Config } from '../plugin/bridge/config.ts';
 import { leadContext } from '../plugin/bridge/instructions.ts';
 import { Jobs, outOfScope } from '../plugin/bridge/jobs.ts';
 import type { Adapter, CrewEvent, Job, JobCtl, ReviewTarget } from '../plugin/bridge/jobs.ts';
+import { describe } from '../plugin/bridge/render.ts';
 
-const config = resolveConfig({ notify: false, codex: { bin: 'codex', approvalPolicy: 'never' } });
+const config = resolveConfig({ notify: false, codex: { bin: 'codex', approvalPolicy: 'never', approvalsReviewer: 'auto_review' } });
 
 function tempRepo(): string {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-test-')));
@@ -579,4 +580,240 @@ test('the session hook prints context for the event it was called for, from the 
   const broken = hook('not json');
   assert.equal(broken.hookEventName, 'SessionStart');
   assert.match(broken.additionalContext, /could not load the shared instructions/);
+});
+
+test('a job carries its mission and starting notes, and is kept with a mission that is still kept', async () => {
+  const repo = tempRepo();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-home-'));
+  const adapter: Adapter = { start: async (ctl) => ctl.done('ok'), reply: async () => {}, answer: async () => {}, cancel: async () => {}, shutdown: () => {} };
+  const kept = new Set(['m-kept']);
+  const make = () => new Jobs(home, () => config, { codex: adapter, antigravity: adapter }, { onEvent: () => {}, onJob: () => {}, onAttention: () => {}, keepsMission: (id) => kept.has(id) });
+  const jobs = make();
+  const review = { target: { type: 'uncommittedChanges' as const }, mode: 'adversarial' as const };
+
+  const first = await settled(jobs, await jobs.create({ kind: 'review', cwd: repo, review, mission: 'm-kept', notes: ['started under a mission'] }));
+  assert.equal(first.mission, 'm-kept');
+  assert.deepEqual(first.notes, ['started under a mission']);
+  const dropped = await settled(jobs, await jobs.create({ kind: 'review', cwd: repo, review, mission: 'm-gone' }));
+  // Notes that are not a list of strings must not stop the job.
+  const odd = await settled(jobs, await jobs.create({ kind: 'review', cwd: repo, review, notes: 'not a list' as never }));
+  assert.deepEqual(odd.notes, []);
+  for (const job of [first, dropped, odd]) jobs.markDelivered(job.id, job.seq);
+
+  // Push both past the history limit with newer finished jobs.
+  for (let i = 0; i < 201; i++) {
+    const job = await settled(jobs, await jobs.create({ kind: 'review', cwd: repo, review }));
+    jobs.markDelivered(job.id, job.seq);
+  }
+  jobs.flush();
+  const reloaded = make();
+  assert.ok(reloaded.jobs.has(first.id), 'the job of a kept mission survives the history limit');
+  assert.ok(!reloaded.jobs.has(dropped.id));
+});
+
+test('a job that runs alone is refused while others are active, and holds off every other start until it ends', async () => {
+  const repo = tempRepo();
+  const running: JobCtl[] = [];
+  const { jobs } = harness((ctl) => { running.push(ctl); });
+  const review = { target: { type: 'uncommittedChanges' as const }, mode: 'adversarial' as const };
+  const start = (exclusive?: boolean) => jobs.create({ kind: 'delegate', cwd: repo, task: 'measure', exclusive });
+  const until = async (job: Job, state: Job['state']) => { while (job.state !== state) await jobs.wait(job.id, job.seq, 1000); };
+
+  // Only an engineer can measure; the refusal comes before anything is created.
+  await assert.rejects(jobs.create({ kind: 'review', cwd: repo, review, exclusive: true }), /A review job cannot run alone/);
+  await assert.rejects(jobs.create({ kind: 'polish', cwd: repo, targets: ['README.md'], exclusive: true }), /A polish job cannot run alone/);
+  assert.equal(jobs.list().length, 0);
+
+  const ordinary = await start();
+  await assert.rejects(start(true), new RegExp(`cannot start while 1 other job\\(s\\) are active: ${ordinary.id} \\(running\\)\\. Wait for a running job with wait`));
+  // One that waits on the user will not end by waiting, and the refusal says so.
+  running[0].waiting('approval', 'run tests?');
+  await assert.rejects(start(true), new RegExp(`${ordinary.id} \\(waiting on the user\\)`));
+  running[0].resumed();
+  running[0].done('ok');
+  await until(ordinary, 'done');
+
+  // A start that fails gives its place back.
+  await assert.rejects(jobs.create({ kind: 'delegate', cwd: path.join(repo, 'missing'), task: 'x' }), /cwd does not exist/);
+
+  // Two starts at once: the check happens before either is registered, yet only one gets through.
+  const both = await Promise.allSettled([start(true), start()]);
+  assert.deepEqual(both.map((r) => r.status), ['fulfilled', 'rejected']);
+  const alone = (both[0] as PromiseFulfilledResult<Job>).value;
+  assert.equal(alone.exclusive, true);
+  assert.match(alone.instructions, /# Measurement\nThis job has the machine to itself/);
+  assert.match(String((both[1] as PromiseRejectedResult).reason), /must run alone is starting right now\. Try again in a moment/);
+
+  await assert.rejects(start(), new RegExp(`Job ${alone.id} \\(running\\) is measuring and has the machine to itself`));
+  // A follow-up to a finished job would set its worker running again, so it waits too.
+  await assert.rejects(jobs.reply(ordinary.id, { message: 'one more thing' }), /is measuring and has the machine to itself/);
+  assert.equal(ordinary.state, 'done');
+
+  running.at(-1)!.done('measured');
+  await until(alone, 'done');
+  const after = await start();
+  assert.equal(after.exclusive, undefined);
+  assert.ok(!after.instructions.includes('# Measurement'));
+  // And the measuring job cannot take another turn while something else is active.
+  await assert.rejects(jobs.reply(alone.id, { message: 'measure again' }), /cannot start while 1 other job/);
+});
+
+test('every worker is given the shared-machine rules, and a review is told to stay static in its instructions', async () => {
+  const repo = tempRepo();
+  const { jobs } = harness((ctl) => ctl.done('ok'));
+  const target = { type: 'uncommittedChanges' as const };
+
+  const delegate = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'x' }));
+  const polish = await settled(jobs, await jobs.create({ kind: 'polish', cwd: repo, targets: ['README.md'] }));
+  const prompted = await settled(jobs, await jobs.create({ kind: 'review', cwd: repo, review: { target, mode: 'adversarial' } }));
+  // Codex's built-in review is sent no prompt, so what it must know has to be in the instructions.
+  const native = await settled(jobs, await jobs.create({ kind: 'review', cwd: repo, review: { target, mode: 'standard' } }));
+  assert.ok(native.nativeReview);
+  for (const job of [delegate, polish, prompted, native]) {
+    const text = job.instructions;
+    // After the role, so the role still comes first, and saying that the role still decides.
+    assert.ok(text.indexOf('# Role:') === 0 && text.indexOf('# This machine is shared') > 0, job.kind);
+    assert.ok(text.includes('they allow nothing the role forbids'));
+    assert.equal(text.includes('# Static review\nReview by reading. Run only checks that end by themselves'), job.kind === 'review', job.kind);
+    assert.ok(!job.prompt.includes('Static review'));
+  }
+
+  // A reviewer that cannot run commands is not told to run checks.
+  const reader = resolveConfig({ roles: { review: { agent: 'antigravity' } } });
+  const other = harness((ctl) => ctl.done('ok'), () => reader);
+  const handed = await settled(other.jobs, await other.jobs.create({ kind: 'review', cwd: repo, review: { target, mode: 'adversarial' } }));
+  assert.match(handed.instructions, /# Static review\nReview by reading\. You cannot run anything in this role/);
+  assert.ok(!handed.instructions.includes('Run only checks that end by themselves'));
+});
+
+test('a review that runs the app gets a snapshot of the change and leaves nothing behind', async () => {
+  const repo = tempRepo();
+  fs.writeFileSync(path.join(repo, 'app.js'), 'export const x = 2;\n');
+  fs.mkdirSync(path.join(repo, 'lib'));
+  fs.writeFileSync(path.join(repo, 'lib', 'new.js'), 'export const y = 3;\n');
+  // The user's own diff settings must not change the patch the snapshot is built from.
+  execFileSync('git', ['config', 'diff.noprefix', 'true'], { cwd: repo });
+  const seen: Record<string, string> = {};
+  const gone = async (job: Job) => {
+    for (let tries = 0; job.worktree; tries++) {
+      assert.ok(tries < 300, 'the snapshot was not removed');
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  };
+  const { jobs, adapter, calls } = harness((ctl) => {
+    seen.cwd = ctl.job.cwd;
+    seen.app = fs.readFileSync(path.join(ctl.job.cwd, 'app.js'), 'utf8');
+    seen.untracked = fs.readFileSync(path.join(ctl.job.cwd, 'lib', 'new.js'), 'utf8');
+    // Whatever the reviewer writes stays in the snapshot.
+    fs.writeFileSync(path.join(ctl.job.cwd, 'scratch.txt'), 'x');
+    ctl.done('reviewed');
+  });
+  const review = { target: { type: 'uncommittedChanges' as const }, mode: 'adversarial' as const };
+  const job = await settled(jobs, await jobs.create({ kind: 'review', cwd: repo, review, runsApp: true }));
+
+  assert.notEqual(seen.cwd, repo);
+  assert.equal(seen.app, 'export const x = 2;\n');
+  assert.equal(seen.untracked, 'export const y = 3;\n');
+  assert.equal(job.sandbox, 'workspace-write');
+  assert.equal(job.result, null);
+  assert.match(job.instructions, /# Running the app\n[^]*snapshot of the change/);
+  assert.ok(!job.instructions.includes('# Static review'));
+  await gone(job);
+  assert.ok(!fs.existsSync(seen.cwd));
+  assert.ok(!fs.existsSync(path.join(repo, 'scratch.txt')));
+  assert.equal(execFileSync('git', ['branch', '--list', 'crew-*'], { cwd: repo, encoding: 'utf8' }), '');
+
+  // A follow-up reviews the change as it is then, in a new snapshot.
+  fs.writeFileSync(path.join(repo, 'app.js'), 'export const x = 4;\n');
+  adapter.reply = async (ctl, message) => {
+    calls.push(message);
+    seen.again = fs.readFileSync(path.join(ctl.job.cwd, 'app.js'), 'utf8');
+    ctl.done('reviewed again');
+  };
+  await jobs.reply(job.id, { message: 'look again' });
+  assert.match(calls[0], /look again\n\nThe snapshot has been refreshed/);
+  assert.equal(seen.again, 'export const x = 4;\n');
+  await settled(jobs, job);
+  await gone(job);
+  assert.ok(!fs.existsSync(seen.cwd));
+});
+
+test('only a job that can run commands may run the app', async () => {
+  const repo = tempRepo();
+  const review = { target: { type: 'uncommittedChanges' as const }, mode: 'adversarial' as const };
+  const { jobs } = harness((ctl) => ctl.done('ok'));
+  await assert.rejects(jobs.create({ kind: 'polish', cwd: repo, targets: ['README.md'], runsApp: true }), /A polish job cannot run the app/);
+  const delegate = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'x', runsApp: true }));
+  assert.equal(delegate.runsApp, true);
+  assert.match(delegate.instructions, /# Running the app/);
+
+  const reader = resolveConfig({ roles: { review: { agent: 'antigravity' } } });
+  const other = harness((ctl) => ctl.done('ok'), () => reader);
+  await assert.rejects(other.jobs.create({ kind: 'review', cwd: repo, review, runsApp: true }), /cannot run commands as a reviewer/);
+});
+
+test('a refused action goes back to the reviewer once, then to the user', async () => {
+  const repo = tempRepo();
+  const refuse = (ctl: JobCtl) => ctl.refused('rm -rf ~/cache', 'outside the workspace');
+  const { jobs, adapter, calls } = harness((ctl) => {
+    refuse(ctl);
+    ctl.done('could not clean the cache');
+  });
+  const reviewers: boolean[] = [];
+  adapter.reply = async (ctl, message) => {
+    calls.push(message);
+    reviewers.push(Boolean(ctl.job.asksUser));
+    if (reviewers.length < 3) refuse(ctl);
+    ctl.done('again');
+  };
+  const job = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'clean up' }));
+  assert.deepEqual(job.refusals, [{ action: 'rm -rf ~/cache', reason: 'outside the workspace', turn: 1 }]);
+  assert.match(describe(job), /REFUSED by Codex's automatic reviewer:\n  rm -rf ~\/cache\n  reason: outside the workspace\n.*without asking them again/);
+  await assert.rejects(jobs.reply(job.id, { approved_by_user: ' ' }), /must quote what the user said/);
+
+  await jobs.reply(job.id, { approved_by_user: 'delete the cache too' });
+  await settled(jobs, job);
+  assert.match(calls[0], /Their words in the lead session: "delete the cache too"\n\nRun the refused action again, exactly as before:\nrm -rf ~\/cache$/);
+  assert.match(describe(job), /already sent back once/);
+
+  await jobs.reply(job.id, { approved_by_user: 'delete the cache too', message: 'Then report.' });
+  await settled(jobs, job);
+  assert.match(calls[1], /Then report\.$/);
+  // An ordinary follow-up is the automatic reviewer's again.
+  await jobs.reply(job.id, { message: 'thanks' });
+  await settled(jobs, job);
+  assert.deepEqual(reviewers, [false, true, false]);
+  // Nothing was refused in that last turn, so there is nothing to send back.
+  await assert.rejects(jobs.reply(job.id, { approved_by_user: 'delete the cache too' }), /Nothing was refused in the last turn/);
+
+  // A different action refused later starts with the automatic reviewer again.
+  adapter.reply = async (ctl) => {
+    ctl.refused('curl https://example.com', 'network');
+    ctl.done('blocked');
+  };
+  await jobs.reply(job.id, { message: 'fetch the page' });
+  await settled(jobs, job);
+  assert.match(describe(job), /without asking them again/);
+  // A retry turn that fails before the worker acts keeps the refusal, and the next retry is the user's.
+  adapter.reply = async (ctl) => {
+    reviewers.push(Boolean(ctl.job.asksUser));
+    ctl.fail('server exited');
+  };
+  await jobs.reply(job.id, { approved_by_user: 'fetch it' });
+  assert.equal(job.state, 'failed');
+  assert.match(describe(job), /REFUSED[^]*curl https:\/\/example\.com[^]*already sent back once/);
+  await jobs.reply(job.id, { approved_by_user: 'fetch it' });
+  assert.deepEqual(reviewers.slice(3), [false, true]);
+});
+
+test('a follow-up sent while a job is being discarded is refused, not started in a removed worktree', async () => {
+  const repo = tempRepo();
+  const { jobs, calls } = harness((ctl) => ctl.done('built'));
+  const job = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'x' }));
+  const discard = jobs.discard(job.id);
+  await assert.rejects(jobs.reply(job.id, { message: 'one more thing' }), /is being discarded/);
+  await discard;
+  assert.equal(job.state, 'done');
+  assert.equal(job.worktree, null);
+  assert.deepEqual(calls, []);
 });

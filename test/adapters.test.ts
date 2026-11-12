@@ -62,7 +62,7 @@ function harness(source: string, agent: WorkerAgent = 'codex', roles: Parameters
   fs.writeFileSync(bin, `#!${process.execPath}\n${source}`, { mode: 0o700 });
   const config = resolveConfig({
     notify: false,
-    codex: { bin, approvalPolicy: 'on-request' },
+    codex: { bin, approvalPolicy: 'on-request', approvalsReviewer: 'auto_review' },
     antigravity: { bin, enabled: true },
     roles,
   });
@@ -300,4 +300,45 @@ test('a cancel the agent never confirms does not leave the job waiting on a requ
   await assert.rejects(h.jobs.cancel(job.id), /did not confirm cancellation/);
   assert.equal(job.state, 'running');
   assert.equal(job.waiting, null);
+});
+
+test('Codex runs an app job with network access and reports what its reviewer refused', { timeout: 5000 }, async (t) => {
+  const { adapter, home, jobs } = harness(`
+    const fs = require('node:fs');
+    const send = (msg) => console.log(JSON.stringify({ jsonrpc: '2.0', ...msg }));
+    let turns = 0;
+    require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
+      const msg = JSON.parse(line);
+      if (msg.method === 'thread/start' || msg.method === 'turn/start') fs.appendFileSync(__dirname + '/seen.jsonl', line + '\\n');
+      if (msg.method === 'thread/start') return send({ id: msg.id, result: { thread: { id: 'thread' } } });
+      if (msg.method !== 'turn/start') return msg.id != null && send({ id: msg.id, result: {} });
+      send({ id: msg.id, result: { turn: { id: 'turn' } } });
+      const review = (status) => send({ method: 'item/autoApprovalReview/completed', params: {
+        threadId: 'thread', review: { status, rationale: 'writes outside the workspace' }, action: { type: 'command', command: 'touch ~/probe' },
+      } });
+      review('approved');
+      if (turns++ < 2) review('denied');
+      send({ method: 'turn/completed', params: { threadId: 'thread', turn: { id: 'turn', status: 'completed' } } });
+    });
+  `);
+  t.after(() => { adapter.shutdown(); jobs.flush(); fs.rmSync(home, { recursive: true, force: true }); });
+  const job = await jobs.create({ kind: 'delegate', cwd: home, isolation: 'in_place', task: 'test', runsApp: true });
+  const ended = async () => {
+    while (!job.endedAt) await jobs.wait(job.id, job.seq, 1000);
+  };
+  await ended();
+  assert.deepEqual(job.refusals, [{ action: 'touch ~/probe', reason: 'writes outside the workspace', turn: 1 }]);
+  // Refused again after the first retry, so the second one is the user's to answer.
+  for (let retry = 0; retry < 2; retry++) {
+    await jobs.reply(job.id, { approved_by_user: 'yes, write it' });
+    await ended();
+  }
+
+  await jobs.reply(job.id, { message: 'thanks' });
+  await ended();
+
+  const seen = fs.readFileSync(path.join(home, 'seen.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line).params);
+  assert.deepEqual(seen[0].config, { sandbox_workspace_write: { network_access: true } });
+  assert.equal(seen[0].approvalsReviewer, 'auto_review');
+  assert.deepEqual(seen.slice(1).map((turn) => turn.approvalsReviewer), ['auto_review', 'auto_review', 'user', 'auto_review']);
 });

@@ -64,7 +64,7 @@ What each agent may do in each role:
 | Role | Codex | Antigravity |
 | --- | --- | --- |
 | `delegate` | `workspace-write` sandbox; approvals follow `codex.approvalPolicy` | Reads anywhere, edits inside the worktree. Every other action (commands, deletes, moves, network) is put to the user as an approval, unless the request omits its input, in which case it is refused |
-| `review` | `read-only` sandbox, never prompts. `mode: "standard"` uses Codex's built-in review | Reads only. Edits and commands are refused and listed in the job's notes. Because it cannot run git, the bridge saves a diff under `~/.crew/reviews/` for each turn (removed when the turn ends) and the job notes say that no tests or checks were run. Follow-ups regenerate the diff for the saved review target and receive its new path, including after a bridge restart. Older jobs without a saved target require a new review. `mode: "standard"` falls back to the prompted review, also noted. Needs a git repository |
+| `review` | `read-only` sandbox, never prompts; with `runs_app`, a writable sandbox in a snapshot worktree, with approvals as for `delegate` (section 5.4). `mode: "standard"` uses Codex's built-in review | Reads only. Edits and commands are refused and listed in the job's notes. Because it cannot run git, the bridge saves a diff under `~/.crew/reviews/` for each turn (removed when the turn ends) and the job notes say that no tests or checks were run. Follow-ups regenerate the diff for the saved review target and receive its new path, including after a bridge restart. Older jobs without a saved target require a new review. `mode: "standard"` falls back to the prompted review, also noted. Needs a git repository |
 | `polish` | `workspace-write` sandbox. Scope is checked after the fact: files outside `targets` are reported as out of scope | Reads anywhere, edits inside the worktree. Everything else is refused |
 
 Antigravity approvals follow the same rules as Codex approvals (section 5.1): the user answers, the prompt shows the whole request (every input field, not only the command) and the job workspace, requests are answered one at a time in arrival order, and the bridge only ever answers "allow once". A denial is sent as "reject once" whenever that is offered. Cancelling the job, the end of the turn, or the server exiting answers any open request as cancelled. No role may switch Antigravity's mode, because "accept-edits" skips the per-edit path check (section 10).
@@ -122,7 +122,7 @@ Not verified: whether `SubagentStart` context reaches a real subagent (the hook'
 | Status board form factor | Local web page served by the daemon, viewable inside Claude Desktop's browser pane. Standalone app discussed in section 7 |
 | Suspected stall timeout | 5 minutes (`stallSeconds` in `~/.crew/config.json`) |
 | Max review rounds | Default 1, max 2, written as a rule in the `/crew:run` skill rather than enforced by the bridge |
-| Codex approval policy | `on-request` for implementation, `never` for review. Who answers approval prompts is covered in section 5.1 |
+| Codex approval policy | `on-request` for implementation and for a review that runs the app, `never` for a static review. Who answers approval prompts is covered in section 5.1 |
 
 ## 5. Status display and stall detection (R5)
 
@@ -134,7 +134,7 @@ Not verified: whether `SubagentStart` context reaches a real subagent (the hook'
 
 ### 5.1 Approval requests and questions
 
-Worker approval requests and questions are answered by the user, not by the lead.
+Codex's approval requests go first to its own automatic reviewer (`codex.approvalsReviewer`, default `auto_review`). What that reviewer refuses twice, and every request and question that reaches Crew, is answered by the user, not by the lead.
 
 - If the lead is inside a tool call waiting on that job (`delegate`, `wait`, etc.), the MCP server sends an elicitation request so the Claude app displays its native input prompt. The user's answer goes straight to the worker without passing through the lead, and the tool call continues uninterrupted.
 - For a background job, the wake hook wakes the lead, and the prompt appears when the lead calls `wait`.
@@ -143,7 +143,15 @@ Worker approval requests and questions are answered by the user, not by the lead
 - If the user dismisses the prompt without answering, the app fails to display it, or the client does not support elicitation, the waiting state returns to the lead with distinct guidance for each case. The lead asks the user in chat rather than deciding on its own.
 - Antigravity never prompts the user; the bridge's role policy decides automatically.
 
-Depending on the user's Codex settings, approval requests may never reach Crew at all: if `approvals_reviewer` in `~/.codex/config.toml` is set to `guardian_subagent` or `auto_review`, Codex's built-in reviewer handles approvals internally. The bridge honors that setting by default. To always route approvals to the user, set `{"codex": {"approvalsReviewer": "user"}}` in `~/.crew/config.json`.
+**The automatic reviewer and refusals.** Crew starts every Codex thread with `approvalsReviewer: auto_review`, so Codex's built-in reviewer answers approval requests and they do not reach Crew. To route every request to the user instead, set `{"codex": {"approvalsReviewer": "user"}}` in `~/.crew/config.json`. Antigravity has no such reviewer; the bridge's role policy (section 2.1) plays that part.
+
+When the reviewer refuses an action, the bridge records it on the job (`item/autoApprovalReview/completed` with status `denied` or `timedOut`) and shows it with the result. The lead then decides whether the user's request in the conversation covers the action:
+
+1. If it does, the lead calls `reply` with `approved_by_user`, quoting the user's words, without asking them again. The bridge sends the worker a follow-up that states the approval and names the refused action, and the reviewer judges it once more.
+2. If it is refused again, the same call starts a turn with `approvalsReviewer: user`, so each request of that turn comes to the user as in the list above. Later turns return to the automatic reviewer. "Again" means the turn before was itself a retry: an unrelated action refused later starts over with the automatic reviewer. If a retry turn fails before the worker can act, the refused action stays on the job and can be sent back once more.
+3. If the request does not cover the action, the lead tells the user and lets them decide.
+
+The first retry rests on the lead's reading of the conversation, not on a check by the bridge: the reviewer treats the follow-up as the user's own message. Checked on 2026-11-12 through `codex app-server`: the reviewer read the thread's user message as authorization ("authorization: high") and approved deleting a folder outside the workspace that the task had asked for. A real refusal was not produced in that check, so the `denied` path is covered only by tests with a stub server.
 
 ### 5.2 Deciding from the board
 
@@ -161,6 +169,48 @@ The board is also where the user reads what happened and acts on it (requirement
 - The resume command moved from the card footer into the sheet, next to a command that shows the job's diff.
 
 Checked on 2026-11-12 in the built-in browser pane against a separate daemon with stub agents: opening a job from a card, the feed, and a link; answering a question in words; a follow-up turn; a job update arriving while an answer was half typed (text, focus, and caret kept); project groups and the project filter with two projects, including a job started from a subfolder; saving roles and per-project instructions and reading the files back; refused writes (unknown project, foreign origin, unknown agent); dark mode and a phone-width pane. Not checked: a screen reader, typing with an input method, and browsers other than the built-in pane. Automated board-handler tests cover instruction saves with concurrent edits, failed requests, and editor reloads. The remaining board behavior was checked by hand as listed.
+
+### 5.3 Missions: a command as one unit
+
+A mission is one user command that the lead takes through the pipeline (requirement R10, roadmap item B2). It answers "what was this command split into, who has each part, and how far along is it" without opening a session.
+
+- **Reported by the lead, not inferred.** The lead calls the `mission` tool (as instructed by `/crew:run`): with `title` to start a mission, with `stage` at each step (`plan`, `implement`, `self-review`, `cross-review`, `fix`, `polish`, `final`), and with `done` or `abandoned` plus a one-line `outcome` at the end. Because the lead's own steps are not jobs, only the lead knows which step it is on. Job membership is automatic: every job the lead starts while a mission is open carries that mission's ID.
+- **On the board.** Above the agent columns, each project group shows its open missions and the two most recently finished ones: the command, a seven-step track, "Step 3 of 7 · 1 of 2 jobs finished", and one row per job with its agent and state (clicking a row opens the job's details). A mission with a job waiting on the user reads "Waiting on you". Dismiss closes a mission on the board while its jobs keep running.
+- **Needs you.** One line at the top lists every job and session waiting on the user across all projects. Clicking a job's entry opens its details. The line is a status region, so new entries are announced.
+- **Lifetime.** Missions are stored in `~/.crew/missions.json` and remain open across daemon restarts, since the lead's session may still be active. A mission with no update for 12 hours and no running job is closed as abandoned (job activity counts as an update). The store keeps every open mission, the 100 that ended most recently, and the last two of each project; a kept mission's jobs are retained with it, even beyond the normal job history limit.
+- **Ownership.** A session advances and closes only the mission it opened. Passing the same title again updates the existing mission instead of opening a second card; passing a different title opens a new mission before closing the session's previous one. A mission closed from outside (dismissed or timed out) is not reopened: the lead is told to continue without reporting.
+- **Jobs do not depend on missions.** A job given a mission that is not open still runs on its own, with a note attached. If `missions.json` cannot be read, the daemon sets it aside under a new name and starts with an empty store.
+- After an MCP server restart, a session no longer remembers its mission ID. Each mission records the Claude session that opened it (`CLAUDE_CODE_SESSION_ID`, when the client passes it to the server). Passing the same title again reattaches to the open mission of that title only if this session opened it; otherwise a new mission starts and the old card stays until it is dismissed or goes stale. Two sessions in one project that use the same title therefore get separate cards. Not verified: that Claude Desktop passes the session id to the MCP server; without it nothing is reattached.
+- A project with a mission keeps its group on the board even when it has no jobs or sessions left, so an open mission can always be seen and dismissed and the last finished ones stay visible.
+
+Checked on 2026-11-12 against a separate daemon with stub agents: starting, advancing, finishing, and dismissing missions through the routes; jobs linked to a mission and a job given an unknown one; refused input (unknown stage, empty title); the mission card, its job rows, and the Needs-you line in the browser pane. The `mission` tool itself was not exercised from a live Claude session in this round: the session that built it was started before the tool existed, and its logic in `mcp.ts` has no automated test.
+
+### 5.4 Sharing the machine
+
+The user and every agent work on one computer, often at the same time (requirement R14). Three rules keep them out of each other's way.
+
+- **Isolated instances.** Every worker job receives `plugin/roles/machine.md` after its role text: start your own copy of anything you run on a free port chosen by the system, keep its data and browser profile under a temporary directory, use headless browsers only, never touch the app's default port or the user's running instance or browser, and stop only what you started. The lead and its subagents get the same rules from `/crew:run` and the self-reviewer's instructions. Only the lead may use the browser pane, because there is only one and it is shared with the user.
+- **Reviews in parallel, one app.** When to review is a rule for the lead, given in the MCP server instructions and in `/crew:run`: one review (self or cross) when a substantial piece of implementation reaches a stopping point, both in parallel before a push or pull request, and none for small fixes. The bridge does not track which commits were reviewed; the lead does, from the conversation. Reviewers that run together are started in one step, and the working tree is left untouched until all report. A worker's review is static by default: it runs in a read-only sandbox that cannot host an app instance, and it is instructed to read files and run only checks that finish on their own. If a change can only be judged by running the app, exactly one reviewer runs it: the lead either tells the self-reviewer that it may, or starts the cross-review with `runs_app` and keeps the self-review static. These rules travel with the job's system instructions rather than its prompt, so Codex's built-in review mode receives them too.
+- **Jobs that run the app.** `runs_app` on `delegate` or `review` gives the job's sandbox network access (`sandbox_workspace_write.network_access`), without which it cannot bind even a local port. A review with `runs_app` does not run in the user's tree: the bridge creates a worktree from `HEAD` (or the commit under review), copies the `.worktreeinclude` files into it and, when the target is the uncommitted changes, those changes and the untracked files, and runs the reviewer there with a writable sandbox. Submodules are not in the snapshot (the job notes say so), and a file marked skip-worktree arrives as committed. The snapshot and its branch are removed when the turn ends, and a follow-up gets a fresh one. Polish jobs, and a reviewer that cannot run commands, are refused `runs_app`. On the board the job is marked "runs the app".
+- **Measurement alone.** A `delegate` job started with `exclusive` runs alone on the machine; review and polish jobs cannot, as they have nothing to measure. The bridge refuses an exclusive job while any other job is active, and refuses every other job start or follow-up turn until the exclusive job ends. A refusal names the blocking jobs and what each is doing, since a job that is waiting on the user or stalled will not clear simply by waiting. Because one daemon serves every session, this lock holds across all sessions and projects. The bridge refuses rather than queues so the lead stays in charge of ordering: it waits and retries when ready. Workers are instructed not to time anything unless their job says it has the machine to itself. On the board, an exclusive job is marked "runs alone".
+
+What is enforced vs. instructed: the exclusivity rule for jobs is enforced by the bridge. Network access and the review snapshot are set by the bridge. Instance isolation, static reviews, and "only one reviewer runs the app" are instructions; the bridge does not allocate ports or monitor processes. Because the lead's own measurements, its subagents, and processes outside Crew are not bridge jobs, the bridge cannot hold them back; `/crew:run` instructs the lead to wait until nothing is running first.
+
+What Codex can run was checked on 2026-11-12 with Codex CLI 0.167.0 (`codex exec`, a throwaway repository, a one-page Node server):
+
+| Sandbox | Result |
+| --- | --- |
+| `read-only` (how reviews run) | Could not write under the temporary directory or in the project, could not start the server, and had no outbound network. A Codex reviewer cannot run the app here, which is why a review that must run it gets a snapshot worktree instead |
+| `workspace-write` (how engineers run) | Could write in the project and under the temporary directory. Could not bind a local port (`listen EPERM ... 127.0.0.1`) and had no outbound network |
+| `workspace-write` with permission requests allowed | Started the server on a free port, fetched it, and loaded a page in headless Chrome with a fresh profile, each after requesting escalation |
+| `workspace-write` with network access, no escalation (how `runs_app` jobs run) | Started the server on a free port, fetched it, and reached an outside host. Headless Chrome still failed (exit code 134), a write to the home directory was blocked, and `kill` on its own server was not permitted, though the server stopped on an interrupt |
+
+- Without `runs_app`, an engineer can follow the isolation rules only through an approval for each command that listens or launches a browser. With it, a server needs no approval and a browser still does. Codex's automatic reviewer answered those requests without asking the user (section 5.1).
+- A real `delegate` job with `runs_app`, run through a separate daemon, started the server on a free port, fetched it, and stopped it with no approval request (about 120,000 tokens). A real review with `runs_app` was not run; its snapshot is covered by tests against a real git repository.
+- `codex app-server` accepts the network setting per thread: `thread/start` with `config: {"sandbox_workspace_write": {"network_access": true}}` reported `networkAccess: true` in its sandbox policy, and `false` without it.
+- Computer use and browser use: both tools are listed in a headless run, but neither worked there. The in-app browser failed with "The browser access host is unavailable", and the one read-only computer-use observation returned no screen state. Through `codex app-server`, which is how Crew drives Codex, computer use answered: a read-only state call listed the apps on the machine and which were running, after the automatic reviewer approved it. Clicking and typing were not tried. The in-app browser failed the same way there; it appears to need a host that a background thread does not have.
+
+Not verified: whether Antigravity follows the isolation rules, and whether Codex's built-in review mode applies the instructions it is sent. Two reviewers running the same test suite at once in one working tree could still collide if the tests use fixed ports or files; this project's do not.
 
 ## 6. Desktop app visibility (R6) findings
 
@@ -238,6 +288,11 @@ Not yet verified:
   - Backfilled the repository path as the owning project when loading jobs saved before project tracking existed.
   - Insulated bridge delivery commits from the user's git commit config by disabling commit signing and falling back to `Crew <crew@localhost>` when git user identity is unset, preventing background daemon commits from hanging on an invisible GPG/SSH passphrase prompt.
   - Renamed job branches from `crew/<job id>` to `crew-<job id>`, because git cannot create `crew/...` refs if a branch named `crew` already exists in the repository.
+- 2026-11-12: From the pull request review: a mission is taken up again only by the session that opened it, and a project whose only records are finished missions stays on the board (section 5.3).
+- 2026-11-12: Reviews are now tied to where the work is going: one review at a stopping point, both before a push or pull request (section 5.4).
+- 2026-11-12: Codex approvals now go to its automatic reviewer by default, a refused action can be sent back once with the user's approval before the user is asked, and jobs marked `runs_app` get network access and, for reviews, a snapshot worktree (sections 5.1 and 5.4).
+- 2026-11-12: Added shared-machine rules, static-by-default reviews, and jobs that run alone (section 5.4). `/crew:run` now runs the self-review and the cross-review at the same time.
+- 2026-11-12: Added missions and the Needs-you line (section 5.3, roadmap item B2). The mission store was written by Codex through `delegate` and merged after review by the lead.
 - 2026-11-12: The board gained job details, text answers, a project filter, and settings (section 5.2, roadmap item B1).
 - 2026-11-12: Added shared instructions (section 2.2, roadmap item A2).
 - 2026-11-12: Roles are no longer fixed in code (section 2.1, roadmap item A1). Requirement R3 changed from fixed roles to default roles the user can reassign. The row "Antigravity role enforcement" in section 3 now describes only the editor role; the bridge decides permission requests by the role of the job.

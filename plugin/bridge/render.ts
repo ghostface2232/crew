@@ -1,4 +1,5 @@
 import { WORKERS } from './config.ts';
+import { openRefusals } from './jobs.ts';
 import type { Job } from './jobs.ts';
 
 /** Text renderings of a job, shared by the MCP tools, the wake hook, and the CLI. */
@@ -44,8 +45,20 @@ export function describe(job: JobView, waitingHint?: string): string {
     if (job.result.files.length > 40) lines.push(`  … and ${job.result.files.length - 40} more`);
     if (job.result.outOfScope.length) lines.push(`OUT OF SCOPE — changed but not in the allowed targets: ${job.result.outOfScope.join(', ')}`);
   }
+  if (job.runsApp) lines.push(job.kind === 'review' ? 'may run the app, in a snapshot of the change' : 'may run the app');
+  if (job.exclusive) lines.push(job.endedAt ? 'ran alone on the machine' : 'runs alone: no other job starts until this one ends');
   if (job.shared?.length) lines.push(`shared instructions: ${job.shared.join(', ')}`);
   for (const note of job.notes) lines.push(`note: ${note}`);
+  const refused = openRefusals(job);
+  if (refused.length) {
+    lines.push(`REFUSED by ${WORKERS[job.agent].name}'s automatic reviewer:`);
+    for (const refusal of refused) lines.push(`  ${refusal.action}\n  reason: ${refusal.reason ?? 'refused before; the retry turn failed before it ran again'}`);
+    if (job.endedAt) {
+      lines.push(job.retrying
+        ? 'This was already sent back once. If the user\'s request still covers it, call reply with approved_by_user again: the user is then asked about each request directly.'
+        : 'If the user\'s request in this conversation covers the refused action, call reply with approved_by_user quoting their words, without asking them again; the reviewer then judges it once more. If it does not, tell the user what was refused and let them decide.');
+    }
+  }
   if (job.sessionId) lines.push(`session: ${resumeCommand(job)}`);
   if (job.report) lines.push('', '--- report ---', job.report);
 

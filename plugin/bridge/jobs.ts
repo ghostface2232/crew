@@ -3,7 +3,7 @@ import path from 'node:path';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { WORKERS } from './config.ts';
 import type { Config, Role, WorkerAgent } from './config.ts';
-import { changesSince, commitAll, copyIncluded, createWorktree, dirtyCount, isInside, projectRoot, removeWorktree, repoRoot, reviewDiff } from './git.ts';
+import { carryUncommitted, changesSince, commitAll, copyIncluded, createWorktree, dirtyCount, isInside, projectRoot, removeWorktree, repoRoot, reviewDiff } from './git.ts';
 import type { Worktree } from './git.ts';
 import { sharedInstructions } from './instructions.ts';
 import { buildPrompt } from './prompts.ts';
@@ -46,6 +46,17 @@ export interface JobSpec {
   review?: { target: ReviewTarget; mode: 'adversarial' | 'standard' };
   model?: string;
   effort?: string;
+  /** Mission the job is part of, if the lead started it while carrying out one. */
+  mission?: string;
+  /** delegate: the job measures performance and must run alone. It starts only when no other job is running, and none starts until it ends. */
+  exclusive?: boolean;
+  /**
+   * delegate, review: the job has to start the app to check its work. Its sandbox gets network access, and a
+   * review runs in a snapshot of the change instead of read-only in the user's tree.
+   */
+  runsApp?: boolean;
+  /** Lines the caller wants shown with the result from the start. */
+  notes?: string[];
 }
 
 export interface Job {
@@ -61,6 +72,18 @@ export interface Job {
   project: string;
   /** Main working tree of the job's repository, for grouping on the board; absent on jobs saved before it was recorded. */
   root?: string;
+  /** Mission this job is one strand of; absent for a job started on its own. */
+  mission?: string;
+  /** Runs alone on the machine, for measurement. */
+  exclusive?: boolean;
+  /** May start the app: network access in the sandbox, and for a review a snapshot worktree. */
+  runsApp?: boolean;
+  /** Actions the agent's automatic reviewer refused, with the turn they were refused in. */
+  refusals?: { action: string; reason: string; turn: number }[];
+  /** Set while the latest turn is a retry of refused actions: the actions it was sent back with. */
+  retrying?: string[];
+  /** Approval requests of the current turn go to the user, not the automatic reviewer. */
+  asksUser?: boolean;
   /** Directory the worker runs in: the worktree when isolated, else the caller's cwd. */
   cwd: string;
   worktree: Worktree | null;
@@ -108,6 +131,8 @@ export interface JobCtl {
   touched(file: string): void;
   /** Adds a line to the result that the lead should see, such as a refused action. */
   note(text: string): void;
+  /** The agent's automatic reviewer refused an action in this turn. */
+  refused(action: string, reason: string): void;
   tokens(total: number): void;
   waiting(type: 'approval' | 'question', reason: string): void;
   resumed(): void;
@@ -131,11 +156,23 @@ export interface JobsHooks {
   onEvent(event: CrewEvent): void;
   onJob(job: Job): void;
   onAttention(job: Job, kind: EventKind, detail: string): void;
+  /** Whether a mission is still being kept; its jobs are then kept with it, beyond the history limit. */
+  keepsMission?(id: string): boolean;
 }
 
 const TERMINAL: JobState[] = ['done', 'failed', 'cancelled'];
 const KEEP_JOBS = 200;
 const KEEP_EVENTS = 5000;
+
+/**
+ * Refused actions the lead still has to deal with: those of the latest turn, or, when a retry turn
+ * failed before the worker could try again, the ones that turn was sent back with.
+ */
+export function openRefusals(job: Pick<Job, 'refusals' | 'turns' | 'retrying' | 'state'>): { action: string; reason?: string }[] {
+  const latest = (job.refusals ?? []).filter((refusal) => refusal.turn === job.turns);
+  if (latest.length || job.state !== 'failed') return latest;
+  return (job.retrying ?? []).map((action) => ({ action }));
+}
 
 export function isTerminal(job: Job): boolean {
   return TERMINAL.includes(job.state);
@@ -150,7 +187,11 @@ export class Jobs {
   private discarding = new Set<string>();
   private finalizing = new Set<string>();
   private cancelling = new Set<string>();
+  /** Jobs past the alone-check but not yet registered, so two starts cannot both slip through it. */
+  private starting: { exclusive: boolean }[] = [];
   private preparingReviews = new Set<string>();
+  /** Review snapshots being removed; a follow-up waits for the removal before it makes a new one. */
+  private snapshots = new Map<string, Promise<void>>();
   private saveTimer: NodeJS.Timeout | null = null;
   private home: string;
   private readConfig: () => Config;
@@ -185,10 +226,48 @@ export class Jobs {
     return job;
   }
 
+  /**
+   * Refuses a start that would break a measurement: a job that must run alone while others run, or any
+   * job while one runs alone. Refusing, not queueing, keeps the lead in charge of the order: it waits and tries again.
+   */
+  private checkAlone(exclusive: boolean, self?: string): void {
+    const running = this.list().filter((job) => !isTerminal(job) && job.id !== self);
+    // What each one is doing, because waiting only helps for a job that can end by itself.
+    const say = (job: Job) => `${job.id} (${job.state === 'waiting' ? 'waiting on the user' : job.stalled ? 'no activity, may be stuck' : 'running'})`;
+    const way = 'Wait for a running job with wait; one waiting on the user needs their answer; cancel one that is stuck. Then start this again.';
+    const alone = running.find((job) => job.exclusive);
+    if (alone) throw new Error(`Job ${say(alone)} is measuring and has the machine to itself, in whichever project it runs. ${way}`);
+    if (this.starting.some((other) => other.exclusive)) throw new Error('A job that must run alone is starting right now. Try again in a moment; it will then show in status and on the board.');
+    if (!exclusive) return;
+    if (running.length) throw new Error(`A job that runs alone cannot start while ${running.length} other job(s) are active: ${running.map(say).join(', ')}. ${way}`);
+    if (this.starting.length) throw new Error(`A job that runs alone cannot start while ${this.starting.length} other job(s) are starting. Try again in a moment.`);
+  }
+
   async create(spec: JobSpec): Promise<Job> {
+    const exclusive = Boolean(spec.exclusive);
+    // Checked and reserved before the first await, so concurrent starts see each other.
+    this.checkAlone(exclusive);
+    const reservation = { exclusive };
+    this.starting.push(reservation);
+    try {
+      return await this.start(spec);
+    } finally {
+      this.starting.splice(this.starting.indexOf(reservation), 1);
+    }
+  }
+
+  private async start(spec: JobSpec): Promise<Job> {
+    // Only an engineer can measure: a review runs in a read-only sandbox and an editor runs nothing.
+    if (spec.exclusive && spec.kind !== 'delegate') {
+      throw new Error(`A ${spec.kind} job cannot run alone, because it has nothing to measure with. Measure with delegate and exclusive, or drop exclusive.`);
+    }
     const config = this.readConfig();
     const role = config.roles[spec.kind];
     const { agent } = role;
+    if (spec.runsApp && spec.kind === 'polish') throw new Error('A polish job cannot run the app: an editor only changes wording. Drop runs_app.');
+    if (spec.runsApp && spec.kind === 'review' && !WORKERS[agent].reviewerRunsGit) {
+      throw new Error(`review is assigned to ${WORKERS[agent].name}, which cannot run commands as a reviewer, so it cannot run the app. Drop runs_app, or run the app in your own review.`);
+    }
     if (agent === 'antigravity' && !config.antigravity.enabled) {
       throw new Error(`${spec.kind} is assigned to Antigravity, which is disabled in ~/.crew/config.json (antigravity.enabled).`);
     }
@@ -199,7 +278,7 @@ export class Jobs {
     // Read from the main working tree even when the job starts inside a worktree, so an uncommitted edit applies to the next job.
     const root = (await projectRoot(spec.cwd)) ?? spec.project ?? spec.cwd;
     const shared = sharedInstructions(this.home, root);
-    const notes: string[] = [];
+    const notes: string[] = Array.isArray(spec.notes) ? spec.notes.filter((note) => typeof note === 'string') : [];
     let worktree: Worktree | null = null;
     let cwd = spec.cwd;
 
@@ -215,6 +294,12 @@ export class Jobs {
       if (included.failed.length) notes.push(`Could not copy from .worktreeinclude: ${included.failed.join('; ')}`);
       const dirty = await dirtyCount(repo);
       if (dirty > 0) notes.push(`${dirty} uncommitted path(s) in the main tree are not in this worktree, which starts from ${base} (${worktree.base.slice(0, 8)}). Commit first if the worker needs them.`);
+    }
+
+    if (spec.kind === 'review' && spec.runsApp) {
+      if (!repo) throw new Error(`${spec.cwd} is not inside a git repository, so there is no snapshot to run the app in. Drop runs_app.`);
+      worktree = await this.snapshot(repo, id, spec.review!.target, notes);
+      cwd = worktree.path;
     }
 
     let diffFile: string | null = null;
@@ -243,9 +328,12 @@ export class Jobs {
       repo,
       project: spec.project ?? repo ?? spec.cwd,
       root,
+      mission: spec.mission,
+      exclusive: Boolean(spec.exclusive) || undefined,
+      runsApp: Boolean(spec.runsApp) || undefined,
       cwd,
       worktree,
-      sandbox: spec.kind === 'review' ? 'read-only' : 'workspace-write',
+      sandbox: spec.kind === 'review' && !spec.runsApp ? 'read-only' : 'workspace-write',
       ...buildPrompt(spec, worktree, diffFile, shared.text),
       shared: shared.sources,
       // Only Codex has a built-in review mode; other agents get the prompted review.
@@ -279,7 +367,7 @@ export class Jobs {
     return job;
   }
 
-  async reply(id: string, input: { message?: string; decision?: 'approve' | 'deny'; request_id?: string }): Promise<Job> {
+  async reply(id: string, input: { message?: string; decision?: 'approve' | 'deny'; request_id?: string; approved_by_user?: string }): Promise<Job> {
     const job = this.get(id);
     if (this.discarding.has(id)) throw new Error(`Job ${id} is being discarded.`);
     if (this.cancelling.has(id)) throw new Error(`Job ${id} is being cancelled.`);
@@ -294,6 +382,7 @@ export class Jobs {
       throw new Error('Pass decision "approve" or "deny".');
     }
     if (job.waiting) {
+      if (input.approved_by_user !== undefined) throw new Error(`Job ${id} is waiting on the user (${job.waiting.reason}). approved_by_user is for an action the automatic reviewer refused in a finished turn; call wait so the user is asked.`);
       if (!input.request_id) throw new Error('Pass the request_id shown in the current job status.');
       // A message alone must never count as approval: the lead may only be asking the worker why.
       if (job.waiting.type === 'approval' && !input.decision) throw new Error(`Job ${id} is waiting for approval (${job.waiting.reason}). Pass decision "approve" or "deny".`);
@@ -302,6 +391,8 @@ export class Jobs {
       return job;
     }
     if (input.decision !== undefined) throw new Error(`Job ${id} is not waiting for a decision.`);
+    const retry = input.approved_by_user === undefined ? null : this.retryRefused(job, input.approved_by_user, input.message);
+    if (retry) input = { message: retry.message };
     if (!input.message) throw new Error(`Job ${id} is not waiting for a decision. Pass a message to send a follow-up.`);
     if (!job.sessionId) throw new Error(`Job ${id} never opened a session, so there is nothing to continue. Start a new job instead.`);
     if (!isTerminal(job)) {
@@ -313,15 +404,38 @@ export class Jobs {
     if (refreshDiff && (!job.reviewTarget || !job.repo)) {
       throw new Error(`Job ${id} has no saved review target or repository. Start a new review instead.`);
     }
+    // A follow-up turn sets a finished worker running again, so it is a start like any other.
+    this.checkAlone(Boolean(job.exclusive), id);
     job.state = 'running';
     job.phase = 'starting';
     job.endedAt = null;
     job.error = null;
+    // A retry that follows a retry goes to the user; every other turn is the automatic reviewer's.
+    job.asksUser = retry !== null && job.retrying !== undefined;
+    job.retrying = retry?.actions;
     job.turns += 1;
     job.activeAt = Date.now();
-    this.event(job, 'started', `follow-up: ${input.message.split('\n')[0].slice(0, 80)}`);
+    const what = !retry ? input.message.split('\n')[0].slice(0, 80) : job.asksUser ? 'refused action retried; the user is asked about each request' : 'refused action retried with the user\'s approval';
+    this.event(job, 'started', `follow-up: ${what}`);
     try {
       let message = input.message;
+      if (job.kind === 'review' && job.runsApp) {
+        this.preparingReviews.add(id);
+        try {
+          await this.snapshots.get(id);
+          if (job.worktree) throw new Error(`The previous snapshot at ${job.worktree.path} could not be removed. Cancel this job with discard: true and start a new review.`);
+          job.worktree = await this.snapshot(job.repo!, id, job.reviewTarget!, job.notes);
+          // Recorded before anything else can fail, so the snapshot is never left without an owner.
+          this.flush();
+          if (isTerminal(job)) {
+            this.dropSnapshot(job);
+            return job;
+          }
+          message += '\n\nThe snapshot has been refreshed to the current state of the change.';
+        } finally {
+          this.preparingReviews.delete(id);
+        }
+      }
       if (refreshDiff) {
         this.preparingReviews.add(id);
         const diffFile = this.diffFile(id, job.turns);
@@ -340,6 +454,54 @@ export class Jobs {
       ctl.fail(String((err as Error)?.message ?? err));
     }
     return job;
+  }
+
+  /** The follow-up that sends a refused action back, stating that the user approved it. */
+  private retryRefused(job: Job, words: string, extra?: string): { message: string; actions: string[] } {
+    if (typeof words !== 'string' || !words.trim()) throw new Error('approved_by_user must quote what the user said that approves the refused action.');
+    if (!isTerminal(job)) throw new Error(`Job ${job.id} is still ${job.state}. Wait for the turn to end before sending a refused action back.`);
+    const actions = openRefusals(job).map((refusal) => refusal.action);
+    if (!actions.length) throw new Error(`Nothing was refused in the last turn of job ${job.id}, so there is nothing to approve. Send a plain message instead.`);
+    const parts = [
+      `The user approved what the automatic reviewer refused. Their words in the lead session: "${words.trim()}"`,
+      `Run the refused action again, exactly as before:\n${actions.join('\n')}`,
+    ];
+    if (extra?.trim()) parts.push(extra.trim());
+    return { message: parts.join('\n\n'), actions };
+  }
+
+  /** A worktree holding the change under review, for a reviewer that runs the app. Removed when the turn ends. */
+  private async snapshot(repo: string, id: string, target: ReviewTarget, notes: string[]): Promise<Worktree> {
+    const worktree = await createWorktree(repo, id, target.type === 'commit' ? target.sha : 'HEAD', this.home);
+    try {
+      if (target.type === 'uncommittedChanges') await carryUncommitted(repo, worktree.path);
+      const partial = 'The snapshot does not contain submodules: their directories are empty in it.';
+      if (fs.existsSync(path.join(repo, '.gitmodules')) && !notes.includes(partial)) notes.push(partial);
+      const included = await copyIncluded(repo, worktree.path);
+      const failed = `Could not copy from .worktreeinclude: ${included.failed.join('; ')}`;
+      if (included.failed.length && !notes.includes(failed)) notes.push(failed);
+    } catch (err) {
+      await removeWorktree(repo, worktree, id, this.home).catch(() => {});
+      throw err;
+    }
+    return worktree;
+  }
+
+  private dropSnapshot(job: Job): void {
+    const { worktree, repo } = job;
+    if (!worktree || !repo || this.snapshots.has(job.id)) return;
+    const removal = removeWorktree(repo, worktree, job.id, this.home).then(
+      () => {
+        job.worktree = null;
+      },
+      (err) => {
+        job.notes.push(`Could not remove the review snapshot at ${worktree.path}: ${err.message}`);
+      },
+    ).finally(() => {
+      this.snapshots.delete(job.id);
+      this.changed(job);
+    });
+    this.snapshots.set(job.id, removal);
   }
 
   async cancel(id: string): Promise<Job> {
@@ -364,17 +526,20 @@ export class Jobs {
     if (this.cancelling.has(id)) throw new Error(`Job ${id} is being cancelled.`);
     if (!isTerminal(job)) throw new Error(`Job ${id} is still ${job.state}; cancel it first.`);
     if (this.discarding.has(id)) throw new Error(`Job ${id} is already being discarded.`);
-    if (job.worktree && job.repo) {
-      this.discarding.add(id);
-      try {
+    // Reserved before the first await, so a follow-up cannot set the worker running in a worktree that is about to go.
+    this.discarding.add(id);
+    try {
+      // A review snapshot may be on its way out already; removing it twice would fail on the branch.
+      await this.snapshots.get(id);
+      if (job.worktree && job.repo) {
         await removeWorktree(job.repo, job.worktree, job.id, this.home);
         job.worktree = null;
         job.notes.push('Worktree and branch removed.');
         this.changed(job);
         this.flush();
-      } finally {
-        this.discarding.delete(id);
       }
+    } finally {
+      this.discarding.delete(id);
     }
     return job;
   }
@@ -447,6 +612,11 @@ export class Jobs {
         job.notes.push(text);
         this.changed(job);
       },
+      refused: (action, reason) => {
+        if (!live()) return;
+        (job.refusals ??= []).push({ action, reason, turn: job.turns });
+        this.event(job, 'progress', `refused by the automatic reviewer: ${action.split('\n')[0].slice(0, 120)}`);
+      },
       tokens: (total) => {
         job.tokens = total;
       },
@@ -492,7 +662,8 @@ export class Jobs {
 
   private async finalize(job: Job, report: string): Promise<void> {
     let result: Job['result'];
-    if (job.worktree) {
+    // A review's worktree is a snapshot to run the app in; nothing in it is kept.
+    if (job.worktree && job.kind !== 'review') {
       const commit = await commitAll(job.worktree.path, `crew(${job.agent}): ${job.title}`);
       const { files, stat } = await changesSince(job.worktree.path, job.worktree.base);
       // The diff only covers the worktree; edits the worker reported elsewhere are violations too.
@@ -562,7 +733,10 @@ export class Jobs {
   private event(job: Job, kind: EventKind, detail: string): void {
     job.seq = this.record(job.agent, job.sessionId, kind, detail, job.id).seq;
     // Each turn has its own file, so delayed cleanup cannot delete a follow-up's fresh diff.
-    if (isTerminal(job) && job.kind === 'review') fs.rm(this.diffFile(job.id, job.turns), { force: true }, () => {});
+    if (isTerminal(job) && job.kind === 'review') {
+      fs.rm(this.diffFile(job.id, job.turns), { force: true }, () => {});
+      this.dropSnapshot(job);
+    }
     this.changed(job);
     for (const wake of [...(this.waiters.get(job.id) ?? [])]) wake();
   }
@@ -578,7 +752,7 @@ export class Jobs {
   private save(): void {
     let history = 0;
     const keep = this.list().filter((job) =>
-      job.worktree || !isTerminal(job) || job.seq > job.delivered || history++ < KEEP_JOBS,
+      job.worktree || !isTerminal(job) || job.seq > job.delivered || (job.mission !== undefined && this.hooks.keepsMission?.(job.mission)) || history++ < KEEP_JOBS,
     );
     const file = path.join(this.home, 'jobs.json');
     fs.writeFileSync(`${file}.tmp`, JSON.stringify({ seq: this.seq, jobs: keep }));
@@ -612,6 +786,7 @@ export class Jobs {
         job.error = { message: `The bridge restarted while this job was running. ${next}`, limit: false };
       }
       this.jobs.set(job.id, job);
+      if (job.kind === 'review') this.dropSnapshot(job);
     }
   }
 }

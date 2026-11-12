@@ -62,13 +62,13 @@ export interface Config {
   notifyOnDone: boolean;
   codex: {
     bin: string;
-    /** Approval policy for delegated implementation work. Reviews always run with "never". */
+    /** Approval policy for delegated implementation work. Static reviews always run with "never". */
     approvalPolicy: 'never' | 'on-request' | 'untrusted';
     /**
-     * Who answers Codex's approval requests. Unset inherits ~/.codex/config.toml, where an
-     * automatic reviewer may be configured; "user" always brings them to the lead session.
+     * Who answers Codex's approval requests. "auto_review" (default) is Codex's own automatic reviewer,
+     * so the user is asked only about what it refuses twice; "user" brings every request to the lead session.
      */
-    approvalsReviewer?: 'user' | 'auto_review' | 'guardian_subagent';
+    approvalsReviewer: 'user' | 'auto_review' | 'guardian_subagent';
     model?: string;
     effort?: string;
   };
@@ -86,7 +86,7 @@ const defaults: Config = {
   stallSeconds: 300,
   notify: true,
   notifyOnDone: false,
-  codex: { bin: 'codex', approvalPolicy: 'on-request' },
+  codex: { bin: 'codex', approvalPolicy: 'on-request', approvalsReviewer: 'auto_review' },
   antigravity: { bin: 'agy', enabled: true },
   roles: { delegate: { agent: 'codex' }, review: { agent: 'codex' }, polish: { agent: 'antigravity' } },
 };

@@ -394,15 +394,15 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 .need-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 /* The button's padding hangs past the edge, so its word ends where the timer below does. */
 .need-bar .quiet { margin-inline-end: -16px; }
-.need-head { display: flex; align-items: center; gap: 16px; min-width: 0; }
+.need-head { display: flex; align-items: center; gap: 12px; min-width: 0; }
+/* A size up from the tiles' mark, beside the larger title. */
+.need-head .agent-well, .need-head .agent-icon { width: 32px; height: 32px; }
 .need-head > div { min-width: 0; }
-.need-icon { flex: none; display: grid; place-items: center; width: 48px; height: 48px; border-radius: 50%; background: var(--waiting-bg); }
-.need-icon .mark { width: 26px; height: 26px; }
 .need-title { font-size: 24px; font-weight: 500; line-height: 1.15; letter-spacing: -0.02em; text-wrap: balance; }
 .need-who { margin-top: 2px; color: var(--muted); font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .need .callout { padding: 0; background: none; }
-/* The agent's own words in a sunken box whose edges are the card's edges. */
-.need .callout p { padding: 16px; border-radius: var(--radius-item); background: oklch(from var(--ink) l c h / 0.04); font-family: var(--mono); font-size: 13.5px; line-height: 1.6; letter-spacing: 0; }
+/* The agent's own words, in the body face, in a sunken box whose edges are the card's edges. */
+.need .callout p { padding: 16px; border-radius: var(--radius-item); background: oklch(from var(--ink) l c h / 0.04); line-height: 1.5; }
 .need .hint { margin-top: -4px; }
 
 /* --- Board and feed side by side when there is room --- */
@@ -615,7 +615,6 @@ button.item { cursor: pointer; }
   .card.need { padding: 16px 16px 20px; border-radius: 26px; }
   .need-bar .quiet { margin-inline-end: -12px; }
   .need-title { font-size: 20px; }
-  .need-icon { width: 40px; height: 40px; }
   .need-who { white-space: normal; overflow-wrap: anywhere; }
   .layout { margin-top: 40px; }
   .groups { gap: 40px; }

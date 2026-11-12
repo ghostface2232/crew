@@ -44,6 +44,8 @@ if (typeof Image === 'function') {
   }
 }
 const agentIcon = (agent) => (AGENT_ICONS[agent] ? `<i class="agent-icon" data-agent="${agent}" aria-hidden="true"></i>` : '');
+/** Who an agent is at a glance: its mark, or its initial until the mark's file has loaded. */
+const agentMark = (agent, name) => `<span class="agent-well" data-agent="${agent}" aria-hidden="true">${agentIcon(agent)}<b>${esc(name[0])}</b></span>`;
 const KIND_NAMES = { delegate: 'Implementation', review: 'Review', polish: 'Polish' };
 const ROLE_NAMES = { delegate: 'Engineer', review: 'Cross-review', polish: 'UX writing · docs' };
 const ROLE_HINTS = { delegate: 'Builds separable pieces', review: 'Reviews the change', polish: 'Tidies wording only' };
@@ -450,7 +452,8 @@ function looseCard(dir, list) {
 }
 
 /** Who is asking, large, with the job it is about under it. */
-const needHead = (title, about) => `<div class="need-head"><span class="need-icon" data-state="waiting"><span class="mark"></span></span><div><p class="need-title">${esc(title)}</p><p class="need-who" title="${esc(about)}">${esc(about)}</p></div></div>`;
+/** Who is asking: the agent's mark, then what it wants and the job it is about. The chip above already says it waits. */
+const needHead = (agent, title, about) => `<div class="need-head">${agentMark(agent, AGENT_NAMES[agent] ?? agent)}<div><p class="need-title">${esc(title)}</p><p class="need-who" title="${esc(about)}">${esc(about)}</p></div></div>`;
 
 /** Whether the requests are laid out or tucked into a pill. A request that arrives lays them out again, except on a phone. */
 let dockOpen = true;
@@ -466,12 +469,12 @@ function renderNeeds() {
   const cards = [
     ...[...jobs.values()].filter(isWaiting).sort((a, b) => a.waiting.since - b.waiting.since).map((job) => ({
       key: job.id,
-      html: `${needHead(`${agents[job.agent]?.name ?? AGENT_NAMES[job.agent]} ${job.waiting.type === 'approval' ? 'needs your permission' : 'has a question'}`, job.title + where(job))}${callout(job)}
+      html: `${needHead(job.agent, `${agents[job.agent]?.name ?? AGENT_NAMES[job.agent]} ${job.waiting.type === 'approval' ? 'needs your permission' : 'has a question'}`, job.title + where(job))}${callout(job)}
         <p class="hint">This job is paused until you answer.</p>`,
     })),
     ...[...sessions.values()].filter(isWaiting).map((s) => ({
       key: `session:${s.id}`,
-      html: `${needHead('Claude needs your input', s.title + where(s))}<div class="callout"><p>${esc(s.waitingFor || 'Answer it in the Claude app.')}</p></div>
+      html: `${needHead('claude', 'Claude needs your input', s.title + where(s))}<div class="callout"><p>${esc(s.waitingFor || 'Answer it in the Claude app.')}</p></div>
         <p class="hint">Answer in the Claude app, in the session that asked.</p>`,
     })),
   ];
@@ -577,7 +580,7 @@ function renderAgents(visible) {
     const extra = agent === 'codex' && usage ? `<p class="usage" title="${esc(usageTitle)}">${usage}</p>` : '';
     return `<li class="tile">
         <div class="tile-head">
-          <span class="agent-well" data-agent="${agent}">${agentIcon(agent)}<b aria-hidden="true">${esc(name[0])}</b></span>
+          ${agentMark(agent, name)}
           <div class="tile-id"><p class="tile-label" title="${esc(role)}">${esc(role)}</p><p class="tile-value" title="${esc(name)}">${esc(name)}</p></div>
           <span class="chip" data-state="${state}"><span class="mark"></span>${label}</span>
         </div>

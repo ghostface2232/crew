@@ -59,6 +59,8 @@ export interface Job {
   repo: string | null;
   /** Project of the lead session that owns the job; sessions only wait on and list their own project's jobs. */
   project: string;
+  /** Main working tree of the job's repository, for grouping on the board; absent on jobs saved before it was recorded. */
+  root?: string;
   /** Directory the worker runs in: the worktree when isolated, else the caller's cwd. */
   cwd: string;
   worktree: Worktree | null;
@@ -195,7 +197,8 @@ export class Jobs {
     const id = `${WORKERS[agent].idPrefix}-${randomBytes(3).toString('hex')}`;
     const repo = await repoRoot(spec.cwd);
     // Read from the main working tree even when the job starts inside a worktree, so an uncommitted edit applies to the next job.
-    const shared = sharedInstructions(this.home, (await projectRoot(spec.cwd)) ?? spec.project ?? spec.cwd);
+    const root = (await projectRoot(spec.cwd)) ?? spec.project ?? spec.cwd;
+    const shared = sharedInstructions(this.home, root);
     const notes: string[] = [];
     let worktree: Worktree | null = null;
     let cwd = spec.cwd;
@@ -239,6 +242,7 @@ export class Jobs {
       phase: 'starting',
       repo,
       project: spec.project ?? repo ?? spec.cwd,
+      root,
       cwd,
       worktree,
       sandbox: spec.kind === 'review' ? 'read-only' : 'workspace-write',

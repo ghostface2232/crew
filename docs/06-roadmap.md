@@ -68,7 +68,7 @@ Injection keeps the decision recorded in [04-implementation.md](04-implementatio
 
 ### B. Board to control screen
 
-**B1. Decision support.** These gaps are already listed in [05-related-work.md](05-related-work.md) section 9: the strand drawer, free-text answers to worker questions on the board, activity filtered by job, the pending count in the tab title, a project filter, and a settings view that edits A1 to A3 by clicking.
+**B1. Decision support.** Implemented 2026-11-12; see [04-implementation.md](04-implementation.md) section 5.2. The settings view covers roles and shared instructions; presets (A3) are not in it yet. These gaps are already listed in [05-related-work.md](05-related-work.md) section 9: the strand drawer, free-text answers to worker questions on the board, activity filtered by job, the pending count in the tab title, a project filter, and a settings view that edits A1 to A3 by clicking.
 
 **B2. Missions.** Add `mission_id` to jobs so that one `/crew:run` is one mission, and build the view in section 3 on top of it. Touches `jobs.ts`, [daemon.ts](../plugin/bridge/daemon.ts), [run/SKILL.md](../plugin/skills/run/SKILL.md), and `plugin/board/`.
 

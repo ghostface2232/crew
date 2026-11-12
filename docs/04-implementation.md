@@ -145,6 +145,23 @@ Worker approval requests and questions are answered by the user, not by the lead
 
 Depending on the user's Codex settings, approval requests may never reach Crew at all: if `approvals_reviewer` in `~/.codex/config.toml` is set to `guardian_subagent` or `auto_review`, Codex's built-in reviewer handles approvals internally. The bridge honors that setting by default. To always route approvals to the user, set `{"codex": {"approvalsReviewer": "user"}}` in `~/.crew/config.json`.
 
+### 5.2 Deciding from the board
+
+The board is also where the user reads what happened and acts on it (requirement R10, roadmap item B1).
+
+- **Job details.** Clicking a job card, its title, or a job's name in the activity feed opens a side sheet with the job's agent, model, project, branch, tokens, and shared-instruction files; the changed files with out-of-scope ones marked; notes; the worker's report; the task it was given; and that job's own activity. The address names the open job (`#<job id>`), so a link opens it directly.
+- **Follow-up.** The sheet sends a message that continues the same worker session, the board's counterpart of the lead's `reply`. The lead is told when the turn ends, as for any job.
+- **Answers in words.** A worker's question can be answered with text from the card or the sheet. Approvals keep Approve and Deny. Every answer carries the id of the request it was shown with, so it cannot settle a later one.
+- **Updates do not disturb.** Cards and the sheet are re-rendered when a job changes, the sheet section by section. Text being typed, its caret, the focused control, an opened section, and the result line of a send are carried over, and a re-render waits while an input method is composing. Answer text is tied to its request and follow-up text to its job, so neither can reach another.
+- **Failures are said.** A job that cannot be opened, a refused copy, and a send whose form has since gone are reported in a line at the top of the board.
+- **Activity by job.** Each feed row names its job. Two jobs of one agent can be told apart, and the name opens the job.
+- **Projects.** Agents are columns and projects are rows. With more than one project on the board, each gets its own headed group holding its sessions and jobs, with a count of what is running and what waits on the user; groups are in alphabetical order and do not move when something happens in one. A job or session belongs to the main working tree of its repository, so work started from a subfolder or a worktree sits with its project. The top bar narrows the board and the feed to one project (remembered in the browser) and shows each project's waiting count; a project's name in its heading does the same. With all projects shown, feed rows say which project they belong to.
+- **Pending count.** The tab title shows how many jobs and sessions wait on the user, across all projects.
+- **Settings.** Roles (agent, model, and effort per role) and shared instructions (global or per project) are edited in a sheet. It writes the same files a text editor would: `~/.crew/config.json`, `~/.crew/instructions.md`, and `.crew/instructions.md` in the project's main working tree. Saving roles keeps every other setting and refuses to overwrite a file it cannot parse. Only projects the daemon knows from a job or a session can be written to, and a symbolic link at `.crew`, at the instructions file, or at a temporary name is never written through, since a project's `.crew` folder comes with its repository. Closing the sheet with unsaved changes asks first.
+- The resume command moved from the card footer into the sheet, next to a command that shows the job's diff.
+
+Checked on 2026-11-12 in the built-in browser pane against a separate daemon with stub agents: opening a job from a card, the feed, and a link; answering a question in words; a follow-up turn; a job update arriving while an answer was half typed (text, focus, and caret kept); project groups and the project filter with two projects, including a job started from a subfolder; saving roles and per-project instructions and reading the files back; refused writes (unknown project, foreign origin, unknown agent); dark mode and a phone-width pane. Not checked: a screen reader, typing with an input method, and browsers other than the built-in pane. The board script has no automated tests; its behavior was checked by hand as listed.
+
 ## 6. Desktop app visibility (R6) findings
 
 | Service | What was verified |
@@ -153,7 +170,7 @@ Depending on the user's Codex settings, approval requests may never reach Crew a
 | Codex | Threads created by the bridge land in the same store used by the Codex desktop app under the title `Crew · <title>` (confirmed via `thread/list`, matching the `source` value of app-created threads). Because the ChatGPT app spawns its own private stdio `app-server`, Crew cannot attach to a running app instance live; when the list refreshes is up to the app (see the issues in document 02 section 6). From the CLI, resume with `codex resume <id>` |
 | Antigravity | ACP sessions are saved to the CLI-specific store (`~/.gemini/antigravity-cli/`) under `default-cli-project`, not the desktop app store (`~/.gemini/antigravity/`), so they do not appear in the Antigravity app list. Resume from the CLI with `agy --conversation <id>`. The `agentapi` endpoint that creates conversations inside the app is documented as sidecar-only and provides no way to read responses, so it was not used |
 
-Resume commands are shown in both job results and status board cards.
+Resume commands are shown in both job results and the board's job details.
 
 ### Antigravity policy risk
 
@@ -221,5 +238,6 @@ Not yet verified:
   - Backfilled the repository path as the owning project when loading jobs saved before project tracking existed.
   - Insulated bridge delivery commits from the user's git commit config by disabling commit signing and falling back to `Crew <crew@localhost>` when git user identity is unset, preventing background daemon commits from hanging on an invisible GPG/SSH passphrase prompt.
   - Renamed job branches from `crew/<job id>` to `crew-<job id>`, because git cannot create `crew/...` refs if a branch named `crew` already exists in the repository.
+- 2026-11-12: The board gained job details, text answers, a project filter, and settings (section 5.2, roadmap item B1).
 - 2026-11-12: Added shared instructions (section 2.2, roadmap item A2).
 - 2026-11-12: Roles are no longer fixed in code (section 2.1, roadmap item A1). Requirement R3 changed from fixed roles to default roles the user can reassign. The row "Antigravity role enforcement" in section 3 now describes only the editor role; the bridge decides permission requests by the role of the job.

@@ -10,39 +10,32 @@
 <body>
 <header class="top">
   <h1>Crew</h1>
+  <div id="projects" class="segmented" role="group" aria-label="Project" hidden></div>
   <p id="connection" class="connection" role="status">Connecting…</p>
+  <button id="open-settings" class="quiet">Settings</button>
 </header>
 
-<main class="lanes">
-  <section class="lane" data-agent="claude" aria-labelledby="lane-claude">
-    <header class="lane-head">
-      <h2 id="lane-claude">Claude</h2>
+<p id="notice" class="notice" role="alert" hidden></p>
+
+<main class="board">
+  <div class="heads">
+    <header class="lane-head" data-agent="claude">
+      <h2>Claude</h2>
       <p class="role">Lead · self-review</p>
       <p class="lane-meta" data-meta></p>
     </header>
-    <ul class="cards" data-cards></ul>
-    <p class="empty" data-empty>No Claude session is reporting yet. Sessions appear here once the Crew plugin is loaded.</p>
-  </section>
-
-  <section class="lane" data-agent="codex" aria-labelledby="lane-codex">
-    <header class="lane-head">
-      <h2 id="lane-codex">Codex</h2>
+    <header class="lane-head" data-agent="codex">
+      <h2>Codex</h2>
       <p class="role" data-role>Engineer · cross-review</p>
       <p class="lane-meta" data-meta></p>
     </header>
-    <ul class="cards" data-cards></ul>
-    <p class="empty" data-empty>Idle. Jobs appear when the lead delegates work or asks for a review.</p>
-  </section>
-
-  <section class="lane" data-agent="antigravity" aria-labelledby="lane-antigravity">
-    <header class="lane-head">
-      <h2 id="lane-antigravity">Antigravity</h2>
+    <header class="lane-head" data-agent="antigravity">
+      <h2>Antigravity</h2>
       <p class="role" data-role>UX writing · docs</p>
       <p class="lane-meta" data-meta></p>
     </header>
-    <ul class="cards" data-cards></ul>
-    <p class="empty" data-empty>Idle. Jobs appear when the lead asks for a polish pass.</p>
-  </section>
+  </div>
+  <div id="groups" class="groups"></div>
 </main>
 
 <section class="feed" aria-labelledby="feed-title">
@@ -50,6 +43,44 @@
   <ol id="feed" class="feed-list"></ol>
   <p id="feed-empty" class="empty">Nothing has happened yet.</p>
 </section>
+
+<dialog id="drawer" class="sheet" aria-labelledby="drawer-title">
+  <div id="drawer-body" class="sheet-body"></div>
+</dialog>
+
+<dialog id="settings" class="sheet" aria-labelledby="settings-title">
+  <div class="sheet-body">
+    <header class="sheet-head">
+      <h2 id="settings-title">Settings</h2>
+      <button class="quiet" data-close aria-label="Close settings">Close</button>
+    </header>
+
+    <form id="roles-form" class="section">
+      <h3>Roles</h3>
+      <p class="hint">Who takes each kind of job. Applies to the next job; leave model and effort empty to use the agent's own.</p>
+      <div id="roles-rows" class="roles"></div>
+      <div class="actions">
+        <button class="primary" type="submit">Save roles</button>
+        <span class="status" role="status" data-status></span>
+      </div>
+    </form>
+
+    <form id="instructions-form" class="section">
+      <h3>Shared instructions</h3>
+      <p class="hint">Written once, given to every agent with its next job and to Claude sessions when they start.</p>
+      <label class="field">
+        <span>Applies to</span>
+        <select id="instructions-scope"></select>
+      </label>
+      <textarea id="instructions-text" rows="12" spellcheck="false" aria-label="Shared instructions" placeholder="Prefer the smallest change that fully solves the task."></textarea>
+      <p class="hint" id="instructions-file"></p>
+      <div class="actions">
+        <button class="primary" type="submit">Save instructions</button>
+        <span class="status" role="status" data-status></span>
+      </div>
+    </form>
+  </div>
+</dialog>
 
 <script src="/board.js"></script>
 </body>

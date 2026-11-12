@@ -5,9 +5,12 @@ import path from 'node:path';
 import { AntigravityAdapter } from './adapters/antigravity.ts';
 import { CodexAdapter } from './adapters/codex.ts';
 import { ClaudeSessions } from './claude.ts';
+import type { ClaudeSession } from './claude.ts';
 import { HOME, installed, loadConfig, PLUGIN_ROOT, PORT, VERSION, WORKERS } from './config.ts';
 import type { Config } from './config.ts';
+import { projectRoot } from './git.ts';
 import { Jobs } from './jobs.ts';
+import { instructionsFile, readInstructions, saveRoles, writeInstructions } from './settings.ts';
 import type { EventKind, Job } from './jobs.ts';
 
 /**
@@ -99,6 +102,31 @@ function state() {
   };
 }
 
+/** Finds a new session's project once, so the board can group it with that project's jobs. */
+function locate(session: ClaudeSession | undefined): void {
+  if (!session || session.root !== undefined || !session.cwd) return;
+  // Provisional until git answers; also the final value outside a repository or when git fails.
+  session.root = session.cwd;
+  projectRoot(session.cwd).then((root) => {
+    if (!root || root === session.root) return;
+    session.root = root;
+    if (claude.sessions.get(session.id) === session) broadcast('claude', { session, removed: false });
+  }).catch(() => {});
+}
+
+/**
+ * The instructions file for a project the board may edit, or the global one for no project.
+ * Only projects the daemon already knows from a job or a session are accepted, so the board
+ * cannot be made to write a `.crew` folder into an arbitrary directory.
+ */
+async function sharedFile(project: string | null): Promise<string> {
+  if (!project) return instructionsFile(HOME, null);
+  const known = [...jobs.list().flatMap((job) => [job.project, job.root]), ...[...claude.sessions.values()].flatMap((s) => [s.cwd, s.root])];
+  if (!known.includes(project)) throw new HttpError(400, 'unknown project');
+  // The same lookup a job uses, so the board edits the file the agents are given.
+  return instructionsFile(HOME, (await projectRoot(project)) ?? project);
+}
+
 const STATIC: Record<string, [file: string, type: string]> = {
   '/': ['index.html', 'text/html; charset=utf-8'],
   '/board.css': ['board.css', 'text/css; charset=utf-8'],
@@ -158,6 +186,10 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     }
     if (pathname === '/api/health') return { name: 'crew', version: VERSION, build: BUILD, root: PLUGIN_ROOT, pid: process.pid, active: jobs.activeCount };
     if (pathname === '/api/state') return state();
+    if (pathname === '/api/instructions') {
+      const file = await sharedFile(url.searchParams.get('project'));
+      return { file, text: readInstructions(file) };
+    }
     if (pathname === '/api/stream') {
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
       res.write(`event: state\ndata: ${JSON.stringify(state())}\n\n`);
@@ -171,6 +203,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
   if (jobRoute) {
     const [, id, action] = jobRoute;
     if (method === 'GET' && !action) return jobs.get(id);
+    if (method === 'GET' && action === 'events') return jobs.eventsFor(id, 0);
     if (method === 'GET' && action === 'wait') {
       const after = Number(url.searchParams.get('after') ?? 0);
       const timeout = Math.min(Number(url.searchParams.get('timeout') ?? 25), 55);
@@ -191,8 +224,22 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
   if (method === 'POST') {
     if (pathname === '/api/jobs') return view(await jobs.create(await readJson(req)));
     if (pathname === '/api/hooks/claude') {
-      claude.ingest(await readJson(req));
+      const payload = await readJson(req);
+      claude.ingest(payload);
+      locate(claude.sessions.get(payload?.session_id));
       return {};
+    }
+    if (pathname === '/api/roles') {
+      const roles = saveRoles(HOME, (await readJson(req)).roles);
+      broadcast('roles', roles);
+      return roles;
+    }
+    if (pathname === '/api/instructions') {
+      const body = await readJson(req);
+      if (typeof body.text !== 'string') throw new HttpError(400, 'text must be a string');
+      const file = await sharedFile(body.project ?? null);
+      writeInstructions(file, body.text);
+      return { file, text: readInstructions(file) };
     }
     if (pathname === '/api/shutdown') {
       setImmediate(shutdown);

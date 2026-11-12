@@ -80,8 +80,8 @@ export interface Job {
   runsApp?: boolean;
   /** Actions the agent's automatic reviewer refused, with the turn they were refused in. */
   refusals?: { action: string; reason: string; turn: number }[];
-  /** Times a refused action was sent back with the user's approval. */
-  reapprovals?: number;
+  /** Set while the latest turn is a retry of refused actions: the actions it was sent back with. */
+  retrying?: string[];
   /** Approval requests of the current turn go to the user, not the automatic reviewer. */
   asksUser?: boolean;
   /** Directory the worker runs in: the worktree when isolated, else the caller's cwd. */
@@ -163,6 +163,16 @@ export interface JobsHooks {
 const TERMINAL: JobState[] = ['done', 'failed', 'cancelled'];
 const KEEP_JOBS = 200;
 const KEEP_EVENTS = 5000;
+
+/**
+ * Refused actions the lead still has to deal with: those of the latest turn, or, when a retry turn
+ * failed before the worker could try again, the ones that turn was sent back with.
+ */
+export function openRefusals(job: Pick<Job, 'refusals' | 'turns' | 'retrying' | 'state'>): { action: string; reason?: string }[] {
+  const latest = (job.refusals ?? []).filter((refusal) => refusal.turn === job.turns);
+  if (latest.length || job.state !== 'failed') return latest;
+  return (job.retrying ?? []).map((action) => ({ action }));
+}
 
 export function isTerminal(job: Job): boolean {
   return TERMINAL.includes(job.state);
@@ -382,7 +392,7 @@ export class Jobs {
     }
     if (input.decision !== undefined) throw new Error(`Job ${id} is not waiting for a decision.`);
     const retry = input.approved_by_user === undefined ? null : this.retryRefused(job, input.approved_by_user, input.message);
-    if (retry) input = { message: retry };
+    if (retry) input = { message: retry.message };
     if (!input.message) throw new Error(`Job ${id} is not waiting for a decision. Pass a message to send a follow-up.`);
     if (!job.sessionId) throw new Error(`Job ${id} never opened a session, so there is nothing to continue. Start a new job instead.`);
     if (!isTerminal(job)) {
@@ -400,9 +410,9 @@ export class Jobs {
     job.phase = 'starting';
     job.endedAt = null;
     job.error = null;
-    // Only the second retry of a refused action goes to the user; every other turn is the automatic reviewer's.
-    job.asksUser = retry !== null && (job.reapprovals ?? 0) > 0;
-    if (retry) job.reapprovals = (job.reapprovals ?? 0) + 1;
+    // A retry that follows a retry goes to the user; every other turn is the automatic reviewer's.
+    job.asksUser = retry !== null && job.retrying !== undefined;
+    job.retrying = retry?.actions;
     job.turns += 1;
     job.activeAt = Date.now();
     const what = !retry ? input.message.split('\n')[0].slice(0, 80) : job.asksUser ? 'refused action retried; the user is asked about each request' : 'refused action retried with the user\'s approval';
@@ -414,12 +424,13 @@ export class Jobs {
         try {
           await this.snapshots.get(id);
           if (job.worktree) throw new Error(`The previous snapshot at ${job.worktree.path} could not be removed. Cancel this job with discard: true and start a new review.`);
-          const snapshot = await this.snapshot(job.repo!, id, job.reviewTarget!, job.notes);
+          job.worktree = await this.snapshot(job.repo!, id, job.reviewTarget!, job.notes);
+          // Recorded before anything else can fail, so the snapshot is never left without an owner.
+          this.flush();
           if (isTerminal(job)) {
-            await removeWorktree(job.repo!, snapshot, id, this.home);
+            this.dropSnapshot(job);
             return job;
           }
-          job.worktree = snapshot;
           message += '\n\nThe snapshot has been refreshed to the current state of the change.';
         } finally {
           this.preparingReviews.delete(id);
@@ -446,17 +457,17 @@ export class Jobs {
   }
 
   /** The follow-up that sends a refused action back, stating that the user approved it. */
-  private retryRefused(job: Job, words: string, extra?: string): string {
+  private retryRefused(job: Job, words: string, extra?: string): { message: string; actions: string[] } {
     if (typeof words !== 'string' || !words.trim()) throw new Error('approved_by_user must quote what the user said that approves the refused action.');
     if (!isTerminal(job)) throw new Error(`Job ${job.id} is still ${job.state}. Wait for the turn to end before sending a refused action back.`);
-    const refused = (job.refusals ?? []).filter((refusal) => refusal.turn === job.turns);
-    if (!refused.length) throw new Error(`Nothing was refused in the last turn of job ${job.id}, so there is nothing to approve. Send a plain message instead.`);
+    const actions = openRefusals(job).map((refusal) => refusal.action);
+    if (!actions.length) throw new Error(`Nothing was refused in the last turn of job ${job.id}, so there is nothing to approve. Send a plain message instead.`);
     const parts = [
       `The user approved what the automatic reviewer refused. Their words in the lead session: "${words.trim()}"`,
-      `Run the refused action again, exactly as before:\n${refused.map((refusal) => refusal.action).join('\n')}`,
+      `Run the refused action again, exactly as before:\n${actions.join('\n')}`,
     ];
     if (extra?.trim()) parts.push(extra.trim());
-    return parts.join('\n\n');
+    return { message: parts.join('\n\n'), actions };
   }
 
   /** A worktree holding the change under review, for a reviewer that runs the app. Removed when the turn ends. */
@@ -464,6 +475,8 @@ export class Jobs {
     const worktree = await createWorktree(repo, id, target.type === 'commit' ? target.sha : 'HEAD', this.home);
     try {
       if (target.type === 'uncommittedChanges') await carryUncommitted(repo, worktree.path);
+      const partial = 'The snapshot does not contain submodules: their directories are empty in it.';
+      if (fs.existsSync(path.join(repo, '.gitmodules')) && !notes.includes(partial)) notes.push(partial);
       const included = await copyIncluded(repo, worktree.path);
       const failed = `Could not copy from .worktreeinclude: ${included.failed.join('; ')}`;
       if (included.failed.length && !notes.includes(failed)) notes.push(failed);
@@ -513,6 +526,8 @@ export class Jobs {
     if (this.cancelling.has(id)) throw new Error(`Job ${id} is being cancelled.`);
     if (!isTerminal(job)) throw new Error(`Job ${id} is still ${job.state}; cancel it first.`);
     if (this.discarding.has(id)) throw new Error(`Job ${id} is already being discarded.`);
+    // A review snapshot may be on its way out already; removing it twice would fail on the branch.
+    await this.snapshots.get(id);
     if (job.worktree && job.repo) {
       this.discarding.add(id);
       try {

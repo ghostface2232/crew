@@ -44,12 +44,12 @@ export function buildPrompt(spec: JobSpec, worktree: Worktree | null, diffFile: 
 }
 
 /**
- * A worker's review is static unless the lead marked it as running the app. It then runs in a read-only sandbox,
- * which cannot hold an instance of the app, and a second reviewer is usually at work on the same change.
+ * A worker's review is static unless the lead marked it as running the app. A static review runs in a read-only
+ * sandbox, which cannot hold an instance of the app, and a second reviewer is often at work on the same change.
  */
 const STATIC_REVIEW = '# Static review\nReview by reading. Run only checks that end by themselves, such as tests and type checks. Do not start the app, a server, or a browser: another reviewer may be running one, and your sandbox is read-only.';
 const READ_ONLY_REVIEW = '# Static review\nReview by reading. You cannot run anything in this role, so list every check you would have run under "Not verified".';
-const RUNS_APP = '# Running the app\nThis job may start the app to check the change, and its sandbox has network access for that. Follow the shared-machine rules above for every instance you start. Starting a browser may still need approval; ask for it, and if it is refused, report what you could not check.';
+const RUNS_APP = '# Running the app\nThis job may start the app to check the change; a sandbox that blocks the network has been opened for that. Follow the shared-machine rules above for every instance you start. Starting a browser may still need approval; ask for it, and if it is refused, report what you could not check.';
 const SNAPSHOT = 'You are in a snapshot of the change, not the user\'s working tree: nothing you write here is kept. Report findings with paths relative to the repository root.';
 const ALONE = '# Measurement\nThis job has the machine to itself: no other Crew job runs until it ends. Take your measurements now, and report the conditions with the numbers: what was running, how many runs, and the spread between them.';
 

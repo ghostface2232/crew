@@ -46,6 +46,7 @@ How jobs work:
 - Reject worker changes that go beyond what was asked. For polish, any file listed as out of scope, or any non-text change, is grounds to reject.
 - If a worker fails on a usage limit, do that piece yourself and say that the cross-check was skipped.
 - This machine is shared. Workers are told to start their own isolated instance of anything they run (free port, own data directory, headless browser) and to measure nothing unless the job runs alone. A job that has to start the app takes runs_app: its sandbox then has network access, and a review runs in a snapshot of the change. Without it a worker's review is static. Only one reviewer of a change runs the app: if the cross-review does, tell your self-review subagent to stay static, and the other way round. A delegate job that measures performance takes exclusive: it is refused while other jobs are active, so wait for them first.
+- When to review, in any session, without being asked: one review (your crew:self-reviewer subagent or \`review\`, not both) when a substantial piece of implementation reaches a stopping point; both in parallel before you push or open a pull request, on whatever is going out that has not had both; none for small fixes and wording. Reviewers that run in parallel are static unless exactly one of them is told it may run the app. The user's own request for a review, or for none, comes first.
 - When you take a user's command through several steps, call \`mission\` with its title first, with the stage as you move on, and with done at the end. The board then shows the command as one unit with its jobs under it. Skip it for a single delegated job.
 
 The user can watch every agent live on the status board at ${BASE_URL}.`;
@@ -92,7 +93,7 @@ const TOOLS = [
   {
     name: 'review',
     title: `Review by ${holder('review')}`,
-    description: `Ask the cross-reviewer (${holder('review')}) for a read-only review of changes in this repository. By default it is static: the worker reads the change and runs checks that end by themselves. Start it together with your own self-review, once per step; do not loop reviews.`,
+    description: `Ask the cross-reviewer (${holder('review')}) for a review of changes in this repository; it changes nothing in your tree. By default it is static and read-only: the worker reads the change and runs checks that end by themselves. Before a push or pull request, start it together with your own self-review; at other stopping points one of the two is enough. Do not loop reviews.`,
     inputSchema: {
       type: 'object',
       properties: {

@@ -334,8 +334,11 @@ test('Codex runs an app job with network access and reports what its reviewer re
     await ended();
   }
 
+  await jobs.reply(job.id, { message: 'thanks' });
+  await ended();
+
   const seen = fs.readFileSync(path.join(home, 'seen.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line).params);
   assert.deepEqual(seen[0].config, { sandbox_workspace_write: { network_access: true } });
   assert.equal(seen[0].approvalsReviewer, 'auto_review');
-  assert.deepEqual(seen.slice(1).map((turn) => turn.approvalsReviewer), ['auto_review', 'auto_review', 'user']);
+  assert.deepEqual(seen.slice(1).map((turn) => turn.approvalsReviewer), ['auto_review', 'auto_review', 'user', 'auto_review']);
 });

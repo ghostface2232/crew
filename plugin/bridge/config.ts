@@ -62,7 +62,7 @@ export interface Config {
   notifyOnDone: boolean;
   codex: {
     bin: string;
-    /** Approval policy for delegated implementation work. Reviews always run with "never". */
+    /** Approval policy for delegated implementation work. Static reviews always run with "never". */
     approvalPolicy: 'never' | 'on-request' | 'untrusted';
     /**
      * Who answers Codex's approval requests. "auto_review" (default) is Codex's own automatic reviewer,

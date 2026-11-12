@@ -87,7 +87,8 @@ export async function carryUncommitted(root: string, wt: string): Promise<void> 
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'crew-snapshot-'));
   try {
     const patch = path.join(dir, 'changes.patch');
-    await git(root, ['diff', 'HEAD', '--binary', `--output=${patch}`]);
+    // The user's diff settings (no prefix, an external tool, textconv) would produce a patch `git apply` cannot read.
+    await git(root, ['diff', 'HEAD', '--binary', '--no-ext-diff', '--no-textconv', '--src-prefix=a/', '--dst-prefix=b/', `--output=${patch}`]);
     if ((await fs.stat(patch)).size) await git(wt, ['apply', '--whitespace=nowarn', patch]);
   } finally {
     await fs.rm(dir, { recursive: true, force: true });

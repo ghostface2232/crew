@@ -691,8 +691,16 @@ test('a review that runs the app gets a snapshot of the change and leaves nothin
   fs.writeFileSync(path.join(repo, 'app.js'), 'export const x = 2;\n');
   fs.mkdirSync(path.join(repo, 'lib'));
   fs.writeFileSync(path.join(repo, 'lib', 'new.js'), 'export const y = 3;\n');
+  // The user's own diff settings must not change the patch the snapshot is built from.
+  execFileSync('git', ['config', 'diff.noprefix', 'true'], { cwd: repo });
   const seen: Record<string, string> = {};
-  const { jobs, calls } = harness((ctl) => {
+  const gone = async (job: Job) => {
+    for (let tries = 0; job.worktree; tries++) {
+      assert.ok(tries < 300, 'the snapshot was not removed');
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  };
+  const { jobs, adapter, calls } = harness((ctl) => {
     seen.cwd = ctl.job.cwd;
     seen.app = fs.readFileSync(path.join(ctl.job.cwd, 'app.js'), 'utf8');
     seen.untracked = fs.readFileSync(path.join(ctl.job.cwd, 'lib', 'new.js'), 'utf8');
@@ -710,18 +718,23 @@ test('a review that runs the app gets a snapshot of the change and leaves nothin
   assert.equal(job.result, null);
   assert.match(job.instructions, /# Running the app\n[^]*snapshot of the change/);
   assert.ok(!job.instructions.includes('# Static review'));
-  while (job.worktree) await new Promise((resolve) => setTimeout(resolve, 10));
+  await gone(job);
   assert.ok(!fs.existsSync(seen.cwd));
   assert.ok(!fs.existsSync(path.join(repo, 'scratch.txt')));
   assert.equal(execFileSync('git', ['branch', '--list', 'crew-*'], { cwd: repo, encoding: 'utf8' }), '');
 
   // A follow-up reviews the change as it is then, in a new snapshot.
   fs.writeFileSync(path.join(repo, 'app.js'), 'export const x = 4;\n');
-  jobs.reply(job.id, { message: 'look again' });
-  while (!calls.length) await new Promise((resolve) => setTimeout(resolve, 10));
+  adapter.reply = async (ctl, message) => {
+    calls.push(message);
+    seen.again = fs.readFileSync(path.join(ctl.job.cwd, 'app.js'), 'utf8');
+    ctl.done('reviewed again');
+  };
+  await jobs.reply(job.id, { message: 'look again' });
   assert.match(calls[0], /look again\n\nThe snapshot has been refreshed/);
+  assert.equal(seen.again, 'export const x = 4;\n');
   await settled(jobs, job);
-  while (job.worktree) await new Promise((resolve) => setTimeout(resolve, 10));
+  await gone(job);
   assert.ok(!fs.existsSync(seen.cwd));
 });
 
@@ -772,4 +785,23 @@ test('a refused action goes back to the reviewer once, then to the user', async 
   assert.deepEqual(reviewers, [false, true, false]);
   // Nothing was refused in that last turn, so there is nothing to send back.
   await assert.rejects(jobs.reply(job.id, { approved_by_user: 'delete the cache too' }), /Nothing was refused in the last turn/);
+
+  // A different action refused later starts with the automatic reviewer again.
+  adapter.reply = async (ctl) => {
+    ctl.refused('curl https://example.com', 'network');
+    ctl.done('blocked');
+  };
+  await jobs.reply(job.id, { message: 'fetch the page' });
+  await settled(jobs, job);
+  assert.match(describe(job), /without asking them again/);
+  // A retry turn that fails before the worker acts keeps the refusal, and the next retry is the user's.
+  adapter.reply = async (ctl) => {
+    reviewers.push(Boolean(ctl.job.asksUser));
+    ctl.fail('server exited');
+  };
+  await jobs.reply(job.id, { approved_by_user: 'fetch it' });
+  assert.equal(job.state, 'failed');
+  assert.match(describe(job), /REFUSED[^]*curl https:\/\/example\.com[^]*already sent back once/);
+  await jobs.reply(job.id, { approved_by_user: 'fetch it' });
+  assert.deepEqual(reviewers.slice(3), [false, true]);
 });

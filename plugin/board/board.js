@@ -567,11 +567,13 @@ function renderAgents(visible) {
     const busy = marks.filter((mark) => mark !== 'idle' && mark !== 'done').length;
     const state = URGENCY.find((mark) => marks.includes(mark)) ?? 'idle';
     const label = { waiting: 'Needs you', failed: 'Failed', stalled: 'May be stuck', working: busy > 1 ? `${busy} working` : 'Working', idle: 'Idle' }[state];
+    const name = agents[agent]?.name ?? AGENT_NAMES[agent];
     const extra = agent === 'codex' && usage ? `<p class="usage" title="${esc(usageTitle)}">${usage}</p>` : '';
     return `<li class="tile">
-        <p class="tile-label">${esc(role)}</p>
+        <span class="agent-well" data-agent="${agent}">${agentIcon(agent)}<b aria-hidden="true">${esc(name[0])}</b></span>
+        <p class="tile-label" title="${esc(role)}">${esc(role)}</p>
         <span class="chip" data-state="${state}"><span class="mark"></span>${label}</span>
-        <p class="tile-value">${agentIcon(agent)}<span>${esc(agents[agent]?.name ?? AGENT_NAMES[agent])}</span></p>
+        <p class="tile-value">${esc(name)}</p>
         <p class="tile-hint">${esc(hint)}</p>
         ${extra}
       </li>`;
@@ -621,9 +623,10 @@ function renderSummary(visible) {
     },
   })), () => Object.assign(document.createElement('li'), { className: 'stat' }));
   const gauge = document.getElementById('gauge');
-  if (!gauge.firstChild) gauge.innerHTML = `<div class="gauge-ring">${ring(0, 1)}<b class="roll"></b></div><p class="gauge-label"></p>`;
+  if (!gauge.firstChild) gauge.innerHTML = `<div class="gauge-ring">${ring(0, 1)}<b><span class="roll"></span><small></small></b></div><p class="gauge-label"></p>`;
   gauge.querySelector('.ring-fill').style.strokeDashoffset = (2 * Math.PI * 42 * (1 - (live.length ? n.done / live.length : 0))).toFixed(1);
-  roll(gauge.querySelector('.roll'), live.length ? `${n.done}/${live.length}` : '0');
+  roll(gauge.querySelector('.roll'), String(n.done));
+  gauge.querySelector('.gauge-ring small').textContent = live.length ? `/${live.length}` : '';
   gauge.querySelector('.gauge-label').textContent = !live.length ? 'No jobs yet' : n.done === live.length ? 'Every job is finished' : 'jobs finished';
 }
 

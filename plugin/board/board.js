@@ -500,61 +500,6 @@ if (window.ResizeObserver) {
   new ResizeObserver(() => document.documentElement.style.setProperty('--dock', `${dock.offsetHeight}px`)).observe(dock);
 }
 
-/** Position in the "right now" list of the line shown largest; it moves on by itself. */
-let nowAt = 0;
-let nowVisible = () => true;
-
-/**
- * What every agent is doing this moment, one line each, as a wheel that turns by itself: the line in
- * the middle is the one to read, its neighbors recede. Lines keep their element, so they glide when the wheel turns.
- */
-function renderNow(visible) {
-  if (visible) nowVisible = visible;
-  const lines = [
-    ...[...sessions.values()].filter((s) => nowVisible(s) && s.state !== 'idle').map((s) => ({
-      key: `session:${s.id}`, state: sessionMark(s), who: 'Claude', about: s.title,
-      text: s.state === 'waiting' ? s.waitingFor || 'Needs your input' : s.phase || sessionLabel(s),
-    })),
-    ...[...jobs.values()].filter((job) => nowVisible(job) && !job.endedAt).map((job) => ({
-      key: job.id, state: jobMark(job), who: agents[job.agent]?.name ?? AGENT_NAMES[job.agent], about: job.title,
-      text: job.state === 'waiting' ? jobLabel(job) : job.stalled ? 'May be stuck' : job.phase || 'Working',
-    })),
-  ];
-  const count = lines.length;
-  if (count) nowAt = ((nowAt % count) + count) % count;
-  reconcile(document.getElementById('now'), lines.map((line, index) => ({
-    key: line.key,
-    update: (li) => {
-      // The shortest way round the wheel from the middle line to this one.
-      let offset = index - nowAt;
-      if (offset > count / 2) offset -= count;
-      if (offset < -count / 2) offset += count;
-      // A line that goes round the back is not seen crossing the front: it jumps to its new place and fades in there.
-      const wrapped = li.dataset.offset !== undefined && Math.abs(offset - Number(li.dataset.offset)) > 1;
-      if (wrapped) {
-        li.dataset.wrap = li.dataset.wrap === 'a' ? 'b' : 'a';
-        li.style.transition = 'none';
-      }
-      li.dataset.offset = offset;
-      li.dataset.state = line.state;
-      li.toggleAttribute('data-center', offset === 0);
-      li.style.setProperty('--o', offset);
-      li.style.setProperty('--a', Math.abs(offset));
-      if (wrapped) {
-        li.getBoundingClientRect();
-        li.style.transition = '';
-      }
-      patch(li, `<span class="dot"></span><span class="now-text" title="${esc(line.text)}">${esc(line.text)}</span><span class="now-who" title="${esc(line.who)} · ${esc(line.about)}">${esc(line.who)} · ${esc(line.about)}</span>`);
-    },
-  })), () => Object.assign(document.createElement('li'), { className: 'now-line' }));
-}
-setInterval(() => {
-  // It holds still while the pointer is on it, so a line can be read to the end.
-  if (document.hidden || document.querySelector('.wheel:hover')) return;
-  nowAt += 1;
-  renderNow();
-}, 2800);
-
 /** The agents as resources: what each is doing and how much of its allowance is used. They are not what the board is organized by. */
 function renderAgents(visible) {
   const windows = limits.codex?.windows ?? [];
@@ -693,7 +638,6 @@ function render() {
   const visible = (it) => !only || projectOf(it) === only;
   renderAgents(visible);
   renderSummary(visible);
-  renderNow(visible);
   renderProjects(dirs, names);
   renderNeeds();
   // Counted across every project: the tab title is what is seen when the board is not.

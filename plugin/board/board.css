@@ -233,11 +233,11 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 
 .notice { margin-top: 12px; padding: 12px 18px; border-radius: var(--radius-item); background: var(--failed-bg); color: var(--failed); overflow-wrap: anywhere; }
 
-/* --- Hero: the board in one sentence, one ring, what is happening this second, and a figure per state --- */
+/* --- Hero: the board in one sentence, one ring, and a figure per state --- */
 .hero {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 232px 404px;
-  grid-template-areas: "summary gauge now" "stats stats stats" "agents agents agents";
+  grid-template-columns: minmax(0, 1fr) 232px;
+  grid-template-areas: "summary gauge" "stats stats" "agents agents";
   gap: 12px;
   margin-top: 48px;
 }
@@ -257,51 +257,6 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 .gauge-ring small { margin-inline-start: 2px; color: var(--on-ink-muted); font-size: 17px; letter-spacing: -0.012em; }
 .gauge-label { color: var(--on-ink-muted); font-size: 13.5px; }
 
-/* The wheel: one line per thing in motion. The middle line is the one to read. */
-.wheel { grid-area: now; position: relative; min-height: 264px; border-radius: var(--radius-tile); background: var(--tile); overflow: hidden; }
-.wheel h2 { position: absolute; z-index: 20; inset: 20px auto auto 20px; color: var(--muted); font-family: var(--text-face); font-size: 13.5px; font-weight: 500; }
-.now-wheel { position: absolute; inset: 0; /* Clear of the heading at the top, so a receding line never reads through it. */ -webkit-mask: linear-gradient(transparent 16%, black 40%, black 70%, transparent 94%); mask: linear-gradient(transparent 16%, black 40%, black 70%, transparent 94%); }
-.now-line {
-  position: absolute;
-  inset: 50% 20px auto;
-  display: grid;
-  grid-template-columns: 28px minmax(0, 1fr);
-  gap: 0 12px;
-  align-items: center;
-  min-height: 64px;
-  margin-top: -32px;
-  padding: 10px 18px 10px 14px;
-  border-radius: 20px;
-  z-index: calc(10 - var(--a));
-  translate: 0 calc(var(--o) * 56px);
-  scale: calc(1 - var(--a) * 0.075);
-  opacity: max(0, 1 - var(--a) * 0.42);
-  transition: opacity var(--dur-base) var(--ease), background-color var(--dur-base) var(--ease), box-shadow var(--dur-base) var(--ease);
-}
-@media (prefers-reduced-motion: no-preference) {
-  /* The fades settle with the spring, so a line does not keep brightening after it has arrived. */
-  .now-line { transition: translate var(--dur-spring) var(--spring), scale var(--dur-spring) var(--spring), opacity var(--dur-base) var(--ease), background-color var(--dur-base) var(--ease), box-shadow var(--dur-base) var(--ease); }
-  .now-line[data-wrap="a"] { animation: wrap-a var(--dur-move) ease-out both; }
-  .now-line[data-wrap="b"] { animation: wrap-b var(--dur-move) ease-out both; }
-}
-.now-line[data-center] { background: var(--surface); box-shadow: var(--lift); }
-@keyframes wrap-a { from { opacity: 0; } }
-@keyframes wrap-b { from { opacity: 0; } }
-.now-text { grid-column: 2; font-size: 17px; font-weight: 500; letter-spacing: -0.012em; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.now-who { grid-column: 2; color: var(--muted); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.now-line:not([data-center]) .now-who { display: none; }
-/* Each state has its own dot, told apart by build as well as color. A line without its second row centers the dot on the first. */
-.dot { grid-row: 1 / span 2; width: 24px; height: 24px; border-radius: 50%; background: radial-gradient(circle, var(--tone) 0 4px, color-mix(in oklch, var(--tone) 22%, white) 4.6px); }
-.now-line:not([data-center]) .dot { grid-row: 1; }
-[data-state="waiting"] > .dot { background: radial-gradient(circle, var(--surface) 0 4.5px, var(--tone) 5px); }
-[data-state="stalled"] > .dot { background: radial-gradient(circle, transparent 0 7px, var(--tone) 7.5px 9.5px, transparent 10px); }
-[data-state="failed"] > .dot { background: var(--tone); border-radius: 8px; }
-@media (prefers-reduced-motion: no-preference) {
-  .now-line[data-center][data-state="working"] > .dot { animation: beat var(--pulse) var(--ease) var(--clock, 0ms) infinite; }
-}
-@keyframes beat { 0% { box-shadow: 0 0 0 0 oklch(from var(--working) l c h / 0.35); } 70%, 100% { box-shadow: 0 0 0 8px oklch(from var(--working) l c h / 0); } }
-.now-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 17px; }
-.now-wheel:not(:empty) ~ .now-empty { display: none; }
 
 /*
  * The five states as one ruled strip: a single card whose hairlines are its own ground showing through 1px
@@ -343,7 +298,6 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
   .tiles { grid-template-columns: minmax(0, 1fr); }
 }
 @container main (max-width: 1180px) {
-  .hero { grid-template-columns: 232px minmax(0, 1fr); grid-template-areas: "summary summary" "gauge now" "stats stats" "agents agents"; }
   .summary h2 { font-size: 48px; }
 }
 
@@ -586,13 +540,12 @@ button.item { cursor: pointer; }
   .side-title { display: none; }
   .projects { display: flex; gap: 4px; overflow-x: auto; padding-block: 4px; margin-block: -4px; }
   .projects button { flex: none; width: auto; max-width: 24ch; min-height: 34px; border-radius: 999px; }
-  .hero { grid-template-columns: 232px minmax(0, 1fr); grid-template-areas: "summary summary" "gauge now" "stats stats" "agents agents"; }
   .summary h2 { font-size: 48px; }
 }
 
 @media (max-width: 760px) {
   body { padding: 8px 12px calc(var(--dock, 72px) + 24px); }
-  .hero { grid-template-columns: minmax(0, 1fr); grid-template-areas: "summary" "now" "gauge" "stats" "agents"; gap: 8px; margin-top: 32px; }
+  .hero { grid-template-columns: minmax(0, 1fr); grid-template-areas: "summary" "gauge" "stats" "agents"; gap: 8px; margin-top: 32px; }
   .summary { padding-bottom: 16px; }
   .summary h2 { font-size: 40px; letter-spacing: -0.035em; }
   .lede { margin-top: 12px; font-size: 15px; }
@@ -603,8 +556,7 @@ button.item { cursor: pointer; }
   .gauge-ring small { font-size: 12.5px; }
   .gauge-label { font-size: 15px; }
   /* Cards keep their 28px corner: their rows sit 12px in, with 16px corners. */
-  .wheel, .gauge, .stats, .tile, .empty { border-radius: 22px; }
-  .wheel { min-height: 232px; }
+  .gauge, .stats, .tile, .empty { border-radius: 22px; }
   .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .stat { gap: 12px; padding: 16px; }
   .stat:last-child { grid-column: 1 / -1; }
@@ -787,7 +739,7 @@ textarea:focus-visible, input:focus-visible, select:focus-visible { outline: 2px
 body[data-loading] :is(.eyebrow, .summary h2, .lede, .stat b, .tile-label, .tile-value, .tile-hint, .gauge-ring b, .gauge-label) { width: fit-content; justify-self: start; color: transparent; border-radius: 8px; background: linear-gradient(90deg, var(--rail) 40%, oklch(from var(--rail) l c h / 0.04) 50%, var(--rail) 60%) 0 0 / 300% 100%; }
 body[data-loading] :is(.gauge-ring b, .gauge-label) { background-image: linear-gradient(90deg, oklch(from var(--on-ink) l c h / 0.14) 40%, oklch(from var(--on-ink) l c h / 0.04) 50%, oklch(from var(--on-ink) l c h / 0.14) 60%); }
 body[data-loading] .gauge-ring b { inset: 50px 34px; }
-body[data-loading] :is(.stat .mark, .tile .chip, .agent-well, .ring-fill, .now-empty, .empty) { visibility: hidden; }
+body[data-loading] :is(.stat .mark, .tile .chip, .agent-well, .ring-fill, .empty) { visibility: hidden; }
 @media (prefers-reduced-motion: no-preference) {
   body[data-loading] :is(.eyebrow, .summary h2, .lede, .stat b, .tile-label, .tile-value, .tile-hint, .gauge-ring b, .gauge-label) { animation: shimmer 1.6s ease-in-out infinite; }
 }
@@ -811,9 +763,8 @@ body[data-loading] :is(.stat .mark, .tile .chip, .agent-well, .ring-fill, .now-e
    * Short, because the board is opened often. The agent tiles are redrawn whole when an agent changes,
    * so their list rises, not each tile, which would rise again on every redraw.
    */
-  .summary, .gauge, .wheel, .stats, .tiles, .group, .feed { animation: rise var(--dur-move) var(--ease) backwards; }
+  .summary, .gauge, .stats, .tiles, .group, .feed { animation: rise var(--dur-move) var(--ease) backwards; }
   .gauge { animation-delay: 40ms; }
-  .wheel { animation-delay: 80ms; }
   .stats { animation-delay: 120ms; }
   .tiles { animation-delay: 240ms; }
   .group, .feed { animation-delay: 280ms; }
@@ -902,7 +853,5 @@ body[data-loading] :is(.stat .mark, .tile .chip, .agent-well, .ring-fill, .now-e
  */
 @media (forced-colors: active) {
   .mark, .tick, .stop[data-pos="past"] .node::before, .mini i, .meter > i, .connection::before { forced-color-adjust: none; background: CanvasText; }
-  /* The wheel's dots are told apart by how they are built, so they keep their own drawing. */
-  .dot { forced-color-adjust: none; }
   .mini i[data-state=""], .meter { forced-color-adjust: none; background: GrayText; }
 }

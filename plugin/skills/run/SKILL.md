@@ -12,7 +12,7 @@ You are the lead. Take the task through the steps below, using the `crew` MCP to
 
 The user assigns each role to an agent: `delegate` goes to the engineer, `review` to the cross-reviewer, `polish` to the editor. The tool titles and each job's result name the agent. Role assignments are the user's; do not route a role's work to a different agent yourself.
 
-Before step 1, call `mission` with the task as `title`, so the board shows this command as one unit with its jobs under it. At the start of each later step, call `mission` with that step's `stage` (`implement`, `self-review`, `cross-review`, `fix`, `polish`, `final`), and end with `mission` and `done: true` plus a one-line `outcome` (or `abandoned: true` if the task is dropped). Each is one short call.
+Before step 1, call `mission` with the task as `title` so the board groups this command and its jobs as one unit. At the start of each later step, call `mission` with that step's `stage` (`implement`, `self-review`, `cross-review`, `fix`, `polish`, `final`). When finished, call `mission` with `done: true` and a one-line `outcome` (or `abandoned: true` if the task is dropped). Each is one short call.
 
 Skip a step only when it has nothing to act on (for example, no separable piece to delegate, or no user-facing text to polish), and say that you skipped it.
 
@@ -37,12 +37,12 @@ When a job is done, read its diff before merging (`git diff <base>..crew-<job id
 
 ## 3 and 4. Self-review and cross-review (at the same time)
 
-Start both in one step, then wait for both. Change nothing in the working tree until both have reported: a reviewer that sees the files move under it loses its footing.
+Start both in one step, then wait for both. Change nothing in the working tree until both have reported: a reviewer that sees files change underneath it loses its footing.
 
 - **Self-review**: launch the `crew:self-reviewer` subagent on the combined change. It has none of this conversation's context, which is the point: rereading your own diff in the same context does not count as review.
 - **Cross-review**: call `review` with `background: true` on the change (target `uncommitted`, or `branch` with the base). Pass the acceptance criteria as `done_when` and use `focus` for decisions and assumptions you are least sure about.
 
-The cross-review is always static: the worker reads and runs checks that end by themselves. If the change can only be judged by running the app, tell the self-reviewer it may run it in its own isolated instance; otherwise tell it to review statically too. Report this combined step to `mission` as `self-review`.
+The cross-review is always static: the worker reads files and runs checks that finish on their own. If the change can only be judged by running the app, tell the self-reviewer it may run the app in its own isolated instance; otherwise tell it to review statically too. Report this combined step to `mission` as `self-review`.
 
 ## 5. Fix (you)
 
@@ -60,11 +60,11 @@ Run the project's tests and checks on the combined result. If failures need comp
 
 ## Sharing the machine
 
-The user and every agent work on one computer. Workers are told the rules with each job; you and your subagents follow the same ones.
+The user and every agent work on one computer. Workers receive these rules with each job; you and your subagents follow the same ones.
 
-- **Isolated instances.** Anything you or a subagent starts (the app, a server, a headless browser) gets a free port chosen by the system, its own data and profile directory under a temporary directory, and is stopped afterwards. Never use the app's default port or the instance the user is running. Give each subagent this rule in its brief.
-- **One browser pane.** The app's browser pane is shared with the user, and there is one. Only you use it. Subagents and workers use their own headless browser.
-- **Measure alone.** Timings taken while other work runs are meaningless. Before you benchmark, profile, or load-test, wait until `status` shows no active job and no subagent of yours is running, and start nothing until the measurement ends. To have a worker measure, pass `exclusive: true` to `delegate`: the bridge refuses it while other jobs run and refuses other jobs until it ends, across every session. Never run two measurements at once.
+- **Isolated instances.** Anything you or a subagent starts (the app, a server, a headless browser) must use a free port chosen by the system and its own data and profile directory under a temporary directory, and must be stopped afterwards. Never use the app's default port or the instance the user is running. Give each subagent this rule in its brief.
+- **One browser pane.** There is only one browser pane in the app, shared with the user. Only you may use it. Subagents and workers must use their own headless browsers.
+- **Measure alone.** Timings taken while other work runs are meaningless. Before you benchmark, profile, or load-test, wait until `status` shows no active job and no subagent of yours is running, and start nothing else until the measurement ends. To have a worker measure, pass `exclusive: true` to `delegate`: the bridge refuses the job while other jobs run and refuses other jobs until it ends, across every session. Never run two measurements at once.
 
 ## When an agent is unavailable
 

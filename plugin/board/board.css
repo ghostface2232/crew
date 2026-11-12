@@ -429,8 +429,8 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 .sessions:empty { display: none; }
 .session { min-width: 0; max-width: 100%; border-radius: 16px; background: var(--tile); font-size: 13.5px; }
 .session summary { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 36px; padding: 4px 12px; cursor: pointer; border-radius: 16px; }
-.session summary::-webkit-details-marker { display: none; }
-.session summary:focus-visible { outline: 2px solid var(--working); outline-offset: 2px; }
+.session summary::-webkit-details-marker, .lead summary::-webkit-details-marker { display: none; }
+.session summary:focus-visible, .lead summary:focus-visible { outline: 2px solid var(--working); outline-offset: 2px; }
 .session details:not([open]) .chev { rotate: -45deg; translate: 0 0; }
 .session-detail { display: grid; gap: 6px; padding: 4px 14px 12px 36px; overflow-wrap: anywhere; user-select: text; }
 .session-detail .path { color: var(--muted); font-size: 12.5px; }
@@ -595,6 +595,12 @@ button.item { cursor: pointer; }
 .item[data-state="done"], .item[data-state="idle"] { background: transparent; }
 .item[data-state="done"] .what, .item[data-state="idle"] .what { font-weight: 400; }
 .item[data-state="waiting"] .now, .item[data-state="stalled"] .now, .item[data-state="failed"] .now { color: var(--tone); font-weight: 500; }
+.lead { min-width: 0; }
+.lead summary { cursor: pointer; }
+.lead .sub { display: flex; align-items: center; justify-content: end; gap: 8px; }
+.lead:not([open]) .chev { rotate: -45deg; translate: 0 0; }
+.lead .session-detail { min-width: 0; padding: 10px 16px 12px 48px; font-size: 13.5px; line-height: 1.5; white-space: pre-wrap; }
+@media (hover: hover) { .lead summary:hover { background: var(--hover); } }
 
 /*
  * The panel stays at the side only where the board still has its widest layout beside it (at least 1120px, the feed

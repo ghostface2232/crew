@@ -147,3 +147,42 @@ test('states combine by urgency and times read as coarse labels', () => {
   assert.equal(run(`STOP_OF_STAGE['self-review']`), run(`STOP_OF_STAGE['cross-review']`));
   assert.match(run(`trackOf([{ id: 'cx-1', kind: 'review', state: 'done', agent: 'codex', title: 'R', createdAt: 0, endedAt: 1000 }], 2, true, false).html`), /data-pos="now"><p class="stop-name"><i class="node"><\/i><span title="Review">Review<\/span><\/p><ul class="items">/);
 });
+
+test('unfinished jobs outlive the recent-command limit without duplicate rows', () => {
+  const h = harness();
+  h.run(`
+    for (const [id, endedAt] of [['old', 100], ['recent', 200], ['newest', 300]]) {
+      missions.set(id, { id, title: id, state: 'abandoned', stage: 'implement', createdAt: 1, endedAt });
+    }
+    jobs.set('cx-old', { id: 'cx-old', mission: 'old', agent: 'codex', kind: 'delegate', title: 'Still running', state: 'running', createdAt: 2 });
+    jobs.set('cx-recent', { id: 'cx-recent', mission: 'recent', agent: 'codex', kind: 'delegate', title: 'Waiting', state: 'waiting', waiting: { type: 'approval' }, createdAt: 3 });
+  `);
+  const cards = () => h.run(`cardsForProject({ missions: [...missions.values()], jobs: [...jobs.values()] }, '/project')`) as { key: string; closed: boolean; html: string }[];
+  assert.deepEqual(Array.from(cards(), (card) => card.key), ['loose:/project', 'newest', 'recent']);
+  assert.equal(cards()[0].closed, false);
+  assert.match(cards()[0].html, /data-job="cx-old"/);
+  assert.doesNotMatch(cards()[0].html, /data-job="cx-recent"/);
+  assert.match(cards().find((card) => card.key === 'recent')!.html, /data-job="cx-recent"/);
+  // The row remains reachable while waiting too, then leaves the active group when it finishes.
+  h.run(`Object.assign(jobs.get('cx-old'), { state: 'waiting', waiting: { type: 'approval' } })`);
+  assert.match(cards()[0].html, /data-job="cx-old"/);
+  h.run(`Object.assign(jobs.get('cx-old'), { state: 'done', endedAt: 400 })`);
+  assert.deepEqual(Array.from(cards(), (card) => card.key), ['newest', 'recent']);
+});
+
+test('mission leads disclose their full escaped question and retain a stable focus key across updates', () => {
+  const h = harness();
+  h.run(`
+    sessions.set('lead-1', { id: 'lead-1', title: 'A long <session> title', cwd: '/project', state: 'waiting', waitingFor: 'First line\\nLast line <question>' });
+    missions.set('active', { id: 'active', owner: 'lead-1', title: 'Task', state: 'active', stage: 'implement', createdAt: 1 });
+  `);
+  const html = () => h.run(`commandCard(missions.get('active')).html`) as string;
+  assert.match(html(), /<details class="lead" data-details="session:lead-1"><summary class="item" data-session="lead-1"/);
+  assert.match(html(), /<div class="session-detail"><p>A long &#60;session&#62; title<\/p><p>First line\nLast line &#60;question&#62;<\/p>/);
+  h.run(`Object.assign(sessions.get('lead-1'), { state: 'working', phase: 'New phase details' })`);
+  assert.match(html(), /data-session="lead-1"/);
+  assert.match(html(), /<p>New phase details<\/p>/);
+  assert.doesNotMatch(html(), /Last line/);
+  assert.equal(h.run(`controlKey({ tagName: 'SUMMARY', matches: () => true, dataset: { session: 'lead-1', state: 'working' } })`),
+    h.run(`controlKey({ tagName: 'SUMMARY', matches: () => true, dataset: { session: 'lead-1', state: 'waiting' } })`));
+});

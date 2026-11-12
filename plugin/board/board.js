@@ -107,7 +107,10 @@ function jobLabel(job) {
 }
 
 /** Identity of a control across re-renders: what it does and to what, not where it sits. */
-const controlKey = (node) => node.matches?.('button, [data-keep], summary') ? `${node.tagName}|${JSON.stringify(node.dataset)}|${Object.keys(node.dataset).length ? '' : node.textContent}` : null;
+const controlKey = (node) => node.matches?.('button, [data-keep], summary')
+  ? node.dataset.session ? `${node.tagName}|session:${node.dataset.session}`
+    : `${node.tagName}|${JSON.stringify(node.dataset)}|${Object.keys(node.dataset).length ? '' : node.textContent}`
+  : null;
 
 /** Field an input method is composing in. Replacing it mid-composition would break the character being typed. */
 let composing = null;
@@ -462,6 +465,11 @@ function commandHead(key, title, mini, meta, action = '') {
     </div>`;
 }
 
+function sessionDetail(session) {
+  const detail = session.state === 'waiting' ? session.waitingFor : session.phase;
+  return `<div class="session-detail"><p>${esc(session.title)}</p>${detail ? `<p>${esc(detail)}</p>` : ''}<p class="path">${esc(session.cwd)}</p></div>`;
+}
+
 /** One command as a unit: the stop the lead has reached, and each job started under it at the stop it belongs to. */
 function commandCard(mission) {
   const mine = [...jobs.values()].filter((job) => job.mission === mission.id).sort((a, b) => a.createdAt - b.createdAt);
@@ -470,11 +478,11 @@ function commandCard(mission) {
   // The lead's own work is not a job. It is shown when the session that opened the command is known.
   const session = active ? sessions.get(mission.owner) : null;
   const lead = session
-    ? `<li><div class="item" data-state="${sessionMark(session)}" title="${esc(sessionLabel(session))}">
+    ? `<li><details class="lead" data-details="session:${esc(session.id)}"><summary class="item" data-session="${esc(session.id)}" data-state="${sessionMark(session)}" title="${esc(sessionLabel(session))}">
         <span class="mark"></span><span class="what">${STAGE_NAMES[mission.stage]}</span>
         ${session.state === 'waiting' && session.waitingFor ? `<span class="now">${esc(session.waitingFor)}</span>` : session.phase ? `<span class="now">${esc(session.phase)}</span>` : ''}
-        <span class="sub">Lead</span><span class="where"><span class="at">${STOPS[at]}</span><span class="who">Claude</span></span>
-      </div></li>`
+        <span class="sub">Lead<i class="chev" aria-hidden="true"></i></span><span class="where"><span class="at">${STOPS[at]}</span><span class="who">Claude</span></span>
+      </summary>${sessionDetail(session)}</details></li>`
     : '';
   const { html, mini } = trackOf(mine, at, active, mission.state === 'done', lead);
   const tokens = mine.reduce((sum, job) => sum + (job.tokens ?? 0), 0);
@@ -728,6 +736,15 @@ function groupElement() {
   return el;
 }
 
+/** Recent commands stay bounded, but unfinished jobs always keep a row and its controls. */
+function cardsForProject(own, dir) {
+  const open = own.missions.filter((m) => m.state === 'active').sort((a, b) => b.createdAt - a.createdAt);
+  const ended = own.missions.filter((m) => m.state !== 'active').sort((a, b) => b.endedAt - a.endedAt).slice(0, MISSIONS_FINISHED_SHOWN);
+  const shown = new Set([...open, ...ended].map((m) => m.id));
+  const loose = own.jobs.filter((job) => !missions.has(job.mission) || (!job.endedAt && !shown.has(job.mission)));
+  return [...open.map(commandCard), ...(loose.length ? [looseCard(dir, loose)] : []), ...ended.map(commandCard)];
+}
+
 function render() {
   const dirs = knownProjects();
   const names = projectNames(dirs);
@@ -755,18 +772,13 @@ function render() {
       reconcile(el.querySelector('[data-sessions]'), own.sessions.filter((s) => !leads.has(s.id)).map((s) => ({
         key: s.id,
         update: (li) => {
-          const detail = s.state === 'waiting' ? s.waitingFor : s.phase;
           li.dataset.state = sessionMark(s);
           li.title = s.cwd;
-          patch(li, `<details data-details="session:${esc(s.id)}"><summary><span class="mark"></span><span class="what">${esc(s.title)}</span><span class="sub">Claude · ${esc(sessionLabel(s))}</span><i class="chev" aria-hidden="true"></i></summary><div class="session-detail"><p>${esc(s.title)}</p>${detail ? `<p>${esc(detail)}</p>` : ''}<p class="path">${esc(s.cwd)}</p></div></details>`);
+          patch(li, `<details data-details="session:${esc(s.id)}"><summary data-session="${esc(s.id)}"><span class="mark"></span><span class="what">${esc(s.title)}</span><span class="sub">Claude · ${esc(sessionLabel(s))}</span><i class="chev" aria-hidden="true"></i></summary>${sessionDetail(s)}</details>`);
         },
       })), () => Object.assign(document.createElement('li'), { className: 'session' }));
 
-      const open = own.missions.filter((m) => m.state === 'active').sort((a, b) => b.createdAt - a.createdAt);
-      // The ones that ended last, whenever they began: a long command must not vanish the moment it finishes.
-      const ended = own.missions.filter((m) => m.state !== 'active').sort((a, b) => b.endedAt - a.endedAt).slice(0, MISSIONS_FINISHED_SHOWN);
-      const loose = own.jobs.filter((job) => !missions.has(job.mission));
-      renderCards(el.querySelector('[data-commands]'), [...open.map(commandCard), ...(loose.length ? [looseCard(dir, loose)] : []), ...ended.map(commandCard)]);
+      renderCards(el.querySelector('[data-commands]'), cardsForProject(own, dir));
     },
   })), groupElement);
 

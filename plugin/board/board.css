@@ -884,14 +884,14 @@ body[data-loading] :is(.stat .mark, .stats-bar, .tile .chip, .agent-well, .empty
 }
 
 /*
- * Smoothed corners, like Figma's 60% corner smoothing on vad-3d's cards. The curve starts 1.6 times further
- * from the corner and bends as a superellipse, so it passes the plain arc's midpoint but flows into the
- * straight edges. Drawn with corner-shape rather than a clip, so shadows, outlines and focus rings follow it.
+ * Smoothed corners, after the corner smoothing on vad-3d's cards. The curve starts 1.6 times further from
+ * the corner and bends as a gentle superellipse (1.4; 1.78 would pass the plain arc's midpoint), so it flows
+ * into the straight edges and reads a little softer than the plain radius. Drawn with corner-shape rather than a clip, so shadows, outlines and focus rings follow it.
  * Pills, tracks and circles have no corner to smooth and stay round. Without corner-shape, the plain radii hold.
  */
 @supports (corner-shape: superellipse(2)) {
   :root { --radius-tile: 45px; --radius-item: 26px; --radius-field: 19px; }
-  :is(.card, .tile, .empty, .feed > .feed-list, .notice, .item, .work, .outcome, .stage, .need .callout p, .cmd-toggle, .projects button, textarea, input, select, .prose, .callout, .section, .facts div, .sheet, .logo) { corner-shape: superellipse(1.78); }
+  :is(.card, .tile, .empty, .feed > .feed-list, .notice, .item, .work, .outcome, .stage, .need .callout p, .cmd-toggle, .projects button, textarea, input, select, .prose, .callout, .section, .facts div, .sheet, .logo) { corner-shape: superellipse(1.4); }
   .card.need, .sheet { border-radius: 51px; }
   .callout, .section, .facts div { border-radius: 38px; }
   .logo { border-radius: 13px; }

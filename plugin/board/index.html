@@ -9,24 +9,41 @@
 </head>
 <body>
 <header class="top">
-  <h1>Crew</h1>
+  <h1><i class="logo" aria-hidden="true"></i>Crew</h1>
   <div id="projects" class="segmented" role="group" aria-label="Project" hidden></div>
-  <div id="agents" class="agents" aria-label="Agents"></div>
   <p id="connection" class="connection" role="status">Connecting…</p>
-  <button id="open-settings" class="quiet">Settings</button>
+  <button id="open-settings">Settings</button>
 </header>
 
 <p id="notice" class="notice" role="alert" hidden></p>
-<ul id="needs" class="needs" aria-label="Needs you" hidden></ul>
 
-<main class="board">
-  <div id="groups" class="groups"></div>
-</main>
+<section class="hero" aria-label="Overview">
+  <div id="summary" class="summary"></div>
+  <div id="gauge" class="gauge"></div>
+  <div class="wheel">
+    <h2>Right now</h2>
+    <ul id="now" class="now-wheel"></ul>
+    <p class="now-empty">Nothing is running.</p>
+  </div>
+  <ul id="stats" class="stats" aria-label="Jobs by state"></ul>
+  <ul id="agents" class="tiles" aria-label="Agents"></ul>
+</section>
 
-<section class="feed" aria-labelledby="feed-title">
-  <h2 id="feed-title">Activity</h2>
-  <ol id="feed" class="feed-list"></ol>
-  <p id="feed-empty" class="empty">Nothing has happened yet.</p>
+<div class="layout">
+  <main class="board">
+    <div id="groups" class="groups"></div>
+  </main>
+
+  <section class="feed" aria-labelledby="feed-title">
+    <h2 id="feed-title">Activity</h2>
+    <ol id="feed" class="feed-list"></ol>
+    <p id="feed-empty" class="empty">Nothing has happened yet.</p>
+  </section>
+</div>
+
+<section id="dock" class="dock" aria-label="Needs you" hidden>
+  <button id="dock-pill" class="dock-pill" data-act="answer" data-state="waiting"></button>
+  <ul id="needs" class="needs"></ul>
 </section>
 
 <dialog id="drawer" class="sheet" aria-labelledby="drawer-title">

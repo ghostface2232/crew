@@ -43,6 +43,15 @@ const MISSIONS_FINISHED_SHOWN = 2;
 const STOPS = ['Plan', 'Build', 'Review', 'Fix', 'Polish', 'Final'];
 const STOP_OF_STAGE = { plan: 0, implement: 1, 'self-review': 2, 'cross-review': 2, fix: 3, polish: 4, final: 5 };
 const STOP_OF_KIND = { delegate: 1, review: 2, polish: 4 };
+/** What is happening at each stop, for someone who has not seen the pipeline before. */
+const STOP_NOTES = [
+  'Claude is working out what needs to be done and splitting it into pieces.',
+  'The agents are writing the code, each in its own copy of the project.',
+  'The work is being checked for mistakes, first by Claude and then by a second agent.',
+  'Claude is fixing what the review found.',
+  'Wording, comments, and docs are being tidied up.',
+  'Everything is being tested one last time before it comes back to you.',
+];
 /** Commands the user folded or unfolded by hand; without an entry, an open command is unfolded and an ended one folded. */
 const folded = new Map();
 const EVENT_TONES = { waiting: 'waiting', stalled: 'waiting', error: 'failed', limit: 'failed', done: 'done' };
@@ -73,13 +82,6 @@ function compact(n) {
 function shortPath(dir) {
   const parts = String(dir ?? '').split('/').filter(Boolean);
   return parts.length > 2 ? `…/${parts.slice(-2).join('/')}` : dir;
-}
-
-function jobTone(job) {
-  if (job.state === 'waiting' || job.stalled) return 'waiting';
-  if (job.state === 'running') return 'working';
-  if (job.state === 'done') return 'done';
-  return job.state === 'failed' ? 'failed' : 'idle';
 }
 
 function jobLabel(job) {
@@ -124,6 +126,8 @@ function patch(el, html) {
   const open = new Set([...el.querySelectorAll('details[open]')].map((d) => d.dataset.details));
   el.innerHTML = html;
   el.dataset.html = html;
+  // Looping animations in the new markup start at the point a never-replaced one would have reached.
+  el.style?.setProperty('--clock', `${-Math.round(performance.now())}ms`);
   for (const line of el.querySelectorAll('[data-status]')) {
     const was = said.get(line.dataset.status);
     if (!was) continue;
@@ -196,12 +200,16 @@ function timeLabel(job) {
 /** One job on a track. The whole item opens its details. */
 function item(job) {
   const agent = agents[job.agent]?.name ?? AGENT_NAMES[job.agent];
-  const flags = [job.runsApp && 'runs the app', job.exclusive && 'runs alone'].filter(Boolean).map((flag) => ` · ${flag}`).join('');
-  const now = job.state === 'running' ? job.phase : job.state === 'failed' ? job.error?.message : '';
+  const flags = [job.runsApp && 'runs the app', job.exclusive && 'runs alone'].filter(Boolean).map((flag) => `<span class="flag">${flag}</span>`).join('');
+  // One line under the title: what the job is doing, or why it is not doing anything.
+  const now = job.state === 'waiting' ? jobLabel(job)
+    : job.stalled ? `May be stuck · ${job.phase}`
+    : job.state === 'running' ? job.phase
+    : job.state === 'failed' ? job.error?.message : '';
   return `<li><button class="item" data-state="${jobMark(job)}" data-act="open" data-job="${esc(job.id)}" title="${esc(jobLabel(job))}">
-      <span class="mark"></span><span class="what">${esc(job.title)}</span>
-      <span class="sub">${esc(agent)} · ${timeLabel(job)}${flags}</span>
+      <span class="mark"></span><span class="what">${esc(job.title)}${flags}</span>
       ${now ? `<span class="now">${esc(now)}</span>` : ''}
+      <span class="at">${STOPS[STOP_OF_KIND[job.kind]]}</span><span class="who">${esc(agent)}</span><span class="sub">${timeLabel(job)}</span>
     </button></li>`;
 }
 
@@ -233,8 +241,22 @@ function renderCards(list, cards) {
       patch(el, card.html);
       el.toggleAttribute('data-quiet', Boolean(card.quiet));
       el.toggleAttribute('data-closed', Boolean(card.closed));
+      el.style.viewTransitionName = cardName(card.key);
     },
-  })), () => Object.assign(document.createElement('li'), { className: 'card enter' }));
+  })), () => Object.assign(document.createElement('li'), { className: document.body.classList.contains('ready') ? 'card enter' : 'card' }));
+}
+
+const cardNames = new Map();
+/** A name for a card that is valid in CSS, whatever its key holds. */
+function cardName(key) {
+  if (!cardNames.has(key)) cardNames.set(key, `card-${cardNames.size + 1}`);
+  return cardNames.get(key);
+}
+
+/** Applies a change the user asked for so that what moves is seen moving, where the browser can do that. */
+function smooth(change) {
+  if (document.startViewTransition && !matchMedia('(prefers-reduced-motion: reduce)').matches) document.startViewTransition(change);
+  else change();
 }
 
 /** Short, distinct names for projects: the folder name, or more of the path when two share one. */
@@ -293,7 +315,8 @@ function together(marks) {
 function trackOf(list, at, active, finished, lead = '') {
   const byStop = STOPS.map((_, stop) => list.filter((job) => STOP_OF_KIND[job.kind] === stop));
   const pos = (stop) => (finished || stop < at ? 'past' : stop === at && active ? 'now' : 'todo');
-  const html = `<ol class="track">${STOPS.map((name, stop) => {
+  const note = active && at >= 0 ? `<p class="step-note"><b>${STOPS[at]}.</b> ${STOP_NOTES[at]}</p>` : '';
+  const html = `${note}<ol class="track">${STOPS.map((name, stop) => {
     const rows = (stop === at ? lead : '') + byStop[stop].map(item).join('');
     return `<li class="stop" data-pos="${pos(stop)}"><p class="stop-name"><i class="node"></i><span>${name}</span></p>${rows ? `<ul class="items">${rows}</ul>` : ''}</li>`;
   }).join('')}</ol>`;
@@ -301,6 +324,21 @@ function trackOf(list, at, active, finished, lead = '') {
   const mini = `<span class="mini" aria-hidden="true">${STOPS.map((_, stop) =>
     `<i data-state="${together(byStop[stop].map(jobMark)) || { past: 'done', now: 'working', todo: '' }[pos(stop)]}"></i>`).join('')}</span>`;
   return { html, mini };
+}
+
+/** A ring filled to `part` of `whole`. */
+function ring(part, whole) {
+  const around = 2 * Math.PI * 42;
+  const left = around * (1 - (whole ? Math.min(part / whole, 1) : 0));
+  return `<svg class="ring" viewBox="0 0 100 100" aria-hidden="true"><circle class="ring-rail" cx="50" cy="50" r="42"/><circle class="ring-fill" cx="50" cy="50" r="42" stroke-dasharray="${around.toFixed(1)}" style="stroke-dashoffset:${left.toFixed(1)}"/></svg>`;
+}
+
+/** Changes a figure so the old value rolls out and the new one rolls in. The first value just appears. */
+function roll(el, text) {
+  const was = el.dataset.value;
+  if (was === text) return;
+  el.dataset.value = text;
+  el.innerHTML = was === undefined ? `<span>${esc(text)}</span>` : `<span class="roll-out" aria-hidden="true">${esc(was)}</span><span class="roll-in">${esc(text)}</span>`;
 }
 
 function commandHead(key, title, closed, mini, meta, action = '') {
@@ -320,25 +358,36 @@ function commandCard(mission) {
   const lead = session
     ? `<li><div class="item" data-state="${sessionMark(session)}" title="${esc(sessionLabel(session))}">
         <span class="mark"></span><span class="what">${STAGE_NAMES[mission.stage]}</span>
-        <span class="sub">Claude · lead</span>${session.state === 'waiting' && session.waitingFor ? `<span class="now">${esc(session.waitingFor)}</span>` : session.phase ? `<span class="now">${esc(session.phase)}</span>` : ''}
+        ${session.state === 'waiting' && session.waitingFor ? `<span class="now">${esc(session.waitingFor)}</span>` : session.phase ? `<span class="now">${esc(session.phase)}</span>` : ''}
+        <span class="at">${STOPS[at]}</span><span class="who">Claude</span><span class="sub">Lead</span>
       </div></li>`
     : '';
   const { html, mini } = trackOf(mine, at, active, mission.state === 'done', lead);
   const tokens = mine.reduce((sum, job) => sum + (job.tokens ?? 0), 0);
-  const waiting = mine.some(isWaiting);
+  // The most urgent thing under the command decides the chip's state; the stop it has reached is its label.
+  const mood = together([...mine.filter((job) => !job.endedAt).map(jobMark), ...(session ? [sessionMark(session)] : [])].filter((mark) => mark !== 'idle')) || 'working';
+  const chip = active
+    ? `<span class="chip" data-state="${mood}"><span class="mark"></span>${{ waiting: 'Needs you', stalled: 'Gone quiet', failed: 'A job failed' }[mood] ?? `Step ${at + 1} of ${STOPS.length} · ${STOPS[at]}`}</span>`
+    : `<span class="chip" data-state="${mission.state === 'done' ? 'done' : 'idle'}"><span class="mark"></span>${mission.state === 'done' ? 'Done' : 'Abandoned'}</span>`;
   const meta = [
-    active ? (waiting ? '<span data-tone="waiting">Waiting on you</span>' : '') : mission.state === 'done' ? 'Done' : 'Abandoned',
-    `<span class="time" data-from="${esc(mission.createdAt)}" data-to="${esc(mission.endedAt ?? '')}" data-brief></span>`,
-    tokens ? `${compact(tokens)} tokens` : '',
+    `<span class="time" data-from="${esc(mission.createdAt)}" data-to="${esc(mission.endedAt ?? '')}" data-brief ${active ? 'data-suffix=" so far"' : 'data-prefix="took "'}></span>`,
+    tokens ? `<span title="How much AI usage this has taken">${compact(tokens)} tokens</span>` : '',
   ].filter(Boolean).join(' · ');
+  const ended = mission.state === 'done' ? 'done' : active ? '' : 'abandoned';
+  // The one figure to read at a glance: how far along the six steps this task is.
+  const stage = `<div class="stage"${ended ? ` data-ended="${ended}"` : ''}>
+      <div class="stage-ring">${ring(ended === 'done' ? STOPS.length : at + 1, STOPS.length)}<b>${ended === 'done' ? '<i class="tick"></i>' : `${at + 1}<small>/${STOPS.length}</small>`}</b></div>
+      <p class="stage-label">${active ? 'Now at step' : ended === 'done' ? 'Finished' : 'Stopped at step'}</p>
+      <p class="stage-name">${ended === 'done' ? 'All done' : STOPS[at]}</p>
+    </div>`;
   const closed = folded.get(mission.id) ?? !active;
   const dismiss = active ? `<button class="quiet" data-act="dismiss" data-mission="${esc(mission.id)}" title="Closes this command on the board. Its jobs keep running.">Dismiss</button>` : '';
   return {
     key: mission.id,
     quiet: !active,
     closed,
-    html: `${commandHead(mission.id, mission.title, closed, mini, meta, dismiss)}
-      <div class="cmd-body">${html}${mission.outcome ? `<p class="outcome">${esc(mission.outcome)}</p>` : ''}</div>`,
+    html: `${commandHead(mission.id, mission.title, closed, mini + chip, meta, dismiss)}
+      <div class="cmd-body">${stage}<div class="cmd-main">${html}${mission.outcome ? `<p class="outcome">${esc(mission.outcome)}</p>` : ''}</div></div>`,
   };
 }
 
@@ -349,12 +398,19 @@ function looseCard(dir, list) {
   const key = `loose:${dir}`;
   const { html, mini } = trackOf(shown, -1, false, false);
   const closed = folded.get(key) ?? running.length === 0;
-  return { key, quiet: running.length === 0, closed, html: `${commandHead(key, 'Jobs outside a command', closed, mini, running.length ? `${running.length} active` : 'Nothing running')}<div class="cmd-body">${html}</div>` };
+  return { key, quiet: running.length === 0, closed, html: `${commandHead(key, 'Other jobs', closed, mini, running.length ? `${running.length} running` : 'Nothing running')}<div class="cmd-body" data-plain><div class="cmd-main">${html}</div></div>` };
 }
 
+/** Who is asking, large, with the job it is about under it. `about` is markup. */
+const needHead = (title, about) => `<div class="need-head"><span class="need-icon" data-state="waiting"><span class="mark"></span></span><div><p class="need-title">${esc(title)}</p><p class="need-who">${about}</p></div></div>`;
+
+/** Whether the requests are laid out or tucked into a pill. A request that arrives lays them out again. */
+let dockOpen = true;
+let dockCount = 0;
+
 /**
- * Everything waiting on the user, above the board, so it is found without scanning every project.
- * Each request is shown in full with the controls that answer it.
+ * Everything waiting on the user, floating over the board so it is seen wherever the page is scrolled.
+ * The oldest request is in front with the controls that answer it; the rest wait behind it.
  */
 function renderNeeds() {
   const names = projectNames(knownProjects());
@@ -362,47 +418,159 @@ function renderNeeds() {
   const cards = [
     ...[...jobs.values()].filter(isWaiting).sort((a, b) => a.waiting.since - b.waiting.since).map((job) => ({
       key: job.id,
-      html: `<p class="need-label"><span class="mark"></span>${job.waiting.type === 'approval' ? 'Approval' : 'Question'}<span class="need-who">${esc(agents[job.agent]?.name ?? AGENT_NAMES[job.agent])} · ${esc(job.title)}${where(job)}</span></p>${callout(job)}`,
+      html: `${needHead(`${agents[job.agent]?.name ?? AGENT_NAMES[job.agent]} ${job.waiting.type === 'approval' ? 'needs your permission' : 'has a question'}`, `${esc(job.title)}${where(job)}`)}${callout(job)}
+        <p class="hint">This job is paused until you answer.</p>`,
     })),
     ...[...sessions.values()].filter(isWaiting).map((s) => ({
       key: `session:${s.id}`,
-      html: `<p class="need-label"><span class="mark"></span>Claude needs input<span class="need-who">${esc(s.title)}${where(s)}</span></p><div class="callout"><p>${esc(s.waitingFor || 'Answer it in the Claude app.')}</p></div>`,
+      html: `${needHead('Claude needs your input', `${esc(s.title)}${where(s)}`)}<div class="callout"><p>${esc(s.waitingFor || 'Answer it in the Claude app.')}</p></div>
+        <p class="hint">Answer in the Claude app, in the session that asked.</p>`,
     })),
   ];
-  const el = document.getElementById('needs');
-  el.hidden = cards.length === 0;
-  reconcile(el, cards.map((card) => ({ key: card.key, update: (li) => patch(li, card.html) })), () => Object.assign(document.createElement('li'), { className: 'card need' }));
+  const total = cards.length;
+  if (total > dockCount) dockOpen = true;
+  dockCount = total;
+  const dock = document.getElementById('dock');
+  dock.hidden = total === 0;
+  dock.toggleAttribute('data-collapsed', !dockOpen);
+  patch(document.getElementById('dock-pill'), `<span class="mark"></span>${total === 1 ? '1 request is waiting on you' : `${total} requests are waiting on you`}<b>Answer</b>`);
+  reconcile(document.getElementById('needs'), cards.map((card, index) => ({
+    key: card.key,
+    update: (li) => patch(li, `<div class="need-bar"><span class="chip" data-state="waiting"><span class="mark"></span>${total > 1 ? `Request ${index + 1} of ${total}` : 'Needs you'}</span>
+        <button class="quiet" data-act="later" title="Tucks the request away. The job stays paused until you answer.">Later</button></div>${card.html}`),
+  })), () => Object.assign(document.createElement('li'), { className: 'card need' }));
 }
+
+/** Position in the "right now" list of the line shown largest; it moves on by itself. */
+let nowAt = 0;
+let nowVisible = () => true;
+
+/**
+ * What every agent is doing this moment, one line each, as a wheel that turns by itself: the line in
+ * the middle is the one to read, its neighbors recede. Lines keep their element, so they glide when the wheel turns.
+ */
+function renderNow(visible) {
+  if (visible) nowVisible = visible;
+  const lines = [
+    ...[...sessions.values()].filter((s) => nowVisible(s) && s.state !== 'idle').map((s) => ({
+      key: `session:${s.id}`, state: sessionMark(s), who: 'Claude', about: s.title,
+      text: s.state === 'waiting' ? s.waitingFor || 'Needs your input' : s.phase || sessionLabel(s),
+    })),
+    ...[...jobs.values()].filter((job) => nowVisible(job) && !job.endedAt).map((job) => ({
+      key: job.id, state: jobMark(job), who: agents[job.agent]?.name ?? AGENT_NAMES[job.agent], about: job.title,
+      text: job.state === 'waiting' ? jobLabel(job) : job.stalled ? 'May be stuck' : job.phase || 'Working',
+    })),
+  ];
+  const count = lines.length;
+  if (count) nowAt = ((nowAt % count) + count) % count;
+  reconcile(document.getElementById('now'), lines.map((line, index) => ({
+    key: line.key,
+    update: (li) => {
+      // The shortest way round the wheel from the middle line to this one.
+      let offset = index - nowAt;
+      if (offset > count / 2) offset -= count;
+      if (offset < -count / 2) offset += count;
+      // A line that goes round the back is not seen crossing the front: it fades in at its new place.
+      if (li.dataset.offset !== undefined && Math.abs(offset - Number(li.dataset.offset)) > 1) li.dataset.wrap = li.dataset.wrap === 'a' ? 'b' : 'a';
+      li.dataset.offset = offset;
+      li.dataset.state = line.state;
+      li.toggleAttribute('data-center', offset === 0);
+      li.style.setProperty('--o', offset);
+      li.style.setProperty('--a', Math.abs(offset));
+      patch(li, `<span class="dot"></span><span class="now-text">${esc(line.text)}</span><span class="now-who">${esc(line.who)} · ${esc(line.about)}</span>`);
+    },
+  })), () => Object.assign(document.createElement('li'), { className: 'now-line' }));
+}
+setInterval(() => {
+  if (document.hidden) return;
+  nowAt += 1;
+  renderNow();
+}, 2800);
 
 /** The agents as resources: what each is doing and how much of its allowance is used. They are not what the board is organized by. */
 function renderAgents(visible) {
   const windows = limits.codex?.windows ?? [];
   const top = windows.reduce((max, w) => Math.max(max, Math.round(w.usedPercent)), 0);
   const usage = windows.length
-    ? `<span class="meter"${top >= 90 ? ' data-high' : ''} style="--used:${top}"><i></i></span><span class="pct">${top}%</span>`
+    ? `<span class="meter"${top >= 90 ? ' data-high' : ''} style="--used:${top}"><i></i></span><span class="pct">${top}% of limit used</span>`
     : '';
   const usageTitle = windows.map((w) => `${Math.round(w.usedPercent)}% of the ${w.minutes >= 1440 ? `${Math.round(w.minutes / 1440)}-day` : `${Math.round(w.minutes / 60)}-hour`} limit`).join(', ');
   const chips = [
-    { agent: 'claude', marks: [...sessions.values()].filter(visible).map(sessionMark), role: 'Lead' },
+    { agent: 'claude', marks: [...sessions.values()].filter(visible).map(sessionMark), role: 'Lead', hint: 'Plans the work, checks it, and puts it together' },
     ...WORKERS_SHOWN.map((agent) => ({
       agent,
       marks: [...jobs.values()].filter((job) => job.agent === agent && !job.endedAt && visible(job)).map(jobMark),
       role: Object.keys(ROLE_NAMES).filter((role) => roles[role]?.agent === agent).map((role) => ROLE_NAMES[role]).join(' · ') || 'No role',
+      hint: Object.keys(ROLE_HINTS).filter((role) => roles[role]?.agent === agent).map((role) => ROLE_HINTS[role]).join(' · ') || 'Not given any kind of job',
     })),
   ];
-  patch(document.getElementById('agents'), chips.map(({ agent, marks, role }) => {
+  patch(document.getElementById('agents'), chips.map(({ agent, marks, role, hint }) => {
     const busy = marks.filter((mark) => mark !== 'idle' && mark !== 'done').length;
     const state = URGENCY.find((mark) => marks.includes(mark)) ?? 'idle';
-    const extra = agent === 'codex' ? usage : '';
-    return `<span class="agent" data-state="${state}" title="${esc([busy ? `${busy} active` : 'Idle', agent === 'codex' && usageTitle].filter(Boolean).join(' · '))}">
-        <span class="mark"></span><b>${esc(agents[agent]?.name ?? AGENT_NAMES[agent])}</b><span class="role">${esc(role)}</span>${extra}</span>`;
+    const label = { waiting: 'Needs you', failed: 'Failed', stalled: 'May be stuck', working: busy > 1 ? `${busy} working` : 'Working', idle: 'Idle' }[state];
+    const extra = agent === 'codex' && usage ? `<span class="usage" title="${esc(usageTitle)}">${usage}</span>` : '';
+    return `<li class="tile">
+        <p class="tile-label">${esc(role)}</p>
+        <p class="tile-value">${esc(agents[agent]?.name ?? AGENT_NAMES[agent])}</p>
+        <p class="tile-hint">${esc(hint)}</p>
+        <p class="tile-foot"><span class="chip" data-state="${state}"><span class="mark"></span>${label}</span>${extra}</p>
+      </li>`;
   }).join(''));
+}
+
+const SUMMARY_STATES = [
+  ['working', 'In progress', 'Jobs an agent is working on right now'],
+  ['waiting', 'Needs you', 'Paused until you approve something or answer a question'],
+  ['stalled', 'Gone quiet', 'Still running, but silent for a while. It may be stuck.'],
+  ['failed', 'Failed', 'Jobs that stopped on an error'],
+  ['done', 'Finished', 'Jobs that are complete'],
+];
+
+/**
+ * The board in one sentence, a figure for each state, and one ring: how much of the work in hand is finished.
+ * Work in hand is every unfinished job, and the finished ones of commands that are still open.
+ */
+function renderSummary(visible) {
+  const open = [...missions.values()].filter((m) => m.state === 'active' && visible(m));
+  const live = [...jobs.values()].filter((job) => visible(job) && (!job.endedAt || missions.get(job.mission)?.state === 'active'));
+  const asking = [...sessions.values()].filter((s) => visible(s) && isWaiting(s)).length;
+  const marks = live.map(jobMark);
+  const stats = SUMMARY_STATES.map(([state, label, hint]) => ({ state, label, hint, n: marks.filter((mark) => mark === state).length + (state === 'waiting' ? asking : 0) }));
+  const n = Object.fromEntries(stats.map((stat) => [stat.state, stat.n]));
+  const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
+  const headline = n.waiting ? (n.waiting === 1 ? 'One thing needs your answer' : `${n.waiting} things need your answer`)
+    : open.length ? `Working on ${plural(open.length, 'task')}`
+    : n.working + n.stalled ? `${plural(n.working + n.stalled, 'job')} running` : 'All quiet';
+  const lede = n.waiting ? 'That job is paused until you reply. The request is at the bottom right of the screen.'
+    : n.failed ? `${plural(n.failed, 'job')} stopped on an error. Open it to see what went wrong.`
+    : n.stalled ? `${plural(n.stalled, 'job')} has gone quiet and may be stuck. Open it to check.`
+    : open.length || n.working ? 'Nothing needs you right now. You can leave this open and check back.'
+    : 'Start a task with /crew:run in a Claude session and it will show up here.';
+  const tokens = live.reduce((sum, job) => sum + (job.tokens ?? 0), 0);
+  patch(document.getElementById('summary'), `<p class="eyebrow">${[open.length && plural(open.length, 'task'), plural(live.length, 'job'), `${compact(tokens)} tokens used`].filter(Boolean).join(' · ')}</p>
+    <h2>${headline}</h2><p class="lede">${lede}</p>`);
+  // The tiles keep their elements, so a figure that changes rolls instead of blinking.
+  reconcile(document.getElementById('stats'), stats.map((stat) => ({
+    key: stat.state,
+    update: (li) => {
+      if (!li.firstChild) li.innerHTML = `<span class="stat-label"><span class="mark"></span>${stat.label}</span><b class="roll"></b>`;
+      li.dataset.state = stat.state;
+      li.title = stat.hint;
+      li.toggleAttribute('data-none', !stat.n);
+      roll(li.querySelector('.roll'), String(stat.n));
+    },
+  })), () => Object.assign(document.createElement('li'), { className: 'stat' }));
+  const gauge = document.getElementById('gauge');
+  if (!gauge.firstChild) gauge.innerHTML = `<div class="gauge-ring">${ring(0, 1)}<b class="roll"></b></div><p class="gauge-label"></p>`;
+  gauge.querySelector('.ring-fill').style.strokeDashoffset = (2 * Math.PI * 42 * (1 - (live.length ? n.done / live.length : 0))).toFixed(1);
+  roll(gauge.querySelector('.roll'), live.length ? `${n.done}/${live.length}` : '0');
+  gauge.querySelector('.gauge-label').textContent = !live.length ? 'No jobs yet' : n.done === live.length ? 'Every job is finished' : 'jobs finished';
 }
 
 function groupElement() {
   const el = document.createElement('section');
   el.className = 'group';
-  el.innerHTML = '<header class="group-head"></header><ul class="sessions" data-sessions></ul><ul class="commands" data-commands></ul><p class="empty">Nothing here yet. Commands appear when a Claude session with the Crew plugin starts one with /crew:run.</p>';
+  el.innerHTML = '<header class="group-head"></header><ul class="sessions" data-sessions></ul><ul class="commands" data-commands></ul><p class="empty">Nothing here yet. Start a task with /crew:run in a Claude session and it will show up here.</p>';
   return el;
 }
 
@@ -421,11 +589,11 @@ function render() {
       const own = { sessions: [...sessions.values()].filter(mine), jobs: [...jobs.values()].filter(mine), missions: [...missions.values()].filter(mine) };
       const active = own.sessions.filter((s) => s.state !== 'idle').length + own.jobs.filter((job) => !job.endedAt).length;
       const waiting = [...own.jobs, ...own.sessions].filter(isWaiting).length;
-      const summary = [active && `${active} active`, waiting && `${waiting} waiting on you`].filter(Boolean).join(' · ') || 'Nothing running';
+      const summary = [active && `<span>${active} active</span>`, waiting && `<span class="chip" data-state="waiting"><span class="mark"></span>${waiting} waiting on you</span>`].filter(Boolean).join('') || 'Nothing running';
       const head = el.querySelector('.group-head');
       head.hidden = !dir;
       patch(head, `<h2><button class="link" data-project="${esc(dir)}" title="Show only this project">${esc(names.get(dir) ?? '')}</button></h2>
-        <span class="path" title="${esc(dir)}">${esc(shortPath(dir))}</span><span class="group-meta"${waiting ? ' data-tone="waiting"' : ''}>${summary}</span>`);
+        <span class="path" title="${esc(dir)}">${esc(shortPath(dir))}</span><span class="group-meta">${summary}</span>`);
 
       own.sessions.sort((a, b) => SESSION_ORDER[a.state] - SESSION_ORDER[b.state] || b.startedAt - a.startedAt || a.id.localeCompare(b.id));
       reconcile(el.querySelector('[data-sessions]'), own.sessions.map((s) => ({
@@ -446,7 +614,10 @@ function render() {
     },
   })), groupElement);
 
-  renderAgents((it) => !only || projectOf(it) === only);
+  const visible = (it) => !only || projectOf(it) === only;
+  renderAgents(visible);
+  renderSummary(visible);
+  renderNow(visible);
   renderProjects(dirs, names);
   renderNeeds();
   // Counted across every project: the tab title is what is seen when the board is not.
@@ -474,7 +645,7 @@ function eventRow(event) {
   const dir = eventProject(event);
   const dirs = knownProjects();
   const where = dir && dirs.length > 1 && !activeProject() ? `<span class="where" title="${esc(dir)}">${esc(projectNames(dirs).get(dir) ?? shortPath(dir))}</span>` : '';
-  return `<time datetime="${esc(event.ts)}">${time}</time><span class="who">${AGENT_NAMES[event.agent]}</span><span class="what"${tone ? ` data-tone="${tone}"` : ''} title="${esc(event.detail)}">${where}${tag}${esc(event.detail)}</span>`;
+  return `<time datetime="${esc(event.ts)}">${time}</time><span class="who">${AGENT_NAMES[event.agent]}${tag}${where}</span><span class="what"${tone ? ` data-tone="${tone}"` : ''} title="${esc(event.detail)}">${esc(event.detail)}</span>`;
 }
 
 function eventProject(event) {
@@ -538,7 +709,7 @@ function drawerParts(job) {
     job.tokens != null && ['Tokens', job.tokens.toLocaleString()],
     job.turns > 1 && ['Turns', job.turns],
     job.shared?.length && ['Shared instructions', job.shared.map(shortPath).join('\n'), job.shared.join('\n')],
-  ].filter(Boolean).map(([name, value, full]) => `<dt>${name}</dt><dd${full ? ` title="${esc(full)}"` : ''}>${esc(value)}</dd>`).join('');
+  ].filter(Boolean).map(([name, value, full]) => `<div><dt>${name}</dt><dd${full ? ` title="${esc(full)}"` : ''}>${esc(value)}</dd></div>`).join('');
 
   const outside = new Set(job.result?.outOfScope ?? []);
   const files = job.result?.files ?? [];
@@ -559,7 +730,7 @@ function drawerParts(job) {
   return {
     head: `<header class="sheet-head">
         <div class="row">
-          <span class="pill" data-tone="${jobTone(job)}">${esc(jobLabel(job))}</span>
+          <span class="chip" data-state="${jobMark(job)}"><span class="mark"></span>${esc(jobLabel(job))}</span>
           <span class="kind">${KIND_NAMES[job.kind]}</span>
           <span class="timer" data-from="${esc(job.createdAt)}" data-to="${esc(job.endedAt ?? '')}"></span>
         </div>
@@ -837,8 +1008,10 @@ document.addEventListener('click', (e) => {
   } catch {
     // See the read above.
   }
-  render();
-  renderFeed();
+  smooth(() => {
+    render();
+    renderFeed();
+  });
 });
 
 document.addEventListener('click', async (e) => {
@@ -852,9 +1025,14 @@ document.addEventListener('click', async (e) => {
   }
   const act = button.dataset.act;
   const id = button.dataset.job ?? card?.dataset.key;
+  if (act === 'later' || act === 'answer') {
+    dockOpen = act === 'answer';
+    smooth(renderNeeds);
+    return;
+  }
   if (act === 'toggle') {
     folded.set(button.dataset.command, button.getAttribute('aria-expanded') === 'true');
-    render();
+    smooth(render);
     return;
   }
   if (act === 'open') {

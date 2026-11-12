@@ -327,6 +327,8 @@ interface CallContext {
 }
 
 /** The mission this session opened and is carrying out. Only this session's own mission is ever advanced or closed from here. */
+/** The Claude session this server belongs to; it outlives a restart of the server. Unset in clients that do not pass it on. */
+const SESSION = process.env.CLAUDE_CODE_SESSION_ID || undefined;
 let missionId: string | null = null;
 /** Set when this session's mission was closed from outside (dismissed on the board, or left too long), until the lead has been told. */
 let closedElsewhere: Mission | null = null;
@@ -360,15 +362,16 @@ async function reportMission(args: any): Promise<string> {
     if (current && current.title === title) {
       return describeMission(args.stage ? await api('POST', `/api/missions/${current.id}`, { stage: args.stage }) : current);
     }
-    // After this server restarts it no longer knows its mission. An open one in this project with the same title is that mission.
-    const all: Mission[] = current ? [] : ((await api('GET', '/api/state')).missions ?? []);
-    const lost = all.find((m) => m.project === PROJECT && m.state === 'active' && m.title === title);
+    // After this server restarts it no longer knows its mission. An open one this session opened under the same title is
+    // that mission. The title alone proves nothing: another session in the project may be carrying out a command of the same name.
+    const all: Mission[] = current || !SESSION ? [] : ((await api('GET', '/api/state')).missions ?? []);
+    const lost = all.find((m) => m.owner === SESSION && m.project === PROJECT && m.state === 'active' && m.title === title);
     if (lost) {
       missionId = lost.id;
       return describeMission(args.stage ? await api('POST', `/api/missions/${lost.id}`, { stage: args.stage }) : lost);
     }
     // Opened before the previous one is closed, so a refused title leaves the previous mission as it was.
-    const opened: Mission = await api('POST', '/api/missions', { title: args.title, project: PROJECT, stage: args.stage });
+    const opened: Mission = await api('POST', '/api/missions', { title: args.title, project: PROJECT, stage: args.stage, owner: SESSION });
     missionId = opened.id;
     closedElsewhere = null;
     if (current) await api('POST', `/api/missions/${current.id}`, { abandoned: true, outcome: 'Superseded by a new mission.' }).catch(() => {});

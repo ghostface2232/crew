@@ -266,3 +266,17 @@ test('a stored record that is not a mission is refused, since records are render
   fs.writeFileSync(file, JSON.stringify({ missions: [good] }));
   assert.equal(new Missions(home, () => {}).list().length, 1);
 });
+
+test('a mission remembers the session that opened it, and only as a string', (t) => {
+  const { missions, home } = harness(t);
+  const mine = missions.start({ ...input, owner: 'session-a' });
+  assert.equal(mine.owner, 'session-a');
+  assert.ok(!('owner' in missions.start({ ...input, title: 'Unowned' })));
+  missions.flush();
+  const file = path.join(home, 'missions.json');
+  const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(saved.missions.find((m: Mission) => m.id === mine.id).owner, 'session-a');
+  saved.missions[0].owner = 7;
+  fs.writeFileSync(file, JSON.stringify(saved));
+  assert.throws(() => new Missions(home, () => {}), /holds a record that is not a mission/);
+});

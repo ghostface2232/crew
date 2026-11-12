@@ -286,7 +286,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       const body = await readJson(req);
       if (typeof body.project !== 'string' || !body.project) throw new HttpError(400, 'project must be the lead session\'s project directory');
       const first = stage(body.stage);
-      const mission = missions.start({ title: text(body.title, 'title') ?? '', project: body.project, root: (await projectRoot(body.project).catch(() => null)) ?? body.project });
+      const mission = missions.start({ title: text(body.title, 'title') ?? '', project: body.project, root: (await projectRoot(body.project).catch(() => null)) ?? body.project, owner: text(body.owner, 'owner') });
       return first ? missions.update(mission.id, { stage: first }) : mission;
     }
     if (pathname === '/api/jobs') {

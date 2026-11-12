@@ -11,6 +11,8 @@ export interface Mission {
   title: string;
   project: string;
   root: string;
+  /** The lead session that opened it, when known. Only that session may take it up again after losing track of it. */
+  owner?: string;
   stage: Stage;
   state: MissionState;
   outcome: string;
@@ -33,6 +35,7 @@ export function normalizeTitle(text: unknown): string {
 function isMission(m: any): m is Mission {
   return Boolean(m) && typeof m === 'object'
     && ['id', 'title', 'project', 'root', 'outcome'].every((key) => typeof m[key] === 'string')
+    && (m.owner === undefined || typeof m.owner === 'string')
     && STAGES.includes(m.stage) && ['active', 'done', 'abandoned'].includes(m.state)
     && Number.isFinite(m.createdAt) && Number.isFinite(m.updatedAt) && (m.endedAt === null || Number.isFinite(m.endedAt));
 }
@@ -65,7 +68,7 @@ export class Missions {
     return mission;
   }
 
-  start(input: { title: string; project: string; root: string }): Mission {
+  start(input: { title: string; project: string; root: string; owner?: string }): Mission {
     const title = titleOf(input.title);
     let id: string;
     do {
@@ -77,6 +80,7 @@ export class Missions {
       title,
       project: input.project,
       root: input.root,
+      ...(input.owner ? { owner: input.owner } : {}),
       stage: 'plan',
       state: 'active',
       outcome: '',

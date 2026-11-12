@@ -256,10 +256,12 @@ function projectNames(dirs) {
 const projectOf = (item) => item.root ?? item.project ?? item.cwd ?? '';
 const isWaiting = (item) => item.state === 'waiting';
 
-/** Every project with something on the board. An open mission counts even when its jobs and its session are gone, or it could be neither seen nor dismissed. */
+/**
+ * Every project with something on the board. A mission counts even when its jobs and its session are gone:
+ * an open one could otherwise be neither seen nor dismissed, and the ended ones the daemon keeps are there to be shown.
+ */
 function knownProjects() {
-  const open = [...missions.values()].filter((m) => m.state === 'active');
-  return [...new Set([...jobs.values(), ...sessions.values(), ...open].map(projectOf).filter(Boolean))].sort();
+  return [...new Set([...jobs.values(), ...sessions.values(), ...missions.values()].map(projectOf).filter(Boolean))].sort();
 }
 
 /** The filter in effect: a saved project that is no longer on the board filters nothing. */

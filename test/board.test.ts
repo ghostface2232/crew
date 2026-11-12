@@ -111,5 +111,5 @@ test('states combine by urgency and times read as coarse labels', () => {
   assert.equal(run(`timeLabel({ state: 'failed', createdAt: 0, endedAt: 660_000 })`), 'stopped after 11m');
   // The two reviews share one stop, and a job sits at the stop of its kind.
   assert.equal(run(`STOP_OF_STAGE['self-review']`), run(`STOP_OF_STAGE['cross-review']`));
-  assert.match(run(`trackOf([{ id: 'cx-1', kind: 'review', state: 'done', agent: 'codex', title: 'R', createdAt: 0, endedAt: 1000 }], 2, true, false).html`), /data-pos="now"><p class="stop-name"><i class="node"><\/i><span>Review<\/span><\/p><ul class="items">/);
+  assert.match(run(`trackOf([{ id: 'cx-1', kind: 'review', state: 'done', agent: 'codex', title: 'R', createdAt: 0, endedAt: 1000 }], 2, true, false).html`), /data-pos="now"><p class="stop-name"><i class="node"><\/i><span title="Review">Review<\/span><\/p><ul class="items">/);
 });

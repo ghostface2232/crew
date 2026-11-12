@@ -235,6 +235,15 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       fs.createReadStream(file).pipe(res);
       return undefined;
     }
+    const icon = /^\/icons\/([\w.-]+\.svg)$/.exec(pathname);
+    if (icon) {
+      // Optional agent marks kept beside the plugin, like the fonts; without them the board shows names alone.
+      const file = path.join(PLUGIN_ROOT, '..', 'public', 'icons', icon[1]);
+      if (!fs.existsSync(file)) throw new HttpError(404, 'not found');
+      res.writeHead(200, { 'content-type': 'image/svg+xml', 'cache-control': 'max-age=86400' });
+      fs.createReadStream(file).pipe(res);
+      return undefined;
+    }
     if (pathname === '/api/health') return { name: 'crew', version: VERSION, build: BUILD, root: PLUGIN_ROOT, pid: process.pid, active: jobs.activeCount };
     if (pathname === '/api/state') return state();
     if (pathname === '/api/instructions') {

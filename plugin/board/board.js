@@ -31,6 +31,19 @@ let clockSkew = 0;
 const FINISHED_SHOWN = 4;
 const FEED_SHOWN = 60;
 const AGENT_NAMES = { claude: 'Claude', codex: 'Codex', antigravity: 'Antigravity' };
+/**
+ * Each agent's own mark, from optional files beside the plugin like the fonts. A mark is shown only once
+ * its file has loaded, so without the files the board shows names alone and leaves no gap.
+ */
+const AGENT_ICONS = { claude: 'ClaudeCode', codex: 'Codex', antigravity: 'Antigravity' };
+if (typeof Image === 'function') {
+  for (const [agent, file] of Object.entries(AGENT_ICONS)) {
+    const img = new Image();
+    img.onload = () => document.documentElement.classList.add(`icon-${agent}`);
+    img.src = `/icons/${file}.svg`;
+  }
+}
+const agentIcon = (agent) => (AGENT_ICONS[agent] ? `<i class="agent-icon" data-agent="${agent}" aria-hidden="true"></i>` : '');
 const KIND_NAMES = { delegate: 'Implementation', review: 'Review', polish: 'Polish' };
 const ROLE_NAMES = { delegate: 'Engineer', review: 'Cross-review', polish: 'UX writing · docs' };
 const ROLE_HINTS = { delegate: 'Builds separable pieces', review: 'Reviews the change', polish: 'Tidies wording only' };
@@ -208,7 +221,7 @@ function item(job) {
     : job.state === 'failed' ? job.error?.message : '';
   return `<li><button class="item" data-state="${jobMark(job)}" data-act="open" data-job="${esc(job.id)}" title="${esc(jobLabel(job))}">
       <span class="mark"></span><span class="what">${esc(job.title)}${flags}</span>
-      ${now ? `<span class="now">${esc(now)}</span>` : ''}
+      ${now ? `<span class="now" title="${esc(now)}">${esc(now)}</span>` : ''}
       <span class="at">${STOPS[STOP_OF_KIND[job.kind]]}</span><span class="who">${esc(agent)}</span><span class="sub">${timeLabel(job)}</span>
     </button></li>`;
 }
@@ -221,6 +234,10 @@ const sessionLabel = (s) => (s.stalled ? 'May be stuck' : SESSION_LABELS[s.state
 /** Reconciles a list against the wanted items: reuse by key, patch changed markup, keep the given order, drop the rest. */
 function reconcile(list, items, create) {
   const existing = new Map([...list.children].map((el) => [el.dataset.key, el]));
+  // Gone ones leave first, so the rest are already in order and are not re-inserted: a moved element
+  // would lose its running transition and replay its entrance.
+  const wanted = new Set(items.map((item) => item.key));
+  for (const [key, el] of existing) if (!wanted.has(key)) el.remove();
   items.forEach((item, index) => {
     let el = existing.get(item.key);
     if (!el) {
@@ -231,7 +248,6 @@ function reconcile(list, items, create) {
     item.update(el);
     if (list.children[index] !== el) list.insertBefore(el, list.children[index] ?? null);
   });
-  for (const el of existing.values()) el.remove();
 }
 
 function renderCards(list, cards) {
@@ -318,7 +334,7 @@ function trackOf(list, at, active, finished, lead = '') {
   const note = active && at >= 0 ? `<p class="step-note"><b>${STOPS[at]}.</b> ${STOP_NOTES[at]}</p>` : '';
   const html = `${note}<ol class="track">${STOPS.map((name, stop) => {
     const rows = (stop === at ? lead : '') + byStop[stop].map(item).join('');
-    return `<li class="stop" data-pos="${pos(stop)}"><p class="stop-name"><i class="node"></i><span>${name}</span></p>${rows ? `<ul class="items">${rows}</ul>` : ''}</li>`;
+    return `<li class="stop" data-pos="${pos(stop)}"><p class="stop-name"><i class="node"></i><span title="${name}">${name}</span></p>${rows ? `<ul class="items">${rows}</ul>` : ''}</li>`;
   }).join('')}</ol>`;
   // Folded, each stop is one square: its jobs' state if it has any, else whether the command has passed it.
   const mini = `<span class="mini" aria-hidden="true">${STOPS.map((_, stop) =>
@@ -333,6 +349,17 @@ function ring(part, whole) {
   return `<svg class="ring" viewBox="0 0 100 100" aria-hidden="true"><circle class="ring-rail" cx="50" cy="50" r="42"/><circle class="ring-fill" cx="50" cy="50" r="42" stroke-dasharray="${around.toFixed(1)}" style="stroke-dashoffset:${left.toFixed(1)}"/></svg>`;
 }
 
+/** The steps as a ring of arcs, one per stop, marked as the track marks its stops: passed, reached, or to come. */
+function stepRing(positions) {
+  const around = 2 * Math.PI * 42;
+  const arc = around / positions.length;
+  // Arcs have round ends, which reach half the stroke (4) past the dash; 13 units leaves a visible gap of 5,
+  // centered on each boundary so the first gap sits at twelve o'clock.
+  const cut = 13;
+  return `<svg class="ring steps" viewBox="0 0 100 100" aria-hidden="true">${positions.map((pos, i) =>
+    `<circle data-pos="${pos}" cx="50" cy="50" r="42" stroke-dasharray="${(arc - cut).toFixed(2)} ${(around - arc + cut).toFixed(2)}" stroke-dashoffset="${(-i * arc - cut / 2).toFixed(2)}"/>`).join('')}</svg>`;
+}
+
 /** Changes a figure so the old value rolls out and the new one rolls in. The first value just appears. */
 function roll(el, text) {
   const was = el.dataset.value;
@@ -343,7 +370,7 @@ function roll(el, text) {
 
 function commandHead(key, title, closed, mini, meta, action = '') {
   return `<div class="cmd-head">
-      <button class="cmd-toggle" data-act="toggle" data-command="${esc(key)}" aria-expanded="${!closed}"><i class="chev"></i><span class="cmd-title">${esc(title)}</span></button>
+      <button class="cmd-toggle" data-act="toggle" data-command="${esc(key)}" aria-expanded="${!closed}"><i class="chev"></i><span class="cmd-title" title="${esc(title)}">${esc(title)}</span></button>
       ${mini}<span class="cmd-meta">${meta}</span>${action}
     </div>`;
 }
@@ -376,7 +403,7 @@ function commandCard(mission) {
   const ended = mission.state === 'done' ? 'done' : active ? '' : 'abandoned';
   // The one figure to read at a glance: how far along the six steps this task is.
   const stage = `<div class="stage"${ended ? ` data-ended="${ended}"` : ''}>
-      <div class="stage-ring">${ring(ended === 'done' ? STOPS.length : at + 1, STOPS.length)}<b>${ended === 'done' ? '<i class="tick"></i>' : `${at + 1}<small>/${STOPS.length}</small>`}</b></div>
+      <div class="stage-ring">${stepRing(STOPS.map((_, stop) => (ended === 'done' || stop < at ? 'past' : stop === at && active ? 'now' : 'todo')))}<b>${ended === 'done' ? '<i class="tick"></i>' : `${at + 1}<small>/${STOPS.length}</small>`}</b></div>
       <p class="stage-label">${active ? 'Now at step' : ended === 'done' ? 'Finished' : 'Stopped at step'}</p>
       <p class="stage-name">${ended === 'done' ? 'All done' : STOPS[at]}</p>
     </div>`;
@@ -401,10 +428,10 @@ function looseCard(dir, list) {
   return { key, quiet: running.length === 0, closed, html: `${commandHead(key, 'Other jobs', closed, mini, running.length ? `${running.length} running` : 'Nothing running')}<div class="cmd-body" data-plain><div class="cmd-main">${html}</div></div>` };
 }
 
-/** Who is asking, large, with the job it is about under it. `about` is markup. */
-const needHead = (title, about) => `<div class="need-head"><span class="need-icon" data-state="waiting"><span class="mark"></span></span><div><p class="need-title">${esc(title)}</p><p class="need-who">${about}</p></div></div>`;
+/** Who is asking, large, with the job it is about under it. */
+const needHead = (title, about) => `<div class="need-head"><span class="need-icon" data-state="waiting"><span class="mark"></span></span><div><p class="need-title">${esc(title)}</p><p class="need-who" title="${esc(about)}">${esc(about)}</p></div></div>`;
 
-/** Whether the requests are laid out or tucked into a pill. A request that arrives lays them out again. */
+/** Whether the requests are laid out or tucked into a pill. A request that arrives lays them out again, except on a phone. */
 let dockOpen = true;
 let dockCount = 0;
 
@@ -414,31 +441,39 @@ let dockCount = 0;
  */
 function renderNeeds() {
   const names = projectNames(knownProjects());
-  const where = (it) => (names.size > 1 ? ` · ${esc(names.get(projectOf(it)) ?? '')}` : '');
+  const where = (it) => (names.size > 1 ? ` · ${names.get(projectOf(it)) ?? ''}` : '');
   const cards = [
     ...[...jobs.values()].filter(isWaiting).sort((a, b) => a.waiting.since - b.waiting.since).map((job) => ({
       key: job.id,
-      html: `${needHead(`${agents[job.agent]?.name ?? AGENT_NAMES[job.agent]} ${job.waiting.type === 'approval' ? 'needs your permission' : 'has a question'}`, `${esc(job.title)}${where(job)}`)}${callout(job)}
+      html: `${needHead(`${agents[job.agent]?.name ?? AGENT_NAMES[job.agent]} ${job.waiting.type === 'approval' ? 'needs your permission' : 'has a question'}`, job.title + where(job))}${callout(job)}
         <p class="hint">This job is paused until you answer.</p>`,
     })),
     ...[...sessions.values()].filter(isWaiting).map((s) => ({
       key: `session:${s.id}`,
-      html: `${needHead('Claude needs your input', `${esc(s.title)}${where(s)}`)}<div class="callout"><p>${esc(s.waitingFor || 'Answer it in the Claude app.')}</p></div>
+      html: `${needHead('Claude needs your input', s.title + where(s))}<div class="callout"><p>${esc(s.waitingFor || 'Answer it in the Claude app.')}</p></div>
         <p class="hint">Answer in the Claude app, in the session that asked.</p>`,
     })),
   ];
   const total = cards.length;
-  if (total > dockCount) dockOpen = true;
+  // On a phone a laid-out request would cover most of the board; there it arrives as the pill, and the
+  // headline's Answer button or the pill lays it out.
+  if (total > dockCount) dockOpen = !matchMedia('(max-width: 760px)').matches;
   dockCount = total;
   const dock = document.getElementById('dock');
   dock.hidden = total === 0;
   dock.toggleAttribute('data-collapsed', !dockOpen);
-  patch(document.getElementById('dock-pill'), `<span class="mark"></span>${total === 1 ? '1 request is waiting on you' : `${total} requests are waiting on you`}<b>Answer</b>`);
+  patch(document.getElementById('dock-pill'), `<span class="mark"></span>${total === 1 ? '1 request waiting on you' : `${total} requests waiting on you`}<b>Answer</b>`);
   reconcile(document.getElementById('needs'), cards.map((card, index) => ({
     key: card.key,
     update: (li) => patch(li, `<div class="need-bar"><span class="chip" data-state="waiting"><span class="mark"></span>${total > 1 ? `Request ${index + 1} of ${total}` : 'Needs you'}</span>
         <button class="quiet" data-act="later" title="Tucks the request away. The job stays paused until you answer.">Later</button></div>${card.html}`),
   })), () => Object.assign(document.createElement('li'), { className: 'card need' }));
+}
+
+// The page and the feed leave room for the dock, however tall the request in front is, so nothing stays under it.
+if (window.ResizeObserver) {
+  const dock = document.getElementById('dock');
+  new ResizeObserver(() => document.documentElement.style.setProperty('--dock', `${dock.offsetHeight}px`)).observe(dock);
 }
 
 /** Position in the "right now" list of the line shown largest; it moves on by itself. */
@@ -470,19 +505,28 @@ function renderNow(visible) {
       let offset = index - nowAt;
       if (offset > count / 2) offset -= count;
       if (offset < -count / 2) offset += count;
-      // A line that goes round the back is not seen crossing the front: it fades in at its new place.
-      if (li.dataset.offset !== undefined && Math.abs(offset - Number(li.dataset.offset)) > 1) li.dataset.wrap = li.dataset.wrap === 'a' ? 'b' : 'a';
+      // A line that goes round the back is not seen crossing the front: it jumps to its new place and fades in there.
+      const wrapped = li.dataset.offset !== undefined && Math.abs(offset - Number(li.dataset.offset)) > 1;
+      if (wrapped) {
+        li.dataset.wrap = li.dataset.wrap === 'a' ? 'b' : 'a';
+        li.style.transition = 'none';
+      }
       li.dataset.offset = offset;
       li.dataset.state = line.state;
       li.toggleAttribute('data-center', offset === 0);
       li.style.setProperty('--o', offset);
       li.style.setProperty('--a', Math.abs(offset));
-      patch(li, `<span class="dot"></span><span class="now-text">${esc(line.text)}</span><span class="now-who">${esc(line.who)} · ${esc(line.about)}</span>`);
+      if (wrapped) {
+        li.getBoundingClientRect();
+        li.style.transition = '';
+      }
+      patch(li, `<span class="dot"></span><span class="now-text" title="${esc(line.text)}">${esc(line.text)}</span><span class="now-who" title="${esc(line.who)} · ${esc(line.about)}">${esc(line.who)} · ${esc(line.about)}</span>`);
     },
   })), () => Object.assign(document.createElement('li'), { className: 'now-line' }));
 }
 setInterval(() => {
-  if (document.hidden) return;
+  // It holds still while the pointer is on it, so a line can be read to the end.
+  if (document.hidden || document.querySelector('.wheel:hover')) return;
   nowAt += 1;
   renderNow();
 }, 2800);
@@ -508,12 +552,13 @@ function renderAgents(visible) {
     const busy = marks.filter((mark) => mark !== 'idle' && mark !== 'done').length;
     const state = URGENCY.find((mark) => marks.includes(mark)) ?? 'idle';
     const label = { waiting: 'Needs you', failed: 'Failed', stalled: 'May be stuck', working: busy > 1 ? `${busy} working` : 'Working', idle: 'Idle' }[state];
-    const extra = agent === 'codex' && usage ? `<span class="usage" title="${esc(usageTitle)}">${usage}</span>` : '';
+    const extra = agent === 'codex' && usage ? `<p class="usage" title="${esc(usageTitle)}">${usage}</p>` : '';
     return `<li class="tile">
         <p class="tile-label">${esc(role)}</p>
-        <p class="tile-value">${esc(agents[agent]?.name ?? AGENT_NAMES[agent])}</p>
+        <span class="chip" data-state="${state}"><span class="mark"></span>${label}</span>
+        <p class="tile-value">${agentIcon(agent)}<span>${esc(agents[agent]?.name ?? AGENT_NAMES[agent])}</span></p>
         <p class="tile-hint">${esc(hint)}</p>
-        <p class="tile-foot"><span class="chip" data-state="${state}"><span class="mark"></span>${label}</span>${extra}</p>
+        ${extra}
       </li>`;
   }).join(''));
 }
@@ -541,14 +586,14 @@ function renderSummary(visible) {
   const headline = n.waiting ? (n.waiting === 1 ? 'One thing needs your answer' : `${n.waiting} things need your answer`)
     : open.length ? `Working on ${plural(open.length, 'task')}`
     : n.working + n.stalled ? `${plural(n.working + n.stalled, 'job')} running` : 'All quiet';
-  const lede = n.waiting ? 'That job is paused until you reply. The request is at the bottom right of the screen.'
+  const lede = n.waiting ? (n.waiting === 1 ? 'That job is paused until you reply.' : 'Those jobs are paused until you reply.')
     : n.failed ? `${plural(n.failed, 'job')} stopped on an error. Open it to see what went wrong.`
     : n.stalled ? `${plural(n.stalled, 'job')} has gone quiet and may be stuck. Open it to check.`
     : open.length || n.working ? 'Nothing needs you right now. You can leave this open and check back.'
     : 'Start a task with /crew:run in a Claude session and it will show up here.';
   const tokens = live.reduce((sum, job) => sum + (job.tokens ?? 0), 0);
   patch(document.getElementById('summary'), `<p class="eyebrow">${[open.length && plural(open.length, 'task'), plural(live.length, 'job'), `${compact(tokens)} tokens used`].filter(Boolean).join(' · ')}</p>
-    <h2>${headline}</h2><p class="lede">${lede}</p>`);
+    <h2>${headline}</h2><p class="lede">${lede}</p>${n.waiting ? '<div class="actions"><button class="primary" data-act="answer">Answer</button></div>' : ''}`);
   // The tiles keep their elements, so a figure that changes rolls instead of blinking.
   reconcile(document.getElementById('stats'), stats.map((stat) => ({
     key: stat.state,
@@ -589,11 +634,11 @@ function render() {
       const own = { sessions: [...sessions.values()].filter(mine), jobs: [...jobs.values()].filter(mine), missions: [...missions.values()].filter(mine) };
       const active = own.sessions.filter((s) => s.state !== 'idle').length + own.jobs.filter((job) => !job.endedAt).length;
       const waiting = [...own.jobs, ...own.sessions].filter(isWaiting).length;
-      const summary = [active && `<span>${active} active</span>`, waiting && `<span class="chip" data-state="waiting"><span class="mark"></span>${waiting} waiting on you</span>`].filter(Boolean).join('') || 'Nothing running';
+      const summary = [active && `<span>${active} active</span>`, waiting && `<span class="waiting">${waiting} waiting on you</span>`].filter(Boolean).join('') || 'Nothing running';
       const head = el.querySelector('.group-head');
-      head.hidden = !dir;
-      patch(head, `<h2><button class="link" data-project="${esc(dir)}" title="Show only this project">${esc(names.get(dir) ?? '')}</button></h2>
-        <span class="path" title="${esc(dir)}">${esc(shortPath(dir))}</span><span class="group-meta">${summary}</span>`);
+      // The empty board still has a heading, so its card lines up with the activity column beside it.
+      patch(head, dir ? `<h2><button class="link" data-project="${esc(dir)}" title="Show only ${esc(names.get(dir) ?? 'this project')}">${esc(names.get(dir) ?? '')}</button></h2>
+        <span class="path" title="${esc(dir)}">${esc(shortPath(dir))}</span><span class="group-meta">${summary}</span>` : '<h2>Projects</h2>');
 
       own.sessions.sort((a, b) => SESSION_ORDER[a.state] - SESSION_ORDER[b.state] || b.startedAt - a.startedAt || a.id.localeCompare(b.id));
       reconcile(el.querySelector('[data-sessions]'), own.sessions.map((s) => ({
@@ -645,7 +690,7 @@ function eventRow(event) {
   const dir = eventProject(event);
   const dirs = knownProjects();
   const where = dir && dirs.length > 1 && !activeProject() ? `<span class="where" title="${esc(dir)}">${esc(projectNames(dirs).get(dir) ?? shortPath(dir))}</span>` : '';
-  return `<time datetime="${esc(event.ts)}">${time}</time><span class="who">${AGENT_NAMES[event.agent]}${tag}${where}</span><span class="what"${tone ? ` data-tone="${tone}"` : ''} title="${esc(event.detail)}">${esc(event.detail)}</span>`;
+  return `<time datetime="${esc(event.ts)}">${time}</time><span class="who">${agentIcon(event.agent)}${AGENT_NAMES[event.agent]}${tag}${where}</span><span class="what"${tone ? ` data-tone="${tone}"` : ''} title="${esc(event.detail)}">${esc(event.detail)}</span>`;
 }
 
 function eventProject(event) {
@@ -1028,6 +1073,8 @@ document.addEventListener('click', async (e) => {
   if (act === 'later' || act === 'answer') {
     dockOpen = act === 'answer';
     smooth(renderNeeds);
+    // Answering from elsewhere on the page goes straight to the front request's first control.
+    if (dockOpen && !button.closest('.dock')) document.querySelector('#needs > :first-child :is(textarea, button:not([data-act="later"]))')?.focus({ preventScroll: true });
     return;
   }
   if (act === 'toggle') {

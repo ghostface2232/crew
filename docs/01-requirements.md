@@ -20,7 +20,7 @@ IDs R1 to R8 keep the meaning other documents refer to. R9 to R15 were added on 
 | R4 | In Claude Desktop lead mode, the services' own features stay usable: subagents, inter-session messaging, Remote Control, computer use, built-in and headless browsers, Chrome, side chat, MCP, compaction | Required |
 | R5 | Each agent's activity is visible in near real time, including stalls, exhausted usage limits, and error stops | Required |
 | R6 | Sessions started through Crew also appear in each service's desktop app where the service allows it | Nice to have |
-| R7 | Operation is intuitive, fast, and smooth, with nothing to carry by hand between stages. Reviews happen without being asked for, and only as often as the work warrants | Required |
+| R7 | Operation is intuitive, fast, and smooth, with nothing to carry by hand between stages. In the pipeline, reviews happen without being asked for, and only as often as the work warrants | Required |
 | R8 | AgentGauge reports each service's remaining usage, and work is routed by it. When every service has capacity, the role assignments in effect are followed | Required |
 | R9 | Shared custom instructions are written once and reach every agent | Required |
 | R10 | The board shows each command as a unit: how it was split, which agent has each part, and how far each part has progressed. Its elements are clickable, and approvals, questions, and follow-ups are answered in place | Required |
@@ -49,7 +49,7 @@ IDs R1 to R8 keep the meaning other documents refer to. R9 to R15 were added on 
 | R4 | Every listed feature works in the lead session. Workers use their configured MCP servers and subagents as they are |
 | R5 | Each agent shows its current stage, last event, and reason for waiting. Limits, errors, and stalls raise a notification within the configured time |
 | R6 | Claude sessions appear in Desktop and mobile. Worker sessions can be resumed in their own tools |
-| R7 | Nothing is copied by hand between delegation, review, and polish. A substantial piece of work gets one review when it is done, and both reviews before it is pushed or opened as a pull request |
+| R7 | Nothing is copied by hand between delegation, review, and polish. Under `/crew:run`, a substantial piece of work gets one review when it is done, and both reviews before it is pushed or opened as a pull request. Outside it, nothing is reviewed unless the user asks |
 | R8 | The board shows usage for every agent. The lead asks for routing at stage boundaries and follows the returned assignee and reason. Handoff starts before the lead's limit runs out |
 | R9 | Editing one instructions file changes what every agent receives on its next job, without writing to any service's own instruction files |
 | R10 | For any command, the board answers "what was it split into, who has each part, and what stage is each in" without opening a session. A waiting item can be answered from the board |

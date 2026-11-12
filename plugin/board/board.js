@@ -493,6 +493,22 @@ if (window.ResizeObserver) {
   new ResizeObserver(() => document.documentElement.style.setProperty('--dock', `${dock.offsetHeight}px`)).observe(dock);
 }
 
+const WORK_SHOWN = 3;
+
+/**
+ * An agent's work in hand, most urgent first, one line each: the state's mark, what it is, and what it is
+ * doing. A job's line opens it. Past three, the rest are counted, so a busy agent's tile keeps its size.
+ */
+function workList(work) {
+  const shown = [...work].sort((a, b) => URGENCY.indexOf(a.mark) - URGENCY.indexOf(b.mark)).slice(0, WORK_SHOWN);
+  const line = (w) => {
+    const body = `<span class="mark"></span><span class="what" title="${esc(w.title)}">${esc(w.title)}</span>${w.now ? `<span class="sub" title="${esc(w.now)}">${esc(w.now)}</span>` : ''}`;
+    return `<li>${w.job ? `<button class="work" data-state="${w.mark}" data-act="open" data-job="${esc(w.job)}">${body}</button>` : `<div class="work" data-state="${w.mark}">${body}</div>`}</li>`;
+  };
+  const more = work.length - shown.length;
+  return `<ul class="tile-work">${shown.map(line).join('')}${more ? `<li class="more">+${more} more</li>` : ''}</ul>`;
+}
+
 /** The agents as resources: what each is doing and how much of its allowance is used. They are not what the board is organized by. */
 function renderAgents(visible) {
   const windows = limits.codex?.windows ?? [];
@@ -501,16 +517,26 @@ function renderAgents(visible) {
     ? `<span class="meter"${top >= 90 ? ' data-high' : ''} style="--used:${top}"><i></i></span><span class="pct">${top}% of limit used</span>`
     : '';
   const usageTitle = windows.map((w) => `${Math.round(w.usedPercent)}% of the ${w.minutes >= 1440 ? `${Math.round(w.minutes / 1440)}-day` : `${Math.round(w.minutes / 60)}-hour`} limit`).join(', ');
+  // What each agent is on now, as lines of work: a lead's open sessions, a worker's unfinished jobs.
+  const leading = [...sessions.values()].filter((s) => visible(s) && s.state !== 'idle').map((s) => ({
+    mark: sessionMark(s), title: s.title,
+    now: s.state === 'waiting' ? s.waitingFor || 'Needs your input' : s.stalled ? 'May be stuck' : s.phase,
+  }));
+  const working = (agent) => [...jobs.values()].filter((job) => job.agent === agent && !job.endedAt && visible(job)).map((job) => ({
+    mark: jobMark(job), title: job.title, job: job.id,
+    now: job.state === 'waiting' ? jobLabel(job) : job.stalled ? `May be stuck · ${job.phase}` : job.phase,
+  }));
   const chips = [
-    { agent: 'claude', marks: [...sessions.values()].filter(visible).map(sessionMark), role: 'Lead', hint: 'Plans the work, checks it, and puts it together' },
+    { agent: 'claude', marks: [...sessions.values()].filter(visible).map(sessionMark), work: leading, role: 'Lead', hint: 'Plans the work, checks it, and puts it together' },
     ...WORKERS_SHOWN.map((agent) => ({
       agent,
       marks: [...jobs.values()].filter((job) => job.agent === agent && !job.endedAt && visible(job)).map(jobMark),
+      work: working(agent),
       role: Object.keys(ROLE_NAMES).filter((role) => roles[role]?.agent === agent).map((role) => ROLE_NAMES[role]).join(' · ') || 'No role',
       hint: Object.keys(ROLE_HINTS).filter((role) => roles[role]?.agent === agent).map((role) => ROLE_HINTS[role]).join(' · ') || 'Not given any kind of job',
     })),
   ];
-  patch(document.getElementById('agents'), chips.map(({ agent, marks, role, hint }) => {
+  patch(document.getElementById('agents'), chips.map(({ agent, marks, work, role, hint }) => {
     const busy = marks.filter((mark) => mark !== 'idle' && mark !== 'done').length;
     const state = URGENCY.find((mark) => marks.includes(mark)) ?? 'idle';
     const label = { waiting: 'Needs you', failed: 'Failed', stalled: 'May be stuck', working: busy > 1 ? `${busy} working` : 'Working', idle: 'Idle' }[state];
@@ -522,7 +548,7 @@ function renderAgents(visible) {
           <div class="tile-id"><p class="tile-label" title="${esc(role)}">${esc(role)}</p><p class="tile-value" title="${esc(name)}">${esc(name)}</p></div>
           <span class="chip" data-state="${state}"><span class="mark"></span>${label}</span>
         </div>
-        <p class="tile-hint">${esc(hint)}</p>
+        ${work.length ? workList(work) : `<p class="tile-hint">${esc(hint)}</p>`}
         ${extra}
       </li>`;
   }).join(''));

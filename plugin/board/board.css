@@ -628,7 +628,6 @@ button:focus-visible { outline: 2px solid var(--working); outline-offset: 2px; }
   button.item:not(:disabled):hover { background: color-mix(in oklch, var(--tint, var(--sunken)), var(--text) 5%); }
   button.item[data-state="done"]:hover, button.item[data-state="idle"]:hover { background: var(--hover); }
   .dock-pill:not(:disabled):hover { background: var(--ink); opacity: 0.9; }
-  .composer-bar button.primary:not(:disabled):hover { background: var(--accent); opacity: 0.9; }
 }
 @media (prefers-reduced-motion: no-preference) {
   button:not(:disabled):active { scale: 0.96; }
@@ -655,16 +654,16 @@ button:focus-visible { outline: 2px solid var(--working); outline-offset: 2px; }
 .callout button:disabled::after { content: ""; position: absolute; inset: 50% 16px auto auto; width: 14px; height: 14px; margin-top: -7px; border-radius: 50%; border: 2px solid currentColor; border-inline-end-color: transparent; }
 @media (prefers-reduced-motion: no-preference) { .callout button:disabled::after { animation: spin 700ms linear infinite; } }
 /*
- * A message to an agent, typed the way a chat message is: one dark bar that grows with the text, the send
- * button at its end. The bar's corner follows the button's, 6px out (22 + 6). The outcome is said under it.
+ * A message to an agent, typed the way a chat message is: one bar that grows with the text, the send button
+ * at its end. A wash of ink rather than a solid fill, so it shows on white, yellow, or glass without
+ * outshouting the card it sits in. The bar's corner follows the button's, 6px out (22 + 6).
  */
 .composer { display: grid; gap: 8px; }
-.composer-bar { display: flex; align-items: flex-end; gap: 8px; padding: 6px 6px 6px 8px; border-radius: 28px; background: var(--ink); }
-.composer-bar textarea { flex: 1; min-height: 44px; padding: 10.75px 12px; border: 0; border-radius: 0; background: none; color: var(--on-ink); }
+.composer-bar { display: flex; align-items: flex-end; gap: 8px; padding: 6px 6px 6px 8px; border-radius: 28px; background: oklch(from var(--ink) l c h / 0.06); transition: background-color var(--dur-press) ease-out, box-shadow var(--dur-press) ease-out; }
+.composer-bar textarea { flex: 1; min-height: 44px; padding: 10.75px 12px; border: 0; border-radius: 0; background: none; }
 .composer-bar textarea:focus-visible { outline: 0; }
-.composer-bar:focus-within { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--working); }
-.composer-bar ::placeholder { color: var(--on-ink-muted); opacity: 1; }
-.composer-bar button.primary { flex: none; min-height: 44px; padding: 0 20px; font-size: 15px; background: var(--accent); color: var(--accent-ink); }
+.composer-bar:focus-within { background: var(--surface); box-shadow: inset 0 0 0 1px var(--line), 0 0 0 2px var(--surface), 0 0 0 4px var(--working); }
+.composer-bar button.primary { flex: none; min-height: 44px; padding: 0 20px; font-size: 15px; }
 .composer .status { padding-inline: 16px; }
 .composer .status:empty { display: none; }
 textarea, input, select {

@@ -660,7 +660,7 @@ button:focus-visible { outline: 2px solid var(--working); outline-offset: 2px; }
  */
 .composer { display: grid; gap: 8px; }
 .composer-bar { display: flex; align-items: flex-end; gap: 8px; padding: 6px 6px 6px 8px; border-radius: 28px; background: var(--ink); }
-.composer-bar textarea { flex: 1; min-height: 44px; padding: 10.75px 12px; border: 0; border-radius: 0; background: none; color: var(--on-ink); resize: none; }
+.composer-bar textarea { flex: 1; min-height: 44px; padding: 10.75px 12px; border: 0; border-radius: 0; background: none; color: var(--on-ink); }
 .composer-bar textarea:focus-visible { outline: 0; }
 .composer-bar:focus-within { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--working); }
 .composer-bar ::placeholder { color: var(--on-ink-muted); opacity: 1; }
@@ -678,7 +678,8 @@ textarea, input, select {
   border-radius: var(--radius-field);
   transition: border-color var(--dur-press) ease-out, box-shadow var(--dur-press) ease-out;
 }
-textarea { resize: vertical; min-height: 2lh; field-sizing: content; max-height: 40vh; }
+/* Fields grow with their text, so no resize grip is drawn. */
+textarea { resize: none; min-height: 2lh; field-sizing: content; max-height: 40vh; }
 #instructions-text { min-height: 10lh; max-height: 60vh; font-family: var(--mono); font-size: 13.5px; line-height: 1.6; letter-spacing: 0; }
 textarea:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--working); outline-offset: 1px; }
 ::placeholder { color: var(--muted); opacity: 0.8; }

@@ -805,3 +805,15 @@ test('a refused action goes back to the reviewer once, then to the user', async 
   await jobs.reply(job.id, { approved_by_user: 'fetch it' });
   assert.deepEqual(reviewers.slice(3), [false, true]);
 });
+
+test('a follow-up sent while a job is being discarded is refused, not started in a removed worktree', async () => {
+  const repo = tempRepo();
+  const { jobs, calls } = harness((ctl) => ctl.done('built'));
+  const job = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'x' }));
+  const discard = jobs.discard(job.id);
+  await assert.rejects(jobs.reply(job.id, { message: 'one more thing' }), /is being discarded/);
+  await discard;
+  assert.equal(job.state, 'done');
+  assert.equal(job.worktree, null);
+  assert.deepEqual(calls, []);
+});

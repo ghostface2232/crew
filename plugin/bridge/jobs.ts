@@ -526,19 +526,20 @@ export class Jobs {
     if (this.cancelling.has(id)) throw new Error(`Job ${id} is being cancelled.`);
     if (!isTerminal(job)) throw new Error(`Job ${id} is still ${job.state}; cancel it first.`);
     if (this.discarding.has(id)) throw new Error(`Job ${id} is already being discarded.`);
-    // A review snapshot may be on its way out already; removing it twice would fail on the branch.
-    await this.snapshots.get(id);
-    if (job.worktree && job.repo) {
-      this.discarding.add(id);
-      try {
+    // Reserved before the first await, so a follow-up cannot set the worker running in a worktree that is about to go.
+    this.discarding.add(id);
+    try {
+      // A review snapshot may be on its way out already; removing it twice would fail on the branch.
+      await this.snapshots.get(id);
+      if (job.worktree && job.repo) {
         await removeWorktree(job.repo, job.worktree, job.id, this.home);
         job.worktree = null;
         job.notes.push('Worktree and branch removed.');
         this.changed(job);
         this.flush();
-      } finally {
-        this.discarding.delete(id);
       }
+    } finally {
+      this.discarding.delete(id);
     }
     return job;
   }

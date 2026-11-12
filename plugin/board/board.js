@@ -498,15 +498,40 @@ const WORK_SHOWN = 3;
 /**
  * An agent's work in hand, most urgent first, one line each: the state's mark, what it is, and what it is
  * doing. A job's line opens it. Past three, the rest are counted, so a busy agent's tile keeps its size.
+ * Lines keep their elements, so only a line that is new rises in, and the list's height eases to its new size.
  */
-function workList(work) {
-  const shown = [...work].sort((a, b) => URGENCY.indexOf(a.mark) - URGENCY.indexOf(b.mark)).slice(0, WORK_SHOWN);
-  const line = (w) => {
-    const body = `<span class="mark"></span><span class="what" title="${esc(w.title)}">${esc(w.title)}</span>${w.now ? `<span class="sub" title="${esc(w.now)}">${esc(w.now)}</span>` : ''}`;
-    return `<li>${w.job ? `<button class="work" data-state="${w.mark}" data-act="open" data-job="${esc(w.job)}">${body}</button>` : `<div class="work" data-state="${w.mark}">${body}</div>`}</li>`;
-  };
-  const more = work.length - shown.length;
-  return `<ul class="tile-work">${shown.map(line).join('')}${more ? `<li class="more">+${more} more</li>` : ''}</ul>`;
+function renderWork(body, work, hint) {
+  const before = body.offsetHeight;
+  if (!work.length) {
+    patch(body, `<p class="tile-hint">${esc(hint)}</p>`);
+  } else {
+    if (!body.querySelector('.tile-work')) {
+      body.innerHTML = '<ul class="tile-work"></ul><p class="more" hidden></p>';
+      delete body.dataset.html;
+    }
+    const shown = [...work].sort((a, b) => URGENCY.indexOf(a.mark) - URGENCY.indexOf(b.mark)).slice(0, WORK_SHOWN);
+    let arriving = 0;
+    reconcile(body.querySelector('.tile-work'), shown.map((w) => ({
+      key: w.key,
+      update: (li) => {
+        const line = `<span class="mark"></span><span class="what" title="${esc(w.title)}">${esc(w.title)}</span>${w.now ? `<span class="sub" title="${esc(w.now)}">${esc(w.now)}</span>` : ''}`;
+        patch(li, w.job ? `<button class="work" data-state="${w.mark}" data-act="open" data-job="${esc(w.job)}">${line}</button>` : `<div class="work" data-state="${w.mark}">${line}</div>`);
+        if (!('seen' in li.dataset)) {
+          li.dataset.seen = '';
+          li.className = 'enter';
+          li.style.setProperty('--i', arriving++);
+        }
+      },
+    })), () => document.createElement('li'));
+    const more = body.querySelector('.more');
+    more.hidden = work.length <= WORK_SHOWN;
+    more.textContent = `+${work.length - WORK_SHOWN} more`;
+  }
+  const after = body.offsetHeight;
+  if (before && after !== before && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    body.getAnimations().forEach((a) => a.cancel());
+    body.animate([{ height: `${before}px` }, { height: `${after}px` }], { duration: 360, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' });
+  }
 }
 
 /** The agents as resources: what each is doing and how much of its allowance is used. They are not what the board is organized by. */
@@ -519,11 +544,11 @@ function renderAgents(visible) {
   const usageTitle = windows.map((w) => `${Math.round(w.usedPercent)}% of the ${w.minutes >= 1440 ? `${Math.round(w.minutes / 1440)}-day` : `${Math.round(w.minutes / 60)}-hour`} limit`).join(', ');
   // What each agent is on now, as lines of work: a lead's open sessions, a worker's unfinished jobs.
   const leading = [...sessions.values()].filter((s) => visible(s) && s.state !== 'idle').map((s) => ({
-    mark: sessionMark(s), title: s.title,
+    key: `session:${s.id}`, mark: sessionMark(s), title: s.title,
     now: s.state === 'waiting' ? s.waitingFor || 'Needs your input' : s.stalled ? 'May be stuck' : s.phase,
   }));
   const working = (agent) => [...jobs.values()].filter((job) => job.agent === agent && !job.endedAt && visible(job)).map((job) => ({
-    mark: jobMark(job), title: job.title, job: job.id,
+    key: job.id, mark: jobMark(job), title: job.title, job: job.id,
     now: job.state === 'waiting' ? jobLabel(job) : job.stalled ? `May be stuck · ${job.phase}` : job.phase,
   }));
   const chips = [
@@ -536,22 +561,25 @@ function renderAgents(visible) {
       hint: Object.keys(ROLE_HINTS).filter((role) => roles[role]?.agent === agent).map((role) => ROLE_HINTS[role]).join(' · ') || 'Not given any kind of job',
     })),
   ];
-  patch(document.getElementById('agents'), chips.map(({ agent, marks, work, role, hint }) => {
-    const busy = marks.filter((mark) => mark !== 'idle' && mark !== 'done').length;
-    const state = URGENCY.find((mark) => marks.includes(mark)) ?? 'idle';
-    const label = { waiting: 'Needs you', failed: 'Failed', stalled: 'May be stuck', working: busy > 1 ? `${busy} working` : 'Working', idle: 'Idle' }[state];
-    const name = agents[agent]?.name ?? AGENT_NAMES[agent];
-    const extra = agent === 'codex' && usage ? `<p class="usage" title="${esc(usageTitle)}">${usage}</p>` : '';
-    return `<li class="tile">
-        <div class="tile-head">
-          ${agentMark(agent, name)}
+  // Tiles keep their elements, so a change of work animates in place instead of redrawing the tile.
+  reconcile(document.getElementById('agents'), chips.map(({ agent, marks, work, role, hint }) => ({
+    key: agent,
+    update: (li) => {
+      if (!li.firstChild) li.innerHTML = '<div class="tile-head"></div><div class="tile-body"></div><p class="usage" hidden></p>';
+      const busy = marks.filter((mark) => mark !== 'idle' && mark !== 'done').length;
+      const state = URGENCY.find((mark) => marks.includes(mark)) ?? 'idle';
+      const label = { waiting: 'Needs you', failed: 'Failed', stalled: 'May be stuck', working: busy > 1 ? `${busy} working` : 'Working', idle: 'Idle' }[state];
+      const name = agents[agent]?.name ?? AGENT_NAMES[agent];
+      patch(li.querySelector('.tile-head'), `${agentMark(agent, name)}
           <div class="tile-id"><p class="tile-label" title="${esc(role)}">${esc(role)}</p><p class="tile-value" title="${esc(name)}">${esc(name)}</p></div>
-          <span class="chip" data-state="${state}"><span class="mark"></span>${label}</span>
-        </div>
-        ${work.length ? workList(work) : `<p class="tile-hint">${esc(hint)}</p>`}
-        ${extra}
-      </li>`;
-  }).join(''));
+          <span class="chip" data-state="${state}"><span class="mark"></span>${label}</span>`);
+      renderWork(li.querySelector('.tile-body'), work, hint);
+      const meter = li.querySelector('.usage');
+      meter.hidden = !(agent === 'codex' && usage);
+      meter.title = usageTitle;
+      if (!meter.hidden) patch(meter, usage);
+    },
+  })), () => Object.assign(document.createElement('li'), { className: 'tile' }));
 }
 
 // In the order they sit on the bar, the way progress reads: what is finished, what is moving, then what is held up.

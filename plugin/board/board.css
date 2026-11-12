@@ -290,6 +290,9 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
  * The agent's work in hand, one line each, on the header's columns: each mark centered under the agent's
  * mark, each title on the name's edge. A line's padding hangs past the tile's edge so its hover fill has room.
  */
+.tile-body { min-width: 0; }
+/* While the list eases to a new height, what is past the edge is cut off; sideways the hover fills still show. */
+.tile-body:has(> .tile-work) { overflow: visible clip; overflow-clip-margin: 8px; }
 .tile-work { display: grid; align-content: start; gap: 2px; margin: 8px -8px 0; }
 .work { display: grid; grid-template-columns: 28px minmax(0, 1fr); column-gap: 12px; align-items: center; width: 100%; min-height: 0; padding: 6px 8px; border: 0; border-radius: var(--radius-field); background: none; color: var(--text); font-size: 13.5px; font-weight: 400; text-align: start; }
 .work .mark { grid-row: 1 / span 2; align-self: start; justify-self: center; width: 16px; height: 16px; margin-top: 2px; }
@@ -297,7 +300,12 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 .work .sub { grid-column: 2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12.5px; }
 .work:is([data-state="waiting"], [data-state="stalled"], [data-state="failed"]) .sub { color: var(--tone); }
 @media (hover: hover) { button.work:not(:disabled):hover { background: var(--hover); } }
-.tile-work .more { padding: 4px 8px 0 48px; color: var(--muted); font-size: 12.5px; }
+/* A line of work that is new rises out of a blur; several arrive one after another. */
+@media (prefers-reduced-motion: no-preference) {
+  .tile-work li.enter { animation: work-in var(--dur-move) var(--ease) backwards; animation-delay: calc(var(--i, 0) * 50ms); }
+}
+@keyframes work-in { from { opacity: 0; translate: 0 8px; filter: blur(4px); } }
+.tile-body .more { padding: 4px 0 0 40px; color: var(--muted); font-size: 12.5px; }
 .usage { display: flex; align-items: center; gap: 12px; margin-top: 12px; color: var(--muted); font-size: 12.5px; letter-spacing: 0; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .meter { display: block; flex: 1; height: 6px; border-radius: 3px; background: var(--rail); overflow: hidden; }
 .meter > i { display: block; height: 100%; width: calc(var(--used) * 1%); background: var(--ink); border-radius: inherit; }

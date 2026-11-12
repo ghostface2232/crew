@@ -267,11 +267,18 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 .stat[data-none] { --tone: var(--faint); }
 .stat[data-none] .stat-label { color: var(--muted); }
 .stat[data-none] b { font-weight: 400; }
-/* Segments meet with a hairline of page between them; the bar's own ends are round. With nothing in hand, it is an empty track. */
-.stats-bar { display: flex; gap: 2px; height: 12px; overflow: hidden; border-radius: 6px; }
-.stats-bar:not(:has(i:not([data-zero]))) { background: var(--rail); }
-.stats-bar i { flex: 0 1 0; min-width: 4px; background: var(--tone); transition: flex-grow var(--dur-move) var(--ease); }
-.stats-bar i[data-zero] { display: none; }
+/*
+ * A slim capsule track, the way AgentGauge draws daily usage: the segments sit on it with a 2px gap between
+ * neighbours and softly rounded joints, while the ends follow the capsule. A state that empties narrows to
+ * nothing instead of dropping out, and a sliver keeps enough width to be seen.
+ */
+.stats-bar { display: flex; height: 10px; overflow: hidden; border-radius: 999px; background: var(--rail); }
+.stats-bar i { flex: 0 1 0; min-width: 0; border-radius: 3px; background: var(--tone); transition: flex-grow 400ms var(--ease), margin 400ms var(--ease), opacity var(--dur-quick) ease-out; }
+.stats-bar i:not([data-zero]) { min-width: 6px; }
+.stats-bar i:not([data-zero]) ~ i:not([data-zero]) { margin-inline-start: 2px; }
+/* Pointing at a state, on the bar or in the legend, keeps it and lets the others step back. */
+.stats [data-dim] { opacity: 0.42; }
+.stat { transition: opacity var(--dur-quick) ease-out; }
 /* Gone quiet shares the waiting color, washed out and finely hatched, as an unconfirmed stretch is: told apart without shouting. */
 .stats-bar i[data-state="stalled"] { background: repeating-linear-gradient(-45deg, oklch(from var(--tone) l c h / 0.5) 0 2.5px, oklch(from var(--tone) l c h / 0.2) 2.5px 6.5px); }
 

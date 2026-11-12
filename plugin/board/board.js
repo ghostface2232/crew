@@ -634,6 +634,18 @@ function renderSummary(visible) {
   }
 }
 
+// A state pointed at on the bar or in its legend stays lit; the rest step back, so the two read as one.
+function focusState(state) {
+  for (const el of document.querySelectorAll('.stats [data-state]')) el.toggleAttribute('data-dim', Boolean(state) && el.dataset.state !== state);
+}
+document.addEventListener('pointerover', (e) => {
+  const el = e.target.closest?.('.stats [data-state]');
+  if (el) focusState(el.dataset.state);
+});
+document.addEventListener('pointerout', (e) => {
+  if (e.target.closest?.('.stats') && !e.relatedTarget?.closest?.('.stats [data-state]')) focusState('');
+});
+
 function groupElement() {
   const el = document.createElement('section');
   el.className = 'group';

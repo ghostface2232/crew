@@ -625,7 +625,10 @@ function renderSummary(visible) {
   })), () => Object.assign(document.createElement('li'), { className: 'stat' }));
   const gauge = document.getElementById('gauge');
   if (!gauge.firstChild) gauge.innerHTML = `<div class="gauge-ring">${ring(0, 1)}<b><span class="roll"></span><small></small></b></div><p class="gauge-label"></p>`;
-  gauge.querySelector('.ring-fill').style.strokeDashoffset = (2 * Math.PI * 42 * (1 - (live.length ? n.done / live.length : 0))).toFixed(1);
+  const fill = gauge.querySelector('.ring-fill');
+  fill.style.strokeDashoffset = (2 * Math.PI * 42 * (1 - (live.length ? n.done / live.length : 0))).toFixed(1);
+  // A round cap on an empty arc still draws a dot at twelve o'clock.
+  fill.style.opacity = n.done ? '' : '0';
   roll(gauge.querySelector('.roll'), String(n.done));
   gauge.querySelector('.gauge-ring small').textContent = live.length ? `/${live.length}` : '';
   gauge.querySelector('.gauge-label').textContent = !live.length ? 'No jobs yet' : n.done === live.length ? 'Every job is finished' : 'jobs finished';
@@ -1127,6 +1130,8 @@ document.addEventListener('click', async (e) => {
 });
 
 const connection = document.getElementById('connection');
+// Drawn empty once while the first snapshot is on its way, so the loading placeholders have the board's own shapes.
+if (document.body?.hasAttribute('data-loading')) render();
 const stream = new EventSource('/api/stream');
 
 stream.addEventListener('state', (e) => {
@@ -1146,6 +1151,7 @@ stream.addEventListener('state', (e) => {
   events = state.events;
   render();
   renderFeed();
+  document.body.removeAttribute('data-loading');
   // After a reconnect the open job may have moved on; on first load the address may name one to open.
   const wanted = openJob?.id ?? location.hash.slice(1);
   if (wanted && jobs.has(wanted)) openDrawer(wanted, Boolean(openJob));

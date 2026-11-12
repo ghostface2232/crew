@@ -130,7 +130,7 @@ ul, ol { list-style: none; }
  * Who an agent is, by its own mark, shown only once its file has loaded (see AGENT_ICONS in board.js).
  * Drawn in the text color through a mask, so color keeps meaning state alone.
  */
-.agent-icon { display: none; flex: none; width: 0.9em; height: 0.9em; background: currentColor; -webkit-mask: var(--src) center / contain no-repeat; mask: var(--src) center / contain no-repeat; }
+.agent-icon { display: none; flex: none; width: 0.9em; height: 0.9em; background: currentColor; opacity: 0.8; -webkit-mask: var(--src) center / contain no-repeat; mask: var(--src) center / contain no-repeat; }
 .agent-icon[data-agent="claude"] { --src: url("/icons/ClaudeCode.svg"); }
 .agent-icon[data-agent="codex"] { --src: url("/icons/Codex.svg"); }
 .agent-icon[data-agent="antigravity"] { --src: url("/icons/Antigravity.svg"); }
@@ -637,6 +637,8 @@ button:focus-visible { outline: 2px solid var(--working); outline-offset: 2px; }
   button.link:not(:disabled):hover { background: none; text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 4px; }
   .segmented button:not([aria-pressed="true"]):hover { background: transparent; color: var(--text); }
   .segmented button[aria-pressed="true"]:hover { background: var(--ink); }
+  /* Hover arrives quickly and leaves at the usual pace, so the pointer feels answered without the board flickering. */
+  button:not(:disabled):hover { transition-duration: 60ms; }
   button.item:not(:disabled):hover { background: color-mix(in oklch, var(--tint, var(--sunken)), var(--text) 5%); }
   button.item[data-state="done"]:hover, button.item[data-state="idle"]:hover { background: var(--hover); }
   .dock-pill:not(:disabled):hover { background: var(--ink); opacity: 0.9; }
@@ -712,7 +714,8 @@ textarea:focus-visible, input:focus-visible, select:focus-visible { outline: 2px
 .feed > .feed-list:empty { display: none; }
 /* Who and when on one line, what happened under it. */
 .feed-list li { display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 2px 12px; padding: 14px 20px; font-size: 13.5px; }
-.feed-list li + li { border-top: 1px solid var(--line); }
+/* A hairline drawn inside the row, so it takes no layout pixel. */
+.feed-list li + li { box-shadow: inset 0 1px 0 var(--line); }
 .feed-list time { color: var(--faint); font-size: 12.5px; line-height: 21px; font-variant-numeric: tabular-nums; }
 .feed-list .who { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13.5px; font-weight: 500; line-height: 21px; white-space: nowrap; }
 .feed-list .what { grid-column: 2; min-width: 0; color: var(--text); overflow-wrap: anywhere; max-height: 3lh; overflow: hidden; }
@@ -722,6 +725,19 @@ textarea:focus-visible, input:focus-visible, select:focus-visible { outline: 2px
 /* The job an event belongs to, as a link to it. */
 .feed-list .tag { flex: 0 1 auto; min-width: 0; min-height: 0; padding: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; font-weight: 400; line-height: 21px; color: var(--muted); background: none; border: 0; border-radius: 4px; }
 @media (hover: hover) { .feed-list .tag:not(:disabled):hover { background: none; color: var(--text); text-decoration: underline; text-underline-offset: 3px; } }
+
+/*
+ * Before the first snapshot the board is drawn empty, and its own text stands in as placeholder bars, so nothing
+ * moves when the real figures arrive and no "nothing yet" message is shown before anything is known.
+ */
+body[data-loading] :is(.eyebrow, .summary h2, .lede, .stat b, .tile-label, .tile-value, .tile-hint, .gauge-ring b, .gauge-label) { width: fit-content; justify-self: start; color: transparent; border-radius: 8px; background: linear-gradient(90deg, var(--rail) 40%, oklch(from var(--rail) l c h / 0.04) 50%, var(--rail) 60%) 0 0 / 300% 100%; }
+body[data-loading] :is(.gauge-ring b, .gauge-label) { background-image: linear-gradient(90deg, oklch(from var(--on-ink) l c h / 0.14) 40%, oklch(from var(--on-ink) l c h / 0.04) 50%, oklch(from var(--on-ink) l c h / 0.14) 60%); }
+body[data-loading] .gauge-ring b { inset: 50px 34px; }
+body[data-loading] :is(.stat .mark, .tile .chip, .agent-well, .ring-fill, .now-empty, .empty) { visibility: hidden; }
+@media (prefers-reduced-motion: no-preference) {
+  body[data-loading] :is(.eyebrow, .summary h2, .lede, .stat b, .tile-label, .tile-value, .tile-hint, .gauge-ring b, .gauge-label) { animation: shimmer 1.6s ease-in-out infinite; }
+}
+@keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
 
 /* One-shot entrances. The page assembles itself once, top to bottom; later arrivals rise into place. */
 @keyframes fade { from { opacity: 0; } }

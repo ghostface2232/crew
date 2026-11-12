@@ -55,8 +55,14 @@
   --done: oklch(0.49 0.13 150);
   --done-bg: oklch(0.948 0.05 145);
 
+  /*
+   * Corners. Two outer radii, and every corner inside one is that radius less its inset, so nested corners
+   * run parallel: a card's rows sit 13px in (12px and its 1px edge), a request's and a sheet's parts 24px and 20px.
+   */
   --radius-tile: 28px;
-  --radius-item: 16px;
+  --radius-sheet: 32px;
+  --radius-item: calc(var(--radius-tile) - 13px);
+  --radius-part: calc(var(--radius-sheet) - 20px);
   --radius-field: 12px;
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
   /* Durations: a press, a quick change or exit, a fade, a move, a spring, and one beat for every pulse. */
@@ -233,7 +239,7 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 #open-settings { border-color: transparent; background: var(--hover); }
 .count { flex: none; display: inline-block; min-width: 18px; margin-inline-start: 6px; padding: 0 5px; border-radius: 9px; background: var(--waiting); color: var(--on-ink); font-size: 12.5px; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; }
 
-.notice { margin-top: 12px; padding: 12px 18px; border-radius: var(--radius-item); background: var(--failed-bg); color: var(--failed); overflow-wrap: anywhere; }
+.notice { margin-top: 12px; padding: 12px 16px; border-radius: var(--radius-item); background: var(--failed-bg); color: var(--failed); overflow-wrap: anywhere; }
 
 /* --- Hero: the board in one sentence, then each state's share of the work as one bar --- */
 .hero {
@@ -246,7 +252,7 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 .summary { grid-area: summary; align-self: end; min-width: 0; padding: 0 8px 12px; }
 .eyebrow { color: var(--muted); font-size: 13.5px; font-weight: 500; font-variant-numeric: tabular-nums; }
 /* Pulled in by the figures' side bearing, so the large glyphs line up with the small text above and below. */
-.summary h2 { margin-top: 12px; margin-inline-start: -0.03em; font-size: 64px; font-weight: 500; line-height: 1.04; letter-spacing: -0.04em; text-wrap: balance; }
+.summary h2 { margin-top: 12px; margin-inline-start: -0.03em; font-size: 64px; font-weight: 500; line-height: 1.04; letter-spacing: -0.013em; text-wrap: balance; }
 .lede { margin-top: 20px; max-width: 46ch; color: var(--muted); font-size: 17px; line-height: 1.45; letter-spacing: -0.012em; text-wrap: pretty; }
 .summary .actions { margin-top: 24px; }
 .summary .actions .primary { min-height: 44px; padding: 0 22px; font-size: 15px; }
@@ -262,7 +268,7 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 .stats-legend { display: flex; flex-wrap: wrap; gap: 16px 48px; }
 .stat { display: grid; gap: 6px; min-width: 0; cursor: default; }
 .stat-label { display: flex; align-items: center; gap: 8px; color: var(--tone); font-size: 15px; font-weight: 500; white-space: nowrap; }
-.stat b { margin-inline-start: -0.03em; color: var(--tone); font-size: 40px; font-weight: 500; line-height: 1; letter-spacing: -0.04em; font-variant-numeric: tabular-nums; }
+.stat b { margin-inline-start: -0.03em; color: var(--tone); font-size: 40px; font-weight: 500; line-height: 1; letter-spacing: -0.013em; font-variant-numeric: tabular-nums; }
 /* A state with nothing in it keeps its place in the legend, so the row does not jump, but steps back. */
 .stat[data-none] { --tone: var(--faint); }
 .stat[data-none] .stat-label { color: var(--muted); }
@@ -298,7 +304,7 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 .tile-id { flex: 1; min-width: 0; }
 .tile-head > .chip { margin-inline-start: auto; }
 .tile-label { color: var(--muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tile-value { font-size: 20px; font-weight: 500; letter-spacing: -0.02em; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tile-value { font-size: 20px; font-weight: 500; letter-spacing: -0.007em; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tile-hint { margin-top: 12px; color: var(--muted); font-size: 13.5px; text-wrap: pretty; }
 /*
  * The agent's work in hand, one line each, on the header's columns: each mark centered under the agent's
@@ -308,7 +314,7 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 /* While the list eases to a new height, what is past the edge is cut off; sideways the hover fills still show. */
 .tile-body:has(> .tile-work) { overflow: visible clip; overflow-clip-margin: 8px; }
 .tile-work { display: grid; align-content: start; gap: 2px; margin: 8px -8px 0; }
-.work { display: grid; grid-template-columns: 28px minmax(0, 1fr); column-gap: 12px; align-items: center; width: 100%; min-height: 0; padding: 6px 8px; border: 0; border-radius: var(--radius-field); background: none; color: var(--text); font-size: 13.5px; font-weight: 400; text-align: start; }
+.work { display: grid; grid-template-columns: 28px minmax(0, 1fr); column-gap: 12px; align-items: center; width: 100%; min-height: 0; padding: 6px 8px; border: 0; border-radius: var(--radius-item); background: none; color: var(--text); font-size: 13.5px; font-weight: 400; text-align: start; }
 .work .mark { grid-row: 1 / span 2; align-self: start; justify-self: center; width: 16px; height: 16px; margin-top: 2px; }
 .work .what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; line-height: 20px; }
 .work .sub { grid-column: 2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12.5px; }
@@ -349,7 +355,7 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
   gap: 16px;
   /* One inset on every side: everything in the card sits 24px from each edge, the corners' chips included. */
   padding: 24px;
-  border-radius: 32px;
+  border-radius: var(--radius-sheet);
   /* Opaque enough that muted text keeps its contrast over the black tiles showing through. */
   background: oklch(1 0 0 / 0.86);
   -webkit-backdrop-filter: saturate(1.8) blur(22px);
@@ -387,11 +393,11 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 /* A size up from the tiles' mark, beside the larger title. */
 .need-head .agent-well, .need-head .agent-icon { width: 32px; height: 32px; }
 .need-head > div { min-width: 0; }
-.need-title { font-size: 24px; font-weight: 500; line-height: 1.15; letter-spacing: -0.02em; text-wrap: balance; }
+.need-title { font-size: 24px; font-weight: 500; line-height: 1.15; letter-spacing: -0.007em; text-wrap: balance; }
 .need-who { margin-top: 2px; color: var(--muted); font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .need .callout { padding: 0; background: none; }
 /* The agent's own words, in the body face, in a sunken box whose edges are the card's edges. */
-.need .callout p { padding: 16px; border-radius: var(--radius-item); background: oklch(from var(--ink) l c h / 0.04); line-height: 1.5; }
+.need .callout p { padding: 16px; border-radius: calc(var(--radius-sheet) - 24px); background: oklch(from var(--ink) l c h / 0.04); line-height: 1.5; }
 .need .hint { margin-top: -4px; }
 
 /* --- Board and feed side by side when there is room --- */
@@ -410,7 +416,7 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 .group { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; min-width: 0; }
 /* Narrow, the counts drop under the name rather than push the page sideways. */
 .group-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; min-width: 0; padding: 0 8px 4px; }
-.group-head h2 { min-width: 0; max-width: 100%; font-size: 24px; font-weight: 500; letter-spacing: -0.02em; line-height: 1.2; white-space: nowrap; }
+.group-head h2 { min-width: 0; max-width: 100%; font-size: 24px; font-weight: 500; letter-spacing: -0.007em; line-height: 1.2; white-space: nowrap; }
 .group-head h2 .link { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .group-head .path { color: var(--faint); font-family: var(--mono); font-size: 12.5px; letter-spacing: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 0; }
 .group-meta { display: flex; align-items: center; gap: 12px; margin-inline-start: auto; align-self: center; color: var(--muted); font-size: 13.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -424,7 +430,7 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 .session .what { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; max-width: 28ch; }
 .session .sub { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1 1 0; }
 
-.empty { color: var(--muted); font-size: 17px; padding: 40px 32px; border-radius: var(--radius-tile); background: var(--tile); text-wrap: pretty; }
+.empty { color: var(--muted); font-size: 17px; padding: 32px; border-radius: var(--radius-tile); background: var(--tile); text-wrap: pretty; }
 .sessions:not(:empty) ~ .empty, .commands:not(:empty) ~ .empty, .feed-list:not(:empty) + .empty { display: none; }
 
 /* --- Tasks --- */
@@ -445,9 +451,10 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
   .commands .card[data-quiet] button:not(:disabled, .item, .cmd-toggle, .link):hover { background: var(--hover); }
 }
 
-.cmd-head { display: flex; align-items: center; gap: 12px; padding: 16px 20px 16px 12px; min-width: 0; }
-.cmd-toggle { flex: 1 1 0; display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 40px; padding: 0 8px; border: 0; border-radius: var(--radius-field); background: none; text-align: start; }
-.cmd-title { font-size: 20px; font-weight: 500; letter-spacing: -0.017em; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+/* The card's one inset, 12px, on every side of the head as of the body, so its controls sit in the corners like its rows. */
+.cmd-head { display: flex; align-items: center; gap: 12px; padding: 12px; min-width: 0; }
+.cmd-toggle { flex: 1 1 0; display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 48px; padding: 0 8px; border: 0; border-radius: var(--radius-item); background: none; text-align: start; }
+.cmd-title { font-size: 20px; font-weight: 500; letter-spacing: -0.006em; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 [data-quiet] .cmd-title { font-family: var(--text-face); font-size: 17px; letter-spacing: -0.012em; }
 /* Patching replaces the chevron, so it is not animated; the view transition carries the change. */
 .chev { flex: none; width: 8px; height: 8px; margin: 0 6px 4px 2px; border: solid var(--faint); border-width: 0 1.75px 1.75px 0; border-radius: 1px; rotate: 45deg; }
@@ -467,7 +474,7 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 /* Inset 12px inside the 28px card, so the rows' 16px corners run parallel to the card's. */
 .cmd-body { display: grid; grid-template-columns: 176px minmax(0, 1fr); gap: 24px; padding: 4px 12px 12px; }
 .cmd-body[data-plain] { grid-template-columns: minmax(0, 1fr); }
-.cmd-main { min-width: 0; padding-top: 8px; }
+.cmd-main { min-width: 0; }
 .outcome { margin-top: 16px; padding: 16px 20px; border-radius: var(--radius-item); background: var(--sunken); font-size: 15px; line-height: 1.5; overflow-wrap: anywhere; text-wrap: pretty; }
 [data-quiet] .outcome { background: var(--bg); }
 
@@ -475,18 +482,18 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
  * How far along the task is. Light, and drawn as six arcs that match the track's stops, so it reads as
  * part of its card's track rather than as a figure of its own.
  */
-.stage { align-self: start; display: grid; justify-items: center; gap: 2px; padding: 20px 16px; border-radius: var(--radius-item); background: var(--sunken); text-align: center; }
+.stage { display: grid; justify-items: center; gap: 2px; padding: 20px; border-radius: var(--radius-item); background: var(--sunken); text-align: center; align-self: stretch; align-content: center; }
 [data-quiet] .stage { background: var(--bg); }
 .stage-ring { position: relative; width: 104px; height: 104px; margin-bottom: 12px; }
 /* Centered on the ring by the box, not by padding, so it stays centered whichever face draws it. */
-.stage-ring b { position: absolute; inset: 0; display: flex; flex-wrap: wrap; align-content: center; align-items: baseline; justify-content: center; font-size: 36px; font-weight: 500; line-height: 1; letter-spacing: -0.04em; font-variant-numeric: tabular-nums; }
+.stage-ring b { position: absolute; inset: 0; display: flex; flex-wrap: wrap; align-content: center; align-items: baseline; justify-content: center; font-size: 36px; font-weight: 500; line-height: 1; letter-spacing: -0.013em; font-variant-numeric: tabular-nums; }
 .stage-ring small { margin-inline-start: 2px; color: var(--muted); font-size: 15px; font-weight: 500; letter-spacing: -0.009em; }
 .steps circle { stroke-width: 8; stroke: var(--rail); stroke-linecap: round; }
 .steps [data-pos="past"] { stroke: var(--ink); }
 .steps [data-pos="now"] { stroke: var(--accent); }
 .stage[data-ended="abandoned"] .steps [data-pos="past"] { stroke: var(--faint); }
 .stage-label { color: var(--muted); font-size: 12.5px; }
-.stage-name { font-size: 20px; font-weight: 500; line-height: 1.2; letter-spacing: -0.017em; }
+.stage-name { font-size: 20px; font-weight: 500; line-height: 1.2; letter-spacing: -0.006em; }
 .tick { width: 40px; height: 40px; background: var(--ink); -webkit-mask: var(--icon-check) center / contain no-repeat; mask: var(--icon-check) center / contain no-repeat; }
 
 /* What the stop the task has reached means, said plainly. */
@@ -497,13 +504,15 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
  * The track: six numbered stops on one line, then every job as a row under it. A stop's markup
  * holds its jobs, but its box is dissolved so the names share the first row and each list spans the card.
  */
-.track { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); row-gap: 4px; counter-reset: stop; }
+/* The last stop is a node-wide column at the right edge, so the track ends where the rows below it do. */
+.track { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)) 28px; row-gap: 4px; counter-reset: stop; }
 .stop { display: contents; }
 .stop-name { grid-row: 1; counter-increment: stop; position: relative; display: grid; gap: 8px; padding-bottom: 20px; font-size: 13.5px; line-height: 1.3; color: var(--muted); }
 .stop-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-inline-end: 8px; }
 /* The line runs from this stop's node to the next one's. */
 .stop-name::before { content: ""; position: absolute; inset-inline: 14px -14px; top: 13px; height: 2px; background: var(--rail); border-radius: 1px; }
 .stop:last-child .stop-name::before { display: none; }
+.stop:last-child .stop-name span { justify-self: unsafe center; overflow: visible; padding: 0; }
 .node { position: relative; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--surface); box-shadow: inset 0 0 0 1.5px var(--rail); color: var(--muted); font-size: 12.5px; font-weight: 500; font-style: normal; font-variant-numeric: tabular-nums; }
 .node::before { content: counter(stop); }
 .stop[data-pos="past"] .stop-name { color: var(--text); }
@@ -527,8 +536,8 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 /* A row: what it is and what it is doing, then where, who, and how long, each in its own column. */
 .item {
   display: grid;
-  /* The time column grows for a long label ("cancelled after 1h 23m") instead of running past the row. */
-  grid-template-columns: 20px minmax(0, 1fr) 52px 84px minmax(104px, auto);
+  /* Fixed right-hand columns, so every row's stop, agent and time line up, whatever the time says. */
+  grid-template-columns: 20px minmax(0, 1fr) 56px 84px 128px;
   column-gap: 12px;
   align-items: center;
   width: 100%;
@@ -550,13 +559,11 @@ button.item { cursor: pointer; }
 .item .now { grid-column: 2; grid-row: 2; margin-top: 2px; font-size: 13.5px; line-height: 1.4; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .item .at { color: var(--muted); font-size: 13.5px; }
 .item .who { font-size: 13.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.item .sub { color: var(--muted); font-size: 13.5px; text-align: end; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.item .sub { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-size: 13.5px; text-align: end; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .flag { margin-inline-start: 8px; padding: 2px 8px; border-radius: 999px; background: var(--hover); color: var(--muted); font-size: 12.5px; font-weight: 500; letter-spacing: 0; vertical-align: 1px; white-space: nowrap; }
 /* Finished work is a plain row in the regular weight; only its mark keeps the color. */
 .item[data-state="done"], .item[data-state="idle"] { background: transparent; }
 .item[data-state="done"] .what, .item[data-state="idle"] .what { font-weight: 400; }
-.item[data-state="waiting"] { box-shadow: inset 0 0 0 1.5px var(--waiting); }
-.item[data-state="stalled"] { background: var(--surface); box-shadow: inset 0 0 0 1.5px var(--waiting); }
 .item[data-state="waiting"] .now, .item[data-state="stalled"] .now, .item[data-state="failed"] .now { color: var(--tone); font-weight: 500; }
 
 /*
@@ -582,17 +589,18 @@ button.item { cursor: pointer; }
   body { padding: 8px 12px calc(var(--dock, 72px) + 24px); }
   .hero { grid-template-columns: minmax(0, 1fr); grid-template-areas: "summary" "stats" "agents"; gap: 8px; margin-top: 32px; }
   .summary { padding-bottom: 16px; }
-  .summary h2 { font-size: 40px; letter-spacing: -0.035em; }
+  .summary h2 { font-size: 40px; letter-spacing: -0.012em; }
   .lede { margin-top: 12px; font-size: 15px; }
   /* Cards keep their 28px corner: their rows sit 12px in, with 16px corners. */
-  .tile, .empty { border-radius: 22px; }
+  :root { --radius-tile: 22px; --radius-sheet: 26px; }
   .stats { margin-block: 24px 16px; }
   .stats-legend { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 12px; }
   .stat b { font-size: 32px; }
   .tiles { grid-template-columns: minmax(0, 1fr); gap: 8px; }
   .tile-hint { display: none; }
   .dock { padding: 0 8px 8px; }
-  .card.need { padding: 16px; border-radius: 26px; }
+  .card.need { padding: 16px; }
+  .need .callout p { border-radius: calc(var(--radius-sheet) - 16px); }
   .need-title { font-size: 20px; }
   .need-who { white-space: normal; overflow-wrap: anywhere; }
   .layout { margin-top: 40px; }
@@ -677,7 +685,7 @@ button:focus-visible { outline: 2px solid var(--working); outline-offset: 2px; }
 .detail[data-wrap] { white-space: normal; overflow-wrap: anywhere; }
 .detail[data-tone] { color: var(--tone); }
 
-.callout { display: grid; gap: 16px; padding: 20px; background: var(--waiting-bg); border-radius: 24px; overflow-wrap: anywhere; }
+.callout { display: grid; gap: 16px; padding: 20px; background: var(--waiting-bg); border-radius: var(--radius-part); overflow-wrap: anywhere; }
 .callout p { white-space: pre-wrap; }
 /* Answering is the one thing asked of the user, so these are the largest controls on the board. */
 .callout button { min-height: 44px; padding: 0 22px; font-size: 15px; font-weight: 500; }
@@ -732,7 +740,7 @@ textarea:focus-visible, input:focus-visible, select:focus-visible { outline: 2px
 /* --- Activity --- */
 .feed { min-width: 0; view-transition-name: feed; }
 .feed-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "title pulse" "read pulse"; align-items: end; column-gap: 16px; padding: 0 8px 16px; }
-.feed h2 { grid-area: title; font-size: 24px; font-weight: 500; letter-spacing: -0.02em; line-height: 1.2; }
+.feed h2 { grid-area: title; font-size: 24px; font-weight: 500; letter-spacing: -0.007em; line-height: 1.2; }
 /* The readout: the hour's count, or the stretch under the pointer. */
 .pulse-read { grid-area: read; margin-top: 2px; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .pulse-read[data-pointed] { color: var(--text); }
@@ -743,7 +751,8 @@ textarea:focus-visible, input:focus-visible, select:focus-visible { outline: 2px
 .pulse i[data-empty] { background: var(--line); }
 @media (hover: hover) { .pulse i:hover { background: var(--ink); } }
 .feed-list { display: grid; align-content: start; }
-.feed > .feed-list { border-radius: var(--radius-tile); background: var(--surface); box-shadow: var(--shadow); }
+/* Clipped to its corners, so a new row's flash does not show square past them. */
+.feed > .feed-list { overflow: clip; border-radius: var(--radius-tile); background: var(--surface); box-shadow: var(--shadow); }
 .feed > .feed-list:empty { display: none; }
 /* Who and when on one line, what happened under it. */
 .feed-list li { display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 2px 12px; padding: 14px 20px; font-size: 13.5px; }
@@ -811,7 +820,7 @@ body[data-loading] :is(.stat .mark, .stats-bar, .tile .chip, .agent-well, .empty
   margin: 12px 12px 12px auto;
   padding: 0;
   border: 0;
-  border-radius: 32px;
+  border-radius: var(--radius-sheet);
   background: var(--bg);
   color: var(--text);
   box-shadow: var(--lift), 0 32px 96px oklch(0.2 0.006 100 / 0.22);
@@ -822,7 +831,7 @@ body[data-loading] :is(.stat .mark, .stats-bar, .tile .chip, .agent-well, .empty
 .sheet-body { display: grid; gap: 12px; padding: 20px 20px 28px; align-content: start; min-height: 100%; }
 .sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-inline-start: 4px; }
 .sheet-head .row { flex: 1; }
-.sheet h2 { padding: 12px 4px 8px; font-size: 32px; font-weight: 500; letter-spacing: -0.022em; line-height: 1.1; overflow-wrap: anywhere; text-wrap: balance; }
+.sheet h2 { padding: 12px 4px 8px; font-size: 32px; font-weight: 500; letter-spacing: -0.007em; line-height: 1.1; overflow-wrap: anywhere; text-wrap: balance; }
 .sheet h3, .sheet summary { font-size: 13.5px; font-weight: 500; color: var(--muted); }
 .sheet summary { cursor: pointer; border-radius: 4px; }
 .sheet summary:focus-visible { outline: 2px solid var(--working); outline-offset: 2px; }
@@ -831,13 +840,13 @@ body[data-loading] :is(.stat .mark, .stats-bar, .tile .chip, .agent-well, .empty
 [data-part] { display: grid; gap: 12px; }
 [data-part]:empty { display: none; }
 [data-part="state"] > .detail { padding-inline: 4px; font-size: 17px; }
-.section { display: grid; gap: 12px; padding: 20px; border-radius: 24px; background: var(--surface); box-shadow: var(--shadow); }
+.section { display: grid; gap: 12px; padding: 20px; border-radius: var(--radius-part); background: var(--surface); box-shadow: var(--shadow); }
 .hint { color: var(--muted); font-size: 13.5px; text-wrap: pretty; overflow-wrap: anywhere; }
 .hint[data-warn] { color: var(--waiting); }
 
 /* Facts as tiles: the name small, the value where the eye lands. */
 .facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0; }
-.facts div { display: grid; gap: 2px; align-content: start; padding: 16px 20px; border-radius: 24px; background: var(--tile); }
+.facts div { display: grid; gap: 2px; align-content: start; padding: 16px 20px; border-radius: var(--radius-part); background: var(--tile); }
 .facts dt { color: var(--muted); font-size: 12.5px; }
 .facts dd { font-size: 15px; font-weight: 500; letter-spacing: -0.009em; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; white-space: pre-wrap; }
 .files, .notes { display: grid; gap: 4px; }
@@ -845,7 +854,8 @@ body[data-loading] :is(.stat .mark, .stats-bar, .tile .chip, .agent-well, .empty
 .files li[data-tone], .notes li[data-tone] { color: var(--tone); }
 .notes li { color: var(--muted); overflow-wrap: anywhere; }
 .notes code { font-family: var(--mono); font-size: 12.5px; letter-spacing: 0; }
-.prose { margin: 0; padding: 14px 16px; background: var(--sunken); border-radius: var(--radius-field); font: inherit; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Two insets deep, past where a parallel corner would vanish, so it keeps a small corner of its own. */
+.prose { margin: 0; padding: 14px 16px; background: var(--sunken); border-radius: 8px; font: inherit; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
 .sheet .feed-list li { grid-template-columns: 66px minmax(0, 1fr); padding: 6px 0; }
 
 .roles { display: grid; gap: 12px; }
@@ -866,7 +876,7 @@ body[data-loading] :is(.stat .mark, .stats-bar, .tile .chip, .agent-well, .empty
 @keyframes sheet-up { from { translate: 0 64px; } }
 @media (max-width: 560px) {
   /* Narrow: the layer rises from the bottom and leaves the top of the board in view. */
-  .sheet { width: calc(100vw - 16px); height: auto; max-height: calc(100dvh - 56px); margin: auto 8px 8px; border-radius: 26px; }
+  .sheet { width: calc(100vw - 16px); height: auto; max-height: calc(100dvh - 56px); margin: auto 8px 8px; }
   .sheet[open] { animation-name: sheet-up; }
   .sheet:not([open]) { translate: 0 64px; }
   .facts { grid-template-columns: minmax(0, 1fr); }
@@ -884,23 +894,17 @@ body[data-loading] :is(.stat .mark, .stats-bar, .tile .chip, .agent-well, .empty
 }
 
 /*
- * Smoothed corners, after the corner smoothing on vad-3d's cards. The curve starts 1.6 times further from
- * the corner and bends as a gentle superellipse (1.4; 1.78 would pass the plain arc's midpoint), so it flows
- * into the straight edges and reads a little softer than the plain radius. Drawn with corner-shape rather than a clip, so shadows, outlines and focus rings follow it.
+ * Smoothed corners, after the corner smoothing on vad-3d's cards: a gentle superellipse that flows into the
+ * straight edges. Drawn with corner-shape rather than a clip, so shadows, outlines and focus rings follow it.
  * Pills, tracks and circles have no corner to smooth and stay round. Without corner-shape, the plain radii hold.
  */
 @supports (corner-shape: superellipse(2)) {
-  :root { --radius-tile: 45px; --radius-item: 26px; --radius-field: 19px; }
+  /* 1.27 times the plain radius, so superellipse(1.4) meets the plain arc at 45 degrees. Inner corners follow by calc. */
+  :root { --radius-tile: 36px; --radius-sheet: 41px; --radius-field: 15px; }
   :is(.card, .tile, .empty, .feed > .feed-list, .notice, .item, .work, .outcome, .stage, .need .callout p, .cmd-toggle, .projects button, textarea, input, select, .prose, .callout, .section, .facts div, .sheet, .logo) { corner-shape: superellipse(1.4); }
-  .card.need, .sheet { border-radius: 51px; }
-  .callout, .section, .facts div { border-radius: 38px; }
-  .logo { border-radius: 13px; }
+  .logo { border-radius: 10px; }
   @media (max-width: 760px) {
-    .tile, .empty { border-radius: 35px; }
-    .card.need { border-radius: 42px; }
-  }
-  @media (max-width: 560px) {
-    .sheet { border-radius: 42px; }
+    :root { --radius-tile: 28px; --radius-sheet: 33px; }
   }
   /* A row of projects is a pill when the panel folds into a row. */
   @media (max-width: 1023px) {

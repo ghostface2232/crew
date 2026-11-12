@@ -25,7 +25,10 @@
 <section class="hero" aria-label="Overview">
   <div id="summary" class="summary"></div>
   <div id="gauge" class="gauge"></div>
-  <ul id="stats" class="stats" aria-label="Jobs by state"></ul>
+  <div class="stats" role="group" aria-label="Jobs by state">
+    <ul id="stats" class="stats-legend"></ul>
+    <div id="stats-bar" class="stats-bar" aria-hidden="true"></div>
+  </div>
   <ul id="agents" class="tiles" aria-label="Agents"></ul>
 </section>
 

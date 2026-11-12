@@ -259,18 +259,26 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 
 
 /*
- * The five states as one ruled strip: a single card whose hairlines are its own ground showing through 1px
- * gaps. Only the states that wait on the user keep their tint, so the strip says where to look.
+ * The states as one bar, read the way progress is: each state's share of the work in hand is its length,
+ * in the order the legend above it names them. No boxes: the names and counts are large and stand on the
+ * page, in their state's color, so the row is read before the bar is.
  */
-.stats { grid-area: stats; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 1px; overflow: hidden; border-radius: var(--radius-tile); background: var(--line); box-shadow: var(--shadow); }
-.stat { display: grid; gap: 20px; align-content: space-between; min-width: 0; padding: 20px; background: var(--surface); cursor: default; transition: background-color var(--dur-base) ease-out; }
-.stat:is([data-state="waiting"], [data-state="stalled"], [data-state="failed"]):not([data-none]) { background: var(--tint); }
-.stat-label { display: flex; align-items: center; gap: 8px; color: var(--tone); font-size: 13.5px; font-weight: 500; white-space: nowrap; }
-.stat b { margin-inline-start: -0.03em; font-size: 48px; font-weight: 500; line-height: 1; letter-spacing: -0.04em; font-variant-numeric: tabular-nums; }
-/* A state nothing is in stays in its place, so the row does not jump, but it steps back. */
+.stats { grid-area: stats; display: grid; gap: 16px; margin-block: 32px 24px; padding-inline: 4px; }
+.stats-legend { display: flex; flex-wrap: wrap; gap: 16px 48px; }
+.stat { display: grid; gap: 6px; min-width: 0; cursor: default; }
+.stat-label { display: flex; align-items: center; gap: 8px; color: var(--tone); font-size: 15px; font-weight: 500; white-space: nowrap; }
+.stat b { margin-inline-start: -0.03em; color: var(--tone); font-size: 40px; font-weight: 500; line-height: 1; letter-spacing: -0.04em; font-variant-numeric: tabular-nums; }
+/* A state with nothing in it keeps its place in the legend, so the row does not jump, but steps back. */
 .stat[data-none] { --tone: var(--faint); }
 .stat[data-none] .stat-label { color: var(--muted); }
-.stat[data-none] b { color: var(--faint); font-weight: 400; }
+.stat[data-none] b { font-weight: 400; }
+/* Segments meet with a hairline of page between them; the bar's own ends are round. With nothing in hand, it is an empty track. */
+.stats-bar { display: flex; gap: 2px; height: 12px; overflow: hidden; border-radius: 6px; }
+.stats-bar:not(:has(i:not([data-zero]))) { background: var(--rail); }
+.stats-bar i { flex: 0 1 0; min-width: 4px; background: var(--tone); transition: flex-grow var(--dur-move) var(--ease); }
+.stats-bar i[data-zero] { display: none; }
+/* Gone quiet shares the waiting color, told apart by hatching, as an unconfirmed stretch is. */
+.stats-bar i[data-state="stalled"] { background: repeating-linear-gradient(-45deg, var(--tone) 0 3px, oklch(from var(--tone) l c h / 0.3) 3px 6px); }
 
 .tiles { grid-area: agents; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 12px; }
 .tile { display: grid; grid-template-rows: auto 1fr auto; min-width: 0; padding: 20px; border: 1px solid transparent; border-radius: var(--radius-tile); background: var(--surface); box-shadow: var(--shadow); }
@@ -556,11 +564,10 @@ button.item { cursor: pointer; }
   .gauge-ring small { font-size: 12.5px; }
   .gauge-label { font-size: 15px; }
   /* Cards keep their 28px corner: their rows sit 12px in, with 16px corners. */
-  .gauge, .stats, .tile, .empty { border-radius: 22px; }
-  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .stat { gap: 12px; padding: 16px; }
-  .stat:last-child { grid-column: 1 / -1; }
-  .stat b { font-size: 40px; }
+  .gauge, .tile, .empty { border-radius: 22px; }
+  .stats { margin-block: 24px 16px; }
+  .stats-legend { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 12px; }
+  .stat b { font-size: 32px; }
   .tiles { grid-template-columns: minmax(0, 1fr); gap: 8px; }
   .tile-hint { display: none; }
   .dock { padding: 0 8px 8px; }
@@ -739,7 +746,7 @@ textarea:focus-visible, input:focus-visible, select:focus-visible { outline: 2px
 body[data-loading] :is(.eyebrow, .summary h2, .lede, .stat b, .tile-label, .tile-value, .tile-hint, .gauge-ring b, .gauge-label) { width: fit-content; justify-self: start; color: transparent; border-radius: 8px; background: linear-gradient(90deg, var(--rail) 40%, oklch(from var(--rail) l c h / 0.04) 50%, var(--rail) 60%) 0 0 / 300% 100%; }
 body[data-loading] :is(.gauge-ring b, .gauge-label) { background-image: linear-gradient(90deg, oklch(from var(--on-ink) l c h / 0.14) 40%, oklch(from var(--on-ink) l c h / 0.04) 50%, oklch(from var(--on-ink) l c h / 0.14) 60%); }
 body[data-loading] .gauge-ring b { inset: 50px 34px; }
-body[data-loading] :is(.stat .mark, .tile .chip, .agent-well, .ring-fill, .empty) { visibility: hidden; }
+body[data-loading] :is(.stat .mark, .stats-bar, .tile .chip, .agent-well, .ring-fill, .empty) { visibility: hidden; }
 @media (prefers-reduced-motion: no-preference) {
   body[data-loading] :is(.eyebrow, .summary h2, .lede, .stat b, .tile-label, .tile-value, .tile-hint, .gauge-ring b, .gauge-label) { animation: shimmer 1.6s ease-in-out infinite; }
 }

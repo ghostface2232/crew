@@ -535,12 +535,13 @@ function renderAgents(visible) {
   }).join(''));
 }
 
+// In the order they sit on the bar, the way progress reads: what is finished, what is moving, then what is held up.
 const SUMMARY_STATES = [
+  ['done', 'Finished', 'Jobs that are complete'],
   ['working', 'In progress', 'Jobs an agent is working on right now'],
   ['waiting', 'Needs you', 'Paused until you approve something or answer a question'],
   ['stalled', 'Gone quiet', 'Still running, but silent for a while. It may be stuck.'],
   ['failed', 'Failed', 'Jobs that stopped on an error'],
-  ['done', 'Finished', 'Jobs that are complete'],
 ];
 
 /**
@@ -566,7 +567,7 @@ function renderSummary(visible) {
   const tokens = live.reduce((sum, job) => sum + (job.tokens ?? 0), 0);
   patch(document.getElementById('summary'), `<p class="eyebrow">${[open.length && plural(open.length, 'task'), plural(live.length, 'job'), `${compact(tokens)} tokens used`].filter(Boolean).join(' · ')}</p>
     <h2>${headline}</h2><p class="lede">${lede}</p>${n.waiting ? '<div class="actions"><button class="primary" data-act="answer">Answer</button></div>' : ''}`);
-  // The tiles keep their elements, so a figure that changes rolls instead of blinking.
+  // The legend keeps its elements, so a figure that changes rolls instead of blinking.
   reconcile(document.getElementById('stats'), stats.map((stat) => ({
     key: stat.state,
     update: (li) => {
@@ -577,6 +578,13 @@ function renderSummary(visible) {
       roll(li.querySelector('.roll'), String(stat.n));
     },
   })), () => Object.assign(document.createElement('li'), { className: 'stat' }));
+  // Each state's share of the work in hand is its length on the bar; a state with none takes no room.
+  const bar = document.getElementById('stats-bar');
+  if (!bar.firstChild) bar.innerHTML = stats.map((stat) => `<i data-state="${stat.state}"></i>`).join('');
+  for (const segment of bar.children) {
+    segment.style.flexGrow = n[segment.dataset.state];
+    segment.toggleAttribute('data-zero', !n[segment.dataset.state]);
+  }
   const gauge = document.getElementById('gauge');
   if (!gauge.firstChild) gauge.innerHTML = `<div class="gauge-ring">${ring(0, 1)}<b><span class="roll"></span><small></small></b></div><p class="gauge-label"></p>`;
   const fill = gauge.querySelector('.ring-fill');

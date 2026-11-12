@@ -36,7 +36,7 @@ crew status
 crew board
 ```
 
-The status board runs at http://127.0.0.1:47615. Click a job to read its report, changed files, and activity, or to send it a follow-up. Settings on the board edits roles and shared instructions.
+The status board runs at http://127.0.0.1:47615. Each command run with `/crew:run` appears as one unit with its jobs under it, and a line at the top lists what is waiting on you. Click a job to read its report, changed files, and activity, or to send it a follow-up. Settings on the board edits roles and shared instructions.
 
 When a worker asks for approval or has a question, an input dialog pops up in the Claude app. You can also answer on the status board: approve or deny, or type an answer to a question. If you have configured Codex's built-in auto-reviewer, Codex handles its own approvals internally without prompting ([docs/04-implementation.md](docs/04-implementation.md) section 5.1).
 

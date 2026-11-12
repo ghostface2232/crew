@@ -580,3 +580,32 @@ test('the session hook prints context for the event it was called for, from the 
   assert.equal(broken.hookEventName, 'SessionStart');
   assert.match(broken.additionalContext, /could not load the shared instructions/);
 });
+
+test('a job carries its mission and starting notes, and is kept with a mission that is still kept', async () => {
+  const repo = tempRepo();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-home-'));
+  const adapter: Adapter = { start: async (ctl) => ctl.done('ok'), reply: async () => {}, answer: async () => {}, cancel: async () => {}, shutdown: () => {} };
+  const kept = new Set(['m-kept']);
+  const make = () => new Jobs(home, () => config, { codex: adapter, antigravity: adapter }, { onEvent: () => {}, onJob: () => {}, onAttention: () => {}, keepsMission: (id) => kept.has(id) });
+  const jobs = make();
+  const review = { target: { type: 'uncommittedChanges' as const }, mode: 'adversarial' as const };
+
+  const first = await settled(jobs, await jobs.create({ kind: 'review', cwd: repo, review, mission: 'm-kept', notes: ['started under a mission'] }));
+  assert.equal(first.mission, 'm-kept');
+  assert.deepEqual(first.notes, ['started under a mission']);
+  const dropped = await settled(jobs, await jobs.create({ kind: 'review', cwd: repo, review, mission: 'm-gone' }));
+  // Notes that are not a list of strings must not stop the job.
+  const odd = await settled(jobs, await jobs.create({ kind: 'review', cwd: repo, review, notes: 'not a list' as never }));
+  assert.deepEqual(odd.notes, []);
+  for (const job of [first, dropped, odd]) jobs.markDelivered(job.id, job.seq);
+
+  // Push both past the history limit with newer finished jobs.
+  for (let i = 0; i < 201; i++) {
+    const job = await settled(jobs, await jobs.create({ kind: 'review', cwd: repo, review }));
+    jobs.markDelivered(job.id, job.seq);
+  }
+  jobs.flush();
+  const reloaded = make();
+  assert.ok(reloaded.jobs.has(first.id), 'the job of a kept mission survives the history limit');
+  assert.ok(!reloaded.jobs.has(dropped.id));
+});

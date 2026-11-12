@@ -3,6 +3,8 @@ import { api, ensureDaemon } from './client.ts';
 import { BASE_URL, DEFAULT_ROLES, loadConfig, VERSION, WORKERS } from './config.ts';
 import type { Role } from './config.ts';
 import type { CrewEvent, JobSpec } from './jobs.ts';
+import { normalizeTitle, STAGES } from './missions.ts';
+import type { Mission } from './missions.ts';
 import { describe, needsLead, summarize } from './render.ts';
 import type { JobView } from './render.ts';
 
@@ -42,6 +44,7 @@ How jobs work:
 - \`reply\` with a message continues the same worker session, e.g. to request fixes.
 - Reject worker changes that go beyond what was asked. For polish, any file listed as out of scope, or any non-text change, is grounds to reject.
 - If a worker fails on a usage limit, do that piece yourself and say that the cross-check was skipped.
+- When you take a user's command through several steps, call \`mission\` with its title first, with the stage as you move on, and with done at the end. The board then shows the command as one unit with its jobs under it. Skip it for a single delegated job.
 
 The user can watch every agent live on the status board at ${BASE_URL}.`;
 
@@ -108,6 +111,21 @@ const TOOLS = [
         ...common,
       },
       required: ['targets'],
+    },
+  },
+  {
+    name: 'mission',
+    title: 'Report the mission',
+    description: 'Tell the board which user command you are carrying out and how far along it is, so the user sees the command as one unit with its jobs under it. Pass title to start one (jobs you start afterwards belong to it), stage as you move through the steps, and done when it is finished. One short call per step; it starts no work itself.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'The user\'s command in a few words. Pass it once, to start the mission; later calls need only stage. A different title starts a new mission and closes this session\'s open one as abandoned.' },
+        stage: { type: 'string', enum: [...STAGES], description: 'The step you are on now.' },
+        done: { type: 'boolean', description: 'The command is finished.' },
+        abandoned: { type: 'boolean', description: 'The command was dropped before it finished.' },
+        outcome: { type: 'string', description: 'With done or abandoned: one line on how it ended.' },
+      },
     },
   },
   {
@@ -295,8 +313,76 @@ interface CallContext {
   signal: AbortSignal;
 }
 
+/** The mission this session opened and is carrying out. Only this session's own mission is ever advanced or closed from here. */
+let missionId: string | null = null;
+/** Set when this session's mission was closed from outside (dismissed on the board, or left too long), until the lead has been told. */
+let closedElsewhere: Mission | null = null;
+
+/** This session's mission if it is still open. A mission closed from outside is forgotten and remembered as such. */
+async function ownMission(): Promise<Mission | null> {
+  const id = missionId;
+  if (!id) return null;
+  const all: Mission[] = (await api('GET', '/api/state')).missions ?? [];
+  const mine = all.find((m) => m.id === id);
+  if (mine?.state === 'active') return mine;
+  // Unless a newer mission was opened while the answer was on its way.
+  if (missionId === id) {
+    missionId = null;
+    closedElsewhere = mine ?? null;
+  }
+  return null;
+}
+
+const describeMission = (m: Mission) => `Mission ${m.id} · ${m.state === 'active' ? `${m.stage} (step ${STAGES.indexOf(m.stage) + 1} of ${STAGES.length})` : m.state} — ${m.title}`;
+
+async function reportMission(args: any): Promise<string> {
+  if (args.done && args.abandoned) throw new Error('Pass done or abandoned, not both.');
+  const ending = Boolean(args.done || args.abandoned);
+  const current = await ownMission();
+
+  if (args.title && !ending) {
+    const title = normalizeTitle(args.title);
+    if (!title) throw new Error('A mission needs a title: the command it carries out.');
+    // The same title again is the same command: report the step, do not open a second card for it.
+    if (current && current.title === title) {
+      return describeMission(args.stage ? await api('POST', `/api/missions/${current.id}`, { stage: args.stage }) : current);
+    }
+    // After this server restarts it no longer knows its mission. An open one in this project with the same title is that mission.
+    const all: Mission[] = current ? [] : ((await api('GET', '/api/state')).missions ?? []);
+    const lost = all.find((m) => m.project === PROJECT && m.state === 'active' && m.title === title);
+    if (lost) {
+      missionId = lost.id;
+      return describeMission(args.stage ? await api('POST', `/api/missions/${lost.id}`, { stage: args.stage }) : lost);
+    }
+    // Opened before the previous one is closed, so a refused title leaves the previous mission as it was.
+    const opened: Mission = await api('POST', '/api/missions', { title: args.title, project: PROJECT, stage: args.stage });
+    missionId = opened.id;
+    closedElsewhere = null;
+    if (current) await api('POST', `/api/missions/${current.id}`, { abandoned: true, outcome: 'Superseded by a new mission.' }).catch(() => {});
+    return `${describeMission(opened)}\nJobs you start now are shown under it. Report each step with stage (no title needed), and finish with done.`;
+  }
+
+  if (!current) {
+    if (closedElsewhere) {
+      const gone = closedElsewhere;
+      closedElsewhere = null;
+      // Reopening it would bring back a card the user closed. The work goes on; only the reporting stops.
+      return `Mission ${gone.id} was closed outside this session (${gone.outcome || gone.state}). Carry on with the work and do not open a new mission for it.`;
+    }
+    throw new Error('This session has no open mission. Start one by passing title; if the work is already under way without one, carry on without reporting.');
+  }
+  if (ending) {
+    const ended: Mission = await api('POST', `/api/missions/${current.id}`, { done: Boolean(args.done), abandoned: Boolean(args.abandoned), outcome: args.outcome });
+    missionId = null;
+    return describeMission(ended);
+  }
+  if (!args.stage) return describeMission(current);
+  return describeMission(await api('POST', `/api/missions/${current.id}`, { stage: args.stage }));
+}
+
 async function runJob(spec: JobSpec, background: boolean, ctx: CallContext): Promise<string> {
-  const job: JobView = await api('POST', '/api/jobs', { ...spec, project: PROJECT });
+  // The id is sent as it is known: the daemon checks it and lets the job stand on its own if the mission has ended.
+  const job: JobView = await api('POST', '/api/jobs', { ...spec, project: PROJECT, mission: missionId ?? undefined });
   return background ? describe(job) : followOne(job.id, ctx);
 }
 
@@ -333,6 +419,8 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
     }
     case 'polish':
       return runJob({ kind: 'polish', cwd, title: args.title ?? `Polish ${args.targets.join(', ')}`, task: args.guidance, targets: args.targets, base: args.base, isolation: args.isolation }, Boolean(args.background), ctx);
+    case 'mission':
+      return reportMission(args);
     case 'status': {
       if (args.job_id) {
         const job: JobView = await api('GET', `/api/jobs/${args.job_id}`);

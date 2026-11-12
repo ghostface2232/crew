@@ -12,6 +12,8 @@ You are the lead. Take the task through the steps below, using the `crew` MCP to
 
 The user assigns each role to an agent: `delegate` goes to the engineer, `review` to the cross-reviewer, `polish` to the editor. The tool titles and each job's result name the agent. Role assignments are the user's; do not route a role's work to a different agent yourself.
 
+Before step 1, call `mission` with the task as `title`, so the board shows this command as one unit with its jobs under it. At the start of each later step, call `mission` with that step's `stage` (`implement`, `self-review`, `cross-review`, `fix`, `polish`, `final`), and end with `mission` and `done: true` plus a one-line `outcome` (or `abandoned: true` if the task is dropped). Each is one short call.
+
 Skip a step only when it has nothing to act on (for example, no separable piece to delegate, or no user-facing text to polish), and say that you skipped it.
 
 ## 1. Plan (you)

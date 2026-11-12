@@ -70,7 +70,7 @@ Injection keeps the decision recorded in [04-implementation.md](04-implementatio
 
 **B1. Decision support.** Implemented 2026-11-12; see [04-implementation.md](04-implementation.md) section 5.2. The settings view covers roles and shared instructions; presets (A3) are not in it yet. These gaps are already listed in [05-related-work.md](05-related-work.md) section 9: the strand drawer, free-text answers to worker questions on the board, activity filtered by job, the pending count in the tab title, a project filter, and a settings view that edits A1 to A3 by clicking.
 
-**B2. Missions.** Add `mission_id` to jobs so that one `/crew:run` is one mission, and build the view in section 3 on top of it. Touches `jobs.ts`, [daemon.ts](../plugin/bridge/daemon.ts), [run/SKILL.md](../plugin/skills/run/SKILL.md), and `plugin/board/`.
+**B2. Missions.** Implemented 2026-11-12; see [04-implementation.md](04-implementation.md) section 5.3. Stages are reported by the lead through a `mission` tool, and job membership is recorded by the bridge; this settles the open item on who writes the plan. Not built: intent (information, question, command), per-round keep or undo, and roll-up below the stage level. Add `mission_id` to jobs so that one `/crew:run` is one mission, and build the view in section 3 on top of it. Touches `jobs.ts`, [daemon.ts](../plugin/bridge/daemon.ts), [run/SKILL.md](../plugin/skills/run/SKILL.md), and `plugin/board/`.
 
 ### C. New connections
 
@@ -99,7 +99,6 @@ Requirements R4 and R6 (computer use, side chat, visibility in the desktop app) 
 ## 6. Open items
 
 - Midmap was read from its Microsoft Store listing only (released 2026-11-04, Windows x64). Its website did not respond and the screenshots were not seen, so its actual layout is unknown. It has no built-in agent and does not run or isolate agents; the ideas taken from it concern the shared board, not orchestration.
-- Whether the lead should write the mission plan to the board itself (a `plan` tool, as Midmap's agents write nodes), or the bridge should derive it from the jobs the lead creates. The second needs no new tool and cannot drift from what actually ran.
 - Conductor's status is inconsistent between sources: 05 records a planned cloud shutdown, while its changelog showed a recent release on 2026-11-12. This does not affect the UX references.
 - Antigravity's native `AGENTS.md` support is unverified. A2 does not depend on it.
 - The shape of a mission when the user dispatches directly: one strand, no lead, no review stages.

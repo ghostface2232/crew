@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
+import os from 'node:os';
 import path from 'node:path';
 import { AntigravityAdapter } from './adapters/antigravity.ts';
 import { CodexAdapter } from './adapters/codex.ts';
@@ -9,7 +10,9 @@ import type { ClaudeSession } from './claude.ts';
 import { HOME, installed, loadConfig, PLUGIN_ROOT, PORT, VERSION, WORKERS } from './config.ts';
 import type { Config } from './config.ts';
 import { projectRoot } from './git.ts';
-import { Jobs } from './jobs.ts';
+import { isTerminal, Jobs } from './jobs.ts';
+import { Missions, STAGES } from './missions.ts';
+import type { Mission } from './missions.ts';
 import { instructionsFile, readInstructions, saveRoles, writeInstructions } from './settings.ts';
 import type { EventKind, Job } from './jobs.ts';
 
@@ -69,10 +72,43 @@ codex.onLimits = (limits) => broadcast('limits', { codex: limits });
 
 // Roles are read per job, so a change to config.json applies to the next one, and an invalid file fails
 // that job with the reason instead of silently running old roles. Adapters keep the settings they started with.
+/**
+ * Missions are a view over the work, not the work itself: a file that cannot be read must not keep
+ * the daemon, and with it every job, from starting. The file is set aside under a new name; if even
+ * that fails, missions are kept in a scratch folder for this run so the original is never overwritten.
+ */
+function loadMissions(): Missions {
+  const onChange = (mission: Mission) => broadcast('mission', mission);
+  try {
+    return new Missions(HOME, onChange);
+  } catch (err) {
+    const file = path.join(HOME, 'missions.json');
+    const cause = (err as Error).message;
+    try {
+      const aside = `${file}.unreadable-${Date.now()}`;
+      fs.renameSync(file, aside);
+      log(`missions.json could not be used and was set aside as ${aside}; starting with no missions. Cause: ${cause}`);
+      return new Missions(HOME, onChange);
+    } catch (again) {
+      const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-missions-'));
+      log(`missions.json could not be used or set aside (${(again as Error).message}); missions for this run are kept in ${scratch} and the file is left as it is. Cause: ${cause}`);
+      return new Missions(scratch, onChange);
+    }
+  }
+}
+const missions = loadMissions();
+
 const jobs = new Jobs(HOME, loadConfig, { codex, antigravity }, {
-  onEvent: (event) => broadcast('event', event),
+  onEvent: (event) => {
+    broadcast('event', event);
+    // A mission is alive as long as its jobs are; the lead need not report in while it waits on them.
+    const mission = event.job_id && jobs.jobs.get(event.job_id)?.mission;
+    if (mission) missions.touch(mission);
+  },
   onJob: (job) => broadcast('job', view(job)),
   onAttention: (job, kind, detail) => notify(job.agent, kind, job.title, detail),
+  // A mission on the board lists its jobs; they stay as long as it does.
+  keepsMission: (id) => missions.saved().some((mission) => mission.id === id),
 });
 
 // The board shows who holds each role, so it must hear about edits to the role table.
@@ -91,6 +127,7 @@ function state() {
     now: Date.now(),
     stallSeconds: config.stallSeconds,
     jobs: jobs.list().map(view),
+    missions: missions.list(),
     claude: [...claude.sessions.values()],
     limits: { codex: codex.limits },
     agents: {
@@ -121,7 +158,11 @@ function locate(session: ClaudeSession | undefined): void {
  */
 async function sharedFile(project: string | null): Promise<string> {
   if (!project) return instructionsFile(HOME, null);
-  const known = [...jobs.list().flatMap((job) => [job.project, job.root]), ...[...claude.sessions.values()].flatMap((s) => [s.cwd, s.root])];
+  const known = [
+    ...jobs.list().flatMap((job) => [job.project, job.root]),
+    ...[...claude.sessions.values()].flatMap((s) => [s.cwd, s.root]),
+    ...missions.list().flatMap((mission) => [mission.project, mission.root]),
+  ];
   if (!known.includes(project)) throw new HttpError(400, 'unknown project');
   // The same lookup a job uses, so the board edits the file the agents are given.
   return instructionsFile(HOME, (await projectRoot(project)) ?? project);
@@ -221,8 +262,42 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     }
   }
 
+  // Everything about a request is checked before anything is created or changed, so a refused request leaves nothing behind.
+  const text = (value: unknown, name: string): string | undefined => {
+    if (value !== undefined && typeof value !== 'string') throw new HttpError(400, `${name} must be a string`);
+    return value;
+  };
+  const stage = (value: unknown): string | undefined => {
+    if (value !== undefined && !(STAGES as readonly unknown[]).includes(value)) throw new HttpError(400, `stage must be one of: ${STAGES.join(', ')}`);
+    return value as string | undefined;
+  };
+
+  const missionRoute = /^\/api\/missions\/([\w-]+)$/.exec(pathname);
+  if (missionRoute && method === 'POST') {
+    const body = await readJson(req);
+    const id = missionRoute[1];
+    if (body.done && body.abandoned) throw new HttpError(400, 'pass done or abandoned, not both');
+    if (body.done || body.abandoned) return missions.finish(id, { outcome: text(body.outcome, 'outcome'), abandoned: Boolean(body.abandoned) });
+    return missions.update(id, { stage: stage(body.stage), title: text(body.title, 'title') });
+  }
+
   if (method === 'POST') {
-    if (pathname === '/api/jobs') return view(await jobs.create(await readJson(req)));
+    if (pathname === '/api/missions') {
+      const body = await readJson(req);
+      if (typeof body.project !== 'string' || !body.project) throw new HttpError(400, 'project must be the lead session\'s project directory');
+      const first = stage(body.stage);
+      const mission = missions.start({ title: text(body.title, 'title') ?? '', project: body.project, root: (await projectRoot(body.project).catch(() => null)) ?? body.project });
+      return first ? missions.update(mission.id, { stage: first }) : mission;
+    }
+    if (pathname === '/api/jobs') {
+      const spec = await readJson(req);
+      // A job outlives a wrong link: it still runs, on its own, and says why it is not shown with a mission.
+      if (spec.mission !== undefined && missions.list().find((m) => m.id === spec.mission)?.state !== 'active') {
+        spec.notes = [...(spec.notes ?? []), `Mission ${spec.mission} is not active, so this job is shown on its own.`];
+        delete spec.mission;
+      }
+      return view(await jobs.create(spec));
+    }
     if (pathname === '/api/hooks/claude') {
       const payload = await readJson(req);
       claude.ingest(payload);
@@ -269,6 +344,7 @@ function shutdown(): void {
   codex.shutdown();
   antigravity.shutdown();
   jobs.flush();
+  missions.flush();
   fs.rmSync(path.join(HOME, 'daemon.json'), { force: true });
   process.exit(0);
 }
@@ -288,6 +364,11 @@ server.listen(PORT, '127.0.0.1', () => {
 setInterval(() => {
   for (const res of streams) res.write(': ping\n\n');
 }, 25_000).unref();
+
+// A mission whose lead session is gone would stay open forever; one with a job still running is not stale.
+setInterval(() => {
+  missions.sweep(Date.now(), (id) => jobs.list().some((job) => job.mission === id && !isTerminal(job)));
+}, 10 * 60_000).unref();
 
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);

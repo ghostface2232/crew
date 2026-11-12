@@ -46,6 +46,10 @@ export interface JobSpec {
   review?: { target: ReviewTarget; mode: 'adversarial' | 'standard' };
   model?: string;
   effort?: string;
+  /** Mission the job is part of, if the lead started it while carrying out one. */
+  mission?: string;
+  /** Lines the caller wants shown with the result from the start. */
+  notes?: string[];
 }
 
 export interface Job {
@@ -61,6 +65,8 @@ export interface Job {
   project: string;
   /** Main working tree of the job's repository, for grouping on the board; absent on jobs saved before it was recorded. */
   root?: string;
+  /** Mission this job is one strand of; absent for a job started on its own. */
+  mission?: string;
   /** Directory the worker runs in: the worktree when isolated, else the caller's cwd. */
   cwd: string;
   worktree: Worktree | null;
@@ -131,6 +137,8 @@ export interface JobsHooks {
   onEvent(event: CrewEvent): void;
   onJob(job: Job): void;
   onAttention(job: Job, kind: EventKind, detail: string): void;
+  /** Whether a mission is still being kept; its jobs are then kept with it, beyond the history limit. */
+  keepsMission?(id: string): boolean;
 }
 
 const TERMINAL: JobState[] = ['done', 'failed', 'cancelled'];
@@ -199,7 +207,7 @@ export class Jobs {
     // Read from the main working tree even when the job starts inside a worktree, so an uncommitted edit applies to the next job.
     const root = (await projectRoot(spec.cwd)) ?? spec.project ?? spec.cwd;
     const shared = sharedInstructions(this.home, root);
-    const notes: string[] = [];
+    const notes: string[] = Array.isArray(spec.notes) ? spec.notes.filter((note) => typeof note === 'string') : [];
     let worktree: Worktree | null = null;
     let cwd = spec.cwd;
 
@@ -243,6 +251,7 @@ export class Jobs {
       repo,
       project: spec.project ?? repo ?? spec.cwd,
       root,
+      mission: spec.mission,
       cwd,
       worktree,
       sandbox: spec.kind === 'review' ? 'read-only' : 'workspace-write',
@@ -578,7 +587,7 @@ export class Jobs {
   private save(): void {
     let history = 0;
     const keep = this.list().filter((job) =>
-      job.worktree || !isTerminal(job) || job.seq > job.delivered || history++ < KEEP_JOBS,
+      job.worktree || !isTerminal(job) || job.seq > job.delivered || (job.mission !== undefined && this.hooks.keepsMission?.(job.mission)) || history++ < KEEP_JOBS,
     );
     const file = path.join(this.home, 'jobs.json');
     fs.writeFileSync(`${file}.tmp`, JSON.stringify({ seq: this.seq, jobs: keep }));

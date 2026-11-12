@@ -162,6 +162,21 @@ The board is also where the user reads what happened and acts on it (requirement
 
 Checked on 2026-11-12 in the built-in browser pane against a separate daemon with stub agents: opening a job from a card, the feed, and a link; answering a question in words; a follow-up turn; a job update arriving while an answer was half typed (text, focus, and caret kept); project groups and the project filter with two projects, including a job started from a subfolder; saving roles and per-project instructions and reading the files back; refused writes (unknown project, foreign origin, unknown agent); dark mode and a phone-width pane. Not checked: a screen reader, typing with an input method, and browsers other than the built-in pane. Automated board-handler tests cover instruction saves with concurrent edits, failed requests, and editor reloads. The remaining board behavior was checked by hand as listed.
 
+### 5.3 Missions: a command as one unit
+
+A mission is one user command that the lead takes through the pipeline (requirement R10, roadmap item B2). It answers "what was this command split into, who has each part, and how far along is it" without opening a session.
+
+- **Reported by the lead, not inferred.** The lead calls the `mission` tool: with `title` to start one, with `stage` at each step (`plan`, `implement`, `self-review`, `cross-review`, `fix`, `polish`, `final`), and with `done` or `abandoned` and a one-line `outcome` at the end. `/crew:run` tells it to. The lead's own steps are not jobs, so only the lead can say which step it is on. Which jobs belong to the mission is not left to the lead: every job it starts while a mission is open carries that mission's id.
+- **On the board.** Each project group shows its open missions and the two most recent finished ones, above the agents' columns: the command, a seven-step track, "Step 3 of 7 · 1 of 2 jobs finished", and one row per job with its agent and state, which opens the job's details. A mission with a job waiting on the user reads "Waiting on you". Dismiss closes a mission on the board; its jobs keep running.
+- **Needs you.** One line at the top lists every job and session waiting on the user across all projects. A job's entry opens its details. The line is a status region, so a new entry is announced.
+- **Lifetime.** Missions are stored in `~/.crew/missions.json` and survive a daemon restart still open, since the lead's session may be alive. A mission with no update for 12 hours and no running job is closed as abandoned; activity of its jobs counts as an update. Every open mission is kept, with the 100 that ended last and the last two of each project; a kept mission's jobs are kept with it, beyond the job history limit.
+- **Ownership.** A session advances and closes only the mission it opened. Passing the same title again reports a step instead of opening a second card, and a different title opens a new mission before closing the session's previous one. A mission closed from outside (dismissed, or left too long) is not reopened: the lead is told to carry on without reporting.
+- **Jobs do not depend on missions.** A job given a mission that is not open still runs, on its own, with a note. If `missions.json` cannot be read, the daemon sets it aside under a new name and starts with none.
+- After a restart of its MCP server a session no longer knows its mission. Passing the title again takes up the open mission with that title in the same project; without that, the old card stays until it is dismissed or goes stale. Two sessions that start the same title in one project would share a card.
+- A project with an open mission has a group on the board even when it has no jobs or sessions left, so the mission can always be seen and dismissed.
+
+Checked on 2026-11-12 against a separate daemon with stub agents: starting, advancing, finishing, and dismissing missions through the routes; jobs linked to a mission and a job given an unknown one; refused input (unknown stage, empty title); the mission card, its job rows, and the Needs-you line in the browser pane. The `mission` tool itself was not exercised from a live Claude session in this round: the session that built it was started before the tool existed, and its logic in `mcp.ts` has no automated test.
+
 ## 6. Desktop app visibility (R6) findings
 
 | Service | What was verified |
@@ -238,6 +253,7 @@ Not yet verified:
   - Backfilled the repository path as the owning project when loading jobs saved before project tracking existed.
   - Insulated bridge delivery commits from the user's git commit config by disabling commit signing and falling back to `Crew <crew@localhost>` when git user identity is unset, preventing background daemon commits from hanging on an invisible GPG/SSH passphrase prompt.
   - Renamed job branches from `crew/<job id>` to `crew-<job id>`, because git cannot create `crew/...` refs if a branch named `crew` already exists in the repository.
+- 2026-11-12: Added missions and the Needs-you line (section 5.3, roadmap item B2). The mission store was written by Codex through `delegate` and merged after review by the lead.
 - 2026-11-12: The board gained job details, text answers, a project filter, and settings (section 5.2, roadmap item B1).
 - 2026-11-12: Added shared instructions (section 2.2, roadmap item A2).
 - 2026-11-12: Roles are no longer fixed in code (section 2.1, roadmap item A1). Requirement R3 changed from fixed roles to default roles the user can reassign. The row "Antigravity role enforcement" in section 3 now describes only the editor role; the bridge decides permission requests by the role of the job.

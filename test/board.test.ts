@@ -28,6 +28,7 @@ function harness() {
     window: { addEventListener: () => {} },
     localStorage: { getItem: () => null },
     setInterval: () => {},
+    setTimeout: () => 0, clearTimeout: () => {},
     EventSource: class { addEventListener() {} },
     fetch: (_route: string, options?: { body: string }) => new Promise((resolve, reject) => {
       requests.push({ body: options && JSON.parse(options.body), resolve: (data) => resolve({ ok: true, json: async () => data }), reject });
@@ -40,6 +41,7 @@ function harness() {
     submit: () => handlers.get('submit')!({ preventDefault() {}, target: form }),
     load: () => vm.runInContext('loadInstructions()', context) as Promise<void>,
     dirty: () => vm.runInContext('settingsDirty()', context) as boolean,
+    run: (code: string) => vm.runInContext(code, context),
   };
 }
 
@@ -61,6 +63,38 @@ test('saving instructions preserves later edits and keeps them unsaved until the
   await second;
   assert.equal(h.instructions.value, 'First draft with a new requirement\n');
   assert.equal(h.dirty(), false);
+});
+
+test('one request shares a lock across decisions and text answers, including after acceptance', async () => {
+  const h = harness();
+  const first = h.run(`runAction(answerKey('cx-1', 'request-1'), 'approve', () => call('/reply', { decision: 'approve' }))`);
+  assert.equal(await h.run(`runAction(answerKey('cx-1', 'request-1'), 'deny', () => call('/reply', { decision: 'deny' }))`), false);
+  assert.equal(await h.run(`runAction(answerKey('cx-1', 'request-1'), 'send', () => call('/reply', { message: 'answer' }))`), false);
+  assert.equal(h.requests.length, 1);
+  h.requests[0].resolve({});
+  assert.equal(await first, true);
+  // A slow SSE update must not reopen the already-answered request.
+  assert.equal(await h.run(`runAction(answerKey('cx-1', 'request-1'), 'deny', () => call('/reply', {}))`), false);
+  const next = h.run(`runAction(answerKey('cx-1', 'request-2'), 'send', () => call('/reply', { message: 'next answer' }))`);
+  assert.equal(h.requests.length, 2);
+  h.requests[1].resolve({});
+  assert.equal(await next, true);
+});
+
+test('a failed answer unlocks for retry and cannot put its error onto the next request', async () => {
+  const h = harness();
+  const first = h.run(`runAction(answerKey('cx-1', 'old'), 'approve', () => call('/reply', {}))`);
+  const next = h.run(`runAction(answerKey('cx-1', 'new'), 'send', () => call('/reply', {}))`);
+  h.requests[0].reject(new Error('Connection lost. Try again.'));
+  assert.equal(await first, false);
+  assert.equal(h.run(`actionStates.get(answerKey('cx-1', 'new')).pending`), true);
+  assert.equal(h.run(`actionStates.get(answerKey('cx-1', 'old')).tone`), 'failed');
+  const retry = h.run(`runAction(answerKey('cx-1', 'old'), 'approve', () => call('/reply', {}))`);
+  assert.equal(h.requests.length, 3);
+  h.requests[2].resolve({});
+  assert.equal(await retry, true);
+  h.requests[1].resolve({});
+  assert.equal(await next, true);
 });
 
 test('a failed instructions save preserves the draft and allows a retry', async () => {

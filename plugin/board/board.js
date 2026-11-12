@@ -156,7 +156,8 @@ function patch(el, html) {
     field.value = was.value;
     if (focusedKey === controlKey(field)) field.setSelectionRange(was.start, was.end);
   }
-  if (focusedKey) [...el.querySelectorAll('button, [data-keep], summary')].find((node) => controlKey(node) === focusedKey)?.focus();
+  syncActions();
+  if (focusedKey) [...el.querySelectorAll('button, [data-keep], summary')].find((node) => controlKey(node) === focusedKey)?.focus({ preventScroll: true });
 }
 
 /** Says briefly, where it will be seen and read out, that something the user asked for did not happen. */
@@ -196,10 +197,11 @@ function callout(job) {
     ? composer('answer', `answer:${request}`, 'Your answer', 'Type an answer', 'Send answer', ` data-request="${request}"`)
     : '';
   const quick = type === 'approval' ? ['Approve', 'Deny'] : ['Yes', 'No'];
-  return `<div class="callout"><p>${esc(reason)}</p>${answer}<div class="actions">
+  const key = esc(answerKey(job.id, id));
+  return `<div class="callout" data-action-key="${key}"><p>${esc(reason)}</p>${answer}<div class="actions">
       <button${type === 'approval' ? ' class="primary"' : ''} data-act="approve" data-request="${request}">${quick[0]}</button>
       <button data-act="deny" data-request="${request}">${quick[1]}</button>
-      <span class="timer" data-from="${esc(since)}" data-suffix=" waiting"></span></div></div>`;
+      <span class="timer" data-from="${esc(since)}" data-suffix=" waiting"></span></div><span class="status action-status" role="status" data-action-status="${key}"></span></div>`;
 }
 
 function resumeButton(job) {
@@ -237,9 +239,9 @@ function item(job) {
     : job.state === 'running' ? job.phase
     : job.state === 'failed' ? job.error?.message : '';
   return `<li><button class="item" data-state="${jobMark(job)}" data-act="open" data-job="${esc(job.id)}" title="${esc(jobLabel(job))}">
-      <span class="mark"></span><span class="what"><span class="title">${esc(job.title)}</span>${flags}</span>
+      <span class="mark"></span><span class="what"><span class="title">${esc(job.title)}</span></span>
       ${now ? `<span class="now" title="${esc(now)}">${esc(now)}</span>` : ''}
-      <span class="sub">${timeLabel(job)}</span><span class="where"><span class="at">${STOPS[STOP_OF_KIND[job.kind]]}</span><span class="who">${esc(agent)}</span></span>
+      <span class="sub">${timeLabel(job)}</span><span class="where"><span class="at">${STOPS[STOP_OF_KIND[job.kind]]}</span><span class="who">${esc(agent)}</span></span>${flags ? `<span class="flags">${flags}</span>` : ''}
     </button></li>`;
 }
 
@@ -296,38 +298,56 @@ function smooth(change) {
 
 /**
  * Folds or unfolds a card by easing its real height, so the cards under it follow frame by frame instead of
- * jumping or sliding as pictures. Folding, the body stays drawn under the shrinking edge as it fades.
+ * jumping or sliding as pictures. The body stays readable under the shrinking edge.
  * A second click mid-way starts from wherever the card is.
  */
-function fold(card, change) {
-  if (!card || matchMedia('(prefers-reduced-motion: reduce)').matches) return change();
+function fold(card, change, animate = true) {
+  if (!card) return change();
+  card.toggleAttribute('data-instant', !animate);
   const from = card.getBoundingClientRect().height;
   for (const a of card.getAnimations({ subtree: true })) if (a.id === 'fold') a.cancel();
   card.removeAttribute('data-folding');
   change();
+  if (!animate || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   const to = card.getBoundingClientRect().height;
   if (Math.abs(from - to) < 1) return;
   const opening = to > from;
   card.setAttribute('data-folding', '');
-  const height = card.animate({ height: [`${from}px`, `${to}px`] }, { id: 'fold', duration: opening ? 520 : 420, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' });
-  const body = card.querySelector('.cmd-body');
-  body?.animate(opening
-    ? { opacity: [0, 1], translate: ['0 -8px', '0 0'] }
-    : { opacity: [1, 0] }, { id: 'fold', duration: opening ? 420 : 200, delay: opening ? 60 : 0, easing: 'ease-out', fill: 'backwards' });
+  const height = card.animate({ height: [`${from}px`, `${to}px`] }, { id: 'fold', duration: opening ? 280 : 220, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' });
   height.finished.then(() => card.removeAttribute('data-folding'), () => {});
 }
 
 /** Narrow, the projects are a panel that slides in from the side over the board. */
-function sidePanel(open) {
+function sidePanel(open, instant = false) {
   const toggle = document.getElementById('open-side');
   if (document.body.hasAttribute('data-side') === open) return;
+  const side = document.getElementById('side');
+  document.body.toggleAttribute('data-side-instant', instant);
   document.body.toggleAttribute('data-side', open);
   toggle.setAttribute('aria-expanded', String(open));
+  document.querySelector('.main').inert = open;
+  document.getElementById('dock').inert = open;
+  if (open) {
+    side.setAttribute('role', 'dialog');
+    side.setAttribute('aria-modal', 'true');
+  } else {
+    side.removeAttribute('role');
+    side.removeAttribute('aria-modal');
+  }
   if (open) document.querySelector('#projects [aria-pressed="true"]')?.focus({ preventScroll: true });
-  else if (document.getElementById('side').contains(document.activeElement)) toggle.focus({ preventScroll: true });
+  else if (side.contains(document.activeElement) && matchMedia('(max-width: 1479px)').matches) toggle.focus({ preventScroll: true });
 }
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && document.body.hasAttribute('data-side')) sidePanel(false);
+  if (!document.body.hasAttribute('data-side')) return;
+  if (e.key === 'Escape') { e.preventDefault(); sidePanel(false, true); }
+  if (e.key === 'Tab') {
+    const controls = [...document.querySelectorAll('#side button:not(:disabled)')].filter((node) => node.getClientRects().length);
+    const next = e.shiftKey ? controls.at(-1) : controls[0];
+    if (document.activeElement === (e.shiftKey ? controls[0] : controls.at(-1))) { e.preventDefault(); next?.focus(); }
+  }
+});
+window.addEventListener('resize', () => {
+  if (document.body.hasAttribute('data-side') && !matchMedia('(max-width: 1479px)').matches) sidePanel(false);
 });
 document.addEventListener('click', (e) => {
   if (e.target.id === 'side-scrim') sidePanel(false);
@@ -364,6 +384,7 @@ function activeProject() {
  * waits on the user there, or else how much is running. With one project there is nothing to choose between.
  */
 function renderProjects(dirs, names) {
+  if (dirs.length < 2 && document.body.hasAttribute('data-side')) sidePanel(false, true);
   document.getElementById('side').hidden = dirs.length < 2;
   document.getElementById('open-side').hidden = dirs.length < 2;
   const current = activeProject();
@@ -418,12 +439,19 @@ function stepRing(positions) {
     `<circle data-pos="${pos}" cx="50" cy="50" r="42" stroke-dasharray="${(arc - cut).toFixed(2)} ${(around - arc + cut).toFixed(2)}" stroke-dashoffset="${(-i * arc - cut / 2).toFixed(2)}"/>`).join('')}</svg>`;
 }
 
-/** Changes a figure so the old value rolls out and the new one rolls in. The first value just appears. */
+const rollTimes = new WeakMap();
+/** Isolated changes roll once; a burst of updates settles straight on its latest value. */
 function roll(el, text) {
   const was = el.dataset.value;
   if (was === text) return;
+  const now = performance.now();
+  const immediate = was === undefined || now - (rollTimes.get(el) ?? -Infinity) < 200 || matchMedia('(prefers-reduced-motion: reduce)').matches;
+  rollTimes.set(el, now);
   el.dataset.value = text;
-  el.innerHTML = was === undefined ? `<span>${esc(text)}</span>` : `<span class="roll-out" aria-hidden="true">${esc(was)}</span><span class="roll-in">${esc(text)}</span>`;
+  el.innerHTML = immediate ? `<span>${esc(text)}</span>` : `<span class="roll-out" aria-hidden="true">${esc(was)}</span><span class="roll-in">${esc(text)}</span>`;
+  el.querySelector('.roll-in')?.addEventListener('animationend', () => {
+    if (el.dataset.value === text) el.querySelector('.roll-out')?.remove();
+  }, { once: true });
 }
 
 function commandHead(key, title, mini, meta, action = '') {
@@ -467,13 +495,14 @@ function commandCard(mission) {
       <p class="stage-name">${ended === 'done' ? 'All done' : STOPS[at]}</p>
     </div>`;
   const closed = folded.get(mission.id) ?? !active;
-  const dismiss = active ? `<button class="quiet" data-act="dismiss" data-mission="${esc(mission.id)}" title="Closes this command on the board. Its jobs keep running.">Dismiss</button>` : '';
+  const dismissKey = esc(`dismiss:${mission.id}`);
+  const dismiss = active ? `<button class="quiet" data-action-key="${dismissKey}" data-act="dismiss" data-mission="${esc(mission.id)}" title="Closes this command on the board. Its jobs keep running.">Dismiss</button>` : '';
   return {
     key: mission.id,
     quiet: !active,
     closed,
     html: `${commandHead(mission.id, mission.title, mini + chip, meta, dismiss)}
-      <div class="cmd-body">${stage}<div class="cmd-main">${html}${mission.outcome ? `<p class="outcome">${esc(mission.outcome)}</p>` : ''}</div></div>`,
+      <div class="cmd-body">${stage}<div class="cmd-main">${html}${mission.outcome ? `<p class="outcome">${esc(mission.outcome)}</p>` : ''}</div></div><p class="status action-status card-status" role="status" data-action-status="${dismissKey}"></p>`,
   };
 }
 
@@ -544,7 +573,8 @@ const WORK_SHOWN = 3;
  * Lines keep their elements, so only a line that is new rises in, and the list's height eases to its new size.
  */
 function renderWork(body, work, hint) {
-  const before = body.offsetHeight;
+  const before = body.getBoundingClientRect().height;
+  body.getAnimations().filter((a) => a.id === 'work-height').forEach((a) => a.cancel());
   if (!work.length) {
     patch(body, `<p class="tile-hint">${esc(hint)}</p>`);
   } else {
@@ -561,8 +591,11 @@ function renderWork(body, work, hint) {
         patch(li, w.job ? `<button class="work" data-state="${w.mark}" data-act="open" data-job="${esc(w.job)}">${line}</button>` : `<div class="work" data-state="${w.mark}">${line}</div>`);
         if (!('seen' in li.dataset)) {
           li.dataset.seen = '';
-          li.className = 'enter';
-          li.style.setProperty('--i', arriving++);
+          if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+            li.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'translateY(0)' }], {
+              duration: 240, delay: arriving++ * 40, easing: 'cubic-bezier(0.22, 1, 0.36, 1)', fill: 'backwards',
+            });
+          }
         }
       },
     })), () => document.createElement('li'));
@@ -570,10 +603,9 @@ function renderWork(body, work, hint) {
     more.hidden = work.length <= WORK_SHOWN;
     more.textContent = `+${work.length - WORK_SHOWN} more`;
   }
-  const after = body.offsetHeight;
-  if (before && after !== before && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    body.getAnimations().forEach((a) => a.cancel());
-    body.animate([{ height: `${before}px` }, { height: `${after}px` }], { duration: 360, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' });
+  const after = body.getBoundingClientRect().height;
+  if (before && Math.abs(after - before) >= 1 && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    body.animate([{ height: `${before}px` }, { height: `${after}px` }], { id: 'work-height', duration: 240, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' });
   }
 }
 
@@ -726,7 +758,7 @@ function render() {
           const detail = s.state === 'waiting' ? s.waitingFor : s.phase;
           li.dataset.state = sessionMark(s);
           li.title = s.cwd;
-          patch(li, `<span class="mark"></span><span class="what">${esc(s.title)}</span><span class="sub">Claude · ${esc(sessionLabel(s))}${detail ? ` · ${esc(detail)}` : ''}</span>`);
+          patch(li, `<details data-details="session:${esc(s.id)}"><summary><span class="mark"></span><span class="what">${esc(s.title)}</span><span class="sub">Claude · ${esc(sessionLabel(s))}</span><i class="chev" aria-hidden="true"></i></summary><div class="session-detail"><p>${esc(s.title)}</p>${detail ? `<p>${esc(detail)}</p>` : ''}<p class="path">${esc(s.cwd)}</p></div></details>`);
         },
       })), () => Object.assign(document.createElement('li'), { className: 'session' }));
 
@@ -925,8 +957,8 @@ function drawerParts(job) {
       : '',
     foot: `<footer class="row foot">
         <span class="id">${key}</span>
-        <span class="actions">${resumeButton(job)}${active ? '<button class="quiet" data-act="cancel">Cancel job</button>' : ''}</span>
-      </footer>`,
+        <span class="actions">${resumeButton(job)}${active ? `<button class="quiet" data-action-key="cancel:${key}:${job.turns ?? 1}" data-act="cancel">Cancel job</button>` : ''}</span>
+      </footer><p class="status action-status" role="status" data-action-status="cancel:${key}:${job.turns ?? 1}"></p>`,
   };
 }
 
@@ -1073,6 +1105,53 @@ settings.addEventListener('cancel', (e) => {
 /** Requests in flight, so a second press cannot send the same thing twice while the first is on its way. */
 const sending = new Set();
 
+/** A request has one outcome even when its controls appear in both the dock and the drawer. */
+const actionStates = new Map();
+const answerKey = (id, request) => `answer:${id}:${request}`;
+
+function busyButton(button, busy) {
+  button.toggleAttribute('data-busy', busy);
+  if (busy) button.setAttribute('aria-busy', 'true');
+  else button.removeAttribute('aria-busy');
+}
+
+function syncActions() {
+  for (const surface of document.querySelectorAll('[data-action-key]')) {
+    const state = actionStates.get(surface.dataset.actionKey);
+    const buttons = surface.matches('button') ? [surface] : surface.querySelectorAll('button');
+    for (const button of buttons) {
+      button.disabled = Boolean(state?.pending || state?.accepted);
+      busyButton(button, Boolean(state?.pending && (button.dataset.act ?? 'send') === state.action));
+    }
+  }
+  for (const line of document.querySelectorAll('[data-action-status]')) {
+    const state = actionStates.get(line.dataset.actionStatus);
+    line.textContent = state?.text ?? '';
+    if (state?.tone) line.dataset.tone = state.tone;
+    else line.removeAttribute('data-tone');
+  }
+}
+
+async function runAction(key, action, work, done = 'Sent') {
+  const previous = actionStates.get(key);
+  if (previous?.pending || previous?.accepted) return false;
+  actionStates.set(key, { pending: true, action, text: 'Sending…' });
+  syncActions();
+  try {
+    await work();
+    // Keep a completed request locked until its next SSE state removes or replaces it.
+    actionStates.set(key, { accepted: true, text: done });
+    return true;
+  } catch (err) {
+    const text = err.message || 'Could not send. Try again.';
+    actionStates.set(key, { text, tone: 'failed' });
+    if (![...document.querySelectorAll('[data-action-status]')].some((line) => line.dataset.actionStatus === key)) notice(text);
+    return false;
+  } finally {
+    syncActions();
+  }
+}
+
 /**
  * Runs a form's request and reports the outcome beside its button. `live` returns the form as it is
  * now, or nothing if it is gone: a job update can replace a card's markup while the request is in flight.
@@ -1081,6 +1160,7 @@ async function submit(form, key, work, done = 'Saved', live = () => form) {
   if (sending.has(key)) return false;
   sending.add(key);
   form.querySelector('button[type="submit"]').disabled = true;
+  busyButton(form.querySelector('button[type="submit"]'), true);
   let outcome = { text: done };
   try {
     await work();
@@ -1091,6 +1171,7 @@ async function submit(form, key, work, done = 'Saved', live = () => form) {
   const now = live();
   if (now) {
     now.querySelector('button[type="submit"]').disabled = false;
+    busyButton(now.querySelector('button[type="submit"]'), false);
     const status = now.querySelector('[data-status]');
     status.textContent = outcome.text;
     if (outcome.tone) status.dataset.tone = outcome.tone;
@@ -1142,10 +1223,12 @@ document.addEventListener('submit', async (e) => {
   const body = kind === 'answer' ? { message, request_id: request } : { message };
   // The same form for the same job and request, or nothing: an outcome must not land on the next question's form.
   const live = () => (container.dataset.key === id ? [...container.querySelectorAll(`form[data-form="${kind}"]`)].find((f) => f.dataset.request === request) : null);
-  const sent = await submit(form, `${id}:${kind}:${request ?? ''}`, () => call(`/api/jobs/${id}/reply`, body), 'Sent', live);
+  const sent = kind === 'answer'
+    ? await runAction(answerKey(id, request), 'send', () => call(`/api/jobs/${id}/reply`, body))
+    : await submit(form, `${id}:${kind}:${request ?? ''}`, () => call(`/api/jobs/${id}/reply`, body), 'Sent', live);
   // Cleared only once accepted, so a refused message is still there to edit and resend.
   const now = live()?.querySelector('textarea');
-  if (sent && now) now.value = '';
+  if (sent && now && now.value.trim() === message) now.value = '';
 });
 
 // --- Clicks ---
@@ -1169,7 +1252,7 @@ document.addEventListener('click', (e) => {
   const button = e.target.closest('button[data-project]');
   if (!button) return;
   project = button.dataset.project;
-  sidePanel(false);
+  sidePanel(false, e.detail === 0);
   try {
     localStorage.setItem('crew.project', project);
   } catch {
@@ -1194,20 +1277,24 @@ document.addEventListener('click', async (e) => {
   const id = button.dataset.job ?? card?.dataset.key;
   if (act === 'later' || act === 'answer') {
     dockOpen = act === 'answer';
-    smooth(renderNeeds);
-    // Answering from elsewhere on the page goes straight to the front request's first control.
-    if (dockOpen && !button.closest('.dock')) document.querySelector('#needs > :first-child :is(textarea, button:not([data-act="later"]))')?.focus({ preventScroll: true });
+    const update = () => {
+      renderNeeds();
+      if (dockOpen) document.querySelector('#needs > :first-child :is(textarea, button:not([data-act="later"]))')?.focus({ preventScroll: true });
+      else document.getElementById('dock-pill').focus({ preventScroll: true });
+    };
+    if (e.detail === 0) update();
+    else smooth(update);
     return;
   }
   if (act === 'toggle') {
     fold(button.closest('.card'), () => {
       folded.set(button.dataset.command, button.getAttribute('aria-expanded') === 'true');
       render();
-    });
+    }, e.detail !== 0);
     return;
   }
   if (act === 'open-side' || act === 'close-side') {
-    sidePanel(act === 'open-side');
+    sidePanel(act === 'open-side' && !document.body.hasAttribute('data-side'), e.detail === 0);
     return;
   }
   if (act === 'open') {
@@ -1227,15 +1314,9 @@ document.addEventListener('click', async (e) => {
     setTimeout(() => { if (button.textContent === 'Copied') button.textContent = label; }, 1500);
     return;
   }
-  button.disabled = true;
-  try {
-    if (act === 'dismiss') await call(`/api/missions/${button.dataset.mission}`, { abandoned: true, outcome: 'Dismissed on the board.' });
-    else if (act === 'cancel') await call(`/api/jobs/${id}/cancel`, {});
-    else await call(`/api/jobs/${id}/reply`, { decision: act, request_id: button.dataset.request });
-  } catch (err) {
-    button.disabled = false;
-    button.textContent = `${button.textContent} — ${err.message}`;
-  }
+  if (act === 'dismiss') await runAction(`dismiss:${button.dataset.mission}`, act, () => call(`/api/missions/${button.dataset.mission}`, { abandoned: true, outcome: 'Dismissed on the board.' }), 'Dismissed');
+  else if (act === 'cancel') await runAction(button.dataset.actionKey, act, () => call(`/api/jobs/${id}/cancel`, {}), 'Cancelled');
+  else await runAction(answerKey(id, button.dataset.request), act, () => call(`/api/jobs/${id}/reply`, { decision: act, request_id: button.dataset.request }));
 });
 
 const connection = document.getElementById('connection');

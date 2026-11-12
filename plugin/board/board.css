@@ -97,7 +97,7 @@
 
 * { box-sizing: border-box; scrollbar-width: none; }
 ::-webkit-scrollbar { display: none; }
-html { min-width: 340px; }
+html { min-width: 320px; }
 body {
   margin: 0;
   /* Room below the last card for the request dock (--dock, its measured height), so nothing ends up under it. */
@@ -130,10 +130,9 @@ body::before {
 @keyframes drift { to { translate: -4% 3%; scale: 1.08; } }
 h1, h2, h3, p, ul, ol, dl, dd { margin: 0; padding: 0; }
 /*
- * The board's own words, headings, labels, figures and controls, are not for copying, so a stray drag
- * selects nothing. What people and agents wrote stays selectable: titles of work, requests, reports, prompts.
+ * Controls do not select on an accidental drag; paths, IDs, errors and other content remain copyable.
  */
-body { -webkit-user-select: none; user-select: none; }
+button, summary, .chip, .stat, .tile-head, .top { -webkit-user-select: none; user-select: none; }
 :is(input, textarea, .prose, .callout p, .need-who, .sheet h2, .facts dd, .files, .notes, .detail, .outcome, .feed-list .what, .feed-list .tag,
   .work .what, .work .sub, .item .what, .item .now, .session .what, .session .sub, .card:not([data-key^="loose:"]) .cmd-title) { -webkit-user-select: text; user-select: text; }
 /*
@@ -222,8 +221,8 @@ body { display: flex; align-items: flex-start; gap: 32px; }
 .roll { display: inline-grid; }
 .roll > span { grid-area: 1 / 1; }
 @media (prefers-reduced-motion: no-preference) {
-  .roll-out { animation: roll-out 420ms var(--ease) both; }
-  .roll-in { animation: roll-in 520ms var(--rise) both; }
+  .roll-out { animation: roll-out 150ms var(--ease) both; }
+  .roll-in { animation: roll-in 200ms var(--ease) both; }
 }
 @media (prefers-reduced-motion: reduce) { .roll-out { display: none; } }
 @keyframes roll-out { to { opacity: 0; translate: 0 -55%; filter: blur(4px); } }
@@ -294,7 +293,7 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 .stats-bar i:not([data-zero]) { min-width: 6px; }
 .stats-bar i:not([data-zero]) ~ i:not([data-zero]) { margin-inline-start: 2px; }
 /* Pointing at a state, on the bar or in the legend, keeps it and lets the others step back. */
-.stats [data-dim] { opacity: 0.42; }
+.stats-bar [data-dim] { opacity: 0.42; }
 .stat { transition: opacity var(--dur-quick) ease-out; }
 /* Gone quiet shares the waiting color, washed out and finely hatched, as an unconfirmed stretch is: told apart without shouting. */
 .stats-bar i[data-state="stalled"] { background: repeating-linear-gradient(-45deg, oklch(from var(--tone) l c h / 0.5) 0 2.5px, oklch(from var(--tone) l c h / 0.2) 2.5px 6.5px); }
@@ -329,14 +328,7 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 .work .sub { grid-column: 2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12.5px; }
 .work:is([data-state="waiting"], [data-state="stalled"], [data-state="failed"]) .sub { color: var(--tone); }
 @media (hover: hover) { button.work:not(:disabled):hover { background: var(--hover); } }
-/*
- * A line of work that is new rises out of a blur; several arrive 70ms apart. What it is doing follows what
- * it is a beat later, the way a caption follows its title.
- */
-@media (prefers-reduced-motion: no-preference) {
-  .tile-work li.enter { --rise-by: 10px; --rise-blur: 6px; animation: rise-o 560ms var(--rise) backwards, rise-y 900ms var(--rise) backwards, rise-b 700ms var(--rise) backwards; animation-delay: calc(var(--i, 0) * 70ms); }
-  .tile-work li.enter .sub { animation: rise-o 560ms var(--rise) backwards, rise-b 700ms var(--rise) backwards; animation-delay: calc(var(--i, 0) * 70ms + 90ms); }
-}
+/* New work enters through WAAPI on its persistent row; text updates never replay it. */
 .tile-body .more { padding: 4px 0 0 40px; color: var(--muted); font-size: 12.5px; }
 .usage { display: flex; align-items: center; gap: 12px; margin-top: 12px; color: var(--muted); font-size: 12.5px; letter-spacing: 0; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .meter { display: block; flex: 1; height: 6px; border-radius: 3px; background: var(--rail); overflow: hidden; }
@@ -416,8 +408,8 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
   /* The feed stays in view beside the board and scrolls on its own. */
   /* It ends above the request dock, so its last rows can always be scrolled into view. */
   .feed { position: sticky; top: 24px; display: flex; flex-direction: column; max-height: calc(100dvh - 48px - var(--dock, 0px)); }
-  /* With no scrollbar, the list fading out at its foot is what says there is more below. */
-  .feed .feed-list { overflow-y: auto; overscroll-behavior: contain; -webkit-mask: linear-gradient(black calc(100% - 72px), transparent); mask: linear-gradient(black calc(100% - 72px), transparent); padding-bottom: 40px; }
+  /* The list can shrink inside the sticky column; its own scrollbar signals overflow. */
+  .feed > .feed-list { min-height: 0; flex: 1 1 auto; overscroll-behavior: contain; }
 }
 
 /* --- Projects: a heading each, its tasks the cards under it --- */
@@ -435,7 +427,13 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 /* Lead sessions of the project, one line each. */
 .sessions { display: flex; flex-wrap: wrap; gap: 8px; }
 .sessions:empty { display: none; }
-.session { display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; min-height: 32px; padding: 0 14px 0 9px; border-radius: 999px; background: var(--tile); font-size: 13.5px; }
+.session { min-width: 0; max-width: 100%; border-radius: 16px; background: var(--tile); font-size: 13.5px; }
+.session summary { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 36px; padding: 4px 12px; cursor: pointer; border-radius: 16px; }
+.session summary::-webkit-details-marker { display: none; }
+.session summary:focus-visible { outline: 2px solid var(--working); outline-offset: 2px; }
+.session details:not([open]) .chev { rotate: -45deg; translate: 0 0; }
+.session-detail { display: grid; gap: 6px; padding: 4px 14px 12px 36px; overflow-wrap: anywhere; user-select: text; }
+.session-detail .path { color: var(--muted); font-size: 12.5px; }
 .session .mark { width: 16px; height: 16px; }
 .session .what { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; max-width: 28ch; }
 .session .sub { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1 1 0; }
@@ -476,8 +474,9 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 .chev { flex: none; width: 8px; height: 8px; margin: 0 6px 0 2px; border: solid var(--faint); border-width: 0 1.75px 1.75px 0; border-radius: 1px; rotate: 45deg; translate: 0 -2px; }
 [data-closed] .chev { rotate: -45deg; translate: 0 0; }
 @media (prefers-reduced-motion: no-preference) {
-  .chev { transition: rotate var(--dur-spring) var(--spring), translate var(--dur-spring) var(--spring); }
+  .chev { transition: rotate 200ms var(--ease), translate 200ms var(--ease); }
 }
+.card[data-instant] .chev { transition: none; }
 /* Under the title, on its edge: how long it has run and what it has used. */
 .cmd-meta { grid-column: 2; color: var(--muted); font-size: 13.5px; font-weight: 400; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .cmd-meta:empty { display: none; }
@@ -590,7 +589,8 @@ button.item { cursor: pointer; }
 .item .at::after { content: "·"; margin-inline: 6px; }
 .item .who { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .item .sub { min-width: 0; max-width: 24ch; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-size: 13.5px; line-height: 1.3; text-align: end; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.flag { flex: none; padding: 2px 8px; line-height: 1.2; border-radius: 999px; background: var(--hover); color: var(--muted); font-size: 12.5px; font-weight: 500; letter-spacing: 0; vertical-align: 1px; white-space: nowrap; }
+.flags { grid-column: 2 / -1; grid-row: 3; display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 6px; }
+.flag { padding: 2px 8px; line-height: 1.2; border-radius: 999px; background: var(--hover); color: var(--muted); font-size: 12.5px; font-weight: 500; letter-spacing: 0; }
 /* Finished work is a plain row in the regular weight; only its mark keeps the color. */
 .item[data-state="done"], .item[data-state="idle"] { background: transparent; }
 .item[data-state="done"] .what, .item[data-state="idle"] .what { font-weight: 400; }
@@ -601,7 +601,8 @@ button.item { cursor: pointer; }
  * beside the tasks). Narrower, it is a layer that slides in from the edge, so the board keeps one form as the
  * window widens: it never falls back to a narrower layout when the panel appears.
  */
-.side-toggle, .side-scrim { display: none; }
+.side-toggle, .side-scrim, .side-close { display: none; }
+.side-head { display: flex; align-items: center; justify-content: space-between; }
 @media (max-width: 1479px) {
   body { gap: 0; }
   .side-toggle { display: inline-grid; place-items: center; width: 40px; min-height: 40px; margin-inline-start: -8px; padding: 0; border-color: transparent; background: transparent; color: var(--muted); }
@@ -621,13 +622,15 @@ button.item { cursor: pointer; }
   body[data-side] .side-scrim { opacity: 1; pointer-events: auto; }
   /* The heading sits on the rows' text edge and leaves the corner for nothing else. */
   .side-title { min-height: 36px; }
+  .side-close { display: block; }
 }
 @media (max-width: 1479px) and (prefers-reduced-motion: no-preference) {
-  .side { transition: translate var(--dur-move) var(--rise), visibility 0s linear var(--dur-move); }
-  body[data-side] .side { transition: translate var(--dur-move) var(--rise), visibility 0s; }
-  .side-scrim { transition: opacity var(--dur-base) ease-out; }
+  .side { transition: translate 180ms var(--ease), visibility 0s linear 180ms; }
+  body[data-side] .side { transition: translate 260ms var(--ease), visibility 0s; }
+  .side-scrim { transition: opacity 180ms ease-out; }
 }
 @media (hover: hover) { .side-toggle:hover { background: var(--hover); color: var(--text); } }
+body[data-side-instant] :is(.side, .side-scrim) { transition: none; }
 @media (max-width: 1023px) {
   .summary h2 { font-size: 48px; }
 }
@@ -657,7 +660,7 @@ button.item { cursor: pointer; }
   .cmd-toggle { flex-basis: 100%; }
   .cmd-title { font-family: var(--text-face); font-size: 17px; letter-spacing: -0.012em; white-space: normal; overflow-wrap: anywhere; }
   .mini, .cmd-head > .chip { margin-inline-start: 32px; }
-  .mini + .chip { margin-inline-start: 0; }
+  [data-closed] .mini + .chip { margin-inline-start: 0; }
   /* Narrow: the state and Dismiss share a line under the title and its time. */
   .cmd-head > .quiet { margin-inline-start: auto; }
   .cmd-body { grid-template-columns: minmax(0, 1fr); gap: 16px; padding: 0 12px 12px; }
@@ -737,10 +740,11 @@ button:focus-visible { outline: 2px solid var(--working); outline-offset: 2px; }
 @media (hover: hover) { .callout .actions button:not(.primary, :disabled):hover { background: oklch(from var(--ink) l c h / 0.13); } }
 /* A pressed answer is on its way: the button says so until the request is gone. */
 /* An answer on its way stays as the record: the pressed one keeps its look with a spinner, the others go quiet. */
-.callout button:disabled { padding-inline-end: 40px; }
-.callout .actions:has(button:disabled) > button:not(:disabled) { opacity: 0.45; pointer-events: none; }
-.callout button:disabled::after { content: ""; position: absolute; inset: 50% 16px auto auto; width: 14px; height: 14px; margin-top: -7px; border-radius: 50%; border: 2px solid currentColor; border-inline-end-color: transparent; }
-@media (prefers-reduced-motion: no-preference) { .callout button:disabled::after { animation: spin 700ms linear infinite; } }
+/* The label keeps the button's size and accessible name; the spinner replaces its ink. */
+button[data-busy] { color: transparent !important; transition-property: scale, background-color, box-shadow, opacity; }
+button[data-busy]::after { content: ""; position: absolute; inset: 50% auto auto 50%; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%; border: 2px solid var(--text); border-inline-end-color: transparent; }
+button.primary[data-busy]::after { border-color: var(--on-ink); border-inline-end-color: transparent; }
+@media (prefers-reduced-motion: no-preference) { button[data-busy]::after { animation: spin 700ms linear infinite; } }
 /*
  * A message to an agent, typed the way a chat message is: one bar that grows with the text, the send button
  * at its end. A wash of ink rather than a solid fill, so it shows on white, yellow, or glass without
@@ -769,16 +773,18 @@ textarea, input, select {
 textarea { resize: none; min-height: 2lh; field-sizing: content; max-height: 40vh; }
 #instructions-text { min-height: 10lh; max-height: 60vh; font-family: var(--mono); font-size: 13.5px; line-height: 1.6; letter-spacing: 0; }
 textarea:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--working); outline-offset: 1px; }
-::placeholder { color: var(--muted); opacity: 0.8; }
+::placeholder { color: var(--muted); opacity: 1; }
 .status { color: var(--muted); font-size: 13.5px; align-self: center; overflow-wrap: anywhere; }
 .status[data-tone] { color: var(--tone); }
+.action-status:empty { display: none; }
+.card-status:not(:empty) { padding: 0 20px 16px; }
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .actions .timer { font-size: 13.5px; }
 
-.foot { color: var(--muted); font-size: 12.5px; }
+.foot { flex-wrap: wrap; color: var(--muted); font-size: 12.5px; }
 .foot .id { font-family: var(--mono); font-size: 12.5px; letter-spacing: 0; }
-.foot .actions { margin-inline-start: auto; flex-wrap: nowrap; }
-.foot .id, .foot .actions button { white-space: nowrap; }
+.foot .actions { margin-inline-start: auto; flex-wrap: wrap; }
+.foot .id { min-width: 0; overflow-wrap: anywhere; }
 
 /* --- Activity --- */
 .feed { min-width: 0; view-transition-name: feed; }
@@ -797,6 +803,11 @@ textarea:focus-visible, input:focus-visible, select:focus-visible { outline: 2px
 .feed-list { display: grid; align-content: start; }
 /* Clipped to its corners, so a new row's flash does not show square past them. */
 .feed > .feed-list { overflow: clip; border-radius: var(--radius-tile); background: var(--surface); box-shadow: var(--shadow); }
+@container main (min-width: 1120px) {
+  .feed > .feed-list { overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; }
+  .feed > .feed-list::-webkit-scrollbar { display: block; width: 6px; }
+  .feed > .feed-list::-webkit-scrollbar-thumb { background: var(--rail); border-radius: 3px; }
+}
 .feed > .feed-list:empty { display: none; }
 /* Who and when on one line, what happened under it. */
 .feed-list li { display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 2px 12px; padding: 14px 20px; font-size: 13.5px; }
@@ -849,7 +860,7 @@ body[data-loading] :is(.stat .mark, .stats-bar, .tile .chip, .agent-well, .empty
   .stats { animation-delay: 80ms; }
   .tiles { animation-delay: 160ms; }
   .group, .feed { animation-delay: 240ms; }
-  .ready .feed-list li.enter { animation: drop 420ms var(--ease) both, flash 1.6s ease-out both; }
+  .ready .feed-list li.enter { animation: drop 180ms var(--ease) both, flash 500ms ease-out both; }
   /* When the user folds a task or changes project, cards glide to where they now belong. */
   ::view-transition-group(*) { animation-duration: 460ms; animation-timing-function: var(--ease); }
   ::view-transition-old(root), ::view-transition-new(root) { animation-duration: 220ms; }
@@ -882,13 +893,14 @@ body[data-loading] :is(.stat .mark, .stats-bar, .tile .chip, .agent-well, .empty
 .sheet-body { display: grid; gap: 12px; padding: 20px 20px 28px; align-content: start; min-height: 100%; }
 .sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-inline-start: 4px; }
 .sheet-head .row { flex: 1; }
-.sheet h2 { padding: 12px 4px 8px; font-size: 32px; font-weight: 500; letter-spacing: -0.007em; line-height: 1.1; overflow-wrap: anywhere; text-wrap: balance; }
+.sheet-head > button { flex: none; align-self: flex-start; }
+.sheet h2 { padding: 12px 4px 8px; font-size: 32px; font-weight: 500; letter-spacing: -0.007em; line-height: 1.1; word-break: keep-all; overflow-wrap: anywhere; text-wrap: balance; }
 .sheet h3, .sheet summary { font-size: 13.5px; font-weight: 500; color: var(--muted); }
 .sheet summary { cursor: pointer; border-radius: 4px; }
 .sheet summary:focus-visible { outline: 2px solid var(--working); outline-offset: 2px; }
 .sheet .foot { padding: 8px 4px 0; }
 /* A part can hold several sections, and an empty part must not leave a gap. */
-[data-part] { display: grid; gap: 12px; }
+[data-part] { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 12px; }
 [data-part]:empty { display: none; }
 [data-part="state"] > .detail { padding-inline: 4px; font-size: 17px; }
 .section { display: grid; gap: 12px; padding: 20px; border-radius: var(--radius-part); background: var(--surface); box-shadow: var(--shadow); }
@@ -933,6 +945,16 @@ body[data-loading] :is(.stat .mark, .stats-bar, .tile .chip, .agent-well, .empty
   .facts { grid-template-columns: minmax(0, 1fr); }
   .role-row { grid-template-columns: 1fr 1fr; }
   .role-row p { grid-column: 1 / -1; }
+  .sheet-head .row { display: grid; grid-template-columns: minmax(0, 1fr); justify-items: start; gap: 4px; }
+  .sheet-head .timer { margin: 0; }
+  .sheet .foot .actions { margin-inline-start: 0; width: 100%; }
+  .sheet .foot button { max-width: 100%; }
+  input, textarea, select, .composer-bar textarea, #instructions-text { font-size: 16px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stats-bar i { transition: opacity var(--dur-press) ease-out; }
+  .pulse i { transition: background-color var(--dur-press) ease-out; }
 }
 
 /*

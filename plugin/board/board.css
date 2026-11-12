@@ -338,8 +338,8 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
   grid-area: 1 / 1;
   display: grid;
   gap: 16px;
-  /* One edge on both sides: the chip, the icon, the request's box, the buttons and the hint all start 24px in. */
-  padding: 20px 24px 24px;
+  /* One inset on every side: everything in the card sits 24px from each edge, the corners' chips included. */
+  padding: 24px;
   border-radius: 32px;
   /* Opaque enough that muted text keeps its contrast over the black tiles showing through. */
   background: oklch(1 0 0 / 0.86);
@@ -372,8 +372,8 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 .dock-pill b { display: grid; place-items: center; min-height: 40px; padding: 0 18px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font-weight: 500; }
 
 .need-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-/* The button's padding hangs past the edge, so its word ends where the timer below does. */
-.need-bar .quiet { margin-inline-end: -16px; }
+/* Later is a quiet pill as tall as the chip opposite it, so the two sit in their corners alike. */
+.need-bar .quiet { min-height: 32px; padding: 0 14px; background: var(--hover); color: var(--muted); }
 .need-head { display: flex; align-items: center; gap: 12px; min-width: 0; }
 /* A size up from the tiles' mark, beside the larger title. */
 .need-head .agent-well, .need-head .agent-icon { width: 32px; height: 32px; }
@@ -583,8 +583,7 @@ button.item { cursor: pointer; }
   .tiles { grid-template-columns: minmax(0, 1fr); gap: 8px; }
   .tile-hint { display: none; }
   .dock { padding: 0 8px 8px; }
-  .card.need { padding: 16px 16px 20px; border-radius: 26px; }
-  .need-bar .quiet { margin-inline-end: -12px; }
+  .card.need { padding: 16px; border-radius: 26px; }
   .need-title { font-size: 20px; }
   .need-who { white-space: normal; overflow-wrap: anywhere; }
   .layout { margin-top: 40px; }
@@ -873,4 +872,29 @@ body[data-loading] :is(.stat .mark, .stats-bar, .tile .chip, .agent-well, .empty
 @media (forced-colors: active) {
   .mark, .tick, .stop[data-pos="past"] .node::before, .mini i, .meter > i, .connection::before { forced-color-adjust: none; background: CanvasText; }
   .mini i[data-state=""], .meter { forced-color-adjust: none; background: GrayText; }
+}
+
+/*
+ * Smoothed corners, like Figma's 60% corner smoothing on vad-3d's cards. The curve starts 1.6 times further
+ * from the corner and bends as a superellipse, so it passes the plain arc's midpoint but flows into the
+ * straight edges. Drawn with corner-shape rather than a clip, so shadows, outlines and focus rings follow it.
+ * Pills, tracks and circles have no corner to smooth and stay round. Without corner-shape, the plain radii hold.
+ */
+@supports (corner-shape: superellipse(2)) {
+  :root { --radius-tile: 45px; --radius-item: 26px; --radius-field: 19px; }
+  :is(.card, .tile, .empty, .feed > .feed-list, .notice, .item, .work, .outcome, .stage, .need .callout p, .cmd-toggle, .projects button, textarea, input, select, .prose, .callout, .section, .facts div, .sheet, .logo) { corner-shape: superellipse(1.78); }
+  .card.need, .sheet { border-radius: 51px; }
+  .callout, .section, .facts div { border-radius: 38px; }
+  .logo { border-radius: 13px; }
+  @media (max-width: 760px) {
+    .tile, .empty { border-radius: 35px; }
+    .card.need { border-radius: 42px; }
+  }
+  @media (max-width: 560px) {
+    .sheet { border-radius: 42px; }
+  }
+  /* A row of projects is a pill when the panel folds into a row. */
+  @media (max-width: 1023px) {
+    .projects button { corner-shape: round; }
+  }
 }

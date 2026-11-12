@@ -609,3 +609,78 @@ test('a job carries its mission and starting notes, and is kept with a mission t
   assert.ok(reloaded.jobs.has(first.id), 'the job of a kept mission survives the history limit');
   assert.ok(!reloaded.jobs.has(dropped.id));
 });
+
+test('a job that runs alone is refused while others are active, and holds off every other start until it ends', async () => {
+  const repo = tempRepo();
+  const running: JobCtl[] = [];
+  const { jobs } = harness((ctl) => { running.push(ctl); });
+  const review = { target: { type: 'uncommittedChanges' as const }, mode: 'adversarial' as const };
+  const start = (exclusive?: boolean) => jobs.create({ kind: 'delegate', cwd: repo, task: 'measure', exclusive });
+  const until = async (job: Job, state: Job['state']) => { while (job.state !== state) await jobs.wait(job.id, job.seq, 1000); };
+
+  // Only an engineer can measure; the refusal comes before anything is created.
+  await assert.rejects(jobs.create({ kind: 'review', cwd: repo, review, exclusive: true }), /A review job cannot run alone/);
+  await assert.rejects(jobs.create({ kind: 'polish', cwd: repo, targets: ['README.md'], exclusive: true }), /A polish job cannot run alone/);
+  assert.equal(jobs.list().length, 0);
+
+  const ordinary = await start();
+  await assert.rejects(start(true), new RegExp(`cannot start while 1 other job\\(s\\) are active: ${ordinary.id} \\(running\\)\\. Wait for a running job with wait`));
+  // One that waits on the user will not end by waiting, and the refusal says so.
+  running[0].waiting('approval', 'run tests?');
+  await assert.rejects(start(true), new RegExp(`${ordinary.id} \\(waiting on the user\\)`));
+  running[0].resumed();
+  running[0].done('ok');
+  await until(ordinary, 'done');
+
+  // A start that fails gives its place back.
+  await assert.rejects(jobs.create({ kind: 'delegate', cwd: path.join(repo, 'missing'), task: 'x' }), /cwd does not exist/);
+
+  // Two starts at once: the check happens before either is registered, yet only one gets through.
+  const both = await Promise.allSettled([start(true), start()]);
+  assert.deepEqual(both.map((r) => r.status), ['fulfilled', 'rejected']);
+  const alone = (both[0] as PromiseFulfilledResult<Job>).value;
+  assert.equal(alone.exclusive, true);
+  assert.match(alone.instructions, /# Measurement\nThis job has the machine to itself/);
+  assert.match(String((both[1] as PromiseRejectedResult).reason), /must run alone is starting right now\. Try again in a moment/);
+
+  await assert.rejects(start(), new RegExp(`Job ${alone.id} \\(running\\) is measuring and has the machine to itself`));
+  // A follow-up to a finished job would set its worker running again, so it waits too.
+  await assert.rejects(jobs.reply(ordinary.id, { message: 'one more thing' }), /is measuring and has the machine to itself/);
+  assert.equal(ordinary.state, 'done');
+
+  running.at(-1)!.done('measured');
+  await until(alone, 'done');
+  const after = await start();
+  assert.equal(after.exclusive, undefined);
+  assert.ok(!after.instructions.includes('# Measurement'));
+  // And the measuring job cannot take another turn while something else is active.
+  await assert.rejects(jobs.reply(alone.id, { message: 'measure again' }), /cannot start while 1 other job/);
+});
+
+test('every worker is given the shared-machine rules, and a review is told to stay static in its instructions', async () => {
+  const repo = tempRepo();
+  const { jobs } = harness((ctl) => ctl.done('ok'));
+  const target = { type: 'uncommittedChanges' as const };
+
+  const delegate = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'x' }));
+  const polish = await settled(jobs, await jobs.create({ kind: 'polish', cwd: repo, targets: ['README.md'] }));
+  const prompted = await settled(jobs, await jobs.create({ kind: 'review', cwd: repo, review: { target, mode: 'adversarial' } }));
+  // Codex's built-in review is sent no prompt, so what it must know has to be in the instructions.
+  const native = await settled(jobs, await jobs.create({ kind: 'review', cwd: repo, review: { target, mode: 'standard' } }));
+  assert.ok(native.nativeReview);
+  for (const job of [delegate, polish, prompted, native]) {
+    const text = job.instructions;
+    // After the role, so the role still comes first, and saying that the role still decides.
+    assert.ok(text.indexOf('# Role:') === 0 && text.indexOf('# This machine is shared') > 0, job.kind);
+    assert.ok(text.includes('they allow nothing the role forbids'));
+    assert.equal(text.includes('# Static review\nReview by reading. Run only checks that end by themselves'), job.kind === 'review', job.kind);
+    assert.ok(!job.prompt.includes('Static review'));
+  }
+
+  // A reviewer that cannot run commands is not told to run checks.
+  const reader = resolveConfig({ roles: { review: { agent: 'antigravity' } } });
+  const other = harness((ctl) => ctl.done('ok'), () => reader);
+  const handed = await settled(other.jobs, await other.jobs.create({ kind: 'review', cwd: repo, review: { target, mode: 'adversarial' } }));
+  assert.match(handed.instructions, /# Static review\nReview by reading\. You cannot run anything in this role/);
+  assert.ok(!handed.instructions.includes('Run only checks that end by themselves'));
+});

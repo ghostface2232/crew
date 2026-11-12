@@ -177,6 +177,18 @@ A mission is one user command that the lead takes through the pipeline (requirem
 
 Checked on 2026-11-12 against a separate daemon with stub agents: starting, advancing, finishing, and dismissing missions through the routes; jobs linked to a mission and a job given an unknown one; refused input (unknown stage, empty title); the mission card, its job rows, and the Needs-you line in the browser pane. The `mission` tool itself was not exercised from a live Claude session in this round: the session that built it was started before the tool existed, and its logic in `mcp.ts` has no automated test.
 
+### 5.4 Sharing the machine
+
+The user and every agent work on one computer, often at the same moment (requirement R14). Three things keep them out of each other's way.
+
+- **Isolated instances.** Every worker job is given `plugin/roles/machine.md` after its role text: start your own copy of anything you run, on a free port chosen by the system, with its data and browser profile under a temporary directory; headless browsers only; never the app's default port, the user's running instance, or their browser; stop what you started and nothing else. The lead and its subagents get the same rules from `/crew:run` and the self-reviewer's own instructions. The browser pane is the lead's alone, because there is one and the user shares it.
+- **Reviews in parallel, one app.** `/crew:run` starts the self-review and the cross-review together and changes nothing until both report. A worker's review is always static: it runs in a read-only sandbox that cannot hold an instance of the app, and it is told to read and to run only checks that end by themselves. If a change can only be judged by running the app, the self-reviewer is the one told it may. The instruction travels with the job's instructions, not its prompt, so Codex's built-in review mode receives it too.
+- **Measurement alone.** A `delegate` job started with `exclusive` runs alone on the machine; a review or a polish job cannot, having nothing to measure with. The bridge refuses it while any other job is active, and refuses every other start, including a follow-up turn, until it ends. A refusal names the jobs in the way and what each is doing, since one that waits on the user or is stuck will not end by being waited for. Because one daemon serves every session, this holds across sessions and projects. It refuses rather than queues, so the lead stays in charge of the order: it waits and starts again. Workers are told not to time anything unless their job says it has the machine. On the board such a job is marked "runs alone".
+
+What is enforced and what is asked: the alone rule for jobs is enforced by the bridge. Isolation and the static-review rule are instructions; the bridge does not hand out ports or watch processes. The lead's own measurements, its subagents, and anything outside Crew are not jobs, so the bridge cannot hold them back; `/crew:run` tells the lead to wait until nothing is running first.
+
+Not verified with the real services: only the instruction text and the refusal logic are covered by tests. Not observed: whether Codex and Antigravity follow the isolation rules, whether Codex's `workspace-write` sandbox lets an engineer bind a local port and write under the temporary directory as the rules ask, and whether its built-in review mode applies the instructions it is sent. Two reviewers running the same test suite at once in one working tree could still collide if the tests use fixed ports or files; this project's do not.
+
 ## 6. Desktop app visibility (R6) findings
 
 | Service | What was verified |
@@ -253,6 +265,7 @@ Not yet verified:
   - Backfilled the repository path as the owning project when loading jobs saved before project tracking existed.
   - Insulated bridge delivery commits from the user's git commit config by disabling commit signing and falling back to `Crew <crew@localhost>` when git user identity is unset, preventing background daemon commits from hanging on an invisible GPG/SSH passphrase prompt.
   - Renamed job branches from `crew/<job id>` to `crew-<job id>`, because git cannot create `crew/...` refs if a branch named `crew` already exists in the repository.
+- 2026-11-12: Added shared-machine rules, static-by-default reviews, and jobs that run alone (section 5.4). `/crew:run` now runs the self-review and the cross-review at the same time.
 - 2026-11-12: Added missions and the Needs-you line (section 5.3, roadmap item B2). The mission store was written by Codex through `delegate` and merged after review by the lead.
 - 2026-11-12: The board gained job details, text answers, a project filter, and settings (section 5.2, roadmap item B1).
 - 2026-11-12: Added shared instructions (section 2.2, roadmap item A2).

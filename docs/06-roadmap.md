@@ -14,6 +14,7 @@ The requirements are in [01-requirements.md](01-requirements.md). This roadmap c
 | R10 (command-centered, clickable board) | B1, B2 |
 | R8 (AgentGauge) | C1, L3 |
 | R12 (Cursor) | C2 |
+| R14 (no collisions between agents) | Implemented 2026-11-12, [04-implementation.md](04-implementation.md) section 5.4 |
 | R13 (other leads, own main screen, direct dispatch) | L1, L2 |
 
 Near-term work targets Claude Desktop lead mode, as 01 section 3 sets out.

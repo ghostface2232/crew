@@ -48,6 +48,8 @@ export interface JobSpec {
   effort?: string;
   /** Mission the job is part of, if the lead started it while carrying out one. */
   mission?: string;
+  /** delegate: the job measures performance and must run alone. It starts only when no other job is running, and none starts until it ends. */
+  exclusive?: boolean;
   /** Lines the caller wants shown with the result from the start. */
   notes?: string[];
 }
@@ -67,6 +69,8 @@ export interface Job {
   root?: string;
   /** Mission this job is one strand of; absent for a job started on its own. */
   mission?: string;
+  /** Runs alone on the machine, for measurement. */
+  exclusive?: boolean;
   /** Directory the worker runs in: the worktree when isolated, else the caller's cwd. */
   cwd: string;
   worktree: Worktree | null;
@@ -158,6 +162,8 @@ export class Jobs {
   private discarding = new Set<string>();
   private finalizing = new Set<string>();
   private cancelling = new Set<string>();
+  /** Jobs past the alone-check but not yet registered, so two starts cannot both slip through it. */
+  private starting: { exclusive: boolean }[] = [];
   private preparingReviews = new Set<string>();
   private saveTimer: NodeJS.Timeout | null = null;
   private home: string;
@@ -193,7 +199,41 @@ export class Jobs {
     return job;
   }
 
+  /**
+   * Refuses a start that would break a measurement: a job that must run alone while others run, or any
+   * job while one runs alone. Refusing, not queueing, keeps the lead in charge of the order: it waits and tries again.
+   */
+  private checkAlone(exclusive: boolean, self?: string): void {
+    const running = this.list().filter((job) => !isTerminal(job) && job.id !== self);
+    // What each one is doing, because waiting only helps for a job that can end by itself.
+    const say = (job: Job) => `${job.id} (${job.state === 'waiting' ? 'waiting on the user' : job.stalled ? 'no activity, may be stuck' : 'running'})`;
+    const way = 'Wait for a running job with wait; one waiting on the user needs their answer; cancel one that is stuck. Then start this again.';
+    const alone = running.find((job) => job.exclusive);
+    if (alone) throw new Error(`Job ${say(alone)} is measuring and has the machine to itself, in whichever project it runs. ${way}`);
+    if (this.starting.some((other) => other.exclusive)) throw new Error('A job that must run alone is starting right now. Try again in a moment; it will then show in status and on the board.');
+    if (!exclusive) return;
+    if (running.length) throw new Error(`A job that runs alone cannot start while ${running.length} other job(s) are active: ${running.map(say).join(', ')}. ${way}`);
+    if (this.starting.length) throw new Error(`A job that runs alone cannot start while ${this.starting.length} other job(s) are starting. Try again in a moment.`);
+  }
+
   async create(spec: JobSpec): Promise<Job> {
+    const exclusive = Boolean(spec.exclusive);
+    // Checked and reserved before the first await, so concurrent starts see each other.
+    this.checkAlone(exclusive);
+    const reservation = { exclusive };
+    this.starting.push(reservation);
+    try {
+      return await this.start(spec);
+    } finally {
+      this.starting.splice(this.starting.indexOf(reservation), 1);
+    }
+  }
+
+  private async start(spec: JobSpec): Promise<Job> {
+    // Only an engineer can measure: a review runs in a read-only sandbox and an editor runs nothing.
+    if (spec.exclusive && spec.kind !== 'delegate') {
+      throw new Error(`A ${spec.kind} job cannot run alone, because it has nothing to measure with. Measure with delegate and exclusive, or drop exclusive.`);
+    }
     const config = this.readConfig();
     const role = config.roles[spec.kind];
     const { agent } = role;
@@ -252,6 +292,7 @@ export class Jobs {
       project: spec.project ?? repo ?? spec.cwd,
       root,
       mission: spec.mission,
+      exclusive: Boolean(spec.exclusive) || undefined,
       cwd,
       worktree,
       sandbox: spec.kind === 'review' ? 'read-only' : 'workspace-write',
@@ -322,6 +363,8 @@ export class Jobs {
     if (refreshDiff && (!job.reviewTarget || !job.repo)) {
       throw new Error(`Job ${id} has no saved review target or repository. Start a new review instead.`);
     }
+    // A follow-up turn sets a finished worker running again, so it is a start like any other.
+    this.checkAlone(Boolean(job.exclusive), id);
     job.state = 'running';
     job.phase = 'starting';
     job.endedAt = null;

@@ -35,17 +35,18 @@ If a worker asks for approval or has a question, the user answers it in the app;
 
 When a job is done, read its diff before merging (`git diff <base>..crew-<job id>`). Merge what is right. Use `reply` with a message to have the worker fix what is not, and reject anything beyond the task. After merging or rejecting, `cancel` with `discard: true` removes the worktree.
 
-## 3. Self-review (you, with fresh eyes)
+## 3 and 4. Self-review and cross-review (at the same time)
 
-Launch the `crew:self-reviewer` subagent on the combined change. It has none of this conversation's context, which is the point: rereading your own diff in the same context does not count as review. Fix what it finds.
+Start both in one step, then wait for both. Change nothing in the working tree until both have reported: a reviewer that sees the files move under it loses its footing.
 
-## 4. Cross-review
+- **Self-review**: launch the `crew:self-reviewer` subagent on the combined change. It has none of this conversation's context, which is the point: rereading your own diff in the same context does not count as review.
+- **Cross-review**: call `review` with `background: true` on the change (target `uncommitted`, or `branch` with the base). Pass the acceptance criteria as `done_when` and use `focus` for decisions and assumptions you are least sure about.
 
-Call `review` on the change (target `uncommitted`, or `branch` with the base). Pass the acceptance criteria as `done_when` and use `focus` for decisions and assumptions you are least sure about.
+The cross-review is always static: the worker reads and runs checks that end by themselves. If the change can only be judged by running the app, tell the self-reviewer it may run it in its own isolated instance; otherwise tell it to review statically too. Report this combined step to `mission` as `self-review`.
 
 ## 5. Fix (you)
 
-Address the findings you agree with, and tell the user about any you decline and why. One review round is the default. Run a second only if the fixes were substantial; never more than two, because review loops burn both agents' usage limits.
+Take the two reports together and fix once. Address the findings you agree with, and tell the user about any you decline and why. One review round is the default. Run a second only if the fixes were substantial; never more than two, because review loops burn both agents' usage limits.
 
 ## 6. Polish
 
@@ -56,6 +57,14 @@ Accept the result only if every changed line is wording. Reject the whole diff i
 ## 7. Final check and merge (you)
 
 Run the project's tests and checks on the combined result. If failures need comparison with the base, run the same checks on the base and compare the reported failing test IDs. Keep the base results for any follow-up runs. Report what changed, what each agent contributed, what was verified, and anything skipped. Commit or merge to the user's branch only if they asked for that.
+
+## Sharing the machine
+
+The user and every agent work on one computer. Workers are told the rules with each job; you and your subagents follow the same ones.
+
+- **Isolated instances.** Anything you or a subagent starts (the app, a server, a headless browser) gets a free port chosen by the system, its own data and profile directory under a temporary directory, and is stopped afterwards. Never use the app's default port or the instance the user is running. Give each subagent this rule in its brief.
+- **One browser pane.** The app's browser pane is shared with the user, and there is one. Only you use it. Subagents and workers use their own headless browser.
+- **Measure alone.** Timings taken while other work runs are meaningless. Before you benchmark, profile, or load-test, wait until `status` shows no active job and no subagent of yours is running, and start nothing until the measurement ends. To have a worker measure, pass `exclusive: true` to `delegate`: the bridge refuses it while other jobs run and refuses other jobs until it ends, across every session. Never run two measurements at once.
 
 ## When an agent is unavailable
 

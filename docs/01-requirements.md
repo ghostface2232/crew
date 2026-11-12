@@ -10,7 +10,7 @@ The supported agents are Claude, Codex, and Antigravity. Cursor is to be added.
 
 ## 2. Requirements
 
-IDs R1 to R8 keep the meaning other documents refer to. R9 to R13 were added on 2026-11-12.
+IDs R1 to R8 keep the meaning other documents refer to. R9 to R14 were added on 2026-11-12.
 
 | ID | Requirement | Kind |
 | --- | --- | --- |
@@ -27,6 +27,7 @@ IDs R1 to R8 keep the meaning other documents refer to. R9 to R13 were added on 
 | R11 | Model and reasoning effort are selectable per role and per service | Required |
 | R12 | Cursor is supported as an agent | Required |
 | R13 | Crew can run with a lead other than Claude Code, from its own main screen, and can dispatch a command to a single agent without a lead | Long term |
+| R14 | Agents working at the same time do not collide. Each runs its own isolated instance of whatever it starts, independent reviews run in parallel and a worker's review never runs the app, and performance is measured with nothing else running | Required |
 
 ## 3. Defaults and priorities
 
@@ -54,6 +55,7 @@ IDs R1 to R8 keep the meaning other documents refer to. R9 to R13 were added on 
 | R11 | Model and effort can be set per role and per service, and a job shows which ones it ran with |
 | R12 | A job can be assigned to Cursor and appears on the board like any other |
 | R13 | A command can be started, followed, and merged without a Claude Code session |
+| R14 | Every worker job carries the isolation rules. The self-review and the cross-review start together, and the cross-review is static. A job marked as measuring is refused while another job runs, and no job starts until it ends |
 
 ## 5. Not required
 

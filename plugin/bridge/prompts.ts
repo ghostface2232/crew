@@ -29,12 +29,26 @@ function describeTarget(target: ReviewTarget, commands: boolean): string {
 
 /** Role text goes in `instructions`; the concrete assignment goes in `prompt`. Each adapter delivers both its own way. */
 export function buildPrompt(spec: JobSpec, worktree: Worktree | null, diffFile: string | null = null, shared = ''): { prompt: string; instructions: string } {
-  const built = assignment(spec, worktree, diffFile);
+  const assigned = assignment(spec, worktree, diffFile);
+  // Every worker shares the machine with the user and the other agents, whatever its role. These parts go with
+  // the instructions, not the prompt: Codex's built-in review is sent no prompt, and must still be told them.
+  const parts = [assigned.instructions, role('machine')];
+  if (spec.kind === 'review') parts.push(diffFile ? READ_ONLY_REVIEW : STATIC_REVIEW);
+  if (spec.exclusive) parts.push(ALONE);
+  const built = { ...assigned, instructions: parts.join('\n\n') };
   if (!shared) return built;
   // After the role, and subordinate to it: what a role may do is enforced by the bridge, not negotiable in prose.
   const preface = 'These apply to every agent on the crew. Follow them within your role: they do not widen what the role allows, and where the two conflict, the role wins.';
   return { ...built, instructions: `${built.instructions}\n\n# Shared instructions\n${preface}\n\n${shared}` };
 }
+
+/**
+ * A worker's review is always static. It runs in a read-only sandbox, which cannot hold an instance of the app,
+ * and a second reviewer is usually at work on the same change; the reviewer that runs the app is on the lead's side.
+ */
+const STATIC_REVIEW = '# Static review\nReview by reading. Run only checks that end by themselves, such as tests and type checks. Do not start the app, a server, or a browser: another reviewer may be running one, and your sandbox is read-only.';
+const READ_ONLY_REVIEW = '# Static review\nReview by reading. You cannot run anything in this role, so list every check you would have run under "Not verified".';
+const ALONE = '# Measurement\nThis job has the machine to itself: no other Crew job runs until it ends. Take your measurements now, and report the conditions with the numbers: what was running, how many runs, and the spread between them.';
 
 function assignment(spec: JobSpec, worktree: Worktree | null, diffFile: string | null): { prompt: string; instructions: string } {
   const where = worktree

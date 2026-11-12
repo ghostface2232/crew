@@ -44,6 +44,7 @@ export function describe(job: JobView, waitingHint?: string): string {
     if (job.result.files.length > 40) lines.push(`  … and ${job.result.files.length - 40} more`);
     if (job.result.outOfScope.length) lines.push(`OUT OF SCOPE — changed but not in the allowed targets: ${job.result.outOfScope.join(', ')}`);
   }
+  if (job.exclusive) lines.push(job.endedAt ? 'ran alone on the machine' : 'runs alone: no other job starts until this one ends');
   if (job.shared?.length) lines.push(`shared instructions: ${job.shared.join(', ')}`);
   for (const note of job.notes) lines.push(`note: ${note}`);
   if (job.sessionId) lines.push(`session: ${resumeCommand(job)}`);

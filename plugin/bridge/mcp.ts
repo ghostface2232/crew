@@ -44,6 +44,7 @@ How jobs work:
 - \`reply\` with a message continues the same worker session, e.g. to request fixes.
 - Reject worker changes that go beyond what was asked. For polish, any file listed as out of scope, or any non-text change, is grounds to reject.
 - If a worker fails on a usage limit, do that piece yourself and say that the cross-check was skipped.
+- This machine is shared. Workers are told to start their own isolated instance of anything they run (free port, own data directory, headless browser) and to measure nothing unless the job runs alone. A worker's review is always static; if the app has to be run to check a change, that is for you or your self-review subagent, one at a time. A delegate job that measures performance takes exclusive: it is refused while other jobs are active, so wait for them first.
 - When you take a user's command through several steps, call \`mission\` with its title first, with the stage as you move on, and with done at the end. The board then shows the command as one unit with its jobs under it. Skip it for a single delegated job.
 
 The user can watch every agent live on the status board at ${BASE_URL}.`;
@@ -55,6 +56,9 @@ const common = {
 const worktreeProps = {
   base: { type: 'string', description: 'Git ref the worker\'s worktree starts from. Defaults to HEAD.' },
   isolation: { type: 'string', enum: ['worktree', 'in_place'], description: 'worktree (default): separate worktree and branch. in_place: edit the project directory directly; only for directories that are not git repositories.' },
+};
+const aloneProp = {
+  exclusive: { type: 'boolean', description: 'The job measures performance (benchmark, profile, load test) and must have the machine to itself. It is refused while any other job runs, and no other job can start until it ends: wait for running jobs first, and start nothing alongside it.' },
 };
 const modelProps = {
   model: { type: 'string', description: 'Model override for this job. Omit to use the model configured for the role, or the agent\'s own default.' },
@@ -74,6 +78,7 @@ const TOOLS = [
         done_when: { type: 'string', description: 'Concrete completion criteria, e.g. tests that must pass.' },
         ...worktreeProps,
         ...modelProps,
+        ...aloneProp,
         ...common,
       },
       required: ['task'],
@@ -82,7 +87,7 @@ const TOOLS = [
   {
     name: 'review',
     title: `Review by ${holder('review')}`,
-    description: `Ask the cross-reviewer (${holder('review')}) for a read-only review of changes in this repository. Use after your own self-review, once per step; do not loop reviews.`,
+    description: `Ask the cross-reviewer (${holder('review')}) for a read-only review of changes in this repository. It is a static review: the worker reads the change and runs checks that end by themselves, never the app. Start it together with your own self-review, once per step; do not loop reviews.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -407,7 +412,7 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
   const cwd: string = args.cwd ?? PROJECT;
   switch (name) {
     case 'delegate':
-      return runJob({ kind: 'delegate', cwd, title: args.title, task: args.task, done_when: args.done_when, base: args.base, isolation: args.isolation, model: args.model, effort: args.effort }, Boolean(args.background), ctx);
+      return runJob({ kind: 'delegate', cwd, title: args.title, task: args.task, done_when: args.done_when, base: args.base, isolation: args.isolation, model: args.model, effort: args.effort, exclusive: Boolean(args.exclusive) }, Boolean(args.background), ctx);
     case 'review': {
       const kind = args.target ?? 'uncommitted';
       if (kind === 'branch' && !args.base) throw new Error('target "branch" needs base (the branch to compare against, e.g. main).');
@@ -418,6 +423,7 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       return runJob({ kind: 'review', cwd, title, task: args.focus, done_when: args.done_when, review: { target, mode: args.mode ?? 'adversarial' }, model: args.model, effort: args.effort }, Boolean(args.background), ctx);
     }
     case 'polish':
+      if (args.exclusive) throw new Error('polish cannot run alone: an editor measures nothing. Drop exclusive.');
       return runJob({ kind: 'polish', cwd, title: args.title ?? `Polish ${args.targets.join(', ')}`, task: args.guidance, targets: args.targets, base: args.base, isolation: args.isolation }, Boolean(args.background), ctx);
     case 'mission':
       return reportMission(args);

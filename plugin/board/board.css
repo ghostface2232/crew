@@ -268,11 +268,13 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 .stat[data-none] .stat-label { color: var(--muted); }
 .stat[data-none] b { font-weight: 400; }
 /*
- * A slim capsule track, the way AgentGauge draws daily usage: the segments sit on it with a 2px gap between
- * neighbours and softly rounded joints, while the ends follow the capsule. A state that empties narrows to
+ * A slim capsule, the way AgentGauge draws daily usage: segments with a 2px gap between neighbours and
+ * softly rounded joints, while the ends follow the capsule. A state that empties narrows to
  * nothing instead of dropping out, and a sliver keeps enough width to be seen.
  */
-.stats-bar { display: flex; height: 10px; overflow: hidden; border-radius: 999px; background: var(--rail); }
+.stats-bar { display: flex; height: 10px; overflow: hidden; border-radius: 999px; }
+/* The gaps between segments show the page; only an empty bar shows its track. */
+.stats-bar:not(:has(i:not([data-zero]))) { background: var(--rail); }
 .stats-bar i { flex: 0 1 0; min-width: 0; border-radius: 3px; background: var(--tone); transition: flex-grow 400ms var(--ease), margin 400ms var(--ease), opacity var(--dur-quick) ease-out; }
 .stats-bar i:not([data-zero]) { min-width: 6px; }
 .stats-bar i:not([data-zero]) ~ i:not([data-zero]) { margin-inline-start: 2px; }

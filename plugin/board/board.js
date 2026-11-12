@@ -166,6 +166,24 @@ function notice(message) {
   notice.timer = setTimeout(() => { el.hidden = true; }, 8000);
 }
 
+/**
+ * Every message to an agent is typed the same way, like a chat: one bar that grows with the text and holds
+ * its send button at the end. `keep` names the draft so a redraw keeps it; `extra` is markup for the form.
+ */
+function composer(form, keep, label, placeholder, sendLabel, extra = '') {
+  return `<form class="composer" data-form="${form}"${extra}>
+      <div class="composer-bar"><textarea data-keep="${esc(keep)}" rows="1" aria-label="${esc(label)}" placeholder="${esc(placeholder)}"></textarea><button class="primary" type="submit" aria-label="${esc(sendLabel)}">Send</button></div>
+      <span class="status" role="status" data-status="${esc(keep)}"></span>
+    </form>`;
+}
+
+// In a composer, Enter sends and Shift+Enter starts a new line; text being composed by an input method is left alone.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' || e.shiftKey || e.isComposing || !e.target.closest?.('.composer-bar')) return;
+  e.preventDefault();
+  e.target.form.requestSubmit();
+});
+
 /** The request a waiting job has for the user, with the controls that answer it. Shared by the card and the drawer. */
 function callout(job) {
   if (job.state !== 'waiting') return '';
@@ -173,10 +191,7 @@ function callout(job) {
   const request = esc(id);
   // Keyed by request, so text typed for one question is never sent as the answer to the next.
   const answer = type === 'question'
-    ? `<form class="answer" data-form="answer" data-request="${request}">
-        <textarea data-keep="answer:${request}" rows="2" aria-label="Your answer" placeholder="Type an answer"></textarea>
-        <div class="actions"><button class="primary" type="submit">Send answer</button><span class="status" role="status" data-status="answer:${request}"></span></div>
-      </form>`
+    ? composer('answer', `answer:${request}`, 'Your answer', 'Type an answer', 'Send answer', ` data-request="${request}"`)
     : '';
   const quick = type === 'approval' ? ['Approve', 'Deny'] : ['Yes', 'No'];
   return `<div class="callout"><p>${esc(reason)}</p>${answer}<div class="actions">
@@ -788,11 +803,8 @@ function drawerParts(job) {
     // A waiting job is answered through its request above; a follow-up would be refused.
     // Keyed by job, so what is typed for one job cannot be sent to another.
     followup: job.sessionId && job.state !== 'waiting'
-      ? `<form class="section answer" data-form="followup">
-          <h3>${active ? 'Steer' : 'Follow up'}</h3>
-          <textarea data-keep="followup:${key}" rows="3" aria-label="Message to ${esc(agent)}" placeholder="${active ? 'Add a note to the work in progress' : 'Ask for a fix or a change; the same session continues'}"></textarea>
-          <div class="actions"><button class="primary" type="submit">Send to ${esc(agent)}</button><span class="status" role="status" data-status="followup:${key}"></span></div>
-        </form>`
+      ? `<section class="section"><h3>${active ? 'Steer' : 'Follow up'}</h3>${composer('followup', `followup:${key}`, `Message to ${agent}`,
+          active ? 'Add a note to the work in progress' : 'Ask for a fix or a change; the same session continues', `Send to ${agent}`)}</section>`
       : '',
     task: job.prompt ? `<details class="section" data-details="task"><summary>Task given to ${esc(agent)}</summary><pre class="prose">${esc(job.prompt)}</pre></details>` : '',
     log: openEvents.length

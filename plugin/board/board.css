@@ -370,15 +370,6 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 .need .callout { padding: 0; margin-inline-end: 8px; background: none; }
 .need .callout p { padding: 16px; border-radius: var(--radius-item); background: oklch(1 0 0 / 0.6); font-family: var(--mono); font-size: 13.5px; line-height: 1.6; letter-spacing: 0; }
 .need .hint { margin-top: -4px; }
-/* A question is answered in a dark bar, the way a message is typed. Its corner follows the button's, 6px out. */
-.need .answer { display: flex; align-items: flex-end; gap: 8px; padding: 6px 6px 6px 8px; border-radius: 28px; background: var(--ink); }
-.need .answer textarea { flex: 1; min-height: 40px; padding: 9px 12px; border: 0; background: none; color: var(--on-ink); resize: none; }
-.need .answer textarea:focus-visible { outline: 0; }
-.need .answer:focus-within { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--working); }
-.need .answer ::placeholder { color: var(--on-ink-muted); opacity: 1; }
-.need .answer .actions { flex: none; flex-direction: row-reverse; }
-.need .answer .status { color: var(--on-ink-muted); }
-.need .answer button.primary { background: var(--accent); color: var(--accent-ink); }
 
 /* --- Board and feed side by side when there is room --- */
 .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 32px; margin-top: 48px; align-items: start; }
@@ -637,7 +628,7 @@ button:focus-visible { outline: 2px solid var(--working); outline-offset: 2px; }
   button.item:not(:disabled):hover { background: color-mix(in oklch, var(--tint, var(--sunken)), var(--text) 5%); }
   button.item[data-state="done"]:hover, button.item[data-state="idle"]:hover { background: var(--hover); }
   .dock-pill:not(:disabled):hover { background: var(--ink); opacity: 0.9; }
-  .need .answer button.primary:not(:disabled):hover { background: var(--accent); opacity: 0.9; }
+  .composer-bar button.primary:not(:disabled):hover { background: var(--accent); opacity: 0.9; }
 }
 @media (prefers-reduced-motion: no-preference) {
   button:not(:disabled):active { scale: 0.96; }
@@ -660,7 +651,19 @@ button:focus-visible { outline: 2px solid var(--working); outline-offset: 2px; }
 .callout button:disabled { opacity: 0.7; padding-inline-end: 40px; }
 .callout button:disabled::after { content: ""; position: absolute; inset: 50% 16px auto auto; width: 14px; height: 14px; margin-top: -7px; border-radius: 50%; border: 2px solid currentColor; border-inline-end-color: transparent; }
 @media (prefers-reduced-motion: no-preference) { .callout button:disabled::after { animation: spin 700ms linear infinite; } }
-.answer { display: grid; gap: 10px; }
+/*
+ * A message to an agent, typed the way a chat message is: one dark bar that grows with the text, the send
+ * button at its end. The bar's corner follows the button's, 6px out (22 + 6). The outcome is said under it.
+ */
+.composer { display: grid; gap: 8px; }
+.composer-bar { display: flex; align-items: flex-end; gap: 8px; padding: 6px 6px 6px 8px; border-radius: 28px; background: var(--ink); }
+.composer-bar textarea { flex: 1; min-height: 44px; padding: 10.75px 12px; border: 0; border-radius: 0; background: none; color: var(--on-ink); resize: none; }
+.composer-bar textarea:focus-visible { outline: 0; }
+.composer-bar:focus-within { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--working); }
+.composer-bar ::placeholder { color: var(--on-ink-muted); opacity: 1; }
+.composer-bar button.primary { flex: none; min-height: 44px; padding: 0 20px; font-size: 15px; background: var(--accent); color: var(--accent-ink); }
+.composer .status { padding-inline: 16px; }
+.composer .status:empty { display: none; }
 textarea, input, select {
   font: inherit;
   letter-spacing: inherit;

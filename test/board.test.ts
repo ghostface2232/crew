@@ -186,3 +186,37 @@ test('mission leads disclose their full escaped question and retain a stable foc
   assert.equal(h.run(`controlKey({ tagName: 'SUMMARY', matches: () => true, dataset: { session: 'lead-1', state: 'working' } })`),
     h.run(`controlKey({ tagName: 'SUMMARY', matches: () => true, dataset: { session: 'lead-1', state: 'waiting' } })`));
 });
+
+test('job focus identity survives presentation changes but distinguishes jobs and actions', () => {
+  const h = harness();
+  const key = (state: string, job = 'cx-1', act = 'open') => h.run(`controlKey({
+    tagName: 'BUTTON', matches: () => true,
+    dataset: ${JSON.stringify({ job, act, state })}, textContent: ${JSON.stringify(state)},
+  })`);
+  for (const state of ['waiting', 'stalled', 'done', 'failed', 'idle']) {
+    assert.equal(key(state), key('working'));
+  }
+  assert.notEqual(key('working', 'cx-2'), key('working'));
+  assert.notEqual(key('working', 'cx-1', 'cancel'), key('working'));
+});
+
+test('urgency reordering preserves the focused control after moving its row', () => {
+  const h = harness();
+  assert.equal(h.run(`(() => {
+    let preventedScroll = false;
+    const button = { focus(options) { document.activeElement = this; preventedScroll = options.preventScroll; } };
+    const first = { dataset: { key: 'first' }, contains: () => false };
+    const urgent = { dataset: { key: 'urgent' }, contains: node => node === button };
+    const list = {
+      children: [first, urgent],
+      insertBefore(el, before) {
+        if (el.contains(document.activeElement)) document.activeElement = null;
+        this.children.splice(this.children.indexOf(el), 1);
+        this.children.splice(before ? this.children.indexOf(before) : this.children.length, 0, el);
+      },
+    };
+    document.activeElement = button;
+    reconcile(list, ['urgent', 'first'].map(key => ({ key, update() {} })), () => { throw new Error('Should reuse rows'); });
+    return list.children[0] === urgent && document.activeElement === button && preventedScroll;
+  })()`), true);
+});

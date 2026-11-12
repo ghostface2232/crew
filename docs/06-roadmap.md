@@ -88,11 +88,13 @@ Injection keeps the decision recorded in [04-implementation.md](04-implementatio
 
 **L1. The lead as an adapter.** Only three parts are tied to Claude Code: the MCP server, the hooks, and the skills. Jobs, events, and the board belong to the daemon. Defining the lead as the role that plans and decides merges lets Codex or a headless Claude take it. This also resolves the "Codex as temporary lead when Claude is nearly exhausted" case in 03 section 8.2.
 
-**L2. Own main screen.** After B1 and B2 the board is close to a control screen. Add mission start, the command bar for direct dispatch (the daemon already accepts `POST /api/jobs`), lead selection, and merge execution, then wrap it in a thin native window. A heavy Electron app remains excluded (05 section 6).
+**L2. Own main screen.** After B1 and B2 the board is close to a control screen. Add mission start, the command bar for direct dispatch (the daemon already accepts `POST /api/jobs`), lead selection, and merge execution, then wrap it in a thin native window. Deferred discussion on 2026-11-12: evaluate Electron as a thin client of the existing daemon, with one app instance, window-state restoration, a tray, and actionable approval notifications. Closing the board must not stop jobs; keep the web board available. The earlier Tauri preference (02 section 5) is not a final choice. Measure resource costs and consider packaging and updates before selecting the shell; avoid a heavy wrapper (05 section 6).
 
 **L3. Usage-based routing.** With AgentGauge G3 (threshold hooks), handoff starts before the lead's limit runs out.
 
 **L4. More entry points.** Start missions from GitHub or Linear issues; a read-only mobile view.
+
+**L5. Board UI foundation and design system (deferred, 2026-11-12).** Preserve the current visual design while evaluating React + TypeScript + Vite, shared CSS tokens and CSS Modules, selected Radix primitives, and CSS-first motion with Motion where needed. Define reusable status chips, job rows, action buttons, and session disclosures, including long Korean text, pending/error/retry states, narrow layouts, and reduced motion. Use Storybook for component states and Playwright for interaction and visual regressions. First establish regression baselines and separate SSE/request state from rendering, then migrate bounded UI areas without sharing DOM ownership between React and the old renderer. Prefer this foundation before desktop packaging. This is a future work item, not part of the current board PR's implementation scope.
 
 ### Cost of L1 and L2
 

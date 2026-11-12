@@ -107,10 +107,12 @@ function jobLabel(job) {
 }
 
 /** Identity of a control across re-renders: what it does and to what, not where it sits. */
-const controlKey = (node) => node.matches?.('button, [data-keep], summary')
-  ? node.dataset.session ? `${node.tagName}|session:${node.dataset.session}`
-    : `${node.tagName}|${JSON.stringify(node.dataset)}|${Object.keys(node.dataset).length ? '' : node.textContent}`
-  : null;
+function controlKey(node) {
+  if (!node.matches?.('button, [data-keep], summary')) return null;
+  if (node.dataset.session) return `${node.tagName}|session:${node.dataset.session}`;
+  if (node.dataset.job) return `${node.tagName}|job:${JSON.stringify([node.dataset.job, node.dataset.act])}`;
+  return `${node.tagName}|${JSON.stringify(node.dataset)}|${Object.keys(node.dataset).length ? '' : node.textContent}`;
+}
 
 /** Field an input method is composing in. Replacing it mid-composition would break the character being typed. */
 let composing = null;
@@ -268,7 +270,12 @@ function reconcile(list, items, create) {
     }
     existing.delete(item.key);
     item.update(el);
-    if (list.children[index] !== el) list.insertBefore(el, list.children[index] ?? null);
+    if (list.children[index] !== el) {
+      // Urgency can reorder a work list. Moving its focused row detaches it and drops focus.
+      const focused = el.contains(document.activeElement) ? document.activeElement : null;
+      list.insertBefore(el, list.children[index] ?? null);
+      if (focused && document.activeElement !== focused) focused.focus({ preventScroll: true });
+    }
   });
 }
 

@@ -647,6 +647,9 @@ button:focus-visible { outline: 2px solid var(--working); outline-offset: 2px; }
 .callout p { white-space: pre-wrap; }
 /* Answering is the one thing asked of the user, so these are the largest controls on the board. */
 .callout button { min-height: 44px; padding: 0 22px; font-size: 15px; font-weight: 500; }
+/* The quick answers are filled with a wash of ink, so they show on the white request card as well as the yellow one. */
+.callout .actions button:not(.primary) { border-color: transparent; background: oklch(from var(--ink) l c h / 0.08); }
+@media (hover: hover) { .callout .actions button:not(.primary, :disabled):hover { background: oklch(from var(--ink) l c h / 0.13); } }
 /* A pressed answer is on its way: the button says so until the request is gone. */
 .callout button:disabled { opacity: 0.7; padding-inline-end: 40px; }
 .callout button:disabled::after { content: ""; position: absolute; inset: 50% 16px auto auto; width: 14px; height: 14px; margin-top: -7px; border-radius: 50%; border: 2px solid currentColor; border-inline-end-color: transparent; }

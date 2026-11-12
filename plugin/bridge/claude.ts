@@ -4,6 +4,8 @@ import type { EventKind } from './jobs.ts';
 export interface ClaudeSession {
   id: string;
   cwd: string;
+  /** Main working tree of the repository `cwd` is in, so a session in a worktree or subfolder groups with its project. Set once looked up. */
+  root?: string;
   title: string;
   state: 'working' | 'waiting' | 'idle' | 'error';
   phase: string;

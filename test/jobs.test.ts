@@ -4,10 +4,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
+import { resolveConfig } from '../plugin/bridge/config.ts';
+import type { Config } from '../plugin/bridge/config.ts';
+import { leadContext } from '../plugin/bridge/instructions.ts';
 import { Jobs, outOfScope } from '../plugin/bridge/jobs.ts';
-import type { Adapter, CrewEvent, Job, JobCtl } from '../plugin/bridge/jobs.ts';
+import type { Adapter, CrewEvent, Job, JobCtl, ReviewTarget } from '../plugin/bridge/jobs.ts';
 
-const config = { stallSeconds: 300, notify: false, notifyOnDone: false, codex: { bin: 'codex', approvalPolicy: 'never' as const }, antigravity: { bin: 'agy', enabled: true } };
+const config = resolveConfig({ notify: false, codex: { bin: 'codex', approvalPolicy: 'never' } });
 
 function tempRepo(): string {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-test-')));
@@ -23,7 +26,7 @@ function tempRepo(): string {
 }
 
 /** Adapter whose behavior each test scripts through `onStart`. */
-function harness(onStart: (ctl: JobCtl) => void) {
+function harness(onStart: (ctl: JobCtl) => void, readConfig: () => Config = () => config) {
   const calls: string[] = [];
   const adapter: Adapter = {
     start: async (ctl) => {
@@ -47,7 +50,7 @@ function harness(onStart: (ctl: JobCtl) => void) {
   const events: CrewEvent[] = [];
   const attention: string[] = [];
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-home-'));
-  const jobs = new Jobs(home, config, { codex: adapter, antigravity: adapter }, {
+  const jobs = new Jobs(home, readConfig, { codex: adapter, antigravity: adapter }, {
     onEvent: (e) => events.push(e),
     onJob: () => {},
     onAttention: (_job, kind) => attention.push(kind),
@@ -171,6 +174,95 @@ test('a finished job can be continued, and delivery is claimed once', async () =
   assert.equal(job.turns, 2);
 });
 
+for (const type of ['uncommittedChanges', 'baseBranch', 'commit'] as const) {
+  test(`Antigravity refreshes ${type} review diffs on reply, including after a restart`, async () => {
+    const repo = tempRepo();
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: repo }).toString().trim();
+    git('branch', 'review-base');
+    fs.writeFileSync(path.join(repo, 'README.md'), 'first change\n');
+    if (type !== 'uncommittedChanges') {
+      git('commit', '-qam', 'first change');
+    }
+    const target: ReviewTarget = type === 'baseBranch' ? { type, branch: 'review-base' }
+      : type === 'commit' ? { type, sha: git('rev-parse', 'HEAD') } : { type };
+    const reviewConfig = resolveConfig({ roles: { review: { agent: 'antigravity' } } });
+    let worker!: JobCtl;
+    const h = harness((ctl) => { worker = ctl; }, () => reviewConfig);
+    const job = await h.jobs.create({ kind: 'review', cwd: repo, review: { target, mode: 'adversarial' } });
+    const firstFile = path.join(h.home, 'reviews', `${job.id}.diff`);
+    assert.match(fs.readFileSync(firstFile, 'utf8'), /\+first change/);
+    let previousFile = firstFile;
+    let expected = 'second change';
+    h.adapter.reply = async (ctl, message) => {
+      assert.match(message, /^Review again\.\n\n/);
+      const file = /refreshed at `([^`]+)`/.exec(message)?.[1];
+      assert.ok(file, message);
+      assert.notEqual(file, previousFile);
+      // Give cleanup from the previous turn a chance to run before reading the new artifact.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      const diff = fs.readFileSync(file, 'utf8');
+      assert.ok(diff.includes(`+${type === 'commit' ? 'first change' : expected}`), diff);
+      if (type === 'commit') assert.ok(!diff.includes(expected), diff);
+      previousFile = file;
+      ctl.done('reviewed');
+    };
+    fs.writeFileSync(path.join(repo, 'README.md'), `${expected}\n`);
+    if (type !== 'uncommittedChanges') git('commit', '-qam', expected);
+    worker.done('first report');
+    await h.jobs.reply(job.id, { message: 'Review again.' });
+    assert.equal(job.state, 'done');
+    h.jobs.flush();
+
+    // The saved job keeps its original target and agent even if role assignments change.
+    const restored = new Jobs(h.home, () => config, { codex: h.adapter, antigravity: h.adapter }, {
+      onEvent: () => {}, onJob: () => {}, onAttention: () => {},
+    });
+    assert.deepEqual(restored.get(job.id).reviewTarget, target);
+    assert.equal(restored.get(job.id).agent, 'antigravity');
+    expected = 'third change';
+    fs.writeFileSync(path.join(repo, 'README.md'), `${expected}\n`);
+    if (type !== 'uncommittedChanges') git('commit', '-qam', expected);
+    await restored.reply(job.id, { message: 'Review again.' });
+    assert.equal(restored.get(job.id).state, 'done');
+    assert.equal(restored.get(job.id).turns, 3);
+    restored.flush();
+  });
+}
+
+test('an unavailable review target fails before sending a follow-up, and old jobs require a new review', async () => {
+  const repo = tempRepo();
+  execFileSync('git', ['branch', 'review-base'], { cwd: repo });
+  const h = harness((ctl) => ctl.done('reviewed'), () => resolveConfig({ roles: { review: { agent: 'antigravity' } } }));
+  const job = await h.jobs.create({ kind: 'review', cwd: repo, review: { target: { type: 'baseBranch', branch: 'review-base' }, mode: 'adversarial' } });
+  execFileSync('git', ['branch', '-D', 'review-base'], { cwd: repo });
+  await h.jobs.reply(job.id, { message: 'Review again.' });
+  assert.equal(job.state, 'failed');
+  assert.match(job.error!.message, /git diff:/);
+  assert.deepEqual(h.calls, []);
+
+  delete job.reviewTarget;
+  h.jobs.flush();
+  const restored = new Jobs(h.home, () => config, { codex: h.adapter, antigravity: h.adapter }, {
+    onEvent: () => {}, onJob: () => {}, onAttention: () => {},
+  });
+  await assert.rejects(restored.reply(job.id, { message: 'Review again.' }), /Start a new review instead/);
+  assert.equal(restored.get(job.id).state, 'failed');
+  assert.deepEqual(h.calls, []);
+});
+
+test('preparing a review diff rejects overlapping replies and cancellation prevents the follow-up', async () => {
+  const repo = tempRepo();
+  const h = harness((ctl) => ctl.done('reviewed'), () => resolveConfig({ roles: { review: { agent: 'antigravity' } } }));
+  const job = await h.jobs.create({ kind: 'review', cwd: repo, review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } });
+  const pending = h.jobs.reply(job.id, { message: 'Review again.' });
+  await assert.rejects(h.jobs.reply(job.id, { message: 'Another review.' }), /preparing its review diff/);
+  await h.jobs.cancel(job.id);
+  await pending;
+  assert.equal(job.state, 'cancelled');
+  assert.deepEqual(h.calls, ['cancel']);
+  assert.equal(fs.existsSync(path.join(h.home, 'reviews', `${job.id}-2.diff`)), false);
+});
+
 test('a worktree job can be continued as soon as its result is published', async () => {
   const repo = tempRepo();
   let worker!: JobCtl;
@@ -197,7 +289,7 @@ test('jobs left running by a previous bridge are restored as failed but resumabl
   delete saved.jobs[0].project;
   fs.writeFileSync(file, JSON.stringify(saved));
 
-  const second = new Jobs(first.home, config, {} as never, { onEvent: () => {}, onJob: () => {}, onAttention: () => {} });
+  const second = new Jobs(first.home, () => config, {} as never, { onEvent: () => {}, onJob: () => {}, onAttention: () => {} });
   const restored = second.get(job.id);
   assert.equal(restored.state, 'failed');
   assert.equal(restored.sessionId, 'session-1');
@@ -216,7 +308,7 @@ test('the history limit does not hide old worktrees or undelivered jobs after a 
     first.jobs.jobs.set(id, { ...job, id, worktree: null, createdAt: job.createdAt + i + 1 });
   }
   first.jobs.flush();
-  const second = new Jobs(first.home, config, {} as never, { onEvent: () => {}, onJob: () => {}, onAttention: () => {} });
+  const second = new Jobs(first.home, () => config, {} as never, { onEvent: () => {}, onJob: () => {}, onAttention: () => {} });
   assert.equal(second.list().length, 202);
   assert.equal(second.get('unread').delivered, 0);
   await second.discard(job.id);
@@ -234,7 +326,7 @@ test('an approval from before a restart cannot settle a new request at the same 
   worker.waiting('approval', 'echo before restart');
   const stale = job.waiting!;
   const adapter = { ...first.adapter, reply: async (ctl: JobCtl) => ctl.waiting('approval', 'echo after restart') };
-  const second = new Jobs(first.home, config, { codex: adapter, antigravity: adapter }, {
+  const second = new Jobs(first.home, () => config, { codex: adapter, antigravity: adapter }, {
     onEvent: () => {}, onJob: () => {}, onAttention: () => {},
   });
   const resumed = await second.reply(job.id, { message: 'continue' });
@@ -312,4 +404,179 @@ test('outOfScope accepts exact files, directories, and globs', () => {
   assert.deepEqual(outOfScope(files, ['docs', 'src/ui/strings.ts']), ['src/core/logic.ts']);
   assert.deepEqual(outOfScope(files, ['**/*.md', 'src/ui/']), ['src/core/logic.ts']);
   assert.deepEqual(outOfScope(files, []), []);
+});
+
+test('each role goes to the agent the role table names, with the model set for that role, and edits apply to the next job', async () => {
+  const repo = tempRepo();
+  let current = config;
+  const { jobs } = harness((ctl) => ctl.done('ok'), () => current);
+
+  const before = await settled(jobs, await jobs.create({ kind: 'polish', cwd: repo, targets: ['README.md'] }));
+  assert.equal(before.agent, 'antigravity');
+  assert.match(before.id, /^ag-/);
+
+  current = resolveConfig({ roles: { polish: { agent: 'codex', model: 'small', effort: 'low' }, review: { agent: 'antigravity' } } });
+  const polish = await settled(jobs, await jobs.create({ kind: 'polish', cwd: repo, targets: ['README.md'] }));
+  assert.equal(polish.agent, 'codex');
+  assert.match(polish.id, /^cx-/);
+  assert.equal(polish.model, 'small');
+  assert.equal(polish.effort, 'low');
+  assert.match(polish.instructions, /Role: UX writing/);
+
+  // A per-job override wins over the role's model.
+  const override = await settled(jobs, await jobs.create({ kind: 'polish', cwd: repo, targets: ['README.md'], model: 'large' }));
+  assert.equal(override.model, 'large');
+
+  // Only Codex has a native review mode, so another reviewer gets the prompted review.
+  const review = await settled(jobs, await jobs.create({ kind: 'review', cwd: repo, review: { target: { type: 'uncommittedChanges' }, mode: 'standard' } }));
+  assert.equal(review.agent, 'antigravity');
+  assert.equal(review.nativeReview, null);
+  assert.equal(review.sandbox, 'read-only');
+});
+
+test('a role assigned to a disabled or unknown agent fails with the reason, and an unreadable config fails the job', async () => {
+  const repo = tempRepo();
+  let read = (): Config => resolveConfig({ antigravity: { bin: 'agy', enabled: false }, roles: { delegate: { agent: 'antigravity' } } });
+  const { jobs } = harness((ctl) => ctl.done('ok'), () => read());
+  await assert.rejects(jobs.create({ kind: 'delegate', cwd: repo, task: 'x' }), /delegate is assigned to Antigravity, which is disabled/);
+
+  assert.throws(() => resolveConfig({ roles: { review: { agent: 'cursor' as never } } }), /roles\.review\.agent is "cursor"; use one of: codex, antigravity/);
+  // Unset roles keep their defaults.
+  assert.deepEqual(resolveConfig({ roles: { polish: { model: 'm' } } }).roles, { delegate: { agent: 'codex' }, review: { agent: 'codex' }, polish: { agent: 'antigravity', model: 'm' } });
+
+  // A table that is not exactly right must not quietly fall back to the defaults.
+  const bad = (roles: unknown) => () => resolveConfig({ roles: roles as never });
+  assert.throws(bad('codex'), /roles must be an object/);
+  assert.throws(bad({ delegate: 'antigravity' }), /roles\.delegate must be an object/);
+  assert.throws(bad({ delegate: null }), /roles\.delegate must be an object/);
+  assert.throws(bad({ reviewer: { agent: 'codex' } }), /roles\.reviewer is not a role; use one of: delegate, review, polish/);
+  assert.throws(bad({ review: { agent: 'codex', model: 5 } }), /roles\.review\.model must be a string/);
+  assert.throws(bad({ review: { agnt: 'codex' } }), /roles\.review\.agnt is not a setting/);
+
+  read = () => {
+    throw new Error('Invalid config.json: bad');
+  };
+  await assert.rejects(jobs.create({ kind: 'delegate', cwd: repo, task: 'x' }), /Invalid config\.json/);
+  assert.equal(jobs.list().length, 0);
+});
+
+test('shared instructions reach every worker after its role, global then project, and name their sources', async () => {
+  const repo = tempRepo();
+  const { jobs, home } = harness((ctl) => ctl.done('ok'));
+
+  const none = await settled(jobs, await jobs.create({ kind: 'review', cwd: repo, review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } }));
+  assert.ok(!none.instructions.includes('Shared instructions'));
+  assert.deepEqual(none.shared, []);
+
+  const globalFile = path.join(home, 'instructions.md');
+  const projectFile = path.join(repo, '.crew', 'instructions.md');
+  fs.writeFileSync(globalFile, 'Prefer small diffs.\n');
+  fs.mkdirSync(path.dirname(projectFile));
+  // Not committed: the worktree does not contain it, yet the job must still be given it.
+  fs.writeFileSync(projectFile, '\nUse tabs in this repository.\n');
+
+  for (const spec of [
+    { kind: 'delegate' as const, cwd: repo, task: 'x' },
+    { kind: 'review' as const, cwd: repo, review: { target: { type: 'uncommittedChanges' as const }, mode: 'adversarial' as const } },
+    { kind: 'polish' as const, cwd: repo, targets: ['README.md'] },
+  ]) {
+    const job = await settled(jobs, await jobs.create(spec));
+    const text = job.instructions;
+    const order = ['# Role:', '# Shared instructions', 'do not widen what the role allows', '## From the user, for every project\nPrefer small diffs.', '## From this repository (`.crew/instructions.md`)\nUse tabs in this repository.'].map((part) => text.indexOf(part));
+    assert.ok(order.every((at, i) => at >= 0 && (i === 0 || at > order[i - 1])), `${spec.kind}: ${text}`);
+    assert.deepEqual(job.shared, [globalFile, projectFile]);
+    // The assignment itself is unchanged; instructions travel on their own channel.
+    assert.ok(!job.prompt.includes('Prefer small diffs'));
+  }
+
+  // An empty file is the same as none.
+  fs.writeFileSync(globalFile, '  \n');
+  const projectOnly = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'x' }));
+  assert.deepEqual(projectOnly.shared, [projectFile]);
+  assert.ok(!projectOnly.instructions.includes('for every project'));
+
+  // A job started inside a linked worktree is given the main tree's file, which the worktree does not contain.
+  const wt = path.join(home, 'wt');
+  execFileSync('git', ['worktree', 'add', '-q', wt], { cwd: repo });
+  const fromWorktree = await settled(jobs, await jobs.create({ kind: 'review', cwd: wt, review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } }));
+  assert.deepEqual(fromWorktree.shared, [projectFile]);
+  // So is one started from a subdirectory.
+  fs.mkdirSync(path.join(repo, 'sub'));
+  const fromSub = await settled(jobs, await jobs.create({ kind: 'review', cwd: path.join(repo, 'sub'), review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } }));
+  assert.deepEqual(fromSub.shared, [projectFile]);
+});
+
+test('instructions that exist but cannot be read fail the job before anything is created', async () => {
+  const repo = tempRepo();
+  const { jobs, home } = harness((ctl) => ctl.done('ok'));
+  fs.mkdirSync(path.join(home, 'instructions.md'));
+  await assert.rejects(jobs.create({ kind: 'delegate', cwd: repo, task: 'x' }), /Could not read .*instructions\.md/);
+  assert.equal(jobs.list().length, 0);
+  assert.equal(execFileSync('git', ['branch', '--list', 'crew-*'], { cwd: repo }).toString(), '');
+
+  // A `.crew` that is a file holds no instructions; that is "none", not an error.
+  fs.rmdirSync(path.join(home, 'instructions.md'));
+  fs.writeFileSync(path.join(repo, '.crew'), 'not a directory');
+  assert.deepEqual((await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'x' }))).shared, []);
+});
+
+test('a Claude session is given each shared file whole, or told where it is, never a cut-off copy', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-home-'));
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-project-'));
+  assert.equal(leadContext(home, project), '');
+
+  const globalFile = path.join(home, 'instructions.md');
+  const projectFile = path.join(project, '.crew', 'instructions.md');
+  fs.mkdirSync(path.dirname(projectFile));
+  fs.writeFileSync(globalFile, 'Prefer small diffs.');
+  const short = leadContext(home, project);
+  assert.ok(short.includes('## From the user, for every project\nPrefer small diffs.') && short.includes('apply to this session too'), short);
+
+  // Only the part that does not fit is replaced by its path; the short one still arrives whole.
+  fs.writeFileSync(projectFile, 'x'.repeat(9_500));
+  const mixed = leadContext(home, project);
+  assert.ok(mixed.length < 9_000 && mixed.includes('Prefer small diffs.') && mixed.includes(`Too long to include here. The complete text is in ${projectFile}`) && !mixed.includes('xxxx'), mixed);
+  fs.writeFileSync(projectFile, 'y'.repeat(8_000));
+  assert.ok(leadContext(home, project).includes('y'.repeat(8_000)));
+
+  // With the home directory as the project, the one file is given once.
+  const asHome = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-user-'));
+  fs.mkdirSync(path.join(asHome, '.crew'));
+  fs.writeFileSync(path.join(asHome, '.crew', 'instructions.md'), 'ONCE');
+  assert.equal(leadContext(path.join(asHome, '.crew'), asHome).match(/ONCE/g)?.length, 1);
+
+  fs.rmSync(globalFile);
+  fs.mkdirSync(globalFile);
+  assert.match(leadContext(home, project), /could not load the shared instructions for this session\. Could not read .*instructions\.md/);
+});
+
+test('the session hook prints context for the event it was called for, from the main tree, and reports its own failures', () => {
+  const repo = tempRepo();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-home-'));
+  fs.mkdirSync(path.join(repo, '.crew'));
+  fs.writeFileSync(path.join(repo, '.crew', 'instructions.md'), 'Use tabs.');
+  const wt = path.join(home, 'wt');
+  execFileSync('git', ['worktree', 'add', '-q', wt], { cwd: repo });
+  const hook = (stdin: string, env: Record<string, string> = {}) => {
+    const out = execFileSync(process.execPath, [path.resolve('plugin/bridge/context.ts')], { input: stdin, env: { ...process.env, CREW_HOME: home, ...env } }).toString();
+    return out ? JSON.parse(out).hookSpecificOutput : null;
+  };
+
+  const session = hook(JSON.stringify({ hook_event_name: 'SessionStart', source: 'compact', cwd: wt }));
+  assert.equal(session.hookEventName, 'SessionStart');
+  assert.ok(session.additionalContext.includes('Use tabs.'));
+  assert.equal(hook(JSON.stringify({ hook_event_name: 'SubagentStart', cwd: path.join(repo, '.crew') })).hookEventName, 'SubagentStart');
+
+  // Outside a repository, the session's project directory is used rather than wherever the cwd has moved to.
+  const plain = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-plain-'));
+  fs.mkdirSync(path.join(plain, '.crew'));
+  fs.mkdirSync(path.join(plain, 'sub'));
+  fs.writeFileSync(path.join(plain, '.crew', 'instructions.md'), 'No repo here.');
+  assert.ok(hook(JSON.stringify({ hook_event_name: 'SessionStart', cwd: path.join(plain, 'sub') }), { CLAUDE_PROJECT_DIR: plain }).additionalContext.includes('No repo here.'));
+
+  // Nothing to say is silence; a broken call is said, with a valid event name.
+  assert.equal(hook(JSON.stringify({ hook_event_name: 'SessionStart', cwd: os.tmpdir() }), { CLAUDE_PROJECT_DIR: os.tmpdir() }), null);
+  const broken = hook('not json');
+  assert.equal(broken.hookEventName, 'SessionStart');
+  assert.match(broken.additionalContext, /could not load the shared instructions/);
 });

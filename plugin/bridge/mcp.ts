@@ -1,8 +1,9 @@
 import readline from 'node:readline';
 import { api, ensureDaemon } from './client.ts';
-import { BASE_URL, VERSION } from './config.ts';
+import { BASE_URL, DEFAULT_ROLES, loadConfig, VERSION, WORKERS } from './config.ts';
+import type { Role } from './config.ts';
 import type { CrewEvent, JobSpec } from './jobs.ts';
-import { AGENT_NAMES, describe, needsLead, summarize } from './render.ts';
+import { describe, needsLead, summarize } from './render.ts';
 import type { JobView } from './render.ts';
 
 /**
@@ -14,11 +15,25 @@ import type { JobView } from './render.ts';
  * dependencies and a build step.
  */
 
-const INSTRUCTIONS = `Crew connects this session to two other coding agents that run in the background. You are the lead: you plan, do the main implementation, review, and decide what is merged.
+/**
+ * Who holds each role, as configured when this session started. Tool text is fixed for the session,
+ * so a later change shows up in `status` and in each job's result, which name the agent that ran.
+ */
+const roles = (() => {
+  try {
+    return loadConfig().roles;
+  } catch {
+    return DEFAULT_ROLES;
+  }
+})();
+const holder = (role: Role) => WORKERS[roles[role].agent].name;
 
-Roles (fixed):
-- Codex — supporting engineer and cross-reviewer. \`delegate\` gives it a separable piece of implementation; \`review\` asks it for an adversarial review.
-- Antigravity — editor. \`polish\` has it improve UI strings, comments, and docs. It must not change logic or structure.
+const INSTRUCTIONS = `Crew connects this session to other coding agents that run in the background. You are the lead: you plan, do the main implementation, review, and decide what is merged.
+
+Roles (assigned by the user in ~/.crew/config.json; each tool goes to the agent holding that role, and you do not reassign them):
+- \`delegate\` — supporting engineer, currently ${holder('delegate')}. Give it a separable piece of implementation.
+- \`review\` — cross-reviewer, currently ${holder('review')}. Ask it for an adversarial review.
+- \`polish\` — editor, currently ${holder('polish')}. It improves UI strings, comments, and docs, and must not change logic or structure.
 
 How jobs work:
 - delegate and polish run in their own git worktree and branch (crew-<job id>) created from HEAD, so commit anything the worker needs first. Gitignored files it needs (node_modules, .env) are copied in if the repository lists them in .worktreeinclude. The bridge commits the worker's changes on that branch; you inspect the diff and merge or reject it. Nothing reaches your branch unless you merge it.
@@ -28,7 +43,7 @@ How jobs work:
 - Reject worker changes that go beyond what was asked. For polish, any file listed as out of scope, or any non-text change, is grounds to reject.
 - If a worker fails on a usage limit, do that piece yourself and say that the cross-check was skipped.
 
-The user can watch all three agents live on the status board at ${BASE_URL}.`;
+The user can watch every agent live on the status board at ${BASE_URL}.`;
 
 const common = {
   cwd: { type: 'string', description: 'Project directory. Defaults to this session\'s project.' },
@@ -38,24 +53,24 @@ const worktreeProps = {
   base: { type: 'string', description: 'Git ref the worker\'s worktree starts from. Defaults to HEAD.' },
   isolation: { type: 'string', enum: ['worktree', 'in_place'], description: 'worktree (default): separate worktree and branch. in_place: edit the project directory directly; only for directories that are not git repositories.' },
 };
-const codexProps = {
-  model: { type: 'string', description: 'Codex model override. Omit to use the user\'s Codex default.' },
-  effort: { type: 'string', description: 'Codex reasoning effort override (e.g. low, medium, high).' },
+const modelProps = {
+  model: { type: 'string', description: 'Model override for this job. Omit to use the model configured for the role, or the agent\'s own default.' },
+  effort: { type: 'string', description: 'Reasoning effort override (e.g. low, medium, high). Ignored by agents without an effort setting.' },
 };
 
 const TOOLS = [
   {
     name: 'delegate',
-    title: 'Delegate to Codex',
-    description: 'Hand a separable piece of implementation to Codex, the supporting engineer. It works in its own git worktree and reports back; its changes land on a crew-<job id> branch for you to review and merge.',
+    title: `Delegate to ${holder('delegate')}`,
+    description: `Hand a separable piece of implementation to the supporting engineer (${holder('delegate')}). It works in its own git worktree and reports back; its changes land on a crew-<job id> branch for you to review and merge.`,
     inputSchema: {
       type: 'object',
       properties: {
-        task: { type: 'string', description: 'What to build, with the context Codex needs: relevant files, constraints, interfaces to match. It has not seen this conversation.' },
+        task: { type: 'string', description: 'What to build, with the context the engineer needs: relevant files, constraints, interfaces to match. It has not seen this conversation.' },
         title: { type: 'string', description: 'Short label shown on the status board.' },
         done_when: { type: 'string', description: 'Concrete completion criteria, e.g. tests that must pass.' },
         ...worktreeProps,
-        ...codexProps,
+        ...modelProps,
         ...common,
       },
       required: ['task'],
@@ -63,8 +78,8 @@ const TOOLS = [
   },
   {
     name: 'review',
-    title: 'Review by Codex',
-    description: 'Ask Codex for a read-only review of changes in this repository. Use after your own self-review, once per step; do not loop reviews.',
+    title: `Review by ${holder('review')}`,
+    description: `Ask the cross-reviewer (${holder('review')}) for a read-only review of changes in this repository. Use after your own self-review, once per step; do not loop reviews.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -72,17 +87,17 @@ const TOOLS = [
         base: { type: 'string', description: 'Base branch for target "branch", e.g. main.' },
         commit: { type: 'string', description: 'Commit SHA for target "commit".' },
         focus: { type: 'string', description: 'What to scrutinize: the design decisions, assumptions or risks you are least sure about.' },
-        mode: { type: 'string', enum: ['adversarial', 'standard'], description: 'adversarial (default): challenges design and assumptions. standard: Codex\'s built-in code review.' },
+        mode: { type: 'string', enum: ['adversarial', 'standard'], description: 'adversarial (default): challenges design and assumptions. standard: Codex\'s built-in code review; other agents run the adversarial review instead.' },
         done_when: { type: 'string', description: 'Acceptance criteria to verify in adversarial mode.' },
-        ...codexProps,
+        ...modelProps,
         ...common,
       },
     },
   },
   {
     name: 'polish',
-    title: 'Polish by Antigravity',
-    description: 'Have Antigravity improve UI strings, comments, and documentation in the given files, in its own worktree. It may not change logic or structure. Not a merge gate: run it after the code is settled.',
+    title: `Polish by ${holder('polish')}`,
+    description: `Have the editor (${holder('polish')}) improve UI strings, comments, and documentation in the given files, in its own worktree. It may not change logic or structure. Not a merge gate: run it after the code is settled.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -186,7 +201,7 @@ async function askUser(job: JobView, signal: AbortSignal): Promise<'settled' | '
 
   const approval = waiting.type === 'approval';
   const prompt = request('elicitation/create', {
-    message: `${AGENT_NAMES[job.agent]} (${job.title}) ${approval ? 'requests approval' : 'asks a question'}\n\n${waiting.reason}`,
+    message: `${WORKERS[job.agent].name} (${job.title}) ${approval ? 'requests approval' : 'asks a question'}\n\n${waiting.reason}`,
     requestedSchema: approval ? APPROVAL_FORM : ANSWER_FORM,
   });
 
@@ -332,6 +347,8 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       const elsewhere = state.jobs.filter((j: JobView) => j.project !== PROJECT && !j.endedAt).length;
       if (elsewhere) lines.push(`(${elsewhere} active job(s) belong to other projects; they are on the board.)`);
       if (recent.length) lines.push('', 'Recent:', ...recent.map(summarize));
+      // A daemon that predates the role table reports none.
+      if (state.roles) lines.push('', `Roles: ${(Object.keys(state.roles) as Role[]).map((role) => `${role} → ${WORKERS[state.roles[role].agent as keyof typeof WORKERS].name}`).join(', ')}`);
       const windows = state.limits.codex?.windows ?? [];
       if (windows.length) lines.push('', `Codex usage: ${windows.map((w: any) => `${Math.round(w.usedPercent)}% of the ${w.minutes >= 1440 ? `${Math.round(w.minutes / 1440)}-day` : `${Math.round(w.minutes / 60)}-hour`} window`).join(', ')}`);
       lines.push('', `Board: ${BASE_URL}`);

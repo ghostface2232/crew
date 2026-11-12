@@ -1,162 +1,243 @@
-# 04. 구현 기록
+# 04. Implementation Notes
 
-작성일 2026-11-11. [02-implementation-plan.md](02-implementation-plan.md)의 Phase 1(브리지)과 Phase 2(상태 보드)를 구현한 결과와, 계획에서 달라진 점을 적는다. AgentGauge 연동(Phase 3, [03 문서](03-agentgauge-integration.md))은 이번 범위에서 뺐다.
+Written 2026-11-11. Records the implementation of Phase 1 (bridge) and Phase 2 (status board) from [02-implementation-plan.md](02-implementation-plan.md), along with what changed from the plan and why. AgentGauge integration (Phase 3, [document 03](03-agentgauge-integration.md)) was left out of this round.
 
-외부 도구에 관한 사실은 모두 2026-11-11에 이 기기에서 직접 확인했다. 확인한 버전은 Claude Code 2.1.321, Codex CLI 0.167.0, Antigravity CLI 1.5.5, Node.js 24.22.1이다.
+All facts about external tools were verified directly on this machine on 2026-11-11 against Claude Code 2.1.321, Codex CLI 0.167.0, Antigravity CLI 1.5.5, and Node.js 24.22.1.
 
-## 1. 구성
+## 1. Architecture
 
 ```
-Claude Code (Desktop 또는 CLI) ── 리드
-  │ stdio MCP                        │ 훅(HTTP)
-  ▼                                  ▼
-plugin/bridge/mcp.ts ──HTTP──▶ Crew 데몬 (127.0.0.1:47615)
-                                 ├─ codex app-server   (Codex: 구현, 리뷰)
-                                 ├─ agy acp            (Antigravity: 문구·문서 정리)
-                                 ├─ 이벤트 로그 ~/.crew/events.jsonl
-                                 └─ 상태 보드 (SSE)  http://127.0.0.1:47615
+Claude Code (Desktop or CLI) ── Lead
+  │ stdio MCP                    │ Hooks (HTTP)
+  ▼                              ▼
+plugin/bridge/mcp.ts ──HTTP──▶ Crew Daemon (127.0.0.1:47615)
+                                 ├─ codex app-server   (Codex: implementation, review)
+                                 ├─ agy acp            (Antigravity: copy & doc cleanup)
+                                 ├─ Event log ~/.crew/events.jsonl
+                                 └─ Status board (SSE) http://127.0.0.1:47615
 ```
 
-- 데몬 하나가 워커 프로세스, 잡 상태, 이벤트 로그, 상태 보드를 소유한다. MCP 서버는 상태가 없는 얇은 클라이언트다. 그래서 Claude 세션이 재시작되거나 컴팩트돼도 잡이 유지되고, 세션이 여러 개여도 같은 보드를 본다.
-- 데몬은 MCP 서버가 뜰 때 자동으로 시작된다. 실행 중인 데몬의 코드가 디스크의 `bridge/` 코드와 다르면(파일 내용 해시로 비교) 다음 호출 때 교체된다. 버전을 올리지 않은 수정도 반영된다. 실행 중인 잡이 있으면 잡이 끝날 때까지 미룬다. 다른 폴더에 설치된 플러그인의 데몬은 이쪽 버전이 더 높을 때만 교체한다.
-- 전체가 Claude Code 플러그인 하나(`plugin/`)다. MCP 서버, 훅, 스킬 2개, 서브에이전트 1개, 역할 파일 3개가 들어 있다.
+- A single daemon owns the worker processes, job state, event log, and status board. The MCP server is a thin stateless client. Jobs survive when a Claude session restarts or compacts, and multiple sessions share the same board.
+- The daemon starts automatically when the MCP server comes up. If the running daemon's code differs from the `bridge/` code on disk (compared by file content hash), it is replaced on the next call—so edits take effect even without bumping the version. If jobs are running, replacement waits until they finish. A daemon from an installation in another folder is replaced only when the caller's version is newer.
+- Everything is packaged as a single Claude Code plugin (`plugin/`) containing the MCP server, hooks, 2 skills, 1 subagent, and 3 role files.
 
-## 2. 리드가 쓰는 도구
+## 2. Tools used by the lead
 
-| 도구 | 동작 |
+| Tool | Behavior |
 | --- | --- |
-| `delegate` | Codex에 구현 조각을 맡긴다. 전용 worktree(`~/.crew/worktrees/<저장소>/<잡 id>`)와 `crew-<잡 id>` 브랜치에서 작업한다 |
-| `review` | Codex에 읽기 전용 리뷰를 맡긴다. 기본은 adversarial, `mode: "standard"`는 Codex 내장 리뷰 |
-| `polish` | Antigravity에 문구·주석·문서 정리를 맡긴다. `targets` 밖을 고치면 범위 이탈로 보고한다 |
-| `status` | 잡 하나의 전체 결과, 또는 진행 중·최근 잡 목록과 Codex 사용량 |
-| `wait` | 잡이 끝날 때까지 기다린다. 도중에 승인 요청이나 질문이 오면 앱에서 사용자에게 묻고 계속 기다린다 |
-| `reply` | 같은 워커 세션에 후속 지시를 보낸다. 사용자가 대화로 알려준 승인·거절을 전달하는 데도 쓴다 |
-| `cancel` | 잡을 취소한다. `discard: true`면 끝난 잡의 worktree와 브랜치를 지운다 |
+| `delegate` | Hand an implementation slice to Codex in a dedicated worktree (`~/.crew/worktrees/<repo>/<job id>`) on branch `crew-<job id>` |
+| `review` | Hand a read-only review to Codex. Defaults to adversarial; `mode: "standard"` uses Codex's built-in review |
+| `polish` | Hand copy, comment, and doc cleanup to Antigravity. Edits outside `targets` are reported as out of scope |
+| `status` | Return the full result of a single job, or the list of active and recent jobs plus Codex usage |
+| `wait` | Wait for a job to finish. If an approval request or question arrives meanwhile, prompt the user in the app and keep waiting |
+| `reply` | Send follow-up instructions to the same worker session, or forward an approval/denial that the user gave in chat |
+| `cancel` | Cancel a job. With `discard: true`, remove the finished job's worktree and branch |
 
-- 02 문서 3.4절의 다섯 개에 `wait`와 `reply`를 더했다. 병렬 구현(리드와 Codex가 동시에 작업)과 수정 요청 왕복에 필요하다.
-- 호출은 기본적으로 워커가 끝날 때까지 기다린다. `background: true`를 주면 잡 id만 받고 바로 돌아온다.
-- worktree는 `HEAD`에서 만들므로 git이 추적하지 않는 파일이 없다. 저장소 루트의 `.worktreeinclude`(Claude Code가 자기 worktree에 쓰는 것과 같은 파일, `.gitignore` 문법)에 적힌 경로 중 gitignore된 것만 worktree로 복사한다. `node_modules`와 `.env`를 적어두면 워커가 설치 없이 테스트를 돌릴 수 있다. APFS에서는 copy-on-write 복제라 큰 폴더도 싸다.
-- 데몬은 모든 세션이 공유하지만 잡은 시작한 세션의 프로젝트에 속한다. 인자 없는 `wait`와 `status` 목록은 자기 프로젝트의 잡만 다룬다. 보드와 `crew status`는 전부 보여준다.
-- 워커는 커밋하지 않는다. worktree의 git 메타데이터가 샌드박스 밖에 있어서 할 수도 없다. 잡이 끝나면 브리지가 잡 브랜치에 커밋하고, 리드가 diff를 보고 병합하거나 반려한다.
+- Added `wait` and `reply` to the five tools from document 02 section 3.4. Both are needed for parallel implementation (the lead and Codex working at the same time) and multi-turn revision requests.
+- Tool calls wait for the worker to finish by default. Passing `background: true` returns the job ID immediately.
+- Because a worktree is created from `HEAD`, untracked files are absent. Any gitignored path listed in `.worktreeinclude` at the repository root (the same `.gitignore`-syntax file that Claude Code uses for its own worktrees) is copied into the worktree. Listing `node_modules` and `.env` lets workers run tests without reinstalling dependencies. On APFS this uses copy-on-write clones, so large directories are cheap.
+- Although the daemon is shared across sessions, each job belongs to the project of the session that started it. Argument-less `wait` and `status` listings filter to the caller's project, while the status board and `crew status` show all projects.
+- Workers do not commit—and cannot, because the worktree's git metadata sits outside their sandbox. When a job finishes, the bridge commits to the job branch, and the lead inspects the diff to merge or reject it.
 
-## 3. 계획에서 달라진 점
+### 2.1 Role assignments
 
-| 항목 | 02 문서 | 구현 | 이유 |
+Each tool is a role, and `roles` in `~/.crew/config.json` names the agent that holds it. With no `roles` entry the defaults apply, which are the original fixed roles (requirement R3).
+
+```json
+{
+  "roles": {
+    "delegate": { "agent": "codex" },
+    "review": { "agent": "codex", "effort": "high" },
+    "polish": { "agent": "antigravity" }
+  }
+}
+```
+
+- `agent` is `codex` or `antigravity`. `model` and `effort` are optional and override the agent's own settings for that role; a `model` or `effort` passed to the tool overrides both. Antigravity has no effort setting.
+- The table is read when a job starts, so an edit applies to the next job without a restart. A table that is not exactly valid (unknown role or setting, wrong type, unknown agent) fails that job with the reason; it never falls back to the defaults or the previous assignments. Other settings are still read when the daemon starts.
+- The role text (`plugin/roles/engineer.md`, `reviewer.md`, `polisher.md`) names no agent. Codex receives it as `developerInstructions`; Antigravity receives it at the top of the first prompt, because ACP has no instruction channel.
+- The lead's tool titles and server instructions name the role holders as of session start. `status` and every job result name the agent that actually ran.
+- The board shows the roles each agent holds and updates when the file changes.
+
+What each agent may do in each role:
+
+| Role | Codex | Antigravity |
+| --- | --- | --- |
+| `delegate` | `workspace-write` sandbox; approvals follow `codex.approvalPolicy` | Reads anywhere, edits inside the worktree. Every other action (commands, deletes, moves, network) is put to the user as an approval, unless the request omits its input, in which case it is refused |
+| `review` | `read-only` sandbox, never prompts. `mode: "standard"` uses Codex's built-in review | Reads only. Edits and commands are refused and listed in the job's notes. Because it cannot run git, the bridge saves a diff under `~/.crew/reviews/` for each turn (removed when the turn ends) and the job notes say that no tests or checks were run. Follow-ups regenerate the diff for the saved review target and receive its new path, including after a bridge restart. Older jobs without a saved target require a new review. `mode: "standard"` falls back to the prompted review, also noted. Needs a git repository |
+| `polish` | `workspace-write` sandbox. Scope is checked after the fact: files outside `targets` are reported as out of scope | Reads anywhere, edits inside the worktree. Everything else is refused |
+
+Antigravity approvals follow the same rules as Codex approvals (section 5.1): the user answers, the prompt shows the whole request (every input field, not only the command) and the job workspace, requests are answered one at a time in arrival order, and the bridge only ever answers "allow once". A denial is sent as "reject once" whenever that is offered. Cancelling the job, the end of the turn, or the server exiting answers any open request as cancelled. No role may switch Antigravity's mode, because "accept-edits" skips the per-edit path check (section 10).
+
+Verified on 2026-11-12 with Codex CLI 0.167.0 and Antigravity CLI 1.5.5, in a throwaway repository on a separate daemon, with the roles swapped:
+
+| Run | Result |
+| --- | --- |
+| Antigravity as `delegate` | Edited two files in its worktree, then asked to run the tests. The approval showed the whole request: Antigravity sends the command as `rawInput.CommandLine` alongside other fields, so the prompt prints the full input as JSON. After approval the tests ran, and the bridge committed the result on the job branch |
+| Antigravity as `review` | Reviewed uncommitted changes from the saved diff, including an untracked file, found the planted defect, and listed the test run under "Not verified". Both notes were attached, and the diff file was removed when the job ended |
+| Codex as `polish` | Rewrote the one target file and nothing else; no approval was requested. It used about 166,000 tokens for a three-line README |
+
+Not exercised against the real services: denying an Antigravity request, a request without `rawInput`, and a mode switch. These are covered by protocol stubs only.
+
+### 2.2 Shared instructions
+
+Instructions written once reach every agent (requirement R9).
+
+| File | Applies to |
+| --- | --- |
+| `~/.crew/instructions.md` | Every project |
+| `.crew/instructions.md` at the repository root | That project. Read last, so it can refine the global file |
+
+- Workers: both files are read when a job starts and appended to the job's instructions after the role text, with a preface saying they apply within the role and do not widen it. Codex receives them in `developerInstructions`, Antigravity at the top of its first prompt. `status` lists the files a job was given.
+- Claude: a `SessionStart` and `SubagentStart` command hook (`bridge/context.ts`) prints them as `additionalContext`, so the lead and its subagents have them too. It runs again after compaction. The text tells the lead that workers already have the instructions, so delegated tasks need not repeat them.
+- The project file is looked up in the repository's main working tree, for a worker job and a Claude session alike, even when either starts inside a linked worktree or a subdirectory. An uncommitted edit therefore applies to the next job. Outside a repository, the session's project directory is used.
+- Nothing is written to any service's own instruction files (`AGENTS.md`, `CLAUDE.md`, rules folders).
+- A missing or empty file means none. A file that exists but cannot be read fails the job with the reason. The hook reports any failure of its own (unreadable file, git error, malformed input) in the session instead of exiting quietly.
+- Claude Code replaces hook context over 10,000 characters with a 2,000-character preview. A file that would take the total past 9,000 characters is replaced by its path, with a statement that none of it is in context until read; files that fit are still sent whole. A cut-off copy is never sent, because it would look complete. Workers have no such limit in the bridge.
+- A project file is part of the repository, so it is trusted to the same degree as that repository's `AGENTS.md` or `CLAUDE.md`, and may have been written by someone other than the user. Each part is therefore headed by where it comes from. It cannot widen a role: what a role may do is enforced by the bridge and the sandbox, not by the text. It can still steer an agent within its role, and because it is read last it can contradict the global file.
+
+Verified on 2026-11-12 with marker instructions in both files (write in English, end with a fixed line, use a given word in the first sentence): a Codex review, an Antigravity polish, and a headless Claude Code 2.1.321 session each followed or quoted both. The Codex report came back in English although the same setup had reported in Korean before, so shared instructions took precedence over the user's own Codex defaults in that run.
+
+Not verified: whether `SubagentStart` context reaches a real subagent (the hook's output for that event was only checked by running the script), whether Claude Code counts the 10,000-character cap per hook or across all hooks of an event, and whether Codex's built-in review mode honors `developerInstructions`.
+
+## 3. Changes from the plan
+
+| Area | Document 02 | Implementation | Reason |
 | --- | --- | --- | --- |
-| Antigravity 연결 | `agy acp` 또는 `agy -p` | `agy acp`만 | 공식 FAQ가 `agy -p`를 서드파티 코딩 에이전트 안에서 감싸 쓰는 것은 소비자 플랜에서 지원하지 않는다고 적고 있다. ACP 문서는 "Any ACP client can launch Antigravity CLI"라고 적는다(6절) |
-| Phase 0 | `codex-plugin-cc`와 스킬로 먼저 완주 | 건너뜀 | app-server가 이 기기에서 바로 동작했다. 중간 단계를 거칠 이유가 없었다 |
-| 역할 파일 | `CLAUDE.md`, `AGENTS.md`, Antigravity 커스텀 에이전트 | 플러그인 안의 `roles/*.md`, 스킬, MCP 서버 지침 | 프로젝트마다 파일을 깔 필요가 없다. Codex에는 `developerInstructions`로, Antigravity에는 프롬프트 앞부분으로 매 잡마다 주입한다 |
-| Antigravity 역할 강제 | `--agent`와 `--mode` | ACP 권한 요청을 브리지가 판정 | 기본 모드에서는 편집마다 권한 요청이 온다. 브리지가 읽기는 어디든 허용하고, 편집은 경로가 worktree 안일 때만 허용하며, 명령 실행·삭제·이동·네트워크 요청은 거절한다. 거절한 내용은 잡 결과에 남는다. 사용자 설정 디렉터리에 파일을 쓰지 않아도 된다 |
-| 이벤트 전송 | WebSocket | SSE | 단방향 스트림이면 충분하고 브라우저가 재연결을 알아서 한다. 조작은 POST로 한다 |
-| Claude 상태 원천 | `claude agents --json` 폴링과 Notification 훅 | 훅만 사용 | 훅은 푸시 방식이고 Desktop 세션도 포함한다. HTTP 훅이라 프로세스를 띄우지 않는다 |
-| 리드 깨우기 | 정해두지 않음 | `asyncRewake` 훅 | 백그라운드 잡이 끝나거나 결정을 요구하면 리드 세션이 쉬고 있어도 깨어난다. Channels는 연구 미리보기이고 플래그가 필요해서 쓰지 않았다 |
+| Antigravity connection | `agy acp` or `agy -p` | `agy acp` only | The official FAQ states that wrapping `agy -p` inside third-party coding agents is not supported on consumer plans, whereas the ACP docs state "Any ACP client can launch Antigravity CLI" (section 6) |
+| Phase 0 | Complete a run with `codex-plugin-cc` and skills first | Skipped | `app-server` worked immediately on this machine, leaving no reason for an intermediate step |
+| Role files | `CLAUDE.md`, `AGENTS.md`, Antigravity custom agent | `roles/*.md`, skills, and MCP server instructions inside the plugin | No files need to be dropped into each repository. Roles are injected per job via `developerInstructions` for Codex and a prompt prefix for Antigravity |
+| Antigravity role enforcement | `--agent` and `--mode` | Bridge evaluates ACP permission requests | In default mode, every edit triggers a permission request. The bridge allows reads anywhere, allows edits only inside the worktree, and denies command execution, deletion, moves, and network requests—recording any denials in the job result. No files need to be written into the user's config directory |
+| Event transport | WebSocket | SSE | One-way streaming is sufficient, the browser reconnects automatically, and actions use plain `POST` requests |
+| Claude status source | `claude agents --json` polling plus Notification hook | Hooks only | Hooks are push-based, cover Desktop sessions, and use HTTP so no extra process is spawned |
+| Waking the lead | Unspecified | `asyncRewake` hook | Wakes an idle lead session when a background job finishes or needs a decision. Channels were skipped because they are a research preview and require a feature flag |
 
-## 4. 미결 사항 중 정한 것
+## 4. Resolved open items
 
-| 항목 | 결정 |
+| Item | Decision |
 | --- | --- |
-| 구현 언어 | TypeScript. Node.js 22.18 이상의 타입 제거 실행으로 바로 돌린다. 런타임 의존성과 빌드 단계가 없다 |
-| MCP 구현 | 공식 SDK 없이 직접 구현했다. 필요한 범위가 수명 주기, 도구, 진행 알림, 취소뿐이다 |
-| 이벤트 로그 | JSONL(`~/.crew/events.jsonl`). 잡 상태는 `~/.crew/jobs.json` |
-| 상태 보드 형태 | 데몬이 서빙하는 로컬 웹 페이지. Claude Desktop의 브라우저 패널에 띄울 수 있다. 독립 앱은 아래 7절 |
-| 정지 의심 시간 | 5분(`~/.crew/config.json`의 `stallSeconds`) |
-| 리뷰 왕복 상한 | 기본 1회, 최대 2회. `/crew:run` 스킬에 규칙으로 적었다. 브리지가 강제하지는 않는다 |
-| Codex 승인 정책 | 구현은 `on-request`, 리뷰는 `never`. 승인 요청을 누가 받는지는 아래 5.1절 |
+| Implementation language | TypeScript executed directly via Node.js 22.18+ type stripping, with zero runtime dependencies and no build step |
+| MCP implementation | Written directly without the official SDK; only lifecycle, tools, progress notifications, and cancellation are needed |
+| Event log | JSONL (`~/.crew/events.jsonl`); job state lives in `~/.crew/jobs.json` |
+| Status board form factor | Local web page served by the daemon, viewable inside Claude Desktop's browser pane. Standalone app discussed in section 7 |
+| Suspected stall timeout | 5 minutes (`stallSeconds` in `~/.crew/config.json`) |
+| Max review rounds | Default 1, max 2, written as a rule in the `/crew:run` skill rather than enforced by the bridge |
+| Codex approval policy | `on-request` for implementation, `never` for review. Who answers approval prompts is covered in section 5.1 |
 
-## 5. 상태 표시와 중단 감지 (R5)
+## 5. Status display and stall detection (R5)
 
-- 이벤트 형태는 02 문서의 제안에 `job_id`와 일련번호를 더한 `{seq, ts, agent, session_id, job_id, kind, detail}`이다. `kind`는 `started`, `progress`, `waiting`, `error`, `limit`, `stalled`, `done`, `cancelled`.
-- 한도 소진: Codex는 턴 오류의 `codexErrorInfo`(`usageLimitExceeded`, `rateLimitExceeded`, `sessionBudgetExceeded`)로, Antigravity는 오류 문구로, Claude는 `StopFailure` 훅의 `error: rate_limit`으로 판정해 `limit` 이벤트를 낸다.
-- 무응답: 실행 중인 잡이 5분간 아무 이벤트도 내지 않으면 `stalled`. Claude 세션은 도구 실행 중이 아닐 때만 같은 기준을 적용한다.
-- `waiting`, `error`, `limit`, `stalled`는 macOS 알림으로도 나간다.
-- Codex 사용량은 app-server의 `account/rateLimits/read`와 `account/rateLimits/updated`로 받아 보드와 `status`에 표시한다(03 문서 9절의 보완 경로). 배분 판단에는 아직 쓰지 않는다.
+- Event shape adds `job_id` and a sequence number to the proposal in document 02: `{seq, ts, agent, session_id, job_id, kind, detail}`, where `kind` is `started`, `progress`, `waiting`, `error`, `limit`, `stalled`, `done`, or `cancelled`.
+- Quota exhaustion: emits a `limit` event based on `codexErrorInfo` (`usageLimitExceeded`, `rateLimitExceeded`, `sessionBudgetExceeded`) on turn errors for Codex, error text for Antigravity, and `error: rate_limit` from the `StopFailure` hook for Claude.
+- Stalls: a running job that emits no events for 5 minutes is marked `stalled`. For Claude sessions, the timer applies only when no tool call is actively running.
+- `waiting`, `error`, `limit`, and `stalled` also trigger macOS system notifications.
+- Codex usage is read via `app-server`'s `account/rateLimits/read` and `account/rateLimits/updated` and shown on the board and in `status` (the supplemental path in document 03 section 9). It is not yet used for routing decisions.
 
-### 5.1 승인 요청과 질문
+### 5.1 Approval requests and questions
 
-워커의 승인 요청과 질문은 리드가 아니라 사용자가 답한다.
+Worker approval requests and questions are answered by the user, not by the lead.
 
-- 리드가 그 잡을 기다리는 도구 호출(`delegate`, `wait` 등) 중이면, MCP 서버가 elicitation 요청을 보내 Claude 앱이 자체 입력 창을 띄운다. 사용자의 답은 리드를 거치지 않고 워커로 전달되고, 도구 호출은 끊기지 않고 이어진다.
-- 백그라운드 잡이면 깨우기 훅이 리드를 깨우고, 리드가 `wait`를 부르면 그때 창이 뜬다.
-- 같은 요청을 보드 버튼으로 먼저 답하거나, 다른 잡이 끝나 도구 호출이 먼저 반환되면 앱의 창은 바로 철회된다.
-- 여러 잡이 동시에 기다리면 창을 한 번에 하나씩 띄운다. 앞 창에 답하는 사이 보드에서 처리된 요청은 묻지 않고 건너뛴다.
-- 사용자가 창을 답 없이 닫거나, 앱이 창을 띄우지 못하거나(오류), 클라이언트가 elicitation을 지원하지 않으면 리드에게 대기 상태가 돌아간다. 리드는 대신 결정하지 않고 대화로 묻는다. 세 경우는 리드에게 서로 다른 안내로 전달된다.
-- Antigravity는 묻지 않는다. 브리지의 역할 정책이 판정한다.
+- If the lead is inside a tool call waiting on that job (`delegate`, `wait`, etc.), the MCP server sends an elicitation request so the Claude app displays its native input prompt. The user's answer goes straight to the worker without passing through the lead, and the tool call continues uninterrupted.
+- For a background job, the wake hook wakes the lead, and the prompt appears when the lead calls `wait`.
+- If the request is answered first via the status board buttons, or if another job finishes and causes the tool call to return early, the in-app prompt is withdrawn immediately.
+- When multiple jobs are waiting at once, prompts are shown one at a time. Any request already answered on the board while an earlier prompt was open is skipped.
+- If the user dismisses the prompt without answering, the app fails to display it, or the client does not support elicitation, the waiting state returns to the lead with distinct guidance for each case. The lead asks the user in chat rather than deciding on its own.
+- Antigravity never prompts the user; the bridge's role policy decides automatically.
 
-Codex 쪽 설정에 따라 요청이 아예 오지 않을 수 있다. `~/.codex/config.toml`의 `approvals_reviewer`가 `guardian_subagent`나 `auto_review`면 Codex의 자동 리뷰어가 승인 요청을 직접 처리한다. 브리지는 기본으로 이 설정을 따른다. 요청을 항상 사용자에게 받으려면 `~/.crew/config.json`에 `{"codex": {"approvalsReviewer": "user"}}`를 넣는다.
+Depending on the user's Codex settings, approval requests may never reach Crew at all: if `approvals_reviewer` in `~/.codex/config.toml` is set to `guardian_subagent` or `auto_review`, Codex's built-in reviewer handles approvals internally. The bridge honors that setting by default. To always route approvals to the user, set `{"codex": {"approvalsReviewer": "user"}}` in `~/.crew/config.json`.
 
-## 6. 데스크톱 앱 노출 (R6) 확인 결과
+### 5.2 Deciding from the board
 
-| 서비스 | 확인한 것 |
+The board is also where the user reads what happened and acts on it (requirement R10, roadmap item B1).
+
+- **Job details.** Clicking a job card, its title, or a job's name in the activity feed opens a side sheet with the job's agent, model, project, branch, tokens, and shared-instruction files; the changed files with out-of-scope ones marked; notes; the worker's report; the task it was given; and that job's own activity. The address names the open job (`#<job id>`), so a link opens it directly.
+- **Follow-up.** The sheet sends a message that continues the same worker session, the board's counterpart of the lead's `reply`. The lead is told when the turn ends, as for any job.
+- **Answers in words.** A worker's question can be answered with text from the card or the sheet. Approvals keep Approve and Deny. Every answer carries the id of the request it was shown with, so it cannot settle a later one.
+- **Updates do not disturb.** Cards and the sheet are re-rendered when a job changes, the sheet section by section. Text being typed, its caret, the focused control, an opened section, and the result line of a send are carried over, and a re-render waits while an input method is composing. Answer text is tied to its request and follow-up text to its job, so neither can reach another.
+- **Failures are said.** A job that cannot be opened, a refused copy, and a send whose form has since gone are reported in a line at the top of the board.
+- **Activity by job.** Each feed row names its job. Two jobs of one agent can be told apart, and the name opens the job.
+- **Projects.** Agents are columns and projects are rows. With more than one project on the board, each gets its own headed group holding its sessions and jobs, with a count of what is running and what waits on the user; groups are in alphabetical order and do not move when something happens in one. A job or session belongs to the main working tree of its repository, so work started from a subfolder or a worktree sits with its project. The top bar narrows the board and the feed to one project (remembered in the browser) and shows each project's waiting count; a project's name in its heading does the same. With all projects shown, feed rows say which project they belong to.
+- **Pending count.** The tab title shows how many jobs and sessions wait on the user, across all projects.
+- **Settings.** Roles (agent, model, and effort per role) and shared instructions (global or per project) are edited in a sheet. It writes the same files a text editor would: `~/.crew/config.json`, `~/.crew/instructions.md`, and `.crew/instructions.md` in the project's main working tree. Saving roles keeps every other setting and refuses to overwrite a file it cannot parse. Only projects the daemon knows from a job or a session can be written to, and a symbolic link at `.crew`, at the instructions file, or at a temporary name is never written through, since a project's `.crew` folder comes with its repository. Closing the sheet with unsaved changes asks first.
+- The resume command moved from the card footer into the sheet, next to a command that shows the job's diff.
+
+Checked on 2026-11-12 in the built-in browser pane against a separate daemon with stub agents: opening a job from a card, the feed, and a link; answering a question in words; a follow-up turn; a job update arriving while an answer was half typed (text, focus, and caret kept); project groups and the project filter with two projects, including a job started from a subfolder; saving roles and per-project instructions and reading the files back; refused writes (unknown project, foreign origin, unknown agent); dark mode and a phone-width pane. Not checked: a screen reader, typing with an input method, and browsers other than the built-in pane. Automated board-handler tests cover instruction saves with concurrent edits, failed requests, and editor reloads. The remaining board behavior was checked by hand as listed.
+
+## 6. Desktop app visibility (R6) findings
+
+| Service | What was verified |
 | --- | --- |
-| Claude | 리드가 Desktop 세션이면 그대로 보인다. 플러그인은 Desktop의 로컬 세션에서 동작한다 |
-| Codex | 브리지가 만든 스레드는 Codex 데스크톱 앱이 쓰는 것과 같은 저장소에 `Crew · <제목>` 이름으로 들어간다(`thread/list`로 확인, 앱이 만든 스레드와 `source` 값이 같다). 다만 ChatGPT 앱은 자기 전용 app-server를 stdio로 띄우므로 실행 중인 앱에 실시간으로 붙을 수는 없다. 목록 갱신 시점은 앱에 달려 있다(02 문서 6절의 이슈). CLI에서는 `codex resume <id>`로 이어받는다 |
-| Antigravity | ACP 세션은 CLI 전용 저장소(`~/.gemini/antigravity-cli/`)에 `default-cli-project`로 저장된다. 앱 저장소(`~/.gemini/antigravity/`)에는 들어가지 않으므로 Antigravity 앱 목록에는 보이지 않는다. `agy --conversation <id>`로 CLI에서 이어받는다. 앱 안에서 대화를 만드는 `agentapi`는 사이드카 전용으로 문서화돼 있고 응답을 읽는 수단이 없어 쓰지 않았다 |
+| Claude | Natively visible when the lead runs in Desktop; the plugin works in local Desktop sessions |
+| Codex | Threads created by the bridge land in the same store used by the Codex desktop app under the title `Crew · <title>` (confirmed via `thread/list`, matching the `source` value of app-created threads). Because the ChatGPT app spawns its own private stdio `app-server`, Crew cannot attach to a running app instance live; when the list refreshes is up to the app (see the issues in document 02 section 6). From the CLI, resume with `codex resume <id>` |
+| Antigravity | ACP sessions are saved to the CLI-specific store (`~/.gemini/antigravity-cli/`) under `default-cli-project`, not the desktop app store (`~/.gemini/antigravity/`), so they do not appear in the Antigravity app list. Resume from the CLI with `agy --conversation <id>`. The `agentapi` endpoint that creates conversations inside the app is documented as sidecar-only and provides no way to read responses, so it was not used |
 
-잡 결과와 보드 카드에 이어받기 명령을 함께 보여준다.
+Resume commands are shown in both job results and the board's job details.
 
-### Antigravity 정책 위험
+### Antigravity policy risk
 
-공식 FAQ(https://antigravity.google/docs/faq/ )에 다음 문장이 있다.
+The official FAQ (https://antigravity.google/docs/faq/) states:
 
 - "Wrapping `agy` inside third-party coding agents or applications, or automating account rotation, is not supported under consumer plans."
 - "Using third-party software, tools, or services to access Antigravity is a violation of our Terms of Service" / "Such actions can result in suspension or termination of your account."
 
-브리지는 공식 `agy` 바이너리를, Google이 서드파티 클라이언트용으로 문서화한 ACP로만 실행하고 인증 정보는 건드리지 않는다. 그래도 Claude Code가 ACP 클라이언트를 통해 Antigravity를 부리는 구성이 위 문장의 범위에 드는지는 Google의 해석에 달려 있다. 꺼두려면 `~/.crew/config.json`에 `{"antigravity": {"enabled": false}}`를 넣는다.
+The bridge runs only the official `agy` binary via ACP—which Google documents for third-party clients—and never touches credentials. Even so, whether driving Antigravity from Claude Code through an ACP client falls under the wording above depends on Google's interpretation. To disable Antigravity completely, set `{"antigravity": {"enabled": false}}` in `~/.crew/config.json`.
 
-## 7. 독립 상태 보드 앱
+## 7. Standalone status board app
 
-지금은 웹 보드 하나다. 독립 앱을 만든다면 Tauri보다 macOS 네이티브(SwiftUI 메뉴 막대 앱)를 먼저 권한다.
+Right now there is only the web board. If a standalone app is built later, a native macOS menu bar app (SwiftUI) is recommended ahead of Tauri:
 
-- 독립 앱이 웹 페이지보다 더 주는 것은 OS 통합(메뉴 막대 상태, 승인·거절 버튼이 달린 알림, 로그인 시 실행)이고, 이 부분은 네이티브가 낫다.
-- 로직은 전부 데몬에 있다. 클라이언트는 `/api/state`, `/api/stream`(SSE), POST 몇 개만 쓰면 되므로 플랫폼별로 얇게 만들 수 있다.
-- 웹 보드는 Claude Desktop 브라우저 패널용으로 계속 둔다.
+- What a standalone app adds over a web page is OS integration—menu bar status, notifications with approve/deny buttons, and launch at login—where native SwiftUI is a better fit.
+- All state and logic already live in the daemon. A client only needs `/api/state`, `/api/stream` (SSE), and a few `POST` endpoints, keeping any platform UI thin.
+- The web board stays for Claude Desktop's browser pane.
 
-## 8. 검증한 것 (2026-11-11)
+## 8. Verification summary (2026-11-11)
 
-실제 계정으로 임시 저장소에서 돌려 확인했다.
+Verified against live accounts in a temporary repository:
 
-- `delegate`: worktree 생성, Codex 구현과 테스트 실행, 브리지 커밋, 보고까지 약 30초.
-- `review`: adversarial과 standard 모두 판정과 근거를 반환.
-- `polish`: Antigravity가 README와 주석만 고침. diff로 확인.
-- 작업 공간 밖 편집: worktree 밖 파일을 고치라고 지시했을 때 브리지가 거절하고 파일이 그대로인 것을 확인.
-- `.worktreeinclude`: `node_modules/`와 `.env`가 worktree로 복사되고 워커 커밋에는 들어가지 않는 것을 확인.
-- 프로젝트 구분: 다른 프로젝트에서 부른 인자 없는 `wait`가 남의 잡을 가져가지 않는 것을 확인.
-- 승인 대기: 승인 정책을 `untrusted`로 두고 `waiting` 전환, `reply` 승인·거절, 재개를 확인.
-- 승인 창: elicitation에 응답하는 테스트 클라이언트로 승인, 거절, 닫기, 클라이언트 오류, 보드에서 먼저 답한 경우, 세 잡이 동시에 기다리는 경우(창이 겹치지 않고 차례로 열림), 다른 잡 종료로 호출이 반환되는 경우(창 즉시 철회)를 확인. Claude Code 2.1.321은 초기화 때 `elicitation: {form, url}`을 선언하고, 헤드리스 세션에서는 요청이 답 없이 닫혀 리드에게 돌아갔으며 리드는 사용자에게 되물었다.
-- `cancel`과 `discard`: worktree와 브랜치 제거.
-- 깨우기 훅: 백그라운드 잡 종료 시 종료 코드 2와 결과 출력. 이미 전달된 잡에는 조용히 종료.
-- 훅: 실제 Claude Code 세션의 프롬프트 제출과 종료가 이벤트 로그에 기록됨.
-- 요청 가드: 다른 Origin의 POST와 다른 Host 요청은 403.
-- 단위 테스트 18개(`npm test`).
-- 전체 파이프라인: 헤드리스 Claude Code 세션에서 `/crew:run`으로 작은 기능 하나를 일곱 단계로 완주했다. Codex가 테스트를 병렬로 작성했고, 셀프 리뷰 서브에이전트와 Codex 교차 리뷰가 통과했으며, Antigravity의 정리 결과 중 작업과 무관한 주석 변경은 리드가 반려했다. 세 레인이 보드에 동시에 표시됐다.
-- Claude Desktop: 플러그인 설치 후 열려 있던 Desktop 세션에 `crew` 도구, 스킬, 서브에이전트가 로드됐다.
+- `delegate`: worktree creation, Codex implementation and test run, bridge commit, and report in ~30 seconds.
+- `review`: both `adversarial` and `standard` modes returned verdicts and supporting evidence.
+- `polish`: Antigravity edited only the README and comments, verified via diff.
+- Out-of-workspace edit protection: instructed Antigravity to edit a file outside the worktree; confirmed the bridge denied the request and left the file untouched.
+- `.worktreeinclude`: confirmed `node_modules/` and `.env` were copied into the worktree and excluded from the worker's commit.
+- Project isolation: confirmed an argument-less `wait` called from another project did not consume jobs belonging to a different project.
+- Approval flow: with approval policy set to `untrusted`, verified transition to `waiting`, approval and denial via `reply`, and resumption.
+- Approval prompts: using a test client that responds to elicitation, verified approve, deny, dismiss, client error, answering on the board first, three jobs waiting simultaneously (prompts opened sequentially without overlapping), and early return when another job finished (prompt withdrawn immediately). Confirmed Claude Code 2.1.321 advertises `elicitation: {form, url}` on initialization, and that in a headless session the unanswered prompt fell back to the lead, which then asked the user in chat.
+- `cancel` and `discard`: removed the worktree and branch cleanly.
+- Wake hook: exited with code 2 and printed the result when a background job finished; exited silently for jobs already delivered.
+- Hooks: confirmed prompt submission and session stop in a live Claude Code session were recorded in the event log.
+- Request guards: `POST` requests from another `Origin` and requests with a foreign `Host` header returned HTTP 403.
+- 18 unit tests (`npm test`).
+- Full pipeline: completed a small feature end to end across all seven stages with `/crew:run` in a headless Claude Code session. Codex wrote tests in parallel, the self-review subagent and Codex cross-review both passed, the lead rejected an unrelated comment change from Antigravity's polish diff, and all three lanes appeared simultaneously on the board.
+- Claude Desktop: after installing the plugin, confirmed the `crew` tools, skills, and subagent loaded in an open Desktop session.
 
-확인하지 못한 것:
+Not yet verified:
 
-- 대화형 세션에서 `asyncRewake`가 실제로 리드를 깨우는 동작(스크립트 단독 실행으로만 확인).
-- Claude Desktop에서 승인 창이 실제로 어떻게 보이는지(프로토콜 왕복만 확인).
-- Codex 데스크톱 앱 화면에 스레드가 나타나는 시점.
+- `asyncRewake` actually waking an idle interactive session (verified only by running the hook script standalone).
+- Visual appearance of the native approval dialog inside Claude Desktop (verified protocol round-trip only).
+- When threads appear in the Codex desktop app UI.
 - Windows.
 
-## 9. 다음 단계
+## 9. Next steps
 
-1. AgentGauge 연동(03 문서 G1): `route`를 붙여 `/crew:run`의 고정 대체 규칙을 실측 기반 배분으로 바꾼다.
-2. macOS 메뉴 막대 앱(7절).
-3. Claude 사용량: statusline의 `rate_limits`를 데몬으로 보내 Claude 레인에 표시한다.
+1. AgentGauge integration (document 03 G1): wire up `route` to replace the static fallback table in `/crew:run` with measured usage routing.
+2. macOS menu bar app (section 7).
+3. Claude usage display: forward `rate_limits` from the statusline to the daemon and show it in the Claude lane.
 
-## 10. 번복 기록
+## 10. Revision log
 
-- 2026-11-11: 코드 리뷰를 받고 다음을 바꿨다.
-  - Antigravity 세션을 `accept-edits` 모드로 두던 것을 기본 모드로 되돌렸다. 실측해 보니 `accept-edits`에서는 작업 공간 밖 파일 편집이 권한 요청 없이 실행됐다. 모드 설명("Approve file edits in the workspace without asking")과 다른 동작이다. 지금은 편집마다 오는 권한 요청의 경로를 브리지가 확인한다.
-  - worktree 위치를 저장소 안 `.crew/worktrees/`에서 저장소 밖 `~/.crew/worktrees/`로 옮겼다. 저장소 안에 두면 테스트 탐색, tsc, 린터, 파일 감시가 worktree 사본까지 읽는다. `info/exclude`를 건드릴 필요도 없어졌다.
-  - worktree에 gitignore된 파일을 넣는 수단이 없던 것을 `.worktreeinclude` 복사로 채웠다. 8절의 초기 검증은 의존성이 없는 임시 저장소에서 했기 때문에 이 문제가 드러나지 않았다.
-  - 잡에 소유 프로젝트를 기록하고, 인자 없는 `wait`와 `status` 목록을 그 기준으로 거른다. 전에는 다른 프로젝트 세션의 잡까지 기다리고 읽음 처리해서, 원래 세션의 깨우기 훅이 결과를 전달하지 못할 수 있었다.
-  - 승인 요청의 주체를 리드에서 사용자로 바꿨다. 전에는 대기 상태가 리드에게 돌아가 리드가 안전하다고 보면 직접 승인할 수 있었다. 지금은 앱의 입력 창으로 사용자에게 묻는다(5.1절).
-  - 데몬 교체 조건을 "버전이 다르면"에서 "호출한 쪽이 더 새 버전이고 실행 중인 잡이 없으면"으로 바꿨다. 버전이 다른 두 설치본이 서로의 데몬을 번갈아 내리는 일과, 교체 때문에 실행 중인 잡이 실패하는 일을 막는다. 참고로 로컬 경로 마켓플레이스의 플러그인은 캐시 복사본이 아니라 원본 폴더에서 실행된다(프로세스 경로로 확인).
-- 2026-11-12: 두 번째 코드 리뷰를 받고 다음을 바꿨다.
-  - 데몬 교체 판정을 버전 비교에서 `bridge/` 코드 해시 비교로 바꿨다. 로컬 경로 설치는 원본 폴더에서 실행되므로 버전을 올리지 않은 수정이 실행 중인 데몬에 반영되지 않았다. 해시는 호출한 프로세스가 아니라 디스크 기준이라, 오래 열린 세션이 옛 코드를 들고 있어도 최신 데몬을 반복해서 내리지 않는다. 버전은 다른 폴더의 설치본끼리 어느 쪽이 더 새 것인지 가릴 때만 쓴다.
-  - 앱이 승인 창을 띄우지 못한 오류를 사용자가 창을 닫은 것으로 처리하던 것을 분리했다. 리드가 받는 안내 문구가 이유에 맞게 달라진다.
-  - 여러 잡의 승인 창을 동시에 띄우던 것을 하나씩 차례로 띄우도록 바꿨다. 도구 호출이 반환되면 열린 창을 즉시 철회한다.
-  - 프로젝트 기록 이전에 저장된 잡은 불러올 때 저장소 경로를 프로젝트로 채운다.
-  - 브리지의 전달용 커밋이 사용자의 커밋 설정에 영향받지 않게 했다. 서명을 끄고, git 사용자 정보가 없으면 `Crew <crew@localhost>`로 커밋한다. 백그라운드 데몬에서 서명 암호 입력 창이 뜨면 아무도 볼 수 없어 잡이 멈춘다.
-  - 잡 브랜치 이름을 `crew/<잡 id>`에서 `crew-<잡 id>`로 바꿨다. 저장소에 `crew`라는 브랜치가 있으면 git이 `crew/...` 브랜치를 만들 수 없다.
+- 2026-11-11: Updated after the first code review:
+  - Reverted Antigravity sessions from `accept-edits` mode back to the default mode. Live testing showed `accept-edits` allowed edits outside the workspace without prompting, contrary to its description ("Approve file edits in the workspace without asking"). The bridge now checks the target path on every edit permission request.
+  - Moved worktrees out of `.crew/worktrees/` inside the repository to `~/.crew/worktrees/`. Keeping them inside the repo caused test runners, `tsc`, linters, and file watchers to scan worktree copies, and required touching `.git/info/exclude`.
+  - Added `.worktreeinclude` copying so gitignored files can be brought into worktrees. Initial verification in section 8 used a dependency-free temp repo, which hid this gap.
+  - Recorded the owning project on each job and filtered argument-less `wait` and `status` listings by project. Previously, a session in another project could wait on and mark-delivered a job from the wrong project, preventing the original session's wake hook from delivering the result.
+  - Changed the responder for approval requests from the lead to the user. Previously, waiting states returned to the lead, which could approve requests on its own if they looked safe. Now the app prompts the user directly (section 5.1).
+  - Tightened daemon replacement from "whenever the version differs" to "when the caller has a newer version and no jobs are active," preventing two installations with different versions from repeatedly killing each other's daemon or interrupting active jobs. Note that plugins installed from a local-path marketplace run directly from the source folder rather than a cached copy (verified via process path).
+- 2026-11-12: Updated after the second code review:
+  - Switched daemon replacement checks from version comparison to hashing the `bridge/` files on disk. Because local-path installations run straight from the source folder, edits made without bumping the version were not picked up by a running daemon. Hashing the files on disk rather than in the calling process also keeps a long-lived session with older in-memory code from repeatedly restarting a newer daemon. Version comparison is kept only for breaking ties between installations in different directories.
+  - Separated "the app failed to open the approval dialog" from "the user dismissed the dialog," giving the lead distinct instructions for each case.
+  - Serialized approval dialogs across multiple waiting jobs so they appear one at a time, and withdrew any open dialog immediately when the tool call returns.
+  - Backfilled the repository path as the owning project when loading jobs saved before project tracking existed.
+  - Insulated bridge delivery commits from the user's git commit config by disabling commit signing and falling back to `Crew <crew@localhost>` when git user identity is unset, preventing background daemon commits from hanging on an invisible GPG/SSH passphrase prompt.
+  - Renamed job branches from `crew/<job id>` to `crew-<job id>`, because git cannot create `crew/...` refs if a branch named `crew` already exists in the repository.
+- 2026-11-12: The board gained job details, text answers, a project filter, and settings (section 5.2, roadmap item B1).
+- 2026-11-12: Added shared instructions (section 2.2, roadmap item A2).
+- 2026-11-12: Roles are no longer fixed in code (section 2.1, roadmap item A1). Requirement R3 changed from fixed roles to default roles the user can reassign. The row "Antigravity role enforcement" in section 3 now describes only the editor role; the bridge decides permission requests by the role of the job.

@@ -1,54 +1,62 @@
-# 01. 요구사항
+# 01. Requirements
 
-작성일 2026-11-11. 요구사항의 출처는 같은 날 대화의 첫 메시지와 후속 메시지다.
+Current as of 2026-11-12. This document states what Crew is for and what it must do now. It is rewritten when the goals change; earlier versions, including the original request text, are in the git history.
 
-## 1. 최초 요구사항 원문
+## 1. Goal
 
-> 내가 Claude, Codex, Antigravity를 다 사용하는데 얘네한테 역할 분담하고 협업하도록 연결할 최적의 방안에 대해 고민하고 검토해 줘. 필요한 정보 있으면 충분히 조사 및 분석해도 좋고 유사 구현 사례를 찾아봐도 됨.
->
-> 원하는 것
->
-> 1. 백그라운드에서는 CLI나 다른 방식으로 연결되어도 좋지만 프론트에서는 깔끔하게 보이면 좋겠음.
-> 2. 또한 주도 리더 모델의 앱 자체를 사용해도 되고 새로운 프론트엔드 페이지나 간단한 웹앱 Wrapper를 하나 만들어도 됨. 상상 가능한 최적 방식으로 구상해줄 것.
-> 3. Claude는 Codex와 협업하는 리드 및 셀프 리뷰어, Codex는 보조 엔지니어 및 리뷰어, 안티그래비티는 UX Writing 점검 및 주석/문서 더 읽기 좋게 정리 정도의 역할만 맡으면 좋겠음.
-> 4. 각 모델 서비스의 서브에이전트, 세션 간 대화, 리모트 컨트롤, 컴퓨터 유즈, 자체 브라우저나 백그라운드 헤드리스 브라우저, 크롬 사용, 사이드챗, MCP, 컴팩트 세션 등의 기능을 전부 사용할 수 있으면 좋겠음.
-> 5. 그리고 각자가 뭐 하고 있는지 실시간 혹은 실시간에 가깝게 보이면 좋겠음 (멈추거나 사용량, 오류 등 때문에 작업 중단되면 알 수 있게).
-> 6. 여기서 실행한 세션은 개별 서비스 데스크톱 앱에서도 보이면 더 좋음.
-> 7. 깔끔하고 직관적이며 빠릿하고 부드럽게 유려한 동작.
+One person directs several coding agents from a clean surface: gives a command, sees how it was split and who has each part, follows progress, answers only what needs a decision, and judges the result. The agents can work as a crew with divided roles, or be directed one at a time.
 
-## 2. 후속 요구 원문
+The supported agents are Claude, Codex, and Antigravity. Cursor is to be added.
 
-> 이미 내가 개발했던 AgentGauge가 있으니 이 새로운 구상의 MCP나 API처럼 연결하면 어때? 에이전트가 연결되어서 스스로와 다른 서비스의 사용량을 확인하고 알아서 적당한 도구에 일을 배분하는 도구인 거지. 다 사용량이 충분하면 원래 역할대로 분배하고.
+## 2. Requirements
 
-## 3. 요구사항 번호
+IDs R1 to R8 keep the meaning other documents refer to. R9 to R13 were added on 2026-11-12.
 
-| 번호 | 요구 | 성격 |
+| ID | Requirement | Kind |
 | --- | --- | --- |
-| R1 | 뒤에서는 CLI 등 어떤 방식으로 연결해도 되지만 프론트는 정돈돼 보여야 한다 | 필수 |
-| R2 | 리드 모델의 앱을 그대로 쓰거나, 새 프론트 또는 얇은 웹앱 래퍼를 만들어도 된다. 가장 나은 방식을 고른다 | 선택지 |
-| R3 | 역할 고정. Claude는 리드 겸 셀프 리뷰어, Codex는 보조 엔지니어 겸 리뷰어, Antigravity는 UX 문구 점검과 주석·문서 가독성 정리만 | 필수 |
-| R4 | 각 서비스의 서브에이전트, 세션 간 대화, 리모트 컨트롤, 컴퓨터 유즈, 자체 또는 헤드리스 브라우저, Chrome 사용, 사이드챗, MCP, 컴팩트 세션을 전부 쓸 수 있어야 한다 | 필수 |
-| R5 | 각 에이전트가 하는 일이 실시간에 가깝게 보여야 한다. 멈춤, 사용량 소진, 오류로 인한 중단을 알 수 있어야 한다 | 필수 |
-| R6 | 여기서 실행한 세션이 각 서비스의 데스크톱 앱에서도 보이면 더 좋다 | 희망 |
-| R7 | 동작이 직관적이고 빠르며 매끄러워야 한다 | 필수 |
-| R8 | AgentGauge를 MCP 또는 API로 붙여, 에이전트가 자신과 다른 서비스의 사용량을 확인하고 작업을 적절한 도구에 배분한다. 모두 여유 있으면 R3의 원래 역할대로 배분한다 | 필수(후속) |
+| R1 | Agents may be connected by any background mechanism, but the user-facing surface stays clean and uncluttered | Required |
+| R2 | Claude Desktop as the lead's app is the primary mode. Crew's own screen grows out of the status board alongside it | Required |
+| R3 | Each role has a default agent: Claude leads and self-reviews, Codex implements separable pieces and cross-reviews, Antigravity checks UX copy and tidies comments and docs. The user can reassign any role, including Antigravity's | Required |
+| R4 | In Claude Desktop lead mode, the services' own features stay usable: subagents, inter-session messaging, Remote Control, computer use, built-in and headless browsers, Chrome, side chat, MCP, compaction | Required |
+| R5 | Each agent's activity is visible in near real time, including stalls, exhausted usage limits, and error stops | Required |
+| R6 | Sessions started through Crew also appear in each service's desktop app where the service allows it | Nice to have |
+| R7 | Operation is intuitive, fast, and smooth, with nothing to carry by hand between stages | Required |
+| R8 | AgentGauge reports each service's remaining usage, and work is routed by it. When every service has capacity, the role assignments in effect are followed | Required |
+| R9 | Shared custom instructions are written once and reach every agent | Required |
+| R10 | The board shows each command as a unit: how it was split, which agent has each part, and how far each part has progressed. Its elements are clickable, and approvals, questions, and follow-ups are answered in place | Required |
+| R11 | Model and reasoning effort are selectable per role and per service | Required |
+| R12 | Cursor is supported as an agent | Required |
+| R13 | Crew can run with a lead other than Claude Code, from its own main screen, and can dispatch a command to a single agent without a lead | Long term |
 
-## 4. 요구 간 충돌과 해석
+## 3. Defaults and priorities
 
-- R2의 래퍼 선택지와 R4, R6이 충돌한다. 사이드챗, 컴퓨터 유즈, 내장 브라우저 패널은 각 회사 데스크톱 앱의 기능이라서, 헤드리스 런타임을 감싼 자체 프론트에서는 쓸 수 없다. 데스크톱 앱 노출(R6)도 리드가 그 앱 안에서 돌 때 가장 확실하다. 그래서 R2는 리드 앱을 그대로 쓰는 쪽으로 정했다.
-- R3의 역할 고정과 R8의 사용량 기반 재배분이 충돌한다. R8의 마지막 문장이 우선순위를 정해준다. 평상시에는 R3을 따르고, 특정 서비스의 한도가 부족할 때만 재배분한다. Antigravity를 엔지니어링 역할로 올리는 재배분은 요구에 없으므로 하지 않는다.
-- R5의 실시간 가시성은 R1의 정돈된 프론트와 함께 봐야 한다. 터미널 여러 개를 나란히 띄우는 방식은 R5를 충족해도 R1에 못 미친다. 이벤트를 모아 요약해 보여주는 별도 표시가 필요하다.
-- R4의 범위는 리드와 워커가 다르다. 리드(Claude)는 데스크톱 앱 기능 전부를 쓴다. 워커(Codex, Antigravity)는 뒤에서 도는 동안 자기 런타임의 서브에이전트, MCP, 컴팩션을 그대로 쓰지만 워커 쪽 데스크톱 전용 기능은 쓰지 못한다. 맡긴 역할에는 그 기능들이 필요하지 않다.
+- **Defaults are the original setup.** With no configuration, roles are the R3 defaults and the lead is Claude in Claude Desktop. Anything else happens only because the user set it.
+- **Only the user changes a role.** Automatic routing (R8) moves work between agents when a service runs low, following [03-agentgauge-integration.md](03-agentgauge-integration.md) section 8. It does not give Antigravity engineering or review work; that requires an explicit assignment by the user.
+- **Claude Desktop lead mode comes first.** Work on R9 to R12 targets this mode. R13 is built after it and never replaces it.
+- **R4 and R6 are scoped to the lead's app.** Workers running in the background keep their runtime's subagents, MCP servers, and compaction, but not their desktop-only features. Under R13, a lead outside Claude Desktop loses those features too, and the screen says which ones are unavailable.
+- **Visibility must not cost cleanliness.** R5 and R10 are met by one view that aggregates and summarizes, not by tiled terminals (R1).
+- **The surface stays small.** New agents, roles, and views are added only where a requirement above needs them. Orchestration for its own sake is out ([05-related-work.md](05-related-work.md) section 6).
 
-## 5. 충족 기준
+## 4. Acceptance criteria
 
-| 번호 | 충족으로 보는 상태 |
+| ID | Met when |
 | --- | --- |
-| R1 | 사용자가 평소에 보는 화면이 Claude Code Desktop 하나와 상태 보드 하나로 끝난다. 터미널을 직접 열 일이 없다 |
-| R2 | 02 문서에 선택한 방식과 배제한 방식의 근거가 기록돼 있다 |
-| R3 | 역할 규칙이 각 에이전트의 지시 파일에 적혀 있고, 범위를 벗어난 변경을 리드가 반려한다 |
-| R4 | 리드 세션에서 열거된 기능이 전부 동작한다. 워커는 자기 설정의 MCP와 서브에이전트를 그대로 쓴다 |
-| R5 | 세 에이전트 각각에 대해 현재 단계, 마지막 이벤트, 대기 사유가 보인다. 한도 소진, 오류, 무응답이 발생하면 정해진 시간 안에 알림이 온다 |
-| R6 | Claude 세션은 Desktop과 모바일에서 보인다. Codex와 Antigravity 세션은 각 앱에서 이어받을 수 있다(노출의 한계는 02 문서 6절) |
-| R7 | 위임, 리뷰, 정리 단계 사이에 사용자가 수동으로 옮겨줄 것이 없다 |
-| R8 | 리드가 단계 경계에서 배분 도구를 호출하고, 반환된 담당자와 근거대로 위임한다. 리드의 한도가 바닥나기 전에 인계가 시작된다 |
+| R1 | In normal use the user looks at Claude Desktop and one board, and never opens a terminal |
+| R2 | Every pipeline step can be run from a Claude Desktop session, and the board opens in its browser pane |
+| R3 | An unconfigured install runs the default roles. Changing one role is a single setting, and the next job uses it. The lead rejects work outside the assigned role |
+| R4 | Every listed feature works in the lead session. Workers use their configured MCP servers and subagents as they are |
+| R5 | Each agent shows its current stage, last event, and reason for waiting. Limits, errors, and stalls raise a notification within the configured time |
+| R6 | Claude sessions appear in Desktop and mobile. Worker sessions can be resumed in their own tools |
+| R7 | Nothing is copied by hand between delegation, review, and polish |
+| R8 | The board shows usage for every agent. The lead asks for routing at stage boundaries and follows the returned assignee and reason. Handoff starts before the lead's limit runs out |
+| R9 | Editing one instructions file changes what every agent receives on its next job, without writing to any service's own instruction files |
+| R10 | For any command, the board answers "what was it split into, who has each part, and what stage is each in" without opening a session. A waiting item can be answered from the board |
+| R11 | Model and effort can be set per role and per service, and a job shows which ones it ran with |
+| R12 | A job can be assigned to Cursor and appears on the board like any other |
+| R13 | A command can be started, followed, and merged without a Claude Code session |
+
+## 5. Not required
+
+- Automatic switching between accounts of the same service.
+- Remote or multi-user access. Crew is local and single-user.
+- Agents beyond the four named above.

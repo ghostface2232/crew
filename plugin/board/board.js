@@ -237,9 +237,9 @@ function item(job) {
     : job.state === 'running' ? job.phase
     : job.state === 'failed' ? job.error?.message : '';
   return `<li><button class="item" data-state="${jobMark(job)}" data-act="open" data-job="${esc(job.id)}" title="${esc(jobLabel(job))}">
-      <span class="mark"></span><span class="what">${esc(job.title)}${flags}</span>
+      <span class="mark"></span><span class="what"><span class="title">${esc(job.title)}</span>${flags}</span>
       ${now ? `<span class="now" title="${esc(now)}">${esc(now)}</span>` : ''}
-      <span class="at">${STOPS[STOP_OF_KIND[job.kind]]}</span><span class="who">${esc(agent)}</span><span class="sub">${timeLabel(job)}</span>
+      <span class="sub">${timeLabel(job)}</span><span class="where"><span class="at">${STOPS[STOP_OF_KIND[job.kind]]}</span><span class="who">${esc(agent)}</span></span>
     </button></li>`;
 }
 
@@ -294,6 +294,45 @@ function smooth(change) {
   else change();
 }
 
+/**
+ * Folds or unfolds a card by easing its real height, so the cards under it follow frame by frame instead of
+ * jumping or sliding as pictures. Folding, the body stays drawn under the shrinking edge as it fades.
+ * A second click mid-way starts from wherever the card is.
+ */
+function fold(card, change) {
+  if (!card || matchMedia('(prefers-reduced-motion: reduce)').matches) return change();
+  const from = card.getBoundingClientRect().height;
+  for (const a of card.getAnimations({ subtree: true })) if (a.id === 'fold') a.cancel();
+  card.removeAttribute('data-folding');
+  change();
+  const to = card.getBoundingClientRect().height;
+  if (Math.abs(from - to) < 1) return;
+  const opening = to > from;
+  card.setAttribute('data-folding', '');
+  const height = card.animate({ height: [`${from}px`, `${to}px`] }, { id: 'fold', duration: opening ? 520 : 420, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' });
+  const body = card.querySelector('.cmd-body');
+  body?.animate(opening
+    ? { opacity: [0, 1], translate: ['0 -8px', '0 0'] }
+    : { opacity: [1, 0] }, { id: 'fold', duration: opening ? 420 : 200, delay: opening ? 60 : 0, easing: 'ease-out', fill: 'backwards' });
+  height.finished.then(() => card.removeAttribute('data-folding'), () => {});
+}
+
+/** Narrow, the projects are a panel that slides in from the side over the board. */
+function sidePanel(open) {
+  const toggle = document.getElementById('open-side');
+  if (document.body.hasAttribute('data-side') === open) return;
+  document.body.toggleAttribute('data-side', open);
+  toggle.setAttribute('aria-expanded', String(open));
+  if (open) document.querySelector('#projects [aria-pressed="true"]')?.focus({ preventScroll: true });
+  else if (document.getElementById('side').contains(document.activeElement)) toggle.focus({ preventScroll: true });
+}
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && document.body.hasAttribute('data-side')) sidePanel(false);
+});
+document.addEventListener('click', (e) => {
+  if (e.target.id === 'side-scrim') sidePanel(false);
+});
+
 /** Short, distinct names for projects: the folder name, or more of the path when two share one. */
 function projectNames(dirs) {
   const last = (dir) => dir.split('/').filter(Boolean).pop() ?? dir;
@@ -326,6 +365,7 @@ function activeProject() {
  */
 function renderProjects(dirs, names) {
   document.getElementById('side').hidden = dirs.length < 2;
+  document.getElementById('open-side').hidden = dirs.length < 2;
   const current = activeProject();
   const mine = (dir) => (item) => !dir || projectOf(item) === dir;
   const waiting = (dir) => [...jobs.values(), ...sessions.values()].filter((item) => isWaiting(item) && mine(dir)(item)).length;
@@ -405,7 +445,7 @@ function commandCard(mission) {
     ? `<li><div class="item" data-state="${sessionMark(session)}" title="${esc(sessionLabel(session))}">
         <span class="mark"></span><span class="what">${STAGE_NAMES[mission.stage]}</span>
         ${session.state === 'waiting' && session.waitingFor ? `<span class="now">${esc(session.waitingFor)}</span>` : session.phase ? `<span class="now">${esc(session.phase)}</span>` : ''}
-        <span class="at">${STOPS[at]}</span><span class="who">Claude</span><span class="sub">Lead</span>
+        <span class="sub">Lead</span><span class="where"><span class="at">${STOPS[at]}</span><span class="who">Claude</span></span>
       </div></li>`
     : '';
   const { html, mini } = trackOf(mine, at, active, mission.state === 'done', lead);
@@ -616,7 +656,7 @@ function renderSummary(visible) {
     : 'Start a task with /crew:run in a Claude session and it will show up here.';
   const tokens = live.reduce((sum, job) => sum + (job.tokens ?? 0), 0);
   patch(document.getElementById('summary'), `<p class="eyebrow">${[open.length && plural(open.length, 'task'), plural(live.length, 'job'), `${compact(tokens)} tokens used`].filter(Boolean).join(' · ')}</p>
-    <h2>${headline}</h2><p class="lede">${lede}</p>${n.waiting ? '<div class="actions"><button class="primary" data-act="answer">Answer</button></div>' : ''}`);
+    <h2>${headline}</h2><p class="lede">${lede}</p>`);
   // The legend keeps its elements, so a figure that changes rolls instead of blinking.
   reconcile(document.getElementById('stats'), stats.map((stat) => ({
     key: stat.state,
@@ -678,7 +718,9 @@ function render() {
         <span class="path" title="${esc(dir)}">${esc(shortPath(dir))}</span><span class="group-meta">${summary}</span>` : '<h2>Projects</h2>');
 
       own.sessions.sort((a, b) => SESSION_ORDER[a.state] - SESSION_ORDER[b.state] || b.startedAt - a.startedAt || a.id.localeCompare(b.id));
-      reconcile(el.querySelector('[data-sessions]'), own.sessions.map((s) => ({
+      // A session leading an open command already has its row on that command's card, so it is not listed again here.
+      const leads = new Set(own.missions.filter((m) => m.state === 'active' && m.owner).map((m) => m.owner));
+      reconcile(el.querySelector('[data-sessions]'), own.sessions.filter((s) => !leads.has(s.id)).map((s) => ({
         key: s.id,
         update: (li) => {
           const detail = s.state === 'waiting' ? s.waitingFor : s.phase;
@@ -1127,6 +1169,7 @@ document.addEventListener('click', (e) => {
   const button = e.target.closest('button[data-project]');
   if (!button) return;
   project = button.dataset.project;
+  sidePanel(false);
   try {
     localStorage.setItem('crew.project', project);
   } catch {
@@ -1144,7 +1187,7 @@ document.addEventListener('click', async (e) => {
   if (!button) {
     // Anywhere on a job card that is not a control opens its details. Selecting text does not.
     const interactive = e.target.closest('button, a, input, textarea, select, summary, form');
-    if (card?.matches('.card') && jobs.has(card.dataset.key) && !interactive && !String(getSelection())) await openDrawer(card.dataset.key);
+    if (card?.matches('.card:not(.need)') && jobs.has(card.dataset.key) && !interactive && !String(getSelection())) await openDrawer(card.dataset.key);
     return;
   }
   const act = button.dataset.act;
@@ -1157,8 +1200,14 @@ document.addEventListener('click', async (e) => {
     return;
   }
   if (act === 'toggle') {
-    folded.set(button.dataset.command, button.getAttribute('aria-expanded') === 'true');
-    smooth(render);
+    fold(button.closest('.card'), () => {
+      folded.set(button.dataset.command, button.getAttribute('aria-expanded') === 'true');
+      render();
+    });
+    return;
+  }
+  if (act === 'open-side' || act === 'close-side') {
+    sidePanel(act === 'open-side');
     return;
   }
   if (act === 'open') {

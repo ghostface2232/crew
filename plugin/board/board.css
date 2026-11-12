@@ -136,8 +136,12 @@ h1, h2, h3, p, ul, ol, dl, dd { margin: 0; padding: 0; }
 body { -webkit-user-select: none; user-select: none; }
 :is(input, textarea, .prose, .callout p, .need-who, .sheet h2, .facts dd, .files, .notes, .detail, .outcome, .feed-list .what, .feed-list .tag,
   .work .what, .work .sub, .item .what, .item .now, .session .what, .session .sub, .card:not([data-key^="loose:"]) .cmd-title) { -webkit-user-select: text; user-select: text; }
+/*
+ * Three faces by size: titles of 32px and up, and the large figures, in Rounded; headlines (20 to 24px) in
+ * Display; everything smaller, body included, in Text.
+ */
 h2, .need-title, .cmd-title, .stage-name, .tile-value { font-family: var(--display); }
-.stat b, .stage-ring b, .node, .count { font-family: var(--rounded); }
+.summary h2, .sheet h2, .stat b, .stage-ring b, .node, .count { font-family: var(--rounded); }
 ul, ol { list-style: none; }
 [hidden] { display: none !important; }
 
@@ -261,8 +265,6 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 /* Pulled in by the figures' side bearing, so the large glyphs line up with the small text above and below. */
 .summary h2 { margin-top: 12px; margin-inline-start: -0.03em; font-size: 64px; font-weight: 500; line-height: 1.04; letter-spacing: -0.013em; text-wrap: balance; }
 .lede { margin-top: 20px; max-width: 46ch; color: var(--muted); font-size: 17px; line-height: 1.45; letter-spacing: -0.012em; text-wrap: pretty; }
-.summary .actions { margin-top: 24px; }
-.summary .actions .primary { min-height: 44px; padding: 0 22px; font-size: 15px; }
 
 
 
@@ -353,7 +355,7 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
  * --- Requests: a dock in the bottom corner, so the tasks stay in view beside it. ---
  * One request in front, the rest stacked behind it. The board shows through, blurred.
  */
-.dock { position: fixed; inset: auto 0 0; z-index: 20; display: grid; justify-items: end; padding: 0 24px 24px; pointer-events: none; }
+.dock { view-transition-name: dock; position: fixed; inset: auto 0 0; z-index: 20; display: grid; justify-items: end; padding: 0 24px 24px; pointer-events: none; }
 .dock > * { pointer-events: auto; }
 .needs { display: grid; width: min(460px, 100%); }
 .card.need {
@@ -377,7 +379,7 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
   .card.need { transition: translate var(--dur-spring) var(--spring), scale var(--dur-spring) var(--spring), opacity var(--dur-base) ease-out; }
 }
 /* Behind the front request only an edge shows: enough to say there is more. */
-.card.need:nth-child(n + 2) { align-self: start; max-height: 96px; overflow: hidden; z-index: -1; pointer-events: none; translate: 0 -12px; scale: 0.955; opacity: 0.86; }
+.card.need:nth-child(n + 2) { align-self: start; max-height: 96px; overflow: hidden; z-index: -1; translate: 0 -12px; scale: 0.955; opacity: 0.86; }
 .card.need:nth-child(n + 2) > * { visibility: hidden; }
 .card.need:nth-child(3) { z-index: -2; translate: 0 -22px; scale: 0.91; opacity: 0.6; }
 .card.need:nth-child(n + 4) { display: none; }
@@ -454,6 +456,9 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 }
 /* An ended task steps back into the page. */
 .commands .card[data-quiet] { --surface: var(--tile); background: var(--tile); box-shadow: none; }
+/* Its track, ring and checks turn from black to gray, so a finished task reads as finished at a glance. */
+.commands .card[data-quiet] { --ink: oklch(0.56 0.005 100); }
+.commands .card[data-quiet] .stop[data-pos="past"] .node::before { background: oklch(1 0 0); }
 /* On the tile, a hovered control darkens, as everywhere else, instead of lightening to the sunken gray. */
 @media (hover: hover) {
   .commands .card[data-quiet] button:not(:disabled, .item, .cmd-toggle, .link):hover { background: var(--hover); }
@@ -486,7 +491,9 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 .mini i { width: 16px; height: 6px; border-radius: 2px; background: var(--rail); }
 .mini i[data-state]:not([data-state=""]) { background: var(--tone); }
 .mini i[data-state="stalled"] { background: repeating-linear-gradient(-45deg, oklch(from var(--tone) l c h / 0.5) 0 2.5px, oklch(from var(--tone) l c h / 0.2) 2.5px 6.5px); }
-[data-closed] .cmd-body { display: none; }
+[data-closed]:not([data-folding]) .cmd-body { display: none; }
+/* While its height eases, the card cuts off what is past its edge. */
+.card[data-folding] { overflow: clip; }
 /* Inset 12px inside the 28px card, so the rows' 16px corners run parallel to the card's. */
 .cmd-body { display: grid; grid-template-columns: 176px minmax(0, 1fr); gap: 24px; padding: 4px 12px 12px; }
 .cmd-body[data-plain] { grid-template-columns: minmax(0, 1fr); }
@@ -548,12 +555,15 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 /* Jobs outside a task are at no stop, so there is no line to draw. */
 .card[data-key^="loose:"] .stop-name { display: none; }
 
-.items { grid-column: 1 / -1; display: grid; gap: 4px; }
+.items { grid-column: 1 / -1; display: grid; gap: 8px; }
 /* A row: what it is and what it is doing, then where, who, and how long, each in its own column. */
 .item {
   display: grid;
-  /* Fixed right-hand columns, so every row's stop, agent and time line up, whatever the time says. */
-  grid-template-columns: 20px minmax(0, 1fr) 56px 84px 128px;
+  /*
+   * The title takes the width; the time and, under it, the stop and agent close the row on its right edge,
+   * two lines against the title's two, so no column stands half empty.
+   */
+  grid-template-columns: 20px minmax(0, 1fr) auto;
   column-gap: 12px;
   align-items: center;
   width: 100%;
@@ -566,38 +576,59 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
   text-align: start;
 }
 button.item { cursor: pointer; }
-.item .mark, .item .at, .item .who, .item .sub { grid-row: 1 / span 2; }
+.item .mark { grid-row: 1 / span 2; }
 .item .mark { grid-column: 1; width: 20px; height: 20px; }
-.item .at { grid-column: 3; }
-.item .who { grid-column: 4; }
-.item .sub { grid-column: 5; }
-.item .what { grid-column: 2; grid-row: 1; font-size: 15px; font-weight: 500; letter-spacing: -0.009em; line-height: 1.3; overflow-wrap: anywhere; text-wrap: pretty; }
+.item .sub { grid-column: 3; grid-row: 1; }
+.item .where { grid-column: 3; grid-row: 2; justify-self: end; display: flex; min-width: 0; margin-top: 2px; font-size: 13.5px; line-height: 1.4; white-space: nowrap; }
+/* One line: the title gives way to its flags, which stay whole beside it. The row opens the full title. */
+.item .what { grid-column: 2; grid-row: 1; display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 15px; font-weight: 500; letter-spacing: -0.009em; line-height: 1.3; }
+/* With no line under it, the title takes the row's middle instead of leaving room for one. */
+.item:not(:has(.now)) .what { grid-row: 1 / span 2; }
+.item .what .title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .item .now { grid-column: 2; grid-row: 2; margin-top: 2px; font-size: 13.5px; line-height: 1.4; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.item .at { color: var(--muted); font-size: 13.5px; }
-.item .who { font-size: 13.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.item .sub { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-size: 13.5px; text-align: end; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.flag { margin-inline-start: 8px; padding: 2px 8px; border-radius: 999px; background: var(--hover); color: var(--muted); font-size: 12.5px; font-weight: 500; letter-spacing: 0; vertical-align: 1px; white-space: nowrap; }
+.item .at { color: var(--muted); }
+.item .at::after { content: "·"; margin-inline: 6px; }
+.item .who { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.item .sub { min-width: 0; max-width: 24ch; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-size: 13.5px; line-height: 1.3; text-align: end; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.flag { flex: none; padding: 2px 8px; line-height: 1.2; border-radius: 999px; background: var(--hover); color: var(--muted); font-size: 12.5px; font-weight: 500; letter-spacing: 0; vertical-align: 1px; white-space: nowrap; }
 /* Finished work is a plain row in the regular weight; only its mark keeps the color. */
 .item[data-state="done"], .item[data-state="idle"] { background: transparent; }
 .item[data-state="done"] .what, .item[data-state="idle"] .what { font-weight: 400; }
 .item[data-state="waiting"] .now, .item[data-state="stalled"] .now, .item[data-state="failed"] .now { color: var(--tone); font-weight: 500; }
 
 /*
- * Narrower than a panel and a board side by side: the projects become one scrolling row under the header.
- * The board's wrapper steps aside (display: contents) so the row can sit between the header and the board;
- * without a container there, the board's width rules are repeated here.
+ * The panel stays at the side only where the board still has its widest layout beside it (at least 1120px, the feed
+ * beside the tasks). Narrower, it is a layer that slides in from the edge, so the board keeps one form as the
+ * window widens: it never falls back to a narrower layout when the panel appears.
  */
+.side-toggle, .side-scrim { display: none; }
+@media (max-width: 1479px) {
+  body { gap: 0; }
+  .side-toggle { display: inline-grid; place-items: center; width: 40px; min-height: 40px; margin-inline-start: -8px; padding: 0; border-color: transparent; background: transparent; color: var(--muted); }
+  /* A panel beside a page: an outline with a bar down its left. */
+  .side-toggle i { width: 18px; height: 15px; border: 1.75px solid currentColor; border-radius: 4px; background: linear-gradient(90deg, transparent 4px, currentColor 4px 5.75px, transparent 5.75px); }
+  .side {
+    position: fixed; inset: 8px auto 8px 8px; z-index: 40;
+    width: min(288px, calc(100vw - 56px)); max-height: none; padding: 8px;
+    border-radius: calc(var(--radius-field) + 8px); background: var(--surface); box-shadow: var(--lift);
+    translate: calc(-100% - 16px) 0; visibility: hidden;
+  }
+  body[data-side] .side { translate: 0 0; visibility: visible; }
+  /* On the white panel, the project shown is a gray row rather than a white one raised off it. */
+  .side .projects button[aria-pressed="true"]:is(*, :hover) { background: var(--hover); box-shadow: none; }
+  .side { view-transition-name: side; }
+  .side-scrim { view-transition-name: side-scrim; display: block; position: fixed; inset: 0; z-index: 39; background: oklch(from var(--ink) l c h / 0.18); opacity: 0; pointer-events: none; }
+  body[data-side] .side-scrim { opacity: 1; pointer-events: auto; }
+  /* The heading sits on the rows' text edge and leaves the corner for nothing else. */
+  .side-title { min-height: 36px; }
+}
+@media (max-width: 1479px) and (prefers-reduced-motion: no-preference) {
+  .side { transition: translate var(--dur-move) var(--rise), visibility 0s linear var(--dur-move); }
+  body[data-side] .side { transition: translate var(--dur-move) var(--rise), visibility 0s; }
+  .side-scrim { transition: opacity var(--dur-base) ease-out; }
+}
+@media (hover: hover) { .side-toggle:hover { background: var(--hover); color: var(--text); } }
 @media (max-width: 1023px) {
-  body { flex-direction: column; align-items: stretch; gap: 0; }
-  .main { display: contents; }
-  .top { order: 0; }
-  .side { order: 1; position: static; width: 100%; max-width: 1320px; max-height: none; margin: 12px auto 0; padding: 0; overflow: visible; }
-  .main > :not(.top) { order: 2; }
-  /* In a column, auto side margins would shrink these to their content; they keep the full measure. */
-  .top, .notice, .hero, .layout { width: 100%; }
-  .side-title { display: none; }
-  .projects { display: flex; gap: 4px; overflow-x: auto; padding-block: 4px; margin-block: -4px; }
-  .projects button { flex: none; width: auto; max-width: 24ch; min-height: 34px; border-radius: 999px; }
   .summary h2 { font-size: 48px; }
 }
 
@@ -642,13 +673,10 @@ button.item { cursor: pointer; }
   .stop-name { font-size: 12.5px; padding-bottom: 16px; }
   .node { width: 24px; height: 24px; font-size: 12.5px; }
   .stop-name::before { top: 11px; inset-inline: 12px -12px; }
-  /* Narrow, a row keeps its title and its time on one line and puts the agent under the time. */
-  .item { grid-template-columns: 20px minmax(0, 1fr) auto; column-gap: 10px; padding-inline: 12px; }
+  /* Narrow, the agent alone is left under the time. */
+  .item { column-gap: 10px; padding-inline: 12px; }
   .item .at { display: none; }
-  .item .who, .item .sub { grid-column: 3; text-align: end; }
-  .item .sub { grid-row: 1; }
-  .item .who { grid-row: 2; color: var(--muted); font-size: 12.5px; font-weight: 400; }
-  .item .what { white-space: normal; overflow-wrap: anywhere; }
+  .item .where { font-size: 12.5px; }
 }
 
 /* --- Shared pieces --- */
@@ -754,12 +782,13 @@ textarea:focus-visible, input:focus-visible, select:focus-visible { outline: 2px
 
 /* --- Activity --- */
 .feed { min-width: 0; view-transition-name: feed; }
-.feed-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "title pulse" "read pulse"; align-items: end; column-gap: 16px; padding: 0 0 16px; }
-.feed h2 { grid-area: title; font-size: 24px; font-weight: 500; letter-spacing: -0.007em; line-height: 1.2; }
+/* One row, built as a project's heading is, so the two headings and the first card and row under them line up. */
+.feed-head { display: flex; align-items: baseline; gap: 12px; min-width: 0; padding: 0 0 16px; }
+.feed h2 { flex: none; font-size: 24px; font-weight: 500; letter-spacing: -0.007em; line-height: 1.2; }
 /* The readout: the hour's count, or the stretch under the pointer. */
-.pulse-read { grid-area: read; margin-top: 2px; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pulse-read { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-size: 13.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .pulse-read[data-pointed] { color: var(--text); }
-.pulse { grid-area: pulse; display: flex; align-items: flex-end; gap: 3px; height: 32px; }
+.pulse { flex: none; align-self: flex-end; display: flex; align-items: flex-end; gap: 3px; height: 24px; margin: 0 0 4px auto; }
 /* Bars of one width with round tops; an empty stretch is a short stub, so the hour keeps its rhythm. */
 .pulse i { width: 6px; height: max(4px, calc(var(--h, 0) * 100%)); border-radius: 3px; background: var(--rail); transition: height var(--dur-move) var(--ease), background-color var(--dur-press) ease-out; }
 .pulse i:last-child { background: var(--muted); }
@@ -824,6 +853,13 @@ body[data-loading] :is(.stat .mark, .stats-bar, .tile .chip, .agent-well, .empty
   /* When the user folds a task or changes project, cards glide to where they now belong. */
   ::view-transition-group(*) { animation-duration: 460ms; animation-timing-function: var(--ease); }
   ::view-transition-old(root), ::view-transition-new(root) { animation-duration: 220ms; }
+  /*
+   * What floats over the board stays over it while the board's cards glide: in the transition's own layer,
+   * above them, and shown as it is now rather than morphed, since it has its own entrances.
+   */
+  ::view-transition-group(dock), ::view-transition-group(side), ::view-transition-group(side-scrim) { z-index: 1; animation: none; }
+  ::view-transition-old(dock), ::view-transition-old(side), ::view-transition-old(side-scrim) { display: none; }
+  ::view-transition-new(dock), ::view-transition-new(side), ::view-transition-new(side-scrim) { animation: none; }
 }
 
 /* --- Details and settings: a layer over the board. A dialog, so focus is held inside and Escape closes it. --- */
@@ -916,13 +952,9 @@ body[data-loading] :is(.stat .mark, .stats-bar, .tile .chip, .agent-well, .empty
 @supports (corner-shape: superellipse(2)) {
   /* 1.27 times the plain radius, so superellipse(1.4) meets the plain arc at 45 degrees. Inner corners follow by calc. */
   :root { --radius-tile: 36px; --radius-sheet: 41px; --radius-field: 15px; }
-  :is(.card, .tile, .empty, .feed > .feed-list, .notice, .item, .work, .outcome, .stage, .need .callout p, .cmd-toggle, .projects button, textarea, input, select, .prose, .callout, .section, .facts div, .sheet, .logo) { corner-shape: superellipse(1.4); }
+  :is(.card, .tile, .empty, .feed > .feed-list, .notice, .item, .work, .outcome, .stage, .need .callout p, .cmd-toggle, .projects button, textarea, input, select, .prose, .callout, .section, .facts div, .sheet, .logo, .side) { corner-shape: superellipse(1.4); }
   .logo { border-radius: 10px; }
   @media (max-width: 760px) {
     :root { --radius-tile: 28px; --radius-sheet: 33px; }
-  }
-  /* A row of projects is a pill when the panel folds into a row. */
-  @media (max-width: 1023px) {
-    .projects button { corner-shape: round; }
   }
 }

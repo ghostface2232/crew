@@ -66,6 +66,11 @@
   --dur-move: 480ms;
   --dur-spring: 560ms;
   --pulse: 2.4s;
+  /*
+   * How things rise into view: a long, soft settle. Opacity, blur and position end at different times, so
+   * the words are readable early while the movement is still easing out.
+   */
+  --rise: cubic-bezier(0.16, 1, 0.3, 1);
   --spring: linear(0, 0.006, 0.025 2.8%, 0.101 6.1%, 0.539 18.9%, 0.721 25.3%, 0.849 31.5%, 0.937 38.1%, 0.968 41.8%, 0.991 45.7%, 1.006 50.1%, 1.015 55%, 1.017 63.9%, 1.001 85.9%, 1);
   --text-face: "SF Pro Text", "SF Pro KR", -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
   /* Headings: the cut drawn for large sizes. */
@@ -201,7 +206,7 @@ body { display: flex; align-items: flex-start; gap: 32px; }
 .roll > span { grid-area: 1 / 1; }
 @media (prefers-reduced-motion: no-preference) {
   .roll-out { animation: roll-out 420ms var(--ease) both; }
-  .roll-in { animation: roll-in 520ms var(--ease) both; }
+  .roll-in { animation: roll-in 520ms var(--rise) both; }
 }
 @media (prefers-reduced-motion: reduce) { .roll-out { display: none; } }
 @keyframes roll-out { to { opacity: 0; translate: 0 -55%; filter: blur(4px); } }
@@ -268,7 +273,7 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 .stats-bar i { flex: 0 1 0; min-width: 4px; background: var(--tone); transition: flex-grow var(--dur-move) var(--ease); }
 .stats-bar i[data-zero] { display: none; }
 /* Gone quiet shares the waiting color, washed out and finely hatched, as an unconfirmed stretch is: told apart without shouting. */
-.stats-bar i[data-state="stalled"] { background: repeating-linear-gradient(-45deg, oklch(from var(--tone) l c h / 0.5) 0 1.5px, oklch(from var(--tone) l c h / 0.2) 1.5px 5px); }
+.stats-bar i[data-state="stalled"] { background: repeating-linear-gradient(-45deg, oklch(from var(--tone) l c h / 0.5) 0 2.5px, oklch(from var(--tone) l c h / 0.2) 2.5px 6.5px); }
 
 .tiles { grid-area: agents; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 12px; }
 .tile { display: grid; grid-template-rows: auto 1fr auto; min-width: 0; padding: 20px; border: 1px solid transparent; border-radius: var(--radius-tile); background: var(--surface); box-shadow: var(--shadow); }
@@ -300,11 +305,14 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 .work .sub { grid-column: 2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12.5px; }
 .work:is([data-state="waiting"], [data-state="stalled"], [data-state="failed"]) .sub { color: var(--tone); }
 @media (hover: hover) { button.work:not(:disabled):hover { background: var(--hover); } }
-/* A line of work that is new rises out of a blur; several arrive one after another. */
+/*
+ * A line of work that is new rises out of a blur; several arrive 70ms apart. What it is doing follows what
+ * it is a beat later, the way a caption follows its title.
+ */
 @media (prefers-reduced-motion: no-preference) {
-  .tile-work li.enter { animation: work-in var(--dur-move) var(--ease) backwards; animation-delay: calc(var(--i, 0) * 50ms); }
+  .tile-work li.enter { --rise-by: 10px; --rise-blur: 6px; animation: rise-o 560ms var(--rise) backwards, rise-y 900ms var(--rise) backwards, rise-b 700ms var(--rise) backwards; animation-delay: calc(var(--i, 0) * 70ms); }
+  .tile-work li.enter .sub { animation: rise-o 560ms var(--rise) backwards, rise-b 700ms var(--rise) backwards; animation-delay: calc(var(--i, 0) * 70ms + 90ms); }
 }
-@keyframes work-in { from { opacity: 0; translate: 0 8px; filter: blur(4px); } }
 .tile-body .more { padding: 4px 0 0 40px; color: var(--muted); font-size: 12.5px; }
 .usage { display: flex; align-items: center; gap: 12px; margin-top: 12px; color: var(--muted); font-size: 12.5px; letter-spacing: 0; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .meter { display: block; flex: 1; height: 6px; border-radius: 3px; background: var(--rail); overflow: hidden; }
@@ -753,7 +761,8 @@ body[data-loading] :is(.stat .mark, .stats-bar, .tile .chip, .agent-well, .empty
   body[data-loading] :is(.eyebrow, .summary h2, .lede, .stat b, .tile-label, .tile-value, .tile-hint) { animation: shimmer 1.6s ease-in-out infinite; }
 }
 @media (prefers-reduced-motion: no-preference) {
-  body[data-resolving] :is(.eyebrow, .summary h2, .lede, .stat b, .tile-head, .tile-hint) { animation: fade var(--dur-base) var(--ease) backwards; animation-delay: calc(var(--i, 0) * 70ms); }
+  /* In place, so nothing moves: the words clear out of a blur as their bars give way. */
+  body[data-resolving] :is(.eyebrow, .summary h2, .lede, .stat b, .tile-head, .tile-hint) { --rise-blur: 4px; animation: rise-o 500ms var(--rise) backwards, rise-b 640ms var(--rise) backwards; animation-delay: calc(var(--i, 0) * 70ms); }
   body[data-resolving] .summary h2 { --i: 1; }
   body[data-resolving] .lede { --i: 2; }
   body[data-resolving] .stat b { --i: 3; }
@@ -763,7 +772,10 @@ body[data-loading] :is(.stat .mark, .stats-bar, .tile .chip, .agent-well, .empty
 
 /* One-shot entrances. The page assembles itself once, top to bottom; later arrivals rise into place. */
 @keyframes fade { from { opacity: 0; } }
-@keyframes rise { from { opacity: 0; translate: 0 12px; } }
+/* The three parts of a rise, so each can take its own time. Distance and blur come from the element. */
+@keyframes rise-o { from { opacity: 0; } }
+@keyframes rise-y { from { translate: 0 var(--rise-by, 16px); } }
+@keyframes rise-b { from { filter: blur(var(--rise-blur, 8px)); } }
 @keyframes drop { from { opacity: 0; translate: 0 -10px; } }
 @keyframes flash { from { background-color: color-mix(in oklch, var(--accent) 38%, transparent); } }
 .ready .card.enter, .ready .feed-list li.enter { animation: fade 200ms ease-out both; }
@@ -772,11 +784,10 @@ body[data-loading] :is(.stat .mark, .stats-bar, .tile .chip, .agent-well, .empty
    * Short, because the board is opened often. The agent tiles are redrawn whole when an agent changes,
    * so their list rises, not each tile, which would rise again on every redraw.
    */
-  .summary, .stats, .tiles, .group, .feed { animation: rise var(--dur-move) var(--ease) backwards; }
-  .stats { animation-delay: 120ms; }
-  .tiles { animation-delay: 240ms; }
-  .group, .feed { animation-delay: 280ms; }
-  .ready .card.enter { animation: rise var(--dur-move) var(--ease) backwards; }
+  .summary, .stats, .tiles, .group, .feed, .ready .card.enter { animation: rise-o 600ms var(--rise) backwards, rise-y 1000ms var(--rise) backwards, rise-b 800ms var(--rise) backwards; }
+  .stats { animation-delay: 80ms; }
+  .tiles { animation-delay: 160ms; }
+  .group, .feed { animation-delay: 240ms; }
   .ready .feed-list li.enter { animation: drop 420ms var(--ease) both, flash 1.6s ease-out both; }
   /* When the user folds a task or changes project, cards glide to where they now belong. */
   ::view-transition-group(*) { animation-duration: 460ms; animation-timing-function: var(--ease); }

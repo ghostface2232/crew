@@ -271,9 +271,11 @@ function renderCards(list, cards) {
   reconcile(list, cards.map((card) => ({
     key: card.key,
     update: (el) => {
+      // Folding is an attribute, not markup, so the chevron is the same element and turns rather than being swapped.
       patch(el, card.html);
       el.toggleAttribute('data-quiet', Boolean(card.quiet));
       el.toggleAttribute('data-closed', Boolean(card.closed));
+      el.querySelector('.cmd-toggle')?.setAttribute('aria-expanded', String(!card.closed));
       el.style.viewTransitionName = cardName(card.key);
     },
   })), () => Object.assign(document.createElement('li'), { className: document.body.classList.contains('ready') ? 'card enter' : 'card' }));
@@ -384,10 +386,11 @@ function roll(el, text) {
   el.innerHTML = was === undefined ? `<span>${esc(text)}</span>` : `<span class="roll-out" aria-hidden="true">${esc(was)}</span><span class="roll-in">${esc(text)}</span>`;
 }
 
-function commandHead(key, title, closed, mini, meta, action = '') {
+function commandHead(key, title, mini, meta, action = '') {
+  // The title with its time and usage under it on the left; the state and its one action on the right.
   return `<div class="cmd-head">
-      <button class="cmd-toggle" data-act="toggle" data-command="${esc(key)}" aria-expanded="${!closed}"><i class="chev"></i><span class="cmd-title" title="${esc(title)}">${esc(title)}</span></button>
-      ${mini}<span class="cmd-meta">${meta}</span>${action}
+      <button class="cmd-toggle" data-act="toggle" data-command="${esc(key)}"><i class="chev"></i><span class="cmd-title" title="${esc(title)}">${esc(title)}</span><span class="cmd-meta">${meta}</span></button>
+      ${mini}${action}
     </div>`;
 }
 
@@ -429,7 +432,7 @@ function commandCard(mission) {
     key: mission.id,
     quiet: !active,
     closed,
-    html: `${commandHead(mission.id, mission.title, closed, mini + chip, meta, dismiss)}
+    html: `${commandHead(mission.id, mission.title, mini + chip, meta, dismiss)}
       <div class="cmd-body">${stage}<div class="cmd-main">${html}${mission.outcome ? `<p class="outcome">${esc(mission.outcome)}</p>` : ''}</div></div>`,
   };
 }
@@ -441,7 +444,7 @@ function looseCard(dir, list) {
   const key = `loose:${dir}`;
   const { html, mini } = trackOf(shown, -1, false, false);
   const closed = folded.get(key) ?? running.length === 0;
-  return { key, quiet: running.length === 0, closed, html: `${commandHead(key, 'Other jobs', closed, mini, running.length ? `${running.length} running` : 'Nothing running')}<div class="cmd-body" data-plain><div class="cmd-main">${html}</div></div>` };
+  return { key, quiet: running.length === 0, closed, html: `${commandHead(key, 'Other jobs', mini, running.length ? `${running.length} running` : 'Nothing running')}<div class="cmd-body" data-plain><div class="cmd-main">${html}</div></div>` };
 }
 
 /** Who is asking, large, with the job it is about under it. */

@@ -129,6 +129,13 @@ body::before {
 }
 @keyframes drift { to { translate: -4% 3%; scale: 1.08; } }
 h1, h2, h3, p, ul, ol, dl, dd { margin: 0; padding: 0; }
+/*
+ * The board's own words, headings, labels, figures and controls, are not for copying, so a stray drag
+ * selects nothing. What people and agents wrote stays selectable: titles of work, requests, reports, prompts.
+ */
+body { -webkit-user-select: none; user-select: none; }
+:is(input, textarea, .prose, .callout p, .need-who, .sheet h2, .facts dd, .files, .notes, .detail, .outcome, .feed-list .what, .feed-list .tag,
+  .work .what, .work .sub, .item .what, .item .now, .session .what, .session .sub, .card:not([data-key^="loose:"]) .cmd-title) { -webkit-user-select: text; user-select: text; }
 h2, .need-title, .cmd-title, .stage-name, .tile-value { font-family: var(--display); }
 .stat b, .stage-ring b, .node, .count { font-family: var(--rounded); }
 ul, ol { list-style: none; }
@@ -223,7 +230,7 @@ body { display: flex; align-items: flex-start; gap: 32px; }
 .ring circle { fill: none; stroke-width: 9; }
 
 /* --- Top: no bar, only the few controls, so the headline is the first thing on the page --- */
-.top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-height: 44px; padding: 8px 4px 0 8px; }
+.top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-height: 44px; padding: 8px 0 0; }
 h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight: 500; letter-spacing: -0.02em; margin-inline-end: 8px; }
 .logo { width: 24px; height: 24px; border-radius: 8px; background: radial-gradient(circle at 50% 50%, var(--accent) 0 3px, var(--ink) 3.5px 6px, var(--accent) 6.5px 7.6px, transparent 8.1px) var(--ink); }
 .connection { display: inline-flex; align-items: center; gap: 8px; margin-inline-start: auto; padding: 0 8px; color: var(--muted); font-size: 13.5px; white-space: nowrap; }
@@ -249,7 +256,7 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
   gap: 12px;
   margin-top: 48px;
 }
-.summary { grid-area: summary; align-self: end; min-width: 0; padding: 0 8px 12px; }
+.summary { grid-area: summary; align-self: end; min-width: 0; padding: 0 0 12px; }
 .eyebrow { color: var(--muted); font-size: 13.5px; font-weight: 500; font-variant-numeric: tabular-nums; }
 /* Pulled in by the figures' side bearing, so the large glyphs line up with the small text above and below. */
 .summary h2 { margin-top: 12px; margin-inline-start: -0.03em; font-size: 64px; font-weight: 500; line-height: 1.04; letter-spacing: -0.013em; text-wrap: balance; }
@@ -264,7 +271,7 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
  * in the order the legend above it names them. No boxes: the names and counts are large and stand on the
  * page, in their state's color, so the row is read before the bar is.
  */
-.stats { grid-area: stats; display: grid; gap: 16px; margin-block: 32px 24px; padding-inline: 8px; }
+.stats { grid-area: stats; display: grid; gap: 16px; margin-block: 32px 24px; }
 .stats-legend { display: flex; flex-wrap: wrap; gap: 16px 48px; }
 .stat { display: grid; gap: 6px; min-width: 0; cursor: default; }
 .stat-label { display: flex; align-items: center; gap: 8px; color: var(--tone); font-size: 15px; font-weight: 500; white-space: nowrap; }
@@ -415,15 +422,16 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 .groups { display: grid; grid-template-columns: minmax(0, 1fr); gap: 48px; }
 .group { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; min-width: 0; }
 /* Narrow, the counts drop under the name rather than push the page sideways. */
-.group-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; min-width: 0; padding: 0 8px 4px; }
+/* Outside the cards, headings, pills and figures start and end on the cards' own edges, and share one baseline. */
+.group-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; min-width: 0; padding: 0 0 4px; }
 .group-head h2 { min-width: 0; max-width: 100%; font-size: 24px; font-weight: 500; letter-spacing: -0.007em; line-height: 1.2; white-space: nowrap; }
 .group-head h2 .link { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .group-head .path { color: var(--faint); font-family: var(--mono); font-size: 12.5px; letter-spacing: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 0; }
-.group-meta { display: flex; align-items: center; gap: 12px; margin-inline-start: auto; align-self: center; color: var(--muted); font-size: 13.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.group-meta { display: flex; align-items: baseline; gap: 12px; margin-inline-start: auto; color: var(--muted); font-size: 13.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .group-meta .waiting { color: var(--waiting); font-weight: 500; }
 
 /* Lead sessions of the project, one line each. */
-.sessions { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 4px; }
+.sessions { display: flex; flex-wrap: wrap; gap: 8px; }
 .sessions:empty { display: none; }
 .session { display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; min-height: 32px; padding: 0 14px 0 9px; border-radius: 999px; background: var(--tile); font-size: 13.5px; }
 .session .mark { width: 16px; height: 16px; }
@@ -453,23 +461,31 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 
 /* The card's one inset, 12px, on every side of the head as of the body, so its controls sit in the corners like its rows. */
 .cmd-head { display: flex; align-items: center; gap: 12px; padding: 12px; min-width: 0; }
-.cmd-toggle { flex: 1 1 0; display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 48px; padding: 0 8px; border: 0; border-radius: var(--radius-item); background: none; text-align: start; }
+.cmd-toggle { flex: 1 1 0; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; column-gap: 8px; min-width: 0; min-height: 48px; padding: 6px 8px; border: 0; border-radius: var(--radius-item); background: none; text-align: start; }
 .cmd-title { font-size: 20px; font-weight: 500; letter-spacing: -0.006em; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 [data-quiet] .cmd-title { font-family: var(--text-face); font-size: 17px; letter-spacing: -0.012em; }
-/* Patching replaces the chevron, so it is not animated; the view transition carries the change. */
-.chev { flex: none; width: 8px; height: 8px; margin: 0 6px 4px 2px; border: solid var(--faint); border-width: 0 1.75px 1.75px 0; border-radius: 1px; rotate: 45deg; }
-[data-closed] .chev { rotate: -45deg; margin-bottom: 0; }
-.cmd-meta { flex: none; color: var(--muted); font-size: 13.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+/*
+ * Open, it points down; folded, it turns a quarter to point right. Raised a little when open, since a V's
+ * weight sits low in its box.
+ */
+.chev { flex: none; width: 8px; height: 8px; margin: 0 6px 0 2px; border: solid var(--faint); border-width: 0 1.75px 1.75px 0; border-radius: 1px; rotate: 45deg; translate: 0 -2px; }
+[data-closed] .chev { rotate: -45deg; translate: 0 0; }
+@media (prefers-reduced-motion: no-preference) {
+  .chev { transition: rotate var(--dur-spring) var(--spring), translate var(--dur-spring) var(--spring); }
+}
+/* Under the title, on its edge: how long it has run and what it has used. */
+.cmd-meta { grid-column: 2; color: var(--muted); font-size: 13.5px; font-weight: 400; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.cmd-meta:empty { display: none; }
+/* The state and its action are pills of one height, side by side. */
+.cmd-head > .quiet { min-height: 32px; padding: 0 14px; background: var(--hover); color: var(--muted); }
 /* Folded, the track is six segments; unfolded, the track itself is there to read. */
-.mini { flex: none; display: none; gap: 3px; }
+.mini { flex: none; display: none; gap: 2px; }
 [data-closed] .mini { display: flex; }
-.mini i { width: 16px; height: 6px; border-radius: 3px; background: var(--rail); }
+/* One capsule of six, drawn as the state bar is: 2px apart, softly rounded joints, round ends, the same tones. */
+.mini { overflow: hidden; border-radius: 999px; }
+.mini i { width: 16px; height: 6px; border-radius: 2px; background: var(--rail); }
 .mini i[data-state]:not([data-state=""]) { background: var(--tone); }
-.mini i[data-state="done"] { background: var(--ink); }
-/* Told apart by shape as well as color: waiting is an open outline, gone quiet a half-filled one, a failure has square ends. */
-.mini i:is([data-state="waiting"], [data-state="stalled"]) { background: none; box-shadow: inset 0 0 0 1.5px var(--tone); }
-.mini i[data-state="stalled"] { background: linear-gradient(90deg, var(--tone) 50%, transparent 0); }
-.mini i[data-state="failed"] { border-radius: 1px; }
+.mini i[data-state="stalled"] { background: repeating-linear-gradient(-45deg, oklch(from var(--tone) l c h / 0.5) 0 2.5px, oklch(from var(--tone) l c h / 0.2) 2.5px 6.5px); }
 [data-closed] .cmd-body { display: none; }
 /* Inset 12px inside the 28px card, so the rows' 16px corners run parallel to the card's. */
 .cmd-body { display: grid; grid-template-columns: 176px minmax(0, 1fr); gap: 24px; padding: 4px 12px 12px; }
@@ -611,9 +627,8 @@ button.item { cursor: pointer; }
   .cmd-title { font-family: var(--text-face); font-size: 17px; letter-spacing: -0.012em; white-space: normal; overflow-wrap: anywhere; }
   .mini, .cmd-head > .chip { margin-inline-start: 32px; }
   .mini + .chip { margin-inline-start: 0; }
-  /* Narrow: the state and Dismiss share a line under the title, and the time and usage go under them. */
+  /* Narrow: the state and Dismiss share a line under the title and its time. */
   .cmd-head > .quiet { margin-inline-start: auto; }
-  .cmd-meta { order: 1; flex-basis: calc(100% - 32px); margin-inline-start: 32px; }
   .cmd-body { grid-template-columns: minmax(0, 1fr); gap: 16px; padding: 0 12px 12px; }
   /* Narrow, the stage lies on its side above the track. */
   .stage { grid-template-columns: auto 1fr; align-items: center; justify-items: start; gap: 0 16px; width: 100%; padding: 16px; text-align: start; }
@@ -739,7 +754,7 @@ textarea:focus-visible, input:focus-visible, select:focus-visible { outline: 2px
 
 /* --- Activity --- */
 .feed { min-width: 0; view-transition-name: feed; }
-.feed-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "title pulse" "read pulse"; align-items: end; column-gap: 16px; padding: 0 8px 16px; }
+.feed-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "title pulse" "read pulse"; align-items: end; column-gap: 16px; padding: 0 0 16px; }
 .feed h2 { grid-area: title; font-size: 24px; font-weight: 500; letter-spacing: -0.007em; line-height: 1.2; }
 /* The readout: the hour's count, or the stretch under the pointer. */
 .pulse-read { grid-area: read; margin-top: 2px; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }

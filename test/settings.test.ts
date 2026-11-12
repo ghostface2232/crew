@@ -99,3 +99,20 @@ test('a config file that is not a settings object is refused, not overwritten', 
     assert.equal(fs.readFileSync(file, 'utf8'), content);
   }
 });
+
+test('clearing instructions refuses a symlinked parent without deleting the external file', (t) => {
+  const project = tempDir();
+  const elsewhere = tempDir();
+  t.after(() => {
+    fs.rmSync(project, { recursive: true, force: true });
+    fs.rmSync(elsewhere, { recursive: true, force: true });
+  });
+  const victim = path.join(elsewhere, 'instructions.md');
+  fs.writeFileSync(victim, 'Keep these instructions.');
+  fs.symlinkSync(elsewhere, path.join(project, '.crew'));
+  for (const text of ['', '  \n']) {
+    assert.throws(() => writeInstructions(instructionsFile(elsewhere, project), text), /is a symbolic link/);
+    assert.equal(fs.readFileSync(victim, 'utf8'), 'Keep these instructions.');
+    assert.equal(fs.lstatSync(path.join(project, '.crew')).isSymbolicLink(), true);
+  }
+});

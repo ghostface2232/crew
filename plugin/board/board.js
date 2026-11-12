@@ -669,12 +669,17 @@ document.addEventListener('submit', async (e) => {
   }
   if (form.id === 'instructions-form') {
     const wanted = scope.value;
+    const draft = instructions.value;
+    const attempt = loading;
+    const current = () => scope.value === wanted && loading === attempt;
     await submit(form, 'instructions', async () => {
-      const { file, text } = await call('/api/instructions', { project: wanted || null, text: instructions.value });
-      if (scope.value !== wanted) return;
-      instructions.value = savedInstructions = text;
+      const { file, text } = await call('/api/instructions', { project: wanted || null, text: draft });
+      if (!current()) return;
+      // Only normalize the submitted draft; later edits must stay visible and unsaved.
+      if (instructions.value === draft) instructions.value = text;
+      savedInstructions = text;
       instructionsHint(file);
-    });
+    }, 'Saved', () => current() ? form : null);
     return;
   }
   const container = form.closest('[data-key]');

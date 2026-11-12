@@ -67,7 +67,9 @@ export function readInstructions(file: string): string {
 
 /** Blank text removes the file: no instructions and an empty file mean the same, and one fewer file to wonder about. */
 export function writeInstructions(file: string, text: string): void {
-  // Removing a link removes the link itself, never what it points to.
+  const dir = path.dirname(file);
+  if (isLink(dir)) throw new Error(`${dir} is a symbolic link, so it was not written to.`);
+  // A link at the file itself can be removed safely, but a linked parent must not be followed.
   if (!text.trim()) fs.rmSync(file, { force: true });
   else writeAtomic(file, text.endsWith('\n') ? text : `${text}\n`);
 }

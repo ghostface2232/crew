@@ -303,20 +303,22 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 .stat[data-none] b { color: var(--faint); font-weight: 400; }
 
 .tiles { grid-area: agents; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 12px; }
-.tile { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: auto auto 1fr auto; gap: 0 12px; align-items: start; min-width: 0; padding: 20px; border: 1px solid transparent; border-radius: var(--radius-tile); background: var(--surface); box-shadow: var(--shadow); }
-/* Who it is: the agent's mark, bare, when its file is there, else its initial. */
-/* Bottom-aligned, so it centers on the label and name rather than on the taller chip row. */
-.agent-well { grid-column: 1; grid-row: 1 / span 2; align-self: end; display: grid; place-items: center; width: 32px; height: 44px; color: var(--text); }
+.tile { display: grid; grid-template-rows: auto 1fr auto; min-width: 0; padding: 20px; border: 1px solid transparent; border-radius: var(--radius-tile); background: var(--surface); box-shadow: var(--shadow); }
+/*
+ * One row, everything on its center line: the agent's mark (bare, or its initial without the file), its role
+ * over its name, and its state at the end. The usage keeps the foot, so the state never moves for it.
+ */
+.tile-head { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.agent-well { flex: none; display: grid; place-items: center; width: 28px; height: 28px; color: var(--text); }
 .agent-well .agent-icon { width: 28px; height: 28px; }
-.agent-well b { font-family: var(--rounded); font-size: 24px; font-weight: 500; color: var(--muted); }
+.agent-well b { font-family: var(--rounded); font-size: 24px; font-weight: 500; line-height: 1; color: var(--muted); }
 .icon-claude .agent-well[data-agent="claude"] b, .icon-codex .agent-well[data-agent="codex"] b, .icon-antigravity .agent-well[data-agent="antigravity"] b { display: none; }
-/* The state holds the top corner and the usage the foot, so neither moves when the other comes or goes. */
-.tile > .chip { grid-column: 3; grid-row: 1; }
-/* Label over value beside the well; the name may run on under the chip. */
-.tile-label { grid-column: 2; grid-row: 1; align-self: end; color: var(--muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tile-value { grid-column: 2 / -1; grid-row: 2; min-width: 0; font-size: 20px; font-weight: 500; letter-spacing: -0.02em; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tile-hint { grid-column: 1 / -1; grid-row: 3; margin-top: 12px; color: var(--muted); font-size: 13.5px; text-wrap: pretty; }
-.usage { grid-column: 1 / -1; grid-row: 4; display: flex; align-items: center; gap: 12px; margin-top: 12px; color: var(--muted); font-size: 12.5px; letter-spacing: 0; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tile-id { flex: 1; min-width: 0; }
+.tile-head > .chip { margin-inline-start: auto; }
+.tile-label { color: var(--muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tile-value { font-size: 20px; font-weight: 500; letter-spacing: -0.02em; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tile-hint { margin-top: 12px; color: var(--muted); font-size: 13.5px; text-wrap: pretty; }
+.usage { display: flex; align-items: center; gap: 12px; margin-top: 12px; color: var(--muted); font-size: 12.5px; letter-spacing: 0; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .meter { display: block; flex: 1; height: 6px; border-radius: 3px; background: var(--rail); overflow: hidden; }
 .meter > i { display: block; height: 100%; width: calc(var(--used) * 1%); background: var(--ink); border-radius: inherit; }
 .meter[data-high] > i { background: var(--failed); }

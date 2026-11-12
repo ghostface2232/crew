@@ -570,10 +570,11 @@ function renderAgents(visible) {
     const name = agents[agent]?.name ?? AGENT_NAMES[agent];
     const extra = agent === 'codex' && usage ? `<p class="usage" title="${esc(usageTitle)}">${usage}</p>` : '';
     return `<li class="tile">
-        <span class="agent-well" data-agent="${agent}">${agentIcon(agent)}<b aria-hidden="true">${esc(name[0])}</b></span>
-        <p class="tile-label" title="${esc(role)}">${esc(role)}</p>
-        <span class="chip" data-state="${state}"><span class="mark"></span>${label}</span>
-        <p class="tile-value">${esc(name)}</p>
+        <div class="tile-head">
+          <span class="agent-well" data-agent="${agent}">${agentIcon(agent)}<b aria-hidden="true">${esc(name[0])}</b></span>
+          <div class="tile-id"><p class="tile-label" title="${esc(role)}">${esc(role)}</p><p class="tile-value" title="${esc(name)}">${esc(name)}</p></div>
+          <span class="chip" data-state="${state}"><span class="mark"></span>${label}</span>
+        </div>
         <p class="tile-hint">${esc(hint)}</p>
         ${extra}
       </li>`;

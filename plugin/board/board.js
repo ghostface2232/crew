@@ -365,13 +365,6 @@ function trackOf(list, at, active, finished, lead = '') {
   return { html, mini };
 }
 
-/** A ring filled to `part` of `whole`. */
-function ring(part, whole) {
-  const around = 2 * Math.PI * 42;
-  const left = around * (1 - (whole ? Math.min(part / whole, 1) : 0));
-  return `<svg class="ring" viewBox="0 0 100 100" aria-hidden="true"><circle class="ring-rail" cx="50" cy="50" r="42"/><circle class="ring-fill" cx="50" cy="50" r="42" stroke-dasharray="${around.toFixed(1)}" style="stroke-dashoffset:${left.toFixed(1)}"/></svg>`;
-}
-
 /** The steps as a ring of arcs, one per stop, marked as the track marks its stops: passed, reached, or to come. */
 function stepRing(positions) {
   const around = 2 * Math.PI * 42;
@@ -545,7 +538,7 @@ const SUMMARY_STATES = [
 ];
 
 /**
- * The board in one sentence, a figure for each state, and one ring: how much of the work in hand is finished.
+ * The board in one sentence, and each state's share of the work in hand as one bar.
  * Work in hand is every unfinished job, and the finished ones of commands that are still open.
  */
 function renderSummary(visible) {
@@ -585,15 +578,6 @@ function renderSummary(visible) {
     segment.style.flexGrow = n[segment.dataset.state];
     segment.toggleAttribute('data-zero', !n[segment.dataset.state]);
   }
-  const gauge = document.getElementById('gauge');
-  if (!gauge.firstChild) gauge.innerHTML = `<div class="gauge-ring">${ring(0, 1)}<b><span class="roll"></span><small></small></b></div><p class="gauge-label"></p>`;
-  const fill = gauge.querySelector('.ring-fill');
-  fill.style.strokeDashoffset = (2 * Math.PI * 42 * (1 - (live.length ? n.done / live.length : 0))).toFixed(1);
-  // A round cap on an empty arc still draws a dot at twelve o'clock.
-  fill.style.opacity = n.done ? '' : '0';
-  roll(gauge.querySelector('.roll'), String(n.done));
-  gauge.querySelector('.gauge-ring small').textContent = live.length ? `/${live.length}` : '';
-  gauge.querySelector('.gauge-label').textContent = !live.length ? 'No jobs yet' : n.done === live.length ? 'Every job is finished' : 'jobs finished';
 }
 
 function groupElement() {

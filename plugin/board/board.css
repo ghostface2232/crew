@@ -38,7 +38,6 @@
   --hover: oklch(0.2 0.006 100 / 0.05);
   /* Text and marks on the black material, kept apart from --surface so a surface can change under them. */
   --on-ink: oklch(1 0 0);
-  --on-ink-muted: oklch(1 0 0 / 0.72);
   --accent: oklch(0.88 0.21 132);
   --accent-ink: oklch(0.27 0.07 135);
   --shadow: 0 0 0 1px oklch(0.2 0.006 100 / 0.03), 0 1px 1px oklch(0.2 0.006 100 / 0.03), 0 8px 20px -6px oklch(0.2 0.006 100 / 0.06);
@@ -120,7 +119,7 @@ body::before {
 @keyframes drift { to { translate: -4% 3%; scale: 1.08; } }
 h1, h2, h3, p, ul, ol, dl, dd { margin: 0; padding: 0; }
 h2, .need-title, .cmd-title, .stage-name, .tile-value { font-family: var(--display); }
-.stat b, .gauge-ring b, .stage-ring b, .node, .count { font-family: var(--rounded); }
+.stat b, .stage-ring b, .node, .count { font-family: var(--rounded); }
 ul, ol { list-style: none; }
 [hidden] { display: none !important; }
 
@@ -211,8 +210,6 @@ body { display: flex; align-items: flex-start; gap: 32px; }
 /* A ring that fills clockwise from the top. */
 .ring { display: block; width: 100%; height: 100%; rotate: -90deg; }
 .ring circle { fill: none; stroke-width: 9; }
-.ring-rail { stroke: oklch(from var(--on-ink) l c h / 0.14); }
-.ring-fill { stroke: var(--accent); stroke-linecap: round; transition: stroke-dashoffset 900ms var(--ease); }
 
 /* --- Top: no bar, only the few controls, so the headline is the first thing on the page --- */
 .top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-height: 44px; padding: 8px 4px 0 8px; }
@@ -233,11 +230,11 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 
 .notice { margin-top: 12px; padding: 12px 18px; border-radius: var(--radius-item); background: var(--failed-bg); color: var(--failed); overflow-wrap: anywhere; }
 
-/* --- Hero: the board in one sentence, one ring, and a figure per state --- */
+/* --- Hero: the board in one sentence, then each state's share of the work as one bar --- */
 .hero {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 232px;
-  grid-template-areas: "summary gauge" "stats stats" "agents agents";
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "summary" "stats" "agents";
   gap: 12px;
   margin-top: 48px;
 }
@@ -249,13 +246,6 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 .summary .actions { margin-top: 24px; }
 .summary .actions .primary { min-height: 44px; padding: 0 22px; font-size: 15px; }
 
-/* The one black tile: how much of the work in hand is finished. */
-.gauge { grid-area: gauge; display: grid; place-items: center; align-content: center; gap: 12px; min-height: 264px; padding: 24px; border-radius: var(--radius-tile); background: var(--ink); color: var(--on-ink); }
-.gauge-ring { position: relative; width: 148px; height: 148px; }
-/* The finished count large, what it is out of small and quiet beside it, as on each task's ring. */
-.gauge-ring b { position: absolute; inset: 0; display: flex; flex-wrap: wrap; align-content: center; align-items: baseline; justify-content: center; font-size: 40px; font-weight: 500; line-height: 1; letter-spacing: -0.04em; font-variant-numeric: tabular-nums; }
-.gauge-ring small { margin-inline-start: 2px; color: var(--on-ink-muted); font-size: 17px; letter-spacing: -0.012em; }
-.gauge-label { color: var(--on-ink-muted); font-size: 13.5px; }
 
 
 /*
@@ -263,7 +253,7 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
  * in the order the legend above it names them. No boxes: the names and counts are large and stand on the
  * page, in their state's color, so the row is read before the bar is.
  */
-.stats { grid-area: stats; display: grid; gap: 16px; margin-block: 32px 24px; padding-inline: 4px; }
+.stats { grid-area: stats; display: grid; gap: 16px; margin-block: 32px 24px; padding-inline: 8px; }
 .stats-legend { display: flex; flex-wrap: wrap; gap: 16px 48px; }
 .stat { display: grid; gap: 6px; min-width: 0; cursor: default; }
 .stat-label { display: flex; align-items: center; gap: 8px; color: var(--tone); font-size: 15px; font-weight: 500; white-space: nowrap; }
@@ -446,7 +436,7 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 
 /*
  * How far along the task is. Light, and drawn as six arcs that match the track's stops, so it reads as
- * part of its card rather than as a second copy of the black gauge at the top of the page.
+ * part of its card's track rather than as a figure of its own.
  */
 .stage { align-self: start; display: grid; justify-items: center; gap: 2px; padding: 20px 16px; border-radius: var(--radius-item); background: var(--sunken); text-align: center; }
 [data-quiet] .stage { background: var(--bg); }
@@ -553,18 +543,12 @@ button.item { cursor: pointer; }
 
 @media (max-width: 760px) {
   body { padding: 8px 12px calc(var(--dock, 72px) + 24px); }
-  .hero { grid-template-columns: minmax(0, 1fr); grid-template-areas: "summary" "gauge" "stats" "agents"; gap: 8px; margin-top: 32px; }
+  .hero { grid-template-columns: minmax(0, 1fr); grid-template-areas: "summary" "stats" "agents"; gap: 8px; margin-top: 32px; }
   .summary { padding-bottom: 16px; }
   .summary h2 { font-size: 40px; letter-spacing: -0.035em; }
   .lede { margin-top: 12px; font-size: 15px; }
-  /* Narrow, the ring lies on its side: the figure, then what it counts. */
-  .gauge { grid-template-columns: auto 1fr; justify-items: start; min-height: 0; padding: 16px 20px; }
-  .gauge-ring { width: 84px; height: 84px; }
-  .gauge-ring b { font-size: 24px; }
-  .gauge-ring small { font-size: 12.5px; }
-  .gauge-label { font-size: 15px; }
   /* Cards keep their 28px corner: their rows sit 12px in, with 16px corners. */
-  .gauge, .tile, .empty { border-radius: 22px; }
+  .tile, .empty { border-radius: 22px; }
   .stats { margin-block: 24px 16px; }
   .stats-legend { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 12px; }
   .stat b { font-size: 32px; }
@@ -743,17 +727,15 @@ textarea:focus-visible, input:focus-visible, select:focus-visible { outline: 2px
  * Before the first snapshot the board is drawn empty, and its own text stands in as placeholder bars, so nothing
  * moves when the real figures arrive and no "nothing yet" message is shown before anything is known.
  */
-body[data-loading] :is(.eyebrow, .summary h2, .lede, .stat b, .tile-label, .tile-value, .tile-hint, .gauge-ring b, .gauge-label) { width: fit-content; justify-self: start; color: transparent; border-radius: 8px; background: linear-gradient(90deg, var(--rail) 40%, oklch(from var(--rail) l c h / 0.04) 50%, var(--rail) 60%) 0 0 / 300% 100%; }
-body[data-loading] :is(.gauge-ring b, .gauge-label) { background-image: linear-gradient(90deg, oklch(from var(--on-ink) l c h / 0.14) 40%, oklch(from var(--on-ink) l c h / 0.04) 50%, oklch(from var(--on-ink) l c h / 0.14) 60%); }
-body[data-loading] .gauge-ring b { inset: 50px 34px; }
-body[data-loading] :is(.stat .mark, .stats-bar, .tile .chip, .agent-well, .ring-fill, .empty) { visibility: hidden; }
+body[data-loading] :is(.eyebrow, .summary h2, .lede, .stat b, .tile-label, .tile-value, .tile-hint) { width: fit-content; justify-self: start; color: transparent; border-radius: 8px; background: linear-gradient(90deg, var(--rail) 40%, oklch(from var(--rail) l c h / 0.04) 50%, var(--rail) 60%) 0 0 / 300% 100%; }
+body[data-loading] :is(.stat .mark, .stats-bar, .tile .chip, .agent-well, .empty) { visibility: hidden; }
 @media (prefers-reduced-motion: no-preference) {
-  body[data-loading] :is(.eyebrow, .summary h2, .lede, .stat b, .tile-label, .tile-value, .tile-hint, .gauge-ring b, .gauge-label) { animation: shimmer 1.6s ease-in-out infinite; }
+  body[data-loading] :is(.eyebrow, .summary h2, .lede, .stat b, .tile-label, .tile-value, .tile-hint) { animation: shimmer 1.6s ease-in-out infinite; }
 }
 @media (prefers-reduced-motion: no-preference) {
-  body[data-resolving] :is(.eyebrow, .summary h2, .lede, .stat b, .tile-head, .tile-hint, .gauge-ring b, .gauge-label) { animation: fade var(--dur-base) var(--ease) backwards; animation-delay: calc(var(--i, 0) * 70ms); }
+  body[data-resolving] :is(.eyebrow, .summary h2, .lede, .stat b, .tile-head, .tile-hint) { animation: fade var(--dur-base) var(--ease) backwards; animation-delay: calc(var(--i, 0) * 70ms); }
   body[data-resolving] .summary h2 { --i: 1; }
-  body[data-resolving] :is(.lede, .gauge-ring b, .gauge-label) { --i: 2; }
+  body[data-resolving] .lede { --i: 2; }
   body[data-resolving] .stat b { --i: 3; }
   body[data-resolving] :is(.tile-head, .tile-hint) { --i: 4; }
 }
@@ -770,8 +752,7 @@ body[data-loading] :is(.stat .mark, .stats-bar, .tile .chip, .agent-well, .ring-
    * Short, because the board is opened often. The agent tiles are redrawn whole when an agent changes,
    * so their list rises, not each tile, which would rise again on every redraw.
    */
-  .summary, .gauge, .stats, .tiles, .group, .feed { animation: rise var(--dur-move) var(--ease) backwards; }
-  .gauge { animation-delay: 40ms; }
+  .summary, .stats, .tiles, .group, .feed { animation: rise var(--dur-move) var(--ease) backwards; }
   .stats { animation-delay: 120ms; }
   .tiles { animation-delay: 240ms; }
   .group, .feed { animation-delay: 280ms; }

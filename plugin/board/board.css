@@ -124,7 +124,23 @@ h2, .need-title, .cmd-title, .stage-name, .tile-value { font-family: var(--displ
 ul, ol { list-style: none; }
 [hidden] { display: none !important; }
 
+/*
+ * The projects run down a panel at the side, which may grow long; the board takes the rest. The board
+ * lays itself out by its own width (container queries), so it reads the same with the panel or without.
+ */
+body { display: flex; align-items: flex-start; gap: 32px; }
+.main { flex: 1; min-width: 0; container: main / inline-size; }
 .top, .hero, .notice, .layout { max-width: 1320px; margin-inline: auto; }
+.side { position: sticky; top: 12px; flex: none; display: grid; align-content: start; gap: 4px; width: 232px; max-height: calc(100dvh - 24px); padding-top: 4px; overflow-y: auto; overscroll-behavior: contain; }
+/* As tall as the header's row and inset like a row's text, so the heading sits on the names' edge. */
+.side-title { display: flex; align-items: center; min-height: 44px; padding-inline: 12px; color: var(--muted); font-size: 12.5px; font-weight: 500; }
+.projects { display: grid; gap: 2px; }
+.projects button { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 38px; padding: 0 10px 0 12px; border: 0; border-radius: var(--radius-field); background: transparent; color: var(--muted); font-weight: 400; text-align: start; }
+.projects .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.projects .count { margin: 0; }
+.projects .busy { flex: none; min-width: 18px; color: var(--faint); font-size: 12.5px; text-align: center; font-variant-numeric: tabular-nums; }
+/* The project shown is a white row raised off the page, the way a card is. */
+.projects button[aria-pressed="true"] { background: var(--surface); color: var(--text); font-weight: 500; box-shadow: var(--shadow); }
 
 /*
  * Who an agent is, by its own mark, shown only once its file has loaded (see AGENT_ICONS in board.js).
@@ -212,13 +228,7 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 }
 @keyframes ping { 0% { box-shadow: 0 0 0 0 oklch(from var(--done) l c h / 0.45); } 70%, 100% { box-shadow: 0 0 0 7px oklch(from var(--done) l c h / 0); } }
 
-/* One choice among a few: the pressed one is solid, the rest recede. The track is as tall as a button. */
-.segmented { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px; background: var(--hover); border-radius: 999px; }
 #open-settings { border-color: transparent; background: var(--hover); }
-.segmented button { display: inline-flex; align-items: center; min-height: 30px; border-color: transparent; background: transparent; color: var(--muted); max-width: 22ch; white-space: nowrap; }
-/* The name gives way before the count does: the count is the reason to look. */
-.segmented .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.segmented button[aria-pressed="true"] { background: var(--ink); color: var(--on-ink); }
 .count { flex: none; display: inline-block; min-width: 18px; margin-inline-start: 6px; padding: 0 5px; border-radius: 9px; background: var(--waiting); color: var(--on-ink); font-size: 12.5px; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; }
 
 .notice { margin-top: 12px; padding: 12px 18px; border-radius: var(--radius-item); background: var(--failed-bg); color: var(--failed); overflow-wrap: anywhere; }
@@ -293,12 +303,17 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 .now-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 17px; }
 .now-wheel:not(:empty) ~ .now-empty { display: none; }
 
-.stats { grid-area: stats; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
-.stat { display: grid; gap: 20px; align-content: space-between; min-width: 0; padding: 20px; border-radius: var(--radius-tile); background: var(--tint); cursor: default; transition: background-color var(--dur-base) ease-out; }
+/*
+ * The five states as one ruled strip: a single card whose hairlines are its own ground showing through 1px
+ * gaps. Only the states that wait on the user keep their tint, so the strip says where to look.
+ */
+.stats { grid-area: stats; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 1px; overflow: hidden; border-radius: var(--radius-tile); background: var(--line); box-shadow: var(--shadow); }
+.stat { display: grid; gap: 20px; align-content: space-between; min-width: 0; padding: 20px; background: var(--surface); cursor: default; transition: background-color var(--dur-base) ease-out; }
+.stat:is([data-state="waiting"], [data-state="stalled"], [data-state="failed"]):not([data-none]) { background: var(--tint); }
 .stat-label { display: flex; align-items: center; gap: 8px; color: var(--tone); font-size: 13.5px; font-weight: 500; white-space: nowrap; }
 .stat b { margin-inline-start: -0.03em; font-size: 48px; font-weight: 500; line-height: 1; letter-spacing: -0.04em; font-variant-numeric: tabular-nums; }
 /* A state nothing is in stays in its place, so the row does not jump, but it steps back. */
-.stat[data-none] { --tone: var(--faint); background: var(--tile); }
+.stat[data-none] { --tone: var(--faint); }
 .stat[data-none] .stat-label { color: var(--muted); }
 .stat[data-none] b { color: var(--faint); font-weight: 400; }
 
@@ -323,7 +338,11 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 .meter > i { display: block; height: 100%; width: calc(var(--used) * 1%); background: var(--ink); border-radius: inherit; }
 .meter[data-high] > i { background: var(--failed); }
 
-@media (max-width: 1180px) {
+/* Too narrow for the three agents side by side: one full row each, rather than two and a stray. */
+@container main (max-width: 880px) {
+  .tiles { grid-template-columns: minmax(0, 1fr); }
+}
+@container main (max-width: 1180px) {
   .hero { grid-template-columns: 232px minmax(0, 1fr); grid-template-areas: "summary summary" "gauge now" "stats stats" "agents agents"; }
   .summary h2 { font-size: 48px; }
 }
@@ -339,7 +358,8 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
   grid-area: 1 / 1;
   display: grid;
   gap: 16px;
-  padding: 16px 16px 20px 24px;
+  /* One edge on both sides: the chip, the icon, the request's box, the buttons and the hint all start 24px in. */
+  padding: 20px 24px 24px;
   border-radius: 32px;
   /* Opaque enough that muted text keeps its contrast over the black tiles showing through. */
   background: oklch(1 0 0 / 0.86);
@@ -371,20 +391,23 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 .dock-pill .mark { background: var(--waiting-on-ink); }
 .dock-pill b { display: grid; place-items: center; min-height: 40px; padding: 0 18px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font-weight: 500; }
 
-.need-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-inline-start: -8px; }
+.need-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+/* The button's padding hangs past the edge, so its word ends where the timer below does. */
+.need-bar .quiet { margin-inline-end: -16px; }
 .need-head { display: flex; align-items: center; gap: 16px; min-width: 0; }
 .need-head > div { min-width: 0; }
 .need-icon { flex: none; display: grid; place-items: center; width: 48px; height: 48px; border-radius: 50%; background: var(--waiting-bg); }
 .need-icon .mark { width: 26px; height: 26px; }
 .need-title { font-size: 24px; font-weight: 500; line-height: 1.15; letter-spacing: -0.02em; text-wrap: balance; }
 .need-who { margin-top: 2px; color: var(--muted); font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.need .callout { padding: 0; margin-inline-end: 8px; background: none; }
-.need .callout p { padding: 16px; border-radius: var(--radius-item); background: oklch(1 0 0 / 0.6); font-family: var(--mono); font-size: 13.5px; line-height: 1.6; letter-spacing: 0; }
+.need .callout { padding: 0; background: none; }
+/* The agent's own words in a sunken box whose edges are the card's edges. */
+.need .callout p { padding: 16px; border-radius: var(--radius-item); background: oklch(from var(--ink) l c h / 0.04); font-family: var(--mono); font-size: 13.5px; line-height: 1.6; letter-spacing: 0; }
 .need .hint { margin-top: -4px; }
 
 /* --- Board and feed side by side when there is room --- */
 .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 32px; margin-top: 48px; align-items: start; }
-@media (min-width: 1120px) {
+@container main (min-width: 1120px) {
   .layout { grid-template-columns: minmax(0, 1fr) 360px; }
   /* The feed stays in view beside the board and scrolls on its own. */
   /* It ends above the request dock, so its last rows can always be scrolled into view. */
@@ -547,9 +570,28 @@ button.item { cursor: pointer; }
 .item[data-state="stalled"] { background: var(--surface); box-shadow: inset 0 0 0 1.5px var(--waiting); }
 .item[data-state="waiting"] .now, .item[data-state="stalled"] .now, .item[data-state="failed"] .now { color: var(--tone); font-weight: 500; }
 
+/*
+ * Narrower than a panel and a board side by side: the projects become one scrolling row under the header.
+ * The board's wrapper steps aside (display: contents) so the row can sit between the header and the board;
+ * without a container there, the board's width rules are repeated here.
+ */
+@media (max-width: 1023px) {
+  body { flex-direction: column; align-items: stretch; gap: 0; }
+  .main { display: contents; }
+  .top { order: 0; }
+  .side { order: 1; position: static; width: 100%; max-width: 1320px; max-height: none; margin: 12px auto 0; padding: 0; overflow: visible; }
+  .main > :not(.top) { order: 2; }
+  /* In a column, auto side margins would shrink these to their content; they keep the full measure. */
+  .top, .notice, .hero, .layout { width: 100%; }
+  .side-title { display: none; }
+  .projects { display: flex; gap: 4px; overflow-x: auto; padding-block: 4px; margin-block: -4px; }
+  .projects button { flex: none; width: auto; max-width: 24ch; min-height: 34px; border-radius: 999px; }
+  .hero { grid-template-columns: 232px minmax(0, 1fr); grid-template-areas: "summary summary" "gauge now" "stats stats" "agents agents"; }
+  .summary h2 { font-size: 48px; }
+}
+
 @media (max-width: 760px) {
   body { padding: 8px 12px calc(var(--dock, 72px) + 24px); }
-  .segmented { order: 2; width: 100%; border-radius: 20px; }
   .hero { grid-template-columns: minmax(0, 1fr); grid-template-areas: "summary" "now" "gauge" "stats" "agents"; gap: 8px; margin-top: 32px; }
   .summary { padding-bottom: 16px; }
   .summary h2 { font-size: 40px; letter-spacing: -0.035em; }
@@ -561,16 +603,17 @@ button.item { cursor: pointer; }
   .gauge-ring small { font-size: 12.5px; }
   .gauge-label { font-size: 15px; }
   /* Cards keep their 28px corner: their rows sit 12px in, with 16px corners. */
-  .wheel, .gauge, .stat, .tile, .empty { border-radius: 22px; }
+  .wheel, .gauge, .stats, .tile, .empty { border-radius: 22px; }
   .wheel { min-height: 232px; }
-  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .stat { gap: 12px; padding: 16px; }
   .stat:last-child { grid-column: 1 / -1; }
   .stat b { font-size: 40px; }
   .tiles { grid-template-columns: minmax(0, 1fr); gap: 8px; }
   .tile-hint { display: none; }
   .dock { padding: 0 8px 8px; }
-  .card.need { padding: 12px 12px 16px 16px; border-radius: 26px; }
+  .card.need { padding: 16px 16px 20px; border-radius: 26px; }
+  .need-bar .quiet { margin-inline-end: -12px; }
   .need-title { font-size: 20px; }
   .need-icon { width: 40px; height: 40px; }
   .need-who { white-space: normal; overflow-wrap: anywhere; }
@@ -584,7 +627,7 @@ button.item { cursor: pointer; }
   .mini + .chip { margin-inline-start: 0; }
   /* Narrow: the state and Dismiss share a line under the title, and the time and usage go under them. */
   .cmd-head > .quiet { margin-inline-start: auto; }
-  .cmd-meta { order: 1; flex-basis: 100%; margin-inline-start: 32px; }
+  .cmd-meta { order: 1; flex-basis: calc(100% - 32px); margin-inline-start: 32px; }
   .cmd-body { grid-template-columns: minmax(0, 1fr); gap: 16px; padding: 0 12px 12px; }
   /* Narrow, the stage lies on its side above the track. */
   .stage { grid-template-columns: auto 1fr; align-items: center; justify-items: start; gap: 0 16px; width: 100%; padding: 16px; text-align: start; }
@@ -635,8 +678,8 @@ button:focus-visible { outline: 2px solid var(--working); outline-offset: 2px; }
   button.primary:not(:disabled):hover { background: var(--ink); opacity: 0.84; }
   button.quiet:not(:disabled):hover, .cmd-toggle:not(:disabled):hover { background: var(--hover); color: var(--text); }
   button.link:not(:disabled):hover { background: none; text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 4px; }
-  .segmented button:not([aria-pressed="true"]):hover { background: transparent; color: var(--text); }
-  .segmented button[aria-pressed="true"]:hover { background: var(--ink); }
+  .projects button:not([aria-pressed="true"]):hover { background: var(--hover); color: var(--text); }
+  .projects button[aria-pressed="true"]:hover { background: var(--surface); }
   /* Hover arrives quickly and leaves at the usual pace, so the pointer feels answered without the board flickering. */
   button:not(:disabled):hover { transition-duration: 60ms; }
   button.item:not(:disabled):hover { background: color-mix(in oklch, var(--tint, var(--sunken)), var(--text) 5%); }
@@ -664,7 +707,9 @@ button:focus-visible { outline: 2px solid var(--working); outline-offset: 2px; }
 .callout .actions button:not(.primary) { border-color: transparent; background: oklch(from var(--ink) l c h / 0.08); }
 @media (hover: hover) { .callout .actions button:not(.primary, :disabled):hover { background: oklch(from var(--ink) l c h / 0.13); } }
 /* A pressed answer is on its way: the button says so until the request is gone. */
-.callout button:disabled { opacity: 0.7; padding-inline-end: 40px; }
+/* An answer on its way stays as the record: the pressed one keeps its look with a spinner, the others go quiet. */
+.callout button:disabled { padding-inline-end: 40px; }
+.callout .actions:has(button:disabled) > button:not(:disabled) { opacity: 0.45; pointer-events: none; }
 .callout button:disabled::after { content: ""; position: absolute; inset: 50% 16px auto auto; width: 14px; height: 14px; margin-top: -7px; border-radius: 50%; border: 2px solid currentColor; border-inline-end-color: transparent; }
 @media (prefers-reduced-motion: no-preference) { .callout button:disabled::after { animation: spin 700ms linear infinite; } }
 /*
@@ -708,7 +753,17 @@ textarea:focus-visible, input:focus-visible, select:focus-visible { outline: 2px
 
 /* --- Activity --- */
 .feed { min-width: 0; view-transition-name: feed; }
-.feed h2 { font-size: 24px; font-weight: 500; letter-spacing: -0.02em; line-height: 1.2; padding: 0 8px 16px; }
+.feed-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "title pulse" "read pulse"; align-items: end; column-gap: 16px; padding: 0 8px 16px; }
+.feed h2 { grid-area: title; font-size: 24px; font-weight: 500; letter-spacing: -0.02em; line-height: 1.2; }
+/* The readout: the hour's count, or the stretch under the pointer. */
+.pulse-read { grid-area: read; margin-top: 2px; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pulse-read[data-pointed] { color: var(--text); }
+.pulse { grid-area: pulse; display: flex; align-items: flex-end; gap: 3px; height: 32px; }
+/* Bars of one width with round tops; an empty stretch is a short stub, so the hour keeps its rhythm. */
+.pulse i { width: 6px; height: max(4px, calc(var(--h, 0) * 100%)); border-radius: 3px; background: var(--rail); transition: height var(--dur-move) var(--ease), background-color var(--dur-press) ease-out; }
+.pulse i:last-child { background: var(--muted); }
+.pulse i[data-empty] { background: var(--line); }
+@media (hover: hover) { .pulse i:hover { background: var(--ink); } }
 .feed-list { display: grid; align-content: start; }
 .feed > .feed-list { border-radius: var(--radius-tile); background: var(--surface); box-shadow: var(--shadow); }
 .feed > .feed-list:empty { display: none; }
@@ -737,6 +792,13 @@ body[data-loading] :is(.stat .mark, .tile .chip, .agent-well, .ring-fill, .now-e
 @media (prefers-reduced-motion: no-preference) {
   body[data-loading] :is(.eyebrow, .summary h2, .lede, .stat b, .tile-label, .tile-value, .tile-hint, .gauge-ring b, .gauge-label) { animation: shimmer 1.6s ease-in-out infinite; }
 }
+@media (prefers-reduced-motion: no-preference) {
+  body[data-resolving] :is(.eyebrow, .summary h2, .lede, .stat b, .tile-head, .tile-hint, .gauge-ring b, .gauge-label) { animation: fade var(--dur-base) var(--ease) backwards; animation-delay: calc(var(--i, 0) * 70ms); }
+  body[data-resolving] .summary h2 { --i: 1; }
+  body[data-resolving] :is(.lede, .gauge-ring b, .gauge-label) { --i: 2; }
+  body[data-resolving] .stat b { --i: 3; }
+  body[data-resolving] :is(.tile-head, .tile-hint) { --i: 4; }
+}
 @keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
 
 /* One-shot entrances. The page assembles itself once, top to bottom; later arrivals rise into place. */
@@ -750,14 +812,10 @@ body[data-loading] :is(.stat .mark, .tile .chip, .agent-well, .ring-fill, .now-e
    * Short, because the board is opened often. The agent tiles are redrawn whole when an agent changes,
    * so their list rises, not each tile, which would rise again on every redraw.
    */
-  .summary, .gauge, .wheel, .stat, .tiles, .group, .feed { animation: rise var(--dur-move) var(--ease) backwards; }
+  .summary, .gauge, .wheel, .stats, .tiles, .group, .feed { animation: rise var(--dur-move) var(--ease) backwards; }
   .gauge { animation-delay: 40ms; }
   .wheel { animation-delay: 80ms; }
-  .stat:nth-child(1) { animation-delay: 120ms; }
-  .stat:nth-child(2) { animation-delay: 140ms; }
-  .stat:nth-child(3) { animation-delay: 160ms; }
-  .stat:nth-child(4) { animation-delay: 180ms; }
-  .stat:nth-child(5) { animation-delay: 200ms; }
+  .stats { animation-delay: 120ms; }
   .tiles { animation-delay: 240ms; }
   .group, .feed { animation-delay: 280ms; }
   .ready .card.enter { animation: rise var(--dur-move) var(--ease) backwards; }

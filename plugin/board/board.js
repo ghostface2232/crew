@@ -316,16 +316,22 @@ function activeProject() {
   return knownProjects().includes(project) ? project : '';
 }
 
+/**
+ * The projects as a panel down the side, one row each, since there may come to be many. A row says what
+ * waits on the user there, or else how much is running. With one project there is nothing to choose between.
+ */
 function renderProjects(dirs, names) {
-  const el = document.getElementById('projects');
-  // With one project there is nothing to choose between.
-  el.hidden = dirs.length < 2;
+  document.getElementById('side').hidden = dirs.length < 2;
   const current = activeProject();
-  const waiting = (dir) => [...jobs.values(), ...sessions.values()].filter((item) => isWaiting(item) && (!dir || projectOf(item) === dir)).length;
-  patch(el, [['', 'All'], ...dirs.map((dir) => [dir, names.get(dir)])]
+  const mine = (dir) => (item) => !dir || projectOf(item) === dir;
+  const waiting = (dir) => [...jobs.values(), ...sessions.values()].filter((item) => isWaiting(item) && mine(dir)(item)).length;
+  const running = (dir) => [...jobs.values()].filter((job) => !job.endedAt && mine(dir)(job)).length + [...sessions.values()].filter((s) => s.state !== 'idle' && mine(dir)(s)).length;
+  patch(document.getElementById('projects'), [['', 'All projects'], ...dirs.map((dir) => [dir, names.get(dir)])]
     .map(([dir, name]) => {
       const count = waiting(dir);
-      return `<button data-project="${esc(dir)}" aria-pressed="${dir === current}" title="${esc(dir || 'Every project')}">${esc(name)}${count ? `<span class="count" title="${count} waiting on you">${count}</span>` : ''}</button>`;
+      const busy = running(dir);
+      const tail = count ? `<span class="count" title="${count} waiting on you">${count}</span>` : busy ? `<span class="busy" title="${busy} running">${busy}</span>` : '';
+      return `<button data-project="${esc(dir)}" aria-pressed="${dir === current}" title="${esc(dir || 'Every project')}"><span class="name">${esc(name)}</span>${tail}</button>`;
     })
     .join(''));
 }
@@ -734,7 +740,52 @@ function renderFeed() {
     li.innerHTML = eventRow(event);
     return li;
   }));
+  renderPulse();
 }
+
+const PULSE_BINS = 12;
+const PULSE_SPAN = 5 * 60_000;
+let pulseBins = [];
+
+/**
+ * The last hour of activity as twelve five-minute bars beside the feed's heading. The heading's own
+ * line is the readout: pointing at a bar says that stretch's count there, instead of in a tooltip.
+ */
+function renderPulse() {
+  const end = Date.now() + clockSkew;
+  pulseBins = Array.from({ length: PULSE_BINS }, (_, i) => ({ from: end - (PULSE_BINS - i) * PULSE_SPAN, n: 0 }));
+  for (const event of events) {
+    if (!inProject(event)) continue;
+    const i = PULSE_BINS - 1 - Math.floor((end - Date.parse(event.ts)) / PULSE_SPAN);
+    if (i >= 0 && i < PULSE_BINS) pulseBins[i].n += 1;
+  }
+  const top = Math.max(1, ...pulseBins.map((bin) => bin.n));
+  const el = document.getElementById('pulse');
+  if (el.children.length !== PULSE_BINS) el.innerHTML = pulseBins.map((_, i) => `<i data-bin="${i}"></i>`).join('');
+  pulseBins.forEach((bin, i) => {
+    el.children[i].style.setProperty('--h', bin.n / top);
+    el.children[i].toggleAttribute('data-empty', !bin.n);
+  });
+  pulseRead();
+}
+
+function pulseRead(i) {
+  const read = document.getElementById('pulse-read');
+  const clock = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+  const total = pulseBins.reduce((sum, bin) => sum + bin.n, 0);
+  read.textContent = i === undefined
+    ? `${total} in the last hour`
+    : `${pulseBins[i].n} at ${clock(pulseBins[i].from)}–${clock(pulseBins[i].from + PULSE_SPAN)}`;
+  read.toggleAttribute('data-pointed', i !== undefined);
+}
+document.addEventListener('pointerover', (e) => {
+  const bar = e.target.closest?.('#pulse i');
+  if (bar) pulseRead(Number(bar.dataset.bin));
+});
+document.addEventListener('pointerout', (e) => {
+  if (e.target.closest?.('#pulse') && !e.relatedTarget?.closest?.('#pulse')) pulseRead();
+});
+setInterval(() => { if (!document.hidden) renderPulse(); }, 60_000);
 
 function addEvent(event) {
   events.push(event);
@@ -750,6 +801,7 @@ function addEvent(event) {
   li.innerHTML = eventRow(event);
   feed.prepend(li);
   while (feed.children.length > FEED_SHOWN) feed.lastElementChild.remove();
+  renderPulse();
 }
 
 async function call(route, body) {
@@ -1151,7 +1203,12 @@ stream.addEventListener('state', (e) => {
   events = state.events;
   render();
   renderFeed();
-  document.body.removeAttribute('data-loading');
+  if (document.body.hasAttribute('data-loading')) {
+    // The placeholders give way to their figures in reading order, once.
+    document.body.removeAttribute('data-loading');
+    document.body.setAttribute('data-resolving', '');
+    setTimeout(() => document.body.removeAttribute('data-resolving'), 900);
+  }
   // After a reconnect the open job may have moved on; on first load the address may name one to open.
   const wanted = openJob?.id ?? location.hash.slice(1);
   if (wanted && jobs.has(wanted)) openDrawer(wanted, Boolean(openJob));

@@ -8,9 +8,14 @@
 <link rel="stylesheet" href="/board.css">
 </head>
 <body data-loading>
+<aside id="side" class="side" aria-labelledby="side-title" hidden>
+  <p id="side-title" class="side-title">Projects</p>
+  <div id="projects" class="projects" role="group" aria-labelledby="side-title"></div>
+</aside>
+
+<div class="main">
 <header class="top">
   <h1><i class="logo" aria-hidden="true"></i>Crew</h1>
-  <div id="projects" class="segmented" role="group" aria-label="Project" hidden></div>
   <p id="connection" class="connection" role="status">Connecting…</p>
   <button id="open-settings">Settings</button>
 </header>
@@ -35,10 +40,16 @@
   </main>
 
   <section class="feed" aria-labelledby="feed-title">
-    <h2 id="feed-title">Activity</h2>
+    <div class="feed-head">
+      <h2 id="feed-title">Activity</h2>
+      <p id="pulse-read" class="pulse-read"></p>
+      <div id="pulse" class="pulse" aria-hidden="true"></div>
+    </div>
     <ol id="feed" class="feed-list"></ol>
     <p id="feed-empty" class="empty">Nothing has happened yet.</p>
   </section>
+</div>
+
 </div>
 
 <section id="dock" class="dock" aria-label="Needs you" hidden>

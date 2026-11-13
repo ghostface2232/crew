@@ -338,7 +338,13 @@ test('Codex runs an app job with network access and reports what its reviewer re
   await ended();
 
   const seen = fs.readFileSync(path.join(home, 'seen.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line).params);
-  assert.deepEqual(seen[0].config.sandbox_workspace_write, { network_access: true });
+  // An app job is a profile, not a sandbox mode: what workspace-write with the network allowed, minus the daemon's secret.
+  assert.equal(seen[0].sandbox, null);
+  assert.equal(seen[0].config.default_permissions, 'crew_app');
+  assert.deepEqual(seen[0].config.permissions.crew_app.network, { enabled: true });
+  const files = seen[0].config.permissions.crew_app.filesystem;
+  assert.deepEqual([files[':root'], files[job.cwd], files[':tmpdir'], files[':slash_tmp']], ['read', 'write', 'write', 'write']);
+  assert.deepEqual(Object.entries(files).filter(([, access]) => access === 'deny').map(([file]) => path.basename(file)), ['token']);
   const crew = seen[0].config.mcp_servers.crew;
   assert.equal(crew.command, process.execPath);
   assert.equal(crew.args[0], path.resolve('plugin/bridge/worker-mcp.ts'));

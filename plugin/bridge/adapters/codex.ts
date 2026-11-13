@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
-import { agentEnv, VERSION } from '../config.ts';
+import { tokenFile } from '../auth.ts';
+import { agentEnv, HOME, VERSION } from '../config.ts';
 import type { Config } from '../config.ts';
 import { isTerminal } from '../jobs.ts';
 import type { Adapter, Job, JobCtl } from '../jobs.ts';
@@ -133,21 +134,30 @@ export class CodexAdapter implements Adapter {
   private threadParams(ctl: JobCtl) {
     const { job } = ctl;
     // Read-only with one writable directory is not a sandbox mode; it is a permissions profile, which replaces the mode.
+    // Either profile also denies the daemon's token file. A job with the network open could otherwise read it and
+    // call the daemon as the user; a job with neither profile has no network to use it with.
+    const secret = { [tokenFile(HOME)]: 'deny' };
     const scratch = job.sandbox === 'read-only' && job.scratch
       ? {
           default_permissions: 'crew_read_only',
-          permissions: { crew_read_only: { filesystem: { ':root': 'read', [job.scratch]: 'write' } } },
+          permissions: { crew_read_only: { filesystem: { ':root': 'read', [job.scratch]: 'write', ...secret } } },
           shell_environment_policy: { set: { TMPDIR: job.scratch } },
+        }
+      : null;
+    // What "workspace-write" with network access allowed, spelled out so that one file can be excepted.
+    const app = job.runsApp && job.sandbox === 'workspace-write'
+      ? {
+          default_permissions: 'crew_app',
+          permissions: { crew_app: { filesystem: { ':root': 'read', [job.cwd]: 'write', ':tmpdir': 'write', ':slash_tmp': 'write', ...secret }, network: { enabled: true } } },
         }
       : null;
     return {
       cwd: job.cwd,
-      sandbox: scratch ? null : job.sandbox,
+      sandbox: scratch || app ? null : job.sandbox,
       // A read-only job (a static review, a question) must never block on a prompt, and has nothing to approve.
       approvalPolicy: job.sandbox === 'read-only' ? 'never' : this.config.codex.approvalPolicy,
       approvalsReviewer: this.reviewer(job),
-      // Without network access the sandbox refuses to bind even a local port.
-      config: { ...(job.runsApp ? { sandbox_workspace_write: { network_access: true } } : scratch), // Its three tools only talk to the bridge. Without this a job with approval policy "never" (a review, a question)
+      config: { ...(app ?? scratch), // Its three tools only talk to the bridge. Without this a job with approval policy "never" (a review, a question)
       // is refused the call outright, and any other job would stop to ask.
       mcp_servers: { crew: { ...ctl.mcp, default_tools_approval_mode: 'approve' } } },
       developerInstructions: job.instructions,

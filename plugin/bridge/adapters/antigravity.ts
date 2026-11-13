@@ -1,6 +1,8 @@
 import { spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
-import { agentEnv, VERSION } from '../config.ts';
+import path from 'node:path';
+import { tokenFile } from '../auth.ts';
+import { agentEnv, HOME, VERSION } from '../config.ts';
 import type { Config } from '../config.ts';
 import { isTerminal } from '../jobs.ts';
 import type { Adapter, JobCtl, JobKind } from '../jobs.ts';
@@ -290,6 +292,9 @@ export function decide(role: JobKind, cwd: string, toolCall: { kind?: string; lo
   // ACP leaves MCP tool identity to agent metadata; this path is unverified with agy.
   if (toolCall._meta?.mcpServerName === 'crew' && ['ask_lead', 'lead_answers', 'siblings'].includes(toolCall._meta.mcpToolName ?? '')) return 'allow';
   const kind = toolCall.kind ?? 'other';
+  // The daemon's secret is not a worker's to read, whatever the role. Commands are the user's to approve as before.
+  const secret = tokenFile(HOME);
+  if ((toolCall.locations ?? []).some((l) => l.path && path.resolve(l.path) === secret)) return { refuse: 'the Crew token file' };
   if (PASSIVE_KINDS.includes(kind)) return 'allow';
   if (kind === 'switch_mode') return { refuse: kind };
   if (readOnly && role !== 'review') return { refuse: kind === 'edit' ? 'edit in a read-only job' : kind };

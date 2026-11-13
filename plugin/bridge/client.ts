@@ -1,15 +1,23 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { readToken, tokenFile } from './auth.ts';
 import { agentEnv, BASE_URL, HOME, installed, PLUGIN_ROOT } from './config.ts';
 
 export async function api<T = any>(method: 'GET' | 'POST', route: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${BASE_URL}${route}`, {
+  const send = (token: string | null) => fetch(`${BASE_URL}${route}`, {
     method,
-    headers: body === undefined ? undefined : { 'content-type': 'application/json' },
+    headers: { ...(body === undefined ? {} : { 'content-type': 'application/json' }), ...(token ? { authorization: `Bearer ${token}` } : {}) },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
+  let res = await send(readToken(HOME));
+  // The daemon makes the token file on its first start, which may be a moment after this process first looked.
+  if (res.status === 401) {
+    await new Promise((r) => setTimeout(r, 200));
+    res = await send(readToken(HOME));
+  }
   const data: any = await res.json();
+  if (res.status === 401) throw new Error(`The Crew daemon refused this request: ${tokenFile(HOME)} is missing or is not the running daemon's. Restart the daemon with \`crew daemon restart\`.`);
   if (!res.ok) throw new Error(data.error ?? `bridge returned ${res.status}`);
   return data;
 }

@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { api, ensureDaemon, health } from './client.ts';
+import { boardUrl, readToken } from './auth.ts';
 import { agentEnv, BASE_URL, HOME, installed, loadConfig, PLUGIN_ROOT, VERSION } from './config.ts';
 import { describe, summarize } from './render.ts';
 import type { JobView } from './render.ts';
@@ -14,7 +15,7 @@ Usage:
   crew status            What each agent is doing, and recent jobs
   crew show <job>        Full result of one job
   crew cancel <job>      Stop a running job
-  crew board             Open the status board in the browser
+  crew board             Open the status board in the browser, signed in (--url prints the address instead)
   crew doctor            Check that everything Crew needs is in place
   crew install           Register the plugin with Claude Code and put crew on PATH
   crew daemon <start|stop|restart|logs>
@@ -119,7 +120,13 @@ try {
       break;
     case 'board':
       await ensureDaemon();
-      spawn('open', [BASE_URL], { stdio: 'ignore', detached: true }).unref();
+      // The address carries the secret in its fragment so the page can sign in. It is printed only when asked for,
+      // for a caller that opens the page itself.
+      if (process.argv.includes('--url')) {
+        console.log(boardUrl(BASE_URL, readToken(HOME)));
+        break;
+      }
+      spawn('open', [boardUrl(BASE_URL, readToken(HOME))], { stdio: 'ignore', detached: true }).unref();
       console.log(BASE_URL);
       break;
     case 'doctor':

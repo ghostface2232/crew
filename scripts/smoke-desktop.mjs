@@ -19,6 +19,8 @@ const env = { ...process.env, PATH: '/usr/bin:/bin:/usr/sbin:/sbin', CREW_HOME: 
 delete env.CREW_ATTACH_ONLY;
 const base = `http://127.0.0.1:${port}`;
 const health = async () => (await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(1000) })).json();
+// Everything but health needs the secret the daemon wrote on its first start.
+const auth = () => ({ authorization: `Bearer ${fs.readFileSync(path.join(home, 'token'), 'utf8').trim()}` });
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const waitFor = async (check, label) => {
   for (let i = 0; i < 100; i++) { if (await check()) return; await sleep(100); }
@@ -48,10 +50,11 @@ try {
   daemonPID = (await health()).pid;
   const startupMs = Math.round(performance.now() - start);
   assert.equal((await health()).name, 'crew');
-  const state = await (await fetch(`${base}/api/state`)).json();
+  assert.equal((await fetch(`${base}/api/state`)).status, 401, 'state needs the secret');
+  const state = await (await fetch(`${base}/api/state`, { headers: auth() })).json();
   assert.ok(Array.isArray(state.jobs));
   const lease = async (body) => (await fetch(`${base}/api/desktop/heartbeat`, {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+    method: 'POST', headers: { 'content-type': 'application/json', ...auth() }, body: JSON.stringify(body),
   })).json();
   assert.equal((await lease({ handlesCompletion: true })).completionNotifications, true);
   assert.equal((await lease({})).completionNotifications, false, 'legacy clients leave completion notifications with the daemon');
@@ -77,7 +80,7 @@ try {
 } finally {
   for (const child of children) await stop(child);
   if (daemonPID) {
-    await fetch(`${base}/api/shutdown`, { method: 'POST', body: '{}', headers: { 'content-type': 'application/json' } }).catch(() => {});
+    await fetch(`${base}/api/shutdown`, { method: 'POST', body: '{}', headers: { 'content-type': 'application/json', ...auth() } }).catch(() => {});
     await waitFor(async () => !(await health().catch(() => null)), 'test daemon shutdown').catch(() => {});
   }
   fs.rmSync(home, { recursive: true, force: true });

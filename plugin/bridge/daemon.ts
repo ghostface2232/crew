@@ -4,6 +4,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { boardAsset, BOARD_CSP } from './assets.ts';
+import { ensureToken, sameToken, SESSION_COOKIE } from './auth.ts';
 import { AntigravityAdapter } from './adapters/antigravity.ts';
 import { CodexAdapter } from './adapters/codex.ts';
 import { ClaudeSessions } from './claude.ts';
@@ -231,11 +232,45 @@ function guard(req: http.IncomingMessage): void {
   if (origin && !hosts.some((h) => origin === `http://${h}`)) throw new HttpError(403, 'forbidden origin');
 }
 
+const TOKEN = ensureToken(HOME);
+
+/**
+ * Host and Origin keep web pages out; they do not tell the user's own programs from any other local
+ * process. The secret does: a header from programs that read the token file, a cookie from the board.
+ */
+function signedIn(req: http.IncomingMessage): boolean {
+  const header = req.headers.authorization;
+  if (header?.startsWith('Bearer ') && sameToken(header.slice(7), TOKEN)) return true;
+  for (const part of (req.headers.cookie ?? '').split(';')) {
+    const [name, ...value] = part.trim().split('=');
+    if (name === SESSION_COOKIE && sameToken(value.join('='), TOKEN)) return true;
+  }
+  return false;
+}
+
+/** What answers without the secret; docs/09-usage-presets-rounds.md section 12 says why for each. */
+function isOpen(method: string, pathname: string): boolean {
+  if (method === 'GET') return pathname === '/api/health' || !pathname.startsWith('/api/');
+  if (method !== 'POST') return false;
+  return pathname === '/api/hooks/claude' || pathname === '/api/session';
+}
+
+/** Routes a worker's own MCP server calls; they are checked against the job's token, not the user's secret. */
+const WORKER_ROUTE = /^\/api\/jobs\/[\w-]+\/(?:questions|siblings)$/;
+
 async function route(req: http.IncomingMessage, res: http.ServerResponse): Promise<unknown> {
   guard(req);
   const url = new URL(req.url ?? '/', `http://127.0.0.1:${PORT}`);
   const { pathname } = url;
   const method = req.method ?? 'GET';
+  if (!isOpen(method, pathname) && !WORKER_ROUTE.test(pathname) && !signedIn(req)) throw new HttpError(401, 'unauthorized');
+
+  if (method === 'POST' && pathname === '/api/session') {
+    if (!sameToken((await readJson(req)).token, TOKEN)) throw new HttpError(401, 'unauthorized');
+    // HttpOnly keeps it from page scripts, SameSite from other sites; it lasts as long as the token file does.
+    res.setHeader('set-cookie', `${SESSION_COOKIE}=${TOKEN}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000`);
+    return {};
+  }
 
   if (method === 'GET') {
     const asset = boardAsset(PLUGIN_ROOT, pathname);

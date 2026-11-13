@@ -74,3 +74,15 @@ test('versions compare numerically', () => {
   assert.equal(isNewer('0.1.0', '0.2.0'), false);
   assert.equal(isNewer('1.0', '0.9.9'), true);
 });
+
+test('Antigravity is refused the daemon token file, whatever the role or the kind of call', async () => {
+  const { tokenFile } = await import('../plugin/bridge/auth.ts');
+  const { HOME } = await import('../plugin/bridge/config.ts');
+  const secret = tokenFile(HOME);
+  for (const role of ['delegate', 'review', 'polish'] as const) {
+    for (const kind of ['read', 'search', 'edit', 'execute']) {
+      assert.deepEqual(decide(role, path.dirname(secret), { kind, locations: [{ path: secret }], rawInput: { command: 'x' } }), { refuse: 'the Crew token file' }, `${role} ${kind}`);
+    }
+  }
+  assert.equal(decide('delegate', path.dirname(secret), { kind: 'read', locations: [{ path: path.join(path.dirname(secret), 'config.json') }] }), 'allow');
+});

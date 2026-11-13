@@ -199,8 +199,10 @@ async function daemon(t: TestContext) {
     child.stderr.on('data', (chunk) => reject(new Error(String(chunk))));
     child.once('exit', (code) => reject(new Error(`daemon exited ${code}`)));
   });
-  const api = async (method: string, route: string, body?: unknown, headers = {}) => {
-    const res = await fetch(`http://127.0.0.1:${port}${route}`, { method, headers: { 'content-type': 'application/json', ...headers }, body: body === undefined ? undefined : JSON.stringify(body) });
+  // The lead's side of every request carries the secret the daemon wrote when it started; `headers` can take it away.
+  const secret = fs.readFileSync(path.join(home, 'token'), 'utf8').trim();
+  const api = async (method: string, route: string, body?: unknown, headers: Record<string, string> = {}) => {
+    const res = await fetch(`http://127.0.0.1:${port}${route}`, { method, headers: { 'content-type': 'application/json', authorization: `Bearer ${secret}`, ...headers }, body: body === undefined ? undefined : JSON.stringify(body) });
     return { status: res.status, body: await res.json() as any };
   };
   const create = async () => {
@@ -216,7 +218,7 @@ async function daemon(t: TestContext) {
     });
     request.on('error', reject);
   });
-  return { home, env, api, create, hostStatus };
+  return { home, env, api, create, hostStatus, port, secret };
 }
 
 const textOf = (result: any): string => {
@@ -357,4 +359,38 @@ test('wake reports a running question and never wakes again for progress on the 
   const newUpdate = await next;
   assert.equal(newUpdate.code, 2);
   assert.ok(newUpdate.stderr.includes(second.id));
+});
+
+test('the daemon answers only requests that carry its secret, as a header or as the board cookie', { timeout: 15000 }, async (t) => {
+  const h = await daemon(t);
+  const none = { authorization: '' };
+  assert.equal(fs.statSync(path.join(h.home, 'token')).mode & 0o777, 0o600);
+  assert.match(h.secret, /^[0-9a-f]{64}$/);
+
+  // Open without it: finding the daemon, the page itself, Claude's hooks.
+  assert.equal((await h.api('GET', '/api/health', undefined, none)).status, 200);
+  assert.equal((await h.api('POST', '/api/hooks/claude', { hook_event_name: 'Stop', session_id: 's' }, none)).status, 200);
+  // Everything else is refused, read or write, and refused work leaves nothing behind.
+  for (const [method, route, body] of [['GET', '/api/state'], ['GET', '/api/usage'], ['GET', '/api/instructions'], ['POST', '/api/jobs', { kind: 'delegate', cwd: h.home, task: 'x', isolation: 'in_place' }], ['POST', '/api/preset', { preset: 'best' }], ['POST', '/api/shutdown', {}]] as const) {
+    assert.deepEqual(await h.api(method, route, body, none), { status: 401, body: { error: 'unauthorized' } }, `${method} ${route}`);
+    assert.equal((await h.api(method, route, body, { authorization: 'Bearer wrong' })).status, 401);
+  }
+  assert.deepEqual((await h.api('GET', '/api/state')).body.jobs, []);
+  const stream = await fetch(`http://127.0.0.1:${h.port}/api/stream`);
+  assert.equal(stream.status, 401);
+
+  // The lead's answer route needs the secret too: a worker with the network open cannot answer as the lead.
+  const { job, server } = await h.create();
+  const question = (await h.api('POST', `/api/jobs/${job.id}/questions`, { text: 'which?', token: server.env.CREW_JOB_TOKEN }, none)).body;
+  assert.equal((await h.api('POST', `/api/jobs/${job.id}/questions/${question.id}`, { answer: 'forged' }, none)).status, 401);
+  assert.equal((await h.api('POST', `/api/jobs/${job.id}/questions/${question.id}`, { answer: 'real' })).status, 200);
+
+  // The board signs in with the token once and holds a cookie after that.
+  assert.equal((await h.api('POST', '/api/session', { token: 'wrong' }, none)).status, 401);
+  const signIn = await fetch(`http://127.0.0.1:${h.port}/api/session`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: h.secret }) });
+  assert.equal(signIn.status, 200);
+  const cookie = signIn.headers.get('set-cookie')!;
+  assert.match(cookie, /^crew_session=[0-9a-f]{64}; Path=\/; HttpOnly; SameSite=Strict; Max-Age=\d+$/);
+  assert.equal((await h.api('GET', '/api/state', undefined, { authorization: '', cookie: cookie.split(';')[0] })).status, 200);
+  assert.equal((await h.api('GET', '/api/state', undefined, { authorization: '', cookie: 'crew_session=wrong' })).status, 401);
 });

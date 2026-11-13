@@ -6,6 +6,12 @@ export const STAGES = ['plan', 'implement', 'self-review', 'cross-review', 'fix'
 export type Stage = (typeof STAGES)[number];
 export type MissionState = 'active' | 'done' | 'abandoned';
 
+/** Information the user pinned to a mission from the board; it starts no work. */
+export interface MissionNote {
+  text: string;
+  at: number;
+}
+
 export interface Mission {
   id: string;
   title: string;
@@ -16,6 +22,8 @@ export interface Mission {
   stage: Stage;
   state: MissionState;
   outcome: string;
+  /** Oldest first; absent on missions without any. */
+  notes?: MissionNote[];
   createdAt: number;
   updatedAt: number;
   endedAt: number | null;

@@ -55,8 +55,27 @@ export interface JobSpec {
    * review runs in a snapshot of the change instead of read-only in the user's tree.
    */
   runsApp?: boolean;
+  /**
+   * The job answers a question and changes nothing: it takes the delegate role's agent, runs read-only in the
+   * caller's directory with no worktree, and its report is the answer.
+   */
+  ask?: boolean;
   /** Lines the caller wants shown with the result from the start. */
   notes?: string[];
+}
+
+/** One worker turn that changed files, as its own commit on the job branch. */
+export interface Round {
+  turn: number;
+  /** The commit holding this turn's changes. */
+  commit: string;
+  files: string[];
+  stat: string;
+  /** "undone" once the turn's commit has been reverted on the job branch. */
+  state: 'kept' | 'undone';
+  /** The revert commit, when undone. */
+  revert?: string;
+  at: number;
 }
 
 export interface Job {
@@ -78,6 +97,10 @@ export interface Job {
   exclusive?: boolean;
   /** May start the app: network access in the sandbox, and for a review a snapshot worktree. */
   runsApp?: boolean;
+  /** Answers a question read-only; see JobSpec.ask. */
+  ask?: boolean;
+  /** Turns that changed files, oldest first; absent on jobs without a worktree and on jobs saved before rounds existed. */
+  rounds?: Round[];
   /** Actions the agent's automatic reviewer refused, with the turn they were refused in. */
   refusals?: { action: string; reason: string; turn: number }[];
   /** Set while the latest turn is a retry of refused actions: the actions it was sent back with. */

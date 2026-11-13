@@ -53,6 +53,16 @@ export interface RoleAssignment {
   effort?: string;
 }
 
+export type PresetName = 'economy' | 'balanced' | 'best';
+
+/** Model and effort a preset gives each agent, and the model the lead should give its subagents. */
+export interface Preset {
+  codex?: { model?: string; effort?: string };
+  antigravity?: { model?: string };
+  /** Passed by the lead as the model of the subagents it starts; "inherit" leaves them on the lead's model. */
+  subagentModel?: string;
+}
+
 export interface Config {
   /** Seconds of silence from a running worker before it is flagged as possibly stalled. */
   stallSeconds: number;

@@ -127,7 +127,7 @@ A static review or a question runs read-only, and a check that only reads is rar
 | Closed | The network, and listening on a port |
 | Lifetime | Created when a turn starts and moved aside the moment it ends, then deleted; a follow-up turn gets a fresh, empty one |
 
-It uses a Codex permissions profile (`default_permissions` with a `filesystem` table) passed in the thread's config instead of the `read-only` sandbox mode, which cannot exempt a single directory. Checked on 2026-11-13 with Codex CLI 0.167.0 and a real review on an isolated daemon: `mktemp -d`, Node's `mkdtemp`, and a `git clone` plus commit inside the scratch directory succeeded; writing to the repository and to the home directory was refused.
+It uses a Codex permissions profile (`default_permissions` with a `filesystem` table) passed in the thread's config instead of the `read-only` sandbox mode, which cannot exempt a single directory. Checked on 2026-11-13 with Codex CLI 0.167.0 and a real review on an isolated daemon: `mktemp -d`, Node's `mkdtemp`, and a `git clone` plus commit inside the scratch directory succeeded; writing to the repository and to the home directory was refused. Checked again on the same day with a real question after the instructions changed: `mktemp -d`, a `git clone` into `$TMPDIR`, and `node --test test/usage.test.ts` in the clone succeeded; `touch` in the repository and in the home directory was refused.
 
 Antigravity runs no commands as a reviewer, so it gets no scratch directory and is handed the diff as before. A review started with `runs_app` already has a writable snapshot and is unchanged.
 
@@ -196,4 +196,19 @@ Sessions that were already open when the daemon gained authentication hold an MC
 ## 13. What a job's tokens are made of
 
 Where the agent reports it (Codex), a job carries `tokenUse`: total input, how much of it was cached input, output, and what the latest turn added. The lead's status output and both boards show it. A follow-up turn that looks expensive is mostly input the worker had already sent once; the cached share says how much.
+
+## 14. What a worker is told
+
+A job's instructions are its role, the rules for sharing the machine, how to ask the lead, and what its sandbox allows. A worker that cannot run commands (Antigravity as reviewer, editor, or question responder) can start nothing on the machine, so it is not given the machine rules. `test/prompts.test.ts` fixes the instructions for every combination of role, agent, `runs_app`, `exclusive`, and scratch directory in a snapshot, and checks that no two parts contradict each other, such as a role that may write nothing next to a note on where to write. Regenerate the snapshot with `node --test --test-update-snapshots test/prompts.test.ts` and read its diff as a wording change.
+
+Codex adds the user's own setup to every thread: the skills under `~/.agents/skills` and those of installed plugins, app connectors, and recommended plugins. No Crew job uses them, so each thread is started with `skills.include_instructions = false` and `features.apps`, `features.plugins`, and `features.tool_suggest` off. MCP servers the user configured in `~/.codex/config.toml` are kept: they are named by the user, and each is one line in the deferred tool list.
+
+Measured on 2026-11-13 with Codex CLI 0.167.0 on an isolated daemon, with a question that runs nothing and answers "OK":
+
+| | Input tokens | Cached input |
+| --- | --- | --- |
+| Before | 23,052 | 13,312 |
+| After | 14,723 | 12,032 |
+
+What left the context: a list of 123 skills (design, Figma, Adobe, data analysis, Google Drive, Notion), 22 app connectors in the deferred tool list (Apple Music, Adobe, and others), the list of recommended plugins, and the computer-use REPL's tools.
 

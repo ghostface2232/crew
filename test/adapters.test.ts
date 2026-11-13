@@ -442,6 +442,9 @@ test('Codex merges crew MCP into a read-only permissions profile', { timeout: 50
   assert.equal(config.mcp_servers.crew.env.CREW_JOB_ID, job.id);
   // Codex refuses an MCP call outright under approval policy "never" unless the server's tools are approved in advance.
   assert.equal(config.mcp_servers.crew.default_tools_approval_mode, 'approve');
+  // The user's skills, plugins, and app connectors stay out of the worker's context.
+  assert.deepEqual(config.skills, { include_instructions: false });
+  assert.deepEqual(config.features, { apps: false, plugins: false, tool_suggest: false });
 });
 
 test('Antigravity passes crew MCP on new and restored sessions and permits identified crew calls', { timeout: 5000 }, async (t) => {

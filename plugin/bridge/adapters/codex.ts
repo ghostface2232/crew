@@ -36,6 +36,14 @@ export interface CodexLimits {
 const CREW_TOOLS = ['ask_lead', 'lead_answers', 'siblings', 'search', 'recent_changes'];
 const LIMIT_ERRORS = ['usageLimitExceeded', 'rateLimitExceeded', 'sessionBudgetExceeded'];
 const IDLE_SHUTDOWN_MS = 10 * 60_000;
+/**
+ * The user's own Codex setup brings skills, plugins, and app connectors (design, music, mail) into every thread.
+ * No Crew job uses them, and they cost each turn thousands of input tokens.
+ */
+const LEAN = {
+  skills: { include_instructions: false },
+  features: { apps: false, plugins: false, tool_suggest: false },
+};
 
 /**
  * Drives Codex through `codex app-server` (JSON-RPC over stdio). One server
@@ -159,7 +167,8 @@ export class CodexAdapter implements Adapter {
       approvalsReviewer: this.reviewer(job),
       config: { ...(app ?? scratch), // Its three tools only talk to the bridge. Without this a job with approval policy "never" (a review, a question)
       // is refused the call outright, and any other job would stop to ask.
-      mcp_servers: { crew: { ...ctl.mcp, default_tools_approval_mode: 'approve' } } },
+      mcp_servers: { crew: { ...ctl.mcp, default_tools_approval_mode: 'approve' } },
+      ...LEAN },
       developerInstructions: job.instructions,
       model: job.model ?? this.config.codex.model ?? null,
     };

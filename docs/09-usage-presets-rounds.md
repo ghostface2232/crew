@@ -162,4 +162,4 @@ The worker routes need the job's token, which is made when the job starts, kept 
 
 Checked on 2026-11-13 with Codex CLI 0.167.0 and real jobs on an isolated daemon, as a read-only question and as a writing job in a worktree: the worker asked, the lead's answer arrived through `lead_answers`, and a request with a wrong token was refused. Codex refuses an MCP tool call outright under approval policy `never`, so the server is registered with `default_tools_approval_mode = "approve"`; its tools only talk to the bridge.
 
-Not exercised: Antigravity. The server is passed in ACP's `mcpServers` and its tool calls are allowed by policy, but neither was run against the real `agy`.
+Antigravity CLI 1.5.5 was checked the same way with a polish job: the server passed in ACP's `mcpServers` was started, the worker asked, and it used the lead's answer. Not exercised: restoring an Antigravity session that has the server, and a question from a Codex sub-agent thread.

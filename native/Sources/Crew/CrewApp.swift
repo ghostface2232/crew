@@ -13,7 +13,6 @@ struct CrewApp: App {
             .background(WindowAccessor { delegate.configure($0) })
         }
         .defaultSize(width: 1180, height: 780)
-        .windowStyle(.hiddenTitleBar)
         .commands {
             // View > Show/Hide Sidebar (⌃⌘S), the standard way to toggle it from the keyboard.
             SidebarCommands()
@@ -121,6 +120,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         // that walk never ends inside the toolbar's separate window, which froze the app on search. Crew has no
         // credential fields, so the check is turned off.
         UserDefaults.standard.register(defaults: ["NSAutoFillHeuristicsEnabled": false])
+        // macOS 27 draws the scroll edge effect as a filled band under the toolbar. This AppKit switch restores
+        // the fading blur, so the toolbar does not read as a region of its own. A user's own setting still wins.
+        UserDefaults.standard.register(defaults: ["MPV8": false])
         super.init()
     }
     func applicationDidFinishLaunching(_ notification: Notification) {

@@ -13,7 +13,8 @@ struct BoardView: View {
                 // Narrow enough for the sidebar to be optional; the window adds the sidebar's own minimum when shown.
                 .frame(minWidth: 560)
                 .toolbar { WorkspaceToolbar(store: store) }
-                // Read by the toolbar for its own edge; the scroll view's setting alone left the bar sharp.
+                // The window keeps its standard title bar: a hidden one is transparent, and AppKit then
+                // draws no scroll edge effect under the toolbar at all.
                 .scrollEdgeEffectStyle(.soft, for: .top)
                 // The system search item folds into a button when the toolbar runs out of room.
                 .searchable(text: $store.search, placement: .toolbar, prompt: "Search work")
@@ -42,13 +43,9 @@ struct BoardView: View {
                         else if store.selection == "activity" { activity }
                         else { workspace }
                     }
-                    .padding(.horizontal, 40).padding(.top, 11).padding(.bottom, 40)
+                    .padding(.horizontal, 40).padding(.top, 12).padding(.bottom, 40)
                     .frame(maxWidth: 1280).frame(maxWidth: .infinity)
                 }
-                // The toolbar alone does not give this scroll view its soft edge; a safe area bar does,
-                // and the pocket then covers the toolbar above it. The bar's 1 pt comes out of the top padding.
-                .safeAreaBar(edge: .top, spacing: 0) { Color.clear.frame(height: 1) }
-                .scrollEdgeEffectStyle(.soft, for: .top)
                 .id(store.selection ?? "overview")
                 // A crossfade layers two full pages at once; only the incoming page animates.
                 .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 6)), removal: .identity))

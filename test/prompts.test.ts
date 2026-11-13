@@ -61,7 +61,7 @@ for (const c of cases) {
     }
     // Write here, or write nothing: never both.
     if (has('# What you can run')) {
-      assert.ok(!has('Without one, run only what writes no files') || has('If you were given a directory of your own'));
+      assert.match(text, /if you were given a directory of your own/i, 'the role must allow the writes the scratch note invites');
       assert.ok(!has('You cannot run anything in this role'));
       assert.ok(!has('# Running the app'), 'a writable sandbox is not a scratch directory');
     }

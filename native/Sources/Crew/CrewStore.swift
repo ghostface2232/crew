@@ -30,6 +30,9 @@ struct JobSubmission: Encodable, Sendable {
 @MainActor @Observable
 final class CrewStore {
     var state = BoardState()
+    // Kept apart from `state` so the frequent event and usage updates only redraw the views that show them.
+    var events: [CrewEvent] = []
+    var limits: [String: Usage?] = [:]
     var connected = false
     var connectionMessage = "Connecting to Crew…"
     var revision = 0
@@ -110,14 +113,30 @@ final class CrewStore {
             completionLeases.accept(lease)
         }
     }
+    /// Hands notifications back to the daemon before the app quits.
+    func sendDeparture() async {
+        struct Departure: Encodable, Sendable { var leaving = true }
+        let _: EmptyReply? = try? await api.post("/api/desktop/heartbeat", Departure(), timeout: 1)
+    }
     func ownsCompletion(at timestamp: Double) -> Bool { completionLeases.owns(timestamp) }
     func receive(_ event: ServerEvent, generation attempt: Int? = nil) throws {
         if let attempt, attempt != generation { return }
-        if event.name == "desktopLease" {
+        switch event.name {
+        case "desktopLease":
             completionLeases.accept(try JSONDecoder().decode(DesktopLease.self, from: event.data))
+            return
+        case "event":
+            events = mergeEvents(events, [try JSONDecoder().decode(CrewEvent.self, from: event.data)])
+            return
+        case "limits":
+            limits.merge(try JSONDecoder().decode([String: Usage?].self, from: event.data)) { _, new in new }
+            return
+        default: break
         }
         if let id = try state.receive(event) { jobVersions[id, default: 0] += 1 }
         if event.name == "state" {
+            events = state.events; limits = state.limits
+            state.events = []; state.limits = [:]
             for id in Set(jobVersions.keys).union(state.jobs.map(\.id)) { jobVersions[id, default: 0] += 1 }
             connected = true; connectionMessage = "Connected"
             clockSkew = state.now - Date().timeIntervalSince1970 * 1000

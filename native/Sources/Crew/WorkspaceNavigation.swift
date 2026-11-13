@@ -6,7 +6,7 @@ struct WorkspaceToolbar: ToolbarContent {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some ToolbarContent {
         ToolbarItem(placement: .navigation) {
-            Text("Crew").font(.system(size: 17, weight: .semibold, design: .rounded)).lineLimit(1)
+            Text("Crew").font(Typeface.cardTitle).lineLimit(1)
         }.sharedBackgroundVisibility(.hidden)
         ToolbarItem(placement: .principal) {
             // A segmented picker in the toolbar renders titles only, so the tabs are drawn here to keep their symbols.
@@ -39,7 +39,7 @@ struct WorkspaceToolbar: ToolbarContent {
         } label: {
             Label(title, systemImage: symbol).labelStyle(.titleAndIcon)
                 .foregroundStyle(selected ? .primary : .secondary)
-                .font(.system(size: 12, weight: .medium))
+                .font(Typeface.calloutStrong)
                 // An overlay keeps the tab width fixed when requests come and go.
                 .overlay(alignment: .topTrailing) {
                     if badge > 0 {

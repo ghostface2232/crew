@@ -53,13 +53,13 @@ struct JobDetailView: View {
     }
     @ViewBuilder private func contents(_ job: Job) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(job.title).font(.system(size: 18, weight: .semibold, design: .rounded)).tracking(-0.3).lineSpacing(2).textSelection(.enabled)
-            if job.isActive { Text(job.phase).font(.system(size: 12)).foregroundStyle(.secondary).textSelection(.enabled) }
-            if let failure = job.error { Text(failure.message).font(.system(size: 12)).foregroundStyle(.red).textSelection(.enabled) }
+            Text(job.title).font(Typeface.title).tracking(-0.3).lineSpacing(2).textSelection(.enabled)
+            if job.isActive { Text(job.phase).font(Typeface.callout).foregroundStyle(.secondary).textSelection(.enabled) }
+            if let failure = job.error { Text(failure.message).font(Typeface.callout).foregroundStyle(.red).textSelection(.enabled) }
         }
         if job.state == "waiting" {
             AnswerView(store: store, job: job)
-                .padding(18).background(.orange.opacity(0.06), in: RoundedRectangle(cornerRadius: 20))
+                .card(fill: .orange.opacity(0.06))
         }
         Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
             fact("Agent", [agentName(job.agent), job.model, job.effort.map { "\($0) effort" }].compactMap { $0 }.joined(separator: " · "))
@@ -70,17 +70,17 @@ struct JobDetailView: View {
             if let tokens = job.tokens { fact("Tokens", tokens.formatted()) }
             fact("Turns", String(job.turns))
             if let shared = job.shared, !shared.isEmpty { fact("Instructions", shared.joined(separator: "\n")) }
-        }.font(.system(size: 12)).textSelection(.enabled)
+        }.font(Typeface.callout).textSelection(.enabled)
         if let result = job.result {
             detailSection("Changes", symbol: "arrow.triangle.branch") {
-                Text(result.stat.isEmpty ? "No files changed" : result.stat).font(.system(.callout, design: .monospaced)).textSelection(.enabled)
-                if let commit = result.commit { Text("Commit \(commit)").font(.caption).textSelection(.enabled) }
+                Text(result.stat.isEmpty ? "No files changed" : result.stat).font(Typeface.code).textSelection(.enabled)
+                if let commit = result.commit { Text("Commit \(commit)").font(Typeface.caption).textSelection(.enabled) }
                 ForEach(Array(Set(result.files + result.outOfScope)).sorted(), id: \.self) { file in
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(file).font(.system(.callout, design: .monospaced)).textSelection(.enabled)
+                        Text(file).font(Typeface.code).textSelection(.enabled)
                         if result.outOfScope.contains(file) {
                             Label(result.files.contains(file) ? "Outside the allowed targets" : "Outside the workspace", systemImage: "exclamationmark.triangle")
-                                .font(.caption).foregroundStyle(.red)
+                                .font(Typeface.caption).foregroundStyle(.red)
                         }
                     }
                 }
@@ -93,25 +93,24 @@ struct JobDetailView: View {
         if !refusals.isEmpty {
             detailSection("Automatic review", symbol: "exclamationmark.shield") {
                 ForEach(Array(refusals.enumerated()), id: \.offset) { _, refusal in
-                    Text("\(refusal.action) — \(refusal.reason)").font(.callout).foregroundStyle(.red).textSelection(.enabled)
+                    Text("\(refusal.action) — \(refusal.reason)").font(Typeface.callout).foregroundStyle(.red).textSelection(.enabled)
                 }
-                if job.retrying != nil { Text("Sent back once with your approval.").font(.callout).foregroundStyle(.secondary) }
+                if job.retrying != nil { Text("Sent back once with your approval.").font(Typeface.callout).foregroundStyle(.secondary) }
             }
         }
         if !job.notes.isEmpty {
             detailSection("Notes", symbol: "note.text") {
-                ForEach(Array(job.notes.enumerated()), id: \.offset) { _, note in Text(note).font(.callout).textSelection(.enabled) }
+                ForEach(Array(job.notes.enumerated()), id: \.offset) { _, note in Text(note).font(Typeface.callout).textSelection(.enabled) }
             }
         }
         if !job.report.isEmpty {
             detailSection("Report", symbol: "doc.text") {
-                Text(job.report).font(.body).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                Text(job.report).font(Typeface.body).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
             }
         }
         if job.sessionId != nil && job.state != "waiting" {
             detailSection(job.isActive ? "Steer" : "Follow up", symbol: "bubble.left") {
                 let key = "followup:\(job.id)"
-                Text(job.isActive ? "Add a note to the work in progress." : "Continue with the same agent session.").font(.callout).foregroundStyle(.secondary)
                 MessageEditor(title: "Message to \(agentName(job.agent))", text: Binding(get: { store.drafts[key] ?? "" }, set: { store.drafts[key] = $0 }))
                 Button("Send message", systemImage: "arrow.up") { Task { await store.followUp(job) } }
                     .buttonStyle(.glassProminent)
@@ -120,9 +119,9 @@ struct JobDetailView: View {
             }
         }
         if let prompt = job.prompt, !prompt.isEmpty {
-            DisclosureGroup("Original task") { Text(prompt).font(.callout).textSelection(.enabled).padding(.top, 8) }
+            DisclosureGroup("Original task") { Text(prompt).font(Typeface.callout).textSelection(.enabled).padding(.top, 8) }
         }
-        let combined = mergeEvents(events, store.state.events.filter { $0.job_id == id }, limit: 80)
+        let combined = mergeEvents(events, store.events.filter { $0.job_id == id }, limit: 80)
         if !combined.isEmpty {
             detailSection("Activity", symbol: "list.bullet.rectangle") { EventList(events: combined) { store.openJob($0) } }
         }
@@ -137,9 +136,9 @@ struct JobDetailView: View {
                     Button("Cancel Job", systemImage: "stop.circle", role: .destructive) { Task { await store.cancel(job) } }
                         .disabled(!store.connected || store.actions["cancel:\(id):\(job.turns)"]?.locked == true)
                 }
-            }.font(.system(size: 12))
+            }.font(Typeface.callout)
             ActionMessage(state: store.actions["cancel:\(id):\(job.turns)"])
-            Text(job.id).font(.system(size: 10, design: .monospaced)).foregroundStyle(.tertiary).textSelection(.enabled)
+            Text(job.id).font(Typeface.codeSmall).foregroundStyle(.tertiary).textSelection(.enabled)
         }
     }
     private func fact(_ title: String, _ value: String) -> some View {
@@ -151,7 +150,7 @@ struct JobDetailView: View {
     private func detailSection<Content: View>(_ title: String, symbol: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Divider().padding(.bottom, 4)
-            Label(title, systemImage: symbol).font(.system(size: 13, weight: .semibold))
+            Label(title, systemImage: symbol).font(Typeface.subheadline)
             content()
         }.frame(maxWidth: .infinity, alignment: .leading)
     }

@@ -164,6 +164,12 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
         #expect(state.events.count == 1)
         #expect(state.events[0].detail == "Restarted")
     }
+    @Test func usageWindowWithoutLengthStillDecodes() throws {
+        let wire = #"{"codex":{"windows":[{"minutes":null,"usedPercent":42,"resetsAt":null}]}}"#
+        let limits = try JSONDecoder().decode([String: Usage?].self, from: Data(wire.utf8))
+        #expect(limits["codex"]??.windows?.first?.minutes == nil)
+        #expect(limits["codex"]??.windows?.first?.usedPercent == 42)
+    }
     @Test func eventHistoryDeduplicatesAndStaysBounded() {
         let events = (0..<500).map { CrewEvent(seq: $0, ts: "", agent: "codex", kind: "progress", detail: String($0)) }
         let merged = mergeEvents(Array(events.prefix(350)), Array(events.suffix(200)))

@@ -7,10 +7,7 @@ struct CrewSettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Make Crew yours.").font(.system(size: 28, weight: .semibold, design: .rounded))
-                    Text("Your agents. Your way of working.").font(.callout).foregroundStyle(.secondary)
-                }
+                Text("Settings").font(Typeface.title)
                 Spacer()
                 Picker("Settings section", selection: $tab) {
                     Text("Roles").tag("roles")
@@ -22,9 +19,9 @@ struct CrewSettingsView: View {
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
             HStack(spacing: 12) {
                 if model.loading && tab == "instructions" { ProgressView().controlSize(.small) }
-                Text(tab == "roles" ? model.roleStatus : model.textStatus).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
+                Text(tab == "roles" ? model.roleStatus : model.textStatus).font(Typeface.callout).foregroundStyle(.secondary).textSelection(.enabled)
                 if tab == "roles" ? model.roles != model.savedRoles : model.text != model.savedText {
-                    Text("Unsaved changes").font(.caption).foregroundStyle(.secondary)
+                    Text("Unsaved changes").font(Typeface.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 if tab == "instructions" && !model.loaded && !model.loading {
@@ -48,7 +45,7 @@ struct CrewSettingsView: View {
                     VStack(alignment: .leading, spacing: 16) {
                         HStack(spacing: 10) {
                             AgentMark(agent: model.roles[role]?.agent ?? "codex", size: 23)
-                            Text(roleNames[role]!).font(.system(size: 16, weight: .semibold, design: .rounded))
+                            Text(roleNames[role]!).font(Typeface.cardTitle)
                             Spacer()
                             Picker("Agent for \(roleNames[role]!)", selection: roleBinding(role, \.agent)) {
                                 ForEach(store.state.agents.keys.sorted(), id: \.self) { id in
@@ -58,25 +55,23 @@ struct CrewSettingsView: View {
                         }
                         HStack(spacing: 20) {
                             VStack(alignment: .leading, spacing: 6) {
-                                Text("Model").font(.caption).foregroundStyle(.secondary)
+                                Text("Model").font(Typeface.caption).foregroundStyle(.secondary)
                                 TextField("Agent default", text: optionalRoleBinding(role, \.model)).accessibilityLabel("\(roleNames[role]!) model")
                             }
                             VStack(alignment: .leading, spacing: 6) {
-                                Text("Reasoning effort").font(.caption).foregroundStyle(.secondary)
+                                Text("Reasoning effort").font(Typeface.caption).foregroundStyle(.secondary)
                                 TextField("Agent default", text: optionalRoleBinding(role, \.effort)).accessibilityLabel("\(roleNames[role]!) reasoning effort")
                             }
                         }.textFieldStyle(.roundedBorder)
-                    }.padding(18).background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: 18))
+                    }.card()
                 }
-                Text("Changes apply to the next job. Empty fields use the agent’s defaults.")
-                    .font(.caption).foregroundStyle(.secondary).padding(.top, 4)
             }.padding(.horizontal, 26)
         }
     }
     private var instructions: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text("Shared instructions").font(WorkspaceStyle.section)
+                Text("Shared instructions").font(Typeface.section)
                 Spacer()
                 Picker("Applies to", selection: Binding(get: { model.scope }, set: changeScope)) {
                     Text("Every project").tag("")
@@ -84,14 +79,14 @@ struct CrewSettingsView: View {
                 }.frame(maxWidth: 250).disabled(model.savingText)
             }
             Text("Given to every agent with its next job and to Claude sessions when they start.")
-                .font(.callout).foregroundStyle(.secondary)
-            TextEditor(text: $model.text).font(.system(.body, design: .monospaced))
+                .font(Typeface.callout).foregroundStyle(.secondary)
+            TextEditor(text: $model.text).font(Typeface.code)
                 .scrollContentBackground(.hidden).padding(14)
-                .background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: 16))
-                .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.primary.opacity(0.08)))
+                .background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: WorkspaceStyle.fieldRadius))
+                .overlay(RoundedRectangle(cornerRadius: WorkspaceStyle.fieldRadius).strokeBorder(WorkspaceStyle.hairline))
                 .accessibilityLabel("Shared instructions").disabled(!model.loaded)
-            Text(model.file).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
-            if model.text.count > 9000 { Label("Claude sessions will be pointed to this file because it is longer than 9,000 characters.", systemImage: "info.circle").font(.callout).foregroundStyle(.secondary) }
+            Text(model.file).font(Typeface.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            if model.text.count > 9000 { Label("Claude sessions will be pointed to this file because it is longer than 9,000 characters.", systemImage: "info.circle").font(Typeface.callout).foregroundStyle(.secondary) }
         }.padding(.horizontal, 26)
     }
     private func changeScope(_ scope: String) {

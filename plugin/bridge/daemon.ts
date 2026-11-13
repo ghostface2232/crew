@@ -302,6 +302,12 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
   if (method === 'POST') {
     if (pathname === '/api/desktop/heartbeat') {
       const body = await readJson(req);
+      if (body.leaving === true) {
+        // The app is quitting, so notifications fall back to the daemon at once instead of after 15 s.
+        desktopSeenAt = 0;
+        desktopHandlesCompletion = false;
+        return {};
+      }
       desktopSeenAt = Date.now();
       desktopHandlesCompletion = body.handlesCompletion === true;
       const lease = { completionNotifications: desktopHandlesCompletion, from: desktopSeenAt, until: desktopSeenAt + 15_000 };

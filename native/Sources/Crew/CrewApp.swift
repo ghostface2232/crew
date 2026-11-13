@@ -22,7 +22,7 @@ struct CrewApp: App {
                     .keyboardShortcut("n").disabled(!delegate.store.connected)
             }
             CommandGroup(replacing: .appSettings) {
-                Button("Settings…", action: delegate.openSettings).keyboardShortcut(",").disabled(delegate.store.state.roles.isEmpty)
+                SettingsCommand(store: delegate.store, open: delegate.openSettings).keyboardShortcut(",")
             }
             CommandGroup(after: .textEditing) {
                 Button("Search Work") { delegate.show(); delegate.store.searchRequest += 1 }.keyboardShortcut("f")
@@ -36,24 +36,52 @@ struct CrewApp: App {
                 Button("Open Web Board") { NSWorkspace.shared.open(delegate.store.api.baseURL) }
             }
         }
+        // The menu bar reads live state in its own views so the App body is not re-evaluated on every update.
         MenuBarExtra {
-            Text(delegate.store.connected ? "Crew is connected" : "Crew is reconnecting")
-            Button("Open Crew", action: delegate.show)
-            if delegate.store.state.pendingCount > 0 {
-                Button("\(delegate.store.state.pendingCount) requests need you") { delegate.show(); delegate.store.selection = "needs" }
-            }
-            Divider()
-            ForEach(Array(delegate.store.state.waitingJobs.prefix(5))) { job in
-                Button("\(agentName(job.agent)): \(job.title)") { delegate.show(job: job.id) }
-            }
-            Divider()
-            Button("Settings…", action: delegate.openSettings).disabled(delegate.store.state.roles.isEmpty)
-            Button("Open Web Board") { NSWorkspace.shared.open(delegate.store.api.baseURL) }
-            Divider()
-            Button("Quit Crew — jobs keep running") { NSApp.terminate(nil) }
+            MenuBarMenu(store: delegate.store, show: { delegate.show(job: $0) }, openSettings: delegate.openSettings)
         } label: {
-            Label(delegate.store.state.pendingCount > 0 ? "Crew · \(delegate.store.state.pendingCount) waiting" : "Crew", systemImage: delegate.store.state.pendingCount > 0 ? "circle.dotted.circle.fill" : "circle.dotted.circle")
+            MenuBarLabel(store: delegate.store)
         }
+    }
+}
+
+private struct MenuBarMenu: View {
+    let store: CrewStore
+    let show: (String?) -> Void
+    let openSettings: () -> Void
+    var body: some View {
+        let waiting = store.state.waitingJobs
+        let pending = store.state.pendingCount
+        Text(store.connected ? "Crew is connected" : "Crew is reconnecting")
+        Button("Open Crew") { show(nil) }
+        if pending > 0 {
+            Button("\(pending) requests need you") { show(nil); store.selection = "needs" }
+        }
+        Divider()
+        ForEach(Array(waiting.prefix(5))) { job in
+            Button("\(agentName(job.agent)): \(job.title)") { show(job.id) }
+        }
+        Divider()
+        SettingsCommand(store: store, open: openSettings)
+        Button("Open Web Board") { NSWorkspace.shared.open(store.api.baseURL) }
+        Divider()
+        Button("Quit Crew — jobs keep running") { NSApp.terminate(nil) }
+    }
+}
+
+private struct MenuBarLabel: View {
+    let store: CrewStore
+    var body: some View {
+        let pending = store.state.pendingCount
+        Label(pending > 0 ? "Crew · \(pending) waiting" : "Crew", systemImage: pending > 0 ? "circle.dotted.circle.fill" : "circle.dotted.circle")
+    }
+}
+
+private struct SettingsCommand: View {
+    let store: CrewStore
+    let open: () -> Void
+    var body: some View {
+        Button("Settings…", action: open).disabled(store.state.roles.isEmpty)
     }
 }
 
@@ -181,8 +209,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard canLeaveSettings() else { return .terminateCancel }
         quitting = true
+        let announced = store.connected && store.notificationsAllowed
         store.stop()
-        return .terminateNow
+        guard announced else { return .terminateNow }
+        // Without this the daemon keeps deferring alerts to a quit app until its heartbeat lease expires.
+        Task {
+            await store.sendDeparture()
+            NSApp.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
     }
     private func canLeaveSettings() -> Bool {
         guard let settings else { return true }
@@ -196,7 +231,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         return !settings.dirty || confirmDiscard("Discard unsaved settings?")
     }
     private func updateNotifications() {
-        NSApp.dockTile.badgeLabel = store.state.pendingCount > 0 ? String(store.state.pendingCount) : nil
+        let badge = store.state.pendingCount > 0 ? String(store.state.pendingCount) : nil
+        if NSApp.dockTile.badgeLabel != badge { NSApp.dockTile.badgeLabel = badge }
         let finished = completions.finished(in: store.state.jobs)
         guard ProcessInfo.processInfo.environment["CREW_TEST_MODE"] != "1" else { return }
         if store.state.notifications?.onDone == true {
@@ -216,9 +252,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             notify(key: session.notificationKey, title: "Claude needs your input", body: session.waitingFor ?? session.title)
         }
         let expired = delivered.subtracting(live)
-        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: Array(expired))
-        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: Array(expired))
-        delivered.subtract(expired)
+        // These are calls into the notification service; most updates expire nothing.
+        if !expired.isEmpty {
+            UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: Array(expired))
+            UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: Array(expired))
+            delivered.subtract(expired)
+        }
         noticed.formIntersection(live)
     }
     private func notify(key: String, title: String, body: String, job: String? = nil, request: String? = nil, persistent: Bool = false) {

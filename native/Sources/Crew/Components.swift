@@ -34,11 +34,16 @@ struct StatusLabel: View {
         default: return .secondary
         }
     }
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.colorSchemeContrast) private var contrast
     var body: some View {
+        // Darkened in light mode so orange and green text reach about 3:1 on the tint; dark mode already does.
+        let text = scheme == .light ? color.mix(with: .black, by: 0.22) : color
         Label(title ?? state.capitalized, systemImage: symbol)
-            .font(.system(size: 10, weight: .medium)).foregroundStyle(color)
+            .font(Typeface.chip).foregroundStyle(text)
             .padding(.horizontal, 8).padding(.vertical, 5)
-            .background(color.opacity(0.09), in: Capsule())
+            .background(color.opacity(0.12), in: Capsule())
+            .overlay { if contrast == .increased { Capsule().strokeBorder(text.opacity(0.5)) } }
     }
 }
 
@@ -49,23 +54,21 @@ struct ContentPanel<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             if let title {
-                Label(title, systemImage: symbol).font(.system(size: 16, weight: .semibold, design: .rounded)).tracking(-0.3).accessibilityAddTraits(.isHeader)
+                Label(title, systemImage: symbol).font(Typeface.cardTitle).tracking(-0.3).accessibilityAddTraits(.isHeader)
             }
             content
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(20)
-        .background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: 20))
-        .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.primary.opacity(0.04)))
+        .card()
     }
 }
 
 struct ActionMessage: View {
     var state: ActionState?
     var body: some View {
-        if let error = state?.error { Label(error, systemImage: "exclamationmark.circle").foregroundStyle(.red).font(.callout).textSelection(.enabled) }
+        if let error = state?.error { Label(error, systemImage: "exclamationmark.circle").foregroundStyle(.red).font(Typeface.callout).textSelection(.enabled) }
         else if state?.pending == true { ProgressView().controlSize(.small).accessibilityLabel("Sending") }
-        else if state?.accepted == true { Label("Sent", systemImage: "checkmark").foregroundStyle(.secondary).font(.callout) }
+        else if state?.accepted == true { Label("Sent", systemImage: "checkmark").foregroundStyle(.secondary).font(Typeface.callout) }
     }
 }
 
@@ -92,12 +95,12 @@ struct MessageEditor: View {
     var disabled = false
     var body: some View {
         TextEditor(text: $text)
-            .font(.body)
+            .font(Typeface.body)
             .scrollContentBackground(.hidden)
-            .padding(8)
+            .padding(10)
             .frame(minHeight: 80, maxHeight: 180)
-            .background(.background, in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.separator))
+            .background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: WorkspaceStyle.fieldRadius))
+            .overlay(RoundedRectangle(cornerRadius: WorkspaceStyle.fieldRadius).strokeBorder(WorkspaceStyle.hairline))
             .accessibilityLabel(title)
             .disabled(disabled)
     }
@@ -115,7 +118,7 @@ struct AnswerView: View {
         if job.state == "waiting", let waiting = job.waiting {
             VStack(alignment: .leading, spacing: 14) {
                 // The request itself is what the person acts on, so it leads the hierarchy.
-                Text(waiting.reason).font(.system(size: 15, weight: .medium)).lineSpacing(4).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                Text(waiting.reason).font(Typeface.headline).lineSpacing(4).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if waiting.type == "question" {
                     composer
@@ -138,12 +141,12 @@ struct AnswerView: View {
     private var composer: some View {
         ZStack(alignment: .topLeading) {
             TextEditor(text: draft)
-                .font(.system(size: 13)).lineSpacing(2)
+                .font(Typeface.body).lineSpacing(2)
                 .scrollContentBackground(.hidden)
                 .frame(minHeight: 56, maxHeight: 160)
                 .accessibilityLabel("Your answer")
             if draft.wrappedValue.isEmpty {
-                Text("Write an answer…").font(.system(size: 13)).foregroundStyle(.tertiary)
+                Text("Write an answer…").font(Typeface.body).foregroundStyle(.tertiary)
                     .padding(.leading, 5).allowsHitTesting(false).accessibilityHidden(true)
             }
         }
@@ -156,21 +159,31 @@ struct AnswerView: View {
             .buttonStyle(.borderedProminent).buttonBorderShape(.circle).controlSize(.small)
             .disabled(!canSend).help("Send answer").padding(8)
         }
-        .background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(.primary.opacity(0.08)))
+        .background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: WorkspaceStyle.fieldRadius))
+        .overlay(RoundedRectangle(cornerRadius: WorkspaceStyle.fieldRadius).strokeBorder(WorkspaceStyle.hairline))
         .disabled(locked)
     }
     @ViewBuilder private func decision(_ title: String, symbol: String, value: String, prominent: Bool) -> some View {
-        let button = Button(title, systemImage: symbol) { Task { await store.answer(job, decision: value) } }
-            .font(.system(size: 12, weight: .medium)).buttonBorderShape(.capsule).disabled(locked)
+        // A draft typed before a quick reply goes along with it rather than being discarded.
+        let note = draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let button = Button(title, systemImage: symbol) { Task { await store.answer(job, decision: value, message: note.isEmpty ? nil : note) } }
+            .font(Typeface.calloutStrong).buttonBorderShape(.capsule).disabled(locked)
         if prominent { button.buttonStyle(.borderedProminent) } else { button.buttonStyle(.bordered) }
     }
+}
+
+/// Reads the store's clock in its own body, so the periodic tick redraws only running timers.
+struct ElapsedText: View {
+    let store: CrewStore
+    let start: Double
+    let end: Double?
+    var body: some View { Text(elapsed((end ?? store.now) - start)) }
 }
 
 struct JobRow: View {
     let job: Job
     var selected = false
-    var now: Double
+    let store: CrewStore
     var open: () -> Void
     var body: some View {
         let detail = [agentName(job.agent), job.error?.message ?? (job.isActive ? job.phase : nil),
@@ -181,17 +194,17 @@ struct JobRow: View {
                 Image(systemName: job.kind == "review" ? "checkmark.shield" : job.kind == "polish" ? "text.badge.checkmark" : "hammer")
                     .font(.system(size: 14)).foregroundStyle(.secondary).frame(width: 20)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(job.title).font(.system(size: 13, weight: .medium)).foregroundStyle(.primary).lineLimit(2)
-                    Text(detail).font(.system(size: 11)).foregroundStyle(job.error == nil ? Color.secondary : .red).lineLimit(1)
+                    Text(job.title).font(Typeface.bodyStrong).foregroundStyle(.primary).lineLimit(2)
+                    Text(detail).font(Typeface.caption).foregroundStyle(job.error == nil ? Color.secondary : .red).lineLimit(1)
                 }
                 Spacer(minLength: 8)
                 StatusLabel(state: job.stalled ? "stalled" : job.state, title: job.status)
-                Text(elapsed((job.endedAt ?? now) - job.createdAt)).monospacedDigit().font(.system(size: 11)).foregroundStyle(.secondary)
+                ElapsedText(store: store, start: job.createdAt, end: job.endedAt).monospacedDigit().font(Typeface.caption).foregroundStyle(.secondary)
                     .frame(minWidth: 28, alignment: .trailing)
-                Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold)).foregroundStyle(.tertiary)
+                Image(systemName: "chevron.right").font(Typeface.micro).foregroundStyle(.tertiary)
             }
             .padding(.horizontal, 12).padding(.vertical, 10).contentShape(Rectangle())
-            .background(selected ? Color.accentColor.opacity(0.09) : job.state == "waiting" ? Color.orange.opacity(0.07) : .primary.opacity(0.025), in: RoundedRectangle(cornerRadius: 12))
+            .background(selected ? Color.accentColor.opacity(0.09) : job.state == "waiting" ? Color.orange.opacity(0.07) : WorkspaceStyle.rowFill, in: RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius))
         }.buttonStyle(WorkspacePressStyle())
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(selected ? .isSelected : [])
@@ -204,14 +217,14 @@ struct SessionView: View {
         DisclosureGroup {
             VStack(alignment: .leading, spacing: 8) {
                 Text(session.waitingFor ?? session.phase)
-                Text(session.cwd).font(.caption).foregroundStyle(.secondary)
-                if session.state == "waiting" { Text("Answer in the Claude app, in the session that asked.").foregroundStyle(.secondary) }
-                if session.inTool { Label("A tool is running", systemImage: "wrench.and.screwdriver").font(.caption) }
+                Text(session.cwd).font(Typeface.caption).foregroundStyle(.secondary)
+                if session.state == "waiting" { Text("Answer in Claude.").foregroundStyle(.secondary) }
+                if session.inTool { Label("A tool is running", systemImage: "wrench.and.screwdriver").font(Typeface.caption) }
             }.textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 8)
         } label: {
             HStack(spacing: 10) {
                 AgentMark(agent: "claude", size: 14)
-                Text(session.title).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                Text(session.title).font(Typeface.bodyStrong).lineLimit(1)
                 Spacer(minLength: 8)
                 StatusLabel(state: session.stalled ? "stalled" : session.state, title: session.stalled ? "May be stuck" : session.state.capitalized)
             }
@@ -227,19 +240,19 @@ struct EventList: View {
             ForEach(events.reversed()) { event in
                 HStack(alignment: .top, spacing: 12) {
                     Image(systemName: event.kind == "error" ? "exclamationmark.circle" : event.kind == "done" ? "checkmark.circle" : "circle.fill")
-                        .font(.caption).foregroundStyle(event.kind == "error" ? .red : .secondary).frame(width: 16).padding(.top, 3)
+                        .font(Typeface.caption).foregroundStyle(event.kind == "error" ? .red : .secondary).frame(width: 16).padding(.top, 3)
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
-                            Text(agentName(event.agent)).font(.callout.weight(.medium))
+                            Text(agentName(event.agent)).font(Typeface.calloutStrong)
                             if let date = ISO8601DateFormatter.crew.date(from: event.ts) {
-                                Text(date, style: .time).font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                                Text(date, style: .time).font(Typeface.caption).monospacedDigit().foregroundStyle(.secondary)
                             }
                             Spacer()
                             if let id = event.job_id {
                                 Button("Show job", systemImage: "arrow.up.right") { openJob(id) }.labelStyle(.iconOnly).buttonStyle(.borderless).help("Show job")
                             }
                         }
-                        Text(event.detail).font(.callout).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                        Text(event.detail).font(Typeface.callout).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }

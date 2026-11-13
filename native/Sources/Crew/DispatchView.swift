@@ -16,7 +16,7 @@ struct DispatchView: View {
     private var worker: Worker? { store.state.roles[role].flatMap { store.state.agents[$0.agent] } }
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Label("New Job", systemImage: "paperplane").font(.system(size: 20, weight: .semibold, design: .rounded))
+            Label("New Job", systemImage: "paperplane").font(Typeface.title)
                 .labelStyle(.titleAndIcon).symbolRenderingMode(.hierarchical)
             VStack(alignment: .leading, spacing: 16) {
                 field("Project") {
@@ -33,7 +33,7 @@ struct DispatchView: View {
                     }
                     field("Assigned to") {
                         Text(worker.map { "\($0.name)\($0.enabled ? "" : " (disabled)")" } ?? "No agent assigned")
-                            .font(.system(size: 13)).frame(minHeight: 22)
+                            .font(Typeface.body).frame(minHeight: 22)
                     }
                 }
                 if role == "polish" {
@@ -44,13 +44,12 @@ struct DispatchView: View {
                 field(role == "review" ? "What should be checked?" : "What needs to be done?") {
                     MessageEditor(title: "New job instructions", text: $task)
                     Text(role == "review" ? "Reviews uncommitted changes in read-only mode." : "Changes stay on an isolated worktree branch until reviewed and merged.")
-                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                        .font(Typeface.caption).foregroundStyle(.secondary)
                 }
             }
             if !error.isEmpty { Label(error, systemImage: "exclamationmark.circle").foregroundStyle(.red).textSelection(.enabled) }
             HStack(spacing: 8) {
-                Text("Full missions start with /crew:run in Claude.").font(.system(size: 11)).foregroundStyle(.secondary)
-                Spacer(minLength: 12)
+                Spacer()
                 Button("Cancel") { if dirty { confirmingDiscard = true } else { dismiss() } }.keyboardShortcut(.cancelAction).disabled(sending)
                 Button(sending ? "Sending…" : "Send Job", systemImage: "arrow.up") { Task { await send() } }
                     .buttonStyle(.glassProminent).disabled(sending || !store.connected || task.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || directory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || worker?.enabled != true)
@@ -63,7 +62,7 @@ struct DispatchView: View {
     }
     private func field<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
+            Text(title).font(Typeface.captionStrong).foregroundStyle(.secondary)
             content()
         }
     }

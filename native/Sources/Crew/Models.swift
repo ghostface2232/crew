@@ -95,7 +95,8 @@ struct RoleAssignment: Codable, Sendable, Equatable {
     var model: String?
     var effort: String?
 }
-struct UsageWindow: Codable, Sendable, Equatable { var usedPercent: Double; var minutes: Double }
+// The daemon reports a window length only when the provider does.
+struct UsageWindow: Codable, Sendable, Equatable { var usedPercent: Double; var minutes: Double? }
 struct Usage: Codable, Sendable, Equatable { var windows: [UsageWindow]? }
 struct NotificationPreferences: Codable, Sendable, Equatable { var enabled: Bool; var onDone: Bool }
 struct BoardState: Codable, Sendable, Equatable {
@@ -129,8 +130,6 @@ struct BoardState: Codable, Sendable, Equatable {
             if change.removed == true { claude.removeAll { $0.id == change.session.id } }
             else { upsert(&claude, change.session) }
         case "roles": roles = try decoder.decode([String: RoleAssignment].self, from: event.data)
-        case "limits": limits.merge(try decoder.decode([String: Usage?].self, from: event.data)) { _, new in new }
-        case "event": events = mergeEvents(events, [try decoder.decode(CrewEvent.self, from: event.data)])
         default: break
         }
         return nil

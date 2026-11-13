@@ -14,7 +14,9 @@ import { projectRoot } from './git.ts';
 import { isTerminal, Jobs } from './jobs.ts';
 import { Missions, STAGES } from './missions.ts';
 import type { Mission } from './missions.ts';
-import { instructionsFile, readInstructions, saveRoles, writeInstructions } from './settings.ts';
+import { appendInstructions, instructionsFile, readInstructions, savePreset, saveRoles, writeInstructions } from './settings.ts';
+import { agentGaugeDir, fromCodexLimits, route as routeWork, UsageMonitor } from './usage.ts';
+import type { RouteKind } from './usage.ts';
 import type { EventKind, Job } from './jobs.ts';
 
 /**
@@ -72,7 +74,6 @@ function liveConfig(): Config {
 
 const codex = new CodexAdapter(config);
 const antigravity = new AntigravityAdapter(config);
-codex.onLimits = (limits) => broadcast('limits', { codex: limits });
 
 // Roles are read per job, so a change to config.json applies to the next one, and an invalid file fails
 // that job with the reason instead of silently running old roles. Adapters keep the settings they started with.
@@ -102,12 +103,21 @@ function loadMissions(): Missions {
 }
 const missions = loadMissions();
 
+const usage = new UsageMonitor(agentGaugeDir(), (latest) => broadcast('usage', latest));
+usage.start().catch((err) => log('usage monitor could not start:', err));
+codex.onLimits = (limits) => {
+  broadcast('limits', { codex: limits });
+  usage.supplement(fromCodexLimits(limits, Date.now()));
+};
+
 const jobs = new Jobs(HOME, loadConfig, { codex, antigravity }, {
   onEvent: (event) => {
     broadcast('event', event);
     // A mission is alive as long as its jobs are; the lead need not report in while it waits on them.
     const mission = event.job_id && jobs.jobs.get(event.job_id)?.mission;
     if (mission) missions.touch(mission);
+    // AgentGauge may not read the agent again for half an hour; a job that just hit the limit is the fresher fact.
+    if (event.kind === 'limit') usage.reportLimit(event.agent, event.detail);
   },
   onJob: (job) => broadcast('job', view(job)),
   onAttention: (job, kind, detail) => notify(job.agent, kind, job.title, detail),
@@ -115,8 +125,12 @@ const jobs = new Jobs(HOME, loadConfig, { codex, antigravity }, {
   keepsMission: (id) => missions.saved().some((mission) => mission.id === id),
 });
 
-// The board shows who holds each role, so it must hear about edits to the role table.
-fs.watchFile(path.join(HOME, 'config.json'), { interval: 2000 }, () => broadcast('roles', liveConfig().roles));
+// The board shows who holds each role and which preset is in effect, so it must hear about edits to the file.
+fs.watchFile(path.join(HOME, 'config.json'), { interval: 2000 }, () => {
+  const live = liveConfig();
+  broadcast('roles', live.roles);
+  broadcast('preset', { preset: live.preset, presets: live.presets });
+});
 
 const claude = new ClaudeSessions(config.stallSeconds, {
   onSession: (session, removed) => broadcast('claude', { session, removed: Boolean(removed) }),
@@ -140,6 +154,9 @@ function state() {
       antigravity: { ...WORKERS.antigravity, enabled: live.antigravity.enabled },
     },
     roles: live.roles,
+    usage: usage.current(),
+    preset: live.preset,
+    presets: live.presets,
     events: jobs.recent.slice(-200),
   };
 }
@@ -249,6 +266,13 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       const file = await sharedFile(url.searchParams.get('project'));
       return { file, text: readInstructions(file) };
     }
+    if (pathname === '/api/usage') return usage.current();
+    if (pathname === '/api/route') {
+      const kind = url.searchParams.get('kind');
+      if (!['delegate', 'review', 'polish', 'lead'].includes(kind ?? '')) throw new HttpError(400, 'kind must be one of: delegate, review, polish, lead');
+      // The config on disk, not the one for display: an invalid role table must fail the question as it would fail a job.
+      return routeWork(kind as RouteKind, usage.current(), loadConfig().roles);
+    }
     if (pathname === '/api/stream') {
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
       res.write(`event: state\ndata: ${JSON.stringify(state())}\n\n`);
@@ -296,6 +320,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     const id = missionRoute[1];
     if (body.done && body.abandoned) throw new HttpError(400, 'pass done or abandoned, not both');
     if (body.done || body.abandoned) return missions.finish(id, { outcome: text(body.outcome, 'outcome'), abandoned: Boolean(body.abandoned) });
+    if (body.note !== undefined) return missions.note(id, text(body.note, 'note') ?? '');
     return missions.update(id, { stage: stage(body.stage), title: text(body.title, 'title') });
   }
 
@@ -344,10 +369,18 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     }
     if (pathname === '/api/instructions') {
       const body = await readJson(req);
-      if (typeof body.text !== 'string') throw new HttpError(400, 'text must be a string');
+      const appending = body.append !== undefined;
+      if (typeof (appending ? body.append : body.text) !== 'string') throw new HttpError(400, `${appending ? 'append' : 'text'} must be a string`);
+      if (appending && body.text !== undefined) throw new HttpError(400, 'pass text or append, not both');
       const file = await sharedFile(body.project ?? null);
-      writeInstructions(file, body.text);
+      if (appending) appendInstructions(file, body.append);
+      else writeInstructions(file, body.text);
       return { file, text: readInstructions(file) };
+    }
+    if (pathname === '/api/preset') {
+      const saved = savePreset(HOME, (await readJson(req)).preset);
+      broadcast('preset', saved);
+      return saved;
     }
     if (pathname === '/api/shutdown') {
       setImmediate(shutdown);
@@ -376,6 +409,7 @@ function shutdown(): void {
   log('shutting down');
   codex.shutdown();
   antigravity.shutdown();
+  usage.stop();
   jobs.flush();
   missions.flush();
   fs.rmSync(path.join(HOME, 'daemon.json'), { force: true });

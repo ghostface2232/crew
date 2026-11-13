@@ -14,6 +14,8 @@ The user assigns each role to an agent: `delegate` goes to the engineer, `review
 
 Before step 1, call `mission` with the task as `title` so the board groups this command and its jobs as one unit. At the start of each later step, call `mission` with that step's `stage` (`implement`, `self-review`, `cross-review`, `fix`, `polish`, `final`). When finished, call `mission` with `done: true` and a one-line `outcome` (or `abandoned: true` if the task is dropped). Each is one short call.
 
+At the start of steps 2, 3 and 6, call `route` with the kind of work you are about to hand out (`delegate`, `review`, `polish`), and at the start of step 1 with `lead`. It reads each agent's remaining usage as AgentGauge measured it and answers with who should take the work: the role's holder, or you. Follow the assignee and the reason. When it says the result is degraded, carry on and say in the final report what was skipped; when it gives a time to wait for polish, skip polish and say when it can be run. One call per step is enough; do not call it on every turn. If AgentGauge has no data the answer is the role's holder, as before.
+
 Skip a step only when it has nothing to act on (for example, no separable piece to delegate, or no user-facing text to polish), and say that you skipped it.
 
 ## 1. Plan (you)
@@ -84,7 +86,7 @@ The user and every agent work on one computer. Workers receive these rules with 
 
 ## When an agent is unavailable
 
-`status` shows the current role holders and Codex's usage; a job that fails on a usage limit says so.
+`status` shows the current role holders and every agent's usage, and `route` says who should take a kind of work now; a job that fails on a usage limit says so, and marks that agent as exhausted for the next `route`.
 
 | Situation | What to do |
 | --- | --- |

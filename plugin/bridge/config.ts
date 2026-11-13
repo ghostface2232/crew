@@ -90,7 +90,22 @@ export interface Config {
   };
   /** Which worker takes each role. Read when a job starts, so edits apply to the next job. */
   roles: Record<Role, RoleAssignment>;
+  /** The preset in effect; none by default, so an unconfigured install runs each agent's own settings. */
+  preset: PresetName | null;
+  /** What each preset sets. The built-in ones set effort only; a user's entry replaces fields of the same name. */
+  presets: Record<PresetName, Preset>;
 }
+
+/**
+ * The built-in presets name no models: which ones an account can use differs, so a model belongs in the
+ * user's config. They differ in Codex's effort and in the model the lead gives its subagents.
+ */
+export const PRESETS: Record<PresetName, Preset> = {
+  economy: { codex: { effort: 'low' }, subagentModel: 'haiku' },
+  balanced: { codex: { effort: 'medium' }, subagentModel: 'sonnet' },
+  best: { codex: { effort: 'high' }, subagentModel: 'inherit' },
+};
+const PRESET_NAMES = Object.keys(PRESETS) as PresetName[];
 
 const defaults: Config = {
   stallSeconds: 300,
@@ -99,11 +114,13 @@ const defaults: Config = {
   codex: { bin: 'codex', approvalPolicy: 'on-request', approvalsReviewer: 'auto_review' },
   antigravity: { bin: 'agy', enabled: true },
   roles: { delegate: { agent: 'codex' }, review: { agent: 'codex' }, polish: { agent: 'antigravity' } },
+  preset: null,
+  presets: PRESETS,
 };
 
 export const DEFAULT_ROLES = defaults.roles;
 
-type UserConfig = Partial<Omit<Config, 'roles'>> & { roles?: Partial<Record<Role, Partial<RoleAssignment>>> };
+type UserConfig = Partial<Omit<Config, 'roles' | 'presets'>> & { roles?: Partial<Record<Role, Partial<RoleAssignment>>>; presets?: Partial<Record<PresetName, Preset>> };
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 
@@ -134,7 +151,50 @@ export function resolveConfig(user: UserConfig): Config {
     codex: { ...defaults.codex, ...user.codex },
     antigravity: { ...defaults.antigravity, ...user.antigravity },
     roles,
+    ...resolvePresets(user),
   };
+}
+
+/** Like the role table, a preset that is not exactly valid throws: a job must not run on settings the user did not choose. */
+function resolvePresets(user: UserConfig): Pick<Config, 'preset' | 'presets'> {
+  const preset: unknown = user.preset ?? null;
+  if (preset !== null && !PRESET_NAMES.includes(preset as PresetName)) throw new Error(`preset is "${String(preset)}"; use one of: ${PRESET_NAMES.join(', ')}, or leave it out.`);
+  const given: unknown = user.presets ?? {};
+  if (!isObject(given)) throw new Error('presets must be an object such as {"best": {"codex": {"model": "..."}}}.');
+  const presets = { ...PRESETS };
+  for (const [name, entry] of Object.entries(given)) {
+    if (!PRESET_NAMES.includes(name as PresetName)) throw new Error(`presets.${name} is not a preset; use one of: ${PRESET_NAMES.join(', ')}.`);
+    if (!isObject(entry)) throw new Error(`presets.${name} must be an object.`);
+    const merged: Preset = { ...PRESETS[name as PresetName] };
+    for (const [key, value] of Object.entries(entry)) {
+      if (key === 'subagentModel') {
+        if (typeof value !== 'string') throw new Error(`presets.${name}.subagentModel must be a string.`);
+        merged.subagentModel = value;
+      } else if (key === 'codex' || key === 'antigravity') {
+        const allowed = key === 'codex' ? ['model', 'effort'] : ['model'];
+        if (!isObject(value)) throw new Error(`presets.${name}.${key} must be an object.`);
+        for (const [setting, text] of Object.entries(value)) {
+          if (!allowed.includes(setting)) throw new Error(`presets.${name}.${key}.${setting} is not a setting; use ${allowed.join(' or ')}.`);
+          if (typeof text !== 'string') throw new Error(`presets.${name}.${key}.${setting} must be a string.`);
+        }
+        merged[key] = { ...merged[key], ...(value as Record<string, string>) };
+      } else throw new Error(`presets.${name}.${key} is not a setting; use codex, antigravity, or subagentModel.`);
+    }
+    presets[name as PresetName] = merged;
+  }
+  return { preset: preset as PresetName | null, presets };
+}
+
+/**
+ * The agent, model, and effort a job of this role runs with. A setting on the role wins over the preset,
+ * and the preset over the agent's own.
+ */
+export function effectiveRole(config: Config, role: Role): RoleAssignment {
+  const assignment = config.roles[role];
+  const preset = config.preset ? config.presets[config.preset][assignment.agent] : undefined;
+  const effort = assignment.effort ?? (preset as { effort?: string } | undefined)?.effort;
+  const model = assignment.model ?? preset?.model;
+  return { agent: assignment.agent, ...(model ? { model } : {}), ...(effort ? { effort } : {}) };
 }
 
 export function loadConfig(): Config {

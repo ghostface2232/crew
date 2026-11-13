@@ -1,6 +1,8 @@
 import readline from 'node:readline';
 import { api, ensureDaemon } from './client.ts';
 import { BASE_URL, DEFAULT_ROLES, loadConfig, VERSION, WORKERS } from './config.ts';
+import { describeUsage } from './usage.ts';
+import type { RouteDecision, Usage } from './usage.ts';
 import type { Role } from './config.ts';
 import type { CrewEvent, JobSpec } from './jobs.ts';
 import { normalizeTitle, STAGES } from './missions.ts';
@@ -21,14 +23,20 @@ import type { JobView } from './render.ts';
  * Who holds each role, as configured when this session started. Tool text is fixed for the session,
  * so a later change shows up in `status` and in each job's result, which name the agent that ran.
  */
-const roles = (() => {
+const started = (() => {
   try {
-    return loadConfig().roles;
+    return loadConfig();
   } catch {
-    return DEFAULT_ROLES;
+    return null;
   }
 })();
+const roles = started?.roles ?? DEFAULT_ROLES;
 const holder = (role: Role) => WORKERS[roles[role].agent].name;
+/** The model the preset asks the lead to give its subagents; none when no preset is set or it leaves them alone. */
+const subagentModel = started?.preset ? started.presets[started.preset].subagentModel : undefined;
+const PRESET_LINE = started?.preset
+  ? `\n- The user chose the "${started.preset}" preset. Workers get its model and effort automatically. ${subagentModel && subagentModel !== 'inherit' ? `Start your own subagents (including crew:self-reviewer) with model "${subagentModel}" unless the user asks otherwise.` : 'Your own subagents stay on your model.'}`
+  : '';
 
 const INSTRUCTIONS = `Crew connects this session to other coding agents that run in the background. You are the lead: you plan, do the main implementation, review, and decide what is merged.
 
@@ -48,6 +56,7 @@ How jobs work:
 - This machine is shared. Workers are told to start their own isolated instance of anything they run (free port, own data directory, headless browser) and to measure nothing unless the job runs alone. A job that has to start the app takes runs_app: its sandbox then has network access, and a review runs in a snapshot of the change. Without it a worker's review is static. Only one reviewer of a change runs the app: if the cross-review does, tell your self-review subagent to stay static, and the other way round. A delegate job that measures performance takes exclusive: it is refused while other jobs are active, so wait for them first.
 - When to review while you run the Crew pipeline (/crew:run), without being asked: one review (your crew:self-reviewer subagent or \`review\`, not both) when a substantial piece of implementation reaches a stopping point; both in parallel before you push or open a pull request, on whatever is going out that has not had both; none for small fixes and wording. Reviewers that run in parallel are static unless exactly one of them is told it may run the app. The user's own request for a review, or for none, comes first. Outside the pipeline, review only when the user asks: do not hold back a commit or a push for one.
 - When you take a user's command through several steps, call \`mission\` with its title first, with the stage as you move on, and with done at the end. The board then shows the command as one unit with its jobs under it. Skip it for a single delegated job.
+- Usage is measured by AgentGauge. In the pipeline, call \`route\` once at each stage boundary before you hand out work (not on every turn) and follow its assignee and reason; when it says degraded, say in your report what was skipped. Outside the pipeline, follow the roles unless a job fails on a limit.${PRESET_LINE}
 
 The user can watch every agent live on the status board at ${BASE_URL}.`;
 
@@ -141,9 +150,19 @@ const TOOLS = [
     },
   },
   {
+    name: 'route',
+    title: 'Route by usage',
+    description: 'Ask who should take a kind of work now, given each agent\'s remaining usage as AgentGauge measured it. Returns the assignee (the role\'s holder, or you), the reason, and whether the result is degraded or should wait. Call it at stage boundaries in the pipeline, not on every turn. With no kind, shows every agent\'s usage.',
+    annotations: { readOnlyHint: true },
+    inputSchema: {
+      type: 'object',
+      properties: { kind: { type: 'string', enum: ['lead', 'delegate', 'review', 'polish'], description: 'What you are about to hand out. lead asks whether you yourself should carry on.' } },
+    },
+  },
+  {
     name: 'status',
     title: 'Crew status',
-    description: 'Show one job in full, or list recent jobs with what each worker is doing now.',
+    description: 'Show one job in full, or list recent jobs with what each worker is doing now, with each agent\'s usage.',
     annotations: { readOnlyHint: true },
     inputSchema: { type: 'object', properties: { job_id: { type: 'string' } } },
   },
@@ -438,6 +457,19 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       return runJob({ kind: 'polish', cwd, title: args.title ?? `Polish ${args.targets.join(', ')}`, task: args.guidance, targets: args.targets, base: args.base, isolation: args.isolation }, Boolean(args.background), ctx);
     case 'mission':
       return reportMission(args);
+    case 'route': {
+      if (!args.kind) {
+        const measured = describeUsage(await api('GET', '/api/usage'));
+        return measured.length ? measured.join('\n') : 'AgentGauge has no usage data on this machine, so the roles are followed as assigned.';
+      }
+      const decision: RouteDecision = await api('GET', `/api/route?kind=${encodeURIComponent(args.kind)}`);
+      const who = decision.assignee === 'claude' ? 'you (the lead)' : WORKERS[decision.assignee].name;
+      const lines = [`${args.kind} → ${who}`, decision.reason];
+      if (decision.degraded) lines.push('Degraded: the usual cross-check is missing. Say so in your report.');
+      if (decision.deferUntil) lines.push(`Can wait until ${new Date(decision.deferUntil).toISOString()}.`);
+      if (decision.fallback.length) lines.push(`If that fails: ${decision.fallback.map((a) => (a === 'claude' ? 'you' : WORKERS[a].name)).join(', then ')}.`);
+      return lines.join('\n');
+    }
     case 'status': {
       if (args.job_id) {
         const job: JobView = await api('GET', `/api/jobs/${args.job_id}`);
@@ -454,7 +486,10 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       if (recent.length) lines.push('', 'Recent:', ...recent.map(summarize));
       // A daemon that predates the role table reports none.
       if (state.roles) lines.push('', `Roles: ${(Object.keys(state.roles) as Role[]).map((role) => `${role} → ${WORKERS[state.roles[role].agent as keyof typeof WORKERS].name}`).join(', ')}`);
-      const windows = state.limits.codex?.windows ?? [];
+      // A daemon that predates AgentGauge support reports no usage; Codex's own figures are then all there is.
+      const measured = state.usage ? describeUsage(state.usage as Usage) : [];
+      if (measured.length) lines.push('', 'Usage (AgentGauge):', ...measured);
+      const windows = measured.length ? [] : (state.limits.codex?.windows ?? []);
       if (windows.length) lines.push('', `Codex usage: ${windows.map((w: any) => `${Math.round(w.usedPercent)}% of the ${w.minutes >= 1440 ? `${Math.round(w.minutes / 1440)}-day` : `${Math.round(w.minutes / 60)}-hour`} window`).join(', ')}`);
       lines.push('', `Board: ${BASE_URL}`);
       return lines.join('\n');

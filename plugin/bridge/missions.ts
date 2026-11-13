@@ -30,6 +30,8 @@ export interface Mission {
 }
 
 export const STALE_MS = 12 * 60 * 60_000;
+const MAX_NOTE = 2000;
+const MAX_NOTES = 20;
 const KEEP_MISSIONS = 100;
 /** Finished missions kept for each project whatever the overall limit, since the board shows that many per project. */
 export const KEEP_PER_PROJECT = 2;
@@ -44,6 +46,7 @@ function isMission(m: any): m is Mission {
   return Boolean(m) && typeof m === 'object'
     && ['id', 'title', 'project', 'root', 'outcome'].every((key) => typeof m[key] === 'string')
     && (m.owner === undefined || typeof m.owner === 'string')
+    && (m.notes === undefined || (Array.isArray(m.notes) && m.notes.every((n: any) => n && typeof n.text === 'string' && Number.isFinite(n.at))))
     && STAGES.includes(m.stage) && ['active', 'done', 'abandoned'].includes(m.state)
     && Number.isFinite(m.createdAt) && Number.isFinite(m.updatedAt) && (m.endedAt === null || Number.isFinite(m.endedAt));
 }
@@ -124,6 +127,19 @@ export class Missions {
     mission.outcome = outcome;
     mission.updatedAt = Date.now();
     mission.endedAt = mission.updatedAt;
+    this.changed(mission);
+    return mission;
+  }
+
+  /** Pins a piece of information to an open mission. It starts no work and does not count as a step. */
+  note(id: string, text: string): Mission {
+    const mission = this.get(id);
+    if (mission.state !== 'active') throw new Error(`Mission ${id} is already ${mission.state}.`);
+    const note = text.trim().slice(0, MAX_NOTE);
+    if (!note) throw new Error('A note needs some text.');
+    if ((mission.notes?.length ?? 0) >= MAX_NOTES) throw new Error(`Mission ${id} already has ${MAX_NOTES} notes.`);
+    (mission.notes ??= []).push({ text: note, at: Date.now() });
+    mission.updatedAt = Date.now();
     this.changed(mission);
     return mission;
   }

@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { instructionsFile, readInstructions, saveRoles, writeInstructions } from '../plugin/bridge/settings.ts';
+import { effectiveRole, PRESETS, resolveConfig } from '../plugin/bridge/config.ts';
+import { appendInstructions, instructionsFile, readInstructions, savePreset, saveRoles, writeInstructions } from '../plugin/bridge/settings.ts';
 
 const tempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'crew-settings-'));
 
@@ -115,4 +116,55 @@ test('clearing instructions refuses a symlinked parent without deleting the exte
     assert.equal(fs.readFileSync(victim, 'utf8'), 'Keep these instructions.');
     assert.equal(fs.lstatSync(path.join(project, '.crew')).isSymbolicLink(), true);
   }
+});
+
+test('no preset is set by default, and a setting on the role wins over the preset', () => {
+  const plain = resolveConfig({});
+  assert.equal(plain.preset, null);
+  assert.deepEqual(effectiveRole(plain, 'delegate'), { agent: 'codex' });
+
+  const best = resolveConfig({ preset: 'best', roles: { review: { effort: 'low' }, delegate: { model: 'own' } } });
+  assert.deepEqual(effectiveRole(best, 'delegate'), { agent: 'codex', model: 'own', effort: 'high' });
+  assert.deepEqual(effectiveRole(best, 'review'), { agent: 'codex', effort: 'low' });
+  // Antigravity has no effort setting, and the built-in presets name no models.
+  assert.deepEqual(effectiveRole(best, 'polish'), { agent: 'antigravity' });
+
+  // A user's preset entry adds to the built-in one of the same name.
+  const tuned = resolveConfig({ preset: 'economy', presets: { economy: { codex: { model: 'small' }, antigravity: { model: 'flash' } } } });
+  assert.deepEqual(tuned.presets.economy, { codex: { effort: 'low', model: 'small' }, antigravity: { model: 'flash' }, subagentModel: 'haiku' });
+  assert.deepEqual(effectiveRole(tuned, 'delegate'), { agent: 'codex', model: 'small', effort: 'low' });
+  assert.deepEqual(effectiveRole(tuned, 'polish'), { agent: 'antigravity', model: 'flash' });
+  assert.deepEqual(tuned.presets.best, PRESETS.best);
+});
+
+test('a preset that is not exactly valid is refused', () => {
+  assert.throws(() => resolveConfig({ preset: 'fast' as never }), /preset is "fast"; use one of: economy, balanced, best/);
+  assert.throws(() => resolveConfig({ presets: { turbo: {} } as never }), /presets\.turbo is not a preset/);
+  assert.throws(() => resolveConfig({ presets: { best: { codex: { speed: 'x' } } } as never }), /presets\.best\.codex\.speed is not a setting; use model or effort/);
+  assert.throws(() => resolveConfig({ presets: { best: { antigravity: { effort: 'high' } } } as never }), /presets\.best\.antigravity\.effort is not a setting; use model/);
+  assert.throws(() => resolveConfig({ presets: { best: { codex: { model: 1 } } } as never }), /must be a string/);
+  assert.throws(() => resolveConfig({ presets: { best: { lead: 'x' } } as never }), /use codex, antigravity, or subagentModel/);
+});
+
+test('saving a preset keeps every other setting, and clearing it removes the key', () => {
+  const home = tempDir();
+  const file = path.join(home, 'config.json');
+  fs.writeFileSync(file, JSON.stringify({ notify: false, roles: { review: { agent: 'antigravity' } } }));
+  assert.equal(savePreset(home, 'balanced').preset, 'balanced');
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { notify: false, roles: { review: { agent: 'antigravity' } }, preset: 'balanced' });
+  const before = fs.readFileSync(file, 'utf8');
+  assert.throws(() => savePreset(home, 'fast'), /preset is "fast"/);
+  assert.equal(fs.readFileSync(file, 'utf8'), before);
+  assert.equal(savePreset(home, null).preset, null);
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { notify: false, roles: { review: { agent: 'antigravity' } } });
+});
+
+test('appending to the instructions adds a paragraph and creates the file when there is none', () => {
+  const file = path.join(tempDir(), 'instructions.md');
+  appendInstructions(file, '  Use pnpm.  ');
+  assert.equal(readInstructions(file), 'Use pnpm.\n');
+  appendInstructions(file, 'Tests live in test/.');
+  assert.equal(readInstructions(file), 'Use pnpm.\n\nTests live in test/.\n');
+  assert.throws(() => appendInstructions(file, '  \n'), /no text to add/);
+  assert.equal(readInstructions(file), 'Use pnpm.\n\nTests live in test/.\n');
 });

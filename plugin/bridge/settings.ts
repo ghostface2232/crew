@@ -51,6 +51,23 @@ export function saveRoles(home: string, roles: unknown): Config['roles'] {
   return resolved.roles;
 }
 
+/** Sets or clears the preset in config.json, keeping every other setting. Refused without writing if it is not a preset. */
+export function savePreset(home: string, preset: unknown): Pick<Config, 'preset' | 'presets'> {
+  const file = path.join(home, 'config.json');
+  let current: Record<string, unknown> = {};
+  try {
+    current = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error(`${file} is not valid JSON, so it was left untouched: ${(err as Error).message}`);
+  }
+  if (!current || typeof current !== 'object' || Array.isArray(current)) throw new Error(`${file} does not hold a settings object, so it was left untouched.`);
+  const { preset: _old, ...rest } = current;
+  const next = preset === null || preset === undefined || preset === '' ? rest : { ...rest, preset };
+  const resolved = resolveConfig(next as never);
+  writeAtomic(file, `${JSON.stringify(next, null, 2)}\n`);
+  return { preset: resolved.preset, presets: resolved.presets };
+}
+
 /** File holding the shared instructions for one project, or for every project when `project` is null. */
 export function instructionsFile(home: string, project: string | null): string {
   return project ? path.join(project, '.crew', 'instructions.md') : path.join(home, 'instructions.md');
@@ -72,4 +89,12 @@ export function writeInstructions(file: string, text: string): void {
   // A link at the file itself can be removed safely, but a linked parent must not be followed.
   if (!text.trim()) fs.rmSync(file, { force: true });
   else writeAtomic(file, text.endsWith('\n') ? text : `${text}\n`);
+}
+
+/** Adds text to the shared instructions as a paragraph of its own. Blank text is refused: it would add nothing. */
+export function appendInstructions(file: string, text: string): void {
+  const added = text.trim();
+  if (!added) throw new Error('There is no text to add.');
+  const current = readInstructions(file).trimEnd();
+  writeInstructions(file, current ? `${current}\n\n${added}` : added);
 }

@@ -280,3 +280,25 @@ test('a mission remembers the session that opened it, and only as a string', (t)
   fs.writeFileSync(file, JSON.stringify(saved));
   assert.throws(() => new Missions(home, () => {}), /holds a record that is not a mission/);
 });
+
+test('a note is pinned to an open mission, saved with it, and refused where it would add nothing', (t) => {
+  const { home, missions, changes } = harness(t);
+  const mission = missions.start(input);
+  changes.length = 0;
+
+  const noted = missions.note(mission.id, '  The API key rotates on Friday.  ');
+  assert.deepEqual(noted.notes?.map((n) => n.text), ['The API key rotates on Friday.']);
+  assert.equal(noted.stage, 'plan');
+  assert.equal(changes.length, 1);
+  assert.throws(() => missions.note(mission.id, '   '), /needs some text/);
+  assert.throws(() => missions.note('m-none', 'x'), /No mission/);
+
+  missions.flush();
+  const reloaded = new Missions(home, () => {});
+  assert.deepEqual(reloaded.get(mission.id).notes?.map((n) => n.text), ['The API key rotates on Friday.']);
+
+  for (let i = 1; i < 20; i++) missions.note(mission.id, `note ${i}`);
+  assert.throws(() => missions.note(mission.id, 'one too many'), /already has 20 notes/);
+  missions.finish(mission.id);
+  assert.throws(() => missions.note(mission.id, 'late'), /already done/);
+});

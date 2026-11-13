@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { WORKERS } from './config.ts';
+import { effectiveRole, WORKERS } from './config.ts';
 import type { Config, Role, WorkerAgent } from './config.ts';
 import { carryUncommitted, changesSince, commitAll, copyIncluded, createWorktree, dirtyCount, isInside, projectRoot, removeWorktree, repoRoot, reviewDiff } from './git.ts';
 import type { Worktree } from './git.ts';
@@ -285,7 +285,7 @@ export class Jobs {
       throw new Error(`A ${spec.kind} job cannot run alone, because it has nothing to measure with. Measure with delegate and exclusive, or drop exclusive.`);
     }
     const config = this.readConfig();
-    const role = config.roles[spec.kind];
+    const role = effectiveRole(config, spec.kind);
     const { agent } = role;
     if (spec.runsApp && spec.kind === 'polish') throw new Error('A polish job cannot run the app: an editor only changes wording. Drop runs_app.');
     if (spec.runsApp && spec.kind === 'review' && !WORKERS[agent].reviewerRunsGit) {

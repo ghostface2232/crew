@@ -125,7 +125,7 @@ A static review or a question runs read-only, and a check that only reads is rar
 | Writable | The scratch directory only. `TMPDIR` points to it |
 | Readable | The whole disk, as before |
 | Closed | The network, and listening on a port |
-| Lifetime | Created when a turn starts, removed when it ends; a follow-up turn gets it back empty |
+| Lifetime | Created when a turn starts and moved aside the moment it ends, then deleted; a follow-up turn gets a fresh, empty one |
 
 It is a Codex permissions profile (`default_permissions` with a `filesystem` table) passed in the thread's config in place of the `read-only` sandbox mode, which has no way to except one directory. Checked on 2026-11-13 with Codex CLI 0.167.0 and a real review on an isolated daemon: `mktemp -d`, Node's `mkdtemp`, and a `git clone` plus commit inside the scratch directory succeeded; writing to the repository and to the home directory was refused.
 
@@ -135,7 +135,7 @@ The job's instructions say what it can run before it finds out by failing, and t
 
 ## 10. Bringing a worker up to date
 
-A worker's worktree starts from the lead's `HEAD` and does not follow it. `reply` with `sync: true` merges the lead's current `HEAD` into the worker's branch before the follow-up turn and moves the job's base to that commit, so the job's result still lists only the worker's own changes. A merge that conflicts is aborted: the reply fails with the conflicting files and no turn starts.
+A worker's worktree starts from the lead's `HEAD` and does not follow it. `reply` with `sync: true` merges the lead's current `HEAD` into the worker's branch before the follow-up turn and moves the job's base to that commit, so the job's result still lists only the worker's own changes. A merge that conflicts is aborted: the reply fails with the conflicting files and no turn starts. While the merge runs, the job's rounds cannot be changed and it cannot be discarded. Rounds are still replayed from the commit the job first started from, so an undo made before a sync is not lost.
 
 A job whose worktree was discarded takes no further turn; ask a new question instead.
 

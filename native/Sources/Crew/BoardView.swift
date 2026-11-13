@@ -54,6 +54,12 @@ struct BoardView: View {
                 .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: store.selection)
                 .disabled(store.selectedJob != nil)
                 .accessibilityHidden(store.selectedJob != nil)
+                // A click anywhere on the page beside the open panel closes it. The sidebar is another column and is not covered.
+                .overlay {
+                    if store.selectedJob != nil {
+                        Color.clear.contentShape(Rectangle()).onTapGesture { store.selectedJob = nil }.accessibilityHidden(true)
+                    }
+                }
                 .overlay(alignment: .trailing) {
                 if let id = store.selectedJob {
                     JobDetailView(store: store, id: id).id(id)

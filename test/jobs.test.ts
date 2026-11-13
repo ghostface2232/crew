@@ -1191,8 +1191,7 @@ test('a read-only Codex job gets a scratch directory for the turn, and Antigravi
   fs.writeFileSync(path.join(scratch, 'cache'), 'x');
   worker.done('reviewed');
   await settled(jobs, review);
-  // Removal is not awaited by the job; give the file system a moment.
-  for (let i = 0; i < 50 && fs.existsSync(scratch); i++) await new Promise((resolve) => setTimeout(resolve, 10));
+  // Moved aside at once, so a follow-up that starts immediately cannot inherit it or lose its own to a late removal.
   assert.equal(fs.existsSync(scratch), false);
 
   // A follow-up turn gets it back, empty.
@@ -1289,5 +1288,41 @@ test('a follow-up can first bring the worker up to date with the lead, without c
 
   const review = await settled(jobs, await jobs.create({ kind: 'review', cwd: repo, review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } }));
   await assert.rejects(jobs.reply(review.id, { message: 'x', sync: true }), /no worktree of its own/);
+  await jobs.discard(job.id);
+});
+
+test('a sync holds the worktree against round changes and discard, and rounds survive a moved base', async () => {
+  const repo = tempRepo();
+  const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd, encoding: 'utf8' }).trim();
+  const { jobs, adapter } = harness((ctl) => {
+    fs.writeFileSync(path.join(ctl.job.cwd, 'worker.js'), 'w\n');
+    ctl.session('s-1');
+    ctl.done('first');
+  });
+  const job = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'x' }));
+  const started = job.worktree!.base;
+  await jobs.round(job.id, 1, 'undo');
+  // The lead takes the worker's branch as it is, undo included, and commits something of its own.
+  git(repo, 'merge', '-q', '--no-edit', job.worktree!.branch);
+  fs.writeFileSync(path.join(repo, 'lead.js'), 'l\n');
+  git(repo, 'add', '-A');
+  git(repo, 'commit', '-q', '-m', 'lead');
+
+  let worker!: JobCtl;
+  adapter.reply = async (ctl) => { worker = ctl; };
+  const syncing = jobs.reply(job.id, { message: 'carry on', sync: true });
+  await assert.rejects(jobs.round(job.id, 1, 'keep'), /being brought up to date/);
+  await assert.rejects(jobs.discard(job.id), /still running|being brought up to date/);
+  await syncing;
+  worker.done('second');
+  await settled(jobs, job);
+
+  assert.equal(job.roundsBase, started);
+  assert.notEqual(job.worktree!.base, started);
+  // The undo is behind the new base now, and is still found.
+  assert.equal(job.rounds![0].state, 'undone');
+  await assert.rejects(jobs.round(job.id, 1, 'undo'), /already undone/);
+  await jobs.round(job.id, 1, 'keep');
+  assert.equal(fs.readFileSync(path.join(job.cwd, 'worker.js'), 'utf8'), 'w\n');
   await jobs.discard(job.id);
 });

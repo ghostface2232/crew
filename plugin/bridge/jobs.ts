@@ -113,6 +113,8 @@ export interface Job {
    * clone to try something in. It exists only while a turn runs. Absent where the agent cannot run commands.
    */
   scratch?: string;
+  /** The commit the job's branch started from, kept once a sync has moved the worktree's base past it. */
+  roundsBase?: string;
   /** Turns that changed files, oldest first; absent on jobs without a worktree and on jobs saved before rounds existed. */
   rounds?: Round[];
   /** Actions the agent's automatic reviewer refused, with the turn they were refused in. */
@@ -471,6 +473,8 @@ export class Jobs {
       try {
         synced = await mergeInto(job.worktree.path, job.repo, typeof input.sync === 'string' ? input.sync : 'HEAD');
         if (synced !== job.worktree.base) {
+          // Rounds are replayed from the branch's history, which starts where the job did, not where it was last synced.
+          job.roundsBase ??= job.worktree.base;
           job.worktree.base = synced;
           job.notes.push(`Brought up to date with ${synced.slice(0, 8)} before turn ${job.turns + 1}.`);
           job.result = await this.worktreeResult(job, job.result?.commit ?? null);
@@ -609,6 +613,7 @@ export class Jobs {
     if (this.changingRounds.has(id)) throw new Error(`Job ${id} is changing a round. Wait for it to finish.`);
     if (this.cancelling.has(id)) throw new Error(`Job ${id} is being cancelled.`);
     if (!isTerminal(job)) throw new Error(`Job ${id} is still ${job.state}; cancel it first.`);
+    if (this.preparingReviews.has(id)) throw new Error(`Job ${id} is being brought up to date. Wait for it to finish.`);
     if (this.discarding.has(id)) throw new Error(`Job ${id} is already being discarded.`);
     // Reserved before the first await, so a follow-up cannot set the worker running in a worktree that is about to go.
     this.discarding.add(id);
@@ -633,6 +638,8 @@ export class Jobs {
     if (!isTerminal(job)) throw new Error(`Job ${id} is still ${job.state}; wait for the turn to end before changing a round.`);
     if (this.discarding.has(id)) throw new Error(`Job ${id} is being discarded.`);
     if (this.changingRounds.has(id)) throw new Error(`Job ${id} is already changing a round.`);
+    // A sync is merging into the same worktree.
+    if (this.preparingReviews.has(id)) throw new Error(`Job ${id} is being brought up to date. Wait for it to finish.`);
     const round = job.rounds?.find((round) => round.turn === turn);
     if (!round) throw new Error(`Job ${id} has no round for turn ${turn}.`);
     if (!job.worktree || !fs.existsSync(path.join(job.worktree.path, '.git'))) throw new Error(`Job ${id}'s worktree is gone or discarded.`);
@@ -671,7 +678,7 @@ export class Jobs {
       round.state = 'kept';
       delete round.revert;
     }
-    for (const { commit, reverts } of await revertsSince(job.worktree!.path, job.worktree!.base)) {
+    for (const { commit, reverts } of await revertsSince(job.worktree!.path, job.roundsBase ?? job.worktree!.base)) {
       for (const round of rounds) {
         if (round.state === 'kept' && same(reverts, round.commit)) {
           round.state = 'undone';
@@ -930,6 +937,21 @@ export class Jobs {
     return path.join(this.home, 'scratch', id);
   }
 
+  /**
+   * Moved aside in one step and deleted afterwards: a follow-up turn that starts at once makes a fresh
+   * directory, and the slow removal of a large one can never reach it.
+   */
+  private dropScratch(id: string): void {
+    const dir = this.scratchDir(id);
+    const gone = `${dir}.gone-${randomBytes(4).toString('hex')}`;
+    try {
+      fs.renameSync(dir, gone);
+    } catch {
+      return;
+    }
+    fs.rm(gone, { recursive: true, force: true }, () => {});
+  }
+
   private diffFile(id: string, turn = 1): string {
     return path.join(this.home, 'reviews', `${id}${turn === 1 ? '' : `-${turn}`}.diff`);
   }
@@ -946,7 +968,7 @@ export class Jobs {
       this.dropSnapshot(job);
     }
     // Scratch is for the turn: nothing in it is a result. The path is derived, never read from the job, before it is removed.
-    if (isTerminal(job) && job.scratch) fs.rm(this.scratchDir(job.id), { recursive: true, force: true }, () => {});
+    if (isTerminal(job) && job.scratch) this.dropScratch(job.id);
     this.changed(job);
     for (const wake of [...(this.waiters.get(job.id) ?? [])]) wake();
   }

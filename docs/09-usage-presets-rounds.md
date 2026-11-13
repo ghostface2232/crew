@@ -42,12 +42,14 @@ A question job is read-only for both agents: Codex runs it with no approval prom
 | Status | Means |
 | --- | --- |
 | `ok` | Room to spare |
-| `tight` | At the recent pace the window runs out before it resets, or little is left |
+| `tight` | 15% or less of the window is left; it is `ok` again once 30% is left |
 | `exhausted` | Nothing left, or a job just failed on this agent's usage limit |
 | `stale` | AgentGauge's reading is too old to act on |
 | `unknown` | No reading: AgentGauge is not installed, or its file has a format this version does not know |
 
 A provider's status is that of its tightest account-wide window. Windows scoped to one model (`group` set) are listed with their own status and do not decide the provider's status. A provider that reports only per-model windows (Antigravity) is judged by the family of its configured model, matched by name. With no model configured, or none that matches, it is judged by its tightest family, because a job does not switch models on its own.
+
+The status follows what is left, not the projected exhaustion. The projection from the recent pace often disagreed with how fast a window was really used (on 2026-11-13 it marked Codex `tight` with 57% of its weekly window left), so the boards show it and routing ignores it.
 
 On the board, a provider that is stale, unknown, or exhausted by a reported limit shows that status on its account-wide gauges instead of each window's own.
 
@@ -74,7 +76,7 @@ Each client computes progress from data it already has using the same rule, so t
 | Source | Used for | Freshness |
 | --- | --- | --- |
 | AgentGauge's `usage-cache.json` | Every agent's windows | As AgentGauge polls: 3 to 10 minutes, stretching to 30 while the user is away |
-| AgentGauge's `usage-history.db` | The last 90 minutes of samples per window, for the projection | Same |
+| AgentGauge's `usage-history.db` | The last 90 minutes of samples per window, for the projection the boards show | Same |
 | Codex's own rate limits (`account/rateLimits/*` on its app-server) | Codex, whenever newer than AgentGauge's reading | Live while a Codex job runs |
 | A job failing on a usage limit | Marks that agent exhausted at once | Immediate; lifted by a later reading that shows room, or after 5 hours |
 

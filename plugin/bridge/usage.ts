@@ -69,7 +69,10 @@ export interface RouteDecision {
 const AGENTS: Agent[] = ['claude', 'codex', 'antigravity'];
 /** AgentGauge stretches its polling to 30 minutes when the user is away; a reading older than this is not acted on. */
 export const STALE_MS = 45 * 60_000;
-/** Without enough samples for a projection: tight at 15% left, and ok again only at 30%, so routing does not flap. */
+/**
+ * Tight at 15% left, and ok again only at 30%, so routing does not flap. Judged by what is left, not by the
+ * projection: the recent pace was found to misjudge how fast a window is actually used.
+ */
 const TIGHT_REMAINING = 0.15;
 const OK_REMAINING = 0.3;
 const PROJECTION_SPAN_MS = 90 * 60_000;
@@ -194,8 +197,8 @@ export class UsageTracker {
       const projection = projectExhaustion(samples(agent, w.key, now - PROJECTION_SPAN_MS), w.resetTime);
       const id = `${agent}:${w.key}`;
       let status: UsageStatus;
+      // The projection is shown on the boards, but the status follows what is left.
       if (w.usedRatio >= 0.999) status = 'exhausted';
-      else if (projection.enough) status = projection.at === null ? 'ok' : 'tight';
       else {
         const remaining = 1 - w.usedRatio;
         status = remaining <= TIGHT_REMAINING ? 'tight' : remaining >= OK_REMAINING ? 'ok' : this.previous.get(id) === 'tight' ? 'tight' : 'ok';
@@ -226,9 +229,7 @@ export class UsageTracker {
       ? `${percent(tightest.usedRatio)} of the ${windowName(tightest)} used.`
       : status === 'exhausted'
         ? `The ${windowName(tightest)} is used up.`
-        : tightest.projectedExhaustion !== null
-          ? `At the recent pace the ${windowName(tightest)} runs out before it resets (${percent(tightest.usedRatio)} used).`
-          : `${percent(1 - tightest.usedRatio)} of the ${windowName(tightest)} is left.`;
+        : `${percent(1 - tightest.usedRatio)} of the ${windowName(tightest)} is left.`;
     return { ...base, status, reason };
   }
 }
@@ -393,7 +394,7 @@ export function describeUsage(usage: Usage): string[] {
   if (usage.source === 'none') return [];
   return usage.providers.map((p) => {
     const wide = p.windows.filter((w) => w.group === null);
-    const shown = (wide.length ? wide : p.windows).map((w) => `${percent(w.usedRatio)} of the ${windowName(w)}`).join(', ');
+    const shown = (wide.length ? wide : p.windows).map((w) => `${percent(w.usedRatio)} of the ${windowName(w)} used`).join(', ');
     return `${name(p.agent)}: ${p.status}${shown ? ` — ${shown}` : ''}${p.status === 'ok' ? '' : `. ${p.reason}`}`;
   });
 }

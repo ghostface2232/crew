@@ -63,7 +63,7 @@ test('a projection needs three samples over half an hour, a rising pace, and exh
   assert.ok(wobbly.enough && Math.abs(wobbly.at! - (NOW + 60 * MIN)) < MIN);
 });
 
-test('a window is judged by its pace when there is one, and by what is left with hysteresis when there is not', () => {
+test('a window is judged by what is left, with hysteresis, whatever its recent pace', () => {
   const tracker = new UsageTracker();
   const status = (ratio: number, samples: Sample[] = []) =>
     tracker.classify(parseCache(cache([snapshot('codex', [weekly(ratio)])])), () => samples, NOW).providers.find((p) => p.agent === 'codex')!;
@@ -75,16 +75,16 @@ test('a window is judged by its pace when there is one, and by what is left with
   assert.equal(status(1).status, 'exhausted');
   assert.match(status(1).reason, /weekly window is used up/);
 
-  // Ten percent left is comfortable when the pace says it lasts until the reset.
+  // The pace is shown, not acted on: it misjudged how fast windows are actually used.
   const reset = NOW + 24 * 60 * MIN;
   const flat = [0, 20, 40].map((ago) => ({ at: NOW - ago * MIN, usedRatio: 0.9, resetTime: reset }));
-  assert.equal(status(0.9, flat).status, 'ok');
-  // Forty percent left is tight when the pace runs out first.
+  const low = new UsageTracker().classify(parseCache(cache([snapshot('codex', [weekly(0.9)])])), () => flat, NOW).providers.find((p) => p.agent === 'codex')!;
+  assert.equal(low.status, 'tight');
+  assert.match(low.reason, /10% of the weekly window is left/);
   const steep = [40, 20, 0].map((ago, i) => ({ at: NOW - ago * MIN, usedRatio: 0.4 + i * 0.1, resetTime: reset }));
-  const tight = status(0.6, steep);
-  assert.equal(tight.status, 'tight');
-  assert.ok(tight.windows[0].projectedExhaustion! < reset);
-  assert.match(tight.reason, /runs out before it resets/);
+  const room = new UsageTracker().classify(parseCache(cache([snapshot('codex', [weekly(0.6)])])), () => steep, NOW).providers.find((p) => p.agent === 'codex')!;
+  assert.equal(room.status, 'ok');
+  assert.ok(room.windows[0].projectedExhaustion! < reset);
 });
 
 test('the account-wide window decides; a provider with only per-model windows follows the configured model, else its tightest family', () => {

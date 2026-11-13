@@ -164,7 +164,7 @@ Input: `tool`, `account`, `detail` (error text), `observed_at`. Called immediate
 
 ### 8.1 Classification rules
 
-- Do not judge by remaining percentage alone. Mark a window `tight` if projected exhaustion comes before `reset_time`, and `exhausted` if remaining quota hits 0 or `report_limit` arrives. Ten percent remaining with a reset in 20 minutes is comfortable; forty percent remaining with four days until reset is tight.
+- Superseded on 2026-11-13 by [09](09-usage-presets-rounds.md) section 3: the status follows the remaining quota with the hysteresis below, and the projection is only shown. The original rule follows. Do not judge by remaining percentage alone. Mark a window `tight` if projected exhaustion comes before `reset_time`, and `exhausted` if remaining quota hits 0 or `report_limit` arrives. Ten percent remaining with a reset in 20 minutes is comfortable; forty percent remaining with four days until reset is tight.
 - When samples are too sparse for a projection, fall back to remaining-quota thresholds with hysteresis so routing does not flap: switch away at 15% remaining and switch back at 30% remaining (initial values, tunable).
 - When a service has multiple windows, follow the tightest applicable window. Model-specific windows (such as Fable) apply only to tasks using that model.
 - If a snapshot is too old, mark it `stale`, keep default role assignments, and rely on `report_limit`.

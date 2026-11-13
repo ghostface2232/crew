@@ -230,7 +230,7 @@ test('Antigravity as engineer asks the user for each command in order, shows it 
   // A request that does not say what it runs, and a mode switch, are refused without asking. The role text leads the prompt.
   assert.equal(job.report, 'yes,yes,no,no,no|# Role: supporting engineer');
   assert.equal(job.notes.filter((n) => n.includes('refused')).length, 2);
-  assert.ok(job.notes.some((n) => n.includes('execute request without its input: Run tests')));
+  assert.ok(job.notes.some((n) => n.includes('execute request without its input: execute: Run tests')));
 });
 
 test('Antigravity as reviewer is read-only: edits and commands are refused without asking, and noted', { timeout: 5000 }, async (t) => {
@@ -256,7 +256,7 @@ test('Antigravity as reviewer is read-only: edits and commands are refused witho
     await h.jobs.wait(job.id, job.seq, 1000);
   }
   assert.equal(job.report, 'yes,no,no|# Role: adversarial reviewer');
-  assert.ok(job.notes.some((n) => /outside the reviewer role \(edit during a read-only review: Fix it\)/.test(n)), job.notes.join('\n'));
+  assert.ok(job.notes.some((n) => /outside the reviewer role \(edit during a read-only review: edit: Fix it/.test(n)), job.notes.join('\n'));
   assert.ok(job.notes.some((n) => n.includes('could not run tests or checks')));
   assert.ok(job.notes.some((n) => n.includes("standard review mode is Codex's own")));
   // The saved diff goes stale, so it does not outlive the review.
@@ -290,7 +290,7 @@ test('a deny uses "reject always" only when it is the only refusal offered, and 
   await until(h.jobs, job, 'done');
   // "Always" is never chosen to approve; with no one-time approval the action is not run, and the lead is told.
   assert.equal(job.report, 'cancelled,never|# Role: supporting engineer');
-  assert.ok(job.notes.some((n) => n.includes('offered no one-time approval: first')), job.notes.join('\n'));
+  assert.ok(job.notes.some((n) => n.includes('offered no one-time approval: execute: first')), job.notes.join('\n'));
 });
 
 test('a cancel the agent never confirms does not leave the job waiting on a request that is gone', { timeout: 10000 }, async (t) => {
@@ -876,4 +876,119 @@ test('Codex leaves an explicitly named disabled app plugin off and notes it', { 
     assert.equal(config.features.plugins, false);
     assert.deepEqual(config.skills, { include_instructions: false });
   }
+});
+
+test('Codex refusal results preserve exact actions and mark generic or missing reasons', async (t) => {
+  const actions = [
+    { type: 'command', command },
+    { type: 'execve', program: '/tools/my tool', argv: ['one argument', 'line\nbreak', ''], cwd: '/exact/cwd' },
+    { type: 'mcpToolCall', server: 'browser', toolName: 'click' },
+    { type: 'applyPatch', files: ['/repo/a.ts'], cwd: '/repo' },
+    { type: 'networkAccess', target: 'example.com:443' },
+    undefined,
+  ];
+  const h = harness(`
+    const actions = ${JSON.stringify(actions)};
+    const send = (msg) => console.log(JSON.stringify({ jsonrpc: '2.0', ...msg }));
+    require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
+      const msg = JSON.parse(line);
+      if (msg.method === 'thread/start') return send({ id: msg.id, result: { thread: { id: 's' } } });
+      if (msg.method === 'turn/start') {
+        send({ id: msg.id, result: { turn: { id: 't' } } });
+        send({ method: 'item/started', params: { threadId: 's', item: { type: 'mcpToolCall', id: 'review-tool', server: 'browser', tool: 'click', arguments: { target: 'exact button', tab: 42 } } } });
+        actions.forEach((action, i) => send({ method: 'item/autoApprovalReview/completed', params: {
+          threadId: 's', targetItemId: i === 2 ? 'review-tool' : null, action, review: { status: 'denied', rationale: i % 2 ? '' : 'blocked by policy' },
+        } }));
+        return send({ method: 'turn/completed', params: { threadId: 's', turn: { id: 't', status: 'completed' } } });
+      }
+      if (msg.method && msg.id != null) send({ id: msg.id, result: {} });
+    });
+  `);
+  cleanup(t, h);
+  const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' });
+  await until(h.jobs, job, 'done');
+  assert.equal(job.refusals?.[0].action, command);
+  for (const arg of actions[1]!.argv!) assert.ok(job.refusals![1].action.includes(JSON.stringify(arg)));
+  assert.match(job.refusals![1].action, /Working directory: \/exact\/cwd/);
+  assert.match(job.refusals![2].action, /target: exact button/);
+  assert.match(job.refusals![2].action, /tab: 42/);
+  assert.match(job.refusals![3].action, /\/repo\/a.ts/);
+  assert.match(job.refusals![4].action, /example.com:443/);
+  assert.match(job.refusals![5].action, /exact action unavailable/);
+  const result = describe(job);
+  assert.match(result, /blocked by policy \(generic; no specific reason supplied\)/);
+  assert.match(result, /no reason given/);
+  assert.match(result, /approved_by_user/);
+  assert.match(result, /Do it another way/);
+  assert.match(job.instructions, /exact command or tool and its full input, and the exact message/);
+});
+
+test('Codex writable and read-only thread parameters set all temp variables and retain each sandbox', async () => {
+  const adapter = new CodexAdapter(resolveConfig({}));
+  for (const sandbox of ['read-only', 'workspace-write'] as const) {
+    for (const runsApp of sandbox === 'read-only' ? [false] : [false, true]) {
+      const job = { cwd: '/worktree', scratch: '/scratch/job', sandbox, runsApp } as Job;
+      const params = await (adapter as any).threadParams({ job, mcp: {} }, {});
+      assert.deepEqual(params.config.shell_environment_policy.set, { TMPDIR: job.scratch, TMP: job.scratch, TEMP: job.scratch });
+      if (sandbox === 'read-only') {
+        assert.equal(params.approvalPolicy, 'never');
+        assert.equal(params.config.permissions.crew_read_only.filesystem[job.scratch!], 'write');
+        assert.equal(params.config.permissions.crew_read_only.filesystem[':root'], 'read');
+      } else if (runsApp) {
+        assert.equal(params.config.permissions.crew_app.filesystem[job.scratch!], 'write');
+        assert.deepEqual(params.config.permissions.crew_app.network, { enabled: true });
+      } else {
+        assert.equal(params.sandbox, 'workspace-write');
+        assert.deepEqual(params.config.sandbox_workspace_write.writable_roots, [job.scratch]);
+      }
+    }
+  }
+});
+
+test('Antigravity refusal and denial notes retain full input, paths, policy reason and a next step', { timeout: 5000 }, async (t) => {
+  const call = { kind: 'execute', title: 'Run checks', rawInput: { CommandLine: command, cwd: '/exact/cwd' }, locations: [{ path: '/exact/file' }] };
+  for (const kind of ['polish', 'delegate'] as const) {
+    const h = harness(permissionStub([call]), 'antigravity', { [kind]: { agent: 'antigravity' } });
+    cleanup(t, h);
+    const job = await h.jobs.create({ kind, cwd: h.home, isolation: 'in_place', task: 'test', targets: kind === 'polish' ? ['README.md'] : undefined });
+    if (kind === 'delegate') {
+      await until(h.jobs, job, 'waiting');
+      await h.jobs.reply(job.id, { decision: 'deny', request_id: job.waiting!.id });
+    }
+    await until(h.jobs, job, 'done');
+    const result = describe(job);
+    assert.ok(result.includes(JSON.stringify(call.rawInput, null, 2)));
+    assert.match(result, /\/exact\/file/);
+    assert.match(result, /Do it another way/);
+    assert.match(result, kind === 'delegate' ? /user declined/ : /outside the editor role \(execute:/);
+    assert.ok(job.report.startsWith('no|'), 'permission response must still reject once');
+  }
+});
+
+test('Codex refusal notifications and immediate approval declines retain full details', async () => {
+  const adapter = new CodexAdapter(resolveConfig({}));
+  const refusals: { action: string; reason: string }[] = [];
+  const notes: string[] = [];
+  const job = { state: 'running', sandbox: 'read-only' } as Job;
+  (adapter as any).openRun({ job, refused: (action: string, reason: string) => refusals.push({ action, reason }), note: (text: string) => notes.push(text), progress: () => {}, activity: () => {} }, 's');
+  const action = { type: 'mcpToolCall', server: 'plugin', toolName: 'execute' };
+  (adapter as any).onNotification('item/started', { threadId: 's', item: { type: 'mcpToolCall', id: 'tool', server: 'plugin', tool: 'execute', arguments: { command } } });
+  (adapter as any).onNotification('item/autoApprovalReview/completed', { threadId: 's', targetItemId: 'tool', action, review: { status: 'denied', rationale: '' } });
+  assert.match(refusals[0].action, /tool plugin\.execute/);
+  assert.ok(refusals[0].action.includes(command));
+  assert.equal(refusals[0].reason, 'no reason given');
+  const response = await (adapter as any).onRequest('item/commandExecution/requestApproval', { threadId: 's', command }, 1);
+  assert.deepEqual(response, { decision: 'decline' });
+  assert.ok(notes[0].includes(command), 'a read-only decline must retain the entire multi-line command');
+  assert.match(notes[0], /Do it another way/);
+  await (adapter as any).onRequest('item/commandExecution/requestApproval', { threadId: 's', command, availableDecisions: ['decline'] }, 2);
+  assert.ok(notes[1].includes(command));
+  assert.match(notes[1], /offered no acceptance/);
+  await (adapter as any).onRequest('item/commandExecution/requestApproval', { threadId: 's', itemId: 'missing-input' }, 3);
+  assert.match(notes[2], /exact action unavailable; input missing/);
+  assert.match(notes[2], /Send a request naming the command/);
+  await (adapter as any).onRequest('mcpServer/elicitation/request', { threadId: 's', serverName: 'other', _meta: { tool_name: 'specific-tool' }, arguments: { command } }, 4);
+  assert.match(notes[3], /specific-tool/);
+  assert.ok(notes[3].includes(command));
+  assert.match(notes[3], /Use a supported tool/);
 });

@@ -260,18 +260,18 @@ export class AntigravityAdapter implements Adapter {
       });
       if (answer === null) return cancelled;
       allow = answer;
-      if (!answer) run.ctl.note(`The user declined an action: ${toolCall.title ?? 'tool call'}.`, { declined: true });
+      if (!answer) run.ctl.note(`The user declined an action: ${describeRequest(toolCall, run.ctl.job.cwd)}\nDo it another way within the job permissions, or report what could not be verified.`, { declined: true });
     }
     if (run && typeof verdict === 'object') {
-      const what = `${verdict.refuse}: ${toolCall.title ?? 'tool call'}`;
+      const what = `${verdict.refuse}: ${describeRequest(toolCall, run.ctl.job.cwd)}`;
       run.ctl.progress(`refused (${what})`);
-      run.ctl.note(`The bridge refused an action outside the ${ROLE_NAMES[run.ctl.job.kind]} role (${what}).`, { declined: true });
+      run.ctl.note(`The bridge refused an action outside the ${ROLE_NAMES[run.ctl.job.kind]} role (${what}). Do it another way within the role permissions, or ask the lead to reassign the work.`, { declined: true });
     }
     // Never "always": each action must come back here so its path is checked and the user sees every command.
     // A refusal is for this request only, so "reject always" is used just when it is the only way to say no.
     const options: any[] = p.options ?? [];
     const option = (allow ? ['allow_once'] : ['reject_once', 'reject_always']).map((kind) => options.find((o) => o.kind === kind)).find(Boolean);
-    if (run && allow && !option) run.ctl.note(`An allowed action was not carried out because Antigravity offered no one-time approval: ${toolCall.title ?? 'tool call'}.`, { declined: true });
+    if (run && allow && !option) run.ctl.note(`An allowed action was not carried out because Antigravity offered no one-time approval: ${describeRequest(toolCall, run.ctl.job.cwd)}\nDo it another way within the job permissions, or report what could not be verified.`, { declined: true });
     // Without a matching option the answer is "cancelled", which grants nothing.
     return option ? { outcome: { outcome: 'selected', optionId: option.optionId } } : cancelled;
   }
@@ -336,7 +336,7 @@ function describeRequest(toolCall: any, cwd: string): string {
   const input = toolCall.rawInput;
   // A lone command reads best as itself; anything with more fields is shown entire, so no argument is hidden.
   const bare = input && typeof input === 'object' && Object.keys(input).length === 1 && typeof input.command === 'string';
-  lines.push(typeof input === 'string' ? input : bare ? input.command : JSON.stringify(input, null, 2));
+  lines.push(typeof input === 'string' ? input : bare ? input.command : JSON.stringify(input, null, 2) ?? '(input missing; exact action unavailable)');
   const paths = (toolCall.locations ?? []).map((l: any) => l.path).filter(Boolean);
   if (paths.length) lines.push(`Paths: ${paths.join(', ')}`);
   lines.push(`Job workspace: ${cwd}`);

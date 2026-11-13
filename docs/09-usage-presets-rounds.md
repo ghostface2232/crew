@@ -118,20 +118,24 @@ The built-in presets name no worker models, because which models an account has 
 
 The lead is told the preset's subagent model in its session instructions, which are fixed when the session starts.
 
-## 9. What a read-only job can write
+## 9. Per-turn temporary files and read-only jobs
 
-A static review or a question runs read-only, and a check that only reads is rare: tests make temporary files, tools write caches. Each such job on Codex gets one directory of its own, `~/.crew/scratch/<job id>`, for the length of a turn.
+A static review or a question runs read-only, and a check that only reads is rare: tests make temporary files, tools write caches. Every Codex job, including writable workers and reviews with `runs_app`, gets one directory of its own, `~/.crew/scratch/<job id>`, for the length of a turn. For a static review or question, the permissions are:
 
 | | |
 | --- | --- |
-| Writable | The scratch directory only. `TMPDIR` points to it |
+| Writable (read-only jobs) | The scratch directory only. `TMPDIR`, `TMP`, and `TEMP` point to it |
 | Readable | The whole disk, as before |
 | Closed | The network, and listening on a port |
 | Lifetime | Created when a turn starts and moved aside the moment it ends, then deleted; a follow-up turn gets a fresh, empty one |
 
-It uses a Codex permissions profile (`default_permissions` with a `filesystem` table) passed in the thread's config instead of the `read-only` sandbox mode, which cannot exempt a single directory. Checked on 2026-11-13 with Codex CLI 0.167.0 and a real review on an isolated daemon: `mktemp -d`, Node's `mkdtemp`, and a `git clone` plus commit inside the scratch directory succeeded; writing to the repository and to the home directory was refused. Checked again on the same day with a real question after the instructions changed: `mktemp -d`, a `git clone` into `$TMPDIR`, and `node --test test/usage.test.ts` in the clone succeeded; `touch` in the repository and in the home directory was refused.
+A read-only job uses a Codex permissions profile (`default_permissions` with a `filesystem` table) passed in the thread's config instead of the `read-only` sandbox mode, which cannot exempt a single directory. Checked on 2026-11-13 with Codex CLI 0.167.0 and a real review on an isolated daemon: `mktemp -d`, Node's `mkdtemp`, and a `git clone` plus commit inside the scratch directory succeeded; writing to the repository and to the home directory was refused. Checked again on the same day with a real question after the instructions changed: `mktemp -d`, a `git clone` into `$TMPDIR`, and `node --test test/usage.test.ts` in the clone succeeded; `touch` in the repository and in the home directory was refused.
 
-Antigravity runs no commands as a reviewer, so it gets no scratch directory and is handed the diff as before. A review started with `runs_app` already has a writable snapshot and is unchanged.
+Writable Codex jobs retain write access to their workspace and normal temp roots, with their scratch path added explicitly. Reviews with `runs_app` keep their writable snapshot and network access, and now get scratch too. All three temp variables are set per thread through `shell_environment_policy.set`; cleanup moves scratch aside before deletion, and every follow-up creates a fresh directory at the same path. Directory links from `.worktreeinclude` share the main checkout read-only when cloning is unsupported; their paths are noted on the job and in worker instructions, and Codex permission profiles mark both link and target read-only even below a writable temp root. Put dependency tool caches in scratch and never install into or delete the shared directory. Crew detaches its links before removing worktrees and review snapshots, and Windows scratch cleanup detaches any links before recursive deletion.
+
+Antigravity jobs share one server process, so a per-job environment cannot be set there; its environment is unchanged. Its reviewer still runs no commands, receives no scratch directory, and is handed the diff as before.
+
+Checked on macOS on 2026-11-14 with unit and temporary-repository tests: writable turn/follow-up scratch lifetime, all three environment variables, retained read-only/app profiles, shared-target read permissions, and safe link cleanup. These changes were not exercised with a live Codex job or on Windows.
 
 The job's instructions state upfront what it can run so it does not find out by failing, and the reviewer marks each finding as reproduced, read, or suspected.
 

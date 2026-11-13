@@ -68,12 +68,17 @@ export function describe(job: JobView, waitingHint?: string): string {
   const refused = openRefusals(job);
   if (refused.length) {
     lines.push(`REFUSED by ${WORKERS[job.agent].name}'s automatic reviewer:`);
-    for (const refusal of refused) lines.push(`  ${refusal.action}\n  reason: ${refusal.reason ?? 'refused before; the retry turn failed before it ran again'}`);
+    for (const refusal of refused) {
+      const reason = refusal.reason?.trim();
+      const generic = reason && /^(?:blocked by policy|denied|refused|not allowed|policy violation)[.!]?$/i.test(reason);
+      lines.push(`  ${refusal.action}\n  reason: ${generic ? `${reason} (generic; no specific reason supplied)` : reason || 'no reason given; a retry may have failed before the action ran again'}`);
+    }
     if (job.endedAt) {
       lines.push(job.retrying
         ? 'This was already sent back once. If the user\'s request still covers it, call reply with approved_by_user again: the user is then asked about each request directly.'
         : 'If the user\'s request in this conversation covers the refused action, call reply with approved_by_user quoting their words, without asking them again; the reviewer then judges it once more. If it does not, tell the user what was refused and let them decide.');
     }
+    lines.push('Do it another way within the job permissions, or report the exact action and message as not verified.');
   }
   if (job.sessionId) lines.push(`session: ${resumeCommand(job)}`);
   // While a follow-up turn runs, the report is the previous turn's, which the lead has already read.

@@ -3,7 +3,7 @@ import path from 'node:path';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { effectiveRole, PORT, runsCommands, WORKERS } from './config.ts';
 import type { Config, Role, WorkerAgent } from './config.ts';
-import { carryUncommitted, changesSince, commitAll, commitChanges, copyIncluded, createWorktree, currentBranch, dirtyCount, mergeInto, isInside, projectRoot, removeWorktree, repoRoot, revertCommit, revertsSince, reviewDiff } from './git.ts';
+import { carryUncommitted, changesSince, commitAll, commitChanges, copyIncluded, createWorktree, detachLinks, currentBranch, dirtyCount, mergeInto, isInside, projectRoot, removeWorktree, repoRoot, revertCommit, revertsSince, reviewDiff } from './git.ts';
 import type { Worktree } from './git.ts';
 import { sharedInstructions } from './instructions.ts';
 import { buildPrompt } from './prompts.ts';
@@ -117,10 +117,7 @@ export interface Job {
   plugins?: string[];
   /** Caller-picked names, kept apart from app defaults so unavailable explicit requests can be noted. */
   requestedPlugins?: string[];
-  /**
-   * A directory of the job's own that a read-only worker may write to: temporary files, caches, a throwaway
-   * clone to try something in. It exists only while a turn runs. Absent where the agent cannot run commands.
-   */
+  /** Per-turn Codex directory for temporary files, caches, and throwaway clones. */
   scratch?: string;
   /** The commit the job's branch started from, kept once a sync has moved the worktree's base past it. */
   roundsBase?: string;
@@ -383,6 +380,8 @@ export class Jobs {
       worktree = await createWorktree(repo, id, base, this.home);
       cwd = worktree.path;
       const included = await copyIncluded(repo, worktree.path);
+      worktree.linked = included.linked;
+      if (included.linked.length) notes.push(`Shared read-only from .worktreeinclude: ${included.linked.join(', ')}`);
       if (included.copied.length) notes.push(`Copied from .worktreeinclude: ${included.copied.join(', ')}`);
       if (included.failed.length) notes.push(`Could not copy from .worktreeinclude: ${included.failed.join('; ')}`);
       const dirty = await dirtyCount(repo);
@@ -404,9 +403,7 @@ export class Jobs {
       notes.push(`${WORKERS[agent].name} cannot run commands as a reviewer: it was given the diff as a file and could not run tests or checks.`);
     }
     if (spec.review?.mode === 'standard' && agent !== 'codex') notes.push(`The standard review mode is Codex's own; ${WORKERS[agent].name} ran the adversarial review instead.`);
-    // A read-only worker that runs commands gets somewhere to write: without it a test that makes a temporary file cannot run.
-    const readOnly = Boolean(spec.ask) || (spec.kind === 'review' && !spec.runsApp);
-    const scratch = readOnly && WORKERS[agent].readOnlyScratch ? this.scratchDir(id) : undefined;
+    const scratch = agent === 'codex' ? this.scratchDir(id) : undefined;
     if (scratch) fs.mkdirSync(scratch, { recursive: true });
 
     // Diffs name files relative to the repo root, so scope targets must be too.
@@ -559,7 +556,10 @@ export class Jobs {
     this.event(job, 'started', `follow-up: ${what}`);
     try {
       let message = input.message + syncWarning;
-      if (job.scratch) fs.mkdirSync(job.scratch, { recursive: true });
+      if (job.agent === 'codex') {
+        job.scratch = this.scratchDir(id);
+        fs.mkdirSync(job.scratch, { recursive: true });
+      }
       if (synced) message += `\n\nYour worktree has been brought up to date: it now contains the lead's commits up to \`${synced.slice(0, 8)}\`, merged into your branch. Look at what changed (\`git log -5 --stat\`) before continuing.`;
       if (job.kind === 'review' && job.runsApp) {
         this.preparingReviews.add(id);
@@ -578,6 +578,7 @@ export class Jobs {
             return job;
           }
           message += '\n\nThe snapshot has been refreshed to the current state of the change.';
+          if (job.worktree.linked?.length) message += ` Shared read-only directories: ${job.worktree.linked.join(', ')}. Do not install into or delete them; put tool caches in the temp directory.`;
         } finally {
           this.preparingReviews.delete(id);
         }
@@ -624,6 +625,9 @@ export class Jobs {
       const partial = 'The snapshot does not contain submodules: their directories are empty in it.';
       if (fs.existsSync(path.join(repo, '.gitmodules')) && !notes.includes(partial)) notes.push(partial);
       const included = await copyIncluded(repo, worktree.path);
+      worktree.linked = included.linked;
+      const linked = `Shared read-only from .worktreeinclude: ${included.linked.join(', ')}`;
+      if (included.linked.length && !notes.includes(linked)) notes.push(linked);
       const failed = `Could not copy from .worktreeinclude: ${included.failed.join('; ')}`;
       if (included.failed.length && !notes.includes(failed)) notes.push(failed);
     } catch (err) {
@@ -1015,14 +1019,18 @@ export class Jobs {
    * directory, and the slow removal of a large one can never reach it.
    */
   private dropScratch(id: string): void {
-    const dir = this.scratchDir(id);
+    this.removeScratch(this.scratchDir(id));
+  }
+
+  private removeScratch(dir: string): void {
     const gone = `${dir}.gone-${randomBytes(4).toString('hex')}`;
     try {
       fs.renameSync(dir, gone);
     } catch {
       return;
     }
-    fs.rm(gone, { recursive: true, force: true }, () => {});
+    const detached = process.platform === 'win32' ? detachLinks(gone) : Promise.resolve();
+    void detached.then(() => fs.promises.rm(gone, { recursive: true, force: true })).catch(() => {});
   }
 
   private diffFile(id: string, turn = 1): string {
@@ -1094,7 +1102,7 @@ export class Jobs {
       if (job.kind === 'review') this.dropSnapshot(job);
     }
     // No turn survives a restart, so neither does any scratch.
-    fs.rmSync(path.join(this.home, 'scratch'), { recursive: true, force: true });
+    this.removeScratch(path.join(this.home, 'scratch'));
   }
 }
 

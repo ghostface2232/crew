@@ -37,7 +37,9 @@ export function buildPrompt(spec: JobSpec, worktree: Worktree | null, diffFile: 
   const parts = commands ? [assigned.instructions, role('machine'), LEAD_QUESTIONS] : [assigned.instructions, LEAD_QUESTIONS];
   if (spec.runsApp) parts.push(spec.kind === 'review' ? `${RUNS_APP}\n${SNAPSHOT}` : RUNS_APP);
   else if (spec.kind === 'review') parts.push(diffFile ? READ_ONLY_REVIEW : STATIC_REVIEW);
-  if (scratch) parts.push(scratchNote(scratch));
+  if (scratch) parts.push(scratchNote(scratch, Boolean(spec.ask) || (spec.kind === 'review' && !spec.runsApp)));
+  if (worktree?.linked?.length) parts.push(`# Shared dependencies\nThese directories link to the main checkout and are shared read-only: ${worktree.linked.map((dir) => `\`${dir}\``).join(', ')}. Do not install into them or delete them. Point tool caches at the temp directory.`);
+  parts.push('# Refused actions\nIf an action is refused, report the exact command or tool and its full input, and the exact message you received. State what you could not verify and whether you can do it another way. Do not summarize it as only "blocked by policy".');
   if (spec.exclusive) parts.push(ALONE);
   if (spec.plugins?.length) parts.push(pluginsNote(spec.plugins));
   if (skills.length) parts.push(skillsNote(skills));
@@ -58,7 +60,7 @@ const LEAD_QUESTIONS = '# Questions for the lead\nUse crew.ask_lead for a decisi
  * Says what the sandbox allows before the worker finds out by failing: a check that writes a temporary
  * file is still a check that ends by itself.
  */
-const scratchNote = (dir: string) => `# What you can run\nYour sandbox is read-only except for one directory of your own: \`${dir}\`. TMPDIR points there. Use it for anything a check has to write: temporary files, caches, a throwaway copy or clone of the repository to try a change or a git operation in. It is deleted when you finish, so nothing in it is a result. Everything else can be read and not written, apart from a few of the bridge's own files, which are closed to you. The network is closed, and nothing can listen on a port. The directory does not carry over to a follow-up turn, so put the commands you ran and what they showed in your report. If a check needs more than that, do not work around it: list it under what you could not verify.`;
+const scratchNote = (dir: string, readOnly: boolean) => readOnly ? `# What you can run\nYour sandbox is read-only except for one directory of your own: \`${dir}\`. TMPDIR, TMP and TEMP point there. Use it for anything a check has to write: temporary files, caches, a throwaway copy or clone of the repository to try a change or a git operation in. It is deleted when you finish, so nothing in it is a result. Everything else can be read and not written, apart from a few of the bridge's own files, which are closed to you. The network is closed, and nothing can listen on a port. The directory does not carry over to a follow-up turn, so put the commands you ran and what they showed in your report. If a check needs more than that, do not work around it: list it under what you could not verify.` : `# Temporary files\nYour temp directory for this turn is \`${dir}\`. TMPDIR, TMP and TEMP point there. Use it for temporary files and tool caches. It is deleted when the turn ends; a follow-up gets a fresh directory. Record checks in your report.`;
 /** Names and paths only: the worker reads what it needs, as it would a skill its own agent listed. */
 const skillsNote = (skills: Skill[]) => `# Skills for this task\nThe lead picked these skills as useful for this task. Read each SKILL.md before you start and follow it where it applies, within your role; files it mentions are relative to its directory.\n${skills.map((s) => `- ${s.name}${s.description ? `: ${s.description}` : ''} (\`${s.file}\`)`).join('\n')}`;
 /**

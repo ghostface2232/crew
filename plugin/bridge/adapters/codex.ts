@@ -1,4 +1,6 @@
 import { spawn } from 'node:child_process';
+import { realpathSync } from 'node:fs';
+import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { tokenFile } from '../auth.ts';
 import { agentCommand, agentEnv, HOME, VERSION } from '../config.ts';
@@ -17,6 +19,15 @@ interface Pending {
   resolve(answer: Answer | null): void;
 }
 
+interface ItemDetails {
+  turnId?: string;
+  type: string;
+  server?: string;
+  tool?: string;
+  input?: string;
+  files?: string;
+}
+
 interface Run {
   ctl: JobCtl;
   /** Id of the turn in flight, or null between turns. */
@@ -26,6 +37,7 @@ interface Run {
   message: string;
   pending: Pending[];
   crewCalls: Set<string>;
+  items: Map<string, ItemDetails>;
 }
 
 export interface CodexLimits {
@@ -177,21 +189,30 @@ export class CodexAdapter implements Adapter {
     const { job } = ctl;
     const lean = await this.lean(ctl, peer);
     // Read-only with one writable directory is not a sandbox mode; it is a permissions profile, which replaces the mode.
-    // Either profile also denies the daemon's token file. A job with the network open could otherwise read it and
+    // Each profile also denies the daemon's token file. A job with the network open could otherwise read it and
     // call the daemon as the user; a job with neither profile has no network to use it with.
     const secret = { [tokenFile(HOME)]: 'deny' };
     const scratch = job.sandbox === 'read-only' && job.scratch
       ? {
           default_permissions: 'crew_read_only',
           permissions: { crew_read_only: { filesystem: { ':root': 'read', [job.scratch]: 'write', ...secret } } },
-          shell_environment_policy: { set: { TMPDIR: job.scratch } },
         }
       : null;
-    // What "workspace-write" with network access allowed, spelled out so that one file can be excepted.
-    const app = job.runsApp && job.sandbox === 'workspace-write'
+    // Shared targets need explicit read rules even when they live under a writable temp root.
+    const shared = Object.fromEntries((job.worktree?.linked ?? []).flatMap((dir) => {
+      const link = path.join(job.cwd, dir);
+      try {
+        return [[realpathSync(link), 'read'], [link, 'read']];
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+        return [[link, 'read']];
+      }
+    }));
+    const profile = job.runsApp ? 'crew_app' : 'crew_workspace';
+    const app = (job.runsApp || Object.keys(shared).length > 0) && job.sandbox === 'workspace-write'
       ? {
-          default_permissions: 'crew_app',
-          permissions: { crew_app: { filesystem: { ':root': 'read', [job.cwd]: 'write', ':tmpdir': 'write', ':slash_tmp': 'write', ...secret }, network: { enabled: true } } },
+          default_permissions: profile,
+          permissions: { [profile]: { filesystem: { ':root': 'read', [job.cwd]: 'write', ':tmpdir': 'write', ':slash_tmp': 'write', ...(job.scratch ? { [job.scratch]: 'write' } : {}), ...shared, ...secret }, network: { enabled: Boolean(job.runsApp) } } },
         }
       : null;
     return {
@@ -200,7 +221,11 @@ export class CodexAdapter implements Adapter {
       // A read-only job (a static review, a question) must never block on a prompt, and has nothing to approve.
       approvalPolicy: job.sandbox === 'read-only' ? 'never' : this.config.codex.approvalPolicy,
       approvalsReviewer: this.reviewer(job),
-      config: { ...(app ?? scratch), // Its three tools only talk to the bridge. Without this a job with approval policy "never" (a review, a question)
+      config: { ...(app ?? scratch),
+      ...(job.scratch ? {
+        shell_environment_policy: { set: { TMPDIR: job.scratch, TMP: job.scratch, TEMP: job.scratch } },
+        ...(!app && !scratch ? { sandbox_workspace_write: { writable_roots: [job.scratch] } } : {}),
+      } : {}), // Its three tools only talk to the bridge. Without this a job with approval policy "never" (a review, a question)
       // is refused the call outright, and any other job would stop to ask.
       mcp_servers: { crew: { ...ctl.mcp, default_tools_approval_mode: 'approve' } },
       ...lean },
@@ -214,7 +239,7 @@ export class CodexAdapter implements Adapter {
   }
 
   private openRun(ctl: JobCtl, threadId: string): Run {
-    const run: Run = { ctl, turnId: null, awaitingTurn: false, interrupt: null, message: '', pending: [], crewCalls: new Set() };
+    const run: Run = { ctl, turnId: null, awaitingTurn: false, interrupt: null, message: '', pending: [], crewCalls: new Set(), items: new Map() };
     this.runs.set(threadId, run);
     return run;
   }
@@ -232,6 +257,7 @@ export class CodexAdapter implements Adapter {
 
   private async sendTurn(peer: RpcPeer, run: Run, method: string, params: unknown): Promise<void> {
     run.message = '';
+    run.items.clear();
     run.awaitingTurn = true;
     try {
       const res = await peer.request(method, params, RPC_TIMEOUT_MS);
@@ -309,6 +335,18 @@ export class CodexAdapter implements Adapter {
     }
     const threadId: string | undefined = p?.threadId;
     if (!threadId) return;
+    const owner = this.runs.get(threadId) ?? this.children.get(threadId);
+    if (method === 'turn/started' || method === 'thread/closed') {
+      for (const key of owner?.items.keys() ?? []) if (key.startsWith(`${threadId}\0`)) owner?.items.delete(key);
+    }
+    if (method === 'item/started' && owner && ['mcpToolCall', 'fileChange'].includes(p.item?.type)) {
+      const item = p.item;
+      owner.items.set(`${threadId}\0${item.id}`, {
+        type: item.type, turnId: p.turnId, server: item.server, tool: item.tool,
+        input: item.type === 'mcpToolCall' ? inputText(item.arguments) : undefined,
+        files: item.type === 'fileChange' ? fileList(item.changes) : undefined,
+      });
+    }
     if (method === 'thread/closed') {
       const owner = this.children.get(threadId);
       if (owner) {
@@ -329,14 +367,17 @@ export class CodexAdapter implements Adapter {
       // An aborted review ended with its turn; only a verdict against the action is a refusal.
       const status = p.review?.status;
       if (status === 'denied' || status === 'timedOut') {
-        const reason = p.review.rationale ?? (status === 'timedOut' ? 'the review timed out' : 'no reason given');
-        (this.runs.get(threadId) ?? this.children.get(threadId))?.ctl.refused(reviewedAction(p.action), reason);
+        const reason = detail(p.review.rationale?.trim() || (status === 'timedOut' ? 'the review timed out; no reason given' : 'no reason given'), 2000);
+        owner?.ctl.refused(reviewedAction(p.action, this.itemDetails(owner, p)), reason);
       }
       return;
     }
     const run = this.runs.get(threadId);
     if (!run) {
       // Sub-agent work only proves the job is alive; its turns must not end the parent job.
+      if (method === 'turn/completed') {
+        for (const key of owner?.items.keys() ?? []) if (key.startsWith(`${threadId}\0`)) owner?.items.delete(key);
+      }
       this.children.get(threadId)?.ctl.activity();
       return;
     }
@@ -377,6 +418,7 @@ export class CodexAdapter implements Adapter {
         run.turnId = null;
         run.awaitingTurn = false;
         run.crewCalls.clear();
+        run.items.clear();
         for (const request of run.pending.splice(0)) request.resolve(null);
         const turn = p.turn;
         if (run.interrupt || turn.status === 'interrupted') ctl.cancelled();
@@ -443,7 +485,7 @@ export class CodexAdapter implements Adapter {
   private settleRequest(run: Run, index: number, answer: Answer | null): void {
     const [request] = run.pending.splice(index, 1);
     if (request.type === 'approval' && answer && !answer.cancelled && !answer.approve) {
-      run.ctl.note(`The user declined an action: ${request.reason}`, { declined: true });
+      run.ctl.note(`The user declined an action: ${request.reason}\nDo it another way within the job permissions, or report what could not be verified.`, { declined: true });
     }
     request.resolve(answer);
     if (index !== 0) return;
@@ -452,15 +494,22 @@ export class CodexAdapter implements Adapter {
     else run.ctl.resumed();
   }
 
+  private itemDetails(run: Run | undefined, params: any): ItemDetails | undefined {
+    const item = run?.items.get(`${params.threadId}\0${params.targetItemId ?? params.itemId}`);
+    return item && (!item.turnId || !params.turnId || item.turnId === params.turnId) ? item : undefined;
+  }
+
   private async onRequest(method: string, p: any, id: string | number): Promise<unknown> {
     const threadId = p?.threadId;
     const run = this.runs.get(threadId) ?? this.children.get(threadId);
+    const item = this.itemDetails(run, p);
     const ask = (type: 'approval' | 'question', reason: string) => {
+      reason = detail(reason, 8000);
       if (!run || isTerminal(run.ctl.job)) return Promise.resolve<Answer>({ approve: false });
       if (run.interrupt) return Promise.resolve<Answer>({ approve: false, cancelled: true });
       // Nothing in a read-only job is the user's to allow: a question or a static review that asks to write is declined.
       if (type === 'approval' && run.ctl.job.sandbox === 'read-only') {
-        run.ctl.note(`Declined in a read-only job: ${reason.split('\n')[0].slice(0, 120)}`, { declined: true });
+        run.ctl.note(`Declined in a read-only job: ${reason}\nDo it another way using the scratch directory, or report what could not be verified.`, { declined: true });
         return Promise.resolve<Answer>({ approve: false });
       }
       if (this.children.has(threadId)) reason = `Sub-agent request\n${reason}`;
@@ -469,34 +518,34 @@ export class CodexAdapter implements Adapter {
         if (run.pending.length === 1) run.ctl.waiting(type, reason);
       });
     };
-    const why = p?.reason ? `\nReason: ${p.reason}` : '';
+    const why = p?.reason ? `\nReason: ${detail(p.reason, 2000)}` : '';
 
     switch (method) {
       case 'item/commandExecution/requestApproval': {
         const deny = p.availableDecisions && !p.availableDecisions.includes('decline') ? 'cancel' : 'decline';
+        const command = p.command ? `Run:\n${reviewedAction({ type: 'command', command: p.command, cwd: p.cwd })}` : '';
+        const network = p.networkApprovalContext ? `Network access: ${detail(p.networkApprovalContext.host ?? '(target missing)')} (${detail(p.networkApprovalContext.protocol ?? 'protocol missing')})` : '';
+        const permissions = p.additionalPermissions ? `Additional permissions:\n${permissionText(p.additionalPermissions)}` : '';
+        const description = detail([command, network, permissions].filter(Boolean).join('\n') + why, 8000);
         if (p.availableDecisions && !p.availableDecisions.includes('accept')) {
-          run?.ctl.note('The bridge declined a command approval that offered no acceptance.', { declined: true });
+          run?.ctl.note(`The bridge declined a command approval that offered no acceptance: ${command || network ? description : `exact action unavailable (input missing)${description ? `\n${description}` : ''}`}. Do it another way or report what could not be verified.`, { declined: true });
           return { decision: deny };
         }
-        const command = p.command ? `Run:\n${p.command}` : '';
-        const network = p.networkApprovalContext ? `Network access: ${JSON.stringify(p.networkApprovalContext)}` : '';
         if (!command && !network) {
-          run?.ctl.note('The bridge declined a command approval that omitted the command.', { declined: true });
+          run?.ctl.note(`The bridge declined a command approval that omitted the command (exact action unavailable; input missing).${description ? `\n${description}` : ''} Send a request naming the command, or do it another way.`, { declined: true });
           return { decision: deny };
         }
-        const cwd = p.cwd ? `Working directory: ${p.cwd}` : '';
-        const permissions = p.additionalPermissions ? `Additional permissions: ${JSON.stringify(p.additionalPermissions)}` : '';
-        const answer = await ask('approval', [command, cwd, network, permissions].filter(Boolean).join('\n') + why);
+        const answer = await ask('approval', description);
         if (!answer) return;
         const cancel = !p.availableDecisions || p.availableDecisions.includes('cancel') ? 'cancel' : deny;
         return { decision: answer.cancelled ? cancel : answer.approve ? 'accept' : deny };
       }
       case 'item/fileChange/requestApproval': {
-        const answer = await ask('approval', `write files${p.grantRoot ? ` under ${p.grantRoot}` : ''}${why}`);
+        const answer = await ask('approval', `write files: ${item?.files ?? fileList(p.files)}${p.grantRoot ? `\nGrant root: ${detail(p.grantRoot)}` : ''}${why}`);
         return answer ? { decision: answer.cancelled ? 'cancel' : answer.approve ? 'accept' : 'decline' } : undefined;
       }
       case 'item/permissions/requestApproval': {
-        const answer = await ask('approval', `Grant permissions:\n${JSON.stringify(p.permissions ?? {}, null, 2)}${why}`);
+        const answer = await ask('approval', `Grant permissions:\n${permissionText(p.permissions)}${why}`);
         if (!answer) return;
         const granted: Record<string, unknown> = {};
         if (answer.approve && p.permissions?.network) granted.network = p.permissions.network;
@@ -523,11 +572,11 @@ export class CodexAdapter implements Adapter {
         // Plugin tools ask for approval before running; forward those to the user like commands,
         // and decline requests from other servers when no plugins are enabled.
         if (run?.ctl.job.plugins?.length && p._meta?.codex_approval_kind === 'mcp_tool_call') {
-          const answer = await ask('approval', `Use the tool ${p.serverName}.${p._meta.tool_name ?? '(unnamed)'}${p.message ? `\n${p.message}` : ''}`);
+          const answer = await ask('approval', toolRequest(p, item));
           if (!answer) return;
           return { action: answer.cancelled ? 'cancel' : answer.approve ? 'accept' : 'decline', content: answer.approve ? {} : null, _meta: null };
         }
-        run?.ctl.note(`The bridge declined an unsupported MCP request from ${p.serverName}.`, { declined: true });
+        run?.ctl.note(`The bridge declined an unsupported MCP request: ${toolRequest(p, item)}. Use a supported tool or do it another way.`, { declined: true });
         return { action: 'decline', content: null, _meta: null };
       default:
         throw new RpcError(-32601, `${method} is not supported by Crew`);
@@ -535,21 +584,92 @@ export class CodexAdapter implements Adapter {
   }
 }
 
-/** The action an automatic review was about, in full: it may be sent back for approval as written. */
-function reviewedAction(action: any): string {
+/** Bound free-form provider text before putting it in a report or approval prompt. */
+function detail(text: string, limit = 4000): string {
+  return text.length > limit ? `${text.slice(0, limit)}… (truncated)` : text;
+}
+
+/** Render only tool input; environment fields are never part of an approval display. */
+function inputText(input: unknown): string {
+  if (input === undefined) return 'input missing';
+  let text = '';
+  let truncated = false;
+  const append = (part: string) => {
+    const room = 4000 - text.length;
+    text += part.slice(0, Math.max(0, room));
+    if (part.length > room) truncated = true;
+  };
+  const visit = (value: unknown, label: string, depth: number) => {
+    if (truncated) return;
+    if (depth > 6) { append(`${label}… (truncated)\n`); return; }
+    if (value !== null && typeof value === 'object') {
+      const entries = Object.entries(value).filter(([key]) => !/^(?:env(?:s|variables|vars)?|environment(?:variables|vars)?)$/i.test(key.replace(/[_-]/g, '')));
+      if (label) append(`${label}\n`);
+      if (!entries.length) append('(no arguments)\n');
+      for (const [key, child] of entries) {
+        if (truncated) break;
+        visit(child, `${'  '.repeat(depth)}${key}: `, depth + 1);
+      }
+    } else append(`${label}${value === '' ? '""' : String(value)}\n`);
+  };
+  visit(input, '', 0);
+  return truncated ? `${text}… (truncated)` : text.slice(0, -1);
+}
+
+function fileList(files: any): string {
+  if (!Array.isArray(files) || !files.length) return 'exact action unavailable (files missing)';
+  return detail(files.slice(0, 100).map((file) => typeof file === 'string' ? file : file.path ?? '(path missing)').join(', ') + (files.length > 100 ? '… (truncated)' : ''));
+}
+
+function permissionText(permissions: any): string {
+  const lines: string[] = [];
+  if (permissions?.network?.enabled !== undefined) lines.push(`Network: ${permissions.network.enabled ? 'enabled' : 'disabled'}`);
+  const files = permissions?.fileSystem;
+  for (const access of ['read', 'write']) {
+    if (files?.[access]?.length) lines.push(`${access} paths: ${fileList(files[access])}`);
+  }
+  for (const entry of (files?.entries ?? []).slice(0, 100)) {
+    const target = entry.path;
+    lines.push(`${detail(entry.access ?? '(access missing)')}: ${detail(target?.path ?? target?.pattern ?? target?.value?.kind ?? '(path missing)')}${target?.value?.subpath ? `/${detail(target.value.subpath)}` : ''}`);
+  }
+  if (files?.entries?.length > 100) lines.push('… (truncated)');
+  if (files?.globScanMaxDepth !== undefined) lines.push(`Glob scan depth: ${files.globScanMaxDepth}`);
+  return detail(lines.join('\n') || 'exact permissions unavailable');
+}
+
+function toolInput(action: any, item?: ItemDetails): string {
+  if (action.arguments !== undefined) return inputText(action.arguments);
+  return item?.type === 'mcpToolCall' && item.server === action.server && item.tool === (action.toolName ?? action.tool)
+    ? item.input ?? 'input missing' : 'input missing (started item unavailable)';
+}
+
+function toolRequest(params: any, item?: ItemDetails): string {
+  const action = { server: params.serverName, toolName: params._meta?.tool_name, arguments: params.arguments };
+  return detail(`Use the tool ${detail(action.server ?? '(server missing)')}.${detail(action.toolName ?? '(unnamed)')}\nArguments:\n${toolInput(action, item)}${params.message ? `\nMessage: ${detail(params.message, 2000)}` : ''}${params.reason ? `\nReason: ${detail(params.reason, 2000)}` : ''}`, 8000);
+}
+
+/** Keep action fields useful to a decision, without protocol ids or environment metadata. */
+function reviewedAction(action: any, item?: ItemDetails): string {
+  const cwd = action?.cwd ? `\nWorking directory: ${detail(action.cwd)}` : '';
   switch (action?.type) {
     case 'command':
-      return action.command;
-    case 'execve':
-      return [action.program, ...(action.argv ?? [])].join(' ');
+      return detail(`${detail(action.command ?? 'exact action unavailable (command missing)')}${cwd}`, 8000);
+    case 'execve': {
+      const argv = Array.isArray(action.argv) ? action.argv.slice(0, 100).map((arg: string, i: number) => `  [${i}] ${detail(JSON.stringify(arg))}`).join('\n') + (action.argv.length > 100 ? '\n… (truncated)' : '') : 'input missing (argv unavailable)';
+      return detail(`execve\nProgram: ${detail(action.program ?? 'exact action unavailable')}\nArguments:\n${detail(argv)}${cwd || '\nWorking directory: missing'}`, 8000);
+    }
     case 'applyPatch':
-      return `write files: ${(action.files ?? []).join(', ')}`;
+      return detail(`write files: ${fileList(action.files)}${cwd}`, 8000);
     case 'networkAccess':
-      return `network access to ${action.target}`;
+      return `network access to ${detail(action.target ?? '(target missing)')}`;
     case 'mcpToolCall':
-      return `tool ${action.server}.${action.toolName}`;
+      return detail(`tool ${detail(action.server ?? '(server missing)')}.${detail(action.toolName ?? action.tool ?? '(unnamed)')}\nArguments:\n${toolInput(action, item)}`, 8000);
+    case 'writeStdin':
+      return detail(`Write to process ${detail(action.processId ?? '(process missing)')}:\n${detail(action.stdin ?? 'input missing')}${cwd}`, 8000);
+    case 'requestPermissions':
+      return detail(`Grant permissions:\n${permissionText(action.permissions)}${action.reason ? `\nReason: ${detail(action.reason, 2000)}` : ''}`, 8000);
     default:
-      return JSON.stringify(action ?? {});
+      return `exact action unavailable${action?.type ? ` (unsupported action ${detail(action.type)})` : ' (Codex omitted it)'}`;
   }
 }
 

@@ -55,6 +55,8 @@ export interface Worktree {
   branch: string;
   /** Commit the worktree was created from. */
   base: string;
+  /** Relative paths of shared directories attached by Crew. */
+  linked?: string[];
 }
 
 /** Number of uncommitted paths in the main tree; a worktree created from a ref will not contain them. */
@@ -108,38 +110,60 @@ function worktreePath(root: string, id: string, home: string): string {
   return path.join(home, 'worktrees', repoKey, id);
 }
 
-/**
- * Copies the gitignored files named in the repository's `.worktreeinclude`
- * (the convention Claude Code uses for its own worktrees) into a new worktree,
- * so a worker can run tests without reinstalling dependencies. Copies rather
- * than links: tools write caches into `node_modules`, and a link would send
- * those writes to the main tree.
- */
-export async function copyIncluded(root: string, wt: string): Promise<{ copied: string[]; failed: string[] }> {
-  const result = { copied: [] as string[], failed: [] as string[] };
+/** Copies included files, cloning directories when supported and otherwise sharing them read-only. */
+export async function copyIncluded(root: string, wt: string, clone: (source: string, dest: string) => Promise<void> = cloneDirectory): Promise<{ copied: string[]; linked: string[]; failed: string[] }> {
+  const result = { copied: [] as string[], linked: [] as string[], failed: [] as string[] };
   if (!(await fs.stat(path.join(root, '.worktreeinclude')).catch(() => null))) return result;
   // Let git apply the patterns, so the syntax is exactly .gitignore's.
   const matched = await git(root, ['ls-files', '--others', '--ignored', '--exclude-from=.worktreeinclude', '--directory']);
   if (!matched) return result;
-  // Only ignored paths are copied: an untracked, unignored file would end up in the worker's commit.
   const ignored = await git(root, ['check-ignore', '--stdin'], matched).catch(() => '');
   for (const entry of ignored.split('\n').filter(Boolean)) {
     const rel = entry.replace(/\/$/, '');
+    const source = path.join(root, rel);
+    const dest = path.join(wt, rel);
     try {
-      await fs.cp(path.join(root, rel), path.join(wt, rel), {
-        recursive: true,
-        errorOnExist: false,
-        force: false,
-        verbatimSymlinks: true,
-        // Copy-on-write clone where the filesystem supports it (APFS), so large trees are cheap.
-        mode: constants.COPYFILE_FICLONE,
+      const directory = (await fs.lstat(source)).isDirectory();
+      const existed = await fs.lstat(dest).catch((err: NodeJS.ErrnoException) => {
+        if (err.code !== 'ENOENT') throw err;
+        return null;
       });
-      result.copied.push(entry);
+      try {
+        if (directory && !existed) await clone(source, dest);
+        else await fs.cp(source, dest, {
+          recursive: true, errorOnExist: false, force: false, verbatimSymlinks: true,
+          mode: directory ? constants.COPYFILE_FICLONE_FORCE : constants.COPYFILE_FICLONE,
+        });
+        result.copied.push(entry);
+      } catch (err) {
+        // FORCE is essential: FICLONE silently copies an entire dependency tree on unsupported filesystems.
+        if (!directory || existed || !['ENOTSUP', 'EOPNOTSUPP', 'EXDEV', 'ENOSYS', 'EINVAL'].includes((err as NodeJS.ErrnoException).code ?? '')) throw err;
+        if (process.platform === 'win32') await detachLinks(dest);
+        await fs.rm(dest, { recursive: true, force: true });
+        await fs.mkdir(path.dirname(dest), { recursive: true });
+        await fs.symlink(source, dest, process.platform === 'win32' ? 'junction' : 'dir');
+        result.linked.push(rel);
+      }
     } catch (err) {
       result.failed.push(`${entry} (${(err as Error).message})`);
     }
   }
   return result;
+}
+
+async function cloneDirectory(source: string, dest: string): Promise<void> {
+  await fs.mkdir(path.dirname(dest), { recursive: true });
+  if (process.platform === 'darwin') {
+    // libuv's forced reflink returns ENOSYS on macOS, even on APFS. cp -c uses clonefile and never falls back.
+    await new Promise<void>((resolve, reject) => {
+      execFile('/bin/cp', ['-cR', '-P', source, dest], { env: { ...process.env, LC_ALL: 'C' } }, (err, _stdout, stderr) => {
+        if (!err) resolve();
+        else if (/clonefile failed: (?:Operation not supported|Cross-device link|Function not implemented|Invalid argument)/.test(stderr)) {
+          reject(Object.assign(new Error(stderr.trim()), { code: 'ENOTSUP' }));
+        } else reject(err);
+      });
+    });
+  } else await fs.cp(source, dest, { recursive: true, force: false, verbatimSymlinks: true, mode: constants.COPYFILE_FICLONE_FORCE });
 }
 
 /** True when `file` is `root` or inside it, after resolving symlinks. */
@@ -281,8 +305,17 @@ export async function removeWorktree(root: string, wt: Worktree, id: string, hom
     }
     const locked = registered.some((line) => line === 'locked' || line.startsWith('locked '));
     // Leave a locked tree untouched so Git can report why it cannot be removed.
-    // Only Windows deletion can follow a link out of the worktree.
-    if (platform === 'win32' && !locked) await detachLinks(wt.path);
+    if (!locked) {
+      if (platform === 'win32') await detachLinks(wt.path);
+      else for (const rel of wt.linked ?? []) {
+        const link = path.resolve(wt.path, rel);
+        if (!isInside(wt.path, path.dirname(link))) throw new Error(`Refusing to detach a link outside ${wt.path}.`);
+        if ((await fs.lstat(link).catch((err: NodeJS.ErrnoException) => {
+          if (err.code !== 'ENOENT') throw err;
+          return null;
+        }))?.isSymbolicLink()) await fs.unlink(link);
+      }
+    }
     try {
       await git(root, ['worktree', 'remove', '--force', wt.path]);
     } catch (err) {

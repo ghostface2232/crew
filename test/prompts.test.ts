@@ -32,7 +32,7 @@ function build(c: Case) {
   if (c.exclusive) spec.exclusive = true;
   const worktree = (spec.kind !== 'review' && !spec.ask) || c.runsApp ? WORKTREE : null;
   const diffFile = spec.kind === 'review' && !WORKERS[c.agent].reviewerRunsGit ? DIFF : null;
-  return buildPrompt(spec, worktree, diffFile, SHARED, c.scratch ? SCRATCH : undefined, runsCommands(c.agent, spec), c.skills ? [SKILL] : []);
+  return buildPrompt(spec, worktree, diffFile, SHARED, (c.scratch ?? (c.agent === 'codex' && (c.role === 'delegate' || c.role === 'polish' || c.runsApp))) ? SCRATCH : undefined, runsCommands(c.agent, spec), c.skills ? [SKILL] : []);
 }
 
 const cases: Case[] = [];

@@ -108,7 +108,7 @@ test('gitignored files listed in .worktreeinclude are copied into the worktree, 
   const job = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'x' }));
   assert.deepEqual(seen, ['node_modules/pkg/index.js', '.env']);
   assert.deepEqual(job.result?.files, []);
-  assert.match(job.notes.join(' '), /Copied from \.worktreeinclude: .*node_modules/);
+  assert.match(job.notes.join(' '), /(?:Copied|Shared read-only) from \.worktreeinclude: .*node_modules/);
 });
 
 test('an edit the worker reports outside its worktree is listed as out of scope', async () => {
@@ -1220,10 +1220,11 @@ test('a read-only Codex job gets a scratch directory for the turn, and Antigravi
   worker.done('because');
   await settled(jobs, ask);
 
-  // A job that writes, or runs the app, has its own writable tree and needs none.
+  // Writable jobs also get a per-turn temp directory.
   const build = await jobs.create({ kind: 'delegate', cwd: repo, task: 'x' });
-  assert.equal(build.scratch, undefined);
-  assert.ok(!build.instructions.includes('What you can run'));
+  assert.equal(build.scratch, path.join(home, 'scratch', build.id));
+  assert.ok(build.instructions.includes('# Temporary files'));
+  assert.ok(!build.instructions.includes('Your sandbox is read-only'));
   worker.done('built');
   await settled(jobs, build);
   await jobs.discard(build.id);
@@ -1750,4 +1751,26 @@ test('failed worktree removal keeps the Git error and only Windows falls back', 
   t.mock.method(fsPromises, 'rm', rm);
   syncBuiltinESMExports();
   await assert.rejects(removeWorktree(repo, wt, 'cx-123abc', home, 'win32'), /original removal failure.*Git still lists/s);
+});
+
+test('writable Codex jobs recreate and retire their scratch on every turn', async (t) => {
+  let worker!: JobCtl;
+  const h = harness((ctl) => { worker = ctl; });
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); });
+  const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' });
+  assert.equal(job.scratch, path.join(h.home, 'scratch', job.id));
+  assert.ok(fs.statSync(job.scratch!).isDirectory());
+  assert.match(job.instructions, /TMPDIR, TMP and TEMP point there/);
+  assert.doesNotMatch(job.instructions, /Your sandbox is read-only/);
+  fs.writeFileSync(path.join(job.scratch!, 'cache'), 'first turn');
+  worker.done('done');
+  await settled(h.jobs, job);
+  assert.ok(!fs.existsSync(job.scratch!));
+  h.adapter.reply = async (ctl) => { worker = ctl; };
+  await h.jobs.reply(job.id, { message: 'again' });
+  assert.deepEqual(fs.readdirSync(job.scratch!), []);
+  fs.writeFileSync(path.join(job.scratch!, 'cache'), 'second turn');
+  worker.done('done again');
+  await settled(h.jobs, job);
+  assert.ok(!fs.existsSync(job.scratch!));
 });

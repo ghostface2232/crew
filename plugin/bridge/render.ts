@@ -24,6 +24,9 @@ export function describe(job: JobView, waitingHint?: string): string {
   const elapsed = duration((job.endedAt ?? Date.now()) - job.createdAt);
   const lines = [`[${job.id}] ${WORKERS[job.agent].name} · ${job.kind} · ${job.state.toUpperCase()} (${elapsed}) — ${job.title}`];
 
+  const effort = job.resolvedEffort ?? (job.agent === 'codex' && !job.nativeReview ? job.effort : undefined);
+  lines.push(`model: ${job.resolvedModel ?? job.model ?? 'unknown (agent default)'}${effort ? ` · effort: ${effort}` : ''}`);
+
   for (const question of job.questions ?? []) {
     if (question.answer !== undefined) continue;
     lines.push(`ASKS YOU: [${question.id}] ${question.text}`);
@@ -51,7 +54,8 @@ export function describe(job: JobView, waitingHint?: string): string {
   }
   if (job.worktree) lines.push(`worktree: ${job.worktree.path} (branch ${job.worktree.branch}, base ${job.worktree.base.slice(0, 8)})`);
   if (job.result) {
-    lines.push(`changes: ${job.result.stat || 'none'}${job.result.commit ? ` · commit ${job.result.commit}` : ''}`);
+    const blocked = job.state === 'done' && !job.result.files.length && (job.declinedTurn === job.turns || job.refusals?.some((r) => r.turn === job.turns));
+    lines.push(`changes: ${blocked ? 'none — an action was refused or declined; see refusals/notes below' : job.result.stat || 'none'}${job.result.commit ? ` · commit ${job.result.commit}` : ''}`);
     for (const file of job.result.files.slice(0, 40)) lines.push(`  ${file}`);
     if (job.result.files.length > 40) lines.push(`  … and ${job.result.files.length - 40} more`);
     if (job.result.outOfScope.length) lines.push(`OUT OF SCOPE — changed but not in the allowed targets: ${job.result.outOfScope.join(', ')}`);
@@ -78,11 +82,12 @@ export function describe(job: JobView, waitingHint?: string): string {
 
   if (job.state === 'done' && job.worktree && job.result?.files.length) {
     const { branch, base } = job.worktree;
+    const commits = job.rounds ? job.rounds.filter((round) => round.state === 'kept').map((round) => round.commit) : job.result.commit ? [job.result.commit] : [];
     lines.push(
       '',
       '--- next ---',
       `Inspect: git diff ${base.slice(0, 8)}..${branch}`,
-      `Accept:  git merge --squash ${branch}   (or cherry-pick ${job.result.commit})`,
+      `Accept:  git merge --squash ${branch}${commits.length ? `   (or cherry-pick ${commits.join(' ')})` : ''}`,
       `Fix:     reply with a message describing what to change`,
       `Then:    cancel with discard: true to remove the worktree and branch`,
     );

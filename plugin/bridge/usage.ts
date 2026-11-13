@@ -33,11 +33,13 @@ export interface ProviderUsage {
   plan: string | null;
   /** Epoch ms of AgentGauge's reading; null when there is none. */
   capturedAt: number | null;
-  /** The tightest account-wide window decides this; scoped windows are listed but do not. */
+  /** The tightest applicable window decides this: account-wide, or the configured model family. */
   status: UsageStatus;
   /** One short sentence saying why, shown as a tooltip and returned to the lead. */
   reason: string;
   windows: UsageWindow[];
+  /** Window keys used for status and reset advice; absent on older readings. */
+  decidingKeys?: string[];
 }
 
 export interface Usage {
@@ -162,6 +164,16 @@ const percent = (ratio: number) => `${Math.round(ratio * 100)}%`;
 const windowName = (w: Pick<UsageWindow, 'kind' | 'group'>) =>
   `${w.group ? `${w.group} ` : ''}${({ fiveHour: '5-hour', weekly: 'weekly', billingCycle: 'billing-cycle' } as Record<string, string>)[w.kind] ?? w.kind} window`;
 
+/** Match the complete family name, not just a shared vendor word; slash-separated labels name alternatives. */
+function applicable<T extends Pick<UsageWindow, 'group'>>(windows: T[], model?: string): T[] {
+  const wide = windows.filter((w) => w.group === null);
+  if (wide.length) return wide;
+  const words = model?.toLowerCase().split(/[^a-z0-9]+/);
+  const matches = words ? windows.filter((w) => w.group!.toLowerCase().split('/').some((family) =>
+    family.split(/[^a-z0-9]+/).filter(Boolean).every((word) => words.includes(word)))) : [];
+  return matches.length ? matches : windows;
+}
+
 export type SampleReader = (agent: Agent, key: string, since: number) => Sample[];
 
 /**
@@ -188,7 +200,7 @@ export class UsageTracker {
     const report = this.reported.get(agent);
     // A reading taken after the report that shows room means the limit has lifted.
     // An empty reading shows nothing, so it lifts nothing.
-    const room = (raw?.windows ?? []).filter((w) => w.group === null);
+    const room = applicable(raw?.windows ?? [], this.models[agent]);
     const lifted = report && (now - report.at > REPORT_MS || Boolean(raw?.capturedAt && raw.capturedAt > report.at && room.length && room.every((w) => w.usedRatio < 0.999)));
     if (lifted) this.reported.delete(agent);
     const limited = report && !lifted ? report : null;
@@ -208,22 +220,13 @@ export class UsageTracker {
       return { ...w, projectedExhaustion: projection.at, status };
     });
 
-    const base = { agent, plan: raw?.plan ?? null, capturedAt: raw?.capturedAt ?? null, windows };
+    const deciding = applicable(windows, this.models[agent]);
+    const base = { decidingKeys: deciding.map((w) => w.key), agent, plan: raw?.plan ?? null, capturedAt: raw?.capturedAt ?? null, windows };
     if (limited) return { ...base, status: 'exhausted', reason: `A job hit the usage limit: ${limited.detail.split('\n')[0].slice(0, 160)}` };
     if (!raw || raw.capturedAt === null) return { ...base, status: 'unknown', reason: 'AgentGauge has no reading for this agent.' };
     if (now - raw.capturedAt > STALE_MS) return { ...base, status: 'stale', reason: `AgentGauge's last reading is ${Math.round((now - raw.capturedAt) / 60_000)} minutes old.` };
     if (!windows.length) return { ...base, status: 'unknown', reason: 'AgentGauge reported no usage windows for this agent.' };
 
-    // Account-wide windows decide. A provider that only has per-model windows is judged by the family of the
-    // model its jobs are configured to use; when that is not known, by its tightest family, because a job
-    // does not move to another model by itself.
-    const wide = windows.filter((w) => w.group === null);
-    let deciding = wide;
-    if (!wide.length) {
-      const model = this.models[agent]?.toLowerCase();
-      const family = model ? windows.filter((w) => w.group!.toLowerCase().split(/[^a-z0-9]+/).some((word) => word.length > 2 && model.includes(word))) : [];
-      deciding = family.length ? family : windows;
-    }
     const status = worst(deciding.map((w) => w.status));
     const tightest = deciding.filter((w) => w.status === status).sort((a, b) => b.usedRatio - a.usedRatio)[0];
     const reason = status === 'ok'
@@ -350,7 +353,8 @@ export function route(kind: RouteKind, usage: Usage, roles: Config['roles']): Ro
   const status = (agent: Agent): UsageStatus => of(agent)?.status ?? 'unknown';
   const short = (agent: Agent) => status(agent) === 'tight' || status(agent) === 'exhausted';
   const resets = (agent: Agent): number | null => {
-    const times = (of(agent)?.windows ?? []).filter((w) => w.status === status(agent) && w.resetTime !== null).map((w) => w.resetTime!);
+    const provider = of(agent);
+    const times = (provider?.windows ?? []).filter((w) => (!provider?.decidingKeys || provider.decidingKeys.includes(w.key)) && w.status === status(agent) && w.resetTime !== null).map((w) => w.resetTime!);
     return times.length ? Math.max(...times) : null;
   };
   const plain = (assignee: Agent, reason: string, fallback: Agent[] = []): RouteDecision => ({ kind, assignee, reason, fallback, degraded: false, deferUntil: null });

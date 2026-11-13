@@ -1626,3 +1626,42 @@ test('worktree safety checks run before detaching links or deleting files', asyn
   assert.equal(fs.existsSync(wt.path), false);
   assert.equal(fs.readFileSync(path.join(repo, 'README.md'), 'utf8'), 'hello\n');
 });
+
+test('result uses kept commits after a no-change follow-up and omits an unknown cherry-pick', async (t) => {
+  const repo = tempRepo();
+  const h = harness((ctl) => {
+    fs.appendFileSync(path.join(ctl.job.cwd, 'README.md'), 'improved\n');
+    ctl.done('edited');
+  });
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); fs.rmSync(repo, { recursive: true, force: true }); });
+  const job = await settled(h.jobs, await h.jobs.create({ kind: 'polish', cwd: repo, targets: ['README.md'] }));
+  const first = job.result!.commit!;
+  await h.jobs.reply(job.id, { message: 'check again' });
+  await settled(h.jobs, job);
+  assert.equal(job.result!.commit, null);
+  assert.ok(job.result!.files.length);
+  assert.match(describe(job), new RegExp(`or cherry-pick ${first}\\)`));
+  job.rounds!.push({ ...job.rounds![0], turn: 3, commit: 'kept-second' }, { ...job.rounds![0], turn: 4, commit: 'undone-third', state: 'undone' });
+  assert.match(describe(job), new RegExp(`or cherry-pick ${first} kept-second\\)`));
+  assert.doesNotMatch(describe(job), /undone-third|null/);
+  delete job.rounds;
+  assert.doesNotMatch(describe(job), /cherry-pick/);
+});
+
+test('only the latest turn refusal qualifies a no-change result, including repeated notes', async (t) => {
+  const h = harness((ctl) => { ctl.note('The bridge refused an action.'); ctl.done('no changes'); });
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); });
+  const job = await settled(h.jobs, await h.jobs.create({ kind: 'polish', cwd: h.home, isolation: 'in_place', targets: ['README.md'] }));
+  assert.match(describe(job), /changes: none — .*refused or declined.*notes below/);
+  await h.jobs.reply(job.id, { message: 'again' });
+  await settled(h.jobs, job);
+  assert.doesNotMatch(describe(job), /changes: .*refused or declined/);
+  h.adapter.reply = async (ctl) => { ctl.note('The bridge refused an action.'); ctl.done('stopped'); };
+  await h.jobs.reply(job.id, { message: 'again' });
+  await settled(h.jobs, job);
+  assert.match(describe(job), /changes: none — .*refused or declined/);
+  h.adapter.reply = async (ctl) => { ctl.refused('edit', 'denied'); ctl.done('stopped'); };
+  await h.jobs.reply(job.id, { message: 'again' });
+  await settled(h.jobs, job);
+  assert.match(describe(job), /changes: none — .*refusals\/notes below/);
+});

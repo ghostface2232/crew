@@ -138,6 +138,7 @@ const TOOLS = [
         guidance: { type: 'string', description: 'Tone, terminology, audience, or what to leave alone.' },
         title: { type: 'string', description: 'Short label shown on the status board.' },
         ...worktreeProps,
+        model: modelProps.model,
         ...skillsProp,
         ...common,
       },
@@ -480,7 +481,7 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
     }
     case 'polish':
       if (args.exclusive) throw new Error('polish cannot run alone: an editor measures nothing. Drop exclusive.');
-      return runJob({ kind: 'polish', cwd, title: args.title ?? `Polish ${args.targets.join(', ')}`, task: args.guidance, targets: args.targets, base: args.base, isolation: args.isolation, skills: args.skills }, Boolean(args.background), ctx);
+      return runJob({ kind: 'polish', cwd, title: args.title ?? `Polish ${args.targets.join(', ')}`, task: args.guidance, targets: args.targets, base: args.base, isolation: args.isolation, model: args.model, skills: args.skills }, Boolean(args.background), ctx);
     case 'mission':
       return reportMission(args);
     case 'route': {

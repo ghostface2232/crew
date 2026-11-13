@@ -47,7 +47,7 @@ A question job is read-only for both agents: Codex runs it with no approval prom
 | `stale` | AgentGauge's reading is too old to act on |
 | `unknown` | No reading: AgentGauge is not installed, or its file has a format this version does not know |
 
-A provider's status is that of its tightest account-wide window. Windows scoped to one model (`group` set) are listed with their own status and do not decide the provider's status. A provider that reports only per-model windows (Antigravity) is judged by the family of its configured model, matched by name. With no model configured, or none that matches, it is judged by its tightest family, because a job does not switch models on its own.
+A provider's status is that of its tightest account-wide window. Windows scoped to one model (`group` set) are listed with their own status and do not decide the provider's status. A provider that reports only per-model windows (Antigravity) is judged by the family of its configured model. Every word in a family label must match a model-name token; slash-separated names such as `Claude/GPT` are alternatives. A non-Argon Gemini model therefore uses the `Gemini` windows, not the `Gemini 4 Argon` windows. With no model configured, or none that matches, it is judged by its tightest family, because a job does not switch models on its own.
 
 The status follows what is left, not the projected exhaustion. The projection from the recent pace often disagreed with how fast a window was really used (on 2026-11-13 it marked Codex `tight` with 57% of its weekly window left), so the web board shows it and routing ignores it.
 
@@ -78,7 +78,7 @@ Each client computes progress from data it already has using the same rule, so t
 | AgentGauge's `usage-cache.json` | Every agent's windows | As AgentGauge polls: 3 to 10 minutes, stretching to 30 while the user is away |
 | AgentGauge's `usage-history.db` | The last 90 minutes of samples per window, for the projection the web board shows | Same |
 | Codex's own rate limits (`account/rateLimits/*` on its app-server) | Codex, whenever newer than AgentGauge's reading | Live while a Codex job runs |
-| A job failing on a usage limit | Marks that agent exhausted at once | Immediate; lifted by a later reading that shows room, or after 5 hours |
+| A job failing on a usage limit | Marks that agent exhausted at once | Immediate; lifted by a later reading that shows room in the applicable windows from section 3, or after 5 hours |
 
 Both files are opened read-only; Crew holds no provider credentials and makes no provider request. Only the macOS cache format (version 1, checked against AgentGauge 0.8.2) is read. On other platforms, or when the version differs, every agent is `unknown` and the roles are followed as assigned.
 
@@ -88,7 +88,7 @@ Open, as in [03-agentgauge-integration.md](03-agentgauge-integration.md): G2 (`-
 
 ## 7. Routing
 
-`route` (the lead's tool, and `GET /api/route`) follows section 8.2 of document 03. It answers only with the role's holder or the lead.
+`route` (the lead's tool, and `GET /api/route`) follows section 8.2 of document 03. It answers only with the role's holder or the lead. Reset advice uses only the windows that decided the provider's status, so another model family cannot extend the wait. Projected exhaustion never defers work: a 57%-used window has room even if its projected exhaustion changes between calls.
 
 | Kind | Holder tight | Holder exhausted |
 | --- | --- | --- |

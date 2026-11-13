@@ -64,7 +64,8 @@ export class AntigravityAdapter implements Adapter {
     // Stay in the default mode, where every edit asks first and onRequest decides it.
     // "accept-edits" was measured to apply edits outside the workspace without asking.
     const model = ctl.job.model ?? this.config.antigravity.model;
-    if (model) await peer.request('session/set_config_option', { sessionId, configId: 'model', value: model }, RPC_TIMEOUT_MS);
+    const selected = model ? await peer.request('session/set_config_option', { sessionId, configId: 'model', value: model }, RPC_TIMEOUT_MS) : res;
+    ctl.model(sessionModel(selected) ?? model);
 
     // ACP has no separate instruction channel, so the role travels with the first prompt.
     if (!isTerminal(ctl.job)) this.prompt(peer, run, `${ctl.job.instructions}\n\n${ctl.job.prompt}`);
@@ -75,7 +76,8 @@ export class AntigravityAdapter implements Adapter {
     const sessionId = ctl.job.sessionId!;
     if (!this.loaded.has(sessionId)) {
       if (!this.restoreMethod) throw new Error('This Antigravity server cannot restore sessions. Continue it from the Antigravity CLI.');
-      await peer.request(this.restoreMethod, { sessionId, cwd: ctl.job.cwd, mcpServers: [crewServer(ctl)] }, RPC_TIMEOUT_MS);
+      const res = await peer.request(this.restoreMethod, { sessionId, cwd: ctl.job.cwd, mcpServers: [crewServer(ctl)] }, RPC_TIMEOUT_MS);
+      ctl.model(sessionModel(res) ?? ctl.job.resolvedModel ?? ctl.job.model ?? this.config.antigravity.model);
       this.loaded.add(sessionId);
     }
     if (isTerminal(ctl.job)) return;
@@ -205,6 +207,11 @@ export class AntigravityAdapter implements Adapter {
     const update = p.update ?? {};
 
     switch (update.sessionUpdate) {
+      case 'config_option_update': {
+        const model = sessionModel(update);
+        if (model) ctl.model(model);
+        break;
+      }
       case 'agent_message_chunk':
         if (update.content?.type === 'text') run.message += update.content.text;
         ctl.phase('writing');
@@ -253,6 +260,7 @@ export class AntigravityAdapter implements Adapter {
       });
       if (answer === null) return cancelled;
       allow = answer;
+      if (!answer) run.ctl.note(`The user declined an action: ${toolCall.title ?? 'tool call'}.`);
     }
     if (run && typeof verdict === 'object') {
       const what = `${verdict.refuse}: ${toolCall.title ?? 'tool call'}`;
@@ -267,6 +275,12 @@ export class AntigravityAdapter implements Adapter {
     // Without a matching option the answer is "cancelled", which grants nothing.
     return option ? { outcome: { outcome: 'selected', optionId: option.optionId } } : cancelled;
   }
+}
+
+function sessionModel(response: any): string | undefined {
+  const option = response.configOptions?.find((o: any) => o.category === 'model' || o.id === 'model');
+  const model = option?.currentValue ?? response.models?.currentModelId;
+  return typeof model === 'string' && model ? model : undefined;
 }
 
 function crewServer(ctl: JobCtl) {
@@ -290,13 +304,15 @@ const ROLE_NAMES: Record<JobKind, string> = { delegate: 'engineer', review: 'rev
  *   the user's call, provided the request says exactly what it will do.
  * - A read-only job changes nothing whatever its role: a question is answered by the engineer, with a reviewer's limits.
  */
-export function decide(role: JobKind, cwd: string, toolCall: { kind?: string; locations?: { path?: string }[]; rawInput?: unknown; _meta?: { mcpServerName?: string; mcpToolName?: string } }, readOnly = false): 'allow' | 'ask' | { refuse: string } {
-  // ACP leaves MCP tool identity to agent metadata; this path is unverified with agy.
+export function decide(role: JobKind, cwd: string, toolCall: { kind?: string; title?: string; locations?: { path?: string }[]; rawInput?: unknown; _meta?: { mcpServerName?: string; mcpToolName?: string } }, readOnly = false): 'allow' | 'ask' | { refuse: string } {
   if (toolCall._meta?.mcpServerName === 'crew' && ['ask_lead', 'lead_answers', 'siblings', 'search', 'recent_changes'].includes(toolCall._meta.mcpToolName ?? '')) return 'allow';
   const kind = toolCall.kind ?? 'other';
   // The daemon's secret is not a worker's to read, whatever the role. Commands are the user's to approve as before.
   const secret = tokenFile(HOME);
   if ((toolCall.locations ?? []).some((l) => l.path && path.resolve(l.path) === secret)) return { refuse: 'the Crew token file' };
+  // Some ACP calls identify the tool only by its qualified title. Never match a substring or a bare tool name.
+  if (!toolCall._meta?.mcpServerName && !toolCall._meta?.mcpToolName && ['other', 'execute'].includes(kind)
+    && /^(?:Run )?mcp_crew_(?:ask_lead|lead_answers|siblings|search|recent_changes)$/.test(toolCall.title ?? '')) return 'allow';
   if (PASSIVE_KINDS.includes(kind)) return 'allow';
   if (kind === 'switch_mode') return { refuse: kind };
   if (readOnly && role !== 'review') return { refuse: kind === 'edit' ? 'edit in a read-only job' : kind };

@@ -10,6 +10,7 @@ import { resolveConfig } from '../plugin/bridge/config.ts';
 import { Jobs } from '../plugin/bridge/jobs.ts';
 import type { Job, WorkerAgent } from '../plugin/bridge/jobs.ts';
 import { describe } from '../plugin/bridge/render.ts';
+import { decide } from '../plugin/bridge/adapters/antigravity.ts';
 
 const command = 'echo first\necho ' + 'a'.repeat(160) + '\necho last';
 const stub = `
@@ -556,4 +557,140 @@ test('Codex turns on only the plugins a job is to have, and asks the user before
 
   await assert.rejects(h.jobs.create({ kind: 'polish', cwd: h.home, isolation: 'in_place', targets: ['a.md'], plugins: ['browser'] }), /polish job cannot use plugins/);
   await assert.rejects(start({ plugins: 'browser' }), /plugins must be a list/);
+});
+
+
+for (const agent of ['codex', 'antigravity'] as const) {
+  test(`${agent} records the reported model on new and restored sessions`, { timeout: 5000 }, async (t) => {
+    const h = harness(`
+      const send = (msg) => console.log(JSON.stringify({ jsonrpc: '2.0', ...msg }));
+      require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') return send({ id: msg.id, result: { agentCapabilities: { loadSession: true } } });
+        if (['thread/start', 'thread/resume', 'session/new', 'session/load'].includes(msg.method)) {
+          const model = /resume|load/.test(msg.method) ? 'restored-model' : 'default-model';
+          return send({ id: msg.id, result: { thread: { id: 's' }, model, reasoningEffort: 'medium', sessionId: 's', configOptions: [{ id: 'model', category: 'model', currentValue: model }] } });
+        }
+        if (msg.method === 'turn/start') {
+          send({ id: msg.id, result: { turn: { id: 't' } } });
+          return send({ method: 'turn/completed', params: { threadId: 's', turn: { id: 't', status: 'completed' } } });
+        }
+        if (msg.method === 'session/prompt') return send({ id: msg.id, result: { stopReason: 'end_turn' } });
+        if (msg.id != null) send({ id: msg.id, result: {} });
+      });
+    `, agent, { polish: { agent } });
+    cleanup(t, h);
+    const job = await h.jobs.create({ kind: 'polish', cwd: h.home, isolation: 'in_place', targets: ['README.md'] });
+    await until(h.jobs, job, 'done');
+    assert.equal(job.model, undefined);
+    assert.equal(describe(job).split('\n')[1], `model: default-model${agent === 'codex' ? ' · effort: medium' : ''}`);
+    h.jobs.flush();
+    assert.equal(JSON.parse(fs.readFileSync(path.join(h.home, 'jobs.json'), 'utf8')).jobs[0].resolvedModel, 'default-model');
+    h.adapter.shutdown();
+    await h.jobs.reply(job.id, { message: 'again' });
+    await until(h.jobs, job, 'done');
+    assert.match(describe(job).split('\n')[1], /^model: restored-model/);
+  });
+}
+
+test('Antigravity permits only exactly identified Crew calls without metadata in polish', { timeout: 5000 }, async (t) => {
+  const names = ['recent_changes', 'search', 'siblings', 'lead_answers', 'ask_lead'];
+  const titles = names.flatMap((name) => [`mcp_crew_${name}`, `Run mcp_crew_${name}`]);
+  const rejected = ['Run mcp_other_recent_changes', 'Run mcp_crew_delete', 'Run mcp_crew_search_extra', 'please Run mcp_crew_search', 'Run mcp_crew_search && rm -rf .', 'recent_changes'];
+  const h = harness(permissionStub([...titles, ...rejected].map((title) => ({ kind: 'execute', title }))), 'antigravity');
+  cleanup(t, h);
+  const job = await h.jobs.create({ kind: 'polish', cwd: h.home, isolation: 'in_place', targets: ['README.md'] });
+  await until(h.jobs, job, 'done');
+  assert.equal(job.report.split('|')[0], [...titles.map(() => 'yes'), ...rejected.map(() => 'no')].join(','));
+  assert.notEqual(decide('polish', h.home, { kind: 'edit', title: 'mcp_crew_search' }), 'allow');
+  assert.notEqual(decide('polish', h.home, { kind: 'execute', title: 'mcp_crew_search', _meta: { mcpServerName: 'other', mcpToolName: 'search' } }), 'allow');
+});
+
+test('Antigravity no-change result distinguishes a refused action from a clean follow-up', { timeout: 5000 }, async (t) => {
+  const h = harness(permissionStub([{ kind: 'execute', title: 'npm test' }]), 'antigravity');
+  cleanup(t, h);
+  const job = await h.jobs.create({ kind: 'polish', cwd: h.home, isolation: 'in_place', targets: ['README.md'] });
+  await until(h.jobs, job, 'done');
+  assert.match(describe(job), /changes: none — .*refused or declined.*notes below/);
+  assert.match(describe(job), /note: The bridge refused/);
+});
+
+for (const agent of ['codex', 'antigravity'] as const) {
+  test(`${agent} prefers a selected session model and falls back to the configured model`, { timeout: 5000 }, async (t) => {
+    for (const reported of [true, false]) {
+      const h = harness(`
+        const send = (msg) => console.log(JSON.stringify({ jsonrpc: '2.0', ...msg }));
+        require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
+          const msg = JSON.parse(line);
+          if (msg.method === 'thread/start') return send({ id: msg.id, result: { thread: { id: 's', model: ${reported ? "'canonical-model'" : 'undefined'} }, reasoningEffort: 'low' } });
+          if (msg.method === 'session/new') return send({ id: msg.id, result: { sessionId: 's', models: { currentModelId: 'old-default' } } });
+          if (msg.method === 'session/set_config_option') return send({ id: msg.id, result: ${reported ? "{ models: { currentModelId: 'canonical-model' } }" : '{}'} });
+          if (msg.method === 'turn/start') {
+            send({ id: msg.id, result: { turn: { id: 't' } } });
+            return send({ method: 'turn/completed', params: { threadId: 's', turn: { id: 't', status: 'completed' } } });
+          }
+          if (msg.method === 'session/prompt') return send({ id: msg.id, result: { stopReason: 'end_turn' } });
+          if (msg.id != null) send({ id: msg.id, result: {} });
+        });
+      `, agent, { polish: { agent, model: 'configured-model', effort: 'high' } });
+      cleanup(t, h);
+      const job = await h.jobs.create({ kind: 'polish', cwd: h.home, isolation: 'in_place', targets: ['README.md'] });
+      await until(h.jobs, job, 'done');
+      assert.equal(job.model, 'configured-model');
+      assert.equal(job.resolvedModel, reported ? 'canonical-model' : 'configured-model');
+      assert.equal(describe(job).split('\n')[1], `model: ${job.resolvedModel}${agent === 'codex' ? ' · effort: high' : ''}`);
+    }
+  });
+}
+
+test('Antigravity records model changes reported during a turn', { timeout: 5000 }, async (t) => {
+  const h = harness(`
+    const send = (msg) => console.log(JSON.stringify({ jsonrpc: '2.0', ...msg }));
+    require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
+      const msg = JSON.parse(line);
+      if (msg.method === 'session/new') return send({ id: msg.id, result: { sessionId: 's', models: { currentModelId: 'initial-model' } } });
+      if (msg.method === 'session/prompt') {
+        send({ method: 'session/update', params: { sessionId: 's', update: { sessionUpdate: 'config_option_update', configOptions: [{ category: 'model', currentValue: 'updated-model' }] } } });
+        return send({ id: msg.id, result: { stopReason: 'end_turn' } });
+      }
+      if (msg.id != null) send({ id: msg.id, result: {} });
+    });
+  `, 'antigravity');
+  cleanup(t, h);
+  const job = await h.jobs.create({ kind: 'polish', cwd: h.home, isolation: 'in_place', targets: ['README.md'] });
+  await until(h.jobs, job, 'done');
+  assert.equal(job.resolvedModel, 'updated-model');
+});
+
+test('Antigravity reports no changes when approval was declined or could not be granted once', { timeout: 5000 }, async (t) => {
+  for (const approve of [false, true]) {
+    const h = harness(permissionStub([{ kind: 'execute', title: 'Run check', rawInput: 'check' }],
+      [{ kind: 'allow_always', optionId: 'always' }, { kind: 'reject_once', optionId: 'no' }]), 'antigravity', { delegate: { agent: 'antigravity' } });
+    cleanup(t, h);
+    const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'check' });
+    await until(h.jobs, job, 'waiting');
+    await h.jobs.reply(job.id, { decision: approve ? 'approve' : 'deny', request_id: job.waiting!.id });
+    await until(h.jobs, job, 'done');
+    assert.match(describe(job), /changes: none — .*refused or declined/);
+    assert.ok(job.notes.some((note) => note.includes(approve ? 'not carried out' : 'declined')));
+  }
+});
+
+test('Codex native review shows the thread effort rather than an unused turn override', { timeout: 5000 }, async (t) => {
+  const h = harness(`
+    const send = (msg) => console.log(JSON.stringify({ jsonrpc: '2.0', ...msg }));
+    require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
+      const msg = JSON.parse(line);
+      if (msg.method === 'thread/start') return send({ id: msg.id, result: { thread: { id: 's' }, model: 'review-model', reasoningEffort: 'medium' } });
+      if (msg.method === 'review/start') {
+        send({ id: msg.id, result: { turn: { id: 't' } } });
+        return send({ method: 'turn/completed', params: { threadId: 's', turn: { id: 't', status: 'completed' } } });
+      }
+      if (msg.id != null) send({ id: msg.id, result: {} });
+    });
+  `, 'codex', { review: { agent: 'codex', effort: 'high' } });
+  cleanup(t, h);
+  const job = await h.jobs.create({ kind: 'review', cwd: h.home, review: { target: { type: 'uncommittedChanges' }, mode: 'standard' } });
+  await until(h.jobs, job, 'done');
+  assert.equal(describe(job).split('\n')[1], 'model: review-model · effort: medium');
 });

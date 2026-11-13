@@ -145,6 +145,11 @@ export interface Job {
   targets: string[];
   model?: string;
   effort?: string;
+  /** Session-reported model, or the configured fallback; absent on older saved jobs. */
+  resolvedModel?: string;
+  resolvedEffort?: string;
+  /** Latest turn in which a bridge note recorded an action that was not allowed. */
+  declinedTurn?: number;
   /** Codex thread id or ACP session id; lets the user continue the session in the vendor's own app. */
   sessionId: string | null;
   createdAt: number;
@@ -183,6 +188,7 @@ export interface JobCtl {
   phase(text: string): void;
   progress(detail: string): void;
   session(id: string): void;
+  model(name: string | undefined, effort?: string): void;
   touched(file: string): void;
   /** Adds a line to the result that the lead should see, such as a refused action. */
   note(text: string): void;
@@ -857,12 +863,22 @@ export class Jobs {
         job.sessionId = id;
         this.changed(job);
       },
+      model: (name, effort) => {
+        job.resolvedModel = name;
+        job.resolvedEffort = effort;
+        this.changed(job);
+      },
       touched: (file) => {
         const set = this.touchedFiles.get(job.id) ?? new Set();
         this.touchedFiles.set(job.id, set);
         set.add(file);
       },
       note: (text) => {
+        // Notes survive follow-ups; record the turn even when the same refusal was already noted.
+        if (/\b(refused|declined|not carried out)\b/i.test(text)) {
+          job.declinedTurn = job.turns;
+          this.changed(job);
+        }
         if (job.notes.includes(text)) return;
         job.notes.push(text);
         this.changed(job);

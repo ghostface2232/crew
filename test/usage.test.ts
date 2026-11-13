@@ -249,3 +249,58 @@ test('statuses age with the clock even without AgentGauge', async (t) => {
   t.mock.timers.tick(STALE_MS + 2 * MIN);
   assert.equal(codex(), 'stale');
 });
+
+test('polish selects the Gemini family without borrowing Argon windows or reset times', (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: NOW });
+  const monitor = new UsageMonitor(null, () => {});
+  t.after(() => monitor.stop());
+  const reading = (gemini: number, argon: number) => parseCache(cache([snapshot('antigravity', [
+    weekly(gemini, { groupLabel: 'Gemini', providerID: 'g-weekly', resetTime: iso(NOW + 60 * MIN) }),
+    weekly(0, { type: 'fiveHour', groupLabel: 'Gemini', providerID: 'g-five' }),
+    weekly(0, { groupLabel: 'Claude/GPT', providerID: 'c-weekly' }),
+    weekly(0, { type: 'fiveHour', groupLabel: 'Claude/GPT', providerID: 'c-five' }),
+    weekly(argon, { groupLabel: 'Gemini 4 Argon', providerID: 'argon' }),
+  ])]))![0];
+  monitor.supplement(reading(0, 0.57));
+  for (const model of [undefined, 'gemini-3.8-flash']) {
+    monitor.setModels({ antigravity: model });
+    assert.equal(route('polish', monitor.current(), DEFAULT_ROLES).deferUntil, null);
+    t.mock.timers.tick(2 * MIN);
+    monitor.refresh();
+    assert.match(route('polish', monitor.current(), DEFAULT_ROLES).reason, /has room/);
+  }
+  monitor.supplement(reading(0, 0.9));
+  assert.equal(route('polish', monitor.current(), DEFAULT_ROLES).deferUntil, null);
+  monitor.supplement(reading(0.9, 0.9));
+  assert.equal(route('polish', monitor.current(), DEFAULT_ROLES).deferUntil, NOW + 60 * MIN);
+  monitor.setModels({ antigravity: 'gemini-4-argon' });
+  assert.equal(route('polish', monitor.current(), DEFAULT_ROLES).deferUntil, NOW + 24 * 60 * MIN);
+});
+
+test('an Antigravity limit is lifted only by room in the applicable family', () => {
+  const tracker = new UsageTracker();
+  tracker.models = { antigravity: 'gemini-3.8-flash' };
+  const raw = (ratio: number) => parseCache(cache([snapshot('antigravity', [
+    weekly(ratio, { groupLabel: 'Gemini', providerID: 'g' }),
+    weekly(1, { groupLabel: 'Gemini 4 Argon', providerID: 'a' }),
+  ], NOW + MIN)]));
+  tracker.reportLimit('antigravity', 'quota', NOW);
+  const of = (ratio: number) => tracker.classify(raw(ratio), none, NOW + 2 * MIN).providers.find((p) => p.agent === 'antigravity')!;
+  assert.equal(of(1).status, 'exhausted');
+  assert.equal(of(0).status, 'ok');
+});
+
+test('a 57% Argon window does not change routing as projection samples age out', () => {
+  const tracker = new UsageTracker();
+  const raw = parseCache(cache([snapshot('antigravity', [
+    weekly(0, { groupLabel: 'Gemini', providerID: 'g' }),
+    weekly(0.57, { groupLabel: 'Gemini 4 Argon', providerID: 'a' }),
+  ])]));
+  const reset = NOW + 24 * 60 * MIN;
+  const samples = [40, 20, 0].map((ago, i) => ({ at: NOW - ago * MIN, usedRatio: 0.37 + i * 0.1, resetTime: reset }));
+  tracker.models = { antigravity: 'gemini-4-argon' };
+  const first = tracker.classify(raw, (_agent, key) => key === 'a' ? samples : [], NOW);
+  assert.ok(first.providers.find((p) => p.agent === 'antigravity')!.windows[1].projectedExhaustion! < reset);
+  const later = tracker.classify(raw, none, NOW + 2 * MIN);
+  for (const usage of [first, later]) assert.match(route('polish', usage, DEFAULT_ROLES).reason, /has room/);
+});

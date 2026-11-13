@@ -83,6 +83,9 @@ export class CodexAdapter implements Adapter {
     const run = this.openRun(ctl, threadId);
     this.loaded.add(threadId);
     ctl.session(threadId);
+    // Native reviews do not use turn/start's effort override.
+    const effort = ctl.job.nativeReview ? res.reasoningEffort : ctl.job.effort ?? this.config.codex.effort ?? res.reasoningEffort;
+    ctl.model(res.model ?? res.thread.model ?? ctl.job.model ?? this.config.codex.model, effort ?? undefined);
     // Makes the thread recognizable in the Codex app and `codex resume`.
     peer.request('thread/name/set', { threadId, name: `Crew · ${ctl.job.title}` }, RPC_TIMEOUT_MS).catch(() => {});
 
@@ -98,7 +101,8 @@ export class CodexAdapter implements Adapter {
     const peer = await this.ensure();
     const threadId = ctl.job.sessionId!;
     if (!this.loaded.has(threadId)) {
-      await peer.request('thread/resume', { threadId, ...await this.threadParams(ctl, peer), excludeTurns: true }, RPC_TIMEOUT_MS);
+      const res = await peer.request('thread/resume', { threadId, ...await this.threadParams(ctl, peer), excludeTurns: true }, RPC_TIMEOUT_MS);
+      ctl.model(res.model ?? res.thread?.model ?? ctl.job.model ?? this.config.codex.model, ctl.job.effort ?? this.config.codex.effort ?? res.reasoningEffort ?? undefined);
       this.loaded.add(threadId);
     }
     if (isTerminal(ctl.job)) return;

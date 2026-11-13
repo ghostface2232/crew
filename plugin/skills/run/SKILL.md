@@ -31,7 +31,7 @@ If nothing separates cleanly, do it all yourself. Do not invent work to delegate
 
 Workers start from `HEAD` in their own worktree, so commit anything they need first. Gitignored files such as `node_modules` and `.env` are copied in only if the repository's `.worktreeinclude` lists them; if a worker reports that it could not run the tests for lack of dependencies, tell the user to add them there.
 
-Call `delegate` with `background: true` for each delegated piece. Write the task for someone who has not seen this conversation: goal, files and interfaces involved, constraints, and a concrete `done_when`. Name the files it may edit when you or another worker are editing others. If you tell it to stop when it finds a certain problem, say which part that stops and that the rest goes on: a worker told only to stop will stop everything. Then do your own part while the engineer works. You are notified when a job ends; call `wait` if you finish first.
+Call `delegate` with `background: true` for each delegated piece. Write the task for someone who has not seen this conversation: goal, files and interfaces involved, constraints, and a concrete `done_when`. Name the files it may edit when you or another worker are editing others. If you give a stop condition for a specific problem, state which part it stops and that the rest should continue: a worker told simply to stop will stop the whole job. Then do your own part while the engineer works. You are notified when a job ends; call `wait` if you finish first.
 
 If a worker asks for approval or has a question, the user answers it in the app; do not decide for them. If you are told a job is waiting, call `wait` on it so they are asked.
 
@@ -39,7 +39,7 @@ Codex's own automatic reviewer answers most of its approval requests. When a res
 
 If a delegated piece can only be done or verified by starting the app, pass `runs_app: true`: the worker's sandbox then has the network access a local server needs.
 
-When a job is done, read its diff before merging (`git diff <base>..crew-<job id>`). Merge what is right. Use `reply` with a message to have the worker fix what is not, and reject anything beyond the task. If the worker needs something you committed after it started, pass `sync: true` with the reply: its branch is brought up to date first. After merging or rejecting, `cancel` with `discard: true` removes the worktree.
+When a job is done, read its diff before merging (`git diff <base>..crew-<job id>`). Merge what is right. Use `reply` with a message to have the worker fix what is not, and reject anything beyond the task. If the worker needs commits you made after it started, pass `sync: true` with the reply to bring its branch up to date first. After merging or rejecting, `cancel` with `discard: true` removes the worktree.
 
 ## 3 and 4. Review
 
@@ -54,7 +54,7 @@ How much review depends on where the work is going, not on how many instructions
 If the user asks for a review, or for none, do that instead.
 
 - **Self-review**: launch the `crew:self-reviewer` subagent on the change. It has none of this conversation's context, which is the point: rereading your own diff in the same context does not count as review. For a broad change, launch several at once, each with its own area.
-- **Cross-review**: call `review` on the change (target `uncommitted`, or `branch` with the base; on the main branch the base is the commit before your first one). Commit first where you can, so the reviewer reads a fixed state. Pass the acceptance criteria as `done_when` and use `focus` for decisions and assumptions you are least sure about. Give the reviewer the map you already have, in a few lines: which file holds what, and how the tests fake what they fake. Give it facts about the structure, not your view that the change is right. Its findings are marked reproduced, read, or suspected; weigh them accordingly, and check a suspected one yourself before acting on it.
+- **Cross-review**: call `review` on the change (target `uncommitted`, or `branch` with the base; on the main branch the base is the commit before your first one). Commit first where you can, so the reviewer reads a fixed state. Pass the acceptance criteria as `done_when` and use `focus` for decisions and assumptions you are least sure about. In a few lines, give the reviewer the map you already have: which file holds what, and what the tests mock or fake. Give it facts about the structure, not your view that the change is right. Findings come back marked reproduced, read, or suspected; weigh them accordingly, and verify any suspected finding yourself before acting on it.
 
 For the single review, prefer the self-review for most changes, and the cross-review where a second model's view matters most: security, concurrency, data loss, or a design you are unsure of.
 

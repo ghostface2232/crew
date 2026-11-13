@@ -127,21 +127,21 @@ A static review or a question runs read-only, and a check that only reads is rar
 | Closed | The network, and listening on a port |
 | Lifetime | Created when a turn starts and moved aside the moment it ends, then deleted; a follow-up turn gets a fresh, empty one |
 
-It is a Codex permissions profile (`default_permissions` with a `filesystem` table) passed in the thread's config in place of the `read-only` sandbox mode, which has no way to except one directory. Checked on 2026-11-13 with Codex CLI 0.167.0 and a real review on an isolated daemon: `mktemp -d`, Node's `mkdtemp`, and a `git clone` plus commit inside the scratch directory succeeded; writing to the repository and to the home directory was refused.
+It uses a Codex permissions profile (`default_permissions` with a `filesystem` table) passed in the thread's config instead of the `read-only` sandbox mode, which cannot exempt a single directory. Checked on 2026-11-13 with Codex CLI 0.167.0 and a real review on an isolated daemon: `mktemp -d`, Node's `mkdtemp`, and a `git clone` plus commit inside the scratch directory succeeded; writing to the repository and to the home directory was refused.
 
 Antigravity runs no commands as a reviewer, so it gets no scratch directory and is handed the diff as before. A review started with `runs_app` already has a writable snapshot and is unchanged.
 
-The job's instructions say what it can run before it finds out by failing, and the reviewer marks each finding as reproduced, read, or suspected.
+The job's instructions state upfront what it can run so it does not find out by failing, and the reviewer marks each finding as reproduced, read, or suspected.
 
 ## 10. Bringing a worker up to date
 
-A worker's worktree starts from the lead's `HEAD` and does not follow it. `reply` with `sync: true` merges the lead's current `HEAD` into the worker's branch before the follow-up turn and moves the job's base to that commit, so the job's result still lists only the worker's own changes. A merge that conflicts is aborted: the reply fails with the conflicting files and no turn starts. While the merge runs, the job's rounds cannot be changed and it cannot be discarded. Rounds are still replayed from the commit the job first started from, so an undo made before a sync is not lost.
+A worker's worktree starts from the lead's `HEAD` and does not follow it. `reply` with `sync: true` merges the lead's current `HEAD` into the worker's branch before the follow-up turn and moves the job's base to that commit, so the job's result still lists only the worker's own changes. A merge that conflicts is aborted: the reply fails with the conflicting files and no turn starts. While the merge runs, the job cannot be discarded and its rounds cannot be changed. Rounds are still replayed from the commit the job first started from, so an undo made before a sync is not lost.
 
 A job whose worktree was discarded takes no further turn; ask a new question instead.
 
 ## 11. Questions from a worker to the lead
 
-A worker that needs a decision or a fact only the lead has asks without ending its turn. Each job is given a small MCP server (`plugin/bridge/worker-mcp.ts`) with three tools:
+A worker that needs a decision or a fact only the lead has can ask without ending its turn. Each job is given a small MCP server (`plugin/bridge/worker-mcp.ts`) with three tools:
 
 | Tool | Does |
 | --- | --- |
@@ -158,7 +158,7 @@ The lead is woken by a new question as it is by a finished job, while the job ke
 | `GET /api/jobs/:id/siblings?token=` | | The job's worker |
 | `POST /api/jobs/:id/questions/:questionId` | `{ answer }` | The lead |
 
-The worker routes need the job's token, which is made when the job starts, kept in memory only, and handed to the worker's MCP server in its environment. It is never saved or sent to a board.
+The worker routes require the job's token, which is created when the job starts, kept in memory only, and passed to the worker's MCP server in its environment. It is never saved to disk or sent to a board.
 
 Checked on 2026-11-13 with Codex CLI 0.167.0 and real jobs on an isolated daemon, as a read-only question and as a writing job in a worktree: the worker asked, the lead's answer arrived through `lead_answers`, and a request with a wrong token was refused. Codex refuses an MCP tool call outright under approval policy `never`, so the server is registered with `default_tools_approval_mode = "approve"`; its tools only talk to the bridge.
 

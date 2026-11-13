@@ -43,7 +43,6 @@ if (!fs.existsSync(licensePath)) throw new Error('Set CREW_NODE_LICENSE to the L
 fs.copyFileSync(node, path.join(resources, 'runtime/node'));
 fs.chmodSync(path.join(resources, 'runtime/node'), 0o755);
 fs.copyFileSync(licensePath, path.join(resources, 'runtime/LICENSE'));
-fs.copyFileSync('desktop/icon.icns', path.join(resources, 'Crew.icns'));
 const catalog = path.join(build, 'Services.xcassets');
 fs.mkdirSync(catalog, { recursive: true });
 fs.writeFileSync(path.join(catalog, 'Contents.json'), JSON.stringify({ info: { version: 1, author: 'xcode' } }));
@@ -57,13 +56,17 @@ for (const name of ['ClaudeCode', 'Codex', 'Antigravity', 'Cursor']) {
     properties: { 'preserves-vector-representation': true, 'template-rendering-intent': 'template' },
   }));
 }
-run('xcrun', ['actool', catalog, '--compile', resources, '--platform', 'macosx', '--minimum-deployment-target', '26.0', '--output-format', 'human-readable-text']);
+// The app icon is an Icon Composer document. Compiled with the catalog, it becomes the layered icon in
+// Assets.car and a flat crew.icns for the places that still read one.
+const iconInfo = path.join(build, 'Icon.plist');
+run('xcrun', ['actool', catalog, 'assets/crew.icon', '--compile', resources, '--app-icon', 'crew', '--output-partial-info-plist', iconInfo,
+  '--platform', 'macosx', '--minimum-deployment-target', '26.0', '--output-format', 'human-readable-text']);
 const version = JSON.parse(fs.readFileSync('package.json', 'utf8')).version;
 const plist = {
   CFBundleName: 'Crew', CFBundleDisplayName: 'Crew', CFBundleExecutable: 'Crew',
   CFBundleIdentifier: 'dev.crew.native', CFBundlePackageType: 'APPL',
   CFBundleShortVersionString: version, CFBundleVersion: version,
-  CFBundleIconFile: 'Crew', LSMinimumSystemVersion: '26.0', NSPrincipalClass: 'NSApplication',
+  CFBundleIconFile: 'crew', CFBundleIconName: 'crew', LSMinimumSystemVersion: '26.0', NSPrincipalClass: 'NSApplication',
   NSHighResolutionCapable: true, NSSupportsAutomaticTermination: false,
   NSAppTransportSecurity: { NSAllowsLocalNetworking: true },
 };

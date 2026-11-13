@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import path from 'node:path';
 import { tokenFile } from '../auth.ts';
-import { agentEnv, HOME, VERSION } from '../config.ts';
+import { agentCommand, agentEnv, HOME, VERSION } from '../config.ts';
 import type { Config } from '../config.ts';
 import { isTerminal } from '../jobs.ts';
 import type { Adapter, JobCtl, JobKind } from '../jobs.ts';
@@ -166,7 +166,9 @@ export class AntigravityAdapter implements Adapter {
   }
 
   private async launch(): Promise<RpcPeer> {
-    const child = spawn(this.config.antigravity.bin, ['acp'], { env: agentEnv(), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    const env = agentEnv();
+    const { bin, shell } = agentCommand(this.config.antigravity.bin, env);
+    const child = spawn(bin, ['acp'], { env, shell, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     const peer = new RpcPeer(child, {
       onNotification: (method, params) => this.onNotification(method, params),
       onRequest: (method, params) => this.onRequest(method, params),

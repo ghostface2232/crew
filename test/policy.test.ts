@@ -86,3 +86,79 @@ test('Antigravity is refused the daemon token file, whatever the role or the kin
   }
   assert.equal(decide('delegate', path.dirname(secret), { kind: 'read', locations: [{ path: path.join(path.dirname(secret), 'config.json') }] }), 'allow');
 });
+
+test('Windows agent commands resolve PATH and PATHEXT and quote batch paths', async (t) => {
+  const { agentCommand } = await import('../plugin/bridge/config.ts');
+  const file = fs.statSync(import.meta.filename);
+  const files = new Set([
+    'c:\\npm tools\\codex.cmd',
+    'c:\\other\\codex.exe',
+    'c:\\npm tools\\agy.bat',
+    'c:\\npm tools\\native.exe',
+    'c:\\npm tools\\native.cmd',
+  ]);
+  const lookedUp: string[] = [];
+  t.mock.method(fs, 'statSync', (candidate: string) => {
+    lookedUp.push(candidate);
+    return files.has(candidate.toLowerCase()) ? file : undefined;
+  });
+  const env = { Path: '"C:\\npm tools";C:\\other', Pathext: '.EXE;.CMD;.BAT' };
+  assert.deepEqual(agentCommand('codex', env, 'win32'), { bin: '"C:\\npm tools\\codex.CMD"', shell: true });
+  assert.deepEqual(lookedUp, ['C:\\npm tools\\codex.EXE', 'C:\\npm tools\\codex.CMD']);
+  assert.deepEqual(agentCommand('agy', env, 'win32'), { bin: '"C:\\npm tools\\agy.BAT"', shell: true });
+  assert.deepEqual(agentCommand('native', env, 'win32'), { bin: 'C:\\npm tools\\native.EXE', shell: false });
+  assert.deepEqual(agentCommand('C:\\npm tools\\codex', env, 'win32'), { bin: '"C:\\npm tools\\codex.CMD"', shell: true });
+  assert.deepEqual(agentCommand('C:\\npm tools\\codex.cmd', {}, 'win32'), { bin: '"C:\\npm tools\\codex.cmd"', shell: true });
+  assert.deepEqual(agentCommand('agy.BAT', {}, 'win32'), { bin: '"agy.BAT"', shell: true });
+  assert.deepEqual(agentCommand('codex', { PATH: 'C:\\npm tools' }, 'win32'), { bin: '"C:\\npm tools\\codex.CMD"', shell: true });
+  assert.deepEqual(agentCommand('missing', env, 'win32'), { bin: 'missing', shell: false });
+  assert.throws(() => agentCommand('bad"path.cmd', {}, 'win32'), /Invalid agent binary path/);
+  lookedUp.length = 0;
+  for (const bin of ['codex', '/tools with spaces/codex', '/tools/codex.cmd']) {
+    assert.deepEqual(agentCommand(bin, env, 'darwin'), { bin, shell: false });
+    assert.deepEqual(agentCommand(bin, env, 'linux'), { bin, shell: false });
+  }
+  assert.deepEqual(lookedUp, []);
+});
+
+test('agentEnv adds the Windows npm bin and keeps the existing macOS PATH behavior', async () => {
+  const { agentEnv } = await import('../plugin/bridge/config.ts');
+  const win = agentEnv('win32', { Path: 'C:\\Windows', APPDATA: 'C:\\Users\\A B\\AppData\\Roaming', ELECTRON_RUN_AS_NODE: '1' });
+  assert.ok(win.PATH!.split(';').includes('C:\\Users\\A B\\AppData\\Roaming\\npm'));
+  assert.equal(win.PATH!.split(';')[0], 'C:\\Windows');
+  assert.equal(win.Path, undefined);
+  assert.equal(win.ELECTRON_RUN_AS_NODE, undefined);
+  assert.ok(!win.PATH!.includes('/opt/homebrew/bin'));
+  const source = { PATH: '/usr/bin:/usr/local/bin', ELECTRON_RUN_AS_NODE: '1', KEEP: 'yes' };
+  const extra = [path.join(os.homedir(), '.local', 'bin'), '/opt/homebrew/bin', '/usr/local/bin', path.dirname(process.execPath)];
+  const current = source.PATH.split(path.delimiter);
+  assert.deepEqual(agentEnv('darwin', source), {
+    PATH: [...current, ...extra.filter((p) => !current.includes(p))].join(path.delimiter), KEEP: 'yes',
+  });
+  assert.equal(source.ELECTRON_RUN_AS_NODE, '1');
+});
+
+test('detaching links leaves files and external link targets untouched', async (t) => {
+  const { detachLinks } = await import('../plugin/bridge/git.ts');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-links-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const tree = path.join(dir, 'tree');
+  const outside = path.join(dir, 'outside');
+  fs.mkdirSync(path.join(tree, 'nested'), { recursive: true });
+  fs.mkdirSync(path.join(outside, '.bin'), { recursive: true });
+  fs.writeFileSync(path.join(outside, '.bin', 'tool'), 'keep');
+  fs.writeFileSync(path.join(tree, 'regular'), 'keep too');
+  fs.symlinkSync(outside, path.join(tree, 'node_modules'), 'junction');
+  fs.symlinkSync(path.join(outside, '.bin', 'tool'), path.join(tree, 'nested', 'file'));
+  fs.symlinkSync(path.join(outside, 'missing'), path.join(tree, 'broken'));
+  fs.symlinkSync(tree, path.join(tree, 'nested', 'cycle'), 'junction');
+  fs.symlinkSync(path.join(outside, '.bin', 'tool'), path.join(outside, 'untouched'));
+  await detachLinks(tree);
+  assert.deepEqual(fs.readdirSync(tree).sort(), ['nested', 'regular']);
+  assert.deepEqual(fs.readdirSync(path.join(tree, 'nested')), []);
+  assert.equal(fs.readFileSync(path.join(tree, 'regular'), 'utf8'), 'keep too');
+  assert.equal(fs.readFileSync(path.join(outside, '.bin', 'tool'), 'utf8'), 'keep');
+  assert.ok(fs.lstatSync(path.join(outside, 'untouched')).isSymbolicLink());
+  await detachLinks(tree);
+  await detachLinks(path.join(dir, 'missing'));
+});

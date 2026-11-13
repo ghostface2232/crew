@@ -1484,3 +1484,145 @@ test('a job still being set up counts as active, so the daemon is not replaced u
   assert.equal(jobs.activeCount, 0);
   await jobs.discard(job.id);
 });
+
+test('worktree removal recovers from a failed git removal and preserves linked targets', async (t) => {
+  const childProcess = (await import('node:child_process')).default;
+  const { syncBuiltinESMExports } = await import('node:module');
+  const { createWorktree, removeWorktree } = await import('../plugin/bridge/git.ts');
+  const repo = tempRepo();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-remove-'));
+  t.after(() => {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(repo, { recursive: true, force: true });
+  });
+  const wt = await createWorktree(repo, 'cx-123abc', 'HEAD', home);
+  const outside = path.join(repo, 'node_modules', '.bin');
+  fs.mkdirSync(outside, { recursive: true });
+  fs.writeFileSync(path.join(outside, 'tool'), 'keep me');
+  const link = path.join(wt.path, 'node_modules');
+  fs.symlinkSync(path.dirname(outside), link, 'junction');
+  const execFile = childProcess.execFile;
+  let failures = 0;
+  let prunes = 0;
+  t.mock.method(childProcess, 'execFile', (file: string, args: string[], options: object, callback: (err: Error | null, stdout: string, stderr: string) => void) => {
+    if (file === 'git' && args[0] === 'worktree' && args[1] === 'remove') {
+      failures++;
+      assert.equal(fs.existsSync(link), false, 'links must be detached before Git deletes the tree');
+      return execFile(process.execPath, ['-e', 'process.stderr.write("Permission denied"); process.exit(1)'], options, callback);
+    }
+    if (file === 'git' && args[0] === 'worktree' && args[1] === 'prune') {
+      prunes++;
+      assert.equal(fs.existsSync(wt.path), false);
+      // Prune can leave locked metadata behind even with a successful exit status.
+      if (prunes === 1) return execFile('git', ['--version'], options, callback);
+      if (prunes === 2) return execFile(process.execPath, ['-e', 'process.exit(1)'], options, callback);
+    }
+    return execFile(file, args, options, callback);
+  });
+  const fsPromises = (await import('node:fs/promises')).default;
+  const rm = fsPromises.rm;
+  let removals = 0;
+  t.mock.method(fsPromises, 'rm', (dir: string, options: Parameters<typeof rm>[1]) => {
+    assert.equal(dir, wt.path);
+    assert.deepEqual(options, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    removals++;
+    return rm(dir, options);
+  });
+  syncBuiltinESMExports();
+  await removeWorktree(repo, wt, 'cx-123abc', home);
+  assert.equal(failures, 1);
+  assert.equal(removals, 1);
+  assert.equal(prunes, 3);
+  assert.equal(fs.existsSync(wt.path), false);
+  assert.equal(execFileSync('git', ['branch', '--list', wt.branch], { cwd: repo, encoding: 'utf8' }), '');
+  assert.equal(execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: repo, encoding: 'utf8' }).includes(wt.path), false);
+  assert.equal(fs.readFileSync(path.join(outside, 'tool'), 'utf8'), 'keep me');
+});
+
+test('a review follow-up retries removal of its previous snapshot', async (t) => {
+  const repo = tempRepo();
+  let worker!: JobCtl;
+  const { jobs, home, calls } = harness((ctl) => { worker = ctl; });
+  t.after(() => {
+    jobs.flush();
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(repo, { recursive: true, force: true });
+  });
+  const job = await jobs.create({ kind: 'review', cwd: repo, runsApp: true, review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } });
+  const lock = path.join(repo, '.git', 'refs', 'heads', `${job.worktree!.branch}.lock`);
+  fs.writeFileSync(lock, '');
+  worker.done('reviewed');
+  await settled(jobs, job);
+  for (let tries = 0; !job.notes.some((note) => note.includes('Could not remove the review snapshot')); tries++) {
+    assert.ok(tries < 300, 'snapshot removal did not fail');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.ok(job.worktree);
+  fs.unlinkSync(lock);
+  await jobs.reply(job.id, { message: 'review again' });
+  assert.ok(calls.some((call) => call.includes('The snapshot has been refreshed')));
+  assert.equal(job.error, null);
+  await settled(jobs, job);
+  for (let tries = 0; job.worktree; tries++) {
+    assert.ok(tries < 300, 'snapshot removal did not recover');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+});
+
+for (const replaceRoot of [false, true]) {
+  test(`scratch cleanup preserves external targets when ${replaceRoot ? 'the scratch root is a link' : 'scratch contains a link'}`, async (t) => {
+    const repo = tempRepo();
+    let worker!: JobCtl;
+    const { jobs, home } = harness((ctl) => { worker = ctl; });
+    t.after(() => {
+      jobs.flush();
+      fs.rmSync(home, { recursive: true, force: true });
+      fs.rmSync(repo, { recursive: true, force: true });
+    });
+    const outside = path.join(repo, 'node_modules', '.bin');
+    fs.mkdirSync(outside, { recursive: true });
+    fs.writeFileSync(path.join(outside, 'tool'), 'keep');
+    const job = await jobs.create({ kind: 'delegate', ask: true, cwd: repo, task: 'read' });
+    if (replaceRoot) fs.rmdirSync(job.scratch!);
+    fs.symlinkSync(path.dirname(outside), replaceRoot ? job.scratch! : path.join(job.scratch!, 'node_modules'), 'junction');
+    worker.done('read');
+    await settled(jobs, job);
+    const scratchHome = path.join(home, 'scratch');
+    for (let tries = 0; fs.readdirSync(scratchHome).length; tries++) {
+      assert.ok(tries < 300, 'scratch cleanup did not finish');
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(fs.readFileSync(path.join(outside, 'tool'), 'utf8'), 'keep');
+  });
+}
+
+test('worktree safety checks run before detaching links or deleting files', async (t) => {
+  const { createWorktree, removeWorktree } = await import('../plugin/bridge/git.ts');
+  const repo = tempRepo();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-remove-safety-'));
+  t.after(() => {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(repo, { recursive: true, force: true });
+  });
+  const wt = await createWorktree(repo, 'cx-123abc', 'HEAD', home);
+  const link = path.join(wt.path, 'outside');
+  fs.symlinkSync(repo, link, 'junction');
+  await assert.rejects(removeWorktree(repo, wt, 'cx-000000', home), /Refusing to remove/);
+  await assert.rejects(removeWorktree(repo, { ...wt, path: repo }, 'cx-123abc', home), /Refusing to remove/);
+  execFileSync('git', ['switch', '--quiet', '--detach'], { cwd: wt.path });
+  await assert.rejects(removeWorktree(repo, wt, 'cx-123abc', home), /different branch/);
+  execFileSync('git', ['switch', '--quiet', wt.branch], { cwd: wt.path });
+  const metadata = path.join(wt.path, '.git');
+  fs.renameSync(metadata, `${metadata}.saved`);
+  fs.symlinkSync(`${metadata}.saved`, metadata);
+  await assert.rejects(removeWorktree(repo, wt, 'cx-123abc', home), /no longer a linked worktree/);
+  fs.unlinkSync(metadata);
+  fs.renameSync(`${metadata}.saved`, metadata);
+  assert.ok(fs.lstatSync(link).isSymbolicLink());
+  assert.equal(fs.readFileSync(path.join(repo, 'README.md'), 'utf8'), 'hello\n');
+  await removeWorktree(repo, wt, 'cx-123abc', home);
+  assert.equal(fs.existsSync(wt.path), false);
+  assert.equal(fs.readFileSync(path.join(repo, 'README.md'), 'utf8'), 'hello\n');
+});

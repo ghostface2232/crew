@@ -88,6 +88,11 @@ export interface Config {
     approvalsReviewer: 'user' | 'auto_review' | 'guardian_subagent';
     model?: string;
     effort?: string;
+    /**
+     * The user's Codex plugins, by name, that a job marked `runs_app` gets without being asked: a worker that runs
+     * the app may need to look at it. Every other job runs with all plugins off unless the lead names some.
+     */
+    appPlugins: string[];
   };
   antigravity: {
     bin: string;
@@ -118,7 +123,7 @@ const defaults: Config = {
   stallSeconds: 300,
   notify: true,
   notifyOnDone: false,
-  codex: { bin: 'codex', approvalPolicy: 'on-request', approvalsReviewer: 'auto_review' },
+  codex: { bin: 'codex', approvalPolicy: 'on-request', approvalsReviewer: 'auto_review', appPlugins: ['computer-use', 'unified-computer-use'] },
   antigravity: { bin: 'agy', enabled: true },
   roles: { delegate: { agent: 'codex' }, review: { agent: 'codex' }, polish: { agent: 'antigravity' } },
   preset: null,
@@ -127,7 +132,7 @@ const defaults: Config = {
 
 export const DEFAULT_ROLES = defaults.roles;
 
-type UserConfig = Partial<Omit<Config, 'roles' | 'presets'>> & { roles?: Partial<Record<Role, Partial<RoleAssignment>>>; presets?: Partial<Record<PresetName, Preset>> };
+type UserConfig = Partial<Omit<Config, 'roles' | 'presets' | 'codex'>> & { codex?: Partial<Config['codex']>; roles?: Partial<Record<Role, Partial<RoleAssignment>>>; presets?: Partial<Record<PresetName, Preset>> };
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 
@@ -152,6 +157,8 @@ export function resolveConfig(user: UserConfig): Config {
     }
     roles[role as Role] = merged;
   }
+  const appPlugins: unknown = user.codex?.appPlugins ?? defaults.codex.appPlugins;
+  if (!Array.isArray(appPlugins) || appPlugins.some((name) => typeof name !== 'string')) throw new Error('codex.appPlugins must be a list of plugin names such as ["computer-use"].');
   return {
     ...defaults,
     ...user,
@@ -222,12 +229,41 @@ export function loadConfig(): Config {
  * GUI-launched processes (Claude Desktop) get a minimal PATH, so the agent
  * CLIs installed under the user's home would not resolve without these.
  */
-export function agentEnv(): NodeJS.ProcessEnv {
+export function agentEnv(platform: NodeJS.Platform = process.platform, source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const home = os.homedir();
-  const extra = [path.join(home, '.local', 'bin'), '/opt/homebrew/bin', '/usr/local/bin', path.dirname(process.execPath)];
-  const current = (process.env.PATH ?? '').split(path.delimiter).filter(Boolean);
+  const windows = platform === 'win32';
+  const extra = [path.join(home, '.local', 'bin'), ...(windows ? [] : ['/opt/homebrew/bin', '/usr/local/bin']), path.dirname(process.execPath)];
+  const appData = source[Object.keys(source).find((key) => key.toUpperCase() === 'APPDATA') ?? 'APPDATA'];
+  if (windows && appData) extra.push(path.win32.join(appData, 'npm'));
+  const pathKey = windows ? Object.keys(source).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH' : 'PATH';
+  const delimiter = windows ? ';' : path.delimiter;
+  const current = (source[pathKey] ?? '').split(delimiter).filter(Boolean);
   const merged = [...current, ...extra.filter((p) => !current.includes(p))];
-  const env: NodeJS.ProcessEnv = { ...process.env, PATH: merged.join(path.delimiter) };
+  const env: NodeJS.ProcessEnv = { ...source };
+  if (windows) for (const key of Object.keys(env)) if (key.toUpperCase() === 'PATH') delete env[key];
+  env.PATH = merged.join(delimiter);
   delete env.ELECTRON_RUN_AS_NODE;
   return env;
+}
+
+/** Windows npm shims need cmd.exe; the callers supply only fixed arguments. */
+export function agentCommand(bin: string, env: NodeJS.ProcessEnv = agentEnv(), platform: NodeJS.Platform = process.platform): { bin: string; shell: boolean } {
+  if (platform !== 'win32') return { bin, shell: false };
+  if (!path.win32.extname(bin)) {
+    const value = (name: string) => env[Object.keys(env).find((key) => key.toUpperCase() === name) ?? name];
+    const extensions = (value('PATHEXT') ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean);
+    const dirs = /[\\/]/.test(bin) || path.win32.isAbsolute(bin) ? [''] : (value('PATH') ?? '').split(';').filter(Boolean);
+    search: for (const dir of dirs) {
+      for (const ext of extensions) {
+        const candidate = path.win32.join(dir.replace(/^"(.*)"$/, '$1'), bin + ext);
+        if (fs.statSync(candidate, { throwIfNoEntry: false })?.isFile()) {
+          bin = candidate;
+          break search;
+        }
+      }
+    }
+  }
+  const shell = /\.(cmd|bat)$/i.test(bin);
+  if (shell && /["\r\n]/.test(bin)) throw new Error('Invalid agent binary path.');
+  return { bin: shell ? `"${bin}"` : bin, shell };
 }

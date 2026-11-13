@@ -65,6 +65,8 @@ export interface JobSpec {
   notes?: string[];
   /** Names of the user's skills (`~/.agents/skills`) the lead picked for this job; the worker is told to read them. */
   skills?: string[];
+  /** Names of the user's Codex plugins to turn on for this job, besides those a `runsApp` job gets by itself. */
+  plugins?: string[];
 }
 
 /** One worker turn that changed files, as its own commit on the job branch. */
@@ -111,6 +113,8 @@ export interface Job {
   runsApp?: boolean;
   /** Answers a question read-only; see JobSpec.ask. */
   ask?: boolean;
+  /** The user's Codex plugins that are on for this job, by name; absent when it runs with none. */
+  plugins?: string[];
   /**
    * A directory of the job's own that a read-only worker may write to: temporary files, caches, a throwaway
    * clone to try something in. It exists only while a turn runs. Absent where the agent cannot run commands.
@@ -341,6 +345,10 @@ export class Jobs {
       throw new Error('skills must be a list of skill names.');
     }
     const skills = findSkills(spec.skills ?? []);
+    if (spec.plugins !== undefined && (!Array.isArray(spec.plugins) || spec.plugins.some((name) => typeof name !== 'string' || !name))) {
+      throw new Error('plugins must be a list of plugin names.');
+    }
+    if (spec.plugins?.length && spec.kind === 'polish') throw new Error('A polish job cannot use plugins: an editor only changes wording. Drop plugins.');
 
     const id = `${WORKERS[agent].idPrefix}-${randomBytes(3).toString('hex')}`;
     const repo = await repoRoot(spec.cwd);
@@ -348,6 +356,10 @@ export class Jobs {
     const root = (await projectRoot(spec.cwd)) ?? spec.project ?? spec.cwd;
     const shared = sharedInstructions(this.home, root);
     const notes: string[] = Array.isArray(spec.notes) ? spec.notes.filter((note) => typeof note === 'string') : [];
+    // Plugins are Codex's. The set the job runs with is settled here, so the prompt, the result and the adapter agree.
+    const plugins = agent === 'codex' ? [...new Set([...(spec.runsApp ? config.codex.appPlugins : []), ...(spec.plugins ?? [])])] : [];
+    if (spec.plugins?.length && agent !== 'codex') notes.push(`${WORKERS[agent].name} has no plugins to turn on, so the job runs without: ${spec.plugins.join(', ')}.`);
+    spec.plugins = plugins;
     let worktree: Worktree | null = null;
     let cwd = spec.cwd;
 
@@ -405,6 +417,7 @@ export class Jobs {
       exclusive: Boolean(spec.exclusive) || undefined,
       runsApp: Boolean(spec.runsApp) || undefined,
       ask: Boolean(spec.ask) || undefined,
+      plugins: plugins.length ? plugins : undefined,
       cwd,
       worktree,
       sandbox: spec.ask || (spec.kind === 'review' && !spec.runsApp) ? 'read-only' : 'workspace-write',
@@ -539,6 +552,10 @@ export class Jobs {
         this.preparingReviews.add(id);
         try {
           await this.snapshots.get(id);
+          if (job.worktree) {
+            this.dropSnapshot(job);
+            await this.snapshots.get(id);
+          }
           if (job.worktree) throw new Error(`The previous snapshot at ${job.worktree.path} could not be removed. Cancel this job with discard: true and start a new review.`);
           job.worktree = await this.snapshot(job.repo!, id, job.reviewTarget!, job.notes);
           // Recorded before anything else can fail, so the snapshot is never left without an owner.

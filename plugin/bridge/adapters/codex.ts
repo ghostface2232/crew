@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { tokenFile } from '../auth.ts';
-import { agentEnv, HOME, VERSION } from '../config.ts';
+import { agentCommand, agentEnv, HOME, VERSION } from '../config.ts';
 import type { Config } from '../config.ts';
 import { isTerminal } from '../jobs.ts';
 import type { Adapter, Job, JobCtl } from '../jobs.ts';
@@ -38,7 +38,8 @@ const LIMIT_ERRORS = ['usageLimitExceeded', 'rateLimitExceeded', 'sessionBudgetE
 const IDLE_SHUTDOWN_MS = 10 * 60_000;
 /**
  * The user's own Codex setup brings skills, plugins, and app connectors (design, music, mail) into every thread.
- * No Crew job uses them, and they cost each turn thousands of input tokens.
+ * Few Crew jobs use them, and they cost each turn thousands of input tokens. A job that names plugins gets
+ * those and no others (`lean` below).
  */
 const LEAN = {
   skills: { include_instructions: false },
@@ -61,6 +62,8 @@ export class CodexAdapter implements Adapter {
   /** Threads the current server process has in memory. */
   private loaded = new Set<string>();
   private lastUsed = Date.now();
+  /** Ids of the plugins the user's Codex has installed ("name@marketplace"), asked once per server process. */
+  private pluginIds: Promise<string[]> | null = null;
   private config: Config;
 
   constructor(config: Config) {
@@ -74,7 +77,7 @@ export class CodexAdapter implements Adapter {
   async start(ctl: JobCtl): Promise<void> {
     const peer = await this.ensure();
     if (isTerminal(ctl.job)) return;
-    const res = await peer.request('thread/start', this.threadParams(ctl), RPC_TIMEOUT_MS);
+    const res = await peer.request('thread/start', await this.threadParams(ctl, peer), RPC_TIMEOUT_MS);
     if (isTerminal(ctl.job)) return;
     const threadId: string = res.thread.id;
     const run = this.openRun(ctl, threadId);
@@ -95,7 +98,7 @@ export class CodexAdapter implements Adapter {
     const peer = await this.ensure();
     const threadId = ctl.job.sessionId!;
     if (!this.loaded.has(threadId)) {
-      await peer.request('thread/resume', { threadId, ...this.threadParams(ctl), excludeTurns: true }, RPC_TIMEOUT_MS);
+      await peer.request('thread/resume', { threadId, ...await this.threadParams(ctl, peer), excludeTurns: true }, RPC_TIMEOUT_MS);
       this.loaded.add(threadId);
     }
     if (isTerminal(ctl.job)) return;
@@ -139,8 +142,35 @@ export class CodexAdapter implements Adapter {
     this.peer?.close();
   }
 
-  private threadParams(ctl: JobCtl) {
+  /**
+   * The lean settings, opened up for the plugins a job is to have. Codex can only switch plugins on as a whole,
+   * so every installed plugin the job did not ask for is switched off by id.
+   */
+  private async lean(ctl: JobCtl, peer: RpcPeer) {
+    const wanted = ctl.job.plugins ?? [];
+    if (!wanted.length) return LEAN;
+    this.pluginIds ??= peer.request('plugin/installed', {}, RPC_TIMEOUT_MS)
+      .then((res) => ((res.marketplaces ?? []) as any[]).flatMap((marketplace) => ((marketplace.plugins ?? []) as any[]).filter((plugin) => plugin.installed).map((plugin) => plugin.id as string)));
+    // A Codex that cannot list its plugins has none to give; the job is still worth running without them.
+    const ids = await this.pluginIds.catch(() => {
+      this.pluginIds = null;
+      return [] as string[];
+    });
+    const named = (id: string, name: string) => id === name || id.startsWith(`${name}@`);
+    // The ones a job that runs the app gets by default are not there on every machine; only a name the lead gave is worth a note.
+    const missing = wanted.filter((name) => !this.config.codex.appPlugins.includes(name) && !ids.some((id) => named(id, name)));
+    if (missing.length) ctl.note(`Codex has no plugin named ${missing.join(', ')}; the job runs without it.`);
+    if (!ids.some((id) => wanted.some((name) => named(id, name)))) return LEAN;
+    return {
+      // A plugin's skill is how the worker learns to use its tools, so the skill list is kept for these jobs.
+      features: { ...LEAN.features, plugins: true },
+      plugins: Object.fromEntries(ids.map((id) => [id, { enabled: wanted.some((name) => named(id, name)) }])),
+    };
+  }
+
+  private async threadParams(ctl: JobCtl, peer: RpcPeer) {
     const { job } = ctl;
+    const lean = await this.lean(ctl, peer);
     // Read-only with one writable directory is not a sandbox mode; it is a permissions profile, which replaces the mode.
     // Either profile also denies the daemon's token file. A job with the network open could otherwise read it and
     // call the daemon as the user; a job with neither profile has no network to use it with.
@@ -168,7 +198,7 @@ export class CodexAdapter implements Adapter {
       config: { ...(app ?? scratch), // Its three tools only talk to the bridge. Without this a job with approval policy "never" (a review, a question)
       // is refused the call outright, and any other job would stop to ask.
       mcp_servers: { crew: { ...ctl.mcp, default_tools_approval_mode: 'approve' } },
-      ...LEAN },
+      ...lean },
       developerInstructions: job.instructions,
       model: job.model ?? this.config.codex.model ?? null,
     };
@@ -225,12 +255,15 @@ export class CodexAdapter implements Adapter {
   }
 
   private async launch(): Promise<RpcPeer> {
-    const child = spawn(this.config.codex.bin, ['app-server'], { env: agentEnv(), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    const env = agentEnv();
+    const { bin, shell } = agentCommand(this.config.codex.bin, env);
+    const child = spawn(bin, ['app-server'], { env, shell, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     const peer = new RpcPeer(child, {
       onNotification: (method, params) => this.onNotification(method, params),
       onRequest: (method, params, id) => this.onRequest(method, params, id),
       onExit: (reason) => {
         if (this.peer === peer) this.peer = null;
+        this.pluginIds = null;
         this.loaded.clear();
         this.children.clear();
         for (const run of this.runs.values()) {
@@ -476,6 +509,13 @@ export class CodexAdapter implements Adapter {
         if (run && !isTerminal(run.ctl.job) && !run.interrupt && p.serverName === 'crew' &&
           ['form', 'openai/form', 'openaiForm'].includes(p.mode) && p._meta?.codex_approval_kind === 'mcp_tool_call' && CREW_TOOLS.includes(p._meta?.tool_name)) {
           return { action: 'accept', content: {}, _meta: null };
+        }
+        // A plugin the job was given asks before its tool runs. Like a command, that is the user's to allow,
+        // not something to refuse unseen; a job without plugins has no business with another server.
+        if (run?.ctl.job.plugins?.length && p._meta?.codex_approval_kind === 'mcp_tool_call') {
+          const answer = await ask('approval', `Use the tool ${p.serverName}.${p._meta.tool_name ?? '(unnamed)'}${p.message ? `\n${p.message}` : ''}`);
+          if (!answer) return;
+          return { action: answer.cancelled ? 'cancel' : answer.approve ? 'accept' : 'decline', content: answer.approve ? {} : null, _meta: null };
         }
         return { action: 'decline', content: null, _meta: null };
       default:

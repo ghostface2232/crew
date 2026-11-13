@@ -74,7 +74,8 @@ const aloneProp = {
   exclusive: { type: 'boolean', description: 'The job measures performance (benchmark, profile, load test) and must have the machine to itself. It is refused while any other job runs, and no other job can start until it ends: wait for running jobs first, and start nothing alongside it.' },
 };
 const runsAppProp = (what: string) => ({
-  runs_app: { type: 'boolean', description: `The job has to start the app (a server, a headless browser) to ${what}. Its sandbox gets network access for that; without this a worker cannot bind a port. Pass it only when running the app is needed.` },
+  runs_app: { type: 'boolean', description: `The job has to start the app (a server, a headless browser) to ${what}. Its sandbox gets network access for that; without this a worker cannot bind a port. A Codex worker also gets the user's computer-use plugin, to look at the app on screen when no other check will do. Pass it only when running the app is needed.` },
+  plugins: { type: 'array', items: { type: 'string' }, description: 'Plugins of the user\'s Codex to turn on for this job, by name, e.g. "browser" or "computer-use". Workers run with every plugin off, which saves thousands of tokens a turn; name one only when the task needs its tools. They act outside the sandbox, and computer use operates the real screen, which the user shares: do not run two such jobs at once. Has no effect when the role is not held by Codex.' },
 });
 const installedSkills = listSkills();
 const skillsProp = installedSkills.length ? {
@@ -467,7 +468,7 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
   const cwd: string = args.cwd ?? PROJECT;
   switch (name) {
     case 'delegate':
-      return runJob({ kind: 'delegate', cwd, title: args.title, task: args.task, done_when: args.done_when, base: args.base, isolation: args.isolation, model: args.model, effort: args.effort, exclusive: Boolean(args.exclusive), runsApp: Boolean(args.runs_app), skills: args.skills }, Boolean(args.background), ctx);
+      return runJob({ kind: 'delegate', cwd, title: args.title, task: args.task, done_when: args.done_when, base: args.base, isolation: args.isolation, model: args.model, effort: args.effort, exclusive: Boolean(args.exclusive), runsApp: Boolean(args.runs_app), plugins: args.plugins, skills: args.skills }, Boolean(args.background), ctx);
     case 'review': {
       const kind = args.target ?? 'uncommitted';
       if (kind === 'branch' && !args.base) throw new Error('target "branch" needs base (the branch to compare against, e.g. main).');
@@ -475,7 +476,7 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       const target = kind === 'branch' ? { type: 'baseBranch' as const, branch: args.base } : kind === 'commit' ? { type: 'commit' as const, sha: args.commit } : { type: 'uncommittedChanges' as const };
       // The focus can be long; the board title only needs to say what is under review.
       const title = `Review of ${kind === 'branch' ? `the branch against ${args.base}` : kind === 'commit' ? `commit ${args.commit.slice(0, 8)}` : 'uncommitted changes'}`;
-      return runJob({ kind: 'review', cwd, title, task: args.focus, done_when: args.done_when, review: { target, mode: args.mode ?? 'adversarial' }, model: args.model, effort: args.effort, runsApp: Boolean(args.runs_app), skills: args.skills }, Boolean(args.background), ctx);
+      return runJob({ kind: 'review', cwd, title, task: args.focus, done_when: args.done_when, review: { target, mode: args.mode ?? 'adversarial' }, model: args.model, effort: args.effort, runsApp: Boolean(args.runs_app), plugins: args.plugins, skills: args.skills }, Boolean(args.background), ctx);
     }
     case 'polish':
       if (args.exclusive) throw new Error('polish cannot run alone: an editor measures nothing. Drop exclusive.');

@@ -39,6 +39,7 @@ export function buildPrompt(spec: JobSpec, worktree: Worktree | null, diffFile: 
   else if (spec.kind === 'review') parts.push(diffFile ? READ_ONLY_REVIEW : STATIC_REVIEW);
   if (scratch) parts.push(scratchNote(scratch));
   if (spec.exclusive) parts.push(ALONE);
+  if (spec.plugins?.length) parts.push(pluginsNote(spec.plugins));
   if (skills.length) parts.push(skillsNote(skills));
   const built = { ...assigned, instructions: parts.join('\n\n') };
   if (!shared) return built;
@@ -60,6 +61,11 @@ const LEAD_QUESTIONS = '# Questions for the lead\nUse crew.ask_lead for a decisi
 const scratchNote = (dir: string) => `# What you can run\nYour sandbox is read-only except for one directory of your own: \`${dir}\`. TMPDIR points there. Use it for anything a check has to write: temporary files, caches, a throwaway copy or clone of the repository to try a change or a git operation in. It is deleted when you finish, so nothing in it is a result. Everything else can be read and not written, apart from a few of the bridge's own files, which are closed to you. The network is closed, and nothing can listen on a port. The directory does not carry over to a follow-up turn, so put the commands you ran and what they showed in your report. If a check needs more than that, do not work around it: list it under what you could not verify.`;
 /** Names and paths only: the worker reads what it needs, as it would a skill its own agent listed. */
 const skillsNote = (skills: Skill[]) => `# Skills for this task\nThe lead picked these skills as useful for this task. Read each SKILL.md before you start and follow it where it applies, within your role; files it mentions are relative to its directory.\n${skills.map((s) => `- ${s.name}${s.description ? `: ${s.description}` : ''} (\`${s.file}\`)`).join('\n')}`;
+/**
+ * A plugin's tools run outside the sandbox, and computer use acts on the one screen everybody shares, which
+ * the isolation rules cannot fence off. So the worker is told where it may act, and to prefer a check without a screen.
+ */
+const pluginsNote = (plugins: string[]) => `# Plugins\nThese plugins of the user's are on for this job, if their Codex has them: ${plugins.join(', ')}. Their tools act outside your sandbox. Computer use shows and operates the real screen, which the user and other jobs are using too. Use it only when what you must judge is on screen and a check without one (tests, a headless browser, a request to your own server) cannot answer it. Act only on windows of the instance you started yourself; leave every other window, app, and file as it is, and do not take the pointer or keyboard for longer than the check needs. Say in your report what you looked at on screen. If a plugin is not there, or its tool is refused, report what you could not check.`;
 const READ_ONLY_REVIEW = '# Static review\nReview by reading. You cannot run anything in this role, so list every check you would have run under "Not verified".';
 const RUNS_APP = '# Running the app\nThis job may start the app to check the change; a sandbox that blocks the network has been opened for that. Follow the shared-machine rules above for every instance you start. Starting a browser may still need approval; ask for it, and if it is refused, report what you could not check.';
 const SNAPSHOT = 'You are in a snapshot of the change, not the user\'s working tree: nothing you write here is kept. Report findings with paths relative to the repository root.';

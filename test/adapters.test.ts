@@ -9,6 +9,7 @@ import { CodexAdapter } from '../plugin/bridge/adapters/codex.ts';
 import { resolveConfig } from '../plugin/bridge/config.ts';
 import { Jobs } from '../plugin/bridge/jobs.ts';
 import type { Job, WorkerAgent } from '../plugin/bridge/jobs.ts';
+import { describe } from '../plugin/bridge/render.ts';
 
 const command = 'echo first\necho ' + 'a'.repeat(160) + '\necho last';
 const stub = `
@@ -488,4 +489,71 @@ test('Antigravity passes crew MCP on new and restored sessions and permits ident
   assert.equal(server.command, process.execPath);
   assert.equal(server.args[0], path.resolve('plugin/bridge/worker-mcp.ts'));
   assert.equal(Object.fromEntries(server.env.map(({ name, value }: { name: string; value: string }) => [name, value])).CREW_JOB_ID, job.id);
+});
+
+test('Codex turns on only the plugins a job is to have, and asks the user before one of their tools runs', { timeout: 5000 }, async (t) => {
+  const h = harness(`
+    const fs = require('node:fs');
+    const send = (msg) => console.log(JSON.stringify({ jsonrpc: '2.0', ...msg }));
+    let threads = 0;
+    require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
+      const msg = JSON.parse(line);
+      if (msg.method === 'thread/start' || msg.method === 'plugin/installed') fs.appendFileSync(__dirname + '/seen.jsonl', line + '\\n');
+      if (msg.method === 'plugin/installed') return send({ id: msg.id, result: { marketplaces: [
+        { name: 'bundled', plugins: [{ id: 'computer-use@bundled', installed: true }, { id: 'browser@bundled', installed: true }, { id: 'mail@bundled', installed: true }, { id: 'latex@bundled', installed: false }] },
+      ] } });
+      if (msg.method === 'thread/start') return send({ id: msg.id, result: { thread: { id: 'thread-' + threads++ } } });
+      if (msg.method === 'turn/start') {
+        send({ id: msg.id, result: { turn: { id: 'turn' } } });
+        return send({ id: 'tool-' + msg.params.threadId, method: 'mcpServer/elicitation/request', params: {
+          threadId: msg.params.threadId, turnId: 'turn', serverName: 'cua_repl', mode: 'form', message: 'Approve tool?',
+          requestedSchema: { type: 'object', properties: {} }, _meta: { codex_approval_kind: 'mcp_tool_call', tool_name: 'js' },
+        } });
+      }
+      if (String(msg.id).startsWith('tool-')) {
+        const threadId = msg.id.slice(5);
+        send({ method: 'item/completed', params: { threadId, item: { type: 'agentMessage', text: msg.result.action } } });
+        return send({ method: 'turn/completed', params: { threadId, turn: { id: 'turn', status: 'completed' } } });
+      }
+      if (msg.method && msg.id != null) send({ id: msg.id, result: {} });
+    });
+  `);
+  cleanup(t, h);
+  const start = (spec: object) => h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test', ...spec });
+
+  // No plugins: nothing is asked of Codex, everything stays off, and another server's tool is refused unseen.
+  const plain = await start({});
+  await until(h.jobs, plain, 'done');
+  assert.deepEqual([plain.plugins, plain.report], [undefined, 'decline']);
+
+  // A job that runs the app gets computer use by itself; the default it lacks on this machine is not worth a note.
+  const app = await start({ runsApp: true });
+  await until(h.jobs, app, 'waiting');
+  assert.deepEqual(app.plugins, ['computer-use', 'unified-computer-use']);
+  assert.match(app.waiting!.reason, /^Use the tool cua_repl\.js/);
+  assert.match(app.instructions, /# Plugins\n.*computer-use, unified-computer-use.*real screen/);
+  await h.jobs.reply(app.id, { decision: 'approve', request_id: app.waiting!.id });
+  await until(h.jobs, app, 'done');
+  assert.deepEqual([app.report, app.notes], ['accept', []]);
+
+  // A plugin the lead names is added; one Codex does not have is said.
+  const named = await start({ plugins: ['browser', 'figma'] });
+  await until(h.jobs, named, 'waiting');
+  await h.jobs.reply(named.id, { decision: 'deny', request_id: named.waiting!.id });
+  await until(h.jobs, named, 'done');
+  assert.deepEqual([named.plugins, named.report, named.notes], [['browser', 'figma'], 'decline', ['Codex has no plugin named figma; the job runs without it.']]);
+  assert.ok(describe(named).includes('plugins on: browser, figma'));
+
+  const seen = fs.readFileSync(path.join(h.home, 'seen.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+  // The list of plugins is asked for once, and only when a job needs it.
+  assert.deepEqual(seen.map((msg) => msg.method), ['thread/start', 'plugin/installed', 'thread/start', 'thread/start']);
+  const configs = seen.filter((msg) => msg.method === 'thread/start').map((msg) => msg.params.config);
+  assert.deepEqual([configs[0].features, configs[0].plugins, configs[0].skills], [{ apps: false, plugins: false, tool_suggest: false }, undefined, { include_instructions: false }]);
+  assert.deepEqual(configs[1].features, { apps: false, plugins: true, tool_suggest: false });
+  assert.deepEqual(configs[1].plugins, { 'computer-use@bundled': { enabled: true }, 'browser@bundled': { enabled: false }, 'mail@bundled': { enabled: false } });
+  assert.deepEqual(configs[2].plugins, { 'computer-use@bundled': { enabled: false }, 'browser@bundled': { enabled: true }, 'mail@bundled': { enabled: false } });
+  assert.equal(configs[1].skills, undefined);
+
+  await assert.rejects(h.jobs.create({ kind: 'polish', cwd: h.home, isolation: 'in_place', targets: ['a.md'], plugins: ['browser'] }), /polish job cannot use plugins/);
+  await assert.rejects(start({ plugins: 'browser' }), /plugins must be a list/);
 });

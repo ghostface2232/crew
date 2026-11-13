@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { api, ensureDaemon, health, stopDaemon } from './client.ts';
 import { boardUrl, readToken } from './auth.ts';
-import { agentEnv, BASE_URL, HOME, installed, loadConfig, PLUGIN_ROOT, VERSION } from './config.ts';
+import { agentCommand, agentEnv, BASE_URL, HOME, installed, loadConfig, PLUGIN_ROOT, VERSION } from './config.ts';
 import { describe, summarize } from './render.ts';
 import type { JobView } from './render.ts';
 
@@ -22,8 +22,10 @@ Usage:
 `;
 
 function run(bin: string, args: string[]): Promise<{ ok: boolean; out: string }> {
+  const env = agentEnv();
+  const command = agentCommand(bin, env);
   return new Promise((resolve) => {
-    execFile(bin, args, { env: agentEnv(), timeout: 20_000, windowsHide: true }, (err, stdout, stderr) => {
+    execFile(command.bin, args, { env, shell: command.shell, timeout: 20_000, windowsHide: true }, (err, stdout, stderr) => {
       resolve({ ok: !err, out: (stdout || stderr || err?.message || '').trim() });
     });
   });

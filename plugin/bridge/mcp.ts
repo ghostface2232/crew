@@ -109,7 +109,7 @@ const TOOLS = [
   {
     name: 'review',
     title: `Review by ${holder('review')}`,
-    description: `Ask the cross-reviewer (${holder('review')}) for a review of changes in this repository; it changes nothing in your tree. By default it is static and read-only: the worker reads the change and runs checks that end by themselves. In the pipeline, before a push or pull request, start it together with your own self-review; at other stopping points one of the two is enough. Do not loop reviews.`,
+    description: `Ask the cross-reviewer (${holder('review')}) for a review of changes in this repository; it changes nothing in your tree. By default it is static and read-only: the worker reads the change and runs checks that end by themselves. In the pipeline, one review (this or your own self-review) covers a stopping point or a push; before a push or pull request, review only what no review has covered, and run both together where security, concurrency, or data loss is involved. Do not loop reviews.`,
     inputSchema: {
       type: 'object',
       properties: {

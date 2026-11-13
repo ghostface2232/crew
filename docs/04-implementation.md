@@ -293,6 +293,7 @@ Not yet verified:
   - Renamed job branches from `crew/<job id>` to `crew-<job id>`, because git cannot create `crew/...` refs if a branch named `crew` already exists in the repository.
 - 2026-11-12: Rebuilt the board around commands: tracks of stops, state shown by color and shape, time as labels only, and an upright layout on narrow screens (sections 5.2 and 5.3).
 - 2026-11-12: From the pull request review: a mission is taken up again only by the session that opened it, and a project whose only records are finished missions stays on the board (section 5.3).
+- 2026-11-13: Before a push or pull request, only what no review has covered is reviewed, with both reviews in parallel where security, concurrency, or data loss is involved (section 5.4).
 - 2026-11-12: Reviews are now tied to where the work is going: one review at a stopping point, both before a push or pull request (section 5.4).
 - 2026-11-12: Codex approvals now go to its automatic reviewer by default, a refused action can be sent back once with the user's approval before the user is asked, and jobs marked `runs_app` get network access and, for reviews, a snapshot worktree (sections 5.1 and 5.4).
 - 2026-11-12: Added shared-machine rules, static-by-default reviews, and jobs that run alone (section 5.4). `/crew:run` now runs the self-review and the cross-review at the same time.

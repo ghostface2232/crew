@@ -68,6 +68,8 @@ test('a window is judged by what is left, with hysteresis, whatever its recent p
   const status = (ratio: number, samples: Sample[] = []) =>
     tracker.classify(parseCache(cache([snapshot('codex', [weekly(ratio)])])), () => samples, NOW).providers.find((p) => p.agent === 'codex')!;
   assert.equal(status(0.5).status, 'ok');
+  assert.equal(status(0.85).status, 'tight'); // exactly 15% left
+  assert.equal(status(0.7).status, 'ok'); // exactly 30% left
   assert.equal(status(0.8).status, 'ok'); // between the thresholds, and it was ok
   assert.equal(status(0.9).status, 'tight');
   assert.equal(status(0.8).status, 'tight'); // stays tight until 30% is left again

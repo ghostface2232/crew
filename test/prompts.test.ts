@@ -40,7 +40,8 @@ for (const agent of ['codex', 'antigravity'] as const) {
   for (const runsApp of [false, true]) for (const exclusive of [false, true]) cases.push({ name: `${agent} delegate${runsApp ? ' runs_app' : ''}${exclusive ? ' exclusive' : ''}`, agent, role: 'delegate', runsApp, exclusive });
   cases.push({ name: `${agent} polish`, agent, role: 'polish' });
 }
-// A read-only job on Codex gets a scratch directory; without one is how it ran before, and must still be coherent.
+// A read-only job on Codex always gets a scratch directory. The cases without one are how it ran before, which
+// Jobs.start no longer produces; they stay because buildPrompt still has to make sense without one.
 for (const scratch of [true, false]) {
   cases.push({ name: `codex question${scratch ? ' scratch' : ''}`, agent: 'codex', role: 'question', scratch });
   cases.push({ name: `codex review${scratch ? ' scratch' : ''}`, agent: 'codex', role: 'review', scratch });
@@ -79,7 +80,7 @@ for (const c of cases) {
     // Starting the app and staying static exclude each other; the app rules point back to the machine rules.
     if (has('# Running the app')) {
       assert.ok(!has('# Static review'));
-      assert.ok(text.indexOf('# This machine is shared') < text.indexOf('# Running the app'));
+      assert.ok(has('# This machine is shared') && text.indexOf('# This machine is shared') < text.indexOf('# Running the app'));
     }
     if (c.role === 'question') assert.ok(has('Do not start the app') && !has('# Running the app'));
     // Measuring needs the machine rules to say it is allowed, and is only for an engineer.
@@ -105,14 +106,16 @@ test('the lead picks skills by name from the installed ones', (t) => {
   assert.throws(() => findSkills(['better-ux'], root), /Unknown skill\(s\): better-ux\. Installed in .*: better-ui\./);
   assert.throws(() => findSkills(['../notes'], root), /Unknown skill/);
   assert.deepEqual(listSkills(path.join(root, 'missing')), []);
-  // Only a leading frontmatter counts, and only a one-line value.
+  // Only a leading frontmatter counts; a block value is joined onto one line, and an empty one stays empty.
   const describe = (text: string) => {
     fs.mkdirSync(path.join(root, 'x'), { recursive: true });
     fs.writeFileSync(path.join(root, 'x', 'SKILL.md'), text);
     return findSkills(['x'], root)[0].description;
   };
   assert.equal(describe('---\ndescription: "Quoted: yes"\n---\n'), 'Quoted: yes');
-  assert.equal(describe('---\ndescription: >\n  Folded.\n---\n'), '');
+  assert.equal(describe('---\ndescription: >\n  Folded\n  over two.\nname: x\n---\n'), 'Folded over two.');
+  assert.equal(describe('---\ndescription: |-\n  Literal.\n---\n'), 'Literal.');
+  assert.equal(describe('---\ndescription:\nlicense: MIT\n---\n'), '');
   assert.equal(describe('# Title\n---\ndescription: body\n---\n'), '');
 });
 

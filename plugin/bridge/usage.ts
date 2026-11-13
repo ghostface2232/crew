@@ -200,7 +200,8 @@ export class UsageTracker {
       // The projection is shown on the boards, but the status follows what is left.
       if (w.usedRatio >= 0.999) status = 'exhausted';
       else {
-        const remaining = 1 - w.usedRatio;
+        // Rounded so 85% used counts as 15% left: 1 - 0.85 is 0.15000000000000002 in floating point.
+        const remaining = Math.round((1 - w.usedRatio) * 1e6) / 1e6;
         status = remaining <= TIGHT_REMAINING ? 'tight' : remaining >= OK_REMAINING ? 'ok' : this.previous.get(id) === 'tight' ? 'tight' : 'ok';
       }
       this.previous.set(id, status);

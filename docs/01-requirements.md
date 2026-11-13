@@ -57,7 +57,7 @@ IDs R1 to R8 keep the meaning other documents refer to. R9 to R15 were added on 
 | R11 | Model and effort can be set per role and per service, and a job shows which ones it ran with |
 | R12 | A job can be assigned to Cursor and appears on the board like any other |
 | R13 | A command can be started, followed, and merged without a Claude Code session |
-| R14 | Every worker job carries the isolation rules. Before a push or pull request the self-review and the cross-review run together, and at most one of them runs the app; a worker's review that does runs in a snapshot, not in the user's tree. A job marked as measuring is refused while another job runs, and no job starts until it ends |
+| R14 | Every worker job that can run commands carries the isolation rules. Before a push or pull request the self-review and the cross-review run together, and at most one of them runs the app; a worker's review that does runs in a snapshot, not in the user's tree. A job marked as measuring is refused while another job runs, and no job starts until it ends |
 | R15 | A Codex job's approval requests are answered without the user by default. An action the reviewer refused is sent back once when the user's request covers it, and the user is asked if it is refused again |
 | R16 | The standalone app runs without Electron or a shell-installed Node, retains jobs when the UI quits, and exposes the board's tasks, requests, settings, and details with native controls |
 

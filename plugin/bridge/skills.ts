@@ -36,12 +36,23 @@ export function findSkills(names: string[], root = SKILLS_ROOT): Skill[] {
   });
 }
 
-/** A one-line `description` from the frontmatter; empty when there is none or it spans lines (the worker reads the file anyway). */
+/** The frontmatter's `description`, on one line; empty when there is none. */
 function describe(text: string): string {
-  const front = /^---\r?\n([\s\S]*?)\r?\n---\s*$/m.exec(text);
+  const front = /^---\r?\n([\s\S]*?)\r?\n---[ \t]*$/m.exec(text);
   if (!front || front.index !== 0) return '';
-  const value = /^description:\s*(.*)$/m.exec(front[1])?.[1].trim() ?? '';
-  if (/^[>|]/.test(value)) return '';
+  const lines = front[1].split(/\r?\n/);
+  const at = lines.findIndex((line) => /^description:/.test(line));
+  if (at < 0) return '';
+  const value = lines[at].slice('description:'.length).trim();
+  // A folded or literal block: the indented lines that follow.
+  if (/^[>|][+-]?$/.test(value)) {
+    const block: string[] = [];
+    for (const line of lines.slice(at + 1)) {
+      if (!/^\s/.test(line) && line !== '') break;
+      block.push(line.trim());
+    }
+    return block.filter(Boolean).join(' ');
+  }
   return /^(["']).*\1$/.test(value) ? value.slice(1, -1) : value;
 }
 

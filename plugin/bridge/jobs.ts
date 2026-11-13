@@ -374,6 +374,8 @@ export class Jobs {
     const readOnly = Boolean(spec.ask) || (spec.kind === 'review' && !spec.runsApp);
     const scratch = readOnly && WORKERS[agent].readOnlyScratch ? this.scratchDir(id) : undefined;
     if (scratch) fs.mkdirSync(scratch, { recursive: true });
+    // Antigravity's commands are refused in every job but an engineer's (decide in adapters/antigravity.ts).
+    const commands = (spec.kind === 'delegate' && !spec.ask) || WORKERS[agent].reviewerRunsGit;
 
     // Diffs name files relative to the repo root, so scope targets must be too.
     const targetRoot = repo ?? spec.cwd;
@@ -399,7 +401,7 @@ export class Jobs {
       worktree,
       sandbox: spec.ask || (spec.kind === 'review' && !spec.runsApp) ? 'read-only' : 'workspace-write',
       scratch,
-      ...buildPrompt(spec, worktree, diffFile, shared.text, scratch),
+      ...buildPrompt(spec, worktree, diffFile, shared.text, scratch, commands),
       shared: shared.sources,
       // Only Codex has a built-in review mode; other agents get the prompted review.
       nativeReview: spec.kind === 'review' && agent === 'codex' && spec.review?.mode === 'standard' ? spec.review.target : null,

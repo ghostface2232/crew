@@ -663,7 +663,7 @@ test('a job that runs alone is refused while others are active, and holds off ev
   await assert.rejects(jobs.reply(alone.id, { message: 'measure again' }), /cannot start while 1 other job/);
 });
 
-test('every worker is given the shared-machine rules, and a review is told to stay static in its instructions', async () => {
+test('every worker that runs commands is given the shared-machine rules, and a review is told to stay static in its instructions', async () => {
   const repo = tempRepo();
   const { jobs } = harness((ctl) => ctl.done('ok'));
   const target = { type: 'uncommittedChanges' as const };
@@ -689,6 +689,11 @@ test('every worker is given the shared-machine rules, and a review is told to st
   const handed = await settled(other.jobs, await other.jobs.create({ kind: 'review', cwd: repo, review: { target, mode: 'adversarial' } }));
   assert.match(handed.instructions, /# Static review\nReview by reading\. You cannot run anything in this role/);
   assert.ok(!handed.instructions.includes('Run only checks that end by themselves'));
+  // Nor told how to share the machine: it can start nothing on it. The same holds for its editor.
+  assert.ok(!handed.instructions.includes('# This machine is shared'));
+  const editor = harness((ctl) => ctl.done('ok'), () => resolveConfig({ roles: { polish: { agent: 'antigravity' } } }));
+  const edited = await settled(editor.jobs, await editor.jobs.create({ kind: 'polish', cwd: repo, targets: ['README.md'] }));
+  assert.ok(!edited.instructions.includes('# This machine is shared'));
 });
 
 test('a review that runs the app gets a snapshot of the change and leaves nothing behind', async () => {
@@ -1044,7 +1049,9 @@ for (const agent of ['codex', 'antigravity'] as const) {
     assert.match(job.instructions, /^# Role: question responder/);
     assert.match(job.instructions, /Change nothing in the repository or anywhere else\. If you were given a directory of your own, checks may write there and only there/);
     assert.match(job.instructions, /Give the answer as your final message/);
-    assert.match(job.instructions, /# This machine is shared/);
+    // Antigravity cannot run commands in a question, so it has nothing to start on the shared machine.
+    if (agent === 'codex') assert.match(job.instructions, /# This machine is shared/);
+    else assert.doesNotMatch(job.instructions, /# This machine is shared/);
     assert.equal(job.prompt, '# Question\nHow does it work?');
     assert.equal(fs.existsSync(path.join(home, 'worktrees')), false);
     assert.equal(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }), head);

@@ -28,11 +28,12 @@ function describeTarget(target: ReviewTarget, commands: boolean): string {
 }
 
 /** Role text goes in `instructions`; the concrete assignment goes in `prompt`. Each adapter delivers both its own way. */
-export function buildPrompt(spec: JobSpec, worktree: Worktree | null, diffFile: string | null = null, shared = '', scratch?: string): { prompt: string; instructions: string } {
+export function buildPrompt(spec: JobSpec, worktree: Worktree | null, diffFile: string | null = null, shared = '', scratch?: string, commands = true): { prompt: string; instructions: string } {
   const assigned = assignment(spec, worktree, diffFile);
-  // Every worker shares the machine with the user and the other agents, whatever its role. These parts go with
-  // the instructions, not the prompt: Codex's built-in review is sent no prompt, and must still be told them.
-  const parts = [assigned.instructions, role('machine'), LEAD_QUESTIONS];
+  // A worker that runs commands shares the machine with the user and the other agents; one that cannot start
+  // anything has no use for the rules. These parts go with the instructions, not the prompt: Codex's built-in
+  // review is sent no prompt, and must still be told them.
+  const parts = commands ? [assigned.instructions, role('machine'), LEAD_QUESTIONS] : [assigned.instructions, LEAD_QUESTIONS];
   if (spec.runsApp) parts.push(spec.kind === 'review' ? `${RUNS_APP}\n${SNAPSHOT}` : RUNS_APP);
   else if (spec.kind === 'review') parts.push(diffFile ? READ_ONLY_REVIEW : STATIC_REVIEW);
   if (scratch) parts.push(scratchNote(scratch));

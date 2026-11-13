@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { effectiveRole, PORT, WORKERS } from './config.ts';
+import { effectiveRole, PORT, runsCommands, WORKERS } from './config.ts';
 import type { Config, Role, WorkerAgent } from './config.ts';
 import { carryUncommitted, changesSince, commitAll, commitChanges, copyIncluded, createWorktree, currentBranch, dirtyCount, mergeInto, isInside, projectRoot, removeWorktree, repoRoot, revertCommit, revertsSince, reviewDiff } from './git.ts';
 import type { Worktree } from './git.ts';
@@ -374,8 +374,6 @@ export class Jobs {
     const readOnly = Boolean(spec.ask) || (spec.kind === 'review' && !spec.runsApp);
     const scratch = readOnly && WORKERS[agent].readOnlyScratch ? this.scratchDir(id) : undefined;
     if (scratch) fs.mkdirSync(scratch, { recursive: true });
-    // Antigravity's commands are refused in every job but an engineer's (decide in adapters/antigravity.ts).
-    const commands = (spec.kind === 'delegate' && !spec.ask) || WORKERS[agent].reviewerRunsGit;
 
     // Diffs name files relative to the repo root, so scope targets must be too.
     const targetRoot = repo ?? spec.cwd;
@@ -401,7 +399,7 @@ export class Jobs {
       worktree,
       sandbox: spec.ask || (spec.kind === 'review' && !spec.runsApp) ? 'read-only' : 'workspace-write',
       scratch,
-      ...buildPrompt(spec, worktree, diffFile, shared.text, scratch, commands),
+      ...buildPrompt(spec, worktree, diffFile, shared.text, scratch, runsCommands(agent, spec)),
       shared: shared.sources,
       // Only Codex has a built-in review mode; other agents get the prompted review.
       nativeReview: spec.kind === 'review' && agent === 'codex' && spec.review?.mode === 'standard' ? spec.review.target : null,

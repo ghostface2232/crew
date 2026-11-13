@@ -48,6 +48,11 @@ export const WORKERS: Record<WorkerAgent, Worker> = {
   antigravity: { name: 'Antigravity', idPrefix: 'ag', resume: 'agy --conversation', reviewerRunsGit: false, readOnlyScratch: false },
 };
 
+/** Antigravity's commands are refused in every job but an engineer's (`decide` in adapters/antigravity.ts). */
+export function runsCommands(agent: WorkerAgent, spec: { kind: Role; ask?: boolean }): boolean {
+  return (spec.kind === 'delegate' && !spec.ask) || WORKERS[agent].reviewerRunsGit;
+}
+
 export interface RoleAssignment {
   agent: WorkerAgent;
   /** Override the agent's own model and effort settings for this role. */

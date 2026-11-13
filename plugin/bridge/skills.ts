@@ -32,7 +32,16 @@ export function findSkills(names: string[], root = SKILLS_ROOT): Skill[] {
   }
   return [...new Set(names)].map((name) => {
     const file = path.join(root, name, 'SKILL.md');
-    const description = /^description:\s*(.+)$/m.exec(fs.readFileSync(file, 'utf8').split(/^---\s*$/m)[1] ?? '')?.[1].trim() ?? '';
-    return { name, description, file };
+    return { name, description: describe(fs.readFileSync(file, 'utf8')), file };
   });
 }
+
+/** A one-line `description` from the frontmatter; empty when there is none or it spans lines (the worker reads the file anyway). */
+function describe(text: string): string {
+  const front = /^---\r?\n([\s\S]*?)\r?\n---\s*$/m.exec(text);
+  if (!front || front.index !== 0) return '';
+  const value = /^description:\s*(.*)$/m.exec(front[1])?.[1].trim() ?? '';
+  if (/^[>|]/.test(value)) return '';
+  return /^(["']).*\1$/.test(value) ? value.slice(1, -1) : value;
+}
+

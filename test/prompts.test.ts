@@ -105,5 +105,14 @@ test('the lead picks skills by name from the installed ones', (t) => {
   assert.throws(() => findSkills(['better-ux'], root), /Unknown skill\(s\): better-ux\. Installed in .*: better-ui\./);
   assert.throws(() => findSkills(['../notes'], root), /Unknown skill/);
   assert.deepEqual(listSkills(path.join(root, 'missing')), []);
+  // Only a leading frontmatter counts, and only a one-line value.
+  const describe = (text: string) => {
+    fs.mkdirSync(path.join(root, 'x'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'x', 'SKILL.md'), text);
+    return findSkills(['x'], root)[0].description;
+  };
+  assert.equal(describe('---\ndescription: "Quoted: yes"\n---\n'), 'Quoted: yes');
+  assert.equal(describe('---\ndescription: >\n  Folded.\n---\n'), '');
+  assert.equal(describe('# Title\n---\ndescription: body\n---\n'), '');
 });
 

@@ -75,9 +75,29 @@ private struct MenuBarLabel: View {
     @Environment(\.openWindow) private var openWindow
     var body: some View {
         let pending = store.state.pendingCount
-        Label(pending > 0 ? "Crew · \(pending) waiting" : "Crew", systemImage: pending > 0 ? "circle.dotted.circle.fill" : "circle.dotted.circle")
-            .onAppear { register(openWindow) }
+        Group {
+            if let mark = Self.mark {
+                // Waiting requests show as a count beside the mark, which has no filled variant to switch to.
+                HStack(spacing: 3) {
+                    Image(nsImage: mark)
+                    if pending > 0 { Text(String(pending)).monospacedDigit() }
+                }
+            } else {
+                Label("Crew", systemImage: pending > 0 ? "circle.dotted.circle.fill" : "circle.dotted.circle")
+            }
+        }
+        .accessibilityLabel(pending > 0 ? "Crew, \(pending) waiting" : "Crew")
+        .onAppear { register(openWindow) }
     }
+    /// The Crew mark at menu bar size. A menu bar label ignores SwiftUI's frame, so the image itself is sized.
+    /// Nil when the app runs outside its bundle, which has no asset catalog.
+    private static let mark: NSImage? = {
+        guard let source = NSImage(named: "MenuBarCrew")?.copy() as? NSImage, source.size.height > 0 else { return nil }
+        let height: CGFloat = 16
+        source.size = NSSize(width: (source.size.width / source.size.height * height).rounded(), height: height)
+        source.isTemplate = true
+        return source
+    }()
 }
 
 private struct SettingsCommand: View {

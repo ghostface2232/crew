@@ -56,6 +56,15 @@ for (const name of ['ClaudeCode', 'Codex', 'Antigravity', 'Cursor']) {
     properties: { 'preserves-vector-representation': true, 'template-rendering-intent': 'template' },
   }));
 }
+// The menu bar mark: a template image, so the system tints it for light and dark menu bars.
+const menuBar = path.join(catalog, 'MenuBarCrew.imageset');
+fs.mkdirSync(menuBar, { recursive: true });
+fs.copyFileSync('assets/crew_menubar.svg', path.join(menuBar, 'crew_menubar.svg'));
+fs.writeFileSync(path.join(menuBar, 'Contents.json'), JSON.stringify({
+  images: [{ filename: 'crew_menubar.svg', idiom: 'universal' }],
+  info: { version: 1, author: 'xcode' },
+  properties: { 'preserves-vector-representation': true, 'template-rendering-intent': 'template' },
+}));
 // The app icon is an Icon Composer document. Compiled with the catalog, it becomes the layered icon in
 // Assets.car and a flat crew.icns for the places that still read one.
 const iconInfo = path.join(build, 'Icon.plist');

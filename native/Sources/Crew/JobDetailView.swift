@@ -63,7 +63,7 @@ struct JobDetailView: View {
         }
         Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
             fact("Agent", [agentName(job.agent), job.model, job.effort.map { "\($0) effort" }].compactMap { $0 }.joined(separator: " · "))
-            fact("Role", roleNames[job.kind] ?? job.kind)
+            fact("Role", job.kindTitle)
             fact("Project", job.projectPath)
             fact("Duration", elapsed((job.endedAt ?? store.now) - job.createdAt))
             if let worktree = job.worktree { fact("Branch", "\(worktree.branch) (from \(worktree.base.prefix(8)))") }
@@ -86,6 +86,28 @@ struct JobDetailView: View {
                 }
                 if let tree = job.worktree, !result.files.isEmpty {
                     CopyButton(title: "Copy diff command", text: "git diff \(tree.base.prefix(8))..\(tree.branch)")
+                }
+            }
+        }
+        if let rounds = job.rounds, !rounds.isEmpty {
+            detailSection("Rounds", symbol: "arrow.counterclockwise") {
+                ForEach(rounds.sorted { $0.turn < $1.turn }, id: \.turn) { round in
+                    let key = job.roundActionKey(round.turn)
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Turn \(round.turn)").font(Typeface.calloutStrong)
+                            Label(round.state == "undone" ? "Undone" : "Kept", systemImage: round.state == "undone" ? "arrow.uturn.backward" : "checkmark")
+                                .font(Typeface.caption).foregroundStyle(.secondary)
+                            Spacer()
+                            Button(round.state == "undone" ? "Keep" : "Undo") {
+                                Task { await store.setRound(job, turn: round.turn, undo: round.state != "undone") }
+                            }
+                            .disabled(!store.connected || job.roundUnavailableReason != nil || store.actions[key]?.locked == true)
+                            .help(job.roundUnavailableReason ?? (!store.connected ? "Connect to Crew to change rounds." : "Change this round on the job branch."))
+                        }
+                        Text(round.stat.isEmpty ? "No files changed" : round.stat).font(Typeface.code).textSelection(.enabled)
+                        ActionMessage(state: store.actions[key])
+                    }
                 }
             }
         }

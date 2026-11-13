@@ -211,12 +211,12 @@ struct JobRow: View {
     let store: CrewStore
     var open: () -> Void
     var body: some View {
-        let detail = [agentName(job.agent), job.error?.message ?? (job.isActive ? job.phase : nil),
+        let detail = [agentName(job.agent), job.ask == true ? "Question" : nil, job.error?.message ?? (job.isActive ? job.phase : nil),
                       job.runsApp == true ? "Runs the app" : nil, job.exclusive == true ? "Runs alone" : nil]
             .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
         Button(action: open) {
             HStack(spacing: 12) {
-                Image(systemName: job.kind == "review" ? "checkmark.shield" : job.kind == "polish" ? "text.badge.checkmark" : "hammer")
+                Image(systemName: job.ask == true ? "questionmark.bubble" : job.kind == "review" ? "checkmark.shield" : job.kind == "polish" ? "text.badge.checkmark" : "hammer")
                     .font(.system(size: 14)).foregroundStyle(.secondary).frame(width: 20)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(job.title).font(Typeface.bodyStrong).foregroundStyle(.primary).lineLimit(2)
@@ -295,5 +295,54 @@ extension ISO8601DateFormatter {
 struct WorkspacePressStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label.opacity(configuration.isPressed ? 0.68 : 1)
+    }
+}
+
+struct AgentUsageView: View {
+    let store: CrewStore
+    let agent: String
+    var body: some View {
+        if let usage = store.usage, usage.source != "none" {
+            if let provider = usage.providers.first(where: { $0.agent == agent }) {
+                VStack(alignment: .leading, spacing: 6) {
+                    if provider.accountWindows.isEmpty {
+                        Text(provider.status.rawValue.capitalized).foregroundStyle(.secondary)
+                    }
+                    ForEach(provider.accountWindows, id: \.key) { window in
+                        let status = provider.status == .stale || provider.status == .unknown ? provider.status : window.status
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 6) {
+                                Text(window.name)
+                                Text(window.usedRatio, format: .percent.precision(.fractionLength(0))).monospacedDigit()
+                                if status == .stale || status == .unknown { Text(status.rawValue) }
+                                Spacer(minLength: 0)
+                                if let reset = window.resetTime {
+                                    Text("Resets \(Date(timeIntervalSince1970: reset / 1000), style: .relative)")
+                                }
+                            }
+                            GeometryReader { geometry in
+                                Capsule().fill(tint(status)).frame(width: geometry.size.width * min(1, max(0, window.usedRatio)))
+                            }.frame(height: 3).background(.quaternary, in: Capsule()).accessibilityHidden(true)
+                        }.foregroundStyle(tint(status))
+                    }
+                }.font(Typeface.caption).help(([provider.reason] + provider.windows.filter { $0.group != nil }.map {
+                    "\($0.group!): \($0.name), \(Int($0.usedRatio * 100))%, \($0.status.rawValue)"
+                }).joined(separator: "\n"))
+            } else {
+                Text("Usage unknown").font(Typeface.caption).foregroundStyle(.secondary)
+            }
+        } else if let usage = store.limits[agent] ?? nil, let maximum = usage.windows?.map(\.usedPercent).max() {
+            Text("\(Int(maximum))% of limit").font(Typeface.caption).monospacedDigit().foregroundStyle(maximum >= 90 ? Color.orange : .secondary)
+                .help((usage.windows ?? []).map { window in
+                    "\(Int(window.usedPercent))% of " + (window.minutes.map { "\(Int($0))-minute limit" } ?? "limit")
+                }.joined(separator: "\n"))
+        }
+    }
+    private func tint(_ status: UsageStatus) -> Color {
+        switch status {
+        case .tight: return .orange
+        case .exhausted: return .red
+        case .ok, .stale, .unknown: return .secondary
+        }
     }
 }

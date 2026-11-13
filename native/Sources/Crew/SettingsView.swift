@@ -12,26 +12,27 @@ struct CrewSettingsView: View {
                 Picker("Settings section", selection: $tab) {
                     Text("Roles").tag("roles")
                     Text("Instructions").tag("instructions")
-                }.pickerStyle(.segmented).labelsHidden().frame(width: 210)
+                    if model.presets != nil { Text("Presets").tag("presets") }
+                }.pickerStyle(.segmented).labelsHidden().frame(width: model.presets == nil ? 210 : 300)
             }.padding(26)
             Group {
-                if tab == "roles" { roles } else { instructions }
+                if tab == "roles" { roles } else if tab == "presets" { presets } else { instructions }
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
             HStack(spacing: 12) {
                 if model.loading && tab == "instructions" { ProgressView().controlSize(.small) }
-                Text(tab == "roles" ? model.roleStatus : model.textStatus).font(Typeface.callout).foregroundStyle(.secondary).textSelection(.enabled)
-                if tab == "roles" ? model.roles != model.savedRoles : model.text != model.savedText {
+                Text(tab == "roles" ? model.roleStatus : tab == "presets" ? model.presetStatus : model.textStatus).font(Typeface.callout).foregroundStyle(.secondary).textSelection(.enabled)
+                if tab == "roles" ? model.roles != model.savedRoles : tab == "presets" ? model.preset != model.savedPreset : model.text != model.savedText {
                     Text("Unsaved changes").font(Typeface.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 if tab == "instructions" && !model.loaded && !model.loading {
                     Button("Retry Loading") { Task { await model.load(scope: model.scope) } }
                 }
-                Button(tab == "roles" ? (model.savingRoles ? "Saving…" : "Save Roles") : (model.savingText ? "Saving…" : "Save Instructions")) {
-                    Task { if tab == "roles" { await model.saveRoles() } else { await model.saveInstructions() } }
+                Button(tab == "roles" ? (model.savingRoles ? "Saving…" : "Save Roles") : tab == "presets" ? (model.savingPreset ? "Saving…" : "Save Preset") : (model.savingText ? "Saving…" : "Save Instructions")) {
+                    Task { if tab == "roles" { await model.saveRoles() } else if tab == "presets" { await model.savePreset() } else { await model.saveInstructions() } }
                 }
                 .buttonStyle(.glassProminent).controlSize(.large).keyboardShortcut("s")
-                .disabled(!store.connected || (tab == "roles" ? model.savingRoles : !model.loaded || model.savingText))
+                .disabled(!store.connected || (tab == "roles" ? model.savingRoles : tab == "presets" ? model.savingPreset : !model.loaded || model.savingText))
             }.padding(.horizontal, 26).padding(.vertical, 18)
         }
         .background(WorkspaceStyle.canvas)
@@ -67,6 +68,19 @@ struct CrewSettingsView: View {
                 }
             }.padding(.horizontal, 26)
         }
+    }
+    private var presets: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Picker("Preset", selection: $model.preset) {
+                Text("None").tag(nil as PresetName?)
+                ForEach(PresetName.allCases, id: \.self) { name in
+                    Text(name.rawValue.capitalized).tag(Optional(name))
+                }
+            }
+            Text(model.preset.flatMap { model.presets?[$0.rawValue]?.description } ?? "Uses each agent's configured model and effort.")
+                .font(Typeface.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Spacer()
+        }.padding(.horizontal, 26)
     }
     private var instructions: some View {
         VStack(alignment: .leading, spacing: 14) {

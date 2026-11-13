@@ -209,18 +209,21 @@ struct AgentOverview: View {
     private var compactAgents: some View {
         VStack(spacing: 0) {
             ForEach(agents, id: \.self) { agent in
-                HStack(spacing: 10) {
-                    AgentMark(agent: agent, size: 18)
-                    Text(agentName(agent)).font(Typeface.calloutStrong)
-                    Spacer()
-                    let jobs = store.state.jobs.filter { $0.agent == agent && $0.isActive && (store.project.isEmpty || $0.projectPath == store.project) }
-                    let sessions = store.state.claude.filter { $0.state != "idle" && (store.project.isEmpty || $0.projectPath == store.project) }
-                    let count = agent == "claude" ? sessions.count : jobs.count
-                    let waiting = agent == "claude" ? sessions.contains { $0.state == "waiting" } : jobs.contains { $0.state == "waiting" }
-                    let stalled = agent == "claude" ? sessions.contains { $0.stalled } : jobs.contains { $0.stalled }
-                    let mark = waiting ? "waiting" : stalled ? "stalled" : count > 0 ? "working" : "idle"
-                    if count > 0 { Text("\(count) active").font(Typeface.caption).foregroundStyle(.secondary) }
-                    StatusLabel(state: mark, title: waiting ? "Needs you" : stalled ? "May be stuck" : store.state.agents[agent]?.enabled == false ? "Disabled" : count > 0 ? "Working" : "Ready")
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 10) {
+                        AgentMark(agent: agent, size: 18)
+                        Text(agentName(agent)).font(Typeface.calloutStrong)
+                        Spacer()
+                        let jobs = store.state.jobs.filter { $0.agent == agent && $0.isActive && (store.project.isEmpty || $0.projectPath == store.project) }
+                        let sessions = store.state.claude.filter { $0.state != "idle" && (store.project.isEmpty || $0.projectPath == store.project) }
+                        let count = agent == "claude" ? sessions.count : jobs.count
+                        let waiting = agent == "claude" ? sessions.contains { $0.state == "waiting" } : jobs.contains { $0.state == "waiting" }
+                        let stalled = agent == "claude" ? sessions.contains { $0.stalled } : jobs.contains { $0.stalled }
+                        let mark = waiting ? "waiting" : stalled ? "stalled" : count > 0 ? "working" : "idle"
+                        if count > 0 { Text("\(count) active").font(Typeface.caption).foregroundStyle(.secondary) }
+                        StatusLabel(state: mark, title: waiting ? "Needs you" : stalled ? "May be stuck" : store.state.agents[agent]?.enabled == false ? "Disabled" : count > 0 ? "Working" : "Ready")
+                    }
+                    if let usage = store.usage, usage.source != "none" { AgentUsageView(store: store, agent: agent) }
                 }.padding(.horizontal, WorkspaceStyle.cardPadding).padding(.vertical, 11)
                 if agent != agents.last { Divider().padding(.leading, WorkspaceStyle.cardPadding + 28) }
             }
@@ -260,13 +263,9 @@ private struct AgentCard: View {
             HStack {
                 Text(activity).font(Typeface.callout).monospacedDigit().foregroundStyle(.secondary)
                 Spacer(minLength: 8)
-                if let usage = store.limits[agent] ?? nil, let maximum = usage.windows?.map(\.usedPercent).max() {
-                    Text("\(Int(maximum))% of limit").font(Typeface.caption).monospacedDigit().foregroundStyle(maximum >= 90 ? Color.orange : .secondary)
-                        .help((usage.windows ?? []).map { window in
-                            "\(Int(window.usedPercent))% of " + (window.minutes.map { "\(Int($0))-minute limit" } ?? "limit")
-                        }.joined(separator: "\n"))
-                }
+                if store.usage == nil || store.usage?.source == "none" { AgentUsageView(store: store, agent: agent) }
             }
+            if let usage = store.usage, usage.source != "none" { AgentUsageView(store: store, agent: agent) }
         }.frame(maxWidth: .infinity, alignment: .leading).card()
     }
 }
@@ -300,6 +299,8 @@ struct MissionPanel: View {
                     }.font(Typeface.caption).monospacedDigit().foregroundStyle(.secondary).help(mission.root)
                 }
                 Spacer(minLength: 8)
+                Text(missionProgress(mission, jobs: jobs), format: .percent.precision(.fractionLength(0)))
+                    .font(Typeface.caption).monospacedDigit().foregroundStyle(.secondary).help("Mission progress")
                 if mission.state != "active" { StatusLabel(state: mission.state, title: mission.state.capitalized) }
                 // Both controls share one 28pt hit area so their glyphs sit on the same center line.
                 HStack(spacing: 2) {
@@ -318,6 +319,9 @@ struct MissionPanel: View {
                 }.foregroundStyle(.secondary).padding(.top, -4).padding(.trailing, -6)
             }
             if expanded {
+                ForEach(Array((mission.notes ?? []).enumerated()), id: \.offset) { _, note in
+                    Text(note.text).font(Typeface.callout).textSelection(.enabled)
+                }
                 if mission.state == "active" { MissionTrack(mission: mission).padding(.vertical, 4) }
                 VStack(spacing: 4) {
                     if let lead = store.state.claude.first(where: { $0.id == mission.owner }), mission.state == "active" {

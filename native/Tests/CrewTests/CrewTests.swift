@@ -3,8 +3,8 @@ import Synchronization
 import Testing
 @testable import Crew
 
-func fixture() throws -> BoardState {
-    let file = Bundle.module.url(forResource: "state", withExtension: "json", subdirectory: "Fixtures")!
+func fixture(_ name: String = "state") throws -> BoardState {
+    let file = Bundle.module.url(forResource: name, withExtension: "json", subdirectory: "Fixtures")!
     return try JSONDecoder().decode(BoardState.self, from: Data(contentsOf: file))
 }
 func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
@@ -166,9 +166,50 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
     }
     @Test func usageWindowWithoutLengthStillDecodes() throws {
         let wire = #"{"codex":{"windows":[{"minutes":null,"usedPercent":42,"resetsAt":null}]}}"#
-        let limits = try JSONDecoder().decode([String: Usage?].self, from: Data(wire.utf8))
+        let limits = try JSONDecoder().decode([String: LimitUsage?].self, from: Data(wire.utf8))
         #expect(limits["codex"]??.windows?.first?.minutes == nil)
         #expect(limits["codex"]??.windows?.first?.usedPercent == 42)
+    }
+    @Test func optionalContractFieldsDecodeAndLegacyStateStillWorks() throws {
+        let legacy = try fixture()
+        #expect(legacy.usage == nil && legacy.preset == nil && legacy.presets == nil)
+        #expect(legacy.jobs.allSatisfy { $0.rounds == nil && $0.ask == nil })
+        #expect(legacy.missions.allSatisfy { $0.notes == nil })
+        #expect(legacy.limits["codex"]??.windows?.first?.usedPercent == 42)
+        let current = try fixture("state-extended")
+        #expect(current.usage?.providers.count == 3)
+        let claude = try #require(current.usage?.providers.first)
+        #expect(claude.status == .tight)
+        #expect(claude.accountWindows.map(\.name) == ["5-hour", "Weekly"])
+        #expect(claude.windows.last?.group == "sonnet")
+        #expect(claude.windows.last?.status == .exhausted)
+        #expect(current.preset == .balanced)
+        #expect(current.presets?["best"]?.subagentModel == "large")
+        #expect(current.presets?["economy"]?.description.contains("low effort") == true)
+        #expect(current.jobs[0].rounds?.map(\.state) == ["kept", "undone"])
+        #expect(current.jobs[0].rounds?.last?.revert == "revert2")
+        #expect(current.jobs[0].kindTitle == "Question")
+        #expect(current.missions[0].notes?.first?.text == "Preserve compatibility.")
+    }
+    @Test func progressUsesSevenStagesAndOnlyUnendedMissionJobs() throws {
+        var mission = try fixture().missions[0]
+        var job = try fixture().jobs[0]
+        for (index, stage) in ["plan", "implement", "self-review", "cross-review", "fix", "polish", "final"].enumerated() {
+            mission.stage = stage
+            let expected = (Double(index) + 0.5) / 7
+            #expect(missionProgress(mission, jobs: []) == expected)
+            for state in ["running", "waiting", "done", "failed", "cancelled"] {
+                job.state = state; job.endedAt = state == "running" || state == "waiting" ? nil : 100
+                #expect(missionProgress(mission, jobs: [job]) == expected)
+            }
+            job.mission = "another-mission"; job.endedAt = nil
+            #expect(missionProgress(mission, jobs: [job]) == expected)
+            job.mission = mission.id
+        }
+        mission.state = "done"
+        #expect(missionProgress(mission, jobs: []) == 1)
+        mission.state = "abandoned"; mission.stage = "unknown"
+        #expect(missionProgress(mission, jobs: []) == 0.5 / 7)
     }
     @Test func eventHistoryDeduplicatesAndStaysBounded() {
         let events = (0..<500).map { CrewEvent(seq: $0, ts: "", agent: "codex", kind: "progress", detail: String($0)) }
@@ -212,9 +253,9 @@ private final class MockProtocol: URLProtocol, @unchecked Sendable {
         MockProtocol.handler.withLock { $0 = handler }
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [MockProtocol.self]
-        return CrewAPI(configuration: config)
+        return CrewAPI(port: 0, configuration: config)
     }
-    private func store(api: CrewAPI = CrewAPI()) throws -> CrewStore {
+    private func store(api: CrewAPI = CrewAPI(port: 0)) throws -> CrewStore {
         let suite = "crew-tests-\(UUID())"
         let defaults = UserDefaults(suiteName: suite)!
         let store = CrewStore(api: api, defaults: defaults)
@@ -335,6 +376,163 @@ private final class MockProtocol: URLProtocol, @unchecked Sendable {
         store.applyJob(created, since: 0)
         #expect(store.state.jobs.contains { $0.id == created.id })
     }
+    @Test func usageAndPresetEventsReplaceReadingsAndReconnectClearsThem() throws {
+        let store = try store()
+        let current = try fixture("state-extended")
+        try store.receive(event("usage", try #require(current.usage)))
+        try store.receive(event("preset", PresetState(preset: current.preset, presets: try #require(current.presets))))
+        #expect(store.usage == current.usage)
+        #expect(store.state.preset == .balanced)
+        #expect(store.state.presets == current.presets)
+        try store.receive(event("job", current.jobs[0]))
+        try store.receive(event("mission", current.missions[0]))
+        #expect(store.state.jobs[0].rounds?.count == 2)
+        #expect(store.state.missions[0].notes?.count == 1)
+        try store.receive(event("preset", PresetState(preset: nil, presets: [:])))
+        #expect(store.state.preset == nil)
+        try store.receive(event("state", current))
+        #expect(store.usage == current.usage)
+        try store.receive(event("state", fixture()))
+        #expect(store.usage == nil && store.state.presets == nil)
+    }
+    @Test func presetSendsNameOrNullAndPreservesEditsWhileSaving() async throws {
+        let definitions = try #require(fixture("state-extended").presets)
+        let calls = Mutex(0)
+        let api = api { request in
+            #expect(request.url?.path == "/api/preset")
+            let body = try requestBody(request)
+            let count = calls.withLock { $0 += 1; return $0 }
+            if count == 1 { #expect(body["preset"] as? String == "economy") }
+            else { #expect(body["preset"] is NSNull) }
+            let result = PresetState(preset: count == 1 ? .economy : nil, presets: definitions)
+            return (200, try JSONEncoder().encode(result), 0.05)
+        }
+        let settings = SettingsModel(api: api, roles: [:], preset: .balanced, presets: definitions)
+        settings.preset = .economy
+        #expect(settings.dirty)
+        let save = Task { await settings.savePreset() }
+        try await Task.sleep(for: .milliseconds(10))
+        #expect(settings.busy)
+        await settings.savePreset()
+        settings.preset = .best
+        await save.value
+        #expect(settings.preset == .best && settings.savedPreset == .economy)
+        #expect(settings.dirty && !settings.busy)
+        settings.preset = nil
+        await settings.savePreset()
+        #expect(calls.withLock { $0 } == 2)
+        #expect(!settings.dirty && settings.presetStatus == "Saved")
+    }
+    @Test func failedPresetSaveRetainsDraftAndCanRetry() async throws {
+        let definitions = try #require(fixture("state-extended").presets)
+        let calls = Mutex(0)
+        let api = api { _ in
+            if calls.withLock({ $0 += 1; return $0 }) == 1 {
+                return (400, Data(#"{"error":"Cannot save preset"}"#.utf8), 0)
+            }
+            return (200, try JSONEncoder().encode(PresetState(preset: .best, presets: definitions)), 0)
+        }
+        let settings = SettingsModel(api: api, roles: [:], presets: definitions)
+        settings.preset = .best
+        await settings.savePreset()
+        #expect(settings.preset == .best && settings.savedPreset == nil)
+        #expect(settings.dirty && !settings.busy)
+        #expect(settings.presetStatus == "Cannot save preset")
+        await settings.savePreset()
+        #expect(!settings.dirty && !settings.busy)
+        #expect(settings.savedPreset == .best && settings.presetStatus == "Saved")
+    }
+    @Test func roundRequestsLockAndSendUndoOrKeep() async throws {
+        var job = try fixture("state-extended").jobs[0]
+        job.state = "done"; job.endedAt = 1
+        let originalJob = job
+        let id = job.id
+        let calls = Mutex(0)
+        let api = api { request in
+            #expect(request.url?.path == "/api/jobs/\(id)/rounds/1")
+            let body = try requestBody(request)
+            let count = calls.withLock { $0 += 1; return $0 }
+            #expect(body.count == 1)
+            #expect(body[count == 1 ? "undo" : "keep"] as? Bool == true)
+            var updated = originalJob
+            updated.rounds?[0].state = count == 1 ? "undone" : "kept"
+            return (200, try JSONEncoder().encode(updated), 0.05)
+        }
+        let store = try store(api: api)
+        let original = job
+        let first = Task { await store.setRound(original, turn: 1, undo: true) }
+        try await Task.sleep(for: .milliseconds(10))
+        await store.setRound(original, turn: 1, undo: true)
+        await first.value
+        #expect(store.state.jobs.first { $0.id == id }?.rounds?.first?.state == "undone")
+        await store.setRound(original, turn: 1, undo: false)
+        #expect(store.state.jobs.first { $0.id == id }?.rounds?.first?.state == "kept")
+        #expect(calls.withLock { $0 } == 2)
+        #expect(store.actions[job.roundActionKey(1)]?.locked == false)
+        for state in ["running", "waiting"] {
+            job.state = state
+            #expect(job.roundUnavailableReason != nil)
+            await store.setRound(job, turn: 1, undo: true)
+        }
+        job.state = "done"; job.worktree = nil
+        #expect(job.roundUnavailableReason != nil)
+        await store.setRound(job, turn: 1, undo: true)
+        #expect(calls.withLock { $0 } == 2)
+    }
+    @Test func roundServerErrorsAreInlineAndRetryable() async throws {
+        var job = try fixture("state-extended").jobs[0]
+        job.state = "done"
+        let api = api { _ in (400, Data(#"{"error":"Revert conflicts"}"#.utf8), 0) }
+        let store = try store(api: api)
+        await store.setRound(job, turn: 1, undo: true)
+        #expect(store.actions[job.roundActionKey(1)]?.error == "Revert conflicts")
+        #expect(store.actions[job.roundActionKey(1)]?.locked == false)
+    }
+    @Test func questionSendsReadOnlyIntentAndAppliesJob() async throws {
+        var job = try fixture().jobs[0]
+        job.id = "new-question"; job.ask = true
+        let response = try JSONEncoder().encode(job)
+        let api = api { request in
+            #expect(request.url?.path == "/api/jobs")
+            let body = try requestBody(request)
+            #expect(body.count == 4)
+            #expect(body["kind"] as? String == "delegate")
+            #expect(body["ask"] as? Bool == true)
+            #expect(body["task"] as? String == "Why?")
+            #expect(body["cwd"] as? String == "/project")
+            return (200, response, 0)
+        }
+        let store = try store(api: api)
+        let created = try await store.submitQuestion("Why?", project: "/project")
+        #expect(created.kindTitle == "Question")
+        #expect(store.state.jobs.contains { $0.id == "new-question" && $0.ask == true })
+    }
+    @Test func informationSendsMissionNotesOrScopedInstructionAppend() async throws {
+        var mission = try fixture().missions[0]
+        mission.notes = [MissionNote(text: "Remember this", at: 1)]
+        let response = try JSONEncoder().encode(mission)
+        let calls = Mutex(0)
+        let api = api { request in
+            let body = try requestBody(request)
+            let count = calls.withLock { $0 += 1; return $0 }
+            if count == 1 {
+                #expect(request.url?.path == "/api/missions/mission-1")
+                #expect(body.count == 1 && body["note"] as? String == "Remember this")
+                return (200, response, 0)
+            }
+            #expect(request.url?.path == "/api/instructions")
+            #expect(body.count == 2 && body["append"] as? String == "Remember this")
+            if count == 2 { #expect(body["project"] as? String == "/project") }
+            else { #expect(body["project"] is NSNull) }
+            return (200, Data(#"{"file":"instructions.md","text":"Remember this"}"#.utf8), 0)
+        }
+        let store = try store(api: api)
+        try await store.addInformation("Remember this", mission: "mission-1", project: "/project")
+        #expect(store.state.missions[0].notes?.first?.text == "Remember this")
+        try await store.addInformation("Remember this", mission: nil, project: "/project")
+        try await store.addInformation("Remember this", mission: nil, project: nil)
+        #expect(calls.withLock { $0 } == 3)
+    }
     @Test func lateSettingsLoadCannotReplaceNewScope() async throws {
         let api = api { request in
             let slow = request.url?.query == nil
@@ -375,4 +573,20 @@ private final class MockProtocol: URLProtocol, @unchecked Sendable {
         #expect(calls.withLock { $0 } == 1)
         #expect(settings.textStatus == "Cannot read")
     }
+}
+
+private func requestBody(_ request: URLRequest) throws -> [String: Any] {
+    var data = request.httpBody ?? Data()
+    if let stream = request.httpBodyStream {
+        stream.open()
+        defer { stream.close() }
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while stream.hasBytesAvailable {
+            let count = stream.read(&buffer, maxLength: buffer.count)
+            if count < 0 { throw stream.streamError ?? CrewFailure("Cannot read request body") }
+            if count == 0 { break }
+            data.append(contentsOf: buffer.prefix(count))
+        }
+    }
+    return try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
 }

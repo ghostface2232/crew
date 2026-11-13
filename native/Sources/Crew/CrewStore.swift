@@ -32,7 +32,8 @@ final class CrewStore {
     var state = BoardState()
     // Kept apart from `state` so the frequent event and usage updates only redraw the views that show them.
     var events: [CrewEvent] = []
-    var limits: [String: Usage?] = [:]
+    var limits: [String: LimitUsage?] = [:]
+    var usage: Usage?
     var connected = false
     var connectionMessage = "Connecting to Crew…"
     var revision = 0
@@ -130,15 +131,18 @@ final class CrewStore {
         case "event":
             events = mergeEvents(events, [try JSONDecoder().decode(CrewEvent.self, from: event.data)])
             return
+        case "usage":
+            usage = try JSONDecoder().decode(Usage.self, from: event.data)
+            return
         case "limits":
-            limits.merge(try JSONDecoder().decode([String: Usage?].self, from: event.data)) { _, new in new }
+            limits.merge(try JSONDecoder().decode([String: LimitUsage?].self, from: event.data)) { _, new in new }
             return
         default: break
         }
         if let id = try state.receive(event) { jobVersions[id, default: 0] += 1 }
         if event.name == "state" {
-            events = state.events; limits = state.limits
-            state.events = []; state.limits = [:]
+            events = state.events; limits = state.limits; usage = state.usage
+            state.events = []; state.limits = [:]; state.usage = nil
             for id in Set(jobVersions.keys).union(state.jobs.map(\.id)) { jobVersions[id, default: 0] += 1 }
             connected = true; connectionMessage = "Connected"
             clockSkew = state.now - Date().timeIntervalSince1970 * 1000
@@ -192,6 +196,40 @@ final class CrewStore {
             upsert(&state.missions, updated)
         }
     }
+    func setRound(_ job: Job, turn: Int, undo: Bool) async {
+        guard job.roundUnavailableReason == nil else { return }
+        struct Change: Encodable, Sendable { var undo: Bool?; var keep: Bool? }
+        await run(job.roundActionKey(turn)) {
+            let version = jobVersion(job.id)
+            let updated: Job = try await api.post("/api/jobs/\(job.id)/rounds/\(turn)", Change(undo: undo ? true : nil, keep: undo ? nil : true))
+            applyJob(updated, since: version)
+        }
+    }
+    func submitQuestion(_ text: String, project: String) async throws -> Job {
+        struct Question: Encodable, Sendable { var kind = "delegate"; var ask = true; var task: String; var cwd: String }
+        let job: Job = try await api.post("/api/jobs", Question(task: text, cwd: project))
+        applyJob(job, since: 0)
+        return job
+    }
+    func addInformation(_ text: String, mission: String?, project: String?) async throws {
+        if let mission {
+            struct Note: Encodable, Sendable { var note: String }
+            let updated: Mission = try await api.post("/api/missions/\(mission)", Note(note: text))
+            upsert(&state.missions, updated)
+        } else {
+            struct Append: Encodable, Sendable {
+                var append: String
+                var project: String?
+                enum CodingKeys: String, CodingKey { case append, project }
+                func encode(to encoder: Encoder) throws {
+                    var values = encoder.container(keyedBy: CodingKeys.self)
+                    try values.encode(append, forKey: .append)
+                    try values.encode(project, forKey: .project)
+                }
+            }
+            let _: Instructions = try await api.post("/api/instructions", Append(append: text, project: project))
+        }
+    }
     func jobVersion(_ id: String) -> Int { jobVersions[id, default: 0] }
     func applyJob(_ job: Job, since version: Int? = nil) {
         if let version, version != jobVersion(job.id) { return }
@@ -207,6 +245,11 @@ final class CrewStore {
 final class SettingsModel {
     var roles: [String: RoleAssignment] = [:]
     var savedRoles: [String: RoleAssignment] = [:]
+    var preset: PresetName?
+    var savedPreset: PresetName?
+    var presets: [String: Preset]?
+    var savingPreset = false
+    var presetStatus = ""
     var scope = ""
     var text = ""
     var savedText = ""
@@ -219,10 +262,11 @@ final class SettingsModel {
     var roleStatus = ""
     private var generation = 0
     private let api: CrewAPI
-    var dirty: Bool { text != savedText || roles != savedRoles }
-    var busy: Bool { savingText || savingRoles }
-    init(api: CrewAPI, roles: [String: RoleAssignment]) {
+    var dirty: Bool { text != savedText || roles != savedRoles || preset != savedPreset }
+    var busy: Bool { savingText || savingRoles || savingPreset }
+    init(api: CrewAPI, roles: [String: RoleAssignment], preset: PresetName? = nil, presets: [String: Preset]? = nil) {
         self.api = api; self.roles = roles; self.savedRoles = roles
+        self.preset = preset; self.savedPreset = preset; self.presets = presets
     }
     func load(scope next: String) async {
         generation += 1
@@ -253,6 +297,25 @@ final class SettingsModel {
             savedText = result.text; file = result.file; textStatus = "Saved"
         } catch { if generation == attempt { textStatus = error.localizedDescription } }
         if generation == attempt { savingText = false }
+    }
+    func savePreset() async {
+        guard presets != nil && !savingPreset else { return }
+        savingPreset = true; presetStatus = ""
+        let draft = preset
+        struct Save: Encodable, Sendable {
+            var preset: PresetName?
+            enum CodingKeys: String, CodingKey { case preset }
+            func encode(to encoder: Encoder) throws {
+                var values = encoder.container(keyedBy: CodingKeys.self)
+                try values.encode(preset, forKey: .preset)
+            }
+        }
+        do {
+            let result: PresetState = try await api.post("/api/preset", Save(preset: draft))
+            if preset == draft { preset = result.preset }
+            savedPreset = result.preset; presets = result.presets; presetStatus = "Saved"
+        } catch { presetStatus = error.localizedDescription }
+        savingPreset = false
     }
     func saveRoles() async {
         guard !savingRoles else { return }

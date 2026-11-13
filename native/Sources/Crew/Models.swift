@@ -33,6 +33,15 @@ struct Job: Codable, Sendable, Identifiable, Equatable {
     var retrying: [String]?
     var runsApp: Bool?
     var exclusive: Bool?
+    var rounds: [Round]?
+    var ask: Bool?
+    var kindTitle: String { ask == true ? "Question" : roleNames[kind] ?? kind }
+    var roundUnavailableReason: String? {
+        if state == "running" || state == "waiting" { return "Wait until the job has stopped before changing rounds." }
+        if worktree == nil { return "This job has no worktree." }
+        return nil
+    }
+    func roundActionKey(_ turn: Int) -> String { "round:\(id):\(turn)" }
     var projectPath: String { root ?? project }
     var isActive: Bool { endedAt == nil }
     var status: String {
@@ -42,6 +51,15 @@ struct Job: Codable, Sendable, Identifiable, Equatable {
         return ["running": "Working", "done": "Done", "failed": "Failed", "cancelled": "Cancelled"][state] ?? state
     }
     var requestKey: String { "answer:\(id):\(waiting?.id ?? "")" }
+}
+struct Round: Codable, Sendable, Equatable {
+    var turn: Int
+    var commit: String
+    var files: [String]
+    var stat: String
+    var state: String
+    var revert: String?
+    var at: Double
 }
 struct Worktree: Codable, Sendable, Equatable { var path: String; var branch: String; var base: String }
 struct Waiting: Codable, Sendable, Equatable { var type: String; var reason: String; var id: String; var since: Double }
@@ -70,9 +88,21 @@ struct Mission: Codable, Sendable, Identifiable, Equatable {
     var createdAt: Double
     var updatedAt: Double
     var endedAt: Double?
+    var notes: [MissionNote]?
     var step: Int { ["plan": 0, "implement": 1, "self-review": 2, "cross-review": 2, "fix": 3, "polish": 4, "final": 5][stage] ?? 0 }
     static let steps = ["Plan", "Build", "Review", "Fix", "Polish", "Final"]
 }
+struct MissionNote: Codable, Sendable, Equatable { var text: String; var at: Double }
+
+func missionProgress(_ mission: Mission, jobs: [Job]) -> Double {
+    if mission.state == "done" { return 1 }
+    let stages = ["plan", "implement", "self-review", "cross-review", "fix", "polish", "final"]
+    let stageIndex = stages.firstIndex(of: mission.stage) ?? 0
+    let weights = jobs.filter { $0.mission == mission.id && $0.endedAt == nil }.map { _ in 0.5 }
+    let share = weights.isEmpty ? 0.5 : weights.reduce(0, +) / Double(weights.count)
+    return min(1, max(0, (Double(stageIndex) + share) / Double(stages.count)))
+}
+
 struct ClaudeSession: Codable, Sendable, Identifiable, Equatable {
     var id: String
     var cwd: String
@@ -95,9 +125,56 @@ struct RoleAssignment: Codable, Sendable, Equatable {
     var model: String?
     var effort: String?
 }
-// The daemon reports a window length only when the provider does.
-struct UsageWindow: Codable, Sendable, Equatable { var usedPercent: Double; var minutes: Double? }
-struct Usage: Codable, Sendable, Equatable { var windows: [UsageWindow]? }
+// The legacy limit event reports a window length only when the provider does.
+struct LimitWindow: Codable, Sendable, Equatable { var usedPercent: Double; var minutes: Double? }
+struct LimitUsage: Codable, Sendable, Equatable { var windows: [LimitWindow]? }
+enum UsageStatus: String, Codable, Sendable { case ok, tight, exhausted, stale, unknown }
+struct UsageWindow: Codable, Sendable, Equatable {
+    var key: String
+    var kind: String
+    var group: String?
+    var usedRatio: Double
+    var resetTime: Double?
+    var durationSec: Double?
+    var projectedExhaustion: Double?
+    var status: UsageStatus
+    var name: String {
+        switch kind.lowercased() {
+        case "fivehour", "five-hour", "5-hour": return "5-hour"
+        case "weekly": return "Weekly"
+        case "billingcycle", "billing-cycle", "billing cycle", "monthly": return "Billing cycle"
+        default: return kind
+        }
+    }
+}
+struct ProviderUsage: Codable, Sendable, Equatable {
+    var agent: String
+    var plan: String?
+    var capturedAt: Double?
+    var status: UsageStatus
+    var reason: String
+    var windows: [UsageWindow]
+    var accountWindows: [UsageWindow] { windows.filter { $0.group == nil } }
+}
+struct Usage: Codable, Sendable, Equatable {
+    var generatedAt: Double
+    var source: String
+    var providers: [ProviderUsage]
+}
+enum PresetName: String, Codable, Sendable, CaseIterable { case economy, balanced, best }
+struct Preset: Codable, Sendable, Equatable {
+    struct Agent: Codable, Sendable, Equatable { var model: String?; var effort: String? }
+    var codex: Agent?
+    var antigravity: Agent?
+    var subagentModel: String?
+    var description: String {
+        let agents = [("Codex", codex), ("Antigravity", antigravity)].compactMap { name, agent in
+            agent.map { name + ": " + [$0.model ?? "Agent default", $0.effort.map { "\($0) effort" }].compactMap { $0 }.joined(separator: " · ") }
+        }
+        return (agents + ["Subagents: " + (subagentModel ?? "inherit")]).joined(separator: "; ")
+    }
+}
+struct PresetState: Codable, Sendable, Equatable { var preset: PresetName?; var presets: [String: Preset] }
 struct NotificationPreferences: Codable, Sendable, Equatable { var enabled: Bool; var onDone: Bool }
 struct BoardState: Codable, Sendable, Equatable {
     var now: Double = 0
@@ -106,9 +183,12 @@ struct BoardState: Codable, Sendable, Equatable {
     var claude: [ClaudeSession] = []
     var agents: [String: Worker] = [:]
     var roles: [String: RoleAssignment] = [:]
-    var limits: [String: Usage?] = [:]
+    var limits: [String: LimitUsage?] = [:]
     var events: [CrewEvent] = []
     var notifications: NotificationPreferences?
+    var usage: Usage?
+    var preset: PresetName?
+    var presets: [String: Preset]?
     var projects: [String] {
         Array(Set(jobs.map(\.projectPath) + missions.map(\.root) + claude.map(\.projectPath))).filter { !$0.isEmpty }.sorted()
     }
@@ -129,6 +209,10 @@ struct BoardState: Codable, Sendable, Equatable {
             let change = try decoder.decode(SessionChange.self, from: event.data)
             if change.removed == true { claude.removeAll { $0.id == change.session.id } }
             else { upsert(&claude, change.session) }
+        case "usage": usage = try decoder.decode(Usage.self, from: event.data)
+        case "preset":
+            let change = try decoder.decode(PresetState.self, from: event.data)
+            preset = change.preset; presets = change.presets
         case "roles": roles = try decoder.decode([String: RoleAssignment].self, from: event.data)
         default: break
         }

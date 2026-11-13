@@ -4,7 +4,7 @@ struct BoardView: View {
     @Bindable var store: CrewStore
     var openSettings: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var toolbarLayout = ToolbarLayout()
+    @FocusState private var searchFocused: Bool
     var body: some View {
         NavigationSplitView {
             ProjectSidebar(store: store, openSettings: openSettings)
@@ -12,11 +12,19 @@ struct BoardView: View {
             page
                 // Narrow enough for the sidebar to be optional; the window adds the sidebar's own minimum when shown.
                 .frame(minWidth: 560)
-                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { if toolbarLayout.detailFrame != $0 { toolbarLayout.detailFrame = $0 } }
-                .toolbar { WorkspaceToolbar(store: store, layout: toolbarLayout) }
+                .toolbar { WorkspaceToolbar(store: store) }
+                // Read by the toolbar for its own edge; the scroll view's setting alone left the bar sharp.
+                .scrollEdgeEffectStyle(.soft, for: .top)
+                // The system search item folds into a button when the toolbar runs out of room.
+                .searchable(text: $store.search, placement: .toolbar, prompt: "Search work")
+                .searchFocused($searchFocused)
+                .onChange(of: store.searchRequest) { searchFocused = true }
                 .navigationTitle(title)
                 .toolbar(removing: .title)
                 .background(WorkspaceStyle.canvas.ignoresSafeArea())
+                .overlay(alignment: .top) {
+                    if store.fullScreenToolbarHeight > 0 { FullScreenToolbarFade(toolbarHeight: store.fullScreenToolbarHeight) }
+                }
         }
         .frame(minHeight: 560)
         .onChange(of: store.selection) { store.persistSelection() }
@@ -34,9 +42,12 @@ struct BoardView: View {
                         else if store.selection == "activity" { activity }
                         else { workspace }
                     }
-                    .padding(.horizontal, 40).padding(.top, 12).padding(.bottom, 40)
+                    .padding(.horizontal, 40).padding(.top, 11).padding(.bottom, 40)
                     .frame(maxWidth: 1280).frame(maxWidth: .infinity)
                 }
+                // The toolbar alone does not give this scroll view its soft edge; a safe area bar does,
+                // and the pocket then covers the toolbar above it. The bar's 1 pt comes out of the top padding.
+                .safeAreaBar(edge: .top, spacing: 0) { Color.clear.frame(height: 1) }
                 .scrollEdgeEffectStyle(.soft, for: .top)
                 .id(store.selection ?? "overview")
                 // A crossfade layers two full pages at once; only the incoming page animates.
@@ -375,8 +386,9 @@ struct ProjectSidebar: View {
     var body: some View {
         let projects = store.projects
         List(selection: Binding<String?>(
-            get: { store.project },
-            set: { path in store.selection = (path ?? "").isEmpty ? "overview" : "project:\(path!)" }
+            // The other pages select no row, so choosing All projects from them returns to the overview.
+            get: { !store.project.isEmpty ? store.project : (store.selection ?? "overview") == "overview" ? "" : nil },
+            set: { path in store.selection = path.map { $0.isEmpty ? "overview" : "project:\($0)" } ?? "overview" }
         )) {
             Label("All projects", systemImage: "square.stack").tag("")
             Section("Projects") {
@@ -404,5 +416,27 @@ extension View {
     /// Places an empty state in the middle of the visible page rather than under the heading.
     func centeredInPage() -> some View {
         frame(maxWidth: .infinity).containerRelativeFrame(.vertical) { height, _ in height * 0.6 }
+    }
+}
+
+/// In full screen the toolbar moves to its own window, where the scroll edge effect has no content to blur
+/// and paints an opaque bar instead. With that bar hidden, this fade stands in for the soft edge.
+private struct FullScreenToolbarFade: View {
+    var toolbarHeight: CGFloat
+    var body: some View {
+        // Blur under the toolbar that fades out below it, close to the soft scroll edge effect.
+        let height = toolbarHeight + 24
+        ZStack {
+            Rectangle().fill(.ultraThinMaterial)
+            WorkspaceStyle.canvas.opacity(0.6)
+        }
+        .mask(LinearGradient(stops: [.init(color: .black, location: 0),
+                                     .init(color: .black, location: toolbarHeight * 0.6 / height),
+                                     .init(color: .clear, location: 1)],
+                             startPoint: .top, endPoint: .bottom))
+        .frame(height: height)
+        .ignoresSafeArea(edges: .top)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }

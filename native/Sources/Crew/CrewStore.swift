@@ -49,6 +49,8 @@ final class CrewStore {
     var notificationsAllowed = false
     private var completionLeases = CompletionLeases()
     var windowVisible = true
+    /// The full-screen toolbar's height, or 0 outside full screen.
+    var fullScreenToolbarHeight: CGFloat = 0
     var displayTime = Date().timeIntervalSince1970 * 1000
     var onStateChange: (() -> Void)?
     let api: CrewAPI

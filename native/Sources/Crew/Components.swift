@@ -55,12 +55,15 @@ struct EmptyState<Actions: View>: View {
     @ViewBuilder var actions: Actions
     var body: some View {
         VStack(spacing: 6) {
-            Image(systemName: symbol).font(.system(size: 30, weight: .light)).foregroundStyle(.secondary).padding(.bottom, 2)
-            Text(title).font(Typeface.emptyTitle).foregroundStyle(.secondary)
-            if let detail { Text(detail).font(Typeface.callout).foregroundStyle(.tertiary) }
+            VStack(spacing: 6) {
+                Image(systemName: symbol).font(.system(size: 30, weight: .light)).foregroundStyle(.secondary).padding(.bottom, 2)
+                Text(title).font(Typeface.emptyTitle).foregroundStyle(.secondary)
+                if let detail { Text(detail).font(Typeface.callout).foregroundStyle(.tertiary) }
+            }.accessibilityElement(children: .combine)
+            // Kept out of the combined element so the action stays its own control.
             actions.padding(.top, 10)
         }
-        .multilineTextAlignment(.center).accessibilityElement(children: .combine).centeredInPage()
+        .multilineTextAlignment(.center).centeredInPage()
     }
 }
 extension EmptyState where Actions == EmptyView {
@@ -287,4 +290,10 @@ extension ISO8601DateFormatter {
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter
     }()
+}
+
+struct WorkspacePressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.opacity(configuration.isPressed ? 0.68 : 1)
+    }
 }

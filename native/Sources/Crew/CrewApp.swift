@@ -103,6 +103,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
     private var quitting = false
     private var instanceLock: InstanceLock?
     private var completions = CompletionTracker()
+    private var hiddenToolbarBackgrounds: [NSView] = []
 
     override init() {
         let home = ProcessInfo.processInfo.environment["CREW_HOME"]
@@ -116,6 +117,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             }
         } else { defaults = .standard }
         store = CrewStore(defaults: defaults)
+        // AppKit's password AutoFill check walks the key view loop when a field takes focus, and in full screen
+        // that walk never ends inside the toolbar's separate window, which froze the app on search. Crew has no
+        // credential fields, so the check is turned off.
+        UserDefaults.standard.register(defaults: ["NSAutoFillHeuristicsEnabled": false])
         super.init()
     }
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -133,6 +138,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             let alert = NSAlert(); alert.messageText = error.localizedDescription; alert.runModal()
             NSApp.terminate(nil)
             return
+        }
+        // SwiftUI's toolbar search has no width setting and sizes its field past the system item's preferred width.
+        // A ceiling rather than a fixed width, so the toolbar can still fold the field when room runs out.
+        NotificationCenter.default.addObserver(forName: NSToolbar.willAddItemNotification, object: nil, queue: .main) { note in
+            guard let item = note.userInfo?["item"] as? NSSearchToolbarItem else { return }
+            MainActor.assumeIsolated { item.searchField.widthAnchor.constraint(lessThanOrEqualToConstant: 180).isActive = true }
         }
         store.onStateChange = { [weak self] in self?.updateNotifications() }
         store.start()
@@ -163,7 +174,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         mainWindow = window
         window.delegate = self
         window.title = "Crew"
-        window.minSize = NSSize(width: 850, height: 560)
         window.isReleasedWhenClosed = false
         let frameName = "CrewMain\(ProcessInfo.processInfo.environment["CREW_HOME"] ?? "")"
         window.setFrameAutosaveName(frameName)
@@ -207,6 +217,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { show(); return false }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+    func windowDidEnterFullScreen(_ notification: Notification) {
+        guard let window = mainWindow, notification.object as? NSWindow === window else { return }
+        store.fullScreenToolbarHeight = window.frame.height - window.contentLayoutRect.height
+        // The full-screen toolbar window draws an opaque bar because its scroll edge effect cannot reach the
+        // content; hiding it lets the content show through under BoardView's own fade.
+        for toolbarWindow in NSApp.windows where String(describing: type(of: toolbarWindow)) == "NSToolbarFullScreenWindow" {
+            func hideBackground(in view: NSView) {
+                if String(describing: type(of: view)) == "NSTitlebarBackgroundView" {
+                    view.isHidden = true
+                    hiddenToolbarBackgrounds.append(view)
+                    return
+                }
+                view.subviews.forEach(hideBackground)
+            }
+            toolbarWindow.contentView?.superview.map(hideBackground)
+        }
+    }
+    func windowWillExitFullScreen(_ notification: Notification) {
+        guard notification.object as? NSWindow === mainWindow else { return }
+        // The titlebar moves back into the window, where its scroll edge effect works again.
+        hiddenToolbarBackgrounds.forEach { $0.isHidden = false }
+        hiddenToolbarBackgrounds = []
+    }
+    func windowDidExitFullScreen(_ notification: Notification) {
+        if notification.object as? NSWindow === mainWindow { store.fullScreenToolbarHeight = 0 }
+    }
     func windowDidMiniaturize(_ notification: Notification) { if notification.object as? NSWindow === mainWindow { store.windowVisible = false } }
     func windowDidDeminiaturize(_ notification: Notification) { if notification.object as? NSWindow === mainWindow { store.windowVisible = true } }
     func applicationDidHide(_ notification: Notification) { store.windowVisible = false }

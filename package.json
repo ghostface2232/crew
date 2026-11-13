@@ -7,23 +7,22 @@
     "node": ">=22.18"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit && tsc -p tsconfig.board.json && tsc -p tsconfig.desktop.json --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.board.json && tsc -p tsconfig.native.json --noEmit",
     "test": "node --test test/*.test.ts",
     "dev:board": "vite",
     "build:board": "vite build",
     "test:e2e": "npm run build:board && playwright test",
     "build:desktop": "npm run build:board && node scripts/build-desktop.mjs",
-    "desktop": "npm run build:desktop && electron desktop/build",
+    "desktop": "npm run build:desktop && open native/build/Crew.app",
     "package:desktop": "npm run build:desktop && node scripts/package-desktop.mjs",
-    "test:desktop": "npm run build:desktop && node scripts/smoke-desktop.mjs"
+    "test:desktop": "npm run build:desktop && node scripts/smoke-desktop.mjs",
+    "test:native": "node scripts/test-native.mjs"
   },
   "devDependencies": {
-    "@electron/packager": "^20.3.0",
     "@playwright/test": "^1.65.0",
     "@types/node": "^24.0.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
-    "electron": "^45.3.1",
     "typescript": "^5.9.0",
     "vite": "^8.3.8"
   },
@@ -31,11 +30,5 @@
     "lucide-react": "^1.72.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
-  },
-  "overrides": {
-    "@electron/asar": {
-      "glob": "^14.0.2",
-      "minimatch": "^11.0.1"
-    }
   }
 }

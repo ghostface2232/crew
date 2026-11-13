@@ -1,5 +1,7 @@
 # 07. React board and Electron desktop
 
+Historical implementation: the Electron shell was replaced on 2026-11-13 by the [native macOS app](08-native-macos.md). The React web board remains supported. Commands and desktop paths below describe the previous implementation.
+
 Implemented 2026-11-12, Crew 0.2.0. This delivers the UI foundation in roadmap L5 and the desktop shell plus role-based direct dispatch from L2. Claude remains the pipeline lead. AgentGauge, Cursor, alternate leads, automatic merges, intent classification, and per-round undo are separate work.
 
 ## Architecture
@@ -133,3 +135,7 @@ Verification uses browser interactions, screenshots and source inspection of hov
 A selected project now keeps the filter selector visible even when it is the only known project, so the user can clear the persisted filter and dispatch to another directory. The browser regression covers selection, reload, clearing, and dispatch.
 
 Claude waiting episodes carry a unique ID. Duplicate hooks within an unchanged wait retain that ID; a new wait gets a new ID even when its message repeats or the desktop misses the intervening work. The desktop uses that ID for notification deduplication and removes inactive records on each poll. Older daemons fall back to message-based keys until they can be restarted safely.
+
+## Revision: native macOS replacement (2026-11-13)
+
+The user requested SwiftUI and AppKit while retaining the TypeScript daemon. The native app replaces Electron, uses system Liquid Glass and SF Symbols, bundles standalone Node, and keeps the browser board. See [08-native-macos.md](08-native-macos.md) for current build and verification instructions.

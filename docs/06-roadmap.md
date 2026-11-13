@@ -121,3 +121,5 @@ Requirements R4 and R6 (computer use, side chat, visibility in the desktop app) 
 ## 8. Revision log
 
 - 2026-11-12: The user explicitly requested React and Electron implementation. Completed the L5 foundation before desktop packaging, retaining the independent daemon and web entry point. Added role-based direct dispatch without claiming full L2/L1 support. The earlier SwiftUI/Tauri preferences are superseded for this implementation; native memory efficiency is not assumed. Dependency decisions, measurements and verification are in document 07.
+
+- 2026-11-13: The user requested a native macOS desktop client. SwiftUI and AppKit replace Electron, with Swift 6 and macOS 26+ support. The TypeScript daemon and React browser board are retained. This changes the L2 desktop shell and native presentation, not lead selection or mission orchestration. See [08-native-macos.md](08-native-macos.md).

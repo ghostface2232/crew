@@ -1,6 +1,6 @@
 # Crew
 
-A Claude Code plugin that divides roles across Claude, Codex, and Antigravity so they collaborate as a three-agent crew. Claude acts as the lead and self-reviewer, Codex handles supporting implementation and cross-review, and Antigravity polishes UX copy, comments, and documentation. A React control board shows what all three agents are doing in real time, in a browser or the Crew Electron app.
+A Claude Code plugin that divides roles across Claude, Codex, and Antigravity so they collaborate as a three-agent crew. Claude acts as the lead and self-reviewer, Codex handles supporting implementation and cross-review, and Antigravity polishes UX copy, comments, and documentation. A native SwiftUI macOS app and a React web board show what all three agents are doing in real time.
 
 ## Getting started
 
@@ -48,9 +48,9 @@ When a worker asks for approval or has a question, an input dialog pops up in th
 npm run desktop
 ```
 
-Build a local app bundle with `npm run package:desktop`. On Apple Silicon macOS it is written to `release/Crew-darwin-arm64/Crew.app`. Closing the window hides it to the tray; quitting the app leaves jobs running. The app restores its window and opens approval notifications at the relevant job. The web board stays available.
+Build a local macOS 26+ app bundle with `npm run package:desktop`; it is written to `release/Crew.app`. Building requires Xcode 26+ and a standalone Node.js distribution. The app bundles Node for the existing TypeScript daemon. Closing the window hides it to the tray; quitting the app leaves jobs running. The app restores its window and opens approval notifications at the relevant job. The web board stays available.
 
-The board can send implementation, read-only review, and wording jobs directly through the configured roles. Full missions still begin in the Claude lead session. See [the desktop implementation and verification notes](docs/07-desktop-and-react.md) for development, tests, resource measurements and distribution limits.
+The board can send implementation, read-only review, and wording jobs directly through the configured roles. Full missions still begin in the Claude lead session. See [the native macOS implementation and verification notes](docs/08-native-macos.md) for development, tests, resource measurements and distribution limits.
 
 ## How it works
 
@@ -70,7 +70,7 @@ Using Antigravity carries a Terms of Service risk; read [docs/04-implementation.
 | --- | --- |
 | `plugin/bridge/` | Daemon, MCP server, agent adapters, CLI (TypeScript, no build step) |
 | `plugin/board/` | React + TypeScript board, shared CSS tokens and Vite output |
-| `desktop/`, `scripts/` | Electron shell, build/packaging and desktop verification |
+| `native/`, `desktop/`, `scripts/` | SwiftUI/AppKit app, app artwork, build/packaging and desktop verification |
 | `plugin/roles/` | Role instructions (engineer, reviewer, editor) injected into whichever agent holds the role, on every job |
 | `plugin/skills/`, `plugin/agents/`, `plugin/hooks/` | `/crew:run`, `/crew:board`, self-reviewer subagent, hooks |
 | `test/` | Unit tests (`npm test`) and Playwright regressions (`npm run test:e2e`) |
@@ -85,7 +85,8 @@ Using Antigravity carries a Terms of Service risk; read [docs/04-implementation.
 | [docs/04-implementation.md](docs/04-implementation.md) | Implemented architecture, changes from the plan and why, desktop app visibility findings, verification log |
 | [docs/05-related-work.md](docs/05-related-work.md) | Survey of related projects, adoption candidates vs. current code, UX gaps |
 | [docs/06-roadmap.md](docs/06-roadmap.md) | Near-term rework, long-term expansion, control UI concept, open items |
-| [docs/07-desktop-and-react.md](docs/07-desktop-and-react.md) | React migration, Electron architecture, dependencies, verification and packaging |
+| [docs/07-desktop-and-react.md](docs/07-desktop-and-react.md) | React migration and historical Electron implementation |
+| [docs/08-native-macos.md](docs/08-native-macos.md) | Native macOS app, Liquid Glass, Swift 6, packaging and verification |
 
 ## Current status
 

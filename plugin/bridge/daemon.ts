@@ -46,9 +46,10 @@ const NOTIFY_TITLES: Partial<Record<EventKind, string>> = {
 };
 
 let desktopSeenAt = 0;
+let desktopHandlesCompletion = false;
 
 function notify(agent: keyof typeof AGENT_NAMES, kind: EventKind, subject: string, detail: string): void {
-  if (!config.notify || process.platform !== 'darwin' || (kind === 'waiting' && Date.now() - desktopSeenAt < 15_000)) return;
+  if (!config.notify || process.platform !== 'darwin' || ((kind === 'waiting' || (kind === 'done' && desktopHandlesCompletion)) && Date.now() - desktopSeenAt < 15_000)) return;
   const quote = (s: string) => `"${s.replace(/[\\"]/g, '\\$&').slice(0, 200)}"`;
   const script = `display notification ${quote(detail)} with title ${quote(`${AGENT_NAMES[agent]} ${NOTIFY_TITLES[kind] ?? kind}`)} subtitle ${quote(subject)}`;
   execFile('osascript', ['-e', script], () => {});
@@ -300,8 +301,13 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
 
   if (method === 'POST') {
     if (pathname === '/api/desktop/heartbeat') {
+      const body = await readJson(req);
       desktopSeenAt = Date.now();
-      return {};
+      desktopHandlesCompletion = body.handlesCompletion === true;
+      const lease = { completionNotifications: desktopHandlesCompletion, from: desktopSeenAt, until: desktopSeenAt + 15_000 };
+      // Order ownership before subsequent completion events, even if HTTP replies arrive late.
+      broadcast('desktopLease', lease);
+      return lease;
     }
     if (pathname === '/api/missions') {
       const body = await readJson(req);

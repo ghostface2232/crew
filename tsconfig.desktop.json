@@ -1,6 +1,0 @@
-{
-  "extends": "./tsconfig.json",
-  "compilerOptions": { "noEmit": false, "outDir": "desktop/build", "rootDir": ".", "rewriteRelativeImportExtensions": true },
-  "include": ["desktop/*.ts", "plugin/bridge", "plugin/board/src/types.ts"],
-  "exclude": ["desktop/build"]
-}

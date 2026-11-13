@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "noEmit": false, "outDir": "native/build/bridge", "rootDir": ".", "rewriteRelativeImportExtensions": true },
+  "include": ["plugin/bridge"],
+  "exclude": ["native/build"]
+}

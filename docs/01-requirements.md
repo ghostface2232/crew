@@ -1,6 +1,6 @@
 # 01. Requirements
 
-Current as of 2026-11-12. This document states what Crew is for and what it must do now. It is rewritten when the goals change; earlier versions, including the original request text, are in the git history.
+Current as of 2026-11-13. This document states what Crew is for and what it must do now. It is rewritten when the goals change; earlier versions, including the original request text, are in the git history.
 
 ## 1. Goal
 
@@ -10,7 +10,7 @@ The supported agents are Claude, Codex, and Antigravity. Cursor is to be added.
 
 ## 2. Requirements
 
-IDs R1 to R8 keep the meaning other documents refer to. R9 to R15 were added on 2026-11-12.
+IDs R1 to R8 keep the meaning other documents refer to. R9 to R15 were added on 2026-11-12; R16 was added on 2026-11-13.
 
 | ID | Requirement | Kind |
 | --- | --- | --- |
@@ -29,6 +29,7 @@ IDs R1 to R8 keep the meaning other documents refer to. R9 to R15 were added on 
 | R13 | Crew can run with a lead other than Claude Code, from its own main screen, and can dispatch a command to a single agent without a lead | Long term |
 | R14 | Agents working at the same time do not collide. Each runs its own isolated instance of whatever it starts, reviews that run in parallel are independent and at most one of them runs the app, and performance is measured with nothing else running | Required |
 | R15 | Approvals need the user as little as is safe. Each agent's automatic reviewer decides first, and the user is asked only about what it will not allow | Required |
+| R16 | The Mac app uses SwiftUI and AppKit with Swift 6, supports macOS 26+, and preserves the TypeScript daemon and existing workflows. Its modern native design uses Liquid Glass, SF Symbols, and supplied service marks | Required |
 
 ## 3. Defaults and priorities
 
@@ -58,6 +59,7 @@ IDs R1 to R8 keep the meaning other documents refer to. R9 to R15 were added on 
 | R13 | A command can be started, followed, and merged without a Claude Code session |
 | R14 | Every worker job carries the isolation rules. Before a push or pull request the self-review and the cross-review run together, and at most one of them runs the app; a worker's review that does runs in a snapshot, not in the user's tree. A job marked as measuring is refused while another job runs, and no job starts until it ends |
 | R15 | A Codex job's approval requests are answered without the user by default. An action the reviewer refused is sent back once when the user's request covers it, and the user is asked if it is refused again |
+| R16 | The standalone app runs without Electron or a shell-installed Node, retains jobs when the UI quits, and exposes the board's tasks, requests, settings, and details with native controls |
 
 ## 5. Not required
 

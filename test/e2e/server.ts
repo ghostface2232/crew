@@ -46,7 +46,8 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, { 'content-type': 'text/event-stream' });
     streams.add(res);
     res.write(`event: state\ndata: ${JSON.stringify(state)}\n\n`);
-    req.on('close', () => streams.delete(res));
+    const heartbeat = setInterval(() => res.write(': ping\n\n'), 25_000);
+    res.on('close', () => { clearInterval(heartbeat); streams.delete(res); });
     return;
   }
   if (url.pathname === '/api/state') return json(state);

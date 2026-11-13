@@ -166,7 +166,7 @@ export class AntigravityAdapter implements Adapter {
   }
 
   private async launch(): Promise<RpcPeer> {
-    const child = spawn(this.config.antigravity.bin, ['acp'], { env: agentEnv(), stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(this.config.antigravity.bin, ['acp'], { env: agentEnv(), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     const peer = new RpcPeer(child, {
       onNotification: (method, params) => this.onNotification(method, params),
       onRequest: (method, params) => this.onRequest(method, params),

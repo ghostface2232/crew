@@ -98,6 +98,7 @@ async function startDaemon(): Promise<void> {
   const out = fs.openSync(path.join(HOME, 'daemon.log'), 'a');
   const child = spawn(process.execPath, [path.join(import.meta.dirname, `daemon${path.extname(import.meta.filename)}`)], {
     detached: true,
+    windowsHide: true,
     stdio: ['ignore', out, out],
     env: { ...agentEnv(), ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}) },
   });

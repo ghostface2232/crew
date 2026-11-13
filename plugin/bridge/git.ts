@@ -8,7 +8,7 @@ import type { ReviewTarget } from './jobs.ts';
 
 export function git(cwd: string, args: string[], stdin?: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = execFile('git', args, { cwd, maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => {
+    const child = execFile('git', args, { cwd, maxBuffer: 16 * 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
       if (err) reject(new Error(`git ${args[0]}: ${(stderr || err.message).trim()}`));
       else resolve(stdout.trim());
     });

@@ -66,7 +66,7 @@ const clip = (text: string) => (text.length > MAX_OUTPUT ? `${text.slice(0, MAX_
 
 async function git(cwd: string, args: string[]): Promise<string> {
   try {
-    return (await run('git', ['-C', cwd, ...args], { maxBuffer: 16 * 1024 * 1024 })).stdout;
+    return (await run('git', ['-C', cwd, ...args], { maxBuffer: 16 * 1024 * 1024, windowsHide: true })).stdout;
   } catch (err: any) {
     // git grep exits 1 when nothing matches; that is an answer, not a failure.
     if (err?.code === 1 && !err.stderr) return '';

@@ -23,7 +23,7 @@ Usage:
 
 function run(bin: string, args: string[]): Promise<{ ok: boolean; out: string }> {
   return new Promise((resolve) => {
-    execFile(bin, args, { env: agentEnv(), timeout: 20_000 }, (err, stdout, stderr) => {
+    execFile(bin, args, { env: agentEnv(), timeout: 20_000, windowsHide: true }, (err, stdout, stderr) => {
       resolve({ ok: !err, out: (stdout || stderr || err?.message || '').trim() });
     });
   });

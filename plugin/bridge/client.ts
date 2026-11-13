@@ -88,6 +88,7 @@ export function shouldReplace(running: Health, disk: { version: string; build: s
 /**
  * Stops the running daemon whatever it is doing, for the user's own `crew daemon stop` and `restart`.
  * A daemon that does not hold the token in the file refuses the request, so it is then stopped by process id.
+ * Throws when the daemon is still up afterwards.
  */
 export async function stopDaemon(): Promise<void> {
   const running = await health();
@@ -95,12 +96,22 @@ export async function stopDaemon(): Promise<void> {
   const down = async () => (await health()) === null;
   const asked = await api('POST', '/api/shutdown', {}).then(() => true, () => false);
   if (asked && await waitFor(down, 5000)) return;
+  const stuck = new Error(`The Crew daemon (process ${running.pid}) is still running at ${BASE_URL}. Stop that process yourself, then start Crew again.`);
+  // Anything on the port can answer /api/health with any number. Only the process the daemon itself
+  // recorded in this home is signalled.
+  let recorded: unknown;
+  try {
+    recorded = JSON.parse(fs.readFileSync(path.join(HOME, 'daemon.json'), 'utf8')).pid;
+  } catch {
+    throw stuck;
+  }
+  if (!Number.isInteger(recorded) || (recorded as number) <= 0 || recorded !== running.pid) throw stuck;
   try {
     process.kill(running.pid, 'SIGTERM');
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ESRCH') throw new Error(`Could not stop the Crew daemon (process ${running.pid}): ${(err as Error).message}`);
+    if ((err as NodeJS.ErrnoException).code !== 'ESRCH') throw stuck;
   }
-  if (!(await waitFor(down, 5000))) throw new Error(`The Crew daemon (process ${running.pid}) is still running at ${BASE_URL}. Stop that process yourself, then start Crew again.`);
+  if (!(await waitFor(down, 5000))) throw stuck;
 }
 
 async function startDaemon(): Promise<void> {

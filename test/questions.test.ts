@@ -501,6 +501,15 @@ test('restart stops a daemon that does not take the token in the file, and says 
     assert.notEqual((await health()).pid, old);
     const state = await fetch(`http://127.0.0.1:${h.port}/api/state`, { headers: { authorization: `Bearer ${token}` } });
     assert.equal(state.status, 200);
+    // A number from the port alone is never signalled: it has to be the process this home's daemon recorded.
+    const { pid } = await health();
+    fs.writeFileSync(path.join(h.home, 'token'), `${'e'.repeat(64)}\n`);
+    fs.writeFileSync(path.join(h.home, 'daemon.json'), JSON.stringify({ pid: pid + 1 }));
+    const stuck = await cli('daemon', 'stop');
+    assert.equal(stuck.code, 1);
+    assert.match(stuck.out, new RegExp(`process ${pid}\\) is still running`));
+    assert.equal((await health()).pid, pid);
+    fs.writeFileSync(path.join(h.home, 'token'), `${token}\n`);
   } finally {
     // The CLI's daemon is detached; it has to go while its home is still there to save into.
     assert.equal((await cli('daemon', 'stop')).out.trim(), 'stopped');

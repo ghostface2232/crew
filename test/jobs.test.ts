@@ -1476,5 +1476,11 @@ test('a job still being set up counts as active, so the daemon is not replaced u
   assert.equal(jobs.activeCount, 1);
   const job = await settled(jobs, await creating);
   assert.equal(jobs.activeCount, 0);
+  // So does a finished job while it is merged up to date for its next turn.
+  const replying = jobs.reply(job.id, { message: 'continue', sync: true });
+  assert.equal(job.state, 'done');
+  assert.equal(jobs.activeCount, 1);
+  await settled(jobs, await replying);
+  assert.equal(jobs.activeCount, 0);
   await jobs.discard(job.id);
 });

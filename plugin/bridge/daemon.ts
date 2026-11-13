@@ -293,6 +293,8 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
   const { pathname } = url;
   const method = req.method ?? 'GET';
   if (!isOpen(method, pathname) && !WORKER_ROUTE.test(pathname) && !signedIn(req)) throw new HttpError(401, 'unauthorized');
+  // Between the decision to stop and the stop itself, nothing new may begin: it would be lost a moment later.
+  if (stopping && method === 'POST') throw new HttpError(503, 'The Crew daemon is shutting down. Try again in a moment.');
 
   if (method === 'POST' && pathname === '/api/session') {
     if (!sameToken((await readJson(req)).token, TOKEN)) throw new HttpError(401, 'unauthorized');
@@ -480,12 +482,15 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     if (pathname === '/api/shutdown') {
       // A client replacing an outdated daemon decided on a health reply that may be stale by now; only the daemon knows.
       if ((await readJson(req)).ifIdle && jobs.activeCount > 0) throw new HttpError(409, `${jobs.activeCount} job(s) are active, so the daemon keeps running.`);
+      stopping = true;
       setImmediate(shutdown);
       return {};
     }
   }
   throw new HttpError(404, 'not found');
 }
+
+let stopping = false;
 
 function shutdown(): void {
   log('shutting down');

@@ -270,9 +270,12 @@ export class Jobs {
     return [...this.jobs.values()].sort((a, b) => b.createdAt - a.createdAt);
   }
 
-  /** Number of jobs that would be lost if the daemon stopped now, counting those still being set up. */
+  /**
+   * Number of jobs that would be lost if the daemon stopped now, counting those still being set up
+   * and finished ones being brought up to date for a follow-up turn.
+   */
   get activeCount(): number {
-    return [...this.jobs.values()].filter((job) => !isTerminal(job)).length + this.starting.length;
+    return [...this.jobs.values()].filter((job) => !isTerminal(job) || this.preparingReviews.has(job.id)).length + this.starting.length;
   }
 
   get(id: string): Job {

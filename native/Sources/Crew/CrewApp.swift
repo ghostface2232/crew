@@ -7,9 +7,7 @@ struct CrewApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     var body: some Scene {
         Window("Crew", id: "main") {
-            NavigationStack {
-                BoardView(store: delegate.store, openSettings: delegate.openSettings)
-            }
+            BoardView(store: delegate.store, openSettings: delegate.openSettings)
             // Small bordered buttons read as pills across the app; sheets inherit this.
             .buttonBorderShape(.capsule)
             .background(WindowAccessor { delegate.configure($0) })

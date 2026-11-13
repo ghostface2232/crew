@@ -53,7 +53,7 @@ struct JobDetailView: View {
     }
     @ViewBuilder private func contents(_ job: Job) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(job.title).font(Typeface.title).tracking(-0.3).lineSpacing(2).textSelection(.enabled)
+            Text(job.title).font(Typeface.title).lineSpacing(2).textSelection(.enabled)
             if job.isActive { Text(job.phase).font(Typeface.callout).foregroundStyle(.secondary).textSelection(.enabled) }
             if let failure = job.error { Text(failure.message).font(Typeface.callout).foregroundStyle(.red).textSelection(.enabled) }
         }

@@ -4,7 +4,25 @@ struct BoardView: View {
     @Bindable var store: CrewStore
     var openSettings: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    // Below this content width the toolbar tabs no longer fit with their titles.
+    @State private var compactTabs = false
     var body: some View {
+        NavigationSplitView {
+            ProjectSidebar(store: store, openSettings: openSettings)
+        } detail: {
+            page
+                .onGeometryChange(for: Bool.self) { $0.size.width < 880 } action: { compactTabs = $0 }
+                .toolbar { WorkspaceToolbar(store: store, compact: compactTabs) }
+                .navigationTitle(title)
+                .toolbar(removing: .title)
+                .background(WorkspaceStyle.canvas.ignoresSafeArea())
+        }
+        .frame(minWidth: 850, minHeight: 560)
+        .onChange(of: store.selection) { store.persistSelection() }
+        .onExitCommand { store.selectedJob = nil }
+        .sheet(isPresented: $store.showingDispatch) { DispatchView(store: store) }
+    }
+    private var page: some View {
                 ScrollView {
                     // Lazy so a long history builds only the panels on screen.
                     LazyVStack(alignment: .leading, spacing: 24) {
@@ -17,9 +35,6 @@ struct BoardView: View {
                     }
                     .padding(.horizontal, 40).padding(.top, 12).padding(.bottom, 40)
                     .frame(maxWidth: 1280).frame(maxWidth: .infinity)
-                }
-                .safeAreaBar(edge: .top, spacing: 0) {
-                    scopeAndSearch.padding(.horizontal, 40).padding(.top, 8)
                 }
                 .scrollEdgeEffectStyle(.soft, for: .top)
                 .id(store.selection ?? "overview")
@@ -40,31 +55,6 @@ struct BoardView: View {
                 }
             }
             .animation(reduceMotion ? nil : .smooth(duration: 0.26, extraBounce: 0), value: store.selectedJob != nil)
-        .toolbar { WorkspaceToolbar(store: store, openSettings: openSettings) }
-        .navigationTitle(title)
-        .toolbar(removing: .title)
-        .scrollEdgeEffectStyle(.soft, for: .top)
-        .background(WorkspaceStyle.canvas.ignoresSafeArea())
-        .frame(minWidth: 850, minHeight: 560)
-        .onChange(of: store.selection) { store.persistSelection() }
-        .onExitCommand { store.selectedJob = nil }
-        .sheet(isPresented: $store.showingDispatch) { DispatchView(store: store) }
-    }
-    private var scopeAndSearch: some View {
-HStack(spacing: 16) {
-                if store.selection == "overview" || store.selection == nil || !store.project.isEmpty {
-                Menu {
-                    Button("All projects") { store.selection = "overview" }
-                    ForEach(store.projects, id: \.self) { path in
-                        Button(projectName(path, among: store.projects)) { store.selection = "project:\(path)" }
-                    }
-                } label: {
-                    Label(store.project.isEmpty ? "All projects" : projectName(store.project, among: store.projects), systemImage: "folder")
-                        .font(Typeface.calloutStrong).lineLimit(1)
-                }.menuStyle(.borderlessButton).frame(maxWidth: 260, alignment: .leading).help(store.project.isEmpty ? "Filter by project" : store.project)
-                }
-                Spacer()
-            }.padding(.bottom, 8)
     }
     private var title: String {
         if !store.project.isEmpty { return projectName(store.project, among: store.projects) }
@@ -94,9 +84,13 @@ HStack(spacing: 16) {
         let pending = store.state.pendingCount
         return ViewThatFits(in: .horizontal) {
             if overview || !store.project.isEmpty {
-                HStack(alignment: .center, spacing: 32) {
+                HStack(alignment: .top, spacing: 32) {
+                    // A fixed ideal width keeps a long project path from forcing the stacked layout;
+                    // the path truncates instead.
                     headingCopy(overview: overview, pending: pending)
-                        .frame(minWidth: 340, maxWidth: .infinity)
+                        .frame(minWidth: 340, idealWidth: 340, maxWidth: .infinity)
+                        // Align the title's cap height, not its line box, with the top of the summary card.
+                        .alignmentGuide(.top) { $0[.firstTextBaseline] - Typeface.pageTitleCapHeight }
                     WorkspaceSummary(store: store).frame(minWidth: 430, maxWidth: 500)
                 }
             }
@@ -165,13 +159,11 @@ HStack(spacing: 16) {
         let emptyHistory = history && shownMissions.isEmpty && loose.isEmpty
         let emptyWorkspace = !history && jobs.isEmpty && scopedMissions.isEmpty && !store.state.claude.contains { (store.project.isEmpty || $0.projectPath == store.project) && matches($0.title) }
         if emptyHistory || emptyWorkspace {
-            ContentUnavailableView {
-                Label(store.search.isEmpty ? (emptyHistory ? "No completed work yet" : "Ready when you are") : "No matching work", systemImage: store.search.isEmpty ? "square.stack.3d.up" : "magnifyingglass")
-            } description: {
-                if store.search.isEmpty && !emptyHistory { Text("Start with New Job, or /crew:run in Claude.") }
-            } actions: {
+            EmptyState(title: store.search.isEmpty ? (emptyHistory ? "No completed work yet" : "Ready when you are") : "No matching work",
+                       symbol: store.search.isEmpty ? "square.stack.3d.up" : "magnifyingglass",
+                       detail: store.search.isEmpty && !emptyHistory ? "Start with New Job, or /crew:run in Claude." : nil) {
                 if store.search.isEmpty && !emptyHistory { Button("New Job", systemImage: "plus") { store.showingDispatch = true }.buttonStyle(.glassProminent).disabled(!store.connected) }
-            }.padding(.vertical, 30).frame(maxWidth: .infinity)
+            }
         }
     }
     private var activity: some View {
@@ -190,7 +182,7 @@ struct AgentOverview: View {
     private var agents: [String] { ["claude"] + ["codex", "antigravity"].filter { store.state.agents[$0] != nil } }
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Agents").font(Typeface.section).tracking(-0.5)
+            Text("Agents").font(Typeface.section)
             if compact { compactAgents }
             else {
                 ViewThatFits(in: .horizontal) {
@@ -243,7 +235,7 @@ private struct AgentCard: View {
             HStack(alignment: .top, spacing: 10) {
                 AgentMark(agent: agent, size: 22).padding(.top, 1)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(agentName(agent)).font(Typeface.cardTitle).tracking(-0.3)
+                    Text(agentName(agent)).font(Typeface.cardTitle)
                     Text(agent == "claude" ? "Lead" : roleOrder.filter { store.state.roles[$0]?.agent == agent }.compactMap { roleNames[$0] }.joined(separator: " · "))
                         .font(Typeface.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
@@ -286,7 +278,7 @@ struct MissionPanel: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .top, spacing: 8) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(mission.title).font(Typeface.cardTitle).tracking(-0.3).fixedSize(horizontal: false, vertical: true)
+                    Text(mission.title).font(Typeface.title).fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: 0) {
                         ElapsedText(store: store, start: mission.createdAt, end: mission.endedAt)
                         Text(" · " + meta)
@@ -334,9 +326,9 @@ struct NeedsYouView: View {
     private var sessions: [ClaudeSession] { store.state.waitingSessions.filter { matches("\($0.title) \($0.projectPath) Claude \($0.waitingFor ?? "")") } }
     var body: some View {
         if store.state.pendingCount == 0 {
-            ContentUnavailableView("All caught up", systemImage: "checkmark.circle")
+            EmptyState(title: "All caught up", symbol: "checkmark.circle")
         } else if jobs.isEmpty && sessions.isEmpty {
-            ContentUnavailableView.search(text: store.search)
+            EmptyState(title: "No matching requests", symbol: "magnifyingglass")
         }
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 420, maximum: 620), spacing: 16)], alignment: .leading, spacing: 16) {
             ForEach(jobs) { job in
@@ -366,5 +358,44 @@ struct NeedsYouView: View {
                 Text("Answer in Claude.").font(Typeface.callout).foregroundStyle(.secondary)
             }
         }
+    }
+}
+
+/// Projects live in a sidebar so a long list stays scannable; choosing one scopes the overview to it.
+struct ProjectSidebar: View {
+    @Bindable var store: CrewStore
+    var openSettings: () -> Void
+    var body: some View {
+        let projects = store.projects
+        List(selection: Binding<String?>(
+            get: { store.project },
+            set: { path in store.selection = (path ?? "").isEmpty ? "overview" : "project:\(path!)" }
+        )) {
+            Label("All projects", systemImage: "square.stack").tag("")
+            Section("Projects") {
+                ForEach(projects, id: \.self) { path in
+                    Label(projectName(path, among: projects), systemImage: "folder").tag(path).help(path)
+                }
+            }
+        }
+        .listStyle(.sidebar)
+        .safeAreaInset(edge: .bottom) {
+            Button(action: openSettings) {
+                Label("Settings", systemImage: "gearshape").font(Typeface.bodyStrong)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 10).padding(.vertical, 7).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).foregroundStyle(.secondary)
+            .disabled(store.state.roles.isEmpty).help("Settings (⌘,)")
+            .padding(.horizontal, 10).padding(.bottom, 10)
+        }
+        .navigationSplitViewColumnWidth(min: 180, ideal: 210, max: 300)
+    }
+}
+
+extension View {
+    /// Places an empty state in the middle of the visible page rather than under the heading.
+    func centeredInPage() -> some View {
+        frame(maxWidth: .infinity).containerRelativeFrame(.vertical) { height, _ in height * 0.6 }
     }
 }

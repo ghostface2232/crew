@@ -2,11 +2,12 @@ import SwiftUI
 
 struct WorkspaceToolbar: ToolbarContent {
     @Bindable var store: CrewStore
-    var openSettings: () -> Void
+    var compact = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some ToolbarContent {
         ToolbarItem(placement: .navigation) {
-            Text("Crew").font(Typeface.cardTitle).lineLimit(1)
+            // The navigation item starts at the detail column's edge; this lines it up with the page's 40 pt content inset.
+            Text("Crew").font(Typeface.cardTitle).lineLimit(1).padding(.leading, 30)
         }.sharedBackgroundVisibility(.hidden)
         ToolbarItem(placement: .principal) {
             // A segmented picker in the toolbar renders titles only, so the tabs are drawn here to keep their symbols.
@@ -23,7 +24,6 @@ struct WorkspaceToolbar: ToolbarContent {
             Menu {
                 Label(store.connected ? "Connected to Crew" : "Reconnecting…", systemImage: store.connected ? "network" : "wifi.slash")
                 Divider()
-                Button("Settings…", systemImage: "gearshape", action: openSettings).disabled(store.state.roles.isEmpty)
                 Button("Open Web Board", systemImage: "globe") { NSWorkspace.shared.open(store.api.baseURL) }
             } label: { Label("Workspace options", systemImage: "ellipsis") }
                 .menuIndicator(.hidden).help("Workspace options")
@@ -37,7 +37,10 @@ struct WorkspaceToolbar: ToolbarContent {
         return Button {
             withAnimation(reduceMotion ? nil : .easeOut(duration: 0.22)) { store.selection = page }
         } label: {
-            Label(title, systemImage: symbol).labelStyle(.titleAndIcon)
+            Group {
+                if compact { Label(title, systemImage: symbol).labelStyle(.iconOnly) }
+                else { Label(title, systemImage: symbol).labelStyle(.titleAndIcon) }
+            }
                 .foregroundStyle(selected ? .primary : .secondary)
                 .font(Typeface.calloutStrong)
                 // An overlay keeps the tab width fixed when requests come and go.
@@ -51,6 +54,7 @@ struct WorkspaceToolbar: ToolbarContent {
                 .background(selected ? Color.primary.opacity(0.08) : .clear, in: Capsule())
                 .contentShape(Capsule())
         }.buttonStyle(.plain).accessibilityAddTraits(selected ? .isSelected : [])
+            .help(compact ? title : "")
             .accessibilityLabel(title).accessibilityValue(badge > 0 ? "\(badge) waiting" : "")
             .animation(reduceMotion ? nil : .spring(duration: 0.25), value: badge)
     }
@@ -132,3 +136,4 @@ private struct SearchField: NSViewRepresentable {
         }
     }
 }
+

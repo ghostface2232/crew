@@ -47,6 +47,28 @@ struct StatusLabel: View {
     }
 }
 
+/// A light, centered empty state; quieter than ContentUnavailableView's bold title.
+struct EmptyState<Actions: View>: View {
+    var title: String
+    var symbol: String
+    var detail: String? = nil
+    @ViewBuilder var actions: Actions
+    var body: some View {
+        VStack(spacing: 6) {
+            Image(systemName: symbol).font(.system(size: 30, weight: .light)).foregroundStyle(.secondary).padding(.bottom, 2)
+            Text(title).font(Typeface.emptyTitle).foregroundStyle(.secondary)
+            if let detail { Text(detail).font(Typeface.callout).foregroundStyle(.tertiary) }
+            actions.padding(.top, 10)
+        }
+        .multilineTextAlignment(.center).accessibilityElement(children: .combine).centeredInPage()
+    }
+}
+extension EmptyState where Actions == EmptyView {
+    init(title: String, symbol: String, detail: String? = nil) {
+        self.init(title: title, symbol: symbol, detail: detail) { EmptyView() }
+    }
+}
+
 struct ContentPanel<Content: View>: View {
     var title: String?
     var symbol = ""
@@ -54,7 +76,7 @@ struct ContentPanel<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             if let title {
-                Label(title, systemImage: symbol).font(Typeface.cardTitle).tracking(-0.3).accessibilityAddTraits(.isHeader)
+                Label(title, systemImage: symbol).font(Typeface.title).accessibilityAddTraits(.isHeader)
             }
             content
         }

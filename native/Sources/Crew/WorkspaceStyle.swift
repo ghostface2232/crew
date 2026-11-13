@@ -21,8 +21,10 @@ enum WorkspaceStyle {
 /// The type scale. Titles are SF Pro Rounded, headlines SF Pro Display, body text SF Pro Text, source text SF Mono.
 enum Typeface {
     static let pageTitle = Font.system(size: 38, weight: .semibold, design: .rounded)
+    static let pageTitleCapHeight = NSFont.systemFont(ofSize: 38, weight: .semibold).capHeight
     static let title = Font.system(size: 18, weight: .semibold, design: .rounded)
     static let cardTitle = Font.system(size: 16, weight: .semibold, design: .rounded)
+    static let emptyTitle = Font.system(size: 17, weight: .regular, design: .rounded)
     static let number = Font.system(size: 40, weight: .regular, design: .rounded)
     static let section = display(20, .semibold)
     static let headline = display(15, .medium)
@@ -53,9 +55,18 @@ struct WorkspaceHeading: View {
     var subtitle: String? = nil
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(Typeface.pageTitle).tracking(-1.1).fixedSize(horizontal: false, vertical: true).accessibilityAddTraits(.isHeader)
+            Text(title).font(Typeface.pageTitle).fixedSize(horizontal: false, vertical: true).accessibilityAddTraits(.isHeader)
             if let subtitle {
-                Text(subtitle).font(Typeface.code).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+                // Selectable text on macOS drops truncation once selected and never restores it,
+                // so the path is copied from a menu instead and always shows its truncated form.
+                Text(subtitle).font(Typeface.code).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    .help(subtitle)
+                    .contextMenu {
+                        Button("Copy Path", systemImage: "doc.on.doc") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(subtitle, forType: .string)
+                        }
+                    }
             }
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -78,7 +89,7 @@ struct WorkspaceSummary: View {
                     let metric = metrics[index]
                     VStack(alignment: .leading, spacing: 7) {
                         Label(metric.0, systemImage: metric.2).font(Typeface.chip).foregroundStyle(.secondary)
-                        Text(metric.1.formatted()).font(Typeface.number).tracking(-1.2).monospacedDigit()
+                        Text(metric.1.formatted()).font(Typeface.number).monospacedDigit()
                             .foregroundStyle(metric.1 == 0 ? Color.secondary.opacity(0.7) : metric.3)
                     }.frame(maxWidth: .infinity, alignment: .leading)
                         .accessibilityElement(children: .combine)

@@ -8,7 +8,7 @@ import { resolveConfig } from '../plugin/bridge/config.ts';
 import type { Config } from '../plugin/bridge/config.ts';
 import { leadContext } from '../plugin/bridge/instructions.ts';
 import { Jobs, outOfScope } from '../plugin/bridge/jobs.ts';
-import type { Adapter, CrewEvent, Job, JobCtl, ReviewTarget } from '../plugin/bridge/jobs.ts';
+import type { Adapter, CrewEvent, Job, JobCtl, JobSpec, ReviewTarget } from '../plugin/bridge/jobs.ts';
 import { describe } from '../plugin/bridge/render.ts';
 
 const config = resolveConfig({ notify: false, codex: { bin: 'codex', approvalPolicy: 'never', approvalsReviewer: 'auto_review' } });
@@ -386,6 +386,11 @@ test('the bridge commit works without a git identity and ignores signing setting
     assert.ok(job.result?.commit);
     const author = execFileSync('git', ['log', '-1', '--format=%an <%ae>', job.worktree!.branch], { cwd: repo }).toString().trim();
     assert.equal(author, 'Crew <crew@localhost>');
+    await jobs.round(job.id, 1, 'undo');
+    assert.deepEqual(job.result!.files, []);
+    await jobs.round(job.id, 1, 'keep');
+    assert.deepEqual(job.result!.files, ['new.js']);
+    await jobs.discard(job.id);
   } finally {
     for (const [k, v] of Object.entries(saved)) {
       if (v === undefined) delete process.env[k];
@@ -816,4 +821,302 @@ test('a follow-up sent while a job is being discarded is refused, not started in
   assert.equal(job.state, 'done');
   assert.equal(job.worktree, null);
   assert.deepEqual(calls, []);
+});
+
+for (const kind of ['delegate', 'polish'] as const) {
+  test(`${kind} records each changing turn, and undo and keep recompute the branch result`, async () => {
+    const repo = tempRepo();
+    const { jobs, adapter, events, home } = harness((ctl) => {
+      fs.writeFileSync(path.join(ctl.job.cwd, 'new.js'), 'export const y = 2;\n');
+      ctl.done('first');
+    });
+    const job = await settled(jobs, await jobs.create({ kind, cwd: repo, task: 'x', targets: kind === 'polish' ? ['new.js'] : undefined }));
+    const first = structuredClone(job.rounds![0]);
+    assert.equal(first.turn, 1);
+    assert.equal(first.commit, job.result!.commit);
+    assert.deepEqual(first.files, ['new.js']);
+    assert.match(first.stat, /1 file changed, 1 insertion/);
+    assert.equal(first.state, 'kept');
+    assert.ok(first.at >= job.createdAt && first.at <= Date.now());
+
+    adapter.reply = async (ctl) => {
+      fs.writeFileSync(path.join(ctl.job.cwd, 'README.md'), 'second turn\n');
+      ctl.done('second');
+    };
+    await jobs.reply(job.id, { message: 'again' });
+    await settled(jobs, job);
+    assert.deepEqual(job.rounds!.map((round) => round.turn), [1, 2]);
+    assert.deepEqual(job.rounds![0], first);
+    assert.deepEqual(job.rounds![1].files, ['README.md']);
+    assert.match(job.rounds![1].stat, /1 file changed, 1 insertion\(\+\), 1 deletion/);
+    assert.deepEqual(job.result!.files, ['README.md', 'new.js']);
+    assert.deepEqual(job.result!.outOfScope, kind === 'polish' ? ['README.md'] : []);
+
+    adapter.reply = async (ctl) => ctl.done('no changes');
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: job.cwd, encoding: 'utf8' });
+    await jobs.reply(job.id, { message: 'check once more' });
+    await settled(jobs, job);
+    assert.equal(job.turns, 3);
+    assert.equal(job.rounds!.length, 2);
+    assert.equal(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: job.cwd, encoding: 'utf8' }), head);
+
+    const seq = job.seq;
+    assert.equal(await jobs.round(job.id, 2, 'undo'), job);
+    assert.equal(fs.readFileSync(path.join(job.cwd, 'README.md'), 'utf8'), 'hello\n');
+    assert.deepEqual(job.result!.files, ['new.js']);
+    assert.match(job.result!.stat, /1 file changed, 1 insertion/);
+    assert.deepEqual(job.result!.outOfScope, []);
+    assert.equal(job.rounds![1].state, 'undone');
+    assert.equal(job.rounds![1].revert, job.result!.commit);
+    assert.equal(job.seq, seq + 1);
+    assert.equal(events.at(-1)!.kind, 'progress');
+    assert.equal(events.at(-1)!.job_id, job.id);
+    assert.equal(events.at(-1)!.detail, 'round 2 undone');
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(home, 'jobs.json'), 'utf8')).jobs[0].rounds, job.rounds);
+
+    await jobs.round(job.id, 2, 'keep');
+    assert.equal(fs.readFileSync(path.join(job.cwd, 'README.md'), 'utf8'), 'second turn\n');
+    assert.equal(job.rounds![1].state, 'kept');
+    assert.ok(!('revert' in job.rounds![1]));
+    assert.deepEqual(job.result!.files, ['README.md', 'new.js']);
+    assert.match(job.result!.stat, /2 files changed/);
+    assert.deepEqual(job.result!.outOfScope, kind === 'polish' ? ['README.md'] : []);
+    assert.equal(job.result!.commit, execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: job.cwd, encoding: 'utf8' }).trim());
+    assert.equal(events.at(-1)!.detail, 'round 2 kept');
+
+    await jobs.round(job.id, 1, 'undo');
+    adapter.reply = async (ctl) => {
+      assert.equal(fs.existsSync(path.join(ctl.job.cwd, 'new.js')), false);
+      fs.writeFileSync(path.join(ctl.job.cwd, 'later.js'), 'later\n');
+      ctl.done('continued after undo');
+    };
+    await jobs.reply(job.id, { message: 'continue' });
+    await settled(jobs, job);
+    assert.deepEqual(job.rounds!.map((round) => [round.turn, round.state]), [[1, 'undone'], [2, 'kept'], [4, 'kept']]);
+    assert.deepEqual(job.rounds![2].files, ['later.js']);
+    assert.deepEqual(job.result!.files, ['README.md', 'later.js']);
+    await jobs.discard(job.id);
+  });
+}
+
+test('round refusals leave the job and worktree unchanged', async () => {
+  const repo = tempRepo();
+  const { jobs, adapter, events } = harness((ctl) => {
+    fs.writeFileSync(path.join(ctl.job.cwd, 'README.md'), 'first\n');
+    ctl.done('changed');
+  });
+  const job = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'x' }));
+  const snapshot = () => ({
+    job: structuredClone(job), events: events.length,
+    head: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: job.cwd, encoding: 'utf8' }),
+    status: execFileSync('git', ['status', '--porcelain'], { cwd: job.cwd, encoding: 'utf8' }),
+    file: fs.readFileSync(path.join(job.cwd, 'README.md'), 'utf8'),
+  });
+  const refuses = async (id: string, turn: number, action: 'undo' | 'keep', reason: RegExp) => {
+    const before = snapshot();
+    await assert.rejects(jobs.round(id, turn, action), reason);
+    assert.deepEqual(snapshot(), before);
+  };
+  await refuses('missing', 1, 'undo', /No job with id/);
+  await refuses(job.id, 99, 'undo', /no round for turn 99/);
+  await refuses(job.id, 1, 'keep', /already kept/);
+  await jobs.round(job.id, 1, 'undo');
+  await refuses(job.id, 1, 'undo', /already undone/);
+  await jobs.round(job.id, 1, 'keep');
+
+  let worker!: JobCtl;
+  adapter.reply = async (ctl) => { worker = ctl; };
+  await jobs.reply(job.id, { message: 'continue' });
+  await refuses(job.id, 1, 'undo', /still running/);
+  worker.waiting('question', 'what next?');
+  await refuses(job.id, 1, 'undo', /still waiting/);
+  worker.resumed();
+  worker.done('done');
+  await settled(jobs, job);
+
+  fs.writeFileSync(path.join(job.cwd, 'README.md'), 'uncommitted\n');
+  await refuses(job.id, 1, 'undo', /uncommitted changes/);
+  fs.writeFileSync(path.join(job.cwd, 'README.md'), 'first\n');
+
+  const tree = job.worktree!;
+  // A removed directory can leave the saved worktree record behind.
+  execFileSync('git', ['worktree', 'remove', '--force', tree.path], { cwd: repo });
+  const beforeMissing = structuredClone(job);
+  await assert.rejects(jobs.round(job.id, 1, 'undo'), /worktree is gone or discarded/);
+  assert.deepEqual(job, beforeMissing);
+  await jobs.discard(job.id);
+  const beforeDiscarded = structuredClone(job);
+  await assert.rejects(jobs.round(job.id, 1, 'undo'), /worktree is gone or discarded/);
+  assert.deepEqual(job, beforeDiscarded);
+});
+
+for (const action of ['undo', 'keep'] as const) {
+  test(`a conflicting round ${action} aborts without changing the worktree or job`, async () => {
+    const repo = tempRepo();
+    const { jobs, adapter, events } = harness((ctl) => {
+      fs.writeFileSync(path.join(ctl.job.cwd, 'README.md'), 'first\n');
+      fs.writeFileSync(path.join(ctl.job.cwd, 'new.js'), 'first\n');
+      ctl.done('first');
+    });
+    const job = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'x' }));
+    if (action === 'keep') await jobs.round(job.id, 1, 'undo');
+    adapter.reply = async (ctl) => {
+      fs.writeFileSync(path.join(ctl.job.cwd, 'README.md'), 'conflicting later edit\n');
+      ctl.done('second');
+    };
+    await jobs.reply(job.id, { message: 'replace the same line' });
+    await settled(jobs, job);
+    const before = structuredClone(job);
+    const count = events.length;
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: job.cwd, encoding: 'utf8' });
+    await assert.rejects(jobs.round(job.id, 1, action), /conflicted files: README\.md/);
+    assert.deepEqual(job, before);
+    assert.equal(events.length, count);
+    assert.equal(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: job.cwd, encoding: 'utf8' }), head);
+    assert.equal(execFileSync('git', ['status', '--porcelain'], { cwd: job.cwd, encoding: 'utf8' }), '');
+    assert.equal(fs.readFileSync(path.join(job.cwd, 'README.md'), 'utf8'), 'conflicting later edit\n');
+    assert.equal(fs.existsSync(path.join(job.cwd, 'new.js')), action === 'undo');
+    if (action === 'undo') assert.equal(fs.readFileSync(path.join(job.cwd, 'new.js'), 'utf8'), 'first\n');
+    const revertHead = execFileSync('git', ['rev-parse', '--git-path', 'REVERT_HEAD'], { cwd: job.cwd, encoding: 'utf8' }).trim();
+    assert.equal(fs.existsSync(path.resolve(job.cwd, revertHead)), false);
+    await jobs.discard(job.id);
+  });
+}
+
+test('round operations exclude concurrent changes, follow-ups and discard', async () => {
+  const repo = tempRepo();
+  const { jobs } = harness((ctl) => {
+    fs.writeFileSync(path.join(ctl.job.cwd, 'README.md'), 'changed\n');
+    ctl.done('done');
+  });
+  const job = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'x' }));
+  const pending = jobs.round(job.id, 1, 'undo');
+  await assert.rejects(jobs.round(job.id, 1, 'undo'), /already changing a round/);
+  await assert.rejects(jobs.reply(job.id, { message: 'again' }), /changing a round/);
+  await assert.rejects(jobs.discard(job.id), /changing a round/);
+  await pending;
+  await jobs.round(job.id, 1, 'keep');
+  const discarding = jobs.discard(job.id);
+  await assert.rejects(jobs.round(job.id, 1, 'undo'), /being discarded/);
+  await discarding;
+});
+
+test('in-place and review jobs never record rounds', async () => {
+  const repo = tempRepo();
+  const { jobs } = harness((ctl) => {
+    fs.writeFileSync(path.join(ctl.job.cwd, 'README.md'), 'changed\n');
+    ctl.touched(path.join(ctl.job.cwd, 'README.md'));
+    ctl.done('done');
+  });
+  const inPlace = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'x', isolation: 'in_place' }));
+  assert.equal(inPlace.rounds, undefined);
+  assert.match(inPlace.result!.stat, /edited in place/);
+  for (const runsApp of [false, true]) {
+    const review = await settled(jobs, await jobs.create({ kind: 'review', cwd: repo, runsApp, review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } }));
+    assert.equal(review.rounds, undefined);
+    assert.equal(review.result, null);
+    await jobs.discard(review.id);
+  }
+});
+
+for (const agent of ['codex', 'antigravity'] as const) {
+  test(`an ask uses the delegate assignment for ${agent}, runs read-only in cwd and returns only its answer`, async () => {
+    const repo = tempRepo();
+    const cwd = path.join(repo, 'sub');
+    fs.mkdirSync(cwd);
+    const assigned = resolveConfig({ roles: { delegate: { agent, model: 'question-model', effort: 'high' } } });
+    const { jobs, home } = harness((ctl) => {
+      assert.equal(ctl.job.cwd, cwd);
+      assert.equal(ctl.job.sandbox, 'read-only');
+      assert.equal(ctl.job.worktree, null);
+      ctl.done('The answer.');
+    }, () => assigned);
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' });
+    const job = await settled(jobs, await jobs.create({ kind: 'delegate', cwd, task: 'How does it work?', ask: true }));
+    assert.equal(job.ask, true);
+    assert.equal(job.agent, agent);
+    assert.equal(job.model, 'question-model');
+    assert.equal(job.effort, 'high');
+    assert.equal(job.nativeReview, null);
+    assert.equal(job.report, 'The answer.');
+    assert.equal(job.result, null);
+    assert.equal(job.rounds, undefined);
+    assert.match(job.instructions, /^# Role: question responder/);
+    assert.match(job.instructions, /read-only: change nothing and run nothing that writes/);
+    assert.match(job.instructions, /Give the answer as your final message/);
+    assert.match(job.instructions, /# This machine is shared/);
+    assert.equal(job.prompt, '# Question\nHow does it work?');
+    assert.equal(fs.existsSync(path.join(home, 'worktrees')), false);
+    assert.equal(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }), head);
+    assert.equal(execFileSync('git', ['status', '--porcelain'], { cwd: repo, encoding: 'utf8' }), '');
+    await jobs.reply(job.id, { message: 'Explain further.' });
+    await settled(jobs, job);
+    assert.equal(job.sandbox, 'read-only');
+    assert.equal(job.cwd, cwd);
+    assert.equal(job.worktree, null);
+    assert.equal(job.result, null);
+    assert.equal(job.rounds, undefined);
+  });
+}
+
+test('ask jobs require a question and refuse every conflicting option before starting', async () => {
+  const repo = tempRepo();
+  const { jobs, home } = harness(() => assert.fail('invalid ask must not start'));
+  const spec: JobSpec = { kind: 'delegate', cwd: repo, task: 'Question?', ask: true };
+  for (const kind of ['review', 'polish'] as const) {
+    await assert.rejects(jobs.create({ ...spec, kind }), /ask job must use kind "delegate"/);
+  }
+  for (const task of [undefined, '', '  \n']) {
+    await assert.rejects(jobs.create({ ...spec, task }), /ask job requires a task/);
+  }
+  const options: Partial<JobSpec>[] = [{ exclusive: true }, { runsApp: true }, { targets: [] }, { targets: ['README.md'] }, { base: 'HEAD' }, { isolation: 'worktree' }];
+  for (const option of options) {
+    await assert.rejects(jobs.create({ ...spec, ...option }), /ask job cannot use/);
+  }
+  assert.equal(jobs.list().length, 0);
+  assert.equal(fs.existsSync(path.join(home, 'worktrees')), false);
+  assert.equal(execFileSync('git', ['branch', '--list', 'crew-*'], { cwd: repo, encoding: 'utf8' }), '');
+});
+
+test('ask jobs also work outside git with explicit in-place isolation', async () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-question-'));
+  const { jobs } = harness((ctl) => ctl.done('answer'));
+  const job = await settled(jobs, await jobs.create({ kind: 'delegate', cwd, task: 'Question?', ask: true, isolation: 'in_place' }));
+  assert.equal(job.repo, null);
+  assert.equal(job.cwd, cwd);
+  assert.equal(job.sandbox, 'read-only');
+  assert.equal(job.worktree, null);
+  assert.equal(job.result, null);
+  assert.equal(job.rounds, undefined);
+});
+
+test('saved worktree jobs without rounds load and gain rounds on their next changing turn', async () => {
+  const repo = tempRepo();
+  const first = harness((ctl) => {
+    fs.writeFileSync(path.join(ctl.job.cwd, 'old.js'), 'old\n');
+    ctl.done('old bridge');
+  });
+  const job = await settled(first.jobs, await first.jobs.create({ kind: 'delegate', cwd: repo, task: 'x' }));
+  first.jobs.flush();
+  const file = path.join(first.home, 'jobs.json');
+  const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+  delete saved.jobs[0].rounds;
+  fs.writeFileSync(file, JSON.stringify(saved));
+  first.adapter.reply = async (ctl) => {
+    fs.writeFileSync(path.join(ctl.job.cwd, 'new.js'), 'new\n');
+    ctl.done('new bridge');
+  };
+  const restored = new Jobs(first.home, () => config, { codex: first.adapter, antigravity: first.adapter }, { onEvent: () => {}, onJob: () => {}, onAttention: () => {} });
+  const loaded = restored.get(job.id);
+  assert.equal(loaded.rounds, undefined);
+  await assert.rejects(restored.round(job.id, 1, 'undo'), /no round for turn 1/);
+  await restored.reply(job.id, { message: 'next' });
+  await settled(restored, loaded);
+  assert.equal(loaded.rounds!.length, 1);
+  assert.equal(loaded.rounds![0].turn, 2);
+  assert.deepEqual(loaded.rounds![0].files, ['new.js']);
+  assert.deepEqual(loaded.result!.files, ['new.js', 'old.js']);
+  await restored.round(job.id, 2, 'undo');
+  assert.deepEqual(loaded.result!.files, ['old.js']);
+  await restored.discard(job.id);
 });

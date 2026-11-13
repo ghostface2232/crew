@@ -170,12 +170,38 @@ export async function commitAll(wt: string, message: string): Promise<string | n
   await git(wt, ['add', '-A']);
   const staged = await git(wt, ['diff', '--cached', '--name-only']);
   if (!staged) return null;
+  await git(wt, [...await commitSettings(wt), 'commit', '--no-verify', '-m', message]);
+  return git(wt, ['rev-parse', '--short', 'HEAD']);
+}
+
+async function commitSettings(wt: string): Promise<string[]> {
   const settings = ['-c', 'commit.gpgsign=false'];
   const name = await git(wt, ['config', 'user.name']).catch(() => '');
   const email = await git(wt, ['config', 'user.email']).catch(() => '');
   if (!name) settings.push('-c', 'user.name=Crew');
   if (!email) settings.push('-c', 'user.email=crew@localhost');
-  await git(wt, [...settings, 'commit', '--no-verify', '-m', message]);
+  return settings;
+}
+
+export async function commitChanges(wt: string, commit: string): Promise<{ files: string[]; stat: string }> {
+  const names = await git(wt, ['show', '--format=', '--name-only', '-z', commit]);
+  const stat = await git(wt, ['show', '--format=', '--shortstat', commit]);
+  return { files: names.split('\0').filter(Boolean), stat };
+}
+
+/** Reverts are transport commits too; a conflict must leave the finished worker's tree untouched. */
+export async function revertCommit(wt: string, commit: string): Promise<string> {
+  if (await dirtyCount(wt)) throw new Error('The worktree has uncommitted changes; commit or remove them before changing a round.');
+  try {
+    await git(wt, [...await commitSettings(wt), '-c', `core.hooksPath=${os.devNull}`, 'revert', '--no-edit', commit]);
+  } catch (err) {
+    const conflicts = (await git(wt, ['diff', '--name-only', '--diff-filter=U', '-z'])).split('\0').filter(Boolean);
+    // A preflight failure may not have opened a revert, so abort has nothing to do in that case.
+    await git(wt, ['revert', '--abort']).catch(async (abort) => {
+      if (await dirtyCount(wt)) throw new Error(`${(err as Error).message}; could not abort the revert: ${abort.message}`);
+    });
+    throw new Error(`Could not revert ${commit}${conflicts.length ? `; conflicted files: ${conflicts.join(', ')}` : ''}: ${(err as Error).message}`);
+  }
   return git(wt, ['rev-parse', '--short', 'HEAD']);
 }
 

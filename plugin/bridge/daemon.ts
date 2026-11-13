@@ -282,6 +282,13 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     }
   }
 
+  const roundRoute = /^\/api\/jobs\/([\w-]+)\/rounds\/(\d+)$/.exec(pathname);
+  if (roundRoute && method === 'POST') {
+    const body = await readJson(req);
+    if (Boolean(body.undo) === Boolean(body.keep)) throw new HttpError(400, 'pass undo or keep');
+    return view(await jobs.round(roundRoute[1], Number(roundRoute[2]), body.undo ? 'undo' : 'keep'));
+  }
+
   const jobRoute = /^\/api\/jobs\/([\w-]+)(?:\/(\w+))?$/.exec(pathname);
   if (jobRoute) {
     const [, id, action] = jobRoute;

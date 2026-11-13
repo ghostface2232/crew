@@ -54,6 +54,11 @@ const SNAPSHOT = 'You are in a snapshot of the change, not the user\'s working t
 const ALONE = '# Measurement\nThis job has the machine to itself: no other Crew job runs until it ends. Take your measurements now, and report the conditions with the numbers: what was running, how many runs, and the spread between them.';
 
 function assignment(spec: JobSpec, worktree: Worktree | null, diffFile: string | null): { prompt: string; instructions: string } {
+  if (spec.ask) {
+    const parts = [`# Question\n${spec.task}`];
+    if (spec.done_when) parts.push(`# Acceptance criteria\n${spec.done_when}`);
+    return { instructions: role('question'), prompt: parts.join('\n\n') };
+  }
   const where = worktree
     ? `You are working in an isolated git worktree (branch \`${worktree.branch}\`). Edit files only inside it. Do not commit, push, or switch branches: the bridge commits your changes when you finish.`
     : spec.kind === 'review'

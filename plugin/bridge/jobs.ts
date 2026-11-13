@@ -3,7 +3,7 @@ import path from 'node:path';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { effectiveRole, WORKERS } from './config.ts';
 import type { Config, Role, WorkerAgent } from './config.ts';
-import { carryUncommitted, changesSince, commitAll, copyIncluded, createWorktree, dirtyCount, isInside, projectRoot, removeWorktree, repoRoot, reviewDiff } from './git.ts';
+import { carryUncommitted, changesSince, commitAll, commitChanges, copyIncluded, createWorktree, dirtyCount, isInside, projectRoot, removeWorktree, repoRoot, revertCommit, reviewDiff } from './git.ts';
 import type { Worktree } from './git.ts';
 import { sharedInstructions } from './instructions.ts';
 import { buildPrompt } from './prompts.ts';
@@ -210,6 +210,7 @@ export class Jobs {
   private discarding = new Set<string>();
   private finalizing = new Set<string>();
   private cancelling = new Set<string>();
+  private changingRounds = new Set<string>();
   /** Jobs past the alone-check but not yet registered, so two starts cannot both slip through it. */
   private starting: { exclusive: boolean }[] = [];
   private preparingReviews = new Set<string>();
@@ -280,6 +281,13 @@ export class Jobs {
   }
 
   private async start(spec: JobSpec): Promise<Job> {
+    if (spec.ask) {
+      if (spec.kind !== 'delegate') throw new Error('An ask job must use kind "delegate".');
+      if (!spec.task?.trim()) throw new Error('An ask job requires a task with the question to answer.');
+      if (spec.exclusive || spec.runsApp || spec.targets !== undefined || spec.base !== undefined || spec.isolation === 'worktree') {
+        throw new Error('An ask job cannot use exclusive, runsApp, targets, base, or isolation "worktree": it runs read-only in cwd.');
+      }
+    }
     // Only an engineer can measure: a review runs in a read-only sandbox and an editor runs nothing.
     if (spec.exclusive && spec.kind !== 'delegate') {
       throw new Error(`A ${spec.kind} job cannot run alone, because it has nothing to measure with. Measure with delegate and exclusive, or drop exclusive.`);
@@ -305,7 +313,7 @@ export class Jobs {
     let worktree: Worktree | null = null;
     let cwd = spec.cwd;
 
-    if (spec.kind !== 'review' && (spec.isolation ?? 'worktree') === 'worktree') {
+    if (!spec.ask && spec.kind !== 'review' && (spec.isolation ?? 'worktree') === 'worktree') {
       if (!repo) {
         throw new Error(`${spec.cwd} is not inside a git repository, so there is no worktree to isolate the worker in. Pass isolation: "in_place" to let it edit that directory directly.`);
       }
@@ -354,13 +362,14 @@ export class Jobs {
       mission: spec.mission,
       exclusive: Boolean(spec.exclusive) || undefined,
       runsApp: Boolean(spec.runsApp) || undefined,
+      ask: Boolean(spec.ask) || undefined,
       cwd,
       worktree,
-      sandbox: spec.kind === 'review' && !spec.runsApp ? 'read-only' : 'workspace-write',
+      sandbox: spec.ask || (spec.kind === 'review' && !spec.runsApp) ? 'read-only' : 'workspace-write',
       ...buildPrompt(spec, worktree, diffFile, shared.text),
       shared: shared.sources,
       // Only Codex has a built-in review mode; other agents get the prompted review.
-      nativeReview: agent === 'codex' && spec.review?.mode === 'standard' ? spec.review.target : null,
+      nativeReview: spec.kind === 'review' && agent === 'codex' && spec.review?.mode === 'standard' ? spec.review.target : null,
       reviewTarget: spec.review?.target,
       targets: spec.targets ?? [],
       model: spec.model ?? role.model,
@@ -392,6 +401,7 @@ export class Jobs {
 
   async reply(id: string, input: { message?: string; decision?: 'approve' | 'deny'; request_id?: string; approved_by_user?: string }): Promise<Job> {
     const job = this.get(id);
+    if (this.changingRounds.has(id)) throw new Error(`Job ${id} is changing a round. Wait for it to finish.`);
     if (this.discarding.has(id)) throw new Error(`Job ${id} is being discarded.`);
     if (this.cancelling.has(id)) throw new Error(`Job ${id} is being cancelled.`);
     if (this.preparingReviews.has(id)) throw new Error(`Job ${id} is preparing its review diff. Wait for it to finish.`);
@@ -546,6 +556,7 @@ export class Jobs {
   /** Removes the worktree and branch of a finished job. */
   async discard(id: string): Promise<Job> {
     const job = this.get(id);
+    if (this.changingRounds.has(id)) throw new Error(`Job ${id} is changing a round. Wait for it to finish.`);
     if (this.cancelling.has(id)) throw new Error(`Job ${id} is being cancelled.`);
     if (!isTerminal(job)) throw new Error(`Job ${id} is still ${job.state}; cancel it first.`);
     if (this.discarding.has(id)) throw new Error(`Job ${id} is already being discarded.`);
@@ -563,6 +574,34 @@ export class Jobs {
       }
     } finally {
       this.discarding.delete(id);
+    }
+    return job;
+  }
+
+  async round(id: string, turn: number, action: 'undo' | 'keep'): Promise<Job> {
+    const job = this.get(id);
+    if (!isTerminal(job)) throw new Error(`Job ${id} is still ${job.state}; wait for the turn to end before changing a round.`);
+    if (this.discarding.has(id)) throw new Error(`Job ${id} is being discarded.`);
+    if (this.changingRounds.has(id)) throw new Error(`Job ${id} is already changing a round.`);
+    const round = job.rounds?.find((round) => round.turn === turn);
+    if (!round) throw new Error(`Job ${id} has no round for turn ${turn}.`);
+    if (!job.worktree || !fs.existsSync(path.join(job.worktree.path, '.git'))) throw new Error(`Job ${id}'s worktree is gone or discarded.`);
+    const state = action === 'undo' ? 'undone' : 'kept';
+    if (round.state === state) throw new Error(`Round ${turn} is already ${state}.`);
+    const commit = action === 'undo' ? round.commit : round.revert;
+    if (!commit) throw new Error(`Round ${turn} has no revert commit to keep.`);
+    this.changingRounds.add(id);
+    try {
+      const reverted = await revertCommit(job.worktree.path, commit);
+      const result = await this.worktreeResult(job, reverted);
+      round.state = state;
+      if (action === 'undo') round.revert = reverted;
+      else delete round.revert;
+      job.result = result;
+      this.event(job, 'progress', `round ${turn} ${state}`);
+      this.flush();
+    } finally {
+      this.changingRounds.delete(id);
     }
     return job;
   }
@@ -688,11 +727,9 @@ export class Jobs {
     // A review's worktree is a snapshot to run the app in; nothing in it is kept.
     if (job.worktree && job.kind !== 'review') {
       const commit = await commitAll(job.worktree.path, `crew(${job.agent}): ${job.title}`);
-      const { files, stat } = await changesSince(job.worktree.path, job.worktree.base);
-      // The diff only covers the worktree; edits the worker reported elsewhere are violations too.
-      const escaped = [...(this.touchedFiles.get(job.id) ?? [])].filter((f) => !isInside(job.cwd, f));
-      result = { files, stat, commit, outOfScope: [...outOfScope(files, job.targets), ...escaped] };
-    } else if (job.kind === 'review') {
+      if (commit) (job.rounds ??= []).push({ turn: job.turns, commit, ...await commitChanges(job.worktree.path, commit), state: 'kept', at: Date.now() });
+      result = await this.worktreeResult(job, commit);
+    } else if (job.kind === 'review' || job.ask) {
       result = null;
     } else {
       const root = job.repo ?? job.cwd;
@@ -710,6 +747,13 @@ export class Jobs {
     job.phase = 'done';
     this.event(job, 'done', result?.stat || headline(report) || 'finished');
     if (this.settings.notifyOnDone) this.hooks.onAttention(job, 'done', job.title);
+  }
+
+  private async worktreeResult(job: Job, commit: string | null): Promise<NonNullable<Job['result']>> {
+    const { files, stat } = await changesSince(job.worktree!.path, job.worktree!.base);
+    // The diff only covers the worktree; edits the worker reported elsewhere are violations too.
+    const escaped = [...(this.touchedFiles.get(job.id) ?? [])].filter((f) => !isInside(job.cwd, f));
+    return { files, stat, commit, outOfScope: [...outOfScope(files, job.targets), ...escaped] };
   }
 
   private fail(job: Job, message: string, limit: boolean): void {

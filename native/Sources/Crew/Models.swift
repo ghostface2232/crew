@@ -24,6 +24,7 @@ struct Job: Codable, Sendable, Identifiable, Equatable {
     var notes: [String]
     var error: JobError?
     var tokens: Int?
+    var tokenUse: TokenUse?
     var seq: Int
     var prompt: String?
     var shared: [String]?
@@ -52,6 +53,7 @@ struct Job: Codable, Sendable, Identifiable, Equatable {
     }
     var requestKey: String { "answer:\(id):\(waiting?.id ?? "")" }
 }
+struct TokenUse: Codable, Sendable, Equatable { var input: Int; var cachedInput: Int; var output: Int; var turn: Int }
 struct Round: Codable, Sendable, Equatable {
     var turn: Int
     var commit: String

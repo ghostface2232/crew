@@ -318,7 +318,11 @@ export class CodexAdapter implements Adapter {
         break;
       }
       case 'thread/tokenUsage/updated':
-        ctl.tokens(p.tokenUsage.total.totalTokens);
+        ctl.tokens(p.tokenUsage.total.totalTokens, {
+          input: p.tokenUsage.total.inputTokens ?? 0,
+          cachedInput: p.tokenUsage.total.cachedInputTokens ?? 0,
+          output: p.tokenUsage.total.outputTokens ?? 0,
+        });
         break;
       case 'error':
         if (p.willRetry) ctl.progress(`retrying: ${p.error.message}`);

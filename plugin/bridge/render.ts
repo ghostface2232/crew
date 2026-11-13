@@ -44,7 +44,11 @@ export function describe(job: JobView, waitingHint?: string): string {
     lines.push(`error: ${job.error.message}`);
     if (job.error.limit) lines.push(`${WORKERS[job.agent].name} is out of usage for now. Do this piece yourself, and tell the user the ${job.kind === 'review' ? 'cross-review was skipped' : 'work was not delegated'}.`);
   }
-  if (job.tokens != null) lines.push(`tokens: ${job.tokens.toLocaleString('en-US')}`);
+  if (job.tokens != null) {
+    const n = (value: number) => value.toLocaleString('en-US');
+    const use = job.tokenUse;
+    lines.push(`tokens: ${n(job.tokens)}${use ? ` (input ${n(use.input)}, of which ${n(use.cachedInput)} cached; output ${n(use.output)}${job.turns > 1 ? `; this turn ${n(use.turn)}` : ''})` : ''}`);
+  }
   if (job.worktree) lines.push(`worktree: ${job.worktree.path} (branch ${job.worktree.branch}, base ${job.worktree.base.slice(0, 8)})`);
   if (job.result) {
     lines.push(`changes: ${job.result.stat || 'none'}${job.result.commit ? ` · commit ${job.result.commit}` : ''}`);

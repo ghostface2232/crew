@@ -1326,3 +1326,28 @@ test('a sync holds the worktree against round changes and discard, and rounds su
   assert.equal(fs.readFileSync(path.join(job.cwd, 'worker.js'), 'utf8'), 'w\n');
   await jobs.discard(job.id);
 });
+
+test('a job says what its tokens are made of and what the latest turn added', async () => {
+  const repo = tempRepo();
+  let worker!: JobCtl;
+  const { jobs, adapter } = harness((ctl) => { worker = ctl; ctl.session('s-1'); });
+  const job = await jobs.create({ kind: 'delegate', cwd: repo, task: 'x' });
+  worker.tokens(1000, { input: 900, cachedInput: 600, output: 100 });
+  assert.deepEqual(job.tokenUse, { input: 900, cachedInput: 600, output: 100, turn: 1000 });
+  const { describe } = await import('../plugin/bridge/render.ts');
+  assert.match(describe(job), /tokens: 1,000 \(input 900, of which 600 cached; output 100\)/);
+  worker.done('first');
+  await settled(jobs, job);
+
+  adapter.reply = async (ctl) => { worker = ctl; };
+  await jobs.reply(job.id, { message: 'more' });
+  worker.tokens(1400, { input: 1250, cachedInput: 900, output: 150 });
+  assert.equal(job.tokenUse!.turn, 400);
+  worker.done('second');
+  await settled(jobs, job);
+  assert.match(describe(job), /output 150; this turn 400\)/);
+  // An agent that reports only a total keeps working as before.
+  worker.tokens(1500);
+  assert.equal(job.tokens, 1500);
+  await jobs.discard(job.id);
+});

@@ -119,6 +119,9 @@ export function JobDrawer({ id, state, close }: { id: string; state: Snapshot; c
               ['Project', projectOf(job)],
               ...(job.worktree ? [['Branch', `${job.worktree.branch} (from ${job.worktree.base.slice(0, 8)})`]] : []),
               ...(job.tokens != null ? [['Tokens', job.tokens.toLocaleString()]] : []),
+              ...(job.tokenUse
+                ? [['Of which', `${job.tokenUse.cachedInput.toLocaleString()} cached input · ${(job.tokenUse.input - job.tokenUse.cachedInput).toLocaleString()} new input · ${job.tokenUse.output.toLocaleString()} output`]]
+                : []),
               ['Turns', String(job.turns)],
               ...(job.shared?.length ? [['Shared instructions', job.shared.join('\n')]] : []),
             ].map(([label, value]) => (

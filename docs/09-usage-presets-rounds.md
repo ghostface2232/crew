@@ -188,3 +188,12 @@ The secret is `~/.crew/token`: 64 hex characters, created by the daemon on first
 Everything else answers `401` with `{ "error": "unauthorized" }` when the secret is missing or wrong. A board that gets `401` says how to open it signed in: `crew board`, or Open Web Board in the app.
 
 Workers are kept from the file. A Codex job that is read-only or has the network open runs under a permissions profile that denies it; a Codex job with neither can read it but has no network to use it with. Antigravity's read of the file is refused by the bridge's policy, and its commands need the user's approval.
+
+Checked on 2026-11-13. A headless browser against a real daemon: with no token and with a wrong one the board showed the sign-in screen after a single API request; with the right one it loaded, the fragment was gone from the address, the cookie was `HttpOnly` and `SameSite=Strict`, and web storage was empty. A real Codex job with the network open (Codex CLI 0.167.0) was refused the token file by its permissions profile, while a local server in its worktree, writing there, and a question to the lead all worked. Not exercised: the native app against a live daemon beyond the packaged smoke test.
+
+Sessions that were already open when the daemon gained authentication hold an MCP server started from the old code, which sends no secret. Their Crew tools answer with an error until the session is restarted.
+
+## 13. What a job's tokens are made of
+
+Where the agent reports it (Codex), a job carries `tokenUse`: total input, how much of it was cached input, output, and what the latest turn added. The lead's status output and both boards show it. A follow-up turn that looks expensive is mostly input the worker had already sent once; the cached share says how much.
+

@@ -68,6 +68,9 @@ struct JobDetailView: View {
             fact("Duration", elapsed((job.endedAt ?? store.now) - job.createdAt))
             if let worktree = job.worktree { fact("Branch", "\(worktree.branch) (from \(worktree.base.prefix(8)))") }
             if let tokens = job.tokens { fact("Tokens", tokens.formatted()) }
+            if let use = job.tokenUse {
+                fact("Of which", "\(use.cachedInput.formatted()) cached input · \((use.input - use.cachedInput).formatted()) new input · \(use.output.formatted()) output")
+            }
             fact("Turns", String(job.turns))
             if let shared = job.shared, !shared.isEmpty { fact("Instructions", shared.joined(separator: "\n")) }
         }.font(Typeface.callout).textSelection(.enabled)

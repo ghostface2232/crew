@@ -156,6 +156,11 @@ export interface Job {
   notes: string[];
   error: { message: string; limit: boolean } | null;
   tokens: number | null;
+  /**
+   * What the total is made of, where the agent reports it, and what the latest turn added. Most of a
+   * worker's tokens are input it has already sent once; this is how to tell that from new work.
+   */
+  tokenUse?: { input: number; cachedInput: number; output: number; turn: number };
   /** Seq of the latest event about this job. */
   seq: number;
   /** Seq up to which the lead has already been told; stops the wake hook from repeating it. */
@@ -176,7 +181,7 @@ export interface JobCtl {
   note(text: string): void;
   /** The agent's automatic reviewer refused an action in this turn. */
   refused(action: string, reason: string): void;
-  tokens(total: number): void;
+  tokens(total: number, parts?: { input: number; cachedInput: number; output: number }): void;
   waiting(type: 'approval' | 'question', reason: string): void;
   resumed(): void;
   done(report: string): void;
@@ -232,6 +237,8 @@ export class Jobs {
   private finalizing = new Set<string>();
   private cancelling = new Set<string>();
   private changingRounds = new Set<string>();
+  /** Each job's token total when its current turn began, so the turn's own share can be shown. */
+  private turnStartTokens = new Map<string, number>();
   /** Jobs past the alone-check but not yet registered, so two starts cannot both slip through it. */
   private starting: { exclusive: boolean }[] = [];
   private preparingReviews = new Set<string>();
@@ -499,6 +506,7 @@ export class Jobs {
     job.asksUser = retry !== null && job.retrying !== undefined;
     job.retrying = retry?.actions;
     job.turns += 1;
+    this.turnStartTokens.set(id, job.tokens ?? 0);
     job.activeAt = Date.now();
     const what = !retry ? input.message.split('\n')[0].slice(0, 80) : job.asksUser ? 'refused action retried; the user is asked about each request' : 'refused action retried with the user\'s approval';
     this.event(job, 'started', `follow-up: ${what}`);
@@ -823,8 +831,9 @@ export class Jobs {
         (job.refusals ??= []).push({ action, reason, turn: job.turns });
         this.event(job, 'progress', `refused by the automatic reviewer: ${action.split('\n')[0].slice(0, 120)}`);
       },
-      tokens: (total) => {
+      tokens: (total, parts) => {
         job.tokens = total;
+        if (parts) job.tokenUse = { ...parts, turn: total - (this.turnStartTokens.get(job.id) ?? 0) };
       },
       waiting: (type, reason) => {
         if (!live()) return;

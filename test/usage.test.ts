@@ -56,7 +56,11 @@ test('a projection needs three samples over half an hour, a rising pace, and exh
   assert.deepEqual(projectExhaustion([at(40, 0.5, NOW + 30 * MIN), at(20, 0.6, NOW + 30 * MIN), at(0, 0.7, NOW + 30 * MIN)], NOW + 30 * MIN), { enough: true, at: null });
   assert.deepEqual(projectExhaustion([at(40, 0.7), at(20, 0.7), at(0, 0.7)], reset), { enough: true, at: null });
   // Samples from before the window last reset say nothing about this cycle.
-  assert.deepEqual(projectExhaustion([at(40, 0.9, reset - 1), at(20, 0.95, reset - 1), at(0, 0.1)], reset), { enough: false, at: null });
+  const earlier = reset - 5 * 60 * MIN;
+  assert.deepEqual(projectExhaustion([at(40, 0.9, earlier), at(20, 0.95, earlier), at(0, 0.1)], reset), { enough: false, at: null });
+  // Within a cycle the reported reset time wobbles by seconds; those samples still count.
+  const wobbly = projectExhaustion([at(40, 0.5, reset + 1000), at(20, 0.6, reset - 2000), at(0, 0.7)], reset);
+  assert.ok(wobbly.enough && Math.abs(wobbly.at! - (NOW + 60 * MIN)) < MIN);
 });
 
 test('a window is judged by its pace when there is one, and by what is left with hysteresis when there is not', () => {
@@ -83,16 +87,23 @@ test('a window is judged by its pace when there is one, and by what is left with
   assert.match(tight.reason, /runs out before it resets/);
 });
 
-test('the account-wide window decides; a provider with only per-model windows follows its roomiest family', () => {
+test('the account-wide window decides; a provider with only per-model windows follows the configured model, else its tightest family', () => {
   const tracker = new UsageTracker();
   const of = (windows: object[]) => tracker.classify(parseCache(cache([snapshot('antigravity', windows)])), none, NOW).providers.find((p) => p.agent === 'antigravity')!;
   // A scoped window that is used up does not exhaust the account.
   const scoped = of([weekly(0.2), weekly(1, { groupLabel: 'Fable', providerID: 'scoped' })]);
   assert.equal(scoped.status, 'ok');
   assert.equal(scoped.windows[1].status, 'exhausted');
-  // Only families: one used up, one with room.
-  assert.equal(of([weekly(1, { groupLabel: 'Gemini', providerID: 'g' }), weekly(0.1, { groupLabel: 'Claude/GPT', providerID: 'c' })]).status, 'ok');
-  assert.equal(of([weekly(1, { groupLabel: 'Gemini', providerID: 'g' }), weekly(0.95, { groupLabel: 'Claude/GPT', providerID: 'c' })]).status, 'tight');
+  // Only families, one used up and one with room: a job does not move to another model by itself.
+  const families = [weekly(1, { groupLabel: 'Gemini', providerID: 'g' }), weekly(0.1, { groupLabel: 'Claude/GPT', providerID: 'c' })];
+  assert.equal(of(families).status, 'exhausted');
+  tracker.models = { antigravity: 'claude-sonnet-5-5' };
+  assert.equal(of(families).status, 'ok');
+  tracker.models = { antigravity: 'gemini-3.8-flash' };
+  assert.equal(of(families).status, 'exhausted');
+  // A model that names no family falls back to the tightest.
+  tracker.models = { antigravity: 'something-else' };
+  assert.equal(of(families).status, 'exhausted');
 });
 
 test('an old reading is stale, and a reported limit stands until a later reading shows room', () => {
@@ -107,6 +118,8 @@ test('an old reading is stale, and a reported limit stands until a later reading
   assert.equal(limited.reason, 'A job hit the usage limit: usageLimitExceeded');
   // The report outranks even a stale reading: a job has just failed.
   assert.equal(codex(NOW - STALE_MS - MIN).status, 'exhausted');
+  // A later reading with no windows shows nothing, so the limit stands.
+  assert.equal(tracker.classify(parseCache(cache([snapshot('codex', [], NOW + MIN)])), none, NOW + 2 * MIN).providers.find((p) => p.agent === 'codex')!.status, 'exhausted');
   // A reading after the report that is still full keeps it; one with room lifts it.
   assert.equal(codex(NOW + MIN, 1, NOW + 2 * MIN).status, 'exhausted');
   assert.equal(codex(NOW + 3 * MIN, 0.2, NOW + 4 * MIN).status, 'ok');
@@ -175,7 +188,8 @@ test('a short lead hands off implementation, and an exhausted one hands the sess
   assert.match(route('lead', usageOf({ claude: 'tight' }), DEFAULT_ROLES).reason, /hand more implementation to Codex/);
   const handoff = route('lead', usageOf({ claude: 'exhausted' }), DEFAULT_ROLES);
   assert.deepEqual([handoff.assignee, handoff.degraded], ['codex', true]);
-  assert.equal(route('lead', usageOf({ claude: 'exhausted', codex: 'exhausted' }), DEFAULT_ROLES).assignee, 'claude');
+  // The session is handed only to an engineer measured to have room.
+  for (const codex of ['exhausted', 'tight', 'stale', 'unknown'] as const) assert.equal(route('lead', usageOf({ claude: 'exhausted', codex }), DEFAULT_ROLES).assignee, 'claude');
   // Antigravity as engineer is the user's choice, but it is never given the lead.
   const roles = { ...DEFAULT_ROLES, delegate: { agent: 'antigravity' as const } };
   assert.equal(route('lead', usageOf({ claude: 'exhausted' }), roles).assignee, 'claude');
@@ -219,4 +233,17 @@ test('a newer reading from the agent itself stands in for a stale AgentGauge one
   assert.equal(monitor.current().providers.find((p) => p.agent === 'claude')!.status, 'stale');
   assert.equal(seen.at(-1), monitor.current());
   assert.equal(route('review', monitor.current(), DEFAULT_ROLES).degraded, true);
+});
+
+test('statuses age with the clock even without AgentGauge', async (t) => {
+  t.mock.timers.enable({ apis: ['setInterval', 'Date'], now: NOW });
+  const seen: Usage[] = [];
+  const monitor = new UsageMonitor(null, (usage) => seen.push(usage));
+  await monitor.start();
+  t.after(() => monitor.stop());
+  monitor.supplement(fromCodexLimits({ plan: null, windows: [{ minutes: 300, usedPercent: 10, resetsAt: null }] }, NOW));
+  const codex = () => monitor.current().providers.find((p) => p.agent === 'codex')!.status;
+  assert.equal(codex(), 'ok');
+  t.mock.timers.tick(STALE_MS + 2 * MIN);
+  assert.equal(codex(), 'stale');
 });

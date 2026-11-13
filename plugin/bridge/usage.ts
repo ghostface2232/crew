@@ -74,6 +74,7 @@ const TIGHT_REMAINING = 0.15;
 const OK_REMAINING = 0.3;
 const PROJECTION_SPAN_MS = 90 * 60_000;
 const MIN_SPAN_MS = 30 * 60_000;
+const CYCLE_SLACK_MS = 5 * 60_000;
 /** A reported limit stands until AgentGauge reads the agent again and finds room, or this long at most. */
 const REPORT_MS = 5 * 60 * 60_000;
 
@@ -96,7 +97,9 @@ export interface Sample {
  * three, or spanning under 30 minutes. Samples from before the window last reset are ignored.
  */
 export function projectExhaustion(samples: Sample[], resetTime: number | null): { enough: boolean; at: number | null } {
-  const cycle = samples.filter((s) => s.resetTime === resetTime).sort((a, b) => a.at - b.at);
+  // A provider's reset time wobbles by seconds between readings of one cycle; a new cycle moves it by hours.
+  const sameCycle = (s: Sample) => (s.resetTime === null || resetTime === null ? s.resetTime === resetTime : Math.abs(s.resetTime - resetTime) <= CYCLE_SLACK_MS);
+  const cycle = samples.filter(sameCycle).sort((a, b) => a.at - b.at);
   if (cycle.length < 3 || cycle[cycle.length - 1].at - cycle[0].at < MIN_SPAN_MS) return { enough: false, at: null };
   const meanT = cycle.reduce((sum, s) => sum + s.at, 0) / cycle.length;
   const meanU = cycle.reduce((sum, s) => sum + s.usedRatio, 0) / cycle.length;
@@ -152,7 +155,6 @@ export function parseCache(text: string): RawProvider[] | null {
 
 const SEVERITY: Record<UsageStatus, number> = { unknown: 0, stale: 0, ok: 1, tight: 2, exhausted: 3 };
 const worst = (statuses: UsageStatus[]): UsageStatus => statuses.reduce((a, b) => (SEVERITY[b] > SEVERITY[a] ? b : a), 'ok' as UsageStatus);
-const least = (statuses: UsageStatus[]): UsageStatus => statuses.reduce((a, b) => (SEVERITY[b] < SEVERITY[a] ? b : a));
 const percent = (ratio: number) => `${Math.round(ratio * 100)}%`;
 const windowName = (w: Pick<UsageWindow, 'kind' | 'group'>) =>
   `${w.group ? `${w.group} ` : ''}${({ fiveHour: '5-hour', weekly: 'weekly', billingCycle: 'billing-cycle' } as Record<string, string>)[w.kind] ?? w.kind} window`;
@@ -166,6 +168,8 @@ export type SampleReader = (agent: Agent, key: string, since: number) => Sample[
 export class UsageTracker {
   private previous = new Map<string, UsageStatus>();
   private reported = new Map<Agent, { at: number; detail: string }>();
+  /** The model each agent's jobs run on, where the user configured one; it picks the windows that apply. */
+  models: Partial<Record<Agent, string>> = {};
 
   /** A job failed on this agent's usage limit; it is exhausted now, whatever the last reading says. */
   reportLimit(agent: Agent, detail: string, at: number): void {
@@ -180,7 +184,9 @@ export class UsageTracker {
   private provider(agent: Agent, raw: RawProvider | undefined, samples: SampleReader, now: number): ProviderUsage {
     const report = this.reported.get(agent);
     // A reading taken after the report that shows room means the limit has lifted.
-    const lifted = report && (now - report.at > REPORT_MS || Boolean(raw?.capturedAt && raw.capturedAt > report.at && raw.windows.every((w) => w.group !== null || w.usedRatio < 0.999)));
+    // An empty reading shows nothing, so it lifts nothing.
+    const room = (raw?.windows ?? []).filter((w) => w.group === null);
+    const lifted = report && (now - report.at > REPORT_MS || Boolean(raw?.capturedAt && raw.capturedAt > report.at && room.length && room.every((w) => w.usedRatio < 0.999)));
     if (lifted) this.reported.delete(agent);
     const limited = report && !lifted ? report : null;
 
@@ -204,15 +210,15 @@ export class UsageTracker {
     if (now - raw.capturedAt > STALE_MS) return { ...base, status: 'stale', reason: `AgentGauge's last reading is ${Math.round((now - raw.capturedAt) / 60_000)} minutes old.` };
     if (!windows.length) return { ...base, status: 'unknown', reason: 'AgentGauge reported no usage windows for this agent.' };
 
-    // Account-wide windows decide. A provider that only has per-model windows is as tight as its roomiest
-    // model family, since work can go to that one.
+    // Account-wide windows decide. A provider that only has per-model windows is judged by the family of the
+    // model its jobs are configured to use; when that is not known, by its tightest family, because a job
+    // does not move to another model by itself.
     const wide = windows.filter((w) => w.group === null);
-    let deciding: UsageWindow[];
-    if (wide.length) deciding = wide;
-    else {
-      const groups = [...new Set(windows.map((w) => w.group))].map((group) => windows.filter((w) => w.group === group));
-      const target = least(groups.map((g) => worst(g.map((w) => w.status))));
-      deciding = groups.find((g) => worst(g.map((w) => w.status)) === target)!;
+    let deciding = wide;
+    if (!wide.length) {
+      const model = this.models[agent]?.toLowerCase();
+      const family = model ? windows.filter((w) => w.group!.toLowerCase().split(/[^a-z0-9]+/).some((word) => word.length > 2 && model.includes(word))) : [];
+      deciding = family.length ? family : windows;
     }
     const status = worst(deciding.map((w) => w.status));
     const tightest = deciding.filter((w) => w.status === status).sort((a, b) => b.usedRatio - a.usedRatio)[0];
@@ -267,13 +273,20 @@ export class UsageMonitor {
   }
 
   async start(): Promise<void> {
+    // Statuses change with the clock alone: a reading goes stale, a reported limit lapses. That holds
+    // without AgentGauge too, for what the agents report of themselves.
+    this.timer = setInterval(() => this.refresh(), 60_000);
+    this.timer.unref();
     if (!this.dir) return;
     this.history = await openHistory(this.dir);
     this.refresh();
     fs.watchFile(path.join(this.dir, 'usage-cache.json'), { interval: 5000 }, () => this.refresh());
-    // Statuses change with the clock alone: a reading goes stale, a reported limit lapses.
-    this.timer = setInterval(() => this.refresh(), 60_000);
-    this.timer.unref();
+  }
+
+  /** Tells the classifier which model each agent runs, from the user's config. */
+  setModels(models: Partial<Record<Agent, string>>): void {
+    this.tracker.models = models;
+    this.refresh();
   }
 
   current(): Usage {
@@ -346,7 +359,8 @@ export function route(kind: RouteKind, usage: Usage, roles: Config['roles']): Ro
   if (kind === 'lead') {
     const engineer = roles.delegate.agent;
     if (status('claude') === 'exhausted') {
-      const takeover = engineer === 'codex' && status('codex') !== 'exhausted';
+      // Handing the session over is not undone lightly: only to an engineer measured to have room.
+      const takeover = engineer === 'codex' && status('codex') === 'ok';
       return { kind, assignee: takeover ? 'codex' : 'claude', reason: `${why('claude')} ${takeover ? 'Write a handoff note and hand the session to Codex.' : 'No other agent can lead; stop and tell the user.'}`, fallback: [], degraded: true, deferUntil: resets('claude') };
     }
     if (status('claude') === 'tight') return plain('claude', `${why('claude')} Keep to planning and merge decisions, and hand more implementation to ${name(engineer)}.`, short(engineer) ? [] : [engineer]);

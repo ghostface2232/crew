@@ -3,7 +3,7 @@ import path from 'node:path';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { effectiveRole, WORKERS } from './config.ts';
 import type { Config, Role, WorkerAgent } from './config.ts';
-import { carryUncommitted, changesSince, commitAll, commitChanges, copyIncluded, createWorktree, dirtyCount, isInside, projectRoot, removeWorktree, repoRoot, revertCommit, reviewDiff } from './git.ts';
+import { carryUncommitted, changesSince, commitAll, commitChanges, copyIncluded, createWorktree, currentBranch, dirtyCount, isInside, projectRoot, removeWorktree, repoRoot, revertCommit, revertsSince, reviewDiff } from './git.ts';
 import type { Worktree } from './git.ts';
 import { sharedInstructions } from './instructions.ts';
 import { buildPrompt } from './prompts.ts';
@@ -586,12 +586,18 @@ export class Jobs {
     const round = job.rounds?.find((round) => round.turn === turn);
     if (!round) throw new Error(`Job ${id} has no round for turn ${turn}.`);
     if (!job.worktree || !fs.existsSync(path.join(job.worktree.path, '.git'))) throw new Error(`Job ${id}'s worktree is gone or discarded.`);
-    const state = action === 'undo' ? 'undone' : 'kept';
-    if (round.state === state) throw new Error(`Round ${turn} is already ${state}.`);
-    const commit = action === 'undo' ? round.commit : round.revert;
-    if (!commit) throw new Error(`Round ${turn} has no revert commit to keep.`);
+    // The path is where git will commit. It must still be the job's own worktree on the job's own branch:
+    // a link put in its place, or a branch switched by hand, would send the revert somewhere else.
+    if (fs.lstatSync(job.worktree.path).isSymbolicLink()) throw new Error(`Job ${id}'s worktree path is now a link to somewhere else, so no round was changed.`);
     this.changingRounds.add(id);
     try {
+      if ((await currentBranch(job.worktree.path)) !== job.worktree.branch) throw new Error(`Job ${id}'s worktree is not on ${job.worktree.branch}, so no round was changed.`);
+      // A revert made just before the daemon stopped is in git but not in the saved job; git is the truth.
+      await this.reconcileRounds(job);
+      const state = action === 'undo' ? 'undone' : 'kept';
+      if (round.state === state) throw new Error(`Round ${turn} is already ${state}.`);
+      const commit = action === 'undo' ? round.commit : round.revert;
+      if (!commit) throw new Error(`Round ${turn} has no revert commit to keep.`);
       const reverted = await revertCommit(job.worktree.path, commit);
       const result = await this.worktreeResult(job, reverted);
       round.state = state;
@@ -604,6 +610,31 @@ export class Jobs {
       this.changingRounds.delete(id);
     }
     return job;
+  }
+
+  /** Sets each round's state from the reverts on the job branch, replayed in the order they were made. */
+  private async reconcileRounds(job: Job): Promise<void> {
+    const rounds = job.rounds ?? [];
+    const same = (a: string, b: string) => a.startsWith(b) || b.startsWith(a);
+    const before = JSON.stringify(rounds);
+    for (const round of rounds) {
+      round.state = 'kept';
+      delete round.revert;
+    }
+    for (const { commit, reverts } of await revertsSince(job.worktree!.path, job.worktree!.base)) {
+      for (const round of rounds) {
+        if (round.state === 'kept' && same(reverts, round.commit)) {
+          round.state = 'undone';
+          round.revert = commit.slice(0, round.commit.length);
+        } else if (round.state === 'undone' && same(reverts, round.revert!)) {
+          round.state = 'kept';
+          delete round.revert;
+        }
+      }
+    }
+    if (JSON.stringify(rounds) === before) return;
+    job.result = await this.worktreeResult(job, job.result?.commit ?? null);
+    this.flush();
   }
 
   /** Resolves when the job has an event newer than `after`, or after `timeoutMs`. */

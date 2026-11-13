@@ -15,7 +15,15 @@ const stats: [Mark, string][] = [
   ['stalled', 'Gone quiet'],
   ['failed', 'Failed'],
 ];
-function UsageGauge({ window, reason }: { window: UsageWindow; reason: string }) {
+/**
+ * A provider that is stale, unknown, or exhausted by a reported limit says so on its account-wide windows:
+ * their own status is then out of date or beside the point.
+ */
+function shownStatus(provider: ProviderUsage, window: UsageWindow) {
+  return window.group == null && ['stale', 'unknown', 'exhausted'].includes(provider.status) ? provider.status : window.status;
+}
+function UsageGauge({ window: measured, status, reason }: { window: UsageWindow; status: UsageWindow['status']; reason: string }) {
+  const window = { ...measured, status };
   const now = useNow();
   const percent = Math.round(Math.max(0, Math.min(1, window.usedRatio)) * 100);
   const name = [window.group, usageWindowName(window.kind)].filter(Boolean).join(' · ');
@@ -43,7 +51,9 @@ function UsageGauges({ provider }: { provider: ProviderUsage }) {
     <div className="usage-windows" aria-label={`${NAMES[provider.agent]} usage`}>
       {provider.windows
         .filter((window) => window.group == null)
-        .map((window) => <UsageGauge key={window.key} window={window} reason={provider.reason} />)}
+        .map((window) => (
+          <UsageGauge key={window.key} window={window} status={shownStatus(provider, window)} reason={provider.reason} />
+        ))}
       {!provider.windows.length && (
         <p className="hint" title={provider.reason}>{provider.status}</p>
       )}
@@ -51,7 +61,7 @@ function UsageGauges({ provider }: { provider: ProviderUsage }) {
         <details>
           <summary>Model limits ({scoped.length})</summary>
           {scoped.map((window) => (
-            <UsageGauge key={window.key} window={window} reason={provider.reason} />
+            <UsageGauge key={window.key} window={window} status={window.status} reason={provider.reason} />
           ))}
         </details>
       )}

@@ -309,12 +309,13 @@ struct AgentUsageView: View {
                         Text(provider.status.rawValue.capitalized).foregroundStyle(.secondary)
                     }
                     ForEach(provider.accountWindows, id: \.key) { window in
-                        let status = provider.status == .stale || provider.status == .unknown ? provider.status : window.status
+                        // The provider's status overrides a window's when the reading is old or a job just hit the limit.
+                        let status = [.stale, .unknown, .exhausted].contains(provider.status) ? provider.status : window.status
                         VStack(alignment: .leading, spacing: 4) {
                             HStack(spacing: 6) {
                                 Text(window.name)
                                 Text(window.usedRatio, format: .percent.precision(.fractionLength(0))).monospacedDigit()
-                                if status == .stale || status == .unknown { Text(status.rawValue) }
+                                if status == .stale || status == .unknown || (status == .exhausted && window.status != .exhausted) { Text(status == .exhausted ? "limit reached" : status.rawValue) }
                                 Spacer(minLength: 0)
                                 if let reset = window.resetTime {
                                     Text("Resets \(Date(timeIntervalSince1970: reset / 1000), style: .relative)")

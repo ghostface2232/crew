@@ -104,6 +104,8 @@ function loadMissions(): Missions {
 const missions = loadMissions();
 
 const usage = new UsageMonitor(agentGaugeDir(), (latest) => broadcast('usage', latest));
+const usageModels = (live: Config) => ({ antigravity: live.roles.polish.agent === 'antigravity' ? live.roles.polish.model ?? live.antigravity.model : live.antigravity.model });
+usage.setModels(usageModels(config));
 usage.start().catch((err) => log('usage monitor could not start:', err));
 codex.onLimits = (limits) => {
   broadcast('limits', { codex: limits });
@@ -130,6 +132,7 @@ fs.watchFile(path.join(HOME, 'config.json'), { interval: 2000 }, () => {
   const live = liveConfig();
   broadcast('roles', live.roles);
   broadcast('preset', { preset: live.preset, presets: live.presets });
+  usage.setModels(usageModels(live));
 });
 
 const claude = new ClaudeSessions(config.stallSeconds, {

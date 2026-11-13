@@ -1120,3 +1120,61 @@ test('saved worktree jobs without rounds load and gain rounds on their next chan
   assert.deepEqual(loaded.result!.files, ['old.js']);
   await restored.discard(job.id);
 });
+
+test('a round changed just before the bridge stopped is recovered from the branch', async () => {
+  const repo = tempRepo();
+  const first = harness((ctl) => {
+    fs.writeFileSync(path.join(ctl.job.cwd, 'a.js'), 'a\n');
+    ctl.done('done');
+  });
+  const job = await settled(first.jobs, await first.jobs.create({ kind: 'delegate', cwd: repo, task: 'x' }));
+  first.jobs.flush();
+  const saved = fs.readFileSync(path.join(first.home, 'jobs.json'), 'utf8');
+  await first.jobs.round(job.id, 1, 'undo');
+  // The revert is on the branch, but the saved job still says the round is kept.
+  fs.writeFileSync(path.join(first.home, 'jobs.json'), saved);
+
+  const restored = new Jobs(first.home, () => config, { codex: first.adapter, antigravity: first.adapter }, { onEvent: () => {}, onJob: () => {}, onAttention: () => {} });
+  const loaded = restored.get(job.id);
+  assert.equal(loaded.rounds![0].state, 'kept');
+  await assert.rejects(restored.round(job.id, 1, 'undo'), /already undone/);
+  assert.equal(loaded.rounds![0].state, 'undone');
+  assert.deepEqual(loaded.result!.files, []);
+  await restored.round(job.id, 1, 'keep');
+  assert.equal(fs.readFileSync(path.join(loaded.cwd, 'a.js'), 'utf8'), 'a\n');
+  assert.deepEqual([loaded.rounds![0].state, loaded.rounds![0].revert], ['kept', undefined]);
+  // Undone, kept, and undone again replays to the latest revert.
+  await restored.round(job.id, 1, 'undo');
+  fs.writeFileSync(path.join(first.home, 'jobs.json'), saved);
+  const again = new Jobs(first.home, () => config, { codex: first.adapter, antigravity: first.adapter }, { onEvent: () => {}, onJob: () => {}, onAttention: () => {} });
+  await again.round(job.id, 1, 'keep');
+  assert.equal(fs.readFileSync(path.join(loaded.cwd, 'a.js'), 'utf8'), 'a\n');
+  await again.discard(job.id);
+});
+
+test('a round is not changed through a link or on another branch', async () => {
+  const repo = tempRepo();
+  const { jobs } = harness((ctl) => {
+    fs.writeFileSync(path.join(ctl.job.cwd, 'a.js'), 'a\n');
+    ctl.done('done');
+  });
+  const job = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'x' }));
+  const tree = job.worktree!.path;
+  const head = () => execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' });
+
+  execFileSync('git', ['switch', '--quiet', '--detach'], { cwd: tree });
+  await assert.rejects(jobs.round(job.id, 1, 'undo'), /is not on crew-/);
+  execFileSync('git', ['switch', '--quiet', job.worktree!.branch], { cwd: tree });
+
+  // The worktree directory replaced by a link to the main repository, as after a merge.
+  const before = head();
+  fs.renameSync(tree, `${tree}.moved`);
+  fs.symlinkSync(repo, tree);
+  await assert.rejects(jobs.round(job.id, 1, 'undo'), /now a link to somewhere else/);
+  assert.equal(head(), before);
+  assert.equal(job.rounds![0].state, 'kept');
+  fs.rmSync(tree);
+  fs.renameSync(`${tree}.moved`, tree);
+  await jobs.round(job.id, 1, 'undo');
+  await jobs.discard(job.id);
+});

@@ -33,7 +33,9 @@ Jobs gain `rounds?: Round[]` and `ask?: boolean` (`jobs.ts`); missions gain `not
 | `POST /api/jobs` | `{ "kind": "delegate", "ask": true, "task": "question", "cwd": path }` | A read-only job whose report is the answer |
 | `POST /api/jobs/:id/rounds/:turn` | `{ "undo": true }` or `{ "keep": true }` | The job. `undo` reverts that round's commit on the job branch; `keep` reverts the revert |
 
-A round can be undone or kept only while the job is not running or waiting, its worktree still exists, and the revert applies cleanly; otherwise the request fails with the reason and nothing changes.
+A round can be undone or kept only while the job is not running or waiting, its worktree still exists as its own directory on the job branch, and the revert applies cleanly; otherwise the request fails with the reason and nothing changes. Round states are replayed from the reverts on the branch before each change, so one made just before the daemon stopped is not lost.
+
+A question job is read-only for both agents: Codex runs it with no approval prompts and the bridge declines any request to write, and Antigravity's edits and commands are refused.
 
 ## 3. Usage status
 
@@ -45,7 +47,9 @@ A round can be undone or kept only while the job is not running or waiting, its 
 | `stale` | AgentGauge's reading is too old to act on |
 | `unknown` | No reading: AgentGauge is not installed, or its file has a format this version does not know |
 
-A provider's status is that of its tightest account-wide window. Windows scoped to one model (`group` set) are listed with their own status and do not decide it.
+A provider's status is that of its tightest account-wide window. Windows scoped to one model (`group` set) are listed with their own status and do not decide it. A provider that reports only per-model windows (Antigravity) is judged by the family its configured model belongs to, matched by name; with no model configured, or none that matches, by its tightest family, because a job does not move to another model by itself.
+
+On a board, a provider that is stale, unknown, or exhausted by a reported limit shows that status on its account-wide gauges in place of each window's own.
 
 ## 4. Intents on the board
 

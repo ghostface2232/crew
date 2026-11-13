@@ -133,8 +133,8 @@ export class CodexAdapter implements Adapter {
     return {
       cwd: job.cwd,
       sandbox: job.sandbox,
-      // A static review must never block on a prompt; it has nothing to approve in a read-only sandbox.
-      approvalPolicy: job.kind === 'review' && !job.runsApp ? 'never' : this.config.codex.approvalPolicy,
+      // A read-only job (a static review, a question) must never block on a prompt, and has nothing to approve.
+      approvalPolicy: job.sandbox === 'read-only' ? 'never' : this.config.codex.approvalPolicy,
       approvalsReviewer: this.reviewer(job),
       // Without network access the sandbox refuses to bind even a local port.
       config: job.runsApp ? { sandbox_workspace_write: { network_access: true } } : null,
@@ -380,6 +380,11 @@ export class CodexAdapter implements Adapter {
     const ask = (type: 'approval' | 'question', reason: string) => {
       if (!run || isTerminal(run.ctl.job)) return Promise.resolve<Answer>({ approve: false });
       if (run.interrupt) return Promise.resolve<Answer>({ approve: false, cancelled: true });
+      // Nothing in a read-only job is the user's to allow: a question or a static review that asks to write is declined.
+      if (type === 'approval' && run.ctl.job.sandbox === 'read-only') {
+        run.ctl.note(`Declined in a read-only job: ${reason.split('\n')[0].slice(0, 120)}`);
+        return Promise.resolve<Answer>({ approve: false });
+      }
       if (this.children.has(threadId)) reason = `Sub-agent request\n${reason}`;
       return new Promise<Answer | null>((resolve) => {
         run.pending.push({ id, threadId, type, reason, resolve });

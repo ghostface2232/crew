@@ -189,6 +189,21 @@ export async function commitChanges(wt: string, commit: string): Promise<{ files
   return { files: names.split('\0').filter(Boolean), stat };
 }
 
+/** Branch checked out in a working tree, or null when HEAD is detached. */
+export async function currentBranch(wt: string): Promise<string | null> {
+  return git(wt, ['symbolic-ref', '--quiet', '--short', 'HEAD']).catch(() => null);
+}
+
+/** The reverts made since `base`, oldest first, each with the commit it reverts. */
+export async function revertsSince(wt: string, base: string): Promise<{ commit: string; reverts: string }[]> {
+  const log = await git(wt, ['log', '--reverse', '--format=%H%x00%B%x01', `${base}..HEAD`]);
+  return log.split('\x01').flatMap((entry) => {
+    const [commit, body = ''] = entry.trim().split('\0');
+    const reverted = /^This reverts commit ([0-9a-f]{7,40})\.?$/m.exec(body);
+    return commit && reverted ? [{ commit, reverts: reverted[1] }] : [];
+  });
+}
+
 /** Reverts are transport commits too; a conflict must leave the finished worker's tree untouched. */
 export async function revertCommit(wt: string, commit: string): Promise<string> {
   if (await dirtyCount(wt)) throw new Error('The worktree has uncommitted changes; commit or remove them before changing a round.');

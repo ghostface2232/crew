@@ -342,3 +342,18 @@ test('Codex runs an app job with network access and reports what its reviewer re
   assert.equal(seen[0].approvalsReviewer, 'auto_review');
   assert.deepEqual(seen.slice(1).map((turn) => turn.approvalsReviewer), ['auto_review', 'auto_review', 'user', 'auto_review']);
 });
+
+test('a read-only question never prompts and never asks the user to allow a write', { timeout: 5000 }, async (t) => {
+  const { adapter, home, jobs } = harness(stub);
+  t.after(() => { adapter.shutdown(); jobs.flush(); fs.rmSync(home, { recursive: true, force: true }); });
+  const job = await jobs.create({ kind: 'delegate', ask: true, cwd: home, task: 'what does this do?' });
+  assert.equal(job.sandbox, 'read-only');
+  let waited = false;
+  while (!job.endedAt) {
+    await jobs.wait(job.id, job.seq, 1000);
+    waited ||= Boolean(job.waiting);
+  }
+  assert.equal(waited, false);
+  assert.equal(job.report, 'decline');
+  assert.ok(job.notes.some((note) => note.startsWith('Declined in a read-only job: Run:')));
+});

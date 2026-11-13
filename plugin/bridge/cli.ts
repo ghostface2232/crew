@@ -3,7 +3,7 @@ import { execFile, execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { api, ensureDaemon, health } from './client.ts';
+import { api, ensureDaemon, health, stopDaemon } from './client.ts';
 import { boardUrl, readToken } from './auth.ts';
 import { agentEnv, BASE_URL, HOME, installed, loadConfig, PLUGIN_ROOT, VERSION } from './config.ts';
 import { describe, summarize } from './render.ts';
@@ -27,12 +27,6 @@ function run(bin: string, args: string[]): Promise<{ ok: boolean; out: string }>
       resolve({ ok: !err, out: (stdout || stderr || err?.message || '').trim() });
     });
   });
-}
-
-async function stopDaemon(): Promise<void> {
-  if (!(await health())) return;
-  await api('POST', '/api/shutdown', {}).catch(() => {});
-  for (let i = 0; i < 50 && (await health()); i++) await new Promise((r) => setTimeout(r, 100));
 }
 
 async function status(): Promise<void> {
@@ -145,7 +139,12 @@ try {
         execFileSync('tail', ['-n', '60', path.join(HOME, 'daemon.log')], { stdio: 'inherit' });
         break;
       } else throw new Error('Usage: crew daemon <start|stop|restart|logs>');
-      console.log((await health()) ? `running at ${BASE_URL}` : 'stopped');
+      if (!(await health())) console.log('stopped');
+      else {
+        // Up is not enough: a daemon that does not take the token in the file refuses everything else.
+        await api('GET', '/api/usage');
+        console.log(`running at ${BASE_URL}`);
+      }
       break;
     default:
       console.log(USAGE);

@@ -1293,11 +1293,18 @@ test('a follow-up can first bring the worker up to date with the lead, without c
   assert.deepEqual(job.result!.files, ['worker.js']);
   assert.deepEqual(job.rounds!.map((round) => [round.turn, round.files]), [[1, ['worker.js']], [2, ['worker.js']]]);
 
-  // A merge that conflicts changes nothing and starts no turn.
-  commit('worker.js', 'lead version\n');
+  // A merge that conflicts leaves the base and result alone but still delivers the message.
+  const conflicting = commit('worker.js', 'lead version\n');
   const before = structuredClone(job);
-  await assert.rejects(jobs.reply(job.id, { message: 'again', sync: true }), /conflicted files: worker\.js/);
-  assert.deepEqual(job, before);
+  await jobs.reply(job.id, { message: 'again', sync: true });
+  assert.deepEqual(job.result, before.result);
+  await settled(jobs, job);
+  assert.ok(told.startsWith('again\n\n'));
+  assert.ok(told.includes(conflicting.slice(0, 8)));
+  assert.match(told, /conflicted files: worker\.js/);
+  assert.equal(job.worktree!.base, before.worktree!.base);
+  assert.equal(job.roundsBase, before.roundsBase);
+  assert.equal(job.state, 'done');
   assert.equal(execFileSync('git', ['status', '--porcelain'], { cwd: job.cwd, encoding: 'utf8' }), '');
 
   const review = await settled(jobs, await jobs.create({ kind: 'review', cwd: repo, review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } }));
@@ -1309,6 +1316,88 @@ test('a follow-up can first bring the worker up to date with the lead, without c
   await assert.rejects(jobs.reply(job.id, { message: 'and this', sync: true }), /sync brings a finished job up to date/);
   live.done('third');
   await settled(jobs, job);
+  await jobs.discard(job.id);
+});
+
+test('a conflicting sync still delivers the follow-up and leaves the worktree and base unchanged', async (t) => {
+  const repo = tempRepo();
+  const { jobs, adapter, home } = harness((ctl) => {
+    fs.writeFileSync(path.join(ctl.job.cwd, 'app.js'), 'export const x = 2;\n');
+    ctl.done('first');
+  });
+  t.after(() => {
+    jobs.flush();
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(repo, { recursive: true, force: true });
+  });
+  const job = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'change x' }));
+  fs.writeFileSync(path.join(repo, 'app.js'), 'export const x = 3;\n');
+  execFileSync('git', ['commit', '-qam', 'lead changes x'], { cwd: repo });
+  const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim().slice(0, 8);
+  const before = structuredClone(job);
+  const workerHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: job.cwd, encoding: 'utf8' });
+  let worker!: JobCtl;
+  let told = '';
+  adapter.reply = async (ctl, message) => { worker = ctl; told = message; };
+
+  await jobs.reply(job.id, { message: 'take the lead change into account', sync: true });
+
+  assert.ok(told.startsWith('take the lead change into account\n\n'));
+  assert.match(told, /could NOT be brought up to date/);
+  assert.ok(told.includes(head));
+  assert.match(told, /conflicted files: app\.js/);
+  assert.match(told, /worktree is unchanged/);
+  assert.ok(told.includes(`git diff HEAD...${head} -- <file>`));
+  assert.ok(told.includes(`git show ${head}:<file>`));
+  assert.match(told, /so your change will merge/);
+  assert.equal(job.state, 'running');
+  assert.equal(job.turns, 2);
+  assert.equal(job.worktree!.base, before.worktree!.base);
+  assert.equal(job.roundsBase, before.roundsBase);
+  assert.deepEqual(job.result, before.result);
+  assert.equal(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: job.cwd, encoding: 'utf8' }), workerHead);
+  assert.equal(execFileSync('git', ['status', '--porcelain'], { cwd: job.cwd, encoding: 'utf8' }), '');
+  assert.throws(() => execFileSync('git', ['rev-parse', '--verify', 'MERGE_HEAD'], { cwd: job.cwd, stdio: 'pipe' }));
+  assert.equal(fs.readFileSync(path.join(job.cwd, 'app.js'), 'utf8'), 'export const x = 2;\n');
+  const note = `Could not be brought up to date with ${head} before turn 2; conflicted files: app.js. The message was sent without it.`;
+  assert.ok(job.notes.includes(note));
+  worker.done('second');
+  await settled(jobs, job);
+  assert.equal(job.state, 'done');
+  assert.ok(describe(job).includes(note));
+  await jobs.discard(job.id);
+});
+
+test('sync failures without conflicted files still refuse the follow-up', async (t) => {
+  const repo = tempRepo();
+  const { jobs, calls, home } = harness((ctl) => {
+    fs.writeFileSync(path.join(ctl.job.cwd, 'worker.js'), 'w\n');
+    ctl.done('first');
+  });
+  t.after(() => {
+    jobs.flush();
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(repo, { recursive: true, force: true });
+  });
+  const job = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'x' }));
+  const before = structuredClone(job);
+  await assert.rejects(jobs.reply(job.id, { message: 'again', sync: 'refs/heads/missing' }), /rev-parse/);
+  assert.deepEqual(job, before);
+
+  fs.writeFileSync(path.join(job.cwd, 'worker.js'), 'uncommitted\n');
+  await assert.rejects(jobs.reply(job.id, { message: 'again', sync: true }), /uncommitted changes/);
+  assert.equal(fs.readFileSync(path.join(job.cwd, 'worker.js'), 'utf8'), 'uncommitted\n');
+  assert.deepEqual(job, before);
+  execFileSync('git', ['restore', 'worker.js'], { cwd: job.cwd });
+
+  fs.writeFileSync(path.join(repo, 'lead.js'), 'l\n');
+  execFileSync('git', ['add', 'lead.js'], { cwd: repo });
+  execFileSync('git', ['commit', '-qm', 'lead'], { cwd: repo });
+  execFileSync('git', ['config', 'merge.ff', 'only'], { cwd: repo });
+  await assert.rejects(jobs.reply(job.id, { message: 'again', sync: true }), /Could not merge/);
+  assert.deepEqual(job, before);
+  assert.deepEqual(calls, []);
+  assert.equal(execFileSync('git', ['status', '--porcelain'], { cwd: job.cwd, encoding: 'utf8' }), '');
   await jobs.discard(job.id);
 });
 
@@ -1370,5 +1459,22 @@ test('a job says what its tokens are made of and what the latest turn added', as
   // An agent that reports only a total keeps working as before.
   worker.tokens(1500);
   assert.equal(job.tokens, 1500);
+  await jobs.discard(job.id);
+});
+
+test('a job still being set up counts as active, so the daemon is not replaced under it', async (t) => {
+  const repo = tempRepo();
+  const { jobs, home } = harness((ctl) => ctl.done('ok'));
+  t.after(() => {
+    jobs.flush();
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(repo, { recursive: true, force: true });
+  });
+  const creating = jobs.create({ kind: 'delegate', cwd: repo, task: 'x' });
+  // The worktree is not made yet and the job has no id, but stopping now would lose it.
+  assert.equal(jobs.list().length, 0);
+  assert.equal(jobs.activeCount, 1);
+  const job = await settled(jobs, await creating);
+  assert.equal(jobs.activeCount, 0);
   await jobs.discard(job.id);
 });

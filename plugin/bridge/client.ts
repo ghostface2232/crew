@@ -85,13 +85,37 @@ export function shouldReplace(running: Health, disk: { version: string; build: s
   return running.active === 0;
 }
 
+/**
+ * Stops the running daemon whatever it is doing, for the user's own `crew daemon stop` and `restart`.
+ * A daemon that does not hold the token in the file refuses the request, so it is then stopped by process id.
+ */
+export async function stopDaemon(): Promise<void> {
+  const running = await health();
+  if (!running) return;
+  const down = async () => (await health()) === null;
+  const asked = await api('POST', '/api/shutdown', {}).then(() => true, () => false);
+  if (asked && await waitFor(down, 5000)) return;
+  try {
+    process.kill(running.pid, 'SIGTERM');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ESRCH') throw new Error(`Could not stop the Crew daemon (process ${running.pid}): ${(err as Error).message}`);
+  }
+  if (!(await waitFor(down, 5000))) throw new Error(`The Crew daemon (process ${running.pid}) is still running at ${BASE_URL}. Stop that process yourself, then start Crew again.`);
+}
+
 async function startDaemon(): Promise<void> {
   const running = await health();
   if (running) {
     // Compare with the code on disk, not the code this process loaded: a long-lived session
     // still running old code must not keep restarting a daemon that is already current.
     if (!shouldReplace(running, installed(), PLUGIN_ROOT)) return;
-    await api('POST', '/api/shutdown', {}).catch(() => {});
+    // `running` is already old: a job may have started since. The daemon refuses if so, and then it stays.
+    // It also stays when it does not take this client's token; the next request says how to recover.
+    try {
+      await api('POST', '/api/shutdown', { ifIdle: true });
+    } catch {
+      return;
+    }
     await waitFor(async () => (await health()) === null, 5000);
   }
   fs.mkdirSync(HOME, { recursive: true });

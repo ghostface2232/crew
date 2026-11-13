@@ -137,7 +137,7 @@ The job's instructions state upfront what it can run so it does not find out by 
 
 ## 10. Bringing a worker up to date
 
-A worker's worktree starts from the lead's `HEAD` and does not follow it. `reply` with `sync: true` merges the lead's current `HEAD` into the worker's branch before the follow-up turn and moves the job's base to that commit, so the job's result still lists only the worker's own changes. A merge that conflicts is aborted: the reply fails with the conflicting files and no turn starts. While the merge runs, the job cannot be discarded and its rounds cannot be changed. Rounds are still replayed from the commit the job first started from, so an undo made before a sync is not lost.
+A worker's worktree starts from the lead's `HEAD` and does not follow it. `reply` with `sync: true` merges the lead's current `HEAD` into the worker's branch before the follow-up turn and moves the job's base to that commit, so the job's result still lists only the worker's own changes. A merge that conflicts is aborted, leaving the worktree, base, and result unchanged. The turn still starts: the message names the lead commit and conflicting files and asks the worker to account for the lead's changes; a job note records the failed sync. Other sync failures still refuse the reply. While the merge runs, the job cannot be discarded and its rounds cannot be changed. Rounds are still replayed from the commit the job first started from, so an undo made before a sync is not lost.
 
 A job whose worktree was discarded takes no further turn; ask a new question instead.
 
@@ -170,7 +170,7 @@ Antigravity CLI 1.5.5 was checked the same way with a polish job: the server pas
 
 The daemon listens on a local port, which every process on the machine can reach. Checking `Host` and `Origin` keeps web pages out, but not a local process, such as a worker whose sandbox has the network open for `runs_app`. So every request carries a secret.
 
-The secret is `~/.crew/token`: 64 hex characters, created by the daemon on first start, readable by the user alone, and kept across restarts.
+The secret is `~/.crew/token`: 64 hex characters, created on first start by the daemon that holds the port, readable by the user alone, and kept across restarts.
 
 | Client | How it presents the secret |
 | --- | --- |

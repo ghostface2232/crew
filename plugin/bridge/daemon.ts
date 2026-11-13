@@ -28,10 +28,39 @@ import type { EventKind, Job } from './jobs.ts';
  */
 
 fs.mkdirSync(HOME, { recursive: true });
+const log = (...args: unknown[]) => console.log(new Date().toISOString(), ...args);
+
+const server = http.createServer((req, res) => {
+  route(req, res).then(
+    (result) => {
+      if (result === undefined) return;
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(result));
+    },
+    (err) => {
+      const status = err instanceof HttpError ? err.status : 400;
+      if (!res.headersSent) res.writeHead(status, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: String(err?.message ?? err) }));
+    },
+  );
+});
+
+/**
+ * The port is what makes this process the daemon, so it is taken before anything else is read or written.
+ * Two daemons started at once both get this far; the one that loses must not make a token the winner does
+ * not hold, or clear away the scratch directories and review snapshots of jobs the winner is running.
+ * The rest of this file runs without yielding, so no request is answered before the state it sets up exists.
+ */
+server.on('error', (err: NodeJS.ErrnoException) => {
+  // Another daemon won the race for the port; the client will find it via /api/health.
+  log(err.code === 'EADDRINUSE' ? `port ${PORT} is already in use` : `server error: ${err.message}`);
+  process.exit(err.code === 'EADDRINUSE' ? 0 : 1);
+});
+await new Promise<void>((resolve) => server.listen(PORT, '127.0.0.1', resolve));
+
 const config = loadConfig();
 /** Fingerprint of the code this process loaded; clients compare it with what is on disk now. */
 const BUILD = installed().build;
-const log = (...args: unknown[]) => console.log(new Date().toISOString(), ...args);
 
 const streams = new Set<http.ServerResponse>();
 function broadcast(type: string, data: unknown): void {
@@ -449,27 +478,14 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       return saved;
     }
     if (pathname === '/api/shutdown') {
+      // A client replacing an outdated daemon decided on a health reply that may be stale by now; only the daemon knows.
+      if ((await readJson(req)).ifIdle && jobs.activeCount > 0) throw new HttpError(409, `${jobs.activeCount} job(s) are active, so the daemon keeps running.`);
       setImmediate(shutdown);
       return {};
     }
   }
   throw new HttpError(404, 'not found');
 }
-
-const server = http.createServer((req, res) => {
-  route(req, res).then(
-    (result) => {
-      if (result === undefined) return;
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify(result));
-    },
-    (err) => {
-      const status = err instanceof HttpError ? err.status : 400;
-      if (!res.headersSent) res.writeHead(status, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ error: String(err?.message ?? err) }));
-    },
-  );
-});
 
 function shutdown(): void {
   log('shutting down');
@@ -482,16 +498,8 @@ function shutdown(): void {
   process.exit(0);
 }
 
-server.on('error', (err: NodeJS.ErrnoException) => {
-  // Another daemon won the race for the port; the client will find it via /api/health.
-  log(err.code === 'EADDRINUSE' ? `port ${PORT} is already in use` : `server error: ${err.message}`);
-  process.exit(err.code === 'EADDRINUSE' ? 0 : 1);
-});
-
-server.listen(PORT, '127.0.0.1', () => {
-  fs.writeFileSync(path.join(HOME, 'daemon.json'), JSON.stringify({ pid: process.pid, port: PORT, version: VERSION, build: BUILD, root: PLUGIN_ROOT }));
-  log(`crew daemon ${VERSION} (${BUILD}) listening on http://127.0.0.1:${PORT}`);
-});
+fs.writeFileSync(path.join(HOME, 'daemon.json'), JSON.stringify({ pid: process.pid, port: PORT, version: VERSION, build: BUILD, root: PLUGIN_ROOT }));
+log(`crew daemon ${VERSION} (${BUILD}) listening on http://127.0.0.1:${PORT}`);
 
 // Keeps idle SSE connections from being dropped by intermediaries and detects dead ones.
 setInterval(() => {

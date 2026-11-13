@@ -270,9 +270,9 @@ export class Jobs {
     return [...this.jobs.values()].sort((a, b) => b.createdAt - a.createdAt);
   }
 
-  /** Number of jobs that would be lost if the daemon stopped now. */
+  /** Number of jobs that would be lost if the daemon stopped now, counting those still being set up. */
   get activeCount(): number {
-    return [...this.jobs.values()].filter((job) => !isTerminal(job)).length;
+    return [...this.jobs.values()].filter((job) => !isTerminal(job)).length + this.starting.length;
   }
 
   get(id: string): Job {
@@ -483,12 +483,21 @@ export class Jobs {
     // The worker started from an older commit. Merging the lead's branch in first gives it what was committed since,
     // and moves the base, so the job's result stays the worker's own changes.
     let synced: string | null = null;
+    let syncWarning = '';
     if (input.sync) {
       if (!job.worktree || !job.repo || job.kind === 'review') throw new Error(`Job ${id} has no worktree of its own to bring up to date. Drop sync.`);
       this.preparingReviews.add(id);
       try {
-        synced = await mergeInto(job.worktree.path, job.repo, typeof input.sync === 'string' ? input.sync : 'HEAD');
-        if (synced !== job.worktree.base) {
+        const merged = await mergeInto(job.worktree.path, job.repo, typeof input.sync === 'string' ? input.sync : 'HEAD');
+        if (merged.conflicts.length) {
+          const commit = merged.commit.slice(0, 8);
+          const files = merged.conflicts.join(', ');
+          syncWarning = `\n\nYour worktree could NOT be brought up to date with the lead's commit \`${commit}\`; conflicted files: ${files}. The merge was aborted and your worktree is unchanged. Look at the lead's version of these files (\`git diff HEAD...${commit} -- <file>\` / \`git show ${commit}:<file>\`) and take it into account so your change will merge.`;
+          job.notes.push(`Could not be brought up to date with ${commit} before turn ${job.turns + 1}; conflicted files: ${files}. The message was sent without it.`);
+        } else {
+          synced = merged.commit;
+        }
+        if (synced && synced !== job.worktree.base) {
           // Rounds are replayed from the branch's history, which starts where the job did, not where it was last synced.
           job.roundsBase ??= job.worktree.base;
           job.worktree.base = synced;
@@ -520,7 +529,7 @@ export class Jobs {
     const what = !retry ? input.message.split('\n')[0].slice(0, 80) : job.asksUser ? 'refused action retried; the user is asked about each request' : 'refused action retried with the user\'s approval';
     this.event(job, 'started', `follow-up: ${what}`);
     try {
-      let message = input.message;
+      let message = input.message + syncWarning;
       if (job.scratch) fs.mkdirSync(job.scratch, { recursive: true });
       if (synced) message += `\n\nYour worktree has been brought up to date: it now contains the lead's commits up to \`${synced.slice(0, 8)}\`, merged into your branch. Look at what changed (\`git log -5 --stat\`) before continuing.`;
       if (job.kind === 'review' && job.runsApp) {

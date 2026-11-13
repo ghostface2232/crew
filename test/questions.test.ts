@@ -443,3 +443,66 @@ test('a worker that cannot run commands can search its tree and see what was jus
   }
   assert.match((await call('search', { pattern: '' })).error, /non-empty/);
 });
+
+test('a daemon that loses the race for the port writes no token and leaves running jobs alone', { timeout: 15000 }, async (t) => {
+  const h = await daemon(t);
+  const { body: job } = await h.api('POST', '/api/jobs', { kind: 'delegate', cwd: h.home, project: h.home, task: 'a question', ask: true });
+  assert.ok(fs.existsSync(job.scratch));
+  // As at a first start: no token yet. Whichever daemon holds the port must be the only one to make it.
+  fs.rmSync(path.join(h.home, 'token'));
+  const loser = spawn(process.execPath, [path.resolve('plugin/bridge/daemon.ts')], { env: h.env, stdio: ['ignore', 'pipe', 'pipe'] });
+  let out = '';
+  loser.stdout.on('data', (chunk) => { out += chunk; });
+  assert.equal(await new Promise((resolve) => loser.once('exit', resolve)), 0);
+  assert.match(out, /already in use/);
+  assert.equal(fs.existsSync(path.join(h.home, 'token')), false);
+  assert.ok(fs.existsSync(job.scratch), 'the running job keeps its scratch directory');
+  assert.equal((await h.api('GET', `/api/jobs/${job.id}`)).body.state, 'running');
+});
+
+test('a client replacing an outdated daemon is refused while a job is active', { timeout: 15000 }, async (t) => {
+  const h = await daemon(t);
+  const { job } = await h.create();
+  const { pid } = (await h.api('GET', '/api/health')).body;
+  const refused = await h.api('POST', '/api/shutdown', { ifIdle: true });
+  assert.equal(refused.status, 409);
+  assert.match(refused.body.error, /1 job\(s\) are active/);
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  assert.equal((await h.api('GET', '/api/health')).body.pid, pid);
+  assert.equal((await h.api('GET', `/api/jobs/${job.id}`)).body.state, 'running');
+  // Idle again, it goes.
+  assert.equal((await h.api('POST', `/api/jobs/${job.id}/cancel`, {})).body.state, 'cancelled');
+  assert.equal((await h.api('POST', '/api/shutdown', { ifIdle: true })).status, 200);
+});
+
+test('restart stops a daemon that does not take the token in the file, and says so when it cannot', { timeout: 30000 }, async (t) => {
+  const h = await daemon(t);
+  const health = async () => fetch(`http://127.0.0.1:${h.port}/api/health`).then((res) => res.json() as any, () => null);
+  const old = (await health()).pid;
+  // What two daemons starting at once used to leave behind: the file holds a token the listener never had.
+  const token = 'f'.repeat(64);
+  fs.writeFileSync(path.join(h.home, 'token'), `${token}\n`);
+  const cli = (...args: string[]) => new Promise<{ code: number | null; out: string }>((resolve) => {
+    const child = spawn(process.execPath, [path.resolve('plugin/bridge/cli.ts'), ...args], { env: h.env, stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '';
+    child.stdout.on('data', (chunk) => { out += chunk; });
+    child.stderr.on('data', (chunk) => { out += chunk; });
+    child.once('exit', (code) => resolve({ code, out }));
+  });
+  // Up, but deaf to this client: that is not "running".
+  const started = await cli('daemon', 'start');
+  assert.equal(started.code, 1);
+  assert.match(started.out, /refused this request/);
+  assert.doesNotMatch(started.out, /running at/);
+
+  try {
+    const restarted = await cli('daemon', 'restart');
+    assert.deepEqual([restarted.code, restarted.out.trim()], [0, `running at http://127.0.0.1:${h.port}`]);
+    assert.notEqual((await health()).pid, old);
+    const state = await fetch(`http://127.0.0.1:${h.port}/api/state`, { headers: { authorization: `Bearer ${token}` } });
+    assert.equal(state.status, 200);
+  } finally {
+    // The CLI's daemon is detached; it has to go while its home is still there to save into.
+    assert.equal((await cli('daemon', 'stop')).out.trim(), 'stopped');
+  }
+});

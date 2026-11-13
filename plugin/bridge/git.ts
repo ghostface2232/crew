@@ -192,20 +192,23 @@ export async function commitChanges(wt: string, commit: string): Promise<{ files
 }
 
 /**
- * Merges `ref` of the repository into the branch checked out in `wt` and returns the merged commit.
+ * Merges `ref` of the repository into the branch checked out in `wt`, returning the commit and any conflicts.
  * A merge that does not apply cleanly is aborted, so the worktree is left as it was.
  */
-export async function mergeInto(wt: string, repo: string, ref: string): Promise<string> {
+export async function mergeInto(wt: string, repo: string, ref: string): Promise<{ commit: string; conflicts: string[] }> {
   const commit = await git(repo, ['rev-parse', '--verify', `${ref}^{commit}`]);
   if (await dirtyCount(wt)) throw new Error('The worktree has uncommitted changes, so nothing was merged into it.');
   try {
     await git(wt, [...await commitSettings(wt), '-c', `core.hooksPath=${os.devNull}`, 'merge', '--no-edit', commit]);
   } catch (err) {
     const conflicts = (await git(wt, ['diff', '--name-only', '--diff-filter=U', '-z'])).split('\0').filter(Boolean);
-    await git(wt, ['merge', '--abort']).catch(() => {});
-    throw new Error(`Could not merge ${commit.slice(0, 8)} into the worker's branch${conflicts.length ? `; conflicted files: ${conflicts.join(', ')}` : ''}: ${(err as Error).message}`);
+    await git(wt, ['merge', '--abort']).catch((abort) => {
+      if (conflicts.length) throw abort;
+    });
+    if (conflicts.length) return { commit, conflicts };
+    throw new Error(`Could not merge ${commit.slice(0, 8)} into the worker's branch: ${(err as Error).message}`);
   }
-  return commit;
+  return { commit, conflicts: [] };
 }
 
 /** Branch checked out in a working tree, or null when HEAD is detached. */

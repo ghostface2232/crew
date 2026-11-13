@@ -40,7 +40,7 @@ struct StatusLabel: View {
         // Darkened in light mode so orange and green text reach about 3:1 on the tint; dark mode already does.
         let text = scheme == .light ? color.mix(with: .black, by: 0.22) : color
         Label(title ?? state.capitalized, systemImage: symbol)
-            .font(Typeface.chip).foregroundStyle(text)
+            .font(Typeface.chip).foregroundStyle(text).lineLimit(1).fixedSize()
             .padding(.horizontal, 8).padding(.vertical, 5)
             .background(color.opacity(0.12), in: Capsule())
             .overlay { if contrast == .increased { Capsule().strokeBorder(text.opacity(0.5)) } }

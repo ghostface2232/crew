@@ -12,7 +12,7 @@ struct BoardView: View {
             page
                 // Narrow enough for the sidebar to be optional; the window adds the sidebar's own minimum when shown.
                 .frame(minWidth: 560)
-                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { toolbarLayout.detailFrame = $0 }
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { if toolbarLayout.detailFrame != $0 { toolbarLayout.detailFrame = $0 } }
                 .toolbar { WorkspaceToolbar(store: store, layout: toolbarLayout) }
                 .navigationTitle(title)
                 .toolbar(removing: .title)
@@ -41,6 +41,9 @@ struct BoardView: View {
                 .id(store.selection ?? "overview")
                 // A crossfade layers two full pages at once; only the incoming page animates.
                 .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 6)), removal: .identity))
+                // Tied to the page itself, so tabs, the sidebar and keyboard shortcuts all get the same entrance;
+                // a withAnimation in the AppKit tab control's action did not reach this view.
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: store.selection)
                 .disabled(store.selectedJob != nil)
                 .accessibilityHidden(store.selectedJob != nil)
                 .overlay(alignment: .trailing) {
@@ -188,7 +191,7 @@ struct AgentOverview: View {
             else {
                 ViewThatFits(in: .horizontal) {
                     HStack(alignment: .top, spacing: 12) {
-                        ForEach(agents, id: \.self) { agent in AgentCard(store: store, agent: agent).frame(minWidth: 205) }
+                        ForEach(agents, id: \.self) { agent in AgentCard(store: store, agent: agent) }
                     }
                     compactAgents
                 }
@@ -236,9 +239,12 @@ private struct AgentCard: View {
             HStack(alignment: .top, spacing: 10) {
                 AgentMark(agent: agent, size: 22).padding(.top, 1)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(agentName(agent)).font(Typeface.cardTitle)
+                    Text(agentName(agent)).font(Typeface.cardTitle).fixedSize()
+                    // The role truncates and claims no width of its own, so the name and status set
+                    // the card's minimum and the cards give way to the list only when those no longer fit.
                     Text(agent == "claude" ? "Lead" : roleOrder.filter { store.state.roles[$0]?.agent == agent }.compactMap { roleNames[$0] }.joined(separator: " · "))
                         .font(Typeface.caption).foregroundStyle(.secondary).lineLimit(1)
+                        .frame(minWidth: 0, idealWidth: 0, maxWidth: .infinity, alignment: .leading)
                 }
                 Spacer(minLength: 8)
                 StatusLabel(state: mark, title: mark == "waiting" ? "Needs you" : mark == "working" ? "Working" : mark == "stalled" ? "May be stuck" : store.state.agents[agent]?.enabled == false ? "Disabled" : "Ready")

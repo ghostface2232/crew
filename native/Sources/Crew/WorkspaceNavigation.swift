@@ -41,34 +41,64 @@ struct WorkspacePressStyle: ButtonStyle {
 struct ToolbarSearch: View {
     @Bindable var store: CrewStore
     @State private var expanded = false
+    /// Driven frame by frame: the toolbar sizes its items itself and does not animate a SwiftUI
+    /// size change, so stepping the width lets the glass, the field and the neighboring items move together.
+    @State private var width = collapsedWidth
+    @State private var stepper: Task<Void, Never>?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private static let collapsedWidth: CGFloat = 36
+    private static let expandedWidth: CGFloat = 200
     var body: some View {
-        Group {
+        ZStack {
             if expanded {
-                SearchField(text: $store.search, onEnd: { if store.search.isEmpty { close() } }, onCancel: close)
-                    .frame(width: 200)
+                SearchField(text: $store.search, onCollapse: collapse, onCancel: cancel)
                     .transition(.opacity)
             } else {
                 // The toolbar's own button style draws a single icon as a circle, like the other toolbar items.
+                // A tinted icon tells that a search still filters the board while the field is closed.
                 Button("Search work", systemImage: "magnifyingglass") { open() }
-                    .labelStyle(.iconOnly).help("Search work (⌘F)")
+                    .labelStyle(.iconOnly).foregroundStyle(store.search.isEmpty ? Color.primary : Color.accentColor)
+                    .help(store.search.isEmpty ? "Search work (⌘F)" : "Searching “\(store.search)” (⌘F)")
+                    .transition(.opacity)
             }
         }
+        .frame(width: width)
         .onChange(of: store.searchRequest) { open() }
     }
     private func open() {
-        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { expanded = true }
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) { expanded = true }
+        resize(to: Self.expandedWidth)
     }
-    private func close() {
+    /// Clicking elsewhere closes the field but keeps the filter, so opening a matching job does not lose it.
+    private func collapse() {
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) { expanded = false }
+        resize(to: Self.collapsedWidth)
+    }
+    /// Escape clears the search as well.
+    private func cancel() {
         store.search = ""
-        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { expanded = false }
+        collapse()
+    }
+    private func resize(to target: CGFloat) {
+        stepper?.cancel()
+        guard !reduceMotion else { width = target; return }
+        let start = width, duration = 0.3, begin = Date()
+        stepper = Task { @MainActor in
+            while !Task.isCancelled {
+                let progress = min(1, Date().timeIntervalSince(begin) / duration)
+                let eased = 1 - pow(1 - progress, 3) // ease-out, close to the system's own toolbar motion
+                width = start + (target - start) * eased
+                if progress >= 1 { break }
+                try? await Task.sleep(for: .milliseconds(8))
+            }
+        }
     }
 }
 
 // SwiftUI focus does not reach a field inside the toolbar, so the AppKit field takes focus itself when shown.
 private struct SearchField: NSViewRepresentable {
     @Binding var text: String
-    var onEnd: () -> Void
+    var onCollapse: () -> Void
     var onCancel: () -> Void
     func makeNSView(context: Context) -> FocusingSearchField {
         let field = FocusingSearchField()
@@ -78,6 +108,8 @@ private struct SearchField: NSViewRepresentable {
         field.focusRingType = .none
         field.delegate = context.coordinator
         field.setAccessibilityLabel("Search work")
+        field.stringValue = text
+        field.onOutsideClick = { context.coordinator.parent.onCollapse() }
         return field
     }
     func updateNSView(_ field: FocusingSearchField, context: Context) {
@@ -92,7 +124,6 @@ private struct SearchField: NSViewRepresentable {
             guard let field = notification.object as? NSSearchField else { return }
             parent.text = field.stringValue
         }
-        func controlTextDidEndEditing(_ notification: Notification) { parent.onEnd() }
         func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
             guard selector == #selector(NSResponder.cancelOperation(_:)) else { return false }
             parent.onCancel()
@@ -100,10 +131,22 @@ private struct SearchField: NSViewRepresentable {
         }
     }
     final class FocusingSearchField: NSSearchField {
+        var onOutsideClick: (() -> Void)?
+        private var monitor: Any?
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
+            if let monitor { NSEvent.removeMonitor(monitor); self.monitor = nil }
             guard window != nil else { return }
             DispatchQueue.main.async { [weak self] in self?.window?.makeFirstResponder(self) }
+            // Clicks on cards and empty areas do not take focus, so a click anywhere else in the window
+            // closes the field directly. The click still goes through to whatever was hit.
+            monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+                if let self, event.window === self.window,
+                   !self.convert(self.bounds, to: nil).contains(event.locationInWindow) {
+                    DispatchQueue.main.async { self.onOutsideClick?() }
+                }
+                return event
+            }
         }
     }
 }
@@ -172,16 +215,23 @@ struct WorkspaceTabs: NSViewRepresentable {
         return control
     }
     func updateNSView(_ control: NSSegmentedControl, context: Context) {
-        context.coordinator.store = store
-        let pending = store.state.pendingCount > 0
-        for index in Self.pages.indices {
-            control.setLabel(compact ? "" : Self.titles[index], forSegment: index)
-            control.setToolTip(compact ? Self.titles[index] : nil, forSegment: index)
-            control.setImage(image(index, badged: index == 1 && pending), forSegment: index)
-            control.setWidth(0, forSegment: index)
+        let coordinator = context.coordinator
+        coordinator.store = store
+        // Only touch the control when something it shows has changed. Setting labels, images or the
+        // selection again on every toolbar update restarts the system's sliding selection animation.
+        let style = Coordinator.Style(compact: compact, badged: store.state.pendingCount > 0)
+        if coordinator.style != style {
+            coordinator.style = style
+            for index in Self.pages.indices {
+                control.setLabel(compact ? "" : Self.titles[index], forSegment: index)
+                control.setToolTip(compact ? Self.titles[index] : nil, forSegment: index)
+                control.setImage(image(index, badged: index == 1 && style.badged), forSegment: index)
+                control.setWidth(0, forSegment: index)
+            }
+            control.invalidateIntrinsicContentSize()
         }
-        control.selectedSegment = Self.pages.firstIndex(of: current) ?? 0
-        control.invalidateIntrinsicContentSize()
+        let selected = Self.pages.firstIndex(of: current) ?? 0
+        if control.selectedSegment != selected { control.selectedSegment = selected }
     }
     /// Waiting requests show as the bell's own orange badge, which keeps the segment's width fixed.
     private func image(_ index: Int, badged: Bool) -> NSImage? {
@@ -200,12 +250,13 @@ struct WorkspaceTabs: NSViewRepresentable {
     }
     func makeCoordinator() -> Coordinator { Coordinator(store: store) }
     @MainActor final class Coordinator: NSObject {
+        struct Style: Equatable { var compact: Bool; var badged: Bool }
+        var style: Style?
         var store: CrewStore
         init(store: CrewStore) { self.store = store }
         @objc func changed(_ control: NSSegmentedControl) {
             let page = WorkspaceTabs.pages[control.selectedSegment]
-            let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.22)) { store.selection = page }
+            store.selection = page
         }
     }
 }

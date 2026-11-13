@@ -163,3 +163,28 @@ The worker routes require the job's token, which is created when the job starts,
 Checked on 2026-11-13 with Codex CLI 0.167.0 and real jobs on an isolated daemon, as a read-only question and as a writing job in a worktree: the worker asked, the lead's answer arrived through `lead_answers`, and a request with a wrong token was refused. Codex refuses an MCP tool call outright under approval policy `never`, so the server is registered with `default_tools_approval_mode = "approve"`; its tools only talk to the bridge.
 
 Antigravity CLI 1.5.5 was checked the same way with a polish job: the server passed in ACP's `mcpServers` was started, the worker asked, and it used the lead's answer. Not exercised: restoring an Antigravity session that has the server, and a question from a Codex sub-agent thread.
+
+## 12. Who may talk to the daemon
+
+The daemon listens on a local port, which every process on the machine can reach. Checking `Host` and `Origin` keeps web pages out, but not a local process, such as a worker whose sandbox has the network open for `runs_app`. So every request carries a secret.
+
+The secret is `~/.crew/token`: 64 hex characters, created by the daemon on first start, readable by the user alone, and kept across restarts.
+
+| Client | How it presents the secret |
+| --- | --- |
+| The lead's MCP server, the CLI, the wake and context hooks | `Authorization: Bearer <token>`, read from the file |
+| The native app | The same header, on requests and on the event stream |
+| The web board | A cookie. The board is opened at `http://127.0.0.1:47615/#token=<token>`; the page posts the token to `POST /api/session`, which answers with an `HttpOnly`, `SameSite=Strict` cookie named `crew_session`, and removes the fragment from the address |
+| A worker's MCP server | Its own per-job token, on the worker routes only (section 11) |
+
+| Open without the secret | Why |
+| --- | --- |
+| `GET /`, the board's assets, fonts, icons | The page has to load before it can sign in; it holds no data |
+| `GET /api/health` | Clients use it to find the daemon and compare versions; it names no job |
+| `POST /api/hooks/claude` | Claude Code's HTTP hooks cannot read a file; the route only records session activity |
+| `POST /api/session` | It is how the secret is presented |
+| The worker routes | They take the job token instead |
+
+Everything else answers `401` with `{ "error": "unauthorized" }` when the secret is missing or wrong. A board that gets `401` says how to open it signed in: `crew board`, or Open Web Board in the app.
+
+Workers are kept from the file. A Codex job that is read-only or has the network open runs under a permissions profile that denies it; a Codex job with neither can read it but has no network to use it with. Antigravity's read of the file is refused by the bridge's policy, and its commands need the user's approval.

@@ -181,7 +181,7 @@ export class AntigravityAdapter implements Adapter {
         for (const run of this.runs.values()) drop(run);
         this.runs.clear();
       },
-    });
+    }, shell);
     this.peer = peer;
     // No fs or terminal capabilities: the agent uses its own tools, gated by request_permission.
     const { agentCapabilities } = await peer.initialize({
@@ -260,18 +260,18 @@ export class AntigravityAdapter implements Adapter {
       });
       if (answer === null) return cancelled;
       allow = answer;
-      if (!answer) run.ctl.note(`The user declined an action: ${toolCall.title ?? 'tool call'}.`);
+      if (!answer) run.ctl.note(`The user declined an action: ${toolCall.title ?? 'tool call'}.`, { declined: true });
     }
     if (run && typeof verdict === 'object') {
       const what = `${verdict.refuse}: ${toolCall.title ?? 'tool call'}`;
       run.ctl.progress(`refused (${what})`);
-      run.ctl.note(`The bridge refused an action outside the ${ROLE_NAMES[run.ctl.job.kind]} role (${what}).`);
+      run.ctl.note(`The bridge refused an action outside the ${ROLE_NAMES[run.ctl.job.kind]} role (${what}).`, { declined: true });
     }
     // Never "always": each action must come back here so its path is checked and the user sees every command.
     // A refusal is for this request only, so "reject always" is used just when it is the only way to say no.
     const options: any[] = p.options ?? [];
     const option = (allow ? ['allow_once'] : ['reject_once', 'reject_always']).map((kind) => options.find((o) => o.kind === kind)).find(Boolean);
-    if (run && allow && !option) run.ctl.note(`An allowed action was not carried out because Antigravity offered no one-time approval: ${toolCall.title ?? 'tool call'}.`);
+    if (run && allow && !option) run.ctl.note(`An allowed action was not carried out because Antigravity offered no one-time approval: ${toolCall.title ?? 'tool call'}.`, { declined: true });
     // Without a matching option the answer is "cancelled", which grants nothing.
     return option ? { outcome: { outcome: 'selected', optionId: option.optionId } } : cancelled;
   }
@@ -310,8 +310,10 @@ export function decide(role: JobKind, cwd: string, toolCall: { kind?: string; ti
   // The daemon's secret is not a worker's to read, whatever the role. Commands are the user's to approve as before.
   const secret = tokenFile(HOME);
   if ((toolCall.locations ?? []).some((l) => l.path && path.resolve(l.path) === secret)) return { refuse: 'the Crew token file' };
-  // Some ACP calls identify the tool only by its qualified title. Never match a substring or a bare tool name.
-  if (!toolCall._meta?.mcpServerName && !toolCall._meta?.mcpToolName && ['other', 'execute'].includes(kind)
+  // A qualified title can identify an MCP call, but must never disguise a command.
+  const input = toolCall.rawInput;
+  const command = typeof input === 'string' || (input !== null && typeof input === 'object' && ('command' in input || 'CommandLine' in input));
+  if (!toolCall._meta?.mcpServerName && !toolCall._meta?.mcpToolName && kind === 'other' && !command
     && /^(?:Run )?mcp_crew_(?:ask_lead|lead_answers|siblings|search|recent_changes)$/.test(toolCall.title ?? '')) return 'allow';
   if (PASSIVE_KINDS.includes(kind)) return 'allow';
   if (kind === 'switch_mode') return { refuse: kind };

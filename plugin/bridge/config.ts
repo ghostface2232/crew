@@ -264,6 +264,6 @@ export function agentCommand(bin: string, env: NodeJS.ProcessEnv = agentEnv(), p
     }
   }
   const shell = /\.(cmd|bat)$/i.test(bin);
-  if (shell && /["\r\n]/.test(bin)) throw new Error('Invalid agent binary path.');
+  if (shell && /["%\r\n]/.test(bin)) throw new Error('Invalid agent binary path.');
   return { bin: shell ? `"${bin}"` : bin, shell };
 }

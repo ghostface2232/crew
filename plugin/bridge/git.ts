@@ -260,7 +260,7 @@ export async function detachLinks(dir: string): Promise<void> {
   }
 }
 
-export async function removeWorktree(root: string, wt: Worktree, id: string, home: string): Promise<void> {
+export async function removeWorktree(root: string, wt: Worktree, id: string, home: string, platform: NodeJS.Platform = process.platform): Promise<void> {
   const worktrees = path.join(home, 'worktrees');
   if (!/^(cx|ag)-[0-9a-f]{6}$/.test(id) || wt.branch !== `crew-${id}`
       || path.resolve(wt.path) !== path.resolve(worktreePath(root, id, home))
@@ -279,25 +279,32 @@ export async function removeWorktree(root: string, wt: Worktree, id: string, hom
     if (!registered.includes(`branch refs/heads/${wt.branch}`)) {
       throw new Error(`Refusing to remove ${wt.path}: Git lists it under a different branch.`);
     }
-    // Only there can Git's deletion follow a link out of the worktree; elsewhere the walk would cost time for nothing.
-    if (process.platform === 'win32') await detachLinks(wt.path);
+    const locked = registered.some((line) => line === 'locked' || line.startsWith('locked '));
+    // Leave a locked tree untouched so Git can report why it cannot be removed.
+    // Only Windows deletion can follow a link out of the worktree.
+    if (platform === 'win32' && !locked) await detachLinks(wt.path);
     try {
       await git(root, ['worktree', 'remove', '--force', wt.path]);
-    } catch {
-      await fs.rm(wt.path, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-      // Windows may keep handles open on Git's metadata even after the directory is gone.
-      for (let attempt = 0; ; attempt++) {
-        try {
-          await git(root, ['worktree', 'prune', '--expire', 'now']);
-          const remaining = (await git(root, ['worktree', 'list', '--porcelain', '-z'])).split('\0');
-          if (remaining.some((line) => line.startsWith('worktree ') && realpath(line.slice(9)) === realpath(wt.path))) {
-            throw new Error(`Git still lists the removed worktree at ${wt.path}.`);
+    } catch (err) {
+      if (platform !== 'win32' || locked) throw err;
+      try {
+        await fs.rm(wt.path, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+        // Windows may keep handles open on Git's metadata even after the directory is gone.
+        for (let attempt = 0; ; attempt++) {
+          try {
+            await git(root, ['worktree', 'prune', '--expire', 'now']);
+            const remaining = (await git(root, ['worktree', 'list', '--porcelain', '-z'])).split('\0');
+            if (remaining.some((line) => line.startsWith('worktree ') && realpath(line.slice(9)) === realpath(wt.path))) {
+              throw new Error(`Git still lists the removed worktree at ${wt.path}.`);
+            }
+            break;
+          } catch (err) {
+            if (attempt === 5) throw err;
+            await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
           }
-          break;
-        } catch (err) {
-          if (attempt === 5) throw err;
-          await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
         }
+      } catch (cleanupError) {
+        throw new Error(`${(err as Error).message}\nWindows cleanup failed: ${(cleanupError as Error).message}`, { cause: err });
       }
     }
   } else if (dir) {

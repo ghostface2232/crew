@@ -62,8 +62,6 @@ export class CodexAdapter implements Adapter {
   /** Threads the current server process has in memory. */
   private loaded = new Set<string>();
   private lastUsed = Date.now();
-  /** Ids of the plugins the user's Codex has installed ("name@marketplace"), asked once per server process. */
-  private pluginIds: Promise<string[]> | null = null;
   private config: Config;
 
   constructor(config: Config) {
@@ -153,22 +151,24 @@ export class CodexAdapter implements Adapter {
   private async lean(ctl: JobCtl, peer: RpcPeer) {
     const wanted = ctl.job.plugins ?? [];
     if (!wanted.length) return LEAN;
-    this.pluginIds ??= peer.request('plugin/installed', {}, RPC_TIMEOUT_MS)
-      .then((res) => ((res.marketplaces ?? []) as any[]).flatMap((marketplace) => ((marketplace.plugins ?? []) as any[]).filter((plugin) => plugin.installed).map((plugin) => plugin.id as string)));
+    // Installation and user settings can change while the app-server is running.
     // A Codex that cannot list its plugins has none to give; the job is still worth running without them.
-    const ids = await this.pluginIds.catch(() => {
-      this.pluginIds = null;
-      return [] as string[];
-    });
+    const installed: { id: string; enabled: boolean }[] = await peer.request('plugin/installed', {}, RPC_TIMEOUT_MS)
+      .then((res) => ((res.marketplaces ?? []) as any[]).flatMap((marketplace) => ((marketplace.plugins ?? []) as any[])
+        .filter((plugin) => plugin.installed).map((plugin) => ({ id: plugin.id, enabled: plugin.enabled === true }))))
+      .catch(() => []);
     const named = (id: string, name: string) => id === name || id.startsWith(`${name}@`);
     // The ones a job that runs the app gets by default are not there on every machine; only a name the lead gave is worth a note.
-    const missing = wanted.filter((name) => !this.config.codex.appPlugins.includes(name) && !ids.some((id) => named(id, name)));
+    const explicit = ctl.job.requestedPlugins ?? wanted.filter((name) => !ctl.job.runsApp || !this.config.codex.appPlugins.includes(name));
+    const missing = explicit.filter((name) => !installed.some((plugin) => named(plugin.id, name)));
     if (missing.length) ctl.note(`Codex has no plugin named ${missing.join(', ')}; the job runs without it.`);
-    if (!ids.some((id) => wanted.some((name) => named(id, name)))) return LEAN;
+    const disabled = explicit.filter((name) => installed.some((plugin) => named(plugin.id, name)) && !installed.some((plugin) => plugin.enabled && named(plugin.id, name)));
+    if (disabled.length) ctl.note(`Codex has plugin ${disabled.join(', ')}, but the user has it off; the job runs without it.`);
+    if (!installed.some((plugin) => plugin.enabled && wanted.some((name) => named(plugin.id, name)))) return LEAN;
     return {
       // A plugin's skill is how the worker learns to use its tools, so the skill list is kept for these jobs.
       features: { ...LEAN.features, plugins: true },
-      plugins: Object.fromEntries(ids.map((id) => [id, { enabled: wanted.some((name) => named(id, name)) }])),
+      plugins: Object.fromEntries(installed.map((plugin) => [plugin.id, { enabled: plugin.enabled && wanted.some((name) => named(plugin.id, name)) }])),
     };
   }
 
@@ -267,7 +267,6 @@ export class CodexAdapter implements Adapter {
       onRequest: (method, params, id) => this.onRequest(method, params, id),
       onExit: (reason) => {
         if (this.peer === peer) this.peer = null;
-        this.pluginIds = null;
         this.loaded.clear();
         this.children.clear();
         for (const run of this.runs.values()) {
@@ -278,7 +277,7 @@ export class CodexAdapter implements Adapter {
         }
         this.runs.clear();
       },
-    });
+    }, shell);
     this.peer = peer;
     await peer.initialize({ clientInfo: { name: 'crew', title: 'Crew', version: VERSION }, capabilities: null });
     peer.notify('initialized');
@@ -442,6 +441,9 @@ export class CodexAdapter implements Adapter {
 
   private settleRequest(run: Run, index: number, answer: Answer | null): void {
     const [request] = run.pending.splice(index, 1);
+    if (request.type === 'approval' && answer && !answer.cancelled && !answer.approve) {
+      run.ctl.note(`The user declined an action: ${request.reason}`, { declined: true });
+    }
     request.resolve(answer);
     if (index !== 0) return;
     const next = run.pending[0];
@@ -457,7 +459,7 @@ export class CodexAdapter implements Adapter {
       if (run.interrupt) return Promise.resolve<Answer>({ approve: false, cancelled: true });
       // Nothing in a read-only job is the user's to allow: a question or a static review that asks to write is declined.
       if (type === 'approval' && run.ctl.job.sandbox === 'read-only') {
-        run.ctl.note(`Declined in a read-only job: ${reason.split('\n')[0].slice(0, 120)}`);
+        run.ctl.note(`Declined in a read-only job: ${reason.split('\n')[0].slice(0, 120)}`, { declined: true });
         return Promise.resolve<Answer>({ approve: false });
       }
       if (this.children.has(threadId)) reason = `Sub-agent request\n${reason}`;
@@ -471,11 +473,14 @@ export class CodexAdapter implements Adapter {
     switch (method) {
       case 'item/commandExecution/requestApproval': {
         const deny = p.availableDecisions && !p.availableDecisions.includes('decline') ? 'cancel' : 'decline';
-        if (p.availableDecisions && !p.availableDecisions.includes('accept')) return { decision: deny };
+        if (p.availableDecisions && !p.availableDecisions.includes('accept')) {
+          run?.ctl.note('The bridge declined a command approval that offered no acceptance.', { declined: true });
+          return { decision: deny };
+        }
         const command = p.command ? `Run:\n${p.command}` : '';
         const network = p.networkApprovalContext ? `Network access: ${JSON.stringify(p.networkApprovalContext)}` : '';
         if (!command && !network) {
-          run?.ctl.note('The bridge declined a command approval that omitted the command.');
+          run?.ctl.note('The bridge declined a command approval that omitted the command.', { declined: true });
           return { decision: deny };
         }
         const cwd = p.cwd ? `Working directory: ${p.cwd}` : '';
@@ -521,6 +526,7 @@ export class CodexAdapter implements Adapter {
           if (!answer) return;
           return { action: answer.cancelled ? 'cancel' : answer.approve ? 'accept' : 'decline', content: answer.approve ? {} : null, _meta: null };
         }
+        run?.ctl.note(`The bridge declined an unsupported MCP request from ${p.serverName}.`, { declined: true });
         return { action: 'decline', content: null, _meta: null };
       default:
         throw new RpcError(-32601, `${method} is not supported by Crew`);

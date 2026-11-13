@@ -304,3 +304,16 @@ test('a 57% Argon window does not change routing as projection samples age out',
   const later = tracker.classify(raw, none, NOW + 2 * MIN);
   for (const usage of [first, later]) assert.match(route('polish', usage, DEFAULT_ROLES).reason, /has room/);
 });
+
+
+test('empty family names and empty alternatives match no model', () => {
+  for (const groupLabel of ['', 'Claude/', '/Claude', ' / ']) {
+    const tracker = new UsageTracker();
+    tracker.models = { antigravity: 'gemini-3.8-flash' };
+    const raw = parseCache(cache([snapshot('antigravity', [
+      weekly(1, { groupLabel, providerID: 'empty' }),
+      weekly(0, { groupLabel: 'Gemini', providerID: 'g' }),
+    ])]));
+    assert.equal(tracker.classify(raw, none, NOW).providers.find((p) => p.agent === 'antigravity')!.status, 'ok', groupLabel);
+  }
+});

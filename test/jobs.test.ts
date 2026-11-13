@@ -1485,7 +1485,7 @@ test('a job still being set up counts as active, so the daemon is not replaced u
   await jobs.discard(job.id);
 });
 
-test('worktree removal recovers from a failed git removal and preserves linked targets', async (t) => {
+test('Windows worktree removal recovers from a failed git removal and preserves linked targets', async (t) => {
   const childProcess = (await import('node:child_process')).default;
   const { syncBuiltinESMExports } = await import('node:module');
   const { createWorktree, removeWorktree } = await import('../plugin/bridge/git.ts');
@@ -1531,7 +1531,7 @@ test('worktree removal recovers from a failed git removal and preserves linked t
     return rm(dir, options);
   });
   syncBuiltinESMExports();
-  await removeWorktree(repo, wt, 'cx-123abc', home);
+  await removeWorktree(repo, wt, 'cx-123abc', home, 'win32');
   assert.equal(failures, 1);
   assert.equal(removals, 1);
   assert.equal(prunes, 3);
@@ -1649,14 +1649,14 @@ test('result uses kept commits after a no-change follow-up and omits an unknown 
 });
 
 test('only the latest turn refusal qualifies a no-change result, including repeated notes', async (t) => {
-  const h = harness((ctl) => { ctl.note('The bridge refused an action.'); ctl.done('no changes'); });
+  const h = harness((ctl) => { ctl.note('The bridge refused an action.', { declined: true }); ctl.done('no changes'); });
   t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); });
   const job = await settled(h.jobs, await h.jobs.create({ kind: 'polish', cwd: h.home, isolation: 'in_place', targets: ['README.md'] }));
   assert.match(describe(job), /changes: none — .*refused or declined.*notes below/);
   await h.jobs.reply(job.id, { message: 'again' });
   await settled(h.jobs, job);
   assert.doesNotMatch(describe(job), /changes: .*refused or declined/);
-  h.adapter.reply = async (ctl) => { ctl.note('The bridge refused an action.'); ctl.done('stopped'); };
+  h.adapter.reply = async (ctl) => { ctl.note('The bridge refused an action.', { declined: true }); ctl.done('stopped'); };
   await h.jobs.reply(job.id, { message: 'again' });
   await settled(h.jobs, job);
   assert.match(describe(job), /changes: none — .*refused or declined/);
@@ -1664,4 +1664,90 @@ test('only the latest turn refusal qualifies a no-change result, including repea
   await h.jobs.reply(job.id, { message: 'again' });
   await settled(h.jobs, job);
   assert.match(describe(job), /changes: none — .*refusals\/notes below/);
+});
+
+
+test('read-only jobs reject explicitly named plugins before starting', async (t) => {
+  const h = harness((ctl) => ctl.done('done'));
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); });
+  const review = { target: { type: 'uncommittedChanges' as const }, mode: 'adversarial' as const };
+  for (const plugins of [['browser'], ['computer-use']]) {
+    await assert.rejects(h.jobs.create({ kind: 'review', cwd: h.home, review, plugins }), /runs_app.*[Dd]rop plugins/);
+    await assert.rejects(h.jobs.create({ kind: 'delegate', ask: true, cwd: h.home, task: 'why?', plugins }), /[Dd]rop plugins/);
+  }
+  assert.equal(h.jobs.list().length, 0);
+  await settled(h.jobs, await h.jobs.create({ kind: 'delegate', ask: true, cwd: h.home, task: 'why?', plugins: [] }));
+  const repo = tempRepo();
+  t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+  const job = await settled(h.jobs, await h.jobs.create({ kind: 'review', cwd: repo, review, runsApp: true, plugins: ['browser'] }));
+  assert.deepEqual(job.plugins, ['computer-use', 'unified-computer-use', 'browser']);
+  await h.jobs.discard(job.id);
+});
+
+test('notes do not infer a declined action from their wording', async (t) => {
+  const h = harness((ctl) => { ctl.note('Connection refused'); ctl.done('no changes'); });
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); });
+  const job = await settled(h.jobs, await h.jobs.create({ kind: 'polish', cwd: h.home, isolation: 'in_place', targets: ['README.md'] }));
+  assert.equal(job.declinedTurn, undefined);
+  assert.doesNotMatch(describe(job), /changes: .*refused or declined/);
+});
+
+test('a locked worktree keeps its directory, links, branch and registration', async (t) => {
+  const { createWorktree, removeWorktree } = await import('../plugin/bridge/git.ts');
+  for (const platform of ['darwin', 'linux', 'win32'] as const) {
+    const repo = tempRepo();
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-locked-'));
+    t.after(() => { fs.rmSync(home, { recursive: true, force: true }); fs.rmSync(repo, { recursive: true, force: true }); });
+    const wt = await createWorktree(repo, 'cx-123abc', 'HEAD', home);
+    fs.symlinkSync(repo, path.join(wt.path, 'link'), 'junction');
+    execFileSync('git', ['worktree', 'lock', '--reason', 'keep this tree', wt.path], { cwd: repo });
+    await assert.rejects(removeWorktree(repo, wt, 'cx-123abc', home, platform), /locked/);
+    assert.ok(fs.existsSync(wt.path), platform);
+    assert.ok(fs.lstatSync(path.join(wt.path, 'link')).isSymbolicLink(), platform);
+    assert.ok(execFileSync('git', ['branch', '--list', wt.branch], { cwd: repo, encoding: 'utf8' }).includes(wt.branch));
+    assert.ok(execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: repo, encoding: 'utf8' }).includes('locked keep this tree'));
+  }
+});
+
+test('failed worktree removal keeps the Git error and only Windows falls back', async (t) => {
+  const childProcess = (await import('node:child_process')).default;
+  const { syncBuiltinESMExports } = await import('node:module');
+  const { createWorktree, removeWorktree } = await import('../plugin/bridge/git.ts');
+  const repo = tempRepo();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-remove-error-'));
+  t.after(() => {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(repo, { recursive: true, force: true });
+  });
+  const wt = await createWorktree(repo, 'cx-123abc', 'HEAD', home);
+  const execFile = childProcess.execFile;
+  let keepRegistration = false;
+  t.mock.method(childProcess, 'execFile', (file: string, args: string[], options: object, callback: (err: Error | null, stdout: string, stderr: string) => void) => {
+    if (file === 'git' && args[0] === 'worktree' && args[1] === 'remove') {
+      return execFile(process.execPath, ['-e', 'process.stderr.write("original removal failure"); process.exit(1)'], options, callback);
+    }
+    if (keepRegistration && file === 'git' && args[0] === 'worktree' && args[1] === 'prune') {
+      return execFile('git', ['--version'], options, callback);
+    }
+    return execFile(file, args, options, callback);
+  });
+  const fsPromises = (await import('node:fs/promises')).default;
+  const rm = fsPromises.rm;
+  let removals = 0;
+  t.mock.method(fsPromises, 'rm', async () => { removals++; throw new Error('fallback deletion failure'); });
+  syncBuiltinESMExports();
+  for (const platform of ['darwin', 'linux'] as const) {
+    await assert.rejects(removeWorktree(repo, wt, 'cx-123abc', home, platform), /^Error: git worktree: original removal failure$/);
+    assert.equal(removals, 0);
+  }
+  await assert.rejects(removeWorktree(repo, wt, 'cx-123abc', home, 'win32'), /original removal failure.*fallback deletion failure/s);
+  assert.equal(removals, 1);
+  assert.ok(fs.existsSync(wt.path));
+
+  keepRegistration = true;
+  t.mock.method(fsPromises, 'rm', rm);
+  syncBuiltinESMExports();
+  await assert.rejects(removeWorktree(repo, wt, 'cx-123abc', home, 'win32'), /original removal failure.*Git still lists/s);
 });

@@ -115,6 +115,8 @@ export interface Job {
   ask?: boolean;
   /** The user's Codex plugins that are on for this job, by name; absent when it runs with none. */
   plugins?: string[];
+  /** Caller-picked names, kept apart from app defaults so unavailable explicit requests can be noted. */
+  requestedPlugins?: string[];
   /**
    * A directory of the job's own that a read-only worker may write to: temporary files, caches, a throwaway
    * clone to try something in. It exists only while a turn runs. Absent where the agent cannot run commands.
@@ -191,7 +193,7 @@ export interface JobCtl {
   model(name: string | undefined, effort?: string): void;
   touched(file: string): void;
   /** Adds a line to the result that the lead should see, such as a refused action. */
-  note(text: string): void;
+  note(text: string, opts?: { declined?: boolean }): void;
   /** The agent's automatic reviewer refused an action in this turn. */
   refused(action: string, reason: string): void;
   tokens(total: number, parts?: { input: number; cachedInput: number; output: number }): void;
@@ -354,6 +356,9 @@ export class Jobs {
     if (spec.plugins !== undefined && (!Array.isArray(spec.plugins) || spec.plugins.some((name) => typeof name !== 'string' || !name))) {
       throw new Error('plugins must be a list of plugin names.');
     }
+    if (spec.plugins?.length && (spec.ask || (spec.kind === 'review' && !spec.runsApp))) {
+      throw new Error(spec.ask ? 'An ask job is read-only and cannot use plugins. Drop plugins.' : 'A read-only review cannot use plugins. Add runs_app, or drop plugins.');
+    }
     if (spec.plugins?.length && spec.kind === 'polish') throw new Error('A polish job cannot use plugins: an editor only changes wording. Drop plugins.');
 
     const id = `${WORKERS[agent].idPrefix}-${randomBytes(3).toString('hex')}`;
@@ -363,6 +368,7 @@ export class Jobs {
     const shared = sharedInstructions(this.home, root);
     const notes: string[] = Array.isArray(spec.notes) ? spec.notes.filter((note) => typeof note === 'string') : [];
     // Plugins are Codex's. The set the job runs with is settled here, so the prompt, the result and the adapter agree.
+    const requestedPlugins = spec.plugins;
     const plugins = agent === 'codex' ? [...new Set([...(spec.runsApp ? config.codex.appPlugins : []), ...(spec.plugins ?? [])])] : [];
     if (spec.plugins?.length && agent !== 'codex') notes.push(`${WORKERS[agent].name} has no plugins to turn on, so the job runs without: ${spec.plugins.join(', ')}.`);
     spec.plugins = plugins;
@@ -424,6 +430,7 @@ export class Jobs {
       runsApp: Boolean(spec.runsApp) || undefined,
       ask: Boolean(spec.ask) || undefined,
       plugins: plugins.length ? plugins : undefined,
+      requestedPlugins,
       cwd,
       worktree,
       sandbox: spec.ask || (spec.kind === 'review' && !spec.runsApp) ? 'read-only' : 'workspace-write',
@@ -873,9 +880,9 @@ export class Jobs {
         this.touchedFiles.set(job.id, set);
         set.add(file);
       },
-      note: (text) => {
+      note: (text, opts) => {
         // Notes survive follow-ups; record the turn even when the same refusal was already noted.
-        if (/\b(refused|declined|not carried out)\b/i.test(text)) {
+        if (opts?.declined) {
           job.declinedTurn = job.turns;
           this.changed(job);
         }

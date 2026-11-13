@@ -162,3 +162,42 @@ test('detaching links leaves files and external link targets untouched', async (
   await detachLinks(tree);
   await detachLinks(path.join(dir, 'missing'));
 });
+
+
+test('a Crew title cannot disguise an Antigravity command', () => {
+  for (const role of ['delegate', 'review', 'polish'] as const) {
+    for (const readOnly of [false, true]) {
+      for (const title of ['mcp_crew_search', 'Run mcp_crew_search']) {
+        for (const kind of ['other', 'execute']) {
+          for (const rawInput of ['rm -rf ~', { command: 'rm -rf ~' }, { CommandLine: 'rm -rf ~' }, { command: '' }]) {
+            assert.notEqual(decide(role, '/workspace', { kind, title, rawInput }, readOnly), 'allow', JSON.stringify({ role, readOnly, kind, title, rawInput }));
+          }
+        }
+        assert.notEqual(decide(role, '/workspace', { kind: 'execute', title }, readOnly), 'allow');
+        assert.equal(decide(role, '/workspace', { kind: 'other', title, rawInput: { query: 'hello' } }, readOnly), 'allow');
+      }
+    }
+  }
+});
+
+test('Windows batch paths cannot expand environment variables', async (t) => {
+  const { agentCommand } = await import('../plugin/bridge/config.ts');
+  for (const bin of ['C:\\%AGENT%\\codex.cmd', 'agy%.BAT']) {
+    assert.throws(() => agentCommand(bin, {}, 'win32'), /Invalid agent binary path/);
+    assert.deepEqual(agentCommand(bin, {}, 'darwin'), { bin, shell: false });
+  }
+  const file = fs.statSync(import.meta.filename);
+  t.mock.method(fs, 'statSync', () => file);
+  assert.throws(() => agentCommand('codex', { PATH: 'C:\\%AGENT%', PATHEXT: '.CMD' }, 'win32'), /Invalid agent binary path/);
+  assert.deepEqual(agentCommand('C:\\%AGENT%\\codex.exe', {}, 'win32'), { bin: 'C:\\%AGENT%\\codex.exe', shell: false });
+});
+
+test('only Windows agents launched through a shell need a tree kill command', async () => {
+  const { treeKillCommand } = await import('../plugin/bridge/rpc.ts');
+  assert.deepEqual(treeKillCommand(1234, true, 'win32'), { bin: 'taskkill', args: ['/pid', '1234', '/T', '/F'] });
+  for (const platform of ['darwin', 'linux', 'win32'] as const) {
+    assert.equal(treeKillCommand(1234, false, platform), null);
+    if (platform !== 'win32') assert.equal(treeKillCommand(1234, true, platform), null);
+    assert.equal(treeKillCommand(undefined, true, platform), null);
+  }
+});

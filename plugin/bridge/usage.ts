@@ -169,8 +169,10 @@ function applicable<T extends Pick<UsageWindow, 'group'>>(windows: T[], model?: 
   const wide = windows.filter((w) => w.group === null);
   if (wide.length) return wide;
   const words = model?.toLowerCase().split(/[^a-z0-9]+/);
-  const matches = words ? windows.filter((w) => w.group!.toLowerCase().split('/').some((family) =>
-    family.split(/[^a-z0-9]+/).filter(Boolean).every((word) => words.includes(word)))) : [];
+  const matches = words ? windows.filter((w) => w.group!.toLowerCase().split('/').some((family) => {
+    const familyWords = family.split(/[^a-z0-9]+/).filter(Boolean);
+    return familyWords.length > 0 && familyWords.every((word) => words.includes(word));
+  })) : [];
   return matches.length ? matches : windows;
 }
 

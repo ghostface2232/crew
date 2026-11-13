@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import readline from 'node:readline';
 
@@ -33,10 +34,12 @@ export class RpcPeer {
   private stderrTail = '';
   private child: ChildProcessWithoutNullStreams;
   private handlers: RpcHandlers;
+  private shell: boolean;
 
-  constructor(child: ChildProcessWithoutNullStreams, handlers: RpcHandlers) {
+  constructor(child: ChildProcessWithoutNullStreams, handlers: RpcHandlers, shell = false) {
     this.child = child;
     this.handlers = handlers;
+    this.shell = shell;
     readline.createInterface({ input: child.stdout }).on('line', (line) => this.onLine(line));
     child.stderr.on('data', (chunk) => {
       this.stderrTail = (this.stderrTail + String(chunk)).slice(-2000);
@@ -85,7 +88,9 @@ export class RpcPeer {
 
   close(signal: NodeJS.Signals = 'SIGTERM'): void {
     if (this.closed) return;
-    this.child.kill(signal);
+    const command = treeKillCommand(this.child.pid, this.shell);
+    if (command) execFile(command.bin, command.args, (err) => { if (err) this.child.kill(signal); });
+    else this.child.kill(signal);
     this.onClose('was closed');
   }
 
@@ -132,4 +137,9 @@ export class RpcPeer {
     this.pending.clear();
     this.handlers.onExit(reason);
   }
+}
+
+/** Killing cmd.exe alone leaves the agent it launched running. */
+export function treeKillCommand(pid: number | undefined, shell: boolean, platform: NodeJS.Platform = process.platform): { bin: string; args: string[] } | null {
+  return platform === 'win32' && shell && pid !== undefined ? { bin: 'taskkill', args: ['/pid', String(pid), '/T', '/F'] } : null;
 }

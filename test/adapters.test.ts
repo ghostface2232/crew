@@ -95,6 +95,8 @@ test('routes a child approval and preserves overlapping approvals and the full c
   await jobs.reply(job.id, { decision: 'deny', request_id: second.id });
   while (!job.endedAt) await jobs.wait(job.id, job.seq, 1000);
   assert.equal(job.report, 'decline');
+  assert.equal(job.declinedTurn, job.turns);
+  assert.match(describe(job), /changes: none — .*refused or declined/);
   await jobs.reply(job.id, { message: 'send the same child another task' });
   assert.ok((await waiting()).reason.includes(command));
   await jobs.cancel(job.id);
@@ -497,12 +499,21 @@ test('Codex turns on only the plugins a job is to have, and asks the user before
     const fs = require('node:fs');
     const send = (msg) => console.log(JSON.stringify({ jsonrpc: '2.0', ...msg }));
     let threads = 0;
+    let lists = 0;
     require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
       const msg = JSON.parse(line);
-      if (msg.method === 'thread/start' || msg.method === 'plugin/installed') fs.appendFileSync(__dirname + '/seen.jsonl', line + '\\n');
-      if (msg.method === 'plugin/installed') return send({ id: msg.id, result: { marketplaces: [
-        { name: 'bundled', plugins: [{ id: 'computer-use@bundled', installed: true }, { id: 'browser@bundled', installed: true }, { id: 'mail@bundled', installed: true }, { id: 'latex@bundled', installed: false }] },
-      ] } });
+      if (['thread/start', 'thread/resume', 'plugin/installed'].includes(msg.method)) fs.appendFileSync(__dirname + '/seen.jsonl', line + '\\n');
+      if (msg.method === 'plugin/installed') {
+        lists++;
+        return send({ id: msg.id, result: { marketplaces: [{ name: 'bundled', plugins: [
+          { id: 'computer-use@bundled', installed: true, enabled: true },
+          { id: 'browser@bundled', installed: true, enabled: true },
+          { id: 'mail@bundled', installed: true, enabled: lists > 2 },
+          { id: 'latex@bundled', installed: false, enabled: true },
+          ...(lists > 1 ? [{ id: 'new@bundled', installed: true, enabled: true }] : []),
+        ] }] } });
+      }
+      if (msg.method === 'thread/resume') return send({ id: msg.id, result: { thread: { id: msg.params.threadId } } });
       if (msg.method === 'thread/start') return send({ id: msg.id, result: { thread: { id: 'thread-' + threads++ } } });
       if (msg.method === 'turn/start') {
         send({ id: msg.id, result: { turn: { id: 'turn' } } });
@@ -538,21 +549,32 @@ test('Codex turns on only the plugins a job is to have, and asks the user before
   assert.deepEqual([app.report, app.notes], ['accept', []]);
 
   // A plugin the lead names is added; one Codex does not have is said.
-  const named = await start({ plugins: ['browser', 'figma'] });
+  const named = await start({ plugins: ['browser', 'figma', 'mail'] });
   await until(h.jobs, named, 'waiting');
   await h.jobs.reply(named.id, { decision: 'deny', request_id: named.waiting!.id });
   await until(h.jobs, named, 'done');
-  assert.deepEqual([named.plugins, named.report, named.notes], [['browser', 'figma'], 'decline', ['Codex has no plugin named figma; the job runs without it.']]);
-  assert.ok(describe(named).includes('plugins on: browser, figma'));
+  assert.deepEqual([named.plugins, named.report], [['browser', 'figma', 'mail'], 'decline']);
+  assert.ok(named.notes.includes('Codex has no plugin named figma; the job runs without it.'));
+  assert.ok(named.notes.some((note) => /mail.*user.*off/i.test(note)));
+  assert.equal(named.declinedTurn, named.turns);
+  assert.ok(describe(named).includes('plugins on: browser, figma, mail'));
+
+  // Restoring a thread in the same server must also see newly installed or enabled plugins.
+  (h.adapter as any).loaded.delete(named.sessionId);
+  await h.jobs.reply(named.id, { message: 'again' });
+  await until(h.jobs, named, 'waiting');
+  await h.jobs.reply(named.id, { decision: 'approve', request_id: named.waiting!.id });
+  await until(h.jobs, named, 'done');
 
   const seen = fs.readFileSync(path.join(h.home, 'seen.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line));
-  // The list of plugins is asked for once, and only when a job needs it.
-  assert.deepEqual(seen.map((msg) => msg.method), ['thread/start', 'plugin/installed', 'thread/start', 'thread/start']);
-  const configs = seen.filter((msg) => msg.method === 'thread/start').map((msg) => msg.params.config);
+  // Each start or restore with plugins asks for the current installation and user settings.
+  assert.deepEqual(seen.map((msg) => msg.method), ['thread/start', 'plugin/installed', 'thread/start', 'plugin/installed', 'thread/start', 'plugin/installed', 'thread/resume']);
+  const configs = seen.filter((msg) => ['thread/start', 'thread/resume'].includes(msg.method)).map((msg) => msg.params.config);
   assert.deepEqual([configs[0].features, configs[0].plugins, configs[0].skills], [{ apps: false, plugins: false, tool_suggest: false }, undefined, { include_instructions: false }]);
   assert.deepEqual(configs[1].features, { apps: false, plugins: true, tool_suggest: false });
   assert.deepEqual(configs[1].plugins, { 'computer-use@bundled': { enabled: true }, 'browser@bundled': { enabled: false }, 'mail@bundled': { enabled: false } });
-  assert.deepEqual(configs[2].plugins, { 'computer-use@bundled': { enabled: false }, 'browser@bundled': { enabled: true }, 'mail@bundled': { enabled: false } });
+  assert.deepEqual(configs[2].plugins, { 'computer-use@bundled': { enabled: false }, 'browser@bundled': { enabled: true }, 'mail@bundled': { enabled: false }, 'new@bundled': { enabled: false } });
+  assert.deepEqual(configs[3].plugins, { ...configs[2].plugins, 'mail@bundled': { enabled: true } });
   assert.equal(configs[1].skills, undefined);
 
   await assert.rejects(h.jobs.create({ kind: 'polish', cwd: h.home, isolation: 'in_place', targets: ['a.md'], plugins: ['browser'] }), /polish job cannot use plugins/);
@@ -597,7 +619,7 @@ test('Antigravity permits only exactly identified Crew calls without metadata in
   const names = ['recent_changes', 'search', 'siblings', 'lead_answers', 'ask_lead'];
   const titles = names.flatMap((name) => [`mcp_crew_${name}`, `Run mcp_crew_${name}`]);
   const rejected = ['Run mcp_other_recent_changes', 'Run mcp_crew_delete', 'Run mcp_crew_search_extra', 'please Run mcp_crew_search', 'Run mcp_crew_search && rm -rf .', 'recent_changes'];
-  const h = harness(permissionStub([...titles, ...rejected].map((title) => ({ kind: 'execute', title }))), 'antigravity');
+  const h = harness(permissionStub([...titles, ...rejected].map((title) => ({ kind: 'other', title, rawInput: { query: 'hello' } }))), 'antigravity');
   cleanup(t, h);
   const job = await h.jobs.create({ kind: 'polish', cwd: h.home, isolation: 'in_place', targets: ['README.md'] });
   await until(h.jobs, job, 'done');
@@ -693,4 +715,65 @@ test('Codex native review shows the thread effort rather than an unused turn ove
   const job = await h.jobs.create({ kind: 'review', cwd: h.home, review: { target: { type: 'uncommittedChanges' }, mode: 'standard' } });
   await until(h.jobs, job, 'done');
   assert.equal(describe(job).split('\n')[1], 'model: review-model · effort: medium');
+});
+
+
+for (const method of ['item/commandExecution/requestApproval', 'item/fileChange/requestApproval', 'item/permissions/requestApproval']) {
+  test(`Codex records a denied ${method} as a declined action`, { timeout: 5000 }, async (t) => {
+    for (const readOnly of [false, true]) {
+      const h = harness(`
+        const send = (msg) => console.log(JSON.stringify({ jsonrpc: '2.0', ...msg }));
+        require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
+          const msg = JSON.parse(line);
+          if (msg.method === 'thread/start') return send({ id: msg.id, result: { thread: { id: 's' } } });
+          if (msg.method === 'turn/start') {
+            send({ id: msg.id, result: { turn: { id: 't' } } });
+            return send({ id: 'approval', method: '${method}', params: { threadId: 's', command: 'echo hello', permissions: { network: { enabled: true } } } });
+          }
+          if (msg.id === 'approval') return send({ method: 'turn/completed', params: { threadId: 's', turn: { id: 't', status: 'completed' } } });
+          if (msg.method && msg.id != null) send({ id: msg.id, result: {} });
+        });
+      `);
+      cleanup(t, h);
+      const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test', ask: readOnly });
+      if (!readOnly) {
+        await until(h.jobs, job, 'waiting');
+        await h.jobs.reply(job.id, { decision: 'deny', request_id: job.waiting!.id });
+      }
+      await until(h.jobs, job, 'done');
+      assert.equal(job.declinedTurn, job.turns);
+      if (!readOnly) assert.match(describe(job), /changes: none — .*refused or declined/);
+    }
+  });
+}
+
+
+test('Codex leaves an explicitly named disabled app plugin off and notes it', { timeout: 5000 }, async (t) => {
+  for (const runsApp of [false, true]) {
+    const h = harness(`
+      const send = (msg) => console.log(JSON.stringify({ jsonrpc: '2.0', ...msg }));
+      require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
+        const msg = JSON.parse(line);
+        if (msg.method === 'plugin/installed') return send({ id: msg.id, result: { marketplaces: [{ plugins: [
+          { id: 'computer-use@bundled', installed: true, enabled: false },
+        ] }] } });
+        if (msg.method === 'thread/start') {
+          require('node:fs').writeFileSync(__dirname + '/config.json', JSON.stringify(msg.params.config));
+          return send({ id: msg.id, result: { thread: { id: 's' } } });
+        }
+        if (msg.method === 'turn/start') {
+          send({ id: msg.id, result: { turn: { id: 't' } } });
+          return send({ method: 'turn/completed', params: { threadId: 's', turn: { id: 't', status: 'completed' } } });
+        }
+        if (msg.method && msg.id != null) send({ id: msg.id, result: {} });
+      });
+    `);
+    cleanup(t, h);
+    const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test', plugins: ['computer-use'], runsApp });
+    await until(h.jobs, job, 'done');
+    assert.ok(job.notes.some((note) => /computer-use.*user.*off/i.test(note)));
+    const config = JSON.parse(fs.readFileSync(path.join(h.home, 'config.json'), 'utf8'));
+    assert.equal(config.features.plugins, false);
+    assert.deepEqual(config.skills, { include_instructions: false });
+  }
 });

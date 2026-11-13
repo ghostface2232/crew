@@ -1,6 +1,7 @@
 import readline from 'node:readline';
 import { api, ensureDaemon } from './client.ts';
 import { BASE_URL, DEFAULT_ROLES, loadConfig, VERSION, WORKERS } from './config.ts';
+import { listSkills } from './skills.ts';
 import { describeUsage } from './usage.ts';
 import type { RouteDecision, Usage } from './usage.ts';
 import type { Role } from './config.ts';
@@ -75,6 +76,10 @@ const aloneProp = {
 const runsAppProp = (what: string) => ({
   runs_app: { type: 'boolean', description: `The job has to start the app (a server, a headless browser) to ${what}. Its sandbox gets network access for that; without this a worker cannot bind a port. Pass it only when running the app is needed.` },
 });
+const installedSkills = listSkills();
+const skillsProp = installedSkills.length ? {
+  skills: { type: 'array', items: { type: 'string', enum: installedSkills }, description: 'Skills from ~/.agents/skills that would help with this particular job, such as a design or writing skill for UI work. The worker is not shown the user\'s skills otherwise; it is told to read the ones you pick. Pick only those that fit the task.' },
+} : {};
 const modelProps = {
   model: { type: 'string', description: 'Model override for this job. Omit to use the model configured for the role, or the agent\'s own default.' },
   effort: { type: 'string', description: 'Reasoning effort override (e.g. low, medium, high). Ignored by agents without an effort setting.' },
@@ -95,6 +100,7 @@ const TOOLS = [
         ...modelProps,
         ...runsAppProp('do or verify the work'),
         ...aloneProp,
+        ...skillsProp,
         ...common,
       },
       required: ['task'],
@@ -115,6 +121,7 @@ const TOOLS = [
         done_when: { type: 'string', description: 'Acceptance criteria to verify in adversarial mode.' },
         ...runsAppProp('judge the change. The review then runs in a snapshot worktree holding the change, and your own self-review must stay static'),
         ...modelProps,
+        ...skillsProp,
         ...common,
       },
     },
@@ -130,6 +137,7 @@ const TOOLS = [
         guidance: { type: 'string', description: 'Tone, terminology, audience, or what to leave alone.' },
         title: { type: 'string', description: 'Short label shown on the status board.' },
         ...worktreeProps,
+        ...skillsProp,
         ...common,
       },
       required: ['targets'],
@@ -459,7 +467,7 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
   const cwd: string = args.cwd ?? PROJECT;
   switch (name) {
     case 'delegate':
-      return runJob({ kind: 'delegate', cwd, title: args.title, task: args.task, done_when: args.done_when, base: args.base, isolation: args.isolation, model: args.model, effort: args.effort, exclusive: Boolean(args.exclusive), runsApp: Boolean(args.runs_app) }, Boolean(args.background), ctx);
+      return runJob({ kind: 'delegate', cwd, title: args.title, task: args.task, done_when: args.done_when, base: args.base, isolation: args.isolation, model: args.model, effort: args.effort, exclusive: Boolean(args.exclusive), runsApp: Boolean(args.runs_app), skills: args.skills }, Boolean(args.background), ctx);
     case 'review': {
       const kind = args.target ?? 'uncommitted';
       if (kind === 'branch' && !args.base) throw new Error('target "branch" needs base (the branch to compare against, e.g. main).');
@@ -467,11 +475,11 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       const target = kind === 'branch' ? { type: 'baseBranch' as const, branch: args.base } : kind === 'commit' ? { type: 'commit' as const, sha: args.commit } : { type: 'uncommittedChanges' as const };
       // The focus can be long; the board title only needs to say what is under review.
       const title = `Review of ${kind === 'branch' ? `the branch against ${args.base}` : kind === 'commit' ? `commit ${args.commit.slice(0, 8)}` : 'uncommitted changes'}`;
-      return runJob({ kind: 'review', cwd, title, task: args.focus, done_when: args.done_when, review: { target, mode: args.mode ?? 'adversarial' }, model: args.model, effort: args.effort, runsApp: Boolean(args.runs_app) }, Boolean(args.background), ctx);
+      return runJob({ kind: 'review', cwd, title, task: args.focus, done_when: args.done_when, review: { target, mode: args.mode ?? 'adversarial' }, model: args.model, effort: args.effort, runsApp: Boolean(args.runs_app), skills: args.skills }, Boolean(args.background), ctx);
     }
     case 'polish':
       if (args.exclusive) throw new Error('polish cannot run alone: an editor measures nothing. Drop exclusive.');
-      return runJob({ kind: 'polish', cwd, title: args.title ?? `Polish ${args.targets.join(', ')}`, task: args.guidance, targets: args.targets, base: args.base, isolation: args.isolation }, Boolean(args.background), ctx);
+      return runJob({ kind: 'polish', cwd, title: args.title ?? `Polish ${args.targets.join(', ')}`, task: args.guidance, targets: args.targets, base: args.base, isolation: args.isolation, skills: args.skills }, Boolean(args.background), ctx);
     case 'mission':
       return reportMission(args);
     case 'route': {

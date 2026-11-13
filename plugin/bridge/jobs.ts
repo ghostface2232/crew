@@ -7,6 +7,7 @@ import { carryUncommitted, changesSince, commitAll, commitChanges, copyIncluded,
 import type { Worktree } from './git.ts';
 import { sharedInstructions } from './instructions.ts';
 import { buildPrompt } from './prompts.ts';
+import { findSkills } from './skills.ts';
 
 export type { WorkerAgent };
 export type Agent = 'claude' | WorkerAgent;
@@ -62,6 +63,8 @@ export interface JobSpec {
   ask?: boolean;
   /** Lines the caller wants shown with the result from the start. */
   notes?: string[];
+  /** Names of the user's skills (`~/.agents/skills`) the lead picked for this job; the worker is told to read them. */
+  skills?: string[];
 }
 
 /** One worker turn that changed files, as its own commit on the job branch. */
@@ -331,6 +334,10 @@ export class Jobs {
       throw new Error(`${spec.kind} is assigned to Antigravity, which is disabled in ~/.crew/config.json (antigravity.enabled).`);
     }
     if (!fs.existsSync(spec.cwd)) throw new Error(`cwd does not exist: ${spec.cwd}`);
+    if (spec.skills !== undefined && (!Array.isArray(spec.skills) || spec.skills.some((name) => typeof name !== 'string'))) {
+      throw new Error('skills must be a list of skill names.');
+    }
+    const skills = findSkills(spec.skills ?? []);
 
     const id = `${WORKERS[agent].idPrefix}-${randomBytes(3).toString('hex')}`;
     const repo = await repoRoot(spec.cwd);
@@ -399,7 +406,7 @@ export class Jobs {
       worktree,
       sandbox: spec.ask || (spec.kind === 'review' && !spec.runsApp) ? 'read-only' : 'workspace-write',
       scratch,
-      ...buildPrompt(spec, worktree, diffFile, shared.text, scratch, runsCommands(agent, spec)),
+      ...buildPrompt(spec, worktree, diffFile, shared.text, scratch, runsCommands(agent, spec), skills),
       shared: shared.sources,
       // Only Codex has a built-in review mode; other agents get the prompted review.
       nativeReview: spec.kind === 'review' && agent === 'codex' && spec.review?.mode === 'standard' ? spec.review.target : null,

@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { test } from 'node:test';
 import { runsCommands, WORKERS } from '../plugin/bridge/config.ts';
 import type { WorkerAgent } from '../plugin/bridge/config.ts';
 import type { JobSpec } from '../plugin/bridge/jobs.ts';
 import { buildPrompt } from '../plugin/bridge/prompts.ts';
+import { findSkills, listSkills } from '../plugin/bridge/skills.ts';
 
 // Fixed paths, so a snapshot changes only when the wording does. Regenerate with:
 //   node --test --test-update-snapshots test/prompts.test.ts
@@ -15,7 +19,8 @@ const SHARED = 'Answer in English.';
 const target = { type: 'uncommittedChanges' as const };
 
 type Role = 'delegate' | 'review' | 'polish' | 'question';
-interface Case { name: string; agent: WorkerAgent; role: Role; runsApp?: boolean; exclusive?: boolean; scratch?: boolean; native?: boolean }
+interface Case { name: string; agent: WorkerAgent; role: Role; runsApp?: boolean; exclusive?: boolean; scratch?: boolean; native?: boolean; skills?: boolean }
+const SKILL = { name: 'better-ui', description: 'Polishes surfaces.', file: '/skills/better-ui/SKILL.md' };
 
 /** Arguments the way Jobs.start derives them; the combinations it refuses are not listed. */
 function build(c: Case) {
@@ -27,7 +32,7 @@ function build(c: Case) {
   if (c.exclusive) spec.exclusive = true;
   const worktree = (spec.kind !== 'review' && !spec.ask) || c.runsApp ? WORKTREE : null;
   const diffFile = spec.kind === 'review' && !WORKERS[c.agent].reviewerRunsGit ? DIFF : null;
-  return buildPrompt(spec, worktree, diffFile, SHARED, c.scratch ? SCRATCH : undefined, runsCommands(c.agent, spec));
+  return buildPrompt(spec, worktree, diffFile, SHARED, c.scratch ? SCRATCH : undefined, runsCommands(c.agent, spec), c.skills ? [SKILL] : []);
 }
 
 const cases: Case[] = [];
@@ -44,6 +49,9 @@ cases.push({ name: 'codex review standard scratch', agent: 'codex', role: 'revie
 cases.push({ name: 'codex review runs_app', agent: 'codex', role: 'review', runsApp: true });
 cases.push({ name: 'antigravity question', agent: 'antigravity', role: 'question' });
 cases.push({ name: 'antigravity review', agent: 'antigravity', role: 'review' });
+// Skills the lead picked, for a worker that runs commands and for one that only reads.
+cases.push({ name: 'codex delegate skills', agent: 'codex', role: 'delegate', skills: true });
+cases.push({ name: 'antigravity polish skills', agent: 'antigravity', role: 'polish', skills: true });
 
 for (const c of cases) {
   test(`instructions for ${c.name}`, (t) => {
@@ -76,7 +84,26 @@ for (const c of cases) {
     if (c.role === 'question') assert.ok(has('Do not start the app') && !has('# Running the app'));
     // Measuring needs the machine rules to say it is allowed, and is only for an engineer.
     assert.equal(has('# Measurement'), Boolean(c.exclusive));
+    assert.equal(has('# Skills for this task'), Boolean(c.skills));
     // The shared instructions come last, subordinate to everything the role says.
     assert.ok(text.endsWith(SHARED) && text.indexOf('# Shared instructions') > text.indexOf('# Questions for the lead'));
   });
 }
+
+test('the lead picks skills by name from the installed ones', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-skills-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, 'better-ui'));
+  fs.writeFileSync(path.join(root, 'better-ui', 'SKILL.md'), '---\nname: better-ui\ndescription: Polishes surfaces.\n---\n\n# UI polish\ndescription: not this one\n');
+  fs.mkdirSync(path.join(root, 'notes'));
+  fs.writeFileSync(path.join(root, 'better-ui.zip'), '');
+
+  assert.deepEqual(listSkills(root), ['better-ui']);
+  assert.deepEqual(findSkills(['better-ui', 'better-ui'], root), [{ name: 'better-ui', description: 'Polishes surfaces.', file: path.join(root, 'better-ui', 'SKILL.md') }]);
+  assert.deepEqual(findSkills([], root), []);
+  // A wrong name is refused with what there is, not dropped: the lead believes the worker has it.
+  assert.throws(() => findSkills(['better-ux'], root), /Unknown skill\(s\): better-ux\. Installed in .*: better-ui\./);
+  assert.throws(() => findSkills(['../notes'], root), /Unknown skill/);
+  assert.deepEqual(listSkills(path.join(root, 'missing')), []);
+});
+

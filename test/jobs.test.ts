@@ -405,6 +405,14 @@ test('delegate outside a git repository explains how to proceed', async () => {
   await assert.rejects(jobs.create({ kind: 'delegate', cwd: dir, task: 'x' }), /in_place/);
 });
 
+test('a job with a skill that is not installed is refused before anything is created', async () => {
+  const repo = tempRepo();
+  const { jobs, home } = harness(() => {});
+  await assert.rejects(jobs.create({ kind: 'delegate', cwd: repo, task: 'x', skills: ['no-such-skill'] }), /Unknown skill\(s\): no-such-skill/);
+  await assert.rejects(jobs.create({ kind: 'delegate', cwd: repo, task: 'x', skills: 'better-ui' as any }), /skills must be a list/);
+  assert.equal(fs.existsSync(path.join(home, 'worktrees')), false);
+});
+
 test('outOfScope accepts exact files, directories, and globs', () => {
   const files = ['docs/a.md', 'src/ui/strings.ts', 'src/core/logic.ts'];
   assert.deepEqual(outOfScope(files, ['docs', 'src/ui/strings.ts']), ['src/core/logic.ts']);

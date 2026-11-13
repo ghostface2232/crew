@@ -3,6 +3,7 @@ import path from 'node:path';
 import { PLUGIN_ROOT } from './config.ts';
 import type { Worktree } from './git.ts';
 import type { JobSpec, ReviewTarget } from './jobs.ts';
+import type { Skill } from './skills.ts';
 
 const ROLE_FILES = { delegate: 'engineer', review: 'reviewer', polish: 'polisher' };
 
@@ -28,7 +29,7 @@ function describeTarget(target: ReviewTarget, commands: boolean): string {
 }
 
 /** Role text goes in `instructions`; the concrete assignment goes in `prompt`. Each adapter delivers both its own way. */
-export function buildPrompt(spec: JobSpec, worktree: Worktree | null, diffFile: string | null = null, shared = '', scratch?: string, commands = true): { prompt: string; instructions: string } {
+export function buildPrompt(spec: JobSpec, worktree: Worktree | null, diffFile: string | null = null, shared = '', scratch?: string, commands = true, skills: Skill[] = []): { prompt: string; instructions: string } {
   const assigned = assignment(spec, worktree, diffFile);
   // A worker that runs commands shares the machine with the user and the other agents; one that cannot start
   // anything has no use for the rules. These parts go with the instructions, not the prompt: Codex's built-in
@@ -38,6 +39,7 @@ export function buildPrompt(spec: JobSpec, worktree: Worktree | null, diffFile: 
   else if (spec.kind === 'review') parts.push(diffFile ? READ_ONLY_REVIEW : STATIC_REVIEW);
   if (scratch) parts.push(scratchNote(scratch));
   if (spec.exclusive) parts.push(ALONE);
+  if (skills.length) parts.push(skillsNote(skills));
   const built = { ...assigned, instructions: parts.join('\n\n') };
   if (!shared) return built;
   // After the role, and subordinate to it: what a role may do is enforced by the bridge, not negotiable in prose.
@@ -56,6 +58,8 @@ const LEAD_QUESTIONS = '# Questions for the lead\nUse crew.ask_lead for a decisi
  * file is still a check that ends by itself.
  */
 const scratchNote = (dir: string) => `# What you can run\nYour sandbox is read-only except for one directory of your own: \`${dir}\`. TMPDIR points there. Use it for anything a check has to write: temporary files, caches, a throwaway copy or clone of the repository to try a change or a git operation in. It is deleted when you finish, so nothing in it is a result. Everything else can be read and not written, apart from a few of the bridge's own files, which are closed to you. The network is closed, and nothing can listen on a port. The directory does not carry over to a follow-up turn, so put the commands you ran and what they showed in your report. If a check needs more than that, do not work around it: list it under what you could not verify.`;
+/** Names and paths only: the worker reads what it needs, as it would a skill its own agent listed. */
+const skillsNote = (skills: Skill[]) => `# Skills for this task\nThe lead picked these skills as useful for this task. Read each SKILL.md before you start and follow it where it applies, within your role; files it mentions are relative to its directory.\n${skills.map((s) => `- ${s.name}: ${s.description} (\`${s.file}\`)`).join('\n')}`;
 const READ_ONLY_REVIEW = '# Static review\nReview by reading. You cannot run anything in this role, so list every check you would have run under "Not verified".';
 const RUNS_APP = '# Running the app\nThis job may start the app to check the change; a sandbox that blocks the network has been opened for that. Follow the shared-machine rules above for every instance you start. Starting a browser may still need approval; ask for it, and if it is refused, report what you could not check.';
 const SNAPSHOT = 'You are in a snapshot of the change, not the user\'s working tree: nothing you write here is kept. Report findings with paths relative to the repository root.';

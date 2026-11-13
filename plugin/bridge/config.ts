@@ -39,11 +39,13 @@ export interface Worker {
   resume: string;
   /** As a reviewer it may run read-only commands, so it can read the diff with git itself. */
   reviewerRunsGit: boolean;
+  /** Its sandbox can leave one directory writable while everything else is read-only. */
+  readOnlyScratch: boolean;
 }
 
 export const WORKERS: Record<WorkerAgent, Worker> = {
-  codex: { name: 'Codex', idPrefix: 'cx', resume: 'codex resume', reviewerRunsGit: true },
-  antigravity: { name: 'Antigravity', idPrefix: 'ag', resume: 'agy --conversation', reviewerRunsGit: false },
+  codex: { name: 'Codex', idPrefix: 'cx', resume: 'codex resume', reviewerRunsGit: true, readOnlyScratch: true },
+  antigravity: { name: 'Antigravity', idPrefix: 'ag', resume: 'agy --conversation', reviewerRunsGit: false, readOnlyScratch: false },
 };
 
 export interface RoleAssignment {

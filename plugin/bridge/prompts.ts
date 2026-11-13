@@ -28,13 +28,14 @@ function describeTarget(target: ReviewTarget, commands: boolean): string {
 }
 
 /** Role text goes in `instructions`; the concrete assignment goes in `prompt`. Each adapter delivers both its own way. */
-export function buildPrompt(spec: JobSpec, worktree: Worktree | null, diffFile: string | null = null, shared = ''): { prompt: string; instructions: string } {
+export function buildPrompt(spec: JobSpec, worktree: Worktree | null, diffFile: string | null = null, shared = '', scratch?: string): { prompt: string; instructions: string } {
   const assigned = assignment(spec, worktree, diffFile);
   // Every worker shares the machine with the user and the other agents, whatever its role. These parts go with
   // the instructions, not the prompt: Codex's built-in review is sent no prompt, and must still be told them.
   const parts = [assigned.instructions, role('machine')];
   if (spec.runsApp) parts.push(spec.kind === 'review' ? `${RUNS_APP}\n${SNAPSHOT}` : RUNS_APP);
   else if (spec.kind === 'review') parts.push(diffFile ? READ_ONLY_REVIEW : STATIC_REVIEW);
+  if (scratch) parts.push(scratchNote(scratch));
   if (spec.exclusive) parts.push(ALONE);
   const built = { ...assigned, instructions: parts.join('\n\n') };
   if (!shared) return built;
@@ -47,7 +48,12 @@ export function buildPrompt(spec: JobSpec, worktree: Worktree | null, diffFile: 
  * A worker's review is static unless the lead marked it as running the app. A static review runs in a read-only
  * sandbox, which cannot hold an instance of the app, and a second reviewer is often at work on the same change.
  */
-const STATIC_REVIEW = '# Static review\nReview by reading. Run only checks that end by themselves, such as tests and type checks. Do not start the app, a server, or a browser: another reviewer may be running one, and your sandbox is read-only.';
+const STATIC_REVIEW = '# Static review\nReview by reading, and by running checks that end by themselves, such as tests and type checks. Do not start the app, a server, or a browser: another reviewer may be running one.';
+/**
+ * Says what the sandbox allows before the worker finds out by failing: a check that writes a temporary
+ * file is still a check that ends by itself.
+ */
+const scratchNote = (dir: string) => `# What you can run\nYour sandbox is read-only except for one directory of your own: \`${dir}\`. TMPDIR points there. Use it for anything a check has to write: temporary files, caches, a throwaway copy or clone of the repository to try a change or a git operation in. It is deleted when you finish, so nothing in it is a result. Everything else on the machine can be read and not written, the network is closed, and nothing can listen on a port. If a check needs more than that, do not work around it: list it under what you could not verify.`;
 const READ_ONLY_REVIEW = '# Static review\nReview by reading. You cannot run anything in this role, so list every check you would have run under "Not verified".';
 const RUNS_APP = '# Running the app\nThis job may start the app to check the change; a sandbox that blocks the network has been opened for that. Follow the shared-machine rules above for every instance you start. Starting a browser may still need approval; ask for it, and if it is refused, report what you could not check.';
 const SNAPSHOT = 'You are in a snapshot of the change, not the user\'s working tree: nothing you write here is kept. Report findings with paths relative to the repository root.';

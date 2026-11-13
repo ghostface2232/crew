@@ -59,8 +59,10 @@ export interface Worktree {
 
 /** Number of uncommitted paths in the main tree; a worktree created from a ref will not contain them. */
 export async function dirtyCount(root: string): Promise<number> {
-  const out = await git(root, ['status', '--porcelain']);
-  return out ? out.split('\n').length : 0;
+  // Every untracked file by name, so a folder holding nothing but Finder's metadata is not counted either.
+  const out = await git(root, ['status', '--porcelain', '--untracked-files=all']);
+  // Finder's .DS_Store files are never something a worker needs, and they are in most trees that do not ignore them.
+  return out.split('\n').filter((line) => line && !/(^|\/)\.DS_Store"?$/.test(line.slice(3))).length;
 }
 
 /**

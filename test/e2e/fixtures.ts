@@ -98,12 +98,12 @@ export function fixture(): BoardState {
       },
     ],
     agents: {
-      codex: { name: 'Codex', idPrefix: 'cx', resume: 'codex resume', reviewerRunsGit: true, enabled: true },
+      codex: { name: 'Codex', idPrefix: 'cx', resume: 'codex resume', reviewerRunsGit: true, readOnlyScratch: true, enabled: true },
       antigravity: {
         name: 'Antigravity',
         idPrefix: 'ag',
         resume: 'agy --conversation',
-        reviewerRunsGit: false,
+        reviewerRunsGit: false, readOnlyScratch: false,
         enabled: true,
       },
     },

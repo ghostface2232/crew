@@ -130,14 +130,22 @@ export class CodexAdapter implements Adapter {
 
   private threadParams(ctl: JobCtl) {
     const { job } = ctl;
+    // Read-only with one writable directory is not a sandbox mode; it is a permissions profile, which replaces the mode.
+    const scratch = job.sandbox === 'read-only' && job.scratch
+      ? {
+          default_permissions: 'crew_read_only',
+          permissions: { crew_read_only: { filesystem: { ':root': 'read', [job.scratch]: 'write' } } },
+          shell_environment_policy: { set: { TMPDIR: job.scratch } },
+        }
+      : null;
     return {
       cwd: job.cwd,
-      sandbox: job.sandbox,
+      sandbox: scratch ? null : job.sandbox,
       // A read-only job (a static review, a question) must never block on a prompt, and has nothing to approve.
       approvalPolicy: job.sandbox === 'read-only' ? 'never' : this.config.codex.approvalPolicy,
       approvalsReviewer: this.reviewer(job),
       // Without network access the sandbox refuses to bind even a local port.
-      config: job.runsApp ? { sandbox_workspace_write: { network_access: true } } : null,
+      config: job.runsApp ? { sandbox_workspace_write: { network_access: true } } : scratch,
       developerInstructions: job.instructions,
       model: job.model ?? this.config.codex.model ?? null,
     };

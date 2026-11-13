@@ -60,7 +60,9 @@ export function describe(job: JobView, waitingHint?: string): string {
     }
   }
   if (job.sessionId) lines.push(`session: ${resumeCommand(job)}`);
-  if (job.report) lines.push('', '--- report ---', job.report);
+  // While a follow-up turn runs, the report is the previous turn's, which the lead has already read.
+  if (job.report && job.state !== 'running') lines.push('', '--- report ---', job.report);
+  else if (job.report) lines.push(`(The report of turn ${job.turns - 1} is not repeated here.)`);
 
   if (job.state === 'done' && job.worktree && job.result?.files.length) {
     const { branch, base } = job.worktree;

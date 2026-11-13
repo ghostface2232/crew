@@ -99,6 +99,11 @@ export interface Job {
   runsApp?: boolean;
   /** Answers a question read-only; see JobSpec.ask. */
   ask?: boolean;
+  /**
+   * A directory of the job's own that a read-only worker may write to: temporary files, caches, a throwaway
+   * clone to try something in. It exists only while a turn runs. Absent where the agent cannot run commands.
+   */
+  scratch?: string;
   /** Turns that changed files, oldest first; absent on jobs without a worktree and on jobs saved before rounds existed. */
   rounds?: Round[];
   /** Actions the agent's automatic reviewer refused, with the turn they were refused in. */
@@ -342,6 +347,10 @@ export class Jobs {
       notes.push(`${WORKERS[agent].name} cannot run commands as a reviewer: it was given the diff as a file and could not run tests or checks.`);
     }
     if (spec.review?.mode === 'standard' && agent !== 'codex') notes.push(`The standard review mode is Codex's own; ${WORKERS[agent].name} ran the adversarial review instead.`);
+    // A read-only worker that runs commands gets somewhere to write: without it a test that makes a temporary file cannot run.
+    const readOnly = Boolean(spec.ask) || (spec.kind === 'review' && !spec.runsApp);
+    const scratch = readOnly && WORKERS[agent].readOnlyScratch ? this.scratchDir(id) : undefined;
+    if (scratch) fs.mkdirSync(scratch, { recursive: true });
 
     // Diffs name files relative to the repo root, so scope targets must be too.
     const targetRoot = repo ?? spec.cwd;
@@ -366,7 +375,8 @@ export class Jobs {
       cwd,
       worktree,
       sandbox: spec.ask || (spec.kind === 'review' && !spec.runsApp) ? 'read-only' : 'workspace-write',
-      ...buildPrompt(spec, worktree, diffFile, shared.text),
+      scratch,
+      ...buildPrompt(spec, worktree, diffFile, shared.text, scratch),
       shared: shared.sources,
       // Only Codex has a built-in review mode; other agents get the prompted review.
       nativeReview: spec.kind === 'review' && agent === 'codex' && spec.review?.mode === 'standard' ? spec.review.target : null,
@@ -428,6 +438,11 @@ export class Jobs {
     if (retry) input = { message: retry.message };
     if (!input.message) throw new Error(`Job ${id} is not waiting for a decision. Pass a message to send a follow-up.`);
     if (!job.sessionId) throw new Error(`Job ${id} never opened a session, so there is nothing to continue. Start a new job instead.`);
+    // Its directory is gone: a turn would run nowhere, and its edits would be reported as made in place.
+    // A review that runs the app is the exception: its snapshot is made anew for each turn, below.
+    if (!(job.kind === 'review' && job.runsApp) && !fs.existsSync(job.cwd)) {
+      throw new Error(`Job ${id}'s worktree was removed, so it cannot take another turn. Start a new job; to ask something without changing anything, use a question.`);
+    }
     if (!isTerminal(job)) {
       // Steering a live turn: a rejected message is the caller's problem, not a reason to fail the job.
       await adapter.reply(ctl, input.message);
@@ -452,6 +467,7 @@ export class Jobs {
     this.event(job, 'started', `follow-up: ${what}`);
     try {
       let message = input.message;
+      if (job.scratch) fs.mkdirSync(job.scratch, { recursive: true });
       if (job.kind === 'review' && job.runsApp) {
         this.preparingReviews.add(id);
         try {
@@ -820,6 +836,10 @@ export class Jobs {
     return event;
   }
 
+  private scratchDir(id: string): string {
+    return path.join(this.home, 'scratch', id);
+  }
+
   private diffFile(id: string, turn = 1): string {
     return path.join(this.home, 'reviews', `${id}${turn === 1 ? '' : `-${turn}`}.diff`);
   }
@@ -835,6 +855,8 @@ export class Jobs {
       fs.rm(this.diffFile(job.id, job.turns), { force: true }, () => {});
       this.dropSnapshot(job);
     }
+    // Scratch is for the turn: nothing in it is a result. The path is derived, never read from the job, before it is removed.
+    if (isTerminal(job) && job.scratch) fs.rm(this.scratchDir(job.id), { recursive: true, force: true }, () => {});
     this.changed(job);
     for (const wake of [...(this.waiters.get(job.id) ?? [])]) wake();
   }
@@ -886,6 +908,8 @@ export class Jobs {
       this.jobs.set(job.id, job);
       if (job.kind === 'review') this.dropSnapshot(job);
     }
+    // No turn survives a restart, so neither does any scratch.
+    fs.rmSync(path.join(this.home, 'scratch'), { recursive: true, force: true });
   }
 }
 

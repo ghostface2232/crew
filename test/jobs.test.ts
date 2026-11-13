@@ -679,7 +679,7 @@ test('every worker is given the shared-machine rules, and a review is told to st
     // After the role, so the role still comes first, and saying that the role still decides.
     assert.ok(text.indexOf('# Role:') === 0 && text.indexOf('# This machine is shared') > 0, job.kind);
     assert.ok(text.includes('they allow nothing the role forbids'));
-    assert.equal(text.includes('# Static review\nReview by reading. Run only checks that end by themselves'), job.kind === 'review', job.kind);
+    assert.equal(text.includes('# Static review\nReview by reading, and by running checks that end by themselves'), job.kind === 'review', job.kind);
     assert.ok(!job.prompt.includes('Static review'));
   }
 
@@ -1177,4 +1177,74 @@ test('a round is not changed through a link or on another branch', async () => {
   fs.renameSync(`${tree}.moved`, tree);
   await jobs.round(job.id, 1, 'undo');
   await jobs.discard(job.id);
+});
+
+test('a read-only Codex job gets a scratch directory for the turn, and Antigravity none', async () => {
+  const repo = tempRepo();
+  let worker!: JobCtl;
+  const { jobs, home, adapter } = harness((ctl) => { worker = ctl; });
+  const review = await jobs.create({ kind: 'review', cwd: repo, review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } });
+  const scratch = path.join(home, 'scratch', review.id);
+  assert.equal(review.scratch, scratch);
+  assert.ok(fs.statSync(scratch).isDirectory());
+  assert.ok(review.instructions.includes(`one directory of your own: \`${scratch}\``));
+  fs.writeFileSync(path.join(scratch, 'cache'), 'x');
+  worker.done('reviewed');
+  await settled(jobs, review);
+  // Removal is not awaited by the job; give the file system a moment.
+  for (let i = 0; i < 50 && fs.existsSync(scratch); i++) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(fs.existsSync(scratch), false);
+
+  // A follow-up turn gets it back, empty.
+  adapter.reply = async (ctl) => { worker = ctl; };
+  await jobs.reply(review.id, { message: 'look again' });
+  assert.deepEqual(fs.readdirSync(scratch), []);
+  worker.done('again');
+  await settled(jobs, review);
+
+  const ask = await jobs.create({ kind: 'delegate', ask: true, cwd: repo, task: 'why?' });
+  assert.equal(ask.scratch, path.join(home, 'scratch', ask.id));
+  worker.done('because');
+  await settled(jobs, ask);
+
+  // A job that writes, or runs the app, has its own writable tree and needs none.
+  const build = await jobs.create({ kind: 'delegate', cwd: repo, task: 'x' });
+  assert.equal(build.scratch, undefined);
+  assert.ok(!build.instructions.includes('What you can run'));
+  worker.done('built');
+  await settled(jobs, build);
+  await jobs.discard(build.id);
+
+  const other = harness((ctl) => ctl.done('read'), () => resolveConfig({ notify: false, roles: { review: { agent: 'antigravity' } } }));
+  const handed = await settled(other.jobs, await other.jobs.create({ kind: 'review', cwd: repo, review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } }));
+  assert.equal(handed.scratch, undefined);
+});
+
+test('a job whose worktree was removed takes no further turn', async () => {
+  const repo = tempRepo();
+  const { jobs } = harness((ctl) => {
+    fs.writeFileSync(path.join(ctl.job.cwd, 'a.js'), 'a\n');
+    ctl.session('s-1');
+    ctl.done('done');
+  });
+  const job = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'x' }));
+  await jobs.discard(job.id);
+  const before = structuredClone(job);
+  await assert.rejects(jobs.reply(job.id, { message: 'one more thing' }), /worktree was removed, so it cannot take another turn/);
+  assert.deepEqual(job, before);
+});
+
+test('Finder metadata does not count as uncommitted work', async () => {
+  const repo = tempRepo();
+  fs.writeFileSync(path.join(repo, '.DS_Store'), 'x');
+  fs.mkdirSync(path.join(repo, 'sub'));
+  fs.writeFileSync(path.join(repo, 'sub', '.DS_Store'), 'x');
+  const { jobs } = harness((ctl) => ctl.done('done'));
+  const clean = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'x' }));
+  assert.ok(!clean.notes.some((note) => note.includes('uncommitted path')));
+  fs.writeFileSync(path.join(repo, 'real.js'), 'x');
+  const dirty = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'x' }));
+  assert.ok(dirty.notes.some((note) => note.startsWith('1 uncommitted path(s)')));
+  await jobs.discard(clean.id);
+  await jobs.discard(dirty.id);
 });

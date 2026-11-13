@@ -47,13 +47,13 @@ A question job is read-only for both agents: Codex runs it with no approval prom
 | `stale` | AgentGauge's reading is too old to act on |
 | `unknown` | No reading: AgentGauge is not installed, or its file has a format this version does not know |
 
-A provider's status is that of its tightest account-wide window. Windows scoped to one model (`group` set) are listed with their own status and do not decide it. A provider that reports only per-model windows (Antigravity) is judged by the family its configured model belongs to, matched by name; with no model configured, or none that matches, by its tightest family, because a job does not move to another model by itself.
+A provider's status is that of its tightest account-wide window. Windows scoped to one model (`group` set) are listed with their own status and do not decide the provider's status. A provider that reports only per-model windows (Antigravity) is judged by the family of its configured model, matched by name. With no model configured, or none that matches, it is judged by its tightest family, because a job does not switch models on its own.
 
-On a board, a provider that is stale, unknown, or exhausted by a reported limit shows that status on its account-wide gauges in place of each window's own.
+On the board, a provider that is stale, unknown, or exhausted by a reported limit shows that status on its account-wide gauges instead of each window's own.
 
 ## 4. Intents on the board
 
-The board's New Job form sends one of three things:
+The board's New Job form sends one of three intents:
 
 | Intent | What the board calls |
 | --- | --- |
@@ -63,11 +63,11 @@ The board's New Job form sends one of three things:
 
 ## 5. Progress roll-up
 
-Computed by each client from data it already has, by the same rule, so the two boards agree:
+Each client computes progress from data it already has using the same rule, so the two boards agree:
 
 - A done mission is 100%.
-- Otherwise progress is (stage index + share) / 7, where the stage index is the position of the mission's stage among the seven stages, and share is how far the current stage is taken to be.
-- Share is the mean over the mission's unfinished jobs of 0.5 each, and 0.5 when it has none. It is therefore always a half step today; the per-job weight is one place to change when jobs report finer progress.
+- Otherwise progress is `(stage index + share) / 7`. The stage index is the position of the mission's current stage among the seven stages, and `share` is how far along the current stage is.
+- `share` is the mean of `0.5` across the mission's unfinished jobs, or `0.5` when it has none. Because every unfinished job currently has a weight of `0.5`, `share` is always `0.5` today; that per-job weight is the single place to update when jobs report finer progress.
 
 ## 6. Where usage comes from
 

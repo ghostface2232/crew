@@ -40,7 +40,7 @@ crew board
 
 The status board runs at http://127.0.0.1:47615. Each command run with `/crew:run` appears as a single unit with its jobs grouped under it, and a line at the top lists anything waiting on you. Click a job to read its report, changed files, and activity, or to send it a follow-up. Settings on the board edits roles, the preset, and shared instructions.
 
-If [AgentGauge](https://github.com/ghostface2232/AgentGauge) is installed, each agent's card shows its remaining usage, and `/crew:run` routes work by it: when an agent runs low, the lead takes its work or defers it, and says so. A job's turns are listed as rounds that can be undone or kept one by one, and Send work also takes a read-only question or a piece of information to pin ([docs/09-usage-presets-rounds.md](docs/09-usage-presets-rounds.md)).
+If [AgentGauge](https://github.com/ghostface2232/AgentGauge) is installed, each agent's card shows its remaining usage, and `/crew:run` routes work accordingly: when an agent runs low, the lead takes over or defers the work and says so. A job's turns appear as rounds that can be undone or kept one by one, and Send work also accepts a read-only question or a piece of information to pin ([docs/09-usage-presets-rounds.md](docs/09-usage-presets-rounds.md)).
 
 When a worker asks for approval or has a question, an input dialog pops up in the Claude app. You can also answer on the status board: approve or deny, or type an answer to a question. Codex's built-in automatic reviewer answers its approval requests first, so you are asked only about what it refuses twice ([docs/04-implementation.md](docs/04-implementation.md) section 5.1).
 
@@ -89,10 +89,11 @@ Using Antigravity carries a Terms of Service risk; read [docs/04-implementation.
 | [docs/06-roadmap.md](docs/06-roadmap.md) | Near-term rework, long-term expansion, control UI concept, open items |
 | [docs/07-desktop-and-react.md](docs/07-desktop-and-react.md) | React migration and historical Electron implementation |
 | [docs/08-native-macos.md](docs/08-native-macos.md) | Native macOS app, Liquid Glass, Swift 6, packaging and verification |
+| [docs/09-usage-presets-rounds.md](docs/09-usage-presets-rounds.md) | AgentGauge usage and routing, presets, rounds, intents, and the API they share |
 
 ## Current status
 
-The bridge (Phase 1) and status board (Phase 2) are implemented, roles can be reassigned in `~/.crew/config.json`, and shared instructions reach every agent ([docs/04-implementation.md](docs/04-implementation.md) sections 2.1 and 2.2). AgentGauge integration (Phase 3) is not yet implemented. What comes next is in [docs/06-roadmap.md](docs/06-roadmap.md).
+The bridge (Phase 1) and status board (Phase 2) are implemented, roles can be reassigned in `~/.crew/config.json`, and shared instructions reach every agent ([docs/04-implementation.md](docs/04-implementation.md) sections 2.1 and 2.2). AgentGauge usage and routing are implemented by reading its files (phase G1, [docs/09-usage-presets-rounds.md](docs/09-usage-presets-rounds.md)); the phases that need changes in AgentGauge itself are not. What comes next is in [docs/06-roadmap.md](docs/06-roadmap.md).
 
 ## Updating the documentation
 

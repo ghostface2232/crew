@@ -115,3 +115,26 @@ The built-in presets name no worker models, because which models an account has 
 ```
 
 The lead is told the preset's subagent model in its session instructions, which are fixed when the session starts.
+
+## 9. What a read-only job can write
+
+A static review or a question runs read-only, and a check that only reads is rare: tests make temporary files, tools write caches. Each such job on Codex gets one directory of its own, `~/.crew/scratch/<job id>`, for the length of a turn.
+
+| | |
+| --- | --- |
+| Writable | The scratch directory only. `TMPDIR` points to it |
+| Readable | The whole disk, as before |
+| Closed | The network, and listening on a port |
+| Lifetime | Created when a turn starts, removed when it ends; a follow-up turn gets it back empty |
+
+It is a Codex permissions profile (`default_permissions` with a `filesystem` table) passed in the thread's config in place of the `read-only` sandbox mode, which has no way to except one directory. Checked on 2026-11-13 with Codex CLI 0.167.0 and a real review on an isolated daemon: `mktemp -d`, Node's `mkdtemp`, and a `git clone` plus commit inside the scratch directory succeeded; writing to the repository and to the home directory was refused.
+
+Antigravity runs no commands as a reviewer, so it gets no scratch directory and is handed the diff as before. A review started with `runs_app` already has a writable snapshot and is unchanged.
+
+The job's instructions say what it can run before it finds out by failing, and the reviewer marks each finding as reproduced, read, or suspected.
+
+## 10. Bringing a worker up to date
+
+A worker's worktree starts from the lead's `HEAD` and does not follow it. `reply` with `sync: true` merges the lead's current `HEAD` into the worker's branch before the follow-up turn and moves the job's base to that commit, so the job's result still lists only the worker's own changes. A merge that conflicts is aborted: the reply fails with the conflicting files and no turn starts.
+
+A job whose worktree was discarded takes no further turn; ask a new question instead.

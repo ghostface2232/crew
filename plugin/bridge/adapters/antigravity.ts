@@ -238,7 +238,7 @@ export class AntigravityAdapter implements Adapter {
     // Outside a turn there is nobody to act on an answer, and a queued request would never be settled.
     if (run && (run.cancelling || !run.prompting || isTerminal(run.ctl.job))) return cancelled;
     const toolCall = p.toolCall ?? {};
-    const verdict = run ? decide(run.ctl.job.kind, run.ctl.job.cwd, toolCall) : { refuse: 'unknown session' };
+    const verdict = run ? decide(run.ctl.job.kind, run.ctl.job.cwd, toolCall, run.ctl.job.sandbox === 'read-only') : { refuse: 'unknown session' };
 
     let allow = verdict === 'allow';
     if (run && verdict === 'ask') {
@@ -279,11 +279,13 @@ const ROLE_NAMES: Record<JobKind, string> = { delegate: 'engineer', review: 'rev
  * - Switching mode is refused: "accept-edits" was measured to apply edits outside the workspace without asking.
  * - Anything else (execute, delete, move, fetch, unknown kinds) is refused for a reviewer or editor. For an engineer it is
  *   the user's call, provided the request says exactly what it will do.
+ * - A read-only job changes nothing whatever its role: a question is answered by the engineer, with a reviewer's limits.
  */
-export function decide(role: JobKind, cwd: string, toolCall: { kind?: string; locations?: { path?: string }[]; rawInput?: unknown }): 'allow' | 'ask' | { refuse: string } {
+export function decide(role: JobKind, cwd: string, toolCall: { kind?: string; locations?: { path?: string }[]; rawInput?: unknown }, readOnly = false): 'allow' | 'ask' | { refuse: string } {
   const kind = toolCall.kind ?? 'other';
   if (PASSIVE_KINDS.includes(kind)) return 'allow';
   if (kind === 'switch_mode') return { refuse: kind };
+  if (readOnly && role !== 'review') return { refuse: kind === 'edit' ? 'edit in a read-only job' : kind };
   if (kind !== 'edit') {
     if (role !== 'delegate') return { refuse: kind };
     // A title alone may be a shortened form; the user must not approve what they cannot see in full.

@@ -45,6 +45,10 @@ test('each role may read anywhere; only editors and engineers edit, inside the w
     assert.deepEqual(decide('delegate', cwd, { kind }), refused(`${kind} request without its input`));
   }
   assert.equal(decide('delegate', cwd, { rawInput: 'x' }), 'ask');
+  // A read-only job (a question) reads freely and changes nothing, even as an engineer.
+  assert.equal(decide('delegate', cwd, { kind: 'read' }, true), 'allow');
+  assert.deepEqual(decide('delegate', cwd, inside, true), refused('edit in a read-only job'));
+  assert.deepEqual(decide('delegate', cwd, { kind: 'execute', rawInput: { command: 'x' } }, true), refused('execute'));
   // No role may leave the mode in which every edit is checked.
   for (const role of ['delegate', 'review', 'polish'] as const) assert.deepEqual(decide(role, cwd, { kind: 'switch_mode', rawInput: { mode: 'accept-edits' } }), refused('switch_mode'));
 });

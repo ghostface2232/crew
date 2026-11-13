@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { effectiveRole, WORKERS } from './config.ts';
+import { effectiveRole, PORT, WORKERS } from './config.ts';
 import type { Config, Role, WorkerAgent } from './config.ts';
 import { carryUncommitted, changesSince, commitAll, commitChanges, copyIncluded, createWorktree, currentBranch, dirtyCount, mergeInto, isInside, projectRoot, removeWorktree, repoRoot, revertCommit, revertsSince, reviewDiff } from './git.ts';
 import type { Worktree } from './git.ts';
@@ -78,6 +78,15 @@ export interface Round {
   at: number;
 }
 
+export interface LeadQuestion {
+  id: string;
+  text: string;
+  blocks?: string;
+  at: number;
+  answer?: string;
+  answeredAt?: number;
+}
+
 export interface Job {
   id: string;
   kind: JobKind;
@@ -138,6 +147,9 @@ export interface Job {
   waiting: { type: 'approval' | 'question'; reason: string; id: string; since: number } | null;
   /** The worker's final message for the latest turn. */
   report: string;
+  questions?: LeadQuestion[];
+  /** Seq of the latest lead question, so later progress cannot redeliver it. */
+  questionSeq?: number;
   result: { files: string[]; stat: string; commit: string | null; outOfScope: string[] } | null;
   notes: string[];
   error: { message: string; limit: boolean } | null;
@@ -151,6 +163,7 @@ export interface Job {
 /** What an adapter may do to the job it is running. */
 export interface JobCtl {
   readonly job: Job;
+  readonly mcp: { command: string; args: string[]; env: Record<string, string> };
   /** Worker is alive; resets the stall timer. */
   activity(): void;
   phase(text: string): void;
@@ -210,6 +223,7 @@ export class Jobs {
   readonly jobs = new Map<string, Job>();
   readonly recent: CrewEvent[] = [];
   private seq = 0;
+  private workerTokens = new Map<string, string>();
   private waiters = new Map<string, Set<() => void>>();
   private touchedFiles = new Map<string, Set<string>>();
   private discarding = new Set<string>();
@@ -673,6 +687,55 @@ export class Jobs {
     this.flush();
   }
 
+  ask(id: string, text: string, blocks?: string): LeadQuestion {
+    const job = this.get(id);
+    if (isTerminal(job)) throw new Error(`Job ${id} is ${job.state}; questions require a running or waiting job.`);
+    if (typeof text !== 'string' || !text.trim()) throw new Error('Question text must be a non-empty string.');
+    if (text.length > 4000) throw new Error('Question text must be at most 4000 characters.');
+    if (blocks !== undefined && typeof blocks !== 'string') throw new Error('blocks must be a string.');
+    if ((job.questions?.length ?? 0) >= 20) throw new Error(`Job ${id} already has 20 lead questions.`);
+    const question: LeadQuestion = { id: randomUUID(), text, ...(blocks === undefined ? {} : { blocks }), at: Date.now() };
+    (job.questions ??= []).push(question);
+    job.activeAt = Date.now();
+    job.questionSeq = this.seq + 1;
+    this.event(job, 'progress', `asks the lead: ${text.trim().split('\n')[0]}`);
+    return question;
+  }
+
+  answer(id: string, questionId: string, text: string): Job {
+    const job = this.get(id);
+    const question = job.questions?.find((q) => q.id === questionId);
+    if (!question) throw new Error(`No lead question with id "${questionId}" on job ${id}.`);
+    if (question.answer !== undefined) throw new Error(`Lead question ${questionId} is already answered.`);
+    if (typeof text !== 'string' || !text.trim()) throw new Error('Answer must be a non-empty string.');
+    question.answer = text;
+    question.answeredAt = Date.now();
+    this.event(job, 'progress', `lead answered ${questionId}`);
+    return job;
+  }
+
+  workerAuthorized(id: string, token: unknown): boolean {
+    return typeof token === 'string' && token.length > 0 && this.workerTokens.get(id) === token;
+  }
+
+  siblings(id: string) {
+    const job = this.get(id);
+    return this.list().filter((other) => other.id !== id && !isTerminal(other) &&
+      (job.mission ? other.mission === job.mission : other.project === job.project))
+      .map(({ id, kind, agent, title, phase, worktree }) => ({ id, kind, agent, title, phase, base: worktree?.base ?? null }));
+  }
+
+  async leadAnswers(id: string, seconds: number): Promise<LeadQuestion[]> {
+    const job = this.get(id);
+    if (!Number.isFinite(seconds) || seconds < 0) throw new Error('wait must be a non-negative number of seconds.');
+    const open = (job.questions ?? []).filter((q) => q.answer === undefined);
+    const deadline = Date.now() + Math.min(seconds, 600) * 1000;
+    while (open.length && open.every((q) => q.answer === undefined) && Date.now() < deadline) {
+      await this.wait(id, job.seq, deadline - Date.now());
+    }
+    return job.questions ?? [];
+  }
+
   /** Resolves when the job has an event newer than `after`, or after `timeoutMs`. */
   wait(id: string, after: number, timeoutMs: number): Promise<void> {
     const job = this.get(id);
@@ -701,8 +764,15 @@ export class Jobs {
 
   private ctl(job: Job): JobCtl {
     const live = () => !isTerminal(job);
+    let token = this.workerTokens.get(job.id);
+    if (!token) this.workerTokens.set(job.id, token = randomBytes(32).toString('hex'));
     return {
       job,
+      mcp: {
+        command: process.execPath,
+        args: [path.join(import.meta.dirname, `worker-mcp${path.extname(import.meta.filename)}`)],
+        env: { CREW_JOB_ID: job.id, CREW_JOB_TOKEN: token, CREW_PORT: String(PORT) },
+      },
       activity: () => {
         if (!live()) return;
         job.activeAt = Date.now();

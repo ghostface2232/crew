@@ -338,7 +338,13 @@ test('Codex runs an app job with network access and reports what its reviewer re
   await ended();
 
   const seen = fs.readFileSync(path.join(home, 'seen.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line).params);
-  assert.deepEqual(seen[0].config, { sandbox_workspace_write: { network_access: true } });
+  assert.deepEqual(seen[0].config.sandbox_workspace_write, { network_access: true });
+  const crew = seen[0].config.mcp_servers.crew;
+  assert.equal(crew.command, process.execPath);
+  assert.equal(crew.args[0], path.resolve('plugin/bridge/worker-mcp.ts'));
+  assert.equal(crew.env.CREW_JOB_ID, job.id);
+  assert.match(crew.env.CREW_JOB_TOKEN, /^[0-9a-f]{64}$/);
+  assert.ok(jobs.workerAuthorized(job.id, crew.env.CREW_JOB_TOKEN));
   assert.equal(seen[0].approvalsReviewer, 'auto_review');
   assert.deepEqual(seen.slice(1).map((turn) => turn.approvalsReviewer), ['auto_review', 'auto_review', 'user', 'auto_review']);
 });
@@ -356,4 +362,121 @@ test('a read-only question never prompts and never asks the user to allow a writ
   assert.equal(waited, false);
   assert.equal(job.report, 'decline');
   assert.ok(job.notes.some((note) => note.startsWith('Declined in a read-only job: Run:')));
+});
+
+
+test('Codex accepts only crew MCP approvals, including correlated legacy input requests', { timeout: 5000 }, async (t) => {
+  const h = harness(`
+    const send = (msg) => console.log(JSON.stringify({ jsonrpc: '2.0', ...msg }));
+    const requests = [
+      ...['ask_lead', 'lead_answers', 'siblings'].map((tool_name) => ({ serverName: 'crew', tool_name, expected: 'accept' })),
+      { serverName: 'other', tool_name: 'ask_lead', expected: 'decline' },
+      { serverName: 'crew', tool_name: 'delete', expected: 'decline' },
+      { serverName: 'crew', tool_name: 'ask_lead', approvalKind: 'browser_auth', expected: 'decline' },
+    ];
+    const outcomes = [];
+    require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
+      const msg = JSON.parse(line);
+      if (msg.method === 'thread/start') return send({ id: msg.id, result: { thread: { id: 'thread' } } });
+      if (msg.method === 'turn/start') {
+        send({ id: msg.id, result: { turn: { id: 'turn' } } });
+        requests.forEach((r, i) => send({ id: 'mcp-' + i, method: 'mcpServer/elicitation/request', params: {
+          threadId: 'thread', turnId: 'turn', serverName: r.serverName, mode: 'form', message: 'Approve tool?',
+          requestedSchema: { type: 'object', properties: {} },
+          _meta: { codex_approval_kind: r.approvalKind || 'mcp_tool_call', tool_name: r.tool_name },
+        } }));
+        send({ method: 'item/started', params: { threadId: 'thread', item: { id: 'call', type: 'mcpToolCall', server: 'crew', tool: 'ask_lead' } } });
+        send({ id: 'legacy', method: 'item/tool/requestUserInput', params: {
+          threadId: 'thread', turnId: 'turn', itemId: 'call', isBlocking: true,
+          questions: [{ id: 'mcp_tool_call_approval_call', header: 'Approve app tool call?', question: 'Allow?', options: [{ label: 'Allow', description: 'Run the tool and continue.' }] }],
+        } });
+        return;
+      }
+      if (String(msg.id).startsWith('mcp-')) {
+        const r = requests[Number(msg.id.slice(4))];
+        outcomes.push(msg.result.action === r.expected);
+      } else if (msg.id === 'legacy') outcomes.push(msg.result.answers.mcp_tool_call_approval_call.answers[0] === 'Allow');
+      else if (msg.method && msg.id != null) return send({ id: msg.id, result: {} });
+      if (outcomes.length === requests.length + 1) {
+        send({ method: 'item/completed', params: { threadId: 'thread', item: { type: 'agentMessage', text: JSON.stringify(outcomes) } } });
+        send({ method: 'turn/completed', params: { threadId: 'thread', turn: { id: 'turn', status: 'completed' } } });
+      }
+    });
+  `);
+  cleanup(t, h);
+  const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' });
+  while (!job.endedAt) {
+    await h.jobs.wait(job.id, job.seq, 1000);
+    assert.equal(job.waiting, null);
+  }
+  assert.deepEqual(JSON.parse(job.report), Array(7).fill(true));
+});
+
+test('Codex merges crew MCP into a read-only permissions profile', { timeout: 5000 }, async (t) => {
+  const h = harness(`
+    const send = (msg) => console.log(JSON.stringify({ jsonrpc: '2.0', ...msg }));
+    require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
+      const msg = JSON.parse(line);
+      if (msg.method === 'thread/start') {
+        require('node:fs').writeFileSync(__dirname + '/config.json', JSON.stringify(msg.params.config));
+        return send({ id: msg.id, result: { thread: { id: 'thread' } } });
+      }
+      if (msg.method === 'turn/start') {
+        send({ id: msg.id, result: { turn: { id: 'turn' } } });
+        send({ method: 'turn/completed', params: { threadId: 'thread', turn: { id: 'turn', status: 'completed' } } });
+      } else if (msg.id != null) send({ id: msg.id, result: {} });
+    });
+  `);
+  cleanup(t, h);
+  const job = await h.jobs.create({ kind: 'delegate', ask: true, cwd: h.home, task: 'why?' });
+  await until(h.jobs, job, 'done');
+  const config = JSON.parse(fs.readFileSync(path.join(h.home, 'config.json'), 'utf8'));
+  assert.equal(config.default_permissions, 'crew_read_only');
+  assert.equal(config.permissions.crew_read_only.filesystem[job.scratch!], 'write');
+  assert.equal(config.mcp_servers.crew.env.CREW_JOB_ID, job.id);
+  // Codex refuses an MCP call outright under approval policy "never" unless the server's tools are approved in advance.
+  assert.equal(config.mcp_servers.crew.default_tools_approval_mode, 'approve');
+});
+
+test('Antigravity passes crew MCP on new and restored sessions and permits identified crew calls', { timeout: 5000 }, async (t) => {
+  const h = harness(`
+    const send = (msg) => console.log(JSON.stringify({ jsonrpc: '2.0', ...msg }));
+    let prompt;
+    require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
+      const msg = JSON.parse(line);
+      if (msg.method === 'initialize') return send({ id: msg.id, result: { agentCapabilities: { loadSession: true } } });
+      if (msg.method === 'session/new' || msg.method === 'session/load') {
+        require('node:fs').appendFileSync(__dirname + '/servers.jsonl', JSON.stringify(msg.params.mcpServers) + '\\n');
+        return send({ id: msg.id, result: { sessionId: 'saved' } });
+      }
+      if (msg.method === 'session/prompt') {
+        prompt = msg.id;
+        return send({ id: 'permission', method: 'session/request_permission', params: {
+          sessionId: 'saved', toolCall: { kind: 'other', _meta: { mcpServerName: 'crew', mcpToolName: 'ask_lead' } },
+          options: [{ kind: 'allow_once', optionId: 'yes' }, { kind: 'reject_once', optionId: 'no' }],
+        } });
+      }
+      if (msg.id === 'permission') {
+        send({ method: 'session/update', params: { sessionId: 'saved', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: msg.result.outcome.optionId } } } });
+        return send({ id: prompt, result: { stopReason: 'end_turn' } });
+      }
+      if (msg.id != null) send({ id: msg.id, result: {} });
+    });
+  `, 'antigravity');
+  cleanup(t, h);
+  const job = await h.jobs.create({ kind: 'polish', cwd: h.home, isolation: 'in_place', targets: ['README.md'] });
+  await until(h.jobs, job, 'done');
+  assert.equal(job.report, 'yes');
+  h.adapter.shutdown();
+  await h.jobs.reply(job.id, { message: 'again' });
+  await until(h.jobs, job, 'done');
+  assert.equal(job.report, 'yes');
+  const servers = fs.readFileSync(path.join(h.home, 'servers.jsonl'), 'utf8').trim().split('\n').map((s) => JSON.parse(s));
+  assert.equal(servers.length, 2);
+  assert.deepEqual(servers[0], servers[1]);
+  const [server] = servers[0];
+  assert.equal(server.name, 'crew');
+  assert.equal(server.command, process.execPath);
+  assert.equal(server.args[0], path.resolve('plugin/bridge/worker-mcp.ts'));
+  assert.equal(Object.fromEntries(server.env.map(({ name, value }: { name: string; value: string }) => [name, value])).CREW_JOB_ID, job.id);
 });

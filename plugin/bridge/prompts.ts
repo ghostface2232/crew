@@ -32,7 +32,7 @@ export function buildPrompt(spec: JobSpec, worktree: Worktree | null, diffFile: 
   const assigned = assignment(spec, worktree, diffFile);
   // Every worker shares the machine with the user and the other agents, whatever its role. These parts go with
   // the instructions, not the prompt: Codex's built-in review is sent no prompt, and must still be told them.
-  const parts = [assigned.instructions, role('machine')];
+  const parts = [assigned.instructions, role('machine'), LEAD_QUESTIONS];
   if (spec.runsApp) parts.push(spec.kind === 'review' ? `${RUNS_APP}\n${SNAPSHOT}` : RUNS_APP);
   else if (spec.kind === 'review') parts.push(diffFile ? READ_ONLY_REVIEW : STATIC_REVIEW);
   if (scratch) parts.push(scratchNote(scratch));
@@ -49,6 +49,7 @@ export function buildPrompt(spec: JobSpec, worktree: Worktree | null, diffFile: 
  * sandbox, which cannot hold an instance of the app, and a second reviewer is often at work on the same change.
  */
 const STATIC_REVIEW = '# Static review\nReview by reading, and by running checks that end by themselves, such as tests and type checks. Do not start the app, a server, or a browser: another reviewer may be running one.';
+const LEAD_QUESTIONS = '# Questions for the lead\nUse crew.ask_lead for a decision or fact only the lead has, or when something outside your allowed files must change. Keep working on what the answer does not affect; call crew.lead_answers when you reach what it blocks (wait_seconds waits for an answer). Read and investigate things you can find yourself. Approvals go to the user through the normal approval flow, not ask_lead. Use crew.siblings to see the other active jobs.';
 /**
  * Says what the sandbox allows before the worker finds out by failing: a check that writes a temporary
  * file is still a check that ends by itself.

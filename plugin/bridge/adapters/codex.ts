@@ -23,6 +23,7 @@ interface Run {
   interrupt: ReturnType<typeof Promise.withResolvers<void>> | null;
   message: string;
   pending: Pending[];
+  crewCalls: Set<string>;
 }
 
 export interface CodexLimits {
@@ -31,6 +32,7 @@ export interface CodexLimits {
   reached: boolean;
 }
 
+const CREW_TOOLS = ['ask_lead', 'lead_answers', 'siblings'];
 const LIMIT_ERRORS = ['usageLimitExceeded', 'rateLimitExceeded', 'sessionBudgetExceeded'];
 const IDLE_SHUTDOWN_MS = 10 * 60_000;
 
@@ -145,7 +147,9 @@ export class CodexAdapter implements Adapter {
       approvalPolicy: job.sandbox === 'read-only' ? 'never' : this.config.codex.approvalPolicy,
       approvalsReviewer: this.reviewer(job),
       // Without network access the sandbox refuses to bind even a local port.
-      config: job.runsApp ? { sandbox_workspace_write: { network_access: true } } : scratch,
+      config: { ...(job.runsApp ? { sandbox_workspace_write: { network_access: true } } : scratch), // Its three tools only talk to the bridge. Without this a job with approval policy "never" (a review, a question)
+      // is refused the call outright, and any other job would stop to ask.
+      mcp_servers: { crew: { ...ctl.mcp, default_tools_approval_mode: 'approve' } } },
       developerInstructions: job.instructions,
       model: job.model ?? this.config.codex.model ?? null,
     };
@@ -156,7 +160,7 @@ export class CodexAdapter implements Adapter {
   }
 
   private openRun(ctl: JobCtl, threadId: string): Run {
-    const run: Run = { ctl, turnId: null, awaitingTurn: false, interrupt: null, message: '', pending: [] };
+    const run: Run = { ctl, turnId: null, awaitingTurn: false, interrupt: null, message: '', pending: [], crewCalls: new Set() };
     this.runs.set(threadId, run);
     return run;
   }
@@ -291,9 +295,11 @@ export class CodexAdapter implements Adapter {
         ctl.phase('working');
         break;
       case 'item/started':
+        if (p.item.type === 'mcpToolCall' && p.item.server === 'crew' && CREW_TOOLS.includes(p.item.tool)) run.crewCalls.add(p.item.id);
         this.onItemStarted(ctl, p.item);
         break;
       case 'item/completed':
+        run.crewCalls.delete(p.item.id);
         this.onItemCompleted(run, p.item);
         break;
       case 'turn/plan/updated': {
@@ -310,6 +316,7 @@ export class CodexAdapter implements Adapter {
       case 'turn/completed': {
         run.turnId = null;
         run.awaitingTurn = false;
+        run.crewCalls.clear();
         for (const request of run.pending.splice(0)) request.resolve(null);
         const turn = p.turn;
         if (run.interrupt || turn.status === 'interrupted') ctl.cancelled();
@@ -432,6 +439,10 @@ export class CodexAdapter implements Adapter {
       }
       case 'item/tool/requestUserInput': {
         const questions: any[] = p.questions ?? [];
+        if (run && !isTerminal(run.ctl.job) && !run.interrupt && run.crewCalls.has(p.itemId) && questions.length &&
+          questions.every((q) => q.id === `mcp_tool_call_approval_${p.itemId}`)) {
+          return { answers: Object.fromEntries(questions.map((q) => [q.id, { answers: ['Allow'] }])) };
+        }
         const answer = await ask('question', questions.map((q) => q.question).join(' / ') || 'the worker asked a question');
         if (!answer) return;
         if (answer.cancelled) return { answers: {} };
@@ -439,6 +450,10 @@ export class CodexAdapter implements Adapter {
         return { answers: Object.fromEntries(questions.map((q) => [q.id, { answers: [text] }])) };
       }
       case 'mcpServer/elicitation/request':
+        if (run && !isTerminal(run.ctl.job) && !run.interrupt && p.serverName === 'crew' &&
+          ['form', 'openai/form', 'openaiForm'].includes(p.mode) && p._meta?.codex_approval_kind === 'mcp_tool_call' && CREW_TOOLS.includes(p._meta?.tool_name)) {
+          return { action: 'accept', content: {}, _meta: null };
+        }
         return { action: 'decline', content: null, _meta: null };
       default:
         throw new RpcError(-32601, `${method} is not supported by Crew`);

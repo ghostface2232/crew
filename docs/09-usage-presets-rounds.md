@@ -138,3 +138,28 @@ The job's instructions say what it can run before it finds out by failing, and t
 A worker's worktree starts from the lead's `HEAD` and does not follow it. `reply` with `sync: true` merges the lead's current `HEAD` into the worker's branch before the follow-up turn and moves the job's base to that commit, so the job's result still lists only the worker's own changes. A merge that conflicts is aborted: the reply fails with the conflicting files and no turn starts.
 
 A job whose worktree was discarded takes no further turn; ask a new question instead.
+
+## 11. Questions from a worker to the lead
+
+A worker that needs a decision or a fact only the lead has asks without ending its turn. Each job is given a small MCP server (`plugin/bridge/worker-mcp.ts`) with three tools:
+
+| Tool | Does |
+| --- | --- |
+| `ask_lead` | Records a question, with what it blocks, and returns at once; the worker carries on with what the answer does not affect |
+| `lead_answers` | Returns the job's questions and their answers, waiting up to ten minutes when asked to |
+| `siblings` | Lists the other unfinished jobs of the same mission or project |
+
+The lead is woken by a new question as it is by a finished job, while the job keeps running. It answers with the `answer` tool and waits again. This is separate from approvals and from questions put to the user, which are unchanged.
+
+| Request | Body | From |
+| --- | --- | --- |
+| `POST /api/jobs/:id/questions` | `{ text, blocks?, token }` | The job's worker |
+| `GET /api/jobs/:id/questions?token=&wait=` | | The job's worker |
+| `GET /api/jobs/:id/siblings?token=` | | The job's worker |
+| `POST /api/jobs/:id/questions/:questionId` | `{ answer }` | The lead |
+
+The worker routes need the job's token, which is made when the job starts, kept in memory only, and handed to the worker's MCP server in its environment. It is never saved or sent to a board.
+
+Checked on 2026-11-13 with Codex CLI 0.167.0 and real jobs on an isolated daemon, as a read-only question and as a writing job in a worktree: the worker asked, the lead's answer arrived through `lead_answers`, and a request with a wrong token was refused. Codex refuses an MCP tool call outright under approval policy `never`, so the server is registered with `default_tools_approval_mode = "approve"`; its tools only talk to the bridge.
+
+Not exercised: Antigravity. The server is passed in ACP's `mcpServers` and its tool calls are allowed by policy, but neither was run against the real `agy`.

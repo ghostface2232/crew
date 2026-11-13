@@ -247,8 +247,9 @@ private struct AgentCard: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top, spacing: 10) {
-                AgentMark(agent: agent, size: 22).padding(.top, 1)
+            // The mark and the status sit on the middle of the name and role together, not on the name alone.
+            HStack(alignment: .center, spacing: 10) {
+                AgentMark(agent: agent, size: 22)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(agentName(agent)).font(Typeface.cardTitle).fixedSize()
                     // The role truncates and claims no width of its own, so the name and status set

@@ -285,6 +285,27 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     }
   }
 
+  const questionRoute = /^\/api\/jobs\/([\w-]+)\/questions(?:\/([\w-]+))?$/.exec(pathname);
+  if (questionRoute) {
+    const [, id, questionId] = questionRoute;
+    if (method === 'POST') {
+      const body = await readJson(req);
+      if (questionId) return view(jobs.answer(id, questionId, body?.answer));
+      if (!jobs.workerAuthorized(id, body?.token)) throw new HttpError(403, 'forbidden worker token');
+      return jobs.ask(id, body.text, body.blocks);
+    }
+    if (method === 'GET' && !questionId) {
+      if (!jobs.workerAuthorized(id, url.searchParams.get('token'))) throw new HttpError(403, 'forbidden worker token');
+      return { questions: await jobs.leadAnswers(id, Number(url.searchParams.get('wait') ?? 0)) };
+    }
+  }
+  const siblingsRoute = /^\/api\/jobs\/([\w-]+)\/siblings$/.exec(pathname);
+  if (siblingsRoute && method === 'GET') {
+    const id = siblingsRoute[1];
+    if (!jobs.workerAuthorized(id, url.searchParams.get('token'))) throw new HttpError(403, 'forbidden worker token');
+    return jobs.siblings(id);
+  }
+
   const roundRoute = /^\/api\/jobs\/([\w-]+)\/rounds\/(\d+)$/.exec(pathname);
   if (roundRoute && method === 'POST') {
     const body = await readJson(req);

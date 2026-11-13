@@ -16,13 +16,20 @@ export function duration(ms: number): string {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${String(s % 60).padStart(2, '0')}s`;
 }
 
-/** True once the job is no longer just running: it ended, or it is waiting on the lead. */
-export const needsLead = (job: JobView) => job.state !== 'running';
+/** Finished, waiting on the user, or asking a lead question not yet delivered. */
+export const needsLead = (job: JobView) => job.state !== 'running' || ((job.questionSeq ?? 0) > job.delivered && Boolean(job.questions?.some((q) => q.answer === undefined)));
 
 /** `waitingHint` replaces the default advice on how to settle a waiting job. */
 export function describe(job: JobView, waitingHint?: string): string {
   const elapsed = duration((job.endedAt ?? Date.now()) - job.createdAt);
   const lines = [`[${job.id}] ${WORKERS[job.agent].name} · ${job.kind} · ${job.state.toUpperCase()} (${elapsed}) — ${job.title}`];
+
+  for (const question of job.questions ?? []) {
+    if (question.answer !== undefined) continue;
+    lines.push(`ASKS YOU: [${question.id}] ${question.text}`);
+    if (question.blocks) lines.push(`Blocks: ${question.blocks}`);
+    lines.push(`Call answer with job_id "${job.id}", question_id "${question.id}" and your answer, then wait again.`);
+  }
 
   if (job.state === 'running') {
     lines.push(`now: ${job.phase}${job.stalled ? ' — no activity for a while, may be stuck' : ''}`);

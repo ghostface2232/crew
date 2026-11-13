@@ -51,7 +51,7 @@ export class AntigravityAdapter implements Adapter {
   async start(ctl: JobCtl): Promise<void> {
     const peer = await this.ensure();
     if (isTerminal(ctl.job)) return;
-    const res = await peer.request('session/new', { cwd: ctl.job.cwd, mcpServers: [] }, RPC_TIMEOUT_MS);
+    const res = await peer.request('session/new', { cwd: ctl.job.cwd, mcpServers: [crewServer(ctl)] }, RPC_TIMEOUT_MS);
     if (isTerminal(ctl.job)) return;
     const sessionId: string = res.sessionId;
     const run: Run = { ctl, prompting: null, cancelling: false, message: '', earlier: '', pending: [] };
@@ -73,7 +73,7 @@ export class AntigravityAdapter implements Adapter {
     const sessionId = ctl.job.sessionId!;
     if (!this.loaded.has(sessionId)) {
       if (!this.restoreMethod) throw new Error('This Antigravity server cannot restore sessions. Continue it from the Antigravity CLI.');
-      await peer.request(this.restoreMethod, { sessionId, cwd: ctl.job.cwd, mcpServers: [] }, RPC_TIMEOUT_MS);
+      await peer.request(this.restoreMethod, { sessionId, cwd: ctl.job.cwd, mcpServers: [crewServer(ctl)] }, RPC_TIMEOUT_MS);
       this.loaded.add(sessionId);
     }
     if (isTerminal(ctl.job)) return;
@@ -265,6 +265,11 @@ export class AntigravityAdapter implements Adapter {
   }
 }
 
+function crewServer(ctl: JobCtl) {
+  const { command, args, env } = ctl.mcp;
+  return { name: 'crew', command, args, env: Object.entries(env).map(([name, value]) => ({ name, value })) };
+}
+
 /** Unblocks permission requests that can no longer be answered. */
 function drop(run: Run): void {
   for (const request of run.pending.splice(0)) request.resolve(null);
@@ -281,7 +286,9 @@ const ROLE_NAMES: Record<JobKind, string> = { delegate: 'engineer', review: 'rev
  *   the user's call, provided the request says exactly what it will do.
  * - A read-only job changes nothing whatever its role: a question is answered by the engineer, with a reviewer's limits.
  */
-export function decide(role: JobKind, cwd: string, toolCall: { kind?: string; locations?: { path?: string }[]; rawInput?: unknown }, readOnly = false): 'allow' | 'ask' | { refuse: string } {
+export function decide(role: JobKind, cwd: string, toolCall: { kind?: string; locations?: { path?: string }[]; rawInput?: unknown; _meta?: { mcpServerName?: string; mcpToolName?: string } }, readOnly = false): 'allow' | 'ask' | { refuse: string } {
+  // ACP leaves MCP tool identity to agent metadata; this path is unverified with agy.
+  if (toolCall._meta?.mcpServerName === 'crew' && ['ask_lead', 'lead_answers', 'siblings'].includes(toolCall._meta.mcpToolName ?? '')) return 'allow';
   const kind = toolCall.kind ?? 'other';
   if (PASSIVE_KINDS.includes(kind)) return 'allow';
   if (kind === 'switch_mode') return { refuse: kind };

@@ -49,7 +49,8 @@ How jobs work:
 - delegate and polish run in their own git worktree and branch (crew-<job id>) created from HEAD, so commit anything the worker needs first. Gitignored files it needs (node_modules, .env) are copied in if the repository lists them in .worktreeinclude. The bridge commits the worker's changes on that branch; you inspect the diff and merge or reject it. Nothing reaches your branch unless you merge it.
 - By default a call blocks until the worker finishes or needs you. Pass background: true to keep working in parallel; you are notified when the job ends, or call \`wait\`.
 - Codex's approval requests go to its own automatic reviewer first; only what reaches you as a waiting job is for the user. If a result lists an action the reviewer REFUSED and the user's request in this conversation clearly covers it, send it back yourself with \`reply\` and approved_by_user, quoting their words; do not ask them again. If it is refused a second time, the same call has the user asked directly. If their request does not cover it, tell them and let them decide.
-- A worker's approval request or question is for the user to answer, not you. While you block on a job, the app asks them directly. If you are told a job is waiting (for example when a background job wakes you), call \`wait\` on it so they are asked. Use \`reply\` with a decision only to pass on one the user gave you in the conversation.
+- A waiting job's approval request or question is for the user to answer, not you. While you block on a job, the app asks them directly. If you are told a job is waiting (for example when a background job wakes you), call \`wait\` on it so they are asked. Use \`reply\` with a decision only to pass on one the user gave you in the conversation.
+- A worker may use ask_lead mid-task for a question that is yours to answer, unlike approval requests, which are the user's. Answer it with \`answer\`, then call \`wait\` again while the worker continues.
 - \`reply\` with a message continues the same worker session, e.g. to request fixes.
 - Reject worker changes that go beyond what was asked. For polish, any file listed as out of scope, or any non-text change, is grounds to reject.
 - If a worker fails on a usage limit, do that piece yourself and say that the cross-check was skipped.
@@ -169,7 +170,7 @@ const TOOLS = [
   {
     name: 'wait',
     title: 'Wait for workers',
-    description: 'Block until one of the given jobs finishes or fails, then return its result. If a job needs an approval or an answer meanwhile, the user is asked in the app and the wait continues. With no ids, waits on every active job of this project.',
+    description: 'Block until one of the given jobs finishes, fails, or asks you a new lead question, then return its result. If a job needs an approval or a user answer meanwhile, the user is asked in the app and the wait continues. With no ids, waits on every active job of this project.',
     annotations: { readOnlyHint: true },
     inputSchema: {
       type: 'object',
@@ -177,6 +178,16 @@ const TOOLS = [
         job_ids: { type: 'array', items: { type: 'string' } },
         timeout_seconds: { type: 'number', description: 'Give up waiting after this long (default 1800). The jobs keep running.' },
       },
+    },
+  },
+  {
+    name: 'answer',
+    title: 'Answer a worker question',
+    description: 'Answer a lead question without ending or restarting the worker turn, then call wait again.',
+    inputSchema: {
+      type: 'object',
+      properties: { job_id: { type: 'string' }, question_id: { type: 'string' }, answer: { type: 'string' } },
+      required: ['job_id', 'question_id', 'answer'],
     },
   },
   {
@@ -294,8 +305,8 @@ async function askUser(job: JobView, signal: AbortSignal): Promise<'settled' | '
 }
 
 /**
- * Follows jobs until one needs the lead (finished, failed, or waiting with no way
- * to ask the user), the time budget runs out, or the call is cancelled.
+ * Follows jobs until one needs the lead (finished, failed, asking the lead, or
+ * waiting with no way to ask the user), the time budget runs out, or the call is cancelled.
  */
 async function follow(ids: string[], seconds: number, onEvent: (e: CrewEvent) => void, signal: AbortSignal): Promise<JobView[]> {
   const latest = new Map<string, JobView>();
@@ -324,7 +335,7 @@ async function follow(ids: string[], seconds: number, onEvent: (e: CrewEvent) =>
         continue;
       }
       if (needsLead(job)) break;
-      const res = await api('GET', `/api/jobs/${id}/wait?after=${after}&timeout=25`);
+      const res = await api('GET', `/api/jobs/${id}/wait?after=${after}&timeout=${Math.min(25, Math.max(0, (deadline - Date.now()) / 1000))}`);
       job = res.job;
       latest.set(id, job);
       for (const event of res.events as CrewEvent[]) if (!stop) onEvent(event);
@@ -416,10 +427,15 @@ async function reportMission(args: any): Promise<string> {
   return describeMission(await api('POST', `/api/missions/${current.id}`, { stage: args.stage }));
 }
 
+async function describeDelivered(job: JobView): Promise<string> {
+  if (needsLead(job)) await api('POST', `/api/jobs/${job.id}/delivered`, { seq: job.seq });
+  return describe(job);
+}
+
 async function runJob(spec: JobSpec, background: boolean, ctx: CallContext): Promise<string> {
   // The id is sent as it is known: the daemon checks it and lets the job stand on its own if the mission has ended.
   const job: JobView = await api('POST', '/api/jobs', { ...spec, project: PROJECT, mission: missionId ?? undefined });
-  return background ? describe(job) : followOne(job.id, ctx);
+  return background ? describeDelivered(job) : followOne(job.id, ctx);
 }
 
 async function followOne(id: string, ctx: CallContext): Promise<string> {
@@ -474,8 +490,7 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
     case 'status': {
       if (args.job_id) {
         const job: JobView = await api('GET', `/api/jobs/${args.job_id}`);
-        if (needsLead(job)) await api('POST', `/api/jobs/${job.id}/delivered`, { seq: job.seq });
-        return describe(job);
+        return describeDelivered(job);
       }
       const state = await api('GET', '/api/state');
       const jobs: JobView[] = state.jobs.filter((j: JobView) => j.project === PROJECT);
@@ -507,9 +522,11 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       if (running.length) parts.push(`${ready.length ? 'Still running' : 'Timed out waiting; still running'}:\n${running.map(summarize).join('\n')}`);
       return parts.join('\n\n────────\n\n');
     }
+    case 'answer':
+      return describeDelivered(await api('POST', `/api/jobs/${args.job_id}/questions/${args.question_id}`, { answer: args.answer }));
     case 'reply': {
       await api('POST', `/api/jobs/${args.job_id}/reply`, { message: args.message, decision: args.decision, request_id: args.request_id, approved_by_user: args.approved_by_user, sync: args.sync ? true : undefined });
-      return args.background ? describe(await api('GET', `/api/jobs/${args.job_id}`)) : followOne(args.job_id, ctx);
+      return args.background ? describeDelivered(await api('GET', `/api/jobs/${args.job_id}`)) : followOne(args.job_id, ctx);
     }
     case 'cancel': {
       let job: JobView = await api('POST', `/api/jobs/${args.job_id}/cancel`, {});

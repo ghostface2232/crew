@@ -5,8 +5,8 @@ import type { JobView } from './render.ts';
 /**
  * PostToolUse hook (asyncRewake) for the Crew job tools. When a tool call
  * leaves a job running in the background, this process outlives the call,
- * waits for the job to end or need a decision, and exits with code 2 so
- * Claude Code wakes the lead session with the result on stderr.
+ * waits for the job to end, need a decision, or ask a new lead question, and
+ * exits with code 2 so Claude Code wakes the lead with the result on stderr.
  *
  * It watches every job the tool result mentions rather than trusting the
  * state printed there: a job reported as running may already be waiting.
@@ -24,6 +24,8 @@ async function watch(id: string): Promise<JobView | null> {
   }
   // The lead may be reading this very result through a blocking wait call; let that win.
   await new Promise((r) => setTimeout(r, 1500));
+  job = await api('GET', `/api/jobs/${id}`);
+  if (!needsLead(job)) return null;
   const { claimed } = await api('POST', `/api/jobs/${id}/delivered`, { seq: job.seq });
   return claimed ? job : null;
 }

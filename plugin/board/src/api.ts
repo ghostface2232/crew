@@ -1,3 +1,28 @@
+export class UnauthorizedError extends Error {
+  constructor() {
+    super('The board is not signed in.');
+  }
+}
+const unauthorizedListeners = new Set<() => void>();
+export function onUnauthorized(listener: () => void) {
+  unauthorizedListeners.add(listener);
+  return () => { unauthorizedListeners.delete(listener); };
+}
+export function tokenFromFragment(fragment: string) {
+  const token = new URLSearchParams(fragment.replace(/^#/, '')).get('token');
+  return token && /^[a-f0-9]{64}$/i.test(token) ? token : null;
+}
+/** Exchange the launch secret before rendering; only the HttpOnly cookie persists. */
+export async function initializeSession() {
+  try {
+    const token = tokenFromFragment(location.hash);
+    if (token) await request('/api/session', { token });
+  } finally {
+    if (new URLSearchParams(location.hash.slice(1)).has('token')) {
+      history.replaceState(null, '', location.pathname + location.search);
+    }
+  }
+}
 export async function request<T>(route: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const response = await fetch(route, {
     method: body === undefined ? 'GET' : 'POST',
@@ -5,6 +30,10 @@ export async function request<T>(route: string, body?: unknown, signal?: AbortSi
     headers: body === undefined ? undefined : { 'content-type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
+  if (response.status === 401) {
+    unauthorizedListeners.forEach((listener) => listener());
+    throw new UnauthorizedError();
+  }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error ?? `Request failed (${response.status}). Try again.`);
   return data as T;

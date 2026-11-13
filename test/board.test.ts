@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { Actions, answerKey } from '../plugin/board/src/api.ts';
+import { Actions, answerKey, tokenFromFragment } from '../plugin/board/src/api.ts';
 import { BoardStore, mergeEvents } from '../plugin/board/src/store.ts';
 import { brief, cardsForProject, jobMark, missionProgress, relativeDuration, usageWindowName, STOP_OF_STAGE, timeLabel, together } from '../plugin/board/src/model.ts';
 import type { BoardJob, BoardState, CrewEvent, Mission } from '../plugin/board/src/types.ts';
@@ -127,7 +127,8 @@ test('events deduplicate overlap between a detail fetch and the stream and stay 
   );
 });
 
-test('stream lifecycle closes connections on unmount and exposes disconnection', () => {
+test('stream lifecycle closes connections on unmount and exposes disconnection', async (t) => {
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ now: Date.now(), events: [] }));
   const store = new BoardStore();
   let closed = false;
   const stream = {
@@ -138,6 +139,7 @@ test('stream lifecycle closes connections on unmount and exposes disconnection',
     },
   };
   const cleanup = store.connect(() => stream as unknown as EventSource);
+  await new Promise((resolve) => setImmediate(resolve));
   stream.onerror!();
   assert.equal(store.getSnapshot().connection, 'lost');
   cleanup();
@@ -197,16 +199,28 @@ test('usage and preset events replace immutable snapshots and older state clears
   assert.equal(store.getSnapshot().presets, undefined);
 });
 
-test('transport subscribes to usage and preset events', () => {
+test('transport subscribes to usage and preset events', async (t) => {
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ now: Date.now(), events: [] }));
   const listeners = new Map<string, (event: { data: string }) => void>();
   const store = new BoardStore();
   const cleanup = store.connect(() => ({
     addEventListener: (type: string, listener: (event: { data: string }) => void) => listeners.set(type, listener),
     close() {},
   }) as unknown as EventSource);
+  await new Promise((resolve) => setImmediate(resolve));
   listeners.get('usage')!({ data: JSON.stringify({ source: 'none', providers: [] }) });
   listeners.get('preset')!({ data: JSON.stringify({ preset: null, presets: {} }) });
   assert.equal(store.getSnapshot().usage?.source, 'none');
   assert.equal(store.getSnapshot().preset, null);
   cleanup();
+});
+
+test('launch fragments accept only a complete 64-digit hexadecimal token', () => {
+  const token = '0123456789abcdef'.repeat(4);
+  assert.equal(tokenFromFragment(`#token=${token}`), token);
+  assert.equal(tokenFromFragment(`#view=board&token=${token.toUpperCase()}&other=value`), token.toUpperCase());
+  for (const fragment of ['', '#cx-build', '#token=', `#token=${token.slice(1)}`, `#token=${token}0`,
+    `#token=${'g'.repeat(64)}`, `#other=token=${token}`, `#token=${token}%0A`]) {
+    assert.equal(tokenFromFragment(fragment), null);
+  }
 });

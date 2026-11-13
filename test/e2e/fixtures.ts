@@ -1,6 +1,7 @@
 import type { BoardJob, BoardState } from '../../plugin/board/src/types.ts';
 
 export const NOW = 1_795_000_000_000;
+export const TEST_TOKEN = '0123456789abcdef'.repeat(4);
 export function job(overrides: Partial<BoardJob> = {}): BoardJob {
   return {
     id: 'cx-build',

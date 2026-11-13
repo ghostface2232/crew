@@ -1,12 +1,14 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fixture, job } from './fixtures.ts';
+import { fixture, job, TEST_TOKEN } from './fixtures.ts';
 import { boardAsset, BOARD_CSP } from '../../plugin/bridge/assets.ts';
 
 let state = fixture();
 let instructions = 'Prefer minimal changes.\n';
 let requests: { route: string; body: unknown }[] = [];
+let requireSession = false;
+let traffic: { route: string; method: string }[] = [];
 const streams = new Set<http.ServerResponse>();
 const send = (type: string, data: unknown) => {
   for (const stream of streams) stream.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);
@@ -27,10 +29,13 @@ const server = http.createServer(async (req, res) => {
     state = fixture();
     instructions = 'Prefer minimal changes.\n';
     requests = [];
+    traffic = [];
+    requireSession = body.auth === true;
     send('state', state);
     return json({});
   }
   if (url.pathname === '/__requests') return json(requests);
+  if (url.pathname === '/__traffic') return json(traffic);
   if (url.pathname === '/__push') {
     if (body.type === 'job')
       state.jobs = state.jobs.map((job) => (job.id === body.data.id ? { ...job, ...body.data } : job));
@@ -43,6 +48,16 @@ const server = http.createServer(async (req, res) => {
     }
     send(body.type, body.type === 'job' ? state.jobs.find((job) => job.id === body.data.id) : body.data);
     return json({});
+  }
+  if (url.pathname.startsWith('/api/')) traffic.push({ route: url.pathname, method: req.method! });
+  if (url.pathname === '/api/session' && req.method === 'POST') {
+    if (body.token !== TEST_TOKEN) return json({ error: 'unauthorized' }, 401);
+    res.setHeader('set-cookie', `crew_session=${TEST_TOKEN}; HttpOnly; SameSite=Strict; Path=/`);
+    return json({});
+  }
+  if (requireSession && url.pathname.startsWith('/api/') &&
+      !req.headers.cookie?.split(';').some((cookie) => cookie.trim() === `crew_session=${TEST_TOKEN}`)) {
+    return json({ error: 'unauthorized' }, 401);
   }
   if (url.pathname === '/api/stream') {
     res.writeHead(200, { 'content-type': 'text/event-stream' });

@@ -23,7 +23,7 @@ export interface BoardState {
   preset?: PresetName | null;
   presets?: Record<PresetName, Preset>;
 }
-export type Connection = 'connecting' | 'live' | 'lost';
+export type Connection = 'connecting' | 'live' | 'lost' | 'unauthorized';
 export interface Snapshot extends BoardState {
   connection: Connection;
   revision: number;

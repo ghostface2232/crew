@@ -1,4 +1,5 @@
 import type { BoardJob, BoardState, ClaudeSession, CrewEvent, Mission, Snapshot } from './types.ts';
+import { onUnauthorized, request } from './api.ts';
 
 const replace = <T extends { id: string }>(items: T[], next: T) =>
   items.some((item) => item.id === next.id)
@@ -88,19 +89,73 @@ export class BoardStore {
         break;
     }
   }
+  private reconnect?: () => void;
+  retry = () => this.reconnect?.();
+  signOut = () => this.update({ connection: 'unauthorized' });
   connect(create = (url: string) => new EventSource(url)) {
-    const stream = create('/api/stream');
-    for (const type of ['state', 'job', 'mission', 'claude', 'roles', 'limits', 'usage', 'preset', 'event']) {
-      stream.addEventListener(type, (event) => {
-        try {
-          this.receive(type, JSON.parse((event as MessageEvent).data));
-        } catch {
-          this.update({ connection: 'lost' });
+    let generation = 0;
+    let stream: EventSource | undefined;
+    let controller: AbortController | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const stop = () => {
+      generation++;
+      controller?.abort();
+      stream?.close();
+      stream = undefined;
+      clearTimeout(timer);
+    };
+    const unsubscribe = onUnauthorized(() => {
+      stop();
+      this.signOut();
+    });
+    const open = async () => {
+      const current = ++generation;
+      controller = new AbortController();
+      const signal = controller.signal;
+      const reconnectLater = () => {
+        if (current === generation) timer = setTimeout(() => void open(), 3000);
+      };
+      try {
+        const state = await request<BoardState>('/api/state', undefined, signal);
+        if (current !== generation) return;
+        this.receive('state', state);
+        const source = create('/api/stream');
+        stream = source;
+        for (const type of ['state', 'job', 'mission', 'claude', 'roles', 'limits', 'usage', 'preset', 'event']) {
+          source.addEventListener(type, (event) => {
+            if (current !== generation || source !== stream) return;
+            try {
+              this.receive(type, JSON.parse((event as MessageEvent).data));
+            } catch {
+              this.update({ connection: 'lost' });
+            }
+          });
         }
-      });
-    }
-    stream.onerror = () => this.update({ connection: 'lost' });
-    return () => stream.close();
+        source.onerror = () => {
+          if (current !== generation || source !== stream) return;
+          // Stop native retries while a fetch distinguishes an expired session from an outage.
+          source.close();
+          stream = undefined;
+          this.update({ connection: 'lost' });
+          void request('/api/state', undefined, signal).catch(() => {}).finally(reconnectLater);
+        };
+      } catch {
+        if (current !== generation) return;
+        this.update({ connection: 'lost' });
+        reconnectLater();
+      }
+    };
+    this.reconnect = () => {
+      stop();
+      this.update({ connection: 'connecting' });
+      void open();
+    };
+    if (this.snapshot.connection !== 'unauthorized') void open();
+    return () => {
+      stop();
+      unsubscribe();
+      this.reconnect = undefined;
+    };
   }
 }
 export const board = new BoardStore();

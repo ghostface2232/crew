@@ -1,5 +1,5 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
-import { Settings as SettingsIcon, Folder } from 'lucide-react';
+import { Settings as SettingsIcon, Folder, LockKeyhole, RotateCw } from 'lucide-react';
 import { board } from './store.ts';
 import { knownProjects, projectNames } from './model.ts';
 import { ClockProvider, Icon } from './ui.tsx';
@@ -51,6 +51,19 @@ export function App() {
     setJobId('');
     history.replaceState(null, '', location.pathname + location.search);
   };
+  if (state.connection === 'unauthorized') {
+    return (
+      <main className="sign-in section" aria-labelledby="sign-in-title">
+        <Icon icon={LockKeyhole} size={32} />
+        <h1 id="sign-in-title">The board is not signed in</h1>
+        <p>Run <code>crew board</code> in a terminal, or choose <strong>Open Web Board</strong> in the Crew app.</p>
+        <button className="primary" onClick={board.retry}>
+          <Icon icon={RotateCw} />
+          Retry
+        </button>
+      </main>
+    );
+  }
   return (
     <ClockProvider skew={state.clockSkew}>
       <div className="main">

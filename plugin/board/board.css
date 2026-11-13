@@ -713,6 +713,11 @@ textarea:focus-visible, input:focus-visible, select:focus-visible { outline: 2px
 .sheet summary:focus-visible { outline: 2px solid var(--working); outline-offset: 2px; }
 .sheet .foot { padding: 8px 4px 0; }
 .section { display: grid; gap: 12px; padding: 20px; border-radius: var(--radius-part); background: var(--surface); box-shadow: var(--shadow); }
+.sign-in { max-width: 480px; margin: 15vh auto 0; padding: 32px; gap: 20px; border-radius: var(--radius-sheet); }
+.sign-in h1 { font-family: var(--display); font-size: 24px; font-weight: 500; line-height: 1.2; }
+.sign-in p { color: var(--muted); text-wrap: pretty; }
+.sign-in code { font-family: var(--mono); color: var(--text); }
+.sign-in button { justify-self: start; }
 .hint { color: var(--muted); font-size: 13.5px; text-wrap: pretty; overflow-wrap: anywhere; }
 .hint[data-warn] { color: var(--waiting); }
 

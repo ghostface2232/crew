@@ -50,14 +50,14 @@ IDs R1 to R8 keep the meaning other documents refer to. R9 to R15 were added on 
 | R4 | Every listed feature works in the lead session. Workers use their configured MCP servers and subagents as they are |
 | R5 | Each agent shows its current stage, last event, and reason for waiting. Limits, errors, and stalls raise a notification within the configured time |
 | R6 | Claude sessions appear in Desktop and mobile. Worker sessions can be resumed in their own tools |
-| R7 | Nothing is copied by hand between delegation, review, and polish. Under `/crew:run`, a substantial piece of work gets one review when it is done, and both reviews before it is pushed or opened as a pull request. Outside it, nothing is reviewed unless the user asks |
+| R7 | Nothing is copied by hand between delegation, review, and polish. Under `/crew:run`, a substantial piece of work gets one review when it is done, and nothing is pushed or opened as a pull request without a review since it last changed substantially. Outside it, nothing is reviewed unless the user asks |
 | R8 | The board shows usage for every agent. The lead asks for routing at stage boundaries and follows the returned assignee and reason. Handoff starts before the lead's limit runs out |
 | R9 | Editing one instructions file changes what every agent receives on its next job, without writing to any service's own instruction files |
 | R10 | For any command, the board answers "what was it split into, who has each part, and what stage is each in" without opening a session. A waiting item can be answered from the board |
 | R11 | Model and effort can be set per role and per service, and a job shows which ones it ran with |
 | R12 | A job can be assigned to Cursor and appears on the board like any other |
 | R13 | A command can be started, followed, and merged without a Claude Code session |
-| R14 | Every worker job that can run commands carries the isolation rules. Before a push or pull request the self-review and the cross-review run together, and at most one of them runs the app; a worker's review that does runs in a snapshot, not in the user's tree. A job marked as measuring is refused while another job runs, and no job starts until it ends |
+| R14 | Every worker job that can run commands carries the isolation rules. Reviews that run together are independent, and at most one of them runs the app; a worker's review that does runs in a snapshot, not in the user's tree. A job marked as measuring is refused while another job runs, and no job starts until it ends |
 | R15 | A Codex job's approval requests are answered without the user by default. An action the reviewer refused is sent back once when the user's request covers it, and the user is asked if it is refused again |
 | R16 | The standalone app runs without Electron or a shell-installed Node, retains jobs when the UI quits, and exposes the board's tasks, requests, settings, and details with native controls |
 

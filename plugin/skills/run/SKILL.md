@@ -48,8 +48,10 @@ How much review depends on where the work is going, not on how many instructions
 | When | Review |
 | --- | --- |
 | A substantial piece of implementation has reached a stopping point | One review: the self-review or the cross-review, whichever suits the change |
-| The work is about to be pushed or opened as a pull request | Both, in parallel, on everything going out that has not yet had both |
+| The work is about to be pushed or opened as a pull request | Only what has had no review since it last changed substantially: one review, or both in parallel when it touches security, concurrency, or data loss. Work that has had either review is ready, with the fixes it called for |
 | A small fix, a wording change, or a follow-up to a review | None beyond your own checks |
+
+Before a push or pull request, list the commits going out (`git log <upstream>..HEAD`) and match each to the review that covered it in this conversation. Review only the ones that no review covered; never go out with one uncovered. Fixes made for a review's findings count as covered by it.
 
 If the user asks for a review, or for none, do that instead.
 
@@ -74,7 +76,7 @@ Accept the result only if every changed line is wording. Reject the whole diff i
 
 ## 7. Final check and merge (you)
 
-Run the project's tests and checks on the combined result. If failures need comparison with the base, run the same checks on the base and compare the reported failing test IDs. Keep the base results for any follow-up runs. Report what changed, what each agent contributed, what was verified, and anything skipped. Commit or merge to the user's branch only if they asked for that. If they asked you to push or open a pull request, run both reviews first as step 3 sets out, and fix what they find before it goes out.
+Run the project's tests and checks on the combined result. If failures need comparison with the base, run the same checks on the base and compare the reported failing test IDs. Keep the base results for any follow-up runs. Report what changed, what each agent contributed, what was verified, and anything skipped. Commit or merge to the user's branch only if they asked for that. If they asked you to push or open a pull request, first review whatever going out no review has covered, as step 3 sets out, and fix what it finds.
 
 ## Sharing the machine
 

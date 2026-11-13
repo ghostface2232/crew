@@ -15,6 +15,8 @@ struct CrewApp: App {
         .defaultSize(width: 1180, height: 780)
         .windowStyle(.hiddenTitleBar)
         .commands {
+            // View > Show/Hide Sidebar (⌃⌘S), the standard way to toggle it from the keyboard.
+            SidebarCommands()
             CommandGroup(replacing: .newItem) {
                 Button("New Job…") { delegate.show(); delegate.store.showingDispatch = true }
                     .keyboardShortcut("n").disabled(!delegate.store.connected)
@@ -38,7 +40,7 @@ struct CrewApp: App {
         MenuBarExtra {
             MenuBarMenu(store: delegate.store, show: { delegate.show(job: $0) }, openSettings: delegate.openSettings)
         } label: {
-            MenuBarLabel(store: delegate.store)
+            MenuBarLabel(store: delegate.store) { delegate.openMainWindow = $0 }
         }
     }
 }
@@ -69,9 +71,13 @@ private struct MenuBarMenu: View {
 
 private struct MenuBarLabel: View {
     let store: CrewStore
+    /// Hands the app delegate a way to open the main window; the status item exists from launch.
+    let register: (OpenWindowAction) -> Void
+    @Environment(\.openWindow) private var openWindow
     var body: some View {
         let pending = store.state.pendingCount
         Label(pending > 0 ? "Crew · \(pending) waiting" : "Crew", systemImage: pending > 0 ? "circle.dotted.circle.fill" : "circle.dotted.circle")
+            .onAppear { register(openWindow) }
     }
 }
 
@@ -87,6 +93,9 @@ private struct SettingsCommand: View {
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUserNotificationCenterDelegate {
     let store: CrewStore
     private weak var mainWindow: NSWindow?
+    /// Opens the main window scene when it does not exist: SwiftUI sometimes launches without
+    /// presenting it, which leaves only the menu bar item.
+    var openMainWindow: OpenWindowAction?
     private var settingsWindow: NSWindow?
     private var settings: SettingsModel?
     private var noticed = Set<String>()
@@ -127,6 +136,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         }
         store.onStateChange = { [weak self] in self?.updateNotifications() }
         store.start()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self, self.mainWindow == nil else { return }
+            self.openMainWindow?(id: "main")
+        }
         if ProcessInfo.processInfo.environment["CREW_TEST_MODE"] != "1" {
             let center = UNUserNotificationCenter.current()
             center.delegate = self
@@ -160,6 +173,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
     func show() { show(job: nil) }
     @objc private func reopenWindow() { show() }
     func show(job: String?) {
+        if mainWindow == nil { openMainWindow?(id: "main") }
         store.windowVisible = true
         if let job { store.openJob(job, navigate: true) }
         mainWindow?.deminiaturize(nil)

@@ -93,10 +93,14 @@ struct ToolbarSearch: View {
         store.search = ""
         collapse()
     }
+    /// Follows the window at once: animating here restarts on every live-resize measurement,
+    /// which makes the field lag behind the window in steps. Opening and closing still animate.
     private func refit() {
         guard expanded, stepper == nil else { return }
         let target = layout.searchFit
-        if abs(target - width) > 2 { resize(to: target) }
+        guard abs(target - width) > 0.5 else { return }
+        width = target
+        layout.searchWidth = target
     }
     private func resize(to target: CGFloat, after delay: Double = 0) {
         stepper?.cancel()

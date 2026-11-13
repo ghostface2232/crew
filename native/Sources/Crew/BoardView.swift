@@ -35,7 +35,7 @@ struct BoardView: View {
     private var page: some View {
                 ScrollView {
                     // Lazy so a long history builds only the panels on screen.
-                    LazyVStack(alignment: .leading, spacing: 24) {
+                    LazyVStack(alignment: .leading, spacing: WorkspaceStyle.cardGap) {
                         if !store.connected { connectionBanner }
                         heading
                         if store.state.pendingCount > 0 && store.selection != "needs" && !store.project.isEmpty { attentionBanner }
@@ -204,7 +204,7 @@ struct AgentOverview: View {
             if compact { compactAgents }
             else {
                 ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .top, spacing: 12) {
+                    HStack(alignment: .top, spacing: WorkspaceStyle.cardGap) {
                         ForEach(agents, id: \.self) { agent in AgentCard(store: store, agent: agent) }
                     }
                     compactAgents
@@ -297,7 +297,8 @@ struct MissionPanel: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .top, spacing: 8) {
+            // Progress, status and the controls sit on the middle of the title and its meta line together.
+            HStack(alignment: .center, spacing: 8) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(mission.title).font(Typeface.title).fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: 0) {
@@ -323,7 +324,7 @@ struct MissionPanel: View {
                             Image(systemName: "ellipsis").font(Typeface.subheadline).frame(width: 28, height: 28).contentShape(Rectangle())
                         }.menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize().help("Mission options")
                     }
-                }.foregroundStyle(.secondary).padding(.top, -4).padding(.trailing, -6)
+                }.foregroundStyle(.secondary).padding(.trailing, -6)
             }
             if expanded {
                 ForEach(Array((mission.notes ?? []).enumerated()), id: \.offset) { _, note in

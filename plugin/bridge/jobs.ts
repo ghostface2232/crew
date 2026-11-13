@@ -739,7 +739,10 @@ export class Jobs {
     const job = this.get(id);
     return this.list().filter((other) => other.id !== id && !isTerminal(other) &&
       (job.mission ? other.mission === job.mission : other.project === job.project))
-      .map(({ id, kind, agent, title, phase, worktree }) => ({ id, kind, agent, title, phase, base: worktree?.base ?? null }));
+      // What a neighbor needs to stay out of the way: who has which files, and whether it is held up. Not its log.
+      .map(({ id, kind, agent, title, targets, ask, questions, worktree }) => ({
+        id, kind: ask ? 'question' : kind, agent, title, files: targets, asking: Boolean(questions?.some((q) => q.answer === undefined)), base: worktree?.base ?? null,
+      }));
   }
 
   async leadAnswers(id: string, seconds: number): Promise<LeadQuestion[]> {
@@ -788,7 +791,7 @@ export class Jobs {
       mcp: {
         command: process.execPath,
         args: [path.join(import.meta.dirname, `worker-mcp${path.extname(import.meta.filename)}`)],
-        env: { CREW_JOB_ID: job.id, CREW_JOB_TOKEN: token, CREW_PORT: String(PORT) },
+        env: { CREW_JOB_ID: job.id, CREW_JOB_TOKEN: token, CREW_PORT: String(PORT), CREW_JOB_CWD: job.cwd },
       },
       activity: () => {
         if (!live()) return;

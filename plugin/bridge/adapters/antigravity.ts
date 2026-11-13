@@ -290,7 +290,7 @@ const ROLE_NAMES: Record<JobKind, string> = { delegate: 'engineer', review: 'rev
  */
 export function decide(role: JobKind, cwd: string, toolCall: { kind?: string; locations?: { path?: string }[]; rawInput?: unknown; _meta?: { mcpServerName?: string; mcpToolName?: string } }, readOnly = false): 'allow' | 'ask' | { refuse: string } {
   // ACP leaves MCP tool identity to agent metadata; this path is unverified with agy.
-  if (toolCall._meta?.mcpServerName === 'crew' && ['ask_lead', 'lead_answers', 'siblings'].includes(toolCall._meta.mcpToolName ?? '')) return 'allow';
+  if (toolCall._meta?.mcpServerName === 'crew' && ['ask_lead', 'lead_answers', 'siblings', 'search', 'recent_changes'].includes(toolCall._meta.mcpToolName ?? '')) return 'allow';
   const kind = toolCall.kind ?? 'other';
   // The daemon's secret is not a worker's to read, whatever the role. Commands are the user's to approve as before.
   const secret = tokenFile(HOME);

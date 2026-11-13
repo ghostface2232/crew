@@ -12,6 +12,8 @@ enum WorkspaceStyle {
         Color(nsColor: NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light })
     }
     static let cardPadding: CGFloat = 20
+    /// The space between neighboring cards, the same across as down.
+    static let cardGap: CGFloat = 16
     static let cardRadius: CGFloat = 20
     static let rowRadius: CGFloat = 12
     static let fieldRadius: CGFloat = 14

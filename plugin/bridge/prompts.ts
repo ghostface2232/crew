@@ -49,7 +49,7 @@ export function buildPrompt(spec: JobSpec, worktree: Worktree | null, diffFile: 
  * sandbox, which cannot hold an instance of the app, and a second reviewer is often at work on the same change.
  */
 const STATIC_REVIEW = '# Static review\nReview by reading, and by running checks that end by themselves, such as tests and type checks. Do not start the app, a server, or a browser: another reviewer may be running one.';
-const LEAD_QUESTIONS = '# Questions for the lead\nUse crew.ask_lead for a decision or fact only the lead has, or when something outside your allowed files must change. Keep working on what the answer does not affect; call crew.lead_answers when you reach what it blocks (wait_seconds waits for an answer). Read and investigate things you can find yourself. Approvals go to the user through the normal approval flow, not ask_lead. Use crew.siblings to see the other active jobs.';
+const LEAD_QUESTIONS = '# Questions for the lead\nUse crew.ask_lead for a decision or fact only the lead has, or when something outside your allowed files must change. Keep working on what the answer does not affect; call crew.lead_answers when you reach what it blocks (wait_seconds waits for an answer). Read and investigate things you can find yourself. Approvals go to the user through the normal approval flow, not ask_lead. Use crew.siblings to see who else is working and on which files. If you cannot run commands, crew.search finds text across your working tree and crew.recent_changes shows what was just written. The names may carry a prefix in your tool list, such as mcp_crew_ask_lead.';
 /**
  * Says what the sandbox allows before the worker finds out by failing: a check that writes a temporary
  * file is still a check that ends by itself.

@@ -33,7 +33,7 @@ export interface CodexLimits {
   reached: boolean;
 }
 
-const CREW_TOOLS = ['ask_lead', 'lead_answers', 'siblings'];
+const CREW_TOOLS = ['ask_lead', 'lead_answers', 'siblings', 'search', 'recent_changes'];
 const LIMIT_ERRORS = ['usageLimitExceeded', 'rateLimitExceeded', 'sessionBudgetExceeded'];
 const IDLE_SHUTDOWN_MS = 10 * 60_000;
 

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -121,7 +121,12 @@ test('siblings are active jobs of the same mission, or the same project without 
   await h.jobs.cancel(ended.id);
   h.workers.get(sibling.id)!.waiting('question', 'user question');
   sibling.worktree = { path: '/tree', branch: 'branch', base: 'abc123' };
-  assert.deepEqual(h.jobs.siblings(first.id), [{ id: sibling.id, kind: 'delegate', agent: 'codex', title: 'test', phase: 'has a question', base: 'abc123' }]);
+  sibling.targets = ['docs/a.md'];
+  assert.deepEqual(h.jobs.siblings(first.id), [{ id: sibling.id, kind: 'delegate', agent: 'codex', title: 'test', files: ['docs/a.md'], asking: false, base: 'abc123' }]);
+  // A question to the lead shows, so a neighbor can tell that job is held up; one to the user does not.
+  h.workers.get(sibling.id)!.resumed();
+  h.jobs.ask(sibling.id, 'which?', undefined);
+  assert.equal(h.jobs.siblings(first.id)[0].asking, true);
   const lone = await h.create();
   const sameProject = h.jobs.siblings(lone.id);
   assert.ok(sameProject.some((j) => j.id === first.id));
@@ -242,20 +247,23 @@ test('worker stdio and all question routes use a private token, with answers wak
   const worker = stdio(t, 'worker-mcp.ts', { ...h.env, ...server.env });
   assert.equal((await worker.request('initialize', { protocolVersion: '2025-11-25' })).serverInfo.name, 'crew-worker');
   const tools = (await worker.request('tools/list')).tools;
-  assert.deepEqual(tools.map((tool: any) => tool.name), ['ask_lead', 'lead_answers', 'siblings']);
+  assert.deepEqual(tools.map((tool: any) => tool.name), ['ask_lead', 'lead_answers', 'siblings', 'search', 'recent_changes']);
   assert.deepEqual(await worker.request('ping'), {});
   const question = JSON.parse(textOf(await worker.call('ask_lead', { question: 'Which contract?', blocks: 'the API' })));
   assert.match(question.guidance, /Carry on.*lead_answers/);
-  let answers = JSON.parse(textOf(await worker.call('lead_answers'))).questions;
-  assert.equal(answers[0].answer, 'not answered yet');
+  let answers = JSON.parse(textOf(await worker.call('lead_answers')));
+  assert.deepEqual([answers.answered, answers.open.map((q: any) => [q.question, q.blocks]), answers.answered_earlier], [[], [['Which contract?', 'the API']], 0]);
   const polling = worker.call('lead_answers', { wait_seconds: 10 });
   await pendingAfter(polling);
   const answered = await h.api('POST', `${route}/questions/${question.id}`, { answer: 'The published contract.' });
   assert.equal(answered.status, 200);
   assert.equal(answered.body.state, 'running');
   assert.equal(answered.body.waiting, null);
-  answers = JSON.parse(textOf(await polling)).questions;
-  assert.equal(answers[0].answer, 'The published contract.');
+  answers = JSON.parse(textOf(await polling));
+  assert.deepEqual([answers.answered.map((q: any) => q.answer), answers.open, answers.answered_earlier], [['The published contract.'], [], 0]);
+  // An answer is handed over once; asking again does not send the history a second time.
+  answers = JSON.parse(textOf(await worker.call('lead_answers')));
+  assert.deepEqual([answers.answered, answers.open, answers.answered_earlier], [[], [], 1]);
   assert.equal((await h.api('POST', `${route}/questions/${question.id}`, { answer: 'again' })).status, 400);
   assert.equal((await h.api('POST', `${route}/questions/missing`, { answer: 'yes' })).status, 400);
   assert.equal((await h.api('GET', `${route}/questions?token=${token}&wait=NaN`)).status, 400);
@@ -264,7 +272,7 @@ test('worker stdio and all question routes use a private token, with answers wak
   const sibling = await h.create();
   const siblings = JSON.parse(textOf(await worker.call('siblings')));
   assert.deepEqual(siblings.map((s: any) => s.id), [sibling.job.id]);
-  assert.deepEqual(Object.keys(siblings[0]).sort(), ['id', 'kind', 'agent', 'title', 'phase', 'base'].sort());
+  assert.deepEqual(Object.keys(siblings[0]).sort(), ['id', 'kind', 'agent', 'title', 'files', 'asking', 'base'].sort());
   assert.equal(JSON.stringify((await h.api('GET', '/api/state')).body).includes(token), false);
   assert.equal(JSON.stringify((await h.api('GET', route)).body).includes(token), false);
   // Shutdown flushes the same job views tested above to disk.
@@ -393,4 +401,45 @@ test('the daemon answers only requests that carry its secret, as a header or as 
   assert.match(cookie, /^crew_session=[0-9a-f]{64}; Path=\/; HttpOnly; SameSite=Strict; Max-Age=\d+$/);
   assert.equal((await h.api('GET', '/api/state', undefined, { authorization: '', cookie: cookie.split(';')[0] })).status, 200);
   assert.equal((await h.api('GET', '/api/state', undefined, { authorization: '', cookie: 'crew_session=wrong' })).status, 401);
+});
+
+test('a worker that cannot run commands can search its tree and see what was just written, and nothing outside', { timeout: 15000 }, async (t) => {
+  const tree = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-tree-')));
+  t.after(() => fs.rmSync(tree, { recursive: true, force: true }));
+  const git = (...args: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd: tree, encoding: 'utf8' });
+  git('init', '-q');
+  fs.mkdirSync(path.join(tree, 'docs'));
+  fs.writeFileSync(path.join(tree, 'docs', 'a.md'), 'The status board shows jobs.\n');
+  fs.writeFileSync(path.join(tree, 'app.ts'), 'const label = "Status Board";\n');
+  git('add', '-A'); git('commit', '-q', '-m', 'first');
+  fs.writeFileSync(path.join(tree, 'docs', 'a.md'), 'The status board shows jobs.\nIt also shows usage.\n');
+  git('add', '-A'); git('commit', '-q', '-m', 'mention usage');
+  fs.writeFileSync(path.join(tree, 'untracked.md'), 'status board, not yet added\n');
+
+  const worker = stdio(t, 'worker-mcp.ts', { ...process.env, CREW_JOB_ID: 'cx-000000', CREW_JOB_TOKEN: 'x', CREW_PORT: '1', CREW_JOB_CWD: tree });
+  const call = async (name: string, args = {}) => {
+    const result = await worker.call(name, args);
+    return result.isError ? { error: result.content[0].text } : JSON.parse(textOf(result));
+  };
+  const everywhere = await call('search', { pattern: 'status board', ignore_case: true });
+  assert.equal(everywhere.matches, 3);
+  assert.match(everywhere.text, /^app\.ts:1:/m);
+  assert.match(everywhere.text, /^untracked\.md:1:/m);
+  assert.deepEqual(await call('search', { pattern: 'status board', path: 'docs' }), { matches: 1, text: 'docs/a.md:1:The status board shows jobs.' });
+  assert.deepEqual(await call('search', { pattern: 'no such thing' }), { matches: 0, text: 'No match.' });
+  // A pattern that looks like an option is still a pattern.
+  assert.equal((await call('search', { pattern: '--open-files-in-pager=touch pwned' })).matches, 0);
+  assert.equal(fs.existsSync(path.join(tree, 'pwned')), false);
+
+  const changes = await call('recent_changes', { path: 'docs/a.md' });
+  assert.match(changes.commits, /mention usage[\s\S]*first/);
+  assert.match(changes.latest_diff, /^\+It also shows usage\.$/m);
+  assert.ok(!changes.latest_diff.includes('Status Board'));
+  assert.deepEqual(await call('recent_changes', { path: 'untracked.md' }), { commits: 'No commit touches that path.' });
+
+  for (const outside of ['..', '../x', '/etc', path.join(tree, '..', 'elsewhere')]) {
+    assert.match((await call('search', { pattern: 'x', path: outside })).error, /inside your working tree/);
+    assert.match((await call('recent_changes', { path: outside })).error, /inside your working tree/);
+  }
+  assert.match((await call('search', { pattern: '' })).error, /non-empty/);
 });

@@ -3,7 +3,7 @@ import path from 'node:path';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { effectiveRole, WORKERS } from './config.ts';
 import type { Config, Role, WorkerAgent } from './config.ts';
-import { carryUncommitted, changesSince, commitAll, commitChanges, copyIncluded, createWorktree, currentBranch, dirtyCount, isInside, projectRoot, removeWorktree, repoRoot, revertCommit, revertsSince, reviewDiff } from './git.ts';
+import { carryUncommitted, changesSince, commitAll, commitChanges, copyIncluded, createWorktree, currentBranch, dirtyCount, mergeInto, isInside, projectRoot, removeWorktree, repoRoot, revertCommit, revertsSince, reviewDiff } from './git.ts';
 import type { Worktree } from './git.ts';
 import { sharedInstructions } from './instructions.ts';
 import { buildPrompt } from './prompts.ts';
@@ -409,7 +409,7 @@ export class Jobs {
     return job;
   }
 
-  async reply(id: string, input: { message?: string; decision?: 'approve' | 'deny'; request_id?: string; approved_by_user?: string }): Promise<Job> {
+  async reply(id: string, input: { message?: string; decision?: 'approve' | 'deny'; request_id?: string; approved_by_user?: string; sync?: boolean | string }): Promise<Job> {
     const job = this.get(id);
     if (this.changingRounds.has(id)) throw new Error(`Job ${id} is changing a round. Wait for it to finish.`);
     if (this.discarding.has(id)) throw new Error(`Job ${id} is being discarded.`);
@@ -448,6 +448,25 @@ export class Jobs {
       await adapter.reply(ctl, input.message);
       return job;
     }
+    // The worker started from an older commit. Merging the lead's branch in first gives it what was committed since,
+    // and moves the base, so the job's result stays the worker's own changes.
+    let synced: string | null = null;
+    if (input.sync) {
+      if (!job.worktree || !job.repo || job.kind === 'review') throw new Error(`Job ${id} has no worktree of its own to bring up to date. Drop sync.`);
+      this.preparingReviews.add(id);
+      try {
+        synced = await mergeInto(job.worktree.path, job.repo, typeof input.sync === 'string' ? input.sync : 'HEAD');
+        if (synced !== job.worktree.base) {
+          job.worktree.base = synced;
+          job.notes.push(`Brought up to date with ${synced.slice(0, 8)} before turn ${job.turns + 1}.`);
+          job.result = await this.worktreeResult(job, job.result?.commit ?? null);
+          this.flush();
+        }
+      } finally {
+        this.preparingReviews.delete(id);
+      }
+      if (!isTerminal(job)) return job;
+    }
     const refreshDiff = job.kind === 'review' && !WORKERS[job.agent].reviewerRunsGit;
     if (refreshDiff && (!job.reviewTarget || !job.repo)) {
       throw new Error(`Job ${id} has no saved review target or repository. Start a new review instead.`);
@@ -468,6 +487,7 @@ export class Jobs {
     try {
       let message = input.message;
       if (job.scratch) fs.mkdirSync(job.scratch, { recursive: true });
+      if (synced) message += `\n\nYour worktree has been brought up to date: it now contains the lead's commits up to \`${synced.slice(0, 8)}\`, merged into your branch. Look at what changed (\`git log -5 --stat\`) before continuing.`;
       if (job.kind === 'review' && job.runsApp) {
         this.preparingReviews.add(id);
         try {

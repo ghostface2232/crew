@@ -1248,3 +1248,46 @@ test('Finder metadata does not count as uncommitted work', async () => {
   await jobs.discard(clean.id);
   await jobs.discard(dirty.id);
 });
+
+test('a follow-up can first bring the worker up to date with the lead, without claiming what the lead changed', async () => {
+  const repo = tempRepo();
+  const commit = (file: string, text: string) => {
+    fs.writeFileSync(path.join(repo, file), text);
+    execFileSync('git', ['add', '-A'], { cwd: repo });
+    execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', file], { cwd: repo });
+    return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim();
+  };
+  const { jobs, adapter } = harness((ctl) => {
+    fs.writeFileSync(path.join(ctl.job.cwd, 'worker.js'), 'w\n');
+    ctl.session('s-1');
+    ctl.done('first');
+  });
+  const job = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'x' }));
+  const head = commit('lead.js', 'l\n');
+
+  let told = '';
+  adapter.reply = async (ctl, message) => {
+    told = message;
+    assert.equal(fs.readFileSync(path.join(ctl.job.cwd, 'lead.js'), 'utf8'), 'l\n');
+    fs.writeFileSync(path.join(ctl.job.cwd, 'worker.js'), 'w2\n');
+    ctl.done('second');
+  };
+  await jobs.reply(job.id, { message: 'use the new file', sync: true });
+  await settled(jobs, job);
+  assert.match(told, new RegExp(`commits up to \`${head.slice(0, 8)}\``));
+  assert.equal(job.worktree!.base, head);
+  // The lead's file is in the worktree but is not the worker's change.
+  assert.deepEqual(job.result!.files, ['worker.js']);
+  assert.deepEqual(job.rounds!.map((round) => [round.turn, round.files]), [[1, ['worker.js']], [2, ['worker.js']]]);
+
+  // A merge that conflicts changes nothing and starts no turn.
+  commit('worker.js', 'lead version\n');
+  const before = structuredClone(job);
+  await assert.rejects(jobs.reply(job.id, { message: 'again', sync: true }), /conflicted files: worker\.js/);
+  assert.deepEqual(job, before);
+  assert.equal(execFileSync('git', ['status', '--porcelain'], { cwd: job.cwd, encoding: 'utf8' }), '');
+
+  const review = await settled(jobs, await jobs.create({ kind: 'review', cwd: repo, review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } }));
+  await assert.rejects(jobs.reply(review.id, { message: 'x', sync: true }), /no worktree of its own/);
+  await jobs.discard(job.id);
+});

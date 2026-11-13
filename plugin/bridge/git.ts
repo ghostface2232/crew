@@ -191,6 +191,23 @@ export async function commitChanges(wt: string, commit: string): Promise<{ files
   return { files: names.split('\0').filter(Boolean), stat };
 }
 
+/**
+ * Merges `ref` of the repository into the branch checked out in `wt` and returns the merged commit.
+ * A merge that does not apply cleanly is aborted, so the worktree is left as it was.
+ */
+export async function mergeInto(wt: string, repo: string, ref: string): Promise<string> {
+  const commit = await git(repo, ['rev-parse', '--verify', `${ref}^{commit}`]);
+  if (await dirtyCount(wt)) throw new Error('The worktree has uncommitted changes, so nothing was merged into it.');
+  try {
+    await git(wt, [...await commitSettings(wt), '-c', `core.hooksPath=${os.devNull}`, 'merge', '--no-edit', commit]);
+  } catch (err) {
+    const conflicts = (await git(wt, ['diff', '--name-only', '--diff-filter=U', '-z'])).split('\0').filter(Boolean);
+    await git(wt, ['merge', '--abort']).catch(() => {});
+    throw new Error(`Could not merge ${commit.slice(0, 8)} into the worker's branch${conflicts.length ? `; conflicted files: ${conflicts.join(', ')}` : ''}: ${(err as Error).message}`);
+  }
+  return commit;
+}
+
 /** Branch checked out in a working tree, or null when HEAD is detached. */
 export async function currentBranch(wt: string): Promise<string | null> {
   return git(wt, ['symbolic-ref', '--quiet', '--short', 'HEAD']).catch(() => null);

@@ -190,6 +190,7 @@ const TOOLS = [
         message: { type: 'string', description: 'Follow-up instruction, or the answer to the worker\'s question.' },
         decision: { type: 'string', enum: ['approve', 'deny'], description: 'The user\'s decision for a job waiting on approval.' },
         request_id: { type: 'string', description: 'Required when forwarding an answer. Use the request ID shown in the job status.' },
+        sync: { type: 'boolean', description: 'For a finished delegate or polish job: first merge your current HEAD into the worker\'s branch, so the next turn sees what you committed since it started (a fix it was waiting for, an interface you changed). Commit first. Refused, with nothing changed, if the merge conflicts.' },
         approved_by_user: { type: 'string', description: 'For a finished job whose result lists a REFUSED action: the user\'s own words from this conversation that cover it. The worker runs the action again and the automatic reviewer judges it with that approval. Use it without asking the user when their request clearly covers the action. A second use on the same job sends each request to the user to answer.' },
         background: common.background,
       },
@@ -507,7 +508,7 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       return parts.join('\n\n────────\n\n');
     }
     case 'reply': {
-      await api('POST', `/api/jobs/${args.job_id}/reply`, { message: args.message, decision: args.decision, request_id: args.request_id, approved_by_user: args.approved_by_user });
+      await api('POST', `/api/jobs/${args.job_id}/reply`, { message: args.message, decision: args.decision, request_id: args.request_id, approved_by_user: args.approved_by_user, sync: args.sync ? true : undefined });
       return args.background ? describe(await api('GET', `/api/jobs/${args.job_id}`)) : followOne(args.job_id, ctx);
     }
     case 'cancel': {

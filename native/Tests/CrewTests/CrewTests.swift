@@ -96,7 +96,7 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
     @Test(.enabled(if: ProcessInfo.processInfo.environment["CREW_STREAM_TEST_PORT"] != nil))
     @MainActor func realStreamDecodesSnapshotsAndCancelsConnection() async throws {
         let port = Int(ProcessInfo.processInfo.environment["CREW_STREAM_TEST_PORT"]!)!
-        let api = CrewAPI(port: port)
+        let api = CrewAPI(port: port, environment: ["CREW_HOME": FileManager.default.temporaryDirectory.appendingPathComponent("crew-test-\(UUID())").path])
         let store = CrewStore(api: api)
         let stream = Task {
             try await api.stream { event in try store.receive(event) }
@@ -253,7 +253,7 @@ private final class MockProtocol: URLProtocol, @unchecked Sendable {
         MockProtocol.handler.withLock { $0 = handler }
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [MockProtocol.self]
-        return CrewAPI(port: 0, configuration: config)
+        return CrewAPI(port: 0, configuration: config, environment: ["CREW_HOME": FileManager.default.temporaryDirectory.appendingPathComponent("crew-test-\(UUID())").path])
     }
     private func store(api: CrewAPI = CrewAPI(port: 0)) throws -> CrewStore {
         let suite = "crew-tests-\(UUID())"

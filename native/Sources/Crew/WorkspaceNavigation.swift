@@ -10,7 +10,7 @@ struct WorkspaceToolbar: ToolbarContent {
             Menu {
                 Label(store.connected ? "Connected to Crew" : "Reconnecting…", systemImage: store.connected ? "network" : "wifi.slash")
                 Divider()
-                Button("Open Web Board", systemImage: "globe") { NSWorkspace.shared.open(store.api.baseURL) }
+                Button("Open Web Board", systemImage: "globe") { NSWorkspace.shared.open(store.api.webBoardURL) }
             } label: { Label("Workspace options", systemImage: "ellipsis") }
                 .menuIndicator(.hidden).help("Workspace options")
         }

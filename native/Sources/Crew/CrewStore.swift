@@ -34,6 +34,7 @@ final class CrewStore {
     var events: [CrewEvent] = []
     var limits: [String: LimitUsage?] = [:]
     var usage: Usage?
+    var signInRequired = false
     var connected = false
     var connectionMessage = "Connecting to Crew…"
     var revision = 0
@@ -64,6 +65,7 @@ final class CrewStore {
     init(api: CrewAPI = CrewAPI(), defaults: UserDefaults = .standard) {
         self.api = api; self.defaults = defaults
         selection = defaults.string(forKey: "selection") ?? "overview"
+        api.onSignInFailure = { [weak self] error in self?.connectionFailed(error) }
     }
     var project: String { selection?.hasPrefix("project:") == true ? String(selection!.dropFirst(8)) : "" }
     var now: Double { displayTime + clockSkew }
@@ -92,8 +94,8 @@ final class CrewStore {
                 } catch {
                     guard !Task.isCancelled, attempt == generation else { return }
                     if connected { backoff = 1 }
-                    connected = false
-                    connectionMessage = error.localizedDescription
+                    connectionFailed(error)
+                    if signInRequired { backoff = max(backoff, 5) }
                 }
                 try? await Task.sleep(nanoseconds: backoff * 1_000_000_000)
                 backoff = min(backoff * 2, 10)
@@ -108,6 +110,11 @@ final class CrewStore {
                 try? await Task.sleep(nanoseconds: 5_000_000_000)
             }
         }
+    }
+    func connectionFailed(_ error: Error) {
+        connected = false
+        signInRequired = error is DaemonSignInFailure
+        connectionMessage = error.localizedDescription
     }
     func stop() { generation += 1; streamTask?.cancel(); heartbeatTask?.cancel() }
     func sendHeartbeat() async {
@@ -144,7 +151,7 @@ final class CrewStore {
             events = state.events; limits = state.limits; usage = state.usage
             state.events = []; state.limits = [:]; state.usage = nil
             for id in Set(jobVersions.keys).union(state.jobs.map(\.id)) { jobVersions[id, default: 0] += 1 }
-            connected = true; connectionMessage = "Connected"
+            signInRequired = false; connected = true; connectionMessage = "Connected"
             clockSkew = state.now - Date().timeIntervalSince1970 * 1000
             displayTime = Date().timeIntervalSince1970 * 1000
             revision += 1

@@ -32,7 +32,7 @@ struct CrewApp: App {
                 Button("Activity") { delegate.show(); delegate.store.selection = "activity" }.keyboardShortcut("3")
                 Button("History") { delegate.show(); delegate.store.selection = "history" }.keyboardShortcut("4")
                 Divider()
-                Button("Open Web Board") { NSWorkspace.shared.open(delegate.store.api.baseURL) }
+                Button("Open Web Board") { NSWorkspace.shared.open(delegate.store.api.webBoardURL) }
             }
         }
         // The menu bar reads live state in its own views so the App body is not re-evaluated on every update.
@@ -62,7 +62,7 @@ private struct MenuBarMenu: View {
         }
         Divider()
         SettingsCommand(store: store, open: openSettings)
-        Button("Open Web Board") { NSWorkspace.shared.open(store.api.baseURL) }
+        Button("Open Web Board") { NSWorkspace.shared.open(store.api.webBoardURL) }
         Divider()
         Button("Quit Crew — jobs keep running") { NSApp.terminate(nil) }
     }
@@ -146,7 +146,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         super.init()
     }
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let home = URL(fileURLWithPath: ProcessInfo.processInfo.environment["CREW_HOME"] ?? NSHomeDirectory() + "/.crew")
+        let home = CrewHome.directory()
         let lock = InstanceLock(home: home)
         do {
             guard try lock.acquire(home: home) else {

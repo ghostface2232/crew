@@ -45,13 +45,27 @@ struct CrewFailure: LocalizedError {
     init(_ message: String) { self.message = message }
     var errorDescription: String? { message }
 }
+struct DaemonSignInFailure: LocalizedError {
+    let tokenFile: URL
+    var errorDescription: String? { "Could not sign in to the Crew daemon. Check the token file at \(tokenFile.path)." }
+}
+
+enum CrewHome {
+    static func directory(environment: [String: String] = ProcessInfo.processInfo.environment) -> URL {
+        URL(fileURLWithPath: environment["CREW_HOME"] ?? NSHomeDirectory() + "/.crew")
+    }
+}
+
 struct EmptyReply: Codable, Sendable {}
 struct Instructions: Codable, Sendable { var file: String; var text: String }
 
 final class CrewAPI: Sendable {
     let baseURL: URL
+    let tokenFile: URL
+    @MainActor var onSignInFailure: (@MainActor @Sendable (DaemonSignInFailure) -> Void)?
     private let session: URLSession
-    init(port: Int = Int(ProcessInfo.processInfo.environment["CREW_PORT"] ?? "") ?? 47615, configuration: URLSessionConfiguration? = nil) {
+    init(port: Int = Int(ProcessInfo.processInfo.environment["CREW_PORT"] ?? "") ?? 47615, configuration: URLSessionConfiguration? = nil, environment: [String: String] = ProcessInfo.processInfo.environment) {
+        tokenFile = CrewHome.directory(environment: environment).appendingPathComponent("token")
         baseURL = URL(string: "http://127.0.0.1:\(port)")!
         let config = configuration ?? URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 35
@@ -68,25 +82,67 @@ final class CrewAPI: Sendable {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = body
         }
-        let (data, response) = try await session.data(for: request)
-        try validate(response, data: data)
+        let original = request
+        let data = try await authenticated { token in
+            var request = original
+            request.setValue(token.map { "Bearer \($0)" }, forHTTPHeaderField: "Authorization")
+            let (data, response) = try await session.data(for: request)
+            try validate(response, data: data)
+            return data
+        }
         return try JSONDecoder().decode(T.self, from: data)
     }
     func post<T: Decodable & Sendable, B: Encodable & Sendable>(_ path: String, _ body: B, timeout: TimeInterval? = nil) async throws -> T {
         try await request(path, body: JSONEncoder().encode(body), timeout: timeout)
     }
-    func stream(receive: @escaping @MainActor @Sendable (ServerEvent) async throws -> Void) async throws {
-        let connection = StreamConnection(url: baseURL.appendingPathComponent("api/stream"))
-        let events = connection.events()
-        try await withTaskCancellationHandler {
-            defer { connection.cancel() }
-            for try await event in events {
+    var webBoardURL: URL {
+        guard let token = readToken() else { return baseURL }
+        var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)!
+        components.path = "/"
+        components.fragment = "token=\(token)"
+        return components.url!
+    }
+    private func readToken() -> String? {
+        guard let contents = try? String(contentsOf: tokenFile, encoding: .utf8) else { return nil }
+        let token = contents.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard token.utf8.count == 64, token.utf8.allSatisfy({
+            (48...57).contains($0) || (65...70).contains($0) || (97...102).contains($0)
+        }) else { return nil }
+        return token
+    }
+    private func authenticated<T: Sendable>(_ operation: (String?) async throws -> T) async throws -> T {
+        let token = readToken()
+        do { return try await operation(token) }
+        catch {
+            try Task.checkCancellation()
+            guard error is DaemonSignInFailure || (token == nil && error is URLError) else { throw error }
+            // Startup can create the file after a connection failure; a 401 can mean it was replaced.
+            do { return try await operation(readToken()) }
+            catch let failure as DaemonSignInFailure {
                 try Task.checkCancellation()
-                try await receive(event)
+                await onSignInFailure?(failure)
+                throw failure
             }
-        } onCancel: { connection.cancel() }
+        }
+    }
+    func stream(receive: @escaping @MainActor @Sendable (ServerEvent) async throws -> Void) async throws {
+        try await authenticated { token in
+            var request = URLRequest(url: baseURL.appendingPathComponent("api/stream"))
+            request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+            request.setValue(token.map { "Bearer \($0)" }, forHTTPHeaderField: "Authorization")
+            let connection = StreamConnection(request: request, configuration: session.configuration, tokenFile: tokenFile)
+            let events = connection.events()
+            try await withTaskCancellationHandler {
+                defer { connection.cancel() }
+                for try await event in events {
+                    try Task.checkCancellation()
+                    try await receive(event)
+                }
+            } onCancel: { connection.cancel() }
+        }
     }
     private func validate(_ response: URLResponse, data: Data) throws {
+        if (response as? HTTPURLResponse)?.statusCode == 401 { throw DaemonSignInFailure(tokenFile: tokenFile) }
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             struct ErrorBody: Decodable { var error: String }
             throw CrewFailure((try? JSONDecoder().decode(ErrorBody.self, from: data).error) ?? "The daemon could not complete the request.")
@@ -122,27 +178,26 @@ enum DaemonLauncher {
 
 // URLSession delivers chunks on a serial delegate queue. Cancellation can arrive on any executor.
 private final class StreamConnection: NSObject, URLSessionDataDelegate, @unchecked Sendable {
-    private let url: URL
+    private let request: URLRequest
+    private let configuration: URLSessionConfiguration
+    private let tokenFile: URL
     private let lock = NSLock()
     private var parser = SSEParser()
     private var continuation: AsyncThrowingStream<ServerEvent, Error>.Continuation?
     private var session: URLSession?
     private var finished = false
-    init(url: URL) { self.url = url }
+    init(request: URLRequest, configuration: URLSessionConfiguration, tokenFile: URL) {
+        self.request = request; self.configuration = configuration; self.tokenFile = tokenFile
+    }
 
     func events() -> AsyncThrowingStream<ServerEvent, Error> {
         AsyncThrowingStream(bufferingPolicy: .bufferingOldest(512)) { continuation in
             lock.lock()
             guard !finished else { lock.unlock(); continuation.finish(throwing: CancellationError()); return }
             self.continuation = continuation
-            let config = URLSessionConfiguration.ephemeral
-            config.timeoutIntervalForRequest = 35
-            config.timeoutIntervalForResource = 60 * 60 * 24
-            let session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
+            let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
             self.session = session
             lock.unlock()
-            var request = URLRequest(url: url)
-            request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
             continuation.onTermination = { [weak self] _ in self?.cancel() }
             session.dataTask(with: request).resume()
         }
@@ -160,6 +215,11 @@ private final class StreamConnection: NSObject, URLSessionDataDelegate, @uncheck
     }
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
                     completionHandler: @escaping @Sendable (URLSession.ResponseDisposition) -> Void) {
+        if (response as? HTTPURLResponse)?.statusCode == 401 {
+            finish(DaemonSignInFailure(tokenFile: tokenFile))
+            completionHandler(.cancel)
+            return
+        }
         guard let http = response as? HTTPURLResponse, http.statusCode == 200,
               http.value(forHTTPHeaderField: "Content-Type")?.hasPrefix("text/event-stream") == true else {
             completionHandler(.cancel)

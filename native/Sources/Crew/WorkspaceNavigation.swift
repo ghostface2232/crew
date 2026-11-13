@@ -2,25 +2,22 @@ import SwiftUI
 
 struct WorkspaceToolbar: ToolbarContent {
     @Bindable var store: CrewStore
-    var compact = false
+    var layout: ToolbarLayout
+    private var compact: Bool { layout.compact }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some ToolbarContent {
-        ToolbarItem(placement: .navigation) {
-            // The navigation item starts at the detail column's edge; this lines it up with the page's 40 pt content inset.
-            Text("Crew").font(Typeface.cardTitle).lineLimit(1).padding(.leading, 30)
-        }.sharedBackgroundVisibility(.hidden)
         ToolbarItem(placement: .principal) {
-            // A segmented picker in the toolbar renders titles only, so the tabs are drawn here to keep their symbols.
-            HStack(spacing: 2) {
-                tab("Overview", symbol: "square.grid.2x2", page: "overview")
-                tab("Needs You", symbol: "bell", page: "needs", badge: store.state.pendingCount)
-                tab("Activity", symbol: "list.bullet.rectangle", page: "activity")
-                tab("History", symbol: "clock.arrow.circlepath", page: "history")
-            }.padding(3).accessibilityElement(children: .contain).accessibilityLabel("Workspace")
+            WorkspaceTabs(store: store, compact: compact)
+            .background(WindowFrameReader(trigger: layout.trigger) { frame, window in
+                layout.tabsCenter = frame.midX
+                if !compact { layout.titledTabsWidth = frame.width }
+                layout.leadingLimit = ToolbarLayout.leadingChromeEnd(in: window)
+            })
         }
         ToolbarItemGroup(placement: .primaryAction) {
             Button("New Job", systemImage: "plus") { store.showingDispatch = true }
                 .help("New job (⌘N)").disabled(!store.connected)
+                .background(WindowFrameReader(trigger: layout.trigger) { frame, _ in layout.actionsX = frame.minX })
             Menu {
                 Label(store.connected ? "Connected to Crew" : "Reconnecting…", systemImage: store.connected ? "network" : "wifi.slash")
                 Divider()
@@ -31,32 +28,6 @@ struct WorkspaceToolbar: ToolbarContent {
         // The spacer gives search its own glass group so it grows on its own.
         ToolbarSpacer(.fixed, placement: .primaryAction)
         ToolbarItem(placement: .primaryAction) { ToolbarSearch(store: store) }
-    }
-    private func tab(_ title: String, symbol: String, page: String, badge: Int = 0) -> some View {
-        let selected = (store.project.isEmpty ? store.selection ?? "overview" : "overview") == page
-        return Button {
-            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.22)) { store.selection = page }
-        } label: {
-            Group {
-                if compact { Label(title, systemImage: symbol).labelStyle(.iconOnly) }
-                else { Label(title, systemImage: symbol).labelStyle(.titleAndIcon) }
-            }
-                .foregroundStyle(selected ? .primary : .secondary)
-                .font(Typeface.calloutStrong)
-                // An overlay keeps the tab width fixed when requests come and go.
-                .overlay(alignment: .topTrailing) {
-                    if badge > 0 {
-                        Circle().fill(.orange).frame(width: 6, height: 6).offset(x: 5, y: -2)
-                            .transition(.scale.combined(with: .opacity))
-                    }
-                }
-                .padding(.horizontal, 12).padding(.vertical, 6)
-                .background(selected ? Color.primary.opacity(0.08) : .clear, in: Capsule())
-                .contentShape(Capsule())
-        }.buttonStyle(.plain).accessibilityAddTraits(selected ? .isSelected : [])
-            .help(compact ? title : "")
-            .accessibilityLabel(title).accessibilityValue(badge > 0 ? "\(badge) waiting" : "")
-            .animation(reduceMotion ? nil : .spring(duration: 0.25), value: badge)
     }
 }
 
@@ -137,3 +108,104 @@ private struct SearchField: NSViewRepresentable {
     }
 }
 
+
+/// Window-space geometry of the toolbar, which SwiftUI hosts outside the window content's coordinate space.
+@MainActor @Observable
+final class ToolbarLayout {
+    var detailFrame: CGRect = .zero
+    /// The right edge of whatever the window places left of the tabs: the window buttons and,
+    /// with the sidebar closed, the sidebar toggle.
+    var leadingLimit: CGFloat = 0
+    var tabsCenter: CGFloat = 0
+    var titledTabsWidth: CGFloat = 0
+    var actionsX: CGFloat = .greatestFiniteMagnitude
+    /// Changes whenever the toolbar may have moved, so the readers measure again.
+    var trigger: CGRect { detailFrame }
+
+    /// Titled tabs are kept while they clear the leading window controls and the trailing actions,
+    /// so the switch happens at a wider window when the sidebar is closed.
+    var compact: Bool {
+        guard titledTabsWidth > 0 else { return false }
+        let half = titledTabsWidth / 2, gap: CGFloat = 12
+        // With the sidebar closed the toggle follows the window buttons: one 36 pt toolbar button and its spacing.
+        let leading = detailFrame.minX > 0 ? detailFrame.minX : leadingLimit + 8 + 36
+        return tabsCenter - half < leading + gap || tabsCenter + half > actionsX - gap
+    }
+
+    /// The window buttons' right edge; the sidebar toggle's own position is not exposed to the app.
+    static func leadingChromeEnd(in window: NSWindow) -> CGFloat {
+        window.standardWindowButton(.zoomButton).map { $0.convert($0.bounds, to: nil).maxX } ?? 0
+    }
+}
+
+/// Reports a view's frame in window coordinates whenever `trigger` changes.
+struct WindowFrameReader: NSViewRepresentable {
+    var trigger: CGRect
+    var report: (CGRect, NSWindow) -> Void
+    func makeNSView(context: Context) -> NSView { NSView() }
+    func updateNSView(_ view: NSView, context: Context) {
+        // Measure after this layout pass, and again once a sidebar or window animation settles.
+        for delay in [0, 0.35] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                guard let window = view.window else { return }
+                report(view.convert(view.bounds, to: nil), window)
+            }
+        }
+    }
+}
+
+/// The page tabs: the system segmented control, which draws the toolbar's glass selection,
+/// its sliding motion and the press lens. SwiftUI's segmented Picker drops the symbols here.
+struct WorkspaceTabs: NSViewRepresentable {
+    @Bindable var store: CrewStore
+    var compact: Bool
+    private static let pages = ["overview", "needs", "activity", "history"]
+    private static let titles = ["Overview", "Needs You", "Activity", "History"]
+    private static let symbols = ["square.grid.2x2", "bell", "bolt", "clock.arrow.circlepath"]
+    private var current: String { store.project.isEmpty ? store.selection ?? "overview" : "overview" }
+
+    func makeNSView(context: Context) -> NSSegmentedControl {
+        let control = NSSegmentedControl(labels: Self.titles, trackingMode: .selectOne,
+                                         target: context.coordinator, action: #selector(Coordinator.changed(_:)))
+        control.setAccessibilityLabel("Workspace")
+        control.segmentDistribution = .fit
+        return control
+    }
+    func updateNSView(_ control: NSSegmentedControl, context: Context) {
+        context.coordinator.store = store
+        let pending = store.state.pendingCount > 0
+        for index in Self.pages.indices {
+            control.setLabel(compact ? "" : Self.titles[index], forSegment: index)
+            control.setToolTip(compact ? Self.titles[index] : nil, forSegment: index)
+            control.setImage(image(index, badged: index == 1 && pending), forSegment: index)
+            control.setWidth(0, forSegment: index)
+        }
+        control.selectedSegment = Self.pages.firstIndex(of: current) ?? 0
+        control.invalidateIntrinsicContentSize()
+    }
+    /// Waiting requests show as the bell's own orange badge, which keeps the segment's width fixed.
+    private func image(_ index: Int, badged: Bool) -> NSImage? {
+        // A little smaller than the 13 pt labels; unsized symbols follow the toolbar's large control size.
+        let size = NSImage.SymbolConfiguration(pointSize: 9, weight: .medium)
+        guard badged else { return NSImage(systemSymbolName: Self.symbols[index], accessibilityDescription: nil)?.withSymbolConfiguration(size) }
+        let config = size.applying(NSImage.SymbolConfiguration(paletteColors: [.systemOrange, .labelColor]))
+        let image = NSImage(systemSymbolName: "bell.badge", accessibilityDescription: "Waiting requests")?.withSymbolConfiguration(config)
+        image?.isTemplate = false
+        return image
+    }
+    /// Without this the toolbar stretches the control into all free space, which pushes the
+    /// trailing items into the overflow menu even when only icons are shown.
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView control: NSSegmentedControl, context: Context) -> CGSize? {
+        control.intrinsicContentSize
+    }
+    func makeCoordinator() -> Coordinator { Coordinator(store: store) }
+    @MainActor final class Coordinator: NSObject {
+        var store: CrewStore
+        init(store: CrewStore) { self.store = store }
+        @objc func changed(_ control: NSSegmentedControl) {
+            let page = WorkspaceTabs.pages[control.selectedSegment]
+            let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.22)) { store.selection = page }
+        }
+    }
+}

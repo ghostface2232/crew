@@ -4,20 +4,21 @@ struct BoardView: View {
     @Bindable var store: CrewStore
     var openSettings: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    // Below this content width the toolbar tabs no longer fit with their titles.
-    @State private var compactTabs = false
+    @State private var toolbarLayout = ToolbarLayout()
     var body: some View {
         NavigationSplitView {
             ProjectSidebar(store: store, openSettings: openSettings)
         } detail: {
             page
-                .onGeometryChange(for: Bool.self) { $0.size.width < 880 } action: { compactTabs = $0 }
-                .toolbar { WorkspaceToolbar(store: store, compact: compactTabs) }
+                // Narrow enough for the sidebar to be optional; the window adds the sidebar's own minimum when shown.
+                .frame(minWidth: 560)
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { toolbarLayout.detailFrame = $0 }
+                .toolbar { WorkspaceToolbar(store: store, layout: toolbarLayout) }
                 .navigationTitle(title)
                 .toolbar(removing: .title)
                 .background(WorkspaceStyle.canvas.ignoresSafeArea())
         }
-        .frame(minWidth: 850, minHeight: 560)
+        .frame(minHeight: 560)
         .onChange(of: store.selection) { store.persistSelection() }
         .onExitCommand { store.selectedJob = nil }
         .sheet(isPresented: $store.showingDispatch) { DispatchView(store: store) }

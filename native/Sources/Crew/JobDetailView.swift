@@ -123,7 +123,7 @@ struct JobDetailView: View {
         }
         let combined = mergeEvents(events, store.events.filter { $0.job_id == id }, limit: 80)
         if !combined.isEmpty {
-            detailSection("Activity", symbol: "list.bullet.rectangle") { EventList(events: combined) { store.openJob($0) } }
+            detailSection("Activity", symbol: "bolt") { EventList(events: combined) { store.openJob($0) } }
         }
         VStack(alignment: .leading, spacing: 10) {
             Divider().padding(.bottom, 4)

@@ -141,7 +141,7 @@ try {
       } else throw new Error('Usage: crew daemon <start|stop|restart|logs>');
       if (!(await health())) console.log('stopped');
       else {
-        // Up is not enough: a daemon that does not take the token in the file refuses everything else.
+        // Verify that the daemon accepts the token on disk before reporting it as running.
         await api('GET', '/api/usage');
         console.log(`running at ${BASE_URL}`);
       }

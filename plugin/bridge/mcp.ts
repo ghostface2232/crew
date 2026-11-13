@@ -209,7 +209,7 @@ const TOOLS = [
         message: { type: 'string', description: 'Follow-up instruction, or the answer to the worker\'s question.' },
         decision: { type: 'string', enum: ['approve', 'deny'], description: 'The user\'s decision for a job waiting on approval.' },
         request_id: { type: 'string', description: 'Required when forwarding an answer. Use the request ID shown in the job status.' },
-        sync: { type: 'boolean', description: 'For a finished delegate or polish job: first merge your current HEAD into the worker\'s branch, so the next turn sees what you committed since it started (a fix it was waiting for, an interface you changed). Commit first. If the merge conflicts it is undone and the message is still sent, telling the worker which files conflicted; the job\'s result notes it.' },
+        sync: { type: 'boolean', description: 'For a finished delegate or polish job: first merge your current HEAD into the worker\'s branch, so the next turn sees what you committed since it started (a fix it was waiting for, an interface you changed). Commit first. If the merge conflicts, it is aborted; the message is still sent, naming the conflicting files, and the job\'s result notes the failed sync.' },
         approved_by_user: { type: 'string', description: 'For a finished job whose result lists a REFUSED action: the user\'s own words from this conversation that cover it. The worker runs the action again and the automatic reviewer judges it with that approval. Use it without asking the user when their request clearly covers the action. A second use on the same job sends each request to the user to answer.' },
         background: common.background,
       },

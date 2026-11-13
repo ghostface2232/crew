@@ -86,9 +86,8 @@ export function shouldReplace(running: Health, disk: { version: string; build: s
 }
 
 /**
- * Stops the running daemon whatever it is doing, for the user's own `crew daemon stop` and `restart`.
- * A daemon that does not hold the token in the file refuses the request, so it is then stopped by process id.
- * Throws when the daemon is still up afterwards.
+ * Stops the running daemon even if jobs are active, for `crew daemon stop` and `restart`.
+ * Falls back to SIGTERM if the daemon rejects the token on disk, and throws if it stays up.
  */
 export async function stopDaemon(): Promise<void> {
   const running = await health();
@@ -97,8 +96,8 @@ export async function stopDaemon(): Promise<void> {
   const asked = await api('POST', '/api/shutdown', {}).then(() => true, () => false);
   if (asked && await waitFor(down, 5000)) return;
   const stuck = new Error(`The Crew daemon (process ${running.pid}) is still running at ${BASE_URL}. Stop that process yourself, then start Crew again.`);
-  // Anything on the port can answer /api/health with any number. Only the process the daemon itself
-  // recorded in this home is signalled.
+  // Any local listener can report an arbitrary PID on /api/health; only signal the PID
+  // that this home's daemon recorded on disk.
   let recorded: unknown;
   try {
     recorded = JSON.parse(fs.readFileSync(path.join(HOME, 'daemon.json'), 'utf8')).pid;
@@ -120,8 +119,8 @@ async function startDaemon(): Promise<void> {
     // Compare with the code on disk, not the code this process loaded: a long-lived session
     // still running old code must not keep restarting a daemon that is already current.
     if (!shouldReplace(running, installed(), PLUGIN_ROOT)) return;
-    // `running` is already old: a job may have started since. The daemon refuses if so, and then it stays.
-    // It also stays when it does not take this client's token; the next request says how to recover.
+    // A job may have started since the health check, or the daemon may reject our token.
+    // Either way, leave the running daemon alone; a token mismatch is reported on the next call.
     try {
       await api('POST', '/api/shutdown', { ifIdle: true });
     } catch {

@@ -46,10 +46,9 @@ const server = http.createServer((req, res) => {
 });
 
 /**
- * The port is what makes this process the daemon, so it is taken before anything else is read or written.
- * Two daemons started at once both get this far; the one that loses must not make a token the winner does
- * not hold, or clear away the scratch directories and review snapshots of jobs the winner is running.
- * The rest of this file runs without yielding, so no request is answered before the state it sets up exists.
+ * Bind the port before reading or writing any state on disk. If two daemons start at once,
+ * the loser exits before creating a token or deleting the winner's scratch directories and
+ * review snapshots. Initialization below is synchronous, so no request is handled until setup finishes.
  */
 server.on('error', (err: NodeJS.ErrnoException) => {
   // Another daemon won the race for the port; the client will find it via /api/health.
@@ -293,7 +292,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
   const { pathname } = url;
   const method = req.method ?? 'GET';
   if (!isOpen(method, pathname) && !WORKER_ROUTE.test(pathname) && !signedIn(req)) throw new HttpError(401, 'unauthorized');
-  // Between the decision to stop and the stop itself, nothing new may begin: it would be lost a moment later.
+  // Reject mutations once shutdown is scheduled so new work is not dropped mid-flight.
   if (stopping && method === 'POST') throw new HttpError(503, 'The Crew daemon is shutting down. Try again in a moment.');
 
   if (method === 'POST' && pathname === '/api/session') {
@@ -480,7 +479,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       return saved;
     }
     if (pathname === '/api/shutdown') {
-      // A client replacing an outdated daemon decided on a health reply that may be stale by now; only the daemon knows.
+      // Re-check active jobs here in case work started after the client's health check.
       if ((await readJson(req)).ifIdle && jobs.activeCount > 0) throw new HttpError(409, `${jobs.activeCount} job(s) are active, so the daemon keeps running.`);
       stopping = true;
       setImmediate(shutdown);

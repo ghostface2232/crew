@@ -271,8 +271,8 @@ export class Jobs {
   }
 
   /**
-   * Number of jobs that would be lost if the daemon stopped now, counting those still being set up
-   * and finished ones being brought up to date for a follow-up turn.
+   * Number of jobs that would be disrupted if the daemon stopped now, including jobs still starting
+   * and finished jobs syncing or refreshing a review for a follow-up turn.
    */
   get activeCount(): number {
     return [...this.jobs.values()].filter((job) => !isTerminal(job) || this.preparingReviews.has(job.id)).length + this.starting.length;
@@ -495,7 +495,7 @@ export class Jobs {
         if (merged.conflicts.length) {
           const commit = merged.commit.slice(0, 8);
           const files = merged.conflicts.join(', ');
-          syncWarning = `\n\nYour worktree could NOT be brought up to date with the lead's commit \`${commit}\`; conflicted files: ${files}. The merge was aborted and your worktree is unchanged. Look at the lead's version of these files (\`git diff HEAD...${commit} -- <file>\` / \`git show ${commit}:<file>\`) and take it into account so your change will merge.`;
+          syncWarning = `\n\nYour worktree could NOT be brought up to date with the lead's commit \`${commit}\`; conflicted files: ${files}. The merge was aborted and your worktree is unchanged. Inspect the lead's version of these files (\`git diff HEAD...${commit} -- <file>\` or \`git show ${commit}:<file>\`) and account for those changes so your change will merge.`;
           job.notes.push(`Could not be brought up to date with ${commit} before turn ${job.turns + 1}; conflicted files: ${files}. The message was sent without it.`);
         } else {
           synced = merged.commit;

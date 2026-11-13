@@ -107,10 +107,10 @@ struct AnswerView: View {
     private var locked: Bool { store.actions[job.requestKey]?.locked == true || !store.connected }
     var body: some View {
         if job.state == "waiting", let waiting = job.waiting {
-            VStack(alignment: .leading, spacing: 12) {
-                Text(waiting.reason).font(.system(size: 13)).lineSpacing(3).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading).padding(12)
-                    .background(.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 12))
+            VStack(alignment: .leading, spacing: 14) {
+                // The request itself is what the person acts on, so it leads the hierarchy.
+                Text(waiting.reason).font(.system(size: 15, weight: .medium)).lineSpacing(4).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 if waiting.type == "question" {
                     MessageEditor(title: "Your answer", text: Binding(
                         get: { store.drafts[job.requestKey] ?? "" }, set: { store.drafts[job.requestKey] = $0 }

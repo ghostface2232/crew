@@ -16,22 +16,21 @@ struct JobDetailView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("Job Details").font(.headline)
+                if let job { StatusLabel(state: job.stalled ? "stalled" : job.state, title: job.status) }
                 Spacer()
                 Button("Close Details", systemImage: "xmark") { store.selectedJob = nil }
                     .buttonStyle(.borderless).labelStyle(.iconOnly).help("Close details (Esc)").keyboardShortcut(.cancelAction)
                     .focused($closeFocused)
-            }.padding(20)
-            Divider()
+            }.padding(.horizontal, 24).padding(.top, 20).padding(.bottom, 4)
             ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: 28) {
                     if !error.isEmpty {
                         Text(error).foregroundStyle(.red).textSelection(.enabled)
                         Button("Retry") { retry += 1 }
                     }
                     if job == nil && error.isEmpty { ProgressView("Loading details…") }
                     if let job { contents(job) }
-                }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
+                }.padding(.horizontal, 24).padding(.top, 12).padding(.bottom, 24).frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .onExitCommand { store.selectedJob = nil }
@@ -53,16 +52,17 @@ struct JobDetailView: View {
         }
     }
     @ViewBuilder private func contents(_ job: Job) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(job.title).font(.system(.title2, design: .rounded, weight: .semibold)).textSelection(.enabled)
-            StatusLabel(state: job.stalled ? "stalled" : job.state, title: job.status)
-            if job.isActive { Text(job.phase).font(.callout).foregroundStyle(.secondary).textSelection(.enabled) }
-            if let failure = job.error { Text(failure.message).foregroundStyle(.red).textSelection(.enabled) }
+        VStack(alignment: .leading, spacing: 8) {
+            Text(job.title).font(.system(size: 18, weight: .semibold, design: .rounded)).tracking(-0.3).lineSpacing(2).textSelection(.enabled)
+            if job.isActive { Text(job.phase).font(.system(size: 12)).foregroundStyle(.secondary).textSelection(.enabled) }
+            if let failure = job.error { Text(failure.message).font(.system(size: 12)).foregroundStyle(.red).textSelection(.enabled) }
         }
         if job.state == "waiting" {
-            GroupBox("Your response") { AnswerView(store: store, job: job).padding(8) }
+            AnswerView(store: store, job: job)
+                .padding(16).background(.orange.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+                .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.orange.opacity(0.15)))
         }
-        Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 10) {
+        Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
             fact("Agent", [agentName(job.agent), job.model, job.effort.map { "\($0) effort" }].compactMap { $0 }.joined(separator: " · "))
             fact("Role", roleNames[job.kind] ?? job.kind)
             fact("Project", job.projectPath)
@@ -71,7 +71,7 @@ struct JobDetailView: View {
             if let tokens = job.tokens { fact("Tokens", tokens.formatted()) }
             fact("Turns", String(job.turns))
             if let shared = job.shared, !shared.isEmpty { fact("Instructions", shared.joined(separator: "\n")) }
-        }.font(.callout).textSelection(.enabled)
+        }.font(.system(size: 12)).textSelection(.enabled)
         if let result = job.result {
             detailSection("Changes", symbol: "arrow.triangle.branch") {
                 Text(result.stat.isEmpty ? "No files changed" : result.stat).font(.system(.callout, design: .monospaced)).textSelection(.enabled)
@@ -140,12 +140,15 @@ struct JobDetailView: View {
         }
     }
     private func fact(_ title: String, _ value: String) -> some View {
-        GridRow(alignment: .top) { Text(title).foregroundStyle(.secondary); Text(value).frame(maxWidth: .infinity, alignment: .leading) }
+        GridRow(alignment: .top) {
+            Text(title).foregroundStyle(.secondary).frame(minWidth: 72, alignment: .leading)
+            Text(value).frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
     private func detailSection<Content: View>(_ title: String, symbol: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Divider()
-            Label(title, systemImage: symbol).font(.headline)
+            Divider().padding(.bottom, 4)
+            Label(title, systemImage: symbol).font(.system(size: 13, weight: .semibold))
             content()
         }.frame(maxWidth: .infinity, alignment: .leading)
     }

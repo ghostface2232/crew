@@ -64,8 +64,6 @@ HStack(spacing: 16) {
                     Label(store.project.isEmpty ? "All projects" : projectName(store.project, among: store.projects), systemImage: "folder")
                         .font(.system(size: 12, weight: .medium)).lineLimit(1)
                 }.menuStyle(.borderlessButton).frame(maxWidth: 260, alignment: .leading).help(store.project.isEmpty ? "Filter by project" : store.project)
-                } else {
-                    Label("Across all projects", systemImage: "square.stack").font(.system(size: 12)).foregroundStyle(.secondary)
                 }
                 Spacer()
             }.padding(.bottom, 8)
@@ -73,11 +71,6 @@ HStack(spacing: 16) {
     private var title: String {
         if !store.project.isEmpty { return projectName(store.project, among: store.projects) }
         return ["needs": "Needs You", "activity": "Activity", "history": "History"][store.selection ?? ""] ?? "Overview"
-    }
-    private var subtitle: String {
-        if store.selection == "needs" { return "Requests across every project" }
-        if !store.project.isEmpty { return store.project }
-        return "Your agents, working together"
     }
     private func matches(_ text: String) -> Bool { store.search.isEmpty || text.localizedCaseInsensitiveContains(store.search) }
     private var jobs: [Job] {
@@ -104,26 +97,23 @@ HStack(spacing: 16) {
     private var heading: some View {
         let overview = store.selection == "overview" || store.selection == nil
         let pending = store.state.pendingCount
-        let running = store.state.jobs.filter { $0.state == "running" }.count
-        let headline = overview ? (pending > 0 ? "\(pending) \(pending == 1 ? "request needs" : "requests need") you." : running > 0 ? "Your crew is on it." : "Ready for what’s next.") : store.selection == "needs" ? "Needs your attention." : store.selection == "history" ? "Completed work." : store.selection == "activity" ? "Recent activity." : title
-        let description = overview ? (pending > 0 ? "Answer pending requests to keep work moving." : "One place for your agents, decisions, and progress.") : subtitle
         return ViewThatFits(in: .horizontal) {
             if overview || !store.project.isEmpty {
                 HStack(alignment: .center, spacing: 32) {
-                    headingCopy(headline, description: description, overview: overview, pending: pending)
+                    headingCopy(overview: overview, pending: pending)
                         .frame(minWidth: 340, maxWidth: .infinity)
                     WorkspaceSummary(store: store).frame(minWidth: 430, maxWidth: 500)
                 }
             }
             VStack(alignment: .leading, spacing: 24) {
-                headingCopy(headline, description: description, overview: overview, pending: pending)
+                headingCopy(overview: overview, pending: pending)
                 if overview || !store.project.isEmpty { WorkspaceSummary(store: store) }
             }
         }.padding(.top, 6).padding(.bottom, 6)
     }
-    private func headingCopy(_ headline: String, description: String, overview: Bool, pending: Int) -> some View {
+    private func headingCopy(overview: Bool, pending: Int) -> some View {
         VStack(alignment: .leading, spacing: 18) {
-            WorkspaceHeading(title: headline, subtitle: description, eyebrow: store.project.isEmpty ? "Workspace" : "Project")
+            WorkspaceHeading(title: title, subtitle: store.project.isEmpty ? nil : store.project)
             if overview && pending > 0 {
                 Button("Review requests", systemImage: "arrow.up.right") { store.selection = "needs"; store.search = "" }
                     .buttonStyle(.glass).controlSize(.large)
@@ -193,11 +183,7 @@ struct AgentOverview: View {
     private var agents: [String] { ["claude"] + ["codex", "antigravity"].filter { store.state.agents[$0] != nil } }
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("The crew").font(WorkspaceStyle.section).tracking(-0.5)
-                Spacer()
-                Text("\(agents.count) agents").font(.system(size: 11)).foregroundStyle(.secondary)
-            }
+            Text("Agents").font(WorkspaceStyle.section).tracking(-0.5)
             if compact { compactAgents }
             else {
                 ViewThatFits(in: .horizontal) {
@@ -343,19 +329,19 @@ struct NeedsYouView: View {
         }
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 420, maximum: 620), spacing: 16)], alignment: .leading, spacing: 16) {
             ForEach(jobs) { job in
-                VStack(alignment: .leading, spacing: 18) {
-                    HStack {
-                        StatusLabel(state: "waiting", title: job.waiting?.type == "approval" ? "Approval" : "Question")
-                        Spacer()
-                        Button("Details", systemImage: "arrow.up.right") { store.openJob(job.id) }.buttonStyle(.borderless)
-                    }
-                    HStack(alignment: .top, spacing: 12) {
-                        AgentMark(agent: job.agent, size: 24).padding(.top, 2)
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(job.title).font(.system(size: 18, weight: .semibold, design: .rounded)).tracking(-0.4).lineLimit(3).help(job.title)
-                            Text("\(agentName(job.agent)) needs your input").font(.system(size: 12)).foregroundStyle(.secondary)
-                            Text(job.projectPath).font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled)
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 10) {
+                            StatusLabel(state: "waiting", title: job.waiting?.type == "approval" ? "Approval" : "Question")
+                            HStack(spacing: 5) {
+                                AgentMark(agent: job.agent, size: 13)
+                                Text("\(agentName(job.agent)) · \(projectName(job.projectPath, among: store.projects))").lineLimit(1)
+                            }.font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary).help(job.projectPath)
+                            Spacer(minLength: 8)
+                            Button("Details", systemImage: "arrow.up.right") { store.openJob(job.id) }
+                                .buttonStyle(.borderless).font(.system(size: 11))
                         }
+                        Text(job.title).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(2).help(job.title)
                     }
                     AnswerView(store: store, job: job)
                 }

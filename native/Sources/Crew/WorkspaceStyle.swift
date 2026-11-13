@@ -16,13 +16,13 @@ enum WorkspaceStyle {
 
 struct WorkspaceHeading: View {
     let title: String
-    let subtitle: String
-    var eyebrow = "Workspace"
+    var subtitle: String? = nil
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(eyebrow.uppercased()).font(.system(size: 10, weight: .semibold)).tracking(1.8).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 8) {
             Text(title).font(WorkspaceStyle.title).tracking(-1.1).fixedSize(horizontal: false, vertical: true).accessibilityAddTraits(.isHeader)
-            Text(subtitle).font(.system(size: 13)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if let subtitle {
+                Text(subtitle).font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+            }
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
 }

@@ -89,8 +89,8 @@ export interface Config {
     model?: string;
     effort?: string;
     /**
-     * The user's Codex plugins, by name, that a job marked `runs_app` gets without being asked: a worker that runs
-     * the app may need to look at it. Every other job runs with all plugins off unless the lead names some.
+     * Codex plugins enabled automatically for `runs_app` jobs, by name. Every other job runs with
+     * all plugins off unless the lead names some.
      */
     appPlugins: string[];
   };

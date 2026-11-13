@@ -74,8 +74,8 @@ const aloneProp = {
   exclusive: { type: 'boolean', description: 'The job measures performance (benchmark, profile, load test) and must have the machine to itself. It is refused while any other job runs, and no other job can start until it ends: wait for running jobs first, and start nothing alongside it.' },
 };
 const runsAppProp = (what: string) => ({
-  runs_app: { type: 'boolean', description: `The job has to start the app (a server, a headless browser) to ${what}. Its sandbox gets network access for that; without this a worker cannot bind a port. A Codex worker also gets the user's computer-use plugin, to look at the app on screen when no other check will do. Pass it only when running the app is needed.` },
-  plugins: { type: 'array', items: { type: 'string' }, description: 'Plugins of the user\'s Codex to turn on for this job, by name, e.g. "browser" or "computer-use". Workers run with every plugin off, which saves thousands of tokens a turn; name one only when the task needs its tools. They act outside the sandbox, and computer use operates the real screen, which the user shares: do not run two such jobs at once. Has no effect when the role is not held by Codex.' },
+  runs_app: { type: 'boolean', description: `The job has to start the app (a server, a headless browser) to ${what}. Its sandbox gets network access for that; without this a worker cannot bind a port. A Codex worker also gets the user's computer-use plugin to inspect the app on screen when no other check will do. Pass it only when running the app is needed.` },
+  plugins: { type: 'array', items: { type: 'string' }, description: 'Codex plugins from the user\'s setup to enable for this job, by name (e.g. "browser" or "computer-use"). Workers run with all plugins off, saving thousands of tokens a turn; name one only when the task needs its tools. Plugin tools act outside the sandbox, and computer use operates the real screen, which the user shares: do not run two such jobs at once. Ignored when the role is not held by Codex.' },
 });
 const installedSkills = listSkills();
 const skillsProp = installedSkills.length ? {

@@ -47,7 +47,7 @@ A question job is read-only for both agents: Codex runs it with no approval prom
 | `stale` | AgentGauge's reading is too old to act on |
 | `unknown` | No reading: AgentGauge is not installed, or its file has a format this version does not know |
 
-A provider's status is that of its tightest account-wide window. Windows scoped to one model (`group` set) are listed with their own status and do not decide the provider's status. A provider that reports only per-model windows (Antigravity) is judged by the family of its configured model. Every word in a family label must match a model-name token; slash-separated names such as `Claude/GPT` are alternatives. A non-Argon Gemini model therefore uses the `Gemini` windows, not the `Gemini 4 Argon` windows. With no model configured, or none that matches, it is judged by its tightest family, because a job does not switch models on its own.
+A provider's status is that of its tightest account-wide window. Windows scoped to one model (`group` set) are listed with their own status and do not decide the provider's status. A provider that reports only per-model windows (Antigravity) is judged by the family of its configured model: every word of a family name must appear in the model name (with `/` separating alternatives, such as `Claude/GPT`), so a non-Argon Gemini model matches `Gemini` rather than `Gemini 4 Argon`. With no model configured, or none that matches, it is judged by its tightest family, since a job does not switch models on its own.
 
 The status follows what is left, not the projected exhaustion. The projection from the recent pace often disagreed with how fast a window was really used (on 2026-11-13 it marked Codex `tight` with 57% of its weekly window left), so the web board shows it and routing ignores it.
 
@@ -88,7 +88,7 @@ Open, as in [03-agentgauge-integration.md](03-agentgauge-integration.md): G2 (`-
 
 ## 7. Routing
 
-`route` (the lead's tool, and `GET /api/route`) follows section 8.2 of document 03. It answers only with the role's holder or the lead. Reset advice uses only the windows that decided the provider's status, so another model family cannot extend the wait. Projected exhaustion never defers work: a 57%-used window has room even if its projected exhaustion changes between calls.
+`route` (the lead's tool, and `GET /api/route`) follows section 8.2 of document 03. It answers only with the role's holder or the lead. Reset advice uses only the windows that decided the provider's status, so another model family cannot extend the wait, and projected exhaustion never defers work.
 
 | Kind | Holder tight | Holder exhausted |
 | --- | --- | --- |

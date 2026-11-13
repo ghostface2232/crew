@@ -145,20 +145,20 @@ export class CodexAdapter implements Adapter {
   }
 
   /**
-   * The lean settings, opened up for the plugins a job is to have. Codex can only switch plugins on as a whole,
-   * so every installed plugin the job did not ask for is switched off by id.
+   * `LEAN`, with the job's requested plugins enabled. Because Codex can only switch plugins on as a whole,
+   * every other installed plugin is disabled by id.
    */
   private async lean(ctl: JobCtl, peer: RpcPeer) {
     const wanted = ctl.job.plugins ?? [];
     if (!wanted.length) return LEAN;
-    // Installation and user settings can change while the app-server is running.
-    // A Codex that cannot list its plugins has none to give; the job is still worth running without them.
+    // Re-queried on each start or resume in case installed plugins or user settings changed.
+    // If Codex cannot list its plugins, the job still runs without them.
     const installed: { id: string; enabled: boolean }[] = await peer.request('plugin/installed', {}, RPC_TIMEOUT_MS)
       .then((res) => ((res.marketplaces ?? []) as any[]).flatMap((marketplace) => ((marketplace.plugins ?? []) as any[])
         .filter((plugin) => plugin.installed).map((plugin) => ({ id: plugin.id, enabled: plugin.enabled === true }))))
       .catch(() => []);
     const named = (id: string, name: string) => id === name || id.startsWith(`${name}@`);
-    // The ones a job that runs the app gets by default are not there on every machine; only a name the lead gave is worth a note.
+    // Missing `appPlugins` defaults are expected on some machines; only explicitly requested plugins are noted.
     const explicit = ctl.job.requestedPlugins ?? wanted.filter((name) => !ctl.job.runsApp || !this.config.codex.appPlugins.includes(name));
     const missing = explicit.filter((name) => !installed.some((plugin) => named(plugin.id, name)));
     if (missing.length) ctl.note(`Codex has no plugin named ${missing.join(', ')}; the job runs without it.`);
@@ -519,8 +519,8 @@ export class CodexAdapter implements Adapter {
           ['form', 'openai/form', 'openaiForm'].includes(p.mode) && p._meta?.codex_approval_kind === 'mcp_tool_call' && CREW_TOOLS.includes(p._meta?.tool_name)) {
           return { action: 'accept', content: {}, _meta: null };
         }
-        // A plugin the job was given asks before its tool runs. Like a command, that is the user's to allow,
-        // not something to refuse unseen; a job without plugins has no business with another server.
+        // Plugin tools ask for approval before running; forward those to the user like commands,
+        // and decline requests from other servers when no plugins are enabled.
         if (run?.ctl.job.plugins?.length && p._meta?.codex_approval_kind === 'mcp_tool_call') {
           const answer = await ask('approval', `Use the tool ${p.serverName}.${p._meta.tool_name ?? '(unnamed)'}${p.message ? `\n${p.message}` : ''}`);
           if (!answer) return;

@@ -89,7 +89,7 @@ export class RpcPeer {
   close(signal: NodeJS.Signals = 'SIGTERM'): void {
     if (this.closed) return;
     const command = treeKillCommand(this.child.pid, this.shell);
-    if (command) execFile(command.bin, command.args, (err) => { if (err) this.child.kill(signal); });
+    if (command) execFile(command.bin, command.args, { windowsHide: true }, (err) => { if (err) this.child.kill(signal); });
     else this.child.kill(signal);
     this.onClose('was closed');
   }

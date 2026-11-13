@@ -5,6 +5,7 @@ import { agentCommand, agentEnv, HOME, VERSION } from '../config.ts';
 import type { Config } from '../config.ts';
 import { isTerminal } from '../jobs.ts';
 import type { Adapter, Job, JobCtl } from '../jobs.ts';
+import { PLUGIN_USER_APP } from '../prompts.ts';
 import { RPC_TIMEOUT_MS, RpcError, RpcPeer, RpcTimeoutError } from '../rpc.ts';
 
 type Answer = { approve: boolean; message?: string; cancelled?: boolean };
@@ -203,7 +204,7 @@ export class CodexAdapter implements Adapter {
       // is refused the call outright, and any other job would stop to ask.
       mcp_servers: { crew: { ...ctl.mcp, default_tools_approval_mode: 'approve' } },
       ...lean },
-      developerInstructions: job.instructions,
+      developerInstructions: lean.features.plugins && !job.nativeReview ? `${job.instructions}\n\n${PLUGIN_USER_APP}` : job.instructions,
       model: job.model ?? this.config.codex.model ?? null,
     };
   }

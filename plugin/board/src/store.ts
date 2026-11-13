@@ -44,6 +44,9 @@ export class BoardStore {
         const state = value as BoardState;
         this.update({
           ...state,
+          usage: state.usage,
+          preset: state.preset,
+          presets: state.presets,
           missions: state.missions ?? [],
           agents: state.agents ?? {},
           roles: state.roles ?? {},
@@ -69,6 +72,14 @@ export class BoardStore {
       case 'roles':
         this.update({ roles: value as BoardState['roles'] });
         break;
+      case 'usage':
+        this.update({ usage: value as BoardState['usage'] });
+        break;
+      case 'preset': {
+        const { preset, presets } = value as Pick<BoardState, 'preset' | 'presets'>;
+        this.update({ preset, presets });
+        break;
+      }
       case 'limits':
         this.update({ limits: { ...current.limits, ...(value as BoardState['limits']) } });
         break;
@@ -79,7 +90,7 @@ export class BoardStore {
   }
   connect(create = (url: string) => new EventSource(url)) {
     const stream = create('/api/stream');
-    for (const type of ['state', 'job', 'mission', 'claude', 'roles', 'limits', 'event']) {
+    for (const type of ['state', 'job', 'mission', 'claude', 'roles', 'limits', 'usage', 'preset', 'event']) {
       stream.addEventListener(type, (event) => {
         try {
           this.receive(type, JSON.parse((event as MessageEvent).data));

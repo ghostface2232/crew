@@ -8,6 +8,7 @@ import {
   compact,
   jobLabel,
   jobMark,
+  missionProgress,
   NAMES,
   projectOf,
   sessionMark,
@@ -53,7 +54,7 @@ export function JobRow({ job, openJob }: { job: BoardJob; openJob: (id: string) 
         )}
         <span className="sub">{timeLabel(job, now)}</span>
         <span className="where">
-          <span className="at">{STOPS[STOP_OF_KIND[job.kind]]}</span>
+          <span className="at">{job.ask ? 'Question' : STOPS[STOP_OF_KIND[job.kind]]}</span>
           <span className="who">{NAMES[job.agent]}</span>
         </span>
         {(job.runsApp || job.exclusive) && (
@@ -154,6 +155,7 @@ function MissionCard({
   const closed = folded ?? !active;
   const at = mission ? STOP_OF_STAGE[mission.stage] : -1;
   const key = `dismiss:${mission?.id}`;
+  const progress = mission ? missionProgress(mission, jobs) : 0;
   const action = useAction(key);
   const mood =
     together([...jobs.filter((job) => !job.endedAt).map(jobMark), ...(lead ? [sessionMark(lead)] : [])]) || 'working';
@@ -221,6 +223,19 @@ function MissionCard({
           </button>
         )}
       </div>
+      {mission && (
+        <div className="mission-progress">
+          <progress aria-label="Mission progress" max={1} value={progress} />
+          <span>{Math.round(progress * 100)}%</span>
+        </div>
+      )}
+      {!!mission?.notes?.length && (
+        <ul className="notes mission-notes" aria-label="Pinned notes">
+          {mission.notes.map((note, index) => (
+            <li key={`${note.at}:${index}`}>{note.text}</li>
+          ))}
+        </ul>
+      )}
       <div className="cmd-body" data-plain={!mission ? '' : undefined} inert={closed}>
         {mission && (
           <div className="stage" data-ended={active ? undefined : mission.state}>

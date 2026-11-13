@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Actions, answerKey } from '../plugin/board/src/api.ts';
 import { BoardStore, mergeEvents } from '../plugin/board/src/store.ts';
-import { brief, cardsForProject, jobMark, STOP_OF_STAGE, timeLabel, together } from '../plugin/board/src/model.ts';
+import { brief, cardsForProject, jobMark, missionProgress, relativeDuration, usageWindowName, STOP_OF_STAGE, timeLabel, together } from '../plugin/board/src/model.ts';
 import type { BoardJob, BoardState, CrewEvent, Mission } from '../plugin/board/src/types.ts';
 
 function deferred() {
@@ -142,4 +142,71 @@ test('stream lifecycle closes connections on unmount and exposes disconnection',
   assert.equal(store.getSnapshot().connection, 'lost');
   cleanup();
   assert.equal(closed, true);
+});
+
+test('mission progress uses all seven stages and only its unfinished jobs', () => {
+  const mission = { id: 'm', stage: 'cross-review', state: 'active' } as Mission;
+  const jobs = [
+    { mission: 'm', state: 'running', endedAt: null },
+    { mission: 'm', state: 'waiting', endedAt: null },
+    { mission: 'm', state: 'done', endedAt: 10 },
+    { mission: 'm', state: 'failed', endedAt: 11 },
+    { mission: 'm', state: 'cancelled', endedAt: 12 },
+    { mission: 'other', state: 'running', endedAt: null },
+  ] as BoardJob[];
+  assert.equal(missionProgress(mission, jobs), 0.5);
+  assert.equal(missionProgress(mission, []), 0.5);
+  assert.equal(missionProgress({ ...mission, state: 'abandoned' }, jobs), 0.5);
+  assert.equal(missionProgress({ ...mission, state: 'done' }, jobs), 1);
+  const stages = ['plan', 'implement', 'self-review', 'cross-review', 'fix', 'polish', 'final'] as const;
+  stages.forEach((stage, index) => {
+    assert.equal(missionProgress({ ...mission, stage }, jobs), (index + 0.5) / 7);
+    assert.equal(missionProgress({ ...mission, stage, state: 'abandoned' }, []), (index + 0.5) / 7);
+  });
+});
+
+test('usage labels and relative durations remain compact', () => {
+  assert.equal(usageWindowName('fiveHour'), '5-hour');
+  assert.equal(usageWindowName('weekly'), 'Weekly');
+  assert.equal(usageWindowName('billingCycle'), 'Billing cycle');
+  assert.equal(usageWindowName('dailyQuota'), 'daily Quota');
+  assert.equal(relativeDuration(-1), '1m');
+  assert.equal(relativeDuration(20 * 60_000), '20m');
+  assert.equal(relativeDuration(3 * 3600_000), '3h');
+  assert.equal(relativeDuration(7 * 86400_000), '7d');
+});
+
+test('usage and preset events replace immutable snapshots and older state clears them', () => {
+  const store = new BoardStore();
+  const usage = { source: 'none', generatedAt: 1, providers: [] } as const;
+  const presets = { economy: {}, balanced: {}, best: {} };
+  const initial = store.getSnapshot();
+  store.receive('usage', usage);
+  store.receive('preset', { preset: 'economy', presets });
+  assert.equal(initial.usage, undefined);
+  assert.equal(initial.preset, undefined);
+  assert.equal(store.getSnapshot().usage, usage);
+  assert.equal(store.getSnapshot().preset, 'economy');
+  assert.equal(store.getSnapshot().presets, presets);
+  const state = { ...initial, now: Date.now() };
+  store.receive('state', { ...state, usage, preset: 'best', presets });
+  assert.equal(store.getSnapshot().preset, 'best');
+  store.receive('state', state);
+  assert.equal(store.getSnapshot().usage, undefined);
+  assert.equal(store.getSnapshot().preset, undefined);
+  assert.equal(store.getSnapshot().presets, undefined);
+});
+
+test('transport subscribes to usage and preset events', () => {
+  const listeners = new Map<string, (event: { data: string }) => void>();
+  const store = new BoardStore();
+  const cleanup = store.connect(() => ({
+    addEventListener: (type: string, listener: (event: { data: string }) => void) => listeners.set(type, listener),
+    close() {},
+  }) as unknown as EventSource);
+  listeners.get('usage')!({ data: JSON.stringify({ source: 'none', providers: [] }) });
+  listeners.get('preset')!({ data: JSON.stringify({ preset: null, presets: {} }) });
+  assert.equal(store.getSnapshot().usage?.source, 'none');
+  assert.equal(store.getSnapshot().preset, null);
+  cleanup();
 });

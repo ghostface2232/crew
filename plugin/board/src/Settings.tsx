@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Roles, Snapshot } from './types.ts';
+import type { PresetName, Roles, Snapshot } from './types.ts';
 import type { Role, RoleAssignment } from '../../bridge/config.ts';
 import { request } from './api.ts';
+import { board } from './store.ts';
 import { knownProjects, projectNames, ROLE_NAMES } from './model.ts';
 import { Dialog } from './ui.tsx';
 
@@ -11,6 +12,12 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
   const [roleStatus, setRoleStatus] = useState('');
   const [savingRoles, setSavingRoles] = useState(false);
   const roleLock = useRef(false);
+  const [preset, setPreset] = useState<PresetName | null>(state.preset ?? null);
+  const [savedPreset, setSavedPreset] = useState(preset);
+  const [presetStatus, setPresetStatus] = useState('');
+  const [savingPreset, setSavingPreset] = useState(false);
+  const presetLock = useRef(false);
+  const selectedPreset = preset ? state.presets?.[preset] : undefined;
   const [scope, setScope] = useState('');
   const [text, setText] = useState('');
   const [saved, setSaved] = useState('');
@@ -21,7 +28,7 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
   const [retry, setRetry] = useState(0);
   const generation = useRef(0);
   const saveLock = useRef(false);
-  const dirty = text !== saved || JSON.stringify(roles) !== savedRoles;
+  const dirty = text !== saved || JSON.stringify(roles) !== savedRoles || preset !== savedPreset;
   const dirs = knownProjects(state);
   const names = projectNames(dirs);
   useEffect(() => {
@@ -58,21 +65,85 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
     };
   }, [scope, retry]);
   useEffect(() => {
-    if (!dirty && !saving && !savingRoles) return;
+    if (!dirty && !saving && !savingRoles && !savingPreset) return;
     const guard = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = '';
     };
     window.addEventListener('beforeunload', guard);
     return () => window.removeEventListener('beforeunload', guard);
-  }, [dirty, saving, savingRoles]);
+  }, [dirty, saving, savingRoles, savingPreset]);
   const closeSettings = () => {
-    if ((!dirty && !saving && !savingRoles) || confirm('Close without saving your changes?')) close();
+    if ((!dirty && !saving && !savingRoles && !savingPreset) || confirm('Close without saving your changes?')) close();
   };
   const editRole = (role: Role, key: keyof RoleAssignment, value: string) =>
     setRoles((current) => ({ ...current, [role]: { ...current[role], [key]: value } }));
   return (
     <Dialog title="Settings" labelId="settings-title" onClose={closeSettings}>
+      {state.presets && (
+        <form
+          className="section"
+          onSubmit={async (event) => {
+            event.preventDefault();
+            if (presetLock.current) return;
+            presetLock.current = true;
+            setSavingPreset(true);
+            setPresetStatus('Saving…');
+            const submitted = preset;
+            try {
+              const result = await request<Pick<Snapshot, 'preset' | 'presets'>>('/api/preset', { preset: submitted });
+              setPreset((current) => (current === submitted ? result.preset ?? null : current));
+              setSavedPreset(result.preset ?? null);
+              board.receive('preset', result);
+              setPresetStatus('Saved');
+            } catch (error) {
+              setPresetStatus((error as Error).message);
+            } finally {
+              presetLock.current = false;
+              setSavingPreset(false);
+            }
+          }}
+        >
+          <h3>Preset</h3>
+          <label className="field">
+            <span>Model preset</span>
+            <select value={preset ?? ''} onChange={(event) => setPreset((event.target.value as PresetName) || null)}>
+              <option value="">None</option>
+              <option value="economy">Economy</option>
+              <option value="balanced">Balanced</option>
+              <option value="best">Best</option>
+            </select>
+          </label>
+          {selectedPreset && (
+            <dl className="facts">
+              <div>
+                <dt>Codex</dt>
+                <dd>
+                  {[selectedPreset.codex?.model, selectedPreset.codex?.effort && `${selectedPreset.codex.effort} effort`]
+                    .filter(Boolean).join(' · ') || 'Agent default'}
+                </dd>
+              </div>
+              <div>
+                <dt>Antigravity</dt>
+                <dd>{selectedPreset.antigravity?.model || 'Agent default'}</dd>
+              </div>
+              <div>
+                <dt>Claude subagent model</dt>
+                <dd>{selectedPreset.subagentModel || 'inherit'}</dd>
+              </div>
+            </dl>
+          )}
+          <p className="hint">A model or effort set on a role overrides the preset.</p>
+          <div className="actions">
+            <button className="primary" type="submit" disabled={savingPreset}>
+              {savingPreset ? 'Saving…' : 'Save preset'}
+            </button>
+            <span className="status" role="status">
+              {presetStatus}
+            </span>
+          </div>
+        </form>
+      )}
       <form
         className="section"
         onSubmit={async (event) => {

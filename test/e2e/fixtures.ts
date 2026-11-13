@@ -23,6 +23,7 @@ export function job(overrides: Partial<BoardJob> = {}): BoardJob {
     activeAt: NOW - 1000,
     endedAt: null,
     turns: 1,
+    rounds: [{ turn: 1, commit: 'abc123', files: ['src/board.ts'], stat: '1 file changed, 8 insertions(+)', state: 'kept', at: NOW - 120_000 }],
     stalled: false,
     waiting: null,
     report: '',
@@ -63,6 +64,7 @@ export function fixture(): BoardState {
         state: 'active',
         stage: 'implement',
         outcome: '',
+        notes: [{ text: 'Keep keyboard navigation available.', at: NOW - 60_000 }],
         createdAt: NOW - 600_000,
         updatedAt: NOW - 1000,
         endedAt: null,
@@ -107,6 +109,28 @@ export function fixture(): BoardState {
     },
     roles: { delegate: { agent: 'codex' }, review: { agent: 'codex' }, polish: { agent: 'antigravity' } },
     limits: { codex: { windows: [{ usedPercent: 42, minutes: 300 }] } },
+    preset: 'balanced',
+    presets: {
+      economy: { codex: { model: 'small', effort: 'low' }, antigravity: { model: 'flash' }, subagentModel: 'haiku' },
+      balanced: { codex: { model: 'standard', effort: 'medium' }, antigravity: { model: 'pro' }, subagentModel: 'sonnet' },
+      best: { codex: { model: 'large', effort: 'high' }, antigravity: { model: 'pro' }, subagentModel: 'inherit' },
+    },
+    usage: {
+      source: 'agentgauge', generatedAt: NOW,
+      providers: [
+        { agent: 'claude', plan: null, capturedAt: NOW, status: 'tight', reason: 'Little room remains.', windows: [
+          { key: 'fiveHour', kind: 'fiveHour', group: null, usedRatio: 0.25, resetTime: NOW + 3600_000, durationSec: 18000, projectedExhaustion: null, status: 'ok' },
+          { key: 'weekly', kind: 'weekly', group: null, usedRatio: 0.9, resetTime: NOW + 86400_000, durationSec: 604800, projectedExhaustion: NOW + 7200_000, status: 'tight' },
+          { key: 'fable', kind: 'weekly', group: 'Fable', usedRatio: 0.3, resetTime: NOW + 86400_000, durationSec: 604800, projectedExhaustion: null, status: 'stale' },
+        ] },
+        { agent: 'codex', plan: null, capturedAt: NOW, status: 'exhausted', reason: 'The account limit is reached.', windows: [
+          { key: 'fiveHour', kind: 'fiveHour', group: null, usedRatio: 1, resetTime: NOW + 3600_000, durationSec: 18000, projectedExhaustion: null, status: 'exhausted' },
+        ] },
+        { agent: 'antigravity', plan: null, capturedAt: null, status: 'unknown', reason: 'No recent reading.', windows: [
+          { key: 'billingCycle', kind: 'billingCycle', group: null, usedRatio: 0, resetTime: null, durationSec: null, projectedExhaustion: null, status: 'unknown' },
+        ] },
+      ],
+    },
     events: [
       {
         seq: 1,

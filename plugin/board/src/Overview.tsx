@@ -1,7 +1,11 @@
 import type { CSSProperties } from 'react';
+import type { ProviderUsage, UsageWindow } from '../../bridge/usage.ts';
 import type { CrewEvent, Snapshot } from './types.ts';
 import type { Mark } from './model.ts';
-import { compact, jobLabel, jobMark, NAMES, projectOf, ROLE_NAMES, sessionMark, together, URGENCY } from './model.ts';
+import {
+  compact, jobLabel, jobMark, NAMES, projectOf, relativeDuration, ROLE_NAMES,
+  sessionMark, together, URGENCY, usageWindowName,
+} from './model.ts';
 import { Chip, MarkIcon, useNow } from './ui.tsx';
 
 const stats: [Mark, string][] = [
@@ -11,6 +15,49 @@ const stats: [Mark, string][] = [
   ['stalled', 'Gone quiet'],
   ['failed', 'Failed'],
 ];
+function UsageGauge({ window, reason }: { window: UsageWindow; reason: string }) {
+  const now = useNow();
+  const percent = Math.round(Math.max(0, Math.min(1, window.usedRatio)) * 100);
+  const name = [window.group, usageWindowName(window.kind)].filter(Boolean).join(' · ');
+  return (
+    <div className="usage-window" data-status={window.status} title={reason}>
+      <span>
+        {name} · {percent}% used{window.status !== 'ok' && ` · ${window.status}`}
+      </span>
+      <progress aria-label={name} max={100} value={percent} />
+      <span>
+        {window.resetTime == null
+          ? 'Reset time unknown'
+          : window.resetTime <= now
+            ? 'Reset due'
+            : `Resets in ${relativeDuration(window.resetTime - now)}`}
+        {window.projectedExhaustion != null &&
+          ` · runs out in about ${relativeDuration(window.projectedExhaustion - now)}`}
+      </span>
+    </div>
+  );
+}
+function UsageGauges({ provider }: { provider: ProviderUsage }) {
+  const scoped = provider.windows.filter((window) => window.group != null);
+  return (
+    <div className="usage-windows" aria-label={`${NAMES[provider.agent]} usage`}>
+      {provider.windows
+        .filter((window) => window.group == null)
+        .map((window) => <UsageGauge key={window.key} window={window} reason={provider.reason} />)}
+      {!provider.windows.length && (
+        <p className="hint" title={provider.reason}>{provider.status}</p>
+      )}
+      {scoped.length > 0 && (
+        <details>
+          <summary>Model limits ({scoped.length})</summary>
+          {scoped.map((window) => (
+            <UsageGauge key={window.key} window={window} reason={provider.reason} />
+          ))}
+        </details>
+      )}
+    </div>
+  );
+}
 export function Overview({
   state,
   project,
@@ -109,6 +156,9 @@ export function Overview({
             .join(' · ');
           const windows = agent === 'codex' ? (state.limits.codex?.windows ?? []) : [];
           const used = Math.max(0, ...windows.map((window) => Math.round(window.usedPercent)));
+          const usage = state.usage?.source === 'agentgauge'
+            ? state.usage.providers.find((provider) => provider.agent === agent)
+            : undefined;
           return (
             <li className="tile" key={agent}>
               <div className="tile-head">
@@ -167,7 +217,8 @@ export function Overview({
                   </p>
                 )}
               </div>
-              {windows.length > 0 && (
+              {usage && <UsageGauges provider={usage} />}
+              {(!state.usage || state.usage.source === 'none') && windows.length > 0 && (
                 <p
                   className="usage"
                   title={windows

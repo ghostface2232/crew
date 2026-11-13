@@ -14,6 +14,28 @@ export const STOP_OF_STAGE = {
   final: 5,
 };
 export const STOP_OF_KIND = { delegate: 1, review: 2, polish: 4 };
+const MISSION_STAGES = ['plan', 'implement', 'self-review', 'cross-review', 'fix', 'polish', 'final'];
+export function missionProgress(mission: Mission, jobs: BoardJob[]) {
+  if (mission.state === 'done') return 1;
+  const unfinished = jobs.filter((job) => job.mission === mission.id && job.endedAt == null);
+  const share = unfinished.length
+    ? unfinished.reduce((sum, job) => sum + (job.state === 'running' || job.state === 'waiting' ? 0.5 : 0), 0) /
+      unfinished.length
+    : 0.5;
+  return Math.max(0, Math.min(1, (MISSION_STAGES.indexOf(mission.stage) + share) / MISSION_STAGES.length));
+}
+export function usageWindowName(kind: string) {
+  return (
+    ({ fiveHour: '5-hour', weekly: 'Weekly', billingCycle: 'Billing cycle' } as Record<string, string>)[kind] ??
+    kind.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[-_]/g, ' ')
+  );
+}
+export function relativeDuration(ms: number) {
+  const minutes = Math.max(1, Math.round(ms / 60_000));
+  if (minutes < 60) return `${minutes}m`;
+  if (minutes < 1440) return `${Math.round(minutes / 60)}h`;
+  return `${Math.round(minutes / 1440)}d`;
+}
 export const STOP_NOTES = [
   'Claude is working out what needs to be done and splitting it into pieces.',
   'The agents are writing the code, each in its own copy of the project.',

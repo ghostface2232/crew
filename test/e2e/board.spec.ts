@@ -245,3 +245,212 @@ test('320px dialogs keep controls within the viewport and support reduced motion
   await page.getByRole('button', { name: 'Save instructions' }).scrollIntoViewIfNeeded();
   await expect(page.getByRole('button', { name: 'Save instructions' })).toBeInViewport();
 });
+
+test('usage windows show every status, reset, projection, and scoped disclosure', async ({ page, request }) => {
+  const gauges = page.locator('.usage-windows');
+  await expect(gauges).toHaveCount(3);
+  for (const status of ['ok', 'tight', 'exhausted', 'unknown'])
+    await expect(page.locator(`.usage-window[data-status="${status}"]`)).toBeVisible();
+  await expect(page.getByText('5-hour · 25% used', { exact: true })).toBeVisible();
+  await expect(page.getByText('Resets in 1d · runs out in about 2h')).toBeVisible();
+  await expect(page.getByText('Billing cycle · 0% used · unknown')).toBeVisible();
+  await expect(page.locator('.usage-window[data-status="tight"]')).toHaveAttribute('title', 'Little room remains.');
+  await expect(page.locator('.usage-window[data-status="stale"]')).toBeHidden();
+  await page.getByText('Model limits (1)').click();
+  await expect(page.getByText('Fable · Weekly · 30% used · stale')).toBeVisible();
+  const usage = fixture().usage!;
+  usage.providers[0].windows[0].usedRatio = 0.5;
+  await request.post('/__push', { data: { type: 'usage', data: usage } });
+  await expect(page.getByText('5-hour · 50% used', { exact: true })).toBeVisible();
+  await expect(page.getByText('Fable · Weekly · 30% used · stale')).toBeVisible();
+});
+
+for (const source of ['absent', 'none'])
+  test(`legacy limit line is unchanged when usage is ${source}`, async ({ page, request }) => {
+    const data = fixture();
+    if (source === 'absent') delete data.usage;
+    else data.usage!.source = 'none';
+    delete data.preset;
+    delete data.presets;
+    await request.post('/__push', { data: { type: 'state', data } });
+    await expect(page.locator('.usage-windows')).toHaveCount(0);
+    await expect(page.locator('.usage')).toHaveText('42% of limit used');
+    await expect(page.locator('.usage')).toHaveAttribute('title', '42% of the 5-hour limit');
+    await page.getByRole('button', { name: 'Settings', exact: true }).click();
+    await expect(page.getByLabel('Model preset')).toHaveCount(0);
+  });
+
+test('preset saves its selection, displays models, and permits none', async ({ page, request }) => {
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const select = page.getByLabel('Model preset');
+  await expect(select).toHaveValue('balanced');
+  await select.selectOption('economy');
+  await expect(page.getByText('small · low effort')).toBeVisible();
+  await expect(page.getByText('haiku', { exact: true })).toBeVisible();
+  await expect(page.getByText('A model or effort set on a role overrides the preset.')).toBeVisible();
+  await page.getByRole('button', { name: 'Save preset' }).click();
+  await expect(page.getByText('Unsaved changes')).toHaveCount(0);
+  let calls = await (await request.get('/__requests')).json();
+  expect(calls.find((call: { route: string }) => call.route === '/api/preset').body).toEqual({ preset: 'economy' });
+  await select.selectOption('');
+  await page.getByRole('button', { name: 'Save preset' }).click();
+  await expect(page.getByText('Unsaved changes')).toHaveCount(0);
+  calls = await (await request.get('/__requests')).json();
+  expect(calls.at(-1)).toEqual({ route: '/api/preset', body: { preset: null } });
+});
+
+test('preset failures keep the draft and saving preserves newer edits', async ({ page }) => {
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const select = page.getByLabel('Model preset');
+  await select.selectOption('best');
+  await page.route('**/api/preset', (route) => route.fulfill({ status: 500, json: { error: 'Cannot save preset' } }));
+  await page.getByRole('button', { name: 'Save preset' }).click();
+  await expect(page.getByText('Cannot save preset')).toBeVisible();
+  await expect(select).toHaveValue('best');
+  await page.unroute('**/api/preset');
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  await page.route('**/api/preset', async (route) => { await gate; await route.continue(); });
+  await page.getByRole('button', { name: 'Save preset' }).click();
+  await select.selectOption('economy');
+  release();
+  await expect(page.getByRole('button', { name: 'Save preset' })).toBeEnabled();
+  await expect(select).toHaveValue('economy');
+  await expect(page.getByText('Unsaved changes')).toBeVisible();
+});
+
+test('rounds are ordered and locked while active, then undo and keep with exact bodies', async ({ page, request }) => {
+  await page.locator('button[data-job="cx-build"]').click();
+  const rounds = page.getByRole('region', { name: 'Rounds' });
+  await expect(rounds.getByRole('button', { name: 'Undo' })).toBeDisabled();
+  await expect(rounds.getByRole('button', { name: 'Undo' })).toHaveAttribute('title', /Wait until/);
+  await request.post('/__push', { data: { type: 'job', data: { id: 'cx-build', state: 'done', endedAt: NOW } } });
+  await rounds.getByRole('button', { name: 'Undo' }).click();
+  await expect(rounds.getByText('Turn 1 · 1 file · Undone')).toBeVisible();
+  await rounds.getByRole('button', { name: 'Keep' }).click();
+  await expect(rounds.getByText('Turn 1 · 1 file · Kept')).toBeVisible();
+  const calls = await (await request.get('/__requests')).json();
+  expect(calls.filter((call: { route: string }) => call.route.includes('/rounds/'))).toEqual([
+    { route: '/api/jobs/cx-build/rounds/1', body: { undo: true } },
+    { route: '/api/jobs/cx-build/rounds/1', body: { keep: true } },
+  ]);
+  await request.post('/__push', { data: { type: 'job', data: { id: 'cx-build', worktree: null } } });
+  await expect(rounds.getByRole('button', { name: 'Undo' })).toBeDisabled();
+  await expect(rounds.getByRole('button', { name: 'Undo' })).toHaveAttribute('title', 'This job has no worktree.');
+});
+
+test('a round lock survives reopening and errors can retry', async ({ page, request }) => {
+  await request.post('/__push', { data: { type: 'job', data: { id: 'cx-build', state: 'done', endedAt: NOW } } });
+  await page.locator('button[data-job="cx-build"]').click();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let calls = 0;
+  await page.route('**/api/jobs/cx-build/rounds/1', async (route) => {
+    calls++;
+    await gate;
+    await route.fulfill({ status: 409, json: { error: 'Revert conflicts with a later round.' } });
+  });
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Undo', exact: true })).toBeDisabled();
+  await page.getByRole('button', { name: 'Close details' }).click();
+  await page.locator('button[data-job="cx-build"]').click();
+  await expect(page.getByRole('button', { name: 'Undo', exact: true })).toBeDisabled();
+  release();
+  await expect(page.getByText('Revert conflicts with a later round.')).toBeVisible();
+  expect(calls).toBe(1);
+  await page.unroute('**/api/jobs/cx-build/rounds/1');
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Keep', exact: true })).toBeVisible();
+});
+
+test('command intent retains the existing implementation request', async ({ page, request }) => {
+  await page.getByLabel('Project directory').fill('/workspace/Crew');
+  await expect(page.getByRole('combobox', { name: 'Intent', exact: true })).toHaveValue('command');
+  await page.getByRole('textbox', { name: 'New job' }).fill('Implement the feature');
+  await page.getByRole('button', { name: 'Send new job' }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  const calls = await (await request.get('/__requests')).json();
+  expect(calls.find((call: { route: string }) => call.route === '/api/jobs').body).toEqual({
+    kind: 'delegate', cwd: '/workspace/Crew', project: '/workspace/Crew', task: 'Implement the feature', isolation: 'worktree',
+  });
+});
+
+test('question intent hides command options, respects IME, and labels the read-only job', async ({ page, request }) => {
+  await page.getByLabel('Project directory').fill('/workspace/Crew');
+  await page.getByRole('combobox', { name: 'Role', exact: true }).selectOption('polish');
+  await page.getByRole('combobox', { name: 'Intent', exact: true }).selectOption('question');
+  await expect(page.getByRole('combobox', { name: 'Role', exact: true })).toHaveCount(0);
+  await expect(page.getByLabel('Allowed files or directories (one per line)')).toHaveCount(0);
+  const field = page.getByRole('textbox', { name: 'Question', exact: true });
+  await field.fill('이 코드는 어떻게 동작하나요?');
+  await field.dispatchEvent('keydown', { key: 'Enter', isComposing: true, keyCode: 229 });
+  expect(await (await request.get('/__requests')).json()).toHaveLength(0);
+  await page.getByRole('button', { name: 'Send question', exact: true }).click();
+  await expect(page.getByRole('dialog').locator('.kind')).toHaveText('Question');
+  await page.getByRole('button', { name: 'Close details' }).click();
+  await expect(page.locator('button[data-job="cx-direct"] .at')).toHaveText('Question');
+  const calls = await (await request.get('/__requests')).json();
+  expect(calls.find((call: { route: string }) => call.route === '/api/jobs').body).toEqual({
+    kind: 'delegate', ask: true, task: '이 코드는 어떻게 동작하나요?', cwd: '/workspace/Crew',
+  });
+});
+
+for (const target of ['mission:mission-1', 'project', 'global'])
+  test(`information intent saves to ${target} without starting a job`, async ({ page, request }) => {
+    await page.getByLabel('Project directory').fill('/workspace/Crew');
+    await page.getByRole('combobox', { name: 'Intent', exact: true }).selectOption('information');
+    await page.getByLabel('Save information to').selectOption(target);
+    await expect(page.getByText('Save information for future work. This starts no job.')).toBeVisible();
+    await page.getByRole('textbox', { name: 'Information', exact: true }).fill('Keep this requirement');
+    await page.getByRole('button', { name: 'Send information' }).click();
+    await expect(page.getByRole('textbox', { name: 'Information', exact: true })).toHaveValue('');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    const calls = await (await request.get('/__requests')).json();
+    expect(calls).toEqual(target.startsWith('mission:')
+      ? [{ route: '/api/missions/mission-1', body: { note: 'Keep this requirement' } }]
+      : [{ route: '/api/instructions', body: { append: 'Keep this requirement', project: target === 'global' ? null : '/workspace/Crew' } }]);
+    if (target.startsWith('mission:')) await expect(page.getByLabel('Pinned notes').getByText('Keep this requirement')).toBeVisible();
+  });
+
+test('mission notes and progress remain visible when collapsed', async ({ page }) => {
+  const card = page.locator('[data-key="mission-1"]');
+  await expect(card.getByRole('progressbar', { name: 'Mission progress' })).toHaveAttribute('value', String(1.5 / 7));
+  await card.getByRole('button', { name: /Make the agent board a desktop app/ }).click();
+  await expect(card.getByText('21%', { exact: true })).toBeVisible();
+  await expect(card.getByText('Keep keyboard navigation available.')).toBeVisible();
+});
+
+test('rounds render oldest first and waiting jobs cannot change them', async ({ page, request }) => {
+  const round = fixture().jobs[0].rounds![0];
+  await request.post('/__push', { data: { type: 'job', data: {
+    id: 'cx-build', state: 'waiting', rounds: [{ ...round, turn: 2, state: 'undone' }, round],
+  } } });
+  await page.locator('button[data-job="cx-build"]').click();
+  const rounds = page.getByRole('region', { name: 'Rounds' });
+  await expect(rounds.locator('li').first()).toContainText('Turn 1');
+  await expect(rounds.locator('li').last()).toContainText('Turn 2');
+  await expect(rounds.getByRole('button', { name: 'Undo' })).toBeDisabled();
+  await expect(rounds.getByRole('button', { name: 'Keep' })).toBeDisabled();
+});
+
+test('information offers only active missions in the chosen project and retains failed drafts', async ({ page, request }) => {
+  const data = fixture();
+  data.missions.push(
+    { ...data.missions[0], id: 'ended', title: 'Ended mission', state: 'done' },
+    { ...data.missions[0], id: 'elsewhere', title: 'Another project mission', project: '/workspace/Other', root: '/workspace/Other' },
+  );
+  await request.post('/__push', { data: { type: 'state', data } });
+  await page.getByLabel('Project directory').fill('/workspace/Crew');
+  await page.getByRole('combobox', { name: 'Intent', exact: true }).selectOption('information');
+  const destination = page.getByRole('combobox', { name: 'Save information to' });
+  await expect(destination.locator('option')).toHaveCount(3);
+  await destination.selectOption('mission:mission-1');
+  const field = page.getByRole('textbox', { name: 'Information', exact: true });
+  await field.fill('정보를 유지해요');
+  await field.dispatchEvent('keydown', { key: 'Enter', isComposing: true, keyCode: 229 });
+  expect(await (await request.get('/__requests')).json()).toHaveLength(0);
+  await page.route('**/api/missions/mission-1', (route) => route.fulfill({ status: 409, json: { error: 'Mission is no longer active' } }));
+  await page.getByRole('button', { name: 'Send information' }).click();
+  await expect(page.getByText('Mission is no longer active')).toBeVisible();
+  await expect(field).toHaveValue('정보를 유지해요');
+});

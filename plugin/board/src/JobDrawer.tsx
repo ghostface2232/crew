@@ -1,11 +1,47 @@
 import { useEffect, useState } from 'react';
 import type { BoardJob, CrewEvent, Snapshot } from './types.ts';
 import { actions, request } from './api.ts';
-import { mergeEvents } from './store.ts';
+import { board, mergeEvents } from './store.ts';
 import { brief, jobLabel, jobMark, NAMES, projectOf } from './model.ts';
 import { ActionStatus, Chip, Composer, CopyButton, Dialog, useAction, useNow } from './ui.tsx';
 import { Answer } from './NeedsYou.tsx';
 import { EventList } from './Overview.tsx';
+
+function RoundRow({ job, round }: { job: BoardJob; round: NonNullable<BoardJob['rounds']>[number] }) {
+  const key = `round:${job.id}:${round.turn}`;
+  const action = useAction(key);
+  const reason =
+    job.state === 'running' || job.state === 'waiting'
+      ? 'Wait until the job has stopped before changing a round.'
+      : !job.worktree ? 'This job has no worktree.' : undefined;
+  return (
+    <li className="round">
+      <div className="row">
+        <span>
+          Turn {round.turn} · {round.files.length} {round.files.length === 1 ? 'file' : 'files'} ·{' '}
+          {round.state === 'kept' ? 'Kept' : 'Undone'}
+        </span>
+        <button
+          disabled={Boolean(reason) || action.pending}
+          title={reason}
+          onClick={() => {
+            void actions.run(key, async () => {
+              const updated = await request<BoardJob>(
+                `/api/jobs/${job.id}/rounds/${round.turn}`,
+                round.state === 'kept' ? { undo: true } : { keep: true },
+              );
+              board.receive('job', updated);
+            }, { once: false, done: '' });
+          }}
+        >
+          {round.state === 'kept' ? 'Undo' : 'Keep'}
+        </button>
+      </div>
+      <p className="hint">{round.stat || 'No files changed'}</p>
+      <ActionStatus actionKey={key} />
+    </li>
+  );
+}
 
 export function JobDrawer({ id, state, close }: { id: string; state: Snapshot; close: () => void }) {
   const [detail, setDetail] = useState<BoardJob | null>(null);
@@ -60,7 +96,7 @@ export function JobDrawer({ id, state, close }: { id: string; state: Snapshot; c
         <>
           <div className="row">
             <Chip state={jobMark(job)}>{jobLabel(job)}</Chip>
-            <span className="kind">{job.kind}</span>
+            <span className="kind">{job.ask ? 'Question' : job.kind}</span>
             <span className="timer">{brief((job.endedAt ?? now) - job.createdAt)}</span>
           </div>
           {job.state === 'running' && (
@@ -92,6 +128,16 @@ export function JobDrawer({ id, state, close }: { id: string; state: Snapshot; c
               </div>
             ))}
           </dl>
+          {!!job.rounds?.length && (
+            <section className="section" aria-label="Rounds">
+              <h3>Rounds</h3>
+              <ol className="rounds">
+                {job.rounds.toSorted((a, b) => a.turn - b.turn).map((round) => (
+                  <RoundRow key={round.turn} job={job} round={round} />
+                ))}
+              </ol>
+            </section>
+          )}
           {job.result && (
             <section className="section">
               <h3>Changes</h3>

@@ -35,6 +35,8 @@ const server = http.createServer(async (req, res) => {
     if (body.type === 'job')
       state.jobs = state.jobs.map((job) => (job.id === body.data.id ? { ...job, ...body.data } : job));
     if (body.type === 'state') state = body.data;
+    if (body.type === 'usage') state.usage = body.data;
+    if (body.type === 'preset') Object.assign(state, body.data);
     if (body.type === 'disconnect') {
       for (const stream of streams) stream.end();
       return json({});
@@ -53,11 +55,41 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === '/api/state') return json(state);
   if (req.method === 'POST') requests.push({ route: url.pathname, body });
   if (url.pathname === '/api/instructions') {
-    if (req.method === 'POST') instructions = body.text.trimEnd() + '\n';
+    if (req.method === 'POST') instructions = body.append != null
+      ? `${instructions.trimEnd()}\n\n${body.append.trim()}\n` : body.text.trimEnd() + '\n';
     return json({
       text: instructions,
       file: `${body.project ?? url.searchParams.get('project') ?? '/global'}/.crew/instructions.md`,
     });
+  }
+  if (url.pathname === '/api/preset') {
+    state.preset = body.preset;
+    const result = { preset: state.preset, presets: state.presets };
+    send('preset', result);
+    return json(result);
+  }
+  const missionMatch = /^\/api\/missions\/([^/]+)$/.exec(url.pathname);
+  if (missionMatch) {
+    const mission = state.missions.find((mission) => mission.id === missionMatch[1]);
+    if (!mission) return json({ error: 'Mission not found' }, 404);
+    if (body.note) {
+      if (mission.state !== 'active') return json({ error: 'Mission is not active' }, 409);
+      mission.notes = [...mission.notes ?? [], { text: body.note, at: state.now }];
+    }
+    if (body.abandoned) mission.state = 'abandoned';
+    send('mission', mission);
+    return json(mission);
+  }
+  const roundMatch = /^\/api\/jobs\/([^/]+)\/rounds\/(\d+)$/.exec(url.pathname);
+  if (roundMatch) {
+    const found = state.jobs.find((job) => job.id === roundMatch[1]);
+    const round = found?.rounds?.find((round) => round.turn === Number(roundMatch[2]));
+    if (!found || !round) return json({ error: 'Round not found' }, 404);
+    if (!found.worktree || found.state === 'running' || found.state === 'waiting')
+      return json({ error: 'Round cannot be changed while running or without a worktree.' }, 409);
+    round.state = body.undo ? 'undone' : 'kept';
+    send('job', found);
+    return json(found);
   }
   if (url.pathname === '/api/roles') {
     state.roles = body.roles;
@@ -65,7 +97,8 @@ const server = http.createServer(async (req, res) => {
     return json(state.roles);
   }
   if (url.pathname === '/api/jobs' && req.method === 'POST') {
-    const created = job({ id: 'cx-direct', mission: undefined, title: body.task, kind: body.kind });
+    const created = job({ id: 'cx-direct', mission: undefined, title: body.task, kind: body.kind,
+      ask: body.ask, cwd: body.cwd, project: body.cwd, root: body.cwd, rounds: [], worktree: body.ask ? null : job().worktree });
     state.jobs.push(created);
     send('job', created);
     return json(created);
@@ -92,4 +125,4 @@ const server = http.createServer(async (req, res) => {
   res.writeHead(404);
   res.end();
 });
-server.listen(47755, '127.0.0.1', () => console.log('Fixture board: http://127.0.0.1:47755'));
+server.listen(Number(process.env.CREW_E2E_PORT ?? 47755), '127.0.0.1', () => console.log('Fixture board ready'));

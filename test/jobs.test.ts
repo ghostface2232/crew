@@ -674,7 +674,7 @@ test('every worker that runs commands is given the shared-machine rules, and a r
   // Codex's built-in review is sent no prompt, so what it must know has to be in the instructions.
   const native = await settled(jobs, await jobs.create({ kind: 'review', cwd: repo, review: { target, mode: 'standard' } }));
   assert.ok(native.nativeReview);
-  for (const job of [delegate, polish, prompted, native]) {
+  for (const job of [delegate, prompted, native]) {
     const text = job.instructions;
     // After the role, so the role still comes first, and saying that the role still decides.
     assert.ok(text.indexOf('# Role:') === 0 && text.indexOf('# This machine is shared') > 0, job.kind);
@@ -689,11 +689,10 @@ test('every worker that runs commands is given the shared-machine rules, and a r
   const handed = await settled(other.jobs, await other.jobs.create({ kind: 'review', cwd: repo, review: { target, mode: 'adversarial' } }));
   assert.match(handed.instructions, /# Static review\nReview by reading\. You cannot run anything in this role/);
   assert.ok(!handed.instructions.includes('Run only checks that end by themselves'));
-  // Nor told how to share the machine: it can start nothing on it. The same holds for its editor.
+  // Nor told how to share the machine: it can start nothing on it. The same holds for the default editor, Antigravity.
   assert.ok(!handed.instructions.includes('# This machine is shared'));
-  const editor = harness((ctl) => ctl.done('ok'), () => resolveConfig({ roles: { polish: { agent: 'antigravity' } } }));
-  const edited = await settled(editor.jobs, await editor.jobs.create({ kind: 'polish', cwd: repo, targets: ['README.md'] }));
-  assert.ok(!edited.instructions.includes('# This machine is shared'));
+  assert.equal(polish.agent, 'antigravity');
+  assert.ok(polish.instructions.startsWith('# Role:') && !polish.instructions.includes('# This machine is shared'));
 });
 
 test('a review that runs the app gets a snapshot of the change and leaves nothing behind', async () => {

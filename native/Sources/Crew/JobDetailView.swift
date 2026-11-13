@@ -59,8 +59,7 @@ struct JobDetailView: View {
         }
         if job.state == "waiting" {
             AnswerView(store: store, job: job)
-                .padding(16).background(.orange.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
-                .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.orange.opacity(0.15)))
+                .padding(18).background(.orange.opacity(0.06), in: RoundedRectangle(cornerRadius: 20))
         }
         Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
             fact("Agent", [agentName(job.agent), job.model, job.effort.map { "\($0) effort" }].compactMap { $0 }.joined(separator: " · "))
@@ -125,18 +124,22 @@ struct JobDetailView: View {
         }
         let combined = mergeEvents(events, store.state.events.filter { $0.job_id == id }, limit: 80)
         if !combined.isEmpty {
-            detailSection("Activity", symbol: "waveform.path") { EventList(events: combined) { store.openJob($0) } }
+            detailSection("Activity", symbol: "list.bullet.rectangle") { EventList(events: combined) { store.openJob($0) } }
         }
-        VStack(alignment: .leading, spacing: 12) {
-            Text(job.id).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled)
-            if let session = job.sessionId, let worker = store.state.agents[job.agent] {
-                CopyButton(title: "Copy resume command", text: "\(worker.resume) \(session)")
-            }
-            if job.isActive {
-                Button("Cancel Job", systemImage: "stop.circle", role: .destructive) { Task { await store.cancel(job) } }
-                    .disabled(!store.connected || store.actions["cancel:\(id):\(job.turns)"]?.locked == true)
-                ActionMessage(state: store.actions["cancel:\(id):\(job.turns)"])
-            }
+        VStack(alignment: .leading, spacing: 10) {
+            Divider().padding(.bottom, 4)
+            HStack(spacing: 8) {
+                if let session = job.sessionId, let worker = store.state.agents[job.agent] {
+                    CopyButton(title: "Copy resume command", text: "\(worker.resume) \(session)")
+                }
+                Spacer(minLength: 0)
+                if job.isActive {
+                    Button("Cancel Job", systemImage: "stop.circle", role: .destructive) { Task { await store.cancel(job) } }
+                        .disabled(!store.connected || store.actions["cancel:\(id):\(job.turns)"]?.locked == true)
+                }
+            }.font(.system(size: 12))
+            ActionMessage(state: store.actions["cancel:\(id):\(job.turns)"])
+            Text(job.id).font(.system(size: 10, design: .monospaced)).foregroundStyle(.tertiary).textSelection(.enabled)
         }
     }
     private func fact(_ title: String, _ value: String) -> some View {

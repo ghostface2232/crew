@@ -16,45 +16,56 @@ struct DispatchView: View {
     private var worker: Worker? { store.state.roles[role].flatMap { store.state.agents[$0.agent] } }
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            HStack {
-                Image(systemName: "paperplane").font(.title2).foregroundStyle(.tint)
-                Text("New Job").font(.system(.title2, design: .rounded, weight: .semibold))
-                Spacer()
-                Text("One agent · One job").font(.callout).foregroundStyle(.secondary)
-            }
-            Form {
-                HStack {
-                    TextField("Project directory", text: $directory, prompt: Text("/path/to/repository")).accessibilityLabel("Project directory")
-                    Button("Choose…", systemImage: "folder") { chooseFolder() }.accessibilityLabel("Choose project directory")
+            Label("New Job", systemImage: "paperplane").font(.system(size: 20, weight: .semibold, design: .rounded))
+                .labelStyle(.titleAndIcon).symbolRenderingMode(.hierarchical)
+            VStack(alignment: .leading, spacing: 16) {
+                field("Project") {
+                    HStack(spacing: 8) {
+                        TextField("Project directory", text: $directory, prompt: Text("/path/to/repository"))
+                            .textFieldStyle(.roundedBorder).labelsHidden().accessibilityLabel("Project directory")
+                        Button("Choose…", systemImage: "folder") { chooseFolder() }.accessibilityLabel("Choose project directory")
+                    }
                 }
-                Picker("Role", selection: $role) { ForEach(roleOrder, id: \.self) { Text(roleNames[$0]!).tag($0) } }
-                LabeledContent("Assigned to", value: worker.map { "\($0.name)\($0.enabled ? "" : " (disabled)")" } ?? "No agent assigned")
-            }
-            if role == "polish" {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Allowed files or directories").font(.headline)
-                    TextField("One path per line", text: $targets, axis: .vertical).lineLimit(3...6)
+                HStack(alignment: .top, spacing: 24) {
+                    field("Role") {
+                        Picker("Role", selection: $role) { ForEach(roleOrder, id: \.self) { Text(roleNames[$0]!).tag($0) } }
+                            .labelsHidden().fixedSize()
+                    }
+                    field("Assigned to") {
+                        Text(worker.map { "\($0.name)\($0.enabled ? "" : " (disabled)")" } ?? "No agent assigned")
+                            .font(.system(size: 13)).frame(minHeight: 22)
+                    }
                 }
-            }
-            VStack(alignment: .leading, spacing: 8) {
-                Text(role == "review" ? "What should be checked?" : "What needs to be done?").font(.headline)
-                MessageEditor(title: "New job instructions", text: $task)
-                Text(role == "review" ? "Reviews uncommitted changes in read-only mode." : "Changes stay on an isolated worktree branch until reviewed and merged.")
-                    .font(.callout).foregroundStyle(.secondary)
+                if role == "polish" {
+                    field("Allowed files or directories") {
+                        TextField("One path per line", text: $targets, axis: .vertical).textFieldStyle(.roundedBorder).lineLimit(3...6)
+                    }
+                }
+                field(role == "review" ? "What should be checked?" : "What needs to be done?") {
+                    MessageEditor(title: "New job instructions", text: $task)
+                    Text(role == "review" ? "Reviews uncommitted changes in read-only mode." : "Changes stay on an isolated worktree branch until reviewed and merged.")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                }
             }
             if !error.isEmpty { Label(error, systemImage: "exclamationmark.circle").foregroundStyle(.red).textSelection(.enabled) }
-            HStack {
-                Text("Full missions start with /crew:run in Claude.").font(.caption).foregroundStyle(.secondary)
-                Spacer()
+            HStack(spacing: 8) {
+                Text("Full missions start with /crew:run in Claude.").font(.system(size: 11)).foregroundStyle(.secondary)
+                Spacer(minLength: 12)
                 Button("Cancel") { if dirty { confirmingDiscard = true } else { dismiss() } }.keyboardShortcut(.cancelAction).disabled(sending)
                 Button(sending ? "Sending…" : "Send Job", systemImage: "arrow.up") { Task { await send() } }
                     .buttonStyle(.glassProminent).disabled(sending || !store.connected || task.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || directory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || worker?.enabled != true)
             }
-        }.padding(28).frame(width: 600).disabled(sending).interactiveDismissDisabled(sending || dirty)
+        }.padding(24).frame(width: 560).disabled(sending).interactiveDismissDisabled(sending || dirty)
         .alert("Discard this job draft?", isPresented: $confirmingDiscard) {
             Button("Keep Editing", role: .cancel) {}
             Button("Discard Draft", role: .destructive) { dismiss() }
         } message: { Text("Your instructions and job options have not been sent.") }
+    }
+    private func field<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
+            content()
+        }
     }
     private func chooseFolder() {
         let panel = NSOpenPanel()

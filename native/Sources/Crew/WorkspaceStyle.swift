@@ -32,7 +32,7 @@ struct WorkspaceSummary: View {
     private var jobs: [Job] { store.state.jobs.filter { store.project.isEmpty || $0.projectPath == store.project } }
     private var metrics: [(String, Int, String, Color)] {
         [("In progress", jobs.filter { $0.state == "running" }.count, "circle.dotted.circle", .primary),
-         ("Needs you", jobs.filter { $0.state == "waiting" }.count + store.state.claude.filter { $0.state == "waiting" && (store.project.isEmpty || $0.projectPath == store.project) }.count, "hand.raised", .orange),
+         ("Needs you", jobs.filter { $0.state == "waiting" }.count + store.state.claude.filter { $0.state == "waiting" && (store.project.isEmpty || $0.projectPath == store.project) }.count, "bell.badge", .orange),
          ("Finished", jobs.filter { $0.state == "done" }.count, "checkmark.circle", .secondary),
          ("Failed", jobs.filter { $0.state == "failed" }.count, "exclamationmark.circle", .red)]
     }
@@ -82,30 +82,17 @@ struct MissionTrack: View {
                                 Text(String(index + 1)).font(.system(size: 10, weight: .medium)).foregroundStyle(index == mission.step && mission.state == "active" ? Color.black : .secondary)
                             }
                         }.frame(width: 24, height: 24)
-                        Rectangle().fill(index < mission.step ? Color.primary.opacity(0.6) : .primary.opacity(0.1)).frame(height: 1)
-                            .opacity(index == 5 ? 0 : 1)
+                        if index < Mission.steps.count - 1 {
+                            Rectangle().fill(index < mission.step ? Color.primary.opacity(0.6) : .primary.opacity(0.1)).frame(height: 1)
+                        }
                     }
                     Text(title).font(.system(size: 11, weight: index == mission.step ? .semibold : .regular))
                         .foregroundStyle(index == mission.step ? .primary : .secondary).lineLimit(1)
-                }.frame(maxWidth: .infinity, alignment: .leading)
+                }
+                // The last step takes only its own width so the track ends at the card's edge.
+                .frame(maxWidth: index < Mission.steps.count - 1 ? .infinity : nil, alignment: .leading)
             }
         }.accessibilityElement(children: .ignore)
             .accessibilityLabel("Step \(mission.step + 1) of 6, \(Mission.steps[mission.step])")
-    }
-}
-
-struct StageRing: View {
-    let mission: Mission
-    var body: some View {
-        ZStack {
-            ForEach(0..<6, id: \.self) { index in
-                Circle().trim(from: Double(index) / 6 + 0.015, to: Double(index + 1) / 6 - 0.015)
-                    .stroke(index < mission.step || mission.state == "done" ? Color.primary : index == mission.step ? WorkspaceStyle.signal : .primary.opacity(0.10), style: StrokeStyle(lineWidth: 5, lineCap: .round))
-            }.rotationEffect(.degrees(-90))
-            HStack(alignment: .firstTextBaseline, spacing: 1) {
-                Text(mission.state == "done" ? "6" : String(mission.step + 1)).font(.system(size: 28, weight: .medium, design: .rounded)).tracking(-1)
-                Text("/6").font(.system(size: 10)).foregroundStyle(.secondary)
-            }
-        }.frame(width: 66, height: 66).accessibilityHidden(true)
     }
 }

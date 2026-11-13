@@ -16,7 +16,7 @@ struct StatusLabel: View {
     var title: String? = nil
     var symbol: String {
         switch state {
-        case "waiting": return "hand.raised.fill"
+        case "waiting": return "bell.badge.fill"
         case "failed", "error": return "exclamationmark.triangle.fill"
         case "stalled": return "clock.badge.exclamationmark"
         case "done": return "checkmark.circle.fill"
@@ -43,12 +43,14 @@ struct StatusLabel: View {
 }
 
 struct ContentPanel<Content: View>: View {
-    var title: String
-    var symbol: String
+    var title: String?
+    var symbol = ""
     @ViewBuilder var content: Content
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Label(title, systemImage: symbol).font(.system(size: 16, weight: .semibold, design: .rounded)).tracking(-0.3).accessibilityAddTraits(.isHeader)
+            if let title {
+                Label(title, systemImage: symbol).font(.system(size: 16, weight: .semibold, design: .rounded)).tracking(-0.3).accessibilityAddTraits(.isHeader)
+            }
             content
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -105,6 +107,10 @@ struct AnswerView: View {
     @Bindable var store: CrewStore
     let job: Job
     private var locked: Bool { store.actions[job.requestKey]?.locked == true || !store.connected }
+    private var draft: Binding<String> {
+        Binding(get: { store.drafts[job.requestKey] ?? "" }, set: { store.drafts[job.requestKey] = $0 })
+    }
+    private var canSend: Bool { !locked && !draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     var body: some View {
         if job.state == "waiting", let waiting = job.waiting {
             VStack(alignment: .leading, spacing: 14) {
@@ -112,30 +118,52 @@ struct AnswerView: View {
                 Text(waiting.reason).font(.system(size: 15, weight: .medium)).lineSpacing(4).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if waiting.type == "question" {
-                    MessageEditor(title: "Your answer", text: Binding(
-                        get: { store.drafts[job.requestKey] ?? "" }, set: { store.drafts[job.requestKey] = $0 }
-                    ), disabled: locked)
-                }
-                GlassEffectContainer {
-                    HStack(spacing: 12) {
-                        if waiting.type == "question" {
-                            Button("Send answer", systemImage: "arrow.up") {
-                                Task { await store.answer(job, message: store.drafts[job.requestKey]) }
-                            }
-                            .buttonStyle(.glassProminent)
-                            .disabled((store.drafts[job.requestKey] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                        }
-                        Button(waiting.type == "approval" ? "Approve" : "Yes", systemImage: "checkmark") {
-                            Task { await store.answer(job, decision: "approve") }
-                        }.buttonStyle(.glass)
-                        Button(waiting.type == "approval" ? "Deny" : "No", systemImage: "xmark") {
-                            Task { await store.answer(job, decision: "deny") }
-                        }.buttonStyle(.glass)
+                    composer
+                    // Quick replies sit apart from the composer so they don't read as part of sending.
+                    HStack(spacing: 8) {
+                        Spacer(minLength: 0)
+                        decision("Yes", symbol: "checkmark", value: "approve", prominent: false)
+                        decision("No", symbol: "xmark", value: "deny", prominent: false)
                     }
-                }.disabled(locked)
+                } else {
+                    HStack(spacing: 8) {
+                        decision("Approve", symbol: "checkmark", value: "approve", prominent: true)
+                        decision("Deny", symbol: "xmark", value: "deny", prominent: false)
+                    }
+                }
                 ActionMessage(state: store.actions[job.requestKey])
             }
         }
+    }
+    private var composer: some View {
+        ZStack(alignment: .topLeading) {
+            TextEditor(text: draft)
+                .font(.system(size: 13)).lineSpacing(2)
+                .scrollContentBackground(.hidden)
+                .frame(minHeight: 56, maxHeight: 160)
+                .accessibilityLabel("Your answer")
+            if draft.wrappedValue.isEmpty {
+                Text("Write an answer…").font(.system(size: 13)).foregroundStyle(.tertiary)
+                    .padding(.leading, 5).allowsHitTesting(false).accessibilityHidden(true)
+            }
+        }
+        .padding(.leading, 10).padding(.top, 10).padding(.trailing, 44).padding(.bottom, 8)
+        .overlay(alignment: .bottomTrailing) {
+            Button("Send answer", systemImage: "arrow.up") {
+                Task { await store.answer(job, message: draft.wrappedValue) }
+            }
+            .labelStyle(.iconOnly).font(.system(size: 12, weight: .bold))
+            .buttonStyle(.borderedProminent).buttonBorderShape(.circle).controlSize(.small)
+            .disabled(!canSend).help("Send answer").padding(8)
+        }
+        .background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(.primary.opacity(0.08)))
+        .disabled(locked)
+    }
+    @ViewBuilder private func decision(_ title: String, symbol: String, value: String, prominent: Bool) -> some View {
+        let button = Button(title, systemImage: symbol) { Task { await store.answer(job, decision: value) } }
+            .font(.system(size: 12, weight: .medium)).buttonBorderShape(.capsule).disabled(locked)
+        if prominent { button.buttonStyle(.borderedProminent) } else { button.buttonStyle(.bordered) }
     }
 }
 
@@ -145,29 +173,24 @@ struct JobRow: View {
     var now: Double
     var open: () -> Void
     var body: some View {
+        let detail = [agentName(job.agent), job.error?.message ?? (job.isActive ? job.phase : nil),
+                      job.runsApp == true ? "Runs the app" : nil, job.exclusive == true ? "Runs alone" : nil]
+            .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
         Button(action: open) {
-            HStack(alignment: .top, spacing: 12) {
+            HStack(spacing: 12) {
                 Image(systemName: job.kind == "review" ? "checkmark.shield" : job.kind == "polish" ? "text.badge.checkmark" : "hammer")
-                    .font(.title3).foregroundStyle(.secondary).frame(width: 24).padding(.top, 2)
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(job.title).font(.system(size: 13, weight: .medium)).foregroundStyle(.primary).lineLimit(3)
-                    HStack {
-                        Text(agentName(job.agent)).foregroundStyle(.secondary)
-                        StatusLabel(state: job.stalled ? "stalled" : job.state, title: job.status)
-                    }.font(.callout)
-                    if job.isActive || job.error != nil {
-                        Text(job.error?.message ?? job.phase).font(.callout).foregroundStyle(.secondary).lineLimit(2)
-                    }
-                    if job.runsApp == true || job.exclusive == true {
-                        Text([job.runsApp == true ? "Runs the app" : nil, job.exclusive == true ? "Runs alone" : nil].compactMap { $0 }.joined(separator: " · "))
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
+                    .font(.system(size: 14)).foregroundStyle(.secondary).frame(width: 20)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(job.title).font(.system(size: 13, weight: .medium)).foregroundStyle(.primary).lineLimit(2)
+                    Text(detail).font(.system(size: 11)).foregroundStyle(job.error == nil ? Color.secondary : .red).lineLimit(1)
                 }
                 Spacer(minLength: 8)
-                Text(elapsed((job.endedAt ?? now) - job.createdAt)).monospacedDigit().font(.caption).foregroundStyle(.secondary)
-                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+                StatusLabel(state: job.stalled ? "stalled" : job.state, title: job.status)
+                Text(elapsed((job.endedAt ?? now) - job.createdAt)).monospacedDigit().font(.system(size: 11)).foregroundStyle(.secondary)
+                    .frame(minWidth: 28, alignment: .trailing)
+                Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold)).foregroundStyle(.tertiary)
             }
-            .padding(12).contentShape(Rectangle())
+            .padding(.horizontal, 12).padding(.vertical, 10).contentShape(Rectangle())
             .background(selected ? Color.accentColor.opacity(0.09) : job.state == "waiting" ? Color.orange.opacity(0.07) : .primary.opacity(0.025), in: RoundedRectangle(cornerRadius: 12))
         }.buttonStyle(WorkspacePressStyle())
         .accessibilityElement(children: .combine)
@@ -186,9 +209,11 @@ struct SessionView: View {
                 if session.inTool { Label("A tool is running", systemImage: "wrench.and.screwdriver").font(.caption) }
             }.textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 8)
         } label: {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(session.title).font(.body.weight(.medium))
-                StatusLabel(state: session.stalled ? "stalled" : session.state, title: "Claude · \(session.stalled ? "May be stuck" : session.state.capitalized)")
+            HStack(spacing: 10) {
+                AgentMark(agent: "claude", size: 14)
+                Text(session.title).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                Spacer(minLength: 8)
+                StatusLabel(state: session.stalled ? "stalled" : session.state, title: session.stalled ? "May be stuck" : session.state.capitalized)
             }
         }
     }

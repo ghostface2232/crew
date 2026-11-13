@@ -10,6 +10,8 @@ struct CrewApp: App {
             NavigationStack {
                 BoardView(store: delegate.store, openSettings: delegate.openSettings)
             }
+            // Small bordered buttons read as pills across the app; sheets inherit this.
+            .buttonBorderShape(.capsule)
             .background(WindowAccessor { delegate.configure($0) })
         }
         .defaultSize(width: 1180, height: 780)
@@ -142,7 +144,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         if let window = settingsWindow { window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return }
         guard !store.state.roles.isEmpty else { show(); return }
         let model = SettingsModel(api: store.api, roles: store.state.roles)
-        let controller = NSHostingController(rootView: CrewSettingsView(model: model, store: store))
+        let controller = NSHostingController(rootView: CrewSettingsView(model: model, store: store).buttonBorderShape(.capsule))
         let window = NSWindow(contentViewController: controller)
         window.title = "Crew Settings"
         window.styleMask = [.titled, .closable, .resizable]

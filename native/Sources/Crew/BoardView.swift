@@ -4,7 +4,6 @@ struct BoardView: View {
     @Bindable var store: CrewStore
     var openSettings: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @FocusState private var searchFocused: Bool
     var body: some View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 24) {
@@ -23,7 +22,8 @@ struct BoardView: View {
                 }
                 .scrollEdgeEffectStyle(.soft, for: .top)
                 .id(store.selection ?? "overview")
-                .transition(.opacity)
+                // A crossfade layers two full pages at once; only the incoming page animates.
+                .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 6)), removal: .identity))
                 .disabled(store.selectedJob != nil)
                 .accessibilityHidden(store.selectedJob != nil)
                 .overlay(alignment: .trailing) {
@@ -43,14 +43,11 @@ struct BoardView: View {
         .navigationTitle(title)
         .toolbar(removing: .title)
         .scrollEdgeEffectStyle(.soft, for: .top)
-        .searchable(text: $store.search, placement: .toolbar, prompt: "Search work")
-        .searchFocused($searchFocused)
         .background(WorkspaceStyle.canvas.ignoresSafeArea())
         .frame(minWidth: 850, minHeight: 560)
         .onChange(of: store.selection) { store.persistSelection() }
         .onExitCommand { store.selectedJob = nil }
         .sheet(isPresented: $store.showingDispatch) { DispatchView(store: store) }
-        .onChange(of: store.searchRequest) { searchFocused = true }
     }
     private var scopeAndSearch: some View {
 HStack(spacing: 16) {
@@ -86,7 +83,7 @@ HStack(spacing: 16) {
     private var attentionBanner: some View {
         Button { store.selection = "needs"; store.search = "" } label: {
             HStack {
-                Image(systemName: "hand.raised.fill").foregroundStyle(.orange)
+                Image(systemName: "bell.badge.fill").foregroundStyle(.orange)
                 Text("\(store.state.pendingCount) \(store.state.pendingCount == 1 ? "request needs" : "requests need") your attention").font(.body.weight(.medium))
                 Spacer()
                 Text("Review").font(.callout)
@@ -165,11 +162,12 @@ HStack(spacing: 16) {
                 Text(store.search.isEmpty ? (emptyHistory ? "Finished jobs and missions will appear here." : "Send a job to an agent, or start a mission with /crew:run in Claude.") : "Try a different title, agent, or project.")
             } actions: {
                 if store.search.isEmpty && !emptyHistory { Button("New Job", systemImage: "plus") { store.showingDispatch = true }.buttonStyle(.glassProminent).disabled(!store.connected) }
-            }.padding(.vertical, 30)
+            }.padding(.vertical, 30).frame(maxWidth: .infinity)
         }
     }
     private var activity: some View {
-        ContentPanel(title: "Recent activity", symbol: "waveform.path") {
+        // The page heading already names this list.
+        ContentPanel(title: nil) {
             let events = store.state.events.filter { matches("\($0.detail) \($0.agent)") }
             if events.isEmpty { Text("No activity yet.").foregroundStyle(.secondary) }
             EventList(events: events) { store.openJob($0) }
@@ -226,31 +224,32 @@ private struct AgentCard: View {
         if agent == "claude" { return sessions.contains { $0.state == "waiting" } ? "waiting" : sessions.contains { $0.stalled } ? "stalled" : sessions.isEmpty ? "idle" : "working" }
         return jobs.contains { $0.state == "waiting" } ? "waiting" : jobs.contains { $0.stalled } ? "stalled" : jobs.isEmpty ? "idle" : "working"
     }
+    private var activity: String {
+        let count = agent == "claude" ? sessions.count : jobs.count
+        let noun = agent == "claude" ? "session" : "job"
+        return count == 0 ? "No active \(noun)s" : "\(count) active \(noun)\(count == 1 ? "" : "s")"
+    }
     var body: some View {
-        VStack(alignment: .leading, spacing: 15) {
-            HStack(spacing: 10) {
-                AgentMark(agent: agent, size: 24)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(agentName(agent)).font(.system(size: 16, weight: .semibold, design: .rounded)).tracking(-0.35)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 10) {
+                AgentMark(agent: agent, size: 22).padding(.top, 1)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(agentName(agent)).font(.system(size: 15, weight: .semibold, design: .rounded)).tracking(-0.3)
                     Text(agent == "claude" ? "Lead" : roleOrder.filter { store.state.roles[$0]?.agent == agent }.compactMap { roleNames[$0] }.joined(separator: " · "))
-                        .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+                        .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
                 }
-                Spacer(minLength: 0)
-            }
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(String(agent == "claude" ? sessions.count : jobs.count)).font(.system(size: 32, weight: .regular, design: .rounded)).monospacedDigit().tracking(-0.8)
-                Text(agent == "claude" ? "active sessions" : "active jobs").font(.system(size: 11)).foregroundStyle(.secondary)
-                Spacer(minLength: 0)
+                Spacer(minLength: 8)
+                StatusLabel(state: mark, title: mark == "waiting" ? "Needs you" : mark == "working" ? "Working" : mark == "stalled" ? "May be stuck" : store.state.agents[agent]?.enabled == false ? "Disabled" : "Ready")
             }
             HStack {
-                StatusLabel(state: mark, title: mark == "waiting" ? "Needs you" : mark == "working" ? "Working" : mark == "stalled" ? "May be stuck" : store.state.agents[agent]?.enabled == false ? "Disabled" : "Ready")
-                Spacer(minLength: 0)
+                Text(activity).font(.system(size: 12)).monospacedDigit().foregroundStyle(.secondary)
+                Spacer(minLength: 8)
                 if let usage = store.state.limits[agent] ?? nil, let maximum = usage.windows?.map(\.usedPercent).max() {
-                    Text("\(Int(maximum))% used").font(.system(size: 10)).monospacedDigit().foregroundStyle(.secondary)
+                    Text("\(Int(maximum))% of limit").font(.system(size: 11)).monospacedDigit().foregroundStyle(maximum >= 90 ? Color.orange : .secondary)
                         .help((usage.windows ?? []).map { "\(Int($0.usedPercent))% of \(Int($0.minutes))-minute limit" }.joined(separator: "\n"))
                 }
             }
-        }.padding(18).frame(maxWidth: .infinity, alignment: .leading)
+        }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
             .background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: 20))
             .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.primary.opacity(0.04)))
     }
@@ -266,53 +265,56 @@ struct MissionPanel: View {
         self.store = store; self.mission = mission; self.jobs = jobs
         _expanded = State(initialValue: mission.state == "active")
     }
+    private var meta: String {
+        let tokens = jobs.reduce(0) { $0 + ($1.tokens ?? 0) }
+        return [
+            elapsed((mission.endedAt ?? store.now) - mission.createdAt),
+            tokens > 0 ? "\(tokens.formatted()) tokens" : nil,
+            store.project.isEmpty ? projectName(mission.root, among: store.projects) : nil,
+            "\(jobs.count) \(jobs.count == 1 ? "job" : "jobs")",
+        ].compactMap { $0 }.joined(separator: " · ")
+    }
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            HStack(alignment: .top, spacing: 16) {
-                if mission.state == "active" { StageRing(mission: mission).padding(2) }
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(mission.state == "active" ? "IN PROGRESS" : "RECENT MISSION").font(.system(size: 9, weight: .semibold)).tracking(1.5).foregroundStyle(.secondary)
-                    Text(mission.title).font(.system(size: 20, weight: .semibold, design: .rounded)).tracking(-0.5).fixedSize(horizontal: false, vertical: true)
-                    HStack(spacing: 8) {
-                        Text(elapsed((mission.endedAt ?? store.now) - mission.createdAt)).monospacedDigit()
-                        let tokens = jobs.reduce(0) { $0 + ($1.tokens ?? 0) }
-                        if tokens > 0 { Text("·"); Text("\(tokens.formatted()) tokens") }
-                    }.font(.system(size: 11)).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top, spacing: 8) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(mission.title).font(.system(size: 17, weight: .semibold, design: .rounded)).tracking(-0.3).fixedSize(horizontal: false, vertical: true)
+                    Text(meta).font(.system(size: 11)).monospacedDigit().foregroundStyle(.secondary).help(mission.root)
                 }
-                Spacer(minLength: 0)
-                Menu {
+                Spacer(minLength: 8)
+                if mission.state != "active" { StatusLabel(state: mission.state, title: mission.state.capitalized) }
+                // Both controls share one 28pt hit area so their glyphs sit on the same center line.
+                HStack(spacing: 2) {
+                    Button { expanded.toggle() } label: {
+                        Image(systemName: "chevron.down").font(.system(size: 12, weight: .semibold))
+                            .rotationEffect(.degrees(expanded ? 0 : -90)).frame(width: 28, height: 28).contentShape(Rectangle())
+                    }.buttonStyle(.plain).accessibilityLabel(expanded ? "Collapse mission" : "Expand mission").help(expanded ? "Collapse" : "Expand")
                     if mission.state == "active" {
-                        Button("Dismiss mission", systemImage: "xmark.circle") { Task { await store.dismiss(mission) } }
-                            .disabled(!store.connected || store.actions["dismiss:\(mission.id)"]?.locked == true)
+                        Menu {
+                            Button("Dismiss mission", systemImage: "xmark.circle") { Task { await store.dismiss(mission) } }
+                                .disabled(!store.connected || store.actions["dismiss:\(mission.id)"]?.locked == true)
+                        } label: {
+                            Image(systemName: "ellipsis").font(.system(size: 13, weight: .semibold)).frame(width: 28, height: 28).contentShape(Rectangle())
+                        }.menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize().help("Mission options")
                     }
-                    Button(expanded ? "Collapse details" : "Expand details", systemImage: expanded ? "chevron.up" : "chevron.down") { expanded.toggle() }
-                } label: { Image(systemName: "ellipsis").frame(width: 24, height: 24) }
-                    .menuStyle(.borderlessButton).fixedSize().help("Mission options")
+                }.foregroundStyle(.secondary).padding(.top, -4).padding(.trailing, -6)
             }
-            if store.project.isEmpty { Text(mission.root).font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled) }
-            DisclosureGroup(isExpanded: $expanded) {
-                VStack(alignment: .leading, spacing: 16) {
-                    MissionTrack(mission: mission).padding(.top, 14)
+            if expanded {
+                if mission.state == "active" { MissionTrack(mission: mission).padding(.vertical, 4) }
+                VStack(spacing: 4) {
                     if let lead = store.state.claude.first(where: { $0.id == mission.owner }), mission.state == "active" {
-                        SessionView(session: lead).padding(12).background(.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 12))
+                        SessionView(session: lead).padding(.horizontal, 12).padding(.vertical, 10)
+                            .background(.primary.opacity(0.025), in: RoundedRectangle(cornerRadius: 12))
                     }
-                    VStack(spacing: 4) {
-                        ForEach(jobs) { job in JobRow(job: job, selected: store.selectedJob == job.id, now: store.now) { store.openJob(job.id) } }
-                    }
-                    if jobs.isEmpty { Text("The lead is coordinating this mission.").font(.callout).foregroundStyle(.secondary) }
-                    if !mission.outcome.isEmpty { Text(mission.outcome).font(.callout).textSelection(.enabled) }
-                    ActionMessage(state: store.actions["dismiss:\(mission.id)"])
+                    ForEach(jobs) { job in JobRow(job: job, selected: store.selectedJob == job.id, now: store.now) { store.openJob(job.id) } }
                 }
-            } label: {
-                HStack {
-                    Text(mission.state == "active" ? "\(Mission.steps[mission.step]) · Step \(mission.step + 1) of 6" : mission.state.capitalized).font(.system(size: 12, weight: .medium))
-                    Spacer()
-                    Text("\(jobs.count) \(jobs.count == 1 ? "job" : "jobs")").font(.system(size: 11)).foregroundStyle(.secondary)
-                }
+                if jobs.isEmpty && mission.state == "active" { Text("The lead is coordinating this mission.").font(.system(size: 12)).foregroundStyle(.secondary) }
+                if !mission.outcome.isEmpty { Text(mission.outcome).font(.system(size: 12)).textSelection(.enabled) }
             }
+            ActionMessage(state: store.actions["dismiss:\(mission.id)"])
         }.animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: expanded)
-            .padding(22).background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: 22))
-            .overlay(RoundedRectangle(cornerRadius: 22).strokeBorder(.primary.opacity(0.05)))
+            .padding(20).background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: 20))
+            .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.primary.opacity(0.05)))
     }
 }
 

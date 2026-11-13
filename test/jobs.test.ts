@@ -1042,7 +1042,7 @@ for (const agent of ['codex', 'antigravity'] as const) {
     assert.equal(job.result, null);
     assert.equal(job.rounds, undefined);
     assert.match(job.instructions, /^# Role: question responder/);
-    assert.match(job.instructions, /read-only: change nothing and run nothing that writes/);
+    assert.match(job.instructions, /Change nothing in the repository or anywhere else\. If you were given a directory of your own, checks may write there and only there/);
     assert.match(job.instructions, /Give the answer as your final message/);
     assert.match(job.instructions, /# This machine is shared/);
     assert.equal(job.prompt, '# Question\nHow does it work?');
@@ -1288,6 +1288,13 @@ test('a follow-up can first bring the worker up to date with the lead, without c
 
   const review = await settled(jobs, await jobs.create({ kind: 'review', cwd: repo, review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } }));
   await assert.rejects(jobs.reply(review.id, { message: 'x', sync: true }), /no worktree of its own/);
+  // A sync is for the gap between turns: it is refused while the worker is editing, not dropped without a word.
+  let live!: JobCtl;
+  adapter.reply = async (ctl) => { live = ctl; };
+  await jobs.reply(job.id, { message: 'start' });
+  await assert.rejects(jobs.reply(job.id, { message: 'and this', sync: true }), /sync brings a finished job up to date/);
+  live.done('third');
+  await settled(jobs, job);
   await jobs.discard(job.id);
 });
 

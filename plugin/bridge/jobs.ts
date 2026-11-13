@@ -467,6 +467,8 @@ export class Jobs {
       throw new Error(`Job ${id}'s worktree was removed, so it cannot take another turn. Start a new job; to ask something without changing anything, use a question.`);
     }
     if (!isTerminal(job)) {
+      // A merge under a worker that is in the middle of editing would pull the tree out from under it.
+      if (input.sync) throw new Error(`Job ${id} is still ${job.state}; sync brings a finished job up to date before its next turn. Wait for the turn to end, or send the message without sync.`);
       // Steering a live turn: a rejected message is the caller's problem, not a reason to fail the job.
       await adapter.reply(ctl, input.message);
       return job;

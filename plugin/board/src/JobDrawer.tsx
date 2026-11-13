@@ -120,7 +120,7 @@ export function JobDrawer({ id, state, close }: { id: string; state: Snapshot; c
               ...(job.worktree ? [['Branch', `${job.worktree.branch} (from ${job.worktree.base.slice(0, 8)})`]] : []),
               ...(job.tokens != null ? [['Tokens', job.tokens.toLocaleString()]] : []),
               ...(job.tokenUse
-                ? [['Of which', `${job.tokenUse.cachedInput.toLocaleString()} cached input · ${(job.tokenUse.input - job.tokenUse.cachedInput).toLocaleString()} new input · ${job.tokenUse.output.toLocaleString()} output`]]
+                ? [['Of which', `${job.tokenUse.cachedInput.toLocaleString()} cached input · ${(job.tokenUse.input - job.tokenUse.cachedInput).toLocaleString()} uncached input · ${job.tokenUse.output.toLocaleString()} output${job.turns > 1 ? ` · ${job.tokenUse.turn.toLocaleString()} in the latest turn` : ''}`]]
                 : []),
               ['Turns', String(job.turns)],
               ...(job.shared?.length ? [['Shared instructions', job.shared.join('\n')]] : []),

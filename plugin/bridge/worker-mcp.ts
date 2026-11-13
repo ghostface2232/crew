@@ -6,7 +6,7 @@ import type { LeadQuestion } from './jobs.ts';
 const TOOLS = [
   {
     name: 'ask_lead',
-    description: 'Ask the lead a question and keep working.',
+    description: 'Ask the lead a question and keep working. At most 20 questions per job.',
     inputSchema: {
       type: 'object',
       properties: { question: { type: 'string', maxLength: 4000 }, blocks: { type: 'string' } },

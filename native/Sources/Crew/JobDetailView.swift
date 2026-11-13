@@ -69,7 +69,7 @@ struct JobDetailView: View {
             if let worktree = job.worktree { fact("Branch", "\(worktree.branch) (from \(worktree.base.prefix(8)))") }
             if let tokens = job.tokens { fact("Tokens", tokens.formatted()) }
             if let use = job.tokenUse {
-                fact("Of which", "\(use.cachedInput.formatted()) cached input · \((use.input - use.cachedInput).formatted()) new input · \(use.output.formatted()) output")
+                fact("Of which", "\(use.cachedInput.formatted()) cached input · \((use.input - use.cachedInput).formatted()) uncached input · \(use.output.formatted()) output" + (job.turns > 1 ? " · \(use.turn.formatted()) in the latest turn" : ""))
             }
             fact("Turns", String(job.turns))
             if let shared = job.shared, !shared.isEmpty { fact("Instructions", shared.joined(separator: "\n")) }

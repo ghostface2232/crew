@@ -59,8 +59,55 @@ The board's New Job form sends one of three things:
 
 ## 5. Progress roll-up
 
-Computed by each client from data it already has, so the two boards agree:
+Computed by each client from data it already has, by the same rule, so the two boards agree:
 
-- A job counts `1` when done, `0.5` while running or waiting, and `0` when failed or cancelled.
-- A stage of an active mission is complete when the mission has moved past it. The current stage is worth the mean of its jobs' counts, or `0.5` when it has none; jobs belong to the stage that was current when they were created (`createdAt` against the mission's `updatedAt` is not recorded, so all of a mission's unfinished jobs count toward the current stage and finished ones toward earlier stages).
-- Mission progress = (completed stages + current stage's share) / 7, shown as a percentage on the collapsed card. A done mission is 100%.
+- A done mission is 100%.
+- Otherwise progress is (stage index + share) / 7, where the stage index is the position of the mission's stage among the seven stages, and share is how far the current stage is taken to be.
+- Share is the mean over the mission's unfinished jobs of 0.5 each, and 0.5 when it has none. It is therefore always a half step today; the per-job weight is one place to change when jobs report finer progress.
+
+## 6. Where usage comes from
+
+| Source | Used for | Freshness |
+| --- | --- | --- |
+| AgentGauge's `usage-cache.json` | Every agent's windows | As AgentGauge polls: 3 to 10 minutes, stretching to 30 while the user is away |
+| AgentGauge's `usage-history.db` | The last 90 minutes of samples per window, for the projection | Same |
+| Codex's own rate limits (`account/rateLimits/*` on its app-server) | Codex, whenever newer than AgentGauge's reading | Live while a Codex job runs |
+| A job failing on a usage limit | Marks that agent exhausted at once | Immediate; lifted by a later reading that shows room, or after 5 hours |
+
+Both files are opened read-only; Crew holds no provider credentials and makes no provider request. Only the macOS cache format (version 1, checked against AgentGauge 0.8.2) is read. On other platforms, or when the version differs, every agent is `unknown` and the roles are followed as assigned.
+
+A reading older than 45 minutes is `stale`. Stale and unknown readings never move work: routing then answers with the role's holder and says that usage is not known.
+
+Open, as in [03-agentgauge-integration.md](03-agentgauge-integration.md): G2 (`--json` output) and G3 (activity signal and threshold hook) are work in the AgentGauge repository. Until G3, AgentGauge slows its polling exactly when agents work unattended, so Claude's usage in particular can go stale; Codex is covered by its own channel, and Claude and Antigravity by limit failures.
+
+## 7. Routing
+
+`route` (the lead's tool, and `GET /api/route`) follows section 8.2 of document 03. It answers only with the role's holder or the lead.
+
+| Kind | Holder tight | Holder exhausted |
+| --- | --- | --- |
+| `delegate` | The lead implements, unless the lead is short too | The lead implements |
+| `review` | Still the holder, one round | The lead repeats its self-review; `degraded` |
+| `polish` | Deferred until the reset; the lead makes urgent wording fixes | Same |
+| `lead` | Claude keeps to planning and merging | Hand off to Codex if it is the engineer and has room; `degraded` |
+
+## 8. Presets
+
+`preset` in `~/.crew/config.json` is `economy`, `balanced`, or `best`; absent by default. A setting on a role wins over the preset, and the preset over the agent's own configuration.
+
+| Preset | Codex effort | Lead's subagents |
+| --- | --- | --- |
+| `economy` | low | haiku |
+| `balanced` | medium | sonnet |
+| `best` | high | the lead's own model |
+
+The built-in presets name no worker models, because which models an account has differs. Add them under `presets`:
+
+```json
+{
+  "preset": "best",
+  "presets": { "best": { "codex": { "model": "gpt-6.1-sol" } } }
+}
+```
+
+The lead is told the preset's subagent model in its session instructions, which are fixed when the session starts.

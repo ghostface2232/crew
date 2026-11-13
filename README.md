@@ -38,7 +38,9 @@ crew status
 crew board
 ```
 
-The status board runs at http://127.0.0.1:47615. Each command run with `/crew:run` appears as a single unit with its jobs grouped under it, and a line at the top lists anything waiting on you. Click a job to read its report, changed files, and activity, or to send it a follow-up. Settings on the board edits roles and shared instructions.
+The status board runs at http://127.0.0.1:47615. Each command run with `/crew:run` appears as a single unit with its jobs grouped under it, and a line at the top lists anything waiting on you. Click a job to read its report, changed files, and activity, or to send it a follow-up. Settings on the board edits roles, the preset, and shared instructions.
+
+If [AgentGauge](https://github.com/ghostface2232/AgentGauge) is installed, each agent's card shows its remaining usage, and `/crew:run` routes work by it: when an agent runs low, the lead takes its work or defers it, and says so. A job's turns are listed as rounds that can be undone or kept one by one, and Send work also takes a read-only question or a piece of information to pin ([docs/09-usage-presets-rounds.md](docs/09-usage-presets-rounds.md)).
 
 When a worker asks for approval or has a question, an input dialog pops up in the Claude app. You can also answer on the status board: approve or deny, or type an answer to a question. Codex's built-in automatic reviewer answers its approval requests first, so you are asked only about what it refuses twice ([docs/04-implementation.md](docs/04-implementation.md) section 5.1).
 

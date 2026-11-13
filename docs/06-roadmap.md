@@ -12,7 +12,7 @@ The requirements are in [01-requirements.md](01-requirements.md). This roadmap c
 | R9 (shared instructions) | A2 |
 | R11 (model and effort) | A3 |
 | R10 (command-centered, clickable board) | B1, B2 |
-| R8 (AgentGauge) | C1, L3 |
+| R8 (AgentGauge) | C1 (G1 implemented 2026-11-13), L3 |
 | R12 (Cursor) | C2 |
 | R14 (no collisions between agents) | Implemented 2026-11-12, [04-implementation.md](04-implementation.md) section 5.4 |
 | R15 (approvals with little user involvement) | Implemented 2026-11-12 for Codex, [04-implementation.md](04-implementation.md) section 5.1 |
@@ -66,17 +66,17 @@ Recommended order is A, then B, then C. Without A, both Cursor support and role 
 
 Injection keeps the decision recorded in [04-implementation.md](04-implementation.md) section 3: Crew does not write into each service's own `AGENTS.md`, `CLAUDE.md`, or rules folder. Touches [prompts.ts](../plugin/bridge/prompts.ts) and [hooks.json](../plugin/hooks/hooks.json).
 
-**A3. Model and effort.** Codex already accepts `model` and `effort`; Antigravity accepts `model` only. Per-role `model` and `effort` arrived with the A1 role table. Remaining: three presets (economy, balanced, best), and include the model of the lead's subagents.
+**A3. Model and effort.** Codex already accepts `model` and `effort`; Antigravity accepts `model` only. Per-role `model` and `effort` arrived with the A1 role table. Presets (economy, balanced, best) and the model of the lead's subagents were implemented 2026-11-13; see [09-usage-presets-rounds.md](09-usage-presets-rounds.md) section 8.
 
 ### B. Board to control screen
 
 **B1. Decision support.** Implemented 2026-11-12; see [04-implementation.md](04-implementation.md) section 5.2. The settings view covers roles and shared instructions; presets (A3) are not in it yet. These gaps are already listed in [05-related-work.md](05-related-work.md) section 9: the strand drawer, free-text answers to worker questions on the board, activity filtered by job, the pending count in the tab title, a project filter, and a settings view that edits A1 to A3 by clicking.
 
-**B2. Missions.** Implemented 2026-11-12; see [04-implementation.md](04-implementation.md) section 5.3. Stages are reported by the lead through a `mission` tool, and job membership is recorded by the bridge; this settles the open item on who writes the plan. Not built: intent (information, question, command), per-round keep or undo, and roll-up below the stage level. Add `mission_id` to jobs so that one `/crew:run` is one mission, and build the view in section 3 on top of it. Touches `jobs.ts`, [daemon.ts](../plugin/bridge/daemon.ts), [run/SKILL.md](../plugin/skills/run/SKILL.md), and `plugin/board/`.
+**B2. Missions.** Implemented 2026-11-12; see [04-implementation.md](04-implementation.md) section 5.3. Stages are reported by the lead through a `mission` tool, and job membership is recorded by the bridge; this settles the open item on who writes the plan. Intent (information, question, command), per-round keep or undo, and the progress roll-up were implemented 2026-11-13; see [09-usage-presets-rounds.md](09-usage-presets-rounds.md). Add `mission_id` to jobs so that one `/crew:run` is one mission, and build the view in section 3 on top of it. Touches `jobs.ts`, [daemon.ts](../plugin/bridge/daemon.ts), [run/SKILL.md](../plugin/skills/run/SKILL.md), and `plugin/board/`.
 
 ### C. New connections
 
-**C1. AgentGauge.** Follow [03-agentgauge-integration.md](03-agentgauge-integration.md), starting with G1: a read-only MCP server over the cache file and history database. It needs no change to AgentGauge and yields the gauges and `route` immediately. G2 (`--json` output) is work in the AgentGauge repository. AgentGauge is now at 0.8.0; the 03 document was written against 0.7.7 and its cache format notes should be rechecked first.
+**C1. AgentGauge.** G1 implemented 2026-11-13 inside the Crew daemon rather than as a separate MCP server, so the board and the lead read one source; see [09-usage-presets-rounds.md](09-usage-presets-rounds.md) sections 3, 6, and 7. G2 and G3 remain. Original plan: Follow [03-agentgauge-integration.md](03-agentgauge-integration.md), starting with G1: a read-only MCP server over the cache file and history database. It needs no change to AgentGauge and yields the gauges and `route` immediately. G2 (`--json` output) is work in the AgentGauge repository. AgentGauge is now at 0.8.0; the 03 document was written against 0.7.7 and its cache format notes should be rechecked first.
 
 **C2. Cursor adapter.** Drive the Cursor CLI in headless mode (`agent -p --output-format stream-json`). Headless mode has no per-action approval: without `--force` it only proposes edits. Start Cursor in a read-only review role, or in a worktree with an allow list, until approvals can be routed to the user as they are for Codex. Open checks before building:
 
@@ -123,3 +123,5 @@ Requirements R4 and R6 (computer use, side chat, visibility in the desktop app) 
 - 2026-11-12: The user explicitly requested React and Electron implementation. Completed the L5 foundation before desktop packaging, retaining the independent daemon and web entry point. Added role-based direct dispatch without claiming full L2/L1 support. The earlier SwiftUI/Tauri preferences are superseded for this implementation; native memory efficiency is not assumed. Dependency decisions, measurements and verification are in document 07.
 
 - 2026-11-13: The user requested a native macOS desktop client. SwiftUI and AppKit replace Electron, with Swift 6 and macOS 26+ support. The TypeScript daemon and React browser board are retained. This changes the L2 desktop shell and native presentation, not lead selection or mission orchestration. See [08-native-macos.md](08-native-macos.md).
+
+- 2026-11-13: Implemented C1 phase G1, A3 presets, and the open parts of B2. The macOS cache format was rechecked against AgentGauge 0.8.2. C2, L1, the rest of L2, L3, and L4 are unchanged.

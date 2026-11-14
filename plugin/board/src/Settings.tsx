@@ -14,7 +14,8 @@ function presetDescription(preset: Preset) {
   return [
     ...agents.flatMap(([name, agent]) =>
       agent ? [`${name}: ${[agent.model ?? 'Agent default', agent.effort && `${agent.effort} effort`].filter(Boolean).join(' · ')}`] : []),
-    `Subagents: ${preset.subagentModel ?? 'inherit'}`,
+    `Subagents: ${preset.subagentModel ?? 'inherit'}${preset.subagentMax ? ` (up to ${preset.subagentMax})` : ''}`,
+    ...(preset.maxTier ? [`Workers up to the ${preset.maxTier} tier`] : []),
   ].join('; ');
 }
 export function Settings({ state, close }: { state: Snapshot; close: () => void }) {

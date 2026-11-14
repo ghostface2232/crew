@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { codexModel, defaultTier, pickModel, tierEffort, tierModel } from '../plugin/bridge/tiers.ts';
+import { codexModel, defaultTier, pickModel, tierEffort, tierModel, tierOf } from '../plugin/bridge/tiers.ts';
 
 function cache(t: { after: (fn: () => void) => void }, models: unknown): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-tiers-'));
@@ -38,6 +38,15 @@ test('Antigravity tiers name a family that the session list resolves', () => {
   assert.equal(pickModel(options, 'gemini-4-argon'), 'gemini-4-argon');
   assert.equal(pickModel(options, 'helium'), undefined);
   assert.equal(pickModel(undefined, 'hydrogen'), undefined);
+});
+
+test('a named model is placed in the tier of its family', () => {
+  assert.equal(tierOf('codex', 'gpt-6-astra'), 'frontier');
+  assert.equal(tierOf('codex', 'gpt-6.1-sol'), 'standard');
+  assert.equal(tierOf('codex', 'gpt-6-luna'), 'fast');
+  assert.equal(tierOf('antigravity', 'gemini-4-argon'), 'frontier');
+  assert.equal(tierOf('antigravity', 'Gemini 4 Hydrogen'), 'standard');
+  assert.equal(tierOf('codex', 'custom'), undefined);
 });
 
 test('effort is medium by default and high at the frontier; a question defaults to the light tier', () => {

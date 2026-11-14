@@ -16,7 +16,7 @@ import type { Worktree } from './git.ts';
 import { sharedInstructions } from './instructions.ts';
 import { buildPrompt } from './prompts.ts';
 import { findSkills } from './skills.ts';
-import { defaultTier, tierEffort, tierModel, TIERS } from './tiers.ts';
+import { defaultTier, tierEffort, tierModel, tierOf, TIERS } from './tiers.ts';
 import type { Tier } from './tiers.ts';
 
 export type { WorkerAgent };
@@ -320,10 +320,17 @@ export function openRefusals(job: Pick<Job, 'refusals' | 'turns' | 'retrying' | 
  */
 function pickModel(agent: WorkerAgent, spec: JobSpec, role: { model?: string; effort?: string }, config: Config): { model?: string; effort?: string; tier?: Tier } {
   const configured = { model: role.model ?? config[agent].model, effort: role.effort ?? (agent === 'codex' ? config.codex.effort : undefined) };
-  const tier = spec.tier ?? (configured.model ? undefined : defaultTier(spec));
-  const model = spec.model ?? (tier ? tierModel(agent, tier) : undefined) ?? configured.model;
+  const cap = config.preset ? config.presets[config.preset].maxTier : undefined;
+  const wanted = spec.tier ?? (configured.model ? undefined : defaultTier(spec));
+  const tier = wanted && cap && TIERS.indexOf(wanted) > TIERS.indexOf(cap) ? cap : wanted;
+  let model = spec.model ?? (tier ? tierModel(agent, tier) : undefined) ?? configured.model;
+  // The cap holds for a model named outright too; effort stays the lead's to choose.
+  const named = model ? tierOf(agent, model) : undefined;
+  const capped = Boolean(cap && named && TIERS.indexOf(named) > TIERS.indexOf(cap));
+  if (capped) model = tierModel(agent, cap!);
   const effort = spec.effort ?? (spec.tier || !configured.effort ? (agent === 'codex' ? tierEffort(tier ?? defaultTier(spec)) : undefined) : configured.effort);
-  return { ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(!spec.model && tier ? { tier } : {}) };
+  const shown = capped ? cap : !spec.model ? tier : undefined;
+  return { ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(shown ? { tier: shown } : {}) };
 }
 
 /** Marks the receipts that still describe the branch as no longer doing so. */

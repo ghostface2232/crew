@@ -38,8 +38,10 @@ const roles = started?.roles ?? DEFAULT_ROLES;
 const holder = (role: Role) => WORKERS[roles[role].agent].name;
 /** The model the preset asks the lead to give its subagents; none when no preset is set or it leaves them alone. */
 const subagentModel = started?.preset ? started.presets[started.preset].subagentModel : undefined;
+const subagentMax = started?.preset ? started.presets[started.preset].subagentMax : undefined;
+const maxTier = started?.preset ? started.presets[started.preset].maxTier : undefined;
 const PRESET_LINE = started?.preset
-  ? `\n- The user chose the "${started.preset}" preset. Workers get its model and effort automatically. ${subagentModel && subagentModel !== 'inherit' ? `Start your own subagents (including crew:self-reviewer) with model "${subagentModel}" unless the user asks otherwise.` : 'Your own subagents stay on your model.'}`
+  ? `\n- The user chose the "${started.preset}" preset. Workers get its model and effort automatically. ${subagentModel && subagentModel !== 'inherit' ? `Start your own subagents (including crew:self-reviewer) with model "${subagentModel}"${subagentMax ? `, or "${subagentMax}" when the work needs more, and never a larger model,` : ''} unless the user asks otherwise.` : 'Your own subagents stay on your model.'}${maxTier ? ` Worker models are capped at the ${maxTier} tier: a higher tier or a larger model you name is lowered to it. You still choose effort.` : ''}`
   : '';
 
 const INSTRUCTIONS = `Crew connects this session to other coding agents that run in the background. You are the lead: you plan, do the main implementation, review, and decide what is merged.

@@ -106,9 +106,11 @@ Open, as in [03-agentgauge-integration.md](03-agentgauge-integration.md): G2 (`-
 
 | Preset | Codex effort | Lead's subagents |
 | --- | --- | --- |
-| `economy` | low | haiku |
+| `economy` | low | haiku, sonnet at most |
 | `balanced` | medium | sonnet |
 | `best` | high | the lead's own model |
+
+`economy` also caps worker models at the `standard` tier (Sol for Codex, Hydrogen for Antigravity): a higher tier, or a larger model the lead or the user names, is lowered to it. The lead still chooses effort. A preset sets the cap with `maxTier`, and the largest subagent model with `subagentMax`.
 
 The built-in presets name no worker models, because which models an account has differs. Add them under `presets`:
 

@@ -142,7 +142,7 @@ test('no preset is set by default, and a setting on the role wins over the prese
 
   // A user's preset entry adds to the built-in one of the same name.
   const tuned = resolveConfig({ preset: 'economy', presets: { economy: { codex: { model: 'small' }, antigravity: { model: 'flash' } } } });
-  assert.deepEqual(tuned.presets.economy, { codex: { effort: 'low', model: 'small' }, antigravity: { model: 'flash' }, subagentModel: 'haiku' });
+  assert.deepEqual(tuned.presets.economy, { codex: { effort: 'low', model: 'small' }, antigravity: { model: 'flash' }, subagentModel: 'haiku', subagentMax: 'sonnet', maxTier: 'standard' });
   assert.deepEqual(effectiveRole(tuned, 'delegate'), { agent: 'codex', model: 'small', effort: 'low' });
   assert.deepEqual(effectiveRole(tuned, 'polish'), { agent: 'antigravity', model: 'flash' });
   assert.deepEqual(tuned.presets.best, PRESETS.best);
@@ -150,11 +150,15 @@ test('no preset is set by default, and a setting on the role wins over the prese
 
 test('a preset that is not exactly valid is refused', () => {
   assert.throws(() => resolveConfig({ preset: 'fast' as never }), /preset is "fast"; use one of: economy, balanced, best/);
+  assert.equal(resolveConfig({}).presets.economy.maxTier, 'standard');
+  assert.equal(resolveConfig({}).presets.economy.subagentMax, 'sonnet');
+  assert.equal(resolveConfig({ presets: { best: { maxTier: 'light' } } }).presets.best.maxTier, 'light');
+  assert.throws(() => resolveConfig({ presets: { best: { maxTier: 'huge' as never } } }), /presets\.best\.maxTier must be one of: fast, light, standard, frontier/);
   assert.throws(() => resolveConfig({ presets: { turbo: {} } as never }), /presets\.turbo is not a preset/);
   assert.throws(() => resolveConfig({ presets: { best: { codex: { speed: 'x' } } } as never }), /presets\.best\.codex\.speed is not a setting; use model or effort/);
   assert.throws(() => resolveConfig({ presets: { best: { antigravity: { effort: 'high' } } } as never }), /presets\.best\.antigravity\.effort is not a setting; use model/);
   assert.throws(() => resolveConfig({ presets: { best: { codex: { model: 1 } } } as never }), /must be a string/);
-  assert.throws(() => resolveConfig({ presets: { best: { lead: 'x' } } as never }), /use codex, antigravity, or subagentModel/);
+  assert.throws(() => resolveConfig({ presets: { best: { lead: 'x' } } as never }), /use codex, antigravity, subagentModel, subagentMax, or maxTier/);
 });
 
 test('saving a preset keeps every other setting, and clearing it removes the key', () => {

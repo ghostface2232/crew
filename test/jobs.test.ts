@@ -942,6 +942,19 @@ test('a job\'s model comes from the lead\'s model, then its tier, then the user\
   assert.deepEqual([polish.tier, polish.model, polish.effort], ['standard', 'hydrogen', undefined]);
   const literary = await jobs.create({ kind: 'polish', cwd: repo, targets: ['README.md'], isolation: 'in_place', tier: 'frontier' });
   assert.equal(literary.model, 'argon');
+
+  // The economy preset caps the model at the standard tier, even one named outright; effort stays the lead's.
+  current = resolveConfig({ preset: 'economy', roles: { polish: { agent: 'antigravity' } } });
+  const cheap = await start({});
+  assert.deepEqual([cheap.tier, cheap.model, cheap.effort], ['standard', tierModel('codex', 'standard'), 'low']);
+  const lowered = await start({ tier: 'frontier', effort: 'high' });
+  assert.deepEqual([lowered.tier, lowered.model, lowered.effort], ['standard', tierModel('codex', 'standard'), 'high']);
+  const astra = await start({ model: 'gpt-6-astra' });
+  assert.deepEqual([astra.tier, astra.model], ['standard', tierModel('codex', 'standard')]);
+  const other = await start({ model: 'some-unknown-model' });
+  assert.deepEqual([other.tier, other.model], [undefined, 'some-unknown-model']);
+  const argon = await jobs.create({ kind: 'polish', cwd: repo, targets: ['README.md'], isolation: 'in_place', model: 'gemini-4-argon' });
+  assert.deepEqual([argon.tier, argon.model], ['standard', 'hydrogen']);
 });
 
 test('the bridge runs the lead\'s check after each turn and marks it stale when the branch moves', async () => {

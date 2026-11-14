@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { TIERS } from './tiers.ts';
+import type { Tier } from './tiers.ts';
 
 export const PLUGIN_ROOT = path.resolve(import.meta.dirname, '..');
 
@@ -72,6 +74,10 @@ export interface Preset {
   antigravity?: { model?: string };
   /** Passed by the lead as the model of the subagents it starts; "inherit" leaves them on the lead's model. */
   subagentModel?: string;
+  /** The largest model the lead may give its subagents when a task needs more than subagentModel. */
+  subagentMax?: string;
+  /** The highest tier a worker job may run at; a higher tier is lowered to it. */
+  maxTier?: Tier;
 }
 
 export interface Config {
@@ -116,7 +122,7 @@ export interface Config {
  * user's config. They differ in Codex's effort and in the model the lead gives its subagents.
  */
 export const PRESETS: Record<PresetName, Preset> = {
-  economy: { codex: { effort: 'low' }, subagentModel: 'haiku' },
+  economy: { codex: { effort: 'low' }, subagentModel: 'haiku', subagentMax: 'sonnet', maxTier: 'standard' },
   balanced: { codex: { effort: 'medium' }, subagentModel: 'sonnet' },
   best: { codex: { effort: 'high' }, subagentModel: 'inherit' },
 };
@@ -186,9 +192,12 @@ function resolvePresets(user: UserConfig): Pick<Config, 'preset' | 'presets'> {
     if (!isObject(entry)) throw new Error(`presets.${name} must be an object.`);
     const merged: Preset = { ...PRESETS[name as PresetName] };
     for (const [key, value] of Object.entries(entry)) {
-      if (key === 'subagentModel') {
-        if (typeof value !== 'string') throw new Error(`presets.${name}.subagentModel must be a string.`);
-        merged.subagentModel = value;
+      if (key === 'subagentModel' || key === 'subagentMax') {
+        if (typeof value !== 'string') throw new Error(`presets.${name}.${key} must be a string.`);
+        merged[key] = value;
+      } else if (key === 'maxTier') {
+        if (!TIERS.includes(value as Tier)) throw new Error(`presets.${name}.maxTier must be one of: ${TIERS.join(', ')}.`);
+        merged.maxTier = value as Tier;
       } else if (key === 'codex' || key === 'antigravity') {
         const allowed = key === 'codex' ? ['model', 'effort'] : ['model'];
         if (!isObject(value)) throw new Error(`presets.${name}.${key} must be an object.`);
@@ -197,7 +206,7 @@ function resolvePresets(user: UserConfig): Pick<Config, 'preset' | 'presets'> {
           if (typeof text !== 'string') throw new Error(`presets.${name}.${key}.${setting} must be a string.`);
         }
         merged[key] = { ...merged[key], ...(value as Record<string, string>) };
-      } else throw new Error(`presets.${name}.${key} is not a setting; use codex, antigravity, or subagentModel.`);
+      } else throw new Error(`presets.${name}.${key} is not a setting; use codex, antigravity, subagentModel, subagentMax, or maxTier.`);
     }
     presets[name as PresetName] = merged;
   }

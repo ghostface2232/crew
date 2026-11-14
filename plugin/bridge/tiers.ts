@@ -69,6 +69,12 @@ export function tierModel(agent: WorkerAgent, tier: Tier, cache?: string): strin
   return agent === 'codex' ? codexModel(family, cache) : family;
 }
 
+/** The tier whose family a model name belongs to, for holding a named model under a preset's cap; undefined when none matches. */
+export function tierOf(agent: WorkerAgent, model: string): Tier | undefined {
+  const name = model.toLowerCase();
+  return [...TIERS].reverse().find((tier) => name.includes(TIER_FAMILIES[agent][tier]));
+}
+
 /** The session's model option that a requested model or family names: an exact value first, else the first value containing it. */
 export function pickModel(options: { value?: unknown; name?: unknown }[] | undefined, wanted: string): string | undefined {
   const values = (options ?? []).map((o) => o.value).filter((v): v is string => typeof v === 'string');

@@ -80,6 +80,8 @@ export interface Round {
   state: 'kept' | 'undone';
   /** The revert commit, when undone. */
   revert?: string;
+  /** The state the worker was last told of; absent means kept, as the worker made it. */
+  toldWorker?: 'undone';
   at: number;
 }
 
@@ -561,6 +563,9 @@ export class Jobs {
         fs.mkdirSync(job.scratch, { recursive: true });
       }
       if (synced) message += `\n\nYour worktree has been brought up to date: it now contains the lead's commits up to \`${synced.slice(0, 8)}\`, merged into your branch. Look at what changed (\`git log -5 --stat\`) before continuing.`;
+      // The worker's conversation still holds the edits of an undone round; told nothing, it builds on them.
+      const untold = (job.rounds ?? []).filter((round) => round.state !== (round.toldWorker ?? 'kept'));
+      message += roundsNotice(untold);
       if (job.kind === 'review' && job.runsApp) {
         this.preparingReviews.add(id);
         try {
@@ -597,6 +602,10 @@ export class Jobs {
         }
       }
       await adapter.reply(ctl, message);
+      for (const round of untold) {
+        if (round.state === 'undone') round.toldWorker = 'undone';
+        else delete round.toldWorker;
+      }
     } catch (err) {
       ctl.fail(String((err as Error)?.message ?? err));
     }
@@ -1110,6 +1119,18 @@ export class Jobs {
 function headline(report: string): string {
   const line = report.split('\n').find((l) => l.trim() && !l.startsWith('#')) ?? '';
   return line.trim().slice(0, 140);
+}
+
+/** Tells the worker which of its rounds were undone or restored since it last heard. */
+function roundsNotice(rounds: Round[]): string {
+  const list = (state: Round['state']) => rounds.filter((round) => round.state === state)
+    .map((round) => `turn ${round.turn} (${round.files.join(', ')})`).join('; ');
+  const undone = list('undone');
+  const restored = list('kept');
+  let notice = '';
+  if (undone) notice += `\n\nThe changes you made in ${undone} were undone: they are reverted on your branch and no longer in your worktree. Do not redo them unless this message asks you to.`;
+  if (restored) notice += `\n\nThe changes you made in ${restored}, undone earlier, were restored and are in your worktree again.`;
+  return notice;
 }
 
 /** Files changed outside the paths the worker was told it may touch. */

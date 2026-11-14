@@ -230,3 +230,40 @@ Comparing Crew's board (`plugin/board/`) and workflow against the surveyed tools
 ### UX conclusion
 
 Crew's status display and approval routing are cleaner than most of the surveyed tools. Its weak spot is the screen where the user reads what happened and decides whether to merge. Because the universal bottleneck in parallel-agent tools is review rather than code generation, expanding the board from passive status display into decision support (card detail drawer, per-job feed, free-text question answers, and merge candidate summaries) will deliver the largest payoff.
+
+## 10. Session features in Claude Code and Codex (2026-11-14)
+
+Checked against code.claude.com docs and Codex CLI 0.167.0 (app-server schema generated locally; GitHub release 0.169.0). Items marked "unverified" were not confirmed by a source.
+
+### What exists
+
+| Feature | Claude Code | Codex |
+| --- | --- | --- |
+| Fork | `/branch`, `/fork`, `--fork-session`; SDK `forkSession` | `thread/fork` (optionally `ephemeral`), `codex fork` |
+| Side question | `/btw` (not added to history) | `/side` (alias `/btw`); whether it is ephemeral is unverified |
+| History rewind | — | `thread/revert {beforeTurnId}` drops that turn and all later ones; `thread/rollback` is gone |
+| Steer and queue | Messages are read between tool calls | `turn/steer` (needs `expectedTurnId`); `thread/queue/*` (experimental) for the next turn |
+| Subagents | Agent tool, `isolation: worktree`, 20 concurrent, depth 3 | `multi_agent` on by default, 6 threads, depth 1; children are threads with `parentThreadId` |
+| Cross-session messages | `ListAgents` / `SendMessage` over a per-session Unix socket; plain text, cannot approve prompts | Several clients can attach to one thread through a shared app-server daemon; which client gets a server request is unverified |
+| Push into a running session | `asyncRewake` hooks; Channels (MCP push, research preview, `--channels` at launch) | Not applicable: the client drives the thread |
+| Remote | Remote Control relays a local session to claude.ai and mobile; cloud sessions, `--teleport` | `codex remote-control` (experimental, pairing from the desktop app), `codex cloud`, WebSocket listener |
+| Approvals | Permission prompts; peers cannot answer them | `approvalsReviewer: auto_review`; `thread/approveGuardianDeniedAction` overrides a denial |
+
+### What Crew already matches
+
+- Waking the lead with an `asyncRewake` hook is the documented mechanism.
+- Sub-agent threads are tied to their job through `parentThreadId`, and their approval requests reach the user marked "Sub-agent request" ([codex.ts](../plugin/bridge/adapters/codex.ts)), so Codex's `multi_agent` is left on.
+- A session that has Remote Control on runs on this machine, so its hooks reach the daemon and the board shows it like any other Claude session (checked 2026-11-14 with a live session). Sessions that run in the cloud send no hooks and are not shown. Crew shows a session's state and phase, not its transcript.
+
+### Adopted
+
+- Undoing a round now tells the worker on its next turn ([09-usage-presets-rounds.md](09-usage-presets-rounds.md) section 2).
+
+### Candidates, not adopted yet
+
+- Answer a question about a strand from an ephemeral `thread/fork` of that worker, so it has the worker's context and leaves its history unchanged. Cross-review stays a fresh thread (section 4).
+- Send a note left on a busy worker with `thread/queue/add`, keeping `turn/steer` for messages meant to change the running turn.
+- Read waiting state from `thread/status/changed` (`waitingOnApproval`, `waitingOnUserInput`) instead of inferring it.
+- Retry an action the automatic reviewer refused with `thread/approveGuardianDeniedAction` instead of a follow-up message.
+- Wake the lead through a Channel for jobs started from the board, which arm no hook. Blocked until Channels leave research preview and work in Claude Desktop.
+- Phone notifications through Remote Control and the lead's push notifications, which may cover much of roadmap item L4 without a separate mobile view.

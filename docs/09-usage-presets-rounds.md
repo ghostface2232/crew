@@ -35,6 +35,8 @@ Jobs gain `rounds?: Round[]` and `ask?: boolean` (`jobs.ts`); missions gain `not
 
 A round can be undone or kept only while the job is not running or waiting, its worktree still exists as its own directory on the job branch, and the revert applies cleanly; otherwise the request fails with the reason and nothing changes. Round states are replayed from the reverts on the branch before each change, so one made just before the daemon stopped is not lost.
 
+Undoing a round changes the files, not the worker's conversation, which still holds those edits. The next follow-up turn therefore names each round whose state changed since the worker last heard (undone, or restored after an undo) and tells it not to redo undone changes unless asked; `Round.toldWorker` records what it was told, so an undo followed by a keep before the next turn says nothing. This works for every agent. Codex's `thread/revert` was not used: it drops the turn and every later one from the history, cannot undo a middle round alone, and cannot be reversed when the round is kept again.
+
 A question job is read-only for both agents: Codex runs it with no approval prompts and the bridge declines any request to write, and Antigravity's edits and commands are refused.
 
 ## 3. Usage status

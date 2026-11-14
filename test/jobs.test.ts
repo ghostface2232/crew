@@ -897,7 +897,9 @@ for (const kind of ['delegate', 'polish'] as const) {
     assert.equal(events.at(-1)!.detail, 'round 2 kept');
 
     await jobs.round(job.id, 1, 'undo');
-    adapter.reply = async (ctl) => {
+    const sent: string[] = [];
+    adapter.reply = async (ctl, message) => {
+      sent.push(message);
       assert.equal(fs.existsSync(path.join(ctl.job.cwd, 'new.js')), false);
       fs.writeFileSync(path.join(ctl.job.cwd, 'later.js'), 'later\n');
       ctl.done('continued after undo');
@@ -907,6 +909,24 @@ for (const kind of ['delegate', 'polish'] as const) {
     assert.deepEqual(job.rounds!.map((round) => [round.turn, round.state]), [[1, 'undone'], [2, 'kept'], [4, 'kept']]);
     assert.deepEqual(job.rounds![2].files, ['later.js']);
     assert.deepEqual(job.result!.files, ['README.md', 'later.js']);
+    // Round 2 was undone and kept again before this turn, so only round 1 is news to the worker.
+    assert.match(sent[0], /^continue\n\nThe changes you made in turn 1 \(new\.js\) were undone/);
+    assert.doesNotMatch(sent[0], /turn 2|restored/);
+    assert.equal(job.rounds![0].toldWorker, 'undone');
+
+    adapter.reply = async (ctl, message) => {
+      sent.push(message);
+      ctl.done('no changes');
+    };
+    await jobs.reply(job.id, { message: 'and now?' });
+    await settled(jobs, job);
+    assert.equal(sent[1], 'and now?');
+
+    await jobs.round(job.id, 1, 'keep');
+    await jobs.reply(job.id, { message: 'last' });
+    await settled(jobs, job);
+    assert.match(sent[2], /The changes you made in turn 1 \(new\.js\), undone earlier, were restored/);
+    assert.ok(!('toldWorker' in job.rounds![0]));
     await jobs.discard(job.id);
   });
 }

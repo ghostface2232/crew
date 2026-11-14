@@ -1,6 +1,6 @@
 import readline from 'node:readline';
 import { api, ensureDaemon } from './client.ts';
-import { BASE_URL, canonicalPath, DEFAULT_ROLES, loadConfig, VERSION, WORKERS } from './config.ts';
+import { BASE_URL, canonicalPath, DEFAULT_ROLES, loadConfig, MAX_DEBATE_ROUNDS, VERSION, WORKERS } from './config.ts';
 import { listSkills } from './skills.ts';
 import { describeUsage } from './usage.ts';
 import type { RouteDecision, Usage } from './usage.ts';
@@ -157,6 +157,23 @@ const TOOLS = [
         ...common,
       },
       required: ['targets'],
+    },
+  },
+  {
+    name: 'debate',
+    title: `Debate with ${holder('delegate')}`,
+    description: `Debate a hard, tricky, or important decision with the supporting engineer (${holder('delegate')}) before acting on it: a design, a risky change, a diagnosis you are unsure of. It reads the code and docs, tests your position, and answers point by point, changing nothing. Continue with reply (a message) for each further round, up to the round limit; the last round ends with a conclusion. Use it only where a second view is worth several turns; routine work does not need it. Record what was decided in the mission's record.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        topic: { type: 'string', description: 'The decision to debate and its context: the problem, constraints, files and docs involved. It has not seen this conversation.' },
+        position: { type: 'string', description: 'Your current position and reasoning, for it to test.' },
+        rounds: { type: 'integer', minimum: 1, maximum: MAX_DEBATE_ROUNDS, description: 'How many exchanges at most, counting the first. Default 3.' },
+        title: { type: 'string', description: 'Short label shown on the status board.' },
+        ...modelProps,
+        ...common,
+      },
+      required: ['topic', 'position'],
     },
   },
   {
@@ -505,6 +522,8 @@ function render(job: JobView): string {
 async function callTool(name: string, args: any, ctx: CallContext): Promise<string> {
   const cwd: string = args.cwd ?? PROJECT;
   switch (name) {
+    case 'debate':
+      return runJob({ kind: 'delegate', cwd, title: args.title ?? `Debate: ${String(args.topic).split('\n')[0].slice(0, 60)}`, task: `${args.topic}\n\n# The lead's position\n${args.position}`, debate: { rounds: args.rounds ?? 3 }, tier: args.tier, model: args.model, effort: args.effort }, args.background !== false, ctx);
     case 'delegate':
       return runJob({ kind: 'delegate', cwd, title: args.title, task: args.task, done_when: args.done_when, check: args.check, base: args.base, isolation: args.isolation, tier: args.tier, model: args.model, effort: args.effort, exclusive: Boolean(args.exclusive), runsApp: Boolean(args.runs_app), plugins: args.plugins, skills: args.skills, attachments: args.attachments }, args.background !== false, ctx);
     case 'review': {

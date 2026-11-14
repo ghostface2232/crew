@@ -23,7 +23,8 @@ export const needsLead = (job: JobView) => job.state !== 'running' || ((job.ques
 /** `waitingHint` replaces the default advice on how to settle a waiting job. */
 export function describe(job: JobView, waitingHint?: string): string {
   const elapsed = duration((job.endedAt ?? Date.now()) - job.createdAt);
-  const lines = [`[${job.id}] ${WORKERS[job.agent].name} · ${job.kind} · ${job.state.toUpperCase()} (${elapsed}) — ${job.title}`];
+  const kind = job.debate ? `debate, round ${job.turns} of ${job.debate.rounds}` : job.kind;
+  const lines = [`[${job.id}] ${WORKERS[job.agent].name} · ${kind} · ${job.state.toUpperCase()} (${elapsed}) — ${job.title}`];
 
   const effort = job.resolvedEffort ?? (job.agent === 'codex' && !job.nativeReview ? job.effort : undefined);
   lines.push(`model: ${job.resolvedModel ?? job.model ?? 'unknown (agent default)'}${effort ? ` · effort: ${effort}` : ''}${job.tier && job.tier !== 'standard' ? ` · tier: ${job.tier}` : ''}`);

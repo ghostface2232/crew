@@ -66,6 +66,9 @@ export interface RoleAssignment {
   effort?: string;
 }
 
+/** A debate longer than this has stopped converging; the lead should decide or start over. */
+export const MAX_DEBATE_ROUNDS = 6;
+
 export type PresetName = 'economy' | 'balanced' | 'best';
 
 /** Model and effort a preset gives each agent, and the model the lead should give its subagents. */

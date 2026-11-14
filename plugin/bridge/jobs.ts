@@ -4,7 +4,7 @@ import path from 'node:path';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { runCheck } from './check.ts';
 import type { CheckResult } from './check.ts';
-import { canonicalPath, effectiveRole, PORT, runsCommands, WORKERS } from './config.ts';
+import { canonicalPath, effectiveRole, MAX_DEBATE_ROUNDS, PORT, runsCommands, WORKERS } from './config.ts';
 import type { Config, Role, WorkerAgent } from './config.ts';
 import { carryUncommitted, changesSince, commitAll, commitChanges, copyIncluded, createWorktree, currentBranch, dirtyCount, git, mergeInto, isInside, projectRoot, realpath, removeDirectory, removeEmptyLeftover, removeWorktree, repoRoot, revertCommit, revertsSince, reviewDiff, WorktreeCleanupError } from './git.ts';
 import { collectGarbage } from './gc.ts';
@@ -79,6 +79,8 @@ export interface JobSpec {
   ask?: boolean;
   /** Lines the caller wants shown with the result from the start. */
   notes?: string[];
+  /** A read-only debate with the lead over a hard or important decision, in at most `rounds` exchanges. Implies ask. */
+  debate?: { rounds: number };
   /** Names of the user's skills (`~/.agents/skills`) the lead picked for this job; the worker is told to read them. */
   skills?: string[];
   /** Additional Codex plugin names beyond the configured defaults. */
@@ -109,6 +111,13 @@ export interface Capabilities {
   network: 'on' | 'off' | 'agent-managed';
   /** Plugins on for the job. Their tools act outside the sandbox. */
   plugins: string[];
+}
+
+export interface ExchangeEntry {
+  turn: number;
+  from: 'lead' | 'worker';
+  text: string;
+  at: number;
 }
 
 export interface RelayedApproval {
@@ -169,6 +178,10 @@ export interface Job {
   runsApp?: boolean;
   /** Answers a question read-only; see JobSpec.ask. */
   ask?: boolean;
+  /** A debate: how many rounds it may run. The current round is the job's turn. */
+  debate?: { rounds: number };
+  /** The messages of the job in order: the lead's task and follow-ups, and the worker's report for each turn. */
+  exchange?: ExchangeEntry[];
   /** The user's Codex plugins that are on for this job, by name; absent when it runs with none. */
   plugins?: string[];
   /** Caller-picked names, kept apart from configured defaults so unavailable explicit requests can be noted. */
@@ -303,6 +316,16 @@ export interface JobsHooks {
 }
 
 const TERMINAL: JobState[] = ['done', 'failed', 'cancelled'];
+const MAX_EXCHANGE_TEXT = 20_000;
+const KEEP_EXCHANGE = 40;
+
+/** Adds a message to the job's conversation, bounded so a long debate cannot grow the record without limit. */
+function exchanged(job: Job, from: ExchangeEntry['from'], text: string): void {
+  const trimmed = text.trim();
+  if (!trimmed) return;
+  const entry = { turn: job.turns, from, text: trimmed.length > MAX_EXCHANGE_TEXT ? `${trimmed.slice(0, MAX_EXCHANGE_TEXT)}\n… (cut)` : trimmed, at: Date.now() };
+  job.exchange = [...(job.exchange ?? []), entry].slice(-KEEP_EXCHANGE);
+}
 const KEEP_JOBS = 200;
 const KEEP_EVENTS = 5000;
 
@@ -443,6 +466,12 @@ export class Jobs {
 
   private async start(spec: JobSpec): Promise<Job> {
     if (this.collecting) throw new Error('Crew gc is running. Try again when it finishes.');
+    if (spec.debate !== undefined) {
+      const rounds = spec.debate?.rounds;
+      if (!Number.isInteger(rounds) || rounds < 1 || rounds > MAX_DEBATE_ROUNDS) throw new Error(`A debate takes 1 to ${MAX_DEBATE_ROUNDS} rounds.`);
+      if (spec.kind !== 'delegate') throw new Error('A debate must use kind "delegate".');
+      spec.ask = true;
+    }
     if (spec.ask) {
       if (spec.kind !== 'delegate') throw new Error('An ask job must use kind "delegate".');
       if (!spec.task?.trim()) throw new Error('An ask job requires a task with the question to answer.');
@@ -560,6 +589,7 @@ export class Jobs {
       exclusive: Boolean(spec.exclusive) || undefined,
       runsApp: Boolean(spec.runsApp) || undefined,
       ask: Boolean(spec.ask) || undefined,
+      debate: spec.debate ? { rounds: spec.debate.rounds } : undefined,
       plugins: plugins.length ? plugins : undefined,
       requestedPlugins,
       cwd,
@@ -591,6 +621,7 @@ export class Jobs {
       seq: 0,
       delivered: 0,
     };
+    exchanged(job, 'lead', spec.task ?? '');
     this.jobs.set(id, job);
     if (job.kind === 'review' && repo) await this.recordReviewed(job, repo);
     this.event(job, 'started', `${spec.kind}: ${title}`);
@@ -633,6 +664,9 @@ export class Jobs {
     const retry = input.approved_by_user === undefined ? null : this.retryRefused(job, input.approved_by_user, input.message, input.lead_session);
     if (retry) input = { message: retry.message };
     if (!input.message) throw new Error(`Job ${id} is not waiting for a decision. Pass a message to send a follow-up.`);
+    if (job.debate && isTerminal(job) && job.turns >= job.debate.rounds) {
+      throw new Error(`This debate has had its ${job.debate.rounds} round(s). Decide from it, or start a new debate if it must go on.`);
+    }
     if (!job.sessionId) throw new Error(`Job ${id} never opened a session, so there is nothing to continue. Start a new job instead.`);
     // Its directory is gone: a turn would run nowhere, and its edits would be reported as made in place.
     // A review that runs the app is the exception: its snapshot is made anew for each turn, below.
@@ -695,6 +729,10 @@ export class Jobs {
     job.retrying = retry?.actions;
     job.turns += 1;
     if (retry) (job.approvals ??= []).push({ ...retry.approval, turn: job.turns });
+    exchanged(job, 'lead', input.message);
+    const round = !job.debate ? '' : `\n\n${job.turns === job.debate.rounds
+      ? `This is the final round (${job.turns} of ${job.debate.rounds}). Answer, then close with your Conclusion.`
+      : `Round ${job.turns} of ${job.debate.rounds}.`}`;
     this.turnStartTokens.set(id, job.tokens ?? 0);
     job.activeAt = Date.now();
     const what = !retry ? input.message.split('\n')[0].slice(0, 80) : job.asksUser ? 'refused action retried; the user is asked about each request' : 'refused action retried with the user\'s approval';
@@ -710,7 +748,7 @@ export class Jobs {
         }
         if (isTerminal(job)) return job;
       }
-      let message = this.attach(job, input.message, attachments, job.turns) + syncWarning;
+      let message = this.attach(job, input.message, attachments, job.turns) + round + syncWarning;
       if (job.agent === 'codex') {
         job.scratch = this.scratchDir(id);
         fs.mkdirSync(job.scratch, { recursive: true });
@@ -1294,6 +1332,7 @@ export class Jobs {
     }
     this.finalizing.delete(job.id);
     if (isTerminal(job)) return;
+    exchanged(job, 'worker', report);
     job.report = report;
     job.result = result;
     job.state = 'done';

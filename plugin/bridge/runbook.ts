@@ -39,7 +39,11 @@ export function runbook(mission: Mission, jobs: Job[]): string {
     for (const refusal of job.refusals ?? []) out.push(`- turn ${refusal.turn} refused: \`${refusal.action.split('\n')[0]}\` (${refusal.reason})`);
     for (const approval of job.approvals ?? []) out.push(`- turn ${approval.turn}: the lead relayed the user's approval${approval.matched ? ', matching their words' : ''}`);
     if (job.error) out.push(`- error: ${job.error.message.split('\n')[0]}`);
-    if (job.report.trim()) out.push('', '<details><summary>Report</summary>', '', job.report.trim(), '', '</details>');
+    if (job.debate && job.exchange?.length) {
+      out.push('', '<details><summary>Debate</summary>', '');
+      for (const entry of job.exchange) out.push(`**${entry.from === 'lead' ? 'Lead' : WORKERS[job.agent].name}, round ${entry.turn}**`, '', entry.text, '');
+      out.push('</details>');
+    } else if (job.report.trim()) out.push('', '<details><summary>Report</summary>', '', job.report.trim(), '', '</details>');
   }
   return `${out.join('\n')}\n`;
 }

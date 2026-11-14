@@ -27,6 +27,8 @@ Read the relevant code first. Decide the change, then split it:
 
 If nothing separates cleanly, do it all yourself. Do not invent work to delegate.
 
+When the decision itself is hard, tricky, or important (a design with failure modes you are unsure of, a risky migration, a diagnosis you cannot settle), `debate` it with the engineer before you build: state your position, answer its points with `reply` for a few rounds, and put what was decided in the mission's `record`. Routine work does not need a debate.
+
 ## 2. Implement (you and the engineer, in parallel)
 
 Workers start from `HEAD` in their own worktree, so commit anything they need first. Gitignored files such as `node_modules` and `.env` are copied in only if the repository's `.worktreeinclude` lists them; if a worker reports that it could not run the tests for lack of dependencies, tell the user to add them there.

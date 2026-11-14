@@ -958,6 +958,28 @@ test('a job\'s model comes from the lead\'s model, then its tier, then the user\
   assert.deepEqual([argon.tier, argon.model], ['standard', 'hydrogen']);
 });
 
+test('a debate runs read-only for its rounds, keeps the conversation, and ends with a conclusion', async () => {
+  const repo = tempRepo();
+  const { jobs, adapter, calls } = harness((ctl) => ctl.done('1. disagree: the hook can be lost'));
+  await assert.rejects(jobs.create({ kind: 'delegate', cwd: repo, task: 't', debate: { rounds: 0 } }), /A debate takes 1 to 6 rounds/);
+  await assert.rejects(jobs.create({ kind: 'review', cwd: repo, task: 't', debate: { rounds: 2 }, review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } }), /must use kind "delegate"/);
+  const job = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'Should wakes be batched?\n\n# The lead\'s position\nYes.', debate: { rounds: 2 } }));
+  assert.equal(job.ask, true);
+  assert.equal(job.sandbox, 'read-only');
+  assert.equal(job.worktree, null);
+  assert.match(job.instructions, /Role: design debater/);
+  assert.match(job.prompt, /# Debate\nShould wakes be batched\?[^]*round 1 of 2/);
+  assert.match(describe(job), /debate, round 1 of 2/);
+
+  adapter.reply = async (ctl, message) => { calls.push(message); ctl.done('Conclusion: send each wake on its own.'); };
+  await jobs.reply(job.id, { message: 'The hook cannot be lost if the Stop hook re-arms it.' });
+  await settled(jobs, job);
+  assert.match(calls.at(-1)!, /re-arms it\.\n\nThis is the final round \(2 of 2\)\. Answer, then close with your Conclusion\.$/);
+  assert.deepEqual(job.exchange?.map(({ turn, from }) => `${turn}:${from}`), ['1:lead', '1:worker', '2:lead', '2:worker']);
+  assert.equal(job.exchange?.[2].text, 'The hook cannot be lost if the Stop hook re-arms it.');
+  await assert.rejects(jobs.reply(job.id, { message: 'one more' }), /has had its 2 round\(s\)/);
+});
+
 test('the bridge runs the lead\'s check after each turn and marks it stale when the branch moves', async () => {
   const repo = tempRepo();
   const { jobs, adapter } = harness((ctl) => {

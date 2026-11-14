@@ -78,6 +78,10 @@ const SNAPSHOT = 'You are in a snapshot of the change, not the user\'s working t
 const ALONE = '# Measurement\nThis job has the machine to itself: no other Crew job runs until it ends. Take your measurements now, and report the conditions with the numbers: what was running, how many runs, and the spread between them.';
 
 function assignment(spec: JobSpec, worktree: Worktree | null, diffFile: string | null): { prompt: string; instructions: string } {
+  if (spec.debate) {
+    const parts = [`# Debate\n${spec.task}`, `# Rounds\nThis is round 1 of ${spec.debate.rounds}. The lead answers each of your messages; you reply in the next round.`];
+    return { instructions: role('debater'), prompt: parts.join('\n\n') };
+  }
   if (spec.ask) {
     const parts = [`# Question\n${spec.task}`];
     if (spec.done_when) parts.push(`# Acceptance criteria\n${spec.done_when}`);

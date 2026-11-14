@@ -53,7 +53,7 @@ test('polish advertises the shared model option and forwards it to the job', asy
   // Evaluate just the schema and handler case, without starting the stdio server or a daemon.
   const source = fs.readFileSync(new URL('../plugin/bridge/mcp.ts', import.meta.url), 'utf8');
   const modelProps = vm.runInNewContext(`(${source.match(/const modelProps = (\{[^]*?\n\});/)![1]})`, { TIERS });
-  const schema = source.slice(source.indexOf("    name: 'polish',"), source.indexOf("    name: 'mission',"));
+  const schema = source.slice(source.indexOf("    name: 'polish',"), source.indexOf("    name: 'debate',"));
   const tool = vm.runInNewContext(`({${schema.slice(0, schema.lastIndexOf('\n  },'))}})`, {
     holder: () => 'Antigravity', worktreeProps: {}, skillsProp: {}, common: {}, modelProps,
   });

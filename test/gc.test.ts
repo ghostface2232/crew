@@ -31,7 +31,15 @@ function fixture(t: TestContext, platform: NodeJS.Platform = process.platform) {
     nativeReview: null, tokens: null, error: null, result: null, sessionId: null, turns: 1, report: '',
     sandbox: 'workspace-write', prompt: '', instructions: '', targets: [], activeAt: 0, stalled: false, waiting: null } as Job;
   jobs.jobs.set(job.id, job);
-  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); jobs.flush(); fs.rmSync(home, { recursive: true, force: true }); });
+  t.after(() => {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+    // The Jobs instance outlives the test: a job left running, last active at 0, would be marked stalled by the
+    // 15-second check and saved into the removed home once a slow run passes that mark.
+    for (const job of jobs.list()) job.state = 'done';
+    jobs.flush();
+    fs.rmSync(home, { recursive: true, force: true });
+  });
   return { home, repo, git, jobs, job, adapter };
 }
 

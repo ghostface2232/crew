@@ -1911,7 +1911,8 @@ test('on Windows, an empty worktree folder left by a held handle is removed when
   };
   fs.writeFileSync(path.join(home, 'jobs.json'), JSON.stringify({ seq: 1, jobs: [job] }));
   const jobs = new Jobs(home, () => config, {} as never, { onEvent: () => {}, onJob: () => {}, onAttention: () => {} }, 'win32');
-  for (let i = 0; i < 100 && fs.existsSync(dir); i++) await new Promise((resolve) => setTimeout(resolve, 20));
+  // The record is cleared after the folder goes, so the wait is for the record.
+  for (let i = 0; i < 100 && jobs.get('cx-abcdef').worktree; i++) await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(fs.existsSync(dir), false);
   const restored = jobs.get('cx-abcdef');
   assert.equal(restored.worktree, null);

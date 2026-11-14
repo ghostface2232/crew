@@ -239,9 +239,13 @@ struct AgentOverview: View {
                 // Usage sits further from the agent's row than its own label from its bar, as on the cards.
                 VStack(alignment: .leading, spacing: 14) {
                     HStack(spacing: 10) {
-                        AgentMark(agent: agent, size: 18)
-                        Text(agentName(agent)).font(Typeface.calloutStrong)
-                        Spacer()
+                        AgentMark(agent: agent, size: 20)
+                        // The name as on the cards, with the role beside it: the row has room across, not down.
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(agentName(agent)).font(Typeface.cardTitle).fixedSize()
+                            Text(agentRole(agent, store: store)).font(Typeface.caption).foregroundStyle(.secondary).fadeTruncated()
+                        }
+                        Spacer(minLength: 8)
                         let jobs = store.state.jobs.filter { $0.agent == agent && $0.isActive && (store.project.isEmpty || $0.projectPath == store.project) }
                         let sessions = store.state.claude.filter { $0.state != "idle" && (store.project.isEmpty || $0.projectPath == store.project) }
                         let count = agent == "claude" ? sessions.count : jobs.count
@@ -255,10 +259,15 @@ struct AgentOverview: View {
                     }
                     if let usage = store.usage, usage.source != "none" { AgentUsageView(store: store, agent: agent) }
                 }.padding(.horizontal, WorkspaceStyle.cardPadding).padding(.vertical, 11)
-                if agent != agents.last { Divider().padding(.leading, WorkspaceStyle.cardPadding + 28) }
+                if agent != agents.last { Divider().padding(.leading, WorkspaceStyle.cardPadding + 30) }
             }
         }.card(padding: 0)
     }
+}
+
+/// The roles an agent holds, as the user assigned them; Claude always leads.
+@MainActor private func agentRole(_ agent: String, store: CrewStore) -> String {
+    agent == "claude" ? "Lead" : roleOrder.filter { store.state.roles[$0]?.agent == agent }.compactMap { roleNames[$0] }.joined(separator: " · ")
 }
 
 /// Claude sessions open in this scope but between turns.
@@ -292,9 +301,8 @@ private struct AgentCard: View {
                     Text(agentName(agent)).font(Typeface.cardTitle).fixedSize()
                     // The role truncates and claims no width of its own, so the name and status set
                     // the card's minimum and the cards give way to the list only when those no longer fit.
-                    Text(agent == "claude" ? "Lead" : roleOrder.filter { store.state.roles[$0]?.agent == agent }.compactMap { roleNames[$0] }.joined(separator: " · "))
-                        .font(Typeface.caption).foregroundStyle(.secondary).lineLimit(1)
-                        .frame(minWidth: 0, idealWidth: 0, maxWidth: .infinity, alignment: .leading)
+                    Text(agentRole(agent, store: store))
+                        .font(Typeface.caption).foregroundStyle(.secondary).fadeTruncated()
                 }
                 Spacer(minLength: 8)
                 StatusLabel(state: mark, title: mark == "waiting" ? "Needs you" : mark == "working" ? "Working" : mark == "stalled" ? "May be stuck" : store.state.agents[agent]?.enabled == false ? "Disabled" : "Ready")

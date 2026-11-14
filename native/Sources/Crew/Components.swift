@@ -366,7 +366,8 @@ private struct FadeTruncation: ViewModifier {
     func body(content: Content) -> some View {
         content.lineLimit(1).fixedSize(horizontal: true, vertical: false)
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { natural = $0 }
-            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+            // No ideal width of its own, so a long line never decides a layout that fits by ideal sizes.
+            .frame(minWidth: 0, idealWidth: 0, maxWidth: .infinity, alignment: .leading)
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { available = $0 }
             .clipped()
             .mask {

@@ -39,6 +39,10 @@ interface Run {
   pending: Pending[];
   crewCalls: Set<string>;
   items: Map<string, ItemDetails>;
+  /** Sub-agent threads with a turn in flight; they can still edit the worktree. */
+  busyChildren: Set<string>;
+  /** The parent's turn/completed, held until busyChildren is empty so the result includes their edits. */
+  held: any | null;
 }
 
 export interface CodexLimits {
@@ -266,7 +270,7 @@ export class CodexAdapter implements Adapter {
   }
 
   private openRun(ctl: JobCtl, threadId: string, pluginsEnabled = false): Run {
-    const run: Run = { ctl, pluginsEnabled, turnId: null, awaitingTurn: false, interrupt: null, message: '', pending: [], crewCalls: new Set(), items: new Map() };
+    const run: Run = { ctl, pluginsEnabled, turnId: null, awaitingTurn: false, interrupt: null, message: '', pending: [], crewCalls: new Set(), items: new Map(), busyChildren: new Set(), held: null };
     this.runs.set(threadId, run);
     return run;
   }
@@ -294,7 +298,11 @@ export class CodexAdapter implements Adapter {
       }
     } catch (err) {
       if (err instanceof RpcTimeoutError) {
-        if (run.awaitingTurn) run.ctl.note(`${err.message}. The turn may have started. Check the worker session before retrying.`);
+        // Not retried: the turn may have started. Failing ends the job instead of leaving it running and uncancellable.
+        if (run.awaitingTurn) {
+          run.awaitingTurn = false;
+          run.ctl.fail(`${err.message}. The turn may have started anyway; check the worker session (resume command) before retrying.`);
+        }
         return;
       }
       run.awaitingTurn = false;
@@ -377,6 +385,7 @@ export class CodexAdapter implements Adapter {
     if (method === 'thread/closed') {
       const owner = this.children.get(threadId);
       if (owner) {
+        this.childSettled(owner, threadId);
         for (let index = owner.pending.length - 1; index >= 0; index--) {
           if (owner.pending[index].threadId === threadId) this.settleRequest(owner, index, null);
         }
@@ -402,8 +411,10 @@ export class CodexAdapter implements Adapter {
     const run = this.runs.get(threadId);
     if (!run) {
       // Sub-agent work only proves the job is alive; its turns must not end the parent job.
+      if (method === 'turn/started') owner?.busyChildren.add(threadId);
       if (method === 'turn/completed') {
         for (const key of owner?.items.keys() ?? []) if (key.startsWith(`${threadId}\0`)) owner?.items.delete(key);
+        if (owner) this.childSettled(owner, threadId);
       }
       this.children.get(threadId)?.ctl.activity();
       return;
@@ -442,25 +453,48 @@ export class CodexAdapter implements Adapter {
         if (p.willRetry) ctl.progress(`retrying: ${p.error.message}`);
         break;
       case 'turn/completed': {
-        run.turnId = null;
-        run.awaitingTurn = false;
-        run.crewCalls.clear();
-        run.items.clear();
-        for (const request of run.pending.splice(0)) request.resolve(null);
-        const turn = p.turn;
-        if (run.interrupt || turn.status === 'interrupted') ctl.cancelled();
-        else if (turn.status === 'completed') ctl.done(run.message);
-        else {
-          const info = turn.error?.codexErrorInfo;
-          ctl.fail(turn.error?.message ?? 'turn failed', { limit: typeof info === 'string' && LIMIT_ERRORS.includes(info) });
+        if (run.busyChildren.size && p.turn?.status === 'completed' && !run.interrupt) {
+          // Collecting the result now would miss what a sub-agent still writes.
+          run.turnId = null;
+          run.held = p;
+          ctl.phase(`waiting for ${run.busyChildren.size} sub-agent(s) to finish`);
+          break;
         }
-        run.interrupt?.resolve();
+        this.endTurn(run, p);
         break;
       }
       default:
         // Streaming deltas and other chatter: proof of life, nothing to log.
         ctl.activity();
     }
+  }
+
+  /** A sub-agent's turn ended; a parent completion held for it goes ahead once none is left. */
+  private childSettled(run: Run, threadId: string): void {
+    run.busyChildren.delete(threadId);
+    if (run.held && run.busyChildren.size === 0) {
+      const held = run.held;
+      run.held = null;
+      this.endTurn(run, held);
+    }
+  }
+
+  private endTurn(run: Run, p: any): void {
+    const { ctl } = run;
+    run.turnId = null;
+    run.awaitingTurn = false;
+    run.held = null;
+    run.crewCalls.clear();
+    run.items.clear();
+    for (const request of run.pending.splice(0)) request.resolve(null);
+    const turn = p.turn;
+    if (run.interrupt || turn.status === 'interrupted') ctl.cancelled();
+    else if (turn.status === 'completed') ctl.done(run.message);
+    else {
+      const info = turn.error?.codexErrorInfo;
+      ctl.fail(turn.error?.message ?? 'turn failed', { limit: typeof info === 'string' && LIMIT_ERRORS.includes(info) });
+    }
+    run.interrupt?.resolve();
   }
 
   private onItemStarted(ctl: JobCtl, item: any): void {

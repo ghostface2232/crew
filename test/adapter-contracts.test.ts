@@ -115,10 +115,7 @@ const permission = (id: string) => `send({ id: '${id}', method: 'session/request
 } });`;
 const terminalEvents = (events: CrewEvent[], job: Job) => events.filter((event) => event.job_id === job.id && ['done', 'error', 'limit', 'cancelled'].includes(event.kind));
 
-// Current behavior: sendTurn catches RpcTimeoutError and only adds a note, leaving awaitingTurn set.
-test('Codex lost turn/start acknowledgement fails clearly instead of remaining active', {
-  timeout: 8000, todo: 'codex.ts sendTurn swallows the setup timeout and leaves the job running and uncancellable',
-}, async (t) => {
+test('Codex lost turn/start acknowledgement fails clearly instead of remaining active', { timeout: 8000 }, async (t) => {
   const h = harness(t, codex(''));
   t.mock.timers.enable({ apis: ['setTimeout'] });
   try {
@@ -223,11 +220,8 @@ test('Codex parentThreadId routes a child approval to the user and returns its a
   assert.equal(terminalEvents(h.events, job).length, 1);
 });
 
-// Current behavior: the parent completion finalizes the worktree even though the child
-// has not completed. The gate lets the child edit only after the test sees job.state=done.
-test('Codex parent completion must not finalize a worktree while its child can still edit it', {
-  timeout: 10000, todo: 'codex.ts handles parent turn/completed without waiting for or stopping active child threads',
-}, async (t) => {
+// The child edits only after the parent's turn/completed has been sent; the result must still include it.
+test('Codex parent completion must not finalize a worktree while its child can still edit it', { timeout: 10000 }, async (t) => {
   const h = harness(t, codex(`
     ${accepted}
     notify('thread/started', { thread: { id: 'child', parentThreadId: 'parent' } });
@@ -246,14 +240,13 @@ test('Codex parent completion must not finalize a worktree while its child can s
   execFileSync('git', ['init', '-q', repo]);
   execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-qm', 'initial', '--allow-empty'], { cwd: repo });
   const job = await h.create(repo, 'worktree');
-  await until(() => job.endedAt !== null);
-  const stateBeforeChildFinished = job.state;
+  await until(() => /sub-agent/.test(job.phase));
+  assert.equal(job.state, 'running', 'the job waits for the sub-agent instead of finishing');
   assert.equal(fs.existsSync(path.join(job.cwd, 'late-child.ts')), false);
   fs.writeFileSync(path.join(h.home, 'release-child'), 'go');
-  await until(() => h.wire().some((msg) => msg.id === 'barrier'));
-  assert.equal(fs.readFileSync(path.join(job.cwd, 'late-child.ts'), 'utf8'), 'export const late = true;\n');
-  assert.equal(job.result?.files.includes('late-child.ts'), false, 'the late child edit is absent from the finalized result');
-  assert.notEqual(stateBeforeChildFinished, 'done', 'job was done before the still-active child edited the worktree');
+  await until(() => job.endedAt !== null);
+  assert.equal(job.state, 'done');
+  assert.ok(job.result?.files.includes('late-child.ts'), 'the sub-agent\'s edit is part of the result');
 });
 
 for (const type of ['approval', 'question'] as const) test(`Codex cancellation clears pending ${type} and queued approvals without allowing any`, { timeout: 8000 }, async (t) => {

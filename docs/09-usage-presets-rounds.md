@@ -106,7 +106,7 @@ Open, as in [03-agentgauge-integration.md](03-agentgauge-integration.md): G2 (`-
 
 | Preset | Codex effort | Lead's subagents |
 | --- | --- | --- |
-| `economy` | medium | haiku |
+| `economy` | low | haiku |
 | `balanced` | medium | sonnet |
 | `best` | high | the lead's own model |
 

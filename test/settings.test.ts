@@ -142,8 +142,8 @@ test('no preset is set by default, and a setting on the role wins over the prese
 
   // A user's preset entry adds to the built-in one of the same name.
   const tuned = resolveConfig({ preset: 'economy', presets: { economy: { codex: { model: 'small' }, antigravity: { model: 'flash' } } } });
-  assert.deepEqual(tuned.presets.economy, { codex: { effort: 'medium', model: 'small' }, antigravity: { model: 'flash' }, subagentModel: 'haiku' });
-  assert.deepEqual(effectiveRole(tuned, 'delegate'), { agent: 'codex', model: 'small', effort: 'medium' });
+  assert.deepEqual(tuned.presets.economy, { codex: { effort: 'low', model: 'small' }, antigravity: { model: 'flash' }, subagentModel: 'haiku' });
+  assert.deepEqual(effectiveRole(tuned, 'delegate'), { agent: 'codex', model: 'small', effort: 'low' });
   assert.deepEqual(effectiveRole(tuned, 'polish'), { agent: 'antigravity', model: 'flash' });
   assert.deepEqual(tuned.presets.best, PRESETS.best);
 });

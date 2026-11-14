@@ -12,6 +12,7 @@ import { resolveConfig } from '../plugin/bridge/config.ts';
 import { Jobs } from '../plugin/bridge/jobs.ts';
 import type { Adapter, CrewEvent, Job, JobCtl } from '../plugin/bridge/jobs.ts';
 import { describe, needsLead } from '../plugin/bridge/render.ts';
+import { writeFakeBin } from './fake-bin.ts';
 
 function harness(t: TestContext) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-questions-'));
@@ -179,7 +180,7 @@ async function daemon(t: TestContext) {
   const port = await freePort();
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-question-http-'));
   const bin = path.join(home, 'codex');
-  fs.writeFileSync(bin, `#!${process.execPath}
+  writeFakeBin(bin, `
     const fs = require('node:fs');
     const send = (msg) => console.log(JSON.stringify({ jsonrpc: '2.0', ...msg }));
     require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
@@ -194,7 +195,7 @@ async function daemon(t: TestContext) {
       if (m.method === 'turn/interrupt') send({ method: 'turn/completed', params: { threadId: m.params.threadId, turn: { id: 'turn', status: 'interrupted' } } });
       if (m.method && m.id != null) send({ id: m.id, result: {} });
     });
-  `, { mode: 0o700 });
+  `);
   fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ notify: false, codex: { bin } }));
   const env = { ...process.env, CREW_HOME: home, CREW_PORT: String(port), CLAUDE_PROJECT_DIR: home, CREW_AGENTGAUGE_DIR: path.join(home, 'gauge') };
   const child = spawn(process.execPath, [path.resolve('plugin/bridge/daemon.ts')], { env, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -372,7 +373,8 @@ test('wake reports a running question and never wakes again for progress on the 
 test('the daemon answers only requests that carry its secret, as a header or as the board cookie', { timeout: 15000 }, async (t) => {
   const h = await daemon(t);
   const none = { authorization: '' };
-  assert.equal(fs.statSync(path.join(h.home, 'token')).mode & 0o777, 0o600);
+  // Windows has no POSIX file modes.
+  if (process.platform !== 'win32') assert.equal(fs.statSync(path.join(h.home, 'token')).mode & 0o777, 0o600);
   assert.match(h.secret, /^[0-9a-f]{64}$/);
 
   // Open without it: finding the daemon, the page itself, Claude's hooks.

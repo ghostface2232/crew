@@ -210,8 +210,9 @@ Every animation takes one of these values, through `Motion.reduced`, so Reduce M
 | `page` | ease out, 0.22 s | A page replacing another |
 | `fade` | ease out, 0.25 s | The detail header's veil |
 | `enter` / `leave` | ease out 0.28 s after 0.06 s / ease in 0.14 s | An opening card's contents arriving after it starts to open, and leaving before it closes |
+| `swapIn` / `swapOut` | ease out 0.24 s after 0.08 s / ease in 0.12 s | A pill's new words arriving once the old have left, both within the `content` resize |
 
-Pill and glass pill labels use `.contentTransition(.interpolate)`, so the words change in a morph and the capsule resizes with them. A change the view sets itself, such as Copied, happens inside `withAnimation(Motion.content)`. A label that follows state the view does not set, such as Saving… or Keep after Undo, applies `.morphs(on:)` to that state.
+A pill or glass pill whose words follow state, such as Copied, Saving… or Keep after Undo, applies `.morphs(on:)` to that state. The style resizes the capsule with `content`; an animation set outside the button does not reach it. Meanwhile the old words leave with `swapOut` and the new arrive with `swapIn`, each faded, scaled to 0.9 and blurred 2 points at its far end. Both are clipped to the capsule, so words never spill out of it or squeeze while it resizes.
 
 ## Controls
 

@@ -19,6 +19,10 @@ enum Motion {
     /// An opening card's contents: in after the card has started to open, out before it closes over them.
     static let enter = Animation.easeOut(duration: 0.28).delay(0.06)
     static let leave = Animation.easeIn(duration: 0.14)
+    /// A control's words swapping while it resizes under `content`: the old leave, then the new arrive once they
+    /// are gone, both finishing with the resize.
+    static let swapOut = Animation.easeIn(duration: 0.12)
+    static let swapIn = Animation.easeOut(duration: 0.24).delay(0.08)
     static func reduced(_ animation: Animation, _ reduce: Bool) -> Animation? { reduce ? nil : animation }
 }
 
@@ -254,6 +258,8 @@ struct IconButtonStyle: ButtonStyle {
     var prominent = false
     @Environment(\.isEnabled) private var enabled
     @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.pillSwap) private var swap
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(Symbol.control).foregroundStyle(prominent ? Color.white : .primary)
@@ -291,10 +297,11 @@ struct RevealToggle: View {
     }
 }
 
-/// A pill's symbol and title, with the optical trim on the symbol's side.
+/// A pill's symbol and title, with the optical trim on the symbol's side. Only the title sets the height, so a
+/// symbol swap such as Copy's to a checkmark leaves the pill, and whatever is aligned beside it, still.
 struct PillLabelStyle: LabelStyle {
     func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: Pill.symbolGap) { configuration.icon; configuration.title }.padding(.leading, -Pill.symbolTrim)
+        HStack(spacing: Pill.symbolGap) { configuration.icon.frame(height: 0); configuration.title }.padding(.leading, -Pill.symbolTrim)
     }
 }
 
@@ -302,14 +309,17 @@ struct PillLabelStyle: LabelStyle {
 struct GlassPillButtonStyle: ButtonStyle {
     var prominent = true
     @Environment(\.isEnabled) private var enabled
+    @Environment(\.pillSwap) private var swap
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
+        PillWords(label: configuration.label)
             .font(Typeface.calloutStrong).foregroundStyle(prominent ? Color.white : .primary).lineLimit(1)
-            .contentTransition(.interpolate)
-            .padding(Pill.insets)
+            .padding(Pill.insets).clipShape(Capsule())
             .glassEffect(prominent ? .regular.tint(Palette.accent).interactive() : .regular.interactive(), in: .capsule)
             .opacity(enabled ? 1 : 0.45)
             .contentShape(Capsule())
+            // Here rather than on the button: an animation set outside does not reach the capsule the style draws.
+            .animation(Motion.reduced(Motion.content, reduceMotion), value: swap)
     }
 }
 
@@ -319,35 +329,65 @@ struct PillButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var enabled
     @Environment(\.colorScheme) private var scheme
     @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.pillSwap) private var swap
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     func makeBody(configuration: Configuration) -> some View {
         let status: Color? = configuration.role == .destructive ? Palette.danger : kind == .warning ? Palette.warning : nil
         // As on chips: darkened in light mode so the tinted label stays readable on its tint.
         let tinted = status.map { scheme == .light ? $0.mix(with: .black, by: 0.22) : $0 }
         let text: Color = kind == .prominent && status == nil ? .white : tinted ?? .primary
         let fill: Color = status.map(Palette.chip) ?? (kind == .prominent ? Palette.accent : Pill.fill)
-        configuration.label
+        PillWords(label: configuration.label)
             .font(Typeface.calloutStrong).foregroundStyle(text).lineLimit(1)
-            // Words that change inside an animation morph rather than cut, and the capsule resizes with them.
-            .contentTransition(.interpolate)
-            .padding(Pill.insets)
+            .padding(Pill.insets).clipShape(Capsule())
             .background(fill, in: Capsule())
             .overlay { if contrast == .increased { Capsule().strokeBorder(text.opacity(0.5)) } }
             .overlay { if configuration.isPressed { Capsule().fill(Color.primary.opacity(0.08)) } }
             .opacity(enabled ? 1 : 0.45)
             .contentShape(Capsule())
+            .animation(Motion.reduced(Motion.content, reduceMotion), value: swap)
     }
 }
 
-/// Animates a control whose words or width follow `value`, such as Save turning into Saving…, with `Motion.content`.
-private struct Morphs<Value: Equatable>: ViewModifier {
+/// Marks a pill whose words follow `value`, such as Save turning into Saving…: its style resizes the capsule with
+/// `Motion.content` while `PillWords` swaps the words.
+private struct Morphs<Value: Hashable>: ViewModifier {
     let value: Value
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    func body(content: Content) -> some View { content.animation(Motion.reduced(Motion.content, reduceMotion), value: value) }
+    func body(content: Content) -> some View { content.environment(\.pillSwap, AnyHashable(value)) }
+}
+
+extension EnvironmentValues {
+    /// The state a pill's words follow; set by `.morphs(on:)`.
+    @Entry var pillSwap: AnyHashable? = nil
+}
+
+/// A pill's words. The capsule sizes to the current words through a hidden copy; the visible words sit over it at
+/// their own size, so when `pillSwap` changes the old fade out and the new fade in, clipped to the capsule, rather
+/// than squeezing or spilling while it resizes.
+private struct PillWords<Label: View>: View {
+    let label: Label
+    @Environment(\.pillSwap) private var swap
+    var body: some View {
+        label.hidden().accessibilityHidden(true)
+            .overlay {
+                label.fixedSize().id(swap)
+                    .transition(.asymmetric(insertion: Self.swapping.animation(Motion.swapIn), removal: Self.swapping.animation(Motion.swapOut)))
+            }
+    }
+    /// Words come and go softly: faded, slightly shrunk and blurred.
+    private static var swapping: AnyTransition { .modifier(active: Swapping(shown: false), identity: Swapping(shown: true)) }
+}
+
+private struct Swapping: ViewModifier {
+    let shown: Bool
+    func body(content: Content) -> some View {
+        content.opacity(shown ? 1 : 0).scaleEffect(shown ? 1 : 0.9).blur(radius: shown ? 0 : 2)
+    }
 }
 
 extension View {
     /// See `Morphs`: for a control whose words change with state it does not set itself.
-    func morphs<Value: Equatable>(on value: Value) -> some View { modifier(Morphs(value: value)) }
+    func morphs<Value: Hashable>(on value: Value) -> some View { modifier(Morphs(value: value)) }
     /// The gray inset that holds a section's or card's contents.
     func inset() -> some View {
         padding(WorkspaceStyle.insetPadding).frame(maxWidth: .infinity, alignment: .leading)

@@ -103,21 +103,20 @@ struct CopyButton: View {
     var text: String
     var help: String? = nil
     @State private var copied = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
         Button {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
-            withAnimation(Motion.reduced(Motion.content, reduceMotion)) { copied = true }
+            copied = true
         } label: { Label(copied ? "Copied" : title, systemImage: copied ? "checkmark" : "doc.on.doc") }
-        .pillButton()
+        .pillButton().morphs(on: copied)
         .help(help ?? title)
         // The title names only what is copied; VoiceOver hears the action too.
         .accessibilityLabel(copied ? "Copied" : "Copy \(title.prefix(1).lowercased() + title.dropFirst())")
         .task(id: copied) {
             if copied {
                 try? await Task.sleep(for: .seconds(2))
-                withAnimation(Motion.reduced(Motion.content, reduceMotion)) { copied = false }
+                copied = false
             }
         }
     }
@@ -460,14 +459,15 @@ extension DetailItem where Accessory == EmptyView {
 struct DetailFooter<Actions: View>: View {
     let id: String
     @ViewBuilder var actions: Actions
-    /// The least of the id worth showing beside the actions before it moves below them.
+    /// The least of the id worth showing beside the actions before it moves below them. It is also the id's ideal
+    /// width: `ViewThatFits` measures ideal sizes, so the full id would otherwise push the row to the fallback.
     private static var idMinWidth: CGFloat { 80 }
     var body: some View {
         VStack(alignment: .leading, spacing: Space.ml) {
             Divider().padding(.bottom, Space.xs)
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: Space.m) {
-                    idText.frame(minWidth: Self.idMinWidth, alignment: .leading).layoutPriority(-1)
+                    idText.frame(minWidth: Self.idMinWidth, idealWidth: Self.idMinWidth, maxWidth: .infinity, alignment: .leading).layoutPriority(-1)
                     Spacer(minLength: WorkspaceStyle.rowSpacer)
                     HStack(spacing: Space.m) { actions }.fixedSize()
                 }

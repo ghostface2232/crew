@@ -21,13 +21,13 @@ struct JobDetailView: View {
                 }
                 if job == nil && error.isEmpty { ProgressView("Loading details…") }
                 if let job { contents(job) }
-            }.padding(.horizontal, 24).padding(.top, 20).padding(.bottom, 24).frame(maxWidth: .infinity, alignment: .leading)
+            }.padding(.horizontal, 24).padding(.top, 8).padding(.bottom, 24).frame(maxWidth: .infinity, alignment: .leading)
                 .background(OverlayScrollers())
         }
         // The header stays while the details scroll under it. As a scroll view's bar, it gets the system's
         // soft edge effect: the content fades and blurs progressively beneath it instead of being cut off.
         .safeAreaBar(edge: .top) {
-            DetailHeader(title: job?.title, close: store.closeDetail) {
+            DetailHeader(title: job?.title, subtitle: job?.isActive == true ? job?.phase : nil, close: store.closeDetail) {
                 if let job { StatusLabel(state: job.stalled ? "stalled" : job.state, title: job.status) }
             }
         }
@@ -50,12 +50,7 @@ struct JobDetailView: View {
         }
     }
     @ViewBuilder private func contents(_ job: Job) -> some View {
-        if job.isActive || job.error != nil {
-            VStack(alignment: .leading, spacing: 8) {
-                if job.isActive { Text(job.phase).font(Typeface.callout).foregroundStyle(.secondary).textSelection(.enabled) }
-                if let failure = job.error { Text(failure.message).font(Typeface.callout).foregroundStyle(.red).textSelection(.enabled) }
-            }
-        }
+        if let failure = job.error { Text(failure.message).font(Typeface.callout).foregroundStyle(.red).textSelection(.enabled) }
         if job.state == "waiting" {
             AnswerView(store: store, job: job)
                 .card(fill: .orange.opacity(0.06))
@@ -193,6 +188,8 @@ struct JobDetailView: View {
 /// The panel's pinned top: status and close button, then the title.
 private struct DetailHeader<Status: View>: View {
     let title: String?
+    /// What the work is doing now, read with the title rather than as the first section.
+    var subtitle: String? = nil
     let close: () -> Void
     @ViewBuilder var status: Status
     /// VoiceOver moves to the title when the panel opens; keyboard focus stays where it was.
@@ -216,6 +213,11 @@ private struct DetailHeader<Status: View>: View {
                             NSPasteboard.general.setString(title, forType: .string)
                         }
                     }
+                    // Tighter than the status row above, so the two read as one heading.
+                    .padding(.bottom, subtitle?.isEmpty == false ? -8 : 0)
+            }
+            if let subtitle, !subtitle.isEmpty {
+                Text(subtitle).font(Typeface.callout).foregroundStyle(.secondary).lineLimit(2).help(subtitle)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 24).padding(.top, 20).padding(.bottom, 12)
@@ -233,11 +235,11 @@ struct SessionDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 if let session { contents(session) } else { Text("This session has ended.").foregroundStyle(.secondary) }
-            }.padding(.horizontal, 24).padding(.top, 20).padding(.bottom, 24).frame(maxWidth: .infinity, alignment: .leading)
+            }.padding(.horizontal, 24).padding(.top, 8).padding(.bottom, 24).frame(maxWidth: .infinity, alignment: .leading)
                 .background(OverlayScrollers())
         }
         .safeAreaBar(edge: .top) {
-            DetailHeader(title: session?.title, close: store.closeDetail) {
+            DetailHeader(title: session?.title, subtitle: session.flatMap { $0.state == "working" ? $0.phase : nil }, close: store.closeDetail) {
                 if let session {
                     StatusLabel(state: session.stalled ? "stalled" : session.state, title: session.stalled ? "May be stuck" : session.state.capitalized)
                 }
@@ -252,8 +254,6 @@ struct SessionDetailView: View {
                 Text(session.waitingFor ?? "Claude needs your input.").font(Typeface.body).textSelection(.enabled)
                 Text("Answer in Claude.").font(Typeface.callout).foregroundStyle(.secondary)
             }.card(fill: .orange.opacity(0.06))
-        } else if session.state != "idle" {
-            Text(session.phase).font(Typeface.callout).foregroundStyle(.secondary).textSelection(.enabled)
         }
         Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
             fact("Agent", "Claude · Lead")
@@ -299,7 +299,7 @@ private struct OriginalTask: View {
     private var long: Bool { height > preview + 1 }
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Button { withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) { shown.toggle() } } label: {
+            Button(action: toggle) {
                 HStack {
                     Label("Original task", systemImage: "text.alignleft").font(Typeface.subheadline)
                     Spacer()
@@ -314,7 +314,11 @@ private struct OriginalTask: View {
             .disabled(!long)
             .accessibilityLabel(long ? (shown ? "Collapse original task" : "Expand original task") : "Original task")
             // Cut by height rather than a line limit, so the last line fades instead of ending in an ellipsis.
-            Text(prompt).font(Typeface.callout).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            // Folded, a click anywhere on it opens it, as on the title row; open, the text is selectable instead.
+            Group {
+                if shown || !long { Text(prompt).textSelection(.enabled) } else { Text(prompt) }
+            }
+                .font(Typeface.callout).fixedSize(horizontal: false, vertical: true)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
                 .frame(maxWidth: .infinity, maxHeight: shown || !long ? nil : preview, alignment: .topLeading)
                 .clipped()
@@ -328,8 +332,11 @@ private struct OriginalTask: View {
                     }
                 }
                 .inset()
+                .contentShape(RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius))
+                .onTapGesture { if long && !shown { toggle() } }
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
+    private func toggle() { withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) { shown.toggle() } }
 }
 
 private extension View {

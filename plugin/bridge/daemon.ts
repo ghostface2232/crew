@@ -39,8 +39,9 @@ const server = http.createServer((req, res) => {
   // Reserve before reading the body: idle replacement must not interrupt an unrecorded worktree.
   // Open and worker routes are left out, so an unauthenticated stalled body cannot hold off a replacement;
   // a request without the secret is rejected before route() first awaits, so it is counted only briefly.
+  // Lead delivery commits synchronously after checking stopping; its long polls must not pin an idle daemon.
   const pathname = req.url?.split('?')[0] ?? '/';
-  const mutating = req.method === 'POST' && pathname !== '/api/shutdown' && !isOpen('POST', pathname) && !WORKER_ROUTE.test(pathname);
+  const mutating = req.method === 'POST' && pathname !== '/api/shutdown' && !pathname.startsWith('/api/lead/') && !isOpen('POST', pathname) && !WORKER_ROUTE.test(pathname);
   if (mutating) mutatingPosts++;
   route(req, res).finally(() => { if (mutating) mutatingPosts--; }).then(
     (result) => {
@@ -458,9 +459,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       if (action === 'reply') return view(await jobs.reply(id, body));
       if (action === 'cancel') return view(await jobs.cancel(id));
       if (action === 'discard') return view(await jobs.discard(id));
-      if (action === 'delivered') {
-        return { claimed: jobs.markDelivered(id, Number(body.seq)) };
-      }
+      if (action === 'delivered') throw new HttpError(400, 'Delivery requires a receipt echoed through /api/lead/ack.');
     }
   }
 
@@ -531,6 +530,46 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       }
       if (mission?.state === 'active' && mission.stages) spec.missionStep = mission.stageIndex ?? mission.stages.indexOf(mission.stage);
       return view(await jobs.create(spec));
+    }
+    if (pathname.startsWith('/api/lead/')) {
+      const body = await readJson(req);
+      if (stopping) throw new HttpError(503, 'The Crew daemon is shutting down. Try again in a moment.');
+      const session = body.session;
+      if (typeof session !== 'string' || !session.trim() || session.length > 200) throw new HttpError(400, 'A lead session id is required.');
+      const delivery = jobs.delivery;
+      switch (pathname.slice('/api/lead/'.length)) {
+        case 'ack':
+          delivery.ack(session, body.ack);
+          for (const job of jobs.list().filter((job) => job.lead === session)) broadcast('job', view(job));
+          return {};
+        case 'context': return { text: delivery.context(session) };
+        case 'watch': return { watch: delivery.watch(session, body.deadline) };
+        case 'heartbeat': return { watch: delivery.heartbeat(session, body.generation) };
+        case 'release':
+          delivery.release(session, body.generation);
+          return {};
+        case 'offer': {
+          if (body.automatic !== undefined && typeof body.automatic !== 'boolean') throw new HttpError(400, 'automatic must be boolean');
+          const options = { automatic: body.automatic === true, watcher: body.generation, ids: body.job_ids, bytes: body.bytes };
+          let offer = delivery.offer(session, options);
+          if (!offer && body.wait === true) {
+            const abort = new AbortController();
+            const closed = () => abort.abort();
+            res.once('close', closed);
+            try {
+              // Check and subscribe without an intervening await. Lease expiry also wakes an idle poll.
+              const expiry = delivery.state.offering[session]?.expiresAt ?? 0;
+              await delivery.wait(expiry > Date.now() ? Math.min(20_000, expiry - Date.now()) : 20_000, abort.signal);
+              if (stopping) throw new HttpError(503, 'The Crew daemon is shutting down. Try again in a moment.');
+              if (!abort.signal.aborted) offer = delivery.offer(session, options);
+            } finally {
+              res.off('close', closed);
+            }
+          }
+          return { offer };
+        }
+        default: throw new HttpError(404, 'not found');
+      }
     }
     if (pathname === '/api/hooks/claude') {
       const payload = await readJson(req);

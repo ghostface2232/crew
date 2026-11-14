@@ -6,10 +6,12 @@ import { test } from 'node:test';
 import { STAGES, normalizeTitle } from '../plugin/bridge/missions.ts';
 import type { Mission } from '../plugin/bridge/missions.ts';
 import { TIERS } from '../plugin/bridge/tiers.ts';
+import { addNews, clipped, Delivery, jsonBytes, LEAD_BYTES, textPage, unread } from '../plugin/bridge/delivery.ts';
+import type { Job } from '../plugin/bridge/jobs.ts';
 
 test('mission forwards plans on start, revision, repeated titles and reattachment', async () => {
   const source = fs.readFileSync(new URL('../plugin/bridge/mcp.ts', import.meta.url), 'utf8');
-  const handler = source.slice(source.indexOf('function describeMission('), source.indexOf('async function describeDelivered'));
+  const handler = source.slice(source.indexOf('function describeMission('), source.indexOf('function describeJob'));
   let current: Mission | null = null;
   let saved: Mission[] = [];
   const calls: { method: string; route: string; body: any }[] = [];
@@ -71,5 +73,80 @@ test('the wake hook follows every tool that can leave a job running, answer incl
   const wake = (hooks.PostToolUse as any[]).find((entry) => entry.hooks.some((hook: any) => hook.asyncRewake));
   const matcher = new RegExp(`^(?:${wake.matcher})$`);
   // answer used to be missing, so a lead that answered a question and ended its turn was never woken again.
-  for (const tool of ['delegate', 'review', 'polish', 'reply', 'wait', 'answer']) assert.ok(matcher.test(`mcp__plugin_crew_crew__${tool}`), tool);
+  for (const tool of ['delegate', 'debate', 'review', 'polish', 'reply', 'wait', 'answer', 'cancel', 'mission', 'status']) assert.ok(matcher.test(`mcp__plugin_crew_crew__${tool}`), tool);
+  assert.ok(hooks.Stop.some((entry: any) => entry.hooks.some((hook: any) => hook.asyncRewake)));
+  assert.ok(hooks.PostToolUseFailure.some((entry: any) => entry.hooks.some((hook: any) => hook.asyncRewake)));
+});
+
+test('MCP bounds a multi-job response and ACKs only echoed receipts before making a new offer', async () => {
+  const source = fs.readFileSync(new URL('../plugin/bridge/mcp.ts', import.meta.url), 'utf8');
+  const handler = source.slice(source.indexOf('async function handle('), source.indexOf('readline.createInterface'));
+  const jobs = Array.from({ length: 12 }, (_, i) => ({ id: `cx-${i}`, lead: 'lead', seq: 1, delivered: 0, state: 'done', turns: 1 } as Job));
+  for (const job of jobs) addNews(job, 'done', '"\\\n한😀'.repeat(50));
+  const delivery = new Delivery(() => jobs, () => {});
+  const replies: any[] = [];
+  const order: string[] = [];
+  const handle = vm.runInNewContext(`${stripTypeScriptTypes(handler)}; handle`, {
+    AbortController, inFlight: new Map(), ensureDaemon: async () => {}, SESSION: 'lead',
+    clipped, jsonBytes, LEAD_BYTES, send: (msg: unknown) => replies.push(msg),
+    imageContent: () => [{ type: 'image', data: 'x'.repeat(900_000), mimeType: 'image/png' }],
+    api: async (_method: string, route: string, body: any) => {
+      order.push(route);
+      if (route === '/api/lead/ack') return delivery.ack(body.session, body.ack);
+      assert.equal(route, '/api/lead/offer');
+      return { offer: delivery.offer(body.session, { ids: body.job_ids, bytes: body.bytes }) };
+    },
+    callTool: async (_name: string, _args: any, ctx: any) => {
+      order.push('tool');
+      ctx.jobs.push(...jobs);
+      return '"\\\n한😀'.repeat(150_000);
+    },
+  });
+  const call = (args = {}) => handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'wait', arguments: args } });
+  await call();
+  assert.ok(jsonBytes(replies[0]) <= LEAD_BYTES);
+  assert.equal(replies[0].result.content.length, 1, 'an oversized image is omitted');
+  const receipt = replies[0].result.content[0].text.match(/Receipt: ([\w-]+)/)[1];
+  const items = delivery.state.receipts[receipt].items;
+  assert.ok(items.length > 0 && items.length <= 8);
+  assert.ok(jobs.every((job) => job.ackedSeq === 0));
+  assert.ok(jobs.every((job) => job.news![0].offers === 0), 'explicit reads do not spend automatic attempts');
+  addNews(jobs[0], 'failed', 'newer failure');
+  order.length = 0;
+  await call({ ack: receipt });
+  assert.deepEqual(order, ['/api/lead/ack', 'tool', '/api/lead/offer']);
+  assert.deepEqual(unread(jobs[0]).map((news) => news.seq), [2]);
+  assert.ok(jobs.slice(items.length).every((job) => job.ackedSeq === 0), 'omitted jobs were never acknowledged');
+  assert.ok(jsonBytes(replies[1]) <= LEAD_BYTES);
+  order.length = 0;
+  await call({ ack: 'unknown' });
+  assert.deepEqual(order, ['/api/lead/ack'], 'invalid ACK stops the call before any new work');
+  assert.equal(replies[2].result.isError, true);
+});
+
+test('status pages the latest full report during a follow-up and retained debate turns', async () => {
+  const source = fs.readFileSync(new URL('../plugin/bridge/mcp.ts', import.meta.url), 'utf8');
+  const body = source.split("    case 'status':")[1].split("    case 'wait':")[0];
+  const report = '"\\\n한😀'.repeat(5000);
+  const job = { id: 'debate', turns: 3, report, exchange: [
+    { from: 'worker', turn: 1, text: 'first answer' },
+    { from: 'worker', turn: 2, text: report.slice(0, 20_000) },
+    { from: 'lead', turn: 3, text: 'follow-up' },
+  ] };
+  const run = vm.runInNewContext(stripTypeScriptTypes(`(async (args: any) => { const ctx: any = { jobs: [] }; ${body} })`), {
+    api: async () => job, showEvidence: () => {}, textPage,
+  });
+  let offset = 0;
+  let restored = '';
+  while (offset < report.length) {
+    const page = await run({ job_id: job.id, report_offset: offset });
+    assert.match(page, /report turn 2/);
+    const text = page.slice(page.indexOf('\n') + 1, page.lastIndexOf('\n'));
+    restored += text;
+    offset += text.length;
+    assert.ok(jsonBytes(page) < 3500);
+  }
+  assert.equal(restored, report);
+  assert.match(await run({ job_id: job.id, report_offset: 0, turn: 1 }), /first answer/);
+  await assert.rejects(run({ job_id: job.id, report_offset: 0, turn: 99 }), /not retained/);
 });

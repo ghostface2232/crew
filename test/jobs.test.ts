@@ -63,6 +63,12 @@ function harness(onStart: (ctl: JobCtl) => void, readConfig: () => Config = () =
   return { adapter, jobs, calls, events, attention, home };
 }
 
+function acknowledge(jobs: Jobs, job: Job): void {
+  job.lead = 'test-lead';
+  const offer = jobs.delivery.offer(job.lead, { ids: [job.id] });
+  if (offer) jobs.delivery.ack(job.lead, offer.receipt);
+}
+
 async function settled(jobs: Jobs, job: Job): Promise<Job> {
   while (job.state === 'running') await jobs.wait(job.id, job.seq, 2000);
   return job;
@@ -198,12 +204,12 @@ test('a waiting job resumes on a decision and reports the limit kind on failure'
   assert.equal(limited.events.at(-1)?.kind, 'limit');
 });
 
-test('a finished job can be continued, and delivery is claimed once', async () => {
+test('a finished job can be continued, and only echoed receipts acknowledge it', async () => {
   const repo = tempRepo();
   const { jobs, calls } = harness((ctl) => ctl.done('first report'));
   const job = await settled(jobs, await jobs.create({ kind: 'review', cwd: repo, review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } }));
-  assert.equal(jobs.markDelivered(job.id, job.seq), true);
-  assert.equal(jobs.markDelivered(job.id, job.seq), false);
+  acknowledge(jobs, job);
+  assert.equal(job.ackedSeq, job.newsSeq);
 
   await jobs.reply(job.id, { message: 'also check the tests' });
   await settled(jobs, job);
@@ -356,8 +362,8 @@ test('the history limit does not hide old worktrees or undelivered jobs after a 
   const first = harness((ctl) => ctl.done('ok'));
   const job = await settled(first.jobs, await first.jobs.create({ kind: 'delegate', cwd: repo, task: 'x' }));
   const worktree = job.worktree!;
-  first.jobs.markDelivered(job.id, job.seq);
-  first.jobs.jobs.set('unread', { ...job, id: 'unread', worktree: null, delivered: 0 });
+  acknowledge(first.jobs, job);
+  first.jobs.jobs.set('unread', { ...job, id: 'unread', worktree: null, delivered: 0, ackedSeq: 0, news: job.news!.map((news) => ({ ...news, acked: false })) });
   for (let i = 0; i < 201; i++) {
     const id = `history-${i}`;
     first.jobs.jobs.set(id, { ...job, id, worktree: null, createdAt: job.createdAt + i + 1 });
@@ -365,13 +371,13 @@ test('the history limit does not hide old worktrees or undelivered jobs after a 
   first.jobs.flush();
   const second = new Jobs(first.home, () => config, {} as never, { onEvent: () => {}, onJob: () => {}, onAttention: () => {} });
   assert.equal(second.list().length, 202);
-  assert.equal(second.get('unread').delivered, 0);
+  assert.ok(second.get('unread').seq > second.get('unread').delivered);
   await second.discard(job.id);
   assert.equal(fs.existsSync(worktree.path), false);
   assert.equal(execFileSync('git', ['branch', '--list', worktree.branch], { cwd: repo }).toString(), '');
 });
 
-test('an approval from before a restart cannot settle a new request at the same event sequence', async () => {
+test('an approval from before a restart cannot settle a new request after synchronous recovery', async () => {
   const repo = tempRepo();
   let worker!: JobCtl;
   const first = harness((ctl) => { worker = ctl; });
@@ -385,7 +391,7 @@ test('an approval from before a restart cannot settle a new request at the same 
     onEvent: () => {}, onJob: () => {}, onAttention: () => {},
   });
   const resumed = await second.reply(job.id, { message: 'continue' });
-  assert.equal(resumed.seq, job.seq);
+  assert.ok(resumed.seq > job.seq);
   await assert.rejects(second.reply(job.id, { decision: 'approve', request_id: stale.id }), /no longer pending/);
   assert.equal(resumed.state, 'waiting');
   await second.reply(job.id, { decision: 'deny', request_id: resumed.waiting!.id });
@@ -665,12 +671,12 @@ test('a job carries its mission and starting notes, and is kept with a mission t
   // Notes that are not a list of strings must not stop the job.
   const odd = await settled(jobs, await jobs.create({ kind: 'review', cwd: repo, review, notes: 'not a list' as never }));
   assert.deepEqual(odd.notes, []);
-  for (const job of [first, dropped, odd]) jobs.markDelivered(job.id, job.seq);
+  for (const job of [first, dropped, odd]) acknowledge(jobs, job);
 
   // Push both past the history limit with newer finished jobs.
   for (let i = 0; i < 201; i++) {
     const job = await settled(jobs, await jobs.create({ kind: 'review', cwd: repo, review }));
-    jobs.markDelivered(job.id, job.seq);
+    acknowledge(jobs, job);
   }
   jobs.flush();
   const reloaded = make();

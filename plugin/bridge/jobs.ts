@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { addNews, Delivery, deliveryPosition, leadSession, unread } from './delivery.ts';
+import type { DeliveryState, News } from './delivery.ts';
 import { runCheck } from './check.ts';
 import type { CheckResult } from './check.ts';
 import { canonicalPath, effectiveRole, MAX_DEBATE_ROUNDS, PORT, runsCommands, WORKERS } from './config.ts';
@@ -41,6 +43,8 @@ export type ReviewTarget =
   | { type: 'commit'; sha: string };
 
 export interface JobSpec {
+  /** Starting Claude session; absent for board and other unowned jobs. */
+  lead?: string;
   kind: JobKind;
   cwd: string;
   /** Project directory of the session that started the job. */
@@ -157,6 +161,10 @@ export interface LeadQuestion {
 }
 
 export interface Job {
+  lead?: string;
+  newsSeq?: number;
+  ackedSeq?: number;
+  news?: News[];
   id: string;
   kind: JobKind;
   agent: WorkerAgent;
@@ -251,7 +259,7 @@ export interface Job {
   /** The worker's final message for the latest turn. */
   report: string;
   questions?: LeadQuestion[];
-  /** Seq of the latest lead question, so later progress cannot redeliver it. */
+  /** Legacy event sequence of the latest lead question. Delivery uses news snapshots. */
   questionSeq?: number;
   result: { files: string[]; stat: string; commit: string | null; outOfScope: string[] } | null;
   notes: string[];
@@ -264,7 +272,7 @@ export interface Job {
   tokenUse?: { input: number; cachedInput: number; output: number; turn: number };
   /** Seq of the latest event about this job. */
   seq: number;
-  /** Seq up to which the lead has already been told; stops the wake hook from repeating it. */
+  /** Compatibility projection of acknowledged news onto event seq; never an ACK input. */
   delivered: number;
 }
 
@@ -377,6 +385,7 @@ export function isTerminal(job: Job): boolean {
 export class Jobs {
   readonly jobs = new Map<string, Job>();
   readonly recent: CrewEvent[] = [];
+  readonly delivery = new Delivery(() => this.list(), () => { this.flush(); });
   private seq = 0;
   private workerTokens = new Map<string, string>();
   private waiters = new Map<string, Set<() => void>>();
@@ -452,6 +461,7 @@ export class Jobs {
   }
 
   async create(spec: JobSpec): Promise<Job> {
+    if (spec.lead !== undefined) leadSession(spec.lead);
     const exclusive = Boolean(spec.exclusive);
     // Checked and reserved before the first await, so concurrent starts see each other.
     this.checkAlone(exclusive);
@@ -576,6 +586,10 @@ export class Jobs {
     const now = Date.now();
     const job: Job = {
       id,
+      lead: spec.lead,
+      newsSeq: 0,
+      ackedSeq: 0,
+      news: [],
       kind: spec.kind,
       agent,
       title,
@@ -625,7 +639,7 @@ export class Jobs {
     this.jobs.set(id, job);
     if (job.kind === 'review' && repo) await this.recordReviewed(job, repo);
     this.event(job, 'started', `${spec.kind}: ${title}`);
-    if (worktree) this.flush();
+    this.flush();
 
     const ctl = this.ctl(job);
     // Session setup can take seconds; the caller gets the job id right away and follows via wait.
@@ -1096,7 +1110,7 @@ export class Jobs {
     (job.questions ??= []).push(question);
     job.activeAt = Date.now();
     job.questionSeq = this.seq + 1;
-    this.event(job, 'progress', `asks the lead: ${text.trim().split('\n')[0]}`);
+    this.event(job, 'progress', `asks the lead: ${text.trim().split('\n')[0]}`, { kind: 'question', reason: text, question: question.id });
     return question;
   }
 
@@ -1172,15 +1186,6 @@ export class Jobs {
       const timer = setTimeout(finish, timeoutMs);
       set.add(finish);
     });
-  }
-
-  /** Records that the lead has seen the job up to `seq`. Returns false if it already had. */
-  markDelivered(id: string, seq: number): boolean {
-    const job = this.jobs.get(id);
-    if (!job || seq <= job.delivered) return false;
-    job.delivered = seq;
-    this.changed(job);
-    return true;
   }
 
   private ctl(job: Job): JobCtl {
@@ -1370,7 +1375,6 @@ export class Jobs {
       job.stalled = true;
       const detail = `no activity for ${Math.round(limit / 60_000)} min (last: ${job.phase})`;
       this.event(job, 'stalled', detail);
-      this.hooks.onAttention(job, 'stalled', detail);
     }
   }
 
@@ -1443,7 +1447,7 @@ export class Jobs {
     return this.recent.filter((e) => e.job_id === id && e.seq > after);
   }
 
-  private event(job: Job, kind: EventKind, detail: string): void {
+  private event(job: Job, kind: EventKind, detail: string, news?: { kind: News['kind']; reason: string; question?: string }): void {
     job.seq = this.record(job.agent, job.sessionId, kind, detail, job.id).seq;
     // Each turn has its own file, so delayed cleanup cannot delete a follow-up's fresh diff.
     if (isTerminal(job) && job.kind === 'review') {
@@ -1455,11 +1459,19 @@ export class Jobs {
     if (isTerminal(job)) this.browsers.stop(job.id);
     // Scratch is for the turn: nothing in it is a result. The path is derived, never read from the job, before it is removed.
     if (isTerminal(job) && job.scratch) this.dropScratch(job.id);
+    if (news) addNews(job, news.kind, news.reason, { question: news.question });
+    else if (kind === 'done') addNews(job, 'done', detail);
+    else if (kind === 'error' || kind === 'limit') addNews(job, 'failed', detail);
+    else if (kind === 'waiting') addNews(job, 'waiting', detail, { request: job.waiting?.id });
+    deliveryPosition(job);
+    if (news || ['done', 'error', 'limit', 'waiting'].includes(kind)) this.flush();
     this.changed(job);
+    this.delivery.changed();
     for (const wake of [...(this.waiters.get(job.id) ?? [])]) wake();
   }
 
   private changed(job: Job): void {
+    deliveryPosition(job);
     this.hooks.onJob(job);
     this.saveTimer ??= setTimeout(() => {
       this.saveTimer = null;
@@ -1470,10 +1482,10 @@ export class Jobs {
   private save(): void {
     let history = 0;
     const keep = this.list().filter((job) =>
-      job.worktree || !isTerminal(job) || job.seq > job.delivered || (job.mission !== undefined && this.hooks.keepsMission?.(job.mission)) || history++ < KEEP_JOBS,
+      job.worktree || !isTerminal(job) || unread(job).length > 0 || (job.mission !== undefined && this.hooks.keepsMission?.(job.mission)) || history++ < KEEP_JOBS,
     );
     const file = path.join(this.home, 'jobs.json');
-    fs.writeFileSync(`${file}.tmp`, JSON.stringify({ seq: this.seq, jobs: keep }));
+    fs.writeFileSync(`${file}.tmp`, JSON.stringify({ seq: this.seq, jobs: keep, delivery: this.delivery.state }));
     fs.renameSync(`${file}.tmp`, file);
   }
 
@@ -1484,14 +1496,26 @@ export class Jobs {
   }
 
   private load(): void {
-    let saved: { seq: number; jobs: Job[] };
+    let saved: { seq: number; jobs: Job[]; delivery?: DeliveryState };
     try {
       saved = JSON.parse(fs.readFileSync(path.join(this.home, 'jobs.json'), 'utf8'));
     } catch {
       return;
     }
     this.seq = saved.seq;
+    this.delivery.restore(saved.delivery);
     for (const job of saved.jobs) {
+      const legacy = job.news === undefined;
+      job.news ??= [];
+      job.newsSeq ??= 0;
+      job.ackedSeq ??= 0;
+      // Preserve unread legacy results without guessing which session owns them.
+      if (legacy && job.seq > job.delivered) {
+        if (job.state === 'done') addNews(job, 'done', job.report || job.title);
+        else if (job.state === 'failed') addNews(job, 'failed', job.error?.message ?? 'failed');
+        else if (job.waiting) addNews(job, 'waiting', job.waiting.reason, { request: job.waiting.id });
+        for (const question of job.questions ?? []) if (question.answer === undefined) addNews(job, 'question', question.text, { question: question.id });
+      }
       // Jobs saved before ownership was recorded; their repository is the closest stand-in.
       job.project = canonicalPath(job.project ?? job.repo ?? job.cwd);
       // Saved before keys were canonical; a Windows job may hold git's `C:/x` spelling.
@@ -1504,12 +1528,16 @@ export class Jobs {
         job.phase = 'failed';
         const next = job.sessionId ? 'Use reply to continue the same session.' : 'Start a new job.';
         job.error = { message: `The bridge restarted while this job was running. ${next}`, limit: false };
+        job.seq = ++this.seq;
+        addNews(job, 'failed', job.error.message);
         // The interrupted turn never reached its end, where evidence is otherwise collected.
         if (job.evidenceDir) job.evidence = collectEvidence(job.evidenceDir, job.evidence ?? [], job.turns);
       }
+      deliveryPosition(job);
       this.jobs.set(job.id, job);
       if (job.kind === 'review') this.dropSnapshot(job);
     }
+    this.flush();
     // No turn survives a restart, so neither does any scratch.
     this.removeScratch(path.join(this.home, 'scratch'));
     // Evidence lives as long as its job's record.

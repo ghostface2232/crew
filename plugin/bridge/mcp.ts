@@ -1,4 +1,5 @@
 import readline from 'node:readline';
+import { clipped, jsonBytes, LEAD_BYTES, textPage, unread } from './delivery.ts';
 import { api, ensureDaemon } from './client.ts';
 import { BASE_URL, canonicalPath, DEFAULT_ROLES, loadConfig, MAX_DEBATE_ROUNDS, VERSION, WORKERS } from './config.ts';
 import { listSkills } from './skills.ts';
@@ -53,7 +54,8 @@ Roles (assigned by the user in ~/.crew/config.json; each tool goes to the agent 
 
 How jobs work:
 - delegate and polish run in their own git worktree and branch (crew-<job id>) created from HEAD, so commit anything the worker needs first. Gitignored files it needs (node_modules, .env) are copied in if the repository lists them in .worktreeinclude. The bridge commits the worker's changes on that branch; you inspect the diff and merge or reject it. Nothing reaches your branch unless you merge it.
-- Job calls return at once with the job id while the worker runs in the background. Do your own part, then end your turn: you are woken when a job ends, needs a decision, or asks you a question. Do not sit in \`wait\` on a running job, since the user cannot talk to you meanwhile. Pass background: false only when you can do nothing else until the result arrives.
+- Every receipt is an offer, not a read acknowledgement. Pass its id as ack with your next Crew call (or an array of ids); only that echo acknowledges the snapshots shown. Automatic offers stop after two attempts, but unacknowledged news remains in status and on the board. Long reports are paged with status and report_offset.
+- Job calls return at once with the job id while the worker runs in the background. Do your own part, then end your turn: a live, connected watcher attempts to wake you when a job ends, needs a decision, or asks you a question. After a watcher expires or fails, the next hook or status recovers pending news. Do not sit in \`wait\` on a running job, since the user cannot talk to you meanwhile. Pass background: false only when you can do nothing else until the result arrives.
 - Codex's approval requests go to its own automatic reviewer first; only what reaches you as a waiting job is for the user. If a result lists an action the reviewer REFUSED and the user's request in this conversation clearly covers it, send it back yourself with \`reply\` and approved_by_user, quoting their words; do not ask them again. If it is refused a second time, the same call has the user asked directly. If their request does not cover it, tell them and let them decide.
 - A waiting job's approval request or question is for the user to answer, not you. The app shows it to them on the board. When you are woken because a job is waiting, call \`wait\` on it so they are asked here too. Use \`reply\` with a decision only to pass on one the user gave you in the conversation.
 - A worker may use ask_lead mid-task for a question that is yours to answer, unlike approval requests, which are the user's. Answer it with \`answer\`; you are woken again when the worker ends or needs you.
@@ -206,9 +208,13 @@ const TOOLS = [
   {
     name: 'status',
     title: 'Crew status',
-    description: 'Show one job in full, or list recent jobs with what each worker is doing now, with each agent\'s usage.',
+    description: 'Show a bounded job summary or report page, or list recent jobs with what each worker is doing now and each agent\'s usage.',
     annotations: { readOnlyHint: true },
-    inputSchema: { type: 'object', properties: { job_id: { type: 'string' } } },
+    inputSchema: { type: 'object', properties: {
+      job_id: { type: 'string' },
+      report_offset: { type: 'integer', minimum: 0, description: 'Read a page of the worker report, starting at this character offset. The response gives the next offset.' },
+      turn: { type: 'integer', minimum: 1, description: 'Report turn to read; defaults to the latest. Older turns use the saved exchange.' },
+    } },
   },
   {
     name: 'wait',
@@ -264,8 +270,14 @@ const TOOLS = [
   },
 ];
 
+const ackProperty = {
+  anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 100 }],
+  description: 'Receipt id(s) received earlier. Acknowledges only those snapshots, never the result of this call.',
+};
+for (const tool of TOOLS) Object.assign(tool.inputSchema.properties, { ack: ackProperty });
+
 const DEFAULT_WAIT_SECONDS = 1800;
-/** The daemon is shared by every session; a session only lists and waits on its own project's jobs. */
+/** Listings use the project; argument-less wait further filters to this lead's jobs. */
 // Canonical, so it matches the project keys the daemon stores.
 const PROJECT = canonicalPath(process.env.CLAUDE_PROJECT_DIR ?? process.cwd());
 
@@ -393,7 +405,6 @@ async function follow(ids: string[], seconds: number, onEvent: (e: CrewEvent) =>
   quit();
 
   const jobs = ids.map((id) => latest.get(id)).filter((j): j is JobView => Boolean(j));
-  await Promise.all(jobs.filter(needsLead).map((j) => api('POST', `/api/jobs/${j.id}/delivered`, { seq: j.seq }).catch(() => {})));
   return jobs;
 }
 
@@ -402,6 +413,7 @@ interface CallContext {
   signal: AbortSignal;
   /** Evidence images to show with the text result. */
   images: Evidence[];
+  jobs: JobView[];
 }
 
 /** The latest turn's screenshots and the open questions' attachments: what the lead needs to see now, not the whole history. */
@@ -490,20 +502,21 @@ async function reportMission(args: any): Promise<string> {
   return describeMission(await api('POST', `/api/missions/${current.id}`, { stage: args.stage, stages: args.stages }));
 }
 
-async function describeDelivered(job: JobView): Promise<string> {
-  if (needsLead(job)) await api('POST', `/api/jobs/${job.id}/delivered`, { seq: job.seq });
-  return describe(job);
+function describeJob(job: JobView, ctx: CallContext): string {
+  ctx.jobs.push(job);
+  return `Read a long report with status: job_id "${job.id}", report_offset: 0.\n${describe(job)}`;
 }
 
 async function runJob(spec: JobSpec, background: boolean, ctx: CallContext): Promise<string> {
   // The id is sent as it is known: the daemon checks it and lets the job stand on its own if the mission has ended.
-  const job: JobView = await api('POST', '/api/jobs', { ...spec, project: PROJECT, mission: missionId ?? undefined });
-  return background ? describeDelivered(job) : followOne(job.id, ctx);
+  const job: JobView = await api('POST', '/api/jobs', { ...spec, lead: SESSION, project: PROJECT, mission: missionId ?? undefined });
+  return background ? describeJob(job, ctx) : followOne(job.id, ctx);
 }
 
 async function followOne(id: string, ctx: CallContext): Promise<string> {
   const [job] = await follow([id], DEFAULT_WAIT_SECONDS, (e) => ctx.progress(e.detail), ctx.signal);
   showEvidence(ctx, job);
+  ctx.jobs.push(job);
   return render(job);
 }
 
@@ -557,13 +570,26 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       if (args.job_id) {
         const job: JobView = await api('GET', `/api/jobs/${args.job_id}`);
         showEvidence(ctx, job);
-        return describeDelivered(job);
+        if (args.report_offset !== undefined) {
+          if (!Number.isSafeInteger(args.report_offset) || args.report_offset < 0 || (args.turn !== undefined && (!Number.isSafeInteger(args.turn) || args.turn < 1))) throw new Error('Invalid report offset or turn.');
+          const latest = job.exchange?.findLast((entry) => entry.from === 'worker');
+          const latestTurn = latest?.turn ?? job.turns;
+          const turn = args.turn ?? latestTurn;
+          const report = turn === latestTurn ? job.report : job.exchange?.find((entry) => entry.turn === turn && entry.from === 'worker')?.text;
+          if (report === undefined) throw new Error('That report turn is not retained.');
+          const page = textPage(report, args.report_offset, 2800);
+          const next = args.report_offset + page.length;
+          ctx.jobs.push(job);
+          return `[${job.id}] report turn ${turn}, offset ${args.report_offset}:\n${page}\n${next < report.length ? `Next: status job_id "${job.id}", turn: ${turn}, report_offset: ${next}` : 'End of report.'}`;
+        }
+        return describeJob(job, ctx);
       }
       const state = await api('GET', '/api/state');
       const jobs: JobView[] = state.jobs.filter((j: JobView) => j.project === PROJECT);
       const active = jobs.filter((j) => !j.endedAt);
       const recent = jobs.filter((j) => j.endedAt).slice(0, 8);
-      const lines = [active.length ? 'Active:' : 'No active jobs.', ...active.map(summarize)];
+      ctx.jobs.push(...active.slice(0, 8), ...recent);
+      const lines = [active.length ? 'Active:' : 'No active jobs.', ...active.slice(0, 8).map(summarize)];
       const elsewhere = state.jobs.filter((j: JobView) => j.project !== PROJECT && !j.endedAt).length;
       if (elsewhere) lines.push(`(${elsewhere} active job(s) belong to other projects; they are on the board.)`);
       if (recent.length) lines.push('', 'Recent:', ...recent.map(summarize));
@@ -580,9 +606,10 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
     case 'wait': {
       let ids: string[] = args.job_ids ?? [];
       // Besides active jobs, pick up background jobs that ended without the lead having seen the result.
-      if (!ids.length) ids = ((await api('GET', '/api/state')).jobs as JobView[]).filter((j) => j.project === PROJECT && (!j.endedAt || j.seq > j.delivered)).map((j) => j.id);
+      if (!ids.length) ids = ((await api('GET', '/api/state')).jobs as JobView[]).filter((j) => j.project === PROJECT && j.lead === SESSION && (!j.endedAt || unread(j).length > 0)).map((j) => j.id);
       if (!ids.length) return 'No active jobs, and no finished job is waiting to be read.';
       const jobs = await follow(ids, args.timeout_seconds ?? DEFAULT_WAIT_SECONDS, (e) => ctx.progress(`${e.job_id}: ${e.detail}`), ctx.signal);
+      ctx.jobs.push(...jobs);
       const ready = jobs.filter(needsLead);
       const running = jobs.filter((j) => !needsLead(j));
       for (const job of ready) showEvidence(ctx, job);
@@ -591,15 +618,15 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       return parts.join('\n\n────────\n\n');
     }
     case 'answer':
-      return describeDelivered(await api('POST', `/api/jobs/${args.job_id}/questions/${args.question_id}`, { answer: args.answer, attachments: args.attachments }));
+      return describeJob(await api('POST', `/api/jobs/${args.job_id}/questions/${args.question_id}`, { answer: args.answer, attachments: args.attachments }), ctx);
     case 'reply': {
       await api('POST', `/api/jobs/${args.job_id}/reply`, { message: args.message, decision: args.decision, request_id: args.request_id, approved_by_user: args.approved_by_user, lead_session: SESSION, sync: args.sync ? true : undefined, attachments: args.attachments });
-      return args.background !== false ? describeDelivered(await api('GET', `/api/jobs/${args.job_id}`)) : followOne(args.job_id, ctx);
+      return args.background !== false ? describeJob(await api('GET', `/api/jobs/${args.job_id}`), ctx) : followOne(args.job_id, ctx);
     }
     case 'cancel': {
       let job: JobView = await api('POST', `/api/jobs/${args.job_id}/cancel`, {});
       if (args.discard) job = await api('POST', `/api/jobs/${args.job_id}/discard`, {});
-      return describe(job);
+      return describeJob(job, ctx);
     }
     default:
       throw new Error(`Unknown tool: ${name}`);
@@ -659,16 +686,29 @@ async function handle(msg: any): Promise<void> {
       const ctx: CallContext = {
         signal: controller.signal,
         images: [],
+        jobs: [],
         progress: (message) => {
           if (token !== undefined) send({ jsonrpc: '2.0', method: 'notifications/progress', params: { progressToken: token, progress: ++step, message } });
         },
       };
       try {
         await ensureDaemon();
-        const text = await callTool(params.name, params.arguments ?? {}, ctx);
-        reply({ content: [{ type: 'text', text }, ...imageContent(ctx.images)] });
+        const args = params.arguments ?? {};
+        // Echoes refer to earlier responses. Process them before creating any new offer.
+        if (args.ack !== undefined) await api('POST', '/api/lead/ack', { session: SESSION, ack: args.ack });
+        let text = clipped(await callTool(params.name, args, ctx), 3500);
+        if (SESSION && ctx.jobs.length) {
+          const { offer } = await api('POST', '/api/lead/offer', { session: SESSION, job_ids: [...new Set(ctx.jobs.map((job) => job.id))], bytes: 3500 });
+          if (offer) text += `\n\n${offer.text}`;
+        }
+        const content: any[] = [{ type: 'text', text }];
+        for (const item of imageContent(ctx.images)) {
+          if (jsonBytes({ jsonrpc: '2.0', id, result: { content: [...content, item] } }) <= LEAD_BYTES) content.push(item);
+        }
+        if (jsonBytes({ jsonrpc: '2.0', id, result: { content } }) > LEAD_BYTES) throw new Error('Crew response exceeds its size limit. Read one job at a time.');
+        reply({ content });
       } catch (err) {
-        reply({ content: [{ type: 'text', text: String((err as Error).message ?? err) }], isError: true });
+        reply({ content: [{ type: 'text', text: clipped(String((err as Error).message ?? err), 7000) }], isError: true });
       } finally {
         inFlight.delete(id);
       }

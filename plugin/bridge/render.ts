@@ -1,3 +1,4 @@
+import { unread } from './delivery.ts';
 import { checkLine } from './check.ts';
 import { WORKERS } from './config.ts';
 import { openRefusals } from './jobs.ts';
@@ -18,7 +19,7 @@ export function duration(ms: number): string {
 }
 
 /** Finished, waiting on the user, or asking a lead question not yet delivered. */
-export const needsLead = (job: JobView) => job.state !== 'running' || ((job.questionSeq ?? 0) > job.delivered && Boolean(job.questions?.some((q) => q.answer === undefined)));
+export const needsLead = (job: JobView) => job.state !== 'running' || unread(job).some((news) => news.kind === 'question' && job.questions?.some((q) => q.id === news.question && q.answer === undefined));
 
 /** `waitingHint` replaces the default advice on how to settle a waiting job. */
 export function describe(job: JobView, waitingHint?: string): string {
@@ -40,9 +41,8 @@ export function describe(job: JobView, waitingHint?: string): string {
 
   if (job.state === 'running') {
     lines.push(`now: ${job.phase}${job.stalled ? ' — no activity for a while, may be stuck' : ''}`);
-    // A stall is reported once and nothing is left watching the job, so ending the turn now would miss its end.
     lines.push(job.stalled
-      ? `It may be stuck. Look at what it is doing, then cancel it, or call wait with job id "${job.id}" to keep following it: ending your turn without that will not wake you when it ends.`
+      ? `No recent activity was observed; this is not proof the worker stopped. Completion and questions are still watched.`
       : 'Still working. You are woken when it ends or needs you; end your turn rather than waiting on it.');
   }
   if (job.state === 'waiting') {

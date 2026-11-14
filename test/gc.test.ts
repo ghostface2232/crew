@@ -383,7 +383,14 @@ test('gc can prune recorded Windows admin leftovers after Git has already delete
 test('a restarted bridge removes the empty directory a locked Windows discard left behind, and only that', async (t) => {
   const { home, repo, jobs, job, adapter } = fixture(t, 'win32');
   const hooks = { onEvent() {}, onJob() {}, onAttention() {} };
-  const restart = () => new Jobs(home, () => resolveConfig({ notify: false }), { codex: adapter, antigravity: adapter }, hooks, 'win32');
+  const cleanup = t.mock.method(Jobs.prototype as unknown as { clearLeftover(job: Job): Promise<boolean> }, 'clearLeftover');
+  const restart = async () => {
+    const before = cleanup.mock.calls.length;
+    const restarted = new Jobs(home, () => resolveConfig({ notify: false }), { codex: adapter, antigravity: adapter }, hooks, 'win32');
+    // Startup cleanup must finish before files change or the fixture is removed.
+    await Promise.all(cleanup.mock.calls.slice(before).map((call) => call.result));
+    return restarted;
+  };
   const wt = { path: worktreePath(repo, job.id, home), branch: `crew-${job.id}`, base: 'x' };
   fs.mkdirSync(wt.path, { recursive: true });
   job.worktree = wt;
@@ -392,13 +399,11 @@ test('a restarted bridge removes the empty directory a locked Windows discard le
 
   // A directory that still holds files is for crew gc.
   fs.writeFileSync(path.join(wt.path, 'file'), 'keep');
-  restart();
-  await new Promise((resolve) => setTimeout(resolve, 500));
+  await restart();
   assert.ok(fs.existsSync(path.join(wt.path, 'file')));
 
   fs.rmSync(path.join(wt.path, 'file'));
-  const second = restart();
-  for (let tries = 0; second.get(job.id).worktree && tries < 100; tries++) await new Promise((resolve) => setTimeout(resolve, 20));
+  const second = await restart();
   const restored = second.get(job.id);
   assert.equal(restored.worktree, null);
   assert.equal(restored.cleanupPending, undefined);

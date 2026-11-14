@@ -278,9 +278,10 @@ test('worker stdio and all question routes use a private token, with answers wak
   assert.deepEqual(Object.keys(siblings[0]).sort(), ['id', 'kind', 'agent', 'title', 'files', 'asking', 'base'].sort());
   assert.equal(JSON.stringify((await h.api('GET', '/api/state')).body).includes(token), false);
   assert.equal(JSON.stringify((await h.api('GET', route)).body).includes(token), false);
-  // Shutdown flushes the same job views tested above to disk.
+  // Shutdown flushes the same job views tested above to disk, then removes daemon.json. jobs.json alone proves
+  // nothing: a save scheduled before the answer may have written it already.
   await h.api('POST', '/api/shutdown', {});
-  while (!fs.existsSync(path.join(h.home, 'jobs.json'))) await new Promise((resolve) => setTimeout(resolve, 10));
+  while (fs.existsSync(path.join(h.home, 'daemon.json'))) await new Promise((resolve) => setTimeout(resolve, 10));
   const saved = fs.readFileSync(path.join(h.home, 'jobs.json'), 'utf8');
   assert.equal(saved.includes(token), false);
   assert.ok(saved.includes('The published contract.'));

@@ -25,6 +25,8 @@ Inside a Claude Code session:
 | Input | What happens |
 | --- | --- |
 | `/crew:run <task>` | Runs planning, parallel implementation, self-review, cross-review, fixes, wording polish, and final verification in order |
+| `/crew:debate <decision>` | Debates a hard or important decision with Codex over a few read-only rounds that end with a conclusion |
+| `/crew:review [target]` | Runs a self-review and a Codex cross-review of a change in parallel, then fixes what holds up |
 | `/crew:board` | Opens the status board (inside the browser pane in Claude Desktop) |
 | Natural prompts like "Have Codex build this part" or "Get a Codex review on this" | The lead calls `delegate`, `review`, or `polish` directly |
 
@@ -76,7 +78,7 @@ Using Antigravity carries a Terms of Service risk; read [docs/04-implementation.
 | `plugin/board/` | React + TypeScript board, shared CSS tokens and Vite output |
 | `native/`, `desktop/`, `scripts/` | SwiftUI/AppKit app, app artwork, build/packaging and desktop verification |
 | `plugin/roles/` | Role instructions (engineer, reviewer, editor) injected into whichever agent holds the role, on every job |
-| `plugin/skills/`, `plugin/agents/`, `plugin/hooks/` | `/crew:run`, `/crew:board`, self-reviewer subagent, hooks |
+| `plugin/skills/`, `plugin/agents/`, `plugin/hooks/` | `/crew:run`, `/crew:debate`, `/crew:review`, `/crew:board`, self-reviewer subagent, hooks |
 | `test/` | Unit tests (`npm test`) and Playwright regressions (`npm run test:e2e`) |
 
 ## Documentation

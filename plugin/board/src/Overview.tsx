@@ -20,7 +20,14 @@ const inProject = (project: string, item: Parameters<typeof projectOf>[0]) => !p
 export function Summary({ state, project }: { state: Snapshot; project: string }) {
   const jobs = state.jobs.filter((job) => inProject(project, job));
   const metrics = [
-    ['In progress', jobs.filter((job) => job.state === 'running').length, CircleDotDashed, 'working'],
+    // Lead sessions count like jobs, as they already do under Needs you.
+    [
+      'In progress',
+      jobs.filter((job) => job.state === 'running').length +
+        state.claude.filter((session) => session.state === 'working' && inProject(project, session)).length,
+      CircleDotDashed,
+      'working',
+    ],
     [
       'Needs you',
       jobs.filter((job) => job.state === 'waiting').length +

@@ -26,7 +26,8 @@ struct WorkspaceSummary: View {
     var store: CrewStore
     private var jobs: [Job] { store.state.jobs.filter { store.project.isEmpty || $0.projectPath == store.project } }
     private var metrics: [(String, Int, String, Color)] {
-        [("In progress", jobs.filter { $0.state == "running" }.count, "circle.dotted.circle", Palette.accent),
+        // Lead sessions count like jobs, as they already do under Needs you.
+        [("In progress", jobs.filter { $0.state == "running" }.count + store.state.claude.filter { $0.state == "working" && (store.project.isEmpty || $0.projectPath == store.project) }.count, "circle.dotted.circle", Palette.accent),
          ("Needs you", jobs.filter { $0.state == "waiting" }.count + store.state.claude.filter { $0.state == "waiting" && (store.project.isEmpty || $0.projectPath == store.project) }.count, "bell.badge", Palette.warning),
          // Settled jobs stay in the list but leave the totals, which would otherwise only grow.
          ("Finished", jobs.filter { $0.state == "done" && $0.isUnsettled }.count, "checkmark.circle", .secondary),

@@ -192,6 +192,27 @@ struct IconButtonStyle: ButtonStyle {
     }
 }
 
+/// Shows or hides more of something already on screen. Pills run actions; this only reveals, so it reads as a
+/// quiet link with a chevron, sits right under what it reveals, and takes a click on its words or the room around them.
+struct RevealToggle: View {
+    var show = "Show all"
+    var hide = "Show less"
+    @Binding var shown: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var body: some View {
+        Button { withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) { shown.toggle() } } label: {
+            HStack(spacing: Space.xs) {
+                Text(shown ? hide : show)
+                Image(systemName: "chevron.down").font(Symbol.badge).rotationEffect(.degrees(shown ? 180 : 0))
+            }
+            .font(Typeface.captionStrong).foregroundStyle(.secondary)
+            .padding(.vertical, Space.xs).padding(.trailing, Space.l)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 /// A pill's symbol and title, with the optical trim on the symbol's side.
 struct PillLabelStyle: LabelStyle {
     func makeBody(configuration: Configuration) -> some View {

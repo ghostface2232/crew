@@ -96,8 +96,8 @@ Titles use SF Pro Rounded and headlines SF Pro Display. Body text uses SF Pro Te
 | `emptyTitle` | 18 regular | Rounded | Empty states |
 | `cardTitle` | 17 semibold | Rounded | Agent names, Settings cards |
 | `headline` | 16 medium | Display | The request in an approval or question |
-| `subheadline` | 14 semibold | Text | Detail section titles; a mission stop's name above its jobs, with the stop's symbol |
-| `bodyStrong` | 14 medium | Text | Row titles, report headings |
+| `subheadline` | 14 semibold | Text | Detail section titles |
+| `bodyStrong` | 14 medium | Text | Row titles, report headings, a mission stop's name above its jobs |
 | `body` | 14 regular | Text | Reports, messages |
 | `calloutStrong` | 13 medium | Text | Pill buttons, agent names in events |
 | `callout` | 13 regular | Text | Facts, notes, secondary copy |
@@ -158,6 +158,7 @@ These views keep their own geometry next to their code, built from the tokens ab
 | Pill | `.pillButton()`; `.pillButton(.prominent)` for the action a group leads with, `.pillButton(.warning)` for one that drops work without completing it | Mark done, Stop tracking, Details, Retry, Copy, Undo/Keep, Cancel Job, approval decisions |
 | Icon | `.iconButton()`: `IconButtonStyle`, a `Pill.fill` circle of `IconButton.diameter` (28 points), a little larger than a chip, with its symbol in `Symbol.control` | Close, Show job, expand a mission |
 | Chip | `StatusLabel`: `Typeface.chip` in a `Palette.chip` capsule with `Chip.insets` (5 × 8) | Status of jobs, sessions, missions and agents |
+| Reveal | `RevealToggle`: `captionStrong` secondary words with a `Symbol.badge` chevron that turns over, no fill; the words and the room around them take the click | Show all / Show less, an earlier debate round, a full reply, the end of a check's output, the original task |
 | Stance chip | The same face as `StatusLabel`: success for agree, danger for disagree, accent for alternative, with a count when it sums a round | Points of a debate reply |
 
 Pill buttons use `PillButtonStyle`, not the system bordered style. The system's regular bordered button is 24 points tall with 5 points above and below its label, which looks pressed flat. A pill instead has `Pill.insets` (7 × 14), so it is about 30 points tall, with its label in `calloutStrong`.
@@ -169,4 +170,8 @@ Pill buttons use `PillButtonStyle`, not the system bordered style. The system's 
 | warning | `Palette.warning` | `Palette.chip(warning)` |
 | destructive role | `Palette.danger` | `Palette.chip(danger)` |
 
-When a pill's label starts with a symbol, the symbol's side has `Pill.symbolTrim` (3 points) less inset. A symbol's round shape sits inside its frame, so an even inset would look wider on that side. Text-only pills stay symmetric. The symbol and the title are `Pill.symbolGap` (6 points) apart. Glass pills use the same insets and label style. A tinted label is darkened 22% in light mode, as on chips. A pressed pill dims, and a disabled one fades to 45%. Under Increase Contrast, a pill gets an outline. A group's actions sit at its trailing edge, and the completing action comes last. Send and completing actions sit at the trailing edge too, such as Send message and Approve after Deny. A mission's Stop tracking and Mark done appear only once an active mission looks finished. An abandoned mission shows Mark done alone.
+When a pill's label starts with a symbol, the symbol's side has `Pill.symbolTrim` (3 points) less inset. A symbol's round shape sits inside its frame, so an even inset would look wider on that side. Text-only pills stay symmetric. The symbol and the title are `Pill.symbolGap` (6 points) apart. Glass pills use the same insets and label style. A tinted label is darkened 22% in light mode, as on chips. A pressed pill dims, and a disabled one fades to 45%. Under Increase Contrast, a pill gets an outline. A group's actions sit at its trailing edge, and the completing action comes last. Placement follows two rules.
+- **Actions sit at the trailing edge.** An item's action sits on the item's header row, as Undo does on a round. A section's action sits on its own last row, as Copy diff command does, or shares that row with a closing line, as Mark done shares it with a mission's outcome, centered on that line. The panel's footer gathers its actions at the trailing edge, with Cancel Job last.
+- **Reveals sit at the leading edge.** A reveal goes directly under what it reveals. Pills run actions and are never used to reveal content.
+
+Send and completing actions sit at the trailing edge too, such as Send message and Approve after Deny. A mission's Stop tracking and Mark done appear only once an active mission looks finished. An abandoned mission shows Mark done alone.

@@ -84,8 +84,9 @@ struct JobDetailView: View {
                         }
                     }
                 }
+                // A section's own action ends it at the trailing edge; an item's sits on the item's header row.
                 if let tree = job.worktree, !result.files.isEmpty {
-                    CopyButton(title: "Copy diff command", text: "git diff \(tree.base.prefix(8))..\(tree.branch)")
+                    HStack { Spacer(minLength: 0); CopyButton(title: "Copy diff command", text: "git diff \(tree.base.prefix(8))..\(tree.branch)") }
                 }
             }
         }
@@ -172,10 +173,10 @@ struct JobDetailView: View {
         VStack(alignment: .leading, spacing: Space.ml) {
             Divider().padding(.bottom, Space.xs)
             HStack(spacing: Space.m) {
+                Spacer(minLength: 0)
                 if let session = job.sessionId, let worker = store.state.agents[job.agent] {
                     CopyButton(title: "Copy resume command", text: "\(worker.resume) \(session)")
                 }
-                Spacer(minLength: 0)
                 if job.isActive {
                     Button("Cancel Job", systemImage: "stop.circle", role: .destructive) { Task { await store.cancel(job) } }.pillButton()
                         .disabled(!store.connected || store.actions["cancel:\(id):\(job.turns)"]?.locked == true)
@@ -325,7 +326,7 @@ struct SessionDetailView: View {
         }
         VStack(alignment: .leading, spacing: Space.ml) {
             Divider().padding(.bottom, Space.xs)
-            CopyButton(title: "Copy resume command", text: "claude --resume \(session.id)")
+            HStack { Spacer(minLength: 0); CopyButton(title: "Copy resume command", text: "claude --resume \(session.id)") }
             Text(session.id).font(Typeface.codeSmall).foregroundStyle(.tertiary).textSelection(.enabled)
         }
     }
@@ -347,41 +348,31 @@ private struct OriginalTask: View {
     private var long: Bool { height > preview + 1 }
     var body: some View {
         VStack(alignment: .leading, spacing: Space.ml) {
-            Button(action: toggle) {
-                HStack {
-                    Label("Original task", systemImage: "text.alignleft").font(Typeface.subheadline).padding(.leading, WorkspaceStyle.rowTitleInset)
-                    Spacer()
-                    if long {
-                        Text(shown ? "Show less" : "Show all").font(Typeface.caption).foregroundStyle(.secondary)
-                        Image(systemName: "chevron.down").font(Typeface.captionStrong).foregroundStyle(.secondary)
-                            .rotationEffect(.degrees(shown ? 180 : 0))
-                    }
-                }.contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(!long)
-            .accessibilityLabel(long ? (shown ? "Collapse original task" : "Expand original task") : "Original task")
-            // Cut by height rather than a line limit, so the last line fades instead of ending in an ellipsis.
-            // Folded, a click anywhere on it opens it, as on the title row; open, the text is selectable instead.
-            Group {
-                if shown || !long { Text(prompt).textSelection(.enabled) } else { Text(prompt) }
-            }
-                .font(Typeface.callout).fixedSize(horizontal: false, vertical: true)
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
-                .frame(maxWidth: .infinity, maxHeight: shown || !long ? nil : preview, alignment: .topLeading)
-                .clipped()
-                .mask {
-                    if long && !shown {
-                        LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: 2 / 3),
-                                               .init(color: .black.opacity(0.1), location: 1)],
-                                       startPoint: .top, endPoint: .bottom)
-                    } else {
-                        Color.black
-                    }
+            Label("Original task", systemImage: "text.alignleft").font(Typeface.subheadline).padding(.leading, WorkspaceStyle.rowTitleInset)
+            VStack(alignment: .leading, spacing: Space.xs) {
+                // Cut by height rather than a line limit, so the last line fades instead of ending in an ellipsis.
+                // Folded, a click anywhere on it opens it; open, the text is selectable instead.
+                Group {
+                    if shown || !long { Text(prompt).textSelection(.enabled) } else { Text(prompt) }
                 }
-                .inset()
-                .contentShape(RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius))
-                .onTapGesture { if long && !shown { toggle() } }
+                    .font(Typeface.callout).fixedSize(horizontal: false, vertical: true)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
+                    .frame(maxWidth: .infinity, maxHeight: shown || !long ? nil : preview, alignment: .topLeading)
+                    .clipped()
+                    .mask {
+                        if long && !shown {
+                            LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: 2 / 3),
+                                                   .init(color: .black.opacity(0.1), location: 1)],
+                                           startPoint: .top, endPoint: .bottom)
+                        } else {
+                            Color.black
+                        }
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture { if long && !shown { toggle() } }
+                if long { RevealToggle(shown: $shown) }
+            }
+            .inset()
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
     private func toggle() { withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) { shown.toggle() } }
@@ -454,11 +445,12 @@ private struct VerificationView: View {
                     Text(check.command).font(Typeface.code).textSelection(.enabled)
                     Text(caption(receipt, extra: check.skipped == nil ? duration(check.ms) : nil)).font(Typeface.caption).foregroundStyle(.secondary)
                     if check.skipped == nil && check.exit != 0 && !check.output.isEmpty {
-                        DisclosureGroup("Output (end)", isExpanded: $outputShown) {
+                        RevealToggle(show: "Show the end of the output", hide: "Hide the output", shown: $outputShown)
+                        if outputShown {
                             Text(check.output.split(separator: "\n", omittingEmptySubsequences: false).suffix(15).joined(separator: "\n"))
                                 .font(Typeface.codeSmall).textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading).padding(.top, Space.xs)
-                        }.font(Typeface.caption)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
                 } else if let reviewed = receipt.reviewed {
                     Label("Reviewed", systemImage: "eye").font(Typeface.calloutStrong)
@@ -532,6 +524,13 @@ private struct DebateView: View {
             DebateStepper(rounds: rounds, replied: replied, current: min(job.turns, rounds), working: job.isActive, concluded: job.debateConcluded)
         }
         let turns = Array(Set(entries.map(\.turn))).sorted()
+        // A job that began before the bridge kept its conversation has its first turns missing; say so rather than
+        // start the story partway through.
+        if let first = turns.first, first > 1 {
+            let label = rounds == nil ? "Turn" : "Round"
+            Text(first == 2 ? "\(label) 1 was not recorded." : "\(label)s 1–\(first - 1) were not recorded.")
+                .font(Typeface.caption).foregroundStyle(.secondary)
+        }
         ForEach(turns, id: \.self) { turn in
             let lead = entries.last { $0.turn == turn && $0.from == "lead" }
             let reply = entries.last { $0.turn == turn && $0.from == "worker" }
@@ -580,9 +579,12 @@ private struct DebateRound: View {
     let working: Bool
     @State private var leadShown = false
     @State private var replyShown = false
+    /// Earlier rounds start folded to their heading and stances; the latest starts open.
+    @State private var open: Bool?
 
     var body: some View {
         let points = reply.map { debatePoints($0.text) } ?? []
+        let opened = Binding(get: { open ?? last }, set: { open = $0 })
         VStack(alignment: .leading, spacing: Space.ml) {
             HStack(spacing: Space.m) {
                 Text(final ? "\(label) \(turn) · final" : "\(label) \(turn)").font(Typeface.calloutStrong)
@@ -592,43 +594,47 @@ private struct DebateRound: View {
                     if count > 0 { StanceChip(stance: stance, count: count) }
                 }
             }
-            if let lead {
-                VStack(alignment: .leading, spacing: Space.xs) {
-                    Text("Lead").font(Typeface.captionStrong).foregroundStyle(Palette.accent)
-                    ReportText(report: lead.text).lineLimit(leadShown ? nil : 4)
-                    if lead.text.split(separator: "\n").count > 4 || lead.text.count > 400 {
-                        Button(leadShown ? "Show less" : "Show all") { leadShown.toggle() }.pillButton()
-                    }
-                }
-                .padding(.leading, Space.l)
-                // A 2-point edge, the width of a focus ring's stroke, marks the lead's voice without a second fill.
-                .overlay(alignment: .leading) { Rectangle().fill(Palette.accent).frame(width: 2) }
-            }
-            if let reply {
-                VStack(alignment: .leading, spacing: Space.s) {
-                    Text(worker).font(Typeface.captionStrong).foregroundStyle(.secondary)
-                    if points.isEmpty {
-                        ReportText(report: reply.text).lineLimit(replyShown ? nil : 8)
-                        Button(replyShown ? "Show less" : "Show all") { replyShown.toggle() }.pillButton()
-                    } else {
-                        ForEach(points, id: \.number) { point in
-                            HStack(alignment: .firstTextBaseline, spacing: Space.m) {
-                                StanceChip(stance: point.stance, count: nil)
-                                Text(point.title).font(Typeface.callout).textSelection(.enabled)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                        }
-                        DisclosureGroup("Full reply", isExpanded: $replyShown) {
-                            ReportText(report: reply.text).padding(.top, Space.xs)
-                        }.font(Typeface.caption)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            } else if working {
-                Label("\(worker) is answering…", systemImage: "ellipsis.bubble").font(Typeface.caption).foregroundStyle(.secondary)
-            }
+            if !last { RevealToggle(show: "Show this \(label.lowercased())", hide: "Hide this \(label.lowercased())", shown: opened) }
+            if opened.wrappedValue { exchange(points) }
         }
         if !last { Divider().padding(.vertical, Space.xs) }
+    }
+
+    @ViewBuilder private func exchange(_ points: [DebatePoint]) -> some View {
+        if let lead {
+            VStack(alignment: .leading, spacing: Space.xs) {
+                Text("Lead").font(Typeface.captionStrong).foregroundStyle(Palette.accent)
+                ReportText(report: lead.text).lineLimit(leadShown ? nil : 4)
+                if lead.text.split(separator: "\n").count > 4 || lead.text.count > 400 {
+                    RevealToggle(shown: $leadShown)
+                }
+            }
+            .padding(.leading, Space.l)
+            // A 2-point edge, the width of a focus ring's stroke, marks the lead's voice without a second fill.
+            .overlay(alignment: .leading) { Rectangle().fill(Palette.accent).frame(width: 2) }
+        }
+        if let reply {
+            VStack(alignment: .leading, spacing: Space.s) {
+                Text(worker).font(Typeface.captionStrong).foregroundStyle(.secondary)
+                if points.isEmpty {
+                    ReportText(report: reply.text).lineLimit(replyShown ? nil : 8)
+                    RevealToggle(shown: $replyShown)
+                } else {
+                    ForEach(points, id: \.number) { point in
+                        HStack(alignment: .firstTextBaseline, spacing: Space.m) {
+                            StanceChip(stance: point.stance, count: nil)
+                            Text(point.title).font(Typeface.callout).textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    RevealToggle(show: "Show the full reply", hide: "Hide the full reply", shown: $replyShown)
+                    if replyShown { ReportText(report: reply.text) }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else if working {
+            Label("\(worker) is answering…", systemImage: "ellipsis.bubble").font(Typeface.caption).foregroundStyle(.secondary)
+        }
     }
 }
 

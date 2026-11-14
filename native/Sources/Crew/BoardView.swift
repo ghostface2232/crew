@@ -373,7 +373,7 @@ struct MissionPanel: View {
                             let mine = jobs.filter { mission.jobStep($0) == index }
                             let lead = mission.state == "active" && index == mission.step ? store.state.claude.first { $0.id == mission.owner } : nil
                             if !mine.isEmpty || lead != nil {
-                                Label(mission.stops[index], systemImage: mission.stopSymbol(index)).font(Typeface.subheadline).foregroundStyle(.secondary).padding(.leading, WorkspaceStyle.rowTitleInset)
+                                Text(mission.stops[index]).font(Typeface.bodyStrong).foregroundStyle(.secondary).padding(.leading, WorkspaceStyle.rowTitleInset)
                                     .frame(maxWidth: .infinity, alignment: .leading).padding(.top, Space.m)
                                 if let lead {
                                     SessionRow(session: lead, selected: store.selectedSession == lead.id, store: store) { store.toggleSession(lead.id) }
@@ -382,19 +382,23 @@ struct MissionPanel: View {
                             }
                         }
                     }
-                    if !mission.outcome.isEmpty { Text(mission.outcome).font(Typeface.callout).textSelection(.enabled).padding(.leading, WorkspaceStyle.rowTitleInset) }
-                    // The mission's own controls close its contents, at the trailing edge with the hint that calls
-                    // for them; the action that completes it comes last.
-                    // Offered once an active mission looks finished; until then the lead is still at it. An abandoned
-                    // one, superseded or gone quiet, can still be marked done if its work turns out complete.
-                    if (mission.state == "active" && finished) || mission.state == "abandoned" {
-                        HStack(spacing: Space.m) {
-                            Spacer(minLength: 0)
-                            if mission.state == "active" {
-                                Text("Looks finished").font(Typeface.caption).foregroundStyle(.secondary)
+                    // The outcome and the mission's own controls share its last row: the outcome leads, the
+                    // controls end it at the trailing edge, centered on one line. Controls are offered once an active
+                    // mission looks finished; an abandoned one, superseded or gone quiet, can still be marked done.
+                    let offered = (mission.state == "active" && finished) || mission.state == "abandoned"
+                    if !mission.outcome.isEmpty || offered {
+                        HStack(alignment: .center, spacing: Space.m) {
+                            if !mission.outcome.isEmpty {
+                                Text(mission.outcome).font(Typeface.callout).textSelection(.enabled).padding(.leading, WorkspaceStyle.rowTitleInset)
                             }
-                            actions
-                        }.padding(.top, Space.xs)
+                            Spacer(minLength: 0)
+                            if offered {
+                                if mission.state == "active" {
+                                    Text("Looks finished").font(Typeface.caption).foregroundStyle(.secondary)
+                                }
+                                actions
+                            }
+                        }
                     }
                 }
                 .transition(reduceMotion ? .opacity : .asymmetric(

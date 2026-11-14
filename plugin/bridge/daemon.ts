@@ -16,6 +16,7 @@ import { projectRoot } from './git.ts';
 import { isTerminal, Jobs } from './jobs.ts';
 import { Missions, STAGES } from './missions.ts';
 import type { Mission } from './missions.ts';
+import { runbook } from './runbook.ts';
 import { appendInstructions, instructionsFile, readInstructions, savePreset, saveRoles, writeInstructions } from './settings.ts';
 import { agentGaugeDir, fromCodexLimits, route as routeWork, UsageMonitor } from './usage.ts';
 import type { RouteKind } from './usage.ts';
@@ -473,12 +474,19 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     return value as string | undefined;
   };
 
+  const runbookRoute = /^\/api\/missions\/([\w-]+)\/runbook$/.exec(pathname);
+  if (runbookRoute && method === 'GET') {
+    const mission = missions.list().find((m) => m.id === runbookRoute[1]);
+    if (!mission) throw new HttpError(404, `No mission with id "${runbookRoute[1]}".`);
+    return { text: runbook(mission, jobs.list()) };
+  }
+
   const missionRoute = /^\/api\/missions\/([\w-]+)$/.exec(pathname);
   if (missionRoute && method === 'POST') {
     const body = await readJson(req);
     const id = missionRoute[1];
     if (body.done && body.abandoned) throw new HttpError(400, 'pass done or abandoned, not both');
-    if (body.done || body.abandoned) return missions.finish(id, { outcome: text(body.outcome, 'outcome'), abandoned: Boolean(body.abandoned) });
+    if (body.done || body.abandoned) return missions.finish(id, { outcome: text(body.outcome, 'outcome'), record: text(body.record, 'record'), abandoned: Boolean(body.abandoned) });
     if (body.note !== undefined) return missions.note(id, text(body.note, 'note') ?? '');
     return missions.update(id, { stage: stage(body.stage), stages: body.stages, title: text(body.title, 'title') });
   }

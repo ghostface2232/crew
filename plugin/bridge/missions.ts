@@ -27,6 +27,8 @@ export interface Mission {
   stageIndex?: number;
   state: MissionState;
   outcome: string;
+  /** What the lead recorded when it finished: decisions taken, approaches that failed, prerequisites. For the runbook. */
+  record?: string;
   /** Oldest first; absent on missions without any. */
   notes?: MissionNote[];
   createdAt: number;
@@ -36,6 +38,7 @@ export interface Mission {
 
 export const STALE_MS = 12 * 60 * 60_000;
 const MAX_NOTE = 2000;
+const MAX_RECORD = 6000;
 const MAX_NOTES = 20;
 const KEEP_MISSIONS = 100;
 /** Finished missions kept for each project whatever the overall limit, since the board shows that many per project. */
@@ -51,6 +54,7 @@ function isMission(m: any): m is Mission {
   return Boolean(m) && typeof m === 'object'
     && ['id', 'title', 'project', 'root', 'outcome'].every((key) => typeof m[key] === 'string')
     && (m.owner === undefined || typeof m.owner === 'string')
+    && (m.record === undefined || typeof m.record === 'string')
     && (m.stages === undefined || isPlan(m.stages))
     && (m.stageIndex === undefined || (m.stages && Number.isInteger(m.stageIndex) && m.stageIndex >= 0
       && m.stageIndex < m.stages.length && m.stages[m.stageIndex] === m.stage))
@@ -176,13 +180,15 @@ export class Missions {
     return mission;
   }
 
-  finish(id: string, input: { outcome?: string; abandoned?: boolean } = {}): Mission {
+  finish(id: string, input: { outcome?: string; abandoned?: boolean; record?: string } = {}): Mission {
     const mission = this.get(id);
     if (mission.state !== 'active') return mission;
     const outcome = (input.outcome ?? '').split(/\r\n|\r|\n/)[0].trim().slice(0, 200).trim();
     mission.state = input.abandoned ? 'abandoned' : 'done';
     if (mission.state === 'done' && !mission.stages) mission.stage = 'final';
     mission.outcome = outcome;
+    const record = input.record?.trim().slice(0, MAX_RECORD);
+    if (record) mission.record = record;
     mission.updatedAt = Date.now();
     mission.endedAt = mission.updatedAt;
     this.changed(mission);

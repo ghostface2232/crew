@@ -167,6 +167,7 @@ const TOOLS = [
         done: { type: 'boolean', description: 'The command is finished.' },
         abandoned: { type: 'boolean', description: 'The command was dropped before it finished.' },
         outcome: { type: 'string', description: 'With done or abandoned: one line on how it ended.' },
+        record: { type: 'string', description: 'Optional, with done: the decisions taken and why, approaches that failed, and prerequisites the next person would need. A few short lines; `crew export <mission>` turns it and the jobs into a runbook.' },
       },
     },
   },
@@ -459,7 +460,7 @@ async function reportMission(args: any): Promise<string> {
     throw new Error('This session has no open mission. Start one by passing title; if the work is already under way without one, carry on without reporting.');
   }
   if (ending) {
-    const ended: Mission = await api('POST', `/api/missions/${current.id}`, { done: Boolean(args.done), abandoned: Boolean(args.abandoned), outcome: args.outcome });
+    const ended: Mission = await api('POST', `/api/missions/${current.id}`, { done: Boolean(args.done), abandoned: Boolean(args.abandoned), outcome: args.outcome, record: args.record });
     missionId = null;
     return describeMission(ended);
   }

@@ -150,6 +150,10 @@ test('a mission carries its normalized title through updates and completion, not
   const long = missions.start({ ...input, title: `  ${'a'.repeat(119)} rest\nDetails` });
   assert.equal(long.title, 'a'.repeat(119));
   assert.equal(missions.finish(long.id, { outcome: 'b'.repeat(210) }).outcome, 'b'.repeat(200));
+  assert.equal(long.record, undefined);
+
+  const recorded = missions.start({ ...input, title: 'With a record' });
+  assert.equal(missions.finish(recorded.id, { outcome: 'ok', record: '  Kept the old parser: the new one drops BOMs.\n' }).record, 'Kept the old parser: the new one drops BOMs.');
 });
 
 test('invalid stages and empty titles are rejected without changing a mission or notifying', (t) => {

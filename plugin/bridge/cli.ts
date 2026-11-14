@@ -15,6 +15,7 @@ Usage:
   crew status            What each agent is doing, and recent jobs
   crew show <job>        Full result of one job
   crew cancel <job>      Stop a running job
+  crew export <mission>  Print a mission as a Markdown runbook: decisions, dead ends, jobs and their checks
   crew gc [--apply] [--branches]  Preview leftovers; --apply cleans directories and metadata, --branches also deletes branches merged into HEAD
   crew board             Open the status board in the browser, signed in (--url prints the address instead)
   crew doctor            Check that everything Crew needs is in place
@@ -110,6 +111,11 @@ try {
     case 'show':
       await ensureDaemon();
       console.log(describe(await api('GET', `/api/jobs/${arg}`)));
+      break;
+    case 'export':
+      if (!arg) throw new Error('Usage: crew export <mission id> (the board and status show mission ids)');
+      await ensureDaemon();
+      process.stdout.write((await api('GET', `/api/missions/${arg}/runbook`)).text);
       break;
     case 'cancel':
       await ensureDaemon();

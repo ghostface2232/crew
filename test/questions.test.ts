@@ -193,7 +193,11 @@ async function daemon(t: TestContext) {
         fs.renameSync(file + '.tmp', file);
         return send({ id: m.id, result: { thread: { id: crew.env.CREW_JOB_ID } } });
       }
-      if (m.method === 'turn/start') return send({ id: m.id, result: { turn: { id: 'turn' } } });
+      if (m.method === 'turn/start') {
+        send({ id: m.id, result: { turn: { id: 'turn' } } });
+        // Read after the reply above, so a client that sees it knows the bridge has the turn confirmed.
+        return send({ method: 'item/started', params: { threadId: m.params.threadId, item: { type: 'commandExecution', command: 'turn started' } } });
+      }
       if (m.method === 'turn/steer') send({ method: 'item/started', params: { threadId: m.params.threadId, item: { type: 'commandExecution', command: 'working independently' } } });
       if (m.method === 'turn/interrupt') send({ method: 'turn/completed', params: { threadId: m.params.threadId, turn: { id: 'turn', status: 'interrupted' } } });
       if (m.method && m.id != null) send({ id: m.id, result: {} });
@@ -214,11 +218,14 @@ async function daemon(t: TestContext) {
     const res = await fetch(`http://127.0.0.1:${port}${route}`, { method, headers: { 'content-type': 'application/json', authorization: `Bearer ${secret}`, ...headers }, body: body === undefined ? undefined : JSON.stringify(body) });
     return { status: res.status, body: await res.json() as any };
   };
+  // Codex refuses a cancel or a message until it confirms the turn, which a loaded machine can delay.
+  const started = async (id: string) => {
+    while (!/turn started/.test((await api('GET', `/api/jobs/${id}`)).body.phase)) await new Promise((resolve) => setTimeout(resolve, 10));
+  };
   const create = async () => {
     const { body: job } = await api('POST', '/api/jobs', { kind: 'delegate', cwd: home, project: home, task: 'test', isolation: 'in_place' });
-    const file = path.join(home, `${job.id}.json`);
-    while (!fs.existsSync(file)) await new Promise((resolve) => setTimeout(resolve, 10));
-    return { job, server: JSON.parse(fs.readFileSync(file, 'utf8')) };
+    await started(job.id);
+    return { job, server: JSON.parse(fs.readFileSync(path.join(home, `${job.id}.json`), 'utf8')) };
   };
   const hostStatus = () => new Promise<number>((resolve, reject) => {
     const request = http.get({ host: '127.0.0.1', port, path: '/api/state', headers: { host: 'evil.invalid' } }, (res) => {
@@ -227,7 +234,7 @@ async function daemon(t: TestContext) {
     });
     request.on('error', reject);
   });
-  return { home, env, api, create, hostStatus, port, secret };
+  return { home, env, api, create, started, hostStatus, port, secret };
 }
 
 const textOf = (result: any): string => {
@@ -456,7 +463,8 @@ test('mission routes revise only the future, capture job rounds and let the user
   try {
     await reader.read();
     const before = Date.now();
-    await h.api('POST', `/api/jobs/${first.id}/cancel`, {});
+    await h.started(first.id);
+    assert.equal((await h.api('POST', `/api/jobs/${first.id}/cancel`, {})).status, 200);
     let wire = '';
     let frame: RegExpMatchArray | null = null;
     while (!frame) {
@@ -575,6 +583,7 @@ test('idle shutdown waits for a mutating POST still reading its body', { timeout
   request.end(JSON.stringify({ kind: 'delegate', cwd: h.home, task: 'test', isolation: 'in_place' }));
   const created = await response;
   assert.equal(created.status, 200);
+  await h.started(created.body.id);
   assert.equal((await h.api('POST', `/api/jobs/${created.body.id}/cancel`, {})).status, 200);
   assert.equal((await h.api('POST', '/api/shutdown', { ifIdle: true })).status, 200);
 });

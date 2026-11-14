@@ -79,7 +79,7 @@ struct ContentPanel<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Space.xl) {
             if let title {
-                Label(title, systemImage: symbol).font(Typeface.title).accessibilityAddTraits(.isHeader)
+                Label(title, systemImage: symbol).font(Typeface.title).accessibilityAddTraits(.isHeader).padding(.leading, WorkspaceStyle.rowTitleInset)
             }
             content
         }

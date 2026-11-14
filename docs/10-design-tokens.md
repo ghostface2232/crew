@@ -46,6 +46,7 @@ These aliases name a role for a scale step. Use the alias when the role fits, so
 | `insetPadding` | 12 | The gray inset holding a section's contents |
 | `iconColumn` | 20 | The column a row's icon or mark sits in, so titles line up |
 | `titleInset` | 6 | Titles outside a card (page heading, Agents, Settings) sit this far in from the cards' edge, since a rounded corner pulls the card's edge in visually |
+| `rowTitleInset` | 4 | The same correction inside a card, for text beside its gray rows and insets: mission stop names, notes and outcomes, list card titles, detail section titles |
 | `windowInset` | 8 | The toolbar items' distance from the window edge, kept by floating panels |
 
 ## Radii

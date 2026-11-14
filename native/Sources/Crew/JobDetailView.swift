@@ -194,7 +194,7 @@ private func noteText(_ text: String, limit: Int = 2_000) -> String {
 /// A titled section whose contents sit in a gray inset, as a mission card's rows do, so sections read apart.
 @MainActor private func detailSection<Content: View>(_ title: String, symbol: String, @ViewBuilder content: () -> Content) -> some View {
     VStack(alignment: .leading, spacing: Space.ml) {
-        Label(title, systemImage: symbol).font(Typeface.subheadline)
+        Label(title, systemImage: symbol).font(Typeface.subheadline).padding(.leading, WorkspaceStyle.rowTitleInset)
         VStack(alignment: .leading, spacing: Space.l) { content() }.inset()
     }.frame(maxWidth: .infinity, alignment: .leading)
 }
@@ -339,7 +339,7 @@ private struct OriginalTask: View {
         VStack(alignment: .leading, spacing: Space.ml) {
             Button(action: toggle) {
                 HStack {
-                    Label("Original task", systemImage: "text.alignleft").font(Typeface.subheadline)
+                    Label("Original task", systemImage: "text.alignleft").font(Typeface.subheadline).padding(.leading, WorkspaceStyle.rowTitleInset)
                     Spacer()
                     if long {
                         Text(shown ? "Show less" : "Show all").font(Typeface.caption).foregroundStyle(.secondary)

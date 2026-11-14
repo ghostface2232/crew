@@ -295,17 +295,19 @@ private struct AgentCard: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: Space.xl) {
-            // The mark and the status sit on the middle of the name and role together, not on the name alone.
-            HStack(alignment: .center, spacing: Space.ml) {
-                AgentMark(agent: agent, size: MarkSize.card)
-                VStack(alignment: .leading, spacing: Space.xxs) {
-                    Text(agentName(agent)).font(Typeface.cardTitle).fixedSize()
-                    // The role truncates and claims no width of its own, so the name and status set
-                    // the card's minimum and the cards give way to the list only when those no longer fit.
-                    Text(agentRole(agent, store: store))
-                        .font(Typeface.caption).foregroundStyle(.secondary).fadeTruncated()
+            // The status keeps to the card's top padding; the mark sits on the middle of the name and role together.
+            HStack(alignment: .top, spacing: Space.ml) {
+                HStack(alignment: .center, spacing: Space.ml) {
+                    AgentMark(agent: agent, size: MarkSize.card)
+                    VStack(alignment: .leading, spacing: Space.xxs) {
+                        Text(agentName(agent)).font(Typeface.cardTitle).fixedSize()
+                        // The role truncates and claims no width of its own, so the name and status set
+                        // the card's minimum and the cards give way to the list only when those no longer fit.
+                        Text(agentRole(agent, store: store))
+                            .font(Typeface.caption).foregroundStyle(.secondary).fadeTruncated()
+                    }
                 }
-                Spacer(minLength: 8)
+                Spacer(minLength: Space.m)
                 StatusLabel(state: mark, title: mark == "waiting" ? "Needs you" : mark == "working" ? "Working" : mark == "stalled" ? "May be stuck" : store.state.agents[agent]?.enabled == false ? "Disabled" : "Ready")
             }
             // The agent's work in a gray inset, apart from its name above and its account usage below; with
@@ -363,7 +365,7 @@ struct MissionPanel: View {
             if expanded {
                 VStack(alignment: .leading, spacing: Space.xl) {
                     ForEach(Array((mission.notes ?? []).enumerated()), id: \.offset) { _, note in
-                        Text(note.text).font(Typeface.callout).textSelection(.enabled)
+                        Text(note.text).font(Typeface.callout).textSelection(.enabled).padding(.leading, WorkspaceStyle.rowTitleInset)
                     }
                     MissionTrack(mission: mission).padding(.vertical, Space.xs)
                     VStack(spacing: WorkspaceStyle.rowGap) {
@@ -371,7 +373,7 @@ struct MissionPanel: View {
                             let mine = jobs.filter { mission.jobStep($0) == index }
                             let lead = mission.state == "active" && index == mission.step ? store.state.claude.first { $0.id == mission.owner } : nil
                             if !mine.isEmpty || lead != nil {
-                                Text(mission.stops[index]).font(Typeface.captionStrong).foregroundStyle(.secondary)
+                                Text(mission.stops[index]).font(Typeface.captionStrong).foregroundStyle(.secondary).padding(.leading, WorkspaceStyle.rowTitleInset)
                                     .frame(maxWidth: .infinity, alignment: .leading).padding(.top, Space.m)
                                 if let lead {
                                     SessionRow(session: lead, selected: store.selectedSession == lead.id, store: store) { store.toggleSession(lead.id) }
@@ -380,7 +382,7 @@ struct MissionPanel: View {
                             }
                         }
                     }
-                    if !mission.outcome.isEmpty { Text(mission.outcome).font(Typeface.callout).textSelection(.enabled) }
+                    if !mission.outcome.isEmpty { Text(mission.outcome).font(Typeface.callout).textSelection(.enabled).padding(.leading, WorkspaceStyle.rowTitleInset) }
                     // The mission's own controls close its contents, at the trailing edge with the hint that calls
                     // for them; the action that completes it comes last.
                     // Offered only once the mission looks finished; until then the lead is still at it.

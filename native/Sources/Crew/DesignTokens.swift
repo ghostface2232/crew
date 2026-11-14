@@ -61,6 +61,8 @@ enum WorkspaceStyle {
     /// Titles outside a card sit this far in from the cards' edge: a card's rounded corner pulls its edge in,
     /// so text flush with it looks outdented.
     static let titleInset = Space.s
+    /// The same correction inside a card, for text beside its gray rows and insets, whose smaller corners need less.
+    static let rowTitleInset = Space.xs
     /// The toolbar's glass items sit this far in from the window's edges; floating panels keep the same margin.
     static let windowInset = Space.m
 

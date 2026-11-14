@@ -116,11 +116,15 @@ test('included directory clone success keeps a private copy, and permission erro
     const wt = path.join(home, fail ? 'denied' : 'cloned');
     fs.mkdirSync(wt);
     const result = await copyIncluded(home, wt, async (source, dest) => {
-      if (fail) throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+      if (fail) throw Object.assign(new Error(['Command failed: cp -cR deps', ...Array.from({ length: 5000 }, (_, i) => `cp: deps/f${i}: clonefile failed: Operation not permitted`)].join('\n')), { code: 'EPERM' });
       await fs.promises.cp(source, dest, { recursive: true });
     });
     assert.deepEqual(result.linked, []);
-    if (fail) assert.match(result.failed[0], /permission denied/);
+    if (fail) {
+      // cp lists every file; the note keeps the gist so results stay readable.
+      assert.match(result.failed[0], /deps\/ \(Command failed: cp -cR deps cp: deps\/f0: clonefile failed: Operation not permitted … and 4999 more line\(s\)\)$/);
+      assert.ok(result.failed[0].length < 600);
+    }
     else {
       assert.deepEqual(result.copied, ['deps/']);
       assert.ok(!fs.lstatSync(path.join(wt, 'deps')).isSymbolicLink());

@@ -160,7 +160,10 @@ export async function copyIncluded(root: string, wt: string, clone: (source: str
         result.linked.push(rel);
       }
     } catch (err) {
-      result.failed.push(`${entry} (${(err as Error).message})`);
+      // cp names every file it could not clone; the note goes into every result the lead reads, so keep its gist.
+      const lines = (err as Error).message.split('\n').filter(Boolean);
+      const gist = lines.slice(0, 2).join(' ').slice(0, 400);
+      result.failed.push(`${entry} (${gist}${lines.length > 2 ? ` … and ${lines.length - 2} more line(s)` : ''})`);
     }
   }
   return result;

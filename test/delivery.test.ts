@@ -7,9 +7,9 @@ import { stripTypeScriptTypes } from 'node:module';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import { Jobs } from '../plugin/bridge/jobs.ts';
-import type { Adapter, JobCtl } from '../plugin/bridge/jobs.ts';
+import type { Adapter, Job, JobCtl } from '../plugin/bridge/jobs.ts';
 import { resolveConfig } from '../plugin/bridge/config.ts';
-import { Delivery, HOOK_SECONDS, jsonBytes, LEAD_BYTES, OFFER_MS, textPage, unread, WATCH_MS, WATCH_REPLACE_MS } from '../plugin/bridge/delivery.ts';
+import { addNews, Delivery, HOOK_SECONDS, jsonBytes, LEAD_BYTES, OFFER_MS, textPage, unread, WATCH_MS, WATCH_REPLACE_MS } from '../plugin/bridge/delivery.ts';
 import { ClaudeSessions } from '../plugin/bridge/claude.ts';
 import { leadHook } from '../plugin/bridge/wake.ts';
 import type { api } from '../plugin/bridge/client.ts';
@@ -294,4 +294,21 @@ test('notification routes require authentication; hook ingestion cannot ACK; shu
   context.stopping = false;
   await route({ method: 'POST', url: '/api/lead/ack', auth: true, body: { session: 'lead', ack: receipt } }, {});
   assert.equal(job.ackedSeq, 1);
+});
+
+test('the receipt store stays bounded, dropping acknowledged receipts before recent unacknowledged ones', () => {
+  const job = { id: 'cx-1', lead: 'lead', seq: 1, delivered: 0, state: 'done', turns: 1 } as Job;
+  addNews(job, 'done', 'finished');
+  const delivery = new Delivery(() => [job], () => {});
+  const now = Date.now();
+  for (let i = 0; i < 600; i++) {
+    delivery.state.receipts[`old-${i}`] = { session: 'lead', items: [], text: '', acknowledged: i % 2 === 0, at: now - 1000 * (600 - i) };
+  }
+  const offer = delivery.offer('lead', { ids: ['cx-1'] }, now)!;
+  const kept = Object.keys(delivery.state.receipts);
+  assert.ok(kept.includes(offer.receipt));
+  assert.equal(kept.length, 500);
+  // Only acknowledged receipts were dropped, oldest first; every unacknowledged one is still there to echo.
+  assert.equal(kept.filter((id) => id.startsWith('old-') && !delivery.state.receipts[id].acknowledged).length, 300);
+  assert.ok(!kept.includes('old-0') && kept.includes('old-598'));
 });

@@ -1,5 +1,5 @@
 import readline from 'node:readline';
-import { clipped, jsonBytes, LEAD_BYTES, textPage, unread } from './delivery.ts';
+import { clipped, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, REPORT_PAGE_BYTES, textPage, unread } from './delivery.ts';
 import { api, ensureDaemon } from './client.ts';
 import { BASE_URL, canonicalPath, DEFAULT_ROLES, loadConfig, MAX_DEBATE_ROUNDS, VERSION, WORKERS } from './config.ts';
 import { listSkills } from './skills.ts';
@@ -577,7 +577,7 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
           const turn = args.turn ?? latestTurn;
           const report = turn === latestTurn ? job.report : job.exchange?.find((entry) => entry.turn === turn && entry.from === 'worker')?.text;
           if (report === undefined) throw new Error('That report turn is not retained.');
-          const page = textPage(report, args.report_offset, 2800);
+          const page = textPage(report, args.report_offset, REPORT_PAGE_BYTES);
           const next = args.report_offset + page.length;
           ctx.jobs.push(job);
           return `[${job.id}] report turn ${turn}, offset ${args.report_offset}:\n${page}\n${next < report.length ? `Next: status job_id "${job.id}", turn: ${turn}, report_offset: ${next}` : 'End of report.'}`;
@@ -694,19 +694,22 @@ async function handle(msg: any): Promise<void> {
       try {
         await ensureDaemon();
         const args = params.arguments ?? {};
-        // Echoes refer to earlier responses. Process them before creating any new offer.
-        if (args.ack !== undefined) await api('POST', '/api/lead/ack', { session: SESSION, ack: args.ack });
-        let text = clipped(await callTool(params.name, args, ctx), 3500);
+        // Echoes refer to earlier responses. Process them before creating any new offer. A bad echo must not block
+        // the call it rode on (a delegate, a reply): it is reported and the receipts stay unacknowledged.
+        let ackNote = '';
+        if (args.ack !== undefined) {
+          await api('POST', '/api/lead/ack', { session: SESSION, ack: args.ack }).catch((err) => {
+            ackNote = `\n\nack not applied: ${String((err as Error).message ?? err).split('\n')[0]}. The news stays unacknowledged; read it with status.`;
+          });
+        }
+        let text = clipped(await callTool(params.name, args, ctx), LEAD_TEXT_BYTES) + ackNote;
         if (SESSION && ctx.jobs.length) {
-          const { offer } = await api('POST', '/api/lead/offer', { session: SESSION, job_ids: [...new Set(ctx.jobs.map((job) => job.id))], bytes: 3500 });
+          const { offer } = await api('POST', '/api/lead/offer', { session: SESSION, job_ids: [...new Set(ctx.jobs.map((job) => job.id))], bytes: 4000 });
           if (offer) text += `\n\n${offer.text}`;
         }
-        const content: any[] = [{ type: 'text', text }];
-        for (const item of imageContent(ctx.images)) {
-          if (jsonBytes({ jsonrpc: '2.0', id, result: { content: [...content, item] } }) <= LEAD_BYTES) content.push(item);
-        }
-        if (jsonBytes({ jsonrpc: '2.0', id, result: { content } }) > LEAD_BYTES) throw new Error('Crew response exceeds its size limit. Read one job at a time.');
-        reply({ content });
+        // The limit is on text, which is what grew without bound; evidence images keep their own path as before.
+        if (jsonBytes(text) > LEAD_BYTES) throw new Error('Crew response exceeds its size limit. Read one job at a time.');
+        reply({ content: [{ type: 'text', text }, ...imageContent(ctx.images)] });
       } catch (err) {
         reply({ content: [{ type: 'text', text: clipped(String((err as Error).message ?? err), 7000) }], isError: true });
       } finally {

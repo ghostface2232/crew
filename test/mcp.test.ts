@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import { STAGES, normalizeTitle } from '../plugin/bridge/missions.ts';
 import type { Mission } from '../plugin/bridge/missions.ts';
 import { TIERS } from '../plugin/bridge/tiers.ts';
-import { addNews, clipped, Delivery, jsonBytes, LEAD_BYTES, textPage, unread } from '../plugin/bridge/delivery.ts';
+import { addNews, clipped, Delivery, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, REPORT_PAGE_BYTES, textPage, unread } from '../plugin/bridge/delivery.ts';
 import type { Job } from '../plugin/bridge/jobs.ts';
 
 test('mission forwards plans on start, revision, repeated titles and reattachment', async () => {
@@ -88,7 +88,7 @@ test('MCP bounds a multi-job response and ACKs only echoed receipts before makin
   const order: string[] = [];
   const handle = vm.runInNewContext(`${stripTypeScriptTypes(handler)}; handle`, {
     AbortController, inFlight: new Map(), ensureDaemon: async () => {}, SESSION: 'lead',
-    clipped, jsonBytes, LEAD_BYTES, send: (msg: unknown) => replies.push(msg),
+    clipped, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, send: (msg: unknown) => replies.push(msg),
     imageContent: () => [{ type: 'image', data: 'x'.repeat(900_000), mimeType: 'image/png' }],
     api: async (_method: string, route: string, body: any) => {
       order.push(route);
@@ -104,8 +104,9 @@ test('MCP bounds a multi-job response and ACKs only echoed receipts before makin
   });
   const call = (args = {}) => handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'wait', arguments: args } });
   await call();
-  assert.ok(jsonBytes(replies[0]) <= LEAD_BYTES);
-  assert.equal(replies[0].result.content.length, 1, 'an oversized image is omitted');
+  // The text is bounded; evidence images travel beside it, as before.
+  assert.ok(jsonBytes(replies[0].result.content[0].text) <= LEAD_BYTES);
+  assert.equal(replies[0].result.content[1].type, 'image');
   const receipt = replies[0].result.content[0].text.match(/Receipt: ([\w-]+)/)[1];
   const items = delivery.state.receipts[receipt].items;
   assert.ok(items.length > 0 && items.length <= 8);
@@ -117,11 +118,12 @@ test('MCP bounds a multi-job response and ACKs only echoed receipts before makin
   assert.deepEqual(order, ['/api/lead/ack', 'tool', '/api/lead/offer']);
   assert.deepEqual(unread(jobs[0]).map((news) => news.seq), [2]);
   assert.ok(jobs.slice(items.length).every((job) => job.ackedSeq === 0), 'omitted jobs were never acknowledged');
-  assert.ok(jsonBytes(replies[1]) <= LEAD_BYTES);
+  assert.ok(jsonBytes(replies[1].result.content[0].text) <= LEAD_BYTES);
   order.length = 0;
   await call({ ack: 'unknown' });
-  assert.deepEqual(order, ['/api/lead/ack'], 'invalid ACK stops the call before any new work');
-  assert.equal(replies[2].result.isError, true);
+  assert.deepEqual(order, ['/api/lead/ack', 'tool', '/api/lead/offer'], 'a bad echo does not block the call it rode on');
+  assert.equal(replies[2].result.isError, undefined);
+  assert.match(replies[2].result.content[0].text, /ack not applied: Unknown receipt/);
 });
 
 test('status pages the latest full report during a follow-up and retained debate turns', async () => {
@@ -134,7 +136,7 @@ test('status pages the latest full report during a follow-up and retained debate
     { from: 'lead', turn: 3, text: 'follow-up' },
   ] };
   const run = vm.runInNewContext(stripTypeScriptTypes(`(async (args: any) => { const ctx: any = { jobs: [] }; ${body} })`), {
-    api: async () => job, showEvidence: () => {}, textPage,
+    api: async () => job, showEvidence: () => {}, textPage, REPORT_PAGE_BYTES,
   });
   let offset = 0;
   let restored = '';
@@ -144,7 +146,7 @@ test('status pages the latest full report during a follow-up and retained debate
     const text = page.slice(page.indexOf('\n') + 1, page.lastIndexOf('\n'));
     restored += text;
     offset += text.length;
-    assert.ok(jsonBytes(page) < 3500);
+    assert.ok(jsonBytes(page) < REPORT_PAGE_BYTES + 500);
   }
   assert.equal(restored, report);
   assert.match(await run({ job_id: job.id, report_offset: 0, turn: 1 }), /first answer/);

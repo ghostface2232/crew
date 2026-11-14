@@ -1,12 +1,21 @@
 import { randomUUID } from 'node:crypto';
 import type { Job, JobState } from './jobs.ts';
 
-export const LEAD_BYTES = 8192;
+/**
+ * Bounds on what one lead tool response carries, far under the host's limit for a tool result, so a result
+ * that grew without bound (a 900k-character note once did) can never turn into an error the lead cannot read.
+ */
+export const LEAD_BYTES = 32_768;
+/** The tool's own text, leaving room for an offer digest. */
+export const LEAD_TEXT_BYTES = 24_000;
+/** One page of a long report read through status. */
+export const REPORT_PAGE_BYTES = 16_000;
 export const OFFER_ITEMS = 8;
 export const OFFER_MS = 30_000;
 export const WATCH_MS = 60_000;
 export const WATCH_REPLACE_MS = 15_000;
 export const HOOK_SECONDS = 86_400;
+const KEEP_RECEIPTS = 500;
 
 /** Immutable notification content; progress and later turns cannot change what a receipt covers. */
 export interface News {
@@ -23,7 +32,7 @@ export interface News {
 }
 
 interface Item { jobId: string; newsSeq: number }
-interface Receipt { session: string; items: Item[]; text: string; acknowledged?: boolean }
+interface Receipt { session: string; items: Item[]; text: string; acknowledged?: boolean; at?: number }
 interface Lease { generation: string; expiresAt: number }
 interface Watch extends Lease { deadline: number }
 export interface DeliveryState {
@@ -181,7 +190,8 @@ export class Delivery {
     const items = selected.map(({ job, news }) => ({ jobId: job.id, newsSeq: news.seq }));
     const previous = this.state.offering[session];
     const counts = selected.map(({ news }) => news.offers);
-    this.state.receipts[receipt] = { session, items, text };
+    this.prune(now);
+    this.state.receipts[receipt] = { session, items, text, at: now };
     this.state.offering[session] = { generation: receipt, expiresAt: now + OFFER_MS };
     if (options.automatic) for (const { news } of selected) news.offers++;
     try {
@@ -195,6 +205,18 @@ export class Delivery {
     }
     this.changed();
     return { receipt, text, items };
+  }
+
+  /** Keeps the receipt store bounded: acknowledged receipts go first, then the oldest, past KEEP_RECEIPTS. */
+  private prune(now: number): void {
+    const entries = Object.entries(this.state.receipts);
+    if (entries.length < KEEP_RECEIPTS) return;
+    const order = entries.sort(([, a], [, b]) => Number(Boolean(b.acknowledged)) - Number(Boolean(a.acknowledged)) || (a.at ?? 0) - (b.at ?? 0));
+    for (const [id, receipt] of order.slice(0, entries.length - KEEP_RECEIPTS + 1)) {
+      // An unacknowledged receipt younger than a day stays: its lead may still echo it.
+      if (!receipt.acknowledged && now - (receipt.at ?? 0) < 86_400_000) continue;
+      delete this.state.receipts[id];
+    }
   }
 
   ack(session: string, value: unknown): void {

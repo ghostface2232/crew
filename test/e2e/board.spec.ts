@@ -179,7 +179,10 @@ test('the scope cannot change during a save and failed loads cannot be saved', a
 });
 
 test('settings can retry failed saves and confirm unsaved close', async ({ page }) => {
-  await openSettings(page, 'Instructions');
+  // Open from the keyboard: Safari does not focus a clicked button, so there would be no focus to return to.
+  await page.getByRole('button', { name: 'Settings', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  await page.getByRole('radio', { name: 'Instructions' }).click();
   const field = page.getByRole('textbox', { name: 'Shared instructions' });
   await expect(field).toBeEnabled();
   await field.fill('Draft');
@@ -295,7 +298,8 @@ for (const width of [1440, 390])
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     expect(await page.locator('.chip svg').first().evaluate((element) => element.tagName)).toBe('svg');
     expect(await page.locator('.agent-mark').first().evaluate((element) => getComputedStyle(element).maskImage)).not.toBe('none');
-    await expect(page).toHaveScreenshot(`board-${width}.png`, { fullPage: true, animations: 'disabled' });
+    // One baseline: other engines render text differently, and their checks above still run.
+    if (testInfo.project.name === 'chromium') await expect(page).toHaveScreenshot(`board-${width}.png`, { fullPage: true, animations: 'disabled' });
     await page.screenshot({ path: testInfo.outputPath(`board-${width}.png`), fullPage: true });
     await needsYou(page);
     await expect(page.getByRole('button', { name: 'Approve', exact: true })).toBeVisible();

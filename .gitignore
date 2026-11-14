@@ -4,6 +4,7 @@ desktop/build/
 release/
 test-results/
 playwright-report/
+.e2e/
 native/build/
 native/.build/
 native/.swiftpm/

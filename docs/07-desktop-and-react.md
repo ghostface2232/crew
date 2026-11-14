@@ -101,7 +101,7 @@ The original 79 tests and typecheck passed before migration. The final unit suit
 npm test
 npm run typecheck
 npm run build:desktop
-npx playwright install chromium
+npx playwright install chromium webkit
 npm run test:e2e
 node scripts/smoke-desktop.mjs
 ```
@@ -112,7 +112,7 @@ To check a packaged macOS app:
 CREW_APP_PATH="$PWD/release/Crew-darwin-arm64/Crew.app/Contents/MacOS/Crew" node scripts/smoke-desktop.mjs
 ```
 
-Browser fixtures use port 47755 and do not start workers. Desktop smoke tests use a fresh temporary home and an unused port, never the user's real jobs. Screenshot baselines are platform-specific; inspect changes before running `npm run test:e2e -- --update-snapshots`.
+Browser checks run in Chromium, WebKit, and a development build that keeps React's StrictMode checks. Each project gets its own fixture server on a free port, so worktrees can run the suite side by side; fixtures do not start workers. The screenshot baselines are Chromium's. Desktop smoke tests use a fresh temporary home and an unused port, never the user's real jobs. Screenshot baselines are platform-specific; inspect changes before running `npm run test:e2e -- --update-snapshots`.
 
 Verified on macOS arm64: renderer isolation, denied external navigation, window close/hide, second-instance focus, restored bounds, cancellation of a quit with unsaved settings, and an unchanged daemon PID after app quit/reopen. Browser checks cover request locking/retry, settings races, scoped dispatch, cancellation/follow-up, escaped report text, live updates, narrow layouts and reduced motion. The desktop smoke test also exercises repeated Claude input requests through the real daemon and poller, with OS notification display mocked. Native notification presentation and buttons were not clicked in Notification Center; those remain a manual acceptance check.
 

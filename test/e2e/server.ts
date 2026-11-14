@@ -136,7 +136,7 @@ const server = http.createServer(async (req, res) => {
     }
     return json(found);
   }
-  const asset = boardAsset(path.resolve('plugin'), url.pathname);
+  const asset = boardAsset(path.resolve(process.env.CREW_E2E_PLUGIN ?? 'plugin'), url.pathname);
   if (asset) {
     res.writeHead(200, { 'content-type': asset.type, 'content-security-policy': BOARD_CSP });
     fs.createReadStream(asset.file).pipe(res);

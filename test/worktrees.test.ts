@@ -8,7 +8,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { CodexAdapter } from '../plugin/bridge/adapters/codex.ts';
 import { resolveConfig } from '../plugin/bridge/config.ts';
-import { commitAll, copyIncluded, createWorktree, detachLinks, dirtyCount, removeDirectory, removeWorktree } from '../plugin/bridge/git.ts';
+import { commitAll, copyIncluded, createWorktree, detachLinks, dirtyCount, removeDirectory, removeEmptyLeftover, removeWorktree } from '../plugin/bridge/git.ts';
 import type { Job, JobCtl } from '../plugin/bridge/jobs.ts';
 import { buildPrompt } from '../plugin/bridge/prompts.ts';
 
@@ -47,7 +47,8 @@ for (const code of ['ENOTSUP', 'EOPNOTSUPP', 'EXDEV', 'ENOSYS', 'EINVAL']) {
     assert.equal(fs.lstatSync(path.join(wt.path, '.env')).isFile(), true);
     // The exclude file is the user's checkout's too, so it is left alone.
     assert.equal(fs.existsSync(exclude) ? fs.readFileSync(exclude, 'utf8') : null, excluded);
-    assert.equal(await dirtyCount(wt.path), 1);
+    // Git reads a Windows junction as a directory, which `node_modules/` already ignores; a symlink it does not.
+    assert.equal(await dirtyCount(wt.path), process.platform === 'win32' ? 0 : 1);
     assert.equal(await dirtyCount(wt.path, wt.linked), 0);
     assert.equal(await commitAll(wt.path, 'no dependency links', wt.linked), null);
     fs.writeFileSync(path.join(wt.path, 'work.txt'), 'change');
@@ -79,6 +80,29 @@ for (const code of ['ENOTSUP', 'EOPNOTSUPP', 'EXDEV', 'ENOSYS', 'EINVAL']) {
     assert.equal(fs.readFileSync(path.join(repo, 'node_modules', '.bin', 'tool'), 'utf8'), 'keep');
   });
 }
+
+test('a linked dependency path that Git already ignores is not named in a pathspec, so the commit still works', async (t) => {
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-ignored-link-')));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const repo = path.join(home, 'repo');
+  fs.mkdirSync(path.join(repo, 'deps'), { recursive: true });
+  fs.writeFileSync(path.join(repo, 'deps', 'tool'), 'keep');
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: repo });
+  git('init', '-q');
+  // No trailing slash, so the rule ignores a link as well as a directory on every platform.
+  fs.writeFileSync(path.join(repo, '.gitignore'), 'deps\n');
+  git('add', '.gitignore');
+  git('-c', 'user.name=Test', '-c', 'user.email=t@example.com', 'commit', '-qm', 'init');
+  const wt = await createWorktree(repo, 'cx-ignore', 'HEAD', home);
+  const link = path.join(wt.path, 'deps');
+  fs.symlinkSync(path.join(repo, 'deps'), link, 'junction');
+  wt.linked = ['deps'];
+  assert.equal(await dirtyCount(wt.path, wt.linked), 0);
+  fs.writeFileSync(path.join(wt.path, 'work.txt'), 'change');
+  assert.ok(await commitAll(wt.path, 'work only', wt.linked));
+  assert.equal(execFileSync('git', ['show', '--format=', '--name-only', 'HEAD'], { cwd: wt.path, encoding: 'utf8' }).trim(), 'work.txt');
+  await detachLinks(wt.path);
+});
 
 test('included directory clone success keeps a private copy, and permission errors do not become links', async (t) => {
   const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-clone-')));
@@ -171,7 +195,8 @@ test('Windows clears read-only directories and files in both trees before Git re
       prepared.push(args);
       const recursive = args.includes('/S');
       const root = recursive ? path.dirname(args[1]) : args[1];
-      assert.ok(root === wt.path || root === admin);
+      // Git prints the admin directory with forward slashes on Windows; the recursive form is built with path.join.
+      assert.ok(path.normalize(root) === wt.path || path.normalize(root) === path.normalize(admin));
       assert.deepEqual(args, ['-R', recursive ? path.join(root, '*') : root, ...(recursive ? ['/S'] : []), '/D', '/L']);
       const clear = (file: string) => {
         const entry = fs.lstatSync(file);
@@ -244,6 +269,8 @@ test('Windows preparation refuses a Git admin path outside common/worktrees befo
   execFileSync('git', ['init', '-q'], { cwd: repo });
   execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=t@example.com', 'commit', '--allow-empty', '-qm', 'init'], { cwd: repo });
   const wt = await createWorktree(repo, 'cx-abcdef', 'HEAD', home);
+  // Git hides `.git` on Windows, and a hidden file cannot be opened for writing.
+  fs.rmSync(path.join(wt.path, '.git'));
   fs.writeFileSync(path.join(wt.path, '.git'), `gitdir: ${path.join(repo, '.git')}\n`);
   fs.symlinkSync(repo, path.join(wt.path, 'shared'), 'junction');
   const unlink = t.mock.method(fs.promises, 'unlink');
@@ -317,3 +344,24 @@ for (const { name, output, failed, root } of attribErrors) {
     assert.equal(fs.existsSync(dir), false);
   });
 }
+
+test('removeEmptyLeftover removes only an empty directory inside the worktree directory', async (t) => {
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-leftover-')));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const worktrees = path.join(home, 'worktrees');
+  const empty = path.join(worktrees, 'repo-1', 'cx-aaaaaa');
+  const full = path.join(worktrees, 'repo-1', 'cx-bbbbbb');
+  fs.mkdirSync(empty, { recursive: true });
+  fs.mkdirSync(full, { recursive: true });
+  fs.writeFileSync(path.join(full, 'file'), 'keep');
+  assert.equal(await removeEmptyLeftover(empty, home), true);
+  assert.equal(fs.existsSync(empty), false);
+  assert.equal(await removeEmptyLeftover(empty, home), true);
+  assert.equal(await removeEmptyLeftover(full, home), false);
+  assert.ok(fs.existsSync(path.join(full, 'file')));
+  const outside = path.join(home, 'elsewhere');
+  fs.mkdirSync(outside);
+  await assert.rejects(removeEmptyLeftover(outside, home), /outside the Crew worktree directory/);
+  await assert.rejects(removeEmptyLeftover(worktrees, home), /outside the Crew worktree directory/);
+  assert.ok(fs.existsSync(outside));
+});

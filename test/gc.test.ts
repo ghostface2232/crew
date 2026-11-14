@@ -35,6 +35,9 @@ function fixture(t: TestContext, platform: NodeJS.Platform = process.platform) {
   return { home, repo, git, jobs, job, adapter };
 }
 
+// Git lists worktrees with forward slashes on Windows; paths in the tests are native.
+const listed = (git: (...args: string[]) => string) => git('worktree', 'list', '--porcelain').replaceAll('/', path.sep);
+
 for (const platform of ['darwin', 'win32'] as const) test(`gc dry run lists without changes; apply keeps branches until --branches (${platform})`, async (t) => {
   const { home, repo, git, jobs } = fixture(t, platform);
   let prunes = 0;
@@ -68,7 +71,7 @@ for (const platform of ['darwin', 'win32'] as const) test(`gc dry run lists with
   const dry = await jobs.gc();
   assert.match(dry, /dry run/);
   assert.ok(dry.includes(`Directory: ${orphan}`));
-  assert.ok(dry.includes(`Git admin directory: ${admin}`));
+  assert.ok(dry.includes(`Git admin directory: ${path.normalize(admin)}`));
   assert.ok(dry.includes('crew-cx-aabbcc (merged into HEAD)'));
   assert.ok(dry.includes('crew-ag-aabbcc (not merged into HEAD)'));
   assert.equal(git('worktree', 'list', '--porcelain'), before);
@@ -102,7 +105,7 @@ test('gc preserves unowned registered worktrees and cleans missing metadata thro
   const result = await collectGarbage(alias, [job], () => false, { apply: true });
   assert.ok(fs.existsSync(wt.path), result);
   assert.equal(fs.readFileSync(path.join(wt.path, 'uncommitted'), 'utf8'), 'keep my work');
-  assert.ok(git('worktree', 'list', '--porcelain').includes(fs.realpathSync(wt.path)));
+  assert.ok(listed(git).includes(fs.realpathSync(wt.path)));
   assert.ok(!fs.existsSync(admin), result);
   assert.doesNotMatch(result, /Cleanup failed/);
 });
@@ -152,10 +155,10 @@ for (const mode of ['fallback', 'failed fallback', 'branch failure', 'recorded a
     else await removing;
     assert.ok(fs.existsSync(otherAdmin), 'unrelated missing worktree metadata must survive');
     assert.equal(fs.readFileSync(path.join(otherAdmin, 'gitdir'), 'utf8'), metadata);
-    assert.ok(git('worktree', 'list', '--porcelain').includes(outside));
+    assert.ok(listed(git).includes(outside));
     if (mode === 'fallback' || mode === 'recorded admin') {
       assert.ok(!fs.existsSync(admin));
-      assert.ok(!git('worktree', 'list', '--porcelain').includes(wt.path));
+      assert.ok(!listed(git).includes(wt.path));
     }
   });
 }
@@ -358,7 +361,7 @@ test('gc can prune recorded Windows admin leftovers after Git has already delete
   });
   const rm = fs.promises.rm;
   t.mock.method(fs.promises, 'rm', async (dir: any, options: any) => {
-    if (dir !== admin || !keepAdmin) await rm(dir, options);
+    if (path.normalize(String(dir)) !== path.normalize(admin) || !keepAdmin) await rm(dir, options);
   });
   syncBuiltinESMExports();
   await assert.rejects(jobs.discard(job.id), /original admin permission failure.*Git metadata remains/s);
@@ -370,4 +373,29 @@ test('gc can prune recorded Windows admin leftovers after Git has already delete
   assert.ok(!fs.existsSync(admin));
   assert.equal(job.worktree, null);
   assert.equal(job.cleanupPending, undefined);
+});
+
+test('a restarted bridge removes the empty directory a locked Windows discard left behind, and only that', async (t) => {
+  const { home, repo, jobs, job, adapter } = fixture(t, 'win32');
+  const hooks = { onEvent() {}, onJob() {}, onAttention() {} };
+  const restart = () => new Jobs(home, () => resolveConfig({ notify: false }), { codex: adapter, antigravity: adapter }, hooks, 'win32');
+  const wt = { path: worktreePath(repo, job.id, home), branch: `crew-${job.id}`, base: 'x' };
+  fs.mkdirSync(wt.path, { recursive: true });
+  job.worktree = wt;
+  job.cleanupPending = [`directory ${wt.path}`];
+  jobs.flush();
+
+  // A directory that still holds files is for crew gc.
+  fs.writeFileSync(path.join(wt.path, 'file'), 'keep');
+  restart();
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  assert.ok(fs.existsSync(path.join(wt.path, 'file')));
+
+  fs.rmSync(path.join(wt.path, 'file'));
+  const second = restart();
+  for (let tries = 0; second.get(job.id).worktree && tries < 100; tries++) await new Promise((resolve) => setTimeout(resolve, 20));
+  const restored = second.get(job.id);
+  assert.equal(restored.worktree, null);
+  assert.equal(restored.cleanupPending, undefined);
+  assert.equal(fs.existsSync(wt.path), false);
 });

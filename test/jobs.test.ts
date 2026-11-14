@@ -19,6 +19,8 @@ function tempRepo(): string {
   git('init', '-q');
   git('config', 'user.email', 'test@example.com');
   git('config', 'user.name', 'Test');
+  // Checked-out files must match what the tests wrote, whatever the user's autocrlf setting is.
+  git('config', 'core.autocrlf', 'false');
   fs.writeFileSync(path.join(dir, 'README.md'), 'hello\n');
   fs.writeFileSync(path.join(dir, 'app.js'), 'export const x = 1;\n');
   git('add', '-A');
@@ -146,7 +148,8 @@ test('a job belongs to the project of the session that started it', async () => 
   const own = await jobs.create({ kind: 'review', cwd: repo, project: '/work/site', review });
   const fallback = await jobs.create({ kind: 'review', cwd: repo, review });
   assert.equal(own.project, '/work/site');
-  assert.equal(fallback.project, repo);
+  // Git prints forward slashes on Windows.
+  assert.equal(path.normalize(fallback.project), repo);
 });
 
 test('polish reports files changed outside the allowed targets', async () => {
@@ -311,7 +314,7 @@ test('jobs left running by a previous bridge are restored as failed but resumabl
   const restored = second.get(job.id);
   assert.equal(restored.state, 'failed');
   assert.equal(restored.sessionId, 'session-1');
-  assert.equal(restored.project, repo);
+  assert.equal(path.normalize(restored.project), repo);
 });
 
 test('the history limit does not hide old worktrees or undelivered jobs after a restart', async () => {
@@ -1618,6 +1621,14 @@ test('a review follow-up retries removal of its previous snapshot', async (t) =>
   }
   assert.ok(job.worktree);
   fs.unlinkSync(lock);
+  if (process.platform === 'win32') {
+    // Windows records the leftovers and asks for crew gc before a follow-up, instead of retrying on reply.
+    await assert.rejects(jobs.reply(job.id, { message: 'review again' }), /incomplete cleanup/);
+    await jobs.gc({ apply: true, branches: true });
+    assert.equal(job.worktree, null);
+    assert.equal(job.cleanupPending, undefined);
+    return;
+  }
   await jobs.reply(job.id, { message: 'review again' });
   assert.ok(calls.some((call) => call.includes('The snapshot has been refreshed')));
   assert.equal(job.error, null);

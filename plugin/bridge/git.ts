@@ -64,13 +64,21 @@ export interface Worktree {
 /**
  * Pathspecs that leave out Crew's shared-dependency links. A directory-only ignore rule such as `node_modules/`
  * does not cover a symlink, and the only exclude file Git reads is shared with the user's own checkout.
+ * A link Git already ignores (a Windows junction counts as a directory) is left out of the list: naming an
+ * ignored path in a pathspec makes `git add` fail.
  */
-const besides = (linked: string[]) => linked.length ? ['--', '.', ...linked.map((rel) => `:(exclude,literal)${rel}`)] : [];
+async function besides(root: string, linked: string[]): Promise<string[]> {
+  const unignored: string[] = [];
+  for (const rel of linked) {
+    if (await git(root, ['check-ignore', '-q', '--', rel]).then(() => false, () => true)) unignored.push(rel);
+  }
+  return unignored.length ? ['--', '.', ...unignored.map((rel) => `:(exclude,literal)${rel}`)] : [];
+}
 
 /** Number of uncommitted paths in the main tree; a worktree created from a ref will not contain them. */
 export async function dirtyCount(root: string, linked: string[] = []): Promise<number> {
   // Every untracked file by name, so a folder holding nothing but Finder's metadata is not counted either.
-  const out = await git(root, ['status', '--porcelain', '--untracked-files=all', ...besides(linked)]);
+  const out = await git(root, ['status', '--porcelain', '--untracked-files=all', ...await besides(root, linked)]);
   // Finder's .DS_Store files are never something a worker needs, and they are in most trees that do not ignore them.
   return out.split('\n').filter((line) => line && !/(^|\/)\.DS_Store"?$/.test(line.slice(3))).length;
 }
@@ -200,7 +208,7 @@ export function realpath(target: string): string {
  * missing identity falls back to Crew's.
  */
 export async function commitAll(wt: string, message: string, linked: string[] = []): Promise<string | null> {
-  await git(wt, ['add', '-A', ...besides(linked)]);
+  await git(wt, ['add', '-A', ...await besides(wt, linked)]);
   const staged = await git(wt, ['diff', '--cached', '--name-only']);
   if (!staged) return null;
   await git(wt, [...await commitSettings(wt), 'commit', '--no-verify', '-m', message]);
@@ -316,6 +324,26 @@ export async function prepareRemoval(dir: string, platform: NodeJS.Platform = pr
   await clear(false);
   // An empty directory has nothing to recurse into, and attrib's "File not found" there is localized.
   if (entry.isDirectory() && (await fs.readdir(dir)).length) await clear(true);
+}
+
+/**
+ * Removes what a finished removal left behind: an empty, plain directory inside Crew's worktree directory.
+ * Never recursive and never through a link, so nothing a lock hides can be deleted by mistake.
+ * Returns whether the directory is gone; a lock that is still held throws.
+ */
+export async function removeEmptyLeftover(dir: string, home: string): Promise<boolean> {
+  const worktrees = path.join(home, 'worktrees');
+  if (!isInside(worktrees, dir) || path.resolve(dir) === path.resolve(worktrees)) {
+    throw new Error(`Refusing to remove ${dir}: it is outside the Crew worktree directory.`);
+  }
+  const entry = await fs.lstat(dir).catch((err: NodeJS.ErrnoException) => {
+    if (err.code !== 'ENOENT') throw err;
+    return null;
+  });
+  if (!entry) return true;
+  if (!entry.isDirectory() || (await fs.readdir(dir)).length) return false;
+  await fs.rmdir(dir);
+  return true;
 }
 
 export async function removeDirectory(dir: string, platform: NodeJS.Platform = process.platform): Promise<void> {

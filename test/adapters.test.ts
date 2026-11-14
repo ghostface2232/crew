@@ -11,6 +11,7 @@ import { HOME, resolveConfig } from '../plugin/bridge/config.ts';
 import { Jobs } from '../plugin/bridge/jobs.ts';
 import type { Job, WorkerAgent } from '../plugin/bridge/jobs.ts';
 import { describe } from '../plugin/bridge/render.ts';
+import { writeFakeBin } from './fake-bin.ts';
 import { decide } from '../plugin/bridge/adapters/antigravity.ts';
 
 const command = 'echo first\necho ' + 'a'.repeat(160) + '\necho last';
@@ -62,7 +63,7 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
 function harness(source: string, agent: WorkerAgent = 'codex', roles: Parameters<typeof resolveConfig>[0]['roles'] = {}) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-codex-test-'));
   const bin = path.join(home, 'codex');
-  fs.writeFileSync(bin, `#!${process.execPath}\n${source}`, { mode: 0o700 });
+  writeFakeBin(bin, source);
   const config = resolveConfig({
     notify: false,
     // No global plugins, so each test turns on only the plugins it is about.
@@ -115,7 +116,7 @@ test('a hung initialize fails the job and the next job can start a fresh server'
   assert.equal(job.state, 'failed');
   assert.match(job.error!.message, /initialize.*timed out/);
   t.mock.timers.reset();
-  fs.writeFileSync(bin, `#!${process.execPath}\n${stub}`);
+  writeFakeBin(bin, stub);
   const next = await jobs.create({ kind: 'delegate', cwd: home, isolation: 'in_place', task: 'test' });
   while (!next.waiting) await jobs.wait(next.id, next.seq, 1000);
   assert.equal(next.sessionId, 'parent');

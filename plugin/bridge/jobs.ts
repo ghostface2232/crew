@@ -3,7 +3,7 @@ import path from 'node:path';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { effectiveRole, PORT, runsCommands, WORKERS } from './config.ts';
 import type { Config, Role, WorkerAgent } from './config.ts';
-import { carryUncommitted, changesSince, commitAll, commitChanges, copyIncluded, createWorktree, currentBranch, dirtyCount, mergeInto, isInside, projectRoot, removeDirectory, removeWorktree, repoRoot, revertCommit, revertsSince, reviewDiff, WorktreeCleanupError } from './git.ts';
+import { carryUncommitted, changesSince, commitAll, commitChanges, copyIncluded, createWorktree, currentBranch, dirtyCount, git, mergeInto, isInside, projectRoot, realpath, removeDirectory, removeEmptyLeftover, removeWorktree, repoRoot, revertCommit, revertsSince, reviewDiff, WorktreeCleanupError } from './git.ts';
 import { collectGarbage } from './gc.ts';
 import type { Worktree } from './git.ts';
 import { sharedInstructions } from './instructions.ts';
@@ -282,6 +282,7 @@ export class Jobs {
     this.hooks = hooks;
     this.platform = platform;
     this.load();
+    for (const job of this.jobs.values()) void this.clearLeftover(job);
     setInterval(() => this.checkStalls(), 15_000).unref();
   }
 
@@ -708,9 +709,47 @@ export class Jobs {
         job.notes.push(`Cleanup left: ${err.leftovers.join('; ') || 'Git registration could not be confirmed'}. Run crew gc to remove leftovers later. ${err.message}`);
         this.changed(job);
         this.flush();
+        this.retryLeftover(job, [30_000, 120_000]);
       }
       throw err;
     }
+  }
+
+  /** Windows can hold the worktree directory for a while after its files and Git metadata are gone. */
+  private onlyDirectoryLeft(job: Job): boolean {
+    return this.platform === 'win32' && Boolean(job.repo && job.worktree) && job.cleanupPending?.length === 1
+      && job.cleanupPending[0] === `directory ${job.worktree!.path}`;
+  }
+
+  /** One attempt at that directory. True once it is gone and the job no longer has leftovers. */
+  private async clearLeftover(job: Job): Promise<boolean> {
+    if (!this.onlyDirectoryLeft(job) || this.collecting || this.discarding.has(job.id) || this.changingRounds.has(job.id)
+        || this.snapshots.has(job.id)) return false;
+    const worktree = job.worktree!;
+    try {
+      const listed = (await git(job.repo!, ['worktree', 'list', '--porcelain', '-z'])).split('\0');
+      // A directory Git still lists is for crew gc, which prunes the registration too.
+      if (listed.some((line) => line.startsWith('worktree ') && realpath(line.slice(9)) === realpath(worktree.path))) return false;
+      if (!await removeEmptyLeftover(worktree.path, this.home)) return false;
+    } catch {
+      return false;
+    }
+    if (job.worktree === worktree) {
+      delete job.cleanupPending;
+      job.worktree = null;
+      job.notes.push('Worktree leftovers removed after a delay.');
+      this.changed(job);
+      this.flush();
+    }
+    return true;
+  }
+
+  private retryLeftover(job: Job, delays: number[]): void {
+    const [wait, ...rest] = delays;
+    if (wait === undefined || !this.onlyDirectoryLeft(job)) return;
+    setTimeout(() => {
+      void this.clearLeftover(job).then((done) => { if (!done) this.retryLeftover(job, rest); });
+    }, wait).unref();
   }
 
   async gc(options: { apply?: boolean; branches?: boolean } = {}): Promise<string> {

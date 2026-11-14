@@ -912,6 +912,51 @@ test('a relayed approval carries the user\'s own recorded words, and a translate
   assert.match(describe(job), /your quote matches one/);
 });
 
+test('the bridge runs the lead\'s check after each turn and marks it stale when the branch moves', async () => {
+  const repo = tempRepo();
+  const { jobs, adapter } = harness((ctl) => {
+    fs.writeFileSync(path.join(ctl.job.cwd, 'app.js'), 'export const x = 2;\n');
+    ctl.done('changed x');
+  });
+  await assert.rejects(jobs.create({ kind: 'delegate', cwd: repo, task: 't', check: '  ' }), /check must be a shell command/);
+  await assert.rejects(jobs.create({ kind: 'delegate', cwd: repo, task: 't', check: 'true', isolation: 'in_place' }), /only a delegate job with a worktree/);
+  const job = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'bump x', check: 'grep -q "x = 2" app.js && echo checked' }));
+  const first = job.receipts?.at(-1);
+  assert.equal(first?.turn, 1);
+  assert.ok(job.result?.commit && first?.head?.startsWith(job.result.commit));
+  assert.equal(first?.check?.exit, 0);
+  assert.equal(first?.check?.output, 'checked');
+  assert.equal(first?.check?.sandboxed, process.platform === 'darwin');
+  assert.match(describe(job), /check by the bridge \(turn 1 at [0-9a-f]{8}\): `grep -q "x = 2" app\.js && echo checked` passed/);
+
+  // Undoing the round leaves the check describing a tree that is gone.
+  await jobs.round(job.id, 1, 'undo');
+  assert.equal(job.receipts?.at(-1)?.stale, 'round 1 undone');
+  assert.match(describe(job), /no longer current: round 1 undone since/);
+
+  // The next turn is checked again, and a failure shows the end of its output.
+  adapter.reply = async (ctl) => ctl.done('nothing changed');
+  await jobs.reply(job.id, { message: 'check again' });
+  await settled(jobs, job);
+  const second = job.receipts?.at(-1);
+  assert.equal(second?.turn, 2);
+  assert.equal(second?.stale, undefined);
+  assert.equal(second?.check?.exit, 1);
+  assert.match(describe(job), /failed \(exit 1\)/);
+});
+
+test('a review records what it read at the start of each turn', async () => {
+  const repo = tempRepo();
+  fs.writeFileSync(path.join(repo, 'app.js'), 'export const x = 3;\n');
+  const { jobs } = harness((ctl) => ctl.done('looks fine'));
+  const job = await settled(jobs, await jobs.create({ kind: 'review', cwd: repo, review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } }));
+  const receipt = job.receipts?.at(-1);
+  assert.equal(receipt?.reviewed?.target, 'uncommitted changes');
+  assert.match(receipt?.reviewed?.diff ?? '', /^[0-9a-f]{12}$/);
+  assert.equal(receipt?.head, execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo }).toString().trim());
+  assert.match(describe(job), /reviewed \(turn 1\): uncommitted changes at [0-9a-f]{8}, diff [0-9a-f]{12}/);
+});
+
 test('a follow-up sent while a job is being discarded is refused, not started in a removed worktree', async () => {
   const repo = tempRepo();
   const { jobs, calls } = harness((ctl) => ctl.done('built'));

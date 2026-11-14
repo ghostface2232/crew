@@ -103,6 +103,7 @@ const TOOLS = [
         task: { type: 'string', description: 'What to build, with the context the engineer needs: relevant files, constraints, interfaces to match. It has not seen this conversation. If the result must match something (a design, screenshots, another implementation), name it by file path and commit; the engineer can open images by path.' },
         title: { type: 'string', description: 'Short label shown on the status board.' },
         done_when: { type: 'string', description: 'Concrete completion criteria the engineer can check, e.g. tests that must pass, or what must be true on screen and at which widths.' },
+        check: { type: 'string', description: 'A shell command (e.g. "npm test") the bridge itself runs in the worktree after every turn, so the result shows an observed exit status instead of the worker\'s word. Runs with the worker\'s file limits, up to 10 minutes. Needs a worktree.' },
         ...worktreeProps,
         ...modelProps,
         ...runsAppProp('do or verify the work'),
@@ -499,7 +500,7 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
   const cwd: string = args.cwd ?? PROJECT;
   switch (name) {
     case 'delegate':
-      return runJob({ kind: 'delegate', cwd, title: args.title, task: args.task, done_when: args.done_when, base: args.base, isolation: args.isolation, model: args.model, effort: args.effort, exclusive: Boolean(args.exclusive), runsApp: Boolean(args.runs_app), plugins: args.plugins, skills: args.skills, attachments: args.attachments }, args.background !== false, ctx);
+      return runJob({ kind: 'delegate', cwd, title: args.title, task: args.task, done_when: args.done_when, check: args.check, base: args.base, isolation: args.isolation, model: args.model, effort: args.effort, exclusive: Boolean(args.exclusive), runsApp: Boolean(args.runs_app), plugins: args.plugins, skills: args.skills, attachments: args.attachments }, args.background !== false, ctx);
     case 'review': {
       const kind = args.target ?? 'uncommitted';
       if (kind === 'branch' && !args.base) throw new Error('target "branch" needs base (the branch to compare against, e.g. main).');

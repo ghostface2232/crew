@@ -1,3 +1,4 @@
+import { checkLine } from './check.ts';
 import { WORKERS } from './config.ts';
 import { openRefusals } from './jobs.ts';
 import type { Job } from './jobs.ts';
@@ -44,6 +45,17 @@ export function describe(job: JobView, waitingHint?: string): string {
     lines.push(`NEEDS A DECISION:\n${job.waiting!.reason}`);
     lines.push(waitingHint ?? `This is the user's call, not yours. Call wait with job id "${job.id}" so they are asked in the app; use reply only to pass on a decision they already gave you (decision "approve" or "deny"${job.waiting!.type === 'question' ? ', or a message with the answer' : ''}).`);
     lines.push(`When forwarding the answer, pass request_id: "${job.waiting!.id}".`);
+  }
+  const receipt = job.receipts?.at(-1);
+  if (receipt) {
+    const at = receipt.head ? ` at ${receipt.head.slice(0, 8)}` : '';
+    const stale = receipt.stale ? ` — no longer current: ${receipt.stale} since` : '';
+    if (receipt.reviewed) {
+      lines.push(`reviewed (turn ${receipt.turn}): ${receipt.reviewed.target}${at}${receipt.reviewed.diff ? `, diff ${receipt.reviewed.diff}` : ''}${stale}`);
+    } else if (receipt.check) {
+      lines.push(`check by the bridge (turn ${receipt.turn}${at}): ${checkLine(receipt.check)}${stale}`);
+      if (receipt.check.exit !== 0 && receipt.check.output) lines.push(`check output (end):\n${receipt.check.output.split('\n').slice(-15).map((line) => `  ${line}`).join('\n')}`);
+    }
   }
   if (job.capabilities) {
     const { filesystem, network, plugins } = job.capabilities;

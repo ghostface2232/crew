@@ -1,6 +1,9 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { runCheck } from './check.ts';
+import type { CheckResult } from './check.ts';
 import { canonicalPath, effectiveRole, PORT, runsCommands, WORKERS } from './config.ts';
 import type { Config, Role, WorkerAgent } from './config.ts';
 import { carryUncommitted, changesSince, commitAll, commitChanges, copyIncluded, createWorktree, currentBranch, dirtyCount, git, mergeInto, isInside, projectRoot, realpath, removeDirectory, removeEmptyLeftover, removeWorktree, repoRoot, revertCommit, revertsSince, reviewDiff, WorktreeCleanupError } from './git.ts';
@@ -44,6 +47,8 @@ export interface JobSpec {
   /** delegate: what to build. polish: extra guidance. review: what to focus on. */
   task?: string;
   done_when?: string;
+  /** delegate: a shell command the bridge runs in the worktree after each turn, recording its exit status. */
+  check?: string;
   /** polish: files or directories the worker may touch. */
   targets?: string[];
   /** Ref the worktree is created from (delegate, polish). */
@@ -113,6 +118,20 @@ export interface RelayedApproval {
   at: number;
 }
 
+/** What a turn left behind and what was checked against it, so a result can be judged without the transcript. */
+export interface TurnReceipt {
+  turn: number;
+  /** The job branch's commit after the turn (delegate), or the reviewed commit (review). */
+  head: string | null;
+  /** The lead's check, as the bridge ran it after the turn. */
+  check?: CheckResult;
+  /** review: what was under review at the start of the turn. */
+  reviewed?: { target: string; diff?: string };
+  /** Why this receipt no longer describes the branch, once a round change or sync moved it. */
+  stale?: string;
+  at: number;
+}
+
 export interface LeadQuestion {
   id: string;
   text: string;
@@ -167,6 +186,10 @@ export interface Job {
    * reviewer and the user can see what the approval rests on.
    */
   approvals?: RelayedApproval[];
+  /** delegate: the lead's check, run by the bridge after every turn. */
+  check?: string;
+  /** One per finished turn, oldest first; absent on jobs saved before receipts existed. */
+  receipts?: TurnReceipt[];
   /** What the worker's runtime was set up to allow, as the adapter configured it; absent until the session starts. */
   capabilities?: Capabilities;
   /** Set while the latest turn is a retry of refused actions: the actions it was sent back with. */
@@ -283,6 +306,11 @@ export function openRefusals(job: Pick<Job, 'refusals' | 'turns' | 'retrying' | 
   const latest = (job.refusals ?? []).filter((refusal) => refusal.turn === job.turns);
   if (latest.length || job.state !== 'failed') return latest;
   return (job.retrying ?? []).map((action) => ({ action }));
+}
+
+/** Marks the receipts that still describe the branch as no longer doing so. */
+function staleReceipts(job: Job, why: string): void {
+  for (const receipt of job.receipts ?? []) receipt.stale ??= why;
 }
 
 /** Text compared without case, spacing or punctuation, in any script. */
@@ -419,6 +447,10 @@ export class Jobs {
       throw new Error(spec.ask ? 'An ask job is read-only and cannot use plugins. Drop plugins.' : 'A read-only review cannot use plugins. Add runs_app, or drop plugins.');
     }
     if (spec.plugins?.length && spec.kind === 'polish') throw new Error('A polish job cannot use plugins: an editor only changes wording. Drop plugins.');
+    if (spec.check !== undefined && (typeof spec.check !== 'string' || !spec.check.trim())) throw new Error('check must be a shell command.');
+    if (spec.check && (spec.kind !== 'delegate' || spec.ask || spec.isolation === 'in_place')) {
+      throw new Error('check runs in the job\'s own worktree after each turn, so only a delegate job with a worktree takes it. Run the check yourself, or drop check.');
+    }
     const attachments = checkAttachments(spec.attachments);
     if (attachments.length && spec.review?.mode === 'standard' && agent === 'codex') {
       throw new Error('Codex\'s standard review is sent no prompt, so it would never see the attachments. Use the adversarial mode, or drop attachments.');
@@ -512,6 +544,7 @@ export class Jobs {
       nativeReview: spec.kind === 'review' && agent === 'codex' && spec.review?.mode === 'standard' ? spec.review.target : null,
       reviewTarget: spec.review?.target,
       targets: spec.targets ?? [],
+      check: spec.check?.trim() || undefined,
       model: spec.model ?? role.model,
       effort: spec.effort ?? role.effort,
       sessionId: null,
@@ -530,6 +563,7 @@ export class Jobs {
       delivered: 0,
     };
     this.jobs.set(id, job);
+    if (job.kind === 'review' && repo) await this.recordReviewed(job, repo);
     this.event(job, 'started', `${spec.kind}: ${title}`);
     if (worktree) this.flush();
 
@@ -607,6 +641,7 @@ export class Jobs {
           job.roundsBase ??= job.worktree.base;
           job.worktree.base = synced;
           job.notes.push(`Brought up to date with ${synced.slice(0, 8)} before turn ${job.turns + 1}.`);
+          staleReceipts(job, `brought up to date with ${synced.slice(0, 8)}`);
           job.result = await this.worktreeResult(job, job.result?.commit ?? null);
           this.flush();
         }
@@ -636,6 +671,16 @@ export class Jobs {
     const what = !retry ? input.message.split('\n')[0].slice(0, 80) : job.asksUser ? 'refused action retried; the user is asked about each request' : 'refused action retried with the user\'s approval';
     this.event(job, 'started', `follow-up: ${what}`);
     try {
+      if (job.kind === 'review' && job.repo) {
+        // Held like the diff refresh below, so an overlapping follow-up is refused rather than steering this turn.
+        this.preparingReviews.add(id);
+        try {
+          await this.recordReviewed(job, job.repo);
+        } finally {
+          this.preparingReviews.delete(id);
+        }
+        if (isTerminal(job)) return job;
+      }
       let message = this.attach(job, input.message, attachments, job.turns) + syncWarning;
       if (job.agent === 'codex') {
         job.scratch = this.scratchDir(id);
@@ -714,6 +759,21 @@ export class Jobs {
     parts.push(`Run the refused action again, exactly as before:\n${actions.join('\n')}`);
     if (extra?.trim()) parts.push(extra.trim());
     return { message: parts.join('\n\n'), actions, approval: { quote, matched, recorded: prompts.length, at: Date.now() } };
+  }
+
+  /** Records what this review turn is reading, so a later change to the tree shows the review no longer covers it. */
+  private async recordReviewed(job: Job, repo: string): Promise<void> {
+    const target = job.reviewTarget;
+    if (!target) return;
+    try {
+      const head = (await git(repo, ['rev-parse', target.type === 'commit' ? target.sha : 'HEAD'])).trim();
+      const reviewed: TurnReceipt['reviewed'] = target.type === 'uncommittedChanges'
+        ? { target: 'uncommitted changes', diff: createHash('sha256').update(await reviewDiff(repo, target)).digest('hex').slice(0, 12) }
+        : { target: target.type === 'commit' ? `commit ${target.sha}` : `changes against ${target.branch}` };
+      (job.receipts ??= []).push({ turn: job.turns, head, reviewed, at: Date.now() });
+    } catch (err) {
+      job.notes.push(`Could not record what turn ${job.turns} reviewed: ${(err as Error).message.split('\n')[0]}`);
+    }
   }
 
   /** A worktree holding the change under review, for a reviewer that runs the app. Removed when the turn ends. */
@@ -915,6 +975,7 @@ export class Jobs {
       const reverted = await revertCommit(job.worktree.path, commit, job.worktree.linked);
       const result = await this.worktreeResult(job, reverted);
       round.state = state;
+      staleReceipts(job, `round ${turn} ${state}`);
       if (action === 'undo') round.revert = reverted;
       else delete round.revert;
       job.result = result;
@@ -1171,6 +1232,19 @@ export class Jobs {
       const commit = await commitAll(job.worktree.path, `crew(${job.agent}): ${job.title}`, job.worktree.linked);
       if (commit) (job.rounds ??= []).push({ turn: job.turns, commit, ...await commitChanges(job.worktree.path, commit), state: 'kept', at: Date.now() });
       result = await this.worktreeResult(job, commit);
+      const head = (await git(job.worktree.path, ['rev-parse', 'HEAD'])).trim();
+      let check: CheckResult | undefined;
+      if (job.check && !isTerminal(job)) {
+        job.phase = 'running the check';
+        this.changed(job);
+        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), `crew-check-${job.id}-`));
+        try {
+          check = await runCheck(job.check, job.worktree.path, tmp, [tokenFile(this.home)]);
+        } finally {
+          fs.rmSync(tmp, { recursive: true, force: true });
+        }
+      }
+      (job.receipts ??= []).push({ turn: job.turns, head, ...(check ? { check } : {}), at: Date.now() });
     } else if (job.kind === 'review' || job.ask) {
       result = null;
     } else {

@@ -183,6 +183,24 @@ function VerificationSection({ job }: { job: BoardJob }) {
   );
 }
 
+/** A debate reads as a conversation, round by round; each side's latest word is what matters most, so nothing is folded. */
+function DebateSection({ job }: { job: BoardJob }) {
+  const debate = job.debate!;
+  const settled = job.state === 'done' && job.turns >= debate.rounds;
+  return (
+    <Section title={`Debate · round ${Math.min(job.turns, debate.rounds)} of ${debate.rounds}${settled ? ' · concluded' : ''}`} icon={MessageSquare}>
+      <ol className="exchange">
+        {(job.exchange ?? []).map((entry, index) => (
+          <li className="exchange-entry" data-from={entry.from} key={index}>
+            <div className="caption">{entry.from === 'lead' ? 'Lead' : NAMES[job.agent]} · round {entry.turn}</div>
+            <pre className="report selectable">{entry.text}</pre>
+          </li>
+        ))}
+      </ol>
+    </Section>
+  );
+}
+
 function FollowUp({ job }: { job: BoardJob }) {
   const key = `followup:${job.id}`;
   const [draft, setDraft] = useDraft(key);
@@ -247,7 +265,7 @@ export function JobDrawer({ id, state, close }: { id: string; state: Snapshot; c
     ? [
         // The model the session reported, else the configured one.
         ['Agent', [NAMES[job.agent], job.resolvedModel ?? job.model, (job.resolvedEffort ?? job.effort) && `${job.resolvedEffort ?? job.effort} effort`].filter(Boolean).join(' · ')],
-        ['Role', job.ask ? 'Question' : (ROLE_NAMES[job.kind] ?? job.kind)],
+        ['Role', job.debate ? 'Debate' : job.ask ? 'Question' : (ROLE_NAMES[job.kind] ?? job.kind)],
         ['Project', projectOf(job)],
         ['Duration', elapsed((job.endedAt ?? now) - job.createdAt)],
         ...(job.worktree ? [['Branch', `${job.worktree.branch} (from ${job.worktree.base.slice(0, 8)})`] as [string, string]] : []),
@@ -352,7 +370,7 @@ export function JobDrawer({ id, state, close }: { id: string; state: Snapshot; c
                 ))}
               </Section>
             )}
-            {job.report && (
+            {job.debate ? <DebateSection job={job} /> : job.report && (
               <Section title="Report" icon={FileText}>
                 <pre className="report selectable">{job.report}</pre>
               </Section>

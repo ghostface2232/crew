@@ -1,6 +1,6 @@
 import { useState, useSyncExternalStore } from 'react';
 import { board } from './store.ts';
-import { Check, ChevronDown, ChevronRight, CircleCheck, CircleX, Ellipsis, Hammer, MessageCircleQuestion, ShieldCheck, SpellCheck, Wrench } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, CircleCheck, CircleX, Ellipsis, Hammer, MessageCircleQuestion, MessagesSquare, ShieldCheck, SpellCheck, Wrench } from 'lucide-react';
 import type { BoardJob, ClaudeSession, Mission } from './types.ts';
 import { actions, request } from './api.ts';
 import {
@@ -17,12 +17,12 @@ export function JobRow({ job, selected, openJob }: { job: BoardJob; selected?: b
   const active = job.endedAt == null;
   const detail = [
     NAMES[job.agent],
-    job.ask ? 'Question' : null,
+    job.debate ? 'Debate' : job.ask ? 'Question' : null,
     job.error?.message ?? (active ? job.phase : null),
     job.runsApp ? 'Runs the app' : null,
     job.exclusive ? 'Runs alone' : null,
   ].filter(Boolean).join(' · ');
-  const kind = job.ask ? MessageCircleQuestion : job.kind === 'review' ? ShieldCheck : job.kind === 'polish' ? SpellCheck : Hammer;
+  const kind = job.debate ? MessagesSquare : job.ask ? MessageCircleQuestion : job.kind === 'review' ? ShieldCheck : job.kind === 'polish' ? SpellCheck : Hammer;
   return (
     <button
       className="job-row"

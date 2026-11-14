@@ -585,6 +585,10 @@ dialog.detail-panel::backdrop { background: transparent; }
 .receipt code { font-size: 12px; overflow-wrap: anywhere; }
 .receipt .callout svg { vertical-align: -1px; }
 .approval { display: grid; gap: 3px; }
+.exchange { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.exchange-entry { display: grid; gap: 4px; padding: 10px 12px; border-radius: var(--row-radius); background: var(--row); }
+/* The lead's turns sit inset with an accent edge, so the two voices separate at a glance. */
+.exchange-entry[data-from="lead"] { margin-inline-start: 24px; background: transparent; border-inline-start: 2px solid var(--accent); border-radius: 0; }
 .approval .caption { overflow-wrap: anywhere; }
 .disclosure-group > summary { cursor: pointer; font-size: 13px; }
 .disclosure-group > pre { margin-top: 8px; }

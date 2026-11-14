@@ -270,6 +270,24 @@ test('the detail panel shows what verified the result and nothing for jobs witho
       receipts: [{ turn: 1, head: 'cafe0123456789ab', reviewed: { target: 'uncommitted changes', diff: '9f8e7d6c' }, at: NOW - 6000 }],
     }),
     job({ id: 'cx-plain', title: 'Plain job', state: 'done', endedAt: NOW - 5000 }),
+    job({
+      id: 'cx-debate',
+      title: 'Debate: how the lead is woken',
+      state: 'done',
+      endedAt: NOW - 5000,
+      ask: true,
+      worktree: null,
+      rounds: [],
+      turns: 2,
+      debate: { rounds: 2 },
+      report: 'Conclusion: wake per job.',
+      exchange: [
+        { turn: 1, from: 'lead', text: 'Batch the wakes.', at: NOW - 9000 },
+        { turn: 1, from: 'worker', text: '1. disagree: a claimed batch can drop a result.', at: NOW - 8000 },
+        { turn: 2, from: 'lead', text: 'Then wake per job.', at: NOW - 7000 },
+        { turn: 2, from: 'worker', text: 'Conclusion: wake per job.', at: NOW - 6000 },
+      ],
+    }),
   );
   await request.post('/__push', { data: { type: 'state', data } });
   const open = async (id: string) => {
@@ -305,6 +323,15 @@ test('the detail panel shows what verified the result and nothing for jobs witho
   await close();
 
   await expect((await open('cx-plain')).getByRole('region', { name: 'Verification' })).toHaveCount(0);
+  await close();
+
+  // A debate reads as the conversation, in order, instead of only the last report.
+  const debate = (await open('cx-debate')).getByRole('region', { name: 'Debate · round 2 of 2 · concluded' });
+  await expect(debate.locator('.exchange-entry')).toHaveCount(4);
+  await expect(debate.locator('.exchange-entry').first()).toContainText('Lead · round 1');
+  await expect(debate.locator('.exchange-entry').nth(1)).toContainText('Codex · round 1');
+  await expect(debate.getByText('a claimed batch can drop a result')).toBeVisible();
+  await expect(page.getByRole('dialog').getByRole('region', { name: 'Report' })).toHaveCount(0);
 });
 
 test('project filtering keeps global requests visible and New Job follows roles', async ({ page, request }) => {

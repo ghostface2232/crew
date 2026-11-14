@@ -191,6 +191,21 @@ These views keep their own geometry next to their code, built from the tokens ab
 - Once details scroll under the header, a veil fades in over 0.25 seconds. The veil is the panel's surface at 100%, 90%, 60% and 0% opacity, laid over an `ultraThinMaterial` blur that thins out from halfway down.
 - The veil extends `Space.x6l` (40 points) below the header. When the details are at the top, no veil shows.
 
+## Motion — `Motion`
+
+Every animation takes one of these values, through `Motion.reduced`, so Reduce Motion turns it off.
+
+| Token | Animation | Use |
+| --- | --- | --- |
+| `content` | smooth, 0.3 s | A control or block changing its words or size: Copied, Saving…, Undo/Keep, a reveal opening |
+| `expand` | smooth, 0.38 s | A card opening or closing, with the cards around it moving along |
+| `panel` | smooth, 0.26 s, no bounce | The detail panel coming in or going out |
+| `page` | ease out, 0.22 s | A page replacing another |
+| `fade` | ease out, 0.25 s | The detail header's veil |
+| `enter` / `leave` | ease out 0.28 s after 0.06 s / ease in 0.14 s | An opening card's contents arriving after it starts to open, and leaving before it closes |
+
+Pill and glass pill labels use `.contentTransition(.interpolate)`, so the words change in a morph and the capsule resizes with them. A change the view sets itself, such as Copied, happens inside `withAnimation(Motion.content)`. A label that follows state the view does not set, such as Saving… or Keep after Undo, applies `.morphs(on:)` to that state.
+
 ## Controls
 
 | Kind | How | Use |
@@ -211,8 +226,10 @@ Pill buttons use `PillButtonStyle`, not the system bordered style. The system's 
 | warning | `Palette.warning` | `Palette.chip(warning)` |
 | destructive role | `Palette.danger` | `Palette.chip(danger)` |
 
-When a pill's label starts with a symbol, the symbol's side has `Pill.symbolTrim` (3 points) less inset. A symbol's round shape sits inside its frame, so an even inset would look wider on that side. Text-only pills stay symmetric. The symbol and the title are `Pill.symbolGap` (6 points) apart. Glass pills use the same insets and label style. A tinted label is darkened 22% in light mode, as on chips. A pressed pill dims, and a disabled one fades to 45%. Under Increase Contrast, a pill gets an outline. A group's actions sit at its trailing edge, and the completing action comes last. Placement follows two rules.
-- **Actions sit at the trailing edge.** An item's action sits on the item's header row, as Undo does on a round. A section's action sits on its own last row, as Copy diff command does, or shares that row with a closing line, as Mark done shares it with a mission's outcome, centered on that line. The panel's footer gathers its actions at the trailing edge, with Cancel Job last.
+When a pill's label starts with a symbol, the symbol's side has `Pill.symbolTrim` (3 points) less inset. A symbol's round shape sits inside its frame, so an even inset would look wider on that side. Text-only pills stay symmetric. The symbol and the title are `Pill.symbolGap` (6 points) apart. Glass pills use the same insets and label style. A tinted label is darkened 22% in light mode, as on chips. A pressed pill dims, and a disabled one fades to 45%. Under Increase Contrast, a pill gets an outline. A group's actions sit at its trailing edge, and the completing action comes last. A copy button names only what it copies, such as Resume command or Diff command. The copy symbol says the rest, and its help gives the whole action.
+
+Placement follows two rules.
+- **Actions sit at the trailing edge.** An item's action sits on the item's header row, as Undo does on a round. A section's action sits on its own last row, as Copy diff command does, or shares that row with a closing line, as Mark done shares it with a mission's outcome, centered on that line. The panel's footer (`DetailFooter`) is one row: the job's or session's id at the leading edge, shortened in the middle when it would crowd the actions, and the actions at the trailing edge with Cancel Job last.
 - **Reveals sit at the leading edge.** A reveal goes directly under what it reveals. Pills run actions and are never used to reveal content.
 
 Send and completing actions sit at the trailing edge too, such as Send message and Approve after Deny. A mission's Stop tracking and Mark done appear only once an active mission looks finished. An abandoned mission shows Mark done alone, which reopens it explicitly: the mission's controls lock per state through `Mission.actionKey`, so Stop tracking never leaves Mark done locked.

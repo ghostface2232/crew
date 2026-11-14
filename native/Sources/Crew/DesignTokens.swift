@@ -3,6 +3,25 @@ import SwiftUI
 // The app's design tokens. Views take sizes, spacing, colors and type from here rather than writing numbers;
 // docs/10-design-tokens.md lists each token with where it is used.
 
+/// The app's motion. Every animation takes one of these, so the same kind of change moves the same way everywhere,
+/// and each passes through `reduced` so Reduce Motion turns it off.
+enum Motion {
+    /// A control or block changing its words or size: a button's label, a reveal opening.
+    static let content = Animation.smooth(duration: 0.3)
+    /// A card opening or closing, with the cards around it moving along.
+    static let expand = Animation.smooth(duration: 0.38)
+    /// The detail panel coming in or going out.
+    static let panel = Animation.smooth(duration: 0.26, extraBounce: 0)
+    /// A page replacing another.
+    static let page = Animation.easeOut(duration: 0.22)
+    /// A veil or overlay fading in or out.
+    static let fade = Animation.easeOut(duration: 0.25)
+    /// An opening card's contents: in after the card has started to open, out before it closes over them.
+    static let enter = Animation.easeOut(duration: 0.28).delay(0.06)
+    static let leave = Animation.easeIn(duration: 0.14)
+    static func reduced(_ animation: Animation, _ reduce: Bool) -> Animation? { reduce ? nil : animation }
+}
+
 /// The spacing scale, in points. Layout spacing and padding use these steps; a component's own geometry
 /// (a chip's insets, a control's glyph frame) is a named token below instead.
 enum Space {
@@ -242,7 +261,7 @@ struct RevealToggle: View {
     @Binding var shown: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
-        Button { withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) { shown.toggle() } } label: {
+        Button { withAnimation(Motion.reduced(Motion.content, reduceMotion)) { shown.toggle() } } label: {
             HStack(spacing: Space.xs) {
                 Text(shown ? hide : show)
                 Image(systemName: "chevron.down").font(Symbol.badge).rotationEffect(.degrees(shown ? 180 : 0)).accessibilityHidden(true)
@@ -271,6 +290,7 @@ struct GlassPillButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(Typeface.calloutStrong).foregroundStyle(prominent ? Color.white : .primary).lineLimit(1)
+            .contentTransition(.interpolate)
             .padding(Pill.insets)
             .glassEffect(prominent ? .regular.tint(Palette.accent).interactive() : .regular.interactive(), in: .capsule)
             .opacity(enabled ? 1 : 0.45)
@@ -292,6 +312,8 @@ struct PillButtonStyle: ButtonStyle {
         let fill: Color = status.map(Palette.chip) ?? (kind == .prominent ? Palette.accent : Pill.fill)
         configuration.label
             .font(Typeface.calloutStrong).foregroundStyle(text).lineLimit(1)
+            // Words that change inside an animation morph rather than cut, and the capsule resizes with them.
+            .contentTransition(.interpolate)
             .padding(Pill.insets)
             .background(fill, in: Capsule())
             .overlay { if contrast == .increased { Capsule().strokeBorder(text.opacity(0.5)) } }
@@ -301,7 +323,16 @@ struct PillButtonStyle: ButtonStyle {
     }
 }
 
+/// Animates a control whose words or width follow `value`, such as Save turning into Saving…, with `Motion.content`.
+private struct Morphs<Value: Equatable>: ViewModifier {
+    let value: Value
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    func body(content: Content) -> some View { content.animation(Motion.reduced(Motion.content, reduceMotion), value: value) }
+}
+
 extension View {
+    /// See `Morphs`: for a control whose words change with state it does not set itself.
+    func morphs<Value: Equatable>(on value: Value) -> some View { modifier(Morphs(value: value)) }
     /// The gray inset that holds a section's or card's contents.
     func inset() -> some View {
         padding(WorkspaceStyle.insetPadding).frame(maxWidth: .infinity, alignment: .leading)

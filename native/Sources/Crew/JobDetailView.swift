@@ -86,7 +86,7 @@ struct JobDetailView: View {
                 }
                 // A section's own action ends it at the trailing edge; an item's sits on the item's header row.
                 if let tree = job.worktree, !result.files.isEmpty {
-                    HStack { Spacer(minLength: 0); CopyButton(title: "Copy diff command", text: "git diff \(tree.base.prefix(8))..\(tree.branch)") }
+                    HStack { Spacer(minLength: 0); CopyButton(title: "Diff command", text: "git diff \(tree.base.prefix(8))..\(tree.branch)", help: "Copy the command that shows this job's changes") }
                 }
             }
         }
@@ -111,7 +111,7 @@ struct JobDetailView: View {
                         Button(round.state == "undone" ? "Keep" : "Undo") {
                             Task { await store.setRound(job, turn: round.turn, undo: round.state != "undone") }
                         }
-                        .pillButton()
+                        .pillButton().morphs(on: round.state)
                         .disabled(!store.connected || job.roundUnavailableReason != nil || store.actions[key]?.locked == true)
                         .help(job.roundUnavailableReason ?? (!store.connected ? "Connect to Crew to change rounds." : "Change this round on the job branch."))
                     } content: {
@@ -167,21 +167,16 @@ struct JobDetailView: View {
         if !combined.isEmpty {
             detailSection("Activity", symbol: "bolt") { EventList(events: combined) }
         }
-        VStack(alignment: .leading, spacing: Space.ml) {
-            Divider().padding(.bottom, Space.xs)
-            HStack(spacing: Space.m) {
-                Spacer(minLength: 0)
-                if let session = job.sessionId, let worker = store.state.agents[job.agent] {
-                    CopyButton(title: "Copy resume command", text: "\(worker.resume) \(session)")
-                }
-                if job.isActive {
-                    Button("Cancel Job", systemImage: "stop.circle", role: .destructive) { Task { await store.cancel(job) } }.pillButton()
-                        .disabled(!store.connected || store.actions["cancel:\(id):\(job.turns)"]?.locked == true)
-                }
-            }.font(Typeface.callout)
-            ActionMessage(state: store.actions["cancel:\(id):\(job.turns)"])
-            Text(job.id).font(Typeface.codeSmall).foregroundStyle(.tertiary).textSelection(.enabled)
+        DetailFooter(id: job.id) {
+            if let session = job.sessionId, let worker = store.state.agents[job.agent] {
+                CopyButton(title: "Resume command", text: "\(worker.resume) \(session)", help: "Copy the command that resumes this job's session")
+            }
+            if job.isActive {
+                Button("Cancel Job", systemImage: "stop.circle", role: .destructive) { Task { await store.cancel(job) } }.pillButton()
+                    .disabled(!store.connected || store.actions["cancel:\(id):\(job.turns)"]?.locked == true)
+            }
         }
+        ActionMessage(state: store.actions["cancel:\(id):\(job.turns)"])
     }
 }
 
@@ -262,7 +257,7 @@ private struct DetailHeader<Status: View>: View {
             }
             .padding(.bottom, -Self.fade)
             .opacity(scrolled ? 1 : 0)
-            .animation(.easeOut(duration: 0.25), value: scrolled)
+            .animation(Motion.fade, value: scrolled)
             .allowsHitTesting(false)
         }
         .onAppear { titleFocused = true }
@@ -321,10 +316,8 @@ struct SessionDetailView: View {
                 }
             }
         }
-        VStack(alignment: .leading, spacing: Space.ml) {
-            Divider().padding(.bottom, Space.xs)
-            HStack { Spacer(minLength: 0); CopyButton(title: "Copy resume command", text: "claude --resume \(session.id)") }
-            Text(session.id).font(Typeface.codeSmall).foregroundStyle(.tertiary).textSelection(.enabled)
+        DetailFooter(id: session.id) {
+            CopyButton(title: "Resume command", text: "claude --resume \(session.id)", help: "Copy the command that resumes this session")
         }
     }
 }
@@ -372,7 +365,7 @@ private struct OriginalTask: View {
             .inset()
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
-    private func toggle() { withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) { shown.toggle() } }
+    private func toggle() { withAnimation(Motion.reduced(Motion.content, reduceMotion)) { shown.toggle() } }
 }
 
 /// A worker's report, with its Markdown headings shown as headings, code blocks in the code face and inline styles

@@ -82,7 +82,7 @@ struct DispatchView: View {
                 Spacer()
                 Button("Cancel") { if dirty { confirmingDiscard = true } else { dismiss() } }.pillButton().keyboardShortcut(.cancelAction).disabled(sending)
                 Button(sending ? "Sending…" : intent == "information" ? "Save Information" : intent == "question" ? "Ask Question" : "Send Job", systemImage: "arrow.up") { Task { await send() } }
-                    .glassPillButton().disabled(!canSend)
+                    .glassPillButton().morphs(on: sending).disabled(!canSend)
             }
         }.padding(WorkspaceStyle.panelPadding).frame(width: WorkspaceStyle.sheetWidth).disabled(sending).interactiveDismissDisabled(sending || dirty)
         .onChange(of: directory) { if destination.hasPrefix("mission:") { destination = "project" } }

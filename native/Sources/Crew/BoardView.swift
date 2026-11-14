@@ -54,7 +54,7 @@ struct BoardView: View {
         .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 6)), removal: .identity))
         // Tied to the page itself, so tabs, the sidebar and keyboard shortcuts all get the same entrance;
         // a withAnimation in the AppKit tab control's action did not reach this view.
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: store.selection)
+        .animation(Motion.reduced(Motion.page, reduceMotion), value: store.selection)
         // The page keeps scrolling and working beside the open panel. A click on it that no control takes
         // closes the panel; one on another job opens that job instead. The sidebar is another column.
         .contentShape(Rectangle())
@@ -75,7 +75,7 @@ struct BoardView: View {
                     .zIndex(1)
             }
         }
-        .animation(reduceMotion ? nil : .smooth(duration: 0.26, extraBounce: 0), value: store.detailOpen)
+        .animation(Motion.reduced(Motion.panel, reduceMotion), value: store.detailOpen)
     }
     /// The content width from which cards pair up, so each column still fits a mission's header.
     private nonisolated static let twoColumnWidth: CGFloat = 1000
@@ -408,8 +408,8 @@ struct MissionPanel: View {
                 }
                 .transition(reduceMotion ? .opacity : .asymmetric(
                     // In after the card has started to open; out quickly, before the card closes over it.
-                    insertion: .modifier(active: Reveal(shown: false), identity: Reveal(shown: true)).animation(.easeOut(duration: 0.28).delay(0.06)),
-                    removal: .modifier(active: Reveal(shown: false), identity: Reveal(shown: true)).animation(.easeIn(duration: 0.14))))
+                    insertion: .modifier(active: Reveal(shown: false), identity: Reveal(shown: true)).animation(Motion.enter),
+                    removal: .modifier(active: Reveal(shown: false), identity: Reveal(shown: true)).animation(Motion.leave)))
             }
             ActionMessage(state: store.actions[mission.actionKey])
         }
@@ -437,7 +437,7 @@ struct MissionPanel: View {
     }
     /// Animated from here rather than inside the card, so the cards below move with it instead of jumping.
     private func toggle() {
-        withAnimation(reduceMotion ? nil : .smooth(duration: 0.38)) { store.missionExpanded[mission.id] = !expanded }
+        withAnimation(Motion.reduced(Motion.expand, reduceMotion)) { store.missionExpanded[mission.id] = !expanded }
     }
 }
 

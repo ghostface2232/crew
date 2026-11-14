@@ -97,20 +97,26 @@ struct ActionMessage: View {
     }
 }
 
+/// Copies text. The copy symbol says what it does, so the title names only what is copied, and `help` says it whole.
 struct CopyButton: View {
     var title: String
     var text: String
+    var help: String? = nil
     @State private var copied = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
         Button {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
-            copied = true
+            withAnimation(Motion.reduced(Motion.content, reduceMotion)) { copied = true }
         } label: { Label(copied ? "Copied" : title, systemImage: copied ? "checkmark" : "doc.on.doc") }
         .pillButton()
-        .help(title)
+        .help(help ?? title)
         .task(id: copied) {
-            if copied { try? await Task.sleep(for: .seconds(2)); copied = false }
+            if copied {
+                try? await Task.sleep(for: .seconds(2))
+                withAnimation(Motion.reduced(Motion.content, reduceMotion)) { copied = false }
+            }
         }
     }
 }
@@ -443,5 +449,29 @@ struct DetailItem<Accessory: View, Content: View>: View {
 extension DetailItem where Accessory == EmptyView {
     init(title: String, symbol: String? = nil, tint: Color? = nil, @ViewBuilder content: () -> Content) {
         self.init(title: title, symbol: symbol, tint: tint, accessory: { EmptyView() }, content: content)
+    }
+}
+
+/// The detail panel's last row: the job's or session's id at the leading edge, its actions at the trailing edge,
+/// centered on one line. The id shortens in the middle rather than push the actions; its menu copies it whole.
+struct DetailFooter<Actions: View>: View {
+    let id: String
+    @ViewBuilder var actions: Actions
+    var body: some View {
+        VStack(alignment: .leading, spacing: Space.ml) {
+            Divider().padding(.bottom, Space.xs)
+            HStack(spacing: Space.m) {
+                Text(id).font(Typeface.codeSmall).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle)
+                    .help(id)
+                    .contextMenu {
+                        Button("Copy ID", systemImage: "doc.on.doc") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(id, forType: .string)
+                        }
+                    }
+                Spacer(minLength: WorkspaceStyle.rowSpacer)
+                actions
+            }
+        }
     }
 }

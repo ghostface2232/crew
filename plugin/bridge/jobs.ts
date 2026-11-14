@@ -715,6 +715,7 @@ export class Jobs {
         }
         this.changed(job);
         this.flush();
+        // Delays are consecutive: tries at about 30 s and 2.5 min after the failed removal.
         this.retryLeftover(job, [30_000, 120_000]);
       }
       throw err;
@@ -800,7 +801,7 @@ export class Jobs {
         } catch (err) {
           // Windows can hold the emptied folder for a while; the delayed retries finish it, so this is not a failure.
           if (!this.onlyDirectoryLeft(job)) throw err;
-          job.notes.push('Worktree files, Git metadata and branch removed. Windows still holds the empty folder; it is removed automatically within about two minutes.');
+          job.notes.push('Worktree files, Git metadata and branch removed. Windows still holds the empty folder; it is removed automatically within about three minutes (retries at 30 seconds and 2.5 minutes), or at the next daemon start.');
           this.changed(job);
           this.flush();
           return job;

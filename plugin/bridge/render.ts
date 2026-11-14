@@ -53,7 +53,11 @@ export function describe(job: JobView, waitingHint?: string): string {
     lines.push(`tokens: ${n(job.tokens)}${use ? ` (input ${n(use.input)}, of which ${n(use.cachedInput)} cached; output ${n(use.output)}${job.turns > 1 ? `; this turn ${n(use.turn)}` : ''})` : ''}`);
   }
   if (job.worktree) lines.push(`worktree: ${job.worktree.path} (branch ${job.worktree.branch}, base ${job.worktree.base.slice(0, 8)})`);
-  if (job.cleanupPending) lines.push(`Cleanup incomplete: ${job.cleanupPending.join('; ') || 'Git registration unconfirmed'}; run crew gc.`);
+  if (job.cleanupPending) {
+    lines.push(heldFolderOnly(job)
+      ? 'Cleanup: Windows still holds the empty worktree folder; it is removed automatically.'
+      : `Cleanup incomplete: ${job.cleanupPending.join('; ') || 'Git registration unconfirmed'}; run crew gc.`);
+  }
   if (job.result) {
     const blocked = job.state === 'done' && !job.result.files.length && (job.declinedTurn === job.turns || job.refusals?.some((r) => r.turn === job.turns));
     lines.push(`changes: ${blocked ? 'none — an action was refused or declined; see refusals/notes below' : job.result.stat || 'none'}${job.result.commit ? ` · commit ${job.result.commit}` : ''}`);
@@ -101,8 +105,13 @@ export function describe(job: JobView, waitingHint?: string): string {
   return lines.join('\n');
 }
 
+/** Only the emptied worktree folder is left; the bridge's delayed retries remove it without the user. */
+function heldFolderOnly(job: JobView): boolean {
+  return Boolean(job.worktree) && job.cleanupPending?.length === 1 && job.cleanupPending[0] === `directory ${job.worktree!.path}`;
+}
+
 export function summarize(job: JobView): string {
   const tail = job.state === 'running' ? job.phase : job.state === 'waiting' ? `needs a decision: ${job.waiting!.reason}` : (job.error?.message ?? job.result?.stat ?? '');
   const unread = job.endedAt && job.seq > job.delivered ? ' (result not read yet)' : '';
-  return `[${job.id}] ${WORKERS[job.agent].name} · ${job.kind} · ${job.state} (${duration((job.endedAt ?? Date.now()) - job.createdAt)}) — ${job.title}${tail ? ` — ${tail}` : ''}${unread}${job.cleanupPending ? ` — cleanup incomplete (${job.cleanupPending.join('; ')}); run crew gc` : ''}`;
+  return `[${job.id}] ${WORKERS[job.agent].name} · ${job.kind} · ${job.state} (${duration((job.endedAt ?? Date.now()) - job.createdAt)}) — ${job.title}${tail ? ` — ${tail}` : ''}${unread}${job.cleanupPending ? heldFolderOnly(job) ? ' — empty worktree folder still held; removed automatically' : ` — cleanup incomplete (${job.cleanupPending.join('; ')}); run crew gc` : ''}`;
 }

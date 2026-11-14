@@ -239,6 +239,11 @@ test('Windows partial discard releases the session, preserves its record and ori
   assert.ok(job.notes.some((note) => note.includes('Run crew gc') && note.includes('original permission failure')));
   assert.ok(describe(job).includes('Cleanup incomplete:'));
   assert.ok(summarize(job).includes('cleanup incomplete'));
+  // Only the emptied folder left: the delayed retries remove it, so the user is not told to run gc.
+  const held = { ...job, cleanupPending: [`directory ${wt.path}`] };
+  assert.match(describe(held), /removed automatically/);
+  assert.equal(describe(held).includes('run crew gc'), false);
+  assert.match(summarize(held), /removed automatically/);
   const saved = JSON.parse(fs.readFileSync(path.join(home, 'jobs.json'), 'utf8')).jobs[0];
   assert.deepEqual(saved.cleanupPending, job.cleanupPending);
 });

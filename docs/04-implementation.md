@@ -284,6 +284,7 @@ Verified against live accounts in a temporary repository:
 - 18 unit tests (`npm test`).
 - Full pipeline: completed a small feature end to end across all seven stages with `/crew:run` in a headless Claude Code session. Codex wrote tests in parallel, the self-review subagent and Codex cross-review both passed, the lead rejected an unrelated comment change from Antigravity's polish diff, and all three lanes appeared simultaneously on the board.
 - Claude Desktop: after installing the plugin, confirmed the `crew` tools, skills, and subagent loaded in an open Desktop session.
+- Windows host (2026-11-14, at a691d92): the full suite passed (304, 2 macOS-only skipped); a discard that left only the held empty folder returned success with its note and the folder went within two to three minutes; and in a new session with Remote Control on, a delegate returned in about a second, the delegate hook woke the lead with the worker's question, and after `answer` the answer hook woke it again when the job finished.
 - Wake hook in a live session (2026-11-14): a lead in the Claude desktop app started a read-only Codex review in the background and ended its turn without calling `wait`; when the job finished seven seconds later, `asyncRewake` woke the idle session with the result. The same day a background job asked the lead a question: the delegate hook woke the lead with it, the lead answered and ended its turn, and the hook armed by `answer` woke it again when the job finished.
 
 Not yet verified:

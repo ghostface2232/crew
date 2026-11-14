@@ -30,6 +30,7 @@ interface ItemDetails {
 
 interface Run {
   ctl: JobCtl;
+  pluginsEnabled: boolean;
   /** Id of the turn in flight, or null between turns. */
   turnId: string | null;
   awaitingTurn: boolean;
@@ -88,10 +89,11 @@ export class CodexAdapter implements Adapter {
   async start(ctl: JobCtl): Promise<void> {
     const peer = await this.ensure();
     if (isTerminal(ctl.job)) return;
-    const res = await peer.request('thread/start', await this.threadParams(ctl, peer), RPC_TIMEOUT_MS);
+    const params = await this.threadParams(ctl, peer);
+    const res = await peer.request('thread/start', params, RPC_TIMEOUT_MS);
     if (isTerminal(ctl.job)) return;
     const threadId: string = res.thread.id;
-    const run = this.openRun(ctl, threadId);
+    const run = this.openRun(ctl, threadId, params.config.features.plugins);
     this.loaded.add(threadId);
     ctl.session(threadId);
     // Native reviews do not use turn/start's effort override.
@@ -111,13 +113,17 @@ export class CodexAdapter implements Adapter {
   async reply(ctl: JobCtl, message: string): Promise<void> {
     const peer = await this.ensure();
     const threadId = ctl.job.sessionId!;
+    let pluginsEnabled = this.runs.get(threadId)?.pluginsEnabled ?? false;
     if (!this.loaded.has(threadId)) {
-      const res = await peer.request('thread/resume', { threadId, ...await this.threadParams(ctl, peer), excludeTurns: true }, RPC_TIMEOUT_MS);
+      const params = await this.threadParams(ctl, peer);
+      const res = await peer.request('thread/resume', { threadId, ...params, excludeTurns: true }, RPC_TIMEOUT_MS);
+      pluginsEnabled = params.config.features.plugins;
       ctl.model(res.model ?? res.thread?.model ?? ctl.job.model ?? this.config.codex.model, ctl.job.effort ?? this.config.codex.effort ?? res.reasoningEffort ?? undefined);
       this.loaded.add(threadId);
     }
     if (isTerminal(ctl.job)) return;
     const run = this.runs.get(threadId) ?? this.openRun(ctl, threadId);
+    run.pluginsEnabled = pluginsEnabled;
     if (run.awaitingTurn || run.interrupt) throw new Error('Codex has not confirmed the turn status. Check the job before sending another message.');
     if (run.turnId) {
       await peer.request('turn/steer', { threadId, input: [textInput(message)], expectedTurnId: run.turnId }, RPC_TIMEOUT_MS);
@@ -166,22 +172,24 @@ export class CodexAdapter implements Adapter {
     if (!wanted.length) return LEAN;
     // Re-queried on each start or resume in case installed plugins or user settings changed.
     // If Codex cannot list its plugins, the job still runs without them.
-    const installed: { id: string; enabled: boolean }[] = await peer.request('plugin/installed', {}, RPC_TIMEOUT_MS)
+    const installed: { id: string; enabled: boolean }[] = await peer.request('plugin/installed', { cwds: [ctl.job.cwd] }, RPC_TIMEOUT_MS)
       .then((res) => ((res.marketplaces ?? []) as any[]).flatMap((marketplace) => ((marketplace.plugins ?? []) as any[])
         .filter((plugin) => plugin.installed).map((plugin) => ({ id: plugin.id, enabled: plugin.enabled === true }))))
       .catch(() => []);
     const named = (id: string, name: string) => id === name || id.startsWith(`${name}@`);
-    // Missing `appPlugins` defaults are expected on some machines; only explicitly requested plugins are noted.
-    const explicit = ctl.job.requestedPlugins ?? wanted.filter((name) => !ctl.job.runsApp || !this.config.codex.appPlugins.includes(name));
+    // Configured defaults need not be installed; only the lead's explicit requests warrant a note.
+    const explicit = ctl.job.requestedPlugins ?? wanted.filter((name) => !this.config.codex.plugins.includes(name) && (!ctl.job.runsApp || !this.config.codex.appPlugins.includes(name)));
     const missing = explicit.filter((name) => !installed.some((plugin) => named(plugin.id, name)));
     if (missing.length) ctl.note(`Codex has no plugin named ${missing.join(', ')}; the job runs without it.`);
     const disabled = explicit.filter((name) => installed.some((plugin) => named(plugin.id, name)) && !installed.some((plugin) => plugin.enabled && named(plugin.id, name)));
     if (disabled.length) ctl.note(`Codex has plugin ${disabled.join(', ')}, but the user has it off; the job runs without it.`);
     if (!installed.some((plugin) => plugin.enabled && wanted.some((name) => named(plugin.id, name)))) return LEAN;
     return {
-      // A plugin's skill is how the worker learns to use its tools, so the skill list is kept for these jobs.
+      // Codex 0.167's include_instructions hides the entire skill catalog, including plugin skills.
+      // Keep it on here so enabled plugins remain usable; it cannot suppress only user skills.
       features: { ...LEAN.features, plugins: true },
-      plugins: Object.fromEntries(installed.map((plugin) => [plugin.id, { enabled: plugin.enabled && wanted.some((name) => named(plugin.id, name)) }])),
+      // Inventory can omit a marketplace or precede a remote install; do not inherit enablement for unseen plugins.
+      plugins: { _default: { enabled: false }, ...Object.fromEntries(installed.map((plugin) => [plugin.id, { enabled: plugin.enabled && wanted.some((name) => named(plugin.id, name)) }])) },
     };
   }
 
@@ -190,7 +198,7 @@ export class CodexAdapter implements Adapter {
     const lean = await this.lean(ctl, peer);
     // Read-only with one writable directory is not a sandbox mode; it is a permissions profile, which replaces the mode.
     // Each profile also denies the daemon's token file. A job with the network open could otherwise read it and
-    // call the daemon as the user; a job with neither profile has no network to use it with.
+    // call the daemon as the user. Plugin tools also act outside the sandbox, so plugin jobs need the deny too.
     const secret = { [tokenFile(HOME)]: 'deny' };
     const scratch = job.sandbox === 'read-only' && job.scratch
       ? {
@@ -209,7 +217,7 @@ export class CodexAdapter implements Adapter {
       }
     }));
     const profile = job.runsApp ? 'crew_app' : 'crew_workspace';
-    const app = (job.runsApp || Object.keys(shared).length > 0) && job.sandbox === 'workspace-write'
+    const app = (job.runsApp || lean.features.plugins || Object.keys(shared).length > 0) && job.sandbox === 'workspace-write'
       ? {
           default_permissions: profile,
           permissions: { [profile]: { filesystem: { ':root': 'read', [job.cwd]: 'write', ':tmpdir': 'write', ':slash_tmp': 'write', ...(job.scratch ? { [job.scratch]: 'write' } : {}), ...shared, ...secret }, network: { enabled: Boolean(job.runsApp) } } },
@@ -238,8 +246,8 @@ export class CodexAdapter implements Adapter {
     return job.asksUser ? 'user' : this.config.codex.approvalsReviewer;
   }
 
-  private openRun(ctl: JobCtl, threadId: string): Run {
-    const run: Run = { ctl, turnId: null, awaitingTurn: false, interrupt: null, message: '', pending: [], crewCalls: new Set(), items: new Map() };
+  private openRun(ctl: JobCtl, threadId: string, pluginsEnabled = false): Run {
+    const run: Run = { ctl, pluginsEnabled, turnId: null, awaitingTurn: false, interrupt: null, message: '', pending: [], crewCalls: new Set(), items: new Map() };
     this.runs.set(threadId, run);
     return run;
   }
@@ -287,8 +295,8 @@ export class CodexAdapter implements Adapter {
 
   private async launch(): Promise<RpcPeer> {
     const env = agentEnv();
-    const { bin, shell } = agentCommand(this.config.codex.bin, env);
-    const child = spawn(bin, ['app-server'], { env, shell, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    const { bin, args, shell } = agentCommand(this.config.codex.bin, ['app-server'], env);
+    const child = spawn(bin, args, { env, shell, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     const peer = new RpcPeer(child, {
       onNotification: (method, params) => this.onNotification(method, params),
       onRequest: (method, params, id) => this.onRequest(method, params, id),
@@ -571,7 +579,7 @@ export class CodexAdapter implements Adapter {
         }
         // Plugin tools ask for approval before running; forward those to the user like commands,
         // and decline requests from other servers when no plugins are enabled.
-        if (run?.ctl.job.plugins?.length && p._meta?.codex_approval_kind === 'mcp_tool_call') {
+        if (run?.pluginsEnabled && p._meta?.codex_approval_kind === 'mcp_tool_call') {
           const answer = await ask('approval', toolRequest(p, item));
           if (!answer) return;
           return { action: answer.cancelled ? 'cancel' : answer.approve ? 'accept' : 'decline', content: answer.approve ? {} : null, _meta: null };

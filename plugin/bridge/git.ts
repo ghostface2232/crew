@@ -141,6 +141,10 @@ export async function copyIncluded(root: string, wt: string, clone: (source: str
         if (process.platform === 'win32') await detachLinks(dest);
         await fs.rm(dest, { recursive: true, force: true });
         await fs.mkdir(path.dirname(dest), { recursive: true });
+        // Directory-only ignore patterns do not cover symlinks. Never stage a shared absolute target.
+        const exclude = path.resolve(wt, await git(wt, ['rev-parse', '--git-path', 'info/exclude']));
+        await fs.mkdir(path.dirname(exclude), { recursive: true });
+        await fs.appendFile(exclude, `\n/${rel.replace(/[\\*?[\]]/g, '\\$&')}\n`);
         await fs.symlink(source, dest, process.platform === 'win32' ? 'junction' : 'dir');
         result.linked.push(rel);
       }

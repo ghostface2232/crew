@@ -23,9 +23,9 @@ Usage:
 
 function run(bin: string, args: string[]): Promise<{ ok: boolean; out: string }> {
   const env = agentEnv();
-  const command = agentCommand(bin, env);
+  const command = agentCommand(bin, args, env);
   return new Promise((resolve) => {
-    execFile(command.bin, args, { env, shell: command.shell, timeout: 20_000, windowsHide: true }, (err, stdout, stderr) => {
+    execFile(command.bin, command.args, { env, shell: command.shell, timeout: 20_000, windowsHide: true }, (err, stdout, stderr) => {
       resolve({ ok: !err, out: (stdout || stderr || err?.message || '').trim() });
     });
   });

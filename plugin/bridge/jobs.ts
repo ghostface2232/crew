@@ -65,7 +65,7 @@ export interface JobSpec {
   notes?: string[];
   /** Names of the user's skills (`~/.agents/skills`) the lead picked for this job; the worker is told to read them. */
   skills?: string[];
-  /** Names of the user's Codex plugins to turn on for this job, besides those a `runsApp` job gets by itself. */
+  /** Additional Codex plugin names beyond the configured defaults. */
   plugins?: string[];
 }
 
@@ -117,7 +117,7 @@ export interface Job {
   ask?: boolean;
   /** The user's Codex plugins that are on for this job, by name; absent when it runs with none. */
   plugins?: string[];
-  /** Caller-picked names, kept apart from app defaults so unavailable explicit requests can be noted. */
+  /** Caller-picked names, kept apart from configured defaults so unavailable explicit requests can be noted. */
   requestedPlugins?: string[];
   /** Per-turn Codex directory for temporary files, caches, and throwaway clones. */
   scratch?: string;
@@ -283,10 +283,10 @@ export class Jobs {
 
   /**
    * Number of jobs that would be disrupted if the daemon stopped now, including jobs still starting
-   * and finished jobs syncing or refreshing a review for a follow-up turn.
+   * and finished jobs syncing, changing rounds, discarding, or refreshing a review.
    */
   get activeCount(): number {
-    return [...this.jobs.values()].filter((job) => !isTerminal(job) || this.preparingReviews.has(job.id)).length + this.starting.length;
+    return [...this.jobs.values()].filter((job) => !isTerminal(job) || this.preparingReviews.has(job.id) || this.changingRounds.has(job.id) || this.discarding.has(job.id)).length + this.starting.length;
   }
 
   get(id: string): Job {
@@ -367,8 +367,9 @@ export class Jobs {
     const shared = sharedInstructions(this.home, root);
     const notes: string[] = Array.isArray(spec.notes) ? spec.notes.filter((note) => typeof note === 'string') : [];
     // Plugins are Codex's. The set the job runs with is settled here, so the prompt, the result and the adapter agree.
-    const requestedPlugins = spec.plugins;
-    const plugins = agent === 'codex' ? [...new Set([...(spec.runsApp ? config.codex.appPlugins : []), ...(spec.plugins ?? [])])] : [];
+    const requestedPlugins = spec.plugins ?? [];
+    const plugins = agent === 'codex' && !spec.ask && (spec.kind === 'delegate' || (spec.kind === 'review' && spec.runsApp))
+      ? [...new Set([...config.codex.plugins, ...(spec.runsApp ? config.codex.appPlugins : []), ...(spec.plugins ?? [])])] : [];
     if (spec.plugins?.length && agent !== 'codex') notes.push(`${WORKERS[agent].name} has no plugins to turn on, so the job runs without: ${spec.plugins.join(', ')}.`);
     spec.plugins = plugins;
     let worktree: Worktree | null = null;
@@ -512,6 +513,7 @@ export class Jobs {
     // and moves the base, so the job's result stays the worker's own changes.
     let synced: string | null = null;
     let syncWarning = '';
+    let syncNote = '';
     if (input.sync) {
       if (!job.worktree || !job.repo || job.kind === 'review') throw new Error(`Job ${id} has no worktree of its own to bring up to date. Drop sync.`);
       this.preparingReviews.add(id);
@@ -521,7 +523,7 @@ export class Jobs {
           const commit = merged.commit.slice(0, 8);
           const files = merged.conflicts.join(', ');
           syncWarning = `\n\nYour worktree could NOT be brought up to date with the lead's commit \`${commit}\`; conflicted files: ${files}. The merge was aborted and your worktree is unchanged. Inspect the lead's version of these files (\`git diff HEAD...${commit} -- <file>\` or \`git show ${commit}:<file>\`) and account for those changes so your change will merge.`;
-          job.notes.push(`Could not be brought up to date with ${commit} before turn ${job.turns + 1}; conflicted files: ${files}. The message was sent without it.`);
+          syncNote = `Could not be brought up to date with ${commit} before turn ${job.turns + 1}; conflicted files: ${files}. The message was sent without it.`;
         } else {
           synced = merged.commit;
         }
@@ -544,6 +546,7 @@ export class Jobs {
     }
     // A follow-up turn sets a finished worker running again, so it is a start like any other.
     this.checkAlone(Boolean(job.exclusive), id);
+    if (syncNote) job.notes.push(syncNote);
     job.state = 'running';
     job.phase = 'starting';
     job.endedAt = null;

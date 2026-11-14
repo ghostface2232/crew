@@ -88,10 +88,9 @@ export interface Config {
     approvalsReviewer: 'user' | 'auto_review' | 'guardian_subagent';
     model?: string;
     effort?: string;
-    /**
-     * Codex plugins enabled automatically for `runs_app` jobs, by name. Every other job runs with
-     * all plugins off unless the lead names some.
-     */
+    /** Plugins enabled for every writable Codex delegate or app review. */
+    plugins: string[];
+    /** Additional plugins for `runs_app` jobs, including real-screen computer use by default. */
     appPlugins: string[];
   };
   antigravity: {
@@ -123,7 +122,7 @@ const defaults: Config = {
   stallSeconds: 300,
   notify: true,
   notifyOnDone: false,
-  codex: { bin: 'codex', approvalPolicy: 'on-request', approvalsReviewer: 'auto_review', appPlugins: ['computer-use', 'unified-computer-use'] },
+  codex: { bin: 'codex', approvalPolicy: 'on-request', approvalsReviewer: 'auto_review', plugins: [], appPlugins: ['computer-use', 'unified-computer-use'] },
   antigravity: { bin: 'agy', enabled: true },
   roles: { delegate: { agent: 'codex' }, review: { agent: 'codex' }, polish: { agent: 'antigravity' } },
   preset: null,
@@ -157,8 +156,10 @@ export function resolveConfig(user: UserConfig): Config {
     }
     roles[role as Role] = merged;
   }
-  const appPlugins: unknown = user.codex?.appPlugins ?? defaults.codex.appPlugins;
-  if (!Array.isArray(appPlugins) || appPlugins.some((name) => typeof name !== 'string')) throw new Error('codex.appPlugins must be a list of plugin names such as ["computer-use"].');
+  for (const key of ['plugins', 'appPlugins'] as const) {
+    const names: unknown = user.codex?.[key] === undefined ? defaults.codex[key] : user.codex[key];
+    if (!Array.isArray(names) || names.some((name) => typeof name !== 'string')) throw new Error(`codex.${key} must be a list of plugin names such as ["computer-use"].`);
+  }
   return {
     ...defaults,
     ...user,
@@ -246,9 +247,9 @@ export function agentEnv(platform: NodeJS.Platform = process.platform, source: N
   return env;
 }
 
-/** Windows npm shims need cmd.exe; the callers supply only fixed arguments. */
-export function agentCommand(bin: string, env: NodeJS.ProcessEnv = agentEnv(), platform: NodeJS.Platform = process.platform): { bin: string; shell: boolean } {
-  if (platform !== 'win32') return { bin, shell: false };
+/** Windows npm shims need cmd.exe and one quoted string to avoid Node's shell-with-args deprecation. */
+export function agentCommand(bin: string, args: string[] = [], env: NodeJS.ProcessEnv = agentEnv(), platform: NodeJS.Platform = process.platform): { bin: string; args: string[] | undefined; shell: boolean } {
+  if (platform !== 'win32') return { bin, args, shell: false };
   if (!path.win32.extname(bin)) {
     const value = (name: string) => env[Object.keys(env).find((key) => key.toUpperCase() === name) ?? name];
     const extensions = (value('PATHEXT') ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean);
@@ -264,6 +265,6 @@ export function agentCommand(bin: string, env: NodeJS.ProcessEnv = agentEnv(), p
     }
   }
   const shell = /\.(cmd|bat)$/i.test(bin);
-  if (shell && /["%\r\n]/.test(bin)) throw new Error('Invalid agent binary path.');
-  return { bin: shell ? `"${bin}"` : bin, shell };
+  if (shell && [bin, ...args].some((value) => /["%\r\n]/.test(value))) throw new Error('Invalid agent binary path or argument.');
+  return { bin: shell ? [bin, ...args].map((value) => `"${value}"`).join(' ') : bin, args: shell ? undefined : args, shell };
 }

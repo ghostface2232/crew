@@ -103,20 +103,20 @@ test('Windows agent commands resolve PATH and PATHEXT and quote batch paths', as
     return files.has(candidate.toLowerCase()) ? file : undefined;
   });
   const env = { Path: '"C:\\npm tools";C:\\other', Pathext: '.EXE;.CMD;.BAT' };
-  assert.deepEqual(agentCommand('codex', env, 'win32'), { bin: '"C:\\npm tools\\codex.CMD"', shell: true });
+  assert.deepEqual(agentCommand('codex', [], env, 'win32'), { bin: '"C:\\npm tools\\codex.CMD"', args: undefined, shell: true });
   assert.deepEqual(lookedUp, ['C:\\npm tools\\codex.EXE', 'C:\\npm tools\\codex.CMD']);
-  assert.deepEqual(agentCommand('agy', env, 'win32'), { bin: '"C:\\npm tools\\agy.BAT"', shell: true });
-  assert.deepEqual(agentCommand('native', env, 'win32'), { bin: 'C:\\npm tools\\native.EXE', shell: false });
-  assert.deepEqual(agentCommand('C:\\npm tools\\codex', env, 'win32'), { bin: '"C:\\npm tools\\codex.CMD"', shell: true });
-  assert.deepEqual(agentCommand('C:\\npm tools\\codex.cmd', {}, 'win32'), { bin: '"C:\\npm tools\\codex.cmd"', shell: true });
-  assert.deepEqual(agentCommand('agy.BAT', {}, 'win32'), { bin: '"agy.BAT"', shell: true });
-  assert.deepEqual(agentCommand('codex', { PATH: 'C:\\npm tools' }, 'win32'), { bin: '"C:\\npm tools\\codex.CMD"', shell: true });
-  assert.deepEqual(agentCommand('missing', env, 'win32'), { bin: 'missing', shell: false });
-  assert.throws(() => agentCommand('bad"path.cmd', {}, 'win32'), /Invalid agent binary path/);
+  assert.deepEqual(agentCommand('agy', [], env, 'win32'), { bin: '"C:\\npm tools\\agy.BAT"', args: undefined, shell: true });
+  assert.deepEqual(agentCommand('native', [], env, 'win32'), { bin: 'C:\\npm tools\\native.EXE', args: [], shell: false });
+  assert.deepEqual(agentCommand('C:\\npm tools\\codex', [], env, 'win32'), { bin: '"C:\\npm tools\\codex.CMD"', args: undefined, shell: true });
+  assert.deepEqual(agentCommand('C:\\npm tools\\codex.cmd', [], {}, 'win32'), { bin: '"C:\\npm tools\\codex.cmd"', args: undefined, shell: true });
+  assert.deepEqual(agentCommand('agy.BAT', [], {}, 'win32'), { bin: '"agy.BAT"', args: undefined, shell: true });
+  assert.deepEqual(agentCommand('codex', [], { PATH: 'C:\\npm tools' }, 'win32'), { bin: '"C:\\npm tools\\codex.CMD"', args: undefined, shell: true });
+  assert.deepEqual(agentCommand('missing', [], env, 'win32'), { bin: 'missing', args: [], shell: false });
+  assert.throws(() => agentCommand('bad"path.cmd', [], {}, 'win32'), /Invalid agent binary path/);
   lookedUp.length = 0;
   for (const bin of ['codex', '/tools with spaces/codex', '/tools/codex.cmd']) {
-    assert.deepEqual(agentCommand(bin, env, 'darwin'), { bin, shell: false });
-    assert.deepEqual(agentCommand(bin, env, 'linux'), { bin, shell: false });
+    assert.deepEqual(agentCommand(bin, [], env, 'darwin'), { bin, args: [], shell: false });
+    assert.deepEqual(agentCommand(bin, [], env, 'linux'), { bin, args: [], shell: false });
   }
   assert.deepEqual(lookedUp, []);
 });
@@ -136,6 +136,20 @@ test('agentEnv adds the Windows npm bin and keeps the existing macOS PATH behavi
     PATH: [...current, ...extra.filter((p) => !current.includes(p))].join(path.delimiter), KEEP: 'yes',
   });
   assert.equal(source.ELECTRON_RUN_AS_NODE, '1');
+});
+
+test('batch agents carry quoted arguments in one shell command without an args array', async () => {
+  const { agentCommand } = await import('../plugin/bridge/config.ts');
+  for (const args of [['app-server'], ['acp'], ['login', 'status'], ['plugin', 'marketplace', 'add', 'C:\\my repo & tools']]) {
+    const command = agentCommand('C:\\npm tools\\agent.cmd', args, {}, 'win32');
+    assert.equal(command.bin, ['C:\\npm tools\\agent.cmd', ...args].map((value) => `"${value}"`).join(' '));
+    assert.equal(command.args, undefined);
+    assert.equal(command.shell, true);
+    assert.deepEqual(agentCommand('agent', args, {}, 'linux'), { bin: 'agent', args, shell: false });
+  }
+  for (const argument of ['bad"arg', '%PATH%', 'line\rbreak', 'line\nbreak']) {
+    assert.throws(() => agentCommand('agent.cmd', [argument], {}, 'win32'), /Invalid agent binary path or argument/);
+  }
 });
 
 test('detaching links leaves files and external link targets untouched', async (t) => {
@@ -183,13 +197,13 @@ test('a Crew title cannot disguise an Antigravity command', () => {
 test('Windows batch paths cannot expand environment variables', async (t) => {
   const { agentCommand } = await import('../plugin/bridge/config.ts');
   for (const bin of ['C:\\%AGENT%\\codex.cmd', 'agy%.BAT']) {
-    assert.throws(() => agentCommand(bin, {}, 'win32'), /Invalid agent binary path/);
-    assert.deepEqual(agentCommand(bin, {}, 'darwin'), { bin, shell: false });
+    assert.throws(() => agentCommand(bin, [], {}, 'win32'), /Invalid agent binary path/);
+    assert.deepEqual(agentCommand(bin, [], {}, 'darwin'), { bin, args: [], shell: false });
   }
   const file = fs.statSync(import.meta.filename);
   t.mock.method(fs, 'statSync', () => file);
-  assert.throws(() => agentCommand('codex', { PATH: 'C:\\%AGENT%', PATHEXT: '.CMD' }, 'win32'), /Invalid agent binary path/);
-  assert.deepEqual(agentCommand('C:\\%AGENT%\\codex.exe', {}, 'win32'), { bin: 'C:\\%AGENT%\\codex.exe', shell: false });
+  assert.throws(() => agentCommand('codex', [], { PATH: 'C:\\%AGENT%', PATHEXT: '.CMD' }, 'win32'), /Invalid agent binary path/);
+  assert.deepEqual(agentCommand('C:\\%AGENT%\\codex.exe', [], {}, 'win32'), { bin: 'C:\\%AGENT%\\codex.exe', args: [], shell: false });
 });
 
 test('only Windows agents launched through a shell need a tree kill command', async () => {

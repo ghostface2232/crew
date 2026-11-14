@@ -475,6 +475,34 @@ test('a client replacing an outdated daemon is refused while a job is active', {
   assert.equal((await h.api('POST', '/api/shutdown', { ifIdle: true })).status, 200);
 });
 
+test('idle shutdown waits for a mutating POST still reading its body', { timeout: 15000 }, async (t) => {
+  const h = await daemon(t);
+  const request = http.request({ host: '127.0.0.1', port: h.port, path: '/api/jobs', method: 'POST', headers: {
+    authorization: `Bearer ${h.secret}`, 'content-type': 'application/json', expect: '100-continue',
+  } });
+  const response = new Promise<any>((resolve, reject) => {
+    request.on('error', reject);
+    request.on('response', (res) => {
+      let body = '';
+      res.on('data', (chunk) => { body += chunk; });
+      res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(body) }));
+    });
+  });
+  // Keep a failed assertion from leaving an unhandled socket error during cleanup.
+  response.catch(() => {});
+  t.after(() => request.destroy());
+  const reading = new Promise<void>((resolve) => request.once('continue', resolve));
+  request.flushHeaders();
+  await reading;
+  const refused = await h.api('POST', '/api/shutdown', { ifIdle: true });
+  assert.equal(refused.status, 409);
+  request.end(JSON.stringify({ kind: 'delegate', cwd: h.home, task: 'test', isolation: 'in_place' }));
+  const created = await response;
+  assert.equal(created.status, 200);
+  assert.equal((await h.api('POST', `/api/jobs/${created.body.id}/cancel`, {})).status, 200);
+  assert.equal((await h.api('POST', '/api/shutdown', { ifIdle: true })).status, 200);
+});
+
 test('restart stops a daemon that does not take the token in the file, and says so when it cannot', { timeout: 30000 }, async (t) => {
   const h = await daemon(t);
   const health = async () => fetch(`http://127.0.0.1:${h.port}/api/health`).then((res) => res.json() as any, () => null);

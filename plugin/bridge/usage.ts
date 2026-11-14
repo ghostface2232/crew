@@ -165,15 +165,17 @@ const windowName = (w: Pick<UsageWindow, 'kind' | 'group'>) =>
   `${w.group ? `${w.group} ` : ''}${({ fiveHour: '5-hour', weekly: 'weekly', billingCycle: 'billing-cycle' } as Record<string, string>)[w.kind] ?? w.kind} window`;
 
 /** Match the complete family name, not just a shared vendor word; slash-separated labels name alternatives. */
-function applicable<T extends Pick<UsageWindow, 'group'>>(windows: T[], model?: string): T[] {
+function applicable<T extends Pick<UsageWindow, 'group'>>(windows: T[], model?: string, includeFamilies = false): T[] {
   const wide = windows.filter((w) => w.group === null);
-  if (wide.length) return wide;
+  if (wide.length && !includeFamilies) return wide;
+  const scoped = windows.filter((w) => w.group !== null);
   const words = model?.toLowerCase().split(/[^a-z0-9]+/);
-  const matches = words ? windows.filter((w) => w.group!.toLowerCase().split('/').some((family) => {
+  const matches = words ? scoped.filter((w) => w.group!.toLowerCase().split('/').some((family) => {
     const familyWords = family.split(/[^a-z0-9]+/).filter(Boolean);
     return familyWords.length > 0 && familyWords.every((word) => words.includes(word));
   })) : [];
-  return matches.length ? matches : windows;
+  // Antigravity can exhaust a family while the account-wide window still has room.
+  return [...wide, ...(matches.length ? matches : scoped)];
 }
 
 export type SampleReader = (agent: Agent, key: string, since: number) => Sample[];
@@ -202,7 +204,7 @@ export class UsageTracker {
     const report = this.reported.get(agent);
     // A reading taken after the report that shows room means the limit has lifted.
     // An empty reading shows nothing, so it lifts nothing.
-    const room = applicable(raw?.windows ?? [], this.models[agent]);
+    const room = applicable(raw?.windows ?? [], this.models[agent], agent === 'antigravity');
     const lifted = report && (now - report.at > REPORT_MS || Boolean(raw?.capturedAt && raw.capturedAt > report.at && room.length && room.every((w) => w.usedRatio < 0.999)));
     if (lifted) this.reported.delete(agent);
     const limited = report && !lifted ? report : null;
@@ -222,7 +224,7 @@ export class UsageTracker {
       return { ...w, projectedExhaustion: projection.at, status };
     });
 
-    const deciding = applicable(windows, this.models[agent]);
+    const deciding = applicable(windows, this.models[agent], agent === 'antigravity');
     const base = { decidingKeys: deciding.map((w) => w.key), agent, plan: raw?.plan ?? null, capturedAt: raw?.capturedAt ?? null, windows };
     if (limited) return { ...base, status: 'exhausted', reason: `A job hit the usage limit: ${limited.detail.split('\n')[0].slice(0, 160)}` };
     if (!raw || raw.capturedAt === null) return { ...base, status: 'unknown', reason: 'AgentGauge has no reading for this agent.' };

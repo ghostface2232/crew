@@ -6,7 +6,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { CodexAdapter } from '../plugin/bridge/adapters/codex.ts';
 import { resolveConfig } from '../plugin/bridge/config.ts';
-import { copyIncluded, createWorktree, detachLinks, removeWorktree } from '../plugin/bridge/git.ts';
+import { commitAll, copyIncluded, createWorktree, detachLinks, dirtyCount, removeWorktree } from '../plugin/bridge/git.ts';
 import type { Job, JobCtl } from '../plugin/bridge/jobs.ts';
 import { buildPrompt } from '../plugin/bridge/prompts.ts';
 
@@ -21,11 +21,16 @@ for (const code of ['ENOTSUP', 'EOPNOTSUPP', 'EXDEV', 'ENOSYS', 'EINVAL']) {
     git('-c', 'user.name=Test', '-c', 'user.email=t@example.com', 'commit', '-qm', 'init', '--allow-empty');
     fs.writeFileSync(path.join(repo, '.gitignore'), 'node_modules/\n.env\n');
     fs.writeFileSync(path.join(repo, '.worktreeinclude'), 'node_modules\n.env\n');
+    git('add', '.gitignore', '.worktreeinclude');
+    git('-c', 'user.name=Test', '-c', 'user.email=t@example.com', 'commit', '-qm', 'includes');
     fs.mkdirSync(path.join(repo, 'node_modules', '.bin'), { recursive: true });
     fs.writeFileSync(path.join(repo, 'node_modules', '.bin', 'tool'), 'keep');
     fs.writeFileSync(path.join(repo, '.env'), 'KEY=1');
     const id = 'cx-abcdef';
     const wt = await createWorktree(repo, id, 'HEAD', home);
+    const exclude = path.resolve(wt.path, execFileSync('git', ['rev-parse', '--git-path', 'info/exclude'], { cwd: wt.path, encoding: 'utf8' }).trim());
+    fs.mkdirSync(path.dirname(exclude), { recursive: true });
+    fs.appendFileSync(exclude, '\n/keep-me');
     const included = await copyIncluded(repo, wt.path, async (_source, dest) => {
       // Some files may have cloned before the unsupported file is reached.
       fs.mkdirSync(dest, { recursive: true });
@@ -39,6 +44,9 @@ for (const code of ['ENOTSUP', 'EOPNOTSUPP', 'EXDEV', 'ENOSYS', 'EINVAL']) {
     assert.equal(fs.realpathSync(link), path.join(repo, 'node_modules'));
     assert.equal(fs.existsSync(path.join(link, 'partial')), false);
     assert.equal(fs.lstatSync(path.join(wt.path, '.env')).isFile(), true);
+    assert.match(fs.readFileSync(exclude, 'utf8'), /\/keep-me\n\/node_modules\n/);
+    assert.equal(await dirtyCount(wt.path), 0);
+    assert.equal(await commitAll(wt.path, 'no dependency links'), null);
     for (const runsApp of [false, true]) {
       const built = buildPrompt({ kind: 'delegate', cwd: wt.path, task: 'test', runsApp }, wt, null, '', path.join(home, 'scratch'));
       assert.match(built.instructions, /shared read-only.*node_modules/);

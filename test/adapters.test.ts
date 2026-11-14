@@ -5,8 +5,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { AntigravityAdapter } from '../plugin/bridge/adapters/antigravity.ts';
+import { tokenFile } from '../plugin/bridge/auth.ts';
 import { CodexAdapter } from '../plugin/bridge/adapters/codex.ts';
-import { resolveConfig } from '../plugin/bridge/config.ts';
+import { HOME, resolveConfig } from '../plugin/bridge/config.ts';
 import { Jobs } from '../plugin/bridge/jobs.ts';
 import type { Job, WorkerAgent } from '../plugin/bridge/jobs.ts';
 import { describe } from '../plugin/bridge/render.ts';
@@ -572,13 +573,55 @@ test('Codex turns on only the plugins a job is to have, and asks the user before
   const configs = seen.filter((msg) => ['thread/start', 'thread/resume'].includes(msg.method)).map((msg) => msg.params.config);
   assert.deepEqual([configs[0].features, configs[0].plugins, configs[0].skills], [{ apps: false, plugins: false, tool_suggest: false }, undefined, { include_instructions: false }]);
   assert.deepEqual(configs[1].features, { apps: false, plugins: true, tool_suggest: false });
-  assert.deepEqual(configs[1].plugins, { 'computer-use@bundled': { enabled: true }, 'browser@bundled': { enabled: false }, 'mail@bundled': { enabled: false } });
-  assert.deepEqual(configs[2].plugins, { 'computer-use@bundled': { enabled: false }, 'browser@bundled': { enabled: true }, 'mail@bundled': { enabled: false }, 'new@bundled': { enabled: false } });
+  assert.deepEqual(configs[1].plugins, { _default: { enabled: false }, 'computer-use@bundled': { enabled: true }, 'browser@bundled': { enabled: false }, 'mail@bundled': { enabled: false } });
+  assert.deepEqual(configs[2].plugins, { _default: { enabled: false }, 'computer-use@bundled': { enabled: false }, 'browser@bundled': { enabled: true }, 'mail@bundled': { enabled: false }, 'new@bundled': { enabled: false } });
   assert.deepEqual(configs[3].plugins, { ...configs[2].plugins, 'mail@bundled': { enabled: true } });
   assert.equal(configs[1].skills, undefined);
+  for (const config of configs.slice(2)) {
+    assert.equal(config.default_permissions, 'crew_workspace');
+    assert.equal(config.permissions.crew_workspace.filesystem[tokenFile(HOME)], 'deny');
+    assert.deepEqual(config.permissions.crew_workspace.network, { enabled: false });
+  }
 
   await assert.rejects(h.jobs.create({ kind: 'polish', cwd: h.home, isolation: 'in_place', targets: ['a.md'], plugins: ['browser'] }), /polish job cannot use plugins/);
   await assert.rejects(start({ plugins: 'browser' }), /plugins must be a list/);
+});
+
+test('Codex keeps dotted plugin IDs literal and denies unseen plugin defaults', async () => {
+  const adapter = new CodexAdapter(resolveConfig({}));
+  const calls: unknown[] = [];
+  const ctl = { job: { cwd: '/workspace', sandbox: 'workspace-write', plugins: ['browser'], requestedPlugins: ['browser'], instructions: '' }, mcp: {} };
+  const peer = { request: async (method: string, params: unknown) => {
+    calls.push([method, params]);
+    return { marketplaces: [{ plugins: [{ id: 'browser@market.place', installed: true, enabled: true }] }] };
+  } };
+  const params = await (adapter as any).threadParams(ctl, peer);
+  assert.deepEqual(params.config.plugins, { _default: { enabled: false }, 'browser@market.place': { enabled: true } });
+  assert.deepEqual(calls, [['plugin/installed', { cwds: ['/workspace'] }]]);
+});
+
+test('Codex plugin jobs deny the daemon token even without app or linked dependencies', async () => {
+  const adapter = new CodexAdapter(resolveConfig({}));
+  const ctl = { job: { cwd: '/workspace', sandbox: 'workspace-write', plugins: ['browser'], requestedPlugins: ['browser'], instructions: '' }, mcp: {} };
+  const peer = { request: async () => ({ marketplaces: [{ plugins: [{ id: 'browser@bundled', installed: true, enabled: true }] }] }) };
+  const params = await (adapter as any).threadParams(ctl, peer);
+  assert.equal(params.sandbox, null);
+  assert.equal(params.config.default_permissions, 'crew_workspace');
+  assert.equal(params.config.permissions.crew_workspace.filesystem[tokenFile(HOME)], 'deny');
+  assert.deepEqual(params.config.permissions.crew_workspace.network, { enabled: false });
+});
+
+test('Codex notes only explicit missing or disabled plugins, even when defaults changed after startup', async () => {
+  const adapter = new CodexAdapter(resolveConfig({}));
+  const notes: string[] = [];
+  const job = { cwd: '/workspace', sandbox: 'workspace-write', plugins: ['global-missing', 'global-off', 'named'], requestedPlugins: [] as string[], instructions: '' };
+  const ctl = { job, mcp: {}, note: (text: string) => notes.push(text) };
+  const peer = { request: async () => ({ marketplaces: [{ plugins: [{ id: 'global-off@bundled', installed: true, enabled: false }] }] }) };
+  assert.equal((await (adapter as any).threadParams(ctl, peer)).config.features.plugins, false);
+  assert.deepEqual(notes, []);
+  job.requestedPlugins = ['named'];
+  await (adapter as any).threadParams(ctl, peer);
+  assert.deepEqual(notes, ['Codex has no plugin named named; the job runs without it.']);
 });
 
 for (const state of ['enabled', 'missing', 'disabled', 'native review'] as const) {
@@ -863,6 +906,12 @@ test('Codex leaves an explicitly named disabled app plugin off and notes it', { 
         }
         if (msg.method === 'turn/start') {
           send({ id: msg.id, result: { turn: { id: 't' } } });
+          return send({ id: 'tool', method: 'mcpServer/elicitation/request', params: {
+            threadId: 's', serverName: 'cua_repl', mode: 'form', _meta: { codex_approval_kind: 'mcp_tool_call', tool_name: 'js' },
+          } });
+        }
+        if (msg.id === 'tool') {
+          send({ method: 'item/completed', params: { threadId: 's', item: { type: 'agentMessage', text: msg.result.action } } });
           return send({ method: 'turn/completed', params: { threadId: 's', turn: { id: 't', status: 'completed' } } });
         }
         if (msg.method && msg.id != null) send({ id: msg.id, result: {} });
@@ -870,7 +919,10 @@ test('Codex leaves an explicitly named disabled app plugin off and notes it', { 
     `);
     cleanup(t, h);
     const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test', plugins: ['computer-use'], runsApp });
+    while (job.state === 'running') await h.jobs.wait(job.id, job.seq, 1000);
+    assert.equal(job.state, 'done', 'disabled plugins must not forward tool approvals');
     await until(h.jobs, job, 'done');
+    assert.equal(job.report, 'decline');
     assert.ok(job.notes.some((note) => /computer-use.*user.*off/i.test(note)));
     const config = JSON.parse(fs.readFileSync(path.join(h.home, 'config.json'), 'utf8'));
     assert.equal(config.features.plugins, false);

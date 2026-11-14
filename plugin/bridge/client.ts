@@ -99,11 +99,18 @@ export async function stopDaemon(): Promise<void> {
   // Any local listener can report an arbitrary PID on /api/health; only signal the PID
   // that this home's daemon recorded on disk.
   let recorded: unknown;
-  try {
-    recorded = JSON.parse(fs.readFileSync(path.join(HOME, 'daemon.json'), 'utf8')).pid;
-  } catch {
-    throw stuck;
-  }
+  const file = path.join(HOME, 'daemon.json');
+  await waitFor(async () => {
+    if (await down()) return true;
+    try {
+      recorded = JSON.parse(fs.readFileSync(file, 'utf8')).pid;
+      return true;
+    } catch {
+      return false;
+    }
+  }, 1000);
+  if (await down()) return;
+  if (recorded === undefined) throw new Error(`The Crew daemon's PID could not be confirmed from ${file}. Stop the process listening at ${BASE_URL} yourself, then start Crew again.`);
   if (!Number.isInteger(recorded) || (recorded as number) <= 0 || recorded !== running.pid) throw stuck;
   try {
     process.kill(running.pid, 'SIGTERM');
@@ -111,6 +118,12 @@ export async function stopDaemon(): Promise<void> {
     if ((err as NodeJS.ErrnoException).code !== 'ESRCH') throw stuck;
   }
   if (!(await waitFor(down, 5000))) throw stuck;
+  // Windows SIGTERM is a hard kill: shutdown cannot flush or remove its own PID file.
+  try {
+    if (JSON.parse(fs.readFileSync(file, 'utf8')).pid === running.pid) fs.rmSync(file, { force: true });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+  }
 }
 
 async function startDaemon(): Promise<void> {
@@ -126,7 +139,9 @@ async function startDaemon(): Promise<void> {
     } catch {
       return;
     }
-    await waitFor(async () => (await health()) === null, 5000);
+    if (!(await waitFor(async () => (await health()) === null, 5000))) {
+      throw new Error(`The previous Crew daemon (process ${running.pid}) did not stop at ${BASE_URL}. Try crew daemon restart again after it exits.`);
+    }
   }
   fs.mkdirSync(HOME, { recursive: true });
   const out = fs.openSync(path.join(HOME, 'daemon.log'), 'a');

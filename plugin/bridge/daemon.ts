@@ -29,9 +29,13 @@ import type { EventKind, Job } from './jobs.ts';
 
 fs.mkdirSync(HOME, { recursive: true });
 const log = (...args: unknown[]) => console.log(new Date().toISOString(), ...args);
+let mutatingPosts = 0;
 
 const server = http.createServer((req, res) => {
-  route(req, res).then(
+  // Reserve before reading the body: idle replacement must not interrupt an unrecorded worktree.
+  const mutating = req.method === 'POST' && req.url?.split('?')[0] !== '/api/shutdown';
+  if (mutating) mutatingPosts++;
+  route(req, res).finally(() => { if (mutating) mutatingPosts--; }).then(
     (result) => {
       if (result === undefined) return;
       res.writeHead(200, { 'content-type': 'application/json' });
@@ -328,7 +332,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       fs.createReadStream(file).pipe(res);
       return undefined;
     }
-    if (pathname === '/api/health') return { name: 'crew', version: VERSION, build: BUILD, root: PLUGIN_ROOT, pid: process.pid, active: jobs.activeCount };
+    if (pathname === '/api/health') return { name: 'crew', version: VERSION, build: BUILD, root: PLUGIN_ROOT, pid: process.pid, active: jobs.activeCount + mutatingPosts };
     if (pathname === '/api/state') return state();
     if (pathname === '/api/instructions') {
       const file = await sharedFile(url.searchParams.get('project'));
@@ -480,7 +484,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     }
     if (pathname === '/api/shutdown') {
       // Re-check active jobs here in case work started after the client's health check.
-      if ((await readJson(req)).ifIdle && jobs.activeCount > 0) throw new HttpError(409, `${jobs.activeCount} job(s) are active, so the daemon keeps running.`);
+      if ((await readJson(req)).ifIdle && (jobs.activeCount > 0 || mutatingPosts > 0)) throw new HttpError(409, `${jobs.activeCount} job(s) are active and ${mutatingPosts} mutating request(s) are in flight, so the daemon keeps running.`);
       stopping = true;
       setImmediate(shutdown);
       return {};

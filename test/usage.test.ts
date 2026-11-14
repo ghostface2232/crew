@@ -91,9 +91,9 @@ test('a window is judged by what is left, with hysteresis, whatever its recent p
 
 test('the account-wide window decides; a provider with only per-model windows follows the configured model, else its tightest family', () => {
   const tracker = new UsageTracker();
-  const of = (windows: object[]) => tracker.classify(parseCache(cache([snapshot('antigravity', windows)])), none, NOW).providers.find((p) => p.agent === 'antigravity')!;
+  const of = (windows: object[], agent = 'antigravity') => tracker.classify(parseCache(cache([snapshot(agent, windows)])), none, NOW).providers.find((p) => p.agent === agent)!;
   // A scoped window that is used up does not exhaust the account.
-  const scoped = of([weekly(0.2), weekly(1, { groupLabel: 'Fable', providerID: 'scoped' })]);
+  const scoped = of([weekly(0.2), weekly(1, { groupLabel: 'Fable', providerID: 'scoped' })], 'claude');
   assert.equal(scoped.status, 'ok');
   assert.equal(scoped.windows[1].status, 'exhausted');
   // Only families, one used up and one with room: a job does not move to another model by itself.
@@ -106,6 +106,26 @@ test('the account-wide window decides; a provider with only per-model windows fo
   // A model that names no family falls back to the tightest.
   tracker.models = { antigravity: 'something-else' };
   assert.equal(of(families).status, 'exhausted');
+});
+
+test('Antigravity accounts for both its account-wide and applicable family windows', () => {
+  const tracker = new UsageTracker();
+  tracker.models = { antigravity: 'gemini-3.8-flash' };
+  const of = (account: number, gemini: number, argon: number, capturedAt = NOW) => tracker.classify(parseCache(cache([snapshot('antigravity', [
+    weekly(account), weekly(gemini, { groupLabel: 'Gemini', providerID: 'g', resetTime: iso(NOW + 30 * MIN) }),
+    weekly(argon, { groupLabel: 'Gemini 4 Argon', providerID: 'a' }),
+  ], capturedAt)])), none, capturedAt).providers.find((p) => p.agent === 'antigravity')!;
+  assert.equal(of(0.2, 1, 0.1).status, 'exhausted');
+  assert.equal(of(1, 0.2, 0.1).status, 'exhausted');
+  const room = of(0.2, 0.2, 1);
+  assert.equal(room.status, 'ok');
+  assert.deepEqual(room.decidingKeys, ['weekly', 'g']);
+  const blocked = of(0.2, 1, 0.1);
+  const usage = { ...new UsageTracker().classify(null, none, NOW), providers: [blocked] };
+  assert.equal(route('polish', usage, DEFAULT_ROLES).deferUntil, NOW + 30 * MIN);
+  tracker.reportLimit('antigravity', 'family limit', NOW);
+  assert.equal(of(0.2, 1, 0.1, NOW + MIN).status, 'exhausted');
+  assert.equal(of(0.2, 0.2, 1, NOW + 2 * MIN).status, 'ok');
 });
 
 test('an old reading is stale, and a reported limit stands until a later reading shows room', () => {

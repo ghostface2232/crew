@@ -19,7 +19,7 @@ function harness() {
     note: (text: string) => notes.push(text), waiting: (_type: string, text: string) => waiting.push(text),
   };
   const internal = adapter as any;
-  internal.openRun(ctl, 'parent');
+  internal.openRun(ctl, 'parent', true);
   const notify = (method: string, params: object) => internal.onNotification(method, { threadId: 'parent', turnId: 'turn', ...params });
   const request = (method: string, params: object) => internal.onRequest(method, { threadId: 'parent', turnId: 'turn', ...params }, 1);
   return { adapter, internal, ctl, job, refusals, notes, waiting, notify, request };

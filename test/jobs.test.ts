@@ -1022,15 +1022,24 @@ test('round operations exclude concurrent changes, follow-ups and discard', asyn
     ctl.done('done');
   });
   const job = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'x' }));
+  const active = [jobs.activeCount];
   const pending = jobs.round(job.id, 1, 'undo');
+  active.push(jobs.activeCount);
   await assert.rejects(jobs.round(job.id, 1, 'undo'), /already changing a round/);
   await assert.rejects(jobs.reply(job.id, { message: 'again' }), /changing a round/);
   await assert.rejects(jobs.discard(job.id), /changing a round/);
   await pending;
-  await jobs.round(job.id, 1, 'keep');
+  active.push(jobs.activeCount);
+  const keeping = jobs.round(job.id, 1, 'keep');
+  active.push(jobs.activeCount);
+  await keeping;
+  active.push(jobs.activeCount);
   const discarding = jobs.discard(job.id);
+  active.push(jobs.activeCount);
   await assert.rejects(jobs.round(job.id, 1, 'undo'), /being discarded/);
   await discarding;
+  active.push(jobs.activeCount);
+  assert.deepEqual(active, [0, 1, 0, 1, 0, 1, 0]);
 });
 
 test('in-place and review jobs never record rounds', async () => {
@@ -1360,6 +1369,13 @@ test('a conflicting sync still delivers the follow-up and leaves the worktree an
   let worker!: JobCtl;
   let told = '';
   adapter.reply = async (ctl, message) => { worker = ctl; told = message; };
+
+  adapter.start = async (ctl) => { ctl.session('alone'); };
+  const alone = await jobs.create({ kind: 'delegate', cwd: home, isolation: 'in_place', task: 'measure', exclusive: true });
+  await assert.rejects(jobs.reply(job.id, { message: 'not accepted', sync: true }), /has the machine to itself/);
+  assert.deepEqual(job.notes, before.notes);
+  assert.equal(job.turns, 1);
+  await jobs.cancel(alone.id);
 
   await jobs.reply(job.id, { message: 'take the lead change into account', sync: true });
 
@@ -1703,6 +1719,27 @@ test('read-only jobs reject explicitly named plugins before starting', async (t)
   const job = await settled(h.jobs, await h.jobs.create({ kind: 'review', cwd: repo, review, runsApp: true, plugins: ['browser'] }));
   assert.deepEqual(job.plugins, ['computer-use', 'unified-computer-use', 'browser']);
   await h.jobs.discard(job.id);
+});
+
+test('global Codex plugins layer with app and explicit plugins only for eligible roles', async (t) => {
+  const config = resolveConfig({ notify: false, codex: { plugins: ['browser', 'github'], appPlugins: ['computer-use', 'browser'] }, roles: { polish: { agent: 'codex' } } });
+  const h = harness((ctl) => ctl.done('done'), () => config);
+  const repo = tempRepo();
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); fs.rmSync(repo, { recursive: true, force: true }); });
+  const create = async (spec: Partial<JobSpec>) => settled(h.jobs, await h.jobs.create({ kind: 'delegate', cwd: repo, isolation: 'in_place', task: 'test', ...spec }));
+  assert.deepEqual((await create({})).plugins, ['browser', 'github']);
+  const combined = await create({ runsApp: true, plugins: ['github', 'figma'] });
+  assert.deepEqual(combined.plugins, ['browser', 'github', 'computer-use', 'figma']);
+  assert.deepEqual(combined.requestedPlugins, ['github', 'figma']);
+  const review = { target: { type: 'uncommittedChanges' as const }, mode: 'adversarial' as const };
+  const appReview = await create({ kind: 'review', review, runsApp: true });
+  assert.deepEqual(appReview.plugins, ['browser', 'github', 'computer-use']);
+  await h.jobs.discard(appReview.id);
+  for (const spec of [{ ask: true }, { kind: 'review' as const, review }, { kind: 'polish' as const, targets: ['README.md'] }]) {
+    assert.equal((await create(spec)).plugins, undefined);
+  }
+  config.roles.delegate = { agent: 'antigravity' };
+  assert.equal((await create({ runsApp: true })).plugins, undefined);
 });
 
 test('notes do not infer a declined action from their wording', async (t) => {

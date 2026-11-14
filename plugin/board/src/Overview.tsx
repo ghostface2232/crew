@@ -1,255 +1,190 @@
-import type { CSSProperties } from 'react';
-import type { ProviderUsage, UsageWindow } from '../../bridge/usage.ts';
-import type { CrewEvent, Snapshot } from './types.ts';
-import type { Mark } from './model.ts';
-import {
-  compact, jobLabel, jobMark, NAMES, projectOf, relativeDuration, ROLE_NAMES,
-  sessionMark, together, unsettled, URGENCY, usageWindowName,
-} from './model.ts';
-import { Chip, MarkIcon, useNow } from './ui.tsx';
+import { ArrowUpRight, BellDot, CircleAlert, CircleCheck, CircleDot, CircleDotDashed, Layers, MessagesSquare, Plus, Search, SquareStack } from 'lucide-react';
+import type { ProviderUsage } from '../../bridge/usage.ts';
+import type { BoardJob, ClaudeSession, CrewEvent, Mission, Snapshot, WorkerAgent } from './types.ts';
+import { NAMES, projectOf, relativeDuration, ROLE_NAMES, usageWindowName, unsettled } from './model.ts';
+import { AgentMark, Chip, ContentPanel, EmptyState, Icon, useNow } from './ui.tsx';
+import { JobRow, MissionPanel, SessionView } from './Missions.tsx';
 
-const stats: [Mark, string][] = [
-  ['done', 'Finished'],
-  ['working', 'In progress'],
-  ['waiting', 'Needs you'],
-  ['stalled', 'Gone quiet'],
-  ['failed', 'Failed'],
-];
-/**
- * A provider that is stale, unknown, or exhausted by a reported limit says so on its account-wide windows:
- * their own status is then out of date or beside the point.
- */
-function shownStatus(provider: ProviderUsage, window: UsageWindow) {
-  return window.group == null && ['stale', 'unknown', 'exhausted'].includes(provider.status) ? provider.status : window.status;
-}
-function UsageGauge({ window: measured, status, reason }: { window: UsageWindow; status: UsageWindow['status']; reason: string }) {
-  const window = { ...measured, status };
-  const now = useNow();
-  const percent = Math.round(Math.max(0, Math.min(1, window.usedRatio)) * 100);
-  const name = [window.group, usageWindowName(window.kind)].filter(Boolean).join(' · ');
-  return (
-    <div className="usage-window" data-status={window.status} title={reason}>
-      <span>
-        {name} · {percent}% used{window.status !== 'ok' && ` · ${window.status}`}
-      </span>
-      <progress aria-label={name} max={100} value={percent} />
-      <span>
-        {window.resetTime == null
-          ? 'Reset time unknown'
-          : window.resetTime <= now
-            ? 'Reset due'
-            : `Resets in ${relativeDuration(window.resetTime - now)}`}
-        {window.projectedExhaustion != null &&
-          ` · runs out in about ${relativeDuration(window.projectedExhaustion - now)}`}
-      </span>
-    </div>
-  );
-}
-function UsageGauges({ provider }: { provider: ProviderUsage }) {
-  const scoped = provider.windows.filter((window) => window.group != null);
-  return (
-    <div className="usage-windows" aria-label={`${NAMES[provider.agent]} usage`}>
-      {provider.windows
-        .filter((window) => window.group == null)
-        .map((window) => (
-          <UsageGauge key={window.key} window={window} status={shownStatus(provider, window)} reason={provider.reason} />
-        ))}
-      {!provider.windows.length && (
-        <p className="hint" title={provider.reason}>{provider.status}</p>
-      )}
-      {scoped.length > 0 && (
-        <details>
-          <summary>Model limits ({scoped.length})</summary>
-          {scoped.map((window) => (
-            <UsageGauge key={window.key} window={window} status={window.status} reason={provider.reason} />
-          ))}
-        </details>
-      )}
-    </div>
-  );
-}
-export function Overview({
-  state,
-  project,
-  openJob,
-}: {
+export interface Scope {
   state: Snapshot;
   project: string;
+  search: string;
+  names: Map<string, string>;
+  selectedJob: string;
   openJob: (id: string) => void;
-}) {
-  const visible = (item: Parameters<typeof projectOf>[0]) => !project || projectOf(item) === project;
-  const missions = state.missions.filter((mission) => mission.state === 'active' && visible(mission));
-  const jobs = state.jobs.filter(
-    (job) => visible(job) && (!job.endedAt || missions.some((mission) => mission.id === job.mission)),
-  );
-  const sessions = state.claude.filter(visible);
-  // Settled jobs leave the totals, which would otherwise only grow; the app counts the same way.
-  const counted = state.jobs.filter((job) => visible(job) && (!job.endedAt || unsettled(job)));
-  const marks = [...counted.map(jobMark), ...sessions.filter((session) => session.state === 'waiting').map(sessionMark)];
-  const counts = Object.fromEntries(stats.map(([mark]) => [mark, marks.filter((value) => value === mark).length]));
-  const headline = counts.waiting
-    ? counts.waiting === 1
-      ? 'One thing needs your answer'
-      : `${counts.waiting} things need your answer`
-    : missions.length
-      ? `Working on ${missions.length} task${missions.length === 1 ? '' : 's'}`
-      : counts.working + counts.stalled
-        ? `${counts.working + counts.stalled} jobs running`
-        : 'All quiet';
-  const lede = counts.waiting
-    ? 'Those jobs are paused until you reply.'
-    : counts.failed
-      ? 'A job stopped on an error. Open it to see what went wrong.'
-      : counts.stalled
-        ? 'A job has gone quiet. Open it to check.'
-        : missions.length || counts.working
-          ? 'Nothing needs you right now. You can leave this open and check back.'
-          : 'Start a task in Claude, or send work directly from this board.';
+}
+export const matches = (search: string, text: string) => !search || text.toLowerCase().includes(search.toLowerCase());
+const inProject = (project: string, item: Parameters<typeof projectOf>[0]) => !project || projectOf(item) === project;
+
+/** WorkspaceSummary: four counts and their shares as one bar. */
+export function Summary({ state, project }: { state: Snapshot; project: string }) {
+  const jobs = state.jobs.filter((job) => inProject(project, job));
+  const metrics = [
+    ['In progress', jobs.filter((job) => job.state === 'running').length, CircleDotDashed, 'working'],
+    [
+      'Needs you',
+      jobs.filter((job) => job.state === 'waiting').length +
+        state.claude.filter((session) => session.state === 'waiting' && inProject(project, session)).length,
+      BellDot,
+      'waiting',
+    ],
+    // Settled jobs stay in the list but leave the totals, which would otherwise only grow.
+    ['Finished', jobs.filter((job) => job.state === 'done' && unsettled(job)).length, CircleCheck, 'idle'],
+    ['Failed', jobs.filter((job) => job.state === 'failed' && unsettled(job)).length, CircleAlert, 'failed'],
+  ] as const;
+  const total = Math.max(1, metrics.reduce((sum, metric) => sum + metric[1], 0));
   return (
-    <section className="hero" aria-label="Overview">
-      <div className="summary">
-        <p className="eyebrow">
-          {missions.length} tasks · {jobs.length} jobs ·{' '}
-          {compact(jobs.reduce((sum, job) => sum + (job.tokens ?? 0), 0))} tokens used
-        </p>
-        <h2>{state.connection === 'connecting' ? 'Connecting to your crew' : headline}</h2>
-        <p className="lede">{lede}</p>
+    <section className="card summary" aria-label="Jobs by state">
+      <ul className="metrics">
+        {metrics.map(([label, count, icon, state]) => (
+          <li className="metric" key={label} data-state={state} data-zero={count === 0 ? '' : undefined}>
+            <span>
+              <Icon icon={icon} />
+              {label}
+            </span>
+            <b>{count.toLocaleString()}</b>
+          </li>
+        ))}
+      </ul>
+      <div className="summary-bar" aria-hidden="true">
+        {metrics.map(([label, count, , state]) =>
+          count > 0 ? <i key={label} data-state={state} style={{ flexGrow: count / total }} /> : null,
+        )}
       </div>
-      <div className="stats" role="group" aria-label="Jobs by state">
-        <ul className="stats-legend">
-          {stats.map(([mark, label]) => (
-            <li className="stat" key={mark} data-state={mark} data-none={!counts[mark] ? '' : undefined}>
-              <span className="stat-label">
-                <MarkIcon state={mark} />
-                {label}
-              </span>
-              <b>{counts[mark]}</b>
-            </li>
-          ))}
-        </ul>
-        <div className="stats-bar" aria-hidden="true">
-          {stats.map(([mark]) => (
-            <i
-              key={mark}
-              data-state={mark}
-              data-zero={!counts[mark] ? '' : undefined}
-              style={{ flexGrow: counts[mark] }}
-            />
-          ))}
-        </div>
-      </div>
-      <ul className="tiles" aria-label="Agents">
-        {(['claude', ...Object.keys(state.agents)] as (keyof typeof NAMES)[]).map((agent) => {
-          const work =
-            agent === 'claude'
-              ? sessions
-                  .filter((session) => session.state !== 'idle')
-                  .map((session) => ({
-                    id: session.id,
-                    title: session.title,
-                    now: session.waitingFor ?? session.phase,
-                    mark: sessionMark(session),
-                    job: false,
-                  }))
-              : state.jobs
-                  .filter((job) => visible(job) && job.agent === agent && !job.endedAt)
-                  .map((job) => ({
-                    id: job.id,
-                    title: job.title,
-                    now: job.state === 'waiting' ? jobLabel(job) : job.phase,
-                    mark: jobMark(job),
-                    job: true,
-                  }));
-          work.sort((a, b) => URGENCY.indexOf(a.mark) - URGENCY.indexOf(b.mark));
-          const mood = together(work.map((item) => item.mark)) || 'idle';
-          const roles = Object.entries(ROLE_NAMES)
-            .filter(([role]) => state.roles[role as keyof typeof ROLE_NAMES]?.agent === agent)
-            .map(([, label]) => label)
-            .join(' · ');
-          const windows = agent === 'codex' ? (state.limits.codex?.windows ?? []) : [];
-          const used = Math.max(0, ...windows.map((window) => Math.round(window.usedPercent)));
-          const usage = state.usage?.source === 'agentgauge'
-            ? state.usage.providers.find((provider) => provider.agent === agent)
-            : undefined;
+    </section>
+  );
+}
+
+function AgentUsage({ state, agent }: { state: Snapshot; agent: string }) {
+  const now = useNow();
+  const usage = state.usage;
+  if (usage && usage.source !== 'none') {
+    const provider = usage.providers.find((item) => item.agent === agent);
+    if (!provider) return <p className="usage">Usage unknown</p>;
+    const account = provider.windows.filter((window) => window.group == null);
+    const scoped = provider.windows.filter((window) => window.group != null);
+    return (
+      <div
+        className="usage"
+        aria-label={`${NAMES[agent as WorkerAgent] ?? agent} usage`}
+        title={[provider.reason, ...scoped.map((window) => `${window.group}: ${usageWindowName(window.kind)}, ${Math.round(window.usedRatio * 100)}%, ${window.status}`)].join('\n')}
+      >
+        {!account.length && <p>{capitalized(provider.status)}</p>}
+        {account.map((window) => {
+          // The provider's status overrides a window's when the reading is old or a job just hit the limit.
+          const status = shownStatus(provider, window.status);
+          const ratio = Math.max(0, Math.min(1, window.usedRatio));
           return (
-            <li className="tile" key={agent}>
-              <div className="tile-head">
-                <span className="agent-well" aria-hidden="true">
-                  {NAMES[agent][0]}
-                </span>
-                <div className="tile-id">
-                  <p className="tile-label">{agent === 'claude' ? 'Lead' : roles || 'No role'}</p>
-                  <p className="tile-value">{NAMES[agent]}</p>
-                </div>
-                <Chip state={mood}>
-                  {mood === 'working'
-                    ? work.length > 1
-                      ? `${work.length} working`
-                      : 'Working'
-                    : mood === 'waiting'
-                      ? 'Needs you'
-                      : mood === 'stalled'
-                        ? 'May be stuck'
-                        : mood === 'failed'
-                          ? 'Failed'
-                          : 'Idle'}
-                </Chip>
-              </div>
-              <div className="tile-body">
-                {work.length ? (
-                  <>
-                    <ul className="tile-work">
-                      {work.slice(0, 3).map((item) => (
-                        <li key={item.id}>
-                          {item.job ? (
-                            <button className="work" data-state={item.mark} onClick={() => openJob(item.id)}>
-                              <MarkIcon state={item.mark} />
-                              <span className="what">{item.title}</span>
-                              <span className="sub">{item.now}</span>
-                            </button>
-                          ) : (
-                            <div className="work" data-state={item.mark}>
-                              <MarkIcon state={item.mark} />
-                              <span className="what">{item.title}</span>
-                              <span className="sub">{item.now}</span>
-                            </div>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                    {work.length > 3 && <p className="more">{work.length - 3} more in progress</p>}
-                  </>
-                ) : (
-                  <p className="tile-hint">
-                    {agent === 'claude'
-                      ? 'Plans the work, checks it, and puts it together'
-                      : state.agents[agent]?.enabled
-                        ? 'Ready for the next job'
-                        : 'Disabled in configuration'}
-                  </p>
+            <div className="usage-window" data-status={status} key={window.key}>
+              <p className="usage-line">
+                <span>{usageWindowName(window.kind)}</span>
+                <span>{Math.round(window.usedRatio * 100)}%</span>
+                {(status === 'stale' || status === 'unknown' || (status === 'exhausted' && window.status !== 'exhausted')) && (
+                  <span>{status === 'exhausted' ? 'limit reached' : status}</span>
                 )}
+                {window.resetTime != null && (
+                  <span className="usage-reset">{window.resetTime <= now ? 'Reset due' : `Resets in ${relativeDuration(window.resetTime - now)}`}</span>
+                )}
+              </p>
+              <span className="usage-bar" aria-hidden="true">
+                <i style={{ width: `${ratio * 100}%` }} />
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+  const windows = agent === 'codex' ? (state.limits.codex?.windows ?? []) : [];
+  if (!windows.length) return null;
+  const used = Math.max(...windows.map((window) => Math.round(window.usedPercent)));
+  return (
+    <span
+      className="usage-limit caption digits"
+      data-high={used >= 90 ? '' : undefined}
+      title={windows.map((window) => `${Math.round(window.usedPercent)}% of ${window.minutes}-minute limit`).join('\n')}
+    >
+      {used}% of limit
+    </span>
+  );
+}
+const capitalized = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+function shownStatus(provider: ProviderUsage, status: ProviderUsage['windows'][number]['status']) {
+  return ['stale', 'unknown', 'exhausted'].includes(provider.status) ? provider.status : status;
+}
+
+function agentActivity(state: Snapshot, project: string, agent: string) {
+  const jobs = state.jobs.filter((job) => job.agent === agent && job.endedAt == null && inProject(project, job));
+  const sessions = state.claude.filter((session) => session.state !== 'idle' && inProject(project, session));
+  const items: { state: string; stalled: boolean }[] = agent === 'claude' ? sessions : jobs;
+  const mark = items.some((item) => item.state === 'waiting')
+    ? 'waiting'
+    : items.some((item) => item.stalled)
+      ? 'stalled'
+      : items.length
+        ? 'working'
+        : 'idle';
+  const title =
+    mark === 'waiting'
+      ? 'Needs you'
+      : mark === 'stalled'
+        ? 'May be stuck'
+        : mark === 'working'
+          ? 'Working'
+          : state.agents[agent as WorkerAgent]?.enabled === false
+            ? 'Disabled'
+            : 'Ready';
+  return { count: items.length, mark, title };
+}
+
+export function AgentOverview({ state, project }: { state: Snapshot; project: string }) {
+  const agents = ['claude', ...(['codex', 'antigravity'] as const).filter((agent) => state.agents[agent])];
+  const measured = state.usage != null && state.usage.source !== 'none';
+  return (
+    <section className="agents" aria-labelledby="agents-title">
+      <h2 className="section-title" id="agents-title">Agents</h2>
+      <ul className="agent-cards">
+        {agents.map((agent) => {
+          const { count, mark, title } = agentActivity(state, project, agent);
+          const noun = agent === 'claude' ? 'session' : 'job';
+          const role =
+            agent === 'claude'
+              ? 'Lead'
+              : (Object.keys(ROLE_NAMES) as (keyof typeof ROLE_NAMES)[])
+                  .filter((key) => state.roles[key]?.agent === agent)
+                  .map((key) => ROLE_NAMES[key])
+                  .join(' · ');
+          return (
+            <li className="card agent-card" key={agent} data-agent={agent}>
+              <div className="agent-card-head">
+                <AgentMark agent={agent} size={22} />
+                <div>
+                  <h3 className="card-title">{NAMES[agent as keyof typeof NAMES]}</h3>
+                  <p className="caption" title={role}>{role}</p>
+                </div>
+                <Chip state={mark}>{title}</Chip>
               </div>
-              {usage && <UsageGauges provider={usage} />}
-              {(!state.usage || state.usage.source === 'none') && windows.length > 0 && (
-                <p
-                  className="usage"
-                  title={windows
-                    .map(
-                      (window) =>
-                        `${Math.round(window.usedPercent)}% of the ${window.minutes >= 1440 ? `${Math.round(window.minutes / 1440)}-day` : `${Math.round(window.minutes / 60)}-hour`} limit`,
-                    )
-                    .join(', ')}
-                >
-                  <span
-                    className="meter"
-                    data-high={used >= 90 ? '' : undefined}
-                    style={{ '--used': Math.min(100, used) } as CSSProperties}
-                  >
-                    <i />
-                  </span>
-                  <span className="pct">{used}% of limit used</span>
-                </p>
-              )}
+              <div className="agent-card-row">
+                <span>{count === 0 ? `No active ${noun}s` : `${count} active ${noun}${count === 1 ? '' : 's'}`}</span>
+                {!measured && <AgentUsage state={state} agent={agent} />}
+              </div>
+              {measured && <AgentUsage state={state} agent={agent} />}
+            </li>
+          );
+        })}
+      </ul>
+      <ul className="card agent-list">
+        {agents.map((agent) => {
+          const { count, mark, title } = agentActivity(state, project, agent);
+          return (
+            <li key={agent}>
+              <div className="agent-list-head">
+                <AgentMark agent={agent} size={18} />
+                <span>{NAMES[agent as keyof typeof NAMES]}</span>
+                {count > 0 && <span className="caption secondary">{count} active</span>}
+                <Chip state={mark}>{title}</Chip>
+              </div>
+              {measured && <AgentUsage state={state} agent={agent} />}
             </li>
           );
         })}
@@ -257,89 +192,128 @@ export function Overview({
     </section>
   );
 }
-export function EventList({
-  events,
-  state,
-  openJob,
-}: {
-  events: CrewEvent[];
-  state: Snapshot;
-  openJob?: (id: string) => void;
-}) {
-  const tones: Record<string, string> = {
-    waiting: 'waiting',
-    stalled: 'waiting',
-    error: 'failed',
-    limit: 'failed',
-    done: 'done',
-  };
+
+export function EventList({ events, openJob }: { events: CrewEvent[]; openJob: (id: string) => void }) {
   return (
-    <ol className="feed-list">
+    <ol className="events">
       {events
         .slice()
         .reverse()
-        .map((event) => {
-          const job = state.jobs.find((job) => job.id === event.job_id);
-          return (
-            <li key={event.seq}>
-              <time dateTime={event.ts}>
-                {new Date(event.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}
-              </time>
-              <span className="who">
-                {NAMES[event.agent]}
-                {job && openJob && (
-                  <button className="tag" onClick={() => openJob(job.id)}>
-                    {job.title}
+        .map((event) => (
+          <li className="event" key={event.seq} data-kind={event.kind}>
+            <Icon icon={event.kind === 'error' ? CircleAlert : event.kind === 'done' ? CircleCheck : CircleDot} />
+            <div>
+              <p className="event-head">
+                <b>{NAMES[event.agent as keyof typeof NAMES] ?? event.agent}</b>
+                <time dateTime={event.ts}>{new Date(event.ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time>
+                {event.job_id && (
+                  <button className="icon" aria-label="Show job" title="Show job" onClick={() => openJob(event.job_id!)}>
+                    <Icon icon={ArrowUpRight} />
                   </button>
                 )}
-              </span>
-              <span className="what" data-tone={tones[event.kind]} title={event.detail}>
-                {event.detail}
-              </span>
-            </li>
-          );
-        })}
+              </p>
+              <p className="selectable">{event.detail}</p>
+            </div>
+          </li>
+        ))}
     </ol>
   );
 }
-export function Activity({
-  state,
-  project,
-  openJob,
-}: {
-  state: Snapshot;
-  project: string;
-  openJob: (id: string) => void;
-}) {
-  const now = useNow();
-  const events = state.events.filter((event) => {
-    const owner =
-      state.jobs.find((job) => job.id === event.job_id) ??
-      state.claude.find((session) => session.id === event.session_id);
-    return !project || !owner || projectOf(owner) === project;
-  });
-  const bins = Array.from(
-    { length: 12 },
-    (_, index) =>
-      events.filter((event) => {
-        const ago = now - Date.parse(event.ts);
-        return ago >= (11 - index) * 300_000 && ago < (12 - index) * 300_000;
-      }).length,
-  );
-  const max = Math.max(1, ...bins);
+
+export function Activity({ state, search, openJob }: Pick<Scope, 'state' | 'search' | 'openJob'>) {
+  // The page heading already names this list.
+  const events = state.events.filter((event) => matches(search, `${event.detail} ${event.agent}`));
   return (
-    <section className="feed" aria-labelledby="feed-title">
-      <div className="feed-head">
-        <h2 id="feed-title">Activity</h2>
-        <p className="pulse-read">{bins.reduce((sum, n) => sum + n, 0)} in the last hour</p>
-        <div className="pulse" aria-hidden="true">
-          {bins.map((n, index) => (
-            <i key={index} data-empty={!n ? '' : undefined} style={{ '--h': n / max } as CSSProperties} />
-          ))}
-        </div>
-      </div>
-      <EventList events={events.slice(-60)} state={state} openJob={openJob} />
-      {!events.length && <p className="empty">Nothing has happened yet.</p>}
-    </section>
+    <ContentPanel>
+      {!events.length && <p className="secondary">No activity yet.</p>}
+      <EventList events={events} openJob={openJob} />
+    </ContentPanel>
+  );
+}
+
+/** The overview, a project, or the history: missions and jobs in the order the app lists them. */
+export function Workspace({ state, project, search, names, selectedJob, openJob, history, newJob }: Scope & { history: boolean; newJob: () => void }) {
+  const inScope = state.jobs.filter((job) => inProject(project, job));
+  const jobs = search ? inScope.filter((job) => matches(search, `${job.title} ${job.phase} ${projectOf(job)} ${job.agent}`)) : inScope;
+  const byMission = (list: BoardJob[]) => {
+    const map = new Map<string, BoardJob[]>();
+    for (const job of list) if (job.mission) map.set(job.mission, [...(map.get(job.mission) ?? []), job]);
+    return map;
+  };
+  const matched = byMission(jobs);
+  const all = search ? byMission(inScope) : matched;
+  const missions = state.missions
+    .filter((mission) => inProject(project, mission) && (matches(search, mission.title) || matched.has(mission.id)))
+    .sort((a, b) => b.createdAt - a.createdAt);
+  // A mission found by its title shows all of its jobs; one found through its jobs shows only the matches.
+  const missionJobs = (mission: Mission) => ((!search || !matches(search, mission.title) ? matched : all).get(mission.id) ?? []);
+  const shown = missions.filter((mission) => (history ? mission.state !== 'active' : mission.state === 'active'));
+  const recent = history ? [] : missions.filter((mission) => mission.state !== 'active').slice(0, 2);
+  const panel = (mission: Mission) => (
+    <MissionPanel
+      key={mission.id}
+      mission={mission}
+      jobs={missionJobs(mission)}
+      allJobs={state.jobs}
+      lead={state.claude.find((session) => session.id === mission.owner)}
+      projectName={project ? undefined : names.get(projectOf(mission))}
+      selectedJob={selectedJob}
+      openJob={openJob}
+    />
+  );
+  // Jobs of a recent mission already appear inside its panel.
+  const panelIds = new Set([...shown, ...recent].map((mission) => mission.id));
+  const loose = jobs
+    .filter((job) => !panelIds.has(job.mission ?? '') && (history ? job.endedAt != null : job.endedAt == null))
+    .sort((a, b) => b.createdAt - a.createdAt);
+  const recentJobs = jobs
+    .filter((job) => job.endedAt != null && !job.mission)
+    .sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0))
+    .slice(0, 4);
+  const sessions = state.claude.filter((session) => inProject(project, session) && matches(search, session.title));
+  const row = (job: BoardJob) => <JobRow key={job.id} job={job} selected={selectedJob === job.id} openJob={openJob} />;
+  const emptyHistory = history && !shown.length && !loose.length;
+  const emptyWorkspace = !history && !jobs.length && !missions.length && !sessions.length;
+  return (
+    <>
+      {!history && !search && <AgentOverview state={state} project={project} />}
+      {shown.map(panel)}
+      {loose.length > 0 && (
+        <ContentPanel title={history ? 'Completed jobs' : 'Other jobs'} icon={SquareStack}>
+          <div className="rows">{loose.map(row)}</div>
+        </ContentPanel>
+      )}
+      {!history && (
+        <>
+          {recent.map(panel)}
+          {recentJobs.length > 0 && (
+            <ContentPanel title="Recently finished" icon={CircleCheck}>
+              <div className="rows">{recentJobs.map(row)}</div>
+            </ContentPanel>
+          )}
+          {sessions.length > 0 && (
+            <ContentPanel title="Claude sessions" icon={MessagesSquare}>
+              {sessions.map((session: ClaudeSession) => (
+                <SessionView key={session.id} session={session} />
+              ))}
+            </ContentPanel>
+          )}
+        </>
+      )}
+      {(emptyHistory || emptyWorkspace) && (
+        <EmptyState
+          title={search ? 'No matching work' : emptyHistory ? 'No completed work yet' : 'Ready when you are'}
+          icon={search ? Search : Layers}
+          detail={!search && !emptyHistory ? 'Start with New Job, or /crew:run in Claude.' : undefined}
+        >
+          {!search && !emptyHistory && (
+            <button className="prominent" disabled={state.connection !== 'live'} onClick={newJob}>
+              <Icon icon={Plus} />
+              New Job
+            </button>
+          )}
+        </EmptyState>
+      )}
+    </>
   );
 }

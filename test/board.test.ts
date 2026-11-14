@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Actions, answerKey, tokenFromFragment } from '../plugin/board/src/api.ts';
 import { BoardStore, mergeEvents } from '../plugin/board/src/store.ts';
-import { brief, cardsForProject, jobMark, unsettled, missionProgress, missionStops, missionStep, missionStopPosition, missionJobStep, missionLooksFinished, relativeDuration, usageWindowName, STOP_OF_STAGE, timeLabel, together } from '../plugin/board/src/model.ts';
+import { elapsed, jobLabel, projectNames, unsettled, missionProgress, missionStops, missionStep, missionStopPosition, missionJobStep, missionLooksFinished, relativeDuration, usageWindowName, STOP_OF_STAGE } from '../plugin/board/src/model.ts';
 import type { BoardJob, BoardState, ClaudeSession, CrewEvent, Mission } from '../plugin/board/src/types.ts';
 
 function deferred() {
@@ -54,40 +54,12 @@ test('repeatable follow-ups can be sent again after acceptance', async () => {
   assert.equal(await actions.run('followup', async () => {}, { once: false }), true);
 });
 
-test('states combine by urgency and elapsed time uses coarse labels', () => {
-  assert.equal(together(['done', 'working', 'waiting']), 'waiting');
-  assert.equal(together(['done', 'stalled', 'working']), 'stalled');
-  assert.equal(together(['done', 'idle']), 'done');
-  assert.equal(together([]), '');
-  assert.equal(jobMark({ state: 'running', stalled: true } as BoardJob), 'stalled');
-  assert.equal(jobMark({ state: 'waiting', stalled: true } as BoardJob), 'waiting');
-  assert.equal(jobMark({ state: 'cancelled' } as BoardJob), 'idle');
-  assert.deepEqual([brief(42_000), brief(479_000), brief(3_780_000)], ['42s', '7m', '1h 3m']);
-  assert.equal(
-    timeLabel({ state: 'failed', createdAt: 0, endedAt: 660_000 } as BoardJob, 1_000_000),
-    'stopped after 11m',
-  );
+test('elapsed time and project names use the app\'s labels', () => {
+  assert.deepEqual([elapsed(42_000), elapsed(479_000), elapsed(3_780_000)], ['<1m', '7m', '1h 3m']);
+  assert.deepEqual([...projectNames(['/a/app', '/b/app', '/c/tool']).values()], ['/a/app', '/b/app', 'tool']);
+  assert.equal(jobLabel({ state: 'running', stalled: true } as BoardJob), 'May be stuck');
+  assert.equal(jobLabel({ state: 'waiting', stalled: true, waiting: { type: 'approval' } } as BoardJob), 'Needs approval');
   assert.equal(STOP_OF_STAGE['self-review'], STOP_OF_STAGE['cross-review']);
-});
-
-test('unfinished jobs outlive the recent mission limit without duplicates', () => {
-  const missions = ['old', 'recent', 'newest'].map(
-    (id, index) => ({ id, state: 'abandoned', endedAt: (index + 1) * 100, createdAt: 1 }) as Mission,
-  );
-  const jobs = [
-    { id: 'cx-old', mission: 'old', state: 'running', endedAt: null, createdAt: 2 },
-    { id: 'cx-recent', mission: 'recent', state: 'waiting', endedAt: null, createdAt: 3 },
-  ] as BoardJob[];
-  assert.deepEqual(
-    cardsForProject(missions, jobs).loose.map((job) => job.id),
-    ['cx-old'],
-  );
-  assert.deepEqual(
-    cardsForProject(missions, jobs).ended.map((mission) => mission.id),
-    ['newest', 'recent'],
-  );
-  jobs[0].endedAt = 400;
-  assert.equal(cardsForProject(missions, jobs).loose.length, 0);
 });
 
 test('a reconnect replaces snapshots and events, including restarted event sequences', () => {

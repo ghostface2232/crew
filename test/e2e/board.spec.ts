@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Locator, type Page } from '@playwright/test';
 import { fixture, NOW, TEST_TOKEN } from './fixtures.ts';
 
 test.beforeEach(async ({ page, request }) => {
@@ -7,6 +7,9 @@ test.beforeEach(async ({ page, request }) => {
   await page.goto('/');
   await expect(page.getByText('Live', { exact: true })).toBeVisible();
 });
+const needsYou = (page: Page) => page.getByRole('tab', { name: 'Needs You' }).click();
+const stage = (card: Locator, name: string) =>
+  card.locator('.stage-groups > .rows').filter({ has: card.page().getByRole('heading', { name, exact: true }) });
 
 test('short mission plans render in order with matching tracks and progress', async ({ page, request }) => {
   const data = fixture();
@@ -14,23 +17,19 @@ test('short mission plans render in order with matching tracks and progress', as
   data.missions[0].stage = 'cross-review';
   await request.post('/__push', { data: { type: 'state', data } });
   const card = page.locator('[data-key="mission-1"]');
-  await expect(card.locator('.stop-name span')).toHaveText(['Review', 'Fix', 'Final']);
-  await expect(card.locator('.stop[data-pos="past"]')).toHaveCount(0);
-  await expect(card.locator('.stop').first().locator('button[data-job]')).toHaveCount(2);
-  await expect(card.getByRole('progressbar', { name: 'Mission progress' })).toHaveAttribute('value', String(0.5 / 3));
-  await expect(card.locator('.steps circle')).toHaveCount(3);
-  await card.locator('.cmd-toggle').click();
-  await expect(card.locator('.mini i')).toHaveCount(3);
+  await expect(card.locator('.track-name')).toHaveText(['Review', 'Fix', 'Final']);
+  await expect(card.locator('.track > li[data-pos="past"]')).toHaveCount(0);
+  await expect(stage(card, 'Review').locator('button[data-job]')).toHaveCount(2);
+  await expect(card.locator('.mission-progress')).toHaveText(`${Math.round((0.5 / 3) * 100)}%`);
 
   data.missions[0].stage = 'final';
   await request.post('/__push', { data: { type: 'state', data } });
-  await expect(card.getByRole('progressbar')).toHaveAttribute('value', String(2.5 / 3));
+  await expect(card.locator('.mission-progress')).toHaveText(`${Math.round((2.5 / 3) * 100)}%`);
   data.missions[0].stages = ['final'];
   await request.post('/__push', { data: { type: 'state', data } });
-  await card.locator('.cmd-toggle').click();
-  await expect(card.locator('.stop-name span')).toHaveText(['Final']);
-  await expect(card.getByRole('progressbar')).toHaveAttribute('value', '0.5');
-  await expect(card.locator('.stop').first().locator('button[data-job]')).toHaveCount(2);
+  await expect(card.locator('.track-name')).toHaveText(['Final']);
+  await expect(card.locator('.mission-progress')).toHaveText('50%');
+  await expect(stage(card, 'Final').locator('button[data-job]')).toHaveCount(2);
 });
 
 test('a quiet ended workload looks finished and the authenticated user can mark the mission done', async ({ page, request }) => {
@@ -49,12 +48,15 @@ test('a quiet ended workload looks finished and the authenticated user can mark 
   await request.post('/__push', { data: { type: 'state', data } });
   const card = page.locator('[data-key="mission-1"]');
   await expect(card.getByText('Looks finished', { exact: true })).toBeVisible();
-  await card.getByRole('button', { name: 'Mark done', exact: true }).click();
-  await expect(card.locator('.chip')).toHaveText('Done');
-  await expect(card.getByRole('progressbar')).toHaveAttribute('value', '1');
+  await card.getByRole('button', { name: 'Mission options' }).click();
+  await page.getByRole('menuitem', { name: 'Mark done' }).click();
+  await expect(card.locator('.mission-head .chip')).toHaveText('Done');
+  await expect(card.locator('.mission-progress')).toHaveText('100%');
   await expect(card.getByText('Looks finished', { exact: true })).toHaveCount(0);
-  await expect(card.locator('.stop[data-pos="past"]')).toHaveCount(2);
-  await expect(card.locator('.mini i[data-state="done"]')).toHaveCount(2);
+  await expect(card.getByRole('button', { name: 'Mission options' })).toHaveCount(0);
+  // An ended mission starts collapsed, as in the app.
+  await card.getByRole('button', { name: 'Expand mission' }).click();
+  await expect(card.locator('.track > li[data-pos="past"]')).toHaveCount(2);
   const calls = await (await request.get('/__requests')).json();
   expect(calls).toEqual([{ route: '/api/missions/mission-1', body: { done: true, outcome: 'Marked done on the board.' } }]);
 });
@@ -68,20 +70,19 @@ test('repeated stops keep jobs on their original round while the remaining plan 
   data.jobs[1].missionStep = 3;
   await request.post('/__push', { data: { type: 'state', data } });
   const card = page.locator('[data-key="mission-1"]');
-  await expect(card.locator('.stop-name span')).toHaveText(['Build', 'Review', 'Fix', 'Review 2', 'Fix 2', 'Polish', 'Final']);
-  await expect(card.locator('.stop').nth(1).locator('button[data-job="cx-build"]')).toHaveCount(1);
-  await expect(card.locator('.stop').nth(3).locator('button[data-job="cx-question"]')).toHaveCount(1);
-  await expect(card.locator('.stop[data-pos="now"] .stop-name span')).toHaveText('Fix 2');
-  await expect(card.getByRole('progressbar')).toHaveAttribute('value', String(4.5 / 7));
+  await expect(card.locator('.track-name')).toHaveText(['Build', 'Review', 'Fix', 'Review 2', 'Fix 2', 'Polish', 'Final']);
+  await expect(stage(card, 'Review').locator('button[data-job="cx-build"]')).toHaveCount(1);
+  await expect(stage(card, 'Review 2').locator('button[data-job="cx-question"]')).toHaveCount(1);
+  await expect(card.locator('.track > li[data-pos="now"] .track-name')).toHaveText('Fix 2');
+  await expect(card.locator('.mission-progress')).toHaveText(`${Math.round((4.5 / 7) * 100)}%`);
   data.missions[0].stages = [...data.missions[0].stages.slice(0, 5), 'final', 'cross-review'];
   await request.post('/__push', { data: { type: 'state', data } });
-  await expect(card.locator('.stop-name span')).toHaveText(['Build', 'Review', 'Fix', 'Review 2', 'Fix 2', 'Final', 'Review 3']);
-  await expect(card.locator('.stop').nth(3).locator('button[data-job="cx-question"]')).toHaveCount(1);
-  await card.locator('.cmd-toggle').click();
-  await expect(card.locator('.mini i')).toHaveCount(7);
+  await expect(card.locator('.track-name')).toHaveText(['Build', 'Review', 'Fix', 'Review 2', 'Fix 2', 'Final', 'Review 3']);
+  await expect(stage(card, 'Review 2').locator('button[data-job="cx-question"]')).toHaveCount(1);
 });
 
 test('question drafts and focus survive stream updates and a reconnect', async ({ page, request }) => {
+  await needsYou(page);
   const field = page.getByRole('textbox', { name: 'Your answer' });
   await field.fill('한글 조합 중에도 유지해요');
   await field.focus();
@@ -93,7 +94,8 @@ test('question drafts and focus survive stream updates and a reconnect', async (
   await expect(page).toHaveTitle('(1) Crew');
 });
 
-test('answering in the drawer locks the same request on the board', async ({ page, request }) => {
+test('answering in the detail panel locks the same request on Needs You', async ({ page, request }) => {
+  await needsYou(page);
   await page.getByRole('button', { name: 'Details', exact: true }).click();
   const drawer = page.getByRole('dialog');
   await drawer.getByRole('textbox', { name: 'Your answer' }).fill('Keep the current selection');
@@ -107,6 +109,7 @@ test('answering in the drawer locks the same request on the board', async ({ pag
 });
 
 test('a failed answer retains its text and unlocks retry', async ({ page }) => {
+  await needsYou(page);
   await page.route('**/api/jobs/cx-question/reply', (route) =>
     route.fulfill({ status: 503, json: { error: 'Connection lost. Retry.' } }),
   );
@@ -188,18 +191,23 @@ test('settings can retry failed saves and confirm unsaved close', async ({ page 
   await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeFocused();
 });
 
-test('drawer cancels, follows up, and escapes task text', async ({ page, request }) => {
+test('detail panel cancels, follows up, and escapes task text', async ({ page, request }) => {
   await page.locator('button[data-job="cx-build"]').click();
   const drawer = page.getByRole('dialog');
   await expect(drawer.getByText('Inspect the existing implementation first. <task>')).toBeHidden();
-  await drawer.getByText('Task given to Codex', { exact: true }).click();
+  await drawer.getByText('Original task', { exact: true }).click();
   await expect(drawer.getByText('Inspect the existing implementation first. <task>')).toBeVisible();
-  await drawer.getByRole('textbox', { name: 'Message to Codex' }).fill('Check the narrow layout');
-  await drawer.getByRole('button', { name: 'Send message to codex' }).click();
-  await expect(drawer.getByRole('textbox', { name: 'Message to Codex' })).toHaveValue('');
-  await drawer.getByRole('button', { name: 'Cancel job' }).click();
+  const message = drawer.getByRole('textbox', { name: 'Message to Codex' });
+  await message.fill('Check the narrow layout');
+  // Return adds a newline; only the button sends.
+  await message.press('Enter');
+  expect((await (await request.get('/__requests')).json()).some((call: { route: string }) => call.route.endsWith('/reply'))).toBe(false);
+  await drawer.getByRole('button', { name: 'Send message' }).click();
+  await expect(message).toHaveValue('');
+  await drawer.getByRole('button', { name: 'Cancel Job' }).click();
   await expect(drawer.getByText('Cancelled', { exact: true }).first()).toBeVisible();
   const calls = await (await request.get('/__requests')).json();
+  expect(calls.find((call: { route: string }) => call.route.endsWith('/reply')).body).toEqual({ message: 'Check the narrow layout\n' });
   expect(calls.some((call: { route: string }) => call.route.endsWith('/cancel'))).toBe(true);
 });
 
@@ -261,7 +269,7 @@ test('a closed slow drawer never opens itself again', async ({ page }) => {
 });
 
 for (const width of [1440, 390])
-  test(`layout at ${width}px has no overflow, consistent SVGs, and readable multiple requests`, async ({
+  test(`layout at ${width}px has no overflow, consistent marks, and readable multiple requests`, async ({
     page,
     request,
   }, testInfo) => {
@@ -275,34 +283,31 @@ for (const width of [1440, 390])
       waiting: { type: 'approval', id: 'approval-1', reason: 'Allow the app verification command?', since: data.now },
     };
     await request.post('/__push', { data: { type: 'state', data } });
+    await expect(page.locator('[data-key="mission-1"]')).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    expect(await page.locator('.chip svg').first().evaluate((element) => element.tagName)).toBe('svg');
+    expect(await page.locator('.agent-mark').first().evaluate((element) => getComputedStyle(element).maskImage)).not.toBe('none');
+    await expect(page).toHaveScreenshot(`board-${width}.png`, { fullPage: true, animations: 'disabled' });
+    await page.screenshot({ path: testInfo.outputPath(`board-${width}.png`), fullPage: true });
+    await needsYou(page);
     await expect(page.getByRole('button', { name: 'Approve', exact: true })).toBeVisible();
     await expect(page.getByRole('textbox', { name: 'Your answer' })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    expect(
-      await page
-        .locator('.mark')
-        .first()
-        .evaluate((element) => element.tagName),
-    ).toBe('svg');
-    expect(
-      await page
-        .locator('.mark')
-        .first()
-        .evaluate((element) => getComputedStyle(element).maskImage),
-    ).toBe('none');
     expect(errors).toEqual([]);
-    await expect(page).toHaveScreenshot(`board-${width}.png`, { fullPage: true, animations: 'disabled' });
-    await page.screenshot({ path: testInfo.outputPath(`board-${width}.png`), fullPage: true });
   });
 
-test('IME Enter does not submit and the next question gets a fresh draft', async ({ page, request }) => {
+test('Return adds a newline in an answer and the next question gets a fresh draft', async ({ page, request }) => {
+  await needsYou(page);
   const field = page.getByRole('textbox', { name: 'Your answer' });
   await field.fill('조합 중');
-  await field.dispatchEvent('keydown', { key: 'Enter', code: 'Enter', isComposing: true, keyCode: 229 });
+  await field.press('Enter');
+  await expect(field).toHaveValue('조합 중\n');
   expect(await (await request.get('/__requests')).json()).toHaveLength(0);
   await request.post('/__push', { data: { type: 'job', data: { id: 'cx-question', waiting: { id: 'request-2', type: 'question', reason: 'A new question', since: NOW } } } });
   await expect(field).toHaveValue('');
-  await field.fill('새 답변'); await field.press('Enter');
+  await field.fill('새 답변');
+  await page.getByRole('button', { name: 'Send your answer' }).click();
+  await expect(field).toHaveValue('');
   const calls = await (await request.get('/__requests')).json();
   expect(calls[0].body).toMatchObject({ message: '새 답변', request_id: 'request-2' });
 });
@@ -319,23 +324,21 @@ test('320px dialogs keep controls within the viewport and support reduced motion
   await expect(page.getByRole('button', { name: 'Save instructions' })).toBeInViewport();
 });
 
-test('usage windows show every status, reset, projection, and scoped disclosure', async ({ page, request }) => {
-  const gauges = page.locator('.usage-windows');
-  await expect(gauges).toHaveCount(3);
+test('usage windows show every status and reset, with model limits in the help text', async ({ page, request }) => {
+  const cards = page.locator('.agent-cards');
+  await expect(cards.locator('.usage')).toHaveCount(3);
   for (const status of ['ok', 'tight', 'exhausted', 'unknown'])
-    await expect(page.locator(`.usage-window[data-status="${status}"]`)).toBeVisible();
-  await expect(page.getByText('5-hour · 25% used', { exact: true })).toBeVisible();
-  await expect(page.getByText('Resets in 1d · runs out in about 2h')).toBeVisible();
-  await expect(page.getByText('Billing cycle · 0% used · unknown')).toBeVisible();
-  await expect(page.locator('.usage-window[data-status="tight"]')).toHaveAttribute('title', 'Little room remains.');
-  await expect(page.locator('.usage-window[data-status="stale"]')).toBeHidden();
-  await page.getByText('Model limits (1)').click();
-  await expect(page.getByText('Fable · Weekly · 30% used · stale')).toBeVisible();
+    await expect(cards.locator(`.usage-window[data-status="${status}"]`)).toBeVisible();
+  const claude = cards.locator('[data-agent="claude"] .usage');
+  await expect(claude.locator('.usage-line').first()).toHaveText(['5-hour25%Resets in 1h']);
+  await expect(claude.locator('.usage-line').nth(1)).toHaveText(['Weekly90%Resets in 1d']);
+  await expect(cards.locator('[data-agent="antigravity"] .usage-line')).toHaveText(['Billing cycle0%unknown']);
+  await expect(claude).toHaveAttribute('title', 'Little room remains.\nFable: Weekly, 30%, stale');
+  await expect(cards.locator('.usage-window[data-status="stale"]')).toHaveCount(0);
   const usage = fixture().usage!;
   usage.providers[0].windows[0].usedRatio = 0.5;
   await request.post('/__push', { data: { type: 'usage', data: usage } });
-  await expect(page.getByText('5-hour · 50% used', { exact: true })).toBeVisible();
-  await expect(page.getByText('Fable · Weekly · 30% used · stale')).toBeVisible();
+  await expect(claude.locator('.usage-line').first()).toHaveText(['5-hour50%Resets in 1h']);
 });
 
 for (const source of ['absent', 'none'])
@@ -346,9 +349,10 @@ for (const source of ['absent', 'none'])
     delete data.preset;
     delete data.presets;
     await request.post('/__push', { data: { type: 'state', data } });
-    await expect(page.locator('.usage-windows')).toHaveCount(0);
-    await expect(page.locator('.usage')).toHaveText('42% of limit used');
-    await expect(page.locator('.usage')).toHaveAttribute('title', '42% of the 5-hour limit');
+    await expect(page.locator('.usage')).toHaveCount(0);
+    const limit = page.locator('.agent-cards .usage-limit');
+    await expect(limit).toHaveText('42% of limit');
+    await expect(limit).toHaveAttribute('title', '42% of 300-minute limit');
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
     await expect(page.getByLabel('Model preset')).toHaveCount(0);
   });
@@ -399,9 +403,9 @@ test('rounds are ordered and locked while active, then undo and keep with exact 
   await expect(rounds.getByRole('button', { name: 'Undo' })).toHaveAttribute('title', /Wait until/);
   await request.post('/__push', { data: { type: 'job', data: { id: 'cx-build', state: 'done', endedAt: NOW } } });
   await rounds.getByRole('button', { name: 'Undo' }).click();
-  await expect(rounds.getByText('Turn 1 · 1 file · Undone')).toBeVisible();
+  await expect(rounds.getByText('Undone', { exact: true })).toBeVisible();
   await rounds.getByRole('button', { name: 'Keep' }).click();
-  await expect(rounds.getByText('Turn 1 · 1 file · Kept')).toBeVisible();
+  await expect(rounds.getByText('Kept', { exact: true })).toBeVisible();
   const calls = await (await request.get('/__requests')).json();
   expect(calls.filter((call: { route: string }) => call.route.includes('/rounds/'))).toEqual([
     { route: '/api/jobs/cx-build/rounds/1', body: { undo: true } },
@@ -485,12 +489,13 @@ for (const target of ['mission:mission-1', 'project', 'global'])
     if (target.startsWith('mission:')) await expect(page.getByLabel('Pinned notes').getByText('Keep this requirement')).toBeVisible();
   });
 
-test('mission notes and progress remain visible when collapsed', async ({ page }) => {
+test('mission progress stays visible when collapsed and notes show when expanded', async ({ page }) => {
   const card = page.locator('[data-key="mission-1"]');
-  await expect(card.getByRole('progressbar', { name: 'Mission progress' })).toHaveAttribute('value', String(1.5 / 7));
-  await card.getByRole('button', { name: /Make the agent board a desktop app/ }).click();
-  await expect(card.getByText('21%', { exact: true })).toBeVisible();
+  await expect(card.locator('.mission-progress')).toHaveText(`${Math.round((1.5 / 7) * 100)}%`);
   await expect(card.getByText('Keep keyboard navigation available.')).toBeVisible();
+  await card.getByRole('button', { name: 'Collapse mission' }).click();
+  await expect(card.getByText('21%', { exact: true })).toBeVisible();
+  await expect(card.getByText('Keep keyboard navigation available.')).toHaveCount(0);
 });
 
 test('rounds render oldest first and waiting jobs cannot change them', async ({ page, request }) => {
@@ -500,8 +505,8 @@ test('rounds render oldest first and waiting jobs cannot change them', async ({ 
   } } });
   await page.locator('button[data-job="cx-build"]').click();
   const rounds = page.getByRole('region', { name: 'Rounds' });
-  await expect(rounds.locator('li').first()).toContainText('Turn 1');
-  await expect(rounds.locator('li').last()).toContainText('Turn 2');
+  await expect(rounds.locator('.round').first()).toContainText('Turn 1');
+  await expect(rounds.locator('.round').last()).toContainText('Turn 2');
   await expect(rounds.getByRole('button', { name: 'Undo' })).toBeDisabled();
   await expect(rounds.getByRole('button', { name: 'Keep' })).toBeDisabled();
 });
@@ -550,7 +555,7 @@ test.describe('authenticated daemon', () => {
     await page.goto(`/?view=board#token=${TEST_TOKEN}`);
     await expect(page.getByText('Live', { exact: true })).toBeVisible();
     await expect(page).toHaveURL(/\/\?view=board$/);
-    await expect(page.getByRole('textbox', { name: 'Your answer' })).toBeVisible();
+    await expect(page.locator('button[data-job="cx-build"]')).toBeVisible();
     const traffic = await (await request.get('/__traffic')).json();
     expect(traffic[0]).toEqual({ route: '/api/session', method: 'POST' });
     expect(traffic.filter((call: { route: string }) => call.route === '/api/session')).toHaveLength(1);
@@ -572,8 +577,8 @@ test.describe('authenticated daemon', () => {
     await expect(page.getByRole('heading', { name: 'The board is not signed in' })).toBeVisible();
     await expect(page.getByText('crew board', { exact: true })).toBeVisible();
     await expect(page.getByText('Open Web Board', { exact: true })).toBeVisible();
-    await expect(page.getByText('Disconnected — reconnecting…')).toHaveCount(0);
-    await expect(page.getByRole('textbox', { name: 'Your answer' })).toHaveCount(0);
+    await expect(page.getByText('Reconnecting…')).toHaveCount(0);
+    await expect(page.locator('button[data-job]')).toHaveCount(0);
     const before = await (await request.get('/__traffic')).json();
     expect(before.length).toBeGreaterThan(0);
     expect(before.length).toBeLessThanOrEqual(2);
@@ -596,12 +601,13 @@ test.describe('authenticated daemon', () => {
     expect((await context.request.post('/api/session', { data: { token: TEST_TOKEN } })).status()).toBe(200);
     await page.getByRole('button', { name: 'Retry', exact: true }).click();
     await expect(page.getByText('Live', { exact: true })).toBeVisible();
-    await expect(page.getByRole('textbox', { name: 'Your answer' })).toBeVisible();
+    await expect(page.locator('button[data-job="cx-build"]')).toBeVisible();
   });
 
   test('an action returning 401 replaces the board and closes its stream', async ({ page, context, request }) => {
     await page.goto(`/#token=${TEST_TOKEN}`);
     await expect(page.getByText('Live', { exact: true })).toBeVisible();
+    await needsYou(page);
     await context.clearCookies();
     await page.getByRole('button', { name: 'Yes', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'The board is not signed in' })).toBeVisible();
@@ -642,7 +648,7 @@ test.describe('authenticated daemon', () => {
 test('an unreachable stream stays a connection failure and can recover', async ({ page, request }) => {
   await page.route('**/api/state', (route) => route.abort());
   await request.post('/__push', { data: { type: 'disconnect' } });
-  await expect(page.getByText('Disconnected — reconnecting…')).toBeVisible();
+  await expect(page.getByText('Lost the connection to Crew. Reconnecting…')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'The board is not signed in' })).toHaveCount(0);
   await page.unroute('**/api/state');
   await expect(page.getByText('Live', { exact: true })).toBeVisible();

@@ -76,3 +76,21 @@ export class Actions {
 }
 export const actions = new Actions();
 export const answerKey = (job: string, requestId: string) => `answer:${job}:${requestId}`;
+/** Unsent text shared by every surface showing the same request, as the app's drafts are. */
+export class Drafts {
+  private texts = new Map<string, string>();
+  private listeners = new Set<() => void>();
+  subscribe = (listener: () => void) => {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  };
+  get = (key: string) => this.texts.get(key) ?? '';
+  set = (key: string, text: string) => {
+    if (text) this.texts.set(key, text);
+    else this.texts.delete(key);
+    this.listeners.forEach((listener) => listener());
+  };
+}
+export const drafts = new Drafts();

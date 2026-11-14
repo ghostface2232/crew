@@ -5,7 +5,7 @@ import {
   TriangleAlert, X,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { actions } from './api.ts';
+import { actions, drafts } from './api.ts';
 import claudeMark from '../../../assets/ClaudeCode.svg';
 import codexMark from '../../../assets/Codex.svg';
 import antigravityMark from '../../../assets/Antigravity.svg';
@@ -304,4 +304,8 @@ export function Segmented<T extends string>({
       ))}
     </div>
   );
+}
+export function useDraft(key: string): [string, (text: string) => void] {
+  const text = useSyncExternalStore(drafts.subscribe, () => drafts.get(key));
+  return [text, (value: string) => drafts.set(key, value)];
 }

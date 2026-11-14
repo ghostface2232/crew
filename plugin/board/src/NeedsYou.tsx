@@ -1,95 +1,113 @@
-import type { BoardJob, Snapshot } from './types.ts';
+import { ArrowUpRight, Check, CircleCheck, MessagesSquare, Search, X } from 'lucide-react';
+import type { BoardJob, ClaudeSession } from './types.ts';
 import { actions, answerKey, request } from './api.ts';
-import { NAMES, projectOf, shortPath } from './model.ts';
-import { ActionStatus, Chip, Composer, useAction } from './ui.tsx';
+import { NAMES, projectOf } from './model.ts';
+import { ActionStatus, AgentMark, Chip, Composer, ContentPanel, EmptyState, Icon, useAction, useDraft } from './ui.tsx';
 
+/** AnswerView in the app: the request leads, then the reply controls. */
 export function Answer({ job }: { job: BoardJob }) {
   const waiting = job.waiting;
   const key = answerKey(job.id, waiting?.id ?? '');
   const state = useAction(key);
+  const [draft, setDraft] = useDraft(key);
   if (job.state !== 'waiting' || !waiting) return null;
+  const locked = state.pending || state.accepted;
   const reply = (body: object) => request(`/api/jobs/${job.id}/reply`, { ...body, request_id: waiting.id });
+  const decide = (decision: 'approve' | 'deny') => {
+    // A draft typed before a quick reply goes along with it rather than being discarded.
+    const note = draft.trim();
+    void actions.run(key, () => reply({ decision, ...(note ? { message: note } : {}) })).then((sent) => {
+      if (sent) setDraft('');
+    });
+  };
+  const button = (label: string, decision: 'approve' | 'deny', prominent: boolean) => (
+    <button className={prominent ? 'prominent' : ''} disabled={locked} onClick={() => decide(decision)}>
+      <Icon icon={decision === 'approve' ? Check : X} />
+      {label}
+    </button>
+  );
   return (
-    <div className="callout">
-      <p>{waiting.reason}</p>
-      {waiting.type === 'question' && (
-        <Composer
-          key={waiting.id}
-          label="Your answer"
-          placeholder="Type an answer"
-          actionKey={key}
-          once
-          onSend={(message) => reply({ message })}
-        />
+    <div className="answer">
+      <p className="headline selectable">{waiting.reason}</p>
+      {waiting.type === 'question' ? (
+        <>
+          <Composer
+            label="Your answer"
+            placeholder="Write an answer…"
+            actionKey={key}
+            once
+            draft={draft}
+            setDraft={setDraft}
+            onSend={(message) => reply({ message })}
+          />
+          <div className="answer-actions">
+            {button('Yes', 'approve', false)}
+            {button('No', 'deny', false)}
+          </div>
+        </>
+      ) : (
+        <div className="answer-actions" data-approval>
+          {button('Approve', 'approve', true)}
+          {button('Deny', 'deny', false)}
+        </div>
       )}
-      <div className="actions">
-        <button
-          className="primary"
-          disabled={state.pending || state.accepted}
-          onClick={() => void actions.run(key, () => reply({ decision: 'approve' }))}
-        >
-          {waiting.type === 'approval' ? 'Approve' : 'Yes'}
-        </button>
-        <button
-          disabled={state.pending || state.accepted}
-          onClick={() => void actions.run(key, () => reply({ decision: 'deny' }))}
-        >
-          {waiting.type === 'approval' ? 'Deny' : 'No'}
-        </button>
-      </div>
-      {waiting.type === 'approval' && <ActionStatus actionKey={key} />}
+      <ActionStatus actionKey={key} />
     </div>
   );
 }
-export function NeedsYou({ state, openJob }: { state: Snapshot; openJob: (id: string) => void }) {
-  const jobs = state.jobs
-    .filter((job) => job.state === 'waiting')
-    .sort((a, b) => (a.waiting?.since ?? 0) - (b.waiting?.since ?? 0));
-  const sessions = state.claude.filter((session) => session.state === 'waiting');
-  const total = jobs.length + sessions.length;
-  if (!total) return null;
+
+export function NeedsYou({
+  jobs,
+  sessions,
+  pending,
+  names,
+  openJob,
+}: {
+  jobs: BoardJob[];
+  sessions: ClaudeSession[];
+  pending: number;
+  names: Map<string, string>;
+  openJob: (id: string) => void;
+}) {
   return (
-    <section className="attention" aria-labelledby="needs-title">
-      <header>
-        <h2 id="needs-title">
-          Needs you <span className="count">{total}</span>
-        </h2>
-        <p className="hint">Across all projects · paused until you answer</p>
-      </header>
-      <div className="attention-list">
-        {jobs.map((job) => (
-          <article className="card need" key={job.id}>
-            <div className="need-bar">
-              <Chip state="waiting">{job.waiting?.type === 'approval' ? 'Approval' : 'Question'}</Chip>
-              <button className="quiet" onClick={() => openJob(job.id)}>
-                Details
-              </button>
-            </div>
-            <div className="need-head">
-              <span className="agent-well" aria-hidden="true">
-                {NAMES[job.agent][0]}
-              </span>
-              <div>
-                <p className="need-title">{NAMES[job.agent]} needs your input</p>
-                <p className="need-who">
-                  {job.title} · {shortPath(projectOf(job))}
-                </p>
+    <>
+      {pending === 0 ? (
+        <EmptyState title="All caught up" icon={CircleCheck} />
+      ) : (
+        !jobs.length && !sessions.length && <EmptyState title="No matching requests" icon={Search} />
+      )}
+      {jobs.length > 0 && (
+        <div className="needs-grid">
+          {jobs.map((job) => (
+            <article className="card need" key={job.id} data-job={job.id}>
+              <div className="need-head">
+                <div className="need-bar">
+                  <Chip state="waiting">{job.waiting?.type === 'approval' ? 'Approval' : 'Question'}</Chip>
+                  <span className="need-who" title={projectOf(job)}>
+                    <AgentMark agent={job.agent} size={13} />
+                    <span>
+                      {NAMES[job.agent]} · {names.get(projectOf(job)) ?? projectOf(job)}
+                    </span>
+                  </span>
+                  <button className="borderless caption" onClick={() => openJob(job.id)}>
+                    <Icon icon={ArrowUpRight} size={12} />
+                    Details
+                  </button>
+                </div>
+                <p className="need-title" title={job.title}>{job.title}</p>
               </div>
-            </div>
-            <Answer job={job} />
-          </article>
-        ))}
-        {sessions.map((session) => (
-          <article className="card need" key={session.id}>
-            <Chip state="waiting">Claude needs your input</Chip>
-            <h3>{session.title}</h3>
-            <p className="detail" data-wrap>
-              {session.waitingFor}
-            </p>
-            <p className="hint">Answer in the Claude app, in the session that asked.</p>
-          </article>
-        ))}
-      </div>
-    </section>
+              <Answer job={job} />
+            </article>
+          ))}
+        </div>
+      )}
+      {sessions.map((session) => (
+        <ContentPanel key={session.id} title={session.title} icon={MessagesSquare}>
+          <p className="selectable">{session.waitingFor ?? 'Claude needs your input.'}</p>
+          <p className="caption secondary">{projectOf(session)}</p>
+          <p className="callout secondary">Answer in Claude.</p>
+        </ContentPanel>
+      ))}
+    </>
   );
 }

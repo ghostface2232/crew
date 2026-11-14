@@ -337,3 +337,19 @@ for (const agent of ['codex', 'antigravity'] as const) {
     assert.equal(persisted.waiting, null);
   });
 }
+
+test('Codex refuses a message while it waits for sub-agents, and a cancel interrupts them', { timeout: 10000 }, async (t) => {
+  const h = harness(t, codex(`
+    ${accepted}
+    notify('thread/started', { thread: { id: 'child', parentThreadId: 'parent' } });
+    notify('turn/started', { threadId: 'child', turn: { id: 'child-turn' } });
+    ${completed}
+  `));
+  const job = await h.create();
+  await until(() => /sub-agent/.test(job.phase));
+  await assert.rejects(h.jobs.reply(job.id, { message: 'one more thing' }), /waiting for 1 sub-agent/);
+  assert.equal(h.wire().filter((msg) => msg.method === 'turn/start').length, 1, 'no second turn was started');
+  await h.jobs.cancel(job.id);
+  assert.equal(job.state, 'cancelled');
+  assert.deepEqual(h.wire().filter((msg) => msg.method === 'turn/interrupt').map((msg) => msg.params), [{ threadId: 'child', turnId: 'child-turn' }]);
+});

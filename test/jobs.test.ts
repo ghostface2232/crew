@@ -11,6 +11,7 @@ import { Jobs, outOfScope } from '../plugin/bridge/jobs.ts';
 import type { Adapter, CrewEvent, Job, JobCtl, JobSpec, ReviewTarget } from '../plugin/bridge/jobs.ts';
 import { describe } from '../plugin/bridge/render.ts';
 import { tierModel } from '../plugin/bridge/tiers.ts';
+import { checkLine, runCheck } from '../plugin/bridge/check.ts';
 
 const config = resolveConfig({ notify: false, codex: { bin: 'codex', approvalPolicy: 'never', approvalsReviewer: 'auto_review' } });
 
@@ -988,6 +989,19 @@ test('the bridge runs the lead\'s check after each turn and marks it stale when 
   assert.equal(second?.stale, undefined);
   assert.equal(second?.check?.exit, 1);
   assert.match(describe(job), /failed \(exit 1\)/);
+
+  // A check that rewrites tracked files passed on a tree the commit does not hold.
+  job.check = 'echo "export const x = 9;" > app.js';
+  await jobs.reply(job.id, { message: 'once more' });
+  await settled(jobs, job);
+  assert.equal(job.receipts?.at(-1)?.check?.exit, 0);
+  assert.equal(job.receipts?.at(-1)?.stale, 'the check itself changed app.js');
+});
+
+test('a check is not run where the worker\'s limits cannot be applied', async () => {
+  const result = await runCheck('true', os.tmpdir(), os.tmpdir(), [], { platform: 'linux' });
+  assert.equal(result.exit, null);
+  assert.match(checkLine(result), /^`true` not run: only macOS can hold the check to the worker's limits/);
 });
 
 test('a review records what it read at the start of each turn', async () => {

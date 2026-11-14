@@ -5,7 +5,7 @@ import type { JobView } from './render.ts';
 /**
  * PostToolUse hook (asyncRewake) for the Crew job tools. When a tool call
  * leaves a job running in the background, this process outlives the call,
- * waits for the job to end, need a decision, ask a new lead question, or stall, and
+ * waits for the job to end, need a decision, or ask a new lead question, and
  * exits with code 2 so Claude Code wakes the lead with the result on stderr.
  *
  * It watches every job the tool result mentions rather than trusting the
@@ -14,50 +14,20 @@ import type { JobView } from './render.ts';
 
 const JOB_ID = /\[((?:cx|ag)-[0-9a-f]{6})\]/g;
 
-const needsWake = (job: JobView) => needsLead(job) || Boolean(job.stalled);
-const urgent = (job: JobView) => (job.state !== 'running' && job.state !== 'done') || Boolean(job.stalled)
-  || ((job.questionSeq ?? 0) > job.delivered && Boolean(job.questions?.some((q) => q.answer === undefined)));
-
-async function batch(job: JobView): Promise<JobView[]> {
-  if (!job.mission) return [job];
-  const deadline = Date.now() + 30 * 60 * 1000;
-  while (true) {
-    const { jobs } = await api<{ jobs: JobView[] }>('GET', '/api/state');
-    const own = jobs.find((peer) => peer.id === job.id);
-    if (!own || own.seq <= own.delivered || !needsWake(own)) return [];
-    const peers = jobs.filter((peer) => peer.mission === job.mission && peer.project === job.project
-      && Math.abs(peer.createdAt - job.createdAt) <= 20_000 && peer.seq > peer.delivered);
-    if (peers.some(urgent) || peers.every(needsWake) || Date.now() >= deadline) {
-      // Every watcher claims the same first result, so only its winner delivers the batch.
-      return peers.sort((a, b) => Number(urgent(b)) - Number(urgent(a)) || a.createdAt - b.createdAt || a.id.localeCompare(b.id));
-    }
-    await new Promise((r) => setTimeout(r, 1000));
-  }
-}
-
-async function watch(id: string): Promise<JobView[] | null> {
+async function watch(id: string): Promise<JobView | null> {
   let job: JobView = await api('GET', `/api/jobs/${id}`);
   let after = job.seq;
-  while (!needsWake(job)) {
+  while (!needsLead(job)) {
     const res = await api('GET', `/api/jobs/${id}/wait?after=${after}&timeout=50`);
     job = res.job;
     after = job.seq;
   }
-  const peers = await batch(job);
-  if (peers.length === 0) return null;
-  // Let blocking lead waits read plain completions before claiming them.
-  if (!peers.some(urgent)) await new Promise((r) => setTimeout(r, 1500));
+  // The lead may be reading this very result through a blocking wait call; let that win.
+  await new Promise((r) => setTimeout(r, 1500));
   job = await api('GET', `/api/jobs/${id}`);
-  if (!needsWake(job) || (job.mission && job.seq <= job.delivered)) return null;
-  const claimed: JobView[] = [];
-  for (const peer of peers) {
-    const current: JobView = peer.id === id ? job : await api('GET', `/api/jobs/${peer.id}`);
-    if (!needsWake(current)) continue;
-    const result = await api('POST', `/api/jobs/${current.id}/delivered`, { seq: current.seq });
-    if (result.claimed) claimed.push(current);
-    else if (claimed.length === 0) return null;
-  }
-  return claimed.length ? claimed : null;
+  if (!needsLead(job)) return null;
+  const { claimed } = await api('POST', `/api/jobs/${id}/delivered`, { seq: job.seq });
+  return claimed ? job : null;
 }
 
 let input = '';
@@ -70,12 +40,9 @@ try {
 
   // Wake on the first job with news the lead has not seen. A job whose result the tool call
   // already returned is marked delivered, so its watcher resolves to null and is ignored.
-  const jobs = await Promise.any(ids.map((id) => watch(id).then((j) => j ?? Promise.reject(new Error('already delivered')))));
-  const body = jobs.map((job) => {
-    const text = describe(job);
-    return text.length > 9000 ? `${text.slice(0, 9000)}\n… (truncated; call status with job_id "${job.id}" for the rest)` : text;
-  }).join('\n\n');
-  process.stderr.write(`Crew background job update:\n\n${body}\n`);
+  const job = await Promise.any(ids.map((id) => watch(id).then((j) => j ?? Promise.reject(new Error('already delivered')))));
+  const body = describe(job);
+  process.stderr.write(`Crew background job update:\n\n${body.length > 9000 ? `${body.slice(0, 9000)}\n… (truncated; call status with job_id "${job.id}" for the rest)` : body}\n`);
   process.exit(2);
 } catch {
   // Bridge unreachable, or every watched job was already reported: nothing to say.

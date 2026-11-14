@@ -69,7 +69,7 @@ export class AntigravityAdapter implements Adapter {
 
     // Stay in the default mode, where every edit asks first and onRequest decides it.
     // "accept-edits" was measured to apply edits outside the workspace without asking.
-    const wanted = ctl.job.model ?? this.config.antigravity.model;
+    const wanted = ctl.job.model ?? (ctl.job.agentDefault ? undefined : this.config.antigravity.model);
     // A tier names a family ("hydrogen"); the session lists the exact values this account has.
     // A family the session does not list is left to the agent's default; a model named outright is still sent, so a typo shows.
     const listed = wanted ? pickModel(res.configOptions?.find((o: any) => o.category === 'model' || o.id === 'model')?.options, wanted) : undefined;

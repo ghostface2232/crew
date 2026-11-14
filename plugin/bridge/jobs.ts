@@ -219,6 +219,8 @@ export interface Job {
   effort?: string;
   /** The tier the model was picked by; absent when a model was named or configured, and on older jobs. */
   tier?: Tier;
+  /** A preset's cap left no model to name, so the adapter must not fall back to the agent's configured one. */
+  agentDefault?: boolean;
   /** Session-reported model, or the configured fallback; absent on older saved jobs. */
   resolvedModel?: string;
   resolvedEffort?: string;
@@ -318,7 +320,7 @@ export function openRefusals(job: Pick<Job, 'refusals' | 'turns' | 'retrying' | 
  * Model and effort for a new job, in this order: what the lead named for the job, the tier the lead named,
  * what the user configured (role, preset, or the agent's own setting in config.json), and last the default tier.
  */
-function pickModel(agent: WorkerAgent, spec: JobSpec, role: { model?: string; effort?: string }, config: Config): { model?: string; effort?: string; tier?: Tier } {
+function pickModel(agent: WorkerAgent, spec: JobSpec, role: { model?: string; effort?: string }, config: Config): { model?: string; effort?: string; tier?: Tier; agentDefault?: boolean } {
   const configured = { model: role.model ?? config[agent].model, effort: role.effort ?? (agent === 'codex' ? config.codex.effort : undefined) };
   const cap = config.preset ? config.presets[config.preset].maxTier : undefined;
   const wanted = spec.tier ?? (configured.model ? undefined : defaultTier(spec));
@@ -328,9 +330,11 @@ function pickModel(agent: WorkerAgent, spec: JobSpec, role: { model?: string; ef
   const named = model ? tierOf(agent, model) : undefined;
   const capped = Boolean(cap && named && TIERS.indexOf(named) > TIERS.indexOf(cap));
   if (capped) model = tierModel(agent, cap!);
+  // With no model of the capped tier to name, the configured fallback could be the very model the cap refused.
+  const agentDefault = capped && !model ? true : undefined;
   const effort = spec.effort ?? (spec.tier || !configured.effort ? (agent === 'codex' ? tierEffort(tier ?? defaultTier(spec)) : undefined) : configured.effort);
   const shown = capped ? cap : !spec.model ? tier : undefined;
-  return { ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(shown ? { tier: shown } : {}) };
+  return { ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(shown ? { tier: shown } : {}), ...(agentDefault ? { agentDefault } : {}) };
 }
 
 /** Marks the receipts that still describe the branch as no longer doing so. */
@@ -696,7 +700,7 @@ export class Jobs {
     const what = !retry ? input.message.split('\n')[0].slice(0, 80) : job.asksUser ? 'refused action retried; the user is asked about each request' : 'refused action retried with the user\'s approval';
     this.event(job, 'started', `follow-up: ${what}`);
     try {
-      if (job.kind === 'review' && job.repo) {
+      if (job.kind === 'review' && job.repo && !job.runsApp) {
         // Held like the diff refresh below, so an overlapping follow-up is refused rather than steering this turn.
         this.preparingReviews.add(id);
         try {
@@ -727,6 +731,7 @@ export class Jobs {
           job.worktree = await this.snapshot(job.repo!, id, job.reviewTarget!, job.notes);
           // Recorded before anything else can fail, so the snapshot is never left without an owner.
           this.flush();
+          await this.recordReviewed(job, job.repo!);
           if (isTerminal(job)) {
             this.dropSnapshot(job);
             return job;
@@ -790,10 +795,12 @@ export class Jobs {
   private async recordReviewed(job: Job, repo: string): Promise<void> {
     const target = job.reviewTarget;
     if (!target) return;
+    // A reviewer that runs the app reads its snapshot, which may already be behind the lead's tree.
+    const where = job.worktree?.path ?? repo;
     try {
-      const head = (await git(repo, ['rev-parse', target.type === 'commit' ? target.sha : 'HEAD'])).trim();
+      const head = (await git(where, ['rev-parse', target.type === 'commit' ? target.sha : 'HEAD'])).trim();
       const reviewed: TurnReceipt['reviewed'] = target.type === 'uncommittedChanges'
-        ? { target: 'uncommitted changes', diff: createHash('sha256').update(await reviewDiff(repo, target)).digest('hex').slice(0, 12) }
+        ? { target: 'uncommitted changes', diff: createHash('sha256').update(await reviewDiff(where, target)).digest('hex').slice(0, 12) }
         : { target: target.type === 'commit' ? `commit ${target.sha}` : `changes against ${target.branch}` };
       (job.receipts ??= []).push({ turn: job.turns, head, reviewed, at: Date.now() });
     } catch (err) {
@@ -1263,13 +1270,21 @@ export class Jobs {
         job.phase = 'running the check';
         this.changed(job);
         const tmp = fs.mkdtempSync(path.join(os.tmpdir(), `crew-check-${job.id}-`));
+        // A long check is the bridge at work, not a stalled worker.
+        const alive = setInterval(() => { job.activeAt = Date.now(); }, 30_000);
         try {
-          check = await runCheck(job.check, job.worktree.path, tmp, [tokenFile(this.home)]);
+          check = await runCheck(job.check, job.worktree.path, tmp, [tokenFile(this.home)], { network: Boolean(job.runsApp) });
         } finally {
+          clearInterval(alive);
+          job.activeAt = Date.now();
           fs.rmSync(tmp, { recursive: true, force: true });
         }
       }
-      (job.receipts ??= []).push({ turn: job.turns, head, ...(check ? { check } : {}), at: Date.now() });
+      // A check that rewrote tracked files passed on a tree the commit does not hold.
+      const listed = check ? `${await git(job.worktree.path, ['diff', '--name-only', 'HEAD'])}\n${await git(job.worktree.path, ['ls-files', '--others', '--exclude-standard'])}` : '';
+      const changed = listed.split('\n').map((line) => line.trim()).filter(Boolean);
+      const stale = changed.length ? `the check itself changed ${changed.slice(0, 3).join(', ')}${changed.length > 3 ? ` and ${changed.length - 3} more` : ''}` : undefined;
+      (job.receipts ??= []).push({ turn: job.turns, head, ...(check ? { check } : {}), ...(stale ? { stale } : {}), at: Date.now() });
     } else if (job.kind === 'review' || job.ask) {
       result = null;
     } else {

@@ -39,8 +39,8 @@ interface Run {
   pending: Pending[];
   crewCalls: Set<string>;
   items: Map<string, ItemDetails>;
-  /** Sub-agent threads with a turn in flight; they can still edit the worktree. */
-  busyChildren: Set<string>;
+  /** Sub-agent threads with a turn in flight, and that turn's id; they can still edit the worktree. */
+  busyChildren: Map<string, string | null>;
   /** The parent's turn/completed, held until busyChildren is empty so the result includes their edits. */
   held: any | null;
 }
@@ -131,6 +131,8 @@ export class CodexAdapter implements Adapter {
     const run = this.runs.get(threadId) ?? this.openRun(ctl, threadId);
     run.pluginsEnabled = pluginsEnabled;
     if (run.awaitingTurn || run.interrupt) throw new Error('Codex has not confirmed the turn status. Check the job before sending another message.');
+    // The turn is over, so there is nothing to steer, and a new turn would be ended by the old sub-agents' completion.
+    if (run.held) throw new Error(`Codex finished its turn and is waiting for ${run.busyChildren.size} sub-agent(s). Send the message once the job ends, or cancel it.`);
     if (run.turnId) {
       await peer.request('turn/steer', { threadId, input: [textInput(message)], expectedTurnId: run.turnId }, RPC_TIMEOUT_MS);
     } else {
@@ -148,6 +150,7 @@ export class CodexAdapter implements Adapter {
     const threadId = ctl.job.sessionId;
     const run = threadId ? this.runs.get(threadId) : undefined;
     if (!run) return;
+    if (run.held) return this.stopChildren(run);
     if (run.awaitingTurn) throw new Error('Codex has not confirmed the start of the turn. The job is still active.');
     if (!run.turnId || !this.peer) return;
     if (run.interrupt) throw new Error('Cancellation is already in progress.');
@@ -163,6 +166,19 @@ export class CodexAdapter implements Adapter {
     } finally {
       run.interrupt = null;
     }
+  }
+
+  /** Cancels a job whose own turn is over but whose sub-agents still work: interrupts each, so none edits after the job ends. */
+  private async stopChildren(run: Run): Promise<void> {
+    const peer = this.peer;
+    const children = [...run.busyChildren];
+    run.held = null;
+    run.busyChildren.clear();
+    for (const request of run.pending.splice(0)) request.resolve({ approve: false, cancelled: true });
+    if (!peer) return;
+    const acks = children.filter(([, turnId]) => turnId).map(([threadId, turnId]) => peer.request('turn/interrupt', { threadId, turnId }, RPC_TIMEOUT_MS));
+    const settled = await Promise.race([Promise.allSettled(acks).then(() => true), delay(5_000, false, { ref: false })]);
+    if (!settled || children.some(([, turnId]) => !turnId)) run.ctl.note('Cancelled while sub-agents were still working; not every one confirmed it stopped. Check the worktree before reusing it.');
   }
 
   async release(ctl: JobCtl): Promise<void> {
@@ -261,7 +277,7 @@ export class CodexAdapter implements Adapter {
       mcp_servers: { crew: { ...ctl.mcp, default_tools_approval_mode: 'approve' } },
       ...lean },
       developerInstructions: lean.features.plugins && !job.nativeReview ? `${job.instructions}\n\n${PLUGIN_USER_APP}` : job.instructions,
-      model: job.model ?? this.config.codex.model ?? null,
+      model: job.model ?? (job.agentDefault ? null : this.config.codex.model) ?? null,
     };
   }
 
@@ -270,7 +286,7 @@ export class CodexAdapter implements Adapter {
   }
 
   private openRun(ctl: JobCtl, threadId: string, pluginsEnabled = false): Run {
-    const run: Run = { ctl, pluginsEnabled, turnId: null, awaitingTurn: false, interrupt: null, message: '', pending: [], crewCalls: new Set(), items: new Map(), busyChildren: new Set(), held: null };
+    const run: Run = { ctl, pluginsEnabled, turnId: null, awaitingTurn: false, interrupt: null, message: '', pending: [], crewCalls: new Set(), items: new Map(), busyChildren: new Map(), held: null };
     this.runs.set(threadId, run);
     return run;
   }
@@ -287,6 +303,7 @@ export class CodexAdapter implements Adapter {
   }
 
   private async sendTurn(peer: RpcPeer, run: Run, method: string, params: unknown): Promise<void> {
+    run.held = null;
     run.message = '';
     run.items.clear();
     run.awaitingTurn = true;
@@ -411,7 +428,7 @@ export class CodexAdapter implements Adapter {
     const run = this.runs.get(threadId);
     if (!run) {
       // Sub-agent work only proves the job is alive; its turns must not end the parent job.
-      if (method === 'turn/started') owner?.busyChildren.add(threadId);
+      if (method === 'turn/started') owner?.busyChildren.set(threadId, p.turn?.id ?? null);
       if (method === 'turn/completed') {
         for (const key of owner?.items.keys() ?? []) if (key.startsWith(`${threadId}\0`)) owner?.items.delete(key);
         if (owner) this.childSettled(owner, threadId);

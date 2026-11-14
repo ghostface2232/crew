@@ -580,7 +580,7 @@ private struct PanelResizeHandle: View {
     @GestureState private var start: CGFloat?
     @State private var hovering = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    private static let grip = CGSize(width: 3, height: Space.x4l)
+    private static let grip = CGSize(width: 5, height: 44)
     private static let step: CGFloat = 40
     var body: some View {
         let width = WorkspaceStyle.panelWidth(store.panelWidth, page: page)

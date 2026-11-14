@@ -75,7 +75,7 @@ enum WorkspaceStyle {
     static let panelMaxWidth: CGFloat = 760
     static let panelPageRoom: CGFloat = 240
     /// The strip on the panel's leading edge that takes a resize drag.
-    static let panelHandleWidth = Space.m
+    static let panelHandleWidth = Space.l
     /// The panel's width for `wanted` on a page `page` points wide.
     /// `contentMinWidth` leaves room for both the minimum panel and the page beside it.
     static func panelWidth(_ wanted: CGFloat, page: CGFloat) -> CGFloat {

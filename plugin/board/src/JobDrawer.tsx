@@ -183,16 +183,19 @@ function VerificationSection({ job }: { job: BoardJob }) {
   );
 }
 
-/** A debate reads as a conversation, round by round; each side's latest word is what matters most, so nothing is folded. */
+/** A debate, or a job the lead followed up, reads as its conversation in order. */
+const hasConversation = (job: BoardJob) => job.debate ? Boolean(job.exchange?.length) : Boolean(job.exchange?.some((entry) => entry.from === 'lead' && entry.turn > 1));
+
 function DebateSection({ job }: { job: BoardJob }) {
-  const debate = job.debate!;
-  const settled = job.state === 'done' && job.turns >= debate.rounds;
+  const debate = job.debate;
+  const settled = debate && job.state === 'done' && job.turns >= debate.rounds;
+  const title = debate ? `Debate · round ${Math.min(job.turns, debate.rounds)} of ${debate.rounds}${settled ? ' · concluded' : ''}` : 'Conversation';
   return (
-    <Section title={`Debate · round ${Math.min(job.turns, debate.rounds)} of ${debate.rounds}${settled ? ' · concluded' : ''}`} icon={MessageSquare}>
+    <Section title={title} icon={MessageSquare}>
       <ol className="exchange">
         {(job.exchange ?? []).map((entry, index) => (
           <li className="exchange-entry" data-from={entry.from} key={index}>
-            <div className="caption">{entry.from === 'lead' ? 'Lead' : NAMES[job.agent]} · round {entry.turn}</div>
+            <div className="caption">{entry.from === 'lead' ? 'Lead' : NAMES[job.agent]} · {debate ? 'round' : 'turn'} {entry.turn}</div>
             <pre className="report selectable">{entry.text}</pre>
           </li>
         ))}
@@ -370,7 +373,7 @@ export function JobDrawer({ id, state, close }: { id: string; state: Snapshot; c
                 ))}
               </Section>
             )}
-            {job.debate ? <DebateSection job={job} /> : job.report && (
+            {hasConversation(job) ? <DebateSection job={job} /> : job.report && (
               <Section title="Report" icon={FileText}>
                 <pre className="report selectable">{job.report}</pre>
               </Section>

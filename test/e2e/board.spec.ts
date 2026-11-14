@@ -258,6 +258,11 @@ test('the detail panel shows what verified the result and nothing for jobs witho
         at: NOW - 6000,
       }],
       approvals: [{ turn: 2, quote: 'yes, delete it', matched: false, recorded: 0, at: NOW - 7000 }],
+      exchange: [
+        { turn: 1, from: 'lead', text: 'Fix the flaky test.', at: NOW - 9000 },
+        { turn: 1, from: 'worker', text: 'Added a retry.', at: NOW - 8500 },
+        { turn: 2, from: 'lead', text: 'No retries; find the race.', at: NOW - 8000 },
+      ],
     }),
     job({
       id: 'cx-review',
@@ -332,6 +337,12 @@ test('the detail panel shows what verified the result and nothing for jobs witho
   await expect(debate.locator('.exchange-entry').nth(1)).toContainText('Codex · round 1');
   await expect(debate.getByText('a claimed batch can drop a result')).toBeVisible();
   await expect(page.getByRole('dialog').getByRole('region', { name: 'Report' })).toHaveCount(0);
+  await close();
+
+  // A job the lead followed up shows its conversation; one with a single task and report keeps the plain report.
+  const followed = (await open('cx-failed')).getByRole('region', { name: 'Conversation' });
+  await expect(followed.locator('.exchange-entry')).toHaveCount(3);
+  await expect(followed.locator('.exchange-entry').nth(2)).toContainText('Lead · turn 2');
 });
 
 test('project filtering keeps global requests visible and New Job follows roles', async ({ page, request }) => {

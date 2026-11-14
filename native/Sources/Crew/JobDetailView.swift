@@ -137,9 +137,9 @@ struct JobDetailView: View {
                 ForEach(Array(job.notes.enumerated()), id: \.offset) { _, note in Text(noteText(note)).font(Typeface.callout).textSelection(.enabled) }
             }
         }
-        if let debate = job.debate, let exchange = job.exchange, !exchange.isEmpty {
-            detailSection("Debate", symbol: "bubble.left.and.bubble.right") {
-                DebateView(job: job, rounds: debate.rounds, entries: exchange)
+        if job.hasConversation, let exchange = job.exchange {
+            detailSection(job.debate != nil ? "Debate" : "Conversation", symbol: "bubble.left.and.bubble.right") {
+                DebateView(job: job, rounds: job.debate?.rounds, entries: exchange)
             }
         } else if !job.report.isEmpty {
             detailSection("Report", symbol: "doc.text") {
@@ -516,21 +516,27 @@ private struct VerificationView: View {
     }
 }
 
-/// A debate as its rounds: a stepper shows how far it has come, and each round pairs the lead's message with the
-/// reply, whose numbered points read as stance-marked headlines with the full text one disclosure away.
+/// A conversation by turn: each pairs the lead's message with the reply, whose numbered points read as
+/// stance-marked headlines with the full text one disclosure away. A debate adds a stepper over its rounds.
+/// Turns recorded before conversations were kept are left out rather than shown empty.
 private struct DebateView: View {
     let job: Job
-    let rounds: Int
+    /// The debate's round limit; nil for a job the lead followed up.
+    let rounds: Int?
     let entries: [ExchangeEntry]
 
     private var replied: Int { entries.filter { $0.from == "worker" }.map(\.turn).max() ?? 0 }
 
     var body: some View {
-        DebateStepper(rounds: rounds, replied: replied, current: min(job.turns, rounds), working: job.isActive, concluded: job.debateConcluded)
-        ForEach(1...max(1, min(job.turns, rounds)), id: \.self) { turn in
+        if let rounds {
+            DebateStepper(rounds: rounds, replied: replied, current: min(job.turns, rounds), working: job.isActive, concluded: job.debateConcluded)
+        }
+        let turns = Array(Set(entries.map(\.turn))).sorted()
+        ForEach(turns, id: \.self) { turn in
             let lead = entries.last { $0.turn == turn && $0.from == "lead" }
             let reply = entries.last { $0.turn == turn && $0.from == "worker" }
-            DebateRound(turn: turn, final: turn == rounds, lead: lead, reply: reply, worker: agentName(job.agent), working: job.isActive && turn == job.turns)
+            DebateRound(turn: turn, label: rounds == nil ? "Turn" : "Round", final: turn == rounds, last: turn == turns.last,
+                        lead: lead, reply: reply, worker: agentName(job.agent), working: job.isActive && turn == job.turns)
         }
     }
 }
@@ -565,7 +571,9 @@ private struct DebateStepper: View {
 
 private struct DebateRound: View {
     let turn: Int
+    let label: String
     let final: Bool
+    let last: Bool
     let lead: ExchangeEntry?
     let reply: ExchangeEntry?
     let worker: String
@@ -577,7 +585,7 @@ private struct DebateRound: View {
         let points = reply.map { debatePoints($0.text) } ?? []
         VStack(alignment: .leading, spacing: Space.ml) {
             HStack(spacing: Space.m) {
-                Text(final ? "Round \(turn) · final" : "Round \(turn)").font(Typeface.calloutStrong)
+                Text(final ? "\(label) \(turn) · final" : "\(label) \(turn)").font(Typeface.calloutStrong)
                 Spacer(minLength: 0)
                 ForEach([DebatePoint.Stance.agree, .disagree, .alternative], id: \.self) { stance in
                     let count = points.filter { $0.stance == stance }.count
@@ -620,7 +628,7 @@ private struct DebateRound: View {
                 Label("\(worker) is answering…", systemImage: "ellipsis.bubble").font(Typeface.caption).foregroundStyle(.secondary)
             }
         }
-        if !final { Divider().padding(.vertical, Space.xs) }
+        if !last { Divider().padding(.vertical, Space.xs) }
     }
 }
 

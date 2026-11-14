@@ -324,6 +324,13 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
         #expect(job.latestReceipt?.check?.command == "npm test")
         #expect(job.hasVerification && job.debateConcluded && job.kindTitle == "Debate" && job.tier == "frontier")
         #expect(job.exchange?.map(\.from) == ["lead", "worker"])
+        // A job is a conversation once the lead followed it up; a first task and report alone are not.
+        object["debate"] = nil
+        let single = try JSONDecoder().decode(Job.self, from: JSONSerialization.data(withJSONObject: object))
+        #expect(!single.hasConversation)
+        object["exchange"] = (object["exchange"] as! [[String: Any]]) + [["turn": 2, "from": "lead", "text": "Fix the race.", "at": 3]]
+        let followed = try JSONDecoder().decode(Job.self, from: JSONSerialization.data(withJSONObject: object))
+        #expect(followed.hasConversation)
     }
     @Test func debatePointsReadTheNumberedStanceLinesOfAReply() {
         let reply = """

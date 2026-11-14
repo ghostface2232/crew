@@ -55,6 +55,8 @@ struct Job: Codable, Sendable, Identifiable, Equatable {
     /// The latest receipt that has something to show: a check the bridge ran, or what a review read.
     var latestReceipt: TurnReceipt? { receipts?.last { $0.check != nil || $0.reviewed != nil } }
     var hasVerification: Bool { latestReceipt != nil || capabilities != nil || !(approvals ?? []).isEmpty }
+    /// The lead and the worker have exchanged more than the first task and report: a debate, or a job the lead followed up.
+    var hasConversation: Bool { debate != nil ? !(exchange ?? []).isEmpty : (exchange ?? []).contains { $0.from == "lead" && $0.turn > 1 } }
     /// A debate that has used all its rounds and ended: no further reply is accepted.
     var debateConcluded: Bool { debate.map { state == "done" && turns >= $0.rounds } ?? false }
     /// Ended, but its worktree still awaits a merge or discard, or the lead has not read its result.

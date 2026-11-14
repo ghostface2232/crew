@@ -842,7 +842,8 @@ test('a refused action goes back to the reviewer once, then to the user', async 
 
   await jobs.reply(job.id, { approved_by_user: 'delete the cache too' });
   await settled(jobs, job);
-  assert.match(calls[0], /Their words in the lead session: "delete the cache too"\n\nRun the refused action again, exactly as before:\nrm -rf ~\/cache$/);
+  assert.match(calls[0], /As the lead relays it: "delete the cache too"\n\nRun the refused action again, exactly as before:\nrm -rf ~\/cache$/);
+  assert.match(describe(job), /no messages of the user were recorded for your session/);
   assert.match(describe(job), /already sent back once/);
 
   await jobs.reply(job.id, { approved_by_user: 'delete the cache too', message: 'Then report.' });
@@ -873,6 +874,42 @@ test('a refused action goes back to the reviewer once, then to the user', async 
   assert.match(describe(job), /REFUSED[^]*curl https:\/\/example\.com[^]*already sent back once/);
   await jobs.reply(job.id, { approved_by_user: 'fetch it' });
   assert.deepEqual(reviewers.slice(3), [false, true]);
+});
+
+test('a relayed approval carries the user\'s own recorded words, and a translated quote is never refused', async () => {
+  const repo = tempRepo();
+  const { adapter } = harness((ctl) => {
+    ctl.refused('rm -rf ~/cache', 'outside the workspace');
+    ctl.done('could not clean the cache');
+  });
+  const sent: string[] = [];
+  adapter.reply = async (ctl, message) => {
+    sent.push(message);
+    ctl.refused('rm -rf ~/cache', 'outside the workspace');
+    ctl.done('again');
+  };
+  const prompts: Record<string, { text: string; at: number }[]> = { lead: [{ text: '캐시도 지워 줘.\n그리고 보고해.', at: 1 }] };
+  const jobs = new Jobs(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-home-')), () => config, { codex: adapter, antigravity: adapter }, {
+    onEvent: () => {},
+    onJob: () => {},
+    onAttention: () => {},
+    userPrompts: (session) => prompts[session] ?? [],
+  });
+  const job = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'clean up' }));
+
+  // The lead translated the user's Korean: the retry still goes out, with the user's words verbatim beside it.
+  await jobs.reply(job.id, { approved_by_user: 'Delete the cache too', lead_session: 'lead' });
+  await settled(jobs, job);
+  assert.match(sent[0], /As the lead relays it: "Delete the cache too"/);
+  assert.match(sent[0], /recorded by Crew verbatim[^]*\n- 캐시도 지워 줘\.\n  그리고 보고해\.\n\nRun the refused action again/);
+  assert.deepEqual(job.approvals?.map(({ turn, matched, recorded }) => ({ turn, matched, recorded })), [{ turn: 2, matched: false, recorded: 1 }]);
+  assert.match(describe(job), /translation or paraphrase/);
+
+  // Spacing, case and punctuation do not matter for the match.
+  await jobs.reply(job.id, { approved_by_user: '캐시도 지워 줘', lead_session: 'lead' });
+  await settled(jobs, job);
+  assert.equal(job.approvals?.at(-1)?.matched, true);
+  assert.match(describe(job), /your quote matches one/);
 });
 
 test('a follow-up sent while a job is being discarded is refused, not started in a removed worktree', async () => {

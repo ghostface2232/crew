@@ -171,6 +171,7 @@ const jobs = new Jobs(HOME, loadConfig, { codex, antigravity }, {
   onAttention: (job, kind, detail) => notify(job.agent, kind, job.title, detail),
   // A mission on the board lists its jobs; they stay as long as it does.
   keepsMission: (id) => missions.saved().some((mission) => mission.id === id),
+  userPrompts: (session) => claude.recentPrompts(session),
 });
 
 // The board shows who holds each role and which preset is in effect, so it must hear about edits to the file.

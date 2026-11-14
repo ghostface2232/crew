@@ -567,7 +567,7 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
     case 'answer':
       return describeDelivered(await api('POST', `/api/jobs/${args.job_id}/questions/${args.question_id}`, { answer: args.answer, attachments: args.attachments }));
     case 'reply': {
-      await api('POST', `/api/jobs/${args.job_id}/reply`, { message: args.message, decision: args.decision, request_id: args.request_id, approved_by_user: args.approved_by_user, sync: args.sync ? true : undefined, attachments: args.attachments });
+      await api('POST', `/api/jobs/${args.job_id}/reply`, { message: args.message, decision: args.decision, request_id: args.request_id, approved_by_user: args.approved_by_user, lead_session: SESSION, sync: args.sync ? true : undefined, attachments: args.attachments });
       return args.background !== false ? describeDelivered(await api('GET', `/api/jobs/${args.job_id}`)) : followOne(args.job_id, ctx);
     }
     case 'cancel': {

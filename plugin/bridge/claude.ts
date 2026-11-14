@@ -28,6 +28,14 @@ export interface ClaudeHooks {
 
 /** Sessions silent this long are dropped, whatever state they were last seen in. */
 const FORGET_IDLE_MS = 6 * 60 * 60_000;
+/** What the user typed recently, per session: enough to show a worker's reviewer the user's own words behind a relayed approval. */
+const KEEP_PROMPTS = 5;
+const MAX_PROMPT = 2000;
+
+export interface UserPrompt {
+  text: string;
+  at: number;
+}
 
 /**
  * Tracks Claude Code sessions from the hook payloads the plugin forwards.
@@ -35,6 +43,8 @@ const FORGET_IDLE_MS = 6 * 60 * 60_000;
  */
 export class ClaudeSessions {
   readonly sessions = new Map<string, ClaudeSession>();
+  /** Kept apart from the session so the prompts never reach the board's state. Memory only. */
+  private prompts = new Map<string, UserPrompt[]>();
   private hooks: ClaudeHooks;
   private stallMs: number;
 
@@ -69,6 +79,11 @@ export class ClaudeSessions {
         s.state = 'working';
         s.waitingFor = null;
         s.phase = 'reading the prompt';
+        if (typeof p.prompt === 'string' && p.prompt.trim()) {
+          const kept = this.prompts.get(id) ?? [];
+          kept.push({ text: p.prompt.trim().slice(0, MAX_PROMPT), at: now });
+          this.prompts.set(id, kept.slice(-KEEP_PROMPTS));
+        }
         this.hooks.onEvent(s, 'started', oneLine(p.prompt ?? 'prompt'));
         break;
       case 'PreToolUse':
@@ -124,11 +139,17 @@ export class ClaudeSessions {
       }
       case 'SessionEnd':
         this.sessions.delete(id);
+        this.prompts.delete(id);
         this.hooks.onSession(s, true);
         return;
     }
     if (s.state !== 'waiting') delete s.waitingId;
     this.hooks.onSession(s);
+  }
+
+  /** The session's recent prompts, oldest first. */
+  recentPrompts(id: string): UserPrompt[] {
+    return [...(this.prompts.get(id) ?? [])];
   }
 
   private sweep(): void {
@@ -137,6 +158,7 @@ export class ClaudeSessions {
       if (now - s.activeAt > FORGET_IDLE_MS) {
         // SessionEnd never arrives when the app is killed.
         this.sessions.delete(s.id);
+        this.prompts.delete(s.id);
         this.hooks.onSession(s, true);
       } else if (s.state === 'working' && !s.inTool && !s.stalled && now - s.activeAt > this.stallMs) {
         s.stalled = true;

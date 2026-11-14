@@ -6,7 +6,7 @@ import { tokenFile } from '../auth.ts';
 import { agentCommand, agentEnv, HOME, VERSION } from '../config.ts';
 import type { Config } from '../config.ts';
 import { isTerminal } from '../jobs.ts';
-import type { Adapter, Job, JobCtl } from '../jobs.ts';
+import type { Adapter, Capabilities, Job, JobCtl } from '../jobs.ts';
 import { PLUGIN_USER_APP } from '../prompts.ts';
 import { RPC_TIMEOUT_MS, RpcError, RpcPeer, RpcTimeoutError } from '../rpc.ts';
 
@@ -90,6 +90,7 @@ export class CodexAdapter implements Adapter {
     const peer = await this.ensure();
     if (isTerminal(ctl.job)) return;
     const params = await this.threadParams(ctl, peer);
+    ctl.capabilities(capabilitiesOf(ctl.job, params));
     const res = await peer.request('thread/start', params, RPC_TIMEOUT_MS);
     if (isTerminal(ctl.job)) return;
     const threadId: string = res.thread.id;
@@ -116,6 +117,7 @@ export class CodexAdapter implements Adapter {
     let pluginsEnabled = this.runs.get(threadId)?.pluginsEnabled ?? false;
     if (!this.loaded.has(threadId)) {
       const params = await this.threadParams(ctl, peer);
+      ctl.capabilities(capabilitiesOf(ctl.job, params));
       const res = await peer.request('thread/resume', { threadId, ...params, excludeTurns: true }, RPC_TIMEOUT_MS);
       pluginsEnabled = params.config.features.plugins;
       ctl.model(res.model ?? res.thread?.model ?? ctl.job.model ?? this.config.codex.model, ctl.job.effort ?? this.config.codex.effort ?? res.reasoningEffort ?? undefined);
@@ -715,4 +717,17 @@ function basename(file: string): string {
 function shortCommand(command: string): string {
   const inner = command.replace(/^\S*sh\s+-l?c\s+/, '').replace(/^(['"])([\s\S]*)\1$/, '$2');
   return firstLine(inner);
+}
+
+/** What the thread parameters let the worker do, read back from them so the record matches what Codex was sent. */
+export function capabilitiesOf(job: Job, params: { sandbox: string | null; config: Record<string, any> }): Capabilities {
+  const profile = params.config.default_permissions as string | undefined;
+  const network = profile ? Boolean(params.config.permissions?.[profile]?.network?.enabled) : false;
+  return {
+    filesystem: profile === 'crew_read_only' ? 'read anywhere; write only its scratch and evidence directories'
+      : profile ? 'read anywhere; write the workspace, temp, scratch and evidence directories'
+      : params.sandbox === 'read-only' ? 'read-only' : 'write the workspace, scratch and evidence directories',
+    network: network ? 'on' : 'off',
+    plugins: params.config.features?.plugins ? job.plugins ?? [] : [],
+  };
 }

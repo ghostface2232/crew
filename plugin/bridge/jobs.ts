@@ -94,6 +94,25 @@ export interface Round {
   at: number;
 }
 
+export interface Capabilities {
+  /** Where the worker may read and write, in a few words. */
+  filesystem: string;
+  network: 'on' | 'off' | 'agent-managed';
+  /** Plugins on for the job. Their tools act outside the sandbox. */
+  plugins: string[];
+}
+
+export interface RelayedApproval {
+  turn: number;
+  /** The lead's quote of the user. */
+  quote: string;
+  /** The quote appears, ignoring case, spacing and punctuation, in one of the user's recorded prompts. */
+  matched: boolean;
+  /** How many of the user's own prompts were recorded and attached; 0 when the lead session sent none. */
+  recorded: number;
+  at: number;
+}
+
 export interface LeadQuestion {
   id: string;
   text: string;
@@ -142,6 +161,14 @@ export interface Job {
   rounds?: Round[];
   /** Actions the agent's automatic reviewer refused, with the turn they were refused in. */
   refusals?: { action: string; reason: string; turn: number }[];
+  /**
+   * Approvals the lead relayed for refused actions, with the user's own recent words as Crew recorded them
+   * from the lead session. Nothing is refused for a mismatch: the record is there so the worker's automatic
+   * reviewer and the user can see what the approval rests on.
+   */
+  approvals?: RelayedApproval[];
+  /** What the worker's runtime was set up to allow, as the adapter configured it; absent until the session starts. */
+  capabilities?: Capabilities;
   /** Set while the latest turn is a retry of refused actions: the actions it was sent back with. */
   retrying?: string[];
   /** Approval requests of the current turn go to the user, not the automatic reviewer. */
@@ -207,6 +234,7 @@ export interface JobCtl {
   progress(detail: string): void;
   session(id: string): void;
   model(name: string | undefined, effort?: string): void;
+  capabilities(value: Capabilities): void;
   touched(file: string): void;
   /** Adds a line to the result that the lead should see, such as a refused action. */
   note(text: string, opts?: { declined?: boolean }): void;
@@ -239,6 +267,8 @@ export interface JobsHooks {
   onAttention(job: Job, kind: EventKind, detail: string): void;
   /** Whether a mission is still being kept; its jobs are then kept with it, beyond the history limit. */
   keepsMission?(id: string): boolean;
+  /** The user's recent prompts in a lead session, oldest first, as its hooks reported them. */
+  userPrompts?(session: string): { text: string; at: number }[];
 }
 
 const TERMINAL: JobState[] = ['done', 'failed', 'cancelled'];
@@ -253,6 +283,11 @@ export function openRefusals(job: Pick<Job, 'refusals' | 'turns' | 'retrying' | 
   const latest = (job.refusals ?? []).filter((refusal) => refusal.turn === job.turns);
   if (latest.length || job.state !== 'failed') return latest;
   return (job.retrying ?? []).map((action) => ({ action }));
+}
+
+/** Text compared without case, spacing or punctuation, in any script. */
+function looseText(text: string): string {
+  return text.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
 }
 
 export function isTerminal(job: Job): boolean {
@@ -504,7 +539,7 @@ export class Jobs {
     return job;
   }
 
-  async reply(id: string, input: { message?: string; decision?: 'approve' | 'deny'; request_id?: string; approved_by_user?: string; sync?: boolean | string; attachments?: string[] }): Promise<Job> {
+  async reply(id: string, input: { message?: string; decision?: 'approve' | 'deny'; request_id?: string; approved_by_user?: string; lead_session?: string; sync?: boolean | string; attachments?: string[] }): Promise<Job> {
     if (this.collecting) throw new Error('Crew gc is running. Try again when it finishes.');
     const job = this.get(id);
     if (job.cleanupPending) throw new Error(`Job ${id} has incomplete cleanup. Run crew gc to resolve it before continuing.`);
@@ -532,7 +567,7 @@ export class Jobs {
       return job;
     }
     if (input.decision !== undefined) throw new Error(`Job ${id} is not waiting for a decision.`);
-    const retry = input.approved_by_user === undefined ? null : this.retryRefused(job, input.approved_by_user, input.message);
+    const retry = input.approved_by_user === undefined ? null : this.retryRefused(job, input.approved_by_user, input.message, input.lead_session);
     if (retry) input = { message: retry.message };
     if (!input.message) throw new Error(`Job ${id} is not waiting for a decision. Pass a message to send a follow-up.`);
     if (!job.sessionId) throw new Error(`Job ${id} never opened a session, so there is nothing to continue. Start a new job instead.`);
@@ -595,6 +630,7 @@ export class Jobs {
     job.asksUser = retry !== null && job.retrying !== undefined;
     job.retrying = retry?.actions;
     job.turns += 1;
+    if (retry) (job.approvals ??= []).push({ ...retry.approval, turn: job.turns });
     this.turnStartTokens.set(id, job.tokens ?? 0);
     job.activeAt = Date.now();
     const what = !retry ? input.message.split('\n')[0].slice(0, 80) : job.asksUser ? 'refused action retried; the user is asked about each request' : 'refused action retried with the user\'s approval';
@@ -655,18 +691,29 @@ export class Jobs {
     return job;
   }
 
-  /** The follow-up that sends a refused action back, stating that the user approved it. */
-  private retryRefused(job: Job, words: string, extra?: string): { message: string; actions: string[] } {
+  /**
+   * The follow-up that sends a refused action back with the user's approval. The lead's quote may be a
+   * translation or a paraphrase, so it is never checked against what the user typed; instead the user's own
+   * recent prompts go with it, verbatim, for the worker's automatic reviewer to judge.
+   */
+  private retryRefused(job: Job, words: string, extra?: string, session?: string): { message: string; actions: string[]; approval: Omit<RelayedApproval, 'turn'> } {
     if (typeof words !== 'string' || !words.trim()) throw new Error('approved_by_user must quote what the user said that approves the refused action.');
     if (!isTerminal(job)) throw new Error(`Job ${job.id} is still ${job.state}. Wait for the turn to end before sending a refused action back.`);
     const actions = openRefusals(job).map((refusal) => refusal.action);
     if (!actions.length) throw new Error(`Nothing was refused in the last turn of job ${job.id}, so there is nothing to approve. Send a plain message instead.`);
+    const quote = words.trim();
+    const prompts = typeof session === 'string' && session ? this.hooks.userPrompts?.(session) ?? [] : [];
+    const loose = looseText(quote);
+    const matched = Boolean(loose) && prompts.some((prompt) => looseText(prompt.text).includes(loose));
     const parts = [
-      `The user approved what the automatic reviewer refused. Their words in the lead session: "${words.trim()}"`,
-      `Run the refused action again, exactly as before:\n${actions.join('\n')}`,
+      `The user approved what the automatic reviewer refused. As the lead relays it: "${quote}"`,
     ];
+    if (prompts.length) {
+      parts.push(`The user's own most recent messages in the lead session, recorded by Crew verbatim (oldest first; the lead's words above may translate or paraphrase them):\n${prompts.map((prompt) => `- ${prompt.text.replace(/\n/g, '\n  ')}`).join('\n')}`);
+    }
+    parts.push(`Run the refused action again, exactly as before:\n${actions.join('\n')}`);
     if (extra?.trim()) parts.push(extra.trim());
-    return { message: parts.join('\n\n'), actions };
+    return { message: parts.join('\n\n'), actions, approval: { quote, matched, recorded: prompts.length, at: Date.now() } };
   }
 
   /** A worktree holding the change under review, for a reviewer that runs the app. Removed when the turn ends. */
@@ -1047,6 +1094,10 @@ export class Jobs {
       model: (name, effort) => {
         job.resolvedModel = name;
         job.resolvedEffort = effort;
+        this.changed(job);
+      },
+      capabilities: (value) => {
+        job.capabilities = value;
         this.changed(job);
       },
       touched: (file) => {

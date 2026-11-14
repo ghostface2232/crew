@@ -45,6 +45,17 @@ export function describe(job: JobView, waitingHint?: string): string {
     lines.push(waitingHint ?? `This is the user's call, not yours. Call wait with job id "${job.id}" so they are asked in the app; use reply only to pass on a decision they already gave you (decision "approve" or "deny"${job.waiting!.type === 'question' ? ', or a message with the answer' : ''}).`);
     lines.push(`When forwarding the answer, pass request_id: "${job.waiting!.id}".`);
   }
+  if (job.capabilities) {
+    const { filesystem, network, plugins } = job.capabilities;
+    lines.push(`runs with: ${filesystem}; network ${network}${plugins.length ? `; plugins ${plugins.join(', ')} (act outside the sandbox)` : ''}`);
+  }
+  const approval = job.approvals?.at(-1);
+  if (approval) {
+    const basis = approval.recorded
+      ? `the user's own ${approval.recorded} recent message(s) went with it${approval.matched ? ', and your quote matches one' : '; your quote is a translation or paraphrase of them'}`
+      : 'no messages of the user were recorded for your session, so only your quote went with it';
+    lines.push(`approval relayed for turn ${approval.turn}: ${basis}.`);
+  }
   if (job.error) {
     lines.push(`error: ${job.error.message}`);
     if (job.error.limit) lines.push(`${WORKERS[job.agent].name} is out of usage for now. Do this piece yourself, and tell the user the ${job.kind === 'review' ? 'cross-review was skipped' : 'work was not delegated'}.`);

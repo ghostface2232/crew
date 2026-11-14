@@ -55,6 +55,11 @@ export class AntigravityAdapter implements Adapter {
     if (isTerminal(ctl.job)) return;
     const res = await peer.request('session/new', { cwd: ctl.job.cwd, mcpServers: [crewServer(ctl)] }, RPC_TIMEOUT_MS);
     if (isTerminal(ctl.job)) return;
+    ctl.capabilities({
+      filesystem: ctl.job.sandbox === 'read-only' ? 'read-only; Crew refuses every edit' : 'edits inside the workspace only; Crew refuses the rest',
+      network: 'agent-managed',
+      plugins: [],
+    });
     const sessionId: string = res.sessionId;
     const run: Run = { ctl, prompting: null, cancelling: false, message: '', earlier: '', pending: [] };
     this.runs.set(sessionId, run);

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { effectiveRole, PORT, runsCommands, WORKERS } from './config.ts';
+import { canonicalPath, effectiveRole, PORT, runsCommands, WORKERS } from './config.ts';
 import type { Config, Role, WorkerAgent } from './config.ts';
 import { carryUncommitted, changesSince, commitAll, commitChanges, copyIncluded, createWorktree, currentBranch, dirtyCount, git, mergeInto, isInside, projectRoot, realpath, removeDirectory, removeEmptyLeftover, removeWorktree, repoRoot, revertCommit, revertsSince, reviewDiff, WorktreeCleanupError } from './git.ts';
 import { collectGarbage } from './gc.ts';
@@ -436,8 +436,8 @@ export class Jobs {
       state: 'running',
       phase: 'starting',
       repo,
-      project: spec.project ?? repo ?? spec.cwd,
-      root,
+      project: canonicalPath(spec.project ?? repo ?? spec.cwd),
+      root: canonicalPath(root),
       mission: spec.mission,
       missionStep: spec.missionStep,
       exclusive: Boolean(spec.exclusive) || undefined,
@@ -1194,7 +1194,9 @@ export class Jobs {
     this.seq = saved.seq;
     for (const job of saved.jobs) {
       // Jobs saved before ownership was recorded; their repository is the closest stand-in.
-      job.project ??= job.repo ?? job.cwd;
+      job.project = canonicalPath(job.project ?? job.repo ?? job.cwd);
+      // Saved before keys were canonical; a Windows job may hold git's `C:/x` spelling.
+      if (job.root) job.root = canonicalPath(job.root);
       if (!isTerminal(job)) {
         // The worker process died with the previous bridge; its session can still be continued with reply.
         job.state = 'failed';

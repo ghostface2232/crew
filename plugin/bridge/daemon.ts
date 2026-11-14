@@ -9,7 +9,7 @@ import { AntigravityAdapter } from './adapters/antigravity.ts';
 import { CodexAdapter } from './adapters/codex.ts';
 import { ClaudeSessions } from './claude.ts';
 import type { ClaudeSession } from './claude.ts';
-import { HOME, installed, loadConfig, PLUGIN_ROOT, PORT, VERSION, WORKERS } from './config.ts';
+import { canonicalPath, HOME, installed, loadConfig, PLUGIN_ROOT, PORT, VERSION, WORKERS } from './config.ts';
 import type { Config } from './config.ts';
 import { projectRoot } from './git.ts';
 import { isTerminal, Jobs } from './jobs.ts';
@@ -213,8 +213,9 @@ function state() {
 function locate(session: ClaudeSession | undefined): void {
   if (!session || session.root !== undefined || !session.cwd) return;
   // Provisional until git answers; also the final value outside a repository or when git fails.
-  session.root = session.cwd;
-  projectRoot(session.cwd).then((root) => {
+  session.root = canonicalPath(session.cwd);
+  projectRoot(session.cwd).then((found) => {
+    const root = found && canonicalPath(found);
     if (!root || root === session.root) return;
     session.root = root;
     if (claude.sessions.get(session.id) === session) broadcast('claude', { session, removed: false });

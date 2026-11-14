@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { effectiveRole, PRESETS, resolveConfig } from '../plugin/bridge/config.ts';
+import { canonicalPath, effectiveRole, PRESETS, resolveConfig } from '../plugin/bridge/config.ts';
 import { appendInstructions, instructionsFile, readInstructions, savePreset, saveRoles, writeInstructions } from '../plugin/bridge/settings.ts';
 
 const tempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'crew-settings-'));
@@ -178,4 +178,13 @@ test('appending to the instructions adds a paragraph and creates the file when t
   assert.equal(readInstructions(file), 'Use pnpm.\n\nTests live in test/.\n');
   assert.throws(() => appendInstructions(file, '  \n'), /no text to add/);
   assert.equal(readInstructions(file), 'Use pnpm.\n\nTests live in test/.\n');
+});
+
+test('project keys have one spelling whether git or Claude Code reported them', () => {
+  // Git's `C:/x`, Claude Code's `C:\\x` and a lowercase drive name the same Windows project.
+  for (const spelling of ['C:/Users/me/repo', 'C:\\Users\\me\\repo', 'c:\\Users\\me\\repo\\', 'C:/Users/me/x/../repo/']) {
+    assert.equal(canonicalPath(spelling, 'win32'), 'C:\\Users\\me\\repo');
+  }
+  assert.equal(canonicalPath('/Users/me/repo/', 'darwin'), '/Users/me/repo');
+  assert.equal(canonicalPath('/Users/me/x/../repo', 'linux'), '/Users/me/repo');
 });

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { resolveConfig } from '../plugin/bridge/config.ts';
+import { canonicalPath, resolveConfig } from '../plugin/bridge/config.ts';
 import type { Config } from '../plugin/bridge/config.ts';
 import { leadContext } from '../plugin/bridge/instructions.ts';
 import { Jobs, outOfScope } from '../plugin/bridge/jobs.ts';
@@ -330,6 +330,23 @@ test('jobs left running by a previous bridge are restored as failed but resumabl
   assert.equal(restored.state, 'failed');
   assert.equal(restored.sessionId, 'session-1');
   assert.equal(path.normalize(restored.project), repo);
+});
+
+test('saved jobs get canonical project and root keys when they load', async () => {
+  const repo = tempRepo();
+  const first = harness(() => {});
+  const job = await first.jobs.create({ kind: 'review', cwd: repo, project: `${repo}/sub/..`, review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } });
+  assert.equal(job.project, canonicalPath(repo));
+  await first.jobs.wait(job.id, 0, 100);
+  first.jobs.flush();
+  const file = path.join(first.home, 'jobs.json');
+  const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+  saved.jobs[0].project = `${repo}/`;
+  saved.jobs[0].root = `${repo}/`;
+  fs.writeFileSync(file, JSON.stringify(saved));
+  const second = new Jobs(first.home, () => config, {} as never, { onEvent: () => {}, onJob: () => {}, onAttention: () => {} });
+  assert.equal(second.get(job.id).project, canonicalPath(repo));
+  assert.equal(second.get(job.id).root, canonicalPath(repo));
 });
 
 test('the history limit does not hide old worktrees or undelivered jobs after a restart', async () => {

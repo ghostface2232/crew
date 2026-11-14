@@ -230,6 +230,16 @@ export function loadConfig(): Config {
  * GUI-launched processes (Claude Desktop) get a minimal PATH, so the agent
  * CLIs installed under the user's home would not resolve without these.
  */
+/**
+ * One spelling for a project key. Git reports Windows paths as `C:/x` while Claude Code passes `C:\x`, and the
+ * drive letter's case can differ; jobs, missions and sessions are grouped and filtered by comparing these strings.
+ * Only keys go through this: paths handed back to git (a job's `repo`) keep git's spelling, which worktree paths hash.
+ */
+export function canonicalPath(file: string, platform: NodeJS.Platform = process.platform): string {
+  if (platform !== 'win32') return path.posix.resolve(file);
+  return path.win32.resolve(file).replace(/^[a-z]:/, (drive) => drive.toUpperCase());
+}
+
 export function agentEnv(platform: NodeJS.Platform = process.platform, source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const home = os.homedir();
   const windows = platform === 'win32';

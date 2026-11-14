@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { canonicalPath } from './config.ts';
 
 export const STAGES = ['plan', 'implement', 'self-review', 'cross-review', 'fix', 'polish', 'final'] as const;
 export type Stage = (typeof STAGES)[number];
@@ -123,8 +124,8 @@ export class Missions {
     const mission: Mission = {
       id,
       title,
-      project: input.project,
-      root: input.root,
+      project: canonicalPath(input.project),
+      root: canonicalPath(input.root),
       ...(input.owner ? { owner: input.owner } : {}),
       stage,
       ...(stages ? { stages, stageIndex } : {}),
@@ -267,6 +268,11 @@ export class Missions {
       throw new Error(`${file} does not hold a missions array, so it was left untouched.`);
     }
     if (!saved.missions.every(isMission)) throw new Error(`${file} holds a record that is not a mission, so it was left untouched.`);
-    for (const mission of saved.missions) this.missions.set(mission.id, mission);
+    for (const mission of saved.missions) {
+      // Saved before keys were canonical; a Windows mission may hold git's `C:/x` spelling.
+      mission.project = canonicalPath(mission.project);
+      mission.root = canonicalPath(mission.root);
+      this.missions.set(mission.id, mission);
+    }
   }
 }

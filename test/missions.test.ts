@@ -403,3 +403,16 @@ test('jumping ahead drops the skipped steps, and a plan has at most thirty steps
   assert.throws(() => missions.update(full.id, { stage: 'polish' }), /at most 30/);
   assert.equal(full.stages!.length, 30);
 });
+
+test('saved missions get canonical project keys when they load', (t) => {
+  const { home, missions } = harness(t);
+  const mission = missions.start({ ...input, project: '/project/x/../worktree/', root: '/project/' });
+  assert.equal(mission.project, '/project/worktree');
+  assert.equal(mission.root, '/project');
+  missions.flush();
+  const file = path.join(home, 'missions.json');
+  const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+  saved.missions[0].project = '/project/worktree/';
+  fs.writeFileSync(file, JSON.stringify(saved));
+  assert.equal(new Missions(home, () => {}).get(mission.id).project, '/project/worktree');
+});

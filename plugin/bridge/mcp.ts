@@ -1,6 +1,6 @@
 import readline from 'node:readline';
 import { api, ensureDaemon } from './client.ts';
-import { BASE_URL, DEFAULT_ROLES, loadConfig, VERSION, WORKERS } from './config.ts';
+import { BASE_URL, canonicalPath, DEFAULT_ROLES, loadConfig, VERSION, WORKERS } from './config.ts';
 import { listSkills } from './skills.ts';
 import { describeUsage } from './usage.ts';
 import type { RouteDecision, Usage } from './usage.ts';
@@ -233,7 +233,8 @@ const TOOLS = [
 
 const DEFAULT_WAIT_SECONDS = 1800;
 /** The daemon is shared by every session; a session only lists and waits on its own project's jobs. */
-const PROJECT = process.env.CLAUDE_PROJECT_DIR ?? process.cwd();
+// Canonical, so it matches the project keys the daemon stores.
+const PROJECT = canonicalPath(process.env.CLAUDE_PROJECT_DIR ?? process.cwd());
 
 /** Set from the client's initialize request: whether it can show the user a form on our behalf. */
 let canElicit = false;

@@ -30,10 +30,15 @@ import type { EventKind, Job } from './jobs.ts';
 fs.mkdirSync(HOME, { recursive: true });
 const log = (...args: unknown[]) => console.log(new Date().toISOString(), ...args);
 let mutatingPosts = 0;
+/** Routes a worker's own MCP server calls; they are checked against the job's token, not the user's secret. */
+const WORKER_ROUTE = /^\/api\/jobs\/[\w-]+\/(?:questions|siblings)$/;
 
 const server = http.createServer((req, res) => {
   // Reserve before reading the body: idle replacement must not interrupt an unrecorded worktree.
-  const mutating = req.method === 'POST' && req.url?.split('?')[0] !== '/api/shutdown';
+  // Open and worker routes are left out, so an unauthenticated stalled body cannot hold off a replacement;
+  // a request without the secret is rejected before route() first awaits, so it is counted only briefly.
+  const pathname = req.url?.split('?')[0] ?? '/';
+  const mutating = req.method === 'POST' && pathname !== '/api/shutdown' && !isOpen('POST', pathname) && !WORKER_ROUTE.test(pathname);
   if (mutating) mutatingPosts++;
   route(req, res).finally(() => { if (mutating) mutatingPosts--; }).then(
     (result) => {
@@ -286,9 +291,6 @@ function isOpen(method: string, pathname: string): boolean {
   if (method !== 'POST') return false;
   return pathname === '/api/hooks/claude' || pathname === '/api/session';
 }
-
-/** Routes a worker's own MCP server calls; they are checked against the job's token, not the user's secret. */
-const WORKER_ROUTE = /^\/api\/jobs\/[\w-]+\/(?:questions|siblings)$/;
 
 async function route(req: http.IncomingMessage, res: http.ServerResponse): Promise<unknown> {
   guard(req);

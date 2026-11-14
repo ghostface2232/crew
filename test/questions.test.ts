@@ -503,6 +503,17 @@ test('idle shutdown waits for a mutating POST still reading its body', { timeout
   assert.equal((await h.api('POST', '/api/shutdown', { ifIdle: true })).status, 200);
 });
 
+test('a stalled POST without the secret does not hold off an idle shutdown', { timeout: 15000 }, async (t) => {
+  const h = await daemon(t);
+  const stalled = http.request({ host: '127.0.0.1', port: h.port, path: '/api/session', method: 'POST', headers: { 'content-type': 'application/json', expect: '100-continue' } });
+  stalled.on('error', () => {});
+  t.after(() => stalled.destroy());
+  const reading = new Promise<void>((resolve) => stalled.once('continue', resolve));
+  stalled.flushHeaders();
+  await reading;
+  assert.equal((await h.api('POST', '/api/shutdown', { ifIdle: true })).status, 200);
+});
+
 test('restart stops a daemon that does not take the token in the file, and says so when it cannot', { timeout: 30000 }, async (t) => {
   const h = await daemon(t);
   const health = async () => fetch(`http://127.0.0.1:${h.port}/api/health`).then((res) => res.json() as any, () => null);

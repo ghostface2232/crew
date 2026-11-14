@@ -29,8 +29,7 @@ for (const code of ['ENOTSUP', 'EOPNOTSUPP', 'EXDEV', 'ENOSYS', 'EINVAL']) {
     const id = 'cx-abcdef';
     const wt = await createWorktree(repo, id, 'HEAD', home);
     const exclude = path.resolve(wt.path, execFileSync('git', ['rev-parse', '--git-path', 'info/exclude'], { cwd: wt.path, encoding: 'utf8' }).trim());
-    fs.mkdirSync(path.dirname(exclude), { recursive: true });
-    fs.appendFileSync(exclude, '\n/keep-me');
+    const excluded = fs.existsSync(exclude) ? fs.readFileSync(exclude, 'utf8') : null;
     const included = await copyIncluded(repo, wt.path, async (_source, dest) => {
       // Some files may have cloned before the unsupported file is reached.
       fs.mkdirSync(dest, { recursive: true });
@@ -44,9 +43,14 @@ for (const code of ['ENOTSUP', 'EOPNOTSUPP', 'EXDEV', 'ENOSYS', 'EINVAL']) {
     assert.equal(fs.realpathSync(link), path.join(repo, 'node_modules'));
     assert.equal(fs.existsSync(path.join(link, 'partial')), false);
     assert.equal(fs.lstatSync(path.join(wt.path, '.env')).isFile(), true);
-    assert.match(fs.readFileSync(exclude, 'utf8'), /\/keep-me\n\/node_modules\n/);
-    assert.equal(await dirtyCount(wt.path), 0);
-    assert.equal(await commitAll(wt.path, 'no dependency links'), null);
+    // The exclude file is the user's checkout's too, so it is left alone.
+    assert.equal(fs.existsSync(exclude) ? fs.readFileSync(exclude, 'utf8') : null, excluded);
+    assert.equal(await dirtyCount(wt.path), 1);
+    assert.equal(await dirtyCount(wt.path, wt.linked), 0);
+    assert.equal(await commitAll(wt.path, 'no dependency links', wt.linked), null);
+    fs.writeFileSync(path.join(wt.path, 'work.txt'), 'change');
+    assert.ok(await commitAll(wt.path, 'work only', wt.linked));
+    assert.equal(execFileSync('git', ['show', '--format=', '--name-only', 'HEAD'], { cwd: wt.path, encoding: 'utf8' }).trim(), 'work.txt');
     for (const runsApp of [false, true]) {
       const built = buildPrompt({ kind: 'delegate', cwd: wt.path, task: 'test', runsApp }, wt, null, '', path.join(home, 'scratch'));
       assert.match(built.instructions, /shared read-only.*node_modules/);

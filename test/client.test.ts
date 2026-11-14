@@ -9,6 +9,8 @@ import type { TestContext } from 'node:test';
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-client-'));
 process.env.CREW_HOME = home;
+// Every request is mocked; an unused port keeps a missed mock away from the user's daemon.
+process.env.CREW_PORT = '1';
 const { ensureDaemon, stopDaemon } = await import('../plugin/bridge/client.ts');
 const { PLUGIN_ROOT } = await import('../plugin/bridge/config.ts');
 const file = path.join(home, 'daemon.json');
@@ -28,6 +30,21 @@ test('replacement refuses to spawn while the previous daemon still answers', asy
   syncBuiltinESMExports();
   t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
   await assert.rejects(ensureDaemon(), /previous Crew daemon.*did not stop/);
+  assert.equal(spawn.mock.callCount(), 0);
+});
+
+test('replacement leaves a daemon another client started in the meantime', async (t) => {
+  fastWaits(t);
+  let shutdown = false;
+  t.mock.method(globalThis, 'fetch', async (url: string) => {
+    if (url.endsWith('/api/shutdown')) { shutdown = true; return Response.json({}); }
+    return Response.json({ name: 'crew', version: '0.0.0', build: shutdown ? 'new' : 'old', root: PLUGIN_ROOT, active: 0, pid: shutdown ? 54321 : 12345 });
+  });
+  const spawn = t.mock.method(childProcess, 'spawn', () => { throw new Error('unexpected spawn'); });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  await ensureDaemon();
+  assert.ok(shutdown);
   assert.equal(spawn.mock.callCount(), 0);
 });
 

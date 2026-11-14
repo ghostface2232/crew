@@ -518,7 +518,7 @@ export class Jobs {
       if (!job.worktree || !job.repo || job.kind === 'review') throw new Error(`Job ${id} has no worktree of its own to bring up to date. Drop sync.`);
       this.preparingReviews.add(id);
       try {
-        const merged = await mergeInto(job.worktree.path, job.repo, typeof input.sync === 'string' ? input.sync : 'HEAD');
+        const merged = await mergeInto(job.worktree.path, job.repo, typeof input.sync === 'string' ? input.sync : 'HEAD', job.worktree.linked);
         if (merged.conflicts.length) {
           const commit = merged.commit.slice(0, 8);
           const files = merged.conflicts.join(', ');
@@ -730,7 +730,7 @@ export class Jobs {
       if (round.state === state) throw new Error(`Round ${turn} is already ${state}.`);
       const commit = action === 'undo' ? round.commit : round.revert;
       if (!commit) throw new Error(`Round ${turn} has no revert commit to keep.`);
-      const reverted = await revertCommit(job.worktree.path, commit);
+      const reverted = await revertCommit(job.worktree.path, commit, job.worktree.linked);
       const result = await this.worktreeResult(job, reverted);
       round.state = state;
       if (action === 'undo') round.revert = reverted;
@@ -959,7 +959,7 @@ export class Jobs {
     let result: Job['result'];
     // A review's worktree is a snapshot to run the app in; nothing in it is kept.
     if (job.worktree && job.kind !== 'review') {
-      const commit = await commitAll(job.worktree.path, `crew(${job.agent}): ${job.title}`);
+      const commit = await commitAll(job.worktree.path, `crew(${job.agent}): ${job.title}`, job.worktree.linked);
       if (commit) (job.rounds ??= []).push({ turn: job.turns, commit, ...await commitChanges(job.worktree.path, commit), state: 'kept', at: Date.now() });
       result = await this.worktreeResult(job, commit);
     } else if (job.kind === 'review' || job.ask) {

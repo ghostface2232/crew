@@ -91,9 +91,9 @@ test('a window is judged by what is left, with hysteresis, whatever its recent p
 
 test('the account-wide window decides; a provider with only per-model windows follows the configured model, else its tightest family', () => {
   const tracker = new UsageTracker();
-  const of = (windows: object[], agent = 'antigravity') => tracker.classify(parseCache(cache([snapshot(agent, windows)])), none, NOW).providers.find((p) => p.agent === agent)!;
+  const of = (windows: object[]) => tracker.classify(parseCache(cache([snapshot('antigravity', windows)])), none, NOW).providers.find((p) => p.agent === 'antigravity')!;
   // A scoped window that is used up does not exhaust the account.
-  const scoped = of([weekly(0.2), weekly(1, { groupLabel: 'Fable', providerID: 'scoped' })], 'claude');
+  const scoped = of([weekly(0.2), weekly(1, { groupLabel: 'Fable', providerID: 'scoped' })]);
   assert.equal(scoped.status, 'ok');
   assert.equal(scoped.windows[1].status, 'exhausted');
   // Only families, one used up and one with room: a job does not move to another model by itself.

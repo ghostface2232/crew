@@ -167,9 +167,10 @@ const windowName = (w: Pick<UsageWindow, 'kind' | 'group'>) =>
 /** Match the complete family name, not just a shared vendor word; slash-separated labels name alternatives. */
 function applicable<T extends Pick<UsageWindow, 'group'>>(windows: T[], model?: string, includeFamilies = false): T[] {
   const wide = windows.filter((w) => w.group === null);
-  if (wide.length && !includeFamilies) return wide;
-  const scoped = windows.filter((w) => w.group !== null);
   const words = model?.toLowerCase().split(/[^a-z0-9]+/);
+  // Without a known model, no family is known to apply; an unused family must not exhaust the account.
+  if (wide.length && (!includeFamilies || !words)) return wide;
+  const scoped = windows.filter((w) => w.group !== null);
   const matches = words ? scoped.filter((w) => w.group!.toLowerCase().split('/').some((family) => {
     const familyWords = family.split(/[^a-z0-9]+/).filter(Boolean);
     return familyWords.length > 0 && familyWords.every((word) => words.includes(word));

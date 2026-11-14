@@ -59,10 +59,16 @@ export interface Worktree {
   linked?: string[];
 }
 
+/**
+ * Pathspecs that leave out Crew's shared-dependency links. A directory-only ignore rule such as `node_modules/`
+ * does not cover a symlink, and the only exclude file Git reads is shared with the user's own checkout.
+ */
+const besides = (linked: string[]) => linked.length ? ['--', '.', ...linked.map((rel) => `:(exclude,literal)${rel}`)] : [];
+
 /** Number of uncommitted paths in the main tree; a worktree created from a ref will not contain them. */
-export async function dirtyCount(root: string): Promise<number> {
+export async function dirtyCount(root: string, linked: string[] = []): Promise<number> {
   // Every untracked file by name, so a folder holding nothing but Finder's metadata is not counted either.
-  const out = await git(root, ['status', '--porcelain', '--untracked-files=all']);
+  const out = await git(root, ['status', '--porcelain', '--untracked-files=all', ...besides(linked)]);
   // Finder's .DS_Store files are never something a worker needs, and they are in most trees that do not ignore them.
   return out.split('\n').filter((line) => line && !/(^|\/)\.DS_Store"?$/.test(line.slice(3))).length;
 }
@@ -141,10 +147,6 @@ export async function copyIncluded(root: string, wt: string, clone: (source: str
         if (process.platform === 'win32') await detachLinks(dest);
         await fs.rm(dest, { recursive: true, force: true });
         await fs.mkdir(path.dirname(dest), { recursive: true });
-        // Directory-only ignore patterns do not cover symlinks. Never stage a shared absolute target.
-        const exclude = path.resolve(wt, await git(wt, ['rev-parse', '--git-path', 'info/exclude']));
-        await fs.mkdir(path.dirname(exclude), { recursive: true });
-        await fs.appendFile(exclude, `\n/${rel.replace(/[\\*?[\]]/g, '\\$&')}\n`);
         await fs.symlink(source, dest, process.platform === 'win32' ? 'junction' : 'dir');
         result.linked.push(rel);
       }
@@ -196,8 +198,8 @@ function realpath(target: string): string {
  * signing (which can block on a passphrase prompt nobody sees) is off, and a
  * missing identity falls back to Crew's.
  */
-export async function commitAll(wt: string, message: string): Promise<string | null> {
-  await git(wt, ['add', '-A']);
+export async function commitAll(wt: string, message: string, linked: string[] = []): Promise<string | null> {
+  await git(wt, ['add', '-A', ...besides(linked)]);
   const staged = await git(wt, ['diff', '--cached', '--name-only']);
   if (!staged) return null;
   await git(wt, [...await commitSettings(wt), 'commit', '--no-verify', '-m', message]);
@@ -223,9 +225,9 @@ export async function commitChanges(wt: string, commit: string): Promise<{ files
  * Merges `ref` of the repository into the branch checked out in `wt`, returning the commit and any conflicts.
  * A merge that does not apply cleanly is aborted, so the worktree is left as it was.
  */
-export async function mergeInto(wt: string, repo: string, ref: string): Promise<{ commit: string; conflicts: string[] }> {
+export async function mergeInto(wt: string, repo: string, ref: string, linked: string[] = []): Promise<{ commit: string; conflicts: string[] }> {
   const commit = await git(repo, ['rev-parse', '--verify', `${ref}^{commit}`]);
-  if (await dirtyCount(wt)) throw new Error('The worktree has uncommitted changes, so nothing was merged into it.');
+  if (await dirtyCount(wt, linked)) throw new Error('The worktree has uncommitted changes, so nothing was merged into it.');
   try {
     await git(wt, [...await commitSettings(wt), '-c', `core.hooksPath=${os.devNull}`, 'merge', '--no-edit', commit]);
   } catch (err) {
@@ -255,15 +257,15 @@ export async function revertsSince(wt: string, base: string): Promise<{ commit: 
 }
 
 /** Reverts are transport commits too; a conflict must leave the finished worker's tree untouched. */
-export async function revertCommit(wt: string, commit: string): Promise<string> {
-  if (await dirtyCount(wt)) throw new Error('The worktree has uncommitted changes; commit or remove them before changing a round.');
+export async function revertCommit(wt: string, commit: string, linked: string[] = []): Promise<string> {
+  if (await dirtyCount(wt, linked)) throw new Error('The worktree has uncommitted changes; commit or remove them before changing a round.');
   try {
     await git(wt, [...await commitSettings(wt), '-c', `core.hooksPath=${os.devNull}`, 'revert', '--no-edit', commit]);
   } catch (err) {
     const conflicts = (await git(wt, ['diff', '--name-only', '--diff-filter=U', '-z'])).split('\0').filter(Boolean);
     // A preflight failure may not have opened a revert, so abort has nothing to do in that case.
     await git(wt, ['revert', '--abort']).catch(async (abort) => {
-      if (await dirtyCount(wt)) throw new Error(`${(err as Error).message}; could not abort the revert: ${abort.message}`);
+      if (await dirtyCount(wt, linked)) throw new Error(`${(err as Error).message}; could not abort the revert: ${abort.message}`);
     });
     throw new Error(`Could not revert ${commit}${conflicts.length ? `; conflicted files: ${conflicts.join(', ')}` : ''}: ${(err as Error).message}`);
   }

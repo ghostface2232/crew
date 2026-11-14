@@ -139,9 +139,11 @@ async function startDaemon(): Promise<void> {
     } catch {
       return;
     }
-    if (!(await waitFor(async () => (await health()) === null, 5000))) {
+    // Wait for that process to go, not for silence: another client may start the replacement in between.
+    if (!(await waitFor(async () => (await health())?.pid !== running.pid, 5000))) {
       throw new Error(`The previous Crew daemon (process ${running.pid}) did not stop at ${BASE_URL}. Try crew daemon restart again after it exits.`);
     }
+    if (await health()) return;
   }
   fs.mkdirSync(HOME, { recursive: true });
   const out = fs.openSync(path.join(HOME, 'daemon.log'), 'a');

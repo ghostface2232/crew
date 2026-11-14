@@ -99,6 +99,6 @@ export function unsettled(job: BoardJob): boolean {
 export function jobLabel(job: BoardJob) {
   if (job.state === 'waiting') return job.waiting?.type === 'approval' ? 'Needs approval' : 'Has a question';
   if (job.stalled) return 'May be stuck';
-  if (job.state === 'failed') return job.error?.limit ? 'Usage limit reached' : 'Failed';
-  return { running: 'Working', done: 'Done', cancelled: 'Cancelled' }[job.state];
+  if (job.error?.limit) return 'Usage limit reached';
+  return { running: 'Working', done: 'Done', failed: 'Failed', cancelled: 'Cancelled' }[job.state];
 }

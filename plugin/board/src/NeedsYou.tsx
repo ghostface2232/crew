@@ -1,5 +1,7 @@
 import { ArrowUpRight, Check, CircleCheck, MessagesSquare, Search, X } from 'lucide-react';
+import { useSyncExternalStore } from 'react';
 import type { BoardJob, ClaudeSession } from './types.ts';
+import { board } from './store.ts';
 import { actions, answerKey, request } from './api.ts';
 import { NAMES, projectOf } from './model.ts';
 import { ActionStatus, AgentMark, Chip, Composer, ContentPanel, EmptyState, Icon, useAction, useDraft } from './ui.tsx';
@@ -11,7 +13,8 @@ export function Answer({ job }: { job: BoardJob }) {
   const state = useAction(key);
   const [draft, setDraft] = useDraft(key);
   if (job.state !== 'waiting' || !waiting) return null;
-  const locked = state.pending || state.accepted;
+  const live = useSyncExternalStore(board.subscribe, () => board.getSnapshot().connection === 'live');
+  const locked = state.pending || state.accepted || !live;
   const reply = (body: object) => request(`/api/jobs/${job.id}/reply`, { ...body, request_id: waiting.id });
   const decide = (decision: 'approve' | 'deny') => {
     // A draft typed before a quick reply goes along with it rather than being discarded.
@@ -36,6 +39,7 @@ export function Answer({ job }: { job: BoardJob }) {
             placeholder="Write an answer…"
             actionKey={key}
             once
+            disabled={!live}
             draft={draft}
             setDraft={setDraft}
             onSend={(message) => reply({ message })}
@@ -89,7 +93,7 @@ export function NeedsYou({
                       {NAMES[job.agent]} · {names.get(projectOf(job)) ?? projectOf(job)}
                     </span>
                   </span>
-                  <button className="borderless caption" onClick={() => openJob(job.id)}>
+                  <button className="caption small" onClick={() => openJob(job.id)}>
                     <Icon icon={ArrowUpRight} size={12} />
                     Details
                   </button>

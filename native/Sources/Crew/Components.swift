@@ -259,7 +259,8 @@ struct SessionView: View {
 
 struct EventList: View {
     var events: [CrewEvent]
-    var openJob: (String) -> Void
+    /// Nil inside a job's own details, where every event belongs to the job already shown.
+    var openJob: ((String) -> Void)? = nil
     var body: some View {
         LazyVStack(alignment: .leading, spacing: 16) {
             ForEach(events.reversed()) { event in
@@ -273,8 +274,9 @@ struct EventList: View {
                                 Text(date, style: .time).font(Typeface.caption).monospacedDigit().foregroundStyle(.secondary)
                             }
                             Spacer()
-                            if let id = event.job_id {
-                                Button("Show job", systemImage: "arrow.up.right") { openJob(id) }.labelStyle(.iconOnly).buttonStyle(.borderless).help("Show job")
+                            if let id = event.job_id, let openJob {
+                                Button("Show job", systemImage: "arrow.up.right") { openJob(id) }.labelStyle(.iconOnly)
+                                    .buttonStyle(.bordered).buttonBorderShape(.circle).controlSize(.small).help("Show job")
                             }
                         }
                         Text(event.detail).font(Typeface.callout).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)

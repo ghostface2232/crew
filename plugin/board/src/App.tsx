@@ -139,17 +139,31 @@ export function App() {
                 </option>
               ))}
             </select>
-            <div className="segmented tabs" role="tablist" aria-label="Workspace">
+            <div
+              className="segmented tabs"
+              role="tablist"
+              aria-label="Workspace"
+              onKeyDown={(event) => {
+                const keys: Record<string, number> = { ArrowRight: 1, ArrowLeft: -1, Home: -PAGES.length, End: PAGES.length };
+                if (!(event.key in keys)) return;
+                event.preventDefault();
+                const at = PAGES.findIndex(([id]) => id === page);
+                const next = Math.max(0, Math.min(PAGES.length - 1, event.key === 'Home' ? 0 : event.key === 'End' ? PAGES.length - 1 : (at + keys[event.key] + PAGES.length) % PAGES.length));
+                select(PAGES[next][0]);
+                event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus();
+              }}
+            >
               {PAGES.map(([id, label, icon]) => (
                 <button
                   key={id}
                   role="tab"
-                  aria-selected={!project && page === id}
+                  // A project is its own overview, so Overview stays selected, as in the app.
+                  aria-selected={page === id}
+                  tabIndex={page === id ? 0 : -1}
                   onClick={() => select(id)}
-                  className={id === 'needs' && pending ? 'tab-badge' : undefined}
                 >
-                  <Icon icon={id === 'needs' && pending ? BellDot : icon} size={13} />
-                  <span>{label}</span>
+                  <Icon icon={icon} size={13} />
+                  <span className={id === 'needs' && pending ? 'tab-badge' : undefined}>{label}</span>
                 </button>
               ))}
             </div>
@@ -232,7 +246,7 @@ export function App() {
           </main>
         </div>
         {dispatching && <Dispatch state={state} project={project} openJob={openJob} close={() => setDispatching(false)} />}
-        {jobId && <JobDrawer key={jobId} id={jobId} state={state} close={closeJob} openJob={openJob} />}
+        {jobId && <JobDrawer key={jobId} id={jobId} state={state} close={closeJob} />}
         {settings && <Settings state={state} close={() => setSettings(false)} />}
       </div>
     </ClockProvider>

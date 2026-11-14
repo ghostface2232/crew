@@ -193,7 +193,8 @@ export function AgentOverview({ state, project }: { state: Snapshot; project: st
   );
 }
 
-export function EventList({ events, openJob }: { events: CrewEvent[]; openJob: (id: string) => void }) {
+/** Without openJob, as in a job's own details, events carry no link to the job. */
+export function EventList({ events, openJob }: { events: CrewEvent[]; openJob?: (id: string) => void }) {
   return (
     <ol className="events">
       {events
@@ -206,7 +207,7 @@ export function EventList({ events, openJob }: { events: CrewEvent[]; openJob: (
               <p className="event-head">
                 <b>{NAMES[event.agent as keyof typeof NAMES] ?? event.agent}</b>
                 <time dateTime={event.ts}>{new Date(event.ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time>
-                {event.job_id && (
+                {event.job_id && openJob && (
                   <button className="icon" aria-label="Show job" title="Show job" onClick={() => openJob(event.job_id!)}>
                     <Icon icon={ArrowUpRight} />
                   </button>

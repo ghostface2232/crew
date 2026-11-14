@@ -6,10 +6,10 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { actions, drafts } from './api.ts';
-import claudeMark from '../../../assets/ClaudeCode.svg';
-import codexMark from '../../../assets/Codex.svg';
-import antigravityMark from '../../../assets/Antigravity.svg';
-import crewMark from '../../../assets/crew_menubar.svg';
+import claudeMark from './icons/ClaudeCode.svg';
+import codexMark from './icons/Codex.svg';
+import antigravityMark from './icons/Antigravity.svg';
+import crewMark from './icons/crew_menubar.svg';
 
 export const ClockContext = createContext(Date.now());
 export const useNow = () => useContext(ClockContext);
@@ -95,6 +95,7 @@ export function Composer({
   once = false,
   draft,
   setDraft,
+  disabled = false,
 }: {
   label: string;
   placeholder: string;
@@ -103,11 +104,12 @@ export function Composer({
   once?: boolean;
   draft: string;
   setDraft: (value: string) => void;
+  disabled?: boolean;
 }) {
   const state = useAction(actionKey);
   const draftRef = useRef(draft);
   draftRef.current = draft;
-  const locked = state.pending || state.accepted;
+  const locked = state.pending || state.accepted || disabled;
   return (
     <div className="composer">
       <textarea
@@ -153,11 +155,14 @@ export function Dialog({
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const pressed = useRef(false);
+  const unmounting = useRef(false);
   useEffect(() => {
     const dialog = ref.current!;
     const previous = document.activeElement as HTMLElement | null;
+    unmounting.current = false;
     dialog.showModal();
     return () => {
+      unmounting.current = true;
       dialog.close();
       previous?.focus({ preventScroll: true });
     };
@@ -171,6 +176,16 @@ export function Dialog({
       onCancel={(event) => {
         event.preventDefault();
         onClose();
+      }}
+      onClose={(event) => {
+        // Repeated Escape without user activation closes a dialog natively despite preventDefault.
+        // The parent decides: if it still renders this dialog, show it again.
+        if (unmounting.current) return;
+        onClose();
+        const dialog = event.currentTarget;
+        requestAnimationFrame(() => {
+          if (!unmounting.current && dialog.isConnected && !dialog.open) dialog.showModal();
+        });
       }}
       onPointerDown={(event) => {
         pressed.current = event.target === event.currentTarget;
@@ -224,35 +239,55 @@ export function CopyButton({ text, children }: { text: string; children: string 
     </>
   );
 }
-/** A pop-up menu: opens under its button and closes on a choice, Escape, or a click elsewhere. */
+/**
+ * A pop-up menu: focus moves to its first item, arrows move between items, and a choice, Escape, a click
+ * elsewhere or tabbing away closes it and returns focus to its button.
+ */
 export function Menu({ label, icon, children }: { label: string; icon: LucideIcon; children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  const items = () => [...(ref.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? [])];
+  const close = (refocus: boolean) => {
+    setOpen(false);
+    if (refocus) button.current?.focus();
+  };
   useEffect(() => {
     if (!open) return;
+    items()[0]?.focus();
     const away = (event: PointerEvent) => {
       if (!ref.current?.contains(event.target as Node)) setOpen(false);
     };
-    const escape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.stopPropagation();
-        setOpen(false);
-      }
-    };
     document.addEventListener('pointerdown', away);
-    document.addEventListener('keydown', escape, true);
-    return () => {
-      document.removeEventListener('pointerdown', away);
-      document.removeEventListener('keydown', escape, true);
-    };
+    return () => document.removeEventListener('pointerdown', away);
   }, [open]);
   return (
-    <div className="menu" ref={ref}>
-      <button className="icon" aria-label={label} title={label} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
+    <div
+      className="menu"
+      ref={ref}
+      onBlur={(event) => {
+        if (open && !ref.current?.contains(event.relatedTarget as Node | null)) setOpen(false);
+      }}
+      onKeyDown={(event) => {
+        if (!open) return;
+        if (event.key === 'Escape') {
+          // Keeps the Escape from also closing a dialog the menu sits in.
+          event.stopPropagation();
+          event.preventDefault();
+          close(true);
+        } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+          event.preventDefault();
+          const list = items();
+          const at = list.indexOf(document.activeElement as HTMLButtonElement);
+          list[(at + (event.key === 'ArrowDown' ? 1 : -1) + list.length) % list.length]?.focus();
+        }
+      }}
+    >
+      <button ref={button} className="icon" aria-label={label} title={label} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
         <Icon icon={icon} />
       </button>
       {open && (
-        <div className="menu-list" role="menu" onClick={() => setOpen(false)}>
+        <div className="menu-list" role="menu" aria-label={label} onClick={() => close(true)}>
           {children}
         </div>
       )}

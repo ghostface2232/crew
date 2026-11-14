@@ -219,7 +219,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         let controller = NSHostingController(rootView: CrewSettingsView(model: model, store: store).buttonBorderShape(.capsule))
         let window = NSWindow(contentViewController: controller)
         window.title = "Crew Settings"
-        window.styleMask = [.titled, .closable, .resizable]
+        // The content runs under a transparent title bar, so the window reads as one surface like the main window.
+        window.styleMask = [.titled, .closable, .resizable, .fullSizeContentView]
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
         window.setContentSize(NSSize(width: 720, height: 620))
         window.minSize = NSSize(width: 640, height: 570)
         window.isReleasedWhenClosed = false

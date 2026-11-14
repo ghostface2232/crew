@@ -117,7 +117,7 @@ export function Dispatch({
               placeholder="/path/to/repository"
               onChange={(event) => {
                 setDirectory(event.target.value);
-                setDestination('project');
+                if (destination.startsWith('mission:')) setDestination('project');
               }}
             />
           </label>

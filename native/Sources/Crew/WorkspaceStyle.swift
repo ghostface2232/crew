@@ -24,6 +24,7 @@ enum WorkspaceStyle {
 enum Typeface {
     static let pageTitle = Font.system(size: 38, weight: .semibold, design: .rounded)
     static let pageTitleCapHeight = NSFont.systemFont(ofSize: 38, weight: .semibold).capHeight
+    static let windowTitle = Font.system(size: 30, weight: .semibold, design: .rounded)
     static let title = Font.system(size: 18, weight: .semibold, design: .rounded)
     static let cardTitle = Font.system(size: 16, weight: .semibold, design: .rounded)
     static let emptyTitle = Font.system(size: 17, weight: .regular, design: .rounded)
@@ -90,10 +91,12 @@ struct WorkspaceSummary: View {
             HStack(alignment: .top, spacing: 16) {
                 ForEach(metrics.indices, id: \.self) { index in
                     let metric = metrics[index]
+                    // A count above zero colors its label too; an empty one fades back.
                     VStack(alignment: .leading, spacing: 7) {
-                        Label(metric.0, systemImage: metric.2).font(Typeface.chip).foregroundStyle(.secondary)
+                        Label(metric.0, systemImage: metric.2).font(Typeface.chip)
+                            .foregroundStyle(metric.1 == 0 ? AnyShapeStyle(.tertiary) : AnyShapeStyle(metric.3))
                         Text(metric.1.formatted()).font(Typeface.number).monospacedDigit()
-                            .foregroundStyle(metric.1 == 0 ? Color.secondary.opacity(0.7) : metric.3)
+                            .foregroundStyle(metric.1 == 0 ? Color.secondary.opacity(0.4) : metric.3)
                     }.frame(maxWidth: .infinity, alignment: .leading)
                         .accessibilityElement(children: .combine)
                 }

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Info } from 'lucide-react';
+import { Info, SlidersHorizontal } from 'lucide-react';
 import type { Preset, PresetName, Roles, Snapshot } from './types.ts';
 import type { Role, RoleAssignment } from '../../bridge/config.ts';
 import { request } from './api.ts';
@@ -179,7 +179,7 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
     <Dialog labelId="settings-title" onClose={closeSettings}>
       <div className={styles.panel}>
         <header className={`sheet-head ${styles.header}`}>
-          <h2 className="title" id="settings-title">Settings</h2>
+          <h2 className="window-title" id="settings-title">Settings</h2>
           <Segmented
             label="Settings section"
             value={currentTab}
@@ -238,18 +238,22 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
           )}
           {currentTab === 'presets' && (
             <div className={styles.presets}>
-              <label className="field">
-                <span>Model preset</span>
-                <select value={preset ?? ''} onChange={(event) => setPreset((event.target.value as PresetName) || null)}>
-                  <option value="">None</option>
-                  <option value="economy">Economy</option>
-                  <option value="balanced">Balanced</option>
-                  <option value="best">Best</option>
-                </select>
-              </label>
-              <p className="callout secondary">
-                {selectedPreset ? presetDescription(selectedPreset) : "Uses each agent's configured model and effort."}
-              </p>
+              <section className={`card ${styles.role}`}>
+                <div className={styles.roleHeader}>
+                  <Icon icon={SlidersHorizontal} size={18} />
+                  <h3 className="card-title">Model preset</h3>
+                  <select aria-label="Model preset" value={preset ?? ''} onChange={(event) => setPreset((event.target.value as PresetName) || null)}>
+                    <option value="">None</option>
+                    <option value="economy">Economy</option>
+                    <option value="balanced">Balanced</option>
+                    <option value="best">Best</option>
+                  </select>
+                </div>
+                <p className="callout secondary">
+                  {selectedPreset ? presetDescription(selectedPreset) : "Uses each agent's configured model and effort."}
+                </p>
+                <p className="caption tertiary">A model or effort set on a role overrides the preset.</p>
+              </section>
             </div>
           )}
           {currentTab === 'instructions' && (
@@ -298,7 +302,7 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
         <footer className={styles.footer}>
           <div className={styles.status} role="status">
             {tabStatus && <span className="callout secondary">{tabStatus}</span>}
-            {tabDirty && <span className="caption secondary">Unsaved changes</span>}
+            {tabDirty && <span className="unsaved">Unsaved changes</span>}
           </div>
           <div className={styles.actions}>
             {currentTab === 'instructions' && load === 'failed' && (

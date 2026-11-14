@@ -19,7 +19,7 @@ struct JobDetailView: View {
                 if let job { StatusLabel(state: job.stalled ? "stalled" : job.state, title: job.status) }
                 Spacer()
                 Button("Close Details", systemImage: "xmark") { store.selectedJob = nil }
-                    .buttonStyle(.borderless).labelStyle(.iconOnly).help("Close details (Esc)").keyboardShortcut(.cancelAction)
+                    .buttonStyle(.bordered).buttonBorderShape(.circle).labelStyle(.iconOnly).help("Close details (Esc)").keyboardShortcut(.cancelAction)
                     .focused($closeFocused)
             }.padding(.horizontal, 24).padding(.top, 20).padding(.bottom, 4)
             ScrollView {
@@ -62,7 +62,8 @@ struct JobDetailView: View {
                 .card(fill: .orange.opacity(0.06))
         }
         Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
-            fact("Agent", [agentName(job.agent), job.model, job.effort.map { "\($0) effort" }].compactMap { $0 }.joined(separator: " · "))
+            // The model the session reported, else the configured one.
+            fact("Agent", [agentName(job.agent), job.resolvedModel ?? job.model, (job.resolvedEffort ?? job.effort).map { "\($0) effort" }].compactMap { $0 }.joined(separator: " · "))
             fact("Role", job.kindTitle)
             fact("Project", job.projectPath)
             fact("Duration", elapsed((job.endedAt ?? store.now) - job.createdAt))
@@ -148,7 +149,7 @@ struct JobDetailView: View {
         }
         let combined = mergeEvents(events, store.events.filter { $0.job_id == id }, limit: 80)
         if !combined.isEmpty {
-            detailSection("Activity", symbol: "bolt") { EventList(events: combined) { store.openJob($0) } }
+            detailSection("Activity", symbol: "bolt") { EventList(events: combined) }
         }
         VStack(alignment: .leading, spacing: 10) {
             Divider().padding(.bottom, 4)

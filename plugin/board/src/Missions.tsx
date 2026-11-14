@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useSyncExternalStore } from 'react';
+import { board } from './store.ts';
 import { Check, ChevronDown, ChevronRight, CircleCheck, CircleX, Ellipsis, Hammer, MessageCircleQuestion, ShieldCheck, SpellCheck, Wrench } from 'lucide-react';
 import type { BoardJob, ClaudeSession, Mission } from './types.ts';
 import { actions, request } from './api.ts';
@@ -73,6 +74,8 @@ export function MissionTrack({ mission }: { mission: Mission }) {
   return (
     <ol
       className="track"
+      // One element for assistive technology, as the app's track is.
+      role="img"
       aria-label={
         mission.state === 'done'
           ? `Done, all ${stops.length} steps passed`
@@ -126,7 +129,8 @@ export function MissionPanel({
     `${jobs.length} ${jobs.length === 1 ? 'job' : 'jobs'}`,
   ].filter(Boolean).join(' · ');
   const progress = missionProgress(mission, jobs);
-  const locked = action.pending || action.accepted;
+  const live = useSyncExternalStore(board.subscribe, () => board.getSnapshot().connection === 'live');
+  const locked = action.pending || action.accepted || !live;
   const update = (body: object, done: string) => void actions.run(key, () => request(`/api/missions/${mission.id}`, body), { done });
   return (
     <section className="card mission" data-key={mission.id} data-state={mission.state}>

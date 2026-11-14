@@ -84,19 +84,20 @@ code, pre { font-family: var(--mono); }
 
 /* --- Type scale (Typeface) --- */
 .page-title { font: 600 38px/1.1 var(--rounded); letter-spacing: -0.01em; }
+.window-title { font: 600 30px/1.15 var(--rounded); }
 .title { font: 600 18px/1.25 var(--rounded); }
 .card-title { font: 600 16px/1.25 var(--rounded); }
 .section-title { font: 600 20px/1.2 var(--display); }
 .headline { font: 500 15px/1.4 var(--display); }
-.subheadline { font-size: 13px; font-weight: 600; }
 .callout { font-size: 12px; }
 .caption { font-size: 11px; }
 .secondary { color: var(--secondary); }
 .tertiary { color: var(--tertiary); }
+.unsaved { display: inline-flex; align-items: center; gap: 5px; color: var(--orange); font-size: 12px; font-weight: 500; }
+.unsaved::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .mono { font-family: var(--mono); font-size: 12px; }
 .digits { font-variant-numeric: tabular-nums; }
 .selectable { -webkit-user-select: text; user-select: text; }
-.hint { color: var(--secondary); font-size: 11px; }
 .error { color: var(--red); }
 
 /* --- State: one color per state, as StatusLabel picks it --- */
@@ -162,17 +163,17 @@ button.glass {
   backdrop-filter: blur(16px) saturate(1.6);
 }
 button.large { min-height: 36px; padding: 0 16px; font-size: 13px; }
-button.plain { min-height: 0; padding: 0; background: none; border-radius: 6px; color: inherit; }
+button.small { min-height: 22px; padding: 0 8px; font-size: 11px; }
 button.borderless { background: none; color: var(--accent); padding: 0 6px; }
-button.icon { width: 28px; padding: 0; background: none; color: var(--secondary); }
+/* Icon buttons keep a visible fill, so their hit area reads as a button. */
+button.icon { flex: none; width: 28px; padding: 0; background: var(--fill); color: var(--label); }
 button.destructive { color: var(--red); }
 button:disabled { opacity: 0.45; cursor: default; }
 button:focus-visible, summary:focus-visible, [role="tab"]:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 50%, transparent); outline-offset: 1px; }
 @media (hover: hover) {
   button:not(:disabled):hover { background: var(--fill-strong); }
   button.prominent:not(:disabled):hover { background: color-mix(in srgb, var(--accent), black 10%); }
-  button.plain:not(:disabled):hover, button.borderless:not(:disabled):hover { background: none; opacity: 0.75; }
-  button.icon:not(:disabled):hover { background: var(--fill); color: var(--label); }
+  button.borderless:not(:disabled):hover { background: none; opacity: 0.75; }
 }
 button:not(:disabled):active { opacity: 0.68; }
 
@@ -314,7 +315,7 @@ dialog.detail-panel::backdrop { background: transparent; }
 }
 .toolbar .segmented { margin-inline: auto; }
 .tab-badge { position: relative; }
-.tab-badge::after { content: ""; position: absolute; top: -2px; right: -3px; width: 6px; height: 6px; border-radius: 50%; background: var(--orange); }
+.tab-badge::after { content: ""; position: absolute; top: 1px; right: -7px; width: 6px; height: 6px; border-radius: 50%; background: var(--orange); }
 .toolbar-project { display: none; max-width: 200px; }
 .toolbar-settings { display: none; }
 .search { position: relative; width: 200px; }
@@ -367,8 +368,11 @@ dialog.detail-panel::backdrop { background: transparent; }
 .metric { display: grid; gap: 7px; }
 .metric > span { display: flex; align-items: center; gap: 4px; color: var(--secondary); font-size: 11px; font-weight: 500; white-space: nowrap; }
 .metric > span svg { width: 12px; height: 12px; }
+/* A count above zero colors its label too; an empty one fades back. */
 .metric b { font: 400 40px/1 var(--rounded); font-variant-numeric: tabular-nums; color: var(--tone); }
-.metric[data-zero] b { color: color-mix(in srgb, var(--secondary) 70%, transparent); }
+.metric:not([data-zero]) > span { color: var(--tone); }
+.metric[data-zero] > span { color: var(--tertiary); }
+.metric[data-zero] b { color: color-mix(in srgb, var(--secondary) 40%, transparent); }
 .summary-bar { display: flex; gap: 3px; height: 5px; border-radius: 999px; background: var(--quaternary); overflow: hidden; }
 .summary-bar i { border-radius: 999px; background: var(--tone); opacity: 0.65; }
 .summary-bar i:first-child[data-state="working"] { opacity: 1; }
@@ -376,7 +380,9 @@ dialog.detail-panel::backdrop { background: transparent; }
 /* Agents */
 .agents { display: grid; gap: 12px; }
 .agent-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: var(--card-gap); }
-.agent-card { display: grid; gap: 14px; align-content: start; }
+/* Cards in a row share a height; usage sits at the bottom, so one bar lines up with the last of two. */
+.agent-card { display: grid; grid-template-rows: auto auto 1fr; gap: 14px; }
+.agent-card > .usage { align-self: end; }
 .agent-card-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .agent-card-head > div { flex: 1; min-width: 0; display: grid; gap: 2px; }
 .agent-card-head .caption { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--secondary); }
@@ -384,7 +390,7 @@ dialog.detail-panel::backdrop { background: transparent; }
 .agent-list { display: none; padding: 0; }
 .agent-list > li { display: grid; gap: 8px; padding: 11px var(--card-padding); }
 /* The divider starts under the name, past the mark, as the app's list divider does. */
-.agent-list > li + li { background: linear-gradient(var(--hairline), var(--hairline)) no-repeat calc(var(--card-padding) + 28px) 0 / 100% 1px; }
+.agent-list > li + li { background: linear-gradient(var(--hairline), var(--hairline)) no-repeat calc(var(--card-padding) + 28px) 0 / calc(100% - var(--card-padding) * 2 - 28px) 1px; }
 .agent-list-head { display: flex; align-items: center; gap: 10px; font-size: 12px; font-weight: 500; }
 .agent-list-head > :nth-child(2) { flex: 1; }
 @container page (max-width: 720px) {
@@ -407,8 +413,17 @@ dialog.detail-panel::backdrop { background: transparent; }
 .mission-head > div:first-child { flex: 1; min-width: 0; display: grid; gap: 4px; }
 .mission-head .title { overflow-wrap: anywhere; }
 .mission-meta { color: var(--secondary); font-size: 11px; font-variant-numeric: tabular-nums; }
-.mission-controls { display: flex; gap: 2px; margin-inline-end: -6px; color: var(--secondary); }
-.mission-controls button { color: inherit; }
+.mission-controls { display: flex; gap: 6px; }
+@container page (max-width: 600px) {
+  /* The title keeps the full width; its status and controls move to the line under it. */
+  .mission-head { flex-wrap: wrap; }
+  .mission-head > div:first-child { flex-basis: 100%; }
+  .mission-controls { margin-inline-start: auto; }
+  .job-row { flex-wrap: wrap; row-gap: 6px; }
+  .job-row > .job-row-text { flex-basis: calc(100% - 33px); }
+  .job-row > .chip { margin-inline-start: 32px; }
+  .job-row-time { margin-inline-start: auto; }
+}
 .disclosure { transition: rotate 200ms ease-out; }
 [aria-expanded="false"] > .disclosure { rotate: -90deg; }
 .mission-note, .mission-outcome { font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }

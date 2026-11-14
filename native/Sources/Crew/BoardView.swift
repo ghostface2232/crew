@@ -206,7 +206,7 @@ struct AgentOverview: View {
                 ViewThatFits(in: .horizontal) {
                     HStack(alignment: .top, spacing: WorkspaceStyle.cardGap) {
                         ForEach(agents, id: \.self) { agent in AgentCard(store: store, agent: agent) }
-                    }
+                    }.fixedSize(horizontal: false, vertical: true)
                     compactAgents
                 }
             }
@@ -272,8 +272,11 @@ private struct AgentCard: View {
                 Spacer(minLength: 8)
                 if store.usage == nil || store.usage?.source == "none" { AgentUsageView(store: store, agent: agent) }
             }
-            if let usage = store.usage, usage.source != "none" { AgentUsageView(store: store, agent: agent) }
-        }.frame(maxWidth: .infinity, alignment: .leading).card()
+            // Cards in a row share a height; usage sits at the bottom, so one bar lines up with the last of two.
+            if let usage = store.usage, usage.source != "none" {
+                AgentUsageView(store: store, agent: agent).frame(maxHeight: .infinity, alignment: .bottom)
+            }
+        }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).card()
     }
 }
 
@@ -313,12 +316,12 @@ struct MissionPanel: View {
                 if mission.looksFinished(jobs: store.state.jobs, now: store.now, lead: store.state.claude.first { $0.id == mission.owner }) {
                     Text("Looks finished").font(Typeface.caption).foregroundStyle(.secondary)
                 }
-                // Both controls share one 28pt hit area so their glyphs sit on the same center line.
-                HStack(spacing: 2) {
+                // Bordered circles, so each control shows its hit area; equal glyph frames keep them the same size.
+                HStack(spacing: 6) {
                     Button { expanded.toggle() } label: {
-                        Image(systemName: "chevron.down").font(.system(size: 12, weight: .semibold))
-                            .rotationEffect(.degrees(expanded ? 0 : -90)).frame(width: 28, height: 28).contentShape(Rectangle())
-                    }.buttonStyle(.plain).accessibilityLabel(expanded ? "Collapse mission" : "Expand mission").help(expanded ? "Collapse" : "Expand")
+                        Image(systemName: "chevron.down").font(.system(size: 11, weight: .semibold))
+                            .rotationEffect(.degrees(expanded ? 0 : -90)).frame(width: 16, height: 16)
+                    }.buttonStyle(.bordered).buttonBorderShape(.circle).accessibilityLabel(expanded ? "Collapse mission" : "Expand mission").help(expanded ? "Collapse" : "Expand")
                     if mission.state == "active" {
                         Menu {
                             Button("Mark done", systemImage: "checkmark.circle") { Task { await store.markDone(mission) } }
@@ -327,10 +330,10 @@ struct MissionPanel: View {
                                 .help("Stops tracking without marking done. Its jobs keep running.")
                                 .disabled(!store.connected || store.actions["dismiss:\(mission.id)"]?.locked == true)
                         } label: {
-                            Image(systemName: "ellipsis").font(Typeface.subheadline).frame(width: 28, height: 28).contentShape(Rectangle())
-                        }.menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize().help("Mission options")
+                            Image(systemName: "ellipsis").font(.system(size: 11, weight: .semibold)).frame(width: 16, height: 16)
+                        }.menuStyle(.button).buttonStyle(.bordered).buttonBorderShape(.circle).menuIndicator(.hidden).fixedSize().help("Mission options")
                     }
-                }.foregroundStyle(.secondary).padding(.trailing, -6)
+                }
             }
             if expanded {
                 ForEach(Array((mission.notes ?? []).enumerated()), id: \.offset) { _, note in
@@ -383,7 +386,7 @@ struct NeedsYouView: View {
                             }.font(Typeface.chip).foregroundStyle(.secondary).help(job.projectPath)
                             Spacer(minLength: 8)
                             Button("Details", systemImage: "arrow.up.right") { store.openJob(job.id) }
-                                .buttonStyle(.borderless).font(Typeface.caption)
+                                .buttonStyle(.bordered).controlSize(.small).font(Typeface.caption)
                         }
                         Text(job.title).font(Typeface.callout).foregroundStyle(.secondary).lineLimit(2).help(job.title)
                     }

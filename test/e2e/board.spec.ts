@@ -214,7 +214,7 @@ test('detail panel cancels, follows up, and escapes task text', async ({ page, r
   await drawer.getByRole('button', { name: 'Cancel Job' }).click();
   await expect(drawer.getByText('Cancelled', { exact: true }).first()).toBeVisible();
   const calls = await (await request.get('/__requests')).json();
-  expect(calls.find((call: { route: string }) => call.route.endsWith('/reply')).body).toEqual({ message: 'Check the narrow layout\n' });
+  expect(calls.find((call: { route: string }) => call.route.endsWith('/reply')).body).toEqual({ message: 'Check the narrow layout' });
   expect(calls.some((call: { route: string }) => call.route.endsWith('/cancel'))).toBe(true);
 });
 

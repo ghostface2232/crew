@@ -71,10 +71,10 @@ function FollowUp({ job }: { job: BoardJob }) {
           className="prominent"
           disabled={!draft.trim() || state.pending || board.getSnapshot().connection !== 'live'}
           onClick={async () => {
-            const message = draft;
+            const message = draft.trim();
             const sent = await actions.run(key, () => request(`/api/jobs/${job.id}/reply`, { message }), { once: false });
             // Text typed while sending stays for the next message.
-            if (sent && drafts.get(key) === message) setDraft('');
+            if (sent && drafts.get(key)?.trim() === message) setDraft('');
           }}
         >
           Send message
@@ -86,7 +86,7 @@ function FollowUp({ job }: { job: BoardJob }) {
 }
 
 /** JobDetailView in the app: status and close, then the job, its facts, results and controls. */
-export function JobDrawer({ id, state, close, openJob }: { id: string; state: Snapshot; close: () => void; openJob: (id: string) => void }) {
+export function JobDrawer({ id, state, close }: { id: string; state: Snapshot; close: () => void }) {
   const [detail, setDetail] = useState<BoardJob | null>(null);
   const [log, setLog] = useState<CrewEvent[]>([]);
   const [error, setError] = useState('');
@@ -120,7 +120,8 @@ export function JobDrawer({ id, state, close, openJob }: { id: string; state: Sn
   const live = state.connection === 'live';
   const facts: [string, string][] = job
     ? [
-        ['Agent', [NAMES[job.agent], job.model, job.effort && `${job.effort} effort`].filter(Boolean).join(' · ')],
+        // The model the session reported, else the configured one.
+        ['Agent', [NAMES[job.agent], job.resolvedModel ?? job.model, (job.resolvedEffort ?? job.effort) && `${job.resolvedEffort ?? job.effort} effort`].filter(Boolean).join(' · ')],
         ['Role', job.ask ? 'Question' : (ROLE_NAMES[job.kind] ?? job.kind)],
         ['Project', projectOf(job)],
         ['Duration', elapsed((job.endedAt ?? now) - job.createdAt)],
@@ -238,7 +239,7 @@ export function JobDrawer({ id, state, close, openJob }: { id: string; state: Sn
             )}
             {events.length > 0 && (
               <Section title="Activity" icon={Zap}>
-                <EventList events={events} openJob={openJob} />
+                <EventList events={events} />
               </Section>
             )}
             <footer className="detail-foot">

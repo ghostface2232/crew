@@ -148,7 +148,7 @@ A worker's worktree starts from the lead's `HEAD` and does not follow it. `reply
 
 A job whose worktree was discarded takes no further turn; ask a new question instead.
 
-From a terminal, `crew gc` lists orphan worktree directories, stale Git admin directories, and unused `crew-cx-*`/`crew-ag-*` branches across repositories Crew remembers. It changes nothing and reports whether each branch is merged into `HEAD`. Use `crew gc --apply` to remove orphan directories and prune metadata; add `--branches` to also delete listed branches, including unmerged ones. Active jobs and workspace operations are protected, owned worktrees are kept, and paths outside Crew's worktrees directory are refused. Cleanup notes remain on failed discards until gc can finish. See [04](04-implementation.md) section 2 for Windows preparation and prune safety.
+From a terminal, `crew gc` lists orphan worktree directories, stale Git admin directories, and unused `crew-cx-*`/`crew-ag-*` branches across repositories Crew remembers. It changes nothing and reports whether each branch is merged into `HEAD`. Use `crew gc --apply` to remove orphan directories and prune metadata; add `--branches` to also delete branches merged into `HEAD`. Unmerged branches are kept, with the exact `git branch -D <name>` command shown for manual removal. Active jobs and workspace operations are protected, owned worktrees are kept, and paths outside Crew's worktrees directory are refused. Jobs with incomplete cleanup refuse follow-ups, sync, and round changes until gc resolves the leftovers. Cleanup notes remain on failed discards until gc can finish. See [04](04-implementation.md) section 2 for Windows preparation and prune safety.
 
 ## 11. Questions from a worker to the lead
 

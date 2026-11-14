@@ -15,7 +15,7 @@ Usage:
   crew status            What each agent is doing, and recent jobs
   crew show <job>        Full result of one job
   crew cancel <job>      Stop a running job
-  crew gc [--apply] [--branches]  Preview leftovers; --apply cleans directories and metadata, --branches also deletes branches
+  crew gc [--apply] [--branches]  Preview leftovers; --apply cleans directories and metadata, --branches also deletes branches merged into HEAD
   crew board             Open the status board in the browser, signed in (--url prints the address instead)
   crew doctor            Check that everything Crew needs is in place
   crew install           Register the plugin with Claude Code and put crew on PATH

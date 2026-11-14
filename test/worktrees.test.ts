@@ -8,7 +8,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { CodexAdapter } from '../plugin/bridge/adapters/codex.ts';
 import { resolveConfig } from '../plugin/bridge/config.ts';
-import { commitAll, copyIncluded, createWorktree, detachLinks, dirtyCount, prepareRemoval, removeDirectory, removeWorktree } from '../plugin/bridge/git.ts';
+import { commitAll, copyIncluded, createWorktree, detachLinks, dirtyCount, removeDirectory, removeWorktree } from '../plugin/bridge/git.ts';
 import type { Job, JobCtl } from '../plugin/bridge/jobs.ts';
 import { buildPrompt } from '../plugin/bridge/prompts.ts';
 
@@ -297,9 +297,11 @@ const attribErrors = [
   { name: 'error output with a zero exit status', output: 'Access denied - child', failed: false, root: false },
   { name: 'a missing attrib executable', output: '', failed: true, root: false },
   { name: 'a missing root rather than an unmatched wildcard', output: 'File not found - root', failed: true, root: true },
+  { name: 'a hidden .git file', output: 'Not resetting hidden file - .git', failed: false, root: false },
+  { name: 'localized hidden file output', output: '숨김 파일을 다시 설정하지 않습니다 - .git', failed: true, root: false },
 ];
 for (const { name, output, failed, root } of attribErrors) {
-  test(`Windows preparation surfaces ${name}`, async (t) => {
+  test(`Windows removal proceeds despite attrib reporting ${name}`, async (t) => {
     const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-attrib-error-')));
     fs.writeFileSync(path.join(dir, 'child'), '');
     t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); fs.rmSync(dir, { recursive: true, force: true }); });
@@ -311,11 +313,7 @@ for (const { name, output, failed, root } of attribErrors) {
       return {} as any;
     });
     syncBuiltinESMExports();
-    await assert.rejects(prepareRemoval(dir, 'win32'), (err: any) => {
-      assert.ok(err.message.includes(output || 'spawn attrib ENOENT'));
-      if (failed) assert.equal(err, failure);
-      return true;
-    });
-    assert.ok(fs.existsSync(dir));
+    await removeDirectory(dir, 'win32');
+    assert.equal(fs.existsSync(dir), false);
   });
 }

@@ -64,6 +64,23 @@ async function settled(jobs: Jobs, job: Job): Promise<Job> {
   return job;
 }
 
+for (const operation of ['reply', 'sync', 'round'] as const) test(`incomplete cleanup prevents ${operation} from resuming work`, async (t) => {
+  const repo = tempRepo();
+  const { jobs, home, calls } = harness((ctl) => {
+    fs.appendFileSync(path.join(ctl.job.cwd, 'README.md'), 'changed\n');
+    ctl.done('done');
+  });
+  t.after(() => { jobs.flush(); fs.rmSync(home, { recursive: true, force: true }); fs.rmSync(repo, { recursive: true, force: true }); });
+  const job = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'edit' }));
+  const before = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: job.cwd, encoding: 'utf8' });
+  job.cleanupPending = [`directory ${job.cwd}`];
+  await assert.rejects(operation === 'round' ? jobs.round(job.id, 1, 'undo')
+    : jobs.reply(job.id, { message: 'again', sync: operation === 'sync' }), /cleanup.*crew gc/i);
+  assert.equal(job.state, 'done');
+  assert.equal(calls.length, 0);
+  assert.equal(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: job.cwd, encoding: 'utf8' }), before);
+});
+
 test('delegate runs in a worktree and commits the result on its branch', async () => {
   const repo = tempRepo();
   const { jobs } = harness((ctl) => {
@@ -1535,6 +1552,7 @@ test('Windows worktree removal recovers from a failed git removal and preserves 
     fs.rmSync(repo, { recursive: true, force: true });
   });
   const wt = await createWorktree(repo, 'cx-123abc', 'HEAD', home);
+  const admin = execFileSync('git', ['rev-parse', '--absolute-git-dir'], { cwd: wt.path, encoding: 'utf8' }).trim();
   const outside = path.join(repo, 'node_modules', '.bin');
   fs.mkdirSync(outside, { recursive: true });
   fs.writeFileSync(path.join(outside, 'tool'), 'keep me');
@@ -1542,7 +1560,6 @@ test('Windows worktree removal recovers from a failed git removal and preserves 
   fs.symlinkSync(path.dirname(outside), link, 'junction');
   const execFile = childProcess.execFile;
   let failures = 0;
-  let prunes = 0;
   t.mock.method(childProcess, 'execFile', (file: string, args: string[], options: object, callback: (err: Error | null, stdout: string, stderr: string) => void) => {
     if (file === 'attrib') return execFile(process.execPath, ['-e', ''], options, callback);
     if (file === 'git' && args[0] === 'worktree' && args[1] === 'remove') {
@@ -1550,29 +1567,31 @@ test('Windows worktree removal recovers from a failed git removal and preserves 
       assert.equal(fs.existsSync(link), false, 'links must be detached before Git deletes the tree');
       return execFile(process.execPath, ['-e', 'process.stderr.write("Permission denied"); process.exit(1)'], options, callback);
     }
-    if (file === 'git' && args[0] === 'worktree' && args[1] === 'prune') {
-      prunes++;
-      assert.equal(fs.existsSync(wt.path), false);
-      // Prune can leave locked metadata behind even with a successful exit status.
-      if (prunes === 1) return execFile('git', ['--version'], options, callback);
-      if (prunes === 2) return execFile(process.execPath, ['-e', 'process.exit(1)'], options, callback);
-    }
+    assert.ok(!(file === 'git' && args[0] === 'worktree' && args[1] === 'prune'));
     return execFile(file, args, options, callback);
   });
   const fsPromises = (await import('node:fs/promises')).default;
   const rm = fsPromises.rm;
   let removals = 0;
+  let adminRemovals = 0;
   t.mock.method(fsPromises, 'rm', (dir: string, options: Parameters<typeof rm>[1]) => {
-    assert.equal(dir, wt.path);
     assert.deepEqual(options, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-    removals++;
+    if (dir === admin) {
+      assert.equal(fs.existsSync(wt.path), false);
+      // A successful removal can leave metadata behind, and open handles can reject the next attempt.
+      if (++adminRemovals === 1) return Promise.resolve();
+      if (adminRemovals === 2) return Promise.reject(Object.assign(new Error('still busy'), { code: 'EBUSY' }));
+    } else {
+      assert.equal(dir, wt.path);
+      removals++;
+    }
     return rm(dir, options);
   });
   syncBuiltinESMExports();
   await removeWorktree(repo, wt, 'cx-123abc', home, 'win32');
   assert.equal(failures, 1);
   assert.equal(removals, 1);
-  assert.equal(prunes, 3);
+  assert.equal(adminRemovals, 3);
   assert.equal(fs.existsSync(wt.path), false);
   assert.equal(execFileSync('git', ['branch', '--list', wt.branch], { cwd: repo, encoding: 'utf8' }), '');
   assert.equal(execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: repo, encoding: 'utf8' }).includes(wt.path), false);
@@ -1791,8 +1810,8 @@ test('failed worktree removal keeps the Git error and only Windows falls back', 
     if (file === 'git' && args[0] === 'worktree' && args[1] === 'remove') {
       return execFile(process.execPath, ['-e', 'process.stderr.write("original removal failure"); process.exit(1)'], options, callback);
     }
-    if (keepRegistration && file === 'git' && args[0] === 'worktree' && args[1] === 'prune') {
-      return execFile('git', ['--version'], options, callback);
+    if (keepRegistration && file === 'git' && args[0] === 'worktree' && args[1] === 'list') {
+      return execFile(process.execPath, ['-e', 'process.stdout.write(JSON.parse(process.argv[1]))', JSON.stringify(`worktree ${wt.path}\0branch refs/heads/${wt.branch}\0\0`)], options, callback);
     }
     return execFile(file, args, options, callback);
   });

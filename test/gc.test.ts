@@ -7,7 +7,8 @@ import path from 'node:path';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import { resolveConfig } from '../plugin/bridge/config.ts';
-import { createWorktree, worktreePath } from '../plugin/bridge/git.ts';
+import { collectGarbage } from '../plugin/bridge/gc.ts';
+import { createWorktree, removeWorktree, worktreePath } from '../plugin/bridge/git.ts';
 import { Jobs } from '../plugin/bridge/jobs.ts';
 import type { Adapter, Job } from '../plugin/bridge/jobs.ts';
 import { describe, summarize } from '../plugin/bridge/render.ts';
@@ -84,9 +85,80 @@ for (const platform of ['darwin', 'win32'] as const) test(`gc dry run lists with
   assert.equal(fs.readFileSync(path.join(outside, 'tool'), 'utf8'), 'keep');
   assert.equal(fs.readFileSync(namedFile, 'utf8'), 'not a directory');
   assert.equal(git('branch', '--format=%(refname:short)'), branches);
-  await jobs.gc({ apply: true, branches: true });
-  assert.equal(git('branch', '--list', 'crew-*'), '');
+  const cleaned = await jobs.gc({ apply: true, branches: true });
+  assert.equal(git('branch', '--list', '--format=%(refname:short)', 'crew-*'), 'crew-ag-aabbcc');
+  assert.ok(cleaned.includes('Kept; not merged into HEAD. To delete manually: git branch -D crew-ag-aabbcc'));
 });
+
+test('gc preserves unowned registered worktrees and cleans missing metadata through a symlinked home', async (t) => {
+  const { home, repo, git, job } = fixture(t);
+  const alias = path.join(home, 'alias');
+  fs.symlinkSync(home, alias, 'junction');
+  const wt = await createWorktree(repo, 'cx-abcdef', 'HEAD', alias);
+  fs.writeFileSync(path.join(wt.path, 'uncommitted'), 'keep my work');
+  const missing = await createWorktree(repo, 'ag-112233', 'HEAD', alias);
+  const admin = git('-C', missing.path, 'rev-parse', '--absolute-git-dir');
+  fs.rmSync(missing.path, { recursive: true, force: true });
+  const result = await collectGarbage(alias, [job], () => false, { apply: true });
+  assert.ok(fs.existsSync(wt.path), result);
+  assert.equal(fs.readFileSync(path.join(wt.path, 'uncommitted'), 'utf8'), 'keep my work');
+  assert.ok(git('worktree', 'list', '--porcelain').includes(fs.realpathSync(wt.path)));
+  assert.ok(!fs.existsSync(admin), result);
+  assert.doesNotMatch(result, /Cleanup failed/);
+});
+
+test('gc protects an unlisted directory whose .git file points to existing admin metadata', async (t) => {
+  const { home, repo, git, jobs } = fixture(t);
+  const wt = await createWorktree(repo, 'cx-abcdef', 'HEAD', home);
+  const admin = git('-C', wt.path, 'rev-parse', '--absolute-git-dir');
+  const orphan = worktreePath(repo, 'ag-112233', home);
+  fs.mkdirSync(orphan);
+  fs.writeFileSync(path.join(orphan, '.git'), `gitdir: ${path.relative(orphan, admin)}\n`);
+  fs.writeFileSync(path.join(orphan, 'uncommitted'), 'keep my work');
+  const result = await jobs.gc({ apply: true });
+  assert.ok(fs.existsSync(orphan), result);
+  assert.equal(fs.readFileSync(path.join(orphan, 'uncommitted'), 'utf8'), 'keep my work');
+  assert.ok(fs.existsSync(admin));
+});
+
+for (const mode of ['fallback', 'failed fallback', 'branch failure', 'recorded admin'] as const) {
+  test(`Windows discard preserves unrelated missing worktree metadata during ${mode}`, async (t) => {
+    const { home, repo, git } = fixture(t, 'win32');
+    const wt = await createWorktree(repo, 'cx-abcdef', 'HEAD', home);
+    const admin = git('-C', wt.path, 'rev-parse', '--absolute-git-dir');
+    const outside = path.join(home, 'detached-drive');
+    git('worktree', 'add', '--detach', outside, 'HEAD');
+    const otherAdmin = git('-C', outside, 'rev-parse', '--absolute-git-dir');
+    const metadata = fs.readFileSync(path.join(otherAdmin, 'gitdir'), 'utf8');
+    fs.rmSync(outside, { recursive: true, force: true });
+    if (mode === 'recorded admin') {
+      wt.admin = admin;
+      fs.rmSync(wt.path, { recursive: true, force: true });
+      fs.unlinkSync(path.join(admin, 'gitdir'));
+    }
+    if (mode === 'branch failure') fs.writeFileSync(path.join(repo, '.git', 'refs', 'heads', `${wt.branch}.lock`), '');
+    const exec = childProcess.execFile;
+    t.mock.method(childProcess, 'execFile', (bin: string, args: string[], options: any, callback: any) => {
+      if (bin === 'attrib') return exec(process.execPath, ['-e', ''], options, callback);
+      if (bin === 'git' && args[1] === 'remove' && mode.includes('fallback')) {
+        return exec(process.execPath, ['-e', 'process.stderr.write("removal failed"); process.exit(1)'], options, callback);
+      }
+      return exec(bin, args, options, callback);
+    });
+    if (mode === 'failed fallback') t.mock.method(fs.promises, 'rm', async () => { throw new Error('still busy'); });
+    syncBuiltinESMExports();
+    const removing = removeWorktree(repo, wt, 'cx-abcdef', home, 'win32');
+    if (mode === 'failed fallback' || mode === 'branch failure') await assert.rejects(removing);
+    else await removing;
+    assert.ok(fs.existsSync(otherAdmin), 'unrelated missing worktree metadata must survive');
+    assert.equal(fs.readFileSync(path.join(otherAdmin, 'gitdir'), 'utf8'), metadata);
+    assert.ok(git('worktree', 'list', '--porcelain').includes(outside));
+    if (mode === 'fallback' || mode === 'recorded admin') {
+      assert.ok(!fs.existsSync(admin));
+      assert.ok(!git('worktree', 'list', '--porcelain').includes(wt.path));
+    }
+  });
+}
 
 for (const state of ['owned', 'active', 'discarding', 'changingRounds'] as const) {
   test(`gc leaves an ${state} job's directory, admin metadata and branch alone`, async (t) => {
@@ -282,8 +354,11 @@ test('gc can prune recorded Windows admin leftovers after Git has already delete
       fs.unlinkSync(path.join(admin, 'gitdir'));
       return exec(process.execPath, ['-e', 'process.stderr.write("original admin permission failure"); process.exit(1)'], options, callback);
     }
-    if (bin === 'git' && args[1] === 'prune' && keepAdmin) return exec('git', ['--version'], options, callback);
     return exec(bin, args, options, callback);
+  });
+  const rm = fs.promises.rm;
+  t.mock.method(fs.promises, 'rm', async (dir: any, options: any) => {
+    if (dir !== admin || !keepAdmin) await rm(dir, options);
   });
   syncBuiltinESMExports();
   await assert.rejects(jobs.discard(job.id), /original admin permission failure.*Git metadata remains/s);

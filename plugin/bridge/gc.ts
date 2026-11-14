@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { commonGitDir, git, isInside, prepareRemoval, removeDirectory, requireAdminDir, worktreePath } from './git.ts';
+import { commonGitDir, git, isInside, prepareRemoval, realpath, removeDirectory, requireAdminDir, worktreePath } from './git.ts';
 import type { Job } from './jobs.ts';
 
 const workerId = /^(cx|ag)-[0-9a-f]{6}$/;
@@ -22,7 +22,7 @@ async function names(dir: string): Promise<string[]> {
 
 function requireCrewPath(home: string, file: string): void {
   const trees = path.join(home, 'worktrees');
-  const rel = path.relative(trees, file);
+  const rel = path.relative(realpath(trees), realpath(file));
   if (!rel || rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)
       || !isInside(home, trees) || !isInside(trees, file)) {
     throw new Error(`Refusing to clean a path outside the Crew worktree directory: ${file}`);
@@ -33,7 +33,7 @@ function requireCrewPath(home: string, file: string): void {
 export async function collectGarbage(home: string, jobs: Job[], busy: (job: Job) => boolean,
   options: { apply?: boolean; branches?: boolean }, platform: NodeJS.Platform = process.platform): Promise<string> {
   const lines = [options.apply ? 'Crew gc: applying cleanup.' : 'Crew gc: dry run; nothing will be changed. Use --apply to clean up.'];
-  const key = (file: string) => platform === 'win32' ? path.resolve(file).toLowerCase() : path.resolve(file);
+  const key = (file: string) => platform === 'win32' ? realpath(file).toLowerCase() : realpath(file);
   const roots = [...new Set(jobs.map((job) => job.repo).filter((root): root is string => Boolean(root)))];
   for (const root of roots) {
     lines.push(`Repository: ${root}`);
@@ -56,6 +56,17 @@ export async function collectGarbage(home: string, jobs: Job[], busy: (job: Job)
         const entry = await fs.lstat(orphan);
         if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
         if (registered.has(key(orphan)) || owned(orphan)) continue;
+        const dotGit = path.join(orphan, '.git');
+        if ((await fs.lstat(dotGit).catch((err: NodeJS.ErrnoException) => {
+          if (err.code !== 'ENOENT') throw err;
+          return null;
+        }))?.isFile()) {
+          const admin = /^gitdir: (.+)$/m.exec(await fs.readFile(dotGit, 'utf8'))?.[1].trim();
+          if (admin && (await fs.stat(path.resolve(orphan, admin)).catch((err: NodeJS.ErrnoException) => {
+            if (err.code !== 'ENOENT') throw err;
+            return null;
+          }))?.isDirectory()) continue;
+        }
         lines.push(`  Directory: ${orphan}`);
         if (options.apply) {
           await removeDirectory(orphan, platform);
@@ -135,10 +146,11 @@ export async function collectGarbage(home: string, jobs: Job[], busy: (job: Job)
         if (owner && (owner.worktree || busy(owner))) continue;
         const merged = await git(root, ['merge-base', '--is-ancestor', branch, 'HEAD']).then(() => true, () => false);
         lines.push(`  Branch: ${branch} (${merged ? 'merged into HEAD' : 'not merged into HEAD'})`);
-        if (options.apply && options.branches) {
-          await git(root, ['branch', '-D', branch]);
+        if (!merged) lines.push(`    Kept; not merged into HEAD. To delete manually: git branch -D ${branch}`);
+        else if (options.apply && options.branches) {
+          await git(root, ['branch', '-d', branch]);
           lines.push('    Deleted.');
-        } else if (options.apply) lines.push('    Kept; add --branches to delete branches.');
+        } else if (options.apply) lines.push('    Kept; add --branches to delete merged branches.');
       }
       if (options.apply) for (const job of mine) {
         if (!job.cleanupPending || busy(job)) continue;

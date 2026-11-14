@@ -480,6 +480,7 @@ export class Jobs {
   async reply(id: string, input: { message?: string; decision?: 'approve' | 'deny'; request_id?: string; approved_by_user?: string; sync?: boolean | string }): Promise<Job> {
     if (this.collecting) throw new Error('Crew gc is running. Try again when it finishes.');
     const job = this.get(id);
+    if (job.cleanupPending) throw new Error(`Job ${id} has incomplete cleanup. Run crew gc to resolve it before continuing.`);
     if (this.changingRounds.has(id)) throw new Error(`Job ${id} is changing a round. Wait for it to finish.`);
     if (this.discarding.has(id)) throw new Error(`Job ${id} is being discarded.`);
     if (this.cancelling.has(id)) throw new Error(`Job ${id} is being cancelled.`);
@@ -760,6 +761,7 @@ export class Jobs {
   async round(id: string, turn: number, action: 'undo' | 'keep'): Promise<Job> {
     if (this.collecting) throw new Error('Crew gc is running. Try again when it finishes.');
     const job = this.get(id);
+    if (job.cleanupPending) throw new Error(`Job ${id} has incomplete cleanup. Run crew gc to resolve it before changing a round.`);
     if (!isTerminal(job)) throw new Error(`Job ${id} is still ${job.state}; wait for the turn to end before changing a round.`);
     if (this.discarding.has(id)) throw new Error(`Job ${id} is being discarded.`);
     if (this.changingRounds.has(id)) throw new Error(`Job ${id} is already changing a round.`);

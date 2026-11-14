@@ -38,7 +38,7 @@ crew status
 crew board
 ```
 
-`crew gc` previews orphan worktrees, Git metadata, and unused worker branches, including whether each branch is merged into `HEAD`. Use `crew gc --apply` to remove orphan directories and prune metadata; add `--branches` to delete the listed branches too, including unmerged ones. Active and owned worktrees are protected. Windows cleanup failures name their leftovers in job status and notes.
+`crew gc` previews orphan worktrees, Git metadata, and unused worker branches, including whether each branch is merged into `HEAD`. Use `crew gc --apply` to remove orphan directories and prune metadata; add `--branches` to delete only branches merged into `HEAD`. Unmerged branches are kept, with a `git branch -D <name>` command shown for manual removal. Active and owned worktrees are protected. Windows cleanup failures name their leftovers in job status and notes.
 
 The status board runs at http://127.0.0.1:47615. Open it with `crew board` or from the app, which sign it in; the daemon answers only requests that carry the secret in `~/.crew/token` ([docs/09-usage-presets-rounds.md](docs/09-usage-presets-rounds.md) section 12). Each command run with `/crew:run` appears as a single unit with its jobs grouped under it, and a line at the top lists anything waiting on you. Click a job to read its report, changed files, and activity, or to send it a follow-up. Settings on the board edits roles, the preset, and shared instructions.
 

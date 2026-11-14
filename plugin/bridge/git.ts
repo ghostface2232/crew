@@ -333,7 +333,10 @@ export async function prepareRemoval(dir: string, platform: NodeJS.Platform = pr
  */
 export async function removeEmptyLeftover(dir: string, home: string): Promise<boolean> {
   const worktrees = path.join(home, 'worktrees');
-  if (!isInside(worktrees, dir) || path.resolve(dir) === path.resolve(worktrees)) {
+  // Resolved, so a linked worktrees directory or a linked parent cannot lead the rmdir elsewhere.
+  const real = realpath(dir);
+  if (!isInside(worktrees, dir) || !isInside(realpath(home), realpath(worktrees)) || !isInside(realpath(worktrees), real)
+      || real === realpath(worktrees)) {
     throw new Error(`Refusing to remove ${dir}: it is outside the Crew worktree directory.`);
   }
   const entry = await fs.lstat(dir).catch((err: NodeJS.ErrnoException) => {

@@ -147,9 +147,9 @@ test('a job belongs to the project of the session that started it', async () => 
   const review = { target: { type: 'uncommittedChanges' as const }, mode: 'adversarial' as const };
   const own = await jobs.create({ kind: 'review', cwd: repo, project: '/work/site', review });
   const fallback = await jobs.create({ kind: 'review', cwd: repo, review });
-  assert.equal(own.project, '/work/site');
-  // Git prints forward slashes on Windows.
-  assert.equal(path.normalize(fallback.project), repo);
+  assert.equal(own.project, canonicalPath('/work/site'));
+  // Git prints forward slashes on Windows; the key is canonical either way.
+  assert.equal(fallback.project, canonicalPath(repo));
 });
 
 test('jobs persist the mission occurrence captured when they were requested', async (t) => {
@@ -329,7 +329,7 @@ test('jobs left running by a previous bridge are restored as failed but resumabl
   const restored = second.get(job.id);
   assert.equal(restored.state, 'failed');
   assert.equal(restored.sessionId, 'session-1');
-  assert.equal(path.normalize(restored.project), repo);
+  assert.equal(restored.project, canonicalPath(repo));
 });
 
 test('saved jobs get canonical project and root keys when they load', async () => {

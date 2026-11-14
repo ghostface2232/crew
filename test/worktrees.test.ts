@@ -365,3 +365,15 @@ test('removeEmptyLeftover removes only an empty directory inside the worktree di
   await assert.rejects(removeEmptyLeftover(worktrees, home), /outside the Crew worktree directory/);
   assert.ok(fs.existsSync(outside));
 });
+
+test('removeEmptyLeftover refuses a worktrees directory that links elsewhere', async (t) => {
+  const temp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-leftover-link-')));
+  t.after(() => fs.rmSync(temp, { recursive: true, force: true }));
+  const home = path.join(temp, 'home');
+  const outside = path.join(temp, 'outside', 'repo', 'cx-aaaaaa');
+  fs.mkdirSync(home);
+  fs.mkdirSync(outside, { recursive: true });
+  fs.symlinkSync(path.join(temp, 'outside'), path.join(home, 'worktrees'), 'junction');
+  await assert.rejects(removeEmptyLeftover(path.join(home, 'worktrees', 'repo', 'cx-aaaaaa'), home), /outside the Crew worktree directory/);
+  assert.ok(fs.existsSync(outside));
+});

@@ -116,6 +116,7 @@ export class Missions {
       stages.splice(1, 0, stage);
       stageIndex = 1;
     }
+    if (stages && stages.length > MAX_PLAN) throw new Error(`A mission plan has at most ${MAX_PLAN} steps.`);
     let id: string;
     do {
       id = `m-${randomBytes(3).toString('hex')}`;

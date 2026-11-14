@@ -4,11 +4,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
+import { canonicalPath } from '../plugin/bridge/config.ts';
 import { Missions, STAGES, STALE_MS } from '../plugin/bridge/missions.ts';
 import type { Mission } from '../plugin/bridge/missions.ts';
 
 const tempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'crew-missions-'));
-const input = { title: 'Build the feature', project: '/project/worktree', root: '/project' };
+// Canonical already, so stored keys equal these on every platform.
+const input = { title: 'Build the feature', project: canonicalPath('/project/worktree'), root: canonicalPath('/project') };
 
 test('plans allow repeats, advance to the next occurrence and insert stages after the current step', (t) => {
   const { home, missions } = harness(t);
@@ -337,8 +339,8 @@ test('what is saved keeps the last finished missions of every project, by when t
   const saved = missions.saved();
   assert.ok(saved.includes(open));
   // 100 overall (all from the busy project) plus the two that ended last in the quiet one.
-  assert.equal(saved.filter((m) => m.root === '/busy').length, 100);
-  assert.deepEqual(saved.filter((m) => m.root === '/quiet').map((m) => m.title).sort(), ['quiet 1', 'quiet 2']);
+  assert.equal(saved.filter((m) => m.root === canonicalPath('/busy')).length, 100);
+  assert.deepEqual(saved.filter((m) => m.root === canonicalPath('/quiet')).map((m) => m.title).sort(), ['quiet 1', 'quiet 2']);
 });
 
 test('a stored record that is not a mission is refused, since records are rendered on the board', (t) => {
@@ -399,6 +401,8 @@ test('jumping ahead drops the skipped steps, and a plan has at most thirty steps
   assert.deepEqual(mission.stages, ['implement', 'final']);
   assert.equal(mission.stageIndex, 1);
   assert.throws(() => missions.start({ ...input, title: 'Too long', stages: Array(31).fill('fix') }), /at most 30/);
+  // An inserted starting stage counts too; a 31-step plan would not load again.
+  assert.throws(() => missions.start({ ...input, title: 'Too long', stages: Array(30).fill('plan'), stage: 'fix' }), /at most 30/);
   const full = missions.start({ ...input, title: 'Full', stages: Array(30).fill('fix') });
   assert.throws(() => missions.update(full.id, { stage: 'polish' }), /at most 30/);
   assert.equal(full.stages!.length, 30);
@@ -407,12 +411,12 @@ test('jumping ahead drops the skipped steps, and a plan has at most thirty steps
 test('saved missions get canonical project keys when they load', (t) => {
   const { home, missions } = harness(t);
   const mission = missions.start({ ...input, project: '/project/x/../worktree/', root: '/project/' });
-  assert.equal(mission.project, '/project/worktree');
-  assert.equal(mission.root, '/project');
+  assert.equal(mission.project, canonicalPath('/project/worktree'));
+  assert.equal(mission.root, canonicalPath('/project'));
   missions.flush();
   const file = path.join(home, 'missions.json');
   const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
   saved.missions[0].project = '/project/worktree/';
   fs.writeFileSync(file, JSON.stringify(saved));
-  assert.equal(new Missions(home, () => {}).get(mission.id).project, '/project/worktree');
+  assert.equal(new Missions(home, () => {}).get(mission.id).project, canonicalPath('/project/worktree'));
 });

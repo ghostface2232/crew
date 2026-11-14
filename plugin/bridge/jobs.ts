@@ -730,6 +730,8 @@ export class Jobs {
     if (!this.onlyDirectoryLeft(job) || this.collecting || this.discarding.has(job.id) || this.changingRounds.has(job.id)
         || this.snapshots.has(job.id)) return false;
     const worktree = job.worktree!;
+    // Shares discard's reservation, so a discard, reply, round change or gc cannot start on this job meanwhile.
+    this.discarding.add(job.id);
     try {
       const listed = (await git(job.repo!, ['worktree', 'list', '--porcelain', '-z'])).split('\0');
       // A directory Git still lists is for crew gc, which prunes the registration too.
@@ -737,6 +739,8 @@ export class Jobs {
       if (!await removeEmptyLeftover(worktree.path, this.home)) return false;
     } catch {
       return false;
+    } finally {
+      this.discarding.delete(job.id);
     }
     if (job.worktree === worktree) {
       delete job.cleanupPending;

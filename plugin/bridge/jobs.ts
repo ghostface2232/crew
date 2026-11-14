@@ -335,6 +335,8 @@ function exchanged(job: Job, from: ExchangeEntry['from'], text: string): void {
   job.exchange = [...(job.exchange ?? []), entry].slice(-KEEP_EXCHANGE);
 }
 const KEEP_JOBS = 200;
+/** Unacknowledged news keeps a finished job past the history limit, but not forever: a lead that never echoed it is gone. */
+const UNREAD_KEEP_MS = 7 * 24 * 60 * 60_000;
 const KEEP_EVENTS = 5000;
 
 /**
@@ -1482,7 +1484,7 @@ export class Jobs {
   private save(): void {
     let history = 0;
     const keep = this.list().filter((job) =>
-      job.worktree || !isTerminal(job) || unread(job).length > 0 || (job.mission !== undefined && this.hooks.keepsMission?.(job.mission)) || history++ < KEEP_JOBS,
+      job.worktree || !isTerminal(job) || (unread(job).length > 0 && Date.now() - (job.endedAt ?? 0) < UNREAD_KEEP_MS) || (job.mission !== undefined && this.hooks.keepsMission?.(job.mission)) || history++ < KEEP_JOBS,
     );
     const file = path.join(this.home, 'jobs.json');
     fs.writeFileSync(`${file}.tmp`, JSON.stringify({ seq: this.seq, jobs: keep, delivery: this.delivery.state }));
@@ -1537,7 +1539,12 @@ export class Jobs {
       this.jobs.set(job.id, job);
       if (job.kind === 'review') this.dropSnapshot(job);
     }
-    this.flush();
+    try {
+      this.flush();
+    } catch (err) {
+      // The daemon must still start; the state is in memory and the next change saves it again.
+      console.error(`crew: could not save jobs at startup: ${(err as Error).message}`);
+    }
     // No turn survives a restart, so neither does any scratch.
     this.removeScratch(path.join(this.home, 'scratch'));
     // Evidence lives as long as its job's record.

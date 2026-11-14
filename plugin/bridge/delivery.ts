@@ -14,6 +14,8 @@ export const OFFER_ITEMS = 8;
 export const OFFER_MS = 30_000;
 export const WATCH_MS = 60_000;
 export const WATCH_REPLACE_MS = 15_000;
+/** A watcher that has not beaten for this long died without releasing its lease, so another may take over. */
+export const WATCH_SILENT_MS = 25_000;
 export const HOOK_SECONDS = 86_400;
 const KEEP_RECEIPTS = 500;
 
@@ -34,7 +36,7 @@ export interface News {
 interface Item { jobId: string; newsSeq: number }
 interface Receipt { session: string; items: Item[]; text: string; acknowledged?: boolean; at?: number }
 interface Lease { generation: string; expiresAt: number }
-interface Watch extends Lease { deadline: number }
+interface Watch extends Lease { deadline: number; beat: number }
 export interface DeliveryState {
   receipts: Record<string, Receipt>;
   offering: Record<string, Lease>;
@@ -75,8 +77,9 @@ export function deliveryPosition(job: Job): void {
 
 export function addNews(job: Job, kind: News['kind'], reason: string, refs: { question?: string; request?: string } = {}): void {
   job.newsSeq = (job.newsSeq ?? 0) + 1;
+  // A job no lead session owns (one started from the board) has no one to deliver to; the board shows it already.
   (job.news ??= []).push({ seq: job.newsSeq, eventSeq: job.seq, kind, state: job.state, turn: job.turns,
-    reason: clipped(reason, 600), ...refs, acked: false, offers: 0 });
+    reason: clipped(reason, 600), ...refs, acked: !job.lead, offers: 0 });
   deliveryPosition(job);
 }
 
@@ -140,8 +143,8 @@ export class Delivery {
     leadSession(session);
     if (!Number.isFinite(deadline) || deadline <= now || deadline > now + HOOK_SECONDS * 1000) throw new Error('Invalid watcher deadline.');
     const current = this.watching.get(session);
-    if (current && current.expiresAt > now && current.deadline - now > WATCH_REPLACE_MS) return null;
-    const watch = { generation: randomUUID(), deadline, expiresAt: Math.min(deadline, now + WATCH_MS) };
+    if (current && current.expiresAt > now && now - current.beat < WATCH_SILENT_MS && current.deadline - now > WATCH_REPLACE_MS) return null;
+    const watch = { generation: randomUUID(), deadline, expiresAt: Math.min(deadline, now + WATCH_MS), beat: now };
     this.watching.set(session, watch);
     this.changed();
     return { ...watch };
@@ -156,6 +159,7 @@ export class Delivery {
   heartbeat(session: string, generation: string, now = Date.now()): Watch {
     const watch = this.watcher(session, generation, now);
     watch.expiresAt = Math.min(watch.deadline, now + WATCH_MS);
+    watch.beat = now;
     return { ...watch };
   }
 
@@ -175,7 +179,7 @@ export class Delivery {
     if (options.automatic && active?.expiresAt > now) return null;
     const candidates = this.pending(session, options.ids).filter(({ news }) => !options.automatic || news.offers < 2);
     const receipt = randomUUID();
-    const suffix = `\nReceipt: ${receipt}\nPass ack: "${receipt}" with your next Crew call (or an array for several receipts). Reading this is not an ACK.`;
+    const suffix = `\nReceipt: ${receipt}\nPass ack: "${receipt}" with your next Crew call (or an array for several receipts); with nothing else to do, call status with it now. Reading this is not an ACK.`;
     let text = 'Crew news (snapshots; use status with job_id to read the current job):';
     const selected: typeof candidates = [];
     for (const item of candidates) {
@@ -190,6 +194,7 @@ export class Delivery {
     const items = selected.map(({ job, news }) => ({ jobId: job.id, newsSeq: news.seq }));
     const previous = this.state.offering[session];
     const counts = selected.map(({ news }) => news.offers);
+    const before = { ...this.state.receipts };
     this.prune(now);
     this.state.receipts[receipt] = { session, items, text, at: now };
     this.state.offering[session] = { generation: receipt, expiresAt: now + OFFER_MS };
@@ -197,7 +202,8 @@ export class Delivery {
     try {
       this.save();
     } catch (error) {
-      delete this.state.receipts[receipt];
+      // Undo the prune too: a receipt dropped by an offer that was never saved must still be echoable.
+      this.state.receipts = Object.assign(Object.create(null), before);
       if (previous) this.state.offering[session] = previous;
       else delete this.state.offering[session];
       selected.forEach(({ news }, i) => { news.offers = counts[i]; });
@@ -219,23 +225,27 @@ export class Delivery {
     }
   }
 
-  ack(session: string, value: unknown): void {
+  /** Returns the receipt ids it could not apply: unknown, another session's, or for news this session no longer owns. */
+  ack(session: string, value: unknown): string[] {
     leadSession(session);
     const ids = typeof value === 'string' ? [value] : value;
     if (!Array.isArray(ids) || !ids.length || ids.length > 100 || ids.some((id) => typeof id !== 'string')) throw new Error('ack must be a receipt id or an array of receipt ids.');
-    const receipts = [...new Set<string>(ids)].map((id) => {
-      const receipt = this.state.receipts[id];
-      if (!receipt || receipt.session !== session) throw new Error('Unknown receipt or wrong lead session.');
-      return receipt;
-    });
-    const changed = new Map<Job, { ackedSeq?: number; delivered: number; acked: boolean[] }>();
+    // One pruned or mistyped id must not block the valid ones beside it; the unknown ones are reported back.
     const jobs = new Map(this.jobs().map((job) => [job.id, job]));
-    // Validate the entire request before changing any position. Previously ACKed receipts survive history pruning.
+    // A receipt applies whole or not at all. Previously ACKed receipts survive history pruning.
+    const fits = (receipt: Receipt | undefined) => receipt?.session === session && (receipt.acknowledged || receipt.items.every((item) => {
+      const job = jobs.get(item.jobId);
+      return job?.lead === session && Number.isSafeInteger(item.newsSeq) && item.newsSeq >= 1 && item.newsSeq <= (job.newsSeq ?? 0) && Boolean(job.news?.some((news) => news.seq === item.newsSeq));
+    }));
+    const unique = [...new Set<string>(ids)];
+    const ignored = unique.filter((id) => !fits(this.state.receipts[id]));
+    const receipts = unique.filter((id) => !ignored.includes(id)).map((id) => this.state.receipts[id]);
+    if (!receipts.length) throw new Error('Unknown receipt, another session\'s, or for news this session no longer owns.');
+    const changed = new Map<Job, { ackedSeq?: number; delivered: number; acked: boolean[] }>();
     for (const receipt of receipts.filter((r) => !r.acknowledged)) {
       for (const item of receipt.items) {
-        const job = jobs.get(item.jobId);
-        if (!job || job.lead !== session || !Number.isSafeInteger(item.newsSeq) || item.newsSeq < 1 || item.newsSeq > (job.newsSeq ?? 0) || !job.news?.some((news) => news.seq === item.newsSeq)) throw new Error('Receipt does not match the job revision or owner.');
-        changed.set(job, { ackedSeq: job.ackedSeq, delivered: job.delivered, acked: job.news.map((news) => news.acked) });
+        const job = jobs.get(item.jobId)!;
+        changed.set(job, { ackedSeq: job.ackedSeq, delivered: job.delivered, acked: job.news!.map((news) => news.acked) });
       }
     }
     const acknowledgements = receipts.map((r) => r.acknowledged);
@@ -260,5 +270,28 @@ export class Delivery {
       throw error;
     }
     this.changed();
+    return ignored;
+  }
+
+  /**
+   * The session that just acted on these jobs through a Crew tool owns their news from now on, as the hook that
+   * saw the call reports it. This covers jobs started from the board, a lead after /clear, and a lead whose MCP
+   * server could not name its session. Already-delivered news is not handed over again.
+   */
+  adopt(session: string, ids: unknown): string[] {
+    leadSession(session);
+    if (!Array.isArray(ids) || ids.length > 50 || ids.some((id) => typeof id !== 'string')) throw new Error('job_ids must be a list of job ids.');
+    const jobs = this.jobs().filter((job) => ids.includes(job.id) && job.lead !== session);
+    if (!jobs.length) return [];
+    const before = jobs.map((job) => job.lead);
+    for (const job of jobs) job.lead = session;
+    try {
+      this.save();
+    } catch (error) {
+      jobs.forEach((job, i) => { job.lead = before[i]; });
+      throw error;
+    }
+    this.changed();
+    return jobs.map((job) => job.id);
   }
 }

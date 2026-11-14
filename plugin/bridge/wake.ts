@@ -3,7 +3,9 @@ import { fileURLToPath } from 'node:url';
 import { api } from './client.ts';
 import { HOOK_SECONDS } from './delivery.ts';
 
-interface HookInput { session_id?: string; agent_id?: string; hook_event_name?: string; stop_hook_active?: boolean }
+interface HookInput { session_id?: string; agent_id?: string; hook_event_name?: string; stop_hook_active?: boolean; tool_response?: unknown }
+
+const JOB_ID = /\[((?:cx|ag)-[0-9a-f]{6})\]/g;
 interface HookOutput { code: number; stderr?: string; stdout?: string }
 
 /** The transport is injectable so crash/retry paths can be checked without a live Claude session. */
@@ -20,13 +22,25 @@ export async function leadHook(input: HookInput, mode: string, request: typeof a
     const { offer } = await send('offer', { automatic: true });
     return offer ? { code: 2, stderr: offer.text } : { code: 0 };
   }
+  // The hook knows the session for certain; the lead's MCP server may not (an older server, /clear, no session
+  // variable). So the session whose Crew call just showed these jobs takes them over, before it watches for news.
+  const shown = [...new Set([...JSON.stringify(input.tool_response ?? '').matchAll(JOB_ID)].map((m) => m[1]))].slice(0, 50);
+  if (shown.length) await send('adopt', { job_ids: shown }).catch(() => {});
   let generation: string | undefined;
   let backoff = 250;
   try {
     while (Date.now() < deadline) {
       try {
         if (!generation) {
-          const { watch } = await send('watch', { deadline });
+          let watch;
+          try {
+            ({ watch } = await send('watch', { deadline }));
+          } catch (error) {
+            // No daemon, or one without delivery: nothing to watch, and the next Stop or Crew call arms again.
+            // Retrying here would leave one process per hook alive for a day.
+            if (!/Watcher lease/.test(String(error))) return { code: 0 };
+            throw error;
+          }
           if (!watch) return { code: 0 };
           generation = watch.generation;
         }

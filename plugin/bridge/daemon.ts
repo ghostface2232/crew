@@ -485,7 +485,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     const body = await readJson(req);
     const id = missionRoute[1];
     if (body.done && body.abandoned) throw new HttpError(400, 'pass done or abandoned, not both');
-    if (body.done || body.abandoned) return missions.finish(id, { outcome: text(body.outcome, 'outcome'), record: text(body.record, 'record'), abandoned: Boolean(body.abandoned) });
+    if (body.done || body.abandoned) return missions.finish(id, { outcome: text(body.outcome, 'outcome'), record: text(body.record, 'record'), abandoned: Boolean(body.abandoned), reopen: body.reopen === true });
     if (body.note !== undefined) return missions.note(id, text(body.note, 'note') ?? '');
     return missions.update(id, { stage: stage(body.stage), stages: body.stages, title: text(body.title, 'title') });
   }
@@ -538,10 +538,16 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       if (typeof session !== 'string' || !session.trim() || session.length > 200) throw new HttpError(400, 'A lead session id is required.');
       const delivery = jobs.delivery;
       switch (pathname.slice('/api/lead/'.length)) {
-        case 'ack':
-          delivery.ack(session, body.ack);
+        case 'ack': {
+          const ignored = delivery.ack(session, body.ack);
           for (const job of jobs.list().filter((job) => job.lead === session)) broadcast('job', view(job));
-          return {};
+          return { ignored };
+        }
+        case 'adopt': {
+          const adopted = delivery.adopt(session, body.job_ids);
+          for (const id of adopted) broadcast('job', view(jobs.get(id)));
+          return { adopted };
+        }
         case 'context': return { text: delivery.context(session) };
         case 'watch': return { watch: delivery.watch(session, body.deadline) };
         case 'heartbeat': return { watch: delivery.heartbeat(session, body.generation) };

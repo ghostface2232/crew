@@ -698,13 +698,18 @@ async function handle(msg: any): Promise<void> {
         // the call it rode on (a delegate, a reply): it is reported and the receipts stay unacknowledged.
         let ackNote = '';
         if (args.ack !== undefined) {
-          await api('POST', '/api/lead/ack', { session: SESSION, ack: args.ack }).catch((err) => {
+          await api('POST', '/api/lead/ack', { session: SESSION, ack: args.ack }).then(({ ignored }) => {
+            if (ignored?.length) ackNote = `\n\nack not applied for ${ignored.join(', ')}: unknown, or for news this session no longer owns.`;
+          }, (err) => {
             ackNote = `\n\nack not applied: ${String((err as Error).message ?? err).split('\n')[0]}. The news stays unacknowledged; read it with status.`;
           });
         }
         let text = clipped(await callTool(params.name, args, ctx), LEAD_TEXT_BYTES) + ackNote;
         if (SESSION && ctx.jobs.length) {
-          const { offer } = await api('POST', '/api/lead/offer', { session: SESSION, job_ids: [...new Set(ctx.jobs.map((job) => job.id))], bytes: 4000 });
+          // The call has already taken effect; failing it now over a missing offer would invite a duplicate retry.
+          // The news stays in the ledger for the watcher, the Stop hook, or the next call.
+          const { offer } = await api('POST', '/api/lead/offer', { session: SESSION, job_ids: [...new Set(ctx.jobs.map((job) => job.id))], bytes: 4000 })
+            .catch(() => ({ offer: null }));
           if (offer) text += `\n\n${offer.text}`;
         }
         // The limit is on text, which is what grew without bound; evidence images keep their own path as before.

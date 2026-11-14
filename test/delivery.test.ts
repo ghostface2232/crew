@@ -107,15 +107,14 @@ test('ACK validates session and receipt and never consumes a newer or omitted it
   const old = h.delivery.offer('lead')!;
   h.jobs.ask(job.id, 'new');
   assert.throws(() => h.delivery.ack('other', old.receipt), /session/);
-  assert.throws(() => h.delivery.ack('lead', [old.receipt, 'unknown']), /receipt/);
-  assert.equal(job.ackedSeq, 0);
-  h.delivery.ack('lead', old.receipt);
+  // An unknown id beside a valid one is reported, not allowed to block it.
+  assert.deepEqual(h.delivery.ack('lead', [old.receipt, 'unknown']), ['unknown']);
   assert.deepEqual(unread(job).map((n) => n.seq), [2]);
   h.delivery.ack('lead', old.receipt);
   assert.equal(job.ackedSeq, 1);
   const next = h.delivery.offer('lead')!;
   h.delivery.state.receipts[next.receipt].items[0].newsSeq = 999999;
-  assert.throws(() => h.delivery.ack('lead', next.receipt), /revision/);
+  assert.throws(() => h.delivery.ack('lead', next.receipt), /no longer owns/);
   assert.equal(job.ackedSeq, 1);
 });
 
@@ -130,8 +129,15 @@ test('board jobs remain unowned and another session cannot offer the owner news'
   assert.deepEqual(offer.items.map((i) => i.jobId), [owner.id]);
   h.delivery.ack('owner', offer.receipt);
   assert.equal(board.lead, undefined);
-  assert.equal(board.ackedSeq, 0);
-  assert.ok(board.seq > board.delivered);
+  // No lead owns it, so its news is settled at once instead of waiting for an echo that cannot come.
+  assert.deepEqual(unread(board), []);
+  assert.equal(board.delivered, board.seq);
+
+  // A session that acts on the job through a Crew call takes it over; its next news goes to that session.
+  assert.deepEqual(h.delivery.adopt('owner', [board.id, owner.id]), [board.id]);
+  h.jobs.ask(board.id, 'after adoption');
+  assert.deepEqual(h.delivery.offer('owner', { ids: [board.id] })!.items.map((i) => i.jobId), [board.id]);
+  assert.throws(() => h.delivery.adopt('owner', 'cx-1' as never), /job_ids/);
 });
 
 test('restart recovery produces persisted failure news and preserves receipts and attempt budgets', async (t) => {
@@ -235,7 +241,7 @@ test('report pages reconstruct escaped Unicode text without splitting surrogate 
   assert.equal(restored, text);
 });
 
-test('watch hook ignores tool output, waits after losing an offer, and releases on exit', async () => {
+test('watch hook adopts the jobs its Crew call showed, waits after losing an offer, and releases on exit', async () => {
   const calls: string[] = [];
   let polls = 0;
   const request = (async (_method: string, route: string, body: any) => {
@@ -245,8 +251,14 @@ test('watch hook ignores tool output, waits after losing an offer, and releases 
     if (route.endsWith('/offer')) return { offer: ++polls === 1 ? null : { text: 'news' } };
     return {};
   }) as typeof api;
-  const result = await leadHook({ session_id: 'lead', hook_event_name: 'PostToolUse' }, 'watch', request);
+  const adopted: unknown[] = [];
+  const recording = (async (method: 'GET' | 'POST', route: string, body: any) => {
+    if (route.endsWith('/adopt')) adopted.push(body.job_ids);
+    return request(method, route, body);
+  }) as typeof api;
+  const result = await leadHook({ session_id: 'lead', hook_event_name: 'PostToolUse', tool_response: [{ type: 'text', text: '[cx-0a1b2c] Codex · review · DONE\n[cx-0a1b2c] again, [ag-ffffff]' }] }, 'watch', recording);
   assert.deepEqual(result, { code: 2, stderr: 'news' });
+  assert.deepEqual(adopted, [['cx-0a1b2c', 'ag-ffffff']]);
   assert.equal(polls, 2);
   assert.equal(calls.at(-1), '/api/lead/release');
   assert.ok(!calls.some((call) => call.includes('ack')));
@@ -311,4 +323,23 @@ test('the receipt store stays bounded, dropping acknowledged receipts before rec
   // Only acknowledged receipts were dropped, oldest first; every unacknowledged one is still there to echo.
   assert.equal(kept.filter((id) => id.startsWith('old-') && !delivery.state.receipts[id].acknowledged).length, 300);
   assert.ok(!kept.includes('old-0') && kept.includes('old-598'));
+});
+
+test('a watcher with no daemon to talk to ends at once instead of living out its hook', async () => {
+  let calls = 0;
+  const down = (async () => { calls++; throw new Error('connect ECONNREFUSED 127.0.0.1:47615'); }) as typeof api;
+  const started = Date.now();
+  assert.deepEqual(await leadHook({ session_id: 'lead', hook_event_name: 'Stop' }, 'watch', down, Date.now() + 60_000), { code: 0 });
+  assert.ok(Date.now() - started < 1000);
+  assert.equal(calls, 1);
+});
+
+test('a watcher that died without releasing is replaced once it stops beating', () => {
+  const delivery = new Delivery(() => [], () => {});
+  const now = Date.now();
+  const first = delivery.watch('lead', now + 3_600_000, now)!;
+  assert.equal(delivery.watch('lead', now + 3_600_000, now + 10_000), null, 'a live watcher is not duplicated');
+  const second = delivery.watch('lead', now + 3_600_000, now + 30_000);
+  assert.ok(second && second.generation !== first.generation);
+  assert.throws(() => delivery.heartbeat('lead', first.generation, now + 31_000), /expired or replaced/);
 });

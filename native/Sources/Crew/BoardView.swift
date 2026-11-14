@@ -5,6 +5,7 @@ struct BoardView: View {
     var openSettings: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var searchFocused: Bool
+    @State private var wide = false
     var body: some View {
         NavigationSplitView {
             ProjectSidebar(store: store, openSettings: openSettings)
@@ -33,46 +34,62 @@ struct BoardView: View {
         .sheet(isPresented: $store.showingDispatch) { DispatchView(store: store) }
     }
     private var page: some View {
-                ScrollView {
-                    // Lazy so a long history builds only the panels on screen.
+        ScrollView {
+            // Lazy so a long history builds only the panels on screen.
+            LazyVStack(alignment: .leading, spacing: WorkspaceStyle.cardGap) {
+                if !store.connected { connectionBanner }
+                heading
+                if store.state.pendingCount > 0 && store.selection != "needs" && !store.project.isEmpty { attentionBanner }
+                if store.selection == "needs" { NeedsYouView(store: store) }
+                else if store.selection == "activity" { activity }
+                else { workspace }
+            }
+            .onGeometryChange(for: Bool.self) { $0.size.width >= Self.twoColumnWidth } action: { wide = $0 }
+            .padding(.horizontal, 40).padding(.top, 12).padding(.bottom, 40)
+            .frame(maxWidth: 1280).frame(maxWidth: .infinity)
+        }
+        .id(store.selection ?? "overview")
+        // A crossfade layers two full pages at once; only the incoming page animates.
+        .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 6)), removal: .identity))
+        // Tied to the page itself, so tabs, the sidebar and keyboard shortcuts all get the same entrance;
+        // a withAnimation in the AppKit tab control's action did not reach this view.
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: store.selection)
+        // The page keeps scrolling and working beside the open panel. A click on it that no control takes
+        // closes the panel; one on another job opens that job instead. The sidebar is another column.
+        .contentShape(Rectangle())
+        .gesture(TapGesture().onEnded { store.selectedJob = nil }, including: store.selectedJob != nil ? .all : .subviews)
+        .overlay(alignment: .trailing) {
+            if let id = store.selectedJob {
+                let shape = RoundedRectangle(cornerRadius: WorkspaceStyle.panelRadius)
+                JobDetailView(store: store, id: id).id(id)
+                    .frame(width: 420).background(WorkspaceStyle.surface, in: shape)
+                    .clipShape(shape)
+                    .overlay(shape.strokeBorder(WorkspaceStyle.hairline))
+                    .shadow(color: .black.opacity(0.14), radius: 26, x: -8, y: 8)
+                    .padding(.trailing, WorkspaceStyle.windowInset).padding(.bottom, WorkspaceStyle.windowInset)
+                    .transition(reduceMotion ? .opacity : .move(edge: .trailing).combined(with: .opacity))
+                    .zIndex(1)
+            }
+        }
+        .animation(reduceMotion ? nil : .smooth(duration: 0.26, extraBounce: 0), value: store.selectedJob != nil)
+    }
+    /// The content width from which cards pair up, so each column still fits a mission's header.
+    private nonisolated static let twoColumnWidth: CGFloat = 1000
+    /// The page's cards in two columns on a wide page, each stacked on its own, so a card that grows moves only
+    /// the cards below it in its own column. Cards alternate left and right in order and keep their column: filling
+    /// the shorter column instead would move cards across whenever one opens or closes. A lone card keeps the full width.
+    @ViewBuilder private func masonry<Card: View>(_ tiles: [Tile], @ViewBuilder card: @escaping (Tile) -> Card) -> some View {
+        if wide && tiles.count > 1 {
+            HStack(alignment: .top, spacing: WorkspaceStyle.cardGap) {
+                ForEach(0..<2, id: \.self) { column in
                     LazyVStack(alignment: .leading, spacing: WorkspaceStyle.cardGap) {
-                        if !store.connected { connectionBanner }
-                        heading
-                        if store.state.pendingCount > 0 && store.selection != "needs" && !store.project.isEmpty { attentionBanner }
-                        if store.selection == "needs" { NeedsYouView(store: store) }
-                        else if store.selection == "activity" { activity }
-                        else { workspace }
-                    }
-                    .padding(.horizontal, 40).padding(.top, 12).padding(.bottom, 40)
-                    .frame(maxWidth: 1280).frame(maxWidth: .infinity)
-                }
-                .id(store.selection ?? "overview")
-                // A crossfade layers two full pages at once; only the incoming page animates.
-                .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 6)), removal: .identity))
-                // Tied to the page itself, so tabs, the sidebar and keyboard shortcuts all get the same entrance;
-                // a withAnimation in the AppKit tab control's action did not reach this view.
-                .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: store.selection)
-                .disabled(store.selectedJob != nil)
-                .accessibilityHidden(store.selectedJob != nil)
-                // A click anywhere on the page beside the open panel closes it. The sidebar is another column and is not covered.
-                .overlay {
-                    if store.selectedJob != nil {
-                        Color.clear.contentShape(Rectangle()).onTapGesture { store.selectedJob = nil }.accessibilityHidden(true)
-                    }
-                }
-                .overlay(alignment: .trailing) {
-                if let id = store.selectedJob {
-                    JobDetailView(store: store, id: id).id(id)
-                        .frame(width: 420).background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: WorkspaceStyle.panelRadius))
-                        .clipShape(RoundedRectangle(cornerRadius: WorkspaceStyle.panelRadius))
-                        .overlay(RoundedRectangle(cornerRadius: WorkspaceStyle.panelRadius).strokeBorder(WorkspaceStyle.hairline))
-                        .shadow(color: .black.opacity(0.14), radius: 26, x: -8, y: 8)
-                        .padding(.trailing, 16).padding(.bottom, 16)
-                        .transition(reduceMotion ? .opacity : .move(edge: .trailing).combined(with: .opacity))
-                        .zIndex(1)
+                        ForEach(stride(from: column, to: tiles.count, by: 2).map { tiles[$0] }) { card($0) }
+                    }.frame(maxWidth: .infinity, alignment: .top)
                 }
             }
-            .animation(reduceMotion ? nil : .smooth(duration: 0.26, extraBounce: 0), value: store.selectedJob != nil)
+        } else {
+            ForEach(tiles) { card($0) }
+        }
     }
     private var title: String {
         if !store.project.isEmpty { return projectName(store.project, among: store.projects) }
@@ -144,31 +161,26 @@ struct BoardView: View {
         }
         let shownMissions = history ? scopedMissions.filter { $0.state != "active" } : scopedMissions.filter { $0.state == "active" }
         let recent = history ? [] : Array(scopedMissions.filter { $0.state != "active" }.prefix(2))
-        ForEach(shownMissions) { mission in
-            MissionPanel(store: store, mission: mission, jobs: missionJobs(mission))
-        }
         // Jobs of a recent mission already appear inside its panel.
         let panelIDs = Set((shownMissions + recent).map(\.id))
         let loose = jobs.filter { !panelIDs.contains($0.mission ?? "") && (history ? !$0.isActive : $0.isActive) }.sorted { $0.createdAt > $1.createdAt }
-        if !loose.isEmpty {
-            ContentPanel(title: history ? "Completed jobs" : "Other jobs", symbol: "rectangle.stack") {
-                ForEach(loose) { job in
-                    JobRow(job: job, selected: store.selectedJob == job.id, store: store) { store.openJob(job.id) }
-                }
-            }
-        }
-        if !history {
-            ForEach(recent) { mission in
+        let recentJobs = history ? [] : Array(jobs.filter { !$0.isActive && $0.mission == nil }.sorted { ($0.endedAt ?? 0) > ($1.endedAt ?? 0) }.prefix(4))
+        let sessions = history ? [] : store.state.claude.filter { (store.project.isEmpty || $0.projectPath == store.project) && matches($0.title) }
+        let tiles: [Tile] = shownMissions.map(Tile.mission) + (loose.isEmpty ? [] : [.loose]) + recent.map(Tile.mission)
+            + (recentJobs.isEmpty ? [] : [.finished]) + (sessions.isEmpty ? [] : [.sessions])
+        masonry(tiles) { tile in
+            switch tile {
+            case .mission(let mission):
                 MissionPanel(store: store, mission: mission, jobs: missionJobs(mission))
-            }
-            let recentJobs = jobs.filter { !$0.isActive && $0.mission == nil }.sorted { ($0.endedAt ?? 0) > ($1.endedAt ?? 0) }.prefix(4)
-            if !recentJobs.isEmpty {
-                ContentPanel(title: "Recently finished", symbol: "checkmark.circle") {
-                    ForEach(Array(recentJobs)) { job in JobRow(job: job, selected: store.selectedJob == job.id, store: store) { store.openJob(job.id) } }
+            case .loose:
+                ContentPanel(title: history ? "Completed jobs" : "Other jobs", symbol: "rectangle.stack") {
+                    ForEach(loose) { job in JobRow(job: job, selected: store.selectedJob == job.id, store: store) { store.openJob(job.id) } }
                 }
-            }
-            let sessions = store.state.claude.filter { (store.project.isEmpty || $0.projectPath == store.project) && matches($0.title) }
-            if !sessions.isEmpty {
+            case .finished:
+                ContentPanel(title: "Recently finished", symbol: "checkmark.circle") {
+                    ForEach(recentJobs) { job in JobRow(job: job, selected: store.selectedJob == job.id, store: store) { store.openJob(job.id) } }
+                }
+            case .sessions:
                 ContentPanel(title: "Claude sessions", symbol: "bubble.left.and.bubble.right") {
                     ForEach(sessions) { SessionView(session: $0) }
                 }
@@ -215,7 +227,8 @@ struct AgentOverview: View {
     private var compactAgents: some View {
         VStack(spacing: 0) {
             ForEach(agents, id: \.self) { agent in
-                VStack(alignment: .leading, spacing: 8) {
+                // Usage sits further from the agent's row than its own label from its bar, as on the cards.
+                VStack(alignment: .leading, spacing: 14) {
                     HStack(spacing: 10) {
                         AgentMark(agent: agent, size: 18)
                         Text(agentName(agent)).font(Typeface.calloutStrong)
@@ -274,7 +287,8 @@ private struct AgentCard: View {
             }
             // Cards in a row share a height; usage sits at the bottom, so one bar lines up with the last of two.
             if let usage = store.usage, usage.source != "none" {
-                AgentUsageView(store: store, agent: agent).frame(maxHeight: .infinity, alignment: .bottom)
+                // Set apart from the activity line above, which is about the work, not the account.
+                AgentUsageView(store: store, agent: agent).padding(.top, 8).frame(maxHeight: .infinity, alignment: .bottom)
             }
         }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).card()
     }
@@ -284,12 +298,8 @@ struct MissionPanel: View {
     @Bindable var store: CrewStore
     let mission: Mission
     let jobs: [Job]
-    @State private var expanded: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    init(store: CrewStore, mission: Mission, jobs: [Job]) {
-        self.store = store; self.mission = mission; self.jobs = jobs
-        _expanded = State(initialValue: mission.state == "active")
-    }
+    private var expanded: Bool { store.isExpanded(mission) }
     private var meta: String {
         let tokens = jobs.reduce(0) { $0 + ($1.tokens ?? 0) }
         return [
@@ -303,11 +313,12 @@ struct MissionPanel: View {
             // Progress, status and the controls sit on the middle of the title and its meta line together.
             HStack(alignment: .center, spacing: 8) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(mission.title).font(Typeface.title).fixedSize(horizontal: false, vertical: true)
+                    // One line each, so cards side by side keep the same height whatever their titles.
+                    Text(mission.title).font(Typeface.title).fadeTruncated().help(mission.title)
                     HStack(spacing: 0) {
                         ElapsedText(store: store, start: mission.createdAt, end: mission.endedAt)
                         Text(" · " + meta)
-                    }.font(Typeface.caption).monospacedDigit().foregroundStyle(.secondary).help(mission.root)
+                    }.font(Typeface.caption).monospacedDigit().foregroundStyle(.secondary).fadeTruncated().help(mission.root)
                 }
                 Spacer(minLength: 8)
                 Text(missionProgress(mission, jobs: jobs), format: .percent.precision(.fractionLength(0)))
@@ -318,7 +329,7 @@ struct MissionPanel: View {
                 }
                 // Bordered circles, so each control shows its hit area; equal glyph frames keep them the same size.
                 HStack(spacing: 6) {
-                    Button { expanded.toggle() } label: {
+                    Button { toggle() } label: {
                         Image(systemName: "chevron.down").font(.system(size: 11, weight: .semibold))
                             .rotationEffect(.degrees(expanded ? 0 : -90)).frame(width: 16, height: 16)
                     }.buttonStyle(.bordered).buttonBorderShape(.circle).accessibilityLabel(expanded ? "Collapse mission" : "Expand mission").help(expanded ? "Collapse" : "Expand")
@@ -335,31 +346,58 @@ struct MissionPanel: View {
                     }
                 }
             }
+            // The title row opens and closes the card; its buttons and menu keep their own clicks.
+            .contentShape(Rectangle())
+            .onTapGesture(perform: toggle)
             if expanded {
-                ForEach(Array((mission.notes ?? []).enumerated()), id: \.offset) { _, note in
-                    Text(note.text).font(Typeface.callout).textSelection(.enabled)
-                }
-                MissionTrack(mission: mission).padding(.vertical, 4)
-                VStack(spacing: 4) {
-                    ForEach(mission.stops.indices, id: \.self) { index in
-                        let mine = jobs.filter { mission.jobStep($0) == index }
-                        let lead = mission.state == "active" && index == mission.step ? store.state.claude.first { $0.id == mission.owner } : nil
-                        if !mine.isEmpty || lead != nil {
-                            Text(mission.stops[index]).font(Typeface.captionStrong).foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 8)
-                            if let lead {
-                                SessionView(session: lead).padding(.horizontal, 12).padding(.vertical, 10)
-                                    .background(WorkspaceStyle.rowFill, in: RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius))
+                VStack(alignment: .leading, spacing: 16) {
+                    ForEach(Array((mission.notes ?? []).enumerated()), id: \.offset) { _, note in
+                        Text(note.text).font(Typeface.callout).textSelection(.enabled)
+                    }
+                    MissionTrack(mission: mission).padding(.vertical, 4)
+                    VStack(spacing: 4) {
+                        ForEach(mission.stops.indices, id: \.self) { index in
+                            let mine = jobs.filter { mission.jobStep($0) == index }
+                            let lead = mission.state == "active" && index == mission.step ? store.state.claude.first { $0.id == mission.owner } : nil
+                            if !mine.isEmpty || lead != nil {
+                                Text(mission.stops[index]).font(Typeface.captionStrong).foregroundStyle(.secondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 8)
+                                if let lead {
+                                    SessionView(session: lead).padding(.horizontal, 12).padding(.vertical, 10)
+                                        .background(WorkspaceStyle.rowFill, in: RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius))
+                                }
+                                ForEach(mine) { job in JobRow(job: job, selected: store.selectedJob == job.id, store: store) { store.openJob(job.id) } }
                             }
-                            ForEach(mine) { job in JobRow(job: job, selected: store.selectedJob == job.id, store: store) { store.openJob(job.id) } }
                         }
                     }
+                    if !mission.outcome.isEmpty { Text(mission.outcome).font(Typeface.callout).textSelection(.enabled) }
                 }
-                if !mission.outcome.isEmpty { Text(mission.outcome).font(Typeface.callout).textSelection(.enabled) }
+                .transition(reduceMotion ? .opacity : .asymmetric(
+                    // In after the card has started to open; out quickly, before the card closes over it.
+                    insertion: .modifier(active: Reveal(shown: false), identity: Reveal(shown: true)).animation(.easeOut(duration: 0.28).delay(0.06)),
+                    removal: .modifier(active: Reveal(shown: false), identity: Reveal(shown: true)).animation(.easeIn(duration: 0.14))))
             }
             ActionMessage(state: store.actions["dismiss:\(mission.id)"])
-        }.animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: expanded)
-            .card()
+        }
+        .card()
+        // Closing, the contents fade while the card shrinks; they must not spill over the card below.
+        .clipShape(RoundedRectangle(cornerRadius: WorkspaceStyle.cardRadius))
+        // Closed, the whole card opens it. Open, only the title row closes it, so text inside stays selectable
+        // and the job rows and sessions keep their clicks.
+        .contentShape(RoundedRectangle(cornerRadius: WorkspaceStyle.cardRadius))
+        .gesture(TapGesture().onEnded(toggle), including: expanded ? .subviews : .all)
+    }
+    /// Animated from here rather than inside the card, so the cards below move with it instead of jumping.
+    private func toggle() {
+        withAnimation(reduceMotion ? nil : .smooth(duration: 0.38)) { store.missionExpanded[mission.id] = !expanded }
+    }
+}
+
+/// How a mission's contents enter and leave: a short drift down out of a soft blur, never a plain cut.
+private struct Reveal: ViewModifier {
+    var shown: Bool
+    func body(content: Content) -> some View {
+        content.opacity(shown ? 1 : 0).blur(radius: shown ? 0 : 6).offset(y: shown ? 0 : -10)
     }
 }
 
@@ -401,6 +439,19 @@ struct NeedsYouView: View {
                 Text(session.projectPath).font(Typeface.caption).foregroundStyle(.secondary)
                 Text("Answer in Claude.").font(Typeface.callout).foregroundStyle(.secondary)
             }
+        }
+    }
+}
+
+/// A card on the overview or history page.
+private enum Tile: Identifiable {
+    case mission(Mission), loose, finished, sessions
+    var id: String {
+        switch self {
+        case .mission(let mission): mission.id
+        case .loose: "loose"
+        case .finished: "finished"
+        case .sessions: "sessions"
         }
     }
 }

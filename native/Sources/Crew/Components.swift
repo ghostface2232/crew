@@ -307,13 +307,13 @@ struct AgentUsageView: View {
         if let usage = store.usage, usage.source != "none" {
             if let provider = usage.providers.first(where: { $0.agent == agent }) {
                 VStack(alignment: .leading, spacing: 6) {
-                    if provider.accountWindows.isEmpty {
+                    if provider.shownWindows.isEmpty {
                         Text(provider.status.rawValue.capitalized).foregroundStyle(.secondary)
                     }
-                    ForEach(provider.accountWindows, id: \.key) { window in
+                    ForEach(provider.shownWindows, id: \.key) { window in
                         // The provider's status overrides a window's when the reading is old or a job just hit the limit.
                         let status = [.stale, .unknown, .exhausted].contains(provider.status) ? provider.status : window.status
-                        VStack(alignment: .leading, spacing: 4) {
+                        VStack(alignment: .leading, spacing: 8) {
                             HStack(spacing: 6) {
                                 Text(window.name)
                                 Text(window.usedRatio, format: .percent.precision(.fractionLength(0))).monospacedDigit()
@@ -324,9 +324,9 @@ struct AgentUsageView: View {
                                 }
                             }
                             GeometryReader { geometry in
-                                Capsule().fill(tint(status)).frame(width: geometry.size.width * min(1, max(0, window.usedRatio)))
+                                Capsule().fill(tint(window.usedRatio, status)).frame(width: geometry.size.width * min(1, max(0, window.usedRatio)))
                             }.frame(height: 3).background(.quaternary, in: Capsule()).accessibilityHidden(true)
-                        }.foregroundStyle(tint(status))
+                        }.foregroundStyle(tint(window.usedRatio, status))
                     }
                 }.font(Typeface.caption).help(([provider.reason] + provider.windows.filter { $0.group != nil }.map {
                     "\($0.group!): \($0.name), \(Int($0.usedRatio * 100))%, \($0.status.rawValue)"
@@ -335,17 +335,43 @@ struct AgentUsageView: View {
                 Text("Usage unknown").font(Typeface.caption).foregroundStyle(.secondary)
             }
         } else if let usage = store.limits[agent] ?? nil, let maximum = usage.windows?.map(\.usedPercent).max() {
-            Text("\(Int(maximum))% of limit").font(Typeface.caption).monospacedDigit().foregroundStyle(maximum >= 90 ? Color.orange : .secondary)
+            Text("\(Int(maximum))% of limit").font(Typeface.caption).monospacedDigit().foregroundStyle(tint(maximum / 100, .ok))
                 .help((usage.windows ?? []).map { window in
                     "\(Int(window.usedPercent))% of " + (window.minutes.map { "\(Int($0))-minute limit" } ?? "limit")
                 }.joined(separator: "\n"))
         }
     }
-    private func tint(_ status: UsageStatus) -> Color {
-        switch status {
-        case .tight: return .orange
-        case .exhausted: return .red
-        case .ok, .stale, .unknown: return .secondary
-        }
+    /// AgentGauge's thresholds: caution from 70% used, danger from 90% or when the limit was hit.
+    private func tint(_ used: Double, _ status: UsageStatus) -> Color {
+        if status == .exhausted || used >= 0.9 { return .red }
+        return used >= 0.7 ? .orange : .secondary
     }
+}
+
+/// Keeps content to its single line and, when the line runs out of room, fades its end out instead of cutting it
+/// with an ellipsis, so a long title neither wraps nor changes the height of what holds it.
+private struct FadeTruncation: ViewModifier {
+    var fade: CGFloat = 36
+    @State private var natural: CGFloat = 0
+    @State private var available: CGFloat = 0
+    func body(content: Content) -> some View {
+        content.lineLimit(1).fixedSize(horizontal: true, vertical: false)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { natural = $0 }
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { available = $0 }
+            .clipped()
+            .mask {
+                if natural > available + 0.5 {
+                    HStack(spacing: 0) {
+                        Color.black
+                        LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing).frame(width: fade)
+                    }
+                } else {
+                    Color.black
+                }
+            }
+    }
+}
+extension View {
+    func fadeTruncated() -> some View { modifier(FadeTruncation()) }
 }

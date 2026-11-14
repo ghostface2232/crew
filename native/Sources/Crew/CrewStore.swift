@@ -48,6 +48,10 @@ final class CrewStore {
     var showingDispatch = false
     var actions: [String: ActionState] = [:]
     var drafts: [String: String] = [:]
+    /// Missions the user opened or closed; the rest are open while active. Kept here rather than in each card,
+    /// so a card keeps its state when the layout moves it between one column and two.
+    var missionExpanded: [String: Bool] = [:]
+    func isExpanded(_ mission: Mission) -> Bool { missionExpanded[mission.id] ?? (mission.state == "active") }
     var notificationsAllowed = false
     private var completionLeases = CompletionLeases()
     var windowVisible = true

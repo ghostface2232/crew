@@ -161,6 +161,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             NSApp.terminate(nil)
             return
         }
+        // A click outside the field being edited ends the editing. AppKit otherwise keeps the cursor in a text
+        // view until another one takes it, so a message box stayed active after clicking anywhere else.
+        NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { event in
+            MainActor.assumeIsolated {
+                if let window = event.window, window.firstResponder is NSTextView,
+                   let content = window.contentView, let frame = content.superview,
+                   let hit = content.hitTest(frame.convert(event.locationInWindow, from: nil)),
+                   !sequence(first: hit, next: \.superview).contains(where: { $0 is NSText || $0 is NSTextField }) {
+                    window.makeFirstResponder(nil)
+                }
+            }
+            return event
+        }
         // SwiftUI's toolbar search has no width setting and sizes its field past the system item's preferred width.
         // A ceiling rather than a fixed width, so the toolbar can still fold the field when room runs out.
         NotificationCenter.default.addObserver(forName: NSToolbar.willAddItemNotification, object: nil, queue: .main) { note in

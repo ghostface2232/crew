@@ -17,7 +17,10 @@ enum WorkspaceStyle {
     static let cardRadius: CGFloat = 20
     static let rowRadius: CGFloat = 12
     static let fieldRadius: CGFloat = 14
-    static let panelRadius: CGFloat = 24
+    /// The toolbar's glass items sit this far in from the window's edges; floating panels keep the same margin.
+    static let windowInset: CGFloat = 8
+    /// Concentric with the window's corner across `windowInset`, and the same as the toolbar items' capsules.
+    static let panelRadius: CGFloat = 18
 }
 
 /// The type scale. Titles are SF Pro Rounded, headlines SF Pro Display, body text SF Pro Text, source text SF Mono.
@@ -25,23 +28,23 @@ enum Typeface {
     static let pageTitle = Font.system(size: 38, weight: .semibold, design: .rounded)
     static let pageTitleCapHeight = NSFont.systemFont(ofSize: 38, weight: .semibold).capHeight
     static let windowTitle = Font.system(size: 30, weight: .semibold, design: .rounded)
-    static let title = Font.system(size: 18, weight: .semibold, design: .rounded)
-    static let cardTitle = Font.system(size: 16, weight: .semibold, design: .rounded)
-    static let emptyTitle = Font.system(size: 17, weight: .regular, design: .rounded)
+    static let title = Font.system(size: 19, weight: .semibold, design: .rounded)
+    static let cardTitle = Font.system(size: 17, weight: .semibold, design: .rounded)
+    static let emptyTitle = Font.system(size: 18, weight: .regular, design: .rounded)
     static let number = Font.system(size: 40, weight: .regular, design: .rounded)
-    static let section = display(20, .semibold)
-    static let headline = display(15, .medium)
-    static let subheadline = Font.system(size: 13, weight: .semibold)
-    static let bodyStrong = Font.system(size: 13, weight: .medium)
-    static let body = Font.system(size: 13)
-    static let calloutStrong = Font.system(size: 12, weight: .medium)
-    static let callout = Font.system(size: 12)
-    static let captionStrong = Font.system(size: 11, weight: .semibold)
-    static let chip = Font.system(size: 11, weight: .medium)
-    static let caption = Font.system(size: 11)
-    static let micro = Font.system(size: 10, weight: .semibold)
-    static let code = Font.system(size: 12, design: .monospaced)
-    static let codeSmall = Font.system(size: 11, design: .monospaced)
+    static let section = display(21, .semibold)
+    static let headline = display(16, .medium)
+    static let subheadline = Font.system(size: 14, weight: .semibold)
+    static let bodyStrong = Font.system(size: 14, weight: .medium)
+    static let body = Font.system(size: 14)
+    static let calloutStrong = Font.system(size: 13, weight: .medium)
+    static let callout = Font.system(size: 13)
+    static let captionStrong = Font.system(size: 12, weight: .semibold)
+    static let chip = Font.system(size: 12, weight: .medium)
+    static let caption = Font.system(size: 12)
+    static let micro = Font.system(size: 11, weight: .semibold)
+    static let code = Font.system(size: 13, design: .monospaced)
+    static let codeSmall = Font.system(size: 12, design: .monospaced)
 
     /// The system picks the Text cut below 20 pt; headlines keep the Display cut at any size.
     private static func display(_ size: CGFloat, _ weight: NSFont.Weight) -> Font {

@@ -7,34 +7,27 @@ struct JobDetailView: View {
     @State private var events: [CrewEvent] = []
     @State private var error = ""
     @State private var retry = 0
-    @FocusState private var closeFocused: Bool
     private var job: Job? {
         guard var current = store.state.jobs.first(where: { $0.id == id }) else { return detail }
         current.prompt = detail?.prompt ?? current.prompt
         return current
     }
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                if let job { StatusLabel(state: job.stalled ? "stalled" : job.state, title: job.status) }
-                Spacer()
-                Button("Close Details", systemImage: "xmark") { store.selectedJob = nil }
-                    .buttonStyle(.bordered).buttonBorderShape(.circle).labelStyle(.iconOnly).help("Close details (Esc)").keyboardShortcut(.cancelAction)
-                    .focused($closeFocused)
-            }.padding(.horizontal, 24).padding(.top, 20).padding(.bottom, 4)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 28) {
-                    if !error.isEmpty {
-                        Text(error).foregroundStyle(.red).textSelection(.enabled)
-                        Button("Retry") { retry += 1 }
-                    }
-                    if job == nil && error.isEmpty { ProgressView("Loading details…") }
-                    if let job { contents(job) }
-                }.padding(.horizontal, 24).padding(.top, 12).padding(.bottom, 24).frame(maxWidth: .infinity, alignment: .leading)
-            }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 28) {
+                if !error.isEmpty {
+                    Text(error).foregroundStyle(.red).textSelection(.enabled)
+                    Button("Retry") { retry += 1 }
+                }
+                if job == nil && error.isEmpty { ProgressView("Loading details…") }
+                if let job { contents(job) }
+            }.padding(.horizontal, 24).padding(.top, 20).padding(.bottom, 24).frame(maxWidth: .infinity, alignment: .leading)
         }
+        // The header stays while the details scroll under it. As a scroll view's bar, it gets the system's
+        // soft edge effect: the content fades and blurs progressively beneath it instead of being cut off.
+        .safeAreaBar(edge: .top) { header }
+        .scrollEdgeEffectStyle(.soft, for: .top)
         .onExitCommand { store.selectedJob = nil }
-        .onAppear { closeFocused = true }
         .task(id: "\(id):\(store.revision):\(retry)") { await load() }
     }
     private func load() async {
@@ -51,11 +44,33 @@ struct JobDetailView: View {
             if !Task.isCancelled { self.error = error.localizedDescription }
         }
     }
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                if let job { StatusLabel(state: job.stalled ? "stalled" : job.state, title: job.status) }
+                Spacer()
+                Button("Close Details", systemImage: "xmark") { store.selectedJob = nil }
+                    .buttonStyle(.bordered).buttonBorderShape(.circle).labelStyle(.iconOnly).help("Close details (Esc)").keyboardShortcut(.cancelAction)
+            }
+            // Two lines at most, so a long title cannot take over the panel. Selectable text drops its
+            // truncation once selected, so the full title is copied from a menu instead.
+            if let job {
+                Text(job.title).font(Typeface.title).lineSpacing(2).lineLimit(2).help(job.title)
+                    .contextMenu {
+                        Button("Copy Title", systemImage: "doc.on.doc") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(job.title, forType: .string)
+                        }
+                    }
+            }
+        }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 24).padding(.top, 20).padding(.bottom, 12)
+    }
     @ViewBuilder private func contents(_ job: Job) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(job.title).font(Typeface.title).lineSpacing(2).textSelection(.enabled)
-            if job.isActive { Text(job.phase).font(Typeface.callout).foregroundStyle(.secondary).textSelection(.enabled) }
-            if let failure = job.error { Text(failure.message).font(Typeface.callout).foregroundStyle(.red).textSelection(.enabled) }
+        if job.isActive || job.error != nil {
+            VStack(alignment: .leading, spacing: 8) {
+                if job.isActive { Text(job.phase).font(Typeface.callout).foregroundStyle(.secondary).textSelection(.enabled) }
+                if let failure = job.error { Text(failure.message).font(Typeface.callout).foregroundStyle(.red).textSelection(.enabled) }
+            }
         }
         if job.state == "waiting" {
             AnswerView(store: store, job: job)
@@ -74,7 +89,7 @@ struct JobDetailView: View {
             }
             fact("Turns", String(job.turns))
             if let shared = job.shared, !shared.isEmpty { fact("Instructions", shared.joined(separator: "\n")) }
-        }.font(Typeface.callout).textSelection(.enabled)
+        }.font(Typeface.callout).textSelection(.enabled).inset()
         if let result = job.result {
             detailSection("Changes", symbol: "arrow.triangle.branch") {
                 Text(result.stat.isEmpty ? "No files changed" : result.stat).font(Typeface.code).textSelection(.enabled)
@@ -139,7 +154,7 @@ struct JobDetailView: View {
         }
         if !job.report.isEmpty {
             detailSection("Report", symbol: "doc.text") {
-                Text(job.report).font(Typeface.body).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                ReportText(report: job.report)
             }
         }
         if job.sessionId != nil && job.state != "waiting" {
@@ -153,7 +168,7 @@ struct JobDetailView: View {
             }
         }
         if let prompt = job.prompt, !prompt.isEmpty {
-            DisclosureGroup("Original task") { Text(prompt).font(Typeface.callout).textSelection(.enabled).padding(.top, 8) }
+            OriginalTask(prompt: prompt)
         }
         let combined = mergeEvents(events, store.events.filter { $0.job_id == id }, limit: 80)
         if !combined.isEmpty {
@@ -181,12 +196,107 @@ struct JobDetailView: View {
             Text(value).frame(maxWidth: .infinity, alignment: .leading)
         }
     }
+    /// A titled section whose contents sit in a gray inset, as a mission card's rows do, so sections read apart.
     private func detailSection<Content: View>(_ title: String, symbol: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Divider().padding(.bottom, 4)
+        VStack(alignment: .leading, spacing: 10) {
             Label(title, systemImage: symbol).font(Typeface.subheadline)
-            content()
+            VStack(alignment: .leading, spacing: 12) { content() }.inset()
         }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// The task as the worker received it: three lines at first, the last fading out, and the whole of it from a click
+/// anywhere on its title row.
+private struct OriginalTask: View {
+    let prompt: String
+    @State private var shown = false
+    @State private var height: CGFloat = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// One line of `Typeface.callout`.
+    private static let line: CGFloat = {
+        let font = NSFont.systemFont(ofSize: 13)
+        return ceil(font.ascender - font.descender + font.leading)
+    }()
+    private var preview: CGFloat { Self.line * 3 }
+    private var long: Bool { height > preview + 1 }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button { withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) { shown.toggle() } } label: {
+                HStack {
+                    Label("Original task", systemImage: "text.alignleft").font(Typeface.subheadline)
+                    Spacer()
+                    if long {
+                        Text(shown ? "Show less" : "Show all").font(Typeface.caption).foregroundStyle(.secondary)
+                        Image(systemName: "chevron.down").font(Typeface.captionStrong).foregroundStyle(.secondary)
+                            .rotationEffect(.degrees(shown ? 180 : 0))
+                    }
+                }.contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!long)
+            .accessibilityLabel(shown ? "Collapse original task" : "Expand original task")
+            // Cut by height rather than a line limit, so the last line fades instead of ending in an ellipsis.
+            Text(prompt).font(Typeface.callout).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
+                .frame(maxWidth: .infinity, maxHeight: shown || !long ? nil : preview, alignment: .topLeading)
+                .clipped()
+                .mask {
+                    if long && !shown {
+                        LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: 2 / 3),
+                                               .init(color: .black.opacity(0.1), location: 1)],
+                                       startPoint: .top, endPoint: .bottom)
+                    } else {
+                        Color.black
+                    }
+                }
+                .inset()
+        }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private extension View {
+    func inset() -> some View {
+        padding(14).frame(maxWidth: .infinity, alignment: .leading)
+            .background(WorkspaceStyle.rowFill, in: RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius))
+    }
+}
+
+/// A worker's report, with its Markdown headings shown as headings and inline styles applied; the rest stays as written.
+private struct ReportText: View {
+    let report: String
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
+                if block.heading {
+                    Text(block.text).font(Typeface.bodyStrong).padding(.top, index == 0 ? 0 : 8)
+                } else {
+                    Text(Self.inline(block.text)).font(Typeface.body)
+                }
+            }
+        }.textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+    }
+    /// Headings on their own; the lines between them kept together as written.
+    private var blocks: [(heading: Bool, text: String)] {
+        var result: [(heading: Bool, text: String)] = []
+        var body: [Substring] = []
+        func flush() {
+            let text = body.joined(separator: "\n").trimmingCharacters(in: .newlines)
+            if !text.isEmpty { result.append((false, text)) }
+            body = []
+        }
+        for line in report.split(separator: "\n", omittingEmptySubsequences: false) {
+            if let match = line.firstMatch(of: /^#{1,6}\s+(.+)$/) {
+                flush()
+                result.append((true, String(match.1)))
+            } else {
+                body.append(line)
+            }
+        }
+        flush()
+        return result
+    }
+    private static func inline(_ text: String) -> AttributedString {
+        (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
     }
 }
 

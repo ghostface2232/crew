@@ -182,6 +182,19 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
         #expect(limits["codex"]??.windows?.first?.minutes == nil)
         #expect(limits["codex"]??.windows?.first?.usedPercent == 42)
     }
+    @Test func antigravityShowsItsGeminiWindowsWhenItHasNoAccountWide() {
+        let window = { (key: String, kind: String, group: String?) in
+            UsageWindow(key: key, kind: kind, group: group, usedRatio: 0.5, resetTime: nil, durationSec: nil, projectedExhaustion: nil, status: .ok)
+        }
+        let families = [window("gemini-weekly", "weekly", "Gemini"), window("gemini-5h", "fiveHour", "Gemini"),
+                        window("3p-5h", "fiveHour", "Claude/GPT"), window("argon", "weekly", "Gemini 4 Argon")]
+        let both = ProviderUsage(agent: "antigravity", status: .ok, reason: "", windows: families)
+        #expect(both.shownWindows.map(\.key) == ["gemini-5h", "gemini-weekly"])
+        let weekly = ProviderUsage(agent: "antigravity", status: .ok, reason: "", windows: families.filter { $0.key != "gemini-5h" })
+        #expect(weekly.shownWindows.map(\.key) == ["gemini-weekly"])
+        // Only Antigravity falls back to a family.
+        #expect(ProviderUsage(agent: "codex", status: .ok, reason: "", windows: families).shownWindows.isEmpty)
+    }
     @Test func optionalContractFieldsDecodeAndLegacyStateStillWorks() throws {
         let legacy = try fixture()
         #expect(legacy.usage == nil && legacy.preset == nil && legacy.presets == nil)
@@ -193,6 +206,7 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
         let claude = try #require(current.usage?.providers.first)
         #expect(claude.status == .tight)
         #expect(claude.accountWindows.map(\.name) == ["5-hour", "Weekly"])
+        #expect(claude.shownWindows == claude.accountWindows)
         #expect(claude.windows.last?.group == "sonnet")
         #expect(claude.windows.last?.status == .exhausted)
         #expect(current.preset == .balanced)

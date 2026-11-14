@@ -204,6 +204,13 @@ struct ProviderUsage: Codable, Sendable, Equatable {
     var reason: String
     var windows: [UsageWindow]
     var accountWindows: [UsageWindow] { windows.filter { $0.group == nil } }
+    /// What the board shows: the account-wide windows, or for Antigravity, which reports only per model family,
+    /// its own Gemini family's 5-hour and weekly windows, whichever of the two it has.
+    var shownWindows: [UsageWindow] {
+        if agent != "antigravity" || !accountWindows.isEmpty { return accountWindows }
+        let gemini = windows.filter { $0.group == "Gemini" }
+        return ["fiveHour", "weekly"].compactMap { kind in gemini.first { $0.kind == kind } }
+    }
 }
 struct Usage: Codable, Sendable, Equatable {
     var generatedAt: Double

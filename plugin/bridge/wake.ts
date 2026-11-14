@@ -1,50 +1,69 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { api } from './client.ts';
-import { describe, needsLead } from './render.ts';
-import type { JobView } from './render.ts';
+import { HOOK_SECONDS } from './delivery.ts';
 
-/**
- * PostToolUse hook (asyncRewake) for the Crew job tools. When a tool call
- * leaves a job running in the background, this process outlives the call,
- * waits for the job to end, need a decision, or ask a new lead question, and
- * exits with code 2 so Claude Code wakes the lead with the result on stderr.
- *
- * It watches every job the tool result mentions rather than trusting the
- * state printed there: a job reported as running may already be waiting.
- */
+interface HookInput { session_id?: string; agent_id?: string; hook_event_name?: string; stop_hook_active?: boolean }
+interface HookOutput { code: number; stderr?: string; stdout?: string }
 
-const JOB_ID = /\[((?:cx|ag)-[0-9a-f]{6})\]/g;
-
-async function watch(id: string): Promise<JobView | null> {
-  let job: JobView = await api('GET', `/api/jobs/${id}`);
-  let after = job.seq;
-  while (!needsLead(job)) {
-    const res = await api('GET', `/api/jobs/${id}/wait?after=${after}&timeout=50`);
-    job = res.job;
-    after = job.seq;
+/** The transport is injectable so crash/retry paths can be checked without a live Claude session. */
+export async function leadHook(input: HookInput, mode: string, request: typeof api = api, deadline = Date.now() + (HOOK_SECONDS - 10) * 1000): Promise<HookOutput> {
+  const session = input.session_id;
+  if (!session || input.agent_id) return { code: 0 };
+  const send = (action: string, body: object = {}) => request('POST', `/api/lead/${action}`, { session, ...body }, AbortSignal.timeout(Math.max(1, Math.min(25_000, deadline - Date.now()))));
+  if (mode === 'context') {
+    const { text } = await send('context');
+    return { code: 0, ...(text ? { stdout: JSON.stringify({ hookSpecificOutput: { hookEventName: input.hook_event_name, additionalContext: text } }) } : {}) };
   }
-  // The lead may be reading this very result through a blocking wait call; let that win.
-  await new Promise((r) => setTimeout(r, 1500));
-  job = await api('GET', `/api/jobs/${id}`);
-  if (!needsLead(job)) return null;
-  const { claimed } = await api('POST', `/api/jobs/${id}/delivered`, { seq: job.seq });
-  return claimed ? job : null;
+  if (mode === 'stop') {
+    if (input.stop_hook_active) return { code: 0 };
+    const { offer } = await send('offer', { automatic: true });
+    return offer ? { code: 2, stderr: offer.text } : { code: 0 };
+  }
+  let generation: string | undefined;
+  let backoff = 250;
+  try {
+    while (Date.now() < deadline) {
+      try {
+        if (!generation) {
+          const { watch } = await send('watch', { deadline });
+          if (!watch) return { code: 0 };
+          generation = watch.generation;
+        }
+        await send('heartbeat', { generation });
+        const { offer } = await send('offer', { automatic: true, generation, wait: true });
+        if (offer) return { code: 2, stderr: offer.text };
+        backoff = 250;
+      } catch (error) {
+        // A restart forgets watching leases. A replaced watcher cannot reacquire while its successor is live.
+        if (/Watcher lease/.test(String(error))) generation = undefined;
+        await new Promise((resolve) => setTimeout(resolve, Math.min(backoff, Math.max(0, deadline - Date.now()))));
+        backoff = Math.min(backoff * 2, 5000);
+      }
+    }
+    return { code: 0 };
+  } finally {
+    if (generation) await send('release', { generation }).catch(() => {});
+  }
 }
 
-let input = '';
-for await (const chunk of process.stdin) input += chunk;
-
-try {
-  const text = JSON.stringify(JSON.parse(input).tool_response ?? '');
-  const ids = [...new Set([...text.matchAll(JOB_ID)].map((m) => m[1]))];
-  if (ids.length === 0) process.exit(0);
-
-  // Wake on the first job with news the lead has not seen. A job whose result the tool call
-  // already returned is marked delivered, so its watcher resolves to null and is ignored.
-  const job = await Promise.any(ids.map((id) => watch(id).then((j) => j ?? Promise.reject(new Error('already delivered')))));
-  const body = describe(job);
-  process.stderr.write(`Crew background job update:\n\n${body.length > 9000 ? `${body.slice(0, 9000)}\n… (truncated; call status with job_id "${job.id}" for the rest)` : body}\n`);
-  process.exit(2);
-} catch {
-  // Bridge unreachable, or every watched job was already reported: nothing to say.
-  process.exit(0);
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const mode = process.argv[2] ?? 'watch';
+  // End before the host timeout, even if stdin or the transport gets stuck.
+  const lifetime = mode === 'watch' ? (HOOK_SECONDS - 10) * 1000 : 4000;
+  const deadline = Date.now() + lifetime;
+  const timer = setTimeout(() => process.exit(0), lifetime);
+  try {
+    let raw = '';
+    for await (const chunk of process.stdin) raw += chunk;
+    const result = await leadHook(JSON.parse(raw), mode, api, deadline);
+    if (result.stdout) await new Promise<void>((resolve) => process.stdout.write(result.stdout + '\n', () => resolve()));
+    if (result.stderr) await new Promise<void>((resolve) => process.stderr.write(result.stderr + '\n', () => resolve()));
+    process.exitCode = result.code;
+  } catch {
+    // The ledger retains news through failures; a later hook or explicit status can recover it.
+    process.exitCode = 0;
+  } finally {
+    clearTimeout(timer);
+  }
 }

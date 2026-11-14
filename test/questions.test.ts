@@ -27,7 +27,7 @@ function harness(t: TestContext) {
   const hooks = { onEvent: (e: CrewEvent) => events.push(e), onJob: () => {}, onAttention: () => {} };
   const jobs = new Jobs(home, () => config, { codex: adapter, antigravity: adapter }, hooks);
   t.after(() => { jobs.flush(); fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }); });
-  const create = (spec = {}) => jobs.create({ kind: 'delegate', cwd: home, isolation: 'in_place', task: 'test', ...spec });
+  const create = (spec = {}) => jobs.create({ kind: 'delegate', cwd: home, isolation: 'in_place', task: 'test', lead: 'test-lead', ...spec });
   return { home, jobs, workers, events, create, restore: () => new Jobs(home, () => config, { codex: adapter, antigravity: adapter }, hooks) };
 }
 
@@ -48,7 +48,8 @@ test('lead questions persist, emit progress, and never carry the worker token on
   assert.match(describe(job), /Blocks: implementing the response/);
   assert.match(describe(job), /Call answer/);
 
-  h.jobs.markDelivered(job.id, job.seq);
+  const offer = h.jobs.delivery.offer('test-lead')!;
+  h.jobs.delivery.ack('test-lead', offer.receipt);
   worker.progress('working on another file');
   assert.equal(needsLead(job), false);
   assert.equal(h.jobs.workerAuthorized(job.id, token), true);
@@ -204,7 +205,7 @@ async function daemon(t: TestContext) {
     });
   `);
   fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ notify: false, codex: { bin } }));
-  const env = { ...process.env, CREW_HOME: home, CREW_PORT: String(port), CLAUDE_PROJECT_DIR: home, CREW_AGENTGAUGE_DIR: path.join(home, 'gauge') };
+  const env = { ...process.env, CREW_HOME: home, CREW_PORT: String(port), CLAUDE_PROJECT_DIR: home, CLAUDE_CODE_SESSION_ID: 'test-lead', CREW_AGENTGAUGE_DIR: path.join(home, 'gauge') };
   const child = spawn(process.execPath, [path.resolve('plugin/bridge/daemon.ts')], { env, stdio: ['ignore', 'pipe', 'pipe'] });
   t.after(async () => { await stop(child); fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }); });
   await new Promise<void>((resolve, reject) => {
@@ -223,7 +224,7 @@ async function daemon(t: TestContext) {
     while (!/turn started/.test((await api('GET', `/api/jobs/${id}`)).body.phase)) await new Promise((resolve) => setTimeout(resolve, 10));
   };
   const create = async () => {
-    const { body: job } = await api('POST', '/api/jobs', { kind: 'delegate', cwd: home, project: home, task: 'test', isolation: 'in_place' });
+    const { body: job } = await api('POST', '/api/jobs', { kind: 'delegate', cwd: home, project: home, task: 'test', isolation: 'in_place', lead: 'test-lead' });
     await started(job.id);
     return { job, server: JSON.parse(fs.readFileSync(path.join(home, `${job.id}.json`), 'utf8')) };
   };
@@ -308,10 +309,12 @@ test('lead wait delivers a running question once, ignores further progress, and 
   const waiting = lead.call('wait', { job_ids: [job.id], timeout_seconds: 5 });
   await pendingAfter(waiting);
   const { body: question } = await h.api('POST', `${route}/questions`, { token: server.env.CREW_JOB_TOKEN, text: 'Choose the behavior.', blocks: 'implementation' });
-  assert.match(textOf(await waiting), /RUNNING.*test[\s\S]*ASKS YOU/);
+  const shown = textOf(await waiting);
+  assert.match(shown, /RUNNING.*test[\s\S]*ASKS YOU/);
+  const receipt = shown.match(/Receipt: ([\w-]+)/)![1];
   let current = (await h.api('GET', route)).body;
-  assert.equal(current.delivered, current.seq);
-  const nextWait = lead.call('wait', { job_ids: [job.id], timeout_seconds: 5 });
+  assert.ok(current.delivered < current.seq);
+  const nextWait = lead.call('wait', { job_ids: [job.id], timeout_seconds: 5, ack: receipt });
   await h.api('POST', `${route}/reply`, { message: 'work on the independent part' });
   await pendingAfter(nextWait);
   textOf(await lead.call('answer', { job_id: job.id, question_id: question.id, answer: 'Follow the contract.' }));
@@ -326,9 +329,9 @@ test('lead wait delivers a running question once, ignores further progress, and 
   const { body: third } = await h.api('POST', `${route}/questions`, { token: server.env.CREW_JOB_TOKEN, text: 'One more decision?' });
   const answerResult = textOf(await lead.call('answer', { job_id: job.id, question_id: second.id, answer: 'yes' }));
   assert.ok(answerResult.includes(third.id));
-  const status = textOf(await lead.call('status', { job_id: job.id }));
+  const status = textOf(await lead.call('status', { job_id: job.id, ack: answerResult.match(/Receipt: ([\w-]+)/)![1] }));
   assert.ok(status.includes(third.id));
-  const timedOut = textOf(await lead.call('wait', { job_ids: [job.id], timeout_seconds: 0.05 }));
+  const timedOut = textOf(await lead.call('wait', { job_ids: [job.id], timeout_seconds: 0.05, ...(status.match(/Receipt: ([\w-]+)/) ? { ack: status.match(/Receipt: ([\w-]+)/)![1] } : {}) }));
   assert.match(timedOut, /Timed out waiting; still running/);
   assert.equal(timedOut.includes('ASKS YOU'), false);
 });
@@ -372,7 +375,7 @@ test('wake reports a running question and never wakes again for progress on the 
     let stderr = '';
     child.stderr.on('data', (chunk) => { stderr += chunk; });
     const exited = new Promise<{ code: number | null; stderr: string }>((resolve) => child.once('exit', (code) => resolve({ code, stderr })));
-    child.stdin.end(JSON.stringify({ tool_response: `[${job.id}]` }));
+    child.stdin.end(JSON.stringify({ session_id: 'test-lead', hook_event_name: 'PostToolUse', tool_response: 'result too large' }));
     t.after(() => stop(child));
     return exited;
   };
@@ -385,6 +388,7 @@ test('wake reports a running question and never wakes again for progress on the 
   assert.equal(shown.code, 2);
   assert.ok(shown.stderr.includes(question.id));
   assert.match(shown.stderr, /RUNNING[\s\S]*ASKS YOU/);
+  await h.api('POST', '/api/lead/ack', { session: 'test-lead', ack: shown.stderr.match(/Receipt: ([\w-]+)/)![1] });
   const next = wake();
   await h.api('POST', `${route}/reply`, { message: 'independent progress' });
   assert.equal(await Promise.race([next.then(() => false), new Promise((resolve) => setTimeout(() => resolve(true), 1800))]), true);

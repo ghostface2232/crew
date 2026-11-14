@@ -314,12 +314,16 @@ for (const agent of ['codex', 'antigravity'] as const) {
     assert.equal(job.state, state);
     const requestId = job.waiting?.id ?? 'expired-request';
     h.jobs.flush();
-    const saved = JSON.parse(fs.readFileSync(path.join(h.home, 'jobs.json'), 'utf8')).jobs[0];
+    const snapshot = fs.readFileSync(path.join(h.home, 'jobs.json'), 'utf8');
+    const saved = JSON.parse(snapshot).jobs[0];
     assert.equal(saved.state, state);
     assert.deepEqual(saved.waiting, job.waiting);
     // Snapshot before shutting down the old process: a new daemon reads the crash record.
     h.adapter.shutdown();
     await new Promise((resolve) => setImmediate(resolve));
+    h.jobs.flush();
+    // Graceful shutdown now persists failure immediately. Restore the crash snapshot explicitly.
+    fs.writeFileSync(path.join(h.home, 'jobs.json'), snapshot);
     const wireBeforeRestart = h.wire();
     const restored = h.restore();
     const recovered = restored.jobs.get(job.id);
@@ -328,6 +332,7 @@ for (const agent of ['codex', 'antigravity'] as const) {
     assert.equal(recovered.waiting, null);
     assert.ok(recovered.endedAt);
     assert.match(recovered.error!.message, /bridge restarted while this job was running/);
+    assert.equal(recovered.newsSeq, saved.newsSeq + 1);
     assert.equal(recovered.sessionId, 'parent');
     await assert.rejects(restored.jobs.reply(job.id, { decision: 'approve', request_id: requestId }), /no longer pending/);
     restored.jobs.flush();

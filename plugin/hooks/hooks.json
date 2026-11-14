@@ -18,6 +18,20 @@
             "timeout": 10
           }
         ]
+      },
+      {
+        "matcher": "startup|resume|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/bridge/wake.ts",
+              "context"
+            ],
+            "timeout": 5
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [
@@ -27,6 +41,15 @@
             "type": "http",
             "url": "http://127.0.0.1:47615/api/hooks/claude",
             "timeout": 2
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/bridge/wake.ts",
+              "context"
+            ],
+            "timeout": 5
           }
         ]
       }
@@ -53,16 +76,17 @@
         ]
       },
       {
-        "matcher": "mcp__plugin_crew_crew__(delegate|debate|review|polish|reply|wait|answer)",
+        "matcher": "mcp__plugin_crew_crew__.*",
         "hooks": [
           {
             "type": "command",
             "command": "node",
             "args": [
-              "${CLAUDE_PLUGIN_ROOT}/bridge/wake.ts"
+              "${CLAUDE_PLUGIN_ROOT}/bridge/wake.ts",
+              "watch"
             ],
-            "asyncRewake": true,
-            "timeout": 7200
+            "timeout": 86400,
+            "asyncRewake": true
           }
         ]
       }
@@ -74,6 +98,21 @@
             "type": "http",
             "url": "http://127.0.0.1:47615/api/hooks/claude",
             "timeout": 2
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__plugin_crew_crew__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/bridge/wake.ts",
+              "watch"
+            ],
+            "timeout": 86400,
+            "asyncRewake": true
           }
         ]
       }
@@ -137,6 +176,25 @@
             "type": "http",
             "url": "http://127.0.0.1:47615/api/hooks/claude",
             "timeout": 2
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/bridge/wake.ts",
+              "stop"
+            ],
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/bridge/wake.ts",
+              "watch"
+            ],
+            "timeout": 86400,
+            "asyncRewake": true
           }
         ]
       }

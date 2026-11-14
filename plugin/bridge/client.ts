@@ -4,9 +4,10 @@ import path from 'node:path';
 import { readToken, tokenFile } from './auth.ts';
 import { agentEnv, BASE_URL, HOME, installed, PLUGIN_ROOT } from './config.ts';
 
-export async function api<T = any>(method: 'GET' | 'POST', route: string, body?: unknown): Promise<T> {
+export async function api<T = any>(method: 'GET' | 'POST', route: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const send = (token: string | null) => fetch(`${BASE_URL}${route}`, {
     method,
+    signal,
     headers: { ...(body === undefined ? {} : { 'content-type': 'application/json' }), ...(token ? { authorization: `Bearer ${token}` } : {}) },
     body: body === undefined ? undefined : JSON.stringify(body),
   });

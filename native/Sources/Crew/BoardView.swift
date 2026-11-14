@@ -183,15 +183,15 @@ struct BoardView: View {
                 MissionPanel(store: store, mission: mission, jobs: missionJobs(mission))
             case .loose:
                 ContentPanel(title: history ? "Completed jobs" : "Other jobs", symbol: "rectangle.stack") {
-                    ForEach(loose) { job in JobRow(job: job, selected: store.selectedJob == job.id, store: store) { store.toggleJob(job.id) } }
+                    VStack(spacing: WorkspaceStyle.rowGap) { ForEach(loose) { job in JobRow(job: job, selected: store.selectedJob == job.id, store: store) { store.toggleJob(job.id) } } }
                 }
             case .finished:
                 ContentPanel(title: "Recently finished", symbol: "checkmark.circle") {
-                    ForEach(recentJobs) { job in JobRow(job: job, selected: store.selectedJob == job.id, store: store) { store.toggleJob(job.id) } }
+                    VStack(spacing: WorkspaceStyle.rowGap) { ForEach(recentJobs) { job in JobRow(job: job, selected: store.selectedJob == job.id, store: store) { store.toggleJob(job.id) } } }
                 }
             case .sessions:
                 ContentPanel(title: "Claude sessions", symbol: "bubble.left.and.bubble.right") {
-                    ForEach(sessions) { session in SessionRow(session: session, selected: store.selectedSession == session.id, store: store) { store.toggleSession(session.id) } }
+                    VStack(spacing: WorkspaceStyle.rowGap) { ForEach(sessions) { session in SessionRow(session: session, selected: store.selectedSession == session.id, store: store) { store.toggleSession(session.id) } } }
                 }
             }
         }
@@ -373,23 +373,26 @@ struct MissionPanel: View {
                             let mine = jobs.filter { mission.jobStep($0) == index }
                             let lead = mission.state == "active" && index == mission.step ? store.state.claude.first { $0.id == mission.owner } : nil
                             if !mine.isEmpty || lead != nil {
-                                Text(mission.stops[index]).font(Typeface.captionStrong).foregroundStyle(.secondary).padding(.leading, WorkspaceStyle.rowTitleInset)
+                                Label(mission.stops[index], systemImage: mission.stopSymbol(index)).font(Typeface.subheadline).foregroundStyle(.secondary).padding(.leading, WorkspaceStyle.rowTitleInset)
                                     .frame(maxWidth: .infinity, alignment: .leading).padding(.top, Space.m)
                                 if let lead {
                                     SessionRow(session: lead, selected: store.selectedSession == lead.id, store: store) { store.toggleSession(lead.id) }
                                 }
-                                ForEach(mine) { job in JobRow(job: job, selected: store.selectedJob == job.id, store: store) { store.toggleJob(job.id) } }
+                                ForEach(mine) { job in JobRow(job: job, selected: store.selectedJob == job.id, showsKind: false, store: store) { store.toggleJob(job.id) } }
                             }
                         }
                     }
                     if !mission.outcome.isEmpty { Text(mission.outcome).font(Typeface.callout).textSelection(.enabled).padding(.leading, WorkspaceStyle.rowTitleInset) }
                     // The mission's own controls close its contents, at the trailing edge with the hint that calls
                     // for them; the action that completes it comes last.
-                    // Offered only once the mission looks finished; until then the lead is still at it.
-                    if mission.state == "active" && finished {
+                    // Offered once an active mission looks finished; until then the lead is still at it. An abandoned
+                    // one, superseded or gone quiet, can still be marked done if its work turns out complete.
+                    if (mission.state == "active" && finished) || mission.state == "abandoned" {
                         HStack(spacing: Space.m) {
                             Spacer(minLength: 0)
-                            Text("Looks finished").font(Typeface.caption).foregroundStyle(.secondary)
+                            if mission.state == "active" {
+                                Text("Looks finished").font(Typeface.caption).foregroundStyle(.secondary)
+                            }
                             actions
                         }.padding(.top, Space.xs)
                     }
@@ -414,10 +417,12 @@ struct MissionPanel: View {
     }
     @ViewBuilder private var actions: some View {
         let locked = !store.connected || store.actions["dismiss:\(mission.id)"]?.locked == true
-        // In the warning color: it drops the mission without completing it.
-        Button("Stop tracking", systemImage: "xmark.circle") { Task { await store.dismiss(mission) } }
-            .pillButton(.warning)
-            .help("Stops tracking without marking done. Its jobs keep running.").disabled(locked)
+        // In the warning color: it drops the mission without completing it. An abandoned one is already dropped.
+        if mission.state == "active" {
+            Button("Stop tracking", systemImage: "xmark.circle") { Task { await store.dismiss(mission) } }
+                .pillButton(.warning)
+                .help("Stops tracking without marking done. Its jobs keep running.").disabled(locked)
+        }
         Button("Mark done", systemImage: "checkmark.circle") { Task { await store.markDone(mission) } }
             .pillButton(.prominent).disabled(locked)
     }

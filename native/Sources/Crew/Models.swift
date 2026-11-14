@@ -162,6 +162,11 @@ struct Mission: Codable, Sendable, Identifiable, Equatable {
             return name + (round > 1 ? " \(round)" : "")
         } ?? Self.steps
     }
+    /// The symbol of the kind of work a stop holds, shown with its name above the stop's jobs.
+    func stopSymbol(_ index: Int) -> String {
+        let kind = stages.map { stages in stages.indices.contains(index) ? Self.stopOfStage[stages[index]] ?? 0 : 0 } ?? index
+        return ["list.bullet.clipboard", "hammer", "checkmark.shield", "wrench.and.screwdriver", "text.badge.checkmark", "flag.checkered"][min(kind, 5)]
+    }
     func passed(_ index: Int) -> Bool { state == "done" || index < step }
     func jobStep(_ job: Job) -> Int {
         if stages != nil, let index = job.missionStep, stops.indices.contains(index) { return index }

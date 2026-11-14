@@ -51,7 +51,7 @@ struct WorkspaceSummary: View {
             }
             GeometryReader { geometry in
                 let total = max(1, metrics.reduce(0) { $0 + $1.1 })
-                let gaps = CGFloat(max(0, metrics.filter { $0.1 > 0 }.count - 1)) * 3
+                let gaps = CGFloat(max(0, metrics.filter { $0.1 > 0 }.count - 1)) * Space.xs
                 HStack(spacing: Space.xs) {
                     ForEach(metrics.indices, id: \.self) { index in
                         if metrics[index].1 > 0 {
@@ -60,41 +60,79 @@ struct WorkspaceSummary: View {
                         }
                     }
                 }
-            }.frame(height: 5).background(.quaternary, in: Capsule()).accessibilityHidden(true)
+            }
+            // Made of its colored parts alone; only an empty summary shows the bare track.
+            .frame(height: 5).background(metrics.allSatisfy { $0.1 == 0 } ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear), in: Capsule())
+            .accessibilityHidden(true)
         }.card()
     }
 }
 
 struct MissionTrack: View {
+    static let marker: CGFloat = 24
+    /// Thick enough to read as a track rather than a hairline.
+    static let line: CGFloat = 2
+    /// Steps not reached yet: their outline and the track leading to them share one weight and color.
+    static let upcoming = Color.primary.opacity(0.12)
+    /// From the edge to the first and last markers' centers, so a name centered under an end marker has room.
+    static let inset = Space.x3l
+    /// One line of a step name in `Typeface.captionStrong`.
+    private static let labelHeight: CGFloat = {
+        let font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+        return ceil(font.ascender - font.descender + font.leading)
+    }()
     let mission: Mission
-    private var passedColor: Color { mission.state == "active" ? .primary : .secondary }
+    /// Passed steps: strongest while the mission runs, quieter once it is done, and quieter still once abandoned.
+    private var passedColor: Color {
+        switch mission.state {
+        case "active": .primary
+        case "abandoned": Color.secondary.opacity(0.55)
+        default: .secondary
+        }
+    }
     var body: some View {
-        HStack(spacing: 0) {
-            ForEach(Array(mission.stops.enumerated()), id: \.offset) { index, title in
-                VStack(alignment: .leading, spacing: Space.m) {
-                    HStack(spacing: 0) {
-                        ZStack {
-                            Circle().fill(index == mission.step && mission.state == "active" ? Palette.accent : .clear)
-                            if mission.passed(index) {
-                                Circle().fill(passedColor)
-                                Image(systemName: "checkmark").font(Symbol.badge).foregroundStyle(WorkspaceStyle.surface)
-                            } else {
-                                Circle().strokeBorder(.primary.opacity(index == mission.step ? 0 : 0.15))
-                                Text(String(index + 1)).font(Typeface.chip).foregroundStyle(index == mission.step && mission.state == "active" ? Color.white : .secondary)
-                            }
-                        }.frame(width: 24, height: 24)
-                        if index < mission.stops.count - 1 {
-                            Rectangle().fill(mission.passed(index) ? passedColor.opacity(0.6) : .primary.opacity(0.1)).frame(height: 1)
-                        }
-                    }
-                    Text(title).font(index == mission.step ? Typeface.captionStrong : Typeface.caption)
-                        .foregroundStyle(index == mission.step && mission.state == "active" ? .primary : .secondary).lineLimit(1)
+        let count = mission.stops.count
+        // Markers spread evenly between the insets; each name sits centered under its marker.
+        GeometryReader { geometry in
+            let span = count > 1 ? (geometry.size.width - Self.inset * 2) / CGFloat(count - 1) : 0
+            let center = { (index: Int) in count > 1 ? Self.inset + span * CGFloat(index) : geometry.size.width / 2 }
+            ZStack(alignment: .topLeading) {
+                ForEach(0..<max(0, count - 1), id: \.self) { index in
+                    Rectangle().fill(mission.passed(index) ? passedColor.opacity(0.6) : Self.upcoming)
+                        .frame(width: span, height: Self.line)
+                        .position(x: center(index) + span / 2, y: Self.marker / 2)
                 }
-                // The last step takes only its own width so the track ends at the card's edge.
-                .frame(maxWidth: index < mission.stops.count - 1 ? .infinity : nil, alignment: .leading)
+                ForEach(Array(mission.stops.enumerated()), id: \.offset) { index, title in
+                    marker(index).position(x: center(index), y: Self.marker / 2)
+                    Text(title).font(index == mission.step ? Typeface.captionStrong : Typeface.caption)
+                        .foregroundStyle(index == mission.step && mission.state == "active" ? .primary : .secondary)
+                        .lineLimit(1).frame(maxWidth: count > 1 ? span - Space.xs : nil)
+                        .position(x: center(index), y: Self.marker + Space.m + Self.labelHeight / 2)
+                }
             }
-        }.accessibilityElement(children: .ignore)
-            .accessibilityLabel(mission.state == "done" ? "Done, all \(mission.stops.count) steps passed" : "Step \(mission.step + 1) of \(mission.stops.count), \(mission.stops[mission.step])")
+        }
+        .frame(height: Self.marker + Space.m + Self.labelHeight)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(mission.state == "done" ? "Done, all \(mission.stops.count) steps passed" : "Step \(mission.step + 1) of \(mission.stops.count), \(mission.stops[mission.step])")
+    }
+    private func marker(_ index: Int) -> some View {
+        let current = index == mission.step
+        // The step a mission ended on without passing it is filled like the passed ones, not left blank.
+        let stopped = current && mission.state != "active" && !mission.passed(index)
+        return ZStack {
+            Circle().fill(current && mission.state == "active" ? Palette.accent : stopped ? passedColor : .clear)
+            if mission.passed(index) {
+                Circle().fill(passedColor)
+                Image(systemName: "checkmark").font(Symbol.badge).foregroundStyle(WorkspaceStyle.surface)
+            } else {
+                Circle().strokeBorder(current ? .clear : Self.upcoming, lineWidth: Self.line)
+                Text(String(index + 1)).font(Typeface.chip)
+                    .foregroundStyle(current && mission.state == "active" ? Color.white : stopped ? WorkspaceStyle.surface : .secondary)
+            }
+        }
+        .frame(width: Self.marker, height: Self.marker)
+        // The track runs under the markers; an outlined one hides it behind the card's own color.
+        .background(WorkspaceStyle.surface, in: Circle())
     }
 }
 

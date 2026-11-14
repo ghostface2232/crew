@@ -132,8 +132,6 @@ enum Symbol {
     static let badge = Font.system(size: 9, weight: .bold)
     /// The glyph of a circular icon button.
     static let control = Font.system(size: 11, weight: .semibold)
-    /// A row's leading icon.
-    static let row = Font.system(size: 14)
     /// A thumbnail placeholder or a settings section's icon.
     static let large = Font.system(size: 17, weight: .medium)
     /// An empty state's illustration.

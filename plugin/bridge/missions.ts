@@ -182,7 +182,9 @@ export class Missions {
 
   finish(id: string, input: { outcome?: string; abandoned?: boolean; record?: string } = {}): Mission {
     const mission = this.get(id);
-    if (mission.state !== 'active') return mission;
+    // A finished mission stays as it ended, except that an abandoned one, superseded or gone quiet, may still be
+    // marked done by the user once its work turns out complete.
+    if (mission.state === 'done' || (mission.state === 'abandoned' && input.abandoned)) return mission;
     const outcome = (input.outcome ?? '').split(/\r\n|\r|\n/)[0].trim().slice(0, 200).trim();
     mission.state = input.abandoned ? 'abandoned' : 'done';
     if (mission.state === 'done' && !mission.stages) mission.stage = 'final';

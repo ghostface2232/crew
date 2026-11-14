@@ -192,14 +192,27 @@ test('updating a finished mission explains its terminal state', (t) => {
 
 test('finishing a mission again returns it unchanged without notifying', (t) => {
   const { missions, changes } = harness(t);
-  for (const abandoned of [false, true]) {
-    const mission = missions.finish(missions.start(input).id, { abandoned, outcome: 'Original result' });
+  for (const [first, again] of [[false, false], [false, true], [true, true]]) {
+    const mission = missions.finish(missions.start(input).id, { abandoned: first, outcome: 'Original result' });
     const before = { ...mission };
     const count = changes.length;
-    assert.strictEqual(missions.finish(mission.id, { abandoned: !abandoned, outcome: 'Replacement' }), mission);
+    assert.strictEqual(missions.finish(mission.id, { abandoned: again, outcome: 'Replacement' }), mission);
     assert.deepEqual(mission, before);
     assert.equal(changes.length, count);
   }
+});
+
+test('an abandoned mission can still be marked done, once', (t) => {
+  const { missions, changes } = harness(t);
+  const mission = missions.finish(missions.start(input).id, { abandoned: true, outcome: 'Superseded by a new mission.' });
+  const count = changes.length;
+  missions.finish(mission.id, { outcome: 'Marked done in Crew.' });
+  assert.equal(mission.state, 'done');
+  assert.equal(mission.outcome, 'Marked done in Crew.');
+  assert.equal(changes.length, count + 1);
+  const before = { ...mission };
+  missions.finish(mission.id, { abandoned: true, outcome: 'Again' });
+  assert.deepEqual(mission, before);
 });
 
 test('completion sets the final stage while abandonment keeps the current stage', (t) => {

@@ -209,22 +209,26 @@ struct ElapsedText: View {
     var body: some View { Text(elapsed((end ?? store.now) - start)) }
 }
 
+/// A job as a row: the mark of the agent that ran it, its title and what it is doing. Under a mission stop the stop
+/// names the kind of work; elsewhere `showsKind` puts it in the detail line instead.
 struct JobRow: View {
     let job: Job
     var selected = false
+    var showsKind = true
     let store: CrewStore
     var open: () -> Void
     var body: some View {
-        let detail = [agentName(job.agent), job.ask == true ? "Question" : nil, job.error?.message ?? (job.isActive ? job.phase : nil),
+        let detail = [showsKind ? job.kindTitle : job.ask == true ? "Question" : nil, job.error?.message ?? (job.isActive ? job.phase : nil),
                       job.runsApp == true ? "Runs the app" : nil, job.exclusive == true ? "Runs alone" : nil]
             .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
         Button(action: open) {
             HStack(spacing: Space.l) {
-                Image(systemName: job.ask == true ? "questionmark.bubble" : job.kind == "review" ? "checkmark.shield" : job.kind == "polish" ? "text.badge.checkmark" : "hammer")
-                    .font(Symbol.row).foregroundStyle(.secondary).frame(width: WorkspaceStyle.iconColumn)
+                AgentMark(agent: job.agent, size: MarkSize.row).frame(width: WorkspaceStyle.iconColumn).help(agentName(job.agent))
                 VStack(alignment: .leading, spacing: Space.xs) {
                     Text(job.title).font(Typeface.bodyStrong).foregroundStyle(.primary).lineLimit(2)
-                    Text(detail).font(Typeface.caption).foregroundStyle(job.error == nil ? Color.secondary : Palette.danger).lineLimit(1)
+                    if !detail.isEmpty {
+                        Text(detail).font(Typeface.caption).foregroundStyle(job.error == nil ? Color.secondary : Palette.danger).lineLimit(1)
+                    }
                 }
                 Spacer(minLength: 8)
                 StatusLabel(state: job.stalled ? "stalled" : job.state, title: job.status)
@@ -247,14 +251,15 @@ struct SessionRow: View {
     let store: CrewStore
     var open: () -> Void
     var body: some View {
-        let detail = ["Claude", session.waitingFor ?? (session.state == "idle" ? nil : session.phase), session.inTool ? "Running a tool" : nil]
+        // The mark names the agent, so the detail line says only what the session is doing.
+        let detail = [session.waitingFor ?? (session.state == "idle" ? nil : session.phase), session.inTool ? "Running a tool" : nil]
             .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
         Button(action: open) {
             HStack(spacing: Space.l) {
                 AgentMark(agent: "claude", size: MarkSize.row).frame(width: WorkspaceStyle.iconColumn)
                 VStack(alignment: .leading, spacing: Space.xs) {
                     Text(session.title).font(Typeface.bodyStrong).foregroundStyle(.primary).lineLimit(2)
-                    Text(detail).font(Typeface.caption).foregroundStyle(.secondary).lineLimit(1)
+                    if !detail.isEmpty { Text(detail).font(Typeface.caption).foregroundStyle(.secondary).lineLimit(1) }
                 }
                 Spacer(minLength: 8)
                 StatusLabel(state: session.stalled ? "stalled" : session.state, title: session.stalled ? "May be stuck" : session.state.capitalized)

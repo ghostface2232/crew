@@ -42,9 +42,24 @@ struct Job: Codable, Sendable, Identifiable, Equatable {
     var rounds: [Round]?
     var ask: Bool?
     var evidence: [Evidence]?
+    /// What each finished turn left behind and what was checked against it; absent on older jobs.
+    var receipts: [TurnReceipt]?
+    /// What the worker's runtime was set up to allow.
+    var capabilities: Capabilities?
+    /// Approvals the lead relayed for actions the automatic reviewer refused.
+    var approvals: [RelayedApproval]?
+    /// The lead's messages and the worker's report for each turn.
+    var exchange: [ExchangeEntry]?
+    var debate: DebateLimit?
+    var tier: String?
+    /// The latest receipt that has something to show: a check the bridge ran, or what a review read.
+    var latestReceipt: TurnReceipt? { receipts?.last { $0.check != nil || $0.reviewed != nil } }
+    var hasVerification: Bool { latestReceipt != nil || capabilities != nil || !(approvals ?? []).isEmpty }
+    /// A debate that has used all its rounds and ended: no further reply is accepted.
+    var debateConcluded: Bool { debate.map { state == "done" && turns >= $0.rounds } ?? false }
     /// Ended, but its worktree still awaits a merge or discard, or the lead has not read its result.
     var isUnsettled: Bool { worktree != nil || seq > (delivered ?? seq) }
-    var kindTitle: String { ask == true ? "Question" : roleNames[kind] ?? kind }
+    var kindTitle: String { debate != nil ? "Debate" : ask == true ? "Question" : roleNames[kind] ?? kind }
     var roundUnavailableReason: String? {
         if state == "running" || state == "waiting" { return "Wait until the job has stopped before changing rounds." }
         if worktree == nil { return "This job has no worktree." }
@@ -86,6 +101,28 @@ struct Waiting: Codable, Sendable, Equatable { var type: String; var reason: Str
 struct JobResult: Codable, Sendable, Equatable { var files: [String]; var stat: String; var commit: String?; var outOfScope: [String] }
 struct JobError: Codable, Sendable, Equatable { var message: String; var limit: Bool }
 struct Refusal: Codable, Sendable, Equatable { var action: String; var reason: String; var turn: Int }
+struct CheckResult: Codable, Sendable, Equatable {
+    var command: String
+    var exit: Int?
+    var timedOut: Bool
+    var output: String
+    var ms: Double
+    var sandboxed: Bool
+    var skipped: String?
+}
+struct ReviewedTarget: Codable, Sendable, Equatable { var target: String; var diff: String? }
+struct TurnReceipt: Codable, Sendable, Equatable {
+    var turn: Int
+    var head: String?
+    var check: CheckResult?
+    var reviewed: ReviewedTarget?
+    var stale: String?
+    var at: Double
+}
+struct Capabilities: Codable, Sendable, Equatable { var filesystem: String; var network: String; var plugins: [String] }
+struct RelayedApproval: Codable, Sendable, Equatable { var turn: Int; var quote: String; var matched: Bool; var recorded: Int; var at: Double }
+struct ExchangeEntry: Codable, Sendable, Equatable { var turn: Int; var from: String; var text: String; var at: Double }
+struct DebateLimit: Codable, Sendable, Equatable { var rounds: Int }
 struct CrewEvent: Codable, Sendable, Identifiable, Equatable {
     var seq: Int
     var ts: String

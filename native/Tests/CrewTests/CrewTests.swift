@@ -304,6 +304,27 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
         let decodedJob = try JSONDecoder().decode(Job.self, from: JSONEncoder().encode(job))
         #expect(decodedJob.missionStep == 1)
     }
+    @Test func verificationAndDebateFieldsDecodeAndOlderJobsShowNone() throws {
+        let plain = try fixture().jobs[0]
+        #expect(!plain.hasVerification && plain.latestReceipt == nil && !plain.debateConcluded)
+        var object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(plain)) as! [String: Any]
+        object["receipts"] = [
+            ["turn": 1, "head": "1111111122", "check": ["command": "npm test", "exit": 0, "timedOut": false, "output": "", "ms": 4000, "sandboxed": true], "at": 1],
+            ["turn": 2, "head": "2222222233", "at": 2],
+        ]
+        object["capabilities"] = ["filesystem": "read-only", "network": "agent-managed", "plugins": []]
+        object["approvals"] = [["turn": 2, "quote": "ok", "matched": false, "recorded": 1, "at": 3]]
+        object["debate"] = ["rounds": 2]
+        object["exchange"] = [["turn": 1, "from": "lead", "text": "Batch?", "at": 1], ["turn": 1, "from": "worker", "text": "No.", "at": 2]]
+        object["tier"] = "frontier"
+        object["state"] = "done"
+        object["turns"] = 2
+        let job = try JSONDecoder().decode(Job.self, from: JSONSerialization.data(withJSONObject: object))
+        // A receipt with nothing to show does not hide the check before it.
+        #expect(job.latestReceipt?.check?.command == "npm test")
+        #expect(job.hasVerification && job.debateConcluded && job.kindTitle == "Debate" && job.tier == "frontier")
+        #expect(job.exchange?.map(\.from) == ["lead", "worker"])
+    }
     @Test func looksFinishedRequiresAnActiveMissionQuietForTwentyMinutesWithoutBusyJobs() throws {
         var mission = try fixture().missions[0]
         var job = try fixture().jobs[0]

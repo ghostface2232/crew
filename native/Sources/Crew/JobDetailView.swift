@@ -59,7 +59,7 @@ struct JobDetailView: View {
         }
         Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
             // The model the session reported, else the configured one.
-            fact("Agent", [agentName(job.agent), job.resolvedModel ?? job.model, (job.resolvedEffort ?? job.effort).map { "\($0) effort" }].compactMap { $0 }.joined(separator: " · "))
+            fact("Agent", [agentName(job.agent), job.resolvedModel ?? job.model, (job.resolvedEffort ?? job.effort).map { "\($0) effort" }, job.tier.map { "\($0) tier" }].compactMap { $0 }.joined(separator: " · "))
             fact("Role", job.kindTitle)
             fact("Project", job.projectPath)
             fact("Duration", elapsed((job.endedAt ?? store.now) - job.createdAt))
@@ -88,6 +88,9 @@ struct JobDetailView: View {
                     CopyButton(title: "Copy diff command", text: "git diff \(tree.base.prefix(8))..\(tree.branch)")
                 }
             }
+        }
+        if job.hasVerification {
+            detailSection("Verification", symbol: "checkmark.shield") { VerificationView(job: job) }
         }
         if let evidence = job.evidence, !evidence.isEmpty {
             detailSection("Evidence", symbol: "photo.on.rectangle") {
@@ -134,13 +137,20 @@ struct JobDetailView: View {
                 ForEach(Array(job.notes.enumerated()), id: \.offset) { _, note in Text(noteText(note)).font(Typeface.callout).textSelection(.enabled) }
             }
         }
-        if !job.report.isEmpty {
+        if let debate = job.debate, let exchange = job.exchange, !exchange.isEmpty {
+            detailSection("Debate · round \(min(job.turns, debate.rounds)) of \(debate.rounds)\(job.debateConcluded ? " · concluded" : "")", symbol: "bubble.left.and.bubble.right") {
+                DebateView(entries: exchange, worker: agentName(job.agent))
+            }
+        } else if !job.report.isEmpty {
             detailSection("Report", symbol: "doc.text") {
                 ReportText(report: job.report)
             }
         }
-        if job.sessionId != nil && job.state != "waiting" {
-            detailSection(job.isActive ? "Steer" : "Follow up", symbol: "bubble.left") {
+        if job.debateConcluded {
+            Label("This debate has used all its rounds. Decide from it, or start a new debate.", systemImage: "checkmark.bubble")
+                .font(Typeface.callout).foregroundStyle(.secondary).inset()
+        } else if job.sessionId != nil && job.state != "waiting" {
+            detailSection(job.isActive ? "Steer" : job.debate != nil ? "Reply" : "Follow up", symbol: "bubble.left") {
                 let key = "followup:\(job.id)"
                 MessageEditor(title: "Message to \(agentName(job.agent))", text: Binding(get: { store.drafts[key] ?? "" }, set: { store.drafts[key] = $0 }))
                 HStack {
@@ -430,6 +440,111 @@ struct ReportText: View {
 }
 
 /// Opens in the default viewer on click; a recording shows its name, since a still frame would need decoding it.
+/// What verified the result: the latest check the bridge itself ran (or what a review read), what the worker's
+/// runtime could do, and approvals the lead relayed. Decision support, so the status reads first and detail folds.
+private struct VerificationView: View {
+    let job: Job
+    @State private var outputShown = false
+
+    var body: some View {
+        if let receipt = job.latestReceipt {
+            VStack(alignment: .leading, spacing: Space.s) {
+                if let check = receipt.check {
+                    checkStatus(check, stale: receipt.stale != nil)
+                    Text(check.command).font(Typeface.code).textSelection(.enabled)
+                    Text(caption(receipt, extra: check.skipped == nil ? duration(check.ms) : nil)).font(Typeface.caption).foregroundStyle(.secondary)
+                    if check.skipped == nil && check.exit != 0 && !check.output.isEmpty {
+                        DisclosureGroup("Output (end)", isExpanded: $outputShown) {
+                            Text(check.output.split(separator: "\n", omittingEmptySubsequences: false).suffix(15).joined(separator: "\n"))
+                                .font(Typeface.codeSmall).textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading).padding(.top, Space.xs)
+                        }.font(Typeface.caption)
+                    }
+                } else if let reviewed = receipt.reviewed {
+                    Label("Reviewed", systemImage: "eye").font(Typeface.calloutStrong)
+                        .foregroundStyle(receipt.stale == nil ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                    Text(reviewed.target).font(Typeface.callout).textSelection(.enabled)
+                    Text(caption(receipt, extra: reviewed.diff.map { "diff \($0)" })).font(Typeface.caption).foregroundStyle(.secondary)
+                }
+                if let stale = receipt.stale {
+                    Label("No longer current: \(stale)", systemImage: "clock.arrow.circlepath")
+                        .font(Typeface.caption).foregroundStyle(Palette.warning)
+                }
+            }
+        }
+        if let capabilities = job.capabilities {
+            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
+                GridRow(alignment: .top) {
+                    Text("Runs with").foregroundStyle(.secondary).frame(minWidth: 72, alignment: .leading)
+                    Text(runsWith(capabilities)).frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }.font(Typeface.callout).textSelection(.enabled)
+        }
+        ForEach(Array((job.approvals ?? []).enumerated()), id: \.offset) { _, approval in
+            VStack(alignment: .leading, spacing: Space.xs) {
+                Label("Approval relayed for turn \(approval.turn)", systemImage: approval.recorded > 0 ? "person.crop.circle.badge.checkmark" : "person.crop.circle.badge.questionmark")
+                    .font(Typeface.calloutStrong)
+                Text(approvalBasis(approval)).font(Typeface.caption).foregroundStyle(.secondary)
+                Text("\u{201C}\(approval.quote)\u{201D}").font(Typeface.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            }
+        }
+    }
+
+    @ViewBuilder private func checkStatus(_ check: CheckResult, stale: Bool) -> some View {
+        let (title, symbol, color): (String, String, Color) =
+            check.skipped != nil ? ("Check not run", "minus.circle", .secondary)
+            : check.timedOut ? ("Check timed out after \(duration(check.ms))", "clock.badge.exclamationmark", Palette.warning)
+            : check.exit == 0 ? ("Check passed", "checkmark.circle.fill", Palette.success)
+            : check.exit == nil ? ("Check stopped before it finished", "xmark.octagon.fill", Palette.danger)
+            : ("Check failed with exit code \(check.exit!)", "xmark.octagon.fill", Palette.danger)
+        // A stale result keeps its words but loses its color: it describes a tree that is gone.
+        Label(title, systemImage: symbol).font(Typeface.calloutStrong).foregroundStyle(stale ? .secondary : color)
+        if let skipped = check.skipped { Text(skipped.prefix(1).uppercased() + skipped.dropFirst() + ".").font(Typeface.caption).foregroundStyle(.secondary) }
+    }
+
+    private func caption(_ receipt: TurnReceipt, extra: String?) -> String {
+        ["Turn \(receipt.turn)", receipt.head.map { String($0.prefix(8)) }, extra].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    private func duration(_ ms: Double) -> String {
+        ms < 60_000 ? "\(max(1, Int((ms / 1000).rounded())))s" : "\(Int(ms / 60_000))m \(Int(ms.truncatingRemainder(dividingBy: 60_000) / 1000))s"
+    }
+
+    private func runsWith(_ c: Capabilities) -> String {
+        let network = ["on": "network on", "off": "no network", "agent-managed": "network as the agent allows"][c.network] ?? "network \(c.network)"
+        return ([c.filesystem, network] + (c.plugins.isEmpty ? [] : ["plugins \(c.plugins.joined(separator: ", ")) (act outside the sandbox)"])).joined(separator: " · ")
+    }
+
+    private func approvalBasis(_ approval: RelayedApproval) -> String {
+        guard approval.recorded > 0 else { return "No messages of the user were recorded, so only the lead\u{2019}s quote went with it." }
+        return "The user\u{2019}s own words went with it" + (approval.matched ? ", and the quote matches them." : "; the quote is a translation or paraphrase.")
+    }
+}
+
+/// A debate as its conversation, oldest first. The lead's turns sit inset behind an accent edge so the two
+/// voices separate at a glance; each message renders like a report.
+private struct DebateView: View {
+    let entries: [ExchangeEntry]
+    let worker: String
+
+    var body: some View {
+        ForEach(Array(entries.enumerated()), id: \.offset) { _, entry in
+            let lead = entry.from == "lead"
+            VStack(alignment: .leading, spacing: Space.xs) {
+                Text("\(lead ? "Lead" : worker) · round \(entry.turn)").font(Typeface.captionStrong).foregroundStyle(lead ? Palette.accent : .secondary)
+                ReportText(report: entry.text)
+            }
+            .padding(.leading, lead ? Space.l : 0)
+            .overlay(alignment: .leading) {
+                if lead { Rectangle().fill(Palette.accent).frame(width: 2) }
+            }
+            .padding(.leading, lead ? Space.xl : 0)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .combine)
+        }
+    }
+}
+
 private struct EvidenceTile: View {
     let item: Evidence
     @State private var thumbnail: NSImage?

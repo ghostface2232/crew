@@ -236,27 +236,36 @@ struct JobRow: View {
     }
 }
 
-struct SessionView: View {
-    var session: ClaudeSession
+/// A Claude session as a row like a job's, opening the same detail panel.
+struct SessionRow: View {
+    let session: ClaudeSession
+    var selected = false
+    let store: CrewStore
+    var open: () -> Void
     var body: some View {
-        DisclosureGroup {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(session.waitingFor ?? session.phase)
-                Text(session.cwd).font(Typeface.caption).foregroundStyle(.secondary)
-                if session.state == "waiting" { Text("Answer in Claude.").foregroundStyle(.secondary) }
-                if session.inTool { Label("A tool is running", systemImage: "wrench.and.screwdriver").font(Typeface.caption) }
-            }.textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 8)
-        } label: {
-            HStack(spacing: 10) {
-                AgentMark(agent: "claude", size: 14)
-                Text(session.title).font(Typeface.bodyStrong).lineLimit(1)
+        let detail = ["Claude", session.waitingFor ?? (session.state == "idle" ? nil : session.phase), session.inTool ? "Running a tool" : nil]
+            .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+        Button(action: open) {
+            HStack(spacing: 12) {
+                AgentMark(agent: "claude", size: 16).frame(width: 20)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(session.title).font(Typeface.bodyStrong).foregroundStyle(.primary).lineLimit(2)
+                    Text(detail).font(Typeface.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
                 Spacer(minLength: 8)
                 StatusLabel(state: session.stalled ? "stalled" : session.state, title: session.stalled ? "May be stuck" : session.state.capitalized)
+                // An idle session stops its clock at its last activity.
+                ElapsedText(store: store, start: session.startedAt, end: session.state == "idle" ? session.activeAt : nil)
+                    .monospacedDigit().font(Typeface.caption).foregroundStyle(.secondary).frame(minWidth: 28, alignment: .trailing)
+                Image(systemName: "chevron.right").font(Typeface.micro).foregroundStyle(.tertiary)
             }
-        }
+            .padding(.horizontal, 12).padding(.vertical, 10).contentShape(Rectangle())
+            .background(selected ? Color.accentColor.opacity(0.09) : session.state == "waiting" ? Color.orange.opacity(0.07) : WorkspaceStyle.rowFill, in: RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius))
+        }.buttonStyle(WorkspacePressStyle())
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
-
 struct EventList: View {
     var events: [CrewEvent]
     /// Nil inside a job's own details, where every event belongs to the job already shown.
@@ -374,4 +383,25 @@ private struct FadeTruncation: ViewModifier {
 }
 extension View {
     func fadeTruncated() -> some View { modifier(FadeTruncation()) }
+}
+
+/// Keeps the scroll view it sits in on thin overlay scroll bars, which show only while scrolling. With a mouse
+/// attached, macOS otherwise switches every scroll view to wide legacy bars that always take a strip of the page.
+struct OverlayScrollers: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { Probe() }
+    func updateNSView(_ view: NSView, context: Context) {}
+    final class Probe: NSView {
+        nonisolated(unsafe) private var observer: NSObjectProtocol?
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            apply()
+            guard observer == nil else { return }
+            // The scroll view takes the new system style on this notice too; applied after it, so ours wins.
+            observer = NotificationCenter.default.addObserver(forName: NSScroller.preferredScrollerStyleDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
+                DispatchQueue.main.async { self?.apply() }
+            }
+        }
+        private func apply() { enclosingScrollView?.scrollerStyle = .overlay }
+        deinit { if let observer { NotificationCenter.default.removeObserver(observer) } }
+    }
 }

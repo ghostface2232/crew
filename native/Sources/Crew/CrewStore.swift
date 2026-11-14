@@ -40,9 +40,17 @@ final class CrewStore {
     var revision = 0
     var clockSkew: Double = 0
     var selection: String? = "overview" {
-        didSet { if selection != oldValue { selectedJob = nil } }
+        didSet { if selection != oldValue { closeDetail() } }
     }
     var selectedJob: String?
+    /// A Claude session shown in the detail panel instead of a job; at most one of the two is set.
+    var selectedSession: String?
+    var detailOpen: Bool { selectedJob != nil || selectedSession != nil }
+    func closeDetail() { selectedJob = nil; selectedSession = nil }
+    func openSession(_ id: String) { selectedJob = nil; selectedSession = id }
+    /// A row clicked again closes the panel it opened.
+    func toggleJob(_ id: String) { if selectedJob == id { closeDetail() } else { openJob(id) } }
+    func toggleSession(_ id: String) { if selectedSession == id { closeDetail() } else { openSession(id) } }
     var search = ""
     var searchRequest = 0
     var showingDispatch = false
@@ -81,6 +89,7 @@ final class CrewStore {
             if let job = state.jobs.first(where: { $0.id == id }) { selection = "project:\(job.projectPath)" }
             else { selection = "overview" }
         }
+        selectedSession = nil
         selectedJob = id
     }
     func start() {

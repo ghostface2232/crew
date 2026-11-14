@@ -30,7 +30,7 @@ struct BoardView: View {
         }
         .frame(minHeight: 560)
         .onChange(of: store.selection) { store.persistSelection() }
-        .onExitCommand { store.selectedJob = nil }
+        .onExitCommand { store.closeDetail() }
         .sheet(isPresented: $store.showingDispatch) { DispatchView(store: store) }
     }
     private var page: some View {
@@ -45,6 +45,7 @@ struct BoardView: View {
                 else { workspace }
             }
             .onGeometryChange(for: Bool.self) { $0.size.width >= Self.twoColumnWidth } action: { wide = $0 }
+            .background(OverlayScrollers())
             .padding(.horizontal, 40).padding(.top, 12).padding(.bottom, 40)
             .frame(maxWidth: 1280).frame(maxWidth: .infinity)
         }
@@ -57,11 +58,14 @@ struct BoardView: View {
         // The page keeps scrolling and working beside the open panel. A click on it that no control takes
         // closes the panel; one on another job opens that job instead. The sidebar is another column.
         .contentShape(Rectangle())
-        .gesture(TapGesture().onEnded { store.selectedJob = nil }, including: store.selectedJob != nil ? .all : .subviews)
+        .gesture(TapGesture().onEnded { store.closeDetail() }, including: store.detailOpen ? .all : .subviews)
         .overlay(alignment: .trailing) {
-            if let id = store.selectedJob {
+            if store.detailOpen {
                 let shape = RoundedRectangle(cornerRadius: WorkspaceStyle.panelRadius)
-                JobDetailView(store: store, id: id).id(id)
+                Group {
+                    if let id = store.selectedJob { JobDetailView(store: store, id: id).id(id) }
+                    else if let id = store.selectedSession { SessionDetailView(store: store, id: id).id("session:\(id)") }
+                }
                     .frame(width: 420).background(WorkspaceStyle.surface, in: shape)
                     .clipShape(shape)
                     .overlay(shape.strokeBorder(WorkspaceStyle.hairline))
@@ -71,7 +75,7 @@ struct BoardView: View {
                     .zIndex(1)
             }
         }
-        .animation(reduceMotion ? nil : .smooth(duration: 0.26, extraBounce: 0), value: store.selectedJob != nil)
+        .animation(reduceMotion ? nil : .smooth(duration: 0.26, extraBounce: 0), value: store.detailOpen)
     }
     /// The content width from which cards pair up, so each column still fits a mission's header.
     private nonisolated static let twoColumnWidth: CGFloat = 1000
@@ -179,15 +183,15 @@ struct BoardView: View {
                 MissionPanel(store: store, mission: mission, jobs: missionJobs(mission))
             case .loose:
                 ContentPanel(title: history ? "Completed jobs" : "Other jobs", symbol: "rectangle.stack") {
-                    ForEach(loose) { job in JobRow(job: job, selected: store.selectedJob == job.id, store: store) { store.openJob(job.id) } }
+                    ForEach(loose) { job in JobRow(job: job, selected: store.selectedJob == job.id, store: store) { store.toggleJob(job.id) } }
                 }
             case .finished:
                 ContentPanel(title: "Recently finished", symbol: "checkmark.circle") {
-                    ForEach(recentJobs) { job in JobRow(job: job, selected: store.selectedJob == job.id, store: store) { store.openJob(job.id) } }
+                    ForEach(recentJobs) { job in JobRow(job: job, selected: store.selectedJob == job.id, store: store) { store.toggleJob(job.id) } }
                 }
             case .sessions:
                 ContentPanel(title: "Claude sessions", symbol: "bubble.left.and.bubble.right") {
-                    ForEach(sessions) { SessionView(session: $0) }
+                    ForEach(sessions) { session in SessionRow(session: session, selected: store.selectedSession == session.id, store: store) { store.toggleSession(session.id) } }
                 }
             }
         }
@@ -244,7 +248,9 @@ struct AgentOverview: View {
                         let waiting = agent == "claude" ? sessions.contains { $0.state == "waiting" } : jobs.contains { $0.state == "waiting" }
                         let stalled = agent == "claude" ? sessions.contains { $0.stalled } : jobs.contains { $0.stalled }
                         let mark = waiting ? "waiting" : stalled ? "stalled" : count > 0 ? "working" : "idle"
-                        if count > 0 { Text("\(count) active").font(Typeface.caption).foregroundStyle(.secondary) }
+                        let idle = agent == "claude" ? idleSessions(store) : 0
+                        let summary = [count > 0 ? "\(count) active" : nil, idle > 0 ? "\(idle) idle" : nil].compactMap { $0 }
+                        if !summary.isEmpty { Text(summary.joined(separator: " · ")).font(Typeface.caption).foregroundStyle(.secondary) }
                         StatusLabel(state: mark, title: waiting ? "Needs you" : stalled ? "May be stuck" : store.state.agents[agent]?.enabled == false ? "Disabled" : count > 0 ? "Working" : "Ready")
                     }
                     if let usage = store.usage, usage.source != "none" { AgentUsageView(store: store, agent: agent) }
@@ -253,6 +259,11 @@ struct AgentOverview: View {
             }
         }.card(padding: 0)
     }
+}
+
+/// Claude sessions open in this scope but between turns.
+@MainActor private func idleSessions(_ store: CrewStore) -> Int {
+    store.state.claude.filter { $0.state == "idle" && (store.project.isEmpty || $0.projectPath == store.project) }.count
 }
 
 private struct AgentCard: View {
@@ -267,7 +278,10 @@ private struct AgentCard: View {
     private var activity: String {
         let count = agent == "claude" ? sessions.count : jobs.count
         let noun = agent == "claude" ? "session" : "job"
-        return count == 0 ? "No active \(noun)s" : "\(count) active \(noun)\(count == 1 ? "" : "s")"
+        // Only Claude sessions sit idle between turns; a worker's job is either running or over.
+        let idle = agent == "claude" ? idleSessions(store) : 0
+        if count == 0 { return idle == 0 ? "No active \(noun)s" : "\(idle) idle \(noun)\(idle == 1 ? "" : "s")" }
+        return "\(count) active \(noun)\(count == 1 ? "" : "s")" + (idle > 0 ? " · \(idle) idle" : "")
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -368,10 +382,9 @@ struct MissionPanel: View {
                                 Text(mission.stops[index]).font(Typeface.captionStrong).foregroundStyle(.secondary)
                                     .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 8)
                                 if let lead {
-                                    SessionView(session: lead).padding(.horizontal, 12).padding(.vertical, 10)
-                                        .background(WorkspaceStyle.rowFill, in: RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius))
+                                    SessionRow(session: lead, selected: store.selectedSession == lead.id, store: store) { store.toggleSession(lead.id) }
                                 }
-                                ForEach(mine) { job in JobRow(job: job, selected: store.selectedJob == job.id, store: store) { store.openJob(job.id) } }
+                                ForEach(mine) { job in JobRow(job: job, selected: store.selectedJob == job.id, store: store) { store.toggleJob(job.id) } }
                             }
                         }
                     }

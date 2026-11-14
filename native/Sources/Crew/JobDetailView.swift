@@ -7,8 +7,6 @@ struct JobDetailView: View {
     @State private var events: [CrewEvent] = []
     @State private var error = ""
     @State private var retry = 0
-    /// VoiceOver moves to the title when the panel opens; keyboard focus stays where it was.
-    @AccessibilityFocusState private var titleFocused: Bool
     private var job: Job? {
         guard var current = store.state.jobs.first(where: { $0.id == id }) else { return detail }
         current.prompt = detail?.prompt ?? current.prompt
@@ -24,13 +22,17 @@ struct JobDetailView: View {
                 if job == nil && error.isEmpty { ProgressView("Loading details…") }
                 if let job { contents(job) }
             }.padding(.horizontal, 24).padding(.top, 20).padding(.bottom, 24).frame(maxWidth: .infinity, alignment: .leading)
+                .background(OverlayScrollers())
         }
         // The header stays while the details scroll under it. As a scroll view's bar, it gets the system's
         // soft edge effect: the content fades and blurs progressively beneath it instead of being cut off.
-        .safeAreaBar(edge: .top) { header }
+        .safeAreaBar(edge: .top) {
+            DetailHeader(title: job?.title, close: store.closeDetail) {
+                if let job { StatusLabel(state: job.stalled ? "stalled" : job.state, title: job.status) }
+            }
+        }
         .scrollEdgeEffectStyle(.soft, for: .top)
-        .onExitCommand { store.selectedJob = nil }
-        .onAppear { titleFocused = true }
+        .onExitCommand { store.closeDetail() }
         .task(id: "\(id):\(store.revision):\(retry)") { await load() }
     }
     private func load() async {
@@ -46,28 +48,6 @@ struct JobDetailView: View {
         } catch {
             if !Task.isCancelled { self.error = error.localizedDescription }
         }
-    }
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                if let job { StatusLabel(state: job.stalled ? "stalled" : job.state, title: job.status) }
-                Spacer()
-                Button("Close Details", systemImage: "xmark") { store.selectedJob = nil }
-                    .buttonStyle(.bordered).buttonBorderShape(.circle).labelStyle(.iconOnly).help("Close details (Esc)").keyboardShortcut(.cancelAction)
-            }
-            // Two lines at most, so a long title cannot take over the panel. Selectable text drops its
-            // truncation once selected, so the full title is copied from a menu instead.
-            if let job {
-                Text(job.title).font(Typeface.title).lineSpacing(2).lineLimit(2).help(job.title)
-                    .accessibilityAddTraits(.isHeader).accessibilityFocused($titleFocused)
-                    .contextMenu {
-                        Button("Copy Title", systemImage: "doc.on.doc") {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(job.title, forType: .string)
-                        }
-                    }
-            }
-        }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 24).padding(.top, 20).padding(.bottom, 12)
     }
     @ViewBuilder private func contents(_ job: Job) -> some View {
         if job.isActive || job.error != nil {
@@ -194,18 +174,112 @@ struct JobDetailView: View {
             Text(job.id).font(Typeface.codeSmall).foregroundStyle(.tertiary).textSelection(.enabled)
         }
     }
-    private func fact(_ title: String, _ value: String) -> some View {
-        GridRow(alignment: .top) {
-            Text(title).foregroundStyle(.secondary).frame(minWidth: 72, alignment: .leading)
-            Text(value).frame(maxWidth: .infinity, alignment: .leading)
-        }
+}
+
+@MainActor private func fact(_ title: String, _ value: String) -> some View {
+    GridRow(alignment: .top) {
+        Text(title).foregroundStyle(.secondary).frame(minWidth: 72, alignment: .leading)
+        Text(value).frame(maxWidth: .infinity, alignment: .leading)
     }
-    /// A titled section whose contents sit in a gray inset, as a mission card's rows do, so sections read apart.
-    private func detailSection<Content: View>(_ title: String, symbol: String, @ViewBuilder content: () -> Content) -> some View {
+}
+/// A titled section whose contents sit in a gray inset, as a mission card's rows do, so sections read apart.
+@MainActor private func detailSection<Content: View>(_ title: String, symbol: String, @ViewBuilder content: () -> Content) -> some View {
+    VStack(alignment: .leading, spacing: 10) {
+        Label(title, systemImage: symbol).font(Typeface.subheadline)
+        VStack(alignment: .leading, spacing: 12) { content() }.inset()
+    }.frame(maxWidth: .infinity, alignment: .leading)
+}
+
+/// The panel's pinned top: status and close button, then the title.
+private struct DetailHeader<Status: View>: View {
+    let title: String?
+    let close: () -> Void
+    @ViewBuilder var status: Status
+    /// VoiceOver moves to the title when the panel opens; keyboard focus stays where it was.
+    @AccessibilityFocusState private var titleFocused: Bool
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                status
+                Spacer()
+                Button("Close Details", systemImage: "xmark", action: close)
+                    .buttonStyle(.bordered).buttonBorderShape(.circle).labelStyle(.iconOnly).help("Close details (Esc)").keyboardShortcut(.cancelAction)
+            }
+            // Two lines at most, so a long title cannot take over the panel. Selectable text drops its
+            // truncation once selected, so the full title is copied from a menu instead.
+            if let title {
+                Text(title).font(Typeface.title).lineSpacing(2).lineLimit(2).help(title)
+                    .accessibilityAddTraits(.isHeader).accessibilityFocused($titleFocused)
+                    .contextMenu {
+                        Button("Copy Title", systemImage: "doc.on.doc") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(title, forType: .string)
+                        }
+                    }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 24).padding(.top, 20).padding(.bottom, 12)
+        .onAppear { titleFocused = true }
+    }
+}
+
+/// A Claude session in the detail panel. Crew sees only what Claude's hooks report, so this shows its state,
+/// what it waits for, where it runs and the missions it leads; the conversation itself stays in Claude.
+struct SessionDetailView: View {
+    @Bindable var store: CrewStore
+    let id: String
+    private var session: ClaudeSession? { store.state.claude.first { $0.id == id } }
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 28) {
+                if let session { contents(session) } else { Text("This session has ended.").foregroundStyle(.secondary) }
+            }.padding(.horizontal, 24).padding(.top, 20).padding(.bottom, 24).frame(maxWidth: .infinity, alignment: .leading)
+                .background(OverlayScrollers())
+        }
+        .safeAreaBar(edge: .top) {
+            DetailHeader(title: session?.title, close: store.closeDetail) {
+                if let session {
+                    StatusLabel(state: session.stalled ? "stalled" : session.state, title: session.stalled ? "May be stuck" : session.state.capitalized)
+                }
+            }
+        }
+        .scrollEdgeEffectStyle(.soft, for: .top)
+        .onExitCommand { store.closeDetail() }
+    }
+    @ViewBuilder private func contents(_ session: ClaudeSession) -> some View {
+        if session.state == "waiting" {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(session.waitingFor ?? "Claude needs your input.").font(Typeface.body).textSelection(.enabled)
+                Text("Answer in Claude.").font(Typeface.callout).foregroundStyle(.secondary)
+            }.card(fill: .orange.opacity(0.06))
+        } else if session.state != "idle" {
+            Text(session.phase).font(Typeface.callout).foregroundStyle(.secondary).textSelection(.enabled)
+        }
+        Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
+            fact("Agent", "Claude · Lead")
+            fact("Project", session.projectPath)
+            if session.cwd != session.projectPath { fact("Directory", session.cwd) }
+            fact("Started", "\(elapsed(store.now - session.startedAt)) ago")
+            fact("Last active", "\(elapsed(store.now - session.activeAt)) ago")
+            if session.inTool { fact("Now", "Running a tool") }
+        }.font(Typeface.callout).textSelection(.enabled).inset()
+        let missions = store.state.missions.filter { $0.owner == session.id }.sorted { $0.createdAt > $1.createdAt }
+        if !missions.isEmpty {
+            detailSection("Missions", symbol: "flag") {
+                ForEach(missions) { mission in
+                    HStack(spacing: 10) {
+                        Text(mission.title).font(Typeface.callout).lineLimit(2)
+                        Spacer(minLength: 8)
+                        StatusLabel(state: mission.state == "active" ? "running" : mission.state, title: mission.state.capitalized)
+                    }
+                }
+            }
+        }
         VStack(alignment: .leading, spacing: 10) {
-            Label(title, systemImage: symbol).font(Typeface.subheadline)
-            VStack(alignment: .leading, spacing: 12) { content() }.inset()
-        }.frame(maxWidth: .infinity, alignment: .leading)
+            Divider().padding(.bottom, 4)
+            CopyButton(title: "Copy resume command", text: "claude --resume \(session.id)").font(Typeface.callout)
+            Text(session.id).font(Typeface.codeSmall).foregroundStyle(.tertiary).textSelection(.enabled)
+        }
     }
 }
 

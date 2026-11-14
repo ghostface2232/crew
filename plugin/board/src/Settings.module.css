@@ -1,0 +1,38 @@
+:global(dialog.sheet):has(> .panel) { width: min(720px, calc(100vw - 32px)); overflow: hidden; background: var(--canvas); }
+.panel { display: flex; flex-direction: column; height: min(620px, calc(100dvh - 48px)); min-height: 0; }
+.header { flex: none; padding: 26px; }
+.header :global(.segmented) { width: 300px; max-width: 100%; }
+.header :global(.segmented) > button { flex: 1; min-width: 0; }
+.content { flex: 1; min-height: 0; overflow: auto; padding: 0 26px 4px; }
+.roles { display: grid; gap: 12px; }
+.role { display: grid; gap: 16px; }
+.roleHeader { display: grid; grid-template-columns: 23px minmax(0, 1fr) 180px; align-items: center; gap: 10px; }
+.roleHeader h3 { overflow-wrap: anywhere; }
+.roleFields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.presets { display: grid; gap: 14px; overflow-wrap: anywhere; }
+.instructions { display: flex; flex-direction: column; gap: 14px; min-height: 100%; }
+.instructionsHeader { display: flex; align-items: center; gap: 20px; }
+.instructionsHeader h3 { flex: 1; }
+.scope { width: 250px; max-width: 50%; }
+.editor { flex: 1; field-sizing: fixed; min-height: 240px; max-height: none; padding: 14px; }
+.file { overflow-wrap: anywhere; }
+.note { display: flex; align-items: start; gap: 6px; }
+.note svg { flex: none; }
+.footer { display: flex; flex: none; align-items: center; flex-wrap: wrap; gap: 12px; padding: 18px 26px; }
+.status { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 12px; margin-inline-start: auto; }
+@media (max-width: 600px) {
+  .header { display: grid; grid-template-columns: minmax(0, 1fr) auto; padding: 20px; }
+  .header :global(.segmented) { grid-row: 2; grid-column: 1 / -1; width: 100%; }
+  .header :global(.icon) { grid-row: 1; grid-column: 2; }
+  .header :global(.segmented) > button { padding-inline: 8px; }
+  .content { padding-inline: 20px; }
+  .roleHeader { grid-template-columns: 23px minmax(0, 1fr); }
+  .roleHeader select { grid-column: 1 / -1; }
+  .roleFields { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .instructionsHeader { flex-direction: column; align-items: stretch; gap: 14px; }
+  .scope { width: auto; max-width: none; }
+  .footer { padding: 18px 20px; }
+  .status { flex-basis: 100%; gap: 6px 12px; }
+  .status:empty { display: none; }
+}

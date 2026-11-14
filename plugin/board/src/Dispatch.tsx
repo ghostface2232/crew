@@ -1,146 +1,203 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import { ArrowUp, CircleAlert, Send } from 'lucide-react';
 import type { Role } from '../../bridge/config.ts';
 import type { BoardJob, Mission, Snapshot } from './types.ts';
 import { request } from './api.ts';
-import { NAMES, projectOf } from './model.ts';
+import { projectOf, ROLE_NAMES } from './model.ts';
 import { board } from './store.ts';
-import { Composer } from './ui.tsx';
+import { Dialog, Icon, Segmented } from './ui.tsx';
 import styles from './Dispatch.module.css';
 
 export function Dispatch({
   state,
   project,
   openJob,
+  close,
 }: {
   state: Snapshot;
   project: string;
   openJob: (id: string) => void;
+  close: () => void;
 }) {
+  const initialDirectory = useRef(project);
   const [directory, setDirectory] = useState(project);
   const [role, setRole] = useState<Role>('delegate');
   const [targets, setTargets] = useState('');
   const [intent, setIntent] = useState('command');
   const [destination, setDestination] = useState('project');
-  const cwd = project || directory;
-  const agent = state.roles[role]?.agent;
+  const [text, setText] = useState('');
+  const [sending, setSending] = useState(false);
+  const sendingLock = useRef(false);
+  const [error, setError] = useState('');
+  const cwd = directory;
+  const agent = state.roles[intent === 'question' ? 'delegate' : role]?.agent;
+  const worker = agent ? state.agents[agent] : undefined;
   const missions = state.missions.filter((mission) => mission.state === 'active' && projectOf(mission) === cwd.trim());
-  const target =
-    destination.startsWith('mission:') && !missions.some((mission) => `mission:${mission.id}` === destination)
-      ? 'project'
-      : destination;
-  return (
-    <section className={styles.panel} aria-labelledby="dispatch-title">
-      <div className={styles.heading}>
-        <h2 id="dispatch-title">Send work</h2>
-        <p className="hint">
-          {intent === 'command'
-            ? 'One job, using your role settings. Changes stay on its worktree branch until reviewed and merged.'
-            : intent === 'question'
-              ? 'Ask a read-only question about this project.'
-              : 'Save information for future work. This starts no job.'}
-        </p>
-      </div>
-      <label className="field">
-        <span>Intent</span>
-        <select value={intent} onChange={(event) => setIntent(event.target.value)}>
-          <option value="command">Command</option>
-          <option value="question">Question</option>
-          <option value="information">Information</option>
-        </select>
-      </label>
-      <div className={styles.fields}>
-        <label className="field">
-          <span>Project directory</span>
-          <input
-            aria-label="Project directory"
-            value={cwd}
-            readOnly={Boolean(project)}
-            placeholder="/path/to/repository"
-            onChange={(event) => setDirectory(event.target.value)}
-          />
-        </label>
-        {intent === 'command' && (
-          <label className="field">
-            <span>Role</span>
-            <select value={role} onChange={(event) => setRole(event.target.value as Role)}>
-              <option value="delegate">Implementation</option>
-              <option value="review">Read-only review</option>
-              <option value="polish">Wording polish</option>
-            </select>
-          </label>
-        )}
-        {intent === 'command' && (
-          <p className="hint">{agent ? `Assigned to ${NAMES[agent]}` : 'Waiting for role settings'}</p>
-        )}
-        {intent === 'information' && (
-          <label className="field">
-            <span>Save information to</span>
-            <select value={target} onChange={(event) => setDestination(event.target.value)}>
-              <option value="project">This project's shared instructions</option>
-              <option value="global">All projects' shared instructions</option>
-              {missions.map((mission) => (
-                <option key={mission.id} value={`mission:${mission.id}`}>{mission.title}</option>
-              ))}
-            </select>
-          </label>
-        )}
-      </div>
-      {intent === 'command' && role === 'polish' && (
-        <label className="field">
-          <span>Allowed files or directories (one per line)</span>
-          <textarea value={targets} onChange={(event) => setTargets(event.target.value)} />
-        </label>
-      )}
-      <Composer
-        key={intent}
-        label={intent === 'command' ? 'New job' : intent === 'question' ? 'Question' : 'Information'}
-        placeholder={
-          intent === 'question'
-            ? 'What would you like to know about this project?'
-            : intent === 'information'
-              ? 'Information to remember for future work'
-              : role === 'review'
-                ? 'What should the agent check in the uncommitted changes?'
-                : 'Describe the work and how to know it is done'
+  const dirty = intent !== 'command' || destination !== 'project' || text !== '' || targets !== ''
+    || role !== 'delegate' || directory !== initialDirectory.current;
+  const canSend = !sending && state.connection === 'live' && Boolean(text.trim())
+    && (intent === 'information' && destination === 'global'
+      || Boolean(cwd.trim()) && (intent === 'information'
+        ? destination === 'project' || missions.some((mission) => `mission:${mission.id}` === destination)
+        : worker?.enabled === true));
+  const closeDraft = () => {
+    if (!sendingLock.current && (!dirty || confirm('Discard this job draft?'))) close();
+  };
+  const send = async () => {
+    if (sendingLock.current || !canSend) return;
+    const task = text.trim();
+    const target = destination;
+    try {
+      if (!(intent === 'information' && target === 'global') && !cwd.trim())
+        throw new Error('Enter a project directory first.');
+      if (intent !== 'information' && !worker?.enabled)
+        throw new Error('The assigned agent is unavailable. Choose an enabled agent in Settings.');
+      const allowed = targets
+        .split('\n')
+        .map((value) => value.trim())
+        .filter(Boolean);
+      if (intent === 'command' && role === 'polish' && !allowed.length)
+        throw new Error('List the files or directories the editor may change.');
+      sendingLock.current = true;
+      setSending(true);
+      setError('');
+      if (intent === 'information') {
+        if (target.startsWith('mission:')) {
+          const mission = await request<Mission>(`/api/missions/${target.slice(8)}`, { note: task });
+          board.receive('mission', mission);
+        } else {
+          await request('/api/instructions', { append: task, project: target === 'global' ? null : cwd.trim() });
         }
-        actionKey="dispatch"
-        onSend={async (task) => {
-          if (!(intent === 'information' && target === 'global') && !cwd.trim())
-            throw new Error('Enter a project directory first.');
-          if (intent === 'information') {
-            if (target.startsWith('mission:')) {
-              const mission = await request<Mission>(`/api/missions/${target.slice(8)}`, { note: task });
-              board.receive('mission', mission);
-            } else {
-              await request('/api/instructions', { append: task, project: target === 'global' ? null : cwd.trim() });
-            }
-            return;
-          }
-          if (intent === 'question') {
-            const job = await request<BoardJob>('/api/jobs', { kind: 'delegate', ask: true, task, cwd: cwd.trim() });
-            openJob(job.id);
-            return;
-          }
-          if (!agent || !state.agents[agent]?.enabled)
-            throw new Error('The assigned agent is unavailable. Choose an enabled agent in Settings.');
-          const allowed = targets
-            .split('\n')
-            .map((value) => value.trim())
-            .filter(Boolean);
-          if (role === 'polish' && !allowed.length)
-            throw new Error('List the files or directories the editor may change.');
-          const job = await request<BoardJob>('/api/jobs', {
-            kind: role,
-            cwd: cwd.trim(),
-            project: cwd.trim(),
-            task,
-            isolation: 'worktree',
-            ...(role === 'review' ? { review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } } : {}),
-            ...(role === 'polish' ? { targets: allowed } : {}),
-          });
-          openJob(job.id);
-        }}
-      />
-    </section>
+        close();
+        return;
+      }
+      if (intent === 'question') {
+        const job = await request<BoardJob>('/api/jobs', { kind: 'delegate', ask: true, task, cwd: cwd.trim() });
+        openJob(job.id);
+        close();
+        return;
+      }
+      const job = await request<BoardJob>('/api/jobs', {
+        kind: role,
+        cwd: cwd.trim(),
+        project: cwd.trim(),
+        task,
+        isolation: 'worktree',
+        ...(role === 'review' ? { review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } } : {}),
+        ...(role === 'polish' ? { targets: allowed } : {}),
+      });
+      openJob(job.id);
+      close();
+    } catch (error) {
+      setError((error as Error).message);
+    } finally {
+      sendingLock.current = false;
+      setSending(false);
+    }
+  };
+  return (
+    <Dialog labelId="dispatch-title" onClose={closeDraft}>
+      <fieldset className={`sheet-body ${styles.body}`} disabled={sending}>
+        <h2 className={`title ${styles.title}`} id="dispatch-title">
+          <Icon icon={Send} size={18} />
+          New Job
+        </h2>
+        <Segmented
+          label="Intent"
+          value={intent}
+          options={[['command', 'Command'], ['question', 'Question'], ['information', 'Information']]}
+          onChange={setIntent}
+        />
+        <div className={styles.fields}>
+          <label className="field">
+            <span>Project</span>
+            <input
+              aria-label="Project directory"
+              value={cwd}
+              placeholder="/path/to/repository"
+              onChange={(event) => {
+                setDirectory(event.target.value);
+                setDestination('project');
+              }}
+            />
+          </label>
+          {intent === 'command' && (
+            <div className={styles.assignment}>
+              <label className="field">
+                <span>Role</span>
+                <select value={role} onChange={(event) => setRole(event.target.value as Role)}>
+                  {(Object.keys(ROLE_NAMES) as Role[]).map((role) => (
+                    <option key={role} value={role}>{ROLE_NAMES[role]}</option>
+                  ))}
+                </select>
+              </label>
+              <div className="field">
+                <span>Assigned to</span>
+                <p className={styles.worker}>
+                  {worker ? `${worker.name}${worker.enabled ? '' : ' (disabled)'}` : 'No agent assigned'}
+                </p>
+              </div>
+            </div>
+          )}
+          {intent === 'command' && role === 'polish' && (
+            <label className="field">
+              <span>Allowed files or directories</span>
+              <textarea
+                rows={3}
+                placeholder="One path per line"
+                value={targets}
+                onChange={(event) => setTargets(event.target.value)}
+              />
+            </label>
+          )}
+          {intent === 'information' && (
+            <label className="field">
+              <span>Add to</span>
+              <select
+                aria-label="Information destination"
+                value={destination}
+                onChange={(event) => setDestination(event.target.value)}
+              >
+                <option value="project">This project's shared instructions</option>
+                <option value="global">Every project's shared instructions</option>
+                {missions.map((mission) => (
+                  <option key={mission.id} value={`mission:${mission.id}`}>{mission.title}</option>
+                ))}
+              </select>
+            </label>
+          )}
+          <label className="field">
+            <span>
+              {intent === 'question' ? 'What would you like to know?'
+                : intent === 'information' ? 'What should be remembered?'
+                  : role === 'review' ? 'What should be checked?' : 'What needs to be done?'}
+            </span>
+            <textarea
+              className={styles.editor}
+              aria-label="New job instructions"
+              aria-describedby="dispatch-caption"
+              value={text}
+              onChange={(event) => setText(event.target.value)}
+              rows={6}
+            />
+            <span className="caption secondary" id="dispatch-caption">
+              {intent === 'information' ? 'Adds information only. This starts no work.'
+                : intent === 'question' ? 'Answers the question in read-only mode.'
+                  : role === 'review' ? 'Reviews uncommitted changes in read-only mode.'
+                    : 'Changes stay on an isolated worktree branch until reviewed and merged.'}
+            </span>
+          </label>
+        </div>
+        {error && <p className={`error ${styles.error}`} role="alert"><Icon icon={CircleAlert} />{error}</p>}
+        <footer className={styles.footer}>
+          <button type="button" onClick={closeDraft}>Cancel</button>
+          <button type="button" className="prominent" disabled={!canSend} onClick={() => void send()}>
+            <Icon icon={ArrowUp} />
+            {sending ? 'Sending…' : intent === 'information' ? 'Save Information'
+              : intent === 'question' ? 'Ask Question' : 'Send Job'}
+          </button>
+        </footer>
+      </fieldset>
+    </Dialog>
   );
 }

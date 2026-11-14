@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
+import { Info } from 'lucide-react';
 import type { PresetName, Roles, Snapshot } from './types.ts';
 import type { Role, RoleAssignment } from '../../bridge/config.ts';
 import { request } from './api.ts';
 import { board } from './store.ts';
 import { knownProjects, projectNames, ROLE_NAMES } from './model.ts';
-import { Dialog } from './ui.tsx';
+import { AgentMark, CloseButton, Dialog, Icon, Segmented } from './ui.tsx';
+import styles from './Settings.module.css';
 
 export function Settings({ state, close }: { state: Snapshot; close: () => void }) {
+  const [tab, setTab] = useState('roles');
   const [roles, setRoles] = useState<Roles>(() => structuredClone(state.roles));
   const [savedRoles, setSavedRoles] = useState(() => JSON.stringify(state.roles));
   const [roleStatus, setRoleStatus] = useState('');
@@ -78,222 +81,234 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
   };
   const editRole = (role: Role, key: keyof RoleAssignment, value: string) =>
     setRoles((current) => ({ ...current, [role]: { ...current[role], [key]: value } }));
+  const savePreset = async () => {
+    if (presetLock.current) return;
+    presetLock.current = true;
+    setSavingPreset(true);
+    setPresetStatus('Saving…');
+    const submitted = preset;
+    try {
+      const result = await request<Pick<Snapshot, 'preset' | 'presets'>>('/api/preset', { preset: submitted });
+      setPreset((current) => (current === submitted ? result.preset ?? null : current));
+      setSavedPreset(result.preset ?? null);
+      board.receive('preset', result);
+      setPresetStatus('Saved');
+    } catch (error) {
+      setPresetStatus((error as Error).message);
+    } finally {
+      presetLock.current = false;
+      setSavingPreset(false);
+    }
+  };
+  const saveRoles = async () => {
+    if (roleLock.current) return;
+    roleLock.current = true;
+    setSavingRoles(true);
+    setRoleStatus('Saving…');
+    const submitted = JSON.stringify(roles);
+    try {
+      await request('/api/roles', { roles });
+      setSavedRoles(submitted);
+      setRoleStatus('Saved');
+    } catch (error) {
+      setRoleStatus((error as Error).message);
+    } finally {
+      roleLock.current = false;
+      setSavingRoles(false);
+    }
+  };
+  const saveInstructions = async () => {
+    if (saveLock.current || load !== 'ready') return;
+    saveLock.current = true;
+    setSaving(true);
+    setStatus('Saving…');
+    const attempt = generation.current;
+    const draft = text;
+    try {
+      const result = await request<{ file: string; text: string }>('/api/instructions', {
+        project: scope || null,
+        text: draft,
+      });
+      if (attempt !== generation.current) return;
+      setText((current) => (current === draft ? result.text : current));
+      setSaved(result.text);
+      setFile(result.file);
+      setStatus('Saved');
+    } catch (error) {
+      if (attempt === generation.current) setStatus((error as Error).message);
+    } finally {
+      if (attempt === generation.current) {
+        saveLock.current = false;
+        setSaving(false);
+      }
+    }
+  };
+  const currentTab = tab === 'presets' && !state.presets ? 'roles' : tab;
+  const tabSaving = currentTab === 'roles' ? savingRoles : currentTab === 'presets' ? savingPreset : saving;
+  const tabDirty = currentTab === 'roles' ? JSON.stringify(roles) !== savedRoles
+    : currentTab === 'presets' ? preset !== savedPreset : text !== saved;
+  const tabStatus = currentTab === 'roles' ? roleStatus : currentTab === 'presets' ? presetStatus
+    : load === 'loading' ? 'Loading…' : status;
+  const canSave = state.connection === 'live' && !tabSaving && (currentTab !== 'instructions' || load === 'ready');
+  const saveCurrent = async () => {
+    if (!canSave) return;
+    if (currentTab === 'roles') await saveRoles();
+    else if (currentTab === 'presets') await savePreset();
+    else await saveInstructions();
+  };
+  useEffect(() => {
+    const shortcut = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's' && !event.altKey) {
+        event.preventDefault();
+        void saveCurrent();
+      }
+    };
+    window.addEventListener('keydown', shortcut);
+    return () => window.removeEventListener('keydown', shortcut);
+  });
   return (
-    <Dialog title="Settings" labelId="settings-title" onClose={closeSettings}>
-      {state.presets && (
-        <form
-          className="section"
-          onSubmit={async (event) => {
-            event.preventDefault();
-            if (presetLock.current) return;
-            presetLock.current = true;
-            setSavingPreset(true);
-            setPresetStatus('Saving…');
-            const submitted = preset;
-            try {
-              const result = await request<Pick<Snapshot, 'preset' | 'presets'>>('/api/preset', { preset: submitted });
-              setPreset((current) => (current === submitted ? result.preset ?? null : current));
-              setSavedPreset(result.preset ?? null);
-              board.receive('preset', result);
-              setPresetStatus('Saved');
-            } catch (error) {
-              setPresetStatus((error as Error).message);
-            } finally {
-              presetLock.current = false;
-              setSavingPreset(false);
-            }
-          }}
-        >
-          <h3>Preset</h3>
-          <label className="field">
-            <span>Model preset</span>
-            <select value={preset ?? ''} onChange={(event) => setPreset((event.target.value as PresetName) || null)}>
-              <option value="">None</option>
-              <option value="economy">Economy</option>
-              <option value="balanced">Balanced</option>
-              <option value="best">Best</option>
-            </select>
-          </label>
-          {selectedPreset && (
-            <dl className="facts">
-              <div>
-                <dt>Codex</dt>
-                <dd>
-                  {[selectedPreset.codex?.model, selectedPreset.codex?.effort && `${selectedPreset.codex.effort} effort`]
-                    .filter(Boolean).join(' · ') || 'Agent default'}
-                </dd>
-              </div>
-              <div>
-                <dt>Antigravity</dt>
-                <dd>{selectedPreset.antigravity?.model || 'Agent default'}</dd>
-              </div>
-              <div>
-                <dt>Claude subagent model</dt>
-                <dd>{selectedPreset.subagentModel || 'inherit'}</dd>
-              </div>
-            </dl>
+    <Dialog labelId="settings-title" onClose={closeSettings}>
+      <div className={styles.panel}>
+        <header className={`sheet-head ${styles.header}`}>
+          <h2 className="title" id="settings-title">Settings</h2>
+          <Segmented
+            label="Settings section"
+            value={currentTab}
+            options={[
+              ['roles', 'Roles'],
+              ['instructions', 'Instructions'],
+              ...(state.presets ? [['presets', 'Presets'] as [string, string]] : []),
+            ]}
+            onChange={setTab}
+          />
+          <CloseButton label="Close settings" onClose={closeSettings} />
+        </header>
+        <div className={styles.content}>
+          {currentTab === 'roles' && (
+            <div className={styles.roles}>
+              {(Object.keys(ROLE_NAMES) as Role[]).map((role) => (
+                <section className={`card ${styles.role}`} key={role} aria-label={ROLE_NAMES[role]}>
+                  <div className={styles.roleHeader}>
+                    <AgentMark agent={roles[role]?.agent ?? 'codex'} size={23} />
+                    <h3 className="card-title">{ROLE_NAMES[role]}</h3>
+                    <select
+                      aria-label={`${ROLE_NAMES[role]} agent`}
+                      value={roles[role]?.agent ?? ''}
+                      onChange={(event) => editRole(role, 'agent', event.target.value)}
+                    >
+                      {Object.entries(state.agents).sort(([a], [b]) => a.localeCompare(b)).map(([id, agent]) => (
+                        <option key={id} value={id}>
+                          {agent.name}{agent.enabled ? '' : ' (disabled)'}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className={styles.roleFields}>
+                    <label className="field">
+                      <span>Model</span>
+                      <input
+                        aria-label={`${ROLE_NAMES[role]} model`}
+                        value={roles[role]?.model ?? ''}
+                        placeholder="Agent default"
+                        onChange={(event) => editRole(role, 'model', event.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Reasoning effort</span>
+                      <input
+                        aria-label={`${ROLE_NAMES[role]} reasoning effort`}
+                        value={roles[role]?.effort ?? ''}
+                        placeholder="Agent default"
+                        onChange={(event) => editRole(role, 'effort', event.target.value)}
+                      />
+                    </label>
+                  </div>
+                </section>
+              ))}
+            </div>
           )}
-          <p className="hint">A model or effort set on a role overrides the preset.</p>
-          <div className="actions">
-            <button className="primary" type="submit" disabled={savingPreset}>
-              {savingPreset ? 'Saving…' : 'Save preset'}
-            </button>
-            <span className="status" role="status">
-              {presetStatus}
-            </span>
-          </div>
-        </form>
-      )}
-      <form
-        className="section"
-        onSubmit={async (event) => {
-          event.preventDefault();
-          if (roleLock.current) return;
-          roleLock.current = true;
-          setSavingRoles(true);
-          setRoleStatus('Saving…');
-          const submitted = JSON.stringify(roles);
-          try {
-            await request('/api/roles', { roles });
-            setSavedRoles(submitted);
-            setRoleStatus('Saved');
-          } catch (error) {
-            setRoleStatus((error as Error).message);
-          } finally {
-            roleLock.current = false;
-            setSavingRoles(false);
-          }
-        }}
-      >
-        <h3>Roles</h3>
-        <p className="hint">Applies to the next job. Leave model and effort empty to use the agent’s default.</p>
-        <div className="roles">
-          {(Object.keys(ROLE_NAMES) as Role[]).map((role) => (
-            <div className="role-row" key={role}>
-              <p>
-                <strong>{ROLE_NAMES[role]}</strong>
-              </p>
+          {currentTab === 'presets' && (
+            <div className={styles.presets}>
               <label className="field">
-                <span>Agent</span>
-                <select
-                  aria-label={`${ROLE_NAMES[role]} agent`}
-                  value={roles[role]?.agent ?? ''}
-                  onChange={(event) => editRole(role, 'agent', event.target.value)}
-                >
-                  {Object.entries(state.agents).map(([id, agent]) => (
-                    <option key={id} value={id}>
-                      {agent.name}
-                      {agent.enabled ? '' : ' (disabled)'}
-                    </option>
-                  ))}
+                <span>Model preset</span>
+                <select value={preset ?? ''} onChange={(event) => setPreset((event.target.value as PresetName) || null)}>
+                  <option value="">None</option>
+                  <option value="economy">Economy</option>
+                  <option value="balanced">Balanced</option>
+                  <option value="best">Best</option>
                 </select>
               </label>
-              <label className="field">
-                <span>Model</span>
-                <input
-                  value={roles[role]?.model ?? ''}
-                  placeholder="Agent default"
-                  onChange={(event) => editRole(role, 'model', event.target.value)}
-                />
-              </label>
-              <label className="field">
-                <span>Effort</span>
-                <input
-                  value={roles[role]?.effort ?? ''}
-                  placeholder="Agent default"
-                  onChange={(event) => editRole(role, 'effort', event.target.value)}
-                />
-              </label>
+              <p className="callout secondary">
+                {selectedPreset ? (
+                  <>
+                    Codex: {[selectedPreset.codex?.model, selectedPreset.codex?.effort && `${selectedPreset.codex.effort} effort`]
+                      .filter(Boolean).join(' · ') || 'Agent default'}
+                    {' · '}Antigravity: {selectedPreset.antigravity?.model || 'Agent default'}
+                    {' · '}Claude subagent model: {selectedPreset.subagentModel || 'inherit'}
+                  </>
+                ) : "Uses each agent's configured model and effort."}
+              </p>
             </div>
-          ))}
-        </div>
-        <div className="actions">
-          <button className="primary" type="submit" disabled={savingRoles}>
-            {savingRoles ? 'Saving…' : 'Save roles'}
-          </button>
-          <span className="status" role="status">
-            {roleStatus}
-          </span>
-        </div>
-      </form>
-      <form
-        className="section"
-        onSubmit={async (event) => {
-          event.preventDefault();
-          if (saveLock.current || load !== 'ready') return;
-          saveLock.current = true;
-          setSaving(true);
-          setStatus('Saving…');
-          const attempt = generation.current;
-          const draft = text;
-          try {
-            const result = await request<{ file: string; text: string }>('/api/instructions', {
-              project: scope || null,
-              text: draft,
-            });
-            if (attempt !== generation.current) return;
-            setText((current) => (current === draft ? result.text : current));
-            setSaved(result.text);
-            setFile(result.file);
-            setStatus('Saved');
-          } catch (error) {
-            if (attempt === generation.current) setStatus((error as Error).message);
-          } finally {
-            if (attempt === generation.current) {
-              saveLock.current = false;
-              setSaving(false);
-            }
-          }
-        }}
-      >
-        <h3>Shared instructions</h3>
-        <p className="hint">Given to every agent with its next job and to Claude sessions when they start.</p>
-        <label className="field">
-          <span>Applies to</span>
-          <select
-            value={scope}
-            onChange={(event) => {
-              if (text !== saved && !confirm('Discard the unsaved changes to these instructions?')) return;
-              setScope(event.target.value);
-            }}
-          >
-            <option value="">Every project</option>
-            {dirs.map((dir) => (
-              <option key={dir} value={dir}>
-                Only {names.get(dir)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <textarea
-          id="instructions-text"
-          aria-label="Shared instructions"
-          rows={12}
-          spellCheck={false}
-          value={text}
-          onChange={(event) => setText(event.target.value)}
-          disabled={load !== 'ready'}
-        />
-        <p className="hint" data-warn={text.length > 9000 ? '' : undefined}>
-          {file}
-          {text.length > 9000 &&
-            ' · Longer than 9,000 characters: Claude sessions are pointed to this file instead of being given the text.'}
-        </p>
-        <div className="actions">
-          <button className="primary" type="submit" disabled={saving || load !== 'ready'}>
-            {saving ? 'Saving…' : 'Save instructions'}
-          </button>
-          {load === 'failed' && (
-            <button type="button" onClick={() => setRetry((value) => value + 1)}>
-              Retry loading
-            </button>
           )}
-          <span className="status" role="status">
-            {load === 'loading' ? 'Loading…' : status}
-          </span>
+          {currentTab === 'instructions' && (
+            <section className={styles.instructions} aria-labelledby="instructions-title">
+              <div className={styles.instructionsHeader}>
+                <h3 className="section-title" id="instructions-title">Shared instructions</h3>
+                <label className={`field ${styles.scope}`}>
+                  <span>Applies to</span>
+                  <select
+                    value={scope}
+                    disabled={saving}
+                    onChange={(event) => {
+                      if (text !== saved && !confirm('Discard the unsaved changes to these instructions?')) return;
+                      setScope(event.target.value);
+                    }}
+                  >
+                    <option value="">Every project</option>
+                    {dirs.map((dir) => <option key={dir} value={dir}>{names.get(dir)}</option>)}
+                  </select>
+                </label>
+              </div>
+              <p className="callout secondary" id="instructions-hint">
+                Given to every agent with its next job and to Claude sessions when they start.
+              </p>
+              <textarea
+                className={`mono ${styles.editor}`}
+                id="instructions-text"
+                aria-label="Shared instructions"
+                aria-describedby="instructions-hint"
+                rows={12}
+                spellCheck={false}
+                value={text}
+                onChange={(event) => setText(event.target.value)}
+                disabled={load !== 'ready'}
+              />
+              <p className={`caption secondary ${styles.file}`}>{file}</p>
+              {text.length > 9000 && (
+                <p className={`callout secondary ${styles.note}`}>
+                  <Icon icon={Info} />
+                  Claude sessions will be pointed to this file because it is longer than 9,000 characters.
+                </p>
+              )}
+            </section>
+          )}
         </div>
-        {dirty && <p className="hint">Unsaved changes</p>}
-      </form>
+        <footer className={styles.footer}>
+          <div className={styles.status} role="status">
+            {tabStatus && <span className="callout secondary">{tabStatus}</span>}
+            {tabDirty && <span className="caption secondary">Unsaved changes</span>}
+          </div>
+          <div className={styles.actions}>
+            {currentTab === 'instructions' && load === 'failed' && (
+              <button type="button" onClick={() => setRetry((value) => value + 1)}>Retry Loading</button>
+            )}
+            <button type="button" className="large prominent" disabled={!canSave} onClick={() => void saveCurrent()}>
+              {tabSaving ? 'Saving…' : currentTab === 'roles' ? 'Save Roles'
+                : currentTab === 'presets' ? 'Save Preset' : 'Save Instructions'}
+            </button>
+          </div>
+        </footer>
+      </div>
     </Dialog>
   );
 }

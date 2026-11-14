@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Actions, answerKey, tokenFromFragment } from '../plugin/board/src/api.ts';
 import { BoardStore, mergeEvents } from '../plugin/board/src/store.ts';
-import { brief, cardsForProject, jobMark, missionProgress, relativeDuration, usageWindowName, STOP_OF_STAGE, timeLabel, together } from '../plugin/board/src/model.ts';
+import { brief, cardsForProject, jobMark, unsettled, missionProgress, relativeDuration, usageWindowName, STOP_OF_STAGE, timeLabel, together } from '../plugin/board/src/model.ts';
 import type { BoardJob, BoardState, CrewEvent, Mission } from '../plugin/board/src/types.ts';
 
 function deferred() {
@@ -223,4 +223,11 @@ test('launch fragments accept only a complete 64-digit hexadecimal token', () =>
     `#token=${'g'.repeat(64)}`, `#other=token=${token}`, `#token=${token}%0A`]) {
     assert.equal(tokenFromFragment(fragment), null);
   }
+});
+
+test('an ended job counts until its worktree is gone and the lead has read its result', () => {
+  const tree = { path: '/w', branch: 'crew-cx-000000', base: 'abc' };
+  assert.equal(unsettled({ worktree: tree, seq: 3, delivered: 3 } as BoardJob), true);
+  assert.equal(unsettled({ worktree: null, seq: 4, delivered: 3 } as BoardJob), true);
+  assert.equal(unsettled({ worktree: null, seq: 4, delivered: 4 } as BoardJob), false);
 });

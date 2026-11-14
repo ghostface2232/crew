@@ -4,7 +4,7 @@ import type { CrewEvent, Snapshot } from './types.ts';
 import type { Mark } from './model.ts';
 import {
   compact, jobLabel, jobMark, NAMES, projectOf, relativeDuration, ROLE_NAMES,
-  sessionMark, together, URGENCY, usageWindowName,
+  sessionMark, together, unsettled, URGENCY, usageWindowName,
 } from './model.ts';
 import { Chip, MarkIcon, useNow } from './ui.tsx';
 
@@ -83,7 +83,9 @@ export function Overview({
     (job) => visible(job) && (!job.endedAt || missions.some((mission) => mission.id === job.mission)),
   );
   const sessions = state.claude.filter(visible);
-  const marks = [...jobs.map(jobMark), ...sessions.filter((session) => session.state === 'waiting').map(sessionMark)];
+  // Settled jobs leave the totals, which would otherwise only grow; the app counts the same way.
+  const counted = state.jobs.filter((job) => visible(job) && (!job.endedAt || unsettled(job)));
+  const marks = [...counted.map(jobMark), ...sessions.filter((session) => session.state === 'waiting').map(sessionMark)];
   const counts = Object.fromEntries(stats.map(([mark]) => [mark, marks.filter((value) => value === mark).length]));
   const headline = counts.waiting
     ? counts.waiting === 1

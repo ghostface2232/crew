@@ -80,8 +80,9 @@ struct WorkspaceSummary: View {
     private var metrics: [(String, Int, String, Color)] {
         [("In progress", jobs.filter { $0.state == "running" }.count, "circle.dotted.circle", .accentColor),
          ("Needs you", jobs.filter { $0.state == "waiting" }.count + store.state.claude.filter { $0.state == "waiting" && (store.project.isEmpty || $0.projectPath == store.project) }.count, "bell.badge", .orange),
-         ("Finished", jobs.filter { $0.state == "done" }.count, "checkmark.circle", .secondary),
-         ("Failed", jobs.filter { $0.state == "failed" }.count, "exclamationmark.circle", .red)]
+         // Settled jobs stay in the list but leave the totals, which would otherwise only grow.
+         ("Finished", jobs.filter { $0.state == "done" && $0.isUnsettled }.count, "checkmark.circle", .secondary),
+         ("Failed", jobs.filter { $0.state == "failed" && $0.isUnsettled }.count, "exclamationmark.circle", .red)]
     }
     var body: some View {
         let metrics = self.metrics

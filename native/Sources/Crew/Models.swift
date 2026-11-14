@@ -26,6 +26,8 @@ struct Job: Codable, Sendable, Identifiable, Equatable {
     var tokens: Int?
     var tokenUse: TokenUse?
     var seq: Int
+    /// Last `seq` the lead has read; absent from older daemons.
+    var delivered: Int?
     var prompt: String?
     var shared: [String]?
     var model: String?
@@ -36,6 +38,8 @@ struct Job: Codable, Sendable, Identifiable, Equatable {
     var exclusive: Bool?
     var rounds: [Round]?
     var ask: Bool?
+    /// Ended, but its worktree still awaits a merge or discard, or the lead has not read its result.
+    var isUnsettled: Bool { worktree != nil || seq > (delivered ?? seq) }
     var kindTitle: String { ask == true ? "Question" : roleNames[kind] ?? kind }
     var roundUnavailableReason: String? {
         if state == "running" || state == "waiting" { return "Wait until the job has stopped before changing rounds." }

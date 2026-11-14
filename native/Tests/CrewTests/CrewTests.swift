@@ -12,6 +12,18 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
 }
 
 @Suite struct StreamTests {
+    @Test func endedJobsLeaveTheTotalsOnceSettled() throws {
+        var job = try fixture().jobs[0]
+        job.worktree = nil
+        job.seq = 4
+        job.delivered = 3
+        #expect(job.isUnsettled)
+        job.delivered = 4
+        #expect(!job.isUnsettled)
+        // An older daemon sends no delivered count; only the worktree decides then.
+        job.delivered = nil
+        #expect(!job.isUnsettled)
+    }
     @Test func shortElapsedLabelsDoNotJumpInSeconds() {
         #expect(elapsed(12_000) == "<1m")
         #expect(elapsed(59_999) == "<1m")

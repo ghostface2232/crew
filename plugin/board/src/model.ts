@@ -59,6 +59,10 @@ export function projectNames(dirs: string[]) {
     dirs.map((dir) => [dir, dirs.filter((other) => last(other) === last(dir)).length > 1 ? shortPath(dir) : last(dir)]),
   );
 }
+/** Ended, but its worktree still awaits a merge or discard, or the lead has not read its result. */
+export function unsettled(job: BoardJob): boolean {
+  return Boolean(job.worktree) || job.seq > job.delivered;
+}
 export function jobMark(job: BoardJob): Mark {
   if (job.state === 'waiting') return 'waiting';
   if (job.stalled) return 'stalled';

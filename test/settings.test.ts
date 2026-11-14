@@ -9,7 +9,7 @@ import { appendInstructions, instructionsFile, readInstructions, savePreset, sav
 const tempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'crew-settings-'));
 
 test('Codex global and app plugin lists have explicit defaults and validate names', () => {
-  assert.deepEqual(resolveConfig({}).codex.plugins, []);
+  assert.deepEqual(resolveConfig({}).codex.plugins, ['browser']);
   assert.deepEqual(resolveConfig({}).codex.appPlugins, ['computer-use', 'unified-computer-use']);
   for (const key of ['plugins', 'appPlugins'] as const) {
     assert.deepEqual(resolveConfig({ codex: { [key]: ['browser'] } }).codex[key], ['browser']);

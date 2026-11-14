@@ -1717,7 +1717,8 @@ test('read-only jobs reject explicitly named plugins before starting', async (t)
   const repo = tempRepo();
   t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
   const job = await settled(h.jobs, await h.jobs.create({ kind: 'review', cwd: repo, review, runsApp: true, plugins: ['browser'] }));
-  assert.deepEqual(job.plugins, ['computer-use', 'unified-computer-use', 'browser']);
+  // The default global browser comes first; naming it again adds nothing.
+  assert.deepEqual(job.plugins, ['browser', 'computer-use', 'unified-computer-use']);
   await h.jobs.discard(job.id);
 });
 

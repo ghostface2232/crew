@@ -88,7 +88,7 @@ export interface Config {
     approvalsReviewer: 'user' | 'auto_review' | 'guardian_subagent';
     model?: string;
     effort?: string;
-    /** Plugins enabled for every writable Codex delegate or app review. */
+    /** Plugins enabled for every writable Codex delegate or app review; the in-app browser by default, for web research and docs. */
     plugins: string[];
     /** Additional plugins for `runs_app` jobs, including real-screen computer use by default. */
     appPlugins: string[];
@@ -122,7 +122,7 @@ const defaults: Config = {
   stallSeconds: 300,
   notify: true,
   notifyOnDone: false,
-  codex: { bin: 'codex', approvalPolicy: 'on-request', approvalsReviewer: 'auto_review', plugins: [], appPlugins: ['computer-use', 'unified-computer-use'] },
+  codex: { bin: 'codex', approvalPolicy: 'on-request', approvalsReviewer: 'auto_review', plugins: ['browser'], appPlugins: ['computer-use', 'unified-computer-use'] },
   antigravity: { bin: 'agy', enabled: true },
   roles: { delegate: { agent: 'codex' }, review: { agent: 'codex' }, polish: { agent: 'antigravity' } },
   preset: null,

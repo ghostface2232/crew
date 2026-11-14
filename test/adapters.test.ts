@@ -65,7 +65,8 @@ function harness(source: string, agent: WorkerAgent = 'codex', roles: Parameters
   fs.writeFileSync(bin, `#!${process.execPath}\n${source}`, { mode: 0o700 });
   const config = resolveConfig({
     notify: false,
-    codex: { bin, approvalPolicy: 'on-request', approvalsReviewer: 'auto_review' },
+    // No global plugins, so each test turns on only the plugins it is about.
+    codex: { bin, approvalPolicy: 'on-request', approvalsReviewer: 'auto_review', plugins: [] },
     antigravity: { bin, enabled: true },
     roles,
   });

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Check, CircleStop, Clock, FileText, GitBranch, History, Images, MessageSquare, NotebookText, RotateCcw, ShieldAlert, ShieldCheck, TriangleAlert, Undo2, X, Zap } from 'lucide-react';
+import { Check, CircleMinus, CircleStop, Clock, FileText, GitBranch, History, Images, MessageSquare, NotebookText, RotateCcw, ShieldAlert, ShieldCheck, TriangleAlert, Undo2, X, Zap } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { BoardJob, CrewEvent, Snapshot } from './types.ts';
@@ -106,7 +106,9 @@ function ReceiptView({ receipt }: { receipt: NonNullable<BoardJob['receipts']>[n
   const passed = check?.exit === 0 && !check.timedOut;
   const [state, icon, label] = !check
     ? (['done', Check, 'Reviewed'] as const)
-    : passed
+    : check.skipped
+      ? (['idle', CircleMinus, 'Check not run'] as const)
+      : passed
       ? (['done', Check, 'Check passed'] as const)
       : check.timedOut
         ? (['waiting', Clock, `Check timed out after ${duration(check.ms)}`] as const)
@@ -120,6 +122,7 @@ function ReceiptView({ receipt }: { receipt: NonNullable<BoardJob['receipts']>[n
         <Icon icon={icon} size={12} />
         {label}
       </p>
+      {check?.skipped && <p className="caption secondary selectable">{check.skipped[0].toUpperCase() + check.skipped.slice(1)}.</p>}
       {check ? (
         <code className="selectable">{check.command}</code>
       ) : (
@@ -128,7 +131,7 @@ function ReceiptView({ receipt }: { receipt: NonNullable<BoardJob['receipts']>[n
       <p className="caption secondary selectable">
         Turn {receipt.turn}
         {at}
-        {check && ` · ${duration(check.ms)}${check.sandboxed ? '' : ' · not sandboxed'}`}
+        {check && !check.skipped && ` · ${duration(check.ms)}${check.sandboxed ? '' : ' · not sandboxed'}`}
         {reviewed?.diff && ` · diff ${reviewed.diff}`}
       </p>
       {stale && (
@@ -136,7 +139,7 @@ function ReceiptView({ receipt }: { receipt: NonNullable<BoardJob['receipts']>[n
           <Icon icon={History} size={11} /> No longer current: {stale}
         </p>
       )}
-      {check && !passed && check.output && (
+      {check && !check.skipped && !passed && check.output && (
         <details className="disclosure-group">
           <summary>Output (end)</summary>
           <pre className="selectable">{check.output.split('\n').slice(-15).join('\n')}</pre>
@@ -186,9 +189,12 @@ function VerificationSection({ job }: { job: BoardJob }) {
 /** A debate, or a job the lead followed up, reads as its conversation in order. */
 const hasConversation = (job: BoardJob) => job.debate ? Boolean(job.exchange?.length) : Boolean(job.exchange?.some((entry) => entry.from === 'lead' && entry.turn > 1));
 
+/** A debate that has had its rounds and stopped: the daemon refuses another reply, whatever state it ended in. */
+const debateConcluded = (job: BoardJob) => Boolean(job.debate && job.state !== 'running' && job.state !== 'waiting' && job.turns >= job.debate.rounds);
+
 function DebateSection({ job }: { job: BoardJob }) {
   const debate = job.debate;
-  const settled = debate && job.state === 'done' && job.turns >= debate.rounds;
+  const settled = debateConcluded(job);
   const title = debate ? `Debate · round ${Math.min(job.turns, debate.rounds)} of ${debate.rounds}${settled ? ' · concluded' : ''}` : 'Conversation';
   return (
     <Section title={title} icon={MessageSquare}>
@@ -378,7 +384,9 @@ export function JobDrawer({ id, state, close }: { id: string; state: Snapshot; c
                 <pre className="report selectable">{job.report}</pre>
               </Section>
             )}
-            {job.sessionId && job.state !== 'waiting' && <FollowUp key={job.id} job={job} />}
+            {debateConcluded(job) ? (
+              <p className="callout secondary">This debate has used all its rounds. Decide from it, or start a new debate.</p>
+            ) : job.sessionId && job.state !== 'waiting' && <FollowUp key={job.id} job={job} />}
             {job.prompt && (
               <details className="disclosure-group">
                 <summary>Original task</summary>

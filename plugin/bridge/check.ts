@@ -1,4 +1,6 @@
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
 import { browserProfile } from './browser.ts';
 
 /** A check the lead asked for, run by the bridge itself so its result is observed, not reported by the worker. */
@@ -21,20 +23,36 @@ const KEEP_OUTPUT = 4000;
 
 /** The worker's own limits for the check: writes only where it may write, the token hidden, and no outside network unless it had network. */
 function checkProfile(cwd: string, tmp: string, unreadable: string[], network: boolean): string {
-  const profile = browserProfile([cwd, tmp], unreadable);
-  // Local sockets stay open: test suites start servers on localhost.
-  return network ? profile : `${profile}
+  const quote = (value: string) => JSON.stringify(value);
+  const both = (dir: string) => [...new Set([dir, real(dir)])];
+  // The bridge runs git in this worktree right after the check; a rewritten .git pointer or config would run
+  // the check's own commands outside the sandbox (core.fsmonitor, hooks).
+  const git = both(path.join(cwd, '.git')).map((file) => `(literal ${quote(file)}) (subpath ${quote(file)})`).join(' ');
+  const profile = `${browserProfile([cwd, tmp], unreadable)}
+(deny file-write* ${git})`;
+  if (network) return profile;
+  // Local servers stay reachable for test suites; other local sockets (an SSH agent, Docker) do not.
+  return `${profile}
 (deny network-outbound (remote ip "*:*"))
 (allow network-outbound (remote ip "localhost:*"))
-(allow network-outbound (remote unix-socket))`;
+(deny network-outbound (remote unix-socket))
+(allow network-outbound (remote unix-socket ${[...both(cwd), ...both(tmp)].map((dir) => `(subpath ${quote(dir)})`).join(' ')}))`;
+}
+
+function real(file: string): string {
+  try {
+    return fs.realpathSync(file);
+  } catch {
+    return file;
+  }
 }
 
 /**
  * Runs `command` in `cwd` through the shell. The worktree holds code the worker wrote, so it must not run with
  * more than the worker could do: on macOS under the same file and network limits, and elsewhere not at all.
  */
-export function runCheck(command: string, cwd: string, tmp: string, unreadable: string[], options: { network?: boolean; timeoutMs?: number; platform?: NodeJS.Platform } = {}): Promise<CheckResult> {
-  const { network = false, timeoutMs = CHECK_TIMEOUT_MS, platform = process.platform } = options;
+export function runCheck(command: string, cwd: string, tmp: string, unreadable: string[], options: { network?: boolean; timeoutMs?: number; platform?: NodeJS.Platform; signal?: AbortSignal } = {}): Promise<CheckResult> {
+  const { network = false, timeoutMs = CHECK_TIMEOUT_MS, platform = process.platform, signal } = options;
   if (platform !== 'darwin') {
     return Promise.resolve({ command, exit: null, timedOut: false, output: '', ms: 0, sandboxed: false, skipped: 'only macOS can hold the check to the worker\'s limits; run it yourself' });
   }
@@ -57,20 +75,32 @@ export function runCheck(command: string, cwd: string, tmp: string, unreadable: 
     });
     child.stdout.on('data', keep);
     child.stderr.on('data', keep);
-    const timer = setTimeout(() => {
-      timedOut = true;
+    const stop = () => {
       try {
         process.kill(-child.pid!, 'SIGKILL');
       } catch {
         // Already gone.
       }
+    };
+    const timer = setTimeout(() => {
+      timedOut = true;
+      stop();
     }, timeoutMs);
+    const cancel = () => {
+      keep(Buffer.from('\nstopped: the job was cancelled'));
+      stop();
+    };
+    signal?.addEventListener('abort', cancel, { once: true });
+    if (signal?.aborted) cancel();
     let finished = false;
     const finish = (exit: number | null) => {
       if (finished) return;
       finished = true;
       clearTimeout(timer);
-      resolve({ command, exit, timedOut, output: output.trimEnd(), ms: Date.now() - started, sandboxed });
+      signal?.removeEventListener('abort', cancel);
+      // Whatever the check left running in the background could still change the worktree after the receipt.
+      stop();
+      resolve({ command, exit: signal?.aborted ? null : exit, timedOut, output: output.trimEnd(), ms: Date.now() - started, sandboxed });
     };
     child.on('error', (err) => {
       keep(Buffer.from(`\n${err.message}`));

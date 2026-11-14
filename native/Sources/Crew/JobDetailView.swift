@@ -643,7 +643,8 @@ private struct DebateRound: View {
                     // Each point reads from the leading edge like any body text. Its own stance ends the line only
                     // when the reply mixes stances; otherwise the mark by the name already says it.
                     let mixed = Set(points.map(\.stance)).count > 1
-                    ForEach(points, id: \.number) { point in
+                    // A reply may repeat a numbered list, so numbers are not unique.
+                    ForEach(Array(points.enumerated()), id: \.offset) { _, point in
                         HStack(alignment: .firstTextBaseline, spacing: WorkspaceStyle.rowSpacer) {
                             Text(point.title).font(Typeface.callout).textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)

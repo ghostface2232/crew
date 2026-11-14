@@ -110,7 +110,7 @@ Open, as in [03-agentgauge-integration.md](03-agentgauge-integration.md): G2 (`-
 | `balanced` | medium | sonnet |
 | `best` | high | the lead's own model |
 
-`economy` also caps worker models at the `standard` tier (Sol for Codex, Hydrogen for Antigravity): a higher tier, or a larger model the lead or the user names, is lowered to it. The lead still chooses effort. A preset sets the cap with `maxTier`, and the largest subagent model with `subagentMax`.
+`economy` also caps worker models at the `standard` tier (Sol for Codex, Hydrogen for Antigravity): a higher tier, or a larger model the lead or the user names, is lowered to it. The lead may still name a different effort for a job. A preset sets the cap with `maxTier`, and the largest subagent model with `subagentMax`.
 
 The built-in presets name no worker models, because which models an account has differs. Add them under `presets`:
 
@@ -136,7 +136,7 @@ Added 2026-11-14. A job names how demanding it is, and the bridge turns that int
 
 A tier names a family, not a version. For Codex the bridge picks the newest model of the family that Codex's own model cache (`$CODEX_HOME/models_cache.json`) lists and does not hide; with no cache or no match, Codex's default applies. For Antigravity the family is matched against the model options the session lists, skipping orchestrators; an unlisted family leaves the agent's default.
 
-The order is: a model the lead names for the job, the tier it names, the model the user configured (role, preset, or `codex.model` / `antigravity.model`), and last the default tier. A configured model therefore stays in effect until the lead names a tier for a particular job. An explicit `effort` always wins; otherwise a named tier sets it, then the configured effort, then the default tier.
+The order is: a model the lead names for the job, the tier it names, the model the user configured (role, preset, or `codex.model` / `antigravity.model`), and last the default tier. A configured model therefore stays in effect until the lead names a tier for a particular job. An explicit `effort` always wins; otherwise a role's or preset's effort, then a named tier's, then `codex.effort`, then the default tier's. So under `economy` a job keeps `low` unless the lead names an effort.
 
 ## 9. Per-turn temporary files and read-only jobs
 

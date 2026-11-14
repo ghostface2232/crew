@@ -224,7 +224,7 @@ struct JobRow: View {
     let store: CrewStore
     var open: () -> Void
     var body: some View {
-        let detail = [showsKind ? job.kindTitle : job.ask == true ? "Question" : nil, job.error?.message ?? (job.isActive ? job.phase : nil),
+        let detail = [showsKind ? job.kindTitle : job.debate != nil ? "Debate" : job.ask == true ? "Question" : nil, job.error?.message ?? (job.isActive ? job.phase : nil),
                       job.runsApp == true ? "Runs the app" : nil, job.exclusive == true ? "Runs alone" : nil]
             .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
         Button(action: open) {

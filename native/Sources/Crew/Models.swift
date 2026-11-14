@@ -52,13 +52,14 @@ struct Job: Codable, Sendable, Identifiable, Equatable {
     var exchange: [ExchangeEntry]?
     var debate: DebateLimit?
     var tier: String?
-    /// The latest receipt that has something to show: a check the bridge ran, or what a review read.
-    var latestReceipt: TurnReceipt? { receipts?.last { $0.check != nil || $0.reviewed != nil } }
+    /// The latest turn's receipt when it has something to show: a check the bridge ran, or what a review read.
+    /// An older turn's check would speak for a branch that has moved on, so it is not shown in its place.
+    var latestReceipt: TurnReceipt? { receipts?.last.flatMap { $0.check != nil || $0.reviewed != nil ? $0 : nil } }
     var hasVerification: Bool { latestReceipt != nil || capabilities != nil || !(approvals ?? []).isEmpty }
     /// The lead and the worker have exchanged more than the first task and report: a debate, or a job the lead followed up.
     var hasConversation: Bool { debate != nil ? !(exchange ?? []).isEmpty : (exchange ?? []).contains { $0.from == "lead" && $0.turn > 1 } }
-    /// A debate that has used all its rounds and ended: no further reply is accepted.
-    var debateConcluded: Bool { debate.map { state == "done" && turns >= $0.rounds } ?? false }
+    /// A debate that has used all its rounds and stopped, in whatever state: the daemon refuses another reply.
+    var debateConcluded: Bool { debate.map { state != "running" && state != "waiting" && turns >= $0.rounds } ?? false }
     /// Ended, but its worktree still awaits a merge or discard, or the lead has not read its result.
     var isUnsettled: Bool { worktree != nil || seq > (delivered ?? seq) }
     var kindTitle: String { debate != nil ? "Debate" : ask == true ? "Question" : roleNames[kind] ?? kind }
@@ -265,11 +266,14 @@ struct Preset: Codable, Sendable, Equatable {
     var codex: Agent?
     var antigravity: Agent?
     var subagentModel: String?
+    var subagentMax: String?
+    var maxTier: String?
     var description: String {
         let agents = [("Codex", codex), ("Antigravity", antigravity)].compactMap { name, agent in
             agent.map { name + ": " + [$0.model ?? "Agent default", $0.effort.map { "\($0) effort" }].compactMap { $0 }.joined(separator: " · ") }
         }
-        return (agents + ["Subagents: " + (subagentModel ?? "inherit")]).joined(separator: "; ")
+        let subagents = "Subagents: " + (subagentModel ?? "inherit") + (subagentMax.map { " (up to \($0))" } ?? "")
+        return (agents + [subagents] + [maxTier.map { "Workers up to the \($0) tier" }].compactMap { $0 }).joined(separator: "; ")
     }
 }
 struct PresetState: Codable, Sendable, Equatable { var preset: PresetName?; var presets: [String: Preset] }
@@ -352,7 +356,7 @@ struct DebatePoint: Equatable, Sendable {
 /// The points a reply marks agree, disagree or alternative: "1. **[agree]** Title…", "2. [disagree] …", "3. **disagree** — …".
 /// Only the first sentence of each is kept, as a headline; the full reply stays one disclosure away.
 func debatePoints(_ text: String) -> [DebatePoint] {
-    let pattern = /^\s*(?:[-*]\s*)?(\d+)\.\s*(?:\*\*)?\[?(agree|disagree|alternative)\]?(?:\*\*)?[\s:.\-—–]*(.*)$/.ignoresCase()
+    let pattern = /^\s*(?:[-*]\s*)?(\d+)\.\s*(?:\*\*)?\[?(agree|disagree|alternative)\b\]?(?:\*\*)?[\s:.\-—–]*(.*)$/.ignoresCase()
     var points: [DebatePoint] = []
     for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
         guard let match = String(line).wholeMatch(of: pattern), let number = Int(match.1),

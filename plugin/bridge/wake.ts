@@ -3,9 +3,23 @@ import { fileURLToPath } from 'node:url';
 import { api } from './client.ts';
 import { HOOK_SECONDS } from './delivery.ts';
 
-interface HookInput { session_id?: string; agent_id?: string; hook_event_name?: string; stop_hook_active?: boolean; tool_response?: unknown }
+interface HookInput {
+  session_id?: string; agent_id?: string; hook_event_name?: string; stop_hook_active?: boolean;
+  tool_name?: string; tool_input?: { job_id?: unknown; job_ids?: unknown }; tool_response?: unknown;
+}
 
-const JOB_ID = /\[((?:cx|ag)-[0-9a-f]{6})\]/g;
+const JOB_ID = /\[((?:cx|ag)-[0-9a-f]{6})\]/;
+const STARTS_JOB = /__(?:delegate|review|polish|debate)$/;
+
+/**
+ * The jobs a Crew call acted on: those it named, or the one it started. Ids merely shown, in a status list or
+ * quoted in a report, are not taken over: another lead session may own them.
+ */
+function actedOn(input: HookInput): string[] {
+  const named = [input.tool_input?.job_id, ...(Array.isArray(input.tool_input?.job_ids) ? input.tool_input.job_ids : [])];
+  const started = STARTS_JOB.test(input.tool_name ?? '') ? JSON.stringify(input.tool_response ?? '').match(JOB_ID)?.[1] : undefined;
+  return [...new Set([...named, started].filter((id): id is string => typeof id === 'string' && /^(?:cx|ag)-[0-9a-f]{6}$/.test(id)))].slice(0, 50);
+}
 interface HookOutput { code: number; stderr?: string; stdout?: string }
 
 /** The transport is injectable so crash/retry paths can be checked without a live Claude session. */
@@ -23,8 +37,8 @@ export async function leadHook(input: HookInput, mode: string, request: typeof a
     return offer ? { code: 2, stderr: offer.text } : { code: 0 };
   }
   // The hook knows the session for certain; the lead's MCP server may not (an older server, /clear, no session
-  // variable). So the session whose Crew call just showed these jobs takes them over, before it watches for news.
-  const shown = [...new Set([...JSON.stringify(input.tool_response ?? '').matchAll(JOB_ID)].map((m) => m[1]))].slice(0, 50);
+  // variable). So the session whose Crew call just acted on these jobs takes them over, before it watches for news.
+  const shown = actedOn(input);
   if (shown.length) await send('adopt', { job_ids: shown }).catch(() => {});
   let generation: string | undefined;
   let backoff = 250;

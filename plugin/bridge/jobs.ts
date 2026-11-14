@@ -355,8 +355,9 @@ export function openRefusals(job: Pick<Job, 'refusals' | 'turns' | 'retrying' | 
 }
 
 /**
- * Model and effort for a new job, in this order: what the lead named for the job, the tier the lead named,
- * what the user configured (role, preset, or the agent's own setting in config.json), and last the default tier.
+ * Model for a new job, in this order: what the lead named for the job, the tier the lead named, what the user
+ * configured (role, preset, or the agent's own setting in config.json), and last the default tier. Effort differs:
+ * a role's or preset's effort holds over a named tier's.
  */
 function pickModel(agent: WorkerAgent, spec: JobSpec, role: { model?: string; effort?: string }, config: Config): { model?: string; effort?: string; tier?: Tier; agentDefault?: boolean } {
   const configured = { model: role.model ?? config[agent].model, effort: role.effort ?? (agent === 'codex' ? config.codex.effort : undefined) };
@@ -370,7 +371,8 @@ function pickModel(agent: WorkerAgent, spec: JobSpec, role: { model?: string; ef
   if (capped) model = tierModel(agent, cap!);
   // With no model of the capped tier to name, the configured fallback could be the very model the cap refused.
   const agentDefault = capped && !model ? true : undefined;
-  const effort = spec.effort ?? (spec.tier || !configured.effort ? (agent === 'codex' ? tierEffort(tier ?? defaultTier(spec)) : undefined) : configured.effort);
+  // A role's or preset's effort is the user's choice and holds over the tier's; the agent-wide setting does not.
+  const effort = spec.effort ?? role.effort ?? (spec.tier || !configured.effort ? (agent === 'codex' ? tierEffort(tier ?? defaultTier(spec)) : undefined) : configured.effort);
   const shown = capped ? cap : !spec.model ? tier : undefined;
   return { ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(shown ? { tier: shown } : {}), ...(agentDefault ? { agentDefault } : {}) };
 }
@@ -409,6 +411,8 @@ export class Jobs {
   private preparingReviews = new Set<string>();
   /** Review snapshots being removed; a follow-up waits for the removal before it makes a new one. */
   private snapshots = new Map<string, Promise<void>>();
+  /** Checks being run while a turn's result is collected; cancelling the job stops its check. */
+  private checks = new Map<string, AbortController>();
   private collecting = false;
   private saveTimer: NodeJS.Timeout | null = null;
   private home: string;
@@ -662,6 +666,12 @@ export class Jobs {
     if (this.discarding.has(id)) throw new Error(`Job ${id} is being discarded.`);
     if (this.cancelling.has(id)) throw new Error(`Job ${id} is being cancelled.`);
     if (this.preparingReviews.has(id)) throw new Error(`Job ${id} is preparing its review diff. Wait for it to finish.`);
+    const check = this.checks.get(id);
+    if (check) {
+      // The turn is over; stopping its check lets the result be collected now, with the check marked as stopped.
+      check.abort();
+      return job;
+    }
     if (this.finalizing.has(id)) throw new Error(`Job ${id} is collecting its result. Wait for it to finish.`);
     const ctl = this.ctl(job);
     const adapter = this.adapters[job.agent];
@@ -1322,9 +1332,12 @@ export class Jobs {
         const tmp = fs.mkdtempSync(path.join(os.tmpdir(), `crew-check-${job.id}-`));
         // A long check is the bridge at work, not a stalled worker.
         const alive = setInterval(() => { job.activeAt = Date.now(); }, 30_000);
+        const stop = new AbortController();
+        this.checks.set(job.id, stop);
         try {
-          check = await runCheck(job.check, job.worktree.path, tmp, [tokenFile(this.home)], { network: Boolean(job.runsApp) });
+          check = await runCheck(job.check, job.worktree.path, tmp, [tokenFile(this.home)], { network: Boolean(job.runsApp), signal: stop.signal });
         } finally {
+          this.checks.delete(job.id);
           clearInterval(alive);
           job.activeAt = Date.now();
           fs.rmSync(tmp, { recursive: true, force: true });
@@ -1492,7 +1505,12 @@ export class Jobs {
     else if (kind === 'error' || kind === 'limit') addNews(job, 'failed', detail);
     else if (kind === 'waiting') addNews(job, 'waiting', detail, { request: job.waiting?.id });
     deliveryPosition(job);
-    if (news || ['done', 'error', 'limit', 'waiting'].includes(kind)) this.flush();
+    try {
+      if (news || ['done', 'error', 'limit', 'waiting'].includes(kind)) this.flush();
+    } catch (err) {
+      // The news is in memory and the next save retries it; failing here would also keep watchers and waits asleep.
+      console.error(`Could not save ${job.id}: ${(err as Error).message}`);
+    }
     this.changed(job);
     this.delivery.changed();
     for (const wake of [...(this.waiters.get(job.id) ?? [])]) wake();
@@ -1537,7 +1555,8 @@ export class Jobs {
       job.news ??= [];
       job.newsSeq ??= 0;
       job.ackedSeq ??= 0;
-      // Preserve unread legacy results without guessing which session owns them.
+      // Record unread legacy results without guessing which session owns them. With no owner they are not offered
+      // to any lead, and adopting the job later does not hand them over; they stay on the board and in status.
       if (legacy && job.seq > job.delivered) {
         if (job.state === 'done') addNews(job, 'done', job.report || job.title);
         else if (job.state === 'failed') addNews(job, 'failed', job.error?.message ?? 'failed');

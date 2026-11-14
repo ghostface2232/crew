@@ -164,11 +164,22 @@ export class CodexAdapter implements Adapter {
     run.ctl.resumed();
     try {
       const ended = interrupt.promise.then(() => true);
+      // Codex does not promise to pass the interrupt on; a sub-agent left running would keep editing the worktree.
+      this.interruptChildren(run);
       const ack = this.peer.request('turn/interrupt', { threadId, turnId: run.turnId }, RPC_TIMEOUT_MS);
       const stopped = await Promise.race([ended, ack.then(() => ended), delay(5_000, false, { ref: false })]);
       if (!stopped) throw new Error('Codex did not confirm cancellation. The job is still active.');
     } finally {
       run.interrupt = null;
+    }
+  }
+
+  /** Interrupts every sub-agent turn still in flight, without waiting for Codex to confirm. */
+  private interruptChildren(run: Run): void {
+    const peer = this.peer;
+    if (!peer) return;
+    for (const [threadId, turnId] of run.busyChildren) {
+      if (turnId) peer.request('turn/interrupt', { threadId, turnId }, RPC_TIMEOUT_MS).catch(() => {});
     }
   }
 
@@ -556,6 +567,11 @@ export class CodexAdapter implements Adapter {
     run.crewCalls.clear();
     run.items.clear();
     for (const request of run.pending.splice(0)) request.resolve(null);
+    // A failed or interrupted parent ends the job at once, so its sub-agents must not go on editing.
+    if (p.turn?.status !== 'completed') {
+      this.interruptChildren(run);
+      run.busyChildren.clear();
+    }
     const turn = p.turn;
     if (run.interrupt || turn.status === 'interrupted') ctl.cancelled();
     else if (turn.status === 'completed') ctl.done(run.message);

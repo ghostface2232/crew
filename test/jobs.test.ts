@@ -941,7 +941,8 @@ test('a job\'s model comes from the lead\'s model, then its tier, then the user\
   const configured = await start({});
   assert.deepEqual([configured.tier, configured.model, configured.effort], [undefined, 'mine', 'high']);
   const tiered = await start({ tier: 'light' });
-  assert.deepEqual([tiered.tier, tiered.model, tiered.effort], ['light', tierModel('codex', 'light') ?? 'mine', 'medium']);
+  // The role's effort is the user's choice and holds over the tier's.
+  assert.deepEqual([tiered.tier, tiered.model, tiered.effort], ['light', tierModel('codex', 'light') ?? 'mine', 'high']);
 
   // Antigravity gets the family; its session resolves it to an exact model.
   current = resolveConfig({ roles: { polish: { agent: 'antigravity' } } });
@@ -954,6 +955,8 @@ test('a job\'s model comes from the lead\'s model, then its tier, then the user\
   current = resolveConfig({ preset: 'economy', roles: { polish: { agent: 'antigravity' } } });
   const cheap = await start({});
   assert.deepEqual([cheap.tier, cheap.model, cheap.effort], ['standard', tierModel('codex', 'standard'), 'low']);
+  // A tier alone keeps the preset's effort; only an effort the lead names replaces it.
+  assert.equal((await start({ tier: 'light' })).effort, 'low');
   const lowered = await start({ tier: 'frontier', effort: 'high' });
   assert.deepEqual([lowered.tier, lowered.model, lowered.effort], ['standard', tierModel('codex', 'standard'), 'high']);
   const astra = await start({ model: 'gpt-6-astra' });
@@ -1024,6 +1027,35 @@ test('the bridge runs the lead\'s check after each turn and marks it stale when 
   await settled(jobs, job);
   assert.equal(job.receipts?.at(-1)?.check?.exit, 0);
   assert.equal(job.receipts?.at(-1)?.stale, 'the check itself changed app.js');
+});
+
+test('a check cannot rewrite .git, reach outside sockets, or outlive its run, and stops when cancelled', { skip: process.platform !== 'darwin' }, async () => {
+  const repo = tempRepo();
+  const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-check-tmp-')));
+  const outside = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-outside-')));
+  const marker = path.join(tmp, 'late');
+  try {
+    // The bridge runs git here after the check; a .git it could rewrite would run commands outside the sandbox.
+    const git = await runCheck('echo "gitdir: ./.evil" > .git/HEAD.lock && echo wrote', repo, tmp, []);
+    assert.notEqual(git.exit, 0);
+    assert.doesNotMatch(git.output, /wrote/);
+    const socket = await runCheck(`/usr/bin/nc -U ${JSON.stringify(path.join(outside, 'agent.sock'))} < /dev/null; echo "nc=$?"`, repo, tmp, []);
+    assert.match(socket.output, /Operation not permitted|nc=1/);
+    // A process the check leaves behind is stopped with it.
+    await runCheck(`(sleep 2; touch ${JSON.stringify(marker)}) & echo started`, repo, tmp, []);
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    assert.equal(fs.existsSync(marker), false);
+    const stop = new AbortController();
+    const running = runCheck('sleep 30', repo, tmp, [], { signal: stop.signal });
+    stop.abort();
+    const cancelled = await running;
+    assert.equal(cancelled.exit, null);
+    assert.match(cancelled.output, /stopped: the job was cancelled/);
+    assert.ok(cancelled.ms < 10_000);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
 });
 
 test('a check is not run where the worker\'s limits cannot be applied', async () => {

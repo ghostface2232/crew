@@ -66,6 +66,26 @@ test('a quiet ended workload looks finished and the authenticated user can mark 
   expect(calls).toEqual([{ route: '/api/missions/mission-1', body: { done: true, outcome: 'Marked done on the board.' } }]);
 });
 
+test('a mission dropped with Stop tracking can still be marked done, reopening it explicitly', async ({ page, request }) => {
+  await page.goto('about:blank');
+  await request.post('/__reset', { data: { auth: true } });
+  await page.goto(`/#token=${TEST_TOKEN}`);
+  await expect(page.getByText('Live', { exact: true })).toBeVisible();
+  const card = page.locator('[data-key="mission-1"]');
+  await card.getByRole('button', { name: 'Mission options' }).click();
+  await page.getByRole('menuitem', { name: 'Stop tracking' }).click();
+  await expect(card.locator('.mission-head .chip')).toHaveText('Abandoned');
+  await card.getByRole('button', { name: 'Mission options' }).click();
+  await expect(page.getByRole('menuitem', { name: 'Stop tracking' })).toHaveCount(0);
+  await page.getByRole('menuitem', { name: 'Mark done' }).click();
+  await expect(card.locator('.mission-head .chip')).toHaveText('Done');
+  const calls = await (await request.get('/__requests')).json();
+  expect(calls).toEqual([
+    { route: '/api/missions/mission-1', body: { abandoned: true, outcome: 'Dismissed on the board.' } },
+    { route: '/api/missions/mission-1', body: { done: true, reopen: true, outcome: 'Marked done on the board.' } },
+  ]);
+});
+
 test('repeated stops keep jobs on their original round while the remaining plan changes', async ({ page, request }) => {
   const data = fixture();
   data.missions[0].stages = ['implement', 'self-review', 'fix', 'cross-review', 'fix', 'polish', 'final'];
@@ -276,9 +296,17 @@ test('the detail panel shows what verified the result and nothing for jobs witho
     }),
     job({ id: 'cx-plain', title: 'Plain job', state: 'done', endedAt: NOW - 5000 }),
     job({
+      id: 'cx-skipped',
+      title: 'Check off macOS',
+      state: 'done',
+      endedAt: NOW - 5000,
+      receipts: [{ turn: 1, head: null, check: { command: 'npm test', exit: null, timedOut: false, output: '', ms: 0, sandboxed: false, skipped: 'only macOS can hold the check to the worker\'s limits; run it yourself' }, at: NOW - 6000 }],
+    }),
+    job({
       id: 'cx-debate',
       title: 'Debate: how the lead is woken',
-      state: 'done',
+      // Cancelled after its last round: the daemon refuses another reply all the same.
+      state: 'cancelled',
       endedAt: NOW - 5000,
       ask: true,
       worktree: null,
@@ -330,6 +358,14 @@ test('the detail panel shows what verified the result and nothing for jobs witho
   await expect((await open('cx-plain')).getByRole('region', { name: 'Verification' })).toHaveCount(0);
   await close();
 
+  // A check the bridge could not hold to the worker's limits says so, instead of reading as a failure.
+  section = (await open('cx-skipped')).getByRole('region', { name: 'Verification' });
+  await expect(section.getByText('Check not run')).toBeVisible();
+  await expect(section.getByText('Only macOS can hold the check to the worker\'s limits; run it yourself.')).toBeVisible();
+  await expect(section.getByText('Check stopped before it finished')).toHaveCount(0);
+  await expect(section.getByText('Turn 1', { exact: true })).toBeVisible();
+  await close();
+
   // A debate reads as the conversation, in order, instead of only the last report.
   const debate = (await open('cx-debate')).getByRole('region', { name: 'Debate · round 2 of 2 · concluded' });
   await expect(debate.locator('.exchange-entry')).toHaveCount(4);
@@ -337,6 +373,8 @@ test('the detail panel shows what verified the result and nothing for jobs witho
   await expect(debate.locator('.exchange-entry').nth(1)).toContainText('Codex · round 1');
   await expect(debate.getByText('a claimed batch can drop a result')).toBeVisible();
   await expect(page.getByRole('dialog').getByRole('region', { name: 'Report' })).toHaveCount(0);
+  await expect(page.getByRole('dialog').getByRole('region', { name: 'Follow up' })).toHaveCount(0);
+  await expect(page.getByRole('dialog').getByText('This debate has used all its rounds. Decide from it, or start a new debate.')).toBeVisible();
   await close();
 
   // A job the lead followed up shows its conversation; one with a single task and report keeps the plain report.

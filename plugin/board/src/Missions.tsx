@@ -117,7 +117,8 @@ export function MissionPanel({
 }) {
   const now = useNow();
   const [expanded, setExpanded] = useState(mission.state === 'active');
-  const key = `dismiss:${mission.id}`;
+  // Keyed by state as in the app: once a mission is abandoned, Mark done takes a fresh lock.
+  const key = `mission:${mission.id}:${mission.state}`;
   const action = useAction(key);
   const stops = missionStops(mission);
   const at = missionStep(mission);
@@ -154,21 +155,28 @@ export function MissionPanel({
           >
             <Icon icon={ChevronDown} className="disclosure" />
           </button>
-          {mission.state === 'active' && (
+          {(mission.state === 'active' || mission.state === 'abandoned') && (
             <Menu label="Mission options" icon={Ellipsis}>
-              <button role="menuitem" disabled={locked} onClick={() => update({ done: true, outcome: 'Marked done on the board.' }, 'Marked done')}>
-                <Icon icon={CircleCheck} />
-                Mark done
-              </button>
               <button
                 role="menuitem"
                 disabled={locked}
-                title="Stops tracking without marking done. Its jobs keep running."
-                onClick={() => update({ abandoned: true, outcome: 'Dismissed on the board.' }, 'Dismissed')}
+                // The daemon reopens an abandoned mission only when asked to explicitly.
+                onClick={() => update({ done: true, ...(mission.state === 'abandoned' ? { reopen: true } : {}), outcome: 'Marked done on the board.' }, 'Marked done')}
               >
-                <Icon icon={CircleX} />
-                Stop tracking
+                <Icon icon={CircleCheck} />
+                Mark done
               </button>
+              {mission.state === 'active' && (
+                <button
+                  role="menuitem"
+                  disabled={locked}
+                  title="Stops tracking without marking done. Its jobs keep running."
+                  onClick={() => update({ abandoned: true, outcome: 'Dismissed on the board.' }, 'Dismissed')}
+                >
+                  <Icon icon={CircleX} />
+                  Stop tracking
+                </button>
+              )}
             </Menu>
           )}
         </span>

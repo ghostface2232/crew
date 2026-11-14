@@ -101,9 +101,10 @@ test('MCP bounds a multi-job response and ACKs only echoed receipts before makin
       assert.equal(route, '/api/lead/offer');
       return { offer: delivery.offer(body.session, { ids: body.job_ids, bytes: body.bytes }) };
     },
-    callTool: async (_name: string, _args: any, ctx: any) => {
+    callTool: async (_name: string, args: any, ctx: any) => {
       order.push('tool');
       ctx.jobs.push(...jobs);
+      if (args.listing) ctx.adopt = false;
       return `[cx-0] done\n${'"\\\n한😀'.repeat(150_000)}\n[cx-11] done`;
     },
   });
@@ -132,6 +133,13 @@ test('MCP bounds a multi-job response and ACKs only echoed receipts before makin
   assert.deepEqual(order, ['/api/lead/ack', 'tool', '/api/lead/adopt', '/api/lead/offer'], 'a bad echo does not block the call it rode on');
   assert.equal(replies[2].result.isError, undefined);
   assert.match(replies[2].result.content[0].text, /ack not applied: Unknown receipt/);
+  // A listing shows another session's job without taking it over.
+  jobs[0].lead = 'other';
+  await call({ listing: true });
+  assert.equal(jobs[0].lead, 'other');
+  // However long a bad echo, the call it rode on still succeeds.
+  await call({ ack: ['x'.repeat(30_000)] });
+  assert.equal(replies.at(-1).result.isError, undefined);
 });
 
 test('status pages the latest full report during a follow-up and retained debate turns', async () => {

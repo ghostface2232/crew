@@ -233,6 +233,8 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
         #expect(current.preset == .balanced)
         #expect(current.presets?["best"]?.subagentModel == "large")
         #expect(current.presets?["economy"]?.description.contains("low effort") == true)
+        let capped = Preset(subagentModel: "haiku", subagentMax: "sonnet", maxTier: "standard")
+        #expect(capped.description == "Subagents: haiku (up to sonnet); Workers up to the standard tier")
         #expect(current.jobs[0].rounds?.map(\.state) == ["kept", "undone"])
         #expect(current.jobs[0].rounds?.last?.revert == "revert2")
         #expect(current.jobs[0].kindTitle == "Question")
@@ -334,9 +336,17 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
         object["state"] = "done"
         object["turns"] = 2
         let job = try JSONDecoder().decode(Job.self, from: JSONSerialization.data(withJSONObject: object))
-        // A receipt with nothing to show does not hide the check before it.
-        #expect(job.latestReceipt?.check?.command == "npm test")
+        // An older turn's check does not stand in for a latest turn that has nothing to show.
+        #expect(job.latestReceipt == nil)
         #expect(job.hasVerification && job.debateConcluded && job.kindTitle == "Debate" && job.tier == "frontier")
+        object["receipts"] = [["turn": 2, "head": "2222222233", "check": ["command": "npm test", "exit": 0, "timedOut": false, "output": "", "ms": 4000, "sandboxed": true], "at": 2]]
+        #expect(try JSONDecoder().decode(Job.self, from: JSONSerialization.data(withJSONObject: object)).latestReceipt?.check?.command == "npm test")
+        // The daemon refuses a reply once a debate has had its rounds, however it ended, but not mid-turn.
+        for (state, concluded) in [("failed", true), ("cancelled", true), ("running", false), ("waiting", false)] {
+            object["state"] = state
+            #expect(try JSONDecoder().decode(Job.self, from: JSONSerialization.data(withJSONObject: object)).debateConcluded == concluded)
+        }
+        object["state"] = "done"
         #expect(job.exchange?.map(\.from) == ["lead", "worker"])
         // A job is a conversation once the lead followed it up; a first task and report alone are not.
         object["debate"] = nil
@@ -364,6 +374,8 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
         #expect(points[1].title == "A later hook event is not proof of receipt: the watcher can die first.")
         #expect(points[3].title == "cap the digest")
         #expect(debatePoints("no points here").isEmpty)
+        // A stance must be a whole word: these are prose that starts with one.
+        #expect(debatePoints("1. Agreed, the ledger belongs to the daemon.\n2. Alternatively, cap the digest.\n3. Disagreement remains on leases.").isEmpty)
     }
     @Test func looksFinishedRequiresAnActiveMissionQuietForTwentyMinutesWithoutBusyJobs() throws {
         var mission = try fixture().missions[0]

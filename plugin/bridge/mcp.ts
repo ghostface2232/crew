@@ -42,7 +42,7 @@ const subagentModel = started?.preset ? started.presets[started.preset].subagent
 const subagentMax = started?.preset ? started.presets[started.preset].subagentMax : undefined;
 const maxTier = started?.preset ? started.presets[started.preset].maxTier : undefined;
 const PRESET_LINE = started?.preset
-  ? `\n- The user chose the "${started.preset}" preset. Workers get its model and effort automatically. ${subagentModel && subagentModel !== 'inherit' ? `Start your own subagents (including crew:self-reviewer) with model "${subagentModel}"${subagentMax ? `, or "${subagentMax}" when the work needs more, and never a larger model,` : ''} unless the user asks otherwise.` : 'Your own subagents stay on your model.'}${maxTier ? ` Worker models are capped at the ${maxTier} tier: a higher tier or a larger model you name is lowered to it. You still choose effort.` : ''}`
+  ? `\n- The user chose the "${started.preset}" preset. Workers get its model and effort automatically. ${subagentModel && subagentModel !== 'inherit' ? `Start your own subagents (including crew:self-reviewer) with model "${subagentModel}"${subagentMax ? `, or "${subagentMax}" when the work needs more, and never a larger model,` : ''} unless the user asks otherwise.` : 'Your own subagents stay on your model.'}${maxTier ? ` Worker models are capped at the ${maxTier} tier: a higher tier or a larger model you name is lowered to it. Leave effort out to keep the preset's, or name one when a job needs it.` : ''}`
   : '';
 
 const INSTRUCTIONS = `Crew connects this session to other coding agents that run in the background. You are the lead: you plan, do the main implementation, review, and decide what is merged.
@@ -414,6 +414,8 @@ interface CallContext {
   /** Evidence images to show with the text result. */
   images: Evidence[];
   jobs: JobView[];
+  /** False for a listing: it shows jobs without acting on them, so it offers their news but takes none over. */
+  adopt?: boolean;
 }
 
 /** The latest turn's screenshots and the open questions' attachments: what the lead needs to see now, not the whole history. */
@@ -591,6 +593,8 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       const active = jobs.filter((j) => !j.endedAt);
       const recent = jobs.filter((j) => j.endedAt).slice(0, 8);
       ctx.jobs.push(...active.slice(0, 8), ...recent);
+      // Another lead session in this project may own these; a glance at the list must not take its news.
+      ctx.adopt = false;
       const lines = [active.length ? 'Active:' : 'No active jobs.', ...active.slice(0, 8).map(summarize)];
       const elsewhere = state.jobs.filter((j: JobView) => j.project !== PROJECT && !j.endedAt).length;
       if (elsewhere) lines.push(`(${elsewhere} active job(s) belong to other projects; they are on the board.)`);
@@ -701,9 +705,9 @@ async function handle(msg: any): Promise<void> {
         let ackNote = '';
         if (args.ack !== undefined) {
           await api('POST', '/api/lead/ack', { session: SESSION, ack: args.ack }).then(({ ignored }) => {
-            if (ignored?.length) ackNote = `\n\nack not applied for ${ignored.join(', ')}: unknown, or for news this session no longer owns.`;
+            if (ignored?.length) ackNote = clipped(`\n\nack not applied for ${ignored.join(', ')}: unknown, or for news this session no longer owns.`, 600);
           }, (err) => {
-            ackNote = `\n\nack not applied: ${String((err as Error).message ?? err).split('\n')[0].replace(/\.$/, '')}. The news stays unacknowledged; read it with status.`;
+            ackNote = clipped(`\n\nack not applied: ${String((err as Error).message ?? err).split('\n')[0].replace(/\.$/, '')}. The news stays unacknowledged; read it with status.`, 600);
           });
         }
         let text = clipped(await callTool(params.name, args, ctx), LEAD_TEXT_BYTES) + ackNote;
@@ -713,7 +717,7 @@ async function handle(msg: any): Promise<void> {
           const ids = [...new Set(ctx.jobs.map((job) => job.id))];
           // Take over the jobs this response actually shows, as the wake hook would after this call, so it can carry their
           // news. A job cut off by the bound stays with its owner.
-          const shown = ids.filter((jobId) => text.includes(`[${jobId}]`)).slice(0, 50);
+          const shown = ctx.adopt === false ? [] : ids.filter((jobId) => text.includes(`[${jobId}]`)).slice(0, 50);
           const offer = await (shown.length ? api('POST', '/api/lead/adopt', { session: SESSION, job_ids: shown }) : Promise.resolve())
             .then(() => api('POST', '/api/lead/offer', { session: SESSION, job_ids: ids, bytes: 4000 }))
             .then(({ offer }) => offer, () => null);

@@ -259,9 +259,11 @@ test('watch hook adopts the jobs its Crew call showed, waits after losing an off
     if (route.endsWith('/adopt')) adopted.push(body.job_ids);
     return request(method, route, body);
   }) as typeof api;
-  const result = await leadHook({ session_id: 'lead', hook_event_name: 'PostToolUse', tool_response: [{ type: 'text', text: '[cx-0a1b2c] Codex · review · DONE\n[cx-0a1b2c] again, [ag-ffffff]' }] }, 'watch', recording);
+  // A started job is taken over; an id the response only quotes is not, since another session may own it.
+  const result = await leadHook({ session_id: 'lead', hook_event_name: 'PostToolUse', tool_name: 'mcp__plugin_crew_crew__review',
+    tool_response: [{ type: 'text', text: '[cx-0a1b2c] Codex · review · DONE\n[cx-0a1b2c] again, [ag-ffffff]' }] }, 'watch', recording);
   assert.deepEqual(result, { code: 2, stderr: 'news' });
-  assert.deepEqual(adopted, [['cx-0a1b2c', 'ag-ffffff']]);
+  assert.deepEqual(adopted, [['cx-0a1b2c']]);
   assert.equal(polls, 2);
   assert.equal(calls.at(-1), '/api/lead/release');
   assert.ok(!calls.some((call) => call.includes('ack')));
@@ -345,4 +347,18 @@ test('a watcher that died without releasing is replaced once it stops beating', 
   const second = delivery.watch('lead', now + 3_600_000, now + 30_000);
   assert.ok(second && second.generation !== first.generation);
   assert.throws(() => delivery.heartbeat('lead', first.generation, now + 31_000), /expired or replaced/);
+});
+
+test('the wake hook takes over only the jobs a call named, never those a listing showed', async () => {
+  const adopted: unknown[] = [];
+  const request = (async (_method: string, route: string, body: any) => {
+    if (route.endsWith('/adopt')) adopted.push(body.job_ids);
+    if (route.endsWith('/watch')) return { watch: null };
+    return {};
+  }) as typeof api;
+  const list = [{ type: 'text', text: 'Active:\n[cx-111111] Codex · delegate · running\nRecent:\n[ag-222222] Antigravity · polish · done' }];
+  await leadHook({ session_id: 'lead', tool_name: 'mcp__plugin_crew_crew__status', tool_input: {}, tool_response: list }, 'watch', request);
+  await leadHook({ session_id: 'lead', tool_name: 'mcp__plugin_crew_crew__wait', tool_input: { job_ids: ['cx-333333', 'not an id'] }, tool_response: list }, 'watch', request);
+  await leadHook({ session_id: 'lead', tool_name: 'mcp__plugin_crew_crew__reply', tool_input: { job_id: 'cx-444444' }, tool_response: list }, 'watch', request);
+  assert.deepEqual(adopted, [['cx-333333'], ['cx-444444']]);
 });

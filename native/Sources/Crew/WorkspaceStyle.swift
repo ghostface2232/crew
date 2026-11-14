@@ -18,7 +18,7 @@ struct WorkspaceHeading: View {
                         }
                     }
             }
-        }.frame(maxWidth: .infinity, alignment: .leading)
+        }.padding(.leading, WorkspaceStyle.titleInset).frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

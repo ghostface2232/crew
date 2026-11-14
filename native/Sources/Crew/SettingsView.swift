@@ -8,7 +8,7 @@ struct CrewSettingsView: View {
         VStack(alignment: .leading, spacing: 0) {
             // The window has no title bar of its own: the heading sits on the canvas under the window controls.
             HStack(alignment: .center) {
-                Text("Settings").font(Typeface.windowTitle).accessibilityAddTraits(.isHeader)
+                Text("Settings").font(Typeface.windowTitle).accessibilityAddTraits(.isHeader).padding(.leading, WorkspaceStyle.titleInset)
                 Spacer()
                 Picker("Settings section", selection: $tab) {
                     Text("Roles").tag("roles")

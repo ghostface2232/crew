@@ -221,7 +221,7 @@ struct AgentOverview: View {
     private var agents: [String] { ["claude"] + ["codex", "antigravity"].filter { store.state.agents[$0] != nil } }
     var body: some View {
         VStack(alignment: .leading, spacing: Space.l) {
-            Text("Agents").font(Typeface.section)
+            Text("Agents").font(Typeface.section).padding(.leading, WorkspaceStyle.titleInset)
             if compact { compactAgents }
             else {
                 ViewThatFits(in: .horizontal) {
@@ -351,9 +351,6 @@ struct MissionPanel: View {
                 Text(missionProgress(mission, jobs: jobs), format: .percent.precision(.fractionLength(0)))
                     .font(Typeface.caption).monospacedDigit().foregroundStyle(.secondary).help("Mission progress")
                 StatusLabel(state: mission.state == "active" ? "running" : mission.state, title: mission.state.capitalized)
-                if mission.looksFinished(jobs: store.state.jobs, now: store.now, lead: store.state.claude.first { $0.id == mission.owner }) {
-                    Text("Looks finished").font(Typeface.caption).foregroundStyle(.secondary)
-                }
                 // A bordered circle, so the control shows its hit area.
                 Button { toggle() } label: {
                     Image(systemName: "chevron.down").font(Symbol.control)
@@ -384,9 +381,14 @@ struct MissionPanel: View {
                         }
                     }
                     if !mission.outcome.isEmpty { Text(mission.outcome).font(Typeface.callout).textSelection(.enabled) }
-                    // The mission's own controls sit with its contents, shown when the card is open.
+                    // The mission's own controls close its contents, at the trailing edge with the hint that calls
+                    // for them; the action that completes it comes last, and leads once the mission looks finished.
                     if mission.state == "active" {
-                        HStack(spacing: Space.m) { actions }.pillButton().padding(.top, Space.xs)
+                        HStack(spacing: Space.m) {
+                            Spacer(minLength: 0)
+                            if finished { Text("Looks finished").font(Typeface.caption).foregroundStyle(.secondary) }
+                            actions
+                        }.padding(.top, Space.xs)
                     }
                 }
                 .transition(reduceMotion ? .opacity : .asymmetric(
@@ -404,11 +406,17 @@ struct MissionPanel: View {
         .contentShape(RoundedRectangle(cornerRadius: WorkspaceStyle.cardRadius))
         .gesture(TapGesture().onEnded(toggle), including: expanded ? .subviews : .all)
     }
+    private var finished: Bool {
+        mission.looksFinished(jobs: store.state.jobs, now: store.now, lead: store.state.claude.first { $0.id == mission.owner })
+    }
     @ViewBuilder private var actions: some View {
         let locked = !store.connected || store.actions["dismiss:\(mission.id)"]?.locked == true
-        Button("Mark done", systemImage: "checkmark.circle") { Task { await store.markDone(mission) } }.disabled(locked)
+        // In the warning color: it drops the mission without completing it.
         Button("Stop tracking", systemImage: "xmark.circle") { Task { await store.dismiss(mission) } }
+            .pillButton().tint(Palette.warning).foregroundStyle(Palette.warning)
             .help("Stops tracking without marking done. Its jobs keep running.").disabled(locked)
+        Button("Mark done", systemImage: "checkmark.circle") { Task { await store.markDone(mission) } }
+            .pillButton(prominent: finished).disabled(locked)
     }
     /// Animated from here rather than inside the card, so the cards below move with it instead of jumping.
     private func toggle() {

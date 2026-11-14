@@ -58,6 +58,9 @@ enum WorkspaceStyle {
     static let insetPadding = Space.l
     /// The column a row's leading icon or mark sits in, so titles line up.
     static let iconColumn: CGFloat = 20
+    /// Titles outside a card sit this far in from the cards' edge: a card's rounded corner pulls its edge in,
+    /// so text flush with it looks outdented.
+    static let titleInset = Space.s
     /// The toolbar's glass items sit this far in from the window's edges; floating panels keep the same margin.
     static let windowInset = Space.m
 

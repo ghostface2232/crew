@@ -45,6 +45,7 @@ These aliases name a role for a scale step. Use the alias when the role fits, so
 | `rowGap` | 4 | Between rows in a list |
 | `insetPadding` | 12 | The gray inset holding a section's contents |
 | `iconColumn` | 20 | The column a row's icon or mark sits in, so titles line up |
+| `titleInset` | 6 | Titles outside a card (page heading, Agents, Settings) sit this far in from the cards' edge, since a rounded corner pulls the card's edge in visually |
 | `windowInset` | 8 | The toolbar items' distance from the window edge, kept by floating panels |
 
 ## Radii
@@ -139,4 +140,4 @@ A symbol inside a label takes the label's font. These tokens are for symbols tha
 | Icon | `.iconButton()`; a custom glyph takes `Symbol.control` in `Symbol.controlFrame` | Close, Show job, expand a mission |
 | Chip | `StatusLabel`: `Typeface.chip` in a `Palette.chip` capsule with `Chip.insets` (5 × 8) | Status of jobs, sessions, missions and agents |
 
-Pill buttons are bordered capsules at the regular control size, labeled in `calloutStrong`. Every pill therefore reads the same, wherever it sits.
+Pill buttons are bordered capsules at the regular control size, labeled in `calloutStrong`. Every pill therefore reads the same, wherever it sits. A pill that drops work without completing it, such as Stop tracking, is tinted `Palette.warning`. A group's actions sit at its trailing edge, and the completing action comes last.

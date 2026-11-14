@@ -381,7 +381,8 @@ dialog.detail-panel::backdrop { background: transparent; }
 .agents { display: grid; gap: 12px; }
 .agent-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: var(--card-gap); }
 /* Cards in a row share a height; usage sits at the bottom, so one bar lines up with the last of two. */
-.agent-card { display: grid; grid-template-rows: auto auto 1fr; gap: 14px; }
+.agent-card { display: grid; align-content: start; gap: 14px; }
+.agent-card:has(> .usage) { grid-template-rows: auto auto 1fr; align-content: stretch; }
 .agent-card > .usage { align-self: end; }
 .agent-card-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .agent-card-head > div { flex: 1; min-width: 0; display: grid; gap: 2px; }

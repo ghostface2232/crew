@@ -180,7 +180,8 @@ export function Dialog({
       onClose={(event) => {
         // Repeated Escape without user activation closes a dialog natively despite preventDefault.
         // The parent decides: if it still renders this dialog, show it again.
-        if (unmounting.current) return;
+        // A close queued before a remount (StrictMode runs effects twice) arrives with the dialog open again.
+        if (unmounting.current || event.currentTarget.open) return;
         onClose();
         const dialog = event.currentTarget;
         requestAnimationFrame(() => {
@@ -287,7 +288,14 @@ export function Menu({ label, icon, children }: { label: string; icon: LucideIco
         <Icon icon={icon} />
       </button>
       {open && (
-        <div className="menu-list" role="menu" aria-label={label} onClick={() => close(true)}>
+        <div
+          className="menu-list"
+          role="menu"
+          aria-label={label}
+          // Safari and Firefox on macOS do not focus a clicked button; keep focus in the menu so blur does not close it first.
+          onPointerDown={(event) => event.preventDefault()}
+          onClick={() => close(true)}
+        >
           {children}
         </div>
       )}

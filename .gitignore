@@ -7,3 +7,4 @@ playwright-report/
 native/build/
 native/.build/
 native/.swiftpm/
+.DS_Store

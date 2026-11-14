@@ -124,7 +124,7 @@ struct MessageEditor: View {
             .font(Typeface.body)
             .scrollContentBackground(.hidden)
             .padding(Space.ml)
-            .frame(minHeight: 80, maxHeight: 180)
+            .frame(minHeight: WorkspaceStyle.editorHeight.lowerBound, maxHeight: WorkspaceStyle.editorHeight.upperBound)
             .background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: WorkspaceStyle.fieldRadius))
             .overlay(RoundedRectangle(cornerRadius: WorkspaceStyle.fieldRadius).strokeBorder(WorkspaceStyle.hairline))
             .accessibilityLabel(title)
@@ -171,7 +171,7 @@ struct AnswerView: View {
             TextEditor(text: draft)
                 .font(Typeface.body).lineSpacing(2)
                 .scrollContentBackground(.hidden)
-                .frame(minHeight: 56, maxHeight: 160)
+                .frame(minHeight: WorkspaceStyle.answerHeight.lowerBound, maxHeight: WorkspaceStyle.answerHeight.upperBound)
                 .accessibilityLabel("Your answer")
             if draft.wrappedValue.isEmpty {
                 Text("Write an answer…").font(Typeface.body).foregroundStyle(.tertiary)
@@ -179,14 +179,13 @@ struct AnswerView: View {
                     .padding(.leading, 5).allowsHitTesting(false).accessibilityHidden(true)
             }
         }
-        // The trailing room keeps text clear of the send button laid over the corner.
-        .padding(.leading, Space.ml).padding(.top, Space.ml).padding(.trailing, 44).padding(.bottom, Space.m)
+        // The trailing room keeps text clear of the send button laid over the corner: its diameter and inset.
+        .padding(.leading, Space.ml).padding(.top, Space.ml).padding(.trailing, IconButton.diameter + Space.m * 2).padding(.bottom, Space.m)
         .overlay(alignment: .bottomTrailing) {
             Button("Send answer", systemImage: "arrow.up") {
                 Task { await store.answer(job, message: draft.wrappedValue) }
             }
-            .labelStyle(.iconOnly).font(Symbol.control)
-            .buttonStyle(.borderedProminent).buttonBorderShape(.circle).controlSize(.small)
+            .iconButton(prominent: true)
             .disabled(!canSend).help("Send answer").padding(Space.m)
         }
         .background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: WorkspaceStyle.fieldRadius))
@@ -230,16 +229,18 @@ struct JobRow: View {
                         Text(detail).font(Typeface.caption).foregroundStyle(job.error == nil ? Color.secondary : Palette.danger).lineLimit(1)
                     }
                 }
-                Spacer(minLength: 8)
+                Spacer(minLength: WorkspaceStyle.rowSpacer)
                 StatusLabel(state: job.stalled ? "stalled" : job.state, title: job.status)
                 ElapsedText(store: store, start: job.createdAt, end: job.endedAt).monospacedDigit().font(Typeface.caption).foregroundStyle(.secondary)
-                    .frame(minWidth: 28, alignment: .trailing)
+                    .frame(minWidth: WorkspaceStyle.elapsedColumn, alignment: .trailing)
                 Image(systemName: "chevron.right").font(Typeface.micro).foregroundStyle(.tertiary)
             }
             .padding(WorkspaceStyle.rowInsets).contentShape(Rectangle())
             .background(selected ? Palette.selection : job.state == "waiting" ? Palette.attention(Palette.warning) : WorkspaceStyle.rowFill, in: RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius))
         }.buttonStyle(WorkspacePressStyle())
         .accessibilityElement(children: .combine)
+        // The mark is decorative to VoiceOver, so the agent it shows is read here.
+        .accessibilityValue(agentName(job.agent))
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
@@ -261,17 +262,18 @@ struct SessionRow: View {
                     Text(session.title).font(Typeface.bodyStrong).foregroundStyle(.primary).lineLimit(2)
                     if !detail.isEmpty { Text(detail).font(Typeface.caption).foregroundStyle(.secondary).lineLimit(1) }
                 }
-                Spacer(minLength: 8)
+                Spacer(minLength: WorkspaceStyle.rowSpacer)
                 StatusLabel(state: session.stalled ? "stalled" : session.state, title: session.stalled ? "May be stuck" : session.state.capitalized)
                 // An idle session stops its clock at its last activity.
                 ElapsedText(store: store, start: session.startedAt, end: session.state == "idle" ? session.activeAt : nil)
-                    .monospacedDigit().font(Typeface.caption).foregroundStyle(.secondary).frame(minWidth: 28, alignment: .trailing)
+                    .monospacedDigit().font(Typeface.caption).foregroundStyle(.secondary).frame(minWidth: WorkspaceStyle.elapsedColumn, alignment: .trailing)
                 Image(systemName: "chevron.right").font(Typeface.micro).foregroundStyle(.tertiary)
             }
             .padding(WorkspaceStyle.rowInsets).contentShape(Rectangle())
             .background(selected ? Palette.selection : session.state == "waiting" ? Palette.attention(Palette.warning) : WorkspaceStyle.rowFill, in: RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius))
         }.buttonStyle(WorkspacePressStyle())
         .accessibilityElement(children: .combine)
+        .accessibilityValue("Claude")
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
@@ -342,7 +344,7 @@ struct AgentUsageView: View {
                             }
                             GeometryReader { geometry in
                                 Capsule().fill(tint(window.usedRatio, status)).frame(width: geometry.size.width * min(1, max(0, window.usedRatio)))
-                            }.frame(height: 3).background(.quaternary, in: Capsule()).accessibilityHidden(true)
+                            }.frame(height: WorkspaceStyle.usageBarHeight).background(.quaternary, in: Capsule()).accessibilityHidden(true)
                         }.foregroundStyle(tint(window.usedRatio, status))
                     }
                 }.font(Typeface.caption).help(([provider.reason] + provider.windows.filter { $0.group != nil }.map {
@@ -412,5 +414,34 @@ struct OverlayScrollers: NSViewRepresentable {
         }
         private func apply() { enclosingScrollView?.scrollerStyle = .overlay }
         deinit { if let observer { NotificationCenter.default.removeObserver(observer) } }
+    }
+}
+
+/// One item in a detail section's gray inset: a title row, then the item's body starting below it at the same
+/// leading edge. Status words, marks and the item's own action sit at the end of the title row.
+struct DetailItem<Accessory: View, Content: View>: View {
+    let title: String
+    var symbol: String? = nil
+    var tint: Color? = nil
+    @ViewBuilder var accessory: Accessory
+    @ViewBuilder var content: Content
+    var body: some View {
+        VStack(alignment: .leading, spacing: Space.xs) {
+            HStack(spacing: Space.s) {
+                Group {
+                    if let symbol { Label(title, systemImage: symbol) } else { Text(title) }
+                }
+                .font(Typeface.bodyStrong).foregroundStyle(tint.map(AnyShapeStyle.init) ?? AnyShapeStyle(.primary))
+                Spacer(minLength: WorkspaceStyle.rowSpacer)
+                accessory
+            }
+            content
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+extension DetailItem where Accessory == EmptyView {
+    init(title: String, symbol: String? = nil, tint: Color? = nil, @ViewBuilder content: () -> Content) {
+        self.init(title: title, symbol: symbol, tint: tint, accessory: { EmptyView() }, content: content)
     }
 }

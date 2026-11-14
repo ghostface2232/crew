@@ -1,6 +1,9 @@
 import SwiftUI
 
 struct CrewSettingsView: View {
+    /// The tab control's width with two or three tabs, and the scope picker's.
+    private static let tabsWidth = (two: CGFloat(210), three: CGFloat(300))
+    private static let scopeWidth: CGFloat = 250
     @Bindable var model: SettingsModel
     var store: CrewStore
     @State private var tab = "roles"
@@ -14,7 +17,7 @@ struct CrewSettingsView: View {
                     Text("Roles").tag("roles")
                     Text("Instructions").tag("instructions")
                     if model.presets != nil { Text("Presets").tag("presets") }
-                }.pickerStyle(.segmented).labelsHidden().frame(width: model.presets == nil ? 210 : 300)
+                }.pickerStyle(.segmented).labelsHidden().frame(width: model.presets == nil ? Self.tabsWidth.two : Self.tabsWidth.three)
             }.padding(.horizontal, Space.x4l).padding(.top, 46).padding(.bottom, Space.xxl) // The top clears the window's transparent title bar.
             Group {
                 if tab == "roles" { roles } else if tab == "presets" { presets } else { instructions }
@@ -39,7 +42,7 @@ struct CrewSettingsView: View {
         }
         .ignoresSafeArea(.container, edges: .top)
         .background(WorkspaceStyle.canvas.ignoresSafeArea())
-        .frame(minWidth: 640, idealWidth: 720, minHeight: 570, idealHeight: 620)
+        .frame(minWidth: WorkspaceStyle.settingsMinSize.width, idealWidth: WorkspaceStyle.settingsSize.width, minHeight: WorkspaceStyle.settingsMinSize.height, idealHeight: WorkspaceStyle.settingsSize.height)
         .task { if !model.loaded && !model.loading { await model.load(scope: model.scope) } }
     }
     private var roles: some View {
@@ -55,7 +58,7 @@ struct CrewSettingsView: View {
                                 ForEach(store.state.agents.keys.sorted(), id: \.self) { id in
                                     Text("\(agentName(id))\(store.state.agents[id]?.enabled == false ? " (disabled)" : "")").tag(id)
                                 }
-                            }.labelsHidden().frame(width: 180)
+                            }.labelsHidden().frame(width: WorkspaceStyle.pickerWidth)
                         }
                         HStack(spacing: Space.xxl) {
                             VStack(alignment: .leading, spacing: Space.s) {
@@ -84,7 +87,7 @@ struct CrewSettingsView: View {
                         ForEach(PresetName.allCases, id: \.self) { name in
                             Text(name.rawValue.capitalized).tag(Optional(name))
                         }
-                    }.labelsHidden().frame(width: 180)
+                    }.labelsHidden().frame(width: WorkspaceStyle.pickerWidth)
                 }
                 Text(model.preset.flatMap { model.presets?[$0.rawValue]?.description } ?? "Uses each agent's configured model and effort.")
                     .font(Typeface.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -101,7 +104,7 @@ struct CrewSettingsView: View {
                 Picker("Applies to", selection: Binding(get: { model.scope }, set: changeScope)) {
                     Text("Every project").tag("")
                     ForEach(store.projects, id: \.self) { Text(projectName($0, among: store.projects)).tag($0) }
-                }.frame(maxWidth: 250).disabled(model.savingText)
+                }.frame(maxWidth: Self.scopeWidth).disabled(model.savingText)
             }
             Text("Given to every agent with its next job and to Claude sessions when they start.")
                 .font(Typeface.callout).foregroundStyle(.secondary)
@@ -136,7 +139,7 @@ struct CrewSettingsView: View {
 /// A small dot before the words, sized to the text.
 private struct UnsavedLabelStyle: LabelStyle {
     func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: Space.s) { configuration.icon.font(.system(size: 6)); configuration.title }
+        HStack(spacing: Space.s) { configuration.icon.font(Symbol.dot); configuration.title }
     }
 }
 

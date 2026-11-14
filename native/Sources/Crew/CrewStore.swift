@@ -211,15 +211,16 @@ final class CrewStore {
     }
     func dismiss(_ mission: Mission) async {
         struct Dismiss: Encodable, Sendable { var abandoned = true; var outcome = "Dismissed in Crew." }
-        await run("dismiss:\(mission.id)", once: true) {
+        await run(mission.actionKey, once: true) {
             let updated: Mission = try await api.post("/api/missions/\(mission.id)", Dismiss())
             upsert(&state.missions, updated)
         }
     }
     func markDone(_ mission: Mission) async {
-        struct Done: Encodable, Sendable { var done = true; var outcome = "Marked done in Crew." }
-        await run("dismiss:\(mission.id)", once: true) {
-            let updated: Mission = try await api.post("/api/missions/\(mission.id)", Done())
+        // An abandoned mission is reopened explicitly, so only this choice of the user's can mark it done.
+        struct Done: Encodable, Sendable { var done = true; var reopen: Bool?; var outcome = "Marked done in Crew." }
+        await run(mission.actionKey, once: true) {
+            let updated: Mission = try await api.post("/api/missions/\(mission.id)", Done(reopen: mission.state == "abandoned" ? true : nil))
             upsert(&state.missions, updated)
         }
     }

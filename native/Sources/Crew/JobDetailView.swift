@@ -57,7 +57,7 @@ struct JobDetailView: View {
             AnswerView(store: store, job: job)
                 .card(fill: Palette.attention(Palette.warning))
         }
-        Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
+        Grid(alignment: .leading, horizontalSpacing: WorkspaceStyle.factColumnGap, verticalSpacing: WorkspaceStyle.factRowGap) {
             // The model the session reported, else the configured one.
             fact("Agent", [agentName(job.agent), job.resolvedModel ?? job.model, (job.resolvedEffort ?? job.effort).map { "\($0) effort" }, job.tier.map { "\($0) tier" }].compactMap { $0 }.joined(separator: " · "))
             fact("Role", job.kindTitle)
@@ -95,7 +95,7 @@ struct JobDetailView: View {
         }
         if let evidence = job.evidence, !evidence.isEmpty {
             detailSection("Evidence", symbol: "photo.on.rectangle") {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 132), spacing: Space.l, alignment: .top)], alignment: .leading, spacing: Space.l) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: EvidenceTile.minWidth), spacing: Space.l, alignment: .top)], alignment: .leading, spacing: Space.l) {
                     // Newest turn first, as on the web board.
                     ForEach(evidence.sorted { $0.turn > $1.turn }, id: \.file) { item in EvidenceTile(item: item) }
                 }
@@ -105,19 +105,16 @@ struct JobDetailView: View {
             detailSection("Rounds", symbol: "arrow.counterclockwise") {
                 ForEach(rounds.sorted { $0.turn < $1.turn }, id: \.turn) { round in
                     let key = job.roundActionKey(round.turn)
-                    VStack(alignment: .leading, spacing: Space.m) {
-                        HStack {
-                            Text("Turn \(round.turn)").font(Typeface.calloutStrong)
-                            Label(round.state == "undone" ? "Undone" : "Kept", systemImage: round.state == "undone" ? "arrow.uturn.backward" : "checkmark")
-                                .font(Typeface.caption).foregroundStyle(.secondary)
-                            Spacer()
-                            Button(round.state == "undone" ? "Keep" : "Undo") {
-                                Task { await store.setRound(job, turn: round.turn, undo: round.state != "undone") }
-                            }
-                            .pillButton()
-                            .disabled(!store.connected || job.roundUnavailableReason != nil || store.actions[key]?.locked == true)
-                            .help(job.roundUnavailableReason ?? (!store.connected ? "Connect to Crew to change rounds." : "Change this round on the job branch."))
+                    DetailItem(title: "Turn \(round.turn)") {
+                        Label(round.state == "undone" ? "Undone" : "Kept", systemImage: round.state == "undone" ? "arrow.uturn.backward" : "checkmark")
+                            .font(Typeface.caption).foregroundStyle(.secondary)
+                        Button(round.state == "undone" ? "Keep" : "Undo") {
+                            Task { await store.setRound(job, turn: round.turn, undo: round.state != "undone") }
                         }
+                        .pillButton()
+                        .disabled(!store.connected || job.roundUnavailableReason != nil || store.actions[key]?.locked == true)
+                        .help(job.roundUnavailableReason ?? (!store.connected ? "Connect to Crew to change rounds." : "Change this round on the job branch."))
+                    } content: {
                         Text(round.stat.isEmpty ? "No files changed" : round.stat).font(Typeface.code).textSelection(.enabled)
                         ActionMessage(state: store.actions[key])
                     }
@@ -198,7 +195,7 @@ private func noteText(_ text: String, limit: Int = 2_000) -> String {
 
 @MainActor private func fact(_ title: String, _ value: String) -> some View {
     GridRow(alignment: .top) {
-        Text(title).foregroundStyle(.secondary).frame(minWidth: 72, alignment: .leading)
+        Text(title).foregroundStyle(.secondary).frame(minWidth: WorkspaceStyle.factLabelWidth, alignment: .leading)
         Text(value).frame(maxWidth: .infinity, alignment: .leading)
     }
 }
@@ -300,11 +297,11 @@ struct SessionDetailView: View {
     @ViewBuilder private func contents(_ session: ClaudeSession) -> some View {
         if session.state == "waiting" {
             VStack(alignment: .leading, spacing: Space.m) {
-                Text(session.waitingFor ?? "Claude needs your input.").font(Typeface.body).textSelection(.enabled)
+                Text(session.waitingFor ?? "Claude needs your input.").font(Typeface.callout).textSelection(.enabled)
                 Text("Answer in Claude.").font(Typeface.callout).foregroundStyle(.secondary)
             }.card(fill: Palette.attention(Palette.warning))
         }
-        Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
+        Grid(alignment: .leading, horizontalSpacing: WorkspaceStyle.factColumnGap, verticalSpacing: WorkspaceStyle.factRowGap) {
             fact("Agent", "Claude · Lead")
             fact("Project", session.projectPath)
             if session.cwd != session.projectPath { fact("Directory", session.cwd) }
@@ -318,7 +315,7 @@ struct SessionDetailView: View {
                 ForEach(missions) { mission in
                     HStack(spacing: Space.ml) {
                         Text(mission.title).font(Typeface.callout).lineLimit(2)
-                        Spacer(minLength: 8)
+                        Spacer(minLength: WorkspaceStyle.rowSpacer)
                         StatusLabel(state: mission.state == "active" ? "running" : mission.state, title: mission.state.capitalized)
                     }
                 }
@@ -370,7 +367,7 @@ private struct OriginalTask: View {
                     }
                     .contentShape(Rectangle())
                     .onTapGesture { if long && !shown { toggle() } }
-                if long { RevealToggle(shown: $shown) }
+                if long { RevealToggle(subject: "the original task", shown: $shown) }
             }
             .inset()
         }.frame(maxWidth: .infinity, alignment: .leading)
@@ -383,7 +380,7 @@ private struct OriginalTask: View {
 struct ReportText: View {
     let report: String
     var body: some View {
-        Text(Self.render(report)).font(Typeface.body).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+        Text(Self.render(report)).font(Typeface.callout).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
     }
     nonisolated static func render(_ report: String) -> AttributedString {
         enum Kind { case heading, code, prose }
@@ -439,54 +436,59 @@ private struct VerificationView: View {
 
     var body: some View {
         if let receipt = job.latestReceipt {
-            VStack(alignment: .leading, spacing: Space.s) {
-                if let check = receipt.check {
-                    checkStatus(check, stale: receipt.stale != nil)
+            if let check = receipt.check {
+                DetailItem(title: checkTitle(check), symbol: checkSymbol(check), tint: receipt.stale != nil ? .secondary : checkColor(check)) {
+                    if let skipped = check.skipped { Text(skipped.prefix(1).uppercased() + skipped.dropFirst() + ".").font(Typeface.caption).foregroundStyle(.secondary) }
                     Text(check.command).font(Typeface.code).textSelection(.enabled)
                     Text(caption(receipt, extra: check.skipped == nil ? duration(check.ms) : nil)).font(Typeface.caption).foregroundStyle(.secondary)
                     if check.skipped == nil && check.exit != 0 && !check.output.isEmpty {
-                        RevealToggle(show: "Show the end of the output", hide: "Hide the output", shown: $outputShown)
                         if outputShown {
                             Text(check.output.split(separator: "\n", omittingEmptySubsequences: false).suffix(15).joined(separator: "\n"))
                                 .font(Typeface.codeSmall).textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
+                        RevealToggle(show: "Show the end of the output", hide: "Hide the output", shown: $outputShown)
                     }
-                } else if let reviewed = receipt.reviewed {
-                    Label("Reviewed", systemImage: "eye").font(Typeface.calloutStrong)
-                        .foregroundStyle(receipt.stale == nil ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                    stale(receipt)
+                }
+            } else if let reviewed = receipt.reviewed {
+                DetailItem(title: "Reviewed", symbol: "eye", tint: receipt.stale == nil ? nil : .secondary) {
                     Text(reviewed.target).font(Typeface.callout).textSelection(.enabled)
                     Text(caption(receipt, extra: reviewed.diff.map { "diff \($0)" })).font(Typeface.caption).foregroundStyle(.secondary)
-                }
-                if let stale = receipt.stale {
-                    Label("No longer current: \(stale)", systemImage: "clock.arrow.circlepath")
-                        .font(Typeface.caption).foregroundStyle(Palette.warning)
+                    stale(receipt)
                 }
             }
         }
         if let capabilities = job.capabilities {
-            Grid(alignment: .leading) { fact("Runs with", runsWith(capabilities)) }.font(Typeface.callout).textSelection(.enabled)
+            DetailItem(title: "Runs with") { Text(runsWith(capabilities)).font(Typeface.callout).textSelection(.enabled) }
         }
         ForEach(Array((job.approvals ?? []).enumerated()), id: \.offset) { _, approval in
-            VStack(alignment: .leading, spacing: Space.xs) {
-                Label("Approval relayed for turn \(approval.turn)", systemImage: approval.recorded > 0 ? "person.crop.circle.badge.checkmark" : "person.crop.circle.badge.questionmark")
-                    .font(Typeface.calloutStrong)
+            DetailItem(title: "Approval relayed for turn \(approval.turn)", symbol: approval.recorded > 0 ? "person.crop.circle.badge.checkmark" : "person.crop.circle.badge.questionmark") {
                 Text(approvalBasis(approval)).font(Typeface.caption).foregroundStyle(.secondary)
-                Text("\u{201C}\(approval.quote)\u{201D}").font(Typeface.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                Text("\u{201C}\(approval.quote)\u{201D}").font(Typeface.callout).textSelection(.enabled)
             }
         }
     }
 
-    @ViewBuilder private func checkStatus(_ check: CheckResult, stale: Bool) -> some View {
-        let (title, symbol, color): (String, String, Color) =
-            check.skipped != nil ? ("Check not run", "minus.circle", .secondary)
-            : check.timedOut ? ("Check timed out after \(duration(check.ms))", "clock.badge.exclamationmark", Palette.warning)
-            : check.exit == 0 ? ("Check passed", "checkmark.circle.fill", Palette.success)
-            : check.exit == nil ? ("Check stopped before it finished", "xmark.octagon.fill", Palette.danger)
-            : ("Check failed with exit code \(check.exit!)", "xmark.octagon.fill", Palette.danger)
-        // A stale result keeps its words but loses its color: it describes a tree that is gone.
-        Label(title, systemImage: symbol).font(Typeface.calloutStrong).foregroundStyle(stale ? .secondary : color)
-        if let skipped = check.skipped { Text(skipped.prefix(1).uppercased() + skipped.dropFirst() + ".").font(Typeface.caption).foregroundStyle(.secondary) }
+    @ViewBuilder private func stale(_ receipt: TurnReceipt) -> some View {
+        if let stale = receipt.stale {
+            Label("No longer current: \(stale)", systemImage: "clock.arrow.circlepath").font(Typeface.caption).foregroundStyle(Palette.warning)
+        }
+    }
+
+    // A stale result keeps its words but loses its color: it describes a tree that is gone.
+    private func checkTitle(_ check: CheckResult) -> String {
+        check.skipped != nil ? "Check not run"
+            : check.timedOut ? "Check timed out after \(duration(check.ms))"
+            : check.exit == 0 ? "Check passed"
+            : check.exit == nil ? "Check stopped before it finished"
+            : "Check failed with exit code \(check.exit!)"
+    }
+    private func checkSymbol(_ check: CheckResult) -> String {
+        check.skipped != nil ? "minus.circle" : check.timedOut ? "clock.badge.exclamationmark" : check.exit == 0 ? "checkmark.circle.fill" : "xmark.octagon.fill"
+    }
+    private func checkColor(_ check: CheckResult) -> Color {
+        check.skipped != nil ? .secondary : check.timedOut ? Palette.warning : check.exit == 0 ? Palette.success : Palette.danger
     }
 
     private func caption(_ receipt: TurnReceipt, extra: String?) -> String {
@@ -587,80 +589,99 @@ private struct DebateRound: View {
         let opened = Binding(get: { open ?? last }, set: { open = $0 })
         VStack(alignment: .leading, spacing: Space.ml) {
             HStack(spacing: Space.m) {
-                Text(final ? "\(label) \(turn) · final" : "\(label) \(turn)").font(Typeface.calloutStrong)
+                Text(final ? "\(label) \(turn) · final" : "\(label) \(turn)").font(Typeface.headline)
+                // Folded, the title carries the reply's stances beside it, as the worker's name does when open.
+                if !opened.wrappedValue { stances(points) }
                 Spacer(minLength: 0)
-                ForEach([DebatePoint.Stance.agree, .disagree, .alternative], id: \.self) { stance in
-                    let count = points.filter { $0.stance == stance }.count
-                    if count > 0 { StanceChip(stance: stance, count: count) }
-                }
             }
-            if !last { RevealToggle(show: "Show this \(label.lowercased())", hide: "Hide this \(label.lowercased())", shown: opened) }
             if opened.wrappedValue { exchange(points) }
+            if !last { RevealToggle(show: "Show this \(label.lowercased())", hide: "Hide this \(label.lowercased())", shown: opened) }
         }
+        // Fixed when the round first appears, so a new round arriving does not fold the one being read.
+        .onAppear { if open == nil { open = last } }
         if !last { Divider().padding(.vertical, Space.xs) }
+    }
+
+    /// One mark per stance the reply takes, counted when it takes it more than once.
+    @ViewBuilder private func stances(_ points: [DebatePoint]) -> some View {
+        ForEach([DebatePoint.Stance.agree, .disagree, .alternative], id: \.self) { stance in
+            let count = points.filter { $0.stance == stance }.count
+            if count > 0 { StanceMark(stance: stance, count: count > 1 ? count : nil) }
+        }
     }
 
     @ViewBuilder private func exchange(_ points: [DebatePoint]) -> some View {
         if let lead {
             VStack(alignment: .leading, spacing: Space.xs) {
-                Text("Lead").font(Typeface.captionStrong).foregroundStyle(Palette.accent)
+                Text("Lead").font(Typeface.bodyStrong).foregroundStyle(Palette.accent)
                 ReportText(report: lead.text).lineLimit(leadShown ? nil : 4)
                 if lead.text.split(separator: "\n").count > 4 || lead.text.count > 400 {
-                    RevealToggle(shown: $leadShown)
+                    RevealToggle(subject: "the lead's message", shown: $leadShown)
                 }
             }
             .padding(.leading, Space.l)
             // A 2-point edge, the width of a focus ring's stroke, marks the lead's voice without a second fill.
-            .overlay(alignment: .leading) { Rectangle().fill(Palette.accent).frame(width: 2) }
+            .overlay(alignment: .leading) { Rectangle().fill(Palette.accent).frame(width: Space.xxs) }
         }
         if let reply {
-            VStack(alignment: .leading, spacing: Space.s) {
-                Text(worker).font(Typeface.captionStrong).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: Space.xs) {
+                HStack(spacing: Space.s) {
+                    Text(worker).font(Typeface.bodyStrong)
+                    stances(points)
+                }
                 if points.isEmpty {
                     ReportText(report: reply.text).lineLimit(replyShown ? nil : 8)
-                    RevealToggle(shown: $replyShown)
+                    RevealToggle(subject: "the reply", shown: $replyShown)
                 } else {
+                    // Each point reads from the leading edge like any body text. Its own stance ends the line only
+                    // when the reply mixes stances; otherwise the mark by the name already says it.
+                    let mixed = Set(points.map(\.stance)).count > 1
                     ForEach(points, id: \.number) { point in
-                        HStack(alignment: .firstTextBaseline, spacing: Space.m) {
-                            StanceChip(stance: point.stance, count: nil)
+                        HStack(alignment: .firstTextBaseline, spacing: WorkspaceStyle.rowSpacer) {
                             Text(point.title).font(Typeface.callout).textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
+                            if mixed { StanceMark(stance: point.stance, count: nil) }
                         }
                     }
-                    RevealToggle(show: "Show the full reply", hide: "Hide the full reply", shown: $replyShown)
                     if replyShown { ReportText(report: reply.text) }
+                    RevealToggle(show: "Show the full reply", hide: "Hide the full reply", shown: $replyShown)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.leading, Space.l)
+            // The worker's voice takes the same edge as the lead's, in a neutral color.
+            .overlay(alignment: .leading) { Rectangle().fill(MissionTrack.upcoming).frame(width: Space.xxs) }
         } else if working {
             Label("\(worker) is answering…", systemImage: "ellipsis.bubble").font(Typeface.caption).foregroundStyle(.secondary)
         }
     }
 }
 
-/// A point's stance: green agree, red disagree, accent alternative, with a count when it sums a round.
-private struct StanceChip: View {
+/// A point's stance as a colored symbol: green agree, red disagree, accent alternative. Not a chip, which would read
+/// as a button. It ends a point's line, and in a round's heading it is followed by its count.
+private struct StanceMark: View {
     let stance: DebatePoint.Stance
     let count: Int?
-    @Environment(\.colorScheme) private var scheme
-    @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {
         let (title, symbol, color): (String, String, Color) = switch stance {
-        case .agree: ("Agree", "checkmark", Palette.success)
-        case .disagree: ("Disagree", "xmark", Palette.danger)
+        case .agree: ("Agree", "checkmark.circle.fill", Palette.success)
+        case .disagree: ("Disagree", "xmark.circle.fill", Palette.danger)
         case .alternative: ("Alternative", "arrow.triangle.branch", Palette.accent)
         }
-        let text = scheme == .light ? color.mix(with: .black, by: 0.22) : color
-        Label(count.map { "\(title) \($0)" } ?? title, systemImage: symbol)
-            .font(Typeface.chip).foregroundStyle(text).lineLimit(1).fixedSize()
-            .padding(Chip.insets)
-            .background(Palette.chip(color), in: Capsule())
-            .overlay { if contrast == .increased { Capsule().strokeBorder(text.opacity(0.5)) } }
+        HStack(spacing: Space.xs) {
+            Image(systemName: symbol).font(Symbol.stance).foregroundStyle(color)
+            if let count { Text(count.formatted()).font(Typeface.captionStrong).monospacedDigit().foregroundStyle(.secondary) }
+        }
+        .help(title)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(count.map { "\($0) \(title.lowercased())" } ?? title)
     }
 }
 
 private struct EvidenceTile: View {
+    /// Narrow enough for three across the detail panel.
+    static let minWidth: CGFloat = 132
     let item: Evidence
     @State private var thumbnail: NSImage?
     var body: some View {

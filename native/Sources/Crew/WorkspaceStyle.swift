@@ -62,7 +62,7 @@ struct WorkspaceSummary: View {
                 }
             }
             // Made of its colored parts alone; only an empty summary shows the bare track.
-            .frame(height: 5).background(metrics.allSatisfy { $0.1 == 0 } ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear), in: Capsule())
+            .frame(height: WorkspaceStyle.summaryBarHeight).background(metrics.allSatisfy { $0.1 == 0 } ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear), in: Capsule())
             .accessibilityHidden(true)
         }.card()
     }
@@ -78,7 +78,7 @@ struct MissionTrack: View {
     static let inset = Space.x3l
     /// One line of a step name in `Typeface.captionStrong`.
     private static let labelHeight: CGFloat = {
-        let font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+        let font = NSFont.systemFont(ofSize: Typeface.captionSize, weight: .semibold)
         return ceil(font.ascender - font.descender + font.leading)
     }()
     let mission: Mission
@@ -94,7 +94,8 @@ struct MissionTrack: View {
         let count = mission.stops.count
         // Markers spread evenly between the insets; each name sits centered under its marker.
         GeometryReader { geometry in
-            let span = count > 1 ? (geometry.size.width - Self.inset * 2) / CGFloat(count - 1) : 0
+            // Never negative, however narrow the card or long the plan.
+            let span = count > 1 ? max(0, (geometry.size.width - Self.inset * 2) / CGFloat(count - 1)) : 0
             let center = { (index: Int) in count > 1 ? Self.inset + span * CGFloat(index) : geometry.size.width / 2 }
             ZStack(alignment: .topLeading) {
                 ForEach(0..<max(0, count - 1), id: \.self) { index in
@@ -106,7 +107,7 @@ struct MissionTrack: View {
                     marker(index).position(x: center(index), y: Self.marker / 2)
                     Text(title).font(index == mission.step ? Typeface.captionStrong : Typeface.caption)
                         .foregroundStyle(index == mission.step && mission.state == "active" ? .primary : .secondary)
-                        .lineLimit(1).frame(maxWidth: count > 1 ? span - Space.xs : nil)
+                        .lineLimit(1).frame(maxWidth: count > 1 ? max(0, span - Space.xs) : nil)
                         .position(x: center(index), y: Self.marker + Space.m + Self.labelHeight / 2)
                 }
             }
@@ -119,15 +120,19 @@ struct MissionTrack: View {
         let current = index == mission.step
         // The step a mission ended on without passing it is filled like the passed ones, not left blank.
         let stopped = current && mission.state != "active" && !mission.passed(index)
+        // An abandoned mission outlines its passed and stopped steps instead of filling them: its lighter color would
+        // leave a white glyph on it nearly unreadable.
+        let outlined = mission.state == "abandoned"
+        let glyph = outlined ? passedColor : WorkspaceStyle.surface
         return ZStack {
-            Circle().fill(current && mission.state == "active" ? Palette.accent : stopped ? passedColor : .clear)
+            Circle().fill(current && mission.state == "active" ? Palette.accent : stopped && !outlined ? passedColor : .clear)
             if mission.passed(index) {
-                Circle().fill(passedColor)
-                Image(systemName: "checkmark").font(Symbol.badge).foregroundStyle(WorkspaceStyle.surface)
+                if outlined { Circle().strokeBorder(passedColor, lineWidth: Self.line) } else { Circle().fill(passedColor) }
+                Image(systemName: "checkmark").font(Symbol.badge).foregroundStyle(glyph)
             } else {
-                Circle().strokeBorder(current ? .clear : Self.upcoming, lineWidth: Self.line)
+                Circle().strokeBorder(stopped && outlined ? passedColor : current ? .clear : Self.upcoming, lineWidth: Self.line)
                 Text(String(index + 1)).font(Typeface.chip)
-                    .foregroundStyle(current && mission.state == "active" ? Color.white : stopped ? WorkspaceStyle.surface : .secondary)
+                    .foregroundStyle(current && mission.state == "active" ? Color.white : stopped ? glyph : .secondary)
             }
         }
         .frame(width: Self.marker, height: Self.marker)

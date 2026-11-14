@@ -448,6 +448,27 @@ private final class MockProtocol: URLProtocol, @unchecked Sendable {
         job.waiting?.id = "next-request"
         #expect(store.actions[job.requestKey]?.locked != true)
     }
+    @Test func stopTrackingLeavesMarkDoneAvailableAndItReopens() async throws {
+        var active = try #require(fixture().missions.first)
+        active.state = "active"
+        let mission = active
+        // What each post said about reopening: nil when the key was left out.
+        let reopens = Mutex<[Bool?]>([])
+        let api = api { request in
+            let reopen = try requestBody(request)["reopen"] as? Bool
+            var reply = mission
+            reply.state = reopens.withLock { $0.append(reopen); return $0.count == 1 ? "abandoned" : "done" }
+            return (200, try! JSONEncoder().encode(reply), 0)
+        }
+        let store = try store(api: api)
+        await store.dismiss(mission)
+        let stopped = try #require(store.state.missions.first { $0.id == mission.id })
+        #expect(stopped.state == "abandoned")
+        #expect(store.actions[stopped.actionKey]?.locked != true)
+        await store.markDone(stopped)
+        #expect(store.state.missions.first { $0.id == mission.id }?.state == "done")
+        #expect(reopens.withLock { $0 } == [nil, true])
+    }
     @Test func failedAnswersKeepDraftAndAllowRetry() async throws {
         let calls = Mutex(0)
         let job = try fixture().waitingJobs[0]

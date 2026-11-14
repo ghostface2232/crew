@@ -12,7 +12,7 @@ struct CrewApp: App {
             .buttonBorderShape(.capsule)
             .background(WindowAccessor { delegate.configure($0) })
         }
-        .defaultSize(width: 1180, height: 780)
+        .defaultSize(WorkspaceStyle.windowDefaultSize)
         .commands {
             // View > Show/Hide Sidebar (⌃⌘S), the standard way to toggle it from the keyboard.
             SidebarCommands()
@@ -239,8 +239,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         window.styleMask = [.titled, .closable, .resizable, .fullSizeContentView]
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
-        window.setContentSize(NSSize(width: 720, height: 620))
-        window.minSize = NSSize(width: 640, height: 570)
+        window.setContentSize(WorkspaceStyle.settingsSize)
+        window.minSize = WorkspaceStyle.settingsMinSize
         window.isReleasedWhenClosed = false
         window.delegate = self
         settings = model; settingsWindow = window

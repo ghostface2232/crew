@@ -66,6 +66,36 @@ enum WorkspaceStyle {
     /// The toolbar's glass items sit this far in from the window's edges; floating panels keep the same margin.
     static let windowInset = Space.m
 
+    /// The detail panel's shadow, cast down and away from the window edge it floats beside.
+    static let panelShadowRadius: CGFloat = 26
+    static let panelShadowOffset = CGSize(width: -8, height: 8)
+    /// A fact's label column in the detail panel, and the gaps of its grid.
+    static let factLabelWidth: CGFloat = 72
+    static let factColumnGap = Space.xl
+    static let factRowGap = Space.m
+    /// The elapsed time at a row's end, wide enough that "<1m" and "59m" line up.
+    static let elapsedColumn: CGFloat = 28
+    /// The least room between a row's text and what follows it.
+    static let rowSpacer = Space.m
+    static let summaryBarHeight: CGFloat = 5
+    static let usageBarHeight: CGFloat = 3
+    /// Message editors grow with their text between these heights.
+    static let editorHeight: ClosedRange<CGFloat> = 80...180
+    static let answerHeight: ClosedRange<CGFloat> = 56...160
+
+    // MARK: Windows
+    /// The page stops widening here and centers; below `contentMinWidth` the window stops narrowing.
+    static let pageMaxWidth: CGFloat = 1280
+    static let contentMinWidth: CGFloat = 560
+    static let windowMinHeight: CGFloat = 560
+    static let windowDefaultSize = CGSize(width: 1180, height: 780)
+    static let sidebarWidth = (min: CGFloat(180), ideal: CGFloat(210), max: CGFloat(300))
+    static let sheetWidth: CGFloat = 560
+    static let settingsSize = CGSize(width: 720, height: 620)
+    static let settingsMinSize = CGSize(width: 640, height: 570)
+    /// A Settings picker's width, so pickers in a column line up.
+    static let pickerWidth: CGFloat = 180
+
     // MARK: Radii
     static let cardRadius: CGFloat = 20
     /// Concentric with the window's corner across `windowInset`, and the same as the toolbar items' capsules.
@@ -111,7 +141,9 @@ enum Typeface {
     static let calloutSize: CGFloat = 13
     static let captionStrong = Font.system(size: 12, weight: .semibold)
     static let chip = Font.system(size: 12, weight: .medium)
-    static let caption = Font.system(size: 12)
+    static let caption = Font.system(size: captionSize)
+    /// For layout that counts lines of caption type.
+    static let captionSize: CGFloat = 12
     static let micro = Font.system(size: 11, weight: .semibold)
     static let code = Font.system(size: 13, design: .monospaced)
     static let codeSmall = Font.system(size: 12, design: .monospaced)
@@ -132,10 +164,16 @@ enum Symbol {
     static let badge = Font.system(size: 9, weight: .bold)
     /// The glyph of a circular icon button.
     static let control = Font.system(size: 11, weight: .semibold)
+    /// A debate point's stance, leading its line.
+    static let stance = Font.system(size: 14, weight: .medium)
     /// A thumbnail placeholder or a settings section's icon.
     static let large = Font.system(size: 17, weight: .medium)
     /// An empty state's illustration.
     static let empty = Font.system(size: 30, weight: .light)
+    /// Shifts a sideways chevron toward its point, where its frame leaves it looking off center.
+    static let chevronNudge: CGFloat = 1
+    /// A small dot before words, such as Unsaved changes.
+    static let dot = Font.system(size: 6)
     /// The frame a control glyph sits in, so icon buttons match whatever their symbol.
     static let controlFrame: CGFloat = 16
 }
@@ -178,13 +216,15 @@ enum IconButton {
 }
 
 struct IconButtonStyle: ButtonStyle {
+    /// Filled with the accent for the action a field leads to, such as sending.
+    var prominent = false
     @Environment(\.isEnabled) private var enabled
     @Environment(\.colorSchemeContrast) private var contrast
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(Symbol.control).foregroundStyle(.primary)
+            .font(Symbol.control).foregroundStyle(prominent ? Color.white : .primary)
             .frame(width: IconButton.diameter, height: IconButton.diameter)
-            .background(Pill.fill, in: Circle())
+            .background(prominent ? Palette.accent : Pill.fill, in: Circle())
             .overlay { if contrast == .increased { Circle().strokeBorder(Palette.contrastStroke) } }
             .overlay { if configuration.isPressed { Circle().fill(Color.primary.opacity(0.08)) } }
             .opacity(enabled ? 1 : 0.45)
@@ -197,19 +237,23 @@ struct IconButtonStyle: ButtonStyle {
 struct RevealToggle: View {
     var show = "Show all"
     var hide = "Show less"
+    /// What it reveals, for VoiceOver, where several "Show all" can sit in one view.
+    var subject: String? = nil
     @Binding var shown: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
         Button { withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) { shown.toggle() } } label: {
             HStack(spacing: Space.xs) {
                 Text(shown ? hide : show)
-                Image(systemName: "chevron.down").font(Symbol.badge).rotationEffect(.degrees(shown ? 180 : 0))
+                Image(systemName: "chevron.down").font(Symbol.badge).rotationEffect(.degrees(shown ? 180 : 0)).accessibilityHidden(true)
             }
             .font(Typeface.captionStrong).foregroundStyle(.secondary)
             .padding(.vertical, Space.xs).padding(.trailing, Space.l)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(subject.map { "\(shown ? hide : show): \($0)" } ?? (shown ? hide : show))
+        .accessibilityValue(shown ? "Expanded" : "Collapsed")
     }
 }
 
@@ -270,5 +314,5 @@ extension View {
     func glassPillButton(prominent: Bool = true) -> some View { buttonStyle(GlassPillButtonStyle(prominent: prominent)).labelStyle(PillLabelStyle()) }
     func pillButton(prominent: Bool) -> some View { pillButton(prominent ? .prominent : .plain) }
     /// An icon-only circle at `IconButton.diameter`; its symbol takes `Symbol.control`.
-    func iconButton() -> some View { labelStyle(.iconOnly).buttonStyle(IconButtonStyle()) }
+    func iconButton(prominent: Bool = false) -> some View { labelStyle(.iconOnly).buttonStyle(IconButtonStyle(prominent: prominent)) }
 }

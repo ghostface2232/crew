@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct DispatchView: View {
+    /// A read-only value lines up with the pickers beside it.
+    private static let fieldHeight: CGFloat = 22
     @Bindable var store: CrewStore
     @Environment(\.dismiss) private var dismiss
     @State private var directory: String
@@ -40,7 +42,7 @@ struct DispatchView: View {
                     HStack(spacing: Space.m) {
                         TextField("Project directory", text: $directory, prompt: Text("/path/to/repository"))
                             .textFieldStyle(.roundedBorder).labelsHidden().accessibilityLabel("Project directory")
-                        Button("Choose…", systemImage: "folder") { chooseFolder() }.accessibilityLabel("Choose project directory")
+                        Button("Choose…", systemImage: "folder") { chooseFolder() }.pillButton().accessibilityLabel("Choose project directory")
                     }
                 }
                 if intent == "command" {
@@ -51,7 +53,7 @@ struct DispatchView: View {
                         }
                         field("Assigned to") {
                             Text(worker.map { "\($0.name)\($0.enabled ? "" : " (disabled)")" } ?? "No agent assigned")
-                                .font(Typeface.body).frame(minHeight: 22)
+                                .font(Typeface.body).frame(minHeight: Self.fieldHeight)
                         }
                     }
                     if role == "polish" {
@@ -82,7 +84,7 @@ struct DispatchView: View {
                 Button(sending ? "Sending…" : intent == "information" ? "Save Information" : intent == "question" ? "Ask Question" : "Send Job", systemImage: "arrow.up") { Task { await send() } }
                     .glassPillButton().disabled(!canSend)
             }
-        }.padding(WorkspaceStyle.panelPadding).frame(width: 560).disabled(sending).interactiveDismissDisabled(sending || dirty)
+        }.padding(WorkspaceStyle.panelPadding).frame(width: WorkspaceStyle.sheetWidth).disabled(sending).interactiveDismissDisabled(sending || dirty)
         .onChange(of: directory) { if destination.hasPrefix("mission:") { destination = "project" } }
         .alert("Discard this job draft?", isPresented: $confirmingDiscard) {
             Button("Keep Editing", role: .cancel) {}

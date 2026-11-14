@@ -12,7 +12,7 @@ struct BoardView: View {
         } detail: {
             page
                 // Narrow enough for the sidebar to be optional; the window adds the sidebar's own minimum when shown.
-                .frame(minWidth: 560)
+                .frame(minWidth: WorkspaceStyle.contentMinWidth)
                 .toolbar { WorkspaceToolbar(store: store) }
                 // The window keeps its standard title bar: a hidden one is transparent, and AppKit then
                 // draws no scroll edge effect under the toolbar at all.
@@ -28,7 +28,7 @@ struct BoardView: View {
                     if store.fullScreenToolbarHeight > 0 { FullScreenToolbarFade(toolbarHeight: store.fullScreenToolbarHeight) }
                 }
         }
-        .frame(minHeight: 560)
+        .frame(minHeight: WorkspaceStyle.windowMinHeight)
         .onChange(of: store.selection) { store.persistSelection() }
         .onExitCommand { store.closeDetail() }
         .sheet(isPresented: $store.showingDispatch) { DispatchView(store: store) }
@@ -47,7 +47,7 @@ struct BoardView: View {
             .onGeometryChange(for: Bool.self) { $0.size.width >= Self.twoColumnWidth } action: { wide = $0 }
             .background(OverlayScrollers())
             .padding(.horizontal, WorkspaceStyle.pageMargin).padding(.top, WorkspaceStyle.pageTop).padding(.bottom, WorkspaceStyle.pageMargin)
-            .frame(maxWidth: 1280).frame(maxWidth: .infinity)
+            .frame(maxWidth: WorkspaceStyle.pageMaxWidth).frame(maxWidth: .infinity)
         }
         .id(store.selection ?? "overview")
         // A crossfade layers two full pages at once; only the incoming page animates.
@@ -69,7 +69,7 @@ struct BoardView: View {
                     .frame(width: WorkspaceStyle.panelWidth).background(WorkspaceStyle.surface, in: shape)
                     .clipShape(shape)
                     .overlay(shape.strokeBorder(WorkspaceStyle.hairline))
-                    .shadow(color: Palette.panelShadow, radius: 26, x: -8, y: 8)
+                    .shadow(color: Palette.panelShadow, radius: WorkspaceStyle.panelShadowRadius, x: WorkspaceStyle.panelShadowOffset.width, y: WorkspaceStyle.panelShadowOffset.height)
                     .padding(.trailing, WorkspaceStyle.windowInset).padding(.bottom, WorkspaceStyle.windowInset)
                     .transition(reduceMotion ? .opacity : .move(edge: .trailing).combined(with: .opacity))
                     .zIndex(1)
@@ -79,6 +79,9 @@ struct BoardView: View {
     }
     /// The content width from which cards pair up, so each column still fits a mission's header.
     private nonisolated static let twoColumnWidth: CGFloat = 1000
+    /// The heading's copy and summary side by side: below these the summary moves under the title.
+    private static let headingCopyWidth: CGFloat = 340
+    private static let summaryWidth: ClosedRange<CGFloat> = 430...500
     /// The page's cards in two columns on a wide page, each stacked on its own, so a card that grows moves only
     /// the cards below it in its own column. Cards alternate left and right in order and keep their column: filling
     /// the shorter column instead would move cards across whenever one opens or closes. `left` and `right` end their
@@ -133,10 +136,10 @@ struct BoardView: View {
                     // A fixed ideal width keeps a long project path from forcing the stacked layout;
                     // the path truncates instead.
                     headingCopy(overview: overview, pending: pending)
-                        .frame(minWidth: 340, idealWidth: 340, maxWidth: .infinity)
+                        .frame(minWidth: Self.headingCopyWidth, idealWidth: Self.headingCopyWidth, maxWidth: .infinity)
                         // Align the title's cap height, not its line box, with the top of the summary card.
                         .alignmentGuide(.top) { $0[.firstTextBaseline] - Typeface.pageTitleCapHeight }
-                    WorkspaceSummary(store: store).frame(minWidth: 430, maxWidth: 500)
+                    WorkspaceSummary(store: store).frame(minWidth: Self.summaryWidth.lowerBound, maxWidth: Self.summaryWidth.upperBound)
                 }
             }
             VStack(alignment: .leading, spacing: Space.x3l) {
@@ -245,7 +248,7 @@ struct AgentOverview: View {
                             Text(agentName(agent)).font(Typeface.cardTitle).fixedSize()
                             Text(agentRole(agent, store: store)).font(Typeface.caption).foregroundStyle(.secondary).fadeTruncated()
                         }
-                        Spacer(minLength: 8)
+                        Spacer(minLength: WorkspaceStyle.rowSpacer)
                         let jobs = store.state.jobs.filter { $0.agent == agent && $0.isActive && (store.project.isEmpty || $0.projectPath == store.project) }
                         let sessions = store.state.claude.filter { $0.state != "idle" && (store.project.isEmpty || $0.projectPath == store.project) }
                         let count = agent == "claude" ? sessions.count : jobs.count
@@ -349,7 +352,7 @@ struct MissionPanel: View {
                         Text(" · " + meta)
                     }.font(Typeface.caption).monospacedDigit().foregroundStyle(.secondary).fadeTruncated().help(mission.root)
                 }
-                Spacer(minLength: 8)
+                Spacer(minLength: WorkspaceStyle.rowSpacer)
                 Text(missionProgress(mission, jobs: jobs), format: .percent.precision(.fractionLength(0)))
                     .font(Typeface.caption).monospacedDigit().foregroundStyle(.secondary).help("Mission progress")
                 StatusLabel(state: mission.state == "active" ? "running" : mission.state, title: mission.state.capitalized)
@@ -357,6 +360,8 @@ struct MissionPanel: View {
                 Button { toggle() } label: {
                     Image(systemName: "chevron.down").font(Symbol.control)
                         .rotationEffect(.degrees(expanded ? 0 : -90)).frame(width: Symbol.controlFrame, height: Symbol.controlFrame)
+                        // Pointing right, the chevron's weight sits left of its frame; a point over centers it optically.
+                        .offset(x: expanded ? 0 : Symbol.chevronNudge)
                 }.iconButton().accessibilityLabel(expanded ? "Collapse mission" : "Expand mission").help(expanded ? "Collapse" : "Expand")
             }
             // The title row opens and closes the card; its button keeps its own click.
@@ -406,7 +411,7 @@ struct MissionPanel: View {
                     insertion: .modifier(active: Reveal(shown: false), identity: Reveal(shown: true)).animation(.easeOut(duration: 0.28).delay(0.06)),
                     removal: .modifier(active: Reveal(shown: false), identity: Reveal(shown: true)).animation(.easeIn(duration: 0.14))))
             }
-            ActionMessage(state: store.actions["dismiss:\(mission.id)"])
+            ActionMessage(state: store.actions[mission.actionKey])
         }
         .card()
         // Closing, the contents fade while the card shrinks; they must not spill over the card below.
@@ -420,7 +425,7 @@ struct MissionPanel: View {
         mission.looksFinished(jobs: store.state.jobs, now: store.now, lead: store.state.claude.first { $0.id == mission.owner })
     }
     @ViewBuilder private var actions: some View {
-        let locked = !store.connected || store.actions["dismiss:\(mission.id)"]?.locked == true
+        let locked = !store.connected || store.actions[mission.actionKey]?.locked == true
         // In the warning color: it drops the mission without completing it. An abandoned one is already dropped.
         if mission.state == "active" {
             Button("Stop tracking", systemImage: "xmark.circle") { Task { await store.dismiss(mission) } }
@@ -445,6 +450,8 @@ private struct Reveal: ViewModifier {
 }
 
 struct NeedsYouView: View {
+    /// Request cards fill the page in columns of this width.
+    private static let requestWidth: ClosedRange<CGFloat> = 420...620
     @Bindable var store: CrewStore
     private func matches(_ text: String) -> Bool { store.search.isEmpty || text.localizedCaseInsensitiveContains(store.search) }
     private var jobs: [Job] { store.state.waitingJobs.filter { matches("\($0.title) \($0.projectPath) \($0.agent) \($0.waiting?.reason ?? "")") } }
@@ -455,7 +462,7 @@ struct NeedsYouView: View {
         } else if jobs.isEmpty && sessions.isEmpty {
             EmptyState(title: "No matching requests", symbol: "magnifyingglass")
         }
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 420, maximum: 620), spacing: WorkspaceStyle.cardGap)], alignment: .leading, spacing: WorkspaceStyle.cardGap) {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: Self.requestWidth.lowerBound, maximum: Self.requestWidth.upperBound), spacing: WorkspaceStyle.cardGap)], alignment: .leading, spacing: WorkspaceStyle.cardGap) {
             ForEach(jobs) { job in
                 VStack(alignment: .leading, spacing: Space.xl) {
                     VStack(alignment: .leading, spacing: Space.ml) {
@@ -465,7 +472,7 @@ struct NeedsYouView: View {
                                 AgentMark(agent: job.agent, size: MarkSize.inline)
                                 Text("\(agentName(job.agent)) · \(projectName(job.projectPath, among: store.projects))").lineLimit(1)
                             }.font(Typeface.chip).foregroundStyle(.secondary).help(job.projectPath)
-                            Spacer(minLength: 8)
+                            Spacer(minLength: WorkspaceStyle.rowSpacer)
                             Button("Details", systemImage: "arrow.up.right") { store.openJob(job.id) }.pillButton()
                         }
                         Text(job.title).font(Typeface.callout).foregroundStyle(.secondary).lineLimit(2).help(job.title)
@@ -527,7 +534,7 @@ struct ProjectSidebar: View {
             .disabled(store.state.roles.isEmpty).help("Settings (⌘,)")
             .padding(.horizontal, Space.ml).padding(.bottom, Space.ml)
         }
-        .navigationSplitViewColumnWidth(min: 180, ideal: 210, max: 300)
+        .navigationSplitViewColumnWidth(min: WorkspaceStyle.sidebarWidth.min, ideal: WorkspaceStyle.sidebarWidth.ideal, max: WorkspaceStyle.sidebarWidth.max)
     }
 }
 

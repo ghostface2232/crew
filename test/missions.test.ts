@@ -202,11 +202,15 @@ test('finishing a mission again returns it unchanged without notifying', (t) => 
   }
 });
 
-test('an abandoned mission can still be marked done, once', (t) => {
+test('an abandoned mission is marked done only by an explicit reopen, once', (t) => {
   const { missions, changes } = harness(t);
   const mission = missions.finish(missions.start(input).id, { abandoned: true, outcome: 'Superseded by a new mission.' });
   const count = changes.length;
-  missions.finish(mission.id, { outcome: 'Marked done in Crew.' });
+  // A plain done, such as a lead's late one, leaves the user's Stop tracking in place.
+  missions.finish(mission.id, { outcome: 'Done by the lead.' });
+  assert.equal(mission.state, 'abandoned');
+  assert.equal(changes.length, count);
+  missions.finish(mission.id, { outcome: 'Marked done in Crew.', reopen: true });
   assert.equal(mission.state, 'done');
   assert.equal(mission.outcome, 'Marked done in Crew.');
   assert.equal(changes.length, count + 1);

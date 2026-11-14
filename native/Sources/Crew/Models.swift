@@ -162,6 +162,9 @@ struct Mission: Codable, Sendable, Identifiable, Equatable {
             return name + (round > 1 ? " \(round)" : "")
         } ?? Self.steps
     }
+    /// Locks the mission's own controls per state: Stop tracking and Mark done exclude each other while it runs,
+    /// and once it is abandoned, Mark done takes a fresh lock.
+    var actionKey: String { "mission:\(id):\(state)" }
     func passed(_ index: Int) -> Bool { state == "done" || index < step }
     func jobStep(_ job: Job) -> Int {
         if stages != nil, let index = job.missionStep, stops.indices.contains(index) { return index }

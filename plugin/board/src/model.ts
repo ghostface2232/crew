@@ -2,7 +2,7 @@ import type { BoardJob, BoardState, ClaudeSession, Mission } from './types.ts';
 
 export type Mark = 'waiting' | 'failed' | 'stalled' | 'working' | 'done' | 'idle';
 export const NAMES = { claude: 'Claude', codex: 'Codex', antigravity: 'Antigravity' };
-export const ROLE_NAMES = { delegate: 'Engineer', review: 'Cross-review', polish: 'UX writing · docs' };
+export const ROLE_NAMES = { delegate: 'Implementation', review: 'Read-only review', polish: 'Wording polish' };
 export const STOPS = ['Plan', 'Build', 'Review', 'Fix', 'Polish', 'Final'];
 export const STOP_OF_STAGE = {
   plan: 0,
@@ -94,11 +94,17 @@ export function shortPath(dir: string) {
   const parts = dir.split('/').filter(Boolean);
   return parts.length > 2 ? `…/${parts.slice(-2).join('/')}` : dir;
 }
+/** The folder name, or the whole path when another project shares the name. */
 export function projectNames(dirs: string[]) {
   const last = (dir: string) => dir.split('/').filter(Boolean).pop() ?? dir;
-  return new Map(
-    dirs.map((dir) => [dir, dirs.filter((other) => last(other) === last(dir)).length > 1 ? shortPath(dir) : last(dir)]),
-  );
+  return new Map(dirs.map((dir) => [dir, dirs.filter((other) => last(other) === last(dir)).length > 1 ? dir : last(dir)]));
+}
+/** The app's elapsed label: under a minute reads <1m. */
+export function elapsed(ms: number) {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  if (seconds < 60) return '<1m';
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+  return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
 }
 /** Ended, but its worktree still awaits a merge or discard, or the lead has not read its result. */
 export function unsettled(job: BoardJob): boolean {

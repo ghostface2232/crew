@@ -152,5 +152,5 @@ function heldFolderOnly(job: JobView): boolean {
 export function summarize(job: JobView): string {
   const tail = job.state === 'running' ? job.phase : job.state === 'waiting' ? `needs a decision: ${job.waiting!.reason}` : (job.error?.message ?? job.result?.stat ?? '');
   const unread = job.endedAt && job.seq > job.delivered ? ' (result not read yet)' : '';
-  return `[${job.id}] ${WORKERS[job.agent].name} · ${job.kind} · ${job.state} (${duration((job.endedAt ?? Date.now()) - job.createdAt)}) — ${job.title}${tail ? ` — ${tail}` : ''}${unread}${job.cleanupPending ? heldFolderOnly(job) ? ' — empty worktree folder still held; removed automatically' : ` — cleanup incomplete (${job.cleanupPending.join('; ')}); run crew gc` : ''}`;
+  return `[${job.id}] ${WORKERS[job.agent].name} · ${job.debate ? 'debate' : job.kind} · ${job.state} (${duration((job.endedAt ?? Date.now()) - job.createdAt)}) — ${job.title}${tail ? ` — ${tail}` : ''}${unread}${job.cleanupPending ? heldFolderOnly(job) ? ' — empty worktree folder still held; removed automatically' : ` — cleanup incomplete (${job.cleanupPending.join('; ')}); run crew gc` : ''}`;
 }

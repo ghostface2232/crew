@@ -504,7 +504,9 @@ async function reportMission(args: any): Promise<string> {
 
 function describeJob(job: JobView, ctx: CallContext): string {
   ctx.jobs.push(job);
-  return `Read a long report with status: job_id "${job.id}", report_offset: 0.\n${describe(job)}`;
+  // First, so it survives when the response is cut to its bound; only a report too long for one page needs it.
+  const paged = job.report && jsonBytes(job.report) > REPORT_PAGE_BYTES;
+  return `${paged ? `Read the full report with status: job_id "${job.id}", report_offset: 0.\n` : ''}${describe(job)}`;
 }
 
 async function runJob(spec: JobSpec, background: boolean, ctx: CallContext): Promise<string> {
@@ -708,8 +710,13 @@ async function handle(msg: any): Promise<void> {
         if (SESSION && ctx.jobs.length) {
           // The call has already taken effect; failing it now over a missing offer would invite a duplicate retry.
           // The news stays in the ledger for the watcher, the Stop hook, or the next call.
-          const { offer } = await api('POST', '/api/lead/offer', { session: SESSION, job_ids: [...new Set(ctx.jobs.map((job) => job.id))], bytes: 4000 })
-            .catch(() => ({ offer: null }));
+          const ids = [...new Set(ctx.jobs.map((job) => job.id))];
+          // Take over the jobs this response actually shows, as the wake hook would after this call, so it can carry their
+          // news. A job cut off by the bound stays with its owner.
+          const shown = ids.filter((jobId) => text.includes(`[${jobId}]`)).slice(0, 50);
+          const offer = await (shown.length ? api('POST', '/api/lead/adopt', { session: SESSION, job_ids: shown }) : Promise.resolve())
+            .then(() => api('POST', '/api/lead/offer', { session: SESSION, job_ids: ids, bytes: 4000 }))
+            .then(({ offer }) => offer, () => null);
           if (offer) text += `\n\n${offer.text}`;
         }
         // The limit is on text, which is what grew without bound; evidence images keep their own path as before.

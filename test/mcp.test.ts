@@ -83,6 +83,10 @@ test('MCP bounds a multi-job response and ACKs only echoed receipts before makin
   const handler = source.slice(source.indexOf('async function handle('), source.indexOf('readline.createInterface'));
   const jobs = Array.from({ length: 12 }, (_, i) => ({ id: `cx-${i}`, lead: 'lead', seq: 1, delivered: 0, state: 'done', turns: 1 } as Job));
   for (const job of jobs) addNews(job, 'done', '"\\\n한😀'.repeat(50));
+  // Owned by another session: the call that shows it takes it over and carries its news at once. One the bounded
+  // response cuts off stays with its owner.
+  jobs[0].lead = 'other';
+  jobs[11].lead = 'other';
   const delivery = new Delivery(() => jobs, () => {});
   const replies: any[] = [];
   const order: string[] = [];
@@ -93,13 +97,14 @@ test('MCP bounds a multi-job response and ACKs only echoed receipts before makin
     api: async (_method: string, route: string, body: any) => {
       order.push(route);
       if (route === '/api/lead/ack') return delivery.ack(body.session, body.ack);
+      if (route === '/api/lead/adopt') return { adopted: delivery.adopt(body.session, body.job_ids) };
       assert.equal(route, '/api/lead/offer');
       return { offer: delivery.offer(body.session, { ids: body.job_ids, bytes: body.bytes }) };
     },
     callTool: async (_name: string, _args: any, ctx: any) => {
       order.push('tool');
       ctx.jobs.push(...jobs);
-      return '"\\\n한😀'.repeat(150_000);
+      return `[cx-0] done\n${'"\\\n한😀'.repeat(150_000)}\n[cx-11] done`;
     },
   });
   const call = (args = {}) => handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'wait', arguments: args } });
@@ -109,19 +114,22 @@ test('MCP bounds a multi-job response and ACKs only echoed receipts before makin
   assert.equal(replies[0].result.content[1].type, 'image');
   const receipt = replies[0].result.content[0].text.match(/Receipt: ([\w-]+)/)[1];
   const items = delivery.state.receipts[receipt].items;
+  assert.equal(jobs[0].lead, 'lead');
+  assert.equal(jobs[11].lead, 'other', 'a job cut from the response is not taken over');
+  assert.ok(items.some((item) => item.jobId === 'cx-0'));
   assert.ok(items.length > 0 && items.length <= 8);
   assert.ok(jobs.every((job) => job.ackedSeq === 0));
   assert.ok(jobs.every((job) => job.news![0].offers === 0), 'explicit reads do not spend automatic attempts');
   addNews(jobs[0], 'failed', 'newer failure');
   order.length = 0;
   await call({ ack: receipt });
-  assert.deepEqual(order, ['/api/lead/ack', 'tool', '/api/lead/offer']);
+  assert.deepEqual(order, ['/api/lead/ack', 'tool', '/api/lead/adopt', '/api/lead/offer']);
   assert.deepEqual(unread(jobs[0]).map((news) => news.seq), [2]);
   assert.ok(jobs.slice(items.length).every((job) => job.ackedSeq === 0), 'omitted jobs were never acknowledged');
   assert.ok(jsonBytes(replies[1].result.content[0].text) <= LEAD_BYTES);
   order.length = 0;
   await call({ ack: 'unknown' });
-  assert.deepEqual(order, ['/api/lead/ack', 'tool', '/api/lead/offer'], 'a bad echo does not block the call it rode on');
+  assert.deepEqual(order, ['/api/lead/ack', 'tool', '/api/lead/adopt', '/api/lead/offer'], 'a bad echo does not block the call it rode on');
   assert.equal(replies[2].result.isError, undefined);
   assert.match(replies[2].result.content[0].text, /ack not applied: Unknown receipt/);
 });

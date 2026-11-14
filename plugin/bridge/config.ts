@@ -17,6 +17,10 @@ export const VERSION: string = JSON.parse(
  */
 export function installed(): { version: string; build: string } {
   const version: string = JSON.parse(fs.readFileSync(path.join(PLUGIN_ROOT, '.claude-plugin', 'plugin.json'), 'utf8')).version;
+  // The packaged app runs compiled JavaScript, so it carries the fingerprint of the source it was built from;
+  // the app and a plugin install of the same source then agree on whose daemon is current.
+  const stamp = path.join(PLUGIN_ROOT, '.claude-plugin', 'build');
+  if (fs.existsSync(stamp)) return { version, build: fs.readFileSync(stamp, 'utf8').trim() };
   const dir = path.join(PLUGIN_ROOT, 'bridge');
   const hash = createHash('sha256');
   const files = (fs.readdirSync(dir, { recursive: true }) as string[]).filter((f) => /\.(ts|js)$/.test(f)).sort();

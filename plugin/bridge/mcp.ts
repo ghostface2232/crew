@@ -48,10 +48,10 @@ Roles (assigned by the user in ~/.crew/config.json; each tool goes to the agent 
 
 How jobs work:
 - delegate and polish run in their own git worktree and branch (crew-<job id>) created from HEAD, so commit anything the worker needs first. Gitignored files it needs (node_modules, .env) are copied in if the repository lists them in .worktreeinclude. The bridge commits the worker's changes on that branch; you inspect the diff and merge or reject it. Nothing reaches your branch unless you merge it.
-- By default a call blocks until the worker finishes or needs you. Pass background: true to keep working in parallel; you are notified when the job ends, or call \`wait\`.
+- Job calls return at once with the job id while the worker runs in the background. Do your own part, then end your turn: you are woken when a job ends, needs a decision, or asks you a question. Do not sit in \`wait\` on a running job, since the user cannot talk to you meanwhile. Pass background: false only when you can do nothing else until the result arrives.
 - Codex's approval requests go to its own automatic reviewer first; only what reaches you as a waiting job is for the user. If a result lists an action the reviewer REFUSED and the user's request in this conversation clearly covers it, send it back yourself with \`reply\` and approved_by_user, quoting their words; do not ask them again. If it is refused a second time, the same call has the user asked directly. If their request does not cover it, tell them and let them decide.
-- A waiting job's approval request or question is for the user to answer, not you. While you block on a job, the app asks them directly. If you are told a job is waiting (for example when a background job wakes you), call \`wait\` on it so they are asked. Use \`reply\` with a decision only to pass on one the user gave you in the conversation.
-- A worker may use ask_lead mid-task for a question that is yours to answer, unlike approval requests, which are the user's. Answer it with \`answer\`, then call \`wait\` again while the worker continues.
+- A waiting job's approval request or question is for the user to answer, not you. The app shows it to them on the board. When you are woken because a job is waiting, call \`wait\` on it so they are asked here too. Use \`reply\` with a decision only to pass on one the user gave you in the conversation.
+- A worker may use ask_lead mid-task for a question that is yours to answer, unlike approval requests, which are the user's. Answer it with \`answer\`; you are woken again when the worker ends or needs you.
 - \`reply\` with a message continues the same worker session, e.g. to request fixes.
 - Reject worker changes that go beyond what was asked. For polish, any file listed as out of scope, or any non-text change, is grounds to reject.
 - If a worker fails on a usage limit, do that piece yourself and say that the cross-check was skipped.
@@ -64,7 +64,7 @@ The user can watch every agent live on the status board at ${BASE_URL}.`;
 
 const common = {
   cwd: { type: 'string', description: 'Project directory. Defaults to this session\'s project.' },
-  background: { type: 'boolean', description: 'Return immediately with the job id instead of blocking until the worker finishes. Use for work that runs in parallel with your own.' },
+  background: { type: 'boolean', description: 'Default true: return at once with the job id; you are woken when the job ends or needs you. Pass false to block until then.' },
 };
 const worktreeProps = {
   base: { type: 'string', description: 'Git ref the worker\'s worktree starts from. Defaults to HEAD.' },
@@ -181,7 +181,7 @@ const TOOLS = [
   {
     name: 'wait',
     title: 'Wait for workers',
-    description: 'Block until one of the given jobs finishes, fails, or asks you a new lead question, then return its result. If a job needs an approval or a user answer meanwhile, the user is asked in the app and the wait continues. With no ids, waits on every active job of this project.',
+    description: 'Collect results of jobs that ended, or have the user asked about a waiting job. Blocks until one of the given jobs finishes, fails, or asks a lead question; for a job still running, end your turn instead, since you are woken when it ends. If a job needs an approval or a user answer meanwhile, the user is asked and the wait continues. With no ids, waits on every active job of this project.',
     annotations: { readOnlyHint: true },
     inputSchema: {
       type: 'object',
@@ -478,7 +478,7 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
   const cwd: string = args.cwd ?? PROJECT;
   switch (name) {
     case 'delegate':
-      return runJob({ kind: 'delegate', cwd, title: args.title, task: args.task, done_when: args.done_when, base: args.base, isolation: args.isolation, model: args.model, effort: args.effort, exclusive: Boolean(args.exclusive), runsApp: Boolean(args.runs_app), plugins: args.plugins, skills: args.skills }, Boolean(args.background), ctx);
+      return runJob({ kind: 'delegate', cwd, title: args.title, task: args.task, done_when: args.done_when, base: args.base, isolation: args.isolation, model: args.model, effort: args.effort, exclusive: Boolean(args.exclusive), runsApp: Boolean(args.runs_app), plugins: args.plugins, skills: args.skills }, args.background !== false, ctx);
     case 'review': {
       const kind = args.target ?? 'uncommitted';
       if (kind === 'branch' && !args.base) throw new Error('target "branch" needs base (the branch to compare against, e.g. main).');
@@ -486,11 +486,11 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       const target = kind === 'branch' ? { type: 'baseBranch' as const, branch: args.base } : kind === 'commit' ? { type: 'commit' as const, sha: args.commit } : { type: 'uncommittedChanges' as const };
       // The focus can be long; the board title only needs to say what is under review.
       const title = `Review of ${kind === 'branch' ? `the branch against ${args.base}` : kind === 'commit' ? `commit ${args.commit.slice(0, 8)}` : 'uncommitted changes'}`;
-      return runJob({ kind: 'review', cwd, title, task: args.focus, done_when: args.done_when, review: { target, mode: args.mode ?? 'adversarial' }, model: args.model, effort: args.effort, runsApp: Boolean(args.runs_app), plugins: args.plugins, skills: args.skills }, Boolean(args.background), ctx);
+      return runJob({ kind: 'review', cwd, title, task: args.focus, done_when: args.done_when, review: { target, mode: args.mode ?? 'adversarial' }, model: args.model, effort: args.effort, runsApp: Boolean(args.runs_app), plugins: args.plugins, skills: args.skills }, args.background !== false, ctx);
     }
     case 'polish':
       if (args.exclusive) throw new Error('polish cannot run alone: an editor measures nothing. Drop exclusive.');
-      return runJob({ kind: 'polish', cwd, title: args.title ?? `Polish ${args.targets.join(', ')}`, task: args.guidance, targets: args.targets, base: args.base, isolation: args.isolation, model: args.model, skills: args.skills }, Boolean(args.background), ctx);
+      return runJob({ kind: 'polish', cwd, title: args.title ?? `Polish ${args.targets.join(', ')}`, task: args.guidance, targets: args.targets, base: args.base, isolation: args.isolation, model: args.model, skills: args.skills }, args.background !== false, ctx);
     case 'mission':
       return reportMission(args);
     case 'route': {
@@ -545,7 +545,7 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       return describeDelivered(await api('POST', `/api/jobs/${args.job_id}/questions/${args.question_id}`, { answer: args.answer }));
     case 'reply': {
       await api('POST', `/api/jobs/${args.job_id}/reply`, { message: args.message, decision: args.decision, request_id: args.request_id, approved_by_user: args.approved_by_user, sync: args.sync ? true : undefined });
-      return args.background ? describeDelivered(await api('GET', `/api/jobs/${args.job_id}`)) : followOne(args.job_id, ctx);
+      return args.background !== false ? describeDelivered(await api('GET', `/api/jobs/${args.job_id}`)) : followOne(args.job_id, ctx);
     }
     case 'cancel': {
       let job: JobView = await api('POST', `/api/jobs/${args.job_id}/cancel`, {});

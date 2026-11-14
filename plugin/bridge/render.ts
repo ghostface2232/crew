@@ -36,7 +36,7 @@ export function describe(job: JobView, waitingHint?: string): string {
 
   if (job.state === 'running') {
     lines.push(`now: ${job.phase}${job.stalled ? ' — no activity for a while, may be stuck' : ''}`);
-    lines.push('Still working. You are notified when it ends; call wait to block on it instead.');
+    lines.push('Still working. You are woken when it ends or needs you; end your turn rather than waiting on it.');
   }
   if (job.state === 'waiting') {
     lines.push(`NEEDS A DECISION:\n${job.waiting!.reason}`);

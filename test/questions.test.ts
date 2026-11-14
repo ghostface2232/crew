@@ -320,6 +320,17 @@ test('lead wait delivers a running question once, ignores further progress, and 
   assert.equal(timedOut.includes('ASKS YOU'), false);
 });
 
+test('job tools return at once by default, so the lead can end its turn while the worker runs', { timeout: 15000 }, async (t) => {
+  const h = await daemon(t);
+  const { job } = await h.create();
+  const lead = stdio(t, 'mcp.ts', h.env);
+  const init = await lead.request('initialize', { protocolVersion: '2025-11-25', capabilities: {} });
+  assert.match(init.instructions, /end your turn/);
+  const replied = textOf(await lead.call('reply', { job_id: job.id, message: 'keep going' }));
+  assert.match(replied, /RUNNING[\s\S]*end your turn rather than waiting/);
+  assert.equal((await h.api('GET', `/api/jobs/${job.id}`)).body.state, 'running');
+});
+
 test('lead answer polling waits for an open answer, times out, and caps waits at 600 seconds', async (t) => {
   const h = harness(t);
   const job = await h.create();

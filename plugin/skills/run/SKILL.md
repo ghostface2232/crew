@@ -31,9 +31,9 @@ If nothing separates cleanly, do it all yourself. Do not invent work to delegate
 
 Workers start from `HEAD` in their own worktree, so commit anything they need first. Gitignored files such as `node_modules` and `.env` are copied in only if the repository's `.worktreeinclude` lists them; if a worker reports that it could not run the tests for lack of dependencies, tell the user to add them there.
 
-Call `delegate` with `background: true` for each delegated piece. Write the task for someone who has not seen this conversation: goal, files and interfaces involved, constraints, and a concrete `done_when`. Name the files it may edit when you or another worker are editing others. If you give a stop condition for a specific problem, state which part it stops and that the rest should continue: a worker told simply to stop will stop the whole job. Then do your own part while the engineer works. You are notified when a job ends; call `wait` if you finish first.
+Call `delegate` for each delegated piece; it returns at once while the engineer works. Write the task for someone who has not seen this conversation: goal, files and interfaces involved, constraints, and a concrete `done_when`. Name the files it may edit when you or another worker are editing others. If you give a stop condition for a specific problem, state which part it stops and that the rest should continue: a worker told simply to stop will stop the whole job. Then do your own part. When you have nothing left to do, end your turn with a one-line status: you are woken when a job ends or needs you. Do not sit in `wait` on a running job; the user cannot talk to you meanwhile.
 
-If a worker asks for approval or has a question, the user answers it in the app; do not decide for them. If you are told a job is waiting, call `wait` on it so they are asked.
+If a worker asks for approval or has a question, the user answers it in the app; do not decide for them. When you are woken because a job is waiting, call `wait` on it so they are asked.
 
 Codex's own automatic reviewer answers most of its approval requests. When a result lists an action it refused and the user's request clearly covers that action, call `reply` with `approved_by_user` quoting their words, without asking them again. If it is refused once more, make the same call again: the user is then asked directly. If their request does not cover the action, tell them and let them decide.
 
@@ -60,7 +60,7 @@ If the user asks for a review, or for none, do that instead.
 
 For the single review, prefer the self-review for most changes, and the cross-review where a second model's view matters most: security, concurrency, data loss, or a design you are unsure of.
 
-Whenever more than one reviewer runs, start them in one step (`review` with `background: true`), then wait for all of them. Change nothing in the working tree until all have reported: a reviewer that sees files change underneath it loses its footing. Parallel reviewers are static by default: they read the change and run checks that finish on their own. If the change can only be judged by running the app, exactly one of them runs it, and each brief says who. Either tell one self-reviewer it may run the app in its own isolated instance, or pass `runs_app: true` to `review`, which then runs in a snapshot of the change. None of them measures performance.
+Whenever more than one reviewer runs, start them in one step, then end your turn until all of them have reported; you are woken as each one ends. Change nothing in the working tree until all have reported: a reviewer that sees files change underneath it loses its footing. Parallel reviewers are static by default: they read the change and run checks that finish on their own. If the change can only be judged by running the app, exactly one of them runs it, and each brief says who. Either tell one self-reviewer it may run the app in its own isolated instance, or pass `runs_app: true` to `review`, which then runs in a snapshot of the change. None of them measures performance.
 
 Report the step to `mission` as `self-review` or `cross-review`, whichever ran; as `self-review` when both did.
 
@@ -70,7 +70,7 @@ Take the reports together and fix once. Address the findings you agree with, and
 
 ## 6. Polish
 
-If the change touched user-facing strings, comments, or docs, commit your work and call `polish` with exactly those files as `targets`. It is not a merge gate, so `background: true` is fine while you prepare the summary.
+If the change touched user-facing strings, comments, or docs, commit your work and call `polish` with exactly those files as `targets`. It is not a merge gate, so prepare the summary while it runs.
 
 Accept the result only if every changed line is wording. Reject the whole diff if any file is listed as out of scope, or if code, identifiers, string keys, or structure changed.
 

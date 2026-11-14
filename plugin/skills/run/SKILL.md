@@ -22,7 +22,7 @@ Skip a step only when it has nothing to act on (for example, no separable piece 
 
 Read the relevant code first. Decide the change, then split it:
 
-- **Yours**: the core of the change and anything that needs this conversation's context.
+- **Yours**: the core of the change, anything that needs this conversation's context, and most UI work (the user finds Claude's UI results better).
 - **The engineer's**: pieces that can be specified completely in writing and built without touching the files you will edit, such as a self-contained module, tests for an agreed interface, or a migration.
 
 If nothing separates cleanly, do it all yourself. Do not invent work to delegate.
@@ -31,7 +31,7 @@ If nothing separates cleanly, do it all yourself. Do not invent work to delegate
 
 Workers start from `HEAD` in their own worktree, so commit anything they need first. Gitignored files such as `node_modules` and `.env` are copied in only if the repository's `.worktreeinclude` lists them; if a worker reports that it could not run the tests for lack of dependencies, tell the user to add them there.
 
-Call `delegate` for each delegated piece; it returns at once while the engineer works. Write the task for someone who has not seen this conversation: goal, files and interfaces involved, constraints, and a concrete `done_when`. Name the files it may edit when you or another worker are editing others. If you give a stop condition for a specific problem, state which part it stops and that the rest should continue: a worker told simply to stop will stop the whole job. Then do your own part. When you have nothing left to do, end your turn with a one-line status: you are woken when a job ends or needs you. Do not sit in `wait` on a running job; the user cannot talk to you meanwhile.
+Call `delegate` for each delegated piece; it returns at once while the engineer works. Write the task for someone who has not seen this conversation: goal, files and interfaces involved, constraints, and a concrete `done_when`. Give every job a `tier` and an `effort`: `standard` for most work, `frontier` only for especially hard or complex work or a UI rebuilt from scratch, `light` for simple tasks, `fast` for plain lookups; effort `medium` for most work and `high` when the task calls for it. Name the files it may edit when you or another worker are editing others. If you give a stop condition for a specific problem, state which part it stops and that the rest should continue: a worker told simply to stop will stop the whole job. Then do your own part. When you have nothing left to do, end your turn with a one-line status: you are woken when a job ends or needs you. Do not sit in `wait` on a running job; the user cannot talk to you meanwhile.
 
 If a worker asks for approval or has a question, the user answers it in the app; do not decide for them. When you are woken because a job is waiting, call `wait` on it so they are asked.
 

@@ -10,6 +10,7 @@ import { leadContext } from '../plugin/bridge/instructions.ts';
 import { Jobs, outOfScope } from '../plugin/bridge/jobs.ts';
 import type { Adapter, CrewEvent, Job, JobCtl, JobSpec, ReviewTarget } from '../plugin/bridge/jobs.ts';
 import { describe } from '../plugin/bridge/render.ts';
+import { tierModel } from '../plugin/bridge/tiers.ts';
 
 const config = resolveConfig({ notify: false, codex: { bin: 'codex', approvalPolicy: 'never', approvalsReviewer: 'auto_review' } });
 
@@ -910,6 +911,37 @@ test('a relayed approval carries the user\'s own recorded words, and a translate
   await settled(jobs, job);
   assert.equal(job.approvals?.at(-1)?.matched, true);
   assert.match(describe(job), /your quote matches one/);
+});
+
+test('a job\'s model comes from the lead\'s model, then its tier, then the user\'s configuration, then the default tier', async () => {
+  const repo = tempRepo();
+  let current = resolveConfig({});
+  const { jobs } = harness((ctl) => ctl.done('ok'), () => current);
+  const start = (spec: Partial<JobSpec>) => jobs.create({ kind: 'delegate', cwd: repo, task: 't', isolation: 'in_place', ...spec });
+
+  const plain = await start({});
+  assert.deepEqual([plain.tier, plain.model, plain.effort], ['standard', tierModel('codex', 'standard'), 'medium']);
+  const hard = await start({ tier: 'frontier' });
+  assert.deepEqual([hard.tier, hard.model, hard.effort], ['frontier', tierModel('codex', 'frontier'), 'high']);
+  const question = await jobs.create({ kind: 'delegate', cwd: repo, task: 'where is x?', ask: true });
+  assert.equal(question.tier, 'light');
+  const named = await start({ tier: 'frontier', model: 'exact', effort: 'medium' });
+  assert.deepEqual([named.tier, named.model, named.effort], [undefined, 'exact', 'medium']);
+  await assert.rejects(start({ tier: 'huge' as never }), /tier must be one of: fast, light, standard, frontier/);
+
+  // A model the user configured is kept unless the lead names a tier for this job.
+  current = resolveConfig({ roles: { delegate: { model: 'mine', effort: 'high' } } });
+  const configured = await start({});
+  assert.deepEqual([configured.tier, configured.model, configured.effort], [undefined, 'mine', 'high']);
+  const tiered = await start({ tier: 'light' });
+  assert.deepEqual([tiered.tier, tiered.model, tiered.effort], ['light', tierModel('codex', 'light') ?? 'mine', 'medium']);
+
+  // Antigravity gets the family; its session resolves it to an exact model.
+  current = resolveConfig({ roles: { polish: { agent: 'antigravity' } } });
+  const polish = await jobs.create({ kind: 'polish', cwd: repo, targets: ['README.md'], isolation: 'in_place' });
+  assert.deepEqual([polish.tier, polish.model, polish.effort], ['standard', 'hydrogen', undefined]);
+  const literary = await jobs.create({ kind: 'polish', cwd: repo, targets: ['README.md'], isolation: 'in_place', tier: 'frontier' });
+  assert.equal(literary.model, 'argon');
 });
 
 test('the bridge runs the lead\'s check after each turn and marks it stale when the branch moves', async () => {

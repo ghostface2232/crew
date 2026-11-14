@@ -13,6 +13,7 @@ import type { Job, WorkerAgent } from '../plugin/bridge/jobs.ts';
 import { describe } from '../plugin/bridge/render.ts';
 import { writeFakeBin } from './fake-bin.ts';
 import { decide } from '../plugin/bridge/adapters/antigravity.ts';
+import { tierModel } from '../plugin/bridge/tiers.ts';
 
 const command = 'echo first\necho ' + 'a'.repeat(160) + '\necho last';
 const stub = `
@@ -749,7 +750,9 @@ for (const agent of ['codex', 'antigravity'] as const) {
     cleanup(t, h);
     const job = await h.jobs.create({ kind: 'polish', cwd: h.home, isolation: 'in_place', targets: ['README.md'] });
     await until(h.jobs, job, 'done');
-    assert.equal(job.model, undefined);
+    // With no model named or configured, the default tier picks one; the session's report is what is shown.
+    assert.equal(job.tier, 'standard');
+    assert.equal(job.model, tierModel(agent, 'standard'));
     assert.equal(describe(job).split('\n')[1], `model: default-model${agent === 'codex' ? ' · effort: medium' : ''}`);
     h.jobs.flush();
     assert.equal(JSON.parse(fs.readFileSync(path.join(h.home, 'jobs.json'), 'utf8')).jobs[0].resolvedModel, 'default-model');

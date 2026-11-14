@@ -16,6 +16,8 @@ import type { Worktree } from './git.ts';
 import { sharedInstructions } from './instructions.ts';
 import { buildPrompt } from './prompts.ts';
 import { findSkills } from './skills.ts';
+import { defaultTier, tierEffort, tierModel, TIERS } from './tiers.ts';
+import type { Tier } from './tiers.ts';
 
 export type { WorkerAgent };
 export type Agent = 'claude' | WorkerAgent;
@@ -57,6 +59,8 @@ export interface JobSpec {
   review?: { target: ReviewTarget; mode: 'adversarial' | 'standard' };
   model?: string;
   effort?: string;
+  /** How demanding the job is; the bridge turns it into the model (see tiers.ts). An explicit model wins. */
+  tier?: Tier;
   /** Mission the job is part of, if the lead started it while carrying out one. */
   mission?: string;
   /** Plan occurrence captured by the daemon when this job was requested. */
@@ -213,6 +217,8 @@ export interface Job {
   targets: string[];
   model?: string;
   effort?: string;
+  /** The tier the model was picked by; absent when a model was named or configured, and on older jobs. */
+  tier?: Tier;
   /** Session-reported model, or the configured fallback; absent on older saved jobs. */
   resolvedModel?: string;
   resolvedEffort?: string;
@@ -306,6 +312,18 @@ export function openRefusals(job: Pick<Job, 'refusals' | 'turns' | 'retrying' | 
   const latest = (job.refusals ?? []).filter((refusal) => refusal.turn === job.turns);
   if (latest.length || job.state !== 'failed') return latest;
   return (job.retrying ?? []).map((action) => ({ action }));
+}
+
+/**
+ * Model and effort for a new job, in this order: what the lead named for the job, the tier the lead named,
+ * what the user configured (role, preset, or the agent's own setting in config.json), and last the default tier.
+ */
+function pickModel(agent: WorkerAgent, spec: JobSpec, role: { model?: string; effort?: string }, config: Config): { model?: string; effort?: string; tier?: Tier } {
+  const configured = { model: role.model ?? config[agent].model, effort: role.effort ?? (agent === 'codex' ? config.codex.effort : undefined) };
+  const tier = spec.tier ?? (configured.model ? undefined : defaultTier(spec));
+  const model = spec.model ?? (tier ? tierModel(agent, tier) : undefined) ?? configured.model;
+  const effort = spec.effort ?? (spec.tier || !configured.effort ? (agent === 'codex' ? tierEffort(tier ?? defaultTier(spec)) : undefined) : configured.effort);
+  return { ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(!spec.model && tier ? { tier } : {}) };
 }
 
 /** Marks the receipts that still describe the branch as no longer doing so. */
@@ -447,6 +465,7 @@ export class Jobs {
       throw new Error(spec.ask ? 'An ask job is read-only and cannot use plugins. Drop plugins.' : 'A read-only review cannot use plugins. Add runs_app, or drop plugins.');
     }
     if (spec.plugins?.length && spec.kind === 'polish') throw new Error('A polish job cannot use plugins: an editor only changes wording. Drop plugins.');
+    if (spec.tier !== undefined && !TIERS.includes(spec.tier)) throw new Error(`tier must be one of: ${TIERS.join(', ')}.`);
     if (spec.check !== undefined && (typeof spec.check !== 'string' || !spec.check.trim())) throw new Error('check must be a shell command.');
     if (spec.check && (spec.kind !== 'delegate' || spec.ask || spec.isolation === 'in_place')) {
       throw new Error('check runs in the job\'s own worktree after each turn, so only a delegate job with a worktree takes it. Run the check yourself, or drop check.');
@@ -545,8 +564,7 @@ export class Jobs {
       reviewTarget: spec.review?.target,
       targets: spec.targets ?? [],
       check: spec.check?.trim() || undefined,
-      model: spec.model ?? role.model,
-      effort: spec.effort ?? role.effort,
+      ...pickModel(agent, spec, role, config),
       sessionId: null,
       createdAt: now,
       activeAt: now,

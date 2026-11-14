@@ -116,7 +116,8 @@ export interface Config {
  * user's config. They differ in Codex's effort and in the model the lead gives its subagents.
  */
 export const PRESETS: Record<PresetName, Preset> = {
-  economy: { codex: { effort: 'low' }, subagentModel: 'haiku' },
+  // Codex effort stays at medium or above: low saves little and costs too much quality for delegated work.
+  economy: { codex: { effort: 'medium' }, subagentModel: 'haiku' },
   balanced: { codex: { effort: 'medium' }, subagentModel: 'sonnet' },
   best: { codex: { effort: 'high' }, subagentModel: 'inherit' },
 };

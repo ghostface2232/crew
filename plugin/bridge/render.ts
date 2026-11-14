@@ -26,7 +26,7 @@ export function describe(job: JobView, waitingHint?: string): string {
   const lines = [`[${job.id}] ${WORKERS[job.agent].name} · ${job.kind} · ${job.state.toUpperCase()} (${elapsed}) — ${job.title}`];
 
   const effort = job.resolvedEffort ?? (job.agent === 'codex' && !job.nativeReview ? job.effort : undefined);
-  lines.push(`model: ${job.resolvedModel ?? job.model ?? 'unknown (agent default)'}${effort ? ` · effort: ${effort}` : ''}`);
+  lines.push(`model: ${job.resolvedModel ?? job.model ?? 'unknown (agent default)'}${effort ? ` · effort: ${effort}` : ''}${job.tier && job.tier !== 'standard' ? ` · tier: ${job.tier}` : ''}`);
 
   for (const question of job.questions ?? []) {
     if (question.answer !== undefined) continue;

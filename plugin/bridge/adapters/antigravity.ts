@@ -8,6 +8,7 @@ import { isTerminal } from '../jobs.ts';
 import type { Adapter, JobCtl, JobKind } from '../jobs.ts';
 import { isInside } from '../git.ts';
 import { RPC_TIMEOUT_MS, RpcError, RpcPeer } from '../rpc.ts';
+import { pickModel } from '../tiers.ts';
 
 interface Run {
   ctl: JobCtl;
@@ -68,7 +69,11 @@ export class AntigravityAdapter implements Adapter {
 
     // Stay in the default mode, where every edit asks first and onRequest decides it.
     // "accept-edits" was measured to apply edits outside the workspace without asking.
-    const model = ctl.job.model ?? this.config.antigravity.model;
+    const wanted = ctl.job.model ?? this.config.antigravity.model;
+    // A tier names a family ("hydrogen"); the session lists the exact values this account has.
+    // A family the session does not list is left to the agent's default; a model named outright is still sent, so a typo shows.
+    const listed = wanted ? pickModel(res.configOptions?.find((o: any) => o.category === 'model' || o.id === 'model')?.options, wanted) : undefined;
+    const model = listed ?? (ctl.job.tier ? undefined : wanted);
     const selected = model ? await peer.request('session/set_config_option', { sessionId, configId: 'model', value: model }, RPC_TIMEOUT_MS) : res;
     ctl.model(sessionModel(selected) ?? model);
 

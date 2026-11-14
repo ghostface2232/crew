@@ -5,6 +5,7 @@ import { stripTypeScriptTypes } from 'node:module';
 import { test } from 'node:test';
 import { STAGES, normalizeTitle } from '../plugin/bridge/missions.ts';
 import type { Mission } from '../plugin/bridge/missions.ts';
+import { TIERS } from '../plugin/bridge/tiers.ts';
 
 test('mission forwards plans on start, revision, repeated titles and reattachment', async () => {
   const source = fs.readFileSync(new URL('../plugin/bridge/mcp.ts', import.meta.url), 'utf8');
@@ -51,16 +52,18 @@ test('mission forwards plans on start, revision, repeated titles and reattachmen
 test('polish advertises the shared model option and forwards it to the job', async () => {
   // Evaluate just the schema and handler case, without starting the stdio server or a daemon.
   const source = fs.readFileSync(new URL('../plugin/bridge/mcp.ts', import.meta.url), 'utf8');
-  const modelProps = vm.runInNewContext(`(${source.match(/const modelProps = (\{[^]*?\n\});/)![1]})`);
+  const modelProps = vm.runInNewContext(`(${source.match(/const modelProps = (\{[^]*?\n\});/)![1]})`, { TIERS });
   const schema = source.slice(source.indexOf("    name: 'polish',"), source.indexOf("    name: 'mission',"));
   const tool = vm.runInNewContext(`({${schema.slice(0, schema.lastIndexOf('\n  },'))}})`, {
     holder: () => 'Antigravity', worktreeProps: {}, skillsProp: {}, common: {}, modelProps,
   });
   assert.deepEqual(tool.inputSchema.properties.model, modelProps.model);
+  assert.deepEqual([...tool.inputSchema.properties.tier.enum], [...TIERS]);
   const body = source.split("    case 'polish':")[1].split("    case 'mission':")[0];
   const run = vm.runInNewContext(`(async (args) => { const cwd = '/project', ctx = {}; ${body} })`, { runJob: (spec: unknown) => spec });
   assert.equal((await run({ targets: ['README.md'], model: 'selected-model' })).model, 'selected-model');
   assert.equal((await run({ targets: ['README.md'] })).model, undefined);
+  assert.equal((await run({ targets: ['README.md'], tier: 'frontier' })).tier, 'frontier');
 });
 
 test('the wake hook follows every tool that can leave a job running, answer included', () => {

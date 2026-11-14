@@ -106,7 +106,7 @@ Open, as in [03-agentgauge-integration.md](03-agentgauge-integration.md): G2 (`-
 
 | Preset | Codex effort | Lead's subagents |
 | --- | --- | --- |
-| `economy` | low | haiku |
+| `economy` | medium | haiku |
 | `balanced` | medium | sonnet |
 | `best` | high | the lead's own model |
 
@@ -120,6 +120,21 @@ The built-in presets name no worker models, because which models an account has 
 ```
 
 The lead is told the preset's subagent model in its session instructions, which are fixed when the session starts.
+
+### Tiers
+
+Added 2026-11-14. A job names how demanding it is, and the bridge turns that into a model ([tiers.ts](../plugin/bridge/tiers.ts)). The lead passes `tier` on `delegate`, `review`, and `polish`; jobs from the board and jobs with no tier use the default.
+
+| Tier | Use | Codex | Antigravity | Codex effort |
+| --- | --- | --- | --- | --- |
+| `fast` | Plain searches and lookups | Luna | Hydrogen | medium |
+| `light` | Simple, well-specified tasks; default for a question | Terra | Hydrogen | medium |
+| `standard` | Most work, including most UI changes; the default | Sol | Hydrogen | medium |
+| `frontier` | Especially hard or complex work, a UI rebuilt from scratch, literary or very complex documents | Astra | Argon | high |
+
+A tier names a family, not a version. For Codex the bridge picks the newest model of the family that Codex's own model cache (`$CODEX_HOME/models_cache.json`) lists and does not hide; with no cache or no match, Codex's default applies. For Antigravity the family is matched against the model options the session lists, skipping orchestrators; an unlisted family leaves the agent's default.
+
+The order is: a model the lead names for the job, the tier it names, the model the user configured (role, preset, or `codex.model` / `antigravity.model`), and last the default tier. A configured model therefore stays in effect until the lead names a tier for a particular job. An explicit `effort` always wins; otherwise a named tier sets it, then the configured effort, then the default tier.
 
 ## 9. Per-turn temporary files and read-only jobs
 

@@ -116,33 +116,34 @@ struct WorkspaceSummary: View {
 
 struct MissionTrack: View {
     let mission: Mission
+    private var passedColor: Color { mission.state == "active" ? .primary : .secondary }
     var body: some View {
         HStack(spacing: 0) {
-            ForEach(Array(Mission.steps.enumerated()), id: \.offset) { index, title in
+            ForEach(Array(mission.stops.enumerated()), id: \.offset) { index, title in
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 0) {
                         ZStack {
                             Circle().fill(index == mission.step && mission.state == "active" ? Color.accentColor : .clear)
-                            if index < mission.step || mission.state == "done" {
-                                Circle().fill(.primary)
+                            if mission.passed(index) {
+                                Circle().fill(passedColor)
                                 Image(systemName: "checkmark").font(.system(size: 9, weight: .bold)).foregroundStyle(WorkspaceStyle.surface)
                             } else {
                                 Circle().strokeBorder(.primary.opacity(index == mission.step ? 0 : 0.15))
                                 Text(String(index + 1)).font(Typeface.chip).foregroundStyle(index == mission.step && mission.state == "active" ? Color.white : .secondary)
                             }
                         }.frame(width: 24, height: 24)
-                        if index < Mission.steps.count - 1 {
-                            Rectangle().fill(index < mission.step ? Color.primary.opacity(0.6) : .primary.opacity(0.1)).frame(height: 1)
+                        if index < mission.stops.count - 1 {
+                            Rectangle().fill(mission.passed(index) ? passedColor.opacity(0.6) : .primary.opacity(0.1)).frame(height: 1)
                         }
                     }
                     Text(title).font(index == mission.step ? Typeface.captionStrong : Typeface.caption)
-                        .foregroundStyle(index == mission.step ? .primary : .secondary).lineLimit(1)
+                        .foregroundStyle(index == mission.step && mission.state == "active" ? .primary : .secondary).lineLimit(1)
                 }
                 // The last step takes only its own width so the track ends at the card's edge.
-                .frame(maxWidth: index < Mission.steps.count - 1 ? .infinity : nil, alignment: .leading)
+                .frame(maxWidth: index < mission.stops.count - 1 ? .infinity : nil, alignment: .leading)
             }
         }.accessibilityElement(children: .ignore)
-            .accessibilityLabel("Step \(mission.step + 1) of 6, \(Mission.steps[mission.step])")
+            .accessibilityLabel(mission.state == "done" ? "Done, all \(mission.stops.count) steps passed" : "Step \(mission.step + 1) of \(mission.stops.count), \(mission.stops[mission.step])")
     }
 }
 

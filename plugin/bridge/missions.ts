@@ -20,6 +20,10 @@ export interface Mission {
   /** The lead session that opened it, when known. Only that session may take it up again after losing track of it. */
   owner?: string;
   stage: Stage;
+  /** Planned order; absent on missions using the original full track. */
+  stages?: Stage[];
+  /** Current occurrence in the plan; stage mirrors this entry for older clients. */
+  stageIndex?: number;
   state: MissionState;
   outcome: string;
   /** Oldest first; absent on missions without any. */
@@ -46,9 +50,28 @@ function isMission(m: any): m is Mission {
   return Boolean(m) && typeof m === 'object'
     && ['id', 'title', 'project', 'root', 'outcome'].every((key) => typeof m[key] === 'string')
     && (m.owner === undefined || typeof m.owner === 'string')
+    && (m.stages === undefined || isPlan(m.stages))
+    && (m.stageIndex === undefined || (m.stages && Number.isInteger(m.stageIndex) && m.stageIndex >= 0
+      && m.stageIndex < m.stages.length && m.stages[m.stageIndex] === m.stage))
     && (m.notes === undefined || (Array.isArray(m.notes) && m.notes.every((n: any) => n && typeof n.text === 'string' && Number.isFinite(n.at))))
     && STAGES.includes(m.stage) && ['active', 'done', 'abandoned'].includes(m.state)
     && Number.isFinite(m.createdAt) && Number.isFinite(m.updatedAt) && (m.endedAt === null || Number.isFinite(m.endedAt));
+}
+
+function isPlan(stages: unknown, allowEmpty = false): stages is Stage[] {
+  return Array.isArray(stages) && (allowEmpty || stages.length > 0)
+    && stages.every((stage) => STAGES.includes(stage));
+}
+
+function planOf(stages: unknown, allowEmpty = false): Stage[] | undefined {
+  if (stages === undefined) return undefined;
+  if (!isPlan(stages, allowEmpty)) throw new Error(`stages must be ${allowEmpty ? 'an' : 'a nonempty'} array using: ${STAGES.join(', ')}.`);
+  return [...stages];
+}
+
+function stageOf(stage: string): Stage {
+  if (!STAGES.includes(stage as Stage)) throw new Error(`Invalid mission stage "${stage}"; use one of: ${STAGES.join(', ')}.`);
+  return stage as Stage;
 }
 
 function titleOf(text: string): string {
@@ -79,8 +102,16 @@ export class Missions {
     return mission;
   }
 
-  start(input: { title: string; project: string; root: string; owner?: string }): Mission {
+  start(input: { title: string; project: string; root: string; owner?: string; stage?: string; stages?: unknown }): Mission {
     const title = titleOf(input.title);
+    const stages = planOf(input.stages);
+    const first = stages?.[0] ?? 'plan';
+    const stage = input.stage === undefined ? first : stageOf(input.stage);
+    let stageIndex = stages?.indexOf(stage) ?? 0;
+    if (stages && stageIndex < 0) {
+      stages.splice(1, 0, stage);
+      stageIndex = 1;
+    }
     let id: string;
     do {
       id = `m-${randomBytes(3).toString('hex')}`;
@@ -92,7 +123,8 @@ export class Missions {
       project: input.project,
       root: input.root,
       ...(input.owner ? { owner: input.owner } : {}),
-      stage: 'plan',
+      stage,
+      ...(stages ? { stages, stageIndex } : {}),
       state: 'active',
       outcome: '',
       createdAt: now,
@@ -104,14 +136,29 @@ export class Missions {
     return mission;
   }
 
-  update(id: string, input: { stage?: string; title?: string }): Mission {
+  update(id: string, input: { stage?: string; stages?: unknown; title?: string }): Mission {
     const mission = this.get(id);
     if (mission.state !== 'active') throw new Error(`Mission ${id} is already ${mission.state}.`);
-    if (input.stage !== undefined && !STAGES.includes(input.stage as Stage)) {
-      throw new Error(`Invalid mission stage "${input.stage}"; use one of: ${STAGES.join(', ')}.`);
-    }
     const title = input.title === undefined ? mission.title : titleOf(input.title);
-    if (input.stage !== undefined) mission.stage = input.stage as Stage;
+    const remaining = planOf(input.stages, true);
+    const stage = input.stage === undefined ? undefined : stageOf(input.stage);
+    let stages = mission.stages?.slice();
+    let index = mission.stageIndex ?? Math.max(0, (stages ?? STAGES).indexOf(mission.stage));
+    if (remaining) {
+      // Revisions replace only the future: passed steps and jobs' recorded indices stay stable.
+      stages = [...(stages ?? STAGES).slice(0, index + 1), ...remaining];
+    }
+    if (stages) {
+      // Reporting the current step again (as a resumed lead does) is not a new round.
+      if (stage !== undefined && stage !== stages[index]) {
+        const next = stages.indexOf(stage, index + 1);
+        if (next < 0) stages.splice(index + 1, 0, stage);
+        index = next < 0 ? index + 1 : next;
+      }
+      mission.stages = stages;
+      mission.stageIndex = index;
+      mission.stage = stages[index];
+    } else if (stage !== undefined) mission.stage = stage;
     mission.title = title;
     mission.updatedAt = Date.now();
     this.changed(mission);
@@ -123,7 +170,7 @@ export class Missions {
     if (mission.state !== 'active') return mission;
     const outcome = (input.outcome ?? '').split(/\r\n|\r|\n/)[0].trim().slice(0, 200).trim();
     mission.state = input.abandoned ? 'abandoned' : 'done';
-    if (mission.state === 'done') mission.stage = 'final';
+    if (mission.state === 'done' && !mission.stages) mission.stage = 'final';
     mission.outcome = outcome;
     mission.updatedAt = Date.now();
     mission.endedAt = mission.updatedAt;

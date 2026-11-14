@@ -309,7 +309,10 @@ struct MissionPanel: View {
                 Spacer(minLength: 8)
                 Text(missionProgress(mission, jobs: jobs), format: .percent.precision(.fractionLength(0)))
                     .font(Typeface.caption).monospacedDigit().foregroundStyle(.secondary).help("Mission progress")
-                if mission.state != "active" { StatusLabel(state: mission.state, title: mission.state.capitalized) }
+                StatusLabel(state: mission.state == "active" ? "running" : mission.state, title: mission.state.capitalized)
+                if mission.looksFinished(jobs: store.state.jobs, now: store.now) {
+                    Text("Looks finished").font(Typeface.caption).foregroundStyle(.secondary)
+                }
                 // Both controls share one 28pt hit area so their glyphs sit on the same center line.
                 HStack(spacing: 2) {
                     Button { expanded.toggle() } label: {
@@ -318,7 +321,10 @@ struct MissionPanel: View {
                     }.buttonStyle(.plain).accessibilityLabel(expanded ? "Collapse mission" : "Expand mission").help(expanded ? "Collapse" : "Expand")
                     if mission.state == "active" {
                         Menu {
-                            Button("Dismiss mission", systemImage: "xmark.circle") { Task { await store.dismiss(mission) } }
+                            Button("Mark done", systemImage: "checkmark.circle") { Task { await store.markDone(mission) } }
+                                .disabled(!store.connected || store.actions["dismiss:\(mission.id)"]?.locked == true)
+                            Button("Stop tracking", systemImage: "xmark.circle") { Task { await store.dismiss(mission) } }
+                                .help("Stops tracking without marking done. Its jobs keep running.")
                                 .disabled(!store.connected || store.actions["dismiss:\(mission.id)"]?.locked == true)
                         } label: {
                             Image(systemName: "ellipsis").font(Typeface.subheadline).frame(width: 28, height: 28).contentShape(Rectangle())
@@ -330,13 +336,21 @@ struct MissionPanel: View {
                 ForEach(Array((mission.notes ?? []).enumerated()), id: \.offset) { _, note in
                     Text(note.text).font(Typeface.callout).textSelection(.enabled)
                 }
-                if mission.state == "active" { MissionTrack(mission: mission).padding(.vertical, 4) }
+                MissionTrack(mission: mission).padding(.vertical, 4)
                 VStack(spacing: 4) {
-                    if let lead = store.state.claude.first(where: { $0.id == mission.owner }), mission.state == "active" {
-                        SessionView(session: lead).padding(.horizontal, 12).padding(.vertical, 10)
-                            .background(WorkspaceStyle.rowFill, in: RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius))
+                    ForEach(mission.stops.indices, id: \.self) { index in
+                        let mine = jobs.filter { mission.jobStep($0) == index }
+                        let lead = mission.state == "active" && index == mission.step ? store.state.claude.first { $0.id == mission.owner } : nil
+                        if !mine.isEmpty || lead != nil {
+                            Text(mission.stops[index]).font(Typeface.captionStrong).foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 8)
+                            if let lead {
+                                SessionView(session: lead).padding(.horizontal, 12).padding(.vertical, 10)
+                                    .background(WorkspaceStyle.rowFill, in: RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius))
+                            }
+                            ForEach(mine) { job in JobRow(job: job, selected: store.selectedJob == job.id, store: store) { store.openJob(job.id) } }
+                        }
                     }
-                    ForEach(jobs) { job in JobRow(job: job, selected: store.selectedJob == job.id, store: store) { store.openJob(job.id) } }
                 }
                 if !mission.outcome.isEmpty { Text(mission.outcome).font(Typeface.callout).textSelection(.enabled) }
             }

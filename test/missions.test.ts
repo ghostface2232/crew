@@ -10,6 +10,94 @@ import type { Mission } from '../plugin/bridge/missions.ts';
 const tempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'crew-missions-'));
 const input = { title: 'Build the feature', project: '/project/worktree', root: '/project' };
 
+test('plans allow repeats, advance to the next occurrence and insert stages after the current step', (t) => {
+  const { home, missions } = harness(t);
+  const stages = ['implement', 'self-review', 'fix', 'cross-review', 'fix', 'final'];
+  const mission = missions.start({ ...input, stages });
+  assert.equal(mission.stage, 'implement');
+  assert.equal(mission.stageIndex, 0);
+  assert.deepEqual(mission.stages, stages);
+  missions.update(mission.id, { stage: 'fix' });
+  assert.equal(mission.stageIndex, 2);
+  // Reporting the current step again, as a resumed lead does, adds no round.
+  missions.update(mission.id, { stage: 'fix' });
+  assert.equal(mission.stageIndex, 2);
+  assert.deepEqual(mission.stages, stages);
+  missions.update(mission.id, { stage: 'cross-review' });
+  missions.update(mission.id, { stage: 'fix' });
+  assert.equal(mission.stageIndex, 4);
+  assert.equal(mission.stage, 'fix');
+  missions.update(mission.id, { stage: 'cross-review' });
+  assert.deepEqual(mission.stages, ['implement', 'self-review', 'fix', 'cross-review', 'fix', 'cross-review', 'final']);
+  assert.equal(mission.stageIndex, 5);
+  missions.flush();
+  assert.deepEqual(new Missions(home, () => {}).get(mission.id), mission);
+  missions.finish(mission.id);
+  assert.equal(mission.stage, 'cross-review');
+  assert.equal(mission.stageIndex, 5);
+});
+
+test('revising the remainder removes, adds and reorders future steps while preserving the immutable prefix', (t) => {
+  const { home, missions } = harness(t);
+  const mission = missions.start({ ...input, stages: ['implement', 'self-review', 'polish', 'final'] });
+  missions.update(mission.id, { stage: 'self-review' });
+  missions.update(mission.id, { stages: ['final'] });
+  assert.deepEqual(mission.stages, ['implement', 'self-review', 'final']);
+  assert.equal(mission.stageIndex, 1);
+  assert.equal(mission.stage, 'self-review');
+  missions.update(mission.id, { stages: ['fix', 'cross-review', 'final'] });
+  assert.deepEqual(mission.stages, ['implement', 'self-review', 'fix', 'cross-review', 'final']);
+  missions.update(mission.id, { stages: ['cross-review', 'fix', 'final'] });
+  assert.deepEqual(mission.stages, ['implement', 'self-review', 'cross-review', 'fix', 'final']);
+  // Even a list omitting every passed/current step can only replace the future.
+  missions.update(mission.id, { stages: ['polish'] });
+  assert.deepEqual(mission.stages, ['implement', 'self-review', 'polish']);
+  missions.update(mission.id, { stage: 'fix', stages: ['fix', 'final'] });
+  assert.deepEqual(mission.stages, ['implement', 'self-review', 'fix', 'final']);
+  assert.equal(mission.stageIndex, 2);
+  missions.update(mission.id, { stages: [] });
+  assert.deepEqual(mission.stages, ['implement', 'self-review', 'fix']);
+  assert.equal(mission.stageIndex, 2);
+  missions.flush();
+  assert.deepEqual(new Missions(home, () => {}).get(mission.id), mission);
+});
+
+test('plans validate atomically on start and revision and do not alias caller arrays', (t) => {
+  const { missions, changes } = harness(t);
+  for (const stages of [[], ['unknown'], 'plan', null]) {
+    assert.throws(() => missions.start({ ...input, stages }), /stages/);
+  }
+  assert.equal(missions.list().length, 0);
+  const stages = ['cross-review', 'final'];
+  const mission = missions.start({ ...input, stages, stage: 'final' });
+  assert.equal(mission.stage, 'final');
+  assert.equal(mission.stageIndex, 1);
+  stages.reverse();
+  assert.deepEqual(mission.stages, ['cross-review', 'final']);
+  const before = structuredClone(mission);
+  const count = changes.length;
+  for (const stages of [[42], {}]) {
+    assert.throws(() => missions.update(mission.id, { stages, stage: 'fix', title: 'Changed' }), /stages/);
+    assert.deepEqual(mission, before);
+  }
+  assert.equal(changes.length, count);
+});
+
+test('legacy missions keep no plan when loaded or advanced and may adopt a remainder', (t) => {
+  const { home, missions } = harness(t);
+  const legacy = missions.start(input);
+  assert.equal(legacy.stages, undefined);
+  missions.flush();
+  const loaded = new Missions(home, () => {});
+  assert.deepEqual(loaded.get(legacy.id), legacy);
+  loaded.update(legacy.id, { stage: 'cross-review' });
+  assert.equal(loaded.get(legacy.id).stages, undefined);
+  loaded.update(legacy.id, { stages: ['fix', 'final'] });
+  assert.deepEqual(loaded.get(legacy.id).stages, ['plan', 'implement', 'self-review', 'cross-review', 'fix', 'final']);
+  assert.equal(loaded.get(legacy.id).stageIndex, 3);
+  loaded.flush();
+});
+
 function harness(t: TestContext) {
   const home = tempDir();
   const changes: Mission[] = [];
@@ -257,7 +345,7 @@ test('a stored record that is not a mission is refused, since records are render
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
   const file = path.join(home, 'missions.json');
   const good = { id: 'm-000001', title: 't', project: '/p', root: '/p', stage: 'plan', state: 'active', outcome: '', createdAt: 1, updatedAt: 1, endedAt: null };
-  for (const bad of [{ ...good, createdAt: '1" onmouseover="x' }, { ...good, stage: 'nope' }, { ...good, endedAt: 'soon' }, { ...good, title: 5 }, null]) {
+  for (const bad of [{ ...good, createdAt: '1" onmouseover="x' }, { ...good, stage: 'nope' }, { ...good, stages: [] }, { ...good, stages: ['plan'], stageIndex: 1 }, { ...good, stages: ['plan'], stageIndex: 0.5 }, { ...good, stageIndex: 0 }, { ...good, stages: ['unknown'] }, { ...good, endedAt: 'soon' }, { ...good, title: 5 }, null]) {
     const content = JSON.stringify({ missions: [good, bad] });
     fs.writeFileSync(file, content);
     assert.throws(() => new Missions(home, () => {}), /holds a record that is not a mission/);

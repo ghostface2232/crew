@@ -203,6 +203,13 @@ final class CrewStore {
             upsert(&state.missions, updated)
         }
     }
+    func markDone(_ mission: Mission) async {
+        struct Done: Encodable, Sendable { var done = true; var outcome = "Marked done in Crew." }
+        await run("dismiss:\(mission.id)", once: true) {
+            let updated: Mission = try await api.post("/api/missions/\(mission.id)", Done())
+            upsert(&state.missions, updated)
+        }
+    }
     func setRound(_ job: Job, turn: Int, undo: Bool) async {
         guard job.roundUnavailableReason == nil else { return }
         struct Change: Encodable, Sendable { var undo: Bool?; var keep: Bool? }

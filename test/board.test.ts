@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Actions, answerKey, tokenFromFragment } from '../plugin/board/src/api.ts';
 import { BoardStore, mergeEvents } from '../plugin/board/src/store.ts';
-import { brief, cardsForProject, jobMark, unsettled, missionProgress, relativeDuration, usageWindowName, STOP_OF_STAGE, timeLabel, together } from '../plugin/board/src/model.ts';
+import { brief, cardsForProject, jobMark, unsettled, missionProgress, missionStops, missionStep, missionStopPosition, missionJobStep, missionLooksFinished, relativeDuration, usageWindowName, STOP_OF_STAGE, timeLabel, together } from '../plugin/board/src/model.ts';
 import type { BoardJob, BoardState, CrewEvent, Mission } from '../plugin/board/src/types.ts';
 
 function deferred() {
@@ -165,6 +165,63 @@ test('mission progress uses all seven stages and only its unfinished jobs', () =
     assert.equal(missionProgress({ ...mission, stage }, jobs), (index + 0.5) / 7);
     assert.equal(missionProgress({ ...mission, stage, state: 'abandoned' }, []), (index + 0.5) / 7);
   });
+});
+
+test('short plans drive stops, passed positions, job attachment and progress in their own order', () => {
+  const mission = { id: 'm', stage: 'self-review', state: 'active', stages: ['implement', 'self-review', 'final'] } as Mission;
+  assert.deepEqual(missionStops(mission).map((stop) => stop.name), ['Build', 'Review', 'Final']);
+  assert.equal(missionStep(mission), 1);
+  assert.deepEqual([0, 1, 2].map((index) => missionStopPosition(mission, index)), ['past', 'now', 'todo']);
+  assert.equal(missionProgress(mission, []), 0.5);
+  assert.equal(missionJobStep(mission, { kind: 'delegate' }), 0);
+  assert.equal(missionJobStep(mission, { kind: 'review' }), 1);
+  assert.equal(missionJobStep(mission, { kind: 'polish' }), 1);
+  mission.stage = 'final';
+  assert.equal(missionProgress(mission, []), 2.5 / 3);
+  mission.state = 'done';
+  assert.equal(missionProgress(mission, []), 1);
+  assert.deepEqual([0, 1, 2].map((index) => missionStopPosition(mission, index)), ['past', 'past', 'past']);
+  mission.state = 'active'; mission.stages = ['final'];
+  assert.equal(missionProgress(mission, []), 0.5);
+  mission.stage = 'cross-review'; mission.stages = ['cross-review', 'implement', 'self-review'];
+  assert.deepEqual(missionStops(mission).map((stop) => stop.name), ['Review', 'Build', 'Review 2']);
+  assert.equal(missionJobStep(mission, { kind: 'review' }), 0);
+  mission.stage = 'self-review';
+  assert.equal(missionJobStep(mission, { kind: 'review' }), 2);
+  assert.equal(missionProgress(mission, []), 2.5 / 3);
+  delete mission.stages;
+  assert.equal(missionStops(mission).length, 6);
+  assert.equal(missionStep(mission), 2);
+  assert.equal(missionProgress(mission, []), 2.5 / 7);
+});
+
+test('repeated stops use the saved occurrence for progress and retain jobs on the stop where they started', () => {
+  const mission = { id: 'm', stage: 'fix', stageIndex: 4, state: 'active', stages: ['implement', 'self-review', 'fix', 'cross-review', 'fix', 'final'] } as Mission;
+  assert.deepEqual(missionStops(mission).map((stop) => stop.name), ['Build', 'Review', 'Fix', 'Review 2', 'Fix 2', 'Final']);
+  assert.equal(missionStep(mission), 4);
+  assert.equal(missionProgress(mission, []), 4.5 / 6);
+  assert.equal(missionJobStep(mission, { kind: 'review', missionStep: 1 }), 1);
+  assert.equal(missionJobStep(mission, { kind: 'review', missionStep: 3 }), 3);
+  assert.equal(missionJobStep(mission, { kind: 'delegate', missionStep: 4 }), 4);
+  mission.stages = [...mission.stages!.slice(0, 5), 'polish', 'cross-review', 'final'];
+  assert.equal(missionJobStep(mission, { kind: 'review', missionStep: 1 }), 1);
+  assert.equal(missionJobStep(mission, { kind: 'review', missionStep: 3 }), 3);
+  assert.equal(missionProgress(mission, []), 4.5 / 8);
+});
+
+test('looks finished requires an active mission quiet for 20 minutes with no running or waiting jobs', () => {
+  const mission = { id: 'm', state: 'active', updatedAt: 1000 } as Mission;
+  const now = 1000 + 20 * 60_000;
+  assert.equal(missionLooksFinished(mission, [], now - 1), false);
+  assert.equal(missionLooksFinished(mission, [], now), true);
+  for (const state of ['running', 'waiting', 'done', 'failed', 'cancelled']) {
+    const jobs = [{ mission: 'm', state, endedAt: null }] as BoardJob[];
+    assert.equal(missionLooksFinished(mission, jobs, now), state !== 'running' && state !== 'waiting');
+    jobs[0].mission = 'other';
+    assert.equal(missionLooksFinished(mission, jobs, now), true);
+  }
+  for (const state of ['done', 'abandoned'] as const)
+    assert.equal(missionLooksFinished({ ...mission, state }, [], now), false);
 });
 
 test('usage labels and relative durations remain compact', () => {

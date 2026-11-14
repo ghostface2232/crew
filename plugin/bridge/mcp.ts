@@ -57,7 +57,7 @@ How jobs work:
 - If a worker fails on a usage limit, do that piece yourself and say that the cross-check was skipped.
 - This machine is shared. Workers are told to start their own isolated instance of anything they run (free port, own data directory, headless browser) and to measure nothing unless the job runs alone. A job that has to start the app takes runs_app: its sandbox then has network access, and a review runs in a snapshot of the change. Without it a worker's review is static. Only one reviewer of a change runs the app: if the cross-review does, tell your self-review subagent to stay static, and the other way round. A delegate job that measures performance takes exclusive: it is refused while other jobs are active, so wait for them first.
 - When to review while you run the Crew pipeline (/crew:run), without being asked: one review (your crew:self-reviewer subagent or \`review\`, not both) when a substantial piece of implementation reaches a stopping point; before you push or open a pull request, a review of whatever is going out that no review has covered since it last changed substantially (both in parallel for security, concurrency, or data loss; fixes for a review's findings count as covered); none for small fixes and wording. Reviewers that run in parallel are static unless exactly one of them is told it may run the app. The user's own request for a review, or for none, comes first. Outside the pipeline, review only when the user asks: do not hold back a commit or a push for one.
-- When you take a user's command through several steps, call \`mission\` with its title first, with the stage as you move on, and with done at the end. The board then shows the command as one unit with its jobs under it. Skip it for a single delegated job.
+- When you take a user's command through several steps, call \`mission\` with title and planned stages first, with stage as you move on, and with done as soon as the work finishes. Pass stages again with what remains to add or drop future steps. The board then shows the command as one unit with its jobs under it. Skip it for a single delegated job.
 - Usage is measured by AgentGauge. In the pipeline, call \`route\` once at each stage boundary before you hand out work (not on every turn) and follow its assignee and reason; when it says degraded, say in your report what was skipped. Outside the pipeline, follow the roles unless a job fails on a limit.${PRESET_LINE}
 
 The user can watch every agent live on the status board at ${BASE_URL}.`;
@@ -148,12 +148,13 @@ const TOOLS = [
   {
     name: 'mission',
     title: 'Report the mission',
-    description: 'Tell the board which user command you are carrying out and how far along it is, so the user sees the command as one unit with its jobs under it. Pass title to start one (jobs you start afterwards belong to it), stage as you move through the steps, and done when it is finished. One short call per step; it starts no work itself.',
+    description: 'Report one user command and its jobs. Start with title and stages in the intended order, pass stages again with what remains to add or drop future steps at any time, report stage as you move on, and call done as soon as the work is finished at any stage. It starts no work.',
     inputSchema: {
       type: 'object',
       properties: {
         title: { type: 'string', description: 'The user\'s command in a few words. Pass it once, to start the mission; later calls need only stage. A different title starts a new mission and closes this session\'s open one as abandoned.' },
-        stage: { type: 'string', enum: [...STAGES], description: 'The step you are on now.' },
+        stages: { type: 'array', items: { type: 'string', enum: [...STAGES] }, description: 'Ordered stages, with repeats allowed. With title: a nonempty whole plan. Later: replace only the remainder to add, drop or reorder steps ([] drops all future steps); passed and current steps stay.' },
+        stage: { type: 'string', enum: [...STAGES], description: 'Advance to the next occurrence of this stage, or insert it after the current step. Reporting the current step again changes nothing.' },
         done: { type: 'boolean', description: 'The command is finished.' },
         abandoned: { type: 'boolean', description: 'The command was dropped before it finished.' },
         outcome: { type: 'string', description: 'With done or abandoned: one line on how it ended.' },
@@ -389,7 +390,13 @@ async function ownMission(): Promise<Mission | null> {
   return null;
 }
 
-const describeMission = (m: Mission) => `Mission ${m.id} · ${m.state === 'active' ? `${m.stage} (step ${STAGES.indexOf(m.stage) + 1} of ${STAGES.length})` : m.state} — ${m.title}`;
+function describeMission(mission: Mission): string {
+  const stages = mission.stages ?? STAGES;
+  const index = mission.stageIndex ?? stages.indexOf(mission.stage);
+  const state = mission.state === 'active' ? `${mission.stage} (step ${index + 1} of ${stages.length})` : mission.state;
+  const plan = stages.map((stage, at) => `${stage}${at === index && mission.state === 'active' ? ' (current)' : ''}`).join(' → ');
+  return `Mission ${mission.id} · ${state} — ${mission.title}\nPlan: ${plan}`;
+}
 
 async function reportMission(args: any): Promise<string> {
   if (args.done && args.abandoned) throw new Error('Pass done or abandoned, not both.');
@@ -401,7 +408,7 @@ async function reportMission(args: any): Promise<string> {
     if (!title) throw new Error('A mission needs a title: the command it carries out.');
     // The same title again is the same command: report the step, do not open a second card for it.
     if (current && current.title === title) {
-      return describeMission(args.stage ? await api('POST', `/api/missions/${current.id}`, { stage: args.stage }) : current);
+      return describeMission(args.stage || args.stages !== undefined ? await api('POST', `/api/missions/${current.id}`, { stage: args.stage, stages: args.stages }) : current);
     }
     // After this server restarts it no longer knows its mission. An open one this session opened under the same title is
     // that mission. The title alone proves nothing: another session in the project may be carrying out a command of the same name.
@@ -409,10 +416,10 @@ async function reportMission(args: any): Promise<string> {
     const lost = all.find((m) => m.owner === SESSION && m.project === PROJECT && m.state === 'active' && m.title === title);
     if (lost) {
       missionId = lost.id;
-      return describeMission(args.stage ? await api('POST', `/api/missions/${lost.id}`, { stage: args.stage }) : lost);
+      return describeMission(args.stage || args.stages !== undefined ? await api('POST', `/api/missions/${lost.id}`, { stage: args.stage, stages: args.stages }) : lost);
     }
     // Opened before the previous one is closed, so a refused title leaves the previous mission as it was.
-    const opened: Mission = await api('POST', '/api/missions', { title: args.title, project: PROJECT, stage: args.stage, owner: SESSION });
+    const opened: Mission = await api('POST', '/api/missions', { title: args.title, project: PROJECT, stage: args.stage, stages: args.stages, owner: SESSION });
     missionId = opened.id;
     closedElsewhere = null;
     if (current) await api('POST', `/api/missions/${current.id}`, { abandoned: true, outcome: 'Superseded by a new mission.' }).catch(() => {});
@@ -433,8 +440,8 @@ async function reportMission(args: any): Promise<string> {
     missionId = null;
     return describeMission(ended);
   }
-  if (!args.stage) return describeMission(current);
-  return describeMission(await api('POST', `/api/missions/${current.id}`, { stage: args.stage }));
+  if (!args.stage && args.stages === undefined) return describeMission(current);
+  return describeMission(await api('POST', `/api/missions/${current.id}`, { stage: args.stage, stages: args.stages }));
 }
 
 async function describeDelivered(job: JobView): Promise<string> {

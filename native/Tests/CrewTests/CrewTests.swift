@@ -223,6 +223,84 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
         mission.state = "abandoned"; mission.stage = "unknown"
         #expect(missionProgress(mission, jobs: []) == 0.5 / 7)
     }
+    @Test func shortPlansSetStopOrderPassedStepsJobAttachmentAndProgress() throws {
+        var mission = try fixture().missions[0]
+        var job = try fixture().jobs[0]
+        #expect(mission.stages == nil)
+        #expect(mission.stops == Mission.steps)
+        mission.stages = ["implement", "self-review", "final"]; mission.stage = "self-review"
+        #expect(mission.stops == ["Build", "Review", "Final"])
+        #expect(mission.step == 1)
+        #expect(mission.stops.indices.map { mission.passed($0) } == [true, false, false])
+        #expect(missionProgress(mission, jobs: []) == 0.5)
+        job.kind = "delegate"
+        #expect(mission.jobStep(job) == 0)
+        job.kind = "review"
+        #expect(mission.jobStep(job) == 1)
+        job.kind = "polish"
+        #expect(mission.jobStep(job) == 1)
+        mission.stage = "final"
+        #expect(missionProgress(mission, jobs: []) == 2.5 / 3)
+        mission.state = "done"
+        #expect(missionProgress(mission, jobs: []) == 1)
+        #expect(mission.stops.indices.allSatisfy { mission.passed($0) })
+        mission.state = "active"; mission.stages = ["final"]
+        #expect(missionProgress(mission, jobs: []) == 0.5)
+        mission.stages = ["cross-review", "implement", "self-review"]; mission.stage = "cross-review"
+        #expect(mission.stops == ["Review", "Build", "Review 2"])
+        job.kind = "review"
+        #expect(mission.jobStep(job) == 0)
+        mission.stage = "self-review"
+        job.kind = "review"
+        #expect(mission.jobStep(job) == 2)
+        #expect(missionProgress(mission, jobs: []) == 2.5 / 3)
+        let loaded = try JSONDecoder().decode(Mission.self, from: JSONEncoder().encode(mission))
+        #expect(loaded.stages == mission.stages)
+        mission.stages = nil
+        #expect(mission.step == 2)
+        #expect(missionProgress(mission, jobs: []) == 2.5 / 7)
+    }
+    @Test func repeatedStopsUseThePersistedIndexAndKeepJobsOnTheirOriginalRound() throws {
+        var mission = try fixture().missions[0]
+        var job = try fixture().jobs[0]
+        mission.stages = ["implement", "self-review", "fix", "cross-review", "fix", "final"]
+        mission.stage = "fix"; mission.stageIndex = 4
+        #expect(mission.step == 4)
+        #expect(mission.stops == ["Build", "Review", "Fix", "Review 2", "Fix 2", "Final"])
+        #expect(missionProgress(mission, jobs: []) == 4.5 / 6)
+        job.kind = "review"; job.missionStep = 1
+        #expect(mission.jobStep(job) == 1)
+        job.missionStep = 3
+        #expect(mission.jobStep(job) == 3)
+        job.kind = "delegate"; job.missionStep = 4
+        #expect(mission.jobStep(job) == 4)
+        mission.stages = ["implement", "self-review", "fix", "cross-review", "fix", "polish", "cross-review", "final"]
+        job.missionStep = 1
+        #expect(mission.jobStep(job) == 1)
+        #expect(missionProgress(mission, jobs: []) == 4.5 / 8)
+        let decoded = try JSONDecoder().decode(Mission.self, from: JSONEncoder().encode(mission))
+        #expect(decoded.stageIndex == 4 && decoded.stage == "fix")
+        let decodedJob = try JSONDecoder().decode(Job.self, from: JSONEncoder().encode(job))
+        #expect(decodedJob.missionStep == 1)
+    }
+    @Test func looksFinishedRequiresAnActiveMissionQuietForTwentyMinutesWithoutBusyJobs() throws {
+        var mission = try fixture().missions[0]
+        var job = try fixture().jobs[0]
+        let now = mission.updatedAt + 20 * 60_000
+        #expect(!mission.looksFinished(jobs: [], now: now - 1))
+        #expect(mission.looksFinished(jobs: [], now: now))
+        for state in ["running", "waiting", "done", "failed", "cancelled"] {
+            job.state = state; job.endedAt = nil
+            #expect(mission.looksFinished(jobs: [job], now: now) == (state != "running" && state != "waiting"))
+            job.mission = "other"
+            #expect(mission.looksFinished(jobs: [job], now: now))
+            job.mission = mission.id
+        }
+        for state in ["done", "abandoned"] {
+            mission.state = state
+            #expect(!mission.looksFinished(jobs: [], now: now))
+        }
+    }
     @Test func eventHistoryDeduplicatesAndStaysBounded() {
         let events = (0..<500).map { CrewEvent(seq: $0, ts: "", agent: "codex", kind: "progress", detail: String($0)) }
         let merged = mergeEvents(Array(events.prefix(350)), Array(events.suffix(200)))
@@ -544,6 +622,28 @@ private final class MockProtocol: URLProtocol, @unchecked Sendable {
         try await store.addInformation("Remember this", mission: nil, project: "/project")
         try await store.addInformation("Remember this", mission: nil, project: nil)
         #expect(calls.withLock { $0 } == 3)
+    }
+    @Test func markDonePostsUserOutcomeAndAppliesTheClosedMission() async throws {
+        var mission = try fixture().missions[0]
+        mission.state = "done"; mission.outcome = "Marked done in Crew."
+        let response = try JSONEncoder().encode(mission)
+        let calls = Mutex(0)
+        let api = api { request in
+            calls.withLock { $0 += 1 }
+            #expect(request.url?.path == "/api/missions/mission-1")
+            let body = try requestBody(request)
+            #expect(body.count == 2)
+            #expect(body["done"] as? Bool == true)
+            #expect(body["outcome"] as? String == "Marked done in Crew.")
+            return (200, response, 0)
+        }
+        let store = try store(api: api)
+        let active = store.state.missions[0]
+        await store.markDone(active)
+        await store.dismiss(active)
+        #expect(calls.withLock { $0 } == 1)
+        #expect(store.state.missions[0].state == "done")
+        #expect(store.state.missions[0].outcome == "Marked done in Crew.")
     }
     @Test func lateSettingsLoadCannotReplaceNewScope() async throws {
         let api = api { request in

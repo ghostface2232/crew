@@ -92,6 +92,11 @@ const server = http.createServer(async (req, res) => {
       mission.notes = [...mission.notes ?? [], { text: body.note, at: state.now }];
     }
     if (body.abandoned) mission.state = 'abandoned';
+    if (body.done) mission.state = 'done';
+    if (body.done || body.abandoned) {
+      mission.endedAt = mission.updatedAt = state.now;
+      mission.outcome = body.outcome ?? '';
+    }
     send('mission', mission);
     return json(mission);
   }

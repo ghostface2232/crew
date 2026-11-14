@@ -149,6 +149,21 @@ test('a job belongs to the project of the session that started it', async () => 
   assert.equal(fallback.project, repo);
 });
 
+test('jobs persist the mission occurrence captured when they were requested', async (t) => {
+  const repo = tempRepo();
+  const { jobs, home } = harness((ctl) => ctl.done('ok'));
+  t.after(() => { jobs.flush(); fs.rmSync(home, { recursive: true, force: true }); fs.rmSync(repo, { recursive: true, force: true }); });
+  const review = { target: { type: 'uncommittedChanges' as const }, mode: 'adversarial' as const };
+  const first = await settled(jobs, await jobs.create({ kind: 'review', cwd: repo, review, mission: 'm', missionStep: 1 }));
+  const second = await settled(jobs, await jobs.create({ kind: 'review', cwd: repo, review, mission: 'm', missionStep: 3 }));
+  assert.equal(first.missionStep, 1);
+  assert.equal(second.missionStep, 3);
+  jobs.flush();
+  const loaded = new Jobs(home, () => config, {} as never, { onEvent: () => {}, onJob: () => {}, onAttention: () => {} });
+  assert.equal(loaded.get(first.id).missionStep, 1);
+  assert.equal(loaded.get(second.id).missionStep, 3);
+});
+
 test('polish reports files changed outside the allowed targets', async () => {
   const repo = tempRepo();
   const { jobs } = harness((ctl) => {

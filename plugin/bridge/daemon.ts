@@ -154,8 +154,15 @@ const jobs = new Jobs(HOME, loadConfig, { codex, antigravity }, {
   onEvent: (event) => {
     broadcast('event', event);
     // A mission is alive as long as its jobs are; the lead need not report in while it waits on them.
-    const mission = event.job_id && jobs.jobs.get(event.job_id)?.mission;
-    if (mission) missions.touch(mission);
+    const job = event.job_id ? jobs.jobs.get(event.job_id) : undefined;
+    if (job?.mission) {
+      missions.touch(job.mission);
+      // Refresh the quiet timer before clients see the job end; routine activity stays silent.
+      if (isTerminal(job)) {
+        const mission = missions.list().find((mission) => mission.id === job.mission && mission.state === 'active');
+        if (mission) broadcast('mission', mission);
+      }
+    }
     // AgentGauge may not read the agent again for half an hour; a job that just hit the limit is the fresher fact.
     if (event.kind === 'limit') usage.reportLimit(event.agent, event.detail);
   },
@@ -423,7 +430,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     if (body.done && body.abandoned) throw new HttpError(400, 'pass done or abandoned, not both');
     if (body.done || body.abandoned) return missions.finish(id, { outcome: text(body.outcome, 'outcome'), abandoned: Boolean(body.abandoned) });
     if (body.note !== undefined) return missions.note(id, text(body.note, 'note') ?? '');
-    return missions.update(id, { stage: stage(body.stage), title: text(body.title, 'title') });
+    return missions.update(id, { stage: stage(body.stage), stages: body.stages, title: text(body.title, 'title') });
   }
 
   if (method === 'POST') {
@@ -453,16 +460,18 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       const body = await readJson(req);
       if (typeof body.project !== 'string' || !body.project) throw new HttpError(400, 'project must be the lead session\'s project directory');
       const first = stage(body.stage);
-      const mission = missions.start({ title: text(body.title, 'title') ?? '', project: body.project, root: (await projectRoot(body.project).catch(() => null)) ?? body.project, owner: text(body.owner, 'owner') });
-      return first ? missions.update(mission.id, { stage: first }) : mission;
+      return missions.start({ title: text(body.title, 'title') ?? '', project: body.project, root: (await projectRoot(body.project).catch(() => null)) ?? body.project, owner: text(body.owner, 'owner'), stage: first, stages: body.stages });
     }
     if (pathname === '/api/jobs') {
       const spec = await readJson(req);
+      delete spec.missionStep;
+      const mission = missions.list().find((m) => m.id === spec.mission);
       // A job outlives a wrong link: it still runs, on its own, and says why it is not shown with a mission.
-      if (spec.mission !== undefined && missions.list().find((m) => m.id === spec.mission)?.state !== 'active') {
+      if (spec.mission !== undefined && mission?.state !== 'active') {
         spec.notes = [...(spec.notes ?? []), `Mission ${spec.mission} is not active, so this job is shown on its own.`];
         delete spec.mission;
       }
+      if (mission?.state === 'active' && mission.stages) spec.missionStep = mission.stageIndex ?? mission.stages.indexOf(mission.stage);
       return view(await jobs.create(spec));
     }
     if (pathname === '/api/hooks/claude') {

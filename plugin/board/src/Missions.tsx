@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type CSSProperties } from 'react';
 import { ChevronDown, Check } from 'lucide-react';
 import type { BoardJob, ClaudeSession, Mission, Snapshot } from './types.ts';
 import { actions, request } from './api.ts';
@@ -9,6 +9,11 @@ import {
   jobLabel,
   jobMark,
   missionProgress,
+  missionStops,
+  missionStep,
+  missionStopPosition,
+  missionJobStep,
+  missionLooksFinished,
   NAMES,
   projectOf,
   sessionMark,
@@ -16,7 +21,6 @@ import {
   STOPS,
   STOP_NOTES,
   STOP_OF_KIND,
-  STOP_OF_STAGE,
   timeLabel,
   together,
 } from './model.ts';
@@ -101,23 +105,24 @@ function Track({
   lead?: ClaudeSession;
   openJob: (id: string) => void;
 }) {
-  const at = mission ? STOP_OF_STAGE[mission.stage] : -1;
+  const at = missionStep(mission);
+  const stops = missionStops(mission);
   const active = mission?.state === 'active';
   return (
     <>
       {active && (
         <p className="step-note">
-          <b>{STOPS[at]}.</b> {STOP_NOTES[at]}
+          <b>{stops[at]?.name}.</b> {STOP_NOTES[stops[at].stop]}
         </p>
       )}
-      <ol className="track">
-        {STOPS.map((name, index) => {
-          const mine = jobs.filter((job) => STOP_OF_KIND[job.kind] === index);
+      <ol className="track" style={{ '--stops': stops.length } as CSSProperties}>
+        {stops.map(({ name }, index) => {
+          const mine = jobs.filter((job) => missionJobStep(mission, job) === index);
           return (
             <li
               className="stop"
-              data-pos={mission?.state === 'done' || index < at ? 'past' : index === at && active ? 'now' : 'todo'}
-              key={name}
+              data-pos={missionStopPosition(mission, index)}
+              key={index}
             >
               <p className="stop-name">
                 <i className="node">{(mission?.state === 'done' || index < at) && <Icon icon={Check} size={16} />}</i>
@@ -153,9 +158,12 @@ function MissionCard({
   const active = mission ? mission.state === 'active' : jobs.some((job) => !job.endedAt);
   const [folded, setFolded] = useState<boolean | null>(null);
   const closed = folded ?? !active;
-  const at = mission ? STOP_OF_STAGE[mission.stage] : -1;
+  const at = missionStep(mission);
+  const stops = missionStops(mission);
   const key = `dismiss:${mission?.id}`;
   const progress = mission ? missionProgress(mission, jobs) : 0;
+  const arc = 263.89 / stops.length;
+  const arcGap = Math.min(13, arc / 2);
   const action = useAction(key);
   const mood =
     together([...jobs.filter((job) => !job.endedAt).map(jobMark), ...(lead ? [sessionMark(lead)] : [])]) || 'working';
@@ -169,7 +177,7 @@ function MissionCard({
         : mood === 'stalled'
           ? 'Gone quiet'
           : mission
-            ? `Step ${at + 1} of ${STOPS.length} · ${STOPS[at]}`
+            ? `Step ${at + 1} of ${stops.length} · ${stops[at]?.name}`
             : 'Working'
     : mission?.state === 'done'
       ? 'Done'
@@ -195,32 +203,47 @@ function MissionCard({
           </span>
         </button>
         <span className="mini" aria-hidden="true">
-          {STOPS.map((name, index) => (
+          {stops.map((_, index) => (
             <i
-              key={name}
+              key={index}
               data-state={
-                together(jobs.filter((job) => STOP_OF_KIND[job.kind] === index).map(jobMark)) ||
-                (mission?.state === 'done' || index < at ? 'done' : index === at && active ? 'working' : '')
+                mission?.state === 'done' ? 'done' :
+                together(jobs.filter((job) => missionJobStep(mission, job) === index).map(jobMark)) ||
+                (index < at ? 'done' : index === at && active ? 'working' : '')
               }
             />
           ))}
         </span>
         <Chip state={state}>{label}</Chip>
+        {mission && missionLooksFinished(mission, jobs, now) && <span className="sub">Looks finished</span>}
         {mission && active && (
-          <button
-            className="quiet"
-            title="Closes this command on the board. Its jobs keep running."
-            disabled={action.pending || action.accepted}
-            onClick={() =>
-              void actions.run(
+          <>
+            <button
+              className="quiet"
+              disabled={action.pending || action.accepted}
+              onClick={() => void actions.run(
                 key,
-                () => request(`/api/missions/${mission.id}`, { abandoned: true, outcome: 'Dismissed on the board.' }),
-                { done: 'Dismissed' },
-              )
-            }
-          >
-            Dismiss
-          </button>
+                () => request(`/api/missions/${mission.id}`, { done: true, outcome: 'Marked done on the board.' }),
+                { done: 'Marked done' },
+              )}
+            >
+              Mark done
+            </button>
+            <button
+              className="quiet"
+              title="Stops tracking without marking done. Its jobs keep running."
+              disabled={action.pending || action.accepted}
+              onClick={() =>
+                void actions.run(
+                  key,
+                  () => request(`/api/missions/${mission.id}`, { abandoned: true, outcome: 'Dismissed on the board.' }),
+                  { done: 'Dismissed' },
+                )
+              }
+            >
+              Stop tracking
+            </button>
+          </>
         )}
       </div>
       {mission && (
@@ -241,15 +264,15 @@ function MissionCard({
           <div className="stage" data-ended={active ? undefined : mission.state}>
             <div className="stage-ring">
               <svg className="ring steps" viewBox="0 0 100 100" aria-hidden="true">
-                {STOPS.map((name, index) => (
+                {stops.map((_, index) => (
                   <circle
-                    key={name}
+                    key={index}
                     cx="50"
                     cy="50"
                     r="42"
-                    strokeDasharray="30.98 232.91"
-                    strokeDashoffset={-index * 43.98 - 6.5}
-                    data-pos={mission.state === 'done' || index < at ? 'past' : index === at && active ? 'now' : 'todo'}
+                    strokeDasharray={`${arc - arcGap} ${263.89 - arc + arcGap}`}
+                    strokeDashoffset={-index * arc - arcGap / 2}
+                    data-pos={missionStopPosition(mission, index)}
                   />
                 ))}
               </svg>
@@ -259,7 +282,7 @@ function MissionCard({
                 ) : (
                   <>
                     {at + 1}
-                    <small>/{STOPS.length}</small>
+                    <small>/{stops.length}</small>
                   </>
                 )}
               </b>
@@ -267,7 +290,7 @@ function MissionCard({
             <p className="stage-label">
               {active ? 'Now at step' : mission.state === 'done' ? 'Finished' : 'Stopped at step'}
             </p>
-            <p className="stage-name">{mission.state === 'done' ? 'All done' : STOPS[at]}</p>
+            <p className="stage-name">{mission.state === 'done' ? 'All done' : stops[at]?.name}</p>
           </div>
         )}
         <div className="cmd-main">

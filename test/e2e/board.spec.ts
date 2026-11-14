@@ -8,6 +8,77 @@ test.beforeEach(async ({ page, request }) => {
   await expect(page.getByText('Live', { exact: true })).toBeVisible();
 });
 
+test('short mission plans render in order with matching tracks and progress', async ({ page, request }) => {
+  const data = fixture();
+  data.missions[0].stages = ['cross-review', 'fix', 'final'];
+  data.missions[0].stage = 'cross-review';
+  await request.post('/__push', { data: { type: 'state', data } });
+  const card = page.locator('[data-key="mission-1"]');
+  await expect(card.locator('.stop-name span')).toHaveText(['Review', 'Fix', 'Final']);
+  await expect(card.locator('.stop[data-pos="past"]')).toHaveCount(0);
+  await expect(card.locator('.stop').first().locator('button[data-job]')).toHaveCount(2);
+  await expect(card.getByRole('progressbar', { name: 'Mission progress' })).toHaveAttribute('value', String(0.5 / 3));
+  await expect(card.locator('.steps circle')).toHaveCount(3);
+  await card.locator('.cmd-toggle').click();
+  await expect(card.locator('.mini i')).toHaveCount(3);
+
+  data.missions[0].stage = 'final';
+  await request.post('/__push', { data: { type: 'state', data } });
+  await expect(card.getByRole('progressbar')).toHaveAttribute('value', String(2.5 / 3));
+  data.missions[0].stages = ['final'];
+  await request.post('/__push', { data: { type: 'state', data } });
+  await card.locator('.cmd-toggle').click();
+  await expect(card.locator('.stop-name span')).toHaveText(['Final']);
+  await expect(card.getByRole('progressbar')).toHaveAttribute('value', '0.5');
+  await expect(card.locator('.stop').first().locator('button[data-job]')).toHaveCount(2);
+});
+
+test('a quiet ended workload looks finished and the authenticated user can mark the mission done', async ({ page, request }) => {
+  // From `/`, a fragment-only goto would not reload the page, so the launch token would never sign in.
+  await page.goto('about:blank');
+  await request.post('/__reset', { data: { auth: true } });
+  await page.goto(`/#token=${TEST_TOKEN}`);
+  await expect(page.getByText('Live', { exact: true })).toBeVisible();
+  const data = fixture();
+  data.missions[0].stages = ['implement', 'cross-review'];
+  data.missions[0].stage = 'cross-review';
+  data.missions[0].updatedAt = NOW - 20 * 60_000;
+  data.jobs.forEach((job) => { job.state = 'done'; job.endedAt = NOW - 60_000; job.waiting = null; });
+  await request.post('/__push', { data: { type: 'state', data } });
+  const card = page.locator('[data-key="mission-1"]');
+  await expect(card.getByText('Looks finished', { exact: true })).toBeVisible();
+  await card.getByRole('button', { name: 'Mark done', exact: true }).click();
+  await expect(card.locator('.chip')).toHaveText('Done');
+  await expect(card.getByRole('progressbar')).toHaveAttribute('value', '1');
+  await expect(card.getByText('Looks finished', { exact: true })).toHaveCount(0);
+  await expect(card.locator('.stop[data-pos="past"]')).toHaveCount(2);
+  await expect(card.locator('.mini i[data-state="done"]')).toHaveCount(2);
+  const calls = await (await request.get('/__requests')).json();
+  expect(calls).toEqual([{ route: '/api/missions/mission-1', body: { done: true, outcome: 'Marked done on the board.' } }]);
+});
+
+test('repeated stops keep jobs on their original round while the remaining plan changes', async ({ page, request }) => {
+  const data = fixture();
+  data.missions[0].stages = ['implement', 'self-review', 'fix', 'cross-review', 'fix', 'polish', 'final'];
+  data.missions[0].stage = 'fix';
+  data.missions[0].stageIndex = 4;
+  data.jobs[0].missionStep = 1;
+  data.jobs[1].missionStep = 3;
+  await request.post('/__push', { data: { type: 'state', data } });
+  const card = page.locator('[data-key="mission-1"]');
+  await expect(card.locator('.stop-name span')).toHaveText(['Build', 'Review', 'Fix', 'Review 2', 'Fix 2', 'Polish', 'Final']);
+  await expect(card.locator('.stop').nth(1).locator('button[data-job="cx-build"]')).toHaveCount(1);
+  await expect(card.locator('.stop').nth(3).locator('button[data-job="cx-question"]')).toHaveCount(1);
+  await expect(card.locator('.stop[data-pos="now"] .stop-name span')).toHaveText('Fix 2');
+  await expect(card.getByRole('progressbar')).toHaveAttribute('value', String(4.5 / 7));
+  data.missions[0].stages = [...data.missions[0].stages.slice(0, 5), 'final', 'cross-review'];
+  await request.post('/__push', { data: { type: 'state', data } });
+  await expect(card.locator('.stop-name span')).toHaveText(['Build', 'Review', 'Fix', 'Review 2', 'Fix 2', 'Final', 'Review 3']);
+  await expect(card.locator('.stop').nth(3).locator('button[data-job="cx-question"]')).toHaveCount(1);
+  await card.locator('.cmd-toggle').click();
+  await expect(card.locator('.mini i')).toHaveCount(7);
+});
+
 test('question drafts and focus survive stream updates and a reconnect', async ({ page, request }) => {
   const field = page.getByRole('textbox', { name: 'Your answer' });
   await field.fill('한글 조합 중에도 유지해요');

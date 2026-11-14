@@ -10,7 +10,7 @@ import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import { resolveConfig } from '../plugin/bridge/config.ts';
 import { Jobs } from '../plugin/bridge/jobs.ts';
-import type { Adapter, CrewEvent, JobCtl } from '../plugin/bridge/jobs.ts';
+import type { Adapter, CrewEvent, Job, JobCtl } from '../plugin/bridge/jobs.ts';
 import { describe, needsLead } from '../plugin/bridge/render.ts';
 
 function harness(t: TestContext) {
@@ -401,6 +401,63 @@ test('the daemon answers only requests that carry its secret, as a header or as 
   assert.match(cookie, /^crew_session=[0-9a-f]{64}; Path=\/; HttpOnly; SameSite=Strict; Max-Age=\d+$/);
   assert.equal((await h.api('GET', '/api/state', undefined, { authorization: '', cookie: cookie.split(';')[0] })).status, 200);
   assert.equal((await h.api('GET', '/api/state', undefined, { authorization: '', cookie: 'crew_session=wrong' })).status, 401);
+});
+
+test('mission routes revise only the future, capture job rounds and let the user mark another session mission done', { timeout: 15000 }, async (t) => {
+  const h = await daemon(t);
+  const mission = (await h.api('POST', '/api/missions', {
+    title: 'Repeated review', project: h.home, owner: 'another-session',
+    stages: ['implement', 'self-review', 'fix', 'self-review', 'polish', 'final'],
+  })).body;
+  assert.equal(mission.stageIndex, 0);
+  assert.equal(mission.stage, 'implement');
+  const route = `/api/missions/${mission.id}`;
+  await h.api('POST', route, { stage: 'self-review' });
+  const create = () => h.api('POST', '/api/jobs', {
+    kind: 'delegate', cwd: h.home, project: h.home, task: 'test', isolation: 'in_place',
+    mission: mission.id, missionStep: 99,
+  });
+  const first = (await create()).body;
+  assert.equal(first.missionStep, 1);
+  await h.api('POST', route, { stage: 'fix' });
+  const advanced = (await h.api('POST', route, { stage: 'self-review' })).body;
+  assert.equal(advanced.stageIndex, 3);
+  const second = (await create()).body;
+  assert.equal(second.missionStep, 3);
+  const revised = (await h.api('POST', route, { stages: ['final'] })).body;
+  assert.deepEqual(revised.stages, ['implement', 'self-review', 'fix', 'self-review', 'final']);
+  assert.equal(revised.stageIndex, 3);
+  const state = (await h.api('GET', '/api/state')).body;
+  assert.equal(state.jobs.find((job: Job) => job.id === first.id).missionStep, 1);
+  assert.equal(state.jobs.find((job: Job) => job.id === second.id).missionStep, 3);
+  const stream = await fetch(`http://127.0.0.1:${h.port}/api/stream`, {
+    headers: { authorization: `Bearer ${h.secret}` }, signal: AbortSignal.timeout(10000),
+  });
+  const reader = stream.body!.getReader();
+  try {
+    await reader.read();
+    const before = Date.now();
+    await h.api('POST', `/api/jobs/${first.id}/cancel`, {});
+    let wire = '';
+    let frame: RegExpMatchArray | null = null;
+    while (!frame) {
+      const { value, done } = await reader.read();
+      assert.equal(done, false);
+      wire += Buffer.from(value!).toString();
+      frame = wire.match(/event: mission\ndata: (.+)\n\n/);
+    }
+    const refreshed = JSON.parse(frame[1]);
+    assert.equal(refreshed.id, mission.id);
+    assert.ok(refreshed.updatedAt >= before);
+  } finally {
+    await reader.cancel();
+  }
+  const body = { done: true, outcome: 'Marked done on the board.' };
+  assert.equal((await h.api('POST', route, body, { authorization: '' })).status, 401);
+  const closed = await h.api('POST', route, body, { authorization: '', cookie: `crew_session=${h.secret}` });
+  assert.equal(closed.status, 200);
+  assert.equal(closed.body.state, 'done');
+  assert.equal(closed.body.outcome, body.outcome);
 });
 
 test('a worker that cannot run commands can search its tree and see what was just written, and nothing outside', { timeout: 15000 }, async (t) => {

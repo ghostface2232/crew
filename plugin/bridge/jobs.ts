@@ -50,6 +50,8 @@ export interface JobSpec {
   effort?: string;
   /** Mission the job is part of, if the lead started it while carrying out one. */
   mission?: string;
+  /** Plan occurrence captured by the daemon when this job was requested. */
+  missionStep?: number;
   /** delegate: the job measures performance and must run alone. It starts only when no other job is running, and none starts until it ends. */
   exclusive?: boolean;
   /**
@@ -110,6 +112,7 @@ export interface Job {
   root?: string;
   /** Mission this job is one strand of; absent for a job started on its own. */
   mission?: string;
+  missionStep?: number;
   /** Runs alone on the machine, for measurement. */
   exclusive?: boolean;
   /** May start the app: network access in the sandbox, and for a review a snapshot worktree. */
@@ -435,6 +438,7 @@ export class Jobs {
       project: spec.project ?? repo ?? spec.cwd,
       root,
       mission: spec.mission,
+      missionStep: spec.missionStep,
       exclusive: Boolean(spec.exclusive) || undefined,
       runsApp: Boolean(spec.runsApp) || undefined,
       ask: Boolean(spec.ask) || undefined,

@@ -10,6 +10,7 @@ struct Job: Codable, Sendable, Identifiable, Equatable {
     var project: String
     var root: String?
     var mission: String?
+    var missionStep: Int?
     var cwd: String
     var worktree: Worktree?
     var sessionId: String?
@@ -95,18 +96,45 @@ struct Mission: Codable, Sendable, Identifiable, Equatable {
     var updatedAt: Double
     var endedAt: Double?
     var notes: [MissionNote]?
-    var step: Int { ["plan": 0, "implement": 1, "self-review": 2, "cross-review": 2, "fix": 3, "polish": 4, "final": 5][stage] ?? 0 }
+    var stages: [String]?
+    var stageIndex: Int?
+    private static let stopOfStage = ["plan": 0, "implement": 1, "self-review": 2, "cross-review": 2, "fix": 3, "polish": 4, "final": 5]
+    var step: Int { stages.map { stageIndex ?? $0.firstIndex(of: stage) ?? 0 } ?? Self.stopOfStage[stage] ?? 0 }
     static let steps = ["Plan", "Build", "Review", "Fix", "Polish", "Final"]
+    var stops: [String] {
+        var rounds: [String: Int] = [:]
+        return stages?.map {
+            let name = Self.steps[Self.stopOfStage[$0] ?? 0]
+            let round = (rounds[name] ?? 0) + 1
+            rounds[name] = round
+            return name + (round > 1 ? " \(round)" : "")
+        } ?? Self.steps
+    }
+    func passed(_ index: Int) -> Bool { state == "done" || index < step }
+    func jobStep(_ job: Job) -> Int {
+        if stages != nil, let index = job.missionStep, stops.indices.contains(index) { return index }
+        let stop = ["delegate": 1, "review": 2, "polish": 4][job.kind] ?? 1
+        let kinds = stages?.map { Self.stopOfStage[$0] ?? 0 } ?? Array(Self.steps.indices)
+        // Jobs without a recorded occurrence use current matching stop, first match, then current.
+        if kinds[step] == stop { return step }
+        return kinds.firstIndex(of: stop) ?? step
+    }
+    func looksFinished(jobs: [Job], now: Double) -> Bool {
+        state == "active" && now - updatedAt >= 20 * 60_000
+            && !jobs.contains { $0.mission == id && ($0.state == "running" || $0.state == "waiting") }
+    }
 }
 struct MissionNote: Codable, Sendable, Equatable { var text: String; var at: Double }
 
 func missionProgress(_ mission: Mission, jobs: [Job]) -> Double {
     if mission.state == "done" { return 1 }
-    let stages = ["plan", "implement", "self-review", "cross-review", "fix", "polish", "final"]
-    let stageIndex = stages.firstIndex(of: mission.stage) ?? 0
-    let weights = jobs.filter { $0.mission == mission.id && $0.endedAt == nil }.map { _ in 0.5 }
+    let stages = mission.stages ?? ["plan", "implement", "self-review", "cross-review", "fix", "polish", "final"]
+    let stageIndex = mission.stages == nil ? stages.firstIndex(of: mission.stage) ?? 0 : mission.step
+    let weights = jobs.filter { $0.mission == mission.id && $0.endedAt == nil }.map { $0.state == "running" || $0.state == "waiting" ? 0.5 : 0 }
     let share = weights.isEmpty ? 0.5 : weights.reduce(0, +) / Double(weights.count)
-    return min(1, max(0, (Double(stageIndex) + share) / Double(stages.count)))
+    // Zero-based plan position plus at most half a step of running work; only done reaches 100%.
+    // Missions without a plan retain the original seven-stage progress formula.
+    return max(0, (Double(stageIndex) + share) / Double(stages.count))
 }
 
 struct ClaudeSession: Codable, Sendable, Identifiable, Equatable {

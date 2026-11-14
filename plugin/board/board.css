@@ -388,10 +388,10 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 .cmd-meta:empty { display: none; }
 /* The state and its action are pills of one height, side by side. */
 .cmd-head > .quiet { min-height: 32px; padding: 0 14px; background: var(--hover); color: var(--muted); }
-/* Folded, the track is six segments; unfolded, the track itself is there to read. */
+/* Folded, the track summarizes the planned stops; unfolded, the track itself is there to read. */
 .mini { flex: none; display: none; gap: 2px; }
 [data-closed] .mini { display: flex; }
-/* One capsule of six, drawn as the state bar is: 2px apart, softly rounded joints, round ends, the same tones. */
+/* One capsule, drawn as the state bar is: 2px apart, softly rounded joints, round ends, the same tones. */
 .mini { overflow: hidden; border-radius: 999px; }
 .mini i { width: 16px; height: 6px; border-radius: 2px; background: var(--rail); }
 .mini i[data-state]:not([data-state=""]) { background: var(--tone); }
@@ -406,7 +406,7 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 [data-quiet] .outcome { background: var(--bg); }
 
 /*
- * How far along the task is. Light, and drawn as six arcs that match the track's stops, so it reads as
+ * How far along the task is. Light, and drawn as arcs that match the track's stops, so it reads as
  * part of its card's track rather than as a figure of its own.
  */
 .stage { display: grid; justify-items: center; gap: 2px; padding: 20px; border-radius: var(--radius-item); background: var(--sunken); text-align: center; align-self: stretch; align-content: center; }
@@ -427,11 +427,12 @@ h1 { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight
 .step-note b { color: var(--text); font-weight: 500; }
 
 /*
- * The track: six numbered stops on one line, then every job as a row under it. A stop's markup
+ * The track: planned numbered stops on one line, then every job as a row under it. A stop's markup
  * holds its jobs, but its box is dissolved so the names share the first row and each list spans the card.
  */
 /* The last stop is a node-wide column at the right edge, so the track ends where the rows below it do. */
-.track { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)) 28px; row-gap: 4px; counter-reset: stop; }
+.track { display: grid; grid-template-columns: repeat(var(--stops, 6), minmax(0, 1fr)); row-gap: 4px; counter-reset: stop; }
+.track:has(> .stop:nth-child(2)) { grid-template-columns: repeat(calc(var(--stops, 6) - 1), minmax(0, 1fr)) 28px; }
 .stop { display: contents; }
 .stop-name { grid-row: 1; counter-increment: stop; position: relative; display: grid; gap: 8px; padding-bottom: 20px; font-size: 13.5px; line-height: 1.3; color: var(--muted); }
 .stop-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-inline-end: 8px; }

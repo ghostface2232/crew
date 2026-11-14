@@ -15,6 +15,41 @@ export const STOP_OF_STAGE = {
 };
 export const STOP_OF_KIND = { delegate: 1, review: 2, polish: 4 };
 const MISSION_STAGES = ['plan', 'implement', 'self-review', 'cross-review', 'fix', 'polish', 'final'];
+export function missionStops(mission?: Mission) {
+  const rounds = new Map<number, number>();
+  return mission?.stages
+    ? mission.stages.map((stage) => {
+      const stop = STOP_OF_STAGE[stage];
+      const round = (rounds.get(stop) ?? 0) + 1;
+      rounds.set(stop, round);
+      return { name: `${STOPS[stop]}${round > 1 ? ` ${round}` : ''}`, stop };
+    })
+    : STOPS.map((name, stop) => ({ name, stop }));
+}
+export function missionStep(mission?: Mission) {
+  if (!mission) return -1;
+  return mission.stages ? mission.stageIndex ?? Math.max(0, mission.stages.indexOf(mission.stage)) : STOP_OF_STAGE[mission.stage];
+}
+export function missionStopPosition(mission: Mission | undefined, index: number) {
+  const at = missionStep(mission);
+  return mission?.state === 'done' || index < at ? 'past' : index === at && mission?.state === 'active' ? 'now' : 'todo';
+}
+export function missionJobStep(mission: Mission | undefined, job: Pick<BoardJob, 'kind' | 'missionStep'>) {
+  const stops = missionStops(mission);
+  const recorded = job.missionStep;
+  if (mission?.stages && recorded !== undefined && Number.isInteger(recorded) && recorded >= 0 && recorded < stops.length)
+    return recorded;
+  const at = missionStep(mission);
+  const stop = STOP_OF_KIND[job.kind];
+  // Jobs without a recorded occurrence use current matching stop, first match, then current.
+  if (stops[at]?.stop === stop) return at;
+  const match = stops.findIndex((step) => step.stop === stop);
+  return match < 0 ? Math.max(0, at) : match;
+}
+export function missionLooksFinished(mission: Mission, jobs: BoardJob[], now: number) {
+  return mission.state === 'active' && now - mission.updatedAt >= 20 * 60_000
+    && !jobs.some((job) => job.mission === mission.id && (job.state === 'running' || job.state === 'waiting'));
+}
 export function missionProgress(mission: Mission, jobs: BoardJob[]) {
   if (mission.state === 'done') return 1;
   const unfinished = jobs.filter((job) => job.mission === mission.id && job.endedAt == null);
@@ -22,7 +57,11 @@ export function missionProgress(mission: Mission, jobs: BoardJob[]) {
     ? unfinished.reduce((sum, job) => sum + (job.state === 'running' || job.state === 'waiting' ? 0.5 : 0), 0) /
       unfinished.length
     : 0.5;
-  return Math.max(0, Math.min(1, (MISSION_STAGES.indexOf(mission.stage) + share) / MISSION_STAGES.length));
+  const stages = mission.stages ?? MISSION_STAGES;
+  // Zero-based plan position plus at most half a step of running work; only done reaches 100%.
+  // Missions without a plan retain the original seven-stage progress formula.
+  const index = mission.stages ? missionStep(mission) : Math.max(0, stages.indexOf(mission.stage));
+  return Math.max(0, (index + share) / stages.length);
 }
 export function usageWindowName(kind: string) {
   return (

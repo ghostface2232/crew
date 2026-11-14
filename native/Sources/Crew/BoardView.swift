@@ -77,18 +77,24 @@ struct BoardView: View {
     private nonisolated static let twoColumnWidth: CGFloat = 1000
     /// The page's cards in two columns on a wide page, each stacked on its own, so a card that grows moves only
     /// the cards below it in its own column. Cards alternate left and right in order and keep their column: filling
-    /// the shorter column instead would move cards across whenever one opens or closes. A lone card keeps the full width.
-    @ViewBuilder private func masonry<Card: View>(_ tiles: [Tile], @ViewBuilder card: @escaping (Tile) -> Card) -> some View {
-        if wide && tiles.count > 1 {
+    /// the shorter column instead would move cards across whenever one opens or closes. `left` and `right` end their
+    /// columns whatever the count above, in the order a single column shows them. With one column's worth of cards,
+    /// they keep the full width.
+    @ViewBuilder private func masonry<Card: View>(_ tiles: [Tile], left: Tile?, right: Tile?, @ViewBuilder card: @escaping (Tile) -> Card) -> some View {
+        let columns = [
+            stride(from: 0, to: tiles.count, by: 2).map { tiles[$0] } + [left].compactMap { $0 },
+            stride(from: 1, to: tiles.count, by: 2).map { tiles[$0] } + [right].compactMap { $0 },
+        ]
+        if wide && !columns[0].isEmpty && !columns[1].isEmpty {
             HStack(alignment: .top, spacing: WorkspaceStyle.cardGap) {
-                ForEach(0..<2, id: \.self) { column in
+                ForEach(columns.indices, id: \.self) { column in
                     LazyVStack(alignment: .leading, spacing: WorkspaceStyle.cardGap) {
-                        ForEach(stride(from: column, to: tiles.count, by: 2).map { tiles[$0] }) { card($0) }
+                        ForEach(columns[column]) { card($0) }
                     }.frame(maxWidth: .infinity, alignment: .top)
                 }
             }
         } else {
-            ForEach(tiles) { card($0) }
+            ForEach(tiles + [left, right].compactMap { $0 }) { card($0) }
         }
     }
     private var title: String {
@@ -167,8 +173,7 @@ struct BoardView: View {
         let recentJobs = history ? [] : Array(jobs.filter { !$0.isActive && $0.mission == nil }.sorted { ($0.endedAt ?? 0) > ($1.endedAt ?? 0) }.prefix(4))
         let sessions = history ? [] : store.state.claude.filter { (store.project.isEmpty || $0.projectPath == store.project) && matches($0.title) }
         let tiles: [Tile] = shownMissions.map(Tile.mission) + (loose.isEmpty ? [] : [.loose]) + recent.map(Tile.mission)
-            + (recentJobs.isEmpty ? [] : [.finished]) + (sessions.isEmpty ? [] : [.sessions])
-        masonry(tiles) { tile in
+        masonry(tiles, left: recentJobs.isEmpty ? nil : .finished, right: sessions.isEmpty ? nil : .sessions) { tile in
             switch tile {
             case .mission(let mission):
                 MissionPanel(store: store, mission: mission, jobs: missionJobs(mission))

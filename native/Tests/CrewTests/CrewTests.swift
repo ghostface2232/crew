@@ -182,6 +182,13 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
         #expect(limits["codex"]??.windows?.first?.minutes == nil)
         #expect(limits["codex"]??.windows?.first?.usedPercent == 42)
     }
+    @Test func reportsShowHeadingsButLeaveCodeBlocksAsWritten() {
+        let report = "## Result\r\nDone.\r\n```bash\r\n# install\r\nnpm i\r\n```\r\n## Open points ##\r\nNone"
+        let rendered = ReportText.render(report)
+        #expect(String(rendered.characters) == "Result\n\nDone.\n\n# install\nnpm i\n\nOpen points\n\nNone")
+        let headings = rendered.runs.filter { $0.font == Typeface.bodyStrong }.map { String(rendered[$0.range].characters) }
+        #expect(headings == ["Result", "Open points"])
+    }
     @Test func antigravityShowsItsGeminiWindowsWhenItHasNoAccountWide() {
         let window = { (key: String, kind: String, group: String?) in
             UsageWindow(key: key, kind: kind, group: group, usedRatio: 0.5, resetTime: nil, durationSec: nil, projectedExhaustion: nil, status: .ok)

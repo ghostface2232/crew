@@ -165,11 +165,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         // view until another one takes it, so a message box stayed active after clicking anywhere else.
         NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { event in
             MainActor.assumeIsolated {
-                if let window = event.window, window.firstResponder is NSTextView,
-                   let content = window.contentView, let frame = content.superview,
-                   let hit = content.hitTest(frame.convert(event.locationInWindow, from: nil)),
-                   !sequence(first: hit, next: \.superview).contains(where: { $0 is NSText || $0 is NSTextField }) {
-                    window.makeFirstResponder(nil)
+                // Hit-tested from the frame view, which holds the toolbar too; its point is in window coordinates.
+                if let window = event.window, let editor = window.firstResponder as? NSTextView,
+                   let frame = window.contentView?.superview, let hit = frame.hitTest(event.locationInWindow) {
+                    // The editor's own scroll bars and any text field, the search field among them, keep editing.
+                    let keeps = sequence(first: hit, next: \.superview).contains { view in
+                        view is NSText || view is NSTextField || view === editor.enclosingScrollView
+                    }
+                    if !keeps { window.makeFirstResponder(nil) }
                 }
             }
             return event

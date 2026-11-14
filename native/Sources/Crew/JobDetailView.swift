@@ -7,6 +7,8 @@ struct JobDetailView: View {
     @State private var events: [CrewEvent] = []
     @State private var error = ""
     @State private var retry = 0
+    /// VoiceOver moves to the title when the panel opens; keyboard focus stays where it was.
+    @AccessibilityFocusState private var titleFocused: Bool
     private var job: Job? {
         guard var current = store.state.jobs.first(where: { $0.id == id }) else { return detail }
         current.prompt = detail?.prompt ?? current.prompt
@@ -28,6 +30,7 @@ struct JobDetailView: View {
         .safeAreaBar(edge: .top) { header }
         .scrollEdgeEffectStyle(.soft, for: .top)
         .onExitCommand { store.selectedJob = nil }
+        .onAppear { titleFocused = true }
         .task(id: "\(id):\(store.revision):\(retry)") { await load() }
     }
     private func load() async {
@@ -56,6 +59,7 @@ struct JobDetailView: View {
             // truncation once selected, so the full title is copied from a menu instead.
             if let job {
                 Text(job.title).font(Typeface.title).lineSpacing(2).lineLimit(2).help(job.title)
+                    .accessibilityAddTraits(.isHeader).accessibilityFocused($titleFocused)
                     .contextMenu {
                         Button("Copy Title", systemImage: "doc.on.doc") {
                             NSPasteboard.general.clearContents()
@@ -234,7 +238,7 @@ private struct OriginalTask: View {
             }
             .buttonStyle(.plain)
             .disabled(!long)
-            .accessibilityLabel(shown ? "Collapse original task" : "Expand original task")
+            .accessibilityLabel(long ? (shown ? "Collapse original task" : "Expand original task") : "Original task")
             // Cut by height rather than a line limit, so the last line fades instead of ending in an ellipsis.
             Text(prompt).font(Typeface.callout).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
@@ -261,42 +265,55 @@ private extension View {
     }
 }
 
-/// A worker's report, with its Markdown headings shown as headings and inline styles applied; the rest stays as written.
-private struct ReportText: View {
+/// A worker's report, with its Markdown headings shown as headings, code blocks in the code face and inline styles
+/// applied. One text, so the whole report still selects and copies at once.
+struct ReportText: View {
     let report: String
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
-                if block.heading {
-                    Text(block.text).font(Typeface.bodyStrong).padding(.top, index == 0 ? 0 : 8)
-                } else {
-                    Text(Self.inline(block.text)).font(Typeface.body)
-                }
-            }
-        }.textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+        Text(Self.render(report)).font(Typeface.body).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
     }
-    /// Headings on their own; the lines between them kept together as written.
-    private var blocks: [(heading: Bool, text: String)] {
-        var result: [(heading: Bool, text: String)] = []
-        var body: [Substring] = []
-        func flush() {
-            let text = body.joined(separator: "\n").trimmingCharacters(in: .newlines)
-            if !text.isEmpty { result.append((false, text)) }
-            body = []
+    nonisolated static func render(_ report: String) -> AttributedString {
+        enum Kind { case heading, code, prose }
+        var blocks: [(kind: Kind, text: String)] = []
+        var lines: [Substring] = []
+        var fenced = false
+        func flush(_ kind: Kind) {
+            let text = lines.joined(separator: "\n").trimmingCharacters(in: .newlines)
+            if !text.isEmpty { blocks.append((kind, text)) }
+            lines = []
         }
-        for line in report.split(separator: "\n", omittingEmptySubsequences: false) {
-            if let match = line.firstMatch(of: /^#{1,6}\s+(.+)$/) {
-                flush()
-                result.append((true, String(match.1)))
+        // `\.isNewline` also takes "\r\n", which is a single Character.
+        for line in report.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline) {
+            let trimmed = line.drop { $0 == " " }
+            if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
+                // The fence lines themselves are left out; the block's face shows what it is.
+                flush(fenced ? .code : .prose)
+                fenced.toggle()
+            } else if !fenced, let match = line.firstMatch(of: /^#{1,6}\s+(.*?)[\s#]*$/), !match.1.isEmpty {
+                flush(.prose)
+                blocks.append((.heading, String(match.1)))
             } else {
-                body.append(line)
+                lines.append(line)
             }
         }
-        flush()
+        flush(fenced ? .code : .prose)
+        var result = AttributedString()
+        for (index, block) in blocks.enumerated() {
+            if index > 0 { result += AttributedString("\n\n") }
+            switch block.kind {
+            case .heading:
+                var heading = AttributedString(block.text)
+                heading.font = Typeface.bodyStrong
+                result += heading
+            case .code:
+                var code = AttributedString(block.text)
+                code.font = Typeface.code
+                result += code
+            case .prose:
+                result += (try? AttributedString(markdown: block.text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(block.text)
+            }
+        }
         return result
-    }
-    private static func inline(_ text: String) -> AttributedString {
-        (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
     }
 }
 

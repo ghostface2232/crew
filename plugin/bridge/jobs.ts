@@ -5,6 +5,8 @@ import { canonicalPath, effectiveRole, PORT, runsCommands, WORKERS } from './con
 import type { Config, Role, WorkerAgent } from './config.ts';
 import { carryUncommitted, changesSince, commitAll, commitChanges, copyIncluded, createWorktree, currentBranch, dirtyCount, git, mergeInto, isInside, projectRoot, realpath, removeDirectory, removeEmptyLeftover, removeWorktree, repoRoot, revertCommit, revertsSince, reviewDiff, WorktreeCleanupError } from './git.ts';
 import { collectGarbage } from './gc.ts';
+import { BrowserServers, jobWritable } from './browser.ts';
+import { tokenFile } from './auth.ts';
 import { attachEvidence, attachmentsNote, checkAttachments, collectEvidence, detachEvidence, questionAttachments } from './evidence.ts';
 import type { Evidence } from './evidence.ts';
 import type { Worktree } from './git.ts';
@@ -265,6 +267,7 @@ export class Jobs {
   private waiters = new Map<string, Set<() => void>>();
   private touchedFiles = new Map<string, Set<string>>();
   private discarding = new Set<string>();
+  private browsers = new BrowserServers();
   private finalizing = new Set<string>();
   private cancelling = new Set<string>();
   private changingRounds = new Set<string>();
@@ -932,6 +935,25 @@ export class Jobs {
     return job;
   }
 
+  /** A Playwright server outside the worker's sandbox, which no browser can start inside on macOS. */
+  async browser(id: string): Promise<{ endpoint: string }> {
+    const job = this.get(id);
+    if (isTerminal(job)) throw new Error(`Job ${id} is ${job.state}; a browser is for a running turn.`);
+    if (!job.runsApp) throw new Error('This job may not run the app, so it gets no browser. Report what you could not check; the lead can start the job with runs_app.');
+    const endpoint = await this.browsers.start(id, {
+      cwd: job.cwd,
+      writable: jobWritable([job.cwd, job.scratch, job.evidenceDir]),
+      unreadable: [tokenFile(this.home)],
+      tmp: job.scratch ?? this.scratchDir(id),
+    });
+    // Ended meanwhile: the turn's end has already stopped the servers it knew of.
+    if (isTerminal(job)) {
+      this.browsers.stop(id);
+      throw new Error(`Job ${id} ended while its browser started.`);
+    }
+    return { endpoint };
+  }
+
   workerAuthorized(id: string, token: unknown): boolean {
     return typeof token === 'string' && token.length > 0 && this.workerTokens.get(id) === token;
   }
@@ -1225,6 +1247,8 @@ export class Jobs {
       this.dropSnapshot(job);
     }
     if (isTerminal(job) && job.evidenceDir) job.evidence = collectEvidence(job.evidenceDir, job.evidence ?? [], job.turns);
+    // Like scratch, a browser is the turn's.
+    if (isTerminal(job)) this.browsers.stop(job.id);
     // Scratch is for the turn: nothing in it is a result. The path is derived, never read from the job, before it is removed.
     if (isTerminal(job) && job.scratch) this.dropScratch(job.id);
     this.changed(job);

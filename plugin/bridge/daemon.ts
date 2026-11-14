@@ -32,7 +32,7 @@ fs.mkdirSync(HOME, { recursive: true });
 const log = (...args: unknown[]) => console.log(new Date().toISOString(), ...args);
 let mutatingPosts = 0;
 /** Routes a worker's own MCP server calls; they are checked against the job's token, not the user's secret. */
-const WORKER_ROUTE = /^\/api\/jobs\/[\w-]+\/(?:questions|siblings)$/;
+const WORKER_ROUTE = /^\/api\/jobs\/[\w-]+\/(?:questions|siblings|browser)$/;
 
 const server = http.createServer((req, res) => {
   // Reserve before reading the body: idle replacement must not interrupt an unrecorded worktree.
@@ -378,6 +378,12 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       if (!jobs.workerAuthorized(id, url.searchParams.get('token'))) throw new HttpError(403, 'forbidden worker token');
       return { questions: await jobs.leadAnswers(id, Number(url.searchParams.get('wait') ?? 0)) };
     }
+  }
+  const browserRoute = /^\/api\/jobs\/([\w-]+)\/browser$/.exec(pathname);
+  if (browserRoute && method === 'POST') {
+    const body = await readJson(req);
+    if (!jobs.workerAuthorized(browserRoute[1], body?.token)) throw new HttpError(403, 'forbidden worker token');
+    return jobs.browser(browserRoute[1]);
   }
   const siblingsRoute = /^\/api\/jobs\/([\w-]+)\/siblings$/.exec(pathname);
   if (siblingsRoute && method === 'GET') {

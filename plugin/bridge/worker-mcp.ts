@@ -27,6 +27,11 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: { wait_seconds: { type: 'number', minimum: 0, maximum: 600 } } },
   },
   {
+    name: 'browser',
+    description: 'Start a headless browser server outside your sandbox, for when a browser cannot start inside it (on macOS it cannot). It runs your working tree\'s Playwright, with the same file limits as your sandbox, until your turn ends. Returns its endpoint: set PW_TEST_CONNECT_WS_ENDPOINT to it for `playwright test`, or call chromium.connect(endpoint) (or webkit, firefox) in a script.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
     name: 'siblings',
     description: 'The other unfinished jobs in this mission or project: who has which files, and whether one is waiting on the lead.',
     annotations: { readOnlyHint: true },
@@ -101,6 +106,8 @@ async function callTool(name: string, args: any): Promise<unknown> {
         answered_earlier: questions.filter((q) => q.answer !== undefined).length - fresh.length,
       };
     }
+    case 'browser':
+      return api('POST', `${route}/browser`, { token });
     case 'siblings':
       return api('GET', `${route}/siblings?${auth}`);
     case 'search': {

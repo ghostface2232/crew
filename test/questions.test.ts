@@ -248,7 +248,9 @@ test('worker stdio and all question routes use a private token, with answers wak
   const worker = stdio(t, 'worker-mcp.ts', { ...h.env, ...server.env });
   assert.equal((await worker.request('initialize', { protocolVersion: '2025-11-25' })).serverInfo.name, 'crew-worker');
   const tools = (await worker.request('tools/list')).tools;
-  assert.deepEqual(tools.map((tool: any) => tool.name), ['ask_lead', 'lead_answers', 'siblings', 'search', 'recent_changes']);
+  assert.deepEqual(tools.map((tool: any) => tool.name), ['ask_lead', 'lead_answers', 'browser', 'siblings', 'search', 'recent_changes']);
+  // Starting a browser outside the sandbox takes the worker's own token.
+  assert.equal((await h.api('POST', `${route}/browser`, { token: 'wrong' })).status, 403);
   assert.deepEqual(await worker.request('ping'), {});
   const question = JSON.parse(textOf(await worker.call('ask_lead', { question: 'Which contract?', blocks: 'the API' })));
   assert.match(question.guidance, /Carry on.*lead_answers/);

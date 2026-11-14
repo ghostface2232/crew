@@ -171,7 +171,7 @@ enum Symbol {
     /// An empty state's illustration.
     static let empty = Font.system(size: 30, weight: .light)
     /// Shifts a sideways chevron toward its point, where its frame leaves it looking off center.
-    static let chevronNudge: CGFloat = 1
+    static let chevronNudge: CGFloat = 0.5
     /// A small dot before words, such as Unsaved changes.
     static let dot = Font.system(size: 6)
     /// The frame a control glyph sits in, so icon buttons match whatever their symbol.

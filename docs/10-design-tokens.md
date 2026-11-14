@@ -148,7 +148,7 @@ A symbol inside a label takes the label's font. These tokens are for symbols tha
 | `stance` | 14 medium | A debate point's stance mark |
 | `dot` | 6 regular | A small dot before words, such as Unsaved changes |
 | `controlFrame` | 16 pt | The frame a control glyph sits in; also the event list's status column |
-| `chevronNudge` | 1 pt | A sideways chevron shifts this far toward its point, where its frame leaves it looking off center |
+| `chevronNudge` | 0.5 pt | A sideways chevron shifts this far toward its point, where its frame leaves it looking off center |
 
 ## Agent marks — `MarkSize`
 

@@ -325,6 +325,25 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
         #expect(job.hasVerification && job.debateConcluded && job.kindTitle == "Debate" && job.tier == "frontier")
         #expect(job.exchange?.map(\.from) == ["lead", "worker"])
     }
+    @Test func debatePointsReadTheNumberedStanceLinesOfAReply() {
+        let reply = """
+        ## Result
+        Mostly agree.
+
+        1. **[agree] The ledger belongs to the daemon.** It survives restarts.
+        2. **[disagree]** A later hook event is not proof of receipt: the watcher can die first.
+        3. [alternative] Use a lease with generation
+        - 4. **alternative** — cap the digest
+        5. Plain point without a stance
+        """
+        let points = debatePoints(reply)
+        #expect(points.map(\.number) == [1, 2, 3, 4])
+        #expect(points.map(\.stance) == [.agree, .disagree, .alternative, .alternative])
+        #expect(points[0].title == "The ledger belongs to the daemon.")
+        #expect(points[1].title == "A later hook event is not proof of receipt: the watcher can die first.")
+        #expect(points[3].title == "cap the digest")
+        #expect(debatePoints("no points here").isEmpty)
+    }
     @Test func looksFinishedRequiresAnActiveMissionQuietForTwentyMinutesWithoutBusyJobs() throws {
         var mission = try fixture().missions[0]
         var job = try fixture().jobs[0]

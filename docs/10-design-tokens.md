@@ -140,6 +140,7 @@ A symbol inside a label takes the label's font. These tokens are for symbols tha
 | Pill | `.pillButton()`; `.pillButton(.prominent)` for the action a group leads with, `.pillButton(.warning)` for one that drops work without completing it | Mark done, Stop tracking, Details, Retry, Copy, Undo/Keep, Cancel Job, approval decisions |
 | Icon | `.iconButton()`; a custom glyph takes `Symbol.control` in `Symbol.controlFrame` | Close, Show job, expand a mission |
 | Chip | `StatusLabel`: `Typeface.chip` in a `Palette.chip` capsule with `Chip.insets` (5 × 8) | Status of jobs, sessions, missions and agents |
+| Stance chip | The same face as `StatusLabel`: success for agree, danger for disagree, accent for alternative, with a count when it sums a round | Points of a debate reply |
 
 Pill buttons use `PillButtonStyle`, not the system bordered style. The system's regular bordered button is 24 points tall with 5 points above and below its label, which looks pressed flat. A pill instead has `Pill.insets` (7 × 14), so it is about 30 points tall, with its label in `calloutStrong`.
 

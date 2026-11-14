@@ -335,3 +335,31 @@ func elapsed(_ milliseconds: Double) -> String {
     if seconds < 3600 { return "\(seconds / 60)m" }
     return "\(seconds / 3600)h \((seconds % 3600) / 60)m"
 }
+
+/// One numbered point of a debater's reply, as its role asks it to end each message.
+struct DebatePoint: Equatable, Sendable {
+    enum Stance: String, Sendable { case agree, disagree, alternative }
+    var number: Int
+    var stance: Stance
+    var title: String
+}
+
+/// The points a reply marks agree, disagree or alternative: "1. **[agree]** Title…", "2. [disagree] …", "3. **disagree** — …".
+/// Only the first sentence of each is kept, as a headline; the full reply stays one disclosure away.
+func debatePoints(_ text: String) -> [DebatePoint] {
+    let pattern = /^\s*(?:[-*]\s*)?(\d+)\.\s*(?:\*\*)?\[?(agree|disagree|alternative)\]?(?:\*\*)?[\s:.\-—–]*(.*)$/.ignoresCase()
+    var points: [DebatePoint] = []
+    for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
+        guard let match = String(line).wholeMatch(of: pattern), let number = Int(match.1),
+              let stance = DebatePoint.Stance(rawValue: match.2.lowercased()) else { continue }
+        var title = String(match.3).replacingOccurrences(of: "**", with: "").replacingOccurrences(of: "`", with: "")
+            .trimmingCharacters(in: .whitespaces)
+        if let end = title.firstIndex(where: { ".!?。".contains($0) }), title.distance(from: title.startIndex, to: end) > 12 {
+            title = String(title[...end])
+        }
+        if title.count > 140 { title = String(title.prefix(139)) + "…" }
+        points.append(DebatePoint(number: number, stance: stance, title: title))
+    }
+    return points
+}
+

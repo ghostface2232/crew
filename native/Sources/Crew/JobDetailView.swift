@@ -138,8 +138,8 @@ struct JobDetailView: View {
             }
         }
         if let debate = job.debate, let exchange = job.exchange, !exchange.isEmpty {
-            detailSection("Debate · round \(min(job.turns, debate.rounds)) of \(debate.rounds)\(job.debateConcluded ? " · concluded" : "")", symbol: "bubble.left.and.bubble.right") {
-                DebateView(entries: exchange, worker: agentName(job.agent))
+            detailSection("Debate", symbol: "bubble.left.and.bubble.right") {
+                DebateView(job: job, rounds: debate.rounds, entries: exchange)
             }
         } else if !job.report.isEmpty {
             detailSection("Report", symbol: "doc.text") {
@@ -473,12 +473,7 @@ private struct VerificationView: View {
             }
         }
         if let capabilities = job.capabilities {
-            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
-                GridRow(alignment: .top) {
-                    Text("Runs with").foregroundStyle(.secondary).frame(minWidth: 72, alignment: .leading)
-                    Text(runsWith(capabilities)).frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }.font(Typeface.callout).textSelection(.enabled)
+            Grid(alignment: .leading) { fact("Runs with", runsWith(capabilities)) }.font(Typeface.callout).textSelection(.enabled)
         }
         ForEach(Array((job.approvals ?? []).enumerated()), id: \.offset) { _, approval in
             VStack(alignment: .leading, spacing: Space.xs) {
@@ -521,27 +516,133 @@ private struct VerificationView: View {
     }
 }
 
-/// A debate as its conversation, oldest first. The lead's turns sit inset behind an accent edge so the two
-/// voices separate at a glance; each message renders like a report.
+/// A debate as its rounds: a stepper shows how far it has come, and each round pairs the lead's message with the
+/// reply, whose numbered points read as stance-marked headlines with the full text one disclosure away.
 private struct DebateView: View {
+    let job: Job
+    let rounds: Int
     let entries: [ExchangeEntry]
-    let worker: String
+
+    private var replied: Int { entries.filter { $0.from == "worker" }.map(\.turn).max() ?? 0 }
 
     var body: some View {
-        ForEach(Array(entries.enumerated()), id: \.offset) { _, entry in
-            let lead = entry.from == "lead"
-            VStack(alignment: .leading, spacing: Space.xs) {
-                Text("\(lead ? "Lead" : worker) · round \(entry.turn)").font(Typeface.captionStrong).foregroundStyle(lead ? Palette.accent : .secondary)
-                ReportText(report: entry.text)
-            }
-            .padding(.leading, lead ? Space.l : 0)
-            .overlay(alignment: .leading) {
-                if lead { Rectangle().fill(Palette.accent).frame(width: 2) }
-            }
-            .padding(.leading, lead ? Space.xl : 0)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityElement(children: .combine)
+        DebateStepper(rounds: rounds, replied: replied, current: min(job.turns, rounds), working: job.isActive, concluded: job.debateConcluded)
+        ForEach(1...max(1, min(job.turns, rounds)), id: \.self) { turn in
+            let lead = entries.last { $0.turn == turn && $0.from == "lead" }
+            let reply = entries.last { $0.turn == turn && $0.from == "worker" }
+            DebateRound(turn: turn, final: turn == rounds, lead: lead, reply: reply, worker: agentName(job.agent), working: job.isActive && turn == job.turns)
         }
+    }
+}
+
+private struct DebateStepper: View {
+    let rounds: Int
+    let replied: Int
+    let current: Int
+    let working: Bool
+    let concluded: Bool
+
+    var body: some View {
+        HStack(spacing: Space.s) {
+            // Done steps take the done color and the step in progress the accent, as mission stops do.
+            ForEach(1...rounds, id: \.self) { round in
+                step(round <= replied ? "checkmark.circle.fill" : round == current && working ? "circle.dotted.circle" : "circle",
+                     "Round \(round)", color: round <= replied ? Palette.success : round == current && working ? Palette.accent : nil)
+                Rectangle().fill(WorkspaceStyle.hairline).frame(height: 1).frame(maxWidth: Space.x4l)
+            }
+            step(concluded ? "flag.checkered.circle.fill" : "flag.circle", "Conclusion", color: concluded ? Palette.success : nil)
+        }
+        .font(Typeface.caption)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(concluded ? "Debate concluded after \(rounds) rounds" : "Debate, round \(current) of \(rounds)")
+    }
+
+    private func step(_ symbol: String, _ title: String, color: Color?) -> some View {
+        Label(title, systemImage: symbol).labelStyle(.titleAndIcon).lineLimit(1).fixedSize()
+            .foregroundStyle(color.map(AnyShapeStyle.init) ?? AnyShapeStyle(.secondary))
+    }
+}
+
+private struct DebateRound: View {
+    let turn: Int
+    let final: Bool
+    let lead: ExchangeEntry?
+    let reply: ExchangeEntry?
+    let worker: String
+    let working: Bool
+    @State private var leadShown = false
+    @State private var replyShown = false
+
+    var body: some View {
+        let points = reply.map { debatePoints($0.text) } ?? []
+        VStack(alignment: .leading, spacing: Space.ml) {
+            HStack(spacing: Space.m) {
+                Text(final ? "Round \(turn) · final" : "Round \(turn)").font(Typeface.calloutStrong)
+                Spacer(minLength: 0)
+                ForEach([DebatePoint.Stance.agree, .disagree, .alternative], id: \.self) { stance in
+                    let count = points.filter { $0.stance == stance }.count
+                    if count > 0 { StanceChip(stance: stance, count: count) }
+                }
+            }
+            if let lead {
+                VStack(alignment: .leading, spacing: Space.xs) {
+                    Text("Lead").font(Typeface.captionStrong).foregroundStyle(Palette.accent)
+                    ReportText(report: lead.text).lineLimit(leadShown ? nil : 4)
+                    if lead.text.split(separator: "\n").count > 4 || lead.text.count > 400 {
+                        Button(leadShown ? "Show less" : "Show all") { leadShown.toggle() }.pillButton()
+                    }
+                }
+                .padding(.leading, Space.l)
+                // A 2-point edge, the width of a focus ring's stroke, marks the lead's voice without a second fill.
+                .overlay(alignment: .leading) { Rectangle().fill(Palette.accent).frame(width: 2) }
+            }
+            if let reply {
+                VStack(alignment: .leading, spacing: Space.s) {
+                    Text(worker).font(Typeface.captionStrong).foregroundStyle(.secondary)
+                    if points.isEmpty {
+                        ReportText(report: reply.text).lineLimit(replyShown ? nil : 8)
+                        Button(replyShown ? "Show less" : "Show all") { replyShown.toggle() }.pillButton()
+                    } else {
+                        ForEach(points, id: \.number) { point in
+                            HStack(alignment: .firstTextBaseline, spacing: Space.m) {
+                                StanceChip(stance: point.stance, count: nil)
+                                Text(point.title).font(Typeface.callout).textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                        DisclosureGroup("Full reply", isExpanded: $replyShown) {
+                            ReportText(report: reply.text).padding(.top, Space.xs)
+                        }.font(Typeface.caption)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else if working {
+                Label("\(worker) is answering…", systemImage: "ellipsis.bubble").font(Typeface.caption).foregroundStyle(.secondary)
+            }
+        }
+        if !final { Divider().padding(.vertical, Space.xs) }
+    }
+}
+
+/// A point's stance: green agree, red disagree, accent alternative, with a count when it sums a round.
+private struct StanceChip: View {
+    let stance: DebatePoint.Stance
+    let count: Int?
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    var body: some View {
+        let (title, symbol, color): (String, String, Color) = switch stance {
+        case .agree: ("Agree", "checkmark", Palette.success)
+        case .disagree: ("Disagree", "xmark", Palette.danger)
+        case .alternative: ("Alternative", "arrow.triangle.branch", Palette.accent)
+        }
+        let text = scheme == .light ? color.mix(with: .black, by: 0.22) : color
+        Label(count.map { "\(title) \($0)" } ?? title, systemImage: symbol)
+            .font(Typeface.chip).foregroundStyle(text).lineLimit(1).fixedSize()
+            .padding(Chip.insets)
+            .background(Palette.chip(color), in: Capsule())
+            .overlay { if contrast == .increased { Capsule().strokeBorder(text.opacity(0.5)) } }
     }
 }
 

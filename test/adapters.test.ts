@@ -1072,3 +1072,93 @@ test('Codex release unsubscribes child and parent threads and forces a later res
   await adapter.release({ job: { sessionId: 'parent' } } as any);
   assert.equal(calls.length, 2);
 });
+
+/** A Codex adapter with one run whose thread statuses come from `statuses`; reads are recorded in `reads`. */
+function probed(statuses: Record<string, unknown>, run: Record<string, unknown> = {}) {
+  const adapter = new CodexAdapter(resolveConfig({}));
+  const internals = adapter as any;
+  const reads: string[] = [];
+  const notes: string[] = [];
+  const ended: unknown[] = [];
+  internals.peer = { alive: true, request: async (method: string, params: any) => {
+    assert.equal(method, 'thread/read');
+    reads.push(params.threadId);
+    const status = statuses[params.threadId];
+    if (status instanceof Error) throw status;
+    return { thread: { id: params.threadId, status } };
+  } };
+  const job = { id: 'cx-1', sessionId: 'parent', state: 'running' } as Job;
+  const ctl = { job, note: (text: string) => notes.push(text), done: (report: string) => { job.state = 'done'; ended.push(report); } } as any;
+  const state = { ctl, turnId: 'turn', awaitingTurn: false, interrupt: null, message: 'final answer', pending: [], crewCalls: new Set(), items: new Map(), busyChildren: new Map(), held: null, lost: null, ...run };
+  internals.runs.set('parent', state);
+  return { adapter, ctl, job, reads, notes, ended, run: state };
+}
+
+test('Codex probe vouches for an active turn and flags a request the bridge never received', async () => {
+  const working = probed({ parent: { type: 'active', activeFlags: [] } });
+  assert.deepEqual(await working.adapter.probe(working.ctl), { verdict: 'working', detail: 'Codex reports the turn still in progress' });
+  const asking = probed({ parent: { type: 'active', activeFlags: ['waitingOnApproval'] } });
+  assert.equal((await asking.adapter.probe(asking.ctl)).verdict, 'unknown');
+  const silent = probed({ parent: {} });
+  assert.equal((await silent.adapter.probe(silent.ctl)).verdict, 'unknown');
+  const broken = probed({ parent: new Error('not answering') });
+  await assert.rejects(broken.adapter.probe(broken.ctl), /not answering/);
+});
+
+test('Codex probe confirms a lost turn end before calling the job ended', { timeout: 15_000 }, async () => {
+  const lost = probed({ parent: { type: 'idle' } });
+  const found = await lost.adapter.probe(lost.ctl);
+  assert.equal(found.verdict, 'ended');
+  assert.match(found.detail, /thread is idle, but the bridge never received the end of its turn/);
+  assert.deepEqual(lost.reads, ['parent', 'parent'], 'a thread found not active is read again before it counts');
+  assert.equal(lost.run.turnId, null, 'a follow-up starts a new turn instead of steering the dead one');
+  const gone = probed({});
+  (gone.adapter as any).runs.clear();
+  assert.equal((await gone.adapter.probe(gone.ctl)).verdict, 'ended');
+});
+
+test('Codex probe releases a parent held by a sub-agent whose end never arrived', { timeout: 15_000 }, async () => {
+  const held = { turn: { id: 'turn', status: 'completed' } };
+  const live = probed({ parent: { type: 'idle' }, busy: { type: 'active', activeFlags: [] }, lost: { type: 'notLoaded' } },
+    { turnId: null, held, busyChildren: new Map([['busy', 'b'], ['lost', 'l']]) });
+  assert.deepEqual(await live.adapter.probe(live.ctl), { verdict: 'working', detail: 'Codex reports 1 sub-agent(s) still working' });
+  assert.equal(live.job.state, 'running', 'a sub-agent that still works keeps the result held');
+  assert.match(live.notes[0], /sub-agent's turn ended without the bridge hearing of it/);
+  const last = probed({ lost: { type: 'idle' } }, { turnId: null, held, busyChildren: new Map([['lost', 'l']]) });
+  assert.equal((await last.adapter.probe(last.ctl)).detail, 'settled during the status check');
+  assert.deepEqual(last.ended, ['final answer'], 'the held completion goes ahead once no sub-agent holds it');
+});
+
+test('Codex probe answers made stale during the check change nothing', { timeout: 20_000 }, async () => {
+  // A sub-agent starts a new turn while its old one is read as idle.
+  const child = probed({ lost: { type: 'idle' } }, { turnId: null, held: { turn: { id: 'turn', status: 'completed' } }, busyChildren: new Map([['lost', 'old']]) });
+  const internals = child.adapter as any;
+  const request = internals.peer.request;
+  internals.peer.request = async (method: string, params: any) => {
+    const result = await request(method, params);
+    child.run.busyChildren.set('lost', 'new');
+    return result;
+  };
+  await child.adapter.probe(child.ctl);
+  assert.equal(child.run.busyChildren.get('lost'), 'new');
+  assert.deepEqual(child.ended, [], 'the held completion still waits for the new sub-agent turn');
+  // Activity while the parent is read again leaves the run as it was.
+  const parent = probed({ parent: { type: 'idle' } });
+  const parentRequest = (parent.adapter as any).peer.request;
+  let reads = 0;
+  (parent.adapter as any).peer.request = async (method: string, params: any) => {
+    if (++reads === 2) parent.job.activeAt = Date.now();
+    return parentRequest(method, params);
+  };
+  assert.equal((await parent.adapter.probe(parent.ctl)).detail, 'settled during the status check');
+  assert.equal(parent.run.turnId, 'turn');
+});
+
+test('the end of a turn the probe gave up on does not end a follow-up turn', { timeout: 15_000 }, async () => {
+  const h = probed({ parent: { type: 'idle' } });
+  assert.equal((await h.adapter.probe(h.ctl)).verdict, 'ended');
+  h.run.turnId = 'follow-up';
+  (h.adapter as any).onNotification('turn/completed', { threadId: 'parent', turn: { id: 'turn', status: 'completed' } });
+  assert.equal(h.run.turnId, 'follow-up');
+  assert.deepEqual(h.ended, []);
+});

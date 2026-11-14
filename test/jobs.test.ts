@@ -8,8 +8,8 @@ import { canonicalPath, resolveConfig } from '../plugin/bridge/config.ts';
 import type { Config } from '../plugin/bridge/config.ts';
 import { leadContext } from '../plugin/bridge/instructions.ts';
 import { Jobs, outOfScope } from '../plugin/bridge/jobs.ts';
-import type { Adapter, CrewEvent, Job, JobCtl, JobSpec, ReviewTarget } from '../plugin/bridge/jobs.ts';
-import { describe } from '../plugin/bridge/render.ts';
+import type { Adapter, CrewEvent, Job, JobCtl, JobSpec, Probe, ReviewTarget } from '../plugin/bridge/jobs.ts';
+import { describe, needsLead } from '../plugin/bridge/render.ts';
 import { tierModel } from '../plugin/bridge/tiers.ts';
 import { checkLine, runCheck } from '../plugin/bridge/check.ts';
 
@@ -2089,4 +2089,73 @@ test('on Windows, an empty worktree folder left by a held handle is removed when
   assert.ok(restored.notes.includes('Worktree leftovers removed after a delay.'));
   jobs.flush();
   fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
+});
+
+test('a stall wakes the lead only when the agent cannot vouch for the turn', async (t) => {
+  const verdicts: (Probe | Error | null)[] = [{ verdict: 'working', detail: 'still going' }, { verdict: 'unknown', detail: 'no answer' }, new Error('rpc closed'), { verdict: 'ended', detail: 'turn lost' }, null];
+  for (const verdict of verdicts) {
+    const h = harness(() => {});
+    t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); });
+    if (verdict) h.adapter.probe = async () => { if (verdict instanceof Error) throw verdict; return verdict; };
+    const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test', lead: 'lead' } as JobSpec);
+    job.activeAt = 0;
+    (h.jobs as any).checkStalls();
+    assert.equal(job.stalled, true, 'the board shows the stall at once');
+    await new Promise((resolve) => setImmediate(resolve));
+    const stalls = (job.news ?? []).filter((news) => news.kind === 'stalled');
+    const label = verdict instanceof Error ? 'error' : verdict?.verdict ?? 'no probe';
+    if (label === 'working') {
+      assert.equal(job.stalled, false, label);
+      assert.equal(stalls.length, 0, label);
+      assert.equal(needsLead(job), false);
+    } else if (label === 'ended') {
+      assert.equal(job.state, 'failed');
+      assert.equal(job.error?.message, 'turn lost');
+      assert.equal(stalls.length, 0, 'the failure is the news');
+    } else {
+      assert.equal(job.state, 'running', label);
+      assert.equal(stalls.length, 1, label);
+      assert.equal(stalls[0].acked, false, label);
+      assert.equal(needsLead(job), true, `${label}: wait returns to the lead`);
+      if (label === 'error') assert.match(stalls[0].reason, /status check failed: rpc closed/);
+      (h.jobs as any).checkStalls();
+      assert.equal((job.news ?? []).filter((news) => news.kind === 'stalled').length, 1, 'one wake per stall');
+    }
+  }
+});
+
+test('activity during a status check settles the stall without a wake', async (t) => {
+  const h = harness(() => {});
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); });
+  const answer = Promise.withResolvers<Probe>();
+  let ctl: JobCtl | undefined;
+  h.adapter.start = async (c) => { c.session('s'); ctl = c; };
+  h.adapter.probe = () => answer.promise;
+  const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test', lead: 'lead' } as JobSpec);
+  job.activeAt = 0;
+  (h.jobs as any).checkStalls();
+  ctl!.activity();
+  answer.resolve({ verdict: 'ended', detail: 'stale verdict' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(job.state, 'running');
+  assert.equal((job.news ?? []).length, 0);
+});
+
+test('a status check from an earlier stall cannot add news to a later one', async (t) => {
+  const h = harness(() => {});
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); });
+  const answers: PromiseWithResolvers<Probe>[] = [];
+  let ctl: JobCtl | undefined;
+  h.adapter.start = async (c) => { c.session('s'); ctl = c; };
+  h.adapter.probe = () => { const answer = Promise.withResolvers<Probe>(); answers.push(answer); return answer.promise; };
+  const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test', lead: 'lead' } as JobSpec);
+  job.activeAt = 0;
+  (h.jobs as any).checkStalls();
+  ctl!.activity();
+  job.activeAt = 1;
+  (h.jobs as any).checkStalls();
+  for (const answer of answers) answer.resolve({ verdict: 'unknown', detail: 'no answer' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(answers.length, 2);
+  assert.equal((job.news ?? []).filter((news) => news.kind === 'stalled').length, 1);
 });

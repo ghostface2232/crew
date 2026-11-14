@@ -701,7 +701,7 @@ async function handle(msg: any): Promise<void> {
           await api('POST', '/api/lead/ack', { session: SESSION, ack: args.ack }).then(({ ignored }) => {
             if (ignored?.length) ackNote = `\n\nack not applied for ${ignored.join(', ')}: unknown, or for news this session no longer owns.`;
           }, (err) => {
-            ackNote = `\n\nack not applied: ${String((err as Error).message ?? err).split('\n')[0]}. The news stays unacknowledged; read it with status.`;
+            ackNote = `\n\nack not applied: ${String((err as Error).message ?? err).split('\n')[0].replace(/\.$/, '')}. The news stays unacknowledged; read it with status.`;
           });
         }
         let text = clipped(await callTool(params.name, args, ctx), LEAD_TEXT_BYTES) + ackNote;

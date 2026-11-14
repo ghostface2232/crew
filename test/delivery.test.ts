@@ -26,7 +26,7 @@ function harness(t: TestContext) {
   const jobs = new Jobs(home, () => config, { codex: adapter, antigravity: adapter }, hooks);
   t.after(() => { jobs.flush(); fs.rmSync(home, { recursive: true, force: true }); });
   const create = (lead: string | undefined = 'lead') => jobs.create({ kind: 'delegate', cwd: home, task: 'test', ask: true, lead: lead === 'board' ? undefined : lead });
-  return { jobs, home, create, workers, delivery: jobs.delivery,
+  return { jobs, home, create, workers, adapter, delivery: jobs.delivery,
     restore: () => new Jobs(home, () => config, { codex: adapter, antigravity: adapter }, hooks) };
 }
 
@@ -84,12 +84,15 @@ test('watching leases are idempotent, bounded by hook lifetime, and fence old ge
   assert.ok(replacement, 'a dead watcher does not hold the lease forever');
 });
 
-test('stalls and progress are not news; completion remains offerable', async (t) => {
+test('a stall the agent vouches for and progress are not news; completion remains offerable', async (t) => {
   const h = harness(t);
+  h.adapter.probe = async () => ({ verdict: 'working', detail: 'still going' });
   const job = await h.create();
   job.activeAt = 0;
   (h.jobs as any).checkStalls();
   assert.equal(job.stalled, true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(job.stalled, false);
   assert.equal(job.newsSeq, 0);
   assert.equal(h.delivery.offer('lead', { automatic: true }), null);
   h.workers.get(job.id)!.progress('working again');

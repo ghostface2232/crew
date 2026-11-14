@@ -19,7 +19,8 @@ export function duration(ms: number): string {
 }
 
 /** Finished, waiting on the user, or asking a lead question not yet delivered. */
-export const needsLead = (job: JobView) => job.state !== 'running' || unread(job).some((news) => news.kind === 'question' && job.questions?.some((q) => q.id === news.question && q.answer === undefined));
+export const needsLead = (job: JobView) => job.state !== 'running' || unread(job).some((news) =>
+  (news.kind === 'question' && job.questions?.some((q) => q.id === news.question && q.answer === undefined)) || (news.kind === 'stalled' && job.stalled));
 
 /** `waitingHint` replaces the default advice on how to settle a waiting job. */
 export function describe(job: JobView, waitingHint?: string): string {
@@ -42,7 +43,9 @@ export function describe(job: JobView, waitingHint?: string): string {
   if (job.state === 'running') {
     lines.push(`now: ${job.phase}${job.stalled ? ' — no activity for a while, may be stuck' : ''}`);
     lines.push(job.stalled
-      ? `No recent activity was observed; this is not proof the worker stopped. Completion and questions are still watched.`
+      ? unread(job).some((news) => news.kind === 'stalled')
+        ? `The worker may be stuck, and nothing confirmed it is still working. Check its status again later, reply to steer it, or cancel it.`
+        : `No recent activity was observed; this is not proof the worker stopped. Completion and questions are still watched.`
       : 'Still working. You are woken when it ends or needs you; end your turn rather than waiting on it.');
   }
   if (job.state === 'waiting') {

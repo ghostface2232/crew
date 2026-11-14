@@ -169,14 +169,22 @@ export async function copyIncluded(root: string, wt: string, clone: (source: str
   return result;
 }
 
+/** cp -c failed only because clonefile refused; any other diagnostic, such as an unreadable source, is a real failure. */
+export function cloneRefused(stderr: string): boolean {
+  const lines = stderr.trim().split('\n').filter(Boolean);
+  return lines.length > 0 && lines.every((line) => /clonefile failed: (?:Operation not supported|Operation not permitted|Cross-device link|Function not implemented|Invalid argument)$/.test(line));
+}
+
 async function cloneDirectory(source: string, dest: string): Promise<void> {
   await fs.mkdir(path.dirname(dest), { recursive: true });
   if (process.platform === 'darwin') {
     // libuv's forced reflink returns ENOSYS on macOS, even on APFS. cp -c uses clonefile and never falls back.
+    // clonefile has also refused with EPERM for hours at a time on a volume where it otherwise works, while plain
+    // reads of the same files succeeded; sharing the directory read-only then still gives the worker its dependencies.
     await new Promise<void>((resolve, reject) => {
       execFile('/bin/cp', ['-cR', '-P', source, dest], { env: { ...process.env, LC_ALL: 'C' } }, (err, _stdout, stderr) => {
         if (!err) resolve();
-        else if (/clonefile failed: (?:Operation not supported|Cross-device link|Function not implemented|Invalid argument)/.test(stderr)) {
+        else if (cloneRefused(stderr)) {
           reject(Object.assign(new Error(stderr.trim()), { code: 'ENOTSUP' }));
         } else reject(err);
       });

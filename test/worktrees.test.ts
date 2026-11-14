@@ -8,7 +8,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { CodexAdapter } from '../plugin/bridge/adapters/codex.ts';
 import { resolveConfig } from '../plugin/bridge/config.ts';
-import { commitAll, copyIncluded, createWorktree, detachLinks, dirtyCount, removeDirectory, removeEmptyLeftover, removeWorktree } from '../plugin/bridge/git.ts';
+import { cloneRefused, commitAll, copyIncluded, createWorktree, detachLinks, dirtyCount, removeDirectory, removeEmptyLeftover, removeWorktree } from '../plugin/bridge/git.ts';
 import type { Job, JobCtl } from '../plugin/bridge/jobs.ts';
 import { buildPrompt } from '../plugin/bridge/prompts.ts';
 
@@ -380,4 +380,11 @@ test('removeEmptyLeftover refuses a worktrees directory that links elsewhere', a
   fs.symlinkSync(path.join(temp, 'outside'), path.join(home, 'worktrees'), 'junction');
   await assert.rejects(removeEmptyLeftover(path.join(home, 'worktrees', 'repo', 'cx-aaaaaa'), home), /outside the Crew worktree directory/);
   assert.ok(fs.existsSync(outside));
+});
+
+test('only a clone refusal, not another error mixed into it, falls back to sharing', () => {
+  assert.equal(cloneRefused('cp: deps/a: clonefile failed: Operation not permitted\ncp: deps/b: clonefile failed: Operation not supported\n'), true);
+  assert.equal(cloneRefused('cp: deps/a: clonefile failed: Operation not permitted\ncp: deps/b: Permission denied\n'), false);
+  assert.equal(cloneRefused('cp: /src/deps: Operation not permitted\n'), false);
+  assert.equal(cloneRefused(''), false);
 });

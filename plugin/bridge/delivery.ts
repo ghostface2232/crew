@@ -23,7 +23,7 @@ const KEEP_RECEIPTS = 500;
 export interface News {
   seq: number;
   eventSeq: number;
-  kind: 'done' | 'failed' | 'question' | 'waiting';
+  kind: 'done' | 'failed' | 'question' | 'waiting' | 'stalled';
   state: JobState;
   turn: number;
   reason: string;

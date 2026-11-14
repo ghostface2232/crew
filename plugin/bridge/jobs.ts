@@ -310,8 +310,13 @@ export interface Adapter {
   cancel(ctl: JobCtl): Promise<void>;
   /** Releases a finished session before removing its workspace. */
   release?(ctl: JobCtl): Promise<void>;
+  /** Asks the agent about a job that has been silent past the stall limit. Without it, a stall is reported unconfirmed. */
+  probe?(ctl: JobCtl): Promise<Probe>;
   shutdown(): void;
 }
+
+/** working: the agent confirms the turn is in progress. ended: it is certainly over, but no end was received. unknown: neither. */
+export interface Probe { verdict: 'working' | 'ended' | 'unknown'; detail: string }
 
 export interface JobsHooks {
   onEvent(event: CrewEvent): void;
@@ -1376,8 +1381,29 @@ export class Jobs {
       if (job.state !== 'running' || job.stalled || Date.now() - job.activeAt < limit) continue;
       job.stalled = true;
       const detail = `no activity for ${Math.round(limit / 60_000)} min (last: ${job.phase})`;
+      const adapter = this.adapters[job.agent];
+      if (!adapter.probe) {
+        this.event(job, 'stalled', detail, { kind: 'stalled', reason: detail });
+        continue;
+      }
+      // The board shows the stall at once; the lead is woken only if the agent cannot vouch for the turn.
       this.event(job, 'stalled', detail);
+      const since = job.activeAt;
+      adapter.probe(this.ctl(job)).then(
+        (found) => this.probed(job, since, detail, found),
+        (err) => this.probed(job, since, detail, { verdict: 'unknown', detail: `the status check failed: ${err?.message ?? err}` }));
     }
+  }
+
+  private probed(job: Job, since: number, detail: string, found: Probe): void {
+    // Activity, a decision request or a new turn since the check settled this stall; a later stall has its own check.
+    if (job.state !== 'running' || !job.stalled || job.activeAt !== since) return;
+    if (found.verdict === 'working') {
+      job.activeAt = Date.now();
+      job.stalled = false;
+      this.event(job, 'progress', found.detail);
+    } else if (found.verdict === 'ended') this.ctl(job).fail(found.detail);
+    else this.event(job, 'stalled', `${detail}; ${found.detail}`, { kind: 'stalled', reason: `${detail}; ${found.detail}` });
   }
 
   /** Appends to the event log. Also used for Claude session events, which have no job. */

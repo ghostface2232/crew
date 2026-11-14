@@ -6,7 +6,7 @@ import { tokenFile } from '../auth.ts';
 import { agentCommand, agentEnv, HOME, VERSION } from '../config.ts';
 import type { Config } from '../config.ts';
 import { isTerminal } from '../jobs.ts';
-import type { Adapter, Capabilities, Job, JobCtl } from '../jobs.ts';
+import type { Adapter, Capabilities, Job, JobCtl, Probe } from '../jobs.ts';
 import { PLUGIN_USER_APP } from '../prompts.ts';
 import { RPC_TIMEOUT_MS, RpcError, RpcPeer, RpcTimeoutError } from '../rpc.ts';
 
@@ -43,6 +43,8 @@ interface Run {
   busyChildren: Map<string, string | null>;
   /** The parent's turn/completed, held until busyChildren is empty so the result includes their edits. */
   held: any | null;
+  /** A turn the status check found over without its end; a turn/completed for it arriving later is ignored. */
+  lost: string | null;
 }
 
 export interface CodexLimits {
@@ -54,6 +56,8 @@ export interface CodexLimits {
 const CREW_TOOLS = ['ask_lead', 'lead_answers', 'siblings', 'search', 'recent_changes'];
 const LIMIT_ERRORS = ['usageLimitExceeded', 'rateLimitExceeded', 'sessionBudgetExceeded'];
 const IDLE_SHUTDOWN_MS = 10 * 60_000;
+const PROBE_TIMEOUT_MS = 15_000;
+const PROBE_CONFIRM_MS = 3_000;
 /**
  * The user's own Codex setup brings skills, plugins, and app connectors (design, music, mail) into every thread.
  * Few Crew jobs use them, and they cost each turn thousands of input tokens. A job that names plugins gets
@@ -181,6 +185,52 @@ export class CodexAdapter implements Adapter {
     if (!settled || children.some(([, turnId]) => !turnId)) run.ctl.note('Cancelled while sub-agents were still working; not every one confirmed it stopped. Check the worktree before reusing it.');
   }
 
+  /**
+   * Reads the thread's runtime status for a silent job. Sub-agents come first: one whose turn ended unheard would
+   * hold the parent's completion forever. A thread found not active is read again after a pause, so a completion
+   * still on its way is not mistaken for a lost one.
+   */
+  async probe(ctl: JobCtl): Promise<Probe> {
+    const threadId = ctl.job.sessionId;
+    const run = threadId ? this.runs.get(threadId) : undefined;
+    const peer = this.peer;
+    if (!threadId || !run) return { verdict: 'ended', detail: 'Codex holds no session for this job, so its end will never arrive. Reply to resume it, or cancel it.' };
+    if (!peer?.alive) return { verdict: 'ended', detail: 'codex app-server is no longer running. Reply to resume the job, or cancel it.' };
+    // Starting and interrupting a turn have their own timeouts.
+    if (run.awaitingTurn || run.interrupt) return { verdict: 'working', detail: 'Codex has yet to confirm the turn' };
+    const read = async (id: string) => (await peer.request('thread/read', { threadId: id, includeTurns: false }, PROBE_TIMEOUT_MS))?.thread?.status;
+    const settled = async (id: string) => {
+      const first = await read(id);
+      if (first?.type === 'active') return first;
+      await delay(PROBE_CONFIRM_MS, undefined, { ref: false });
+      return read(id);
+    };
+    // Any activity since the check began, including a sub-agent's new turn, makes its answers stale.
+    const since = ctl.job.activeAt;
+    const stale = () => ctl.job.activeAt !== since || ctl.job.state !== 'running';
+    for (const [child, childTurn] of [...run.busyChildren]) {
+      if ((await settled(child))?.type === 'active') continue;
+      if (stale() || !run.busyChildren.has(child) || run.busyChildren.get(child) !== childTurn) continue;
+      for (const key of run.items.keys()) if (key.startsWith(`${child}\0`)) run.items.delete(key);
+      ctl.note(`A sub-agent's turn ended without the bridge hearing of it; it no longer holds the job.`);
+      this.childSettled(run, child);
+    }
+    if (stale()) return { verdict: 'working', detail: 'settled during the status check' };
+    if (run.busyChildren.size) return { verdict: 'working', detail: `Codex reports ${run.busyChildren.size} sub-agent(s) still working` };
+    const turnId = run.turnId;
+    const status = await settled(threadId);
+    if (run.turnId !== turnId || stale()) return { verdict: 'working', detail: 'settled during the status check' };
+    if (status?.type === 'active') {
+      return status.activeFlags?.length
+        ? { verdict: 'unknown', detail: `Codex is ${status.activeFlags.join(', ')}, but the bridge never received that request` }
+        : { verdict: 'working', detail: 'Codex reports the turn still in progress' };
+    }
+    if (!status?.type) return { verdict: 'unknown', detail: 'Codex did not report the thread status' };
+    run.lost = turnId;
+    run.turnId = null;
+    return { verdict: 'ended', detail: `Codex's thread is ${status.type}, but the bridge never received the end of its turn. The work may be finished: reply to have it report, or check the worktree.` };
+  }
+
   async release(ctl: JobCtl): Promise<void> {
     const threadId = ctl.job.sessionId;
     const peer = this.peer;
@@ -286,7 +336,7 @@ export class CodexAdapter implements Adapter {
   }
 
   private openRun(ctl: JobCtl, threadId: string, pluginsEnabled = false): Run {
-    const run: Run = { ctl, pluginsEnabled, turnId: null, awaitingTurn: false, interrupt: null, message: '', pending: [], crewCalls: new Set(), items: new Map(), busyChildren: new Map(), held: null };
+    const run: Run = { ctl, pluginsEnabled, turnId: null, awaitingTurn: false, interrupt: null, message: '', pending: [], crewCalls: new Set(), items: new Map(), busyChildren: new Map(), held: null, lost: null };
     this.runs.set(threadId, run);
     return run;
   }
@@ -470,6 +520,8 @@ export class CodexAdapter implements Adapter {
         if (p.willRetry) ctl.progress(`retrying: ${p.error.message}`);
         break;
       case 'turn/completed': {
+        // The end of a turn the status check gave up on, or of any turn but the current one, must not end a later turn.
+        if (p.turn?.id && (p.turn.id === run.lost || (run.turnId && p.turn.id !== run.turnId))) break;
         if (run.busyChildren.size && p.turn?.status === 'completed' && !run.interrupt) {
           // Collecting the result now would miss what a sub-agent still writes.
           run.turnId = null;

@@ -29,7 +29,7 @@ function describeTarget(target: ReviewTarget, commands: boolean): string {
 }
 
 /** Role text goes in `instructions`; the concrete assignment goes in `prompt`. Each adapter delivers both its own way. */
-export function buildPrompt(spec: JobSpec, worktree: Worktree | null, diffFile: string | null = null, shared = '', scratch?: string, commands = true, skills: Skill[] = []): { prompt: string; instructions: string } {
+export function buildPrompt(spec: JobSpec, worktree: Worktree | null, diffFile: string | null = null, shared = '', scratch?: string, commands = true, skills: Skill[] = [], evidence?: string): { prompt: string; instructions: string } {
   const assigned = assignment(spec, worktree, diffFile);
   // A worker that runs commands shares the machine with the user and the other agents; one that cannot start
   // anything has no use for the rules. These parts go with the instructions, not the prompt: Codex's built-in
@@ -38,6 +38,7 @@ export function buildPrompt(spec: JobSpec, worktree: Worktree | null, diffFile: 
   if (spec.runsApp) parts.push(spec.kind === 'review' ? `${RUNS_APP}\n${SNAPSHOT}` : RUNS_APP);
   else if (spec.kind === 'review') parts.push(diffFile ? READ_ONLY_REVIEW : STATIC_REVIEW);
   if (scratch) parts.push(scratchNote(scratch, Boolean(spec.ask) || (spec.kind === 'review' && !spec.runsApp)));
+  if (evidence && commands && spec.kind !== 'polish') parts.push(evidenceNote(evidence));
   if (worktree?.linked?.length) parts.push(`# Shared dependencies\nThese directories link to the main checkout and are shared read-only: ${worktree.linked.map((dir) => `\`${dir}\``).join(', ')}. Do not install into them or delete them. Point tool caches at the temp directory.`);
   parts.push('# Refused actions\nIf an action is refused, report the exact command or tool and its full input, and the exact message you received. State what you could not verify and whether you can do it another way. Do not summarize it as only "blocked by policy".');
   if (spec.exclusive) parts.push(ALONE);
@@ -61,6 +62,8 @@ const LEAD_QUESTIONS = '# Questions for the lead\nUse crew.ask_lead for a decisi
  * file is still a check that ends by itself.
  */
 const scratchNote = (dir: string, readOnly: boolean) => readOnly ? `# What you can run\nYour sandbox is read-only except for one directory of your own: \`${dir}\`. TMPDIR, TMP and TEMP point there. Use it for anything a check has to write: temporary files, caches, a throwaway copy or clone of the repository to try a change or a git operation in. It is deleted when you finish, so nothing in it is a result. Everything else can be read and not written, apart from a few of the bridge's own files, which are closed to you. The network is closed, and nothing can listen on a port. The directory does not carry over to a follow-up turn, so put the commands you ran and what they showed in your report. If a check needs more than that, do not work around it: list it under what you could not verify.` : `# Temporary files\nYour temp directory for this turn is \`${dir}\`. TMPDIR, TMP and TEMP point there. Use it for temporary files and tool caches. It is deleted when the turn ends; a follow-up gets a fresh directory. Record checks in your report.`;
+/** Unlike scratch, kept with the job: what the worker saw is what the lead and the user get to see. */
+const evidenceNote = (dir: string) => `# Evidence\nSave screenshots and recordings that show your result, or what you could not get working, directly in \`${dir}\` as PNG, JPEG, GIF, WebP, WebM, or MP4, with names that say what they show. Unlike temporary files, they are kept with the job: the lead, reviewers, and the user see them beside your report. Name each one in your report. To show one with a question, pass its name in ask_lead's attachments.`;
 /** Names and paths only: the worker reads what it needs, as it would a skill its own agent listed. */
 const skillsNote = (skills: Skill[]) => `# Skills for this task\nThe lead picked these skills as useful for this task. Read each SKILL.md before you start and follow it where it applies, within your role; files it mentions are relative to its directory.\n${skills.map((s) => `- ${s.name}${s.description ? `: ${s.description}` : ''} (\`${s.file}\`)`).join('\n')}`;
 /**

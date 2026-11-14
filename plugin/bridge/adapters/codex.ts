@@ -215,10 +215,12 @@ export class CodexAdapter implements Adapter {
     // Each profile also denies the daemon's token file. A job with the network open could otherwise read it and
     // call the daemon as the user. Plugin tools also act outside the sandbox, so plugin jobs need the deny too.
     const secret = { [tokenFile(HOME)]: 'deny' };
+    // Evidence outlives the turn, so it is a directory of its own, writable in every profile.
+    const evidence = job.evidenceDir ? { [job.evidenceDir]: 'write' } : {};
     const scratch = job.sandbox === 'read-only' && job.scratch
       ? {
           default_permissions: 'crew_read_only',
-          permissions: { crew_read_only: { filesystem: { ':root': 'read', [job.scratch]: 'write', ...secret } } },
+          permissions: { crew_read_only: { filesystem: { ':root': 'read', [job.scratch]: 'write', ...evidence, ...secret } } },
         }
       : null;
     // Shared targets need explicit read rules even when they live under a writable temp root.
@@ -235,7 +237,7 @@ export class CodexAdapter implements Adapter {
     const app = (job.runsApp || lean.features.plugins || Object.keys(shared).length > 0) && job.sandbox === 'workspace-write'
       ? {
           default_permissions: profile,
-          permissions: { [profile]: { filesystem: { ':root': 'read', [job.cwd]: 'write', ':tmpdir': 'write', ':slash_tmp': 'write', ...(job.scratch ? { [job.scratch]: 'write' } : {}), ...shared, ...secret }, network: { enabled: Boolean(job.runsApp) } } },
+          permissions: { [profile]: { filesystem: { ':root': 'read', [job.cwd]: 'write', ':tmpdir': 'write', ':slash_tmp': 'write', ...(job.scratch ? { [job.scratch]: 'write' } : {}), ...evidence, ...shared, ...secret }, network: { enabled: Boolean(job.runsApp) } } },
         }
       : null;
     return {
@@ -247,7 +249,7 @@ export class CodexAdapter implements Adapter {
       config: { ...(app ?? scratch),
       ...(job.scratch ? {
         shell_environment_policy: { set: { TMPDIR: job.scratch, TMP: job.scratch, TEMP: job.scratch } },
-        ...(!app && !scratch ? { sandbox_workspace_write: { writable_roots: [job.scratch] } } : {}),
+        ...(!app && !scratch ? { sandbox_workspace_write: { writable_roots: [job.scratch, ...Object.keys(evidence)] } } : {}),
       } : {}), // Its three tools only talk to the bridge. Without this a job with approval policy "never" (a review, a question)
       // is refused the call outright, and any other job would stop to ask.
       mcp_servers: { crew: { ...ctl.mcp, default_tools_approval_mode: 'approve' } },

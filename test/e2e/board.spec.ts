@@ -221,6 +221,22 @@ test('detail panel cancels, follows up, and escapes task text', async ({ page, r
   expect(calls.some((call: { route: string }) => call.route.endsWith('/cancel'))).toBe(true);
 });
 
+test('the detail panel shows the worker\'s evidence and the lead\'s attachments', async ({ page, request }) => {
+  const data = fixture();
+  data.jobs[0].evidence = [
+    { file: 'narrow.png', path: '/x/narrow.png', turn: 1, from: 'worker', bytes: 10, modified: 1 },
+    { file: 'lead-1-design.png', path: '/x/lead-1-design.png', turn: 1, from: 'lead', bytes: 10, modified: 1 },
+  ];
+  await request.post('/__push', { data: { type: 'state', data } });
+  await page.locator(`button[data-job="${data.jobs[0].id}"]`).click();
+  const section = page.getByRole('dialog').getByRole('region', { name: 'Evidence' });
+  const shot = section.getByRole('img', { name: 'narrow.png' });
+  await expect(shot).toBeVisible();
+  expect(await shot.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true);
+  await expect(section.getByText('Turn 1 · narrow.png')).toBeVisible();
+  await expect(section.getByText('Attached by the lead · lead-1-design.png')).toBeVisible();
+});
+
 test('project filtering keeps global requests visible and New Job follows roles', async ({ page, request }) => {
   await page.getByRole('navigation').getByRole('button', { name: 'Other', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Other', exact: true, level: 1 })).toBeVisible();

@@ -5,6 +5,8 @@ import { canonicalPath, effectiveRole, PORT, runsCommands, WORKERS } from './con
 import type { Config, Role, WorkerAgent } from './config.ts';
 import { carryUncommitted, changesSince, commitAll, commitChanges, copyIncluded, createWorktree, currentBranch, dirtyCount, git, mergeInto, isInside, projectRoot, realpath, removeDirectory, removeEmptyLeftover, removeWorktree, repoRoot, revertCommit, revertsSince, reviewDiff, WorktreeCleanupError } from './git.ts';
 import { collectGarbage } from './gc.ts';
+import { attachEvidence, attachmentsNote, checkAttachments, collectEvidence, detachEvidence, questionAttachments } from './evidence.ts';
+import type { Evidence } from './evidence.ts';
 import type { Worktree } from './git.ts';
 import { sharedInstructions } from './instructions.ts';
 import { buildPrompt } from './prompts.ts';
@@ -70,6 +72,8 @@ export interface JobSpec {
   skills?: string[];
   /** Additional Codex plugin names beyond the configured defaults. */
   plugins?: string[];
+  /** Images or recordings the lead attaches to the task; copied into the job's evidence directory. */
+  attachments?: string[];
 }
 
 /** One worker turn that changed files, as its own commit on the job branch. */
@@ -95,6 +99,8 @@ export interface LeadQuestion {
   at: number;
   answer?: string;
   answeredAt?: number;
+  /** Evidence files the worker showed with the question. */
+  attachments?: string[];
 }
 
 export interface Job {
@@ -125,6 +131,9 @@ export interface Job {
   requestedPlugins?: string[];
   /** Per-turn Codex directory for temporary files, caches, and throwaway clones. */
   scratch?: string;
+  /** Kept with the job: screenshots and recordings from the worker, and the lead's attachments. */
+  evidenceDir?: string;
+  evidence?: Evidence[];
   /** The commit the job's branch started from, kept once a sync has moved the worktree's base past it. */
   roundsBase?: string;
   /** Turns that changed files, oldest first; absent on jobs without a worktree and on jobs saved before rounds existed. */
@@ -372,6 +381,10 @@ export class Jobs {
       throw new Error(spec.ask ? 'An ask job is read-only and cannot use plugins. Drop plugins.' : 'A read-only review cannot use plugins. Add runs_app, or drop plugins.');
     }
     if (spec.plugins?.length && spec.kind === 'polish') throw new Error('A polish job cannot use plugins: an editor only changes wording. Drop plugins.');
+    const attachments = checkAttachments(spec.attachments);
+    if (attachments.length && spec.review?.mode === 'standard' && agent === 'codex') {
+      throw new Error('Codex\'s standard review is sent no prompt, so it would never see the attachments. Use the adversarial mode, or drop attachments.');
+    }
 
     const id = `${WORKERS[agent].idPrefix}-${randomBytes(3).toString('hex')}`;
     const repo = await repoRoot(spec.cwd);
@@ -421,6 +434,10 @@ export class Jobs {
     if (spec.review?.mode === 'standard' && agent !== 'codex') notes.push(`The standard review mode is Codex's own; ${WORKERS[agent].name} ran the adversarial review instead.`);
     const scratch = agent === 'codex' ? this.scratchDir(id) : undefined;
     if (scratch) fs.mkdirSync(scratch, { recursive: true });
+    const evidenceDir = this.evidenceDir(id);
+    fs.mkdirSync(evidenceDir, { recursive: true });
+    const attached = attachEvidence(evidenceDir, attachments, 1);
+    if (attached.length) spec.task = `${spec.task ?? ''}${attachmentsNote(attached)}`;
 
     // Diffs name files relative to the repo root, so scope targets must be too.
     const targetRoot = repo ?? spec.cwd;
@@ -449,7 +466,9 @@ export class Jobs {
       worktree,
       sandbox: spec.ask || (spec.kind === 'review' && !spec.runsApp) ? 'read-only' : 'workspace-write',
       scratch,
-      ...buildPrompt(spec, worktree, diffFile, shared.text, scratch, runsCommands(agent, spec), skills),
+      evidenceDir,
+      evidence: attached.length ? attached : undefined,
+      ...buildPrompt(spec, worktree, diffFile, shared.text, scratch, runsCommands(agent, spec), skills, evidenceDir),
       shared: shared.sources,
       // Only Codex has a built-in review mode; other agents get the prompted review.
       nativeReview: spec.kind === 'review' && agent === 'codex' && spec.review?.mode === 'standard' ? spec.review.target : null,
@@ -482,7 +501,7 @@ export class Jobs {
     return job;
   }
 
-  async reply(id: string, input: { message?: string; decision?: 'approve' | 'deny'; request_id?: string; approved_by_user?: string; sync?: boolean | string }): Promise<Job> {
+  async reply(id: string, input: { message?: string; decision?: 'approve' | 'deny'; request_id?: string; approved_by_user?: string; sync?: boolean | string; attachments?: string[] }): Promise<Job> {
     if (this.collecting) throw new Error('Crew gc is running. Try again when it finishes.');
     const job = this.get(id);
     if (job.cleanupPending) throw new Error(`Job ${id} has incomplete cleanup. Run crew gc to resolve it before continuing.`);
@@ -493,6 +512,7 @@ export class Jobs {
     if (this.finalizing.has(id)) throw new Error(`Job ${id} is collecting its result. Wait for it to finish.`);
     const ctl = this.ctl(job);
     const adapter = this.adapters[job.agent];
+    const attachments = checkAttachments(input.attachments);
     if (input.request_id !== undefined && input.request_id !== job.waiting?.id) {
       throw new Error('That request is no longer pending. Check the current job before answering.');
     }
@@ -505,7 +525,7 @@ export class Jobs {
       // A message alone must never count as approval: the lead may only be asking the worker why.
       if (job.waiting.type === 'approval' && !input.decision) throw new Error(`Job ${id} is waiting for approval (${job.waiting.reason}). Pass decision "approve" or "deny".`);
       if (!input.decision && !input.message?.trim()) throw new Error(`Job ${id} asked a question (${job.waiting.reason}). Pass a message with the answer, or a decision.`);
-      await adapter.answer(ctl, input.decision !== 'deny', input.message);
+      await this.sendWith(job, attachments, (note) => adapter.answer(ctl, input.decision !== 'deny', note ? `${input.message ?? ''}${note}` : input.message));
       return job;
     }
     if (input.decision !== undefined) throw new Error(`Job ${id} is not waiting for a decision.`);
@@ -522,7 +542,8 @@ export class Jobs {
       // A merge under a worker that is in the middle of editing would pull the tree out from under it.
       if (input.sync) throw new Error(`Job ${id} is still ${job.state}; sync brings a finished job up to date before its next turn. Wait for the turn to end, or send the message without sync.`);
       // Steering a live turn: a rejected message is the caller's problem, not a reason to fail the job.
-      await adapter.reply(ctl, input.message);
+      const message = input.message;
+      await this.sendWith(job, attachments, (note) => adapter.reply(ctl, message + note));
       return job;
     }
     // The worker started from an older commit. Merging the lead's branch in first gives it what was committed since,
@@ -576,7 +597,7 @@ export class Jobs {
     const what = !retry ? input.message.split('\n')[0].slice(0, 80) : job.asksUser ? 'refused action retried; the user is asked about each request' : 'refused action retried with the user\'s approval';
     this.event(job, 'started', `follow-up: ${what}`);
     try {
-      let message = input.message + syncWarning;
+      let message = this.attach(job, input.message, attachments, job.turns) + syncWarning;
       if (job.agent === 'codex') {
         job.scratch = this.scratchDir(id);
         fs.mkdirSync(job.scratch, { recursive: true });
@@ -880,14 +901,17 @@ export class Jobs {
     this.flush();
   }
 
-  ask(id: string, text: string, blocks?: string): LeadQuestion {
+  ask(id: string, text: string, blocks?: string, attachments?: string[]): LeadQuestion {
     const job = this.get(id);
     if (isTerminal(job)) throw new Error(`Job ${id} is ${job.state}; questions require a running or waiting job.`);
     if (typeof text !== 'string' || !text.trim()) throw new Error('Question text must be a non-empty string.');
     if (text.length > 4000) throw new Error('Question text must be at most 4000 characters.');
     if (blocks !== undefined && typeof blocks !== 'string') throw new Error('blocks must be a string.');
     if ((job.questions?.length ?? 0) >= 20) throw new Error(`Job ${id} already has 20 lead questions.`);
-    const question: LeadQuestion = { id: randomUUID(), text, ...(blocks === undefined ? {} : { blocks }), at: Date.now() };
+    const files = job.evidenceDir ? questionAttachments(job.evidenceDir, attachments) : [];
+    if (attachments?.length && !job.evidenceDir) throw new Error(`Job ${id} has no evidence directory to attach from.`);
+    if (files.length) job.evidence = collectEvidence(job.evidenceDir!, job.evidence ?? [], job.turns);
+    const question: LeadQuestion = { id: randomUUID(), text, ...(blocks === undefined ? {} : { blocks }), ...(files.length ? { attachments: files } : {}), at: Date.now() };
     (job.questions ??= []).push(question);
     job.activeAt = Date.now();
     job.questionSeq = this.seq + 1;
@@ -895,13 +919,14 @@ export class Jobs {
     return question;
   }
 
-  answer(id: string, questionId: string, text: string): Job {
+  answer(id: string, questionId: string, text: string, attachments?: string[]): Job {
     const job = this.get(id);
     const question = job.questions?.find((q) => q.id === questionId);
     if (!question) throw new Error(`No lead question with id "${questionId}" on job ${id}.`);
     if (question.answer !== undefined) throw new Error(`Lead question ${questionId} is already answered.`);
     if (typeof text !== 'string' || !text.trim()) throw new Error('Answer must be a non-empty string.');
-    question.answer = text;
+    const files = checkAttachments(attachments);
+    question.answer = this.attach(job, text, files, job.turns);
     question.answeredAt = Date.now();
     this.event(job, 'progress', `lead answered ${questionId}`);
     return job;
@@ -1137,6 +1162,35 @@ export class Jobs {
     return path.join(this.home, 'scratch', id);
   }
 
+  private evidenceDir(id: string): string {
+    return path.join(this.home, 'evidence', id);
+  }
+
+  /** Copies checked attachments next to the worker's evidence and adds their paths to the message. */
+  private attach(job: Job, message: string, sources: string[], turn: number): string {
+    return message + attachmentsNote(this.addAttachments(job, sources, turn));
+  }
+
+  private addAttachments(job: Job, sources: string[], turn: number) {
+    if (!sources.length) return [];
+    job.evidenceDir ??= this.evidenceDir(job.id);
+    const added = attachEvidence(job.evidenceDir, sources, turn);
+    job.evidence = [...(job.evidence ?? []), ...added];
+    return added;
+  }
+
+  /** For a message into a live turn, which the worker can refuse: the attachments go only if the message does. */
+  private async sendWith(job: Job, sources: string[], send: (note: string) => Promise<void>): Promise<void> {
+    const added = this.addAttachments(job, sources, job.turns);
+    try {
+      await send(attachmentsNote(added));
+    } catch (err) {
+      detachEvidence(added);
+      job.evidence = job.evidence?.filter((item) => !added.includes(item));
+      throw err;
+    }
+  }
+
   /**
    * Moved aside in one step and deleted afterwards: a follow-up turn that starts at once makes a fresh
    * directory, and the slow removal of a large one can never reach it.
@@ -1170,6 +1224,7 @@ export class Jobs {
       fs.rm(this.diffFile(job.id, job.turns), { force: true }, () => {});
       this.dropSnapshot(job);
     }
+    if (isTerminal(job) && job.evidenceDir) job.evidence = collectEvidence(job.evidenceDir, job.evidence ?? [], job.turns);
     // Scratch is for the turn: nothing in it is a result. The path is derived, never read from the job, before it is removed.
     if (isTerminal(job) && job.scratch) this.dropScratch(job.id);
     this.changed(job);
@@ -1221,12 +1276,19 @@ export class Jobs {
         job.phase = 'failed';
         const next = job.sessionId ? 'Use reply to continue the same session.' : 'Start a new job.';
         job.error = { message: `The bridge restarted while this job was running. ${next}`, limit: false };
+        // The interrupted turn never reached its end, where evidence is otherwise collected.
+        if (job.evidenceDir) job.evidence = collectEvidence(job.evidenceDir, job.evidence ?? [], job.turns);
       }
       this.jobs.set(job.id, job);
       if (job.kind === 'review') this.dropSnapshot(job);
     }
     // No turn survives a restart, so neither does any scratch.
     this.removeScratch(path.join(this.home, 'scratch'));
+    // Evidence lives as long as its job's record.
+    const evidence = path.join(this.home, 'evidence');
+    for (const id of fs.existsSync(evidence) ? fs.readdirSync(evidence) : []) {
+      if (!this.jobs.has(id)) this.removeScratch(path.join(evidence, id));
+    }
   }
 }
 

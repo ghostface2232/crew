@@ -93,6 +93,14 @@ struct JobDetailView: View {
                 }
             }
         }
+        if let evidence = job.evidence, !evidence.isEmpty {
+            detailSection("Evidence", symbol: "photo.on.rectangle") {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 132), spacing: 12, alignment: .top)], alignment: .leading, spacing: 12) {
+                    // Newest turn first, as on the web board.
+                    ForEach(evidence.sorted { $0.turn > $1.turn }, id: \.file) { item in EvidenceTile(item: item) }
+                }
+            }
+        }
         if let rounds = job.rounds, !rounds.isEmpty {
             detailSection("Rounds", symbol: "arrow.counterclockwise") {
                 ForEach(rounds.sorted { $0.turn < $1.turn }, id: \.turn) { round in
@@ -179,5 +187,48 @@ struct JobDetailView: View {
             Label(title, systemImage: symbol).font(Typeface.subheadline)
             content()
         }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// Opens in the default viewer on click; a recording shows its name, since a still frame would need decoding it.
+private struct EvidenceTile: View {
+    let item: Evidence
+    @State private var thumbnail: NSImage?
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button { NSWorkspace.shared.open(URL(fileURLWithPath: item.path)) } label: {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.quaternary.opacity(0.5))
+                    if let thumbnail {
+                        Image(nsImage: thumbnail).resizable().scaledToFit().padding(1)
+                    } else {
+                        Image(systemName: item.isVideo ? "play.rectangle" : "photo").font(.title2).foregroundStyle(.secondary)
+                    }
+                }
+                .aspectRatio(4 / 3, contentMode: .fit)
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.separator))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .help(item.path)
+            Text("\(item.from == "lead" ? "Attached by the lead" : "Turn \(item.turn)") · \(item.file)")
+                .font(Typeface.caption).foregroundStyle(.secondary).textSelection(.enabled)
+        }
+        // Decoded once per version, off the main thread and at tile size, not on every refresh of a live job.
+        .task(id: "\(item.path)|\(item.modified)") {
+            guard !item.isVideo else { return }
+            let path = item.path
+            thumbnail = await Task.detached { Self.thumbnail(path) }.value
+        }
+    }
+    private nonisolated static func thumbnail(_ path: String) -> NSImage? {
+        guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil),
+              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                  kCGImageSourceCreateThumbnailFromImageAlways: true,
+                  kCGImageSourceThumbnailMaxPixelSize: 600,
+                  kCGImageSourceCreateThumbnailWithTransform: true,
+              ] as CFDictionary)
+        else { return nil }
+        return NSImage(cgImage: image, size: .zero)
     }
 }

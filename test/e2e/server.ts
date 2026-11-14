@@ -123,6 +123,14 @@ const server = http.createServer(async (req, res) => {
     send('job', created);
     return json(created);
   }
+  const evidence = /^\/api\/jobs\/([^/]+)\/evidence\/([^/]+)$/.exec(url.pathname);
+  if (evidence) {
+    const item = state.jobs.find((found) => found.id === evidence[1])?.evidence?.find((entry) => entry.file === decodeURIComponent(evidence[2]));
+    if (!item) return json({ error: 'not found' }, 404);
+    res.writeHead(200, { 'content-type': 'image/png' });
+    fs.createReadStream(path.resolve('test/e2e/board.spec.ts-snapshots/board-390-darwin.png')).pipe(res);
+    return;
+  }
   const match = /^\/api\/jobs\/([^/]+)(?:\/(\w+))?$/.exec(url.pathname);
   if (match) {
     const found = state.jobs.find((job) => job.id === match[1]);

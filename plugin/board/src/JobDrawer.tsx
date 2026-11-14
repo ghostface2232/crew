@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Check, CircleStop, FileText, GitBranch, MessageSquare, NotebookText, RotateCcw, ShieldAlert, TriangleAlert, Undo2, Zap } from 'lucide-react';
+import { Check, CircleStop, FileText, GitBranch, Images, MessageSquare, NotebookText, RotateCcw, ShieldAlert, TriangleAlert, Undo2, Zap } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { BoardJob, CrewEvent, Snapshot } from './types.ts';
@@ -55,6 +55,36 @@ function RoundRow({ job, round }: { job: BoardJob; round: NonNullable<BoardJob['
       <pre>{round.stat || 'No files changed'}</pre>
       <ActionStatus actionKey={key} />
     </div>
+  );
+}
+
+/** What the worker saw, newest turn first, and what the lead attached. */
+function EvidenceSection({ job }: { job: BoardJob }) {
+  const items = (job.evidence ?? []).toSorted((a, b) => b.turn - a.turn);
+  if (!items.length) return null;
+  return (
+    <Section title="Evidence" icon={Images}>
+      <div className="evidence">
+        {items.map((item) => {
+          // The version keeps a cached copy from standing in for a file rewritten under the same name.
+          const src = `/api/jobs/${encodeURIComponent(job.id)}/evidence/${encodeURIComponent(item.file)}?v=${item.modified}`;
+          return (
+            <figure key={item.file}>
+              {item.file.match(/\.(webm|mp4)$/i) ? (
+                <video src={src} controls preload="metadata" />
+              ) : (
+                <a href={src} target="_blank" rel="noreferrer">
+                  <img src={src} alt={item.file} loading="lazy" />
+                </a>
+              )}
+              <figcaption className="caption secondary selectable">
+                {item.from === 'lead' ? 'Attached by the lead' : `Turn ${item.turn}`} · {item.file}
+              </figcaption>
+            </figure>
+          );
+        })}
+      </div>
+    </Section>
   );
 }
 
@@ -201,6 +231,7 @@ export function JobDrawer({ id, state, close }: { id: string; state: Snapshot; c
                 )}
               </Section>
             )}
+            <EvidenceSection job={job} />
             {!!job.rounds?.length && (
               <Section title="Rounds" icon={RotateCcw}>
                 {job.rounds.toSorted((a, b) => a.turn - b.turn).map((round) => (

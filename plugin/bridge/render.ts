@@ -31,6 +31,8 @@ export function describe(job: JobView, waitingHint?: string): string {
     if (question.answer !== undefined) continue;
     lines.push(`ASKS YOU: [${question.id}] ${question.text}`);
     if (question.blocks) lines.push(`Blocks: ${question.blocks}`);
+    const shown = (question.attachments ?? []).map((file) => job.evidence?.find((item) => item.file === file)?.path ?? file);
+    if (shown.length) lines.push(`Attached: ${shown.join(', ')}`);
     lines.push(`Call answer with job_id "${job.id}", question_id "${question.id}" and your answer, then end your turn; you are woken when it ends or needs you.`);
   }
 
@@ -84,6 +86,13 @@ export function describe(job: JobView, waitingHint?: string): string {
         : 'If the user\'s request in this conversation covers the refused action, call reply with approved_by_user quoting their words, without asking them again; the reviewer then judges it once more. If it does not, tell the user what was refused and let them decide.');
     }
     lines.push('Do it another way within the job permissions, or report the exact action and message as not verified.');
+  }
+  // Paths, so a reader without the images (the wake hook, the CLI) can still open them.
+  const evidence = (job.evidence ?? []).filter((item) => item.from === 'worker');
+  const latest = evidence.filter((item) => item.turn === job.turns);
+  if (evidence.length) {
+    lines.push(`evidence: ${latest.length ? `${latest.length} file(s) from turn ${job.turns}` : 'none from this turn'}${evidence.length > latest.length ? `, ${evidence.length - latest.length} earlier` : ''}`);
+    for (const item of latest) lines.push(`  ${item.path}`);
   }
   if (job.sessionId) lines.push(`session: ${resumeCommand(job)}`);
   // While a follow-up turn runs, the report is the previous turn's, which the lead has already read.

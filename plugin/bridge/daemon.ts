@@ -11,6 +11,7 @@ import { ClaudeSessions } from './claude.ts';
 import type { ClaudeSession } from './claude.ts';
 import { canonicalPath, HOME, installed, loadConfig, PLUGIN_ROOT, PORT, VERSION, WORKERS } from './config.ts';
 import type { Config } from './config.ts';
+import { evidenceType, openEvidence } from './evidence.ts';
 import { projectRoot } from './git.ts';
 import { isTerminal, Jobs } from './jobs.ts';
 import { Missions, STAGES } from './missions.ts';
@@ -369,9 +370,9 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     const [, id, questionId] = questionRoute;
     if (method === 'POST') {
       const body = await readJson(req);
-      if (questionId) return view(jobs.answer(id, questionId, body?.answer));
+      if (questionId) return view(jobs.answer(id, questionId, body?.answer, body?.attachments));
       if (!jobs.workerAuthorized(id, body?.token)) throw new HttpError(403, 'forbidden worker token');
-      return jobs.ask(id, body.text, body.blocks);
+      return jobs.ask(id, body.text, body.blocks, body.attachments);
     }
     if (method === 'GET' && !questionId) {
       if (!jobs.workerAuthorized(id, url.searchParams.get('token'))) throw new HttpError(403, 'forbidden worker token');
@@ -383,6 +384,47 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     const id = siblingsRoute[1];
     if (!jobs.workerAuthorized(id, url.searchParams.get('token'))) throw new HttpError(403, 'forbidden worker token');
     return jobs.siblings(id);
+  }
+
+  const evidenceRoute = /^\/api\/jobs\/([\w-]+)\/evidence\/([^/]+)$/.exec(pathname);
+  if (evidenceRoute && method === 'GET') {
+    // Only files the job recorded are served, never a path taken from the request.
+    const item = jobs.get(evidenceRoute[1]).evidence?.find((entry) => entry.file === decodeURIComponent(evidenceRoute[2]));
+    const type = item && evidenceType(item.file);
+    const opened = item && type ? openEvidence(item) : null;
+    if (!opened) throw new HttpError(404, 'not found');
+    // One byte range, which Safari asks for before it plays a video.
+    const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? '');
+    let start = 0;
+    let end = opened.size - 1;
+    if (range && (range[1] || range[2])) {
+      start = range[1] ? Number(range[1]) : Math.max(0, opened.size - Number(range[2]));
+      end = range[1] && range[2] ? Math.min(Number(range[2]), end) : end;
+      if (start > end) {
+        fs.closeSync(opened.fd);
+        res.writeHead(416, { 'content-range': `bytes */${opened.size}` });
+        res.end();
+        return undefined;
+      }
+    }
+    const partial = Boolean(range && (range[1] || range[2]));
+    res.writeHead(partial ? 206 : 200, {
+      'content-type': type!,
+      'content-length': String(end - start + 1),
+      'accept-ranges': 'bytes',
+      ...(partial ? { 'content-range': `bytes ${start}-${end}/${opened.size}` } : {}),
+      'x-content-type-options': 'nosniff',
+      'cache-control': 'private, max-age=3600',
+    });
+    if (end < start) {
+      // An empty file: a stream cannot cover no bytes.
+      fs.closeSync(opened.fd);
+      res.end();
+      return undefined;
+    }
+    // The descriptor was opened without following links, so a file swapped for one after it was recorded is not read.
+    fs.createReadStream('', { fd: opened.fd, start, end }).on('error', () => res.destroy()).pipe(res);
+    return undefined;
   }
 
   const roundRoute = /^\/api\/jobs\/([\w-]+)\/rounds\/(\d+)$/.exec(pathname);

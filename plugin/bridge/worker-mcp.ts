@@ -12,7 +12,11 @@ const TOOLS = [
     description: 'Ask the lead a question and keep working. At most 20 questions per job.',
     inputSchema: {
       type: 'object',
-      properties: { question: { type: 'string', maxLength: 4000 }, blocks: { type: 'string' } },
+      properties: {
+        question: { type: 'string', maxLength: 4000 },
+        blocks: { type: 'string' },
+        attachments: { type: 'array', items: { type: 'string' }, maxItems: 10, description: 'Names of screenshots or recordings in your evidence directory to show the lead with the question.' },
+      },
       required: ['question'],
     },
   },
@@ -82,7 +86,7 @@ async function callTool(name: string, args: any): Promise<unknown> {
   const auth = `token=${encodeURIComponent(token)}`;
   switch (name) {
     case 'ask_lead': {
-      const question = await api('POST', `${route}/questions`, { text: args.question, blocks: args.blocks, token });
+      const question = await api('POST', `${route}/questions`, { text: args.question, blocks: args.blocks, attachments: args.attachments, token });
       return { ...question, guidance: 'Carry on with whatever the answer does not affect; call lead_answers when you reach the part it blocks.' };
     }
     case 'lead_answers': {

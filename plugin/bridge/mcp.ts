@@ -8,6 +8,8 @@ import type { Role } from './config.ts';
 import type { CrewEvent, JobSpec } from './jobs.ts';
 import { normalizeTitle, STAGES } from './missions.ts';
 import type { Mission } from './missions.ts';
+import { imageContent, isImage } from './evidence.ts';
+import type { Evidence } from './evidence.ts';
 import { describe, needsLead, summarize } from './render.ts';
 import type { JobView } from './render.ts';
 
@@ -56,6 +58,7 @@ How jobs work:
 - Reject worker changes that go beyond what was asked. For polish, any file listed as out of scope, or any non-text change, is grounds to reject.
 - If a worker fails on a usage limit, do that piece yourself and say that the cross-check was skipped.
 - This machine is shared. Workers are told to start their own isolated instance of anything they run (free port, own data directory, headless browser) and to measure nothing unless the job runs alone. A job that has to start the app takes runs_app: its sandbox then has network access, and a review runs in a snapshot of the change. Without it a worker's review is static. Work whose result only shows while it runs (how it looks, interaction and timing, traffic between processes, startup and builds, concurrency and recovery), or whose checks need a server, browser, or app, always takes runs_app, and so does one reviewer of it: reading code and mocked tests do not show these. Pure logic that tests can check in the sandbox does not need it. Only one reviewer of a change runs the app: if the cross-review does, tell your self-review subagent to stay static, and the other way round. A delegate job that measures performance takes exclusive: it is refused while other jobs are active, so wait for them first.
+- Workers save screenshots and recordings in the job's evidence directory, which is kept with the job: results list them and show the latest turn's images, and the board shows them all. To show a worker an image (a design, a screenshot of the problem), pass its path in attachments with delegate, review, reply, or answer.
 - When to review while you run the Crew pipeline (/crew:run), without being asked: one review (your crew:self-reviewer subagent or \`review\`, not both) when a substantial piece of implementation reaches a stopping point; before you push or open a pull request, a review of whatever is going out that no review has covered since it last changed substantially (both in parallel for security, concurrency, or data loss; fixes for a review's findings count as covered); none for small fixes and wording. Reviewers that run in parallel are static unless exactly one of them is told it may run the app. The user's own request for a review, or for none, comes first. Outside the pipeline, review only when the user asks: do not hold back a commit or a push for one.
 - When you take a user's command through several steps, call \`mission\` with title and planned stages first, with stage as you move on, and with done as soon as the work finishes. Pass stages again with what remains to add or drop future steps. The board then shows the command as one unit with its jobs under it. Skip it for a single delegated job.
 - Usage is measured by AgentGauge. In the pipeline, call \`route\` once at each stage boundary before you hand out work (not on every turn) and follow its assignee and reason; when it says degraded, say in your report what was skipped. Outside the pipeline, follow the roles unless a job fails on a limit.${PRESET_LINE}
@@ -81,6 +84,9 @@ const installedSkills = listSkills();
 const skillsProp = installedSkills.length ? {
   skills: { type: 'array', items: { type: 'string', enum: installedSkills }, description: 'Skills from ~/.agents/skills that would help with this particular job, such as a design or writing skill for UI work. The worker is not shown the user\'s skills otherwise; it is told to read the ones you pick. Pick only those that fit the task.' },
 } : {};
+const attachmentsProp = {
+  attachments: { type: 'array', items: { type: 'string' }, maxItems: 10, description: 'Absolute paths of images or recordings (PNG, JPEG, GIF, WebP, WebM, MP4) the worker should see, such as a design or a screenshot of the problem. They are copied into the job\'s evidence and shown on the board.' },
+};
 const modelProps = {
   model: { type: 'string', description: 'Model override for this job. Omit to use the model configured for the role, or the agent\'s own default.' },
   effort: { type: 'string', description: 'Reasoning effort override (e.g. low, medium, high). Ignored by agents without an effort setting.' },
@@ -100,6 +106,7 @@ const TOOLS = [
         ...worktreeProps,
         ...modelProps,
         ...runsAppProp('do or verify the work'),
+        ...attachmentsProp,
         ...aloneProp,
         ...skillsProp,
         ...common,
@@ -121,6 +128,7 @@ const TOOLS = [
         mode: { type: 'string', enum: ['adversarial', 'standard'], description: 'adversarial (default): challenges design and assumptions. standard: Codex\'s built-in code review; other agents run the adversarial review instead.' },
         done_when: { type: 'string', description: 'Acceptance criteria to verify in adversarial mode.' },
         ...runsAppProp('judge the change. The review then runs in a snapshot worktree holding the change, and your own self-review must stay static'),
+        ...attachmentsProp,
         ...modelProps,
         ...skillsProp,
         ...common,
@@ -197,7 +205,7 @@ const TOOLS = [
     description: 'Answer a lead question without ending or restarting the worker turn. Then end your turn: you are woken when the worker ends or needs you.',
     inputSchema: {
       type: 'object',
-      properties: { job_id: { type: 'string' }, question_id: { type: 'string' }, answer: { type: 'string' } },
+      properties: { job_id: { type: 'string' }, question_id: { type: 'string' }, answer: { type: 'string' }, ...attachmentsProp },
       required: ['job_id', 'question_id', 'answer'],
     },
   },
@@ -213,6 +221,7 @@ const TOOLS = [
         decision: { type: 'string', enum: ['approve', 'deny'], description: 'The user\'s decision for a job waiting on approval.' },
         request_id: { type: 'string', description: 'Required when forwarding an answer. Use the request ID shown in the job status.' },
         sync: { type: 'boolean', description: 'For a finished delegate or polish job: first merge your current HEAD into the worker\'s branch, so the next turn sees what you committed since it started (a fix it was waiting for, an interface you changed). Commit first. If the merge conflicts, it is aborted; the message is still sent, naming the conflicting files, and the job\'s result notes the failed sync.' },
+        ...attachmentsProp,
         approved_by_user: { type: 'string', description: 'For a finished job whose result lists a REFUSED action: the user\'s own words from this conversation that cover it. The worker runs the action again and the automatic reviewer judges it with that approval. Use it without asking the user when their request clearly covers the action. A second use on the same job sends each request to the user to answer.' },
         background: common.background,
       },
@@ -367,7 +376,18 @@ async function follow(ids: string[], seconds: number, onEvent: (e: CrewEvent) =>
 interface CallContext {
   progress(message: string): void;
   signal: AbortSignal;
+  /** Evidence images to show with the text result. */
+  images: Evidence[];
 }
+
+/** The latest turn's screenshots and the open questions' attachments: what the lead needs to see now, not the whole history. */
+function showEvidence(ctx: CallContext, job: JobView): void {
+  const open = new Set((job.questions ?? []).filter((q) => q.answer === undefined).flatMap((q) => q.attachments ?? []));
+  for (const item of job.evidence ?? []) {
+    if (item.from === 'worker' && isImage(item.file) && (item.turn === job.turns || open.has(item.file))) ctx.images.push(item);
+  }
+}
+
 
 /** The mission this session opened and is carrying out. Only this session's own mission is ever advanced or closed from here. */
 /** The Claude session this server belongs to; it outlives a restart of the server. Unset in clients that do not pass it on. */
@@ -459,6 +479,7 @@ async function runJob(spec: JobSpec, background: boolean, ctx: CallContext): Pro
 
 async function followOne(id: string, ctx: CallContext): Promise<string> {
   const [job] = await follow([id], DEFAULT_WAIT_SECONDS, (e) => ctx.progress(e.detail), ctx.signal);
+  showEvidence(ctx, job);
   return render(job);
 }
 
@@ -478,7 +499,7 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
   const cwd: string = args.cwd ?? PROJECT;
   switch (name) {
     case 'delegate':
-      return runJob({ kind: 'delegate', cwd, title: args.title, task: args.task, done_when: args.done_when, base: args.base, isolation: args.isolation, model: args.model, effort: args.effort, exclusive: Boolean(args.exclusive), runsApp: Boolean(args.runs_app), plugins: args.plugins, skills: args.skills }, args.background !== false, ctx);
+      return runJob({ kind: 'delegate', cwd, title: args.title, task: args.task, done_when: args.done_when, base: args.base, isolation: args.isolation, model: args.model, effort: args.effort, exclusive: Boolean(args.exclusive), runsApp: Boolean(args.runs_app), plugins: args.plugins, skills: args.skills, attachments: args.attachments }, args.background !== false, ctx);
     case 'review': {
       const kind = args.target ?? 'uncommitted';
       if (kind === 'branch' && !args.base) throw new Error('target "branch" needs base (the branch to compare against, e.g. main).');
@@ -486,7 +507,7 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       const target = kind === 'branch' ? { type: 'baseBranch' as const, branch: args.base } : kind === 'commit' ? { type: 'commit' as const, sha: args.commit } : { type: 'uncommittedChanges' as const };
       // The focus can be long; the board title only needs to say what is under review.
       const title = `Review of ${kind === 'branch' ? `the branch against ${args.base}` : kind === 'commit' ? `commit ${args.commit.slice(0, 8)}` : 'uncommitted changes'}`;
-      return runJob({ kind: 'review', cwd, title, task: args.focus, done_when: args.done_when, review: { target, mode: args.mode ?? 'adversarial' }, model: args.model, effort: args.effort, runsApp: Boolean(args.runs_app), plugins: args.plugins, skills: args.skills }, args.background !== false, ctx);
+      return runJob({ kind: 'review', cwd, title, task: args.focus, done_when: args.done_when, review: { target, mode: args.mode ?? 'adversarial' }, model: args.model, effort: args.effort, runsApp: Boolean(args.runs_app), plugins: args.plugins, skills: args.skills, attachments: args.attachments }, args.background !== false, ctx);
     }
     case 'polish':
       if (args.exclusive) throw new Error('polish cannot run alone: an editor measures nothing. Drop exclusive.');
@@ -509,6 +530,7 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
     case 'status': {
       if (args.job_id) {
         const job: JobView = await api('GET', `/api/jobs/${args.job_id}`);
+        showEvidence(ctx, job);
         return describeDelivered(job);
       }
       const state = await api('GET', '/api/state');
@@ -537,14 +559,15 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       const jobs = await follow(ids, args.timeout_seconds ?? DEFAULT_WAIT_SECONDS, (e) => ctx.progress(`${e.job_id}: ${e.detail}`), ctx.signal);
       const ready = jobs.filter(needsLead);
       const running = jobs.filter((j) => !needsLead(j));
+      for (const job of ready) showEvidence(ctx, job);
       const parts = ready.map(render);
       if (running.length) parts.push(`${ready.length ? 'Still running' : 'Timed out waiting; still running'}:\n${running.map(summarize).join('\n')}`);
       return parts.join('\n\n────────\n\n');
     }
     case 'answer':
-      return describeDelivered(await api('POST', `/api/jobs/${args.job_id}/questions/${args.question_id}`, { answer: args.answer }));
+      return describeDelivered(await api('POST', `/api/jobs/${args.job_id}/questions/${args.question_id}`, { answer: args.answer, attachments: args.attachments }));
     case 'reply': {
-      await api('POST', `/api/jobs/${args.job_id}/reply`, { message: args.message, decision: args.decision, request_id: args.request_id, approved_by_user: args.approved_by_user, sync: args.sync ? true : undefined });
+      await api('POST', `/api/jobs/${args.job_id}/reply`, { message: args.message, decision: args.decision, request_id: args.request_id, approved_by_user: args.approved_by_user, sync: args.sync ? true : undefined, attachments: args.attachments });
       return args.background !== false ? describeDelivered(await api('GET', `/api/jobs/${args.job_id}`)) : followOne(args.job_id, ctx);
     }
     case 'cancel': {
@@ -609,6 +632,7 @@ async function handle(msg: any): Promise<void> {
       let step = 0;
       const ctx: CallContext = {
         signal: controller.signal,
+        images: [],
         progress: (message) => {
           if (token !== undefined) send({ jsonrpc: '2.0', method: 'notifications/progress', params: { progressToken: token, progress: ++step, message } });
         },
@@ -616,7 +640,7 @@ async function handle(msg: any): Promise<void> {
       try {
         await ensureDaemon();
         const text = await callTool(params.name, params.arguments ?? {}, ctx);
-        reply({ content: [{ type: 'text', text }] });
+        reply({ content: [{ type: 'text', text }, ...imageContent(ctx.images)] });
       } catch (err) {
         reply({ content: [{ type: 'text', text: String((err as Error).message ?? err) }], isError: true });
       } finally {

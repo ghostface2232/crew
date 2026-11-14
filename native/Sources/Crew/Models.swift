@@ -41,6 +41,7 @@ struct Job: Codable, Sendable, Identifiable, Equatable {
     var exclusive: Bool?
     var rounds: [Round]?
     var ask: Bool?
+    var evidence: [Evidence]?
     /// Ended, but its worktree still awaits a merge or discard, or the lead has not read its result.
     var isUnsettled: Bool { worktree != nil || seq > (delivered ?? seq) }
     var kindTitle: String { ask == true ? "Question" : roleNames[kind] ?? kind }
@@ -69,6 +70,16 @@ struct Round: Codable, Sendable, Equatable {
     var state: String
     var revert: String?
     var at: Double
+}
+/// A screenshot or recording kept with a job; the daemon runs on this Mac, so `path` is a local file.
+struct Evidence: Codable, Sendable, Equatable {
+    var file: String
+    var path: String
+    var turn: Int
+    var from: String
+    var bytes: Int
+    var modified: Double
+    var isVideo: Bool { ["webm", "mp4"].contains((file as NSString).pathExtension.lowercased()) }
 }
 struct Worktree: Codable, Sendable, Equatable { var path: String; var branch: String; var base: String }
 struct Waiting: Codable, Sendable, Equatable { var type: String; var reason: String; var id: String; var since: Double }

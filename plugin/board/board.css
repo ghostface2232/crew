@@ -567,6 +567,11 @@ dialog.detail-panel::backdrop { background: transparent; }
 .detail-section > h3 { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; }
 .detail-section > h3 svg { width: 14px; height: 14px; color: var(--accent); }
 .detail-section pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+.evidence { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 12px; }
+.evidence figure { display: grid; gap: 6px; min-width: 0; margin: 0; }
+.evidence a { display: block; border-radius: var(--row-radius); }
+.evidence img, .evidence video { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: contain; background: var(--fill); border: 1px solid var(--hairline); border-radius: var(--row-radius); }
+.evidence figcaption { overflow-wrap: anywhere; }
 .report { white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--text-face); font-size: 13px; }
 .file { display: grid; gap: 3px; }
 .file code { font-size: 12px; overflow-wrap: anywhere; }

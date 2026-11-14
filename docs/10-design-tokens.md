@@ -135,9 +135,18 @@ A symbol inside a label takes the label's font. These tokens are for symbols tha
 
 | Kind | How | Use |
 | --- | --- | --- |
-| Primary | `.buttonStyle(.glassProminent)`; `.controlSize(.large)` on a page or window footer | Send message, New Job, Save |
-| Pill | `.pillButton()`, or `.pillButton(prominent: true)` for the action a group leads with | Mark done, Stop tracking, Details, Retry, Copy, Undo/Keep, Cancel Job, approval decisions |
+| Primary | `.glassPillButton()`, or `.glassPillButton(prominent: false)` for clear glass: Liquid Glass at the pill's size and face | Send message, New Job, Save, Send Job; Review requests in clear glass |
+| Pill | `.pillButton()`; `.pillButton(.prominent)` for the action a group leads with, `.pillButton(.warning)` for one that drops work without completing it | Mark done, Stop tracking, Details, Retry, Copy, Undo/Keep, Cancel Job, approval decisions |
 | Icon | `.iconButton()`; a custom glyph takes `Symbol.control` in `Symbol.controlFrame` | Close, Show job, expand a mission |
 | Chip | `StatusLabel`: `Typeface.chip` in a `Palette.chip` capsule with `Chip.insets` (5 × 8) | Status of jobs, sessions, missions and agents |
 
-Pill buttons are bordered capsules at the regular control size, labeled in `calloutStrong`. Every pill therefore reads the same, wherever it sits. A pill that drops work without completing it, such as Stop tracking, is tinted `Palette.warning`. A group's actions sit at its trailing edge, and the completing action comes last.
+Pill buttons use `PillButtonStyle`, not the system bordered style. The system's regular bordered button is 24 points tall with 5 points above and below its label, which looks pressed flat. A pill instead has `Pill.insets` (7 × 14), so it is about 30 points tall, with its label in `calloutStrong`.
+
+| Kind | Label | Fill |
+| --- | --- | --- |
+| plain | primary | `Pill.fill` (8% primary) |
+| prominent | white | `Palette.accent` |
+| warning | `Palette.warning` | `Palette.chip(warning)` |
+| destructive role | `Palette.danger` | `Palette.chip(danger)` |
+
+When a pill's label starts with a symbol, the symbol's side has `Pill.symbolTrim` (3 points) less inset. A symbol's round shape sits inside its frame, so an even inset would look wider on that side. Text-only pills stay symmetric. The symbol and the title are `Pill.symbolGap` (6 points) apart. Glass pills use the same insets and label style. A tinted label is darkened 22% in light mode, as on chips. A pressed pill dims, and a disabled one fades to 45%. Under Increase Contrast, a pill gets an outline. A group's actions sit at its trailing edge, and the completing action comes last.

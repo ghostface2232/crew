@@ -157,13 +157,76 @@ enum Chip {
     static let insets = EdgeInsets(top: 5, leading: Space.m, bottom: 5, trailing: Space.m)
 }
 
-extension View {
-    /// A secondary action: a bordered capsule at the regular size, its label in the strong callout face, so
-    /// pills read the same wherever they sit. `prominent` fills it for the one action a group leads with.
-    @ViewBuilder func pillButton(prominent: Bool = false) -> some View {
-        let styled = font(Typeface.calloutStrong).buttonBorderShape(.capsule).controlSize(.regular)
-        if prominent { styled.buttonStyle(.borderedProminent) } else { styled.buttonStyle(.bordered) }
+/// A pill button: a capsule a little taller than the system's regular bordered button, whose 5-point top and
+/// bottom made its label look pressed flat against the edges.
+enum Pill {
+    static let insets = EdgeInsets(top: 7, leading: 14, bottom: 7, trailing: 14)
+    /// Taken off the leading inset when the label starts with a symbol: a symbol's round shape sits inside its
+    /// frame, so an even inset looks wider on that side. Text-only pills stay symmetric.
+    static let symbolTrim: CGFloat = 3
+    /// Between a pill's symbol and its title.
+    static let symbolGap = Space.s
+    /// The plain pill's fill, close to the system bordered button's.
+    static let fill = Color.primary.opacity(0.08)
+    enum Kind { case plain, prominent, warning }
+}
+
+/// A pill's symbol and title, with the optical trim on the symbol's side.
+struct PillLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: Pill.symbolGap) { configuration.icon; configuration.title }.padding(.leading, -Pill.symbolTrim)
     }
+}
+
+/// A primary action in Liquid Glass, at the pill's size and face so it lines up with the pills around it.
+struct GlassPillButtonStyle: ButtonStyle {
+    var prominent = true
+    @Environment(\.isEnabled) private var enabled
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(Typeface.calloutStrong).foregroundStyle(prominent ? Color.white : .primary).lineLimit(1)
+            .padding(Pill.insets)
+            .glassEffect(prominent ? .regular.tint(Palette.accent).interactive() : .regular.interactive(), in: .capsule)
+            .opacity(enabled ? 1 : 0.45)
+            .contentShape(Capsule())
+    }
+}
+
+/// Draws pills with `Pill.insets`. A destructive role takes the danger color whatever the kind.
+struct PillButtonStyle: ButtonStyle {
+    var kind = Pill.Kind.plain
+    @Environment(\.isEnabled) private var enabled
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.colorSchemeContrast) private var contrast
+    func makeBody(configuration: Configuration) -> some View {
+        let status: Color? = configuration.role == .destructive ? Palette.danger : kind == .warning ? Palette.warning : nil
+        // As on chips: darkened in light mode so the tinted label stays readable on its tint.
+        let tinted = status.map { scheme == .light ? $0.mix(with: .black, by: 0.22) : $0 }
+        let text: Color = kind == .prominent && status == nil ? .white : tinted ?? .primary
+        let fill: Color = status.map(Palette.chip) ?? (kind == .prominent ? Palette.accent : Pill.fill)
+        configuration.label
+            .font(Typeface.calloutStrong).foregroundStyle(text).lineLimit(1)
+            .padding(Pill.insets)
+            .background(fill, in: Capsule())
+            .overlay { if contrast == .increased { Capsule().strokeBorder(text.opacity(0.5)) } }
+            .overlay { if configuration.isPressed { Capsule().fill(Color.primary.opacity(0.08)) } }
+            .opacity(enabled ? 1 : 0.45)
+            .contentShape(Capsule())
+    }
+}
+
+extension View {
+    /// The gray inset that holds a section's or card's contents.
+    func inset() -> some View {
+        padding(WorkspaceStyle.insetPadding).frame(maxWidth: .infinity, alignment: .leading)
+            .background(WorkspaceStyle.rowFill, in: RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius))
+    }
+    /// A secondary action as a pill, so pills read the same wherever they sit. `.prominent` fills it for the one
+    /// action a group leads with; `.warning` marks one that drops work without completing it.
+    func pillButton(_ kind: Pill.Kind = .plain) -> some View { buttonStyle(PillButtonStyle(kind: kind)).labelStyle(PillLabelStyle()) }
+    /// A primary action in glass at the pill's size; `prominent` tints it with the accent.
+    func glassPillButton(prominent: Bool = true) -> some View { buttonStyle(GlassPillButtonStyle(prominent: prominent)).labelStyle(PillLabelStyle()) }
+    func pillButton(prominent: Bool) -> some View { pillButton(prominent ? .prominent : .plain) }
     /// An icon-only bordered circle; its label's symbol takes `Symbol.control` in `Symbol.controlFrame`.
     func iconButton() -> some View {
         labelStyle(.iconOnly).font(Symbol.control).buttonStyle(.bordered).buttonBorderShape(.circle).controlSize(.regular)

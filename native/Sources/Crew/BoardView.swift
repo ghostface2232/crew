@@ -150,7 +150,7 @@ struct BoardView: View {
             WorkspaceHeading(title: title, subtitle: store.project.isEmpty ? nil : store.project)
             if overview && pending > 0 {
                 Button("Review requests", systemImage: "arrow.up.right") { store.selection = "needs"; store.search = "" }
-                    .buttonStyle(.glass).controlSize(.large)
+                    .glassPillButton(prominent: false)
             }
         }
     }
@@ -201,7 +201,7 @@ struct BoardView: View {
             EmptyState(title: store.search.isEmpty ? (emptyHistory ? "No completed work yet" : "Ready when you are") : "No matching work",
                        symbol: store.search.isEmpty ? "square.stack.3d.up" : "magnifyingglass",
                        detail: store.search.isEmpty && !emptyHistory ? "Start with New Job, or /crew:run in Claude." : nil) {
-                if store.search.isEmpty && !emptyHistory { Button("New Job", systemImage: "plus") { store.showingDispatch = true }.buttonStyle(.glassProminent).disabled(!store.connected) }
+                if store.search.isEmpty && !emptyHistory { Button("New Job", systemImage: "plus") { store.showingDispatch = true }.glassPillButton().disabled(!store.connected) }
             }
         }
     }
@@ -284,6 +284,7 @@ private struct AgentCard: View {
         if agent == "claude" { return sessions.contains { $0.state == "waiting" } ? "waiting" : sessions.contains { $0.stalled } ? "stalled" : sessions.isEmpty ? "idle" : "working" }
         return jobs.contains { $0.state == "waiting" } ? "waiting" : jobs.contains { $0.stalled } ? "stalled" : jobs.isEmpty ? "idle" : "working"
     }
+    private var busy: Bool { (agent == "claude" ? sessions.count + idleSessions(store) : jobs.count) > 0 }
     private var activity: String {
         let count = agent == "claude" ? sessions.count : jobs.count
         let noun = agent == "claude" ? "session" : "job"
@@ -307,11 +308,10 @@ private struct AgentCard: View {
                 Spacer(minLength: 8)
                 StatusLabel(state: mark, title: mark == "waiting" ? "Needs you" : mark == "working" ? "Working" : mark == "stalled" ? "May be stuck" : store.state.agents[agent]?.enabled == false ? "Disabled" : "Ready")
             }
-            HStack {
-                Text(activity).font(Typeface.callout).monospacedDigit().foregroundStyle(.secondary)
-                Spacer(minLength: 8)
-                if store.usage == nil || store.usage?.source == "none" { AgentUsageView(store: store, agent: agent) }
-            }
+            // The agent's work in a gray inset, apart from its name above and its account usage below; with
+            // nothing open, the inset is left out rather than saying so.
+            if busy { Text(activity).font(Typeface.callout).monospacedDigit().foregroundStyle(.secondary).inset() }
+            if store.usage == nil || store.usage?.source == "none" { AgentUsageView(store: store, agent: agent) }
             // Cards in a row share a height; usage sits at the bottom, so one bar lines up with the last of two.
             if let usage = store.usage, usage.source != "none" {
                 // Set apart from the activity line above, which is about the work, not the account.
@@ -382,11 +382,12 @@ struct MissionPanel: View {
                     }
                     if !mission.outcome.isEmpty { Text(mission.outcome).font(Typeface.callout).textSelection(.enabled) }
                     // The mission's own controls close its contents, at the trailing edge with the hint that calls
-                    // for them; the action that completes it comes last, and leads once the mission looks finished.
-                    if mission.state == "active" {
+                    // for them; the action that completes it comes last.
+                    // Offered only once the mission looks finished; until then the lead is still at it.
+                    if mission.state == "active" && finished {
                         HStack(spacing: Space.m) {
                             Spacer(minLength: 0)
-                            if finished { Text("Looks finished").font(Typeface.caption).foregroundStyle(.secondary) }
+                            Text("Looks finished").font(Typeface.caption).foregroundStyle(.secondary)
                             actions
                         }.padding(.top, Space.xs)
                     }
@@ -413,10 +414,10 @@ struct MissionPanel: View {
         let locked = !store.connected || store.actions["dismiss:\(mission.id)"]?.locked == true
         // In the warning color: it drops the mission without completing it.
         Button("Stop tracking", systemImage: "xmark.circle") { Task { await store.dismiss(mission) } }
-            .pillButton().tint(Palette.warning).foregroundStyle(Palette.warning)
+            .pillButton(.warning)
             .help("Stops tracking without marking done. Its jobs keep running.").disabled(locked)
         Button("Mark done", systemImage: "checkmark.circle") { Task { await store.markDone(mission) } }
-            .pillButton(prominent: finished).disabled(locked)
+            .pillButton(.prominent).disabled(locked)
     }
     /// Animated from here rather than inside the card, so the cards below move with it instead of jumping.
     private func toggle() {

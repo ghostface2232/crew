@@ -151,13 +151,15 @@ struct AnswerView: View {
                     // Quick replies sit apart from the composer so they don't read as part of sending.
                     HStack(spacing: Space.m) {
                         Spacer(minLength: 0)
-                        decision("Yes", symbol: "checkmark", value: "approve", prominent: false)
                         decision("No", symbol: "xmark", value: "deny", prominent: false)
+                        decision("Yes", symbol: "checkmark", value: "approve", prominent: false)
                     }
                 } else {
+                    // At the trailing edge with the completing action last, as everywhere a choice ends something.
                     HStack(spacing: Space.m) {
-                        decision("Approve", symbol: "checkmark", value: "approve", prominent: true)
+                        Spacer(minLength: 0)
                         decision("Deny", symbol: "xmark", value: "deny", prominent: false)
+                        decision("Approve", symbol: "checkmark", value: "approve", prominent: true)
                     }
                 }
                 ActionMessage(state: store.actions[job.requestKey])

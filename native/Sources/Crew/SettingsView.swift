@@ -33,7 +33,7 @@ struct CrewSettingsView: View {
                 Button(tab == "roles" ? (model.savingRoles ? "Saving…" : "Save Roles") : tab == "presets" ? (model.savingPreset ? "Saving…" : "Save Preset") : (model.savingText ? "Saving…" : "Save Instructions")) {
                     Task { if tab == "roles" { await model.saveRoles() } else if tab == "presets" { await model.savePreset() } else { await model.saveInstructions() } }
                 }
-                .buttonStyle(.glassProminent).controlSize(.large).keyboardShortcut("s")
+                .glassPillButton().keyboardShortcut("s")
                 .disabled(!store.connected || (tab == "roles" ? model.savingRoles : tab == "presets" ? model.savingPreset : !model.loaded || model.savingText))
             }.padding(.horizontal, Space.x4l).padding(.vertical, Space.xxl)
         }

@@ -7,6 +7,7 @@ struct JobDetailView: View {
     @State private var events: [CrewEvent] = []
     @State private var error = ""
     @State private var retry = 0
+    @State private var scrolled = false
     private var job: Job? {
         guard var current = store.state.jobs.first(where: { $0.id == id }) else { return detail }
         current.prompt = detail?.prompt ?? current.prompt
@@ -27,11 +28,12 @@ struct JobDetailView: View {
         // The header stays while the details scroll under it. As a scroll view's bar, it gets the system's
         // soft edge effect: the content fades and blurs progressively beneath it instead of being cut off.
         .safeAreaBar(edge: .top) {
-            DetailHeader(title: job?.title, subtitle: job?.isActive == true ? job?.phase : nil, close: store.closeDetail) {
+            DetailHeader(title: job?.title, subtitle: job?.isActive == true ? job?.phase : nil, scrolled: scrolled, close: store.closeDetail) {
                 if let job { StatusLabel(state: job.stalled ? "stalled" : job.state, title: job.status) }
             }
         }
         .scrollEdgeEffectStyle(.soft, for: .top)
+        .onScrollGeometryChange(for: Bool.self) { $0.contentOffset.y + $0.contentInsets.top > 1 } action: { _, now in scrolled = now }
         .onExitCommand { store.closeDetail() }
         .task(id: "\(id):\(store.revision):\(retry)") { await load() }
     }
@@ -141,9 +143,12 @@ struct JobDetailView: View {
             detailSection(job.isActive ? "Steer" : "Follow up", symbol: "bubble.left") {
                 let key = "followup:\(job.id)"
                 MessageEditor(title: "Message to \(agentName(job.agent))", text: Binding(get: { store.drafts[key] ?? "" }, set: { store.drafts[key] = $0 }))
-                Button("Send message", systemImage: "arrow.up") { Task { await store.followUp(job) } }
-                    .buttonStyle(.glassProminent)
-                    .disabled(!store.connected || store.actions[key]?.locked == true || (store.drafts[key] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                HStack {
+                    Spacer(minLength: 0)
+                    Button("Send message", systemImage: "arrow.up") { Task { await store.followUp(job) } }
+                        .glassPillButton()
+                        .disabled(!store.connected || store.actions[key]?.locked == true || (store.drafts[key] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
                 ActionMessage(state: store.actions[key])
             }
         }
@@ -199,10 +204,14 @@ private struct DetailHeader<Status: View>: View {
     let title: String?
     /// What the work is doing now, read with the title rather than as the first section.
     var subtitle: String? = nil
+    /// Whether details have scrolled under the header; at the top there is nothing for its veil to cover.
+    var scrolled = false
     let close: () -> Void
     @ViewBuilder var status: Status
     /// VoiceOver moves to the title when the panel opens; keyboard focus stays where it was.
     @AccessibilityFocusState private var titleFocused: Bool
+    /// How far below the header its background fades out.
+    private static var fade: CGFloat { Space.x6l }
     var body: some View {
         VStack(alignment: .leading, spacing: Space.xl) {
             HStack {
@@ -230,6 +239,24 @@ private struct DetailHeader<Status: View>: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, WorkspaceStyle.panelPadding).padding(.top, Space.xxl).padding(.bottom, Space.l)
+        // Scrolled details show through gradually: solid at the panel's top edge, then a veil of the panel color
+        // over a blur that both thin out past the header, so the heading stays legible without a hard band.
+        .background(alignment: .top) {
+            ZStack {
+                Rectangle().fill(.ultraThinMaterial)
+                    .mask(LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: 0.55),
+                                                 .init(color: .clear, location: 1)], startPoint: .top, endPoint: .bottom))
+                LinearGradient(stops: [.init(color: WorkspaceStyle.surface, location: 0),
+                                       .init(color: WorkspaceStyle.surface.opacity(0.9), location: 0.35),
+                                       .init(color: WorkspaceStyle.surface.opacity(0.6), location: 0.65),
+                                       .init(color: WorkspaceStyle.surface.opacity(0), location: 1)],
+                               startPoint: .top, endPoint: .bottom)
+            }
+            .padding(.bottom, -Self.fade)
+            .opacity(scrolled ? 1 : 0)
+            .animation(.easeOut(duration: 0.25), value: scrolled)
+            .allowsHitTesting(false)
+        }
         .onAppear { titleFocused = true }
     }
 }
@@ -239,6 +266,7 @@ private struct DetailHeader<Status: View>: View {
 struct SessionDetailView: View {
     @Bindable var store: CrewStore
     let id: String
+    @State private var scrolled = false
     private var session: ClaudeSession? { store.state.claude.first { $0.id == id } }
     var body: some View {
         ScrollView {
@@ -248,13 +276,14 @@ struct SessionDetailView: View {
                 .background(OverlayScrollers())
         }
         .safeAreaBar(edge: .top) {
-            DetailHeader(title: session?.title, subtitle: session.flatMap { $0.state == "working" ? $0.phase : nil }, close: store.closeDetail) {
+            DetailHeader(title: session?.title, subtitle: session.flatMap { $0.state == "working" ? $0.phase : nil }, scrolled: scrolled, close: store.closeDetail) {
                 if let session {
                     StatusLabel(state: session.stalled ? "stalled" : session.state, title: session.stalled ? "May be stuck" : session.state.capitalized)
                 }
             }
         }
         .scrollEdgeEffectStyle(.soft, for: .top)
+        .onScrollGeometryChange(for: Bool.self) { $0.contentOffset.y + $0.contentInsets.top > 1 } action: { _, now in scrolled = now }
         .onExitCommand { store.closeDetail() }
     }
     @ViewBuilder private func contents(_ session: ClaudeSession) -> some View {
@@ -346,13 +375,6 @@ private struct OriginalTask: View {
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
     private func toggle() { withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) { shown.toggle() } }
-}
-
-private extension View {
-    func inset() -> some View {
-        padding(WorkspaceStyle.insetPadding).frame(maxWidth: .infinity, alignment: .leading)
-            .background(WorkspaceStyle.rowFill, in: RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius))
-    }
 }
 
 /// A worker's report, with its Markdown headings shown as headings, code blocks in the code face and inline styles

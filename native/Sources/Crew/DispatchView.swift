@@ -78,9 +78,9 @@ struct DispatchView: View {
             if !error.isEmpty { Label(error, systemImage: "exclamationmark.circle").foregroundStyle(Palette.danger).textSelection(.enabled) }
             HStack(spacing: Space.m) {
                 Spacer()
-                Button("Cancel") { if dirty { confirmingDiscard = true } else { dismiss() } }.keyboardShortcut(.cancelAction).disabled(sending)
+                Button("Cancel") { if dirty { confirmingDiscard = true } else { dismiss() } }.pillButton().keyboardShortcut(.cancelAction).disabled(sending)
                 Button(sending ? "Sending…" : intent == "information" ? "Save Information" : intent == "question" ? "Ask Question" : "Send Job", systemImage: "arrow.up") { Task { await send() } }
-                    .buttonStyle(.glassProminent).disabled(!canSend)
+                    .glassPillButton().disabled(!canSend)
             }
         }.padding(WorkspaceStyle.panelPadding).frame(width: 560).disabled(sending).interactiveDismissDisabled(sending || dirty)
         .onChange(of: directory) { if destination.hasPrefix("mission:") { destination = "project" } }

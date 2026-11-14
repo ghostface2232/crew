@@ -213,6 +213,7 @@ private struct DetailHeader<Status: View>: View {
     @ViewBuilder var status: Status
     /// VoiceOver moves to the title when the panel opens; keyboard focus stays where it was.
     @AccessibilityFocusState private var titleFocused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// How far below the header its background fades out.
     private static var fade: CGFloat { Space.x6l }
     var body: some View {
@@ -257,7 +258,7 @@ private struct DetailHeader<Status: View>: View {
             }
             .padding(.bottom, -Self.fade)
             .opacity(scrolled ? 1 : 0)
-            .animation(Motion.fade, value: scrolled)
+            .animation(Motion.reduced(Motion.fade, reduceMotion), value: scrolled)
             .allowsHitTesting(false)
         }
         .onAppear { titleFocused = true }

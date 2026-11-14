@@ -45,7 +45,7 @@ These aliases name a role for a scale step. Use the alias when the role fits, so
 | `sectionGap` | 28 | Between detail panel sections |
 | `bannerPadding` | 16 | Connection and attention banners |
 | `panelPadding` | 24 | Detail panel and New Job sheet |
-| `panelWidth` | 420 | The detail panel's width until the user drags it; a drag keeps to `panelMinWidth` (360) to `panelMaxWidth` (760), and the page keeps `panelPageRoom` (240) beside it, so a narrow window lowers the limit. `panelWidth(_:page:)` applies all three |
+| `panelWidth` | 420 | The detail panel's width until the user drags it; a drag keeps to `panelMinWidth` (360) to `panelMaxWidth` (760), and the page keeps `panelPageRoom` (240) visible beside it and its inset, so a narrow window lowers the limit. `panelWidth(_:page:)` applies all three |
 | `panelHandleWidth` | 8 | The strip on the panel's leading edge that takes a resize drag |
 | `rowInsets` | 10 × 12 | Job and session rows |
 | `rowGap` | 4 | Between rows of one kind: a mission's jobs and the list cards (Recently finished, Other jobs, Claude sessions) |
@@ -67,7 +67,7 @@ These aliases name a role for a scale step. Use the alias when the role fits, so
 | Token | Value | Use |
 | --- | --- | --- |
 | `pageMaxWidth` | 1280 | The page stops widening here and centers |
-| `contentMinWidth` | 560 | The page column's minimum width |
+| `contentMinWidth` | 608 | The page column's minimum width: the minimum panel, its inset and the page room, so both limits hold at once |
 | `windowMinHeight` | 560 | The main window's minimum height |
 | `windowDefaultSize` | 1180 × 780 | The main window's first size |
 | `sidebarWidth` | 180 / 210 / 300 | The project sidebar's minimum, ideal and maximum width |
@@ -233,10 +233,10 @@ Pill buttons use `PillButtonStyle`, not the system bordered style. The system's 
 | warning | `Palette.warning` | `Palette.chip(warning)` |
 | destructive role | `Palette.danger` | `Palette.chip(danger)` |
 
-When a pill's label starts with a symbol, the symbol's side has `Pill.symbolTrim` (3 points) less inset. A symbol's round shape sits inside its frame, so an even inset would look wider on that side. Text-only pills stay symmetric. The symbol and the title are `Pill.symbolGap` (6 points) apart. Glass pills use the same insets and label style. A tinted label is darkened 22% in light mode, as on chips. A pressed pill dims, and a disabled one fades to 45%. Under Increase Contrast, a pill gets an outline. A group's actions sit at its trailing edge, and the completing action comes last. A copy button names only what it copies, such as Resume command or Diff command. The copy symbol says the rest, and its help gives the whole action.
+When a pill's label starts with a symbol, the symbol's side has `Pill.symbolTrim` (3 points) less inset. A symbol's round shape sits inside its frame, so an even inset would look wider on that side. Text-only pills stay symmetric. The symbol and the title are `Pill.symbolGap` (6 points) apart. Glass pills use the same insets and label style. A tinted label is darkened 22% in light mode, as on chips. A pressed pill dims, and a disabled one fades to 45%. Under Increase Contrast, a pill gets an outline. A group's actions sit at its trailing edge, and the completing action comes last. A copy button names only what it copies, such as Resume command or Diff command. The copy symbol says the rest, its help gives the whole action, and VoiceOver hears Copy resume command.
 
 Placement follows two rules.
-- **Actions sit at the trailing edge.** An item's action sits on the item's header row, as Undo does on a round. A section's action sits on its own last row, as Copy diff command does, or shares that row with a closing line, as Mark done shares it with a mission's outcome, centered on that line. The panel's footer (`DetailFooter`) is one row: the job's or session's id at the leading edge, shortened in the middle when it would crowd the actions, and the actions at the trailing edge with Cancel Job last.
+- **Actions sit at the trailing edge.** An item's action sits on the item's header row, as Undo does on a round. A section's action sits on its own last row, as Copy diff command does, or shares that row with a closing line, as Mark done shares it with a mission's outcome, centered on that line. The panel's footer (`DetailFooter`) is one row: the job's or session's id at the leading edge and the actions at the trailing edge, with Cancel Job last. The id gives way first and shortens in the middle. When even 80 points of it would leave the actions too little room, it moves below them.
 - **Reveals sit at the leading edge.** A reveal goes directly under what it reveals. Pills run actions and are never used to reveal content.
 
 Send and completing actions sit at the trailing edge too, such as Send message and Approve after Deny. A mission's Stop tracking and Mark done appear only once an active mission looks finished. An abandoned mission shows Mark done alone, which reopens it explicitly: the mission's controls lock per state through `Mission.actionKey`, so Stop tracking never leaves Mark done locked.

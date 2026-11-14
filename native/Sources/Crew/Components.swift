@@ -112,6 +112,8 @@ struct CopyButton: View {
         } label: { Label(copied ? "Copied" : title, systemImage: copied ? "checkmark" : "doc.on.doc") }
         .pillButton()
         .help(help ?? title)
+        // The title names only what is copied; VoiceOver hears the action too.
+        .accessibilityLabel(copied ? "Copied" : "Copy \(title.prefix(1).lowercased() + title.dropFirst())")
         .task(id: copied) {
             if copied {
                 try? await Task.sleep(for: .seconds(2))
@@ -453,25 +455,37 @@ extension DetailItem where Accessory == EmptyView {
 }
 
 /// The detail panel's last row: the job's or session's id at the leading edge, its actions at the trailing edge,
-/// centered on one line. The id shortens in the middle rather than push the actions; its menu copies it whole.
+/// centered on one line. The id gives way first, shortening in the middle; when even a short id leaves the actions
+/// too little room, it moves below them. Its menu copies it whole.
 struct DetailFooter<Actions: View>: View {
     let id: String
     @ViewBuilder var actions: Actions
+    /// The least of the id worth showing beside the actions before it moves below them.
+    private static var idMinWidth: CGFloat { 80 }
     var body: some View {
         VStack(alignment: .leading, spacing: Space.ml) {
             Divider().padding(.bottom, Space.xs)
-            HStack(spacing: Space.m) {
-                Text(id).font(Typeface.codeSmall).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle)
-                    .help(id)
-                    .contextMenu {
-                        Button("Copy ID", systemImage: "doc.on.doc") {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(id, forType: .string)
-                        }
-                    }
-                Spacer(minLength: WorkspaceStyle.rowSpacer)
-                actions
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: Space.m) {
+                    idText.frame(minWidth: Self.idMinWidth, alignment: .leading).layoutPriority(-1)
+                    Spacer(minLength: WorkspaceStyle.rowSpacer)
+                    HStack(spacing: Space.m) { actions }.fixedSize()
+                }
+                VStack(alignment: .leading, spacing: Space.ml) {
+                    HStack(spacing: Space.m) { Spacer(minLength: 0); actions }
+                    idText
+                }
             }
         }
+    }
+    private var idText: some View {
+        Text(id).font(Typeface.codeSmall).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle)
+            .help(id)
+            .contextMenu {
+                Button("Copy ID", systemImage: "doc.on.doc") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(id, forType: .string)
+                }
+            }
     }
 }

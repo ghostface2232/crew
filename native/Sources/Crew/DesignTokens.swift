@@ -77,9 +77,10 @@ enum WorkspaceStyle {
     /// The strip on the panel's leading edge that takes a resize drag.
     static let panelHandleWidth = Space.m
     /// The panel's width for `wanted` on a page `page` points wide.
+    /// `contentMinWidth` leaves room for both the minimum panel and the page beside it.
     static func panelWidth(_ wanted: CGFloat, page: CGFloat) -> CGFloat {
         let fits = page - windowInset * 2
-        let upper = max(panelMinWidth, min(panelMaxWidth, page - panelPageRoom))
+        let upper = max(panelMinWidth, min(panelMaxWidth, page - panelPageRoom - windowInset))
         return max(0, min(fits, min(upper, max(panelMinWidth, wanted))))
     }
     /// A row in a list: an icon, two lines and trailing status.
@@ -118,7 +119,8 @@ enum WorkspaceStyle {
     // MARK: Windows
     /// The page stops widening here and centers; below `contentMinWidth` the window stops narrowing.
     static let pageMaxWidth: CGFloat = 1280
-    static let contentMinWidth: CGFloat = 560
+    /// The minimum panel, its inset and the page room beside it.
+    static let contentMinWidth: CGFloat = panelMinWidth + panelPageRoom + windowInset
     static let windowMinHeight: CGFloat = 560
     static let windowDefaultSize = CGSize(width: 1180, height: 780)
     static let sidebarWidth = (min: CGFloat(180), ideal: CGFloat(210), max: CGFloat(300))

@@ -194,8 +194,11 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
         #expect(WorkspaceStyle.panelWidth(500, page: 1400) == 500)
         #expect(WorkspaceStyle.panelWidth(100, page: 1400) == WorkspaceStyle.panelMinWidth)
         #expect(WorkspaceStyle.panelWidth(2000, page: 1400) == WorkspaceStyle.panelMaxWidth)
-        // A narrower page lowers the limit so the page keeps its room beside the panel.
-        #expect(WorkspaceStyle.panelWidth(2000, page: 800) == 800 - WorkspaceStyle.panelPageRoom)
+        // A narrower page lowers the limit so the page keeps its room beside the panel and its inset.
+        #expect(WorkspaceStyle.panelWidth(2000, page: 800) == 800 - WorkspaceStyle.panelPageRoom - WorkspaceStyle.windowInset)
+        // At the page's minimum width, the minimum panel and the page room both still fit.
+        let narrowest = WorkspaceStyle.contentMinWidth
+        #expect(narrowest - WorkspaceStyle.panelWidth(2000, page: narrowest) - WorkspaceStyle.windowInset >= WorkspaceStyle.panelPageRoom)
         // Never wider than the page itself, and never negative before the page is measured.
         #expect(WorkspaceStyle.panelWidth(500, page: 300) == 300 - WorkspaceStyle.windowInset * 2)
         #expect(WorkspaceStyle.panelWidth(500, page: 0) == 0)

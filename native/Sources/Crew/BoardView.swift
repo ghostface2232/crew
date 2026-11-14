@@ -6,7 +6,7 @@ struct BoardView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var searchFocused: Bool
     @State private var wide = false
-    /// The page's width beside the panel, which bounds how wide the panel may be dragged.
+    /// The page column's width, the panel floating over its trailing part; it bounds how wide the panel may be dragged.
     @State private var pageWidth: CGFloat = 0
     var body: some View {
         NavigationSplitView {
@@ -576,7 +576,8 @@ private struct FullScreenToolbarFade: View {
 private struct PanelResizeHandle: View {
     @Bindable var store: CrewStore
     let page: CGFloat
-    @State private var start: CGFloat?
+    /// The width a drag began from; a gesture state, so a drag the system cancels leaves nothing behind.
+    @GestureState private var start: CGFloat?
     @State private var hovering = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private static let grip = CGSize(width: 3, height: Space.x4l)
@@ -596,14 +597,14 @@ private struct PanelResizeHandle: View {
             .onHover { hovering = $0 }
             .gesture(
                 DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                    .updating($start) { _, start, _ in if start == nil { start = width } }
                     .onChanged { drag in
-                        let from = start ?? width
-                        start = from
                         // Dragging left widens the panel, which grows from the window's trailing edge.
+                        let from = start ?? width
                         var instant = Transaction(); instant.disablesAnimations = true
                         withTransaction(instant) { store.panelWidth = WorkspaceStyle.panelWidth(from - drag.translation.width, page: page) }
                     }
-                    .onEnded { _ in start = nil; store.persistPanelWidth() }
+                    .onEnded { _ in store.persistPanelWidth() }
             )
             .onTapGesture(count: 2) {
                 withAnimation(Motion.reduced(Motion.panel, reduceMotion)) { store.panelWidth = WorkspaceStyle.panelWidth }

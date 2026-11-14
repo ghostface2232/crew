@@ -187,7 +187,10 @@ async function daemon(t: TestContext) {
       const m = JSON.parse(line);
       if (m.method === 'thread/start') {
         const crew = m.params.config.mcp_servers.crew;
-        fs.writeFileSync(__dirname + '/' + crew.env.CREW_JOB_ID + '.json', JSON.stringify(crew));
+        // Renamed into place, so the test never reads it half written.
+        const file = __dirname + '/' + crew.env.CREW_JOB_ID + '.json';
+        fs.writeFileSync(file + '.tmp', JSON.stringify(crew));
+        fs.renameSync(file + '.tmp', file);
         return send({ id: m.id, result: { thread: { id: crew.env.CREW_JOB_ID } } });
       }
       if (m.method === 'turn/start') return send({ id: m.id, result: { turn: { id: 'turn' } } });

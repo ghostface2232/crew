@@ -173,6 +173,27 @@ enum Pill {
     enum Kind { case plain, prominent, warning }
 }
 
+/// An icon button: a filled circle a little larger than a chip, where the system's regular circle read smaller
+/// than the chip beside it and left a small target.
+enum IconButton {
+    static let diameter: CGFloat = 28
+}
+
+struct IconButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var enabled
+    @Environment(\.colorSchemeContrast) private var contrast
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(Symbol.control).foregroundStyle(.primary)
+            .frame(width: IconButton.diameter, height: IconButton.diameter)
+            .background(Pill.fill, in: Circle())
+            .overlay { if contrast == .increased { Circle().strokeBorder(Palette.contrastStroke) } }
+            .overlay { if configuration.isPressed { Circle().fill(Color.primary.opacity(0.08)) } }
+            .opacity(enabled ? 1 : 0.45)
+            .contentShape(Circle())
+    }
+}
+
 /// A pill's symbol and title, with the optical trim on the symbol's side.
 struct PillLabelStyle: LabelStyle {
     func makeBody(configuration: Configuration) -> some View {
@@ -229,8 +250,6 @@ extension View {
     /// A primary action in glass at the pill's size; `prominent` tints it with the accent.
     func glassPillButton(prominent: Bool = true) -> some View { buttonStyle(GlassPillButtonStyle(prominent: prominent)).labelStyle(PillLabelStyle()) }
     func pillButton(prominent: Bool) -> some View { pillButton(prominent ? .prominent : .plain) }
-    /// An icon-only bordered circle; its label's symbol takes `Symbol.control` in `Symbol.controlFrame`.
-    func iconButton() -> some View {
-        labelStyle(.iconOnly).font(Symbol.control).buttonStyle(.bordered).buttonBorderShape(.circle).controlSize(.regular)
-    }
+    /// An icon-only circle at `IconButton.diameter`; its symbol takes `Symbol.control`.
+    func iconButton() -> some View { labelStyle(.iconOnly).buttonStyle(IconButtonStyle()) }
 }

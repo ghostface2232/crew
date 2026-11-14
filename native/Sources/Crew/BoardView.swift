@@ -353,11 +353,11 @@ struct MissionPanel: View {
                 Text(missionProgress(mission, jobs: jobs), format: .percent.precision(.fractionLength(0)))
                     .font(Typeface.caption).monospacedDigit().foregroundStyle(.secondary).help("Mission progress")
                 StatusLabel(state: mission.state == "active" ? "running" : mission.state, title: mission.state.capitalized)
-                // A bordered circle, so the control shows its hit area.
+                // A filled circle, so the control shows its hit area.
                 Button { toggle() } label: {
                     Image(systemName: "chevron.down").font(Symbol.control)
                         .rotationEffect(.degrees(expanded ? 0 : -90)).frame(width: Symbol.controlFrame, height: Symbol.controlFrame)
-                }.buttonStyle(.bordered).buttonBorderShape(.circle).accessibilityLabel(expanded ? "Collapse mission" : "Expand mission").help(expanded ? "Collapse" : "Expand")
+                }.iconButton().accessibilityLabel(expanded ? "Collapse mission" : "Expand mission").help(expanded ? "Collapse" : "Expand")
             }
             // The title row opens and closes the card; its button keeps its own click.
             .contentShape(Rectangle())

@@ -9,3 +9,6 @@ native/build/
 native/.build/
 native/.swiftpm/
 .DS_Store
+output/
+public/
+.playwright-cli/

@@ -316,6 +316,7 @@ dialog.detail-panel::backdrop { background: transparent; }
 .tab-badge { position: relative; }
 .tab-badge::after { content: ""; position: absolute; top: -2px; right: -3px; width: 6px; height: 6px; border-radius: 50%; background: var(--orange); }
 .toolbar-project { display: none; max-width: 200px; }
+.toolbar-settings { display: none; }
 .search { position: relative; width: 200px; }
 .search svg { position: absolute; left: 8px; top: 50%; translate: 0 -50%; width: 14px; height: 14px; color: var(--secondary); pointer-events: none; }
 .search input { min-height: 28px; padding-inline-start: 26px; border-radius: 999px; background: var(--fill); border-color: transparent; }
@@ -575,7 +576,8 @@ dialog.detail-panel::backdrop { background: transparent; }
   .app { grid-template-columns: minmax(0, 1fr); }
   .sidebar { display: none; }
   .toolbar { flex-wrap: wrap; padding: 8px 16px; }
-  .toolbar-project { display: block; }
+  .toolbar-project, .toolbar-settings { display: inline-flex; }
+  .toolbar-project { display: block; flex: 1; }
   .toolbar .segmented { order: 3; margin-inline: 0; }
   .search { order: 4; flex: 1; width: auto; }
   .page { padding: 8px 16px 32px; }

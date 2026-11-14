@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Info } from 'lucide-react';
-import type { PresetName, Roles, Snapshot } from './types.ts';
+import type { Preset, PresetName, Roles, Snapshot } from './types.ts';
 import type { Role, RoleAssignment } from '../../bridge/config.ts';
 import { request } from './api.ts';
 import { board } from './store.ts';
@@ -8,6 +8,15 @@ import { knownProjects, projectNames, ROLE_NAMES } from './model.ts';
 import { AgentMark, CloseButton, Dialog, Icon, Segmented } from './ui.tsx';
 import styles from './Settings.module.css';
 
+/** The app's one-line summary of a preset. */
+function presetDescription(preset: Preset) {
+  const agents: [string, { model?: string; effort?: string } | undefined][] = [['Codex', preset.codex], ['Antigravity', preset.antigravity]];
+  return [
+    ...agents.flatMap(([name, agent]) =>
+      agent ? [`${name}: ${[agent.model ?? 'Agent default', agent.effort && `${agent.effort} effort`].filter(Boolean).join(' · ')}`] : []),
+    `Subagents: ${preset.subagentModel ?? 'inherit'}`,
+  ].join('; ');
+}
 export function Settings({ state, close }: { state: Snapshot; close: () => void }) {
   const [tab, setTab] = useState('roles');
   const [roles, setRoles] = useState<Roles>(() => structuredClone(state.roles));
@@ -239,14 +248,7 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
                 </select>
               </label>
               <p className="callout secondary">
-                {selectedPreset ? (
-                  <>
-                    Codex: {[selectedPreset.codex?.model, selectedPreset.codex?.effort && `${selectedPreset.codex.effort} effort`]
-                      .filter(Boolean).join(' · ') || 'Agent default'}
-                    {' · '}Antigravity: {selectedPreset.antigravity?.model || 'Agent default'}
-                    {' · '}Claude subagent model: {selectedPreset.subagentModel || 'inherit'}
-                  </>
-                ) : "Uses each agent's configured model and effort."}
+                {selectedPreset ? presetDescription(selectedPreset) : "Uses each agent's configured model and effort."}
               </p>
             </div>
           )}

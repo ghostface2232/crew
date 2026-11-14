@@ -8,6 +8,11 @@ test.beforeEach(async ({ page, request }) => {
   await expect(page.getByText('Live', { exact: true })).toBeVisible();
 });
 const needsYou = (page: Page) => page.getByRole('tab', { name: 'Needs You' }).click();
+const openSettings = async (page: Page, tab?: string) => {
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  if (tab) await page.getByRole('radio', { name: tab }).click();
+};
+const newJob = (page: Page) => page.getByRole('button', { name: 'New Job', exact: true }).click();
 const stage = (card: Locator, name: string) =>
   card.locator('.stage-groups > .rows').filter({ has: card.page().getByRole('heading', { name, exact: true }) });
 
@@ -133,19 +138,19 @@ test('saving instructions preserves edits typed while the request is in flight',
     await gate;
     await route.fulfill({ json: { file: '/global/.crew/instructions.md', text: 'First draft\n' } });
   });
-  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await openSettings(page, 'Instructions');
   const field = page.getByRole('textbox', { name: 'Shared instructions' });
   await expect(field).toBeEnabled();
   await field.fill('First draft');
-  await page.getByRole('button', { name: 'Save instructions' }).click();
+  await page.getByRole('button', { name: 'Save Instructions' }).click();
   await field.fill('First draft with a new requirement');
   release();
-  await expect(page.getByRole('button', { name: 'Save instructions' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Save Instructions' })).toBeEnabled();
   await expect(field).toHaveValue('First draft with a new requirement');
   await expect(page.getByText('Unsaved changes')).toBeVisible();
 });
 
-test('an old save cannot replace another scope and failed loads cannot be saved', async ({ page }) => {
+test('the scope cannot change during a save and failed loads cannot be saved', async ({ page }) => {
   let release!: () => void;
   const gate = new Promise<void>((resolve) => {
     release = resolve;
@@ -158,33 +163,35 @@ test('an old save cannot replace another scope and failed loads cannot be saved'
   await page.route('**/api/instructions?project=*', (route) =>
     route.fulfill({ status: 500, json: { error: 'Cannot read project instructions' } }),
   );
-  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await openSettings(page, 'Instructions');
   const field = page.getByRole('textbox', { name: 'Shared instructions' });
   await expect(field).toBeEnabled();
   await field.fill('Old text');
-  await page.getByRole('button', { name: 'Save instructions' }).click();
-  page.on('dialog', (dialog) => dialog.accept());
-  await page.getByLabel('Applies to').selectOption('/workspace/Other');
+  await page.getByRole('button', { name: 'Save Instructions' }).click();
+  // As in the app, the scope is locked while its save is in flight.
+  await expect(page.getByLabel('Applies to')).toBeDisabled();
   release();
+  await expect(page.getByText('Unsaved changes')).toHaveCount(0);
+  await page.getByLabel('Applies to').selectOption('/workspace/Other');
   await expect(field).toBeDisabled();
-  await expect(page.getByRole('button', { name: 'Save instructions' })).toBeDisabled();
-  await expect(page.getByRole('button', { name: 'Retry loading' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Save Instructions' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Retry Loading' })).toBeVisible();
 });
 
 test('settings can retry failed saves and confirm unsaved close', async ({ page }) => {
-  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await openSettings(page, 'Instructions');
   const field = page.getByRole('textbox', { name: 'Shared instructions' });
   await expect(field).toBeEnabled();
   await field.fill('Draft');
   await page.route('**/api/instructions', (route) => route.fulfill({ status: 500, json: { error: 'Save failed' } }));
-  await page.getByRole('button', { name: 'Save instructions' }).click();
+  await page.getByRole('button', { name: 'Save Instructions' }).click();
   await expect(page.getByText('Save failed', { exact: true })).toBeVisible();
   await expect(field).toHaveValue('Draft');
   page.once('dialog', (dialog) => dialog.dismiss());
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toBeVisible();
   await page.unroute('**/api/instructions');
-  await page.getByRole('button', { name: 'Save instructions' }).click();
+  await page.getByRole('button', { name: 'Save Instructions' }).click();
   await expect(page.getByText('Unsaved changes')).toHaveCount(0);
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);
@@ -211,14 +218,16 @@ test('detail panel cancels, follows up, and escapes task text', async ({ page, r
   expect(calls.some((call: { route: string }) => call.route.endsWith('/cancel'))).toBe(true);
 });
 
-test('project filtering keeps global requests visible and direct dispatch follows roles', async ({ page, request }) => {
-  await page.getByRole('combobox', { name: 'Filter project' }).selectOption('/workspace/Other');
-  await expect(page.getByRole('heading', { name: 'Other', exact: true })).toBeVisible();
-  await expect(page.getByRole('textbox', { name: 'Your answer' })).toBeVisible();
+test('project filtering keeps global requests visible and New Job follows roles', async ({ page, request }) => {
+  await page.getByRole('navigation').getByRole('button', { name: 'Other', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Other', exact: true, level: 1 })).toBeVisible();
+  await expect(page.getByRole('button', { name: /1 request needs your attention/ })).toBeVisible();
+  await newJob(page);
+  await expect(page.getByRole('textbox', { name: 'Project directory' })).toHaveValue('/workspace/Other');
   await page.getByRole('combobox', { name: 'Role', exact: true }).selectOption('review');
-  await page.getByRole('textbox', { name: 'New job' }).fill('Review the accessibility changes');
-  await page.getByRole('button', { name: 'Send new job' }).click();
-  await expect(page.getByRole('dialog')).toBeVisible();
+  await page.getByRole('textbox', { name: 'New job instructions' }).fill('Review the accessibility changes');
+  await page.getByRole('button', { name: 'Send Job' }).click();
+  await expect(page.getByRole('button', { name: 'Close details' })).toBeVisible();
   const calls = await (await request.get('/__requests')).json();
   const created = calls.find((call: { route: string }) => call.route === '/api/jobs');
   expect(created.body).toMatchObject({
@@ -228,28 +237,27 @@ test('project filtering keeps global requests visible and direct dispatch follow
   });
 });
 
-test('a single project filter can be cleared after reload to dispatch elsewhere', async ({ page, request }) => {
-  const data = fixture();
-  data.claude = data.claude.filter((session) => session.cwd === '/workspace/Crew');
-  await request.post('/__push', { data: { type: 'state', data } });
-  const directory = page.getByRole('textbox', { name: 'Project directory' });
-  await expect(directory).toBeEditable();
-  await page.getByRole('heading', { name: 'Crew', exact: true }).getByRole('button').click();
-  await expect(directory).not.toBeEditable();
+test('a chosen project survives reload and All projects lets New Job go elsewhere', async ({ page, request }) => {
+  await page.getByRole('navigation').getByRole('button', { name: 'Crew', exact: true }).click();
   await page.reload();
   await expect(page.getByText('Live', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Crew', exact: true, level: 1 })).toBeVisible();
+  await newJob(page);
+  const directory = page.getByRole('textbox', { name: 'Project directory' });
   await expect(directory).toHaveValue('/workspace/Crew');
-  await page.getByRole('combobox', { name: 'Filter project' }).selectOption('');
-  await expect(directory).toBeEditable();
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await page.getByRole('button', { name: 'All projects' }).click();
+  await newJob(page);
+  await expect(directory).toHaveValue('');
   await directory.fill('/workspace/New');
-  await page.getByRole('textbox', { name: 'New job' }).fill('Implement the new project');
-  await page.getByRole('button', { name: 'Send new job' }).click();
-  await expect(page.getByRole('dialog')).toBeVisible();
+  await page.getByRole('textbox', { name: 'New job instructions' }).fill('Implement the new project');
+  await page.getByRole('button', { name: 'Send Job' }).click();
+  await expect(page.getByRole('button', { name: 'Close details' })).toBeVisible();
   const calls = await (await request.get('/__requests')).json();
   expect(calls.find((call: { route: string }) => call.route === '/api/jobs').body).toMatchObject({
     cwd: '/workspace/New', project: '/workspace/New',
   });
-  expect(await page.evaluate(() => localStorage.getItem('crew.project'))).toBe('');
+  expect(await page.evaluate(() => localStorage.getItem('crew.selection'))).toBe('overview');
 });
 
 test('a closed slow drawer never opens itself again', async ({ page }) => {
@@ -312,16 +320,27 @@ test('Return adds a newline in an answer and the next question gets a fresh draf
   expect(calls[0].body).toMatchObject({ message: '새 답변', request_id: 'request-2' });
 });
 
-test('320px dialogs keep controls within the viewport and support reduced motion', async ({ page }) => {
+test('320px sheets keep controls within the viewport and support reduced motion', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 800 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  const dialog = page.getByRole('dialog');
+  await page.getByRole('combobox', { name: 'Project' }).selectOption('/workspace/Crew');
+  await expect(page.getByRole('heading', { name: 'Crew', level: 1 })).toBeVisible();
+  await page.getByRole('combobox', { name: 'Project' }).selectOption('');
+  await newJob(page);
+  const job = page.getByRole('dialog');
+  expect(await job.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await expect(page.getByRole('button', { name: 'Send Job' })).toBeInViewport();
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await page.locator('button[data-job="cx-build"]').click();
+  const panel = page.getByRole('dialog');
+  expect(await panel.evaluate((element) => element.getBoundingClientRect().right <= innerWidth)).toBe(true);
+  expect(await panel.evaluate((element) => getComputedStyle(element).animationName)).toBe('none');
+  await page.getByRole('button', { name: 'Close details' }).click();
+  await openSettings(page, 'Instructions');
+  const settings = page.getByRole('dialog');
   await expect(page.getByRole('textbox', { name: 'Shared instructions' })).toBeEnabled();
-  expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
-  expect(await dialog.evaluate((element) => getComputedStyle(element).animationName)).toBe('none');
-  await page.getByRole('button', { name: 'Save instructions' }).scrollIntoViewIfNeeded();
-  await expect(page.getByRole('button', { name: 'Save instructions' })).toBeInViewport();
+  expect(await settings.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await expect(page.getByRole('button', { name: 'Save Instructions' })).toBeInViewport();
 });
 
 test('usage windows show every status and reset, with model limits in the help text', async ({ page, request }) => {
@@ -357,41 +376,40 @@ for (const source of ['absent', 'none'])
     await expect(page.getByLabel('Model preset')).toHaveCount(0);
   });
 
-test('preset saves its selection, displays models, and permits none', async ({ page, request }) => {
-  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+test('preset saves its selection, describes its models, and permits none', async ({ page, request }) => {
+  await openSettings(page, 'Presets');
   const select = page.getByLabel('Model preset');
   await expect(select).toHaveValue('balanced');
   await select.selectOption('economy');
-  await expect(page.getByText('small · low effort')).toBeVisible();
-  await expect(page.getByText('haiku', { exact: true })).toBeVisible();
-  await expect(page.getByText('A model or effort set on a role overrides the preset.')).toBeVisible();
-  await page.getByRole('button', { name: 'Save preset' }).click();
+  await expect(page.getByText('Codex: small · low effort; Antigravity: flash; Subagents: haiku', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Save Preset' }).click();
   await expect(page.getByText('Unsaved changes')).toHaveCount(0);
   let calls = await (await request.get('/__requests')).json();
   expect(calls.find((call: { route: string }) => call.route === '/api/preset').body).toEqual({ preset: 'economy' });
   await select.selectOption('');
-  await page.getByRole('button', { name: 'Save preset' }).click();
+  await expect(page.getByText("Uses each agent's configured model and effort.")).toBeVisible();
+  await page.getByRole('button', { name: 'Save Preset' }).click();
   await expect(page.getByText('Unsaved changes')).toHaveCount(0);
   calls = await (await request.get('/__requests')).json();
   expect(calls.at(-1)).toEqual({ route: '/api/preset', body: { preset: null } });
 });
 
 test('preset failures keep the draft and saving preserves newer edits', async ({ page }) => {
-  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await openSettings(page, 'Presets');
   const select = page.getByLabel('Model preset');
   await select.selectOption('best');
   await page.route('**/api/preset', (route) => route.fulfill({ status: 500, json: { error: 'Cannot save preset' } }));
-  await page.getByRole('button', { name: 'Save preset' }).click();
+  await page.getByRole('button', { name: 'Save Preset' }).click();
   await expect(page.getByText('Cannot save preset')).toBeVisible();
   await expect(select).toHaveValue('best');
   await page.unroute('**/api/preset');
   let release!: () => void;
   const gate = new Promise<void>((resolve) => { release = resolve; });
   await page.route('**/api/preset', async (route) => { await gate; await route.continue(); });
-  await page.getByRole('button', { name: 'Save preset' }).click();
+  await page.getByRole('button', { name: 'Save Preset' }).click();
   await select.selectOption('economy');
   release();
-  await expect(page.getByRole('button', { name: 'Save preset' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Save Preset' })).toBeEnabled();
   await expect(select).toHaveValue('economy');
   await expect(page.getByText('Unsaved changes')).toBeVisible();
 });
@@ -441,31 +459,34 @@ test('a round lock survives reopening and errors can retry', async ({ page, requ
 });
 
 test('command intent retains the existing implementation request', async ({ page, request }) => {
+  await newJob(page);
   await page.getByLabel('Project directory').fill('/workspace/Crew');
-  await expect(page.getByRole('combobox', { name: 'Intent', exact: true })).toHaveValue('command');
-  await page.getByRole('textbox', { name: 'New job' }).fill('Implement the feature');
-  await page.getByRole('button', { name: 'Send new job' }).click();
-  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(page.getByRole('radio', { name: 'Command' })).toBeChecked();
+  await page.getByRole('textbox', { name: 'New job instructions' }).fill('Implement the feature');
+  await page.getByRole('button', { name: 'Send Job' }).click();
+  await expect(page.getByRole('button', { name: 'Close details' })).toBeVisible();
   const calls = await (await request.get('/__requests')).json();
   expect(calls.find((call: { route: string }) => call.route === '/api/jobs').body).toEqual({
     kind: 'delegate', cwd: '/workspace/Crew', project: '/workspace/Crew', task: 'Implement the feature', isolation: 'worktree',
   });
 });
 
-test('question intent hides command options, respects IME, and labels the read-only job', async ({ page, request }) => {
+test('question intent hides command options, keeps Return as a newline, and labels the read-only job', async ({ page, request }) => {
+  await newJob(page);
   await page.getByLabel('Project directory').fill('/workspace/Crew');
   await page.getByRole('combobox', { name: 'Role', exact: true }).selectOption('polish');
-  await page.getByRole('combobox', { name: 'Intent', exact: true }).selectOption('question');
+  await expect(page.getByRole('textbox', { name: 'Allowed files or directories' })).toBeVisible();
+  await page.getByRole('radio', { name: 'Question' }).click();
   await expect(page.getByRole('combobox', { name: 'Role', exact: true })).toHaveCount(0);
-  await expect(page.getByLabel('Allowed files or directories (one per line)')).toHaveCount(0);
-  const field = page.getByRole('textbox', { name: 'Question', exact: true });
+  await expect(page.getByRole('textbox', { name: 'Allowed files or directories' })).toHaveCount(0);
+  const field = page.getByRole('textbox', { name: 'New job instructions' });
   await field.fill('이 코드는 어떻게 동작하나요?');
-  await field.dispatchEvent('keydown', { key: 'Enter', isComposing: true, keyCode: 229 });
+  await field.press('Enter');
   expect(await (await request.get('/__requests')).json()).toHaveLength(0);
-  await page.getByRole('button', { name: 'Send question', exact: true }).click();
-  await expect(page.getByRole('dialog').locator('.kind')).toHaveText('Question');
+  await page.getByRole('button', { name: 'Ask Question', exact: true }).click();
+  await expect(page.getByRole('dialog').locator('.facts')).toContainText('RoleQuestion');
   await page.getByRole('button', { name: 'Close details' }).click();
-  await expect(page.locator('button[data-job="cx-direct"] .at')).toHaveText('Question');
+  await expect(page.locator('button[data-job="cx-direct"] .job-row-text span')).toContainText('Question');
   const calls = await (await request.get('/__requests')).json();
   expect(calls.find((call: { route: string }) => call.route === '/api/jobs').body).toEqual({
     kind: 'delegate', ask: true, task: '이 코드는 어떻게 동작하나요?', cwd: '/workspace/Crew',
@@ -474,19 +495,19 @@ test('question intent hides command options, respects IME, and labels the read-o
 
 for (const target of ['mission:mission-1', 'project', 'global'])
   test(`information intent saves to ${target} without starting a job`, async ({ page, request }) => {
+    await newJob(page);
     await page.getByLabel('Project directory').fill('/workspace/Crew');
-    await page.getByRole('combobox', { name: 'Intent', exact: true }).selectOption('information');
-    await page.getByLabel('Save information to').selectOption(target);
-    await expect(page.getByText('Save information for future work. This starts no job.')).toBeVisible();
-    await page.getByRole('textbox', { name: 'Information', exact: true }).fill('Keep this requirement');
-    await page.getByRole('button', { name: 'Send information' }).click();
-    await expect(page.getByRole('textbox', { name: 'Information', exact: true })).toHaveValue('');
+    await page.getByRole('radio', { name: 'Information' }).click();
+    await page.getByLabel('Information destination').selectOption(target);
+    await expect(page.getByText('Adds information only. This starts no work.')).toBeVisible();
+    await page.getByRole('textbox', { name: 'New job instructions' }).fill('Keep this requirement');
+    await page.getByRole('button', { name: 'Save Information' }).click();
     await expect(page.getByRole('dialog')).toHaveCount(0);
     const calls = await (await request.get('/__requests')).json();
     expect(calls).toEqual(target.startsWith('mission:')
       ? [{ route: '/api/missions/mission-1', body: { note: 'Keep this requirement' } }]
       : [{ route: '/api/instructions', body: { append: 'Keep this requirement', project: target === 'global' ? null : '/workspace/Crew' } }]);
-    if (target.startsWith('mission:')) await expect(page.getByLabel('Pinned notes').getByText('Keep this requirement')).toBeVisible();
+    if (target.startsWith('mission:')) await expect(page.locator('[data-key="mission-1"]').getByText('Keep this requirement')).toBeVisible();
   });
 
 test('mission progress stays visible when collapsed and notes show when expanded', async ({ page }) => {
@@ -518,19 +539,20 @@ test('information offers only active missions in the chosen project and retains 
     { ...data.missions[0], id: 'elsewhere', title: 'Another project mission', project: '/workspace/Other', root: '/workspace/Other' },
   );
   await request.post('/__push', { data: { type: 'state', data } });
+  await newJob(page);
   await page.getByLabel('Project directory').fill('/workspace/Crew');
-  await page.getByRole('combobox', { name: 'Intent', exact: true }).selectOption('information');
-  const destination = page.getByRole('combobox', { name: 'Save information to' });
+  await page.getByRole('radio', { name: 'Information' }).click();
+  const destination = page.getByRole('combobox', { name: 'Information destination' });
   await expect(destination.locator('option')).toHaveCount(3);
   await destination.selectOption('mission:mission-1');
-  const field = page.getByRole('textbox', { name: 'Information', exact: true });
+  const field = page.getByRole('textbox', { name: 'New job instructions' });
   await field.fill('정보를 유지해요');
-  await field.dispatchEvent('keydown', { key: 'Enter', isComposing: true, keyCode: 229 });
+  await field.press('Enter');
   expect(await (await request.get('/__requests')).json()).toHaveLength(0);
   await page.route('**/api/missions/mission-1', (route) => route.fulfill({ status: 409, json: { error: 'Mission is no longer active' } }));
-  await page.getByRole('button', { name: 'Send information' }).click();
+  await page.getByRole('button', { name: 'Save Information' }).click();
   await expect(page.getByText('Mission is no longer active')).toBeVisible();
-  await expect(field).toHaveValue('정보를 유지해요');
+  await expect(field).toHaveValue('정보를 유지해요\n');
 });
 
 test.describe('authenticated daemon', () => {

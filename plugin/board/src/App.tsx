@@ -166,6 +166,10 @@ export function App() {
             <p className="connection" role="status" data-state={state.connection}>
               {live ? 'Live' : state.connection === 'lost' ? 'Reconnecting…' : 'Connecting…'}
             </p>
+            {/* The sidebar is hidden in narrow windows, so Settings moves here. */}
+            <button className="icon toolbar-settings" aria-label="Settings" title="Settings" disabled={!Object.keys(state.roles).length} onClick={() => setSettings(true)}>
+              <Icon icon={SettingsIcon} />
+            </button>
             <button className="glass" disabled={!live} title="New job" onClick={() => setDispatching(true)}>
               <Icon icon={Plus} />
               New Job

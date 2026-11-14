@@ -1,5 +1,5 @@
 import { test, expect, type Locator, type Page } from '@playwright/test';
-import { fixture, NOW, TEST_TOKEN } from './fixtures.ts';
+import { fixture, job, NOW, TEST_TOKEN } from './fixtures.ts';
 
 test.beforeEach(async ({ page, request }) => {
   await request.post('/__reset');
@@ -235,6 +235,76 @@ test('the detail panel shows the worker\'s evidence and the lead\'s attachments'
   expect(await shot.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true);
   await expect(section.getByText('Turn 1 · narrow.png')).toBeVisible();
   await expect(section.getByText('Attached by the lead · lead-1-design.png')).toBeVisible();
+});
+
+test('the detail panel shows what verified the result and nothing for jobs without receipts', async ({ page, request }) => {
+  const data = fixture();
+  const check = { command: 'npm test', exit: 0, timedOut: false, output: 'ok 12 tests', ms: 4200, sandboxed: true };
+  data.jobs[0].receipts = [{ turn: 1, head: 'f00dbabe12345678', check, at: NOW - 1000 }];
+  data.jobs[0].capabilities = { filesystem: 'writes in the worktree only', network: 'off', plugins: ['figma'] };
+  data.jobs[0].approvals = [{ turn: 1, quote: 'go ahead and push', matched: true, recorded: 2, at: NOW - 2000 }];
+  data.jobs.push(
+    job({
+      id: 'cx-failed',
+      title: 'Fix the flaky test',
+      state: 'done',
+      endedAt: NOW - 5000,
+      turns: 2,
+      receipts: [{
+        turn: 2,
+        head: 'deadbeef00000000',
+        check: { command: 'npm run test:e2e', exit: 1, timedOut: false, output: 'FAIL board.spec.ts\nExpected 2, received 3', ms: 95_000, sandboxed: true },
+        stale: 'turn 2 was undone',
+        at: NOW - 6000,
+      }],
+      approvals: [{ turn: 2, quote: 'yes, delete it', matched: false, recorded: 0, at: NOW - 7000 }],
+    }),
+    job({
+      id: 'cx-review',
+      kind: 'review',
+      title: 'Review the board change',
+      state: 'done',
+      endedAt: NOW - 5000,
+      worktree: null,
+      rounds: [],
+      receipts: [{ turn: 1, head: 'cafe0123456789ab', reviewed: { target: 'uncommitted changes', diff: '9f8e7d6c' }, at: NOW - 6000 }],
+    }),
+    job({ id: 'cx-plain', title: 'Plain job', state: 'done', endedAt: NOW - 5000 }),
+  );
+  await request.post('/__push', { data: { type: 'state', data } });
+  const open = async (id: string) => {
+    await page.locator(`button[data-job="${id}"]`).first().click();
+    return page.getByRole('dialog');
+  };
+  const close = () => page.getByRole('button', { name: 'Close details' }).click();
+
+  let section = (await open('cx-build')).getByRole('region', { name: 'Verification' });
+  await expect(section.getByText('Check passed')).toBeVisible();
+  await expect(section.getByText('npm test', { exact: true })).toBeVisible();
+  await expect(section.getByText('Turn 1 · f00dbabe · 4s')).toBeVisible();
+  await expect(section.getByText('Output (end)')).toHaveCount(0);
+  await expect(section.getByText('writes in the worktree only · no network · plugins figma (act outside the sandbox)')).toBeVisible();
+  await expect(section.getByText('Approval relayed for turn 1 — the user’s own words went with it, and the quote matches them.')).toBeVisible();
+  await expect(section.getByText('“go ahead and push”')).toBeVisible();
+  await close();
+
+  section = (await open('cx-failed')).getByRole('region', { name: 'Verification' });
+  await expect(section.getByText('Check failed with exit code 1')).toBeVisible();
+  await expect(section.getByText('No longer current: turn 2 was undone')).toBeVisible();
+  await expect(section.getByText('Expected 2, received 3')).toBeHidden();
+  await section.getByText('Output (end)').click();
+  await expect(section.getByText('Expected 2, received 3')).toBeVisible();
+  await expect(section.getByText(/no messages of the user were recorded/)).toBeVisible();
+  await expect(section.getByText('Runs with')).toHaveCount(0);
+  await close();
+
+  section = (await open('cx-review')).getByRole('region', { name: 'Verification' });
+  await expect(section.getByText('Reviewed', { exact: true })).toBeVisible();
+  await expect(section.getByText('uncommitted changes')).toBeVisible();
+  await expect(section.getByText('Turn 1 · cafe0123 · diff 9f8e7d6c')).toBeVisible();
+  await close();
+
+  await expect((await open('cx-plain')).getByRole('region', { name: 'Verification' })).toHaveCount(0);
 });
 
 test('project filtering keeps global requests visible and New Job follows roles', async ({ page, request }) => {

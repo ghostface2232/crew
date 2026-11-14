@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Check, CircleStop, FileText, GitBranch, Images, MessageSquare, NotebookText, RotateCcw, ShieldAlert, TriangleAlert, Undo2, Zap } from 'lucide-react';
+import { Check, CircleStop, Clock, FileText, GitBranch, History, Images, MessageSquare, NotebookText, RotateCcw, ShieldAlert, ShieldCheck, TriangleAlert, Undo2, X, Zap } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { BoardJob, CrewEvent, Snapshot } from './types.ts';
@@ -84,6 +84,101 @@ function EvidenceSection({ job }: { job: BoardJob }) {
           );
         })}
       </div>
+    </Section>
+  );
+}
+
+const NETWORK: Record<NonNullable<BoardJob['capabilities']>['network'], string> = {
+  on: 'network on',
+  off: 'no network',
+  'agent-managed': 'network as the agent allows',
+};
+
+function duration(ms: number) {
+  return ms < 60_000 ? `${Math.max(1, Math.round(ms / 1000))}s` : elapsed(ms);
+}
+
+/** The latest turn's receipt: the check the bridge ran itself, or what a review looked at. */
+function ReceiptView({ receipt }: { receipt: NonNullable<BoardJob['receipts']>[number] }) {
+  const { check, reviewed, stale } = receipt;
+  if (!check && !reviewed) return null;
+  const at = receipt.head ? ` · ${receipt.head.slice(0, 8)}` : '';
+  const passed = check?.exit === 0 && !check.timedOut;
+  const [state, icon, label] = !check
+    ? (['done', Check, 'Reviewed'] as const)
+    : passed
+      ? (['done', Check, 'Check passed'] as const)
+      : check.timedOut
+        ? (['waiting', Clock, `Check timed out after ${duration(check.ms)}`] as const)
+        : check.exit == null
+          ? (['failed', X, 'Check stopped before it finished'] as const)
+          : (['failed', X, `Check failed with exit code ${check.exit}`] as const);
+  return (
+    // A stale receipt keeps its words but loses its color: it no longer speaks for the branch.
+    <div className="receipt" data-state={stale ? 'idle' : state}>
+      <p className="receipt-status">
+        <Icon icon={icon} size={12} />
+        {label}
+      </p>
+      {check ? (
+        <code className="selectable">{check.command}</code>
+      ) : (
+        <code className="selectable">{reviewed!.target}</code>
+      )}
+      <p className="caption secondary selectable">
+        Turn {receipt.turn}
+        {at}
+        {check && ` · ${duration(check.ms)}${check.sandboxed ? '' : ' · not sandboxed'}`}
+        {reviewed?.diff && ` · diff ${reviewed.diff}`}
+      </p>
+      {stale && (
+        <p className="callout secondary selectable">
+          <Icon icon={History} size={11} /> No longer current: {stale}
+        </p>
+      )}
+      {check && !passed && check.output && (
+        <details className="disclosure-group">
+          <summary>Output (end)</summary>
+          <pre className="selectable">{check.output.split('\n').slice(-15).join('\n')}</pre>
+        </details>
+      )}
+    </div>
+  );
+}
+
+function approvalBasis({ recorded, matched }: NonNullable<BoardJob['approvals']>[number]) {
+  if (!recorded) return 'no messages of the user were recorded, so only the lead’s quote went with it';
+  return matched ? 'the user’s own words went with it, and the quote matches them' : 'the user’s own words went with it; the quote is a translation or paraphrase';
+}
+
+/** What backs the result: the latest check or review, what the worker could reach, and relayed approvals. */
+function VerificationSection({ job }: { job: BoardJob }) {
+  const receipt = job.receipts?.at(-1);
+  const shown = receipt && (receipt.check || receipt.reviewed);
+  const capabilities = job.capabilities;
+  const approvals = job.approvals ?? [];
+  if (!shown && !capabilities && !approvals.length) return null;
+  return (
+    <Section title="Verification" icon={ShieldCheck}>
+      {shown && <ReceiptView receipt={receipt} />}
+      {capabilities && (
+        <dl className="facts selectable">
+          <dt>Runs with</dt>
+          <dd>
+            {[
+              capabilities.filesystem,
+              NETWORK[capabilities.network],
+              capabilities.plugins.length && `plugins ${capabilities.plugins.join(', ')} (act outside the sandbox)`,
+            ].filter(Boolean).join(' · ')}
+          </dd>
+        </dl>
+      )}
+      {approvals.map((approval, index) => (
+        <div className="approval selectable" key={index}>
+          <p className="callout">Approval relayed for turn {approval.turn} — {approvalBasis(approval)}.</p>
+          <p className="caption secondary">“{approval.quote}”</p>
+        </div>
+      ))}
     </Section>
   );
 }
@@ -231,6 +326,7 @@ export function JobDrawer({ id, state, close }: { id: string; state: Snapshot; c
                 )}
               </Section>
             )}
+            <VerificationSection job={job} />
             <EvidenceSection job={job} />
             {!!job.rounds?.length && (
               <Section title="Rounds" icon={RotateCcw}>

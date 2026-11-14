@@ -580,6 +580,12 @@ dialog.detail-panel::backdrop { background: transparent; }
 .round-head b { font-size: 12px; font-weight: 500; }
 .round-head span { color: var(--secondary); font-size: 11px; display: inline-flex; gap: 4px; align-items: center; }
 .round-head button { margin-inline-start: auto; }
+.receipt { display: grid; gap: 6px; }
+.receipt-status { display: inline-flex; align-items: center; gap: 6px; color: color-mix(in srgb, var(--tone), black var(--tone-darken)); font-size: 12px; font-weight: 600; }
+.receipt code { font-size: 12px; overflow-wrap: anywhere; }
+.receipt .callout svg { vertical-align: -1px; }
+.approval { display: grid; gap: 3px; }
+.approval .caption { overflow-wrap: anywhere; }
 .disclosure-group > summary { cursor: pointer; font-size: 13px; }
 .disclosure-group > pre { margin-top: 8px; }
 .detail-foot { display: grid; gap: 10px; padding-top: 16px; border-top: 1px solid var(--hairline); font-size: 12px; }

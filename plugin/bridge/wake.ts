@@ -5,7 +5,7 @@ import type { JobView } from './render.ts';
 /**
  * PostToolUse hook (asyncRewake) for the Crew job tools. When a tool call
  * leaves a job running in the background, this process outlives the call,
- * waits for the job to end, need a decision, or ask a new lead question, and
+ * waits for the job to end, need a decision, ask a new lead question, or stall, and
  * exits with code 2 so Claude Code wakes the lead with the result on stderr.
  *
  * It watches every job the tool result mentions rather than trusting the
@@ -14,20 +14,22 @@ import type { JobView } from './render.ts';
 
 const JOB_ID = /\[((?:cx|ag)-[0-9a-f]{6})\]/g;
 
+const needsWake = (job: JobView) => needsLead(job) || Boolean(job.stalled);
+const urgent = (job: JobView) => (job.state !== 'running' && job.state !== 'done') || Boolean(job.stalled)
+  || ((job.questionSeq ?? 0) > job.delivered && Boolean(job.questions?.some((q) => q.answer === undefined)));
+
 async function batch(job: JobView): Promise<JobView[]> {
   if (!job.mission) return [job];
   const deadline = Date.now() + 30 * 60 * 1000;
   while (true) {
     const { jobs } = await api<{ jobs: JobView[] }>('GET', '/api/state');
     const own = jobs.find((peer) => peer.id === job.id);
-    if (!own || own.seq <= own.delivered || !needsLead(own)) return [];
+    if (!own || own.seq <= own.delivered || !needsWake(own)) return [];
     const peers = jobs.filter((peer) => peer.mission === job.mission && peer.project === job.project
       && Math.abs(peer.createdAt - job.createdAt) <= 20_000 && peer.seq > peer.delivered);
-    const decision = peers.some((peer) => peer.state === 'waiting'
-      || ((peer.questionSeq ?? 0) > peer.delivered && peer.questions?.some((q) => q.answer === undefined)));
-    if (decision || peers.every(needsLead) || Date.now() >= deadline) {
+    if (peers.some(urgent) || peers.every(needsWake) || Date.now() >= deadline) {
       // Every watcher claims the same first result, so only its winner delivers the batch.
-      return peers.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+      return peers.sort((a, b) => Number(urgent(b)) - Number(urgent(a)) || a.createdAt - b.createdAt || a.id.localeCompare(b.id));
     }
     await new Promise((r) => setTimeout(r, 1000));
   }
@@ -36,21 +38,21 @@ async function batch(job: JobView): Promise<JobView[]> {
 async function watch(id: string): Promise<JobView[] | null> {
   let job: JobView = await api('GET', `/api/jobs/${id}`);
   let after = job.seq;
-  while (!needsLead(job)) {
+  while (!needsWake(job)) {
     const res = await api('GET', `/api/jobs/${id}/wait?after=${after}&timeout=50`);
     job = res.job;
     after = job.seq;
   }
   const peers = await batch(job);
   if (peers.length === 0) return null;
-  // The lead may be reading this very result through a blocking wait call; let that win.
-  await new Promise((r) => setTimeout(r, 1500));
+  // Let blocking lead waits read plain completions before claiming them.
+  if (!peers.some(urgent)) await new Promise((r) => setTimeout(r, 1500));
   job = await api('GET', `/api/jobs/${id}`);
-  if (!needsLead(job) || (job.mission && job.seq <= job.delivered)) return null;
+  if (!needsWake(job) || (job.mission && job.seq <= job.delivered)) return null;
   const claimed: JobView[] = [];
   for (const peer of peers) {
     const current: JobView = peer.id === id ? job : await api('GET', `/api/jobs/${peer.id}`);
-    if (!needsLead(current)) continue;
+    if (!needsWake(current)) continue;
     const result = await api('POST', `/api/jobs/${current.id}/delivered`, { seq: current.seq });
     if (result.claimed) claimed.push(current);
     else if (claimed.length === 0) return null;

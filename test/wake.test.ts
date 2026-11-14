@@ -25,7 +25,10 @@ function harness(t: TestContext, jobs: JobView[], beforeClaim?: (current: JobVie
     const realNow = Date.now;
     Date.now = () => now ?? realNow();
     const timer = globalThis.setTimeout;
-    globalThis.setTimeout = (fn, ms, ...args) => timer(fn, Math.min(ms, 25), ...args);
+    globalThis.setTimeout = (fn, ms, ...args) => {
+      process.send({ timer: ms });
+      return timer(fn, Math.min(ms, 25), ...args);
+    };
     process.on('message', ({ id, data, time }) => {
       now = time;
       pending.get(id)(Response.json(data));
@@ -38,7 +41,7 @@ function harness(t: TestContext, jobs: JobView[], beforeClaim?: (current: JobVie
         body: options.body ? JSON.parse(options.body) : undefined });
     });
   `);
-  const h = { now: Date.now(), stateReads: 0, claims: [] as string[] };
+  const h = { now: Date.now(), stateReads: 0, claims: [] as string[], timers: [] as number[] };
   const polls: (() => void)[] = [];
   const wake = (watched: JobView) => {
     const child = fork(path.resolve('plugin/bridge/wake.ts'), [], {
@@ -52,6 +55,7 @@ function harness(t: TestContext, jobs: JobView[], beforeClaim?: (current: JobVie
         child.once('exit', (code) => { watcher.result = { code, stderr }; resolve(watcher.result); });
       }) };
     child.on('message', (message: any) => {
+      if (message.timer !== undefined) { h.timers.push(message.timer); return; }
       const reply = (data: unknown) => child.send({ id: message.id, data, time: h.now });
       if (message.route === '/api/state') {
         h.stateReads++;
@@ -107,8 +111,18 @@ test('parallel mission watchers deliver two settled jobs in one wake', { timeout
   assert.deepEqual(await h.wake(second).exited, { code: 0, stderr: '' });
 });
 
-for (const decision of ['waiting', 'question'] as const) {
-  test(`a ${decision} peer wakes the batch while another peer still runs`, { timeout: 10000 }, async (t) => {
+const important: { name: string; changes: Partial<JobView>; expected: RegExp }[] = [
+  { name: 'waiting', changes: { state: 'waiting', waiting: { id: 'approval', type: 'approval', reason: 'Choose now', since: Date.now() } }, expected: /Choose now/ },
+  { name: 'question', changes: { questionSeq: 3, questions: [{ id: 'q1', text: 'Choose now', at: Date.now() }] }, expected: /ASKS YOU.*Choose now/ },
+  { name: 'completed with a question', changes: { state: 'done', questionSeq: 3, questions: [{ id: 'q1', text: 'Choose now', at: Date.now() }] }, expected: /ASKS YOU.*Choose now/ },
+  { name: 'failed', changes: { state: 'failed', error: { message: 'Worker failed', limit: false } }, expected: /error: Worker failed/ },
+  { name: 'usage limit', changes: { state: 'failed', error: { message: 'Usage limit reached', limit: true } }, expected: /out of usage for now/ },
+  { name: 'cancelled', changes: { state: 'cancelled' }, expected: /CANCELLED/ },
+  { name: 'stalled', changes: { stalled: true }, expected: /no activity for a while, may be stuck/ },
+];
+
+for (const { name, changes, expected } of important) {
+  test(`a ${name} peer wakes the batch while another peer still runs`, { timeout: 10000 }, async (t) => {
     const first = job('cx-000001', { state: 'done' });
     const peer = job('cx-000002');
     const running = job('cx-000003');
@@ -116,18 +130,47 @@ for (const decision of ['waiting', 'question'] as const) {
     const watcher = h.wake(first);
     await h.until(() => h.clock.stateReads >= 2 || Boolean(watcher.result));
     assert.equal(watcher.result, undefined);
-    h.update(peer, decision === 'waiting'
-      ? { state: 'waiting', waiting: { id: 'approval', type: 'approval', reason: 'Choose now', since: Date.now() } }
-      : { questionSeq: peer.seq + 1, questions: [{ id: 'q1', text: 'Choose now', at: Date.now() }] });
+    h.update(peer, changes);
     const result = await watcher.exited;
     assert.equal(result.code, 2);
-    assert.match(result.stderr, /Choose now/);
+    assert.match(result.stderr, expected);
     assert.ok(result.stderr.includes(`[${first.id}]`));
     assert.ok(result.stderr.includes(`[${peer.id}]`));
     assert.ok(!result.stderr.includes(`[${running.id}]`));
     assert.equal(running.delivered, 0);
+    assert.ok(!h.clock.timers.includes(1500), 'important updates must skip the delivery grace period');
+  });
+
+  test(`a watched ${name} job wakes immediately with already-settled peers`, { timeout: 10000 }, async (t) => {
+    const own = job('cx-000001', { ...changes, seq: 3 });
+    const settled = job('cx-000002', { state: 'done' });
+    const running = job('cx-000003');
+    const h = harness(t, [own, settled, running]);
+    const result = await h.wake(own).exited;
+    assert.equal(result.code, 2);
+    assert.match(result.stderr, expected);
+    assert.ok(result.stderr.includes(`[${settled.id}]`));
+    assert.ok(!result.stderr.includes(`[${running.id}]`));
+    assert.equal(running.delivered, 0);
+    assert.ok(!h.clock.timers.includes(1000), 'important updates must not wait for peers');
+    assert.ok(!h.clock.timers.includes(1500), 'important updates must skip the delivery grace period');
   });
 }
+
+test('running peers retain their own watcher for a later wake after an important update', { timeout: 10000 }, async (t) => {
+  const failed = job('cx-000001', { state: 'failed' });
+  const running = job('cx-000002');
+  const h = harness(t, [failed, running]);
+  const later = h.wake(running);
+  assert.equal((await h.wake(failed).exited).code, 2);
+  assert.equal(later.result, undefined);
+  assert.equal(running.delivered, 0);
+  h.update(running, { state: 'done' });
+  const result = await later.exited;
+  assert.equal(result.code, 2);
+  assert.ok(result.stderr.includes(`[${running.id}]`));
+  assert.ok(!result.stderr.includes(`[${failed.id}]`));
+});
 
 test('batch matching excludes other missions, projects, old jobs and delivered jobs', { timeout: 10000 }, async (t) => {
   const own = job('cx-000001', { state: 'done' });

@@ -15,6 +15,7 @@ Usage:
   crew status            What each agent is doing, and recent jobs
   crew show <job>        Full result of one job
   crew cancel <job>      Stop a running job
+  crew gc [--apply] [--branches]  Preview leftovers; --apply cleans directories and metadata, --branches also deletes branches
   crew board             Open the status board in the browser, signed in (--url prints the address instead)
   crew doctor            Check that everything Crew needs is in place
   crew install           Register the plugin with Claude Code and put crew on PATH
@@ -114,6 +115,13 @@ try {
       await ensureDaemon();
       console.log(describe(await api('POST', `/api/jobs/${arg}/cancel`, {})));
       break;
+    case 'gc': {
+      if (process.argv.slice(3).some((flag) => !['--apply', '--branches'].includes(flag))) throw new Error('Usage: crew gc [--apply] [--branches]');
+      await ensureDaemon();
+      const result = await api('POST', '/api/gc', { apply: process.argv.includes('--apply'), branches: process.argv.includes('--branches') });
+      console.log(result.text);
+      break;
+    }
     case 'board':
       await ensureDaemon();
       // The address carries the secret in its fragment so the page can sign in. It is printed only when asked for,

@@ -427,6 +427,13 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
   }
 
   if (method === 'POST') {
+    if (pathname === '/api/gc') {
+      const body = await readJson(req);
+      if (body.apply !== undefined && typeof body.apply !== 'boolean' || body.branches !== undefined && typeof body.branches !== 'boolean') {
+        throw new HttpError(400, 'apply and branches must be booleans');
+      }
+      return { text: await jobs.gc(body) };
+    }
     if (pathname === '/api/desktop/heartbeat') {
       const body = await readJson(req);
       if (body.leaving === true) {

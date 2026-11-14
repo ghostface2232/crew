@@ -159,6 +159,21 @@ export class CodexAdapter implements Adapter {
     }
   }
 
+  async release(ctl: JobCtl): Promise<void> {
+    const threadId = ctl.job.sessionId;
+    const peer = this.peer;
+    if (!threadId || !peer || !this.loaded.has(threadId)) return;
+    const run = this.runs.get(threadId);
+    const threads = [...this.children].filter(([, owner]) => owner === run).map(([id]) => id);
+    for (const id of [...threads, threadId]) {
+      // Unsubscribe schedules an idle unload; it does not guarantee immediate handle release.
+      await peer.request('thread/unsubscribe', { threadId: id }, 5_000);
+      this.loaded.delete(id);
+      this.children.delete(id);
+    }
+    this.runs.delete(threadId);
+  }
+
   shutdown(): void {
     this.peer?.close();
   }

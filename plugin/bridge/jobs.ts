@@ -3,7 +3,8 @@ import path from 'node:path';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { effectiveRole, PORT, runsCommands, WORKERS } from './config.ts';
 import type { Config, Role, WorkerAgent } from './config.ts';
-import { carryUncommitted, changesSince, commitAll, commitChanges, copyIncluded, createWorktree, detachLinks, currentBranch, dirtyCount, mergeInto, isInside, projectRoot, removeWorktree, repoRoot, revertCommit, revertsSince, reviewDiff } from './git.ts';
+import { carryUncommitted, changesSince, commitAll, commitChanges, copyIncluded, createWorktree, currentBranch, dirtyCount, mergeInto, isInside, projectRoot, removeDirectory, removeWorktree, repoRoot, revertCommit, revertsSince, reviewDiff, WorktreeCleanupError } from './git.ts';
+import { collectGarbage } from './gc.ts';
 import type { Worktree } from './git.ts';
 import { sharedInstructions } from './instructions.ts';
 import { buildPrompt } from './prompts.ts';
@@ -134,6 +135,8 @@ export interface Job {
   /** Directory the worker runs in: the worktree when isolated, else the caller's cwd. */
   cwd: string;
   worktree: Worktree | null;
+  /** A failed discard keeps its record until gc can finish the removal. */
+  cleanupPending?: string[];
   sandbox: 'read-only' | 'workspace-write';
   prompt: string;
   instructions: string;
@@ -211,6 +214,8 @@ export interface Adapter {
   /** Resolves the pending approval or question. */
   answer(ctl: JobCtl, approve: boolean, message?: string): Promise<void>;
   cancel(ctl: JobCtl): Promise<void>;
+  /** Releases a finished session before removing its workspace. */
+  release?(ctl: JobCtl): Promise<void>;
   shutdown(): void;
 }
 
@@ -258,6 +263,7 @@ export class Jobs {
   private preparingReviews = new Set<string>();
   /** Review snapshots being removed; a follow-up waits for the removal before it makes a new one. */
   private snapshots = new Map<string, Promise<void>>();
+  private collecting = false;
   private saveTimer: NodeJS.Timeout | null = null;
   private home: string;
   private readConfig: () => Config;
@@ -265,14 +271,16 @@ export class Jobs {
   private settings: Config;
   private adapters: Record<WorkerAgent, Adapter>;
   private hooks: JobsHooks;
+  private platform: NodeJS.Platform;
 
   /** `config` is called again for each new job, so role assignments can change without a restart. */
-  constructor(home: string, config: () => Config, adapters: Record<WorkerAgent, Adapter>, hooks: JobsHooks) {
+  constructor(home: string, config: () => Config, adapters: Record<WorkerAgent, Adapter>, hooks: JobsHooks, platform: NodeJS.Platform = process.platform) {
     this.home = home;
     this.readConfig = config;
     this.settings = config();
     this.adapters = adapters;
     this.hooks = hooks;
+    this.platform = platform;
     this.load();
     setInterval(() => this.checkStalls(), 15_000).unref();
   }
@@ -326,6 +334,7 @@ export class Jobs {
   }
 
   private async start(spec: JobSpec): Promise<Job> {
+    if (this.collecting) throw new Error('Crew gc is running. Try again when it finishes.');
     if (spec.ask) {
       if (spec.kind !== 'delegate') throw new Error('An ask job must use kind "delegate".');
       if (!spec.task?.trim()) throw new Error('An ask job requires a task with the question to answer.');
@@ -469,6 +478,7 @@ export class Jobs {
   }
 
   async reply(id: string, input: { message?: string; decision?: 'approve' | 'deny'; request_id?: string; approved_by_user?: string; sync?: boolean | string }): Promise<Job> {
+    if (this.collecting) throw new Error('Crew gc is running. Try again when it finishes.');
     const job = this.get(id);
     if (this.changingRounds.has(id)) throw new Error(`Job ${id} is changing a round. Wait for it to finish.`);
     if (this.discarding.has(id)) throw new Error(`Job ${id} is being discarded.`);
@@ -643,7 +653,7 @@ export class Jobs {
       const failed = `Could not copy from .worktreeinclude: ${included.failed.join('; ')}`;
       if (included.failed.length && !notes.includes(failed)) notes.push(failed);
     } catch (err) {
-      await removeWorktree(repo, worktree, id, this.home).catch(() => {});
+      await removeWorktree(repo, worktree, id, this.home, this.platform).catch(() => {});
       throw err;
     }
     return worktree;
@@ -652,7 +662,7 @@ export class Jobs {
   private dropSnapshot(job: Job): void {
     const { worktree, repo } = job;
     if (!worktree || !repo || this.snapshots.has(job.id)) return;
-    const removal = removeWorktree(repo, worktree, job.id, this.home).then(
+    const removal = this.removeJobWorktree(job).then(
       () => {
         job.worktree = null;
       },
@@ -682,8 +692,47 @@ export class Jobs {
     return job;
   }
 
+  private async removeJobWorktree(job: Job): Promise<void> {
+    try {
+      await this.adapters[job.agent].release?.(this.ctl(job));
+    } catch (err) {
+      job.notes.push(`Could not release the worker session: ${(err as Error).message}`);
+    }
+    try {
+      await removeWorktree(job.repo!, job.worktree!, job.id, this.home, this.platform);
+      delete job.cleanupPending;
+    } catch (err) {
+      if (err instanceof WorktreeCleanupError) {
+        job.cleanupPending = err.leftovers;
+        job.notes.push(`Cleanup left: ${err.leftovers.join('; ') || 'Git registration could not be confirmed'}. Run crew gc to remove leftovers later. ${err.message}`);
+        this.changed(job);
+        this.flush();
+      }
+      throw err;
+    }
+  }
+
+  async gc(options: { apply?: boolean; branches?: boolean } = {}): Promise<string> {
+    if (this.collecting || this.starting.length) throw new Error('Jobs or gc are starting. Try again when they finish.');
+    this.collecting = true;
+    try {
+      const pending = this.list().filter((job) => job.cleanupPending);
+      const result = await collectGarbage(this.home, this.list(), (job) => !isTerminal(job) || this.discarding.has(job.id)
+        || this.changingRounds.has(job.id) || this.preparingReviews.has(job.id) || this.snapshots.has(job.id)
+        || this.finalizing.has(job.id) || this.cancelling.has(job.id), options, this.platform);
+      if (options.apply) {
+        for (const job of pending) this.changed(job);
+        this.flush();
+      }
+      return result;
+    } finally {
+      this.collecting = false;
+    }
+  }
+
   /** Removes the worktree and branch of a finished job. */
   async discard(id: string): Promise<Job> {
+    if (this.collecting) throw new Error('Crew gc is running. Try again when it finishes.');
     const job = this.get(id);
     if (this.changingRounds.has(id)) throw new Error(`Job ${id} is changing a round. Wait for it to finish.`);
     if (this.cancelling.has(id)) throw new Error(`Job ${id} is being cancelled.`);
@@ -696,7 +745,7 @@ export class Jobs {
       // A review snapshot may be on its way out already; removing it twice would fail on the branch.
       await this.snapshots.get(id);
       if (job.worktree && job.repo) {
-        await removeWorktree(job.repo, job.worktree, job.id, this.home);
+        await this.removeJobWorktree(job);
         job.worktree = null;
         job.notes.push('Worktree and branch removed.');
         this.changed(job);
@@ -709,6 +758,7 @@ export class Jobs {
   }
 
   async round(id: string, turn: number, action: 'undo' | 'keep'): Promise<Job> {
+    if (this.collecting) throw new Error('Crew gc is running. Try again when it finishes.');
     const job = this.get(id);
     if (!isTerminal(job)) throw new Error(`Job ${id} is still ${job.state}; wait for the turn to end before changing a round.`);
     if (this.discarding.has(id)) throw new Error(`Job ${id} is being discarded.`);
@@ -1041,8 +1091,7 @@ export class Jobs {
     } catch {
       return;
     }
-    const detached = process.platform === 'win32' ? detachLinks(gone) : Promise.resolve();
-    void detached.then(() => fs.promises.rm(gone, { recursive: true, force: true })).catch(() => {});
+    void removeDirectory(gone, this.platform).catch(() => {});
   }
 
   private diffFile(id: string, turn = 1): string {

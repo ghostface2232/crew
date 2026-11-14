@@ -1544,6 +1544,7 @@ test('Windows worktree removal recovers from a failed git removal and preserves 
   let failures = 0;
   let prunes = 0;
   t.mock.method(childProcess, 'execFile', (file: string, args: string[], options: object, callback: (err: Error | null, stdout: string, stderr: string) => void) => {
+    if (file === 'attrib') return execFile(process.execPath, ['-e', ''], options, callback);
     if (file === 'git' && args[0] === 'worktree' && args[1] === 'remove') {
       failures++;
       assert.equal(fs.existsSync(link), false, 'links must be detached before Git deletes the tree');
@@ -1624,6 +1625,7 @@ for (const replaceRoot of [false, true]) {
     const job = await jobs.create({ kind: 'delegate', ask: true, cwd: repo, task: 'read' });
     if (replaceRoot) fs.rmdirSync(job.scratch!);
     fs.symlinkSync(path.dirname(outside), replaceRoot ? job.scratch! : path.join(job.scratch!, 'node_modules'), 'junction');
+    const unlinks = t.mock.method(fs.promises, 'unlink');
     worker.done('read');
     await settled(jobs, job);
     const scratchHome = path.join(home, 'scratch');
@@ -1631,6 +1633,7 @@ for (const replaceRoot of [false, true]) {
       assert.ok(tries < 300, 'scratch cleanup did not finish');
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
+    assert.ok(unlinks.mock.callCount() > 0, 'scratch links must be explicitly detached');
     assert.equal(fs.readFileSync(path.join(outside, 'tool'), 'utf8'), 'keep');
   });
 }
@@ -1784,6 +1787,7 @@ test('failed worktree removal keeps the Git error and only Windows falls back', 
   const execFile = childProcess.execFile;
   let keepRegistration = false;
   t.mock.method(childProcess, 'execFile', (file: string, args: string[], options: object, callback: (err: Error | null, stdout: string, stderr: string) => void) => {
+    if (file === 'attrib') return execFile(process.execPath, ['-e', ''], options, callback);
     if (file === 'git' && args[0] === 'worktree' && args[1] === 'remove') {
       return execFile(process.execPath, ['-e', 'process.stderr.write("original removal failure"); process.exit(1)'], options, callback);
     }

@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import childProcess from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { CodexAdapter } from '../plugin/bridge/adapters/codex.ts';
 import { resolveConfig } from '../plugin/bridge/config.ts';
-import { commitAll, copyIncluded, createWorktree, detachLinks, dirtyCount, removeWorktree } from '../plugin/bridge/git.ts';
+import { commitAll, copyIncluded, createWorktree, detachLinks, dirtyCount, prepareRemoval, removeDirectory, removeWorktree } from '../plugin/bridge/git.ts';
 import type { Job, JobCtl } from '../plugin/bridge/jobs.ts';
 import { buildPrompt } from '../plugin/bridge/prompts.ts';
 
@@ -137,3 +139,183 @@ test('nested APFS includes create missing destination parents before cloning', {
   assert.deepEqual(await copyIncluded(dir, wt), { copied: ['a/deps/'], linked: [], failed: [] });
   assert.equal(fs.readFileSync(path.join(wt, 'a', 'deps', 'file'), 'utf8'), 'original');
 });
+
+test('Windows clears read-only directories and files in both trees before Git removal, after detaching links', async (t) => {
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-readonly-')));
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); fs.rmSync(home, { recursive: true, force: true }); });
+  const repo = path.join(home, 'repo');
+  fs.mkdirSync(repo);
+  execFileSync('git', ['init', '-q'], { cwd: repo });
+  execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=t@example.com', 'commit', '--allow-empty', '-qm', 'init'], { cwd: repo });
+  const wt = await createWorktree(repo, 'cx-123abc', 'HEAD', home);
+  const admin = execFileSync('git', ['rev-parse', '--absolute-git-dir'], { cwd: wt.path, encoding: 'utf8' }).trim();
+  const outside = path.join(home, 'shared');
+  fs.mkdirSync(outside);
+  fs.writeFileSync(path.join(outside, 'tool'), 'keep');
+  const link = path.join(wt.path, 'node_modules');
+  fs.symlinkSync(outside, link, 'junction');
+  const dirs = [wt.path, path.join(wt.path, 'readonly-dir'), admin, path.join(admin, 'logs'), path.join(admin, 'refs'),
+    ...Array.from({ length: 20 }, (_, index) => path.join(wt.path, `nested-${index}`, 'child'))];
+  const file = path.join(wt.path, 'readonly');
+  fs.writeFileSync(file, 'remove');
+  fs.chmodSync(file, 0o444);
+  for (const dir of dirs) fs.mkdirSync(dir, { recursive: true });
+  // POSIX needs a writable parent to unlink; Windows's directory attribute does not impose that rule.
+  for (const dir of dirs.slice(1)) fs.chmodSync(dir, 0o555);
+  const prepared: string[][] = [];
+  const execFile = childProcess.execFile;
+  t.mock.method(childProcess, 'execFile', (bin: string, args: string[], options: any, callback: any) => {
+    if (bin === 'attrib') {
+      assert.equal(options.windowsHide, true);
+      assert.equal(fs.existsSync(link), false);
+      prepared.push(args);
+      const recursive = args.includes('/S');
+      const root = recursive ? path.dirname(args[1]) : args[1];
+      assert.ok(root === wt.path || root === admin);
+      assert.deepEqual(args, ['-R', recursive ? path.join(root, '*') : root, ...(recursive ? ['/S'] : []), '/D', '/L']);
+      const clear = (file: string) => {
+        const entry = fs.lstatSync(file);
+        assert.equal(entry.isSymbolicLink(), false);
+        fs.chmodSync(file, entry.mode | (entry.isDirectory() ? 0o700 : 0o200));
+        if (recursive && entry.isDirectory()) for (const name of fs.readdirSync(file)) clear(path.join(file, name));
+      };
+      if (recursive) for (const name of fs.readdirSync(root)) clear(path.join(root, name));
+      else clear(root);
+      return execFile(process.execPath, ['-e', ''], options, callback);
+    }
+    if (bin === 'git' && args[1] === 'remove') {
+      assert.deepEqual(prepared, [
+        ['-R', wt.path, '/D', '/L'], ['-R', path.join(wt.path, '*'), '/S', '/D', '/L'],
+        ['-R', admin, '/D', '/L'], ['-R', path.join(admin, '*'), '/S', '/D', '/L'],
+      ]);
+      for (const dir of dirs) assert.ok(fs.statSync(dir).mode & 0o200, dir);
+      assert.ok(fs.statSync(file).mode & 0o200);
+    }
+    return execFile(bin, args, options, callback);
+  });
+  syncBuiltinESMExports();
+  await removeWorktree(repo, wt, 'cx-123abc', home, 'win32');
+  assert.equal(fs.readFileSync(path.join(outside, 'tool'), 'utf8'), 'keep');
+  assert.ok(!fs.existsSync(wt.path));
+  assert.ok(!fs.existsSync(admin));
+});
+
+test('directory-style Windows junctions are detached non-recursively', async (t) => {
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-junction-')));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const dir = path.join(home, 'tree');
+  const outside = path.join(home, 'outside');
+  fs.mkdirSync(dir);
+  fs.mkdirSync(outside);
+  fs.writeFileSync(path.join(outside, 'tool'), 'keep');
+  const link = path.join(dir, 'deps');
+  fs.symlinkSync(outside, link, 'junction');
+  const lstat = fs.promises.lstat;
+  t.mock.method(fs.promises, 'lstat', async (file: any) => file === link ? fs.statSync(outside) : lstat(file));
+  const rmdir = t.mock.method(fs.promises, 'rmdir', async (file: any) => {
+    assert.equal(file, link);
+    await fs.promises.unlink(file);
+  });
+  await detachLinks(dir, 'win32');
+  assert.equal(rmdir.mock.callCount(), 1);
+  assert.equal(fs.existsSync(link), false);
+  assert.equal(fs.readFileSync(path.join(outside, 'tool'), 'utf8'), 'keep');
+});
+
+for (const code of ['EBUSY', 'EPERM', 'EACCES', 'ENOTEMPTY']) test(`Windows removal retries ${code} with bounded backoff`, async (t) => {
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-retry-')));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  // A missing root needs no attrib command.
+  const dir = path.join(home, 'missing');
+  const waits: number[] = [];
+  t.mock.method(globalThis, 'setTimeout', (callback: () => void, delay: number) => { waits.push(delay); queueMicrotask(callback); });
+  let calls = 0;
+  t.mock.method(fs.promises, 'rm', async () => { if (++calls < 4) throw Object.assign(new Error('locked'), { code }); });
+  await removeDirectory(dir, 'win32');
+  assert.equal(calls, 4);
+  assert.deepEqual(waits, [100, 200, 300]);
+});
+
+test('Windows preparation refuses a Git admin path outside common/worktrees before detaching anything', async (t) => {
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-admin-guard-')));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const repo = path.join(home, 'repo');
+  fs.mkdirSync(repo);
+  execFileSync('git', ['init', '-q'], { cwd: repo });
+  execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=t@example.com', 'commit', '--allow-empty', '-qm', 'init'], { cwd: repo });
+  const wt = await createWorktree(repo, 'cx-abcdef', 'HEAD', home);
+  fs.writeFileSync(path.join(wt.path, '.git'), `gitdir: ${path.join(repo, '.git')}\n`);
+  fs.symlinkSync(repo, path.join(wt.path, 'shared'), 'junction');
+  const unlink = t.mock.method(fs.promises, 'unlink');
+  await assert.rejects(removeWorktree(repo, wt, 'cx-abcdef', home, 'win32'), /Refusing to prepare Git metadata outside/);
+  assert.equal(unlink.mock.callCount(), 0);
+  assert.ok(fs.lstatSync(path.join(wt.path, 'shared')).isSymbolicLink());
+});
+
+for (const failed of [false, true]) for (const stream of ['stdout', 'stderr']) {
+  test(`Windows cleanup tolerates unmatched wildcards in ${stream} (nonzero exit: ${failed})`, async (t) => {
+    const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-attrib-empty-')));
+    t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); fs.rmSync(dir, { recursive: true, force: true }); });
+    const calls: string[][] = [];
+    t.mock.method(childProcess, 'execFile', (bin: string, args: string[], options: any, callback: any) => {
+      assert.equal(bin, 'attrib');
+      assert.equal(options.windowsHide, true);
+      calls.push(args);
+      const recursive = args.includes('/S');
+      const output = recursive ? `File not found - ${path.join(dir, '*')}\r\n` : '';
+      queueMicrotask(() => callback(recursive && failed ? Object.assign(new Error('attrib failed'), { code: 1 }) : null,
+        stream === 'stdout' ? output : '', stream === 'stderr' ? output : ''));
+      return {} as any;
+    });
+    syncBuiltinESMExports();
+    // English "File not found" output for an unmatched wildcard is still tolerated.
+    fs.writeFileSync(path.join(dir, 'child'), '');
+    await removeDirectory(dir, 'win32');
+    assert.deepEqual(calls, [['-R', dir, '/D', '/L'], ['-R', path.join(dir, '*'), '/S', '/D', '/L']]);
+    assert.equal(fs.existsSync(dir), false);
+  });
+}
+
+test('Windows cleanup of an empty directory runs no recursive attrib, whose message is localized', async (t) => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-attrib-empty-')));
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); fs.rmSync(dir, { recursive: true, force: true }); });
+  const calls: string[][] = [];
+  t.mock.method(childProcess, 'execFile', (_bin: string, args: string[], _options: any, callback: any) => {
+    calls.push(args);
+    queueMicrotask(() => callback(args.includes('/S') ? Object.assign(new Error('파일을 찾을 수 없습니다'), { code: 1 }) : null, '', ''));
+    return {} as any;
+  });
+  syncBuiltinESMExports();
+  await removeDirectory(dir, 'win32');
+  assert.deepEqual(calls, [['-R', dir, '/D', '/L']]);
+  assert.equal(fs.existsSync(dir), false);
+});
+
+const attribErrors = [
+  { name: 'access denied', output: 'Access denied - child', failed: true, root: false },
+  { name: 'mixed missing and denied paths', output: 'File not found - child\r\nAccess denied - other', failed: true, root: false },
+  { name: 'error output with a zero exit status', output: 'Access denied - child', failed: false, root: false },
+  { name: 'a missing attrib executable', output: '', failed: true, root: false },
+  { name: 'a missing root rather than an unmatched wildcard', output: 'File not found - root', failed: true, root: true },
+];
+for (const { name, output, failed, root } of attribErrors) {
+  test(`Windows preparation surfaces ${name}`, async (t) => {
+    const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-attrib-error-')));
+    fs.writeFileSync(path.join(dir, 'child'), '');
+    t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); fs.rmSync(dir, { recursive: true, force: true }); });
+    const failure = Object.assign(new Error(output || 'spawn attrib ENOENT'), { code: output ? 1 : 'ENOENT' });
+    t.mock.method(childProcess, 'execFile', (bin: string, args: string[], _options: any, callback: any) => {
+      assert.equal(bin, 'attrib');
+      const errorHere = root || args.includes('/S');
+      queueMicrotask(() => callback(errorHere && failed ? failure : null, errorHere ? output : '', ''));
+      return {} as any;
+    });
+    syncBuiltinESMExports();
+    await assert.rejects(prepareRemoval(dir, 'win32'), (err: any) => {
+      assert.ok(err.message.includes(output || 'spawn attrib ENOENT'));
+      if (failed) assert.equal(err, failure);
+      return true;
+    });
+    assert.ok(fs.existsSync(dir));
+  });
+}

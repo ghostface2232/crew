@@ -554,3 +554,29 @@ test('restart stops a daemon that does not take the token in the file, and says 
     assert.equal((await cli('daemon', 'stop')).out.trim(), 'stopped');
   }
 });
+
+test('gc requires the user secret and the CLI prints a readable dry run', { timeout: 15000 }, async (t) => {
+  const h = await daemon(t);
+  assert.equal((await h.api('POST', '/api/gc', {}, { authorization: '' })).status, 401);
+  assert.equal((await h.api('POST', '/api/gc', {}, { authorization: 'Bearer wrong' })).status, 401);
+  assert.equal((await h.api('POST', '/api/gc', { apply: 'yes' })).status, 400);
+  const dry = await h.api('POST', '/api/gc', {});
+  assert.equal(dry.status, 200);
+  assert.match(dry.body.text, /dry run; nothing will be changed/);
+  const cli = (args: string[]) => new Promise<{ code: number | null; out: string }>((resolve) => {
+    const child = spawn(process.execPath, [path.resolve('plugin/bridge/cli.ts'), 'gc', ...args], { env: h.env, stdio: ['ignore', 'pipe', 'pipe'] });
+    t.after(() => stop(child));
+    let out = '';
+    child.stdout.on('data', (chunk) => { out += chunk; });
+    child.stderr.on('data', (chunk) => { out += chunk; });
+    child.once('exit', (code) => resolve({ code, out }));
+  });
+  const printed = await cli([]);
+  assert.equal(printed.code, 0);
+  assert.match(printed.out, /^Crew gc: dry run/);
+  assert.doesNotMatch(printed.out, /\{"text"/);
+  const applied = await cli(['--apply', '--branches']);
+  assert.equal(applied.code, 0);
+  assert.match(applied.out, /^Crew gc: applying cleanup/);
+  assert.equal((await cli(['--unknown'])).code, 1);
+});

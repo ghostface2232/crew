@@ -57,6 +57,8 @@ export interface Worktree {
   base: string;
   /** Relative paths of shared directories attached by Crew. */
   linked?: string[];
+  /** Validated before Windows deletion, which can remove gitdir before the admin directory. */
+  admin?: string;
 }
 
 /**
@@ -101,7 +103,7 @@ export async function carryUncommitted(root: string, wt: string): Promise<void> 
     await git(root, ['diff', 'HEAD', '--binary', '--no-ext-diff', '--no-textconv', '--src-prefix=a/', '--dst-prefix=b/', `--output=${patch}`]);
     if ((await fs.stat(patch)).size) await git(wt, ['apply', '--whitespace=nowarn', patch]);
   } finally {
-    await fs.rm(dir, { recursive: true, force: true });
+    await removeDirectory(dir);
   }
   const untracked = (await git(root, ['ls-files', '--others', '--exclude-standard', '-z'])).split('\0').filter(Boolean);
   for (const file of untracked) {
@@ -110,7 +112,7 @@ export async function carryUncommitted(root: string, wt: string): Promise<void> 
   }
 }
 
-function worktreePath(root: string, id: string, home: string): string {
+export function worktreePath(root: string, id: string, home: string): string {
   // The hash keeps two repositories with the same folder name apart.
   const repoKey = `${path.basename(root)}-${createHash('sha256').update(root).digest('hex').slice(0, 8)}`;
   return path.join(home, 'worktrees', repoKey, id);
@@ -144,8 +146,7 @@ export async function copyIncluded(root: string, wt: string, clone: (source: str
       } catch (err) {
         // FORCE is essential: FICLONE silently copies an entire dependency tree on unsupported filesystems.
         if (!directory || existed || !['ENOTSUP', 'EOPNOTSUPP', 'EXDEV', 'ENOSYS', 'EINVAL'].includes((err as NodeJS.ErrnoException).code ?? '')) throw err;
-        if (process.platform === 'win32') await detachLinks(dest);
-        await fs.rm(dest, { recursive: true, force: true });
+        await removeDirectory(dest);
         await fs.mkdir(path.dirname(dest), { recursive: true });
         await fs.symlink(source, dest, process.platform === 'win32' ? 'junction' : 'dir');
         result.linked.push(rel);
@@ -279,15 +280,127 @@ export async function changesSince(wt: string, base: string): Promise<{ files: s
 }
 
 /** Detach links (including Windows junctions) before Git can follow them during deletion. */
-export async function detachLinks(dir: string): Promise<void> {
+export async function detachLinks(dir: string, platform: NodeJS.Platform = process.platform): Promise<void> {
   const entry = await fs.lstat(dir).catch((err: NodeJS.ErrnoException) => {
     if (err.code !== 'ENOENT') throw err;
     return null;
   });
   if (entry?.isSymbolicLink()) await fs.unlink(dir);
   else if (entry?.isDirectory()) {
-    for (const name of await fs.readdir(dir)) await detachLinks(path.join(dir, name));
+    // Node 22's libuv reports reparse points as links. Also guard older directory-style junction reports.
+    if (platform === 'win32' && path.resolve(await fs.realpath(dir)).toLowerCase() !== path.join(await fs.realpath(path.dirname(dir)), path.basename(dir)).toLowerCase()) {
+      await fs.rmdir(dir);
+      return;
+    }
+    for (const name of await fs.readdir(dir)) await detachLinks(path.join(dir, name), platform);
   }
+}
+
+/** Links must be detached before attributes or recursive removal can reach a shared target. */
+export async function prepareRemoval(dir: string, platform: NodeJS.Platform = process.platform): Promise<void> {
+  await detachLinks(dir, platform);
+  if (platform !== 'win32') return;
+  const entry = await fs.lstat(dir).catch((err: NodeJS.ErrnoException) => {
+    if (err.code !== 'ENOENT') throw err;
+    return null;
+  });
+  if (!entry || entry.isSymbolicLink()) return;
+  // Sandbox SID denies do not apply to the daemon's user token; resetting ACLs would erase user policy.
+  // libuv's _wchmod contract covers files; attrib explicitly supports directories.
+  // Detaching links first makes bulk recursion safe without a process per directory.
+  const clear = (recursive: boolean) => new Promise<void>((resolve, reject) => {
+    const args = ['-R', recursive ? path.join(dir, '*') : dir, ...(recursive ? ['/S'] : []), '/D', '/L'];
+    execFile('attrib', args, { windowsHide: true }, (err, stdout, stderr) => {
+      const output = `${stdout}\n${stderr}`.trim();
+      const noMatches = recursive && output && output.split(/\r?\n/).every((line) => /^File not found(?:\s*-\s*.*)?$/i.test(line.trim()));
+      if (noMatches || (!err && !output)) resolve();
+      else if (err) {
+        if (output) err.message = `attrib: ${output}`;
+        reject(err);
+      } else reject(new Error(`attrib: ${output}`));
+    });
+  });
+  await clear(false);
+  // An empty directory has nothing to recurse into, and attrib's "File not found" there is localized.
+  if (entry.isDirectory() && (await fs.readdir(dir)).length) await clear(true);
+}
+
+export async function removeDirectory(dir: string, platform: NodeJS.Platform = process.platform): Promise<void> {
+  const deadline = Date.now() + 1_500;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await prepareRemoval(dir, platform);
+      await fs.rm(dir, { recursive: true, force: true, ...(platform === 'win32' ? { maxRetries: 5, retryDelay: 100 } : {}) });
+      return;
+    } catch (err) {
+      // Include preparation failures and EACCES, which fs.rm's own retries omit.
+      if (platform !== 'win32' || !['EBUSY', 'EPERM', 'EACCES', 'ENOTEMPTY'].includes((err as NodeJS.ErrnoException).code ?? '') || attempt === 5) throw err;
+      const wait = 100 * (attempt + 1);
+      if (Date.now() + wait > deadline) throw err;
+      await new Promise((resolve) => setTimeout(resolve, wait));
+    }
+  }
+}
+
+export async function commonGitDir(root: string): Promise<string> {
+  return path.resolve(root, await git(root, ['rev-parse', '--git-common-dir']));
+}
+
+export function requireAdminDir(common: string, admin: string): void {
+  const parent = path.join(common, 'worktrees');
+  if (path.resolve(admin) === path.resolve(parent) || !isInside(parent, admin) || !isInside(common, parent)) {
+    throw new Error(`Refusing to prepare Git metadata outside ${parent}: ${admin}`);
+  }
+}
+
+async function worktreeAdmin(root: string, wt: string, known?: string): Promise<string | null> {
+  const common = await commonGitDir(root);
+  if (existsSync(path.join(wt, '.git'))) {
+    const admin = await git(wt, ['rev-parse', '--absolute-git-dir']);
+    requireAdminDir(common, admin);
+    return admin;
+  }
+  const parent = path.join(common, 'worktrees');
+  if (!isInside(common, parent)) throw new Error(`Refusing to follow Git metadata outside ${common}: ${parent}`);
+  for (const name of await fs.readdir(parent).catch((err: NodeJS.ErrnoException) => {
+    if (err.code !== 'ENOENT') throw err;
+    return [];
+  })) {
+    const admin = path.join(parent, name);
+    requireAdminDir(common, admin);
+    const target = await fs.readFile(path.join(admin, 'gitdir'), 'utf8').catch((err: NodeJS.ErrnoException) => {
+      if (err.code !== 'ENOENT') throw err;
+      return '';
+    });
+    if (target && path.resolve(admin, target.trim()) === path.resolve(wt, '.git')) return admin;
+  }
+  if (known) {
+    requireAdminDir(common, known);
+    if (existsSync(path.join(known, 'gitdir'))) throw new Error(`Refusing to prepare reused Git metadata at ${known}.`);
+    return known;
+  }
+  return null;
+}
+
+export class WorktreeCleanupError extends Error {
+  readonly leftovers: string[];
+
+  constructor(error: unknown, cleanup: unknown, leftovers: string[]) {
+    super(`${(error as Error).message}\nWindows cleanup failed: ${(cleanup as Error).message}`, { cause: error });
+    this.leftovers = leftovers;
+  }
+}
+
+async function worktreeLeftovers(root: string, wt: Worktree, admin: string | null): Promise<string[]> {
+  const remains = (file: string) => {
+    try { return Boolean(lstatSync(file, { throwIfNoEntry: false })); }
+    catch { return true; }
+  };
+  const leftovers: string[] = [];
+  if (remains(wt.path)) leftovers.push(`directory ${wt.path}`);
+  if (admin && remains(admin)) leftovers.push(`Git admin directory ${admin}`);
+  if (await git(root, ['branch', '--list', '--format=%(refname:short)', wt.branch]).catch(() => wt.branch)) leftovers.push(`branch ${wt.branch}`);
+  return leftovers;
 }
 
 export async function removeWorktree(root: string, wt: Worktree, id: string, home: string, platform: NodeJS.Platform = process.platform): Promise<void> {
@@ -302,6 +415,8 @@ export async function removeWorktree(root: string, wt: Worktree, id: string, hom
     ([dir]) => dir.startsWith('worktree ') && realpath(dir.slice(9)) === realpath(wt.path),
   );
   const dir = lstatSync(wt.path, { throwIfNoEntry: false });
+  const admin = platform === 'win32' ? await worktreeAdmin(root, wt.path, wt.admin) : null;
+  let removalError: unknown;
   if (registered) {
     if (dir && (!dir.isDirectory() || !lstatSync(path.join(wt.path, '.git'), { throwIfNoEntry: false })?.isFile())) {
       throw new Error(`Refusing to remove ${wt.path}: it is no longer a linked worktree.`);
@@ -312,8 +427,7 @@ export async function removeWorktree(root: string, wt: Worktree, id: string, hom
     const locked = registered.some((line) => line === 'locked' || line.startsWith('locked '));
     // Leave a locked tree untouched so Git can report why it cannot be removed.
     if (!locked) {
-      if (platform === 'win32') await detachLinks(wt.path);
-      else for (const rel of wt.linked ?? []) {
+      if (platform !== 'win32') for (const rel of wt.linked ?? []) {
         const link = path.resolve(wt.path, rel);
         if (!isInside(wt.path, path.dirname(link))) throw new Error(`Refusing to detach a link outside ${wt.path}.`);
         if ((await fs.lstat(link).catch((err: NodeJS.ErrnoException) => {
@@ -323,11 +437,21 @@ export async function removeWorktree(root: string, wt: Worktree, id: string, hom
       }
     }
     try {
+      if (platform === 'win32' && !locked) {
+        if (admin) wt.admin = admin;
+        await prepareRemoval(wt.path, platform);
+        if (admin) await prepareRemoval(admin, platform);
+      }
       await git(root, ['worktree', 'remove', '--force', wt.path]);
+      if (platform === 'win32' && (existsSync(wt.path) || admin && existsSync(admin))) {
+        throw new Error(`Git left worktree files or metadata at ${wt.path}${admin ? ` or ${admin}` : ''}.`);
+      }
     } catch (err) {
       if (platform !== 'win32' || locked) throw err;
+      removalError = err;
       try {
-        await fs.rm(wt.path, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+        await removeDirectory(wt.path, platform);
+        if (admin) await prepareRemoval(admin, platform);
         // Windows may keep handles open on Git's metadata even after the directory is gone.
         for (let attempt = 0; ; attempt++) {
           try {
@@ -336,6 +460,7 @@ export async function removeWorktree(root: string, wt: Worktree, id: string, hom
             if (remaining.some((line) => line.startsWith('worktree ') && realpath(line.slice(9)) === realpath(wt.path))) {
               throw new Error(`Git still lists the removed worktree at ${wt.path}.`);
             }
+            if (admin && existsSync(admin)) throw new Error(`Git metadata remains at ${admin}.`);
             break;
           } catch (err) {
             if (attempt === 5) throw err;
@@ -343,13 +468,34 @@ export async function removeWorktree(root: string, wt: Worktree, id: string, hom
           }
         }
       } catch (cleanupError) {
-        throw new Error(`${(err as Error).message}\nWindows cleanup failed: ${(cleanupError as Error).message}`, { cause: err });
+        // Even partial deletion can leave a prunable entry. Never delete a branch still checked out.
+        await git(root, ['worktree', 'prune', '--expire', 'now']).catch(() => {});
+        const listed = await git(root, ['worktree', 'list', '--porcelain', '-z']).catch(() => null);
+        if (listed !== null && !listed.split('\0').some((line) => line === `branch refs/heads/${wt.branch}`
+            || line.startsWith('worktree ') && realpath(line.slice(9)) === realpath(wt.path))) {
+          await git(root, ['branch', '-D', wt.branch]).catch(() => {});
+        }
+        throw new WorktreeCleanupError(err, cleanupError, await worktreeLeftovers(root, wt, admin));
       }
     }
   } else if (dir) {
     throw new Error(`Refusing to remove ${wt.path}: Git no longer lists it as a worktree.`);
+  } else if (platform === 'win32' && admin && existsSync(admin)) {
+    try {
+      await prepareRemoval(admin, platform);
+      await git(root, ['worktree', 'prune', '--expire', 'now']);
+      if (existsSync(admin)) throw new Error(`Git metadata remains at ${admin}.`);
+    } catch (err) {
+      throw new WorktreeCleanupError(err, err, await worktreeLeftovers(root, wt, admin));
+    }
   }
-  if (await git(root, ['branch', '--list', '--format=%(refname:short)', wt.branch])) {
-    await git(root, ['branch', '-D', wt.branch]);
+  try {
+    if (await git(root, ['branch', '--list', '--format=%(refname:short)', wt.branch])) {
+      await git(root, ['branch', '-D', wt.branch]);
+    }
+  } catch (err) {
+    if (platform !== 'win32') throw err;
+    await git(root, ['worktree', 'prune', '--expire', 'now']).catch(() => {});
+    throw new WorktreeCleanupError(removalError ?? err, removalError ? err : new Error(`Could not delete branch ${wt.branch}.`), await worktreeLeftovers(root, wt, admin));
   }
 }

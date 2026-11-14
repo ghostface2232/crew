@@ -1045,3 +1045,26 @@ test('Codex refusal notifications and immediate approval declines retain full de
   assert.ok(notes[3].includes(command));
   assert.match(notes[3], /Use a supported tool/);
 });
+
+test('Codex release unsubscribes child and parent threads and forces a later resume', async (t) => {
+  const adapter = new CodexAdapter(resolveConfig({}));
+  const calls: { method: string; params: unknown }[] = [];
+  const run = {};
+  const internals = adapter as any;
+  internals.peer = { request: async (method: string, params: unknown) => { calls.push({ method, params }); return { status: 'unsubscribed' }; } };
+  internals.loaded.add('parent');
+  internals.runs.set('parent', run);
+  internals.children.set('child', run);
+  internals.children.set('other', {});
+  await adapter.release({ job: { sessionId: 'parent' } } as any);
+  assert.deepEqual(calls, [
+    { method: 'thread/unsubscribe', params: { threadId: 'child' } },
+    { method: 'thread/unsubscribe', params: { threadId: 'parent' } },
+  ]);
+  assert.equal(internals.loaded.has('parent'), false);
+  assert.equal(internals.runs.has('parent'), false);
+  assert.equal(internals.children.has('child'), false);
+  assert.equal(internals.children.has('other'), true);
+  await adapter.release({ job: { sessionId: 'parent' } } as any);
+  assert.equal(calls.length, 2);
+});

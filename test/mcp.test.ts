@@ -26,17 +26,23 @@ test('mission forwards plans on start, revision, repeated titles and reattachmen
   assert.match(report, /step 1 of 3/);
   assert.deepEqual(calls.at(-1)?.body.stages, stages);
   current = { id: 'm', title: 'Review' } as Mission;
-  for (const args of [{ stages }, { title: 'Review', stages }, { stage: 'fix', stages }]) {
+  for (const args of [{ stages }, { stage: 'fix', stages }]) {
     const update = await run(args);
     assert.match(update, /Plan: cross-review \(current\) → fix → final/);
     assert.equal(calls.at(-1)?.route, '/api/missions/m');
     assert.deepEqual(calls.at(-1)?.body.stages, stages);
   }
+  // A resumed lead resending its starting call must not append its whole plan again.
+  const before = calls.length;
+  await run({ title: 'Review', stages });
+  assert.equal(calls.length, before);
+  await run({ title: 'Review', stage: 'fix', stages });
+  assert.deepEqual({ ...calls.at(-1)?.body }, { stage: 'fix' });
   current = null;
   saved = [{ id: 'lost', title: 'Review', owner: 'lead', project: '/project', state: 'active' } as Mission];
-  await run({ title: 'Review', stages });
+  await run({ title: 'Review', stage: 'fix', stages });
   assert.equal(calls.at(-1)?.route, '/api/missions/lost');
-  assert.deepEqual(calls.at(-1)?.body.stages, stages);
+  assert.deepEqual({ ...calls.at(-1)?.body }, { stage: 'fix' });
   const describe = vm.runInNewContext(`${stripTypeScriptTypes(handler.slice(0, handler.indexOf('async function reportMission')))}; describeMission`, { STAGES });
   assert.match(describe({ id: 'm', title: 'Review', state: 'active', stage: 'self-review', stageIndex: 2,
     stages: ['self-review', 'fix', 'self-review'] }), /Plan: self-review → fix → self-review \(current\)/);

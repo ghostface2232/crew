@@ -46,8 +46,10 @@ export function missionJobStep(mission: Mission | undefined, job: Pick<BoardJob,
   const match = stops.findIndex((step) => step.stop === stop);
   return match < 0 ? Math.max(0, at) : match;
 }
-export function missionLooksFinished(mission: Mission, jobs: BoardJob[], now: number) {
+/** A lead working alone touches neither the mission nor any job, so its own session must be quiet too. */
+export function missionLooksFinished(mission: Mission, jobs: BoardJob[], now: number, lead?: ClaudeSession) {
   return mission.state === 'active' && now - mission.updatedAt >= 20 * 60_000
+    && (!lead || lead.state === 'idle' || lead.state === 'error')
     && !jobs.some((job) => job.mission === mission.id && (job.state === 'running' || job.state === 'waiting'));
 }
 export function missionProgress(mission: Mission, jobs: BoardJob[]) {

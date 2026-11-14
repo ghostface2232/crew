@@ -119,8 +119,10 @@ struct Mission: Codable, Sendable, Identifiable, Equatable {
         if kinds[step] == stop { return step }
         return kinds.firstIndex(of: stop) ?? step
     }
-    func looksFinished(jobs: [Job], now: Double) -> Bool {
+    /// A lead working alone touches neither the mission nor any job, so its own session must be quiet too.
+    func looksFinished(jobs: [Job], now: Double, lead: ClaudeSession? = nil) -> Bool {
         state == "active" && now - updatedAt >= 20 * 60_000
+            && (lead == nil || lead?.state == "idle" || lead?.state == "error")
             && !jobs.contains { $0.mission == id && ($0.state == "running" || $0.state == "waiting") }
     }
 }

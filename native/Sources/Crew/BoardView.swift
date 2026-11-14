@@ -310,7 +310,7 @@ struct MissionPanel: View {
                 Text(missionProgress(mission, jobs: jobs), format: .percent.precision(.fractionLength(0)))
                     .font(Typeface.caption).monospacedDigit().foregroundStyle(.secondary).help("Mission progress")
                 StatusLabel(state: mission.state == "active" ? "running" : mission.state, title: mission.state.capitalized)
-                if mission.looksFinished(jobs: store.state.jobs, now: store.now) {
+                if mission.looksFinished(jobs: store.state.jobs, now: store.now, lead: store.state.claude.first { $0.id == mission.owner }) {
                     Text("Looks finished").font(Typeface.caption).foregroundStyle(.secondary)
                 }
                 // Both controls share one 28pt hit area so their glyphs sit on the same center line.

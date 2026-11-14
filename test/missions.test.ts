@@ -17,6 +17,7 @@ test('plans allow repeats, advance to the next occurrence and insert stages afte
   assert.equal(mission.stage, 'implement');
   assert.equal(mission.stageIndex, 0);
   assert.deepEqual(mission.stages, stages);
+  missions.update(mission.id, { stage: 'self-review' });
   missions.update(mission.id, { stage: 'fix' });
   assert.equal(mission.stageIndex, 2);
   // Reporting the current step again, as a resumed lead does, adds no round.
@@ -389,4 +390,16 @@ test('a note is pinned to an open mission, saved with it, and refused where it w
   assert.throws(() => missions.note(mission.id, 'one too many'), /already has 20 notes/);
   missions.finish(mission.id);
   assert.throws(() => missions.note(mission.id, 'late'), /already done/);
+});
+
+test('jumping ahead drops the skipped steps, and a plan has at most thirty steps', (t) => {
+  const { missions } = harness(t);
+  const mission = missions.start({ ...input, stages: ['implement', 'self-review', 'polish', 'final'] });
+  missions.update(mission.id, { stage: 'final' });
+  assert.deepEqual(mission.stages, ['implement', 'final']);
+  assert.equal(mission.stageIndex, 1);
+  assert.throws(() => missions.start({ ...input, title: 'Too long', stages: Array(31).fill('fix') }), /at most 30/);
+  const full = missions.start({ ...input, title: 'Full', stages: Array(30).fill('fix') });
+  assert.throws(() => missions.update(full.id, { stage: 'polish' }), /at most 30/);
+  assert.equal(full.stages!.length, 30);
 });

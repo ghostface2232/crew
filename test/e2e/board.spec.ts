@@ -44,6 +44,8 @@ test('a quiet ended workload looks finished and the authenticated user can mark 
   data.missions[0].stage = 'cross-review';
   data.missions[0].updatedAt = NOW - 20 * 60_000;
   data.jobs.forEach((job) => { job.state = 'done'; job.endedAt = NOW - 60_000; job.waiting = null; });
+  // A working lead would keep the mission from looking finished.
+  data.claude.forEach((session) => { session.state = 'idle'; });
   await request.post('/__push', { data: { type: 'state', data } });
   const card = page.locator('[data-key="mission-1"]');
   await expect(card.getByText('Looks finished', { exact: true })).toBeVisible();

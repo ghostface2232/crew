@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { Actions, answerKey, tokenFromFragment } from '../plugin/board/src/api.ts';
 import { BoardStore, mergeEvents } from '../plugin/board/src/store.ts';
 import { brief, cardsForProject, jobMark, unsettled, missionProgress, missionStops, missionStep, missionStopPosition, missionJobStep, missionLooksFinished, relativeDuration, usageWindowName, STOP_OF_STAGE, timeLabel, together } from '../plugin/board/src/model.ts';
-import type { BoardJob, BoardState, CrewEvent, Mission } from '../plugin/board/src/types.ts';
+import type { BoardJob, BoardState, ClaudeSession, CrewEvent, Mission } from '../plugin/board/src/types.ts';
 
 function deferred() {
   let resolve!: (value?: unknown) => void;
@@ -214,6 +214,9 @@ test('looks finished requires an active mission quiet for 20 minutes with no run
   const now = 1000 + 20 * 60_000;
   assert.equal(missionLooksFinished(mission, [], now - 1), false);
   assert.equal(missionLooksFinished(mission, [], now), true);
+  // A lead working on its own keeps the mission from looking finished.
+  assert.equal(missionLooksFinished(mission, [], now, { state: 'working' } as ClaudeSession), false);
+  assert.equal(missionLooksFinished(mission, [], now, { state: 'idle' } as ClaudeSession), true);
   for (const state of ['running', 'waiting', 'done', 'failed', 'cancelled']) {
     const jobs = [{ mission: 'm', state, endedAt: null }] as BoardJob[];
     assert.equal(missionLooksFinished(mission, jobs, now), state !== 'running' && state !== 'waiting');

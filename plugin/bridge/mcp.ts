@@ -152,7 +152,7 @@ const TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        title: { type: 'string', description: 'The user\'s command in a few words. Pass it once, to start the mission; later calls need only stage. A different title starts a new mission and closes this session\'s open one as abandoned.' },
+        title: { type: 'string', description: 'The user\'s command in a few words. Pass it once, to start the mission; later calls pass stage or stages without it. Passing the same title again resumes the mission and ignores stages. A different title starts a new mission and closes this session\'s open one as abandoned.' },
         stages: { type: 'array', items: { type: 'string', enum: [...STAGES] }, description: 'Ordered stages, with repeats allowed. With title: a nonempty whole plan. Later: replace only the remainder to add, drop or reorder steps ([] drops all future steps); passed and current steps stay.' },
         stage: { type: 'string', enum: [...STAGES], description: 'Advance to the next occurrence of this stage, or insert it after the current step. Reporting the current step again changes nothing.' },
         done: { type: 'boolean', description: 'The command is finished.' },
@@ -407,8 +407,9 @@ async function reportMission(args: any): Promise<string> {
     const title = normalizeTitle(args.title);
     if (!title) throw new Error('A mission needs a title: the command it carries out.');
     // The same title again is the same command: report the step, do not open a second card for it.
+    // A resumed lead may resend its whole starting call; its plan is not a revision, so stages are ignored here.
     if (current && current.title === title) {
-      return describeMission(args.stage || args.stages !== undefined ? await api('POST', `/api/missions/${current.id}`, { stage: args.stage, stages: args.stages }) : current);
+      return describeMission(args.stage ? await api('POST', `/api/missions/${current.id}`, { stage: args.stage }) : current);
     }
     // After this server restarts it no longer knows its mission. An open one this session opened under the same title is
     // that mission. The title alone proves nothing: another session in the project may be carrying out a command of the same name.
@@ -416,7 +417,7 @@ async function reportMission(args: any): Promise<string> {
     const lost = all.find((m) => m.owner === SESSION && m.project === PROJECT && m.state === 'active' && m.title === title);
     if (lost) {
       missionId = lost.id;
-      return describeMission(args.stage || args.stages !== undefined ? await api('POST', `/api/missions/${lost.id}`, { stage: args.stage, stages: args.stages }) : lost);
+      return describeMission(args.stage ? await api('POST', `/api/missions/${lost.id}`, { stage: args.stage }) : lost);
     }
     // Opened before the previous one is closed, so a refused title leaves the previous mission as it was.
     const opened: Mission = await api('POST', '/api/missions', { title: args.title, project: PROJECT, stage: args.stage, stages: args.stages, owner: SESSION });

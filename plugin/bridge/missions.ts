@@ -58,14 +58,17 @@ function isMission(m: any): m is Mission {
     && Number.isFinite(m.createdAt) && Number.isFinite(m.updatedAt) && (m.endedAt === null || Number.isFinite(m.endedAt));
 }
 
+/** Every stop is drawn on the board and in the app. */
+export const MAX_PLAN = 30;
+
 function isPlan(stages: unknown, allowEmpty = false): stages is Stage[] {
-  return Array.isArray(stages) && (allowEmpty || stages.length > 0)
+  return Array.isArray(stages) && (allowEmpty || stages.length > 0) && stages.length <= MAX_PLAN
     && stages.every((stage) => STAGES.includes(stage));
 }
 
 function planOf(stages: unknown, allowEmpty = false): Stage[] | undefined {
   if (stages === undefined) return undefined;
-  if (!isPlan(stages, allowEmpty)) throw new Error(`stages must be ${allowEmpty ? 'an' : 'a nonempty'} array using: ${STAGES.join(', ')}.`);
+  if (!isPlan(stages, allowEmpty)) throw new Error(`stages must be ${allowEmpty ? 'an' : 'a nonempty'} array of at most ${MAX_PLAN} using: ${STAGES.join(', ')}.`);
   return [...stages];
 }
 
@@ -152,9 +155,15 @@ export class Missions {
       // Reporting the current step again (as a resumed lead does) is not a new round.
       if (stage !== undefined && stage !== stages[index]) {
         const next = stages.indexOf(stage, index + 1);
-        if (next < 0) stages.splice(index + 1, 0, stage);
-        index = next < 0 ? index + 1 : next;
+        // Steps jumped over were not done, so they leave the plan instead of showing as passed.
+        if (next > index + 1) stages.splice(index + 1, next - index - 1);
+        else if (next < 0) {
+          if (stages.length >= MAX_PLAN) throw new Error(`A mission plan has at most ${MAX_PLAN} steps; drop some with stages first.`);
+          stages.splice(index + 1, 0, stage);
+        }
+        index += 1;
       }
+      if (stages.length > MAX_PLAN) throw new Error(`A mission plan has at most ${MAX_PLAN} steps.`);
       mission.stages = stages;
       mission.stageIndex = index;
       mission.stage = stages[index];

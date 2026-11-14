@@ -215,7 +215,7 @@ function MissionCard({
           ))}
         </span>
         <Chip state={state}>{label}</Chip>
-        {mission && missionLooksFinished(mission, jobs, now) && <span className="sub">Looks finished</span>}
+        {mission && missionLooksFinished(mission, jobs, now, lead) && <span className="sub">Looks finished</span>}
         {mission && active && (
           <>
             <button

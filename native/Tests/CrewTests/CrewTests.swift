@@ -289,6 +289,12 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
         let now = mission.updatedAt + 20 * 60_000
         #expect(!mission.looksFinished(jobs: [], now: now - 1))
         #expect(mission.looksFinished(jobs: [], now: now))
+        if var lead = try fixture().claude.first {
+            lead.state = "working"
+            #expect(!mission.looksFinished(jobs: [], now: now, lead: lead))
+            lead.state = "idle"
+            #expect(mission.looksFinished(jobs: [], now: now, lead: lead))
+        }
         for state in ["running", "waiting", "done", "failed", "cancelled"] {
             job.state = state; job.endedAt = nil
             #expect(mission.looksFinished(jobs: [job], now: now) == (state != "running" && state != "waiting"))

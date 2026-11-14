@@ -77,12 +77,17 @@ final class CrewStore {
     init(api: CrewAPI = CrewAPI(), defaults: UserDefaults = .standard) {
         self.api = api; self.defaults = defaults
         selection = defaults.string(forKey: "selection") ?? "overview"
+        let saved = defaults.double(forKey: "panelWidth")
+        panelWidth = saved > 0 ? saved : WorkspaceStyle.panelWidth
         api.onSignInFailure = { [weak self] error in self?.connectionFailed(error) }
     }
     var project: String { selection?.hasPrefix("project:") == true ? String(selection!.dropFirst(8)) : "" }
     var now: Double { displayTime + clockSkew }
     var projects: [String] { Array(Set(state.projects + (project.isEmpty ? [] : [project]))).sorted() }
     func persistSelection() { defaults.set(selection, forKey: "selection") }
+    /// The detail panel's width as the user last dragged it, kept across launches.
+    var panelWidth: CGFloat = WorkspaceStyle.panelWidth
+    func persistPanelWidth() { defaults.set(Double(panelWidth), forKey: "panelWidth") }
     func openJob(_ id: String, navigate: Bool = false) {
         if navigate {
             search = ""

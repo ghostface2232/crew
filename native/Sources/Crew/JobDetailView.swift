@@ -543,23 +543,36 @@ private struct DebateStepper: View {
     let concluded: Bool
 
     var body: some View {
-        HStack(spacing: Space.s) {
-            // Done steps take the done color and the step in progress the accent, as mission stops do.
-            ForEach(1...rounds, id: \.self) { round in
-                step(round <= replied ? "checkmark.circle.fill" : round == current && working ? "circle.dotted.circle" : "circle",
-                     "Round \(round)", color: round <= replied ? Palette.success : round == current && working ? Palette.accent : nil)
-                Rectangle().fill(WorkspaceStyle.hairline).frame(height: 1).frame(maxWidth: Space.x4l)
-            }
-            step(concluded ? "flag.checkered.circle.fill" : "flag.circle", "Conclusion", color: concluded ? Palette.success : nil)
+        // A narrow panel drops the step names before anything overflows; the symbols keep the progress.
+        ViewThatFits(in: .horizontal) {
+            steps(named: true)
+            steps(named: false)
         }
         .font(Typeface.caption)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(concluded ? "Debate concluded after \(rounds) rounds" : "Debate, round \(current) of \(rounds)")
     }
 
-    private func step(_ symbol: String, _ title: String, color: Color?) -> some View {
-        Label(title, systemImage: symbol).labelStyle(.titleAndIcon).lineLimit(1).fixedSize()
-            .foregroundStyle(color.map(AnyShapeStyle.init) ?? AnyShapeStyle(.secondary))
+    private func steps(named: Bool) -> some View {
+        HStack(spacing: Space.s) {
+            // Done steps take the done color and the step in progress the accent, as mission stops do.
+            ForEach(1...rounds, id: \.self) { round in
+                step(round <= replied ? "checkmark.circle.fill" : round == current && working ? "circle.dotted.circle" : "circle",
+                     "Round \(round)", named: named, color: round <= replied ? Palette.success : round == current && working ? Palette.accent : nil)
+                Rectangle().fill(WorkspaceStyle.hairline).frame(height: 1).frame(maxWidth: Space.x4l)
+            }
+            step(concluded ? "flag.checkered.circle.fill" : "flag.circle", "Conclusion", named: named, color: concluded ? Palette.success : nil)
+        }
+    }
+
+    @ViewBuilder private func step(_ symbol: String, _ title: String, named: Bool, color: Color?) -> some View {
+        let label = Label(title, systemImage: symbol)
+        Group {
+            if named { label.labelStyle(.titleAndIcon) } else { label.labelStyle(.iconOnly) }
+        }
+        .lineLimit(1).fixedSize()
+        .foregroundStyle(color.map(AnyShapeStyle.init) ?? AnyShapeStyle(.secondary))
+        .help(title)
     }
 }
 

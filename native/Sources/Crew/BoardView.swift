@@ -6,6 +6,8 @@ struct BoardView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var searchFocused: Bool
     @State private var wide = false
+    /// The page's width beside the panel, which bounds how wide the panel may be dragged.
+    @State private var pageWidth: CGFloat = 0
     var body: some View {
         NavigationSplitView {
             ProjectSidebar(store: store, openSettings: openSettings)
@@ -66,9 +68,10 @@ struct BoardView: View {
                     if let id = store.selectedJob { JobDetailView(store: store, id: id).id(id) }
                     else if let id = store.selectedSession { SessionDetailView(store: store, id: id).id("session:\(id)") }
                 }
-                    .frame(width: WorkspaceStyle.panelWidth).background(WorkspaceStyle.surface, in: shape)
+                    .frame(width: WorkspaceStyle.panelWidth(store.panelWidth, page: pageWidth)).background(WorkspaceStyle.surface, in: shape)
                     .clipShape(shape)
                     .overlay(shape.strokeBorder(WorkspaceStyle.hairline))
+                    .overlay(alignment: .leading) { PanelResizeHandle(store: store, page: pageWidth) }
                     .shadow(color: Palette.panelShadow, radius: WorkspaceStyle.panelShadowRadius, x: WorkspaceStyle.panelShadowOffset.width, y: WorkspaceStyle.panelShadowOffset.height)
                     .padding(.trailing, WorkspaceStyle.windowInset).padding(.bottom, WorkspaceStyle.windowInset)
                     .transition(reduceMotion ? .opacity : .move(edge: .trailing).combined(with: .opacity))
@@ -76,6 +79,7 @@ struct BoardView: View {
             }
         }
         .animation(Motion.reduced(Motion.panel, reduceMotion), value: store.detailOpen)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { pageWidth = $0 }
     }
     /// The content width from which cards pair up, so each column still fits a mission's header.
     private nonisolated static let twoColumnWidth: CGFloat = 1000
@@ -564,5 +568,54 @@ private struct FullScreenToolbarFade: View {
         .ignoresSafeArea(edges: .top)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
+    }
+}
+
+/// The detail panel's leading edge: dragged, it resizes the panel within its range; double-clicked, it returns the
+/// panel to its default width. A faint grip shows on hover so the edge reads as something to take hold of.
+private struct PanelResizeHandle: View {
+    @Bindable var store: CrewStore
+    let page: CGFloat
+    @State private var start: CGFloat?
+    @State private var hovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private static let grip = CGSize(width: 3, height: Space.x4l)
+    private static let step: CGFloat = 40
+    var body: some View {
+        let width = WorkspaceStyle.panelWidth(store.panelWidth, page: page)
+        Rectangle().fill(.clear)
+            .frame(width: WorkspaceStyle.panelHandleWidth)
+            .overlay {
+                Capsule().fill(.secondary.opacity(start != nil ? 0.5 : 0.3))
+                    .frame(width: Self.grip.width, height: Self.grip.height)
+                    .opacity(hovering || start != nil ? 1 : 0)
+                    .animation(Motion.reduced(Motion.fade, reduceMotion), value: hovering || start != nil)
+            }
+            .contentShape(Rectangle())
+            .pointerStyle(.frameResize(position: .leading))
+            .onHover { hovering = $0 }
+            .gesture(
+                DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                    .onChanged { drag in
+                        let from = start ?? width
+                        start = from
+                        // Dragging left widens the panel, which grows from the window's trailing edge.
+                        var instant = Transaction(); instant.disablesAnimations = true
+                        withTransaction(instant) { store.panelWidth = WorkspaceStyle.panelWidth(from - drag.translation.width, page: page) }
+                    }
+                    .onEnded { _ in start = nil; store.persistPanelWidth() }
+            )
+            .onTapGesture(count: 2) {
+                withAnimation(Motion.reduced(Motion.panel, reduceMotion)) { store.panelWidth = WorkspaceStyle.panelWidth }
+                store.persistPanelWidth()
+            }
+            .accessibilityElement()
+            .accessibilityLabel("Details width")
+            .accessibilityValue("\(Int(width)) points")
+            .accessibilityAdjustableAction { direction in
+                let change: CGFloat = direction == .increment ? Self.step : direction == .decrement ? -Self.step : 0
+                store.panelWidth = WorkspaceStyle.panelWidth(width + change, page: page)
+                store.persistPanelWidth()
+            }
     }
 }

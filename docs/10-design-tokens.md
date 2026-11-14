@@ -45,7 +45,8 @@ These aliases name a role for a scale step. Use the alias when the role fits, so
 | `sectionGap` | 28 | Between detail panel sections |
 | `bannerPadding` | 16 | Connection and attention banners |
 | `panelPadding` | 24 | Detail panel and New Job sheet |
-| `panelWidth` | 420 | The detail panel |
+| `panelWidth` | 420 | The detail panel's width until the user drags it; a drag keeps to `panelMinWidth` (360) to `panelMaxWidth` (760), and the page keeps `panelPageRoom` (240) beside it, so a narrow window lowers the limit. `panelWidth(_:page:)` applies all three |
+| `panelHandleWidth` | 8 | The strip on the panel's leading edge that takes a resize drag |
 | `rowInsets` | 10 × 12 | Job and session rows |
 | `rowGap` | 4 | Between rows of one kind: a mission's jobs and the list cards (Recently finished, Other jobs, Claude sessions) |
 | `insetPadding` | 12 | The gray inset (`inset()`) holding a detail section's contents, or an agent card's sessions or jobs. The agent card leaves the inset out when there are none |
@@ -185,6 +186,12 @@ These views keep their own geometry next to their code, built from the tokens ab
 - The latest round starts open, and earlier rounds start folded to their title.
 - A round's open or folded state is fixed when it first appears, so a round arriving later does not fold the one being read.
 - When the first turns predate the recorded conversation, a caption says which turns are missing.
+
+**Panel resize (`PanelResizeHandle`).**
+- Dragging the detail panel's leading edge resizes it with no animation, so it follows the pointer. The width is kept across launches.
+- Double-clicking the edge returns the panel to `panelWidth` with `Motion.panel`.
+- The edge shows the frame-resize pointer, and a faint grip fades in on hover. VoiceOver adjusts the width in 40-point steps.
+- Content reflows with the width. A debate's round stepper drops its step names when they no longer fit, and the footer's id shortens.
 
 **Detail panel header (`DetailHeader`).**
 - The status and title are pinned above the details. The title runs to two lines at most, and what the work is doing now appears as a `callout` subtitle under it.

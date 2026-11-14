@@ -68,7 +68,20 @@ enum WorkspaceStyle {
     static let bannerPadding = Space.xl
     /// The detail panel's and sheets' side padding.
     static let panelPadding = Space.x3l
+    /// The detail panel's width until the user drags it, and the range a drag keeps to. The page keeps at least
+    /// `panelPageRoom` beside it, so a narrow window shrinks the panel's limit rather than hide the page.
     static let panelWidth: CGFloat = 420
+    static let panelMinWidth: CGFloat = 360
+    static let panelMaxWidth: CGFloat = 760
+    static let panelPageRoom: CGFloat = 240
+    /// The strip on the panel's leading edge that takes a resize drag.
+    static let panelHandleWidth = Space.m
+    /// The panel's width for `wanted` on a page `page` points wide.
+    static func panelWidth(_ wanted: CGFloat, page: CGFloat) -> CGFloat {
+        let fits = page - windowInset * 2
+        let upper = max(panelMinWidth, min(panelMaxWidth, page - panelPageRoom))
+        return max(0, min(fits, min(upper, max(panelMinWidth, wanted))))
+    }
     /// A row in a list: an icon, two lines and trailing status.
     static let rowInsets = EdgeInsets(top: Space.ml, leading: Space.l, bottom: Space.ml, trailing: Space.l)
     /// Between rows in a list.

@@ -11,7 +11,7 @@
     "test": "node --test test/*.test.ts",
     "dev:board": "vite",
     "build:board": "vite build",
-    "test:e2e": "npm run build:board && NODE_ENV=development vite build --outDir ../../.e2e/development/board/dist --emptyOutDir --logLevel warn && playwright test",
+    "test:e2e": "npm run build:board && node scripts/build-board-development.mjs && playwright test",
     "build:desktop": "npm run build:board && node scripts/build-desktop.mjs",
     "desktop": "npm run build:desktop && open native/build/Crew.app",
     "package:desktop": "npm run build:desktop && node scripts/package-desktop.mjs",

@@ -314,8 +314,8 @@ for (const width of [1440, 390])
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     expect(await page.locator('.chip svg').first().evaluate((element) => element.tagName)).toBe('svg');
     expect(await page.locator('.agent-mark').first().evaluate((element) => getComputedStyle(element).maskImage)).not.toBe('none');
-    // One baseline: other engines render text differently, and their checks above still run.
-    if (testInfo.project.name === 'chromium') await expect(page).toHaveScreenshot(`board-${width}.png`, { fullPage: true, animations: 'disabled' });
+    // One baseline, Chromium's on macOS: text renders differently in other engines and systems, where the checks above still run.
+    if (testInfo.project.name === 'chromium' && process.platform === 'darwin') await expect(page).toHaveScreenshot(`board-${width}.png`, { fullPage: true, animations: 'disabled' });
     await page.screenshot({ path: testInfo.outputPath(`board-${width}.png`), fullPage: true });
     await needsYou(page);
     await expect(page.getByRole('button', { name: 'Approve', exact: true })).toBeVisible();
@@ -591,7 +591,7 @@ test.describe('authenticated daemon', () => {
     });
   });
 
-  test('a launch token signs in before other requests, clears the fragment, and uses only the cookie', async ({ page, context, request }) => {
+  test('a launch token signs in before other requests, clears the fragment, and uses only the cookie', async ({ page, context, request, browserName }) => {
     const errors: string[] = [];
     page.on('pageerror', (error) => errors.push(error.message));
     await page.goto(`/?view=board#token=${TEST_TOKEN}`);
@@ -603,8 +603,9 @@ test.describe('authenticated daemon', () => {
     expect(traffic.filter((call: { route: string }) => call.route === '/api/session')).toHaveLength(1);
     expect(traffic.some((call: { route: string }) => call.route === '/api/stream')).toBe(true);
     expect(traffic.every((call: { route: string }) => !call.route.includes(TEST_TOKEN))).toBe(true);
+    // WebKit on Windows reports every cookie's SameSite as None; the server still sends Strict.
     expect((await context.cookies()).find((cookie) => cookie.name === 'crew_session')).toMatchObject({
-      httpOnly: true, sameSite: 'Strict',
+      httpOnly: true, ...(browserName === 'webkit' && process.platform === 'win32' ? {} : { sameSite: 'Strict' }),
     });
     expect(await page.evaluate(() => ({ local: { ...localStorage }, session: { ...sessionStorage } })))
       .toEqual({ local: {}, session: {} });

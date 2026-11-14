@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -59,6 +60,9 @@ export function collectEvidence(dir: string, known: Evidence[], turn: number): E
  * was recorded. The descriptor is the caller's to close.
  */
 export function openEvidence(item: Evidence): { fd: number; size: number } | null {
+  // Windows has no O_NOFOLLOW, so the path is looked at first and the opened file must be the one seen.
+  const seen = fs.lstatSync(item.path, { throwIfNoEntry: false });
+  if (!seen?.isFile()) return null;
   let fd: number;
   try {
     fd = fs.openSync(item.path, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
@@ -66,7 +70,7 @@ export function openEvidence(item: Evidence): { fd: number; size: number } | nul
     return null;
   }
   const stat = fs.fstatSync(fd);
-  if (!stat.isFile()) {
+  if (!stat.isFile() || stat.ino !== seen.ino || stat.dev !== seen.dev) {
     fs.closeSync(fd);
     return null;
   }
@@ -102,19 +106,17 @@ export function attachEvidence(dir: string, sources: string[], turn: number): Ev
     const data = fs.readFileSync(source);
     const ext = path.extname(source);
     const stem = `lead-${turn}-${path.basename(source, ext)}`;
-    for (let n = 1; ; n++) {
-      const file = `${stem}${n > 1 ? `-${n}` : ''}${ext}`;
-      const full = path.join(dir, file);
-      try {
-        // Exclusive create: a name the worker planted, a link among them, is skipped rather than written through.
-        fs.writeFileSync(full, data, { flag: 'wx' });
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === 'EEXIST') continue;
-        throw err;
-      }
-      added.push({ file, path: full, turn, from: 'lead', bytes: data.length, modified: fs.statSync(full).mtimeMs });
-      break;
-    }
+    let n = 1;
+    const name = () => `${stem}${n > 1 ? `-${n}` : ''}${ext}`;
+    // A name the worker already used, a planted link among them, is skipped.
+    while (fs.lstatSync(path.join(dir, name()), { throwIfNoEntry: false })) n++;
+    const full = path.join(dir, name());
+    // Written under a name the worker cannot guess, then renamed: a rename replaces a link put there meanwhile
+    // instead of writing through it, which an exclusive create does not guarantee on Windows.
+    const temp = path.join(dir, `.lead-${randomBytes(8).toString('hex')}`);
+    fs.writeFileSync(temp, data, { flag: 'wx' });
+    fs.renameSync(temp, full);
+    added.push({ file: name(), path: full, turn, from: 'lead', bytes: data.length, modified: fs.statSync(full).mtimeMs });
   }
   return added;
 }

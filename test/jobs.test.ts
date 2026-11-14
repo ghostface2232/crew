@@ -2191,3 +2191,18 @@ test('a status check from an earlier stall cannot add news to a later one', asyn
   assert.equal(answers.length, 2);
   assert.equal((job.news ?? []).filter((news) => news.kind === 'stalled').length, 1);
 });
+
+test('cancelling a job while its check runs stops the check and still collects the turn', { skip: process.platform !== 'darwin' }, async () => {
+  const repo = tempRepo();
+  const { jobs } = harness((ctl) => ctl.done('built it'));
+  const job = await jobs.create({ kind: 'delegate', cwd: repo, task: 't', check: 'sleep 30' });
+  while (job.phase !== 'running the check') await jobs.wait(job.id, job.seq, 200);
+  // A reply is not a cancel: it must not stop the check.
+  await assert.rejects(jobs.reply(job.id, { message: 'more' }), /collecting its result/);
+  await jobs.cancel(job.id);
+  await settled(jobs, job);
+  assert.equal(job.state, 'done');
+  assert.equal(job.report, 'built it');
+  assert.equal(job.receipts?.at(-1)?.check?.exit, null);
+  assert.match(job.receipts?.at(-1)?.check?.output ?? '', /stopped: the job was cancelled/);
+});

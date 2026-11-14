@@ -99,6 +99,7 @@ export function runCheck(command: string, cwd: string, tmp: string, unreadable: 
       clearTimeout(timer);
       signal?.removeEventListener('abort', cancel);
       // Whatever the check left running in the background could still change the worktree after the receipt.
+      // A process that left the group (setsid) escapes this, though it keeps the sandbox's write limits.
       stop();
       resolve({ command, exit: signal?.aborted ? null : exit, timedOut, output: output.trimEnd(), ms: Date.now() - started, sandboxed });
     };

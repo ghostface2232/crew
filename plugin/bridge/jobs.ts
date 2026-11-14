@@ -666,12 +666,6 @@ export class Jobs {
     if (this.discarding.has(id)) throw new Error(`Job ${id} is being discarded.`);
     if (this.cancelling.has(id)) throw new Error(`Job ${id} is being cancelled.`);
     if (this.preparingReviews.has(id)) throw new Error(`Job ${id} is preparing its review diff. Wait for it to finish.`);
-    const check = this.checks.get(id);
-    if (check) {
-      // The turn is over; stopping its check lets the result be collected now, with the check marked as stopped.
-      check.abort();
-      return job;
-    }
     if (this.finalizing.has(id)) throw new Error(`Job ${id} is collecting its result. Wait for it to finish.`);
     const ctl = this.ctl(job);
     const adapter = this.adapters[job.agent];
@@ -918,6 +912,12 @@ export class Jobs {
     const job = this.get(id);
     if (this.cancelling.has(id)) throw new Error(`Job ${id} is already being cancelled.`);
     if (isTerminal(job)) return job;
+    const check = this.checks.get(id);
+    if (check) {
+      // The turn is over; stopping its check lets the result be collected now, with the check marked as stopped.
+      check.abort();
+      return job;
+    }
     if (this.finalizing.has(id)) throw new Error(`Job ${id} is collecting its result. Wait for it to finish.`);
     const ctl = this.ctl(job);
     this.cancelling.add(id);

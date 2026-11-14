@@ -14,14 +14,14 @@ struct JobDetailView: View {
     }
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
+            VStack(alignment: .leading, spacing: WorkspaceStyle.sectionGap) {
                 if !error.isEmpty {
-                    Text(error).foregroundStyle(.red).textSelection(.enabled)
-                    Button("Retry") { retry += 1 }
+                    Text(error).foregroundStyle(Palette.danger).textSelection(.enabled)
+                    Button("Retry") { retry += 1 }.pillButton()
                 }
                 if job == nil && error.isEmpty { ProgressView("Loading details…") }
                 if let job { contents(job) }
-            }.padding(.horizontal, 24).padding(.top, 8).padding(.bottom, 24).frame(maxWidth: .infinity, alignment: .leading)
+            }.padding(.horizontal, WorkspaceStyle.panelPadding).padding(.top, Space.m).padding(.bottom, WorkspaceStyle.panelPadding).frame(maxWidth: .infinity, alignment: .leading)
                 .background(OverlayScrollers())
         }
         // The header stays while the details scroll under it. As a scroll view's bar, it gets the system's
@@ -50,10 +50,10 @@ struct JobDetailView: View {
         }
     }
     @ViewBuilder private func contents(_ job: Job) -> some View {
-        if let failure = job.error { Text(failure.message).font(Typeface.callout).foregroundStyle(.red).textSelection(.enabled) }
+        if let failure = job.error { Text(failure.message).font(Typeface.callout).foregroundStyle(Palette.danger).textSelection(.enabled) }
         if job.state == "waiting" {
             AnswerView(store: store, job: job)
-                .card(fill: .orange.opacity(0.06))
+                .card(fill: Palette.attention(Palette.warning))
         }
         Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
             // The model the session reported, else the configured one.
@@ -74,11 +74,11 @@ struct JobDetailView: View {
                 Text(result.stat.isEmpty ? "No files changed" : result.stat).font(Typeface.code).textSelection(.enabled)
                 if let commit = result.commit { Text("Commit \(commit)").font(Typeface.caption).textSelection(.enabled) }
                 ForEach(Array(Set(result.files + result.outOfScope)).sorted(), id: \.self) { file in
-                    VStack(alignment: .leading, spacing: 3) {
+                    VStack(alignment: .leading, spacing: Space.xs) {
                         Text(file).font(Typeface.code).textSelection(.enabled)
                         if result.outOfScope.contains(file) {
                             Label(result.files.contains(file) ? "Outside the allowed targets" : "Outside the workspace", systemImage: "exclamationmark.triangle")
-                                .font(Typeface.caption).foregroundStyle(.red)
+                                .font(Typeface.caption).foregroundStyle(Palette.danger)
                         }
                     }
                 }
@@ -89,7 +89,7 @@ struct JobDetailView: View {
         }
         if let evidence = job.evidence, !evidence.isEmpty {
             detailSection("Evidence", symbol: "photo.on.rectangle") {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 132), spacing: 12, alignment: .top)], alignment: .leading, spacing: 12) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 132), spacing: Space.l, alignment: .top)], alignment: .leading, spacing: Space.l) {
                     // Newest turn first, as on the web board.
                     ForEach(evidence.sorted { $0.turn > $1.turn }, id: \.file) { item in EvidenceTile(item: item) }
                 }
@@ -99,7 +99,7 @@ struct JobDetailView: View {
             detailSection("Rounds", symbol: "arrow.counterclockwise") {
                 ForEach(rounds.sorted { $0.turn < $1.turn }, id: \.turn) { round in
                     let key = job.roundActionKey(round.turn)
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: Space.m) {
                         HStack {
                             Text("Turn \(round.turn)").font(Typeface.calloutStrong)
                             Label(round.state == "undone" ? "Undone" : "Kept", systemImage: round.state == "undone" ? "arrow.uturn.backward" : "checkmark")
@@ -108,6 +108,7 @@ struct JobDetailView: View {
                             Button(round.state == "undone" ? "Keep" : "Undo") {
                                 Task { await store.setRound(job, turn: round.turn, undo: round.state != "undone") }
                             }
+                            .pillButton()
                             .disabled(!store.connected || job.roundUnavailableReason != nil || store.actions[key]?.locked == true)
                             .help(job.roundUnavailableReason ?? (!store.connected ? "Connect to Crew to change rounds." : "Change this round on the job branch."))
                         }
@@ -121,14 +122,14 @@ struct JobDetailView: View {
         if !refusals.isEmpty {
             detailSection("Automatic review", symbol: "exclamationmark.shield") {
                 ForEach(Array(refusals.enumerated()), id: \.offset) { _, refusal in
-                    Text("\(refusal.action) — \(refusal.reason)").font(Typeface.callout).foregroundStyle(.red).textSelection(.enabled)
+                    Text("\(refusal.action) — \(refusal.reason)").font(Typeface.callout).foregroundStyle(Palette.danger).textSelection(.enabled)
                 }
                 if job.retrying != nil { Text("Sent back once with your approval.").font(Typeface.callout).foregroundStyle(.secondary) }
             }
         }
         if !job.notes.isEmpty {
             detailSection("Notes", symbol: "note.text") {
-                ForEach(Array(job.notes.enumerated()), id: \.offset) { _, note in Text(note).font(Typeface.callout).textSelection(.enabled) }
+                ForEach(Array(job.notes.enumerated()), id: \.offset) { _, note in Text(noteText(note)).font(Typeface.callout).textSelection(.enabled) }
             }
         }
         if !job.report.isEmpty {
@@ -153,15 +154,15 @@ struct JobDetailView: View {
         if !combined.isEmpty {
             detailSection("Activity", symbol: "bolt") { EventList(events: combined) }
         }
-        VStack(alignment: .leading, spacing: 10) {
-            Divider().padding(.bottom, 4)
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: Space.ml) {
+            Divider().padding(.bottom, Space.xs)
+            HStack(spacing: Space.m) {
                 if let session = job.sessionId, let worker = store.state.agents[job.agent] {
                     CopyButton(title: "Copy resume command", text: "\(worker.resume) \(session)")
                 }
                 Spacer(minLength: 0)
                 if job.isActive {
-                    Button("Cancel Job", systemImage: "stop.circle", role: .destructive) { Task { await store.cancel(job) } }
+                    Button("Cancel Job", systemImage: "stop.circle", role: .destructive) { Task { await store.cancel(job) } }.pillButton()
                         .disabled(!store.connected || store.actions["cancel:\(id):\(job.turns)"]?.locked == true)
                 }
             }.font(Typeface.callout)
@@ -169,6 +170,14 @@ struct JobDetailView: View {
             Text(job.id).font(Typeface.codeSmall).foregroundStyle(.tertiary).textSelection(.enabled)
         }
     }
+}
+
+/// The start of a note and how much was left out. A job's notes once held whole command output, and SwiftUI
+/// draws nothing for text that tall, leaving an empty box.
+private func noteText(_ text: String, limit: Int = 2_000) -> String {
+    guard text.count > limit else { return text }
+    let rest = text.dropFirst(limit).split(separator: "\n", omittingEmptySubsequences: false).count
+    return text.prefix(limit) + "… and \(rest) more line(s)"
 }
 
 @MainActor private func fact(_ title: String, _ value: String) -> some View {
@@ -179,9 +188,9 @@ struct JobDetailView: View {
 }
 /// A titled section whose contents sit in a gray inset, as a mission card's rows do, so sections read apart.
 @MainActor private func detailSection<Content: View>(_ title: String, symbol: String, @ViewBuilder content: () -> Content) -> some View {
-    VStack(alignment: .leading, spacing: 10) {
+    VStack(alignment: .leading, spacing: Space.ml) {
         Label(title, systemImage: symbol).font(Typeface.subheadline)
-        VStack(alignment: .leading, spacing: 12) { content() }.inset()
+        VStack(alignment: .leading, spacing: Space.l) { content() }.inset()
     }.frame(maxWidth: .infinity, alignment: .leading)
 }
 
@@ -195,12 +204,12 @@ private struct DetailHeader<Status: View>: View {
     /// VoiceOver moves to the title when the panel opens; keyboard focus stays where it was.
     @AccessibilityFocusState private var titleFocused: Bool
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: Space.xl) {
             HStack {
                 status
                 Spacer()
                 Button("Close Details", systemImage: "xmark", action: close)
-                    .buttonStyle(.bordered).buttonBorderShape(.circle).labelStyle(.iconOnly).help("Close details (Esc)").keyboardShortcut(.cancelAction)
+                    .iconButton().help("Close details (Esc)").keyboardShortcut(.cancelAction)
             }
             // Two lines at most, so a long title cannot take over the panel. Selectable text drops its
             // truncation once selected, so the full title is copied from a menu instead.
@@ -214,13 +223,13 @@ private struct DetailHeader<Status: View>: View {
                         }
                     }
                     // Tighter than the status row above, so the two read as one heading.
-                    .padding(.bottom, subtitle?.isEmpty == false ? -8 : 0)
+                    .padding(.bottom, subtitle?.isEmpty == false ? -Space.m : 0)
             }
             if let subtitle, !subtitle.isEmpty {
                 Text(subtitle).font(Typeface.callout).foregroundStyle(.secondary).lineLimit(2).help(subtitle)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 24).padding(.top, 20).padding(.bottom, 12)
+        .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, WorkspaceStyle.panelPadding).padding(.top, Space.xxl).padding(.bottom, Space.l)
         .onAppear { titleFocused = true }
     }
 }
@@ -233,9 +242,9 @@ struct SessionDetailView: View {
     private var session: ClaudeSession? { store.state.claude.first { $0.id == id } }
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
+            VStack(alignment: .leading, spacing: WorkspaceStyle.sectionGap) {
                 if let session { contents(session) } else { Text("This session has ended.").foregroundStyle(.secondary) }
-            }.padding(.horizontal, 24).padding(.top, 8).padding(.bottom, 24).frame(maxWidth: .infinity, alignment: .leading)
+            }.padding(.horizontal, WorkspaceStyle.panelPadding).padding(.top, Space.m).padding(.bottom, WorkspaceStyle.panelPadding).frame(maxWidth: .infinity, alignment: .leading)
                 .background(OverlayScrollers())
         }
         .safeAreaBar(edge: .top) {
@@ -250,10 +259,10 @@ struct SessionDetailView: View {
     }
     @ViewBuilder private func contents(_ session: ClaudeSession) -> some View {
         if session.state == "waiting" {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: Space.m) {
                 Text(session.waitingFor ?? "Claude needs your input.").font(Typeface.body).textSelection(.enabled)
                 Text("Answer in Claude.").font(Typeface.callout).foregroundStyle(.secondary)
-            }.card(fill: .orange.opacity(0.06))
+            }.card(fill: Palette.attention(Palette.warning))
         }
         Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
             fact("Agent", "Claude · Lead")
@@ -267,7 +276,7 @@ struct SessionDetailView: View {
         if !missions.isEmpty {
             detailSection("Missions", symbol: "flag") {
                 ForEach(missions) { mission in
-                    HStack(spacing: 10) {
+                    HStack(spacing: Space.ml) {
                         Text(mission.title).font(Typeface.callout).lineLimit(2)
                         Spacer(minLength: 8)
                         StatusLabel(state: mission.state == "active" ? "running" : mission.state, title: mission.state.capitalized)
@@ -275,9 +284,9 @@ struct SessionDetailView: View {
                 }
             }
         }
-        VStack(alignment: .leading, spacing: 10) {
-            Divider().padding(.bottom, 4)
-            CopyButton(title: "Copy resume command", text: "claude --resume \(session.id)").font(Typeface.callout)
+        VStack(alignment: .leading, spacing: Space.ml) {
+            Divider().padding(.bottom, Space.xs)
+            CopyButton(title: "Copy resume command", text: "claude --resume \(session.id)")
             Text(session.id).font(Typeface.codeSmall).foregroundStyle(.tertiary).textSelection(.enabled)
         }
     }
@@ -292,13 +301,13 @@ private struct OriginalTask: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// One line of `Typeface.callout`.
     private static let line: CGFloat = {
-        let font = NSFont.systemFont(ofSize: 13)
+        let font = NSFont.systemFont(ofSize: Typeface.calloutSize)
         return ceil(font.ascender - font.descender + font.leading)
     }()
     private var preview: CGFloat { Self.line * 3 }
     private var long: Bool { height > preview + 1 }
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: Space.ml) {
             Button(action: toggle) {
                 HStack {
                     Label("Original task", systemImage: "text.alignleft").font(Typeface.subheadline)
@@ -341,7 +350,7 @@ private struct OriginalTask: View {
 
 private extension View {
     func inset() -> some View {
-        padding(14).frame(maxWidth: .infinity, alignment: .leading)
+        padding(WorkspaceStyle.insetPadding).frame(maxWidth: .infinity, alignment: .leading)
             .background(WorkspaceStyle.rowFill, in: RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius))
     }
 }
@@ -403,19 +412,19 @@ private struct EvidenceTile: View {
     let item: Evidence
     @State private var thumbnail: NSImage?
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: Space.s) {
             Button { NSWorkspace.shared.open(URL(fileURLWithPath: item.path)) } label: {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.quaternary.opacity(0.5))
+                    RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius, style: .continuous).fill(.quaternary.opacity(0.5))
                     if let thumbnail {
                         Image(nsImage: thumbnail).resizable().scaledToFit().padding(1)
                     } else {
-                        Image(systemName: item.isVideo ? "play.rectangle" : "photo").font(.title2).foregroundStyle(.secondary)
+                        Image(systemName: item.isVideo ? "play.rectangle" : "photo").font(Symbol.large).foregroundStyle(.secondary)
                     }
                 }
                 .aspectRatio(4 / 3, contentMode: .fit)
-                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.separator))
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius, style: .continuous).strokeBorder(.separator))
+                .clipShape(RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius, style: .continuous))
             }
             .buttonStyle(.plain)
             .help(item.path)

@@ -27,10 +27,10 @@ struct StatusLabel: View {
     }
     var color: Color {
         switch state {
-        case "waiting", "stalled": return .orange
-        case "failed", "error": return .red
-        case "done": return .green
-        case "running", "working", "active": return .accentColor
+        case "waiting", "stalled": return Palette.warning
+        case "failed", "error": return Palette.danger
+        case "done": return Palette.success
+        case "running", "working", "active": return Palette.accent
         default: return .secondary
         }
     }
@@ -41,8 +41,8 @@ struct StatusLabel: View {
         let text = scheme == .light ? color.mix(with: .black, by: 0.22) : color
         Label(title ?? state.capitalized, systemImage: symbol)
             .font(Typeface.chip).foregroundStyle(text).lineLimit(1).fixedSize()
-            .padding(.horizontal, 8).padding(.vertical, 5)
-            .background(color.opacity(0.12), in: Capsule())
+            .padding(Chip.insets)
+            .background(Palette.chip(color), in: Capsule())
             .overlay { if contrast == .increased { Capsule().strokeBorder(text.opacity(0.5)) } }
     }
 }
@@ -54,14 +54,14 @@ struct EmptyState<Actions: View>: View {
     var detail: String? = nil
     @ViewBuilder var actions: Actions
     var body: some View {
-        VStack(spacing: 6) {
-            VStack(spacing: 6) {
-                Image(systemName: symbol).font(.system(size: 30, weight: .light)).foregroundStyle(.secondary).padding(.bottom, 2)
+        VStack(spacing: Space.s) {
+            VStack(spacing: Space.s) {
+                Image(systemName: symbol).font(Symbol.empty).foregroundStyle(.secondary).padding(.bottom, Space.xxs)
                 Text(title).font(Typeface.emptyTitle).foregroundStyle(.secondary)
                 if let detail { Text(detail).font(Typeface.callout).foregroundStyle(.tertiary) }
             }.accessibilityElement(children: .combine)
             // Kept out of the combined element so the action stays its own control.
-            actions.padding(.top, 10)
+            actions.padding(.top, Space.ml)
         }
         .multilineTextAlignment(.center).centeredInPage()
     }
@@ -77,7 +77,7 @@ struct ContentPanel<Content: View>: View {
     var symbol = ""
     @ViewBuilder var content: Content
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: Space.xl) {
             if let title {
                 Label(title, systemImage: symbol).font(Typeface.title).accessibilityAddTraits(.isHeader)
             }
@@ -91,7 +91,7 @@ struct ContentPanel<Content: View>: View {
 struct ActionMessage: View {
     var state: ActionState?
     var body: some View {
-        if let error = state?.error { Label(error, systemImage: "exclamationmark.circle").foregroundStyle(.red).font(Typeface.callout).textSelection(.enabled) }
+        if let error = state?.error { Label(error, systemImage: "exclamationmark.circle").foregroundStyle(Palette.danger).font(Typeface.callout).textSelection(.enabled) }
         else if state?.pending == true { ProgressView().controlSize(.small).accessibilityLabel("Sending") }
         else if state?.accepted == true { Label("Sent", systemImage: "checkmark").foregroundStyle(.secondary).font(Typeface.callout) }
     }
@@ -107,6 +107,7 @@ struct CopyButton: View {
             NSPasteboard.general.setString(text, forType: .string)
             copied = true
         } label: { Label(copied ? "Copied" : title, systemImage: copied ? "checkmark" : "doc.on.doc") }
+        .pillButton()
         .help(title)
         .task(id: copied) {
             if copied { try? await Task.sleep(for: .seconds(2)); copied = false }
@@ -122,7 +123,7 @@ struct MessageEditor: View {
         TextEditor(text: $text)
             .font(Typeface.body)
             .scrollContentBackground(.hidden)
-            .padding(10)
+            .padding(Space.ml)
             .frame(minHeight: 80, maxHeight: 180)
             .background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: WorkspaceStyle.fieldRadius))
             .overlay(RoundedRectangle(cornerRadius: WorkspaceStyle.fieldRadius).strokeBorder(WorkspaceStyle.hairline))
@@ -141,20 +142,20 @@ struct AnswerView: View {
     private var canSend: Bool { !locked && !draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     var body: some View {
         if job.state == "waiting", let waiting = job.waiting {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: Space.xl) {
                 // The request itself is what the person acts on, so it leads the hierarchy.
                 Text(waiting.reason).font(Typeface.headline).lineSpacing(4).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if waiting.type == "question" {
                     composer
                     // Quick replies sit apart from the composer so they don't read as part of sending.
-                    HStack(spacing: 8) {
+                    HStack(spacing: Space.m) {
                         Spacer(minLength: 0)
                         decision("Yes", symbol: "checkmark", value: "approve", prominent: false)
                         decision("No", symbol: "xmark", value: "deny", prominent: false)
                     }
                 } else {
-                    HStack(spacing: 8) {
+                    HStack(spacing: Space.m) {
                         decision("Approve", symbol: "checkmark", value: "approve", prominent: true)
                         decision("Deny", symbol: "xmark", value: "deny", prominent: false)
                     }
@@ -172,17 +173,19 @@ struct AnswerView: View {
                 .accessibilityLabel("Your answer")
             if draft.wrappedValue.isEmpty {
                 Text("Write an answer…").font(Typeface.body).foregroundStyle(.tertiary)
+                    // The text view's own line fragment padding, so the placeholder sits where typing starts.
                     .padding(.leading, 5).allowsHitTesting(false).accessibilityHidden(true)
             }
         }
-        .padding(.leading, 10).padding(.top, 10).padding(.trailing, 44).padding(.bottom, 8)
+        // The trailing room keeps text clear of the send button laid over the corner.
+        .padding(.leading, Space.ml).padding(.top, Space.ml).padding(.trailing, 44).padding(.bottom, Space.m)
         .overlay(alignment: .bottomTrailing) {
             Button("Send answer", systemImage: "arrow.up") {
                 Task { await store.answer(job, message: draft.wrappedValue) }
             }
-            .labelStyle(.iconOnly).font(.system(size: 12, weight: .bold))
+            .labelStyle(.iconOnly).font(Symbol.control)
             .buttonStyle(.borderedProminent).buttonBorderShape(.circle).controlSize(.small)
-            .disabled(!canSend).help("Send answer").padding(8)
+            .disabled(!canSend).help("Send answer").padding(Space.m)
         }
         .background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: WorkspaceStyle.fieldRadius))
         .overlay(RoundedRectangle(cornerRadius: WorkspaceStyle.fieldRadius).strokeBorder(WorkspaceStyle.hairline))
@@ -191,9 +194,8 @@ struct AnswerView: View {
     @ViewBuilder private func decision(_ title: String, symbol: String, value: String, prominent: Bool) -> some View {
         // A draft typed before a quick reply goes along with it rather than being discarded.
         let note = draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        let button = Button(title, systemImage: symbol) { Task { await store.answer(job, decision: value, message: note.isEmpty ? nil : note) } }
-            .font(Typeface.calloutStrong).buttonBorderShape(.capsule).disabled(locked)
-        if prominent { button.buttonStyle(.borderedProminent) } else { button.buttonStyle(.bordered) }
+        Button(title, systemImage: symbol) { Task { await store.answer(job, decision: value, message: note.isEmpty ? nil : note) } }
+            .pillButton(prominent: prominent).disabled(locked)
     }
 }
 
@@ -215,12 +217,12 @@ struct JobRow: View {
                       job.runsApp == true ? "Runs the app" : nil, job.exclusive == true ? "Runs alone" : nil]
             .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
         Button(action: open) {
-            HStack(spacing: 12) {
+            HStack(spacing: Space.l) {
                 Image(systemName: job.ask == true ? "questionmark.bubble" : job.kind == "review" ? "checkmark.shield" : job.kind == "polish" ? "text.badge.checkmark" : "hammer")
-                    .font(.system(size: 14)).foregroundStyle(.secondary).frame(width: 20)
-                VStack(alignment: .leading, spacing: 3) {
+                    .font(Symbol.row).foregroundStyle(.secondary).frame(width: WorkspaceStyle.iconColumn)
+                VStack(alignment: .leading, spacing: Space.xs) {
                     Text(job.title).font(Typeface.bodyStrong).foregroundStyle(.primary).lineLimit(2)
-                    Text(detail).font(Typeface.caption).foregroundStyle(job.error == nil ? Color.secondary : .red).lineLimit(1)
+                    Text(detail).font(Typeface.caption).foregroundStyle(job.error == nil ? Color.secondary : Palette.danger).lineLimit(1)
                 }
                 Spacer(minLength: 8)
                 StatusLabel(state: job.stalled ? "stalled" : job.state, title: job.status)
@@ -228,8 +230,8 @@ struct JobRow: View {
                     .frame(minWidth: 28, alignment: .trailing)
                 Image(systemName: "chevron.right").font(Typeface.micro).foregroundStyle(.tertiary)
             }
-            .padding(.horizontal, 12).padding(.vertical, 10).contentShape(Rectangle())
-            .background(selected ? Color.accentColor.opacity(0.09) : job.state == "waiting" ? Color.orange.opacity(0.07) : WorkspaceStyle.rowFill, in: RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius))
+            .padding(WorkspaceStyle.rowInsets).contentShape(Rectangle())
+            .background(selected ? Palette.selection : job.state == "waiting" ? Palette.attention(Palette.warning) : WorkspaceStyle.rowFill, in: RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius))
         }.buttonStyle(WorkspacePressStyle())
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(selected ? .isSelected : [])
@@ -246,9 +248,9 @@ struct SessionRow: View {
         let detail = ["Claude", session.waitingFor ?? (session.state == "idle" ? nil : session.phase), session.inTool ? "Running a tool" : nil]
             .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
         Button(action: open) {
-            HStack(spacing: 12) {
-                AgentMark(agent: "claude", size: 16).frame(width: 20)
-                VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: Space.l) {
+                AgentMark(agent: "claude", size: MarkSize.row).frame(width: WorkspaceStyle.iconColumn)
+                VStack(alignment: .leading, spacing: Space.xs) {
                     Text(session.title).font(Typeface.bodyStrong).foregroundStyle(.primary).lineLimit(2)
                     Text(detail).font(Typeface.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
@@ -259,8 +261,8 @@ struct SessionRow: View {
                     .monospacedDigit().font(Typeface.caption).foregroundStyle(.secondary).frame(minWidth: 28, alignment: .trailing)
                 Image(systemName: "chevron.right").font(Typeface.micro).foregroundStyle(.tertiary)
             }
-            .padding(.horizontal, 12).padding(.vertical, 10).contentShape(Rectangle())
-            .background(selected ? Color.accentColor.opacity(0.09) : session.state == "waiting" ? Color.orange.opacity(0.07) : WorkspaceStyle.rowFill, in: RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius))
+            .padding(WorkspaceStyle.rowInsets).contentShape(Rectangle())
+            .background(selected ? Palette.selection : session.state == "waiting" ? Palette.attention(Palette.warning) : WorkspaceStyle.rowFill, in: RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius))
         }.buttonStyle(WorkspacePressStyle())
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(selected ? .isSelected : [])
@@ -271,12 +273,12 @@ struct EventList: View {
     /// Nil inside a job's own details, where every event belongs to the job already shown.
     var openJob: ((String) -> Void)? = nil
     var body: some View {
-        LazyVStack(alignment: .leading, spacing: 16) {
+        LazyVStack(alignment: .leading, spacing: Space.xl) {
             ForEach(events.reversed()) { event in
-                HStack(alignment: .top, spacing: 12) {
+                HStack(alignment: .top, spacing: Space.l) {
                     Image(systemName: event.kind == "error" ? "exclamationmark.circle" : event.kind == "done" ? "checkmark.circle" : "circle.fill")
-                        .font(Typeface.caption).foregroundStyle(event.kind == "error" ? .red : .secondary).frame(width: 16).padding(.top, 3)
-                    VStack(alignment: .leading, spacing: 4) {
+                        .font(Typeface.caption).foregroundStyle(event.kind == "error" ? Palette.danger : .secondary).frame(width: Symbol.controlFrame).padding(.top, Space.xs)
+                    VStack(alignment: .leading, spacing: Space.xs) {
                         HStack {
                             Text(agentName(event.agent)).font(Typeface.calloutStrong)
                             if let date = ISO8601DateFormatter.crew.date(from: event.ts) {
@@ -284,8 +286,7 @@ struct EventList: View {
                             }
                             Spacer()
                             if let id = event.job_id, let openJob {
-                                Button("Show job", systemImage: "arrow.up.right") { openJob(id) }.labelStyle(.iconOnly)
-                                    .buttonStyle(.bordered).buttonBorderShape(.circle).controlSize(.small).help("Show job")
+                                Button("Show job", systemImage: "arrow.up.right") { openJob(id) }.iconButton().help("Show job")
                             }
                         }
                         Text(event.detail).font(Typeface.callout).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
@@ -315,15 +316,15 @@ struct AgentUsageView: View {
     var body: some View {
         if let usage = store.usage, usage.source != "none" {
             if let provider = usage.providers.first(where: { $0.agent == agent }) {
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: Space.s) {
                     if provider.shownWindows.isEmpty {
                         Text(provider.status.rawValue.capitalized).foregroundStyle(.secondary)
                     }
                     ForEach(provider.shownWindows, id: \.key) { window in
                         // The provider's status overrides a window's when the reading is old or a job just hit the limit.
                         let status = [.stale, .unknown, .exhausted].contains(provider.status) ? provider.status : window.status
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack(spacing: 6) {
+                        VStack(alignment: .leading, spacing: Space.m) {
+                            HStack(spacing: Space.s) {
                                 Text(window.name)
                                 Text(window.usedRatio, format: .percent.precision(.fractionLength(0))).monospacedDigit()
                                 if status == .stale || status == .unknown || (status == .exhausted && window.status != .exhausted) { Text(status == .exhausted ? "limit reached" : status.rawValue) }
@@ -352,8 +353,8 @@ struct AgentUsageView: View {
     }
     /// AgentGauge's thresholds: caution from 70% used, danger from 90% or when the limit was hit.
     private func tint(_ used: Double, _ status: UsageStatus) -> Color {
-        if status == .exhausted || used >= 0.9 { return .red }
-        return used >= 0.7 ? .orange : .secondary
+        if status == .exhausted || used >= 0.9 { return Palette.danger }
+        return used >= 0.7 ? Palette.warning : .secondary
     }
 }
 

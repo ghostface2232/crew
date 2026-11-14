@@ -15,7 +15,7 @@ The app contains a standalone Node runtime and compiled bridge JavaScript. Start
 
 ## Interface
 
-- The native window toolbar combines workspace navigation, search, and primary actions. Project selection stays in the content. A detail panel preserves the workspace layout and disables obscured controls until closed.
+- The native window toolbar combines workspace navigation, search, and primary actions. Project selection stays in the content. A floating detail panel opens beside the page, which keeps scrolling and working; a click on the page that no control takes closes it, and clicking the open row again does too.
 - The workspace uses a neutral canvas, rounded 38-point headlines and 40-point summary values, service cards, and mission stage rings and tracks. Lime is restricted to progress accents; the background has no gradient. System appearance remains automatic. Opening an inspector preserves the list and search context; narrow layouts retain agent status labels.
 - Needs You always includes every project. Approval and question responses share request-specific action locks with the inspector and notification actions.
 - Missions retain stage progress, lead disclosures, job membership, outcomes, token totals, and dismissal without cancelling jobs. History keeps completed work reachable.
@@ -24,6 +24,7 @@ The app contains a standalone Node runtime and compiled bridge JavaScript. Start
 - Settings has separate role and shared-instruction tabs, project scopes, failed-load protection, save-generation checks, and unsaved-change protection on close and quit. Role cards and a fixed save footer share the workspace typography and surfaces. New Job also confirms before discarding a draft with Cancel or Escape.
 - Native text editors preserve marked text and use Return for a newline. Sending requires an explicit button; IME confirmation cannot submit a message.
 - Navigation, controls, and statuses use SF Symbols. Service marks come from the supplied SVGs in `assets/`, compiled as template vector assets so they remain legible in light and dark appearances. Cursor's asset is packaged but no unsupported Cursor adapter is implied.
+- Sizes, spacing, colors, type and controls come from the design tokens in [10-design-tokens.md](10-design-tokens.md).
 - Liquid Glass is provided by system navigation/toolbars and glass buttons, with a custom glass attention banner. Reports and logs use readable content surfaces. System materials and controls inherit accessibility appearance settings; there are no custom continuous animations.
 
 Keyboard shortcuts: Command-N creates a job, Command-comma opens Settings, Command-1 through Command-4 select workspace sections, and Command-S saves the selected settings tab, and Command-F focuses toolbar search. Escape closes job details.

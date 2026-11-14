@@ -27,7 +27,7 @@ struct DispatchView: View {
         return worker?.enabled == true
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: Space.xxl) {
             Label("New Job", systemImage: "paperplane").font(Typeface.title)
                 .labelStyle(.titleAndIcon).symbolRenderingMode(.hierarchical)
             Picker("Intent", selection: $intent) {
@@ -35,16 +35,16 @@ struct DispatchView: View {
                 Text("Question").tag("question")
                 Text("Information").tag("information")
             }.pickerStyle(.segmented)
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: Space.xl) {
                 field("Project") {
-                    HStack(spacing: 8) {
+                    HStack(spacing: Space.m) {
                         TextField("Project directory", text: $directory, prompt: Text("/path/to/repository"))
                             .textFieldStyle(.roundedBorder).labelsHidden().accessibilityLabel("Project directory")
                         Button("Choose…", systemImage: "folder") { chooseFolder() }.accessibilityLabel("Choose project directory")
                     }
                 }
                 if intent == "command" {
-                    HStack(alignment: .top, spacing: 24) {
+                    HStack(alignment: .top, spacing: Space.x3l) {
                         field("Role") {
                             Picker("Role", selection: $role) { ForEach(roleOrder, id: \.self) { Text(roleNames[$0]!).tag($0) } }
                                 .labelsHidden().fixedSize()
@@ -75,14 +75,14 @@ struct DispatchView: View {
                         .font(Typeface.caption).foregroundStyle(.secondary)
                 }
             }
-            if !error.isEmpty { Label(error, systemImage: "exclamationmark.circle").foregroundStyle(.red).textSelection(.enabled) }
-            HStack(spacing: 8) {
+            if !error.isEmpty { Label(error, systemImage: "exclamationmark.circle").foregroundStyle(Palette.danger).textSelection(.enabled) }
+            HStack(spacing: Space.m) {
                 Spacer()
                 Button("Cancel") { if dirty { confirmingDiscard = true } else { dismiss() } }.keyboardShortcut(.cancelAction).disabled(sending)
                 Button(sending ? "Sending…" : intent == "information" ? "Save Information" : intent == "question" ? "Ask Question" : "Send Job", systemImage: "arrow.up") { Task { await send() } }
                     .buttonStyle(.glassProminent).disabled(!canSend)
             }
-        }.padding(24).frame(width: 560).disabled(sending).interactiveDismissDisabled(sending || dirty)
+        }.padding(WorkspaceStyle.panelPadding).frame(width: 560).disabled(sending).interactiveDismissDisabled(sending || dirty)
         .onChange(of: directory) { if destination.hasPrefix("mission:") { destination = "project" } }
         .alert("Discard this job draft?", isPresented: $confirmingDiscard) {
             Button("Keep Editing", role: .cancel) {}
@@ -90,7 +90,7 @@ struct DispatchView: View {
         } message: { Text("Your instructions and job options have not been sent.") }
     }
     private func field<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: Space.s) {
             Text(title).font(Typeface.captionStrong).foregroundStyle(.secondary)
             content()
         }

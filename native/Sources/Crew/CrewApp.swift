@@ -78,7 +78,7 @@ private struct MenuBarLabel: View {
         Group {
             if let mark = Self.mark {
                 // Waiting requests show as a count beside the mark, which has no filled variant to switch to.
-                HStack(spacing: 3) {
+                HStack(spacing: Space.xs) {
                     Image(nsImage: mark)
                     if pending > 0 { Text(String(pending)).monospacedDigit() }
                 }

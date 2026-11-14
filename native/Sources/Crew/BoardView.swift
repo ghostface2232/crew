@@ -46,7 +46,7 @@ struct BoardView: View {
             }
             .onGeometryChange(for: Bool.self) { $0.size.width >= Self.twoColumnWidth } action: { wide = $0 }
             .background(OverlayScrollers())
-            .padding(.horizontal, 40).padding(.top, 12).padding(.bottom, 40)
+            .padding(.horizontal, WorkspaceStyle.pageMargin).padding(.top, WorkspaceStyle.pageTop).padding(.bottom, WorkspaceStyle.pageMargin)
             .frame(maxWidth: 1280).frame(maxWidth: .infinity)
         }
         .id(store.selection ?? "overview")
@@ -66,10 +66,10 @@ struct BoardView: View {
                     if let id = store.selectedJob { JobDetailView(store: store, id: id).id(id) }
                     else if let id = store.selectedSession { SessionDetailView(store: store, id: id).id("session:\(id)") }
                 }
-                    .frame(width: 420).background(WorkspaceStyle.surface, in: shape)
+                    .frame(width: WorkspaceStyle.panelWidth).background(WorkspaceStyle.surface, in: shape)
                     .clipShape(shape)
                     .overlay(shape.strokeBorder(WorkspaceStyle.hairline))
-                    .shadow(color: .black.opacity(0.14), radius: 26, x: -8, y: 8)
+                    .shadow(color: Palette.panelShadow, radius: 26, x: -8, y: 8)
                     .padding(.trailing, WorkspaceStyle.windowInset).padding(.bottom, WorkspaceStyle.windowInset)
                     .transition(reduceMotion ? .opacity : .move(edge: .trailing).combined(with: .opacity))
                     .zIndex(1)
@@ -110,18 +110,18 @@ struct BoardView: View {
         HStack(alignment: .top) {
             Label(store.connectionMessage, systemImage: "wifi.exclamationmark").font(Typeface.callout).textSelection(.enabled)
             Spacer()
-            Button("Retry") { store.start() }
-        }.padding(16).background(.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: WorkspaceStyle.cardRadius))
+            Button("Retry") { store.start() }.pillButton()
+        }.padding(WorkspaceStyle.bannerPadding).background(Palette.attention(Palette.warning), in: RoundedRectangle(cornerRadius: WorkspaceStyle.cardRadius))
     }
     private var attentionBanner: some View {
         Button { store.selection = "needs"; store.search = "" } label: {
             HStack {
-                Image(systemName: "bell.badge.fill").foregroundStyle(.orange)
+                Image(systemName: "bell.badge.fill").foregroundStyle(Palette.warning)
                 Text("\(store.state.pendingCount) \(store.state.pendingCount == 1 ? "request needs" : "requests need") your attention").font(Typeface.bodyStrong)
                 Spacer()
                 Text("Review").font(Typeface.callout)
                 Image(systemName: "chevron.right").font(Typeface.captionStrong)
-            }.padding(16).contentShape(Rectangle())
+            }.padding(WorkspaceStyle.bannerPadding).contentShape(Rectangle())
         }.buttonStyle(.plain).glassEffect(.regular, in: .rect(cornerRadius: WorkspaceStyle.cardRadius))
     }
     private var heading: some View {
@@ -129,7 +129,7 @@ struct BoardView: View {
         let pending = store.state.pendingCount
         return ViewThatFits(in: .horizontal) {
             if overview || !store.project.isEmpty {
-                HStack(alignment: .top, spacing: 32) {
+                HStack(alignment: .top, spacing: Space.x5l) {
                     // A fixed ideal width keeps a long project path from forcing the stacked layout;
                     // the path truncates instead.
                     headingCopy(overview: overview, pending: pending)
@@ -139,14 +139,14 @@ struct BoardView: View {
                     WorkspaceSummary(store: store).frame(minWidth: 430, maxWidth: 500)
                 }
             }
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: Space.x3l) {
                 headingCopy(overview: overview, pending: pending)
                 if overview || !store.project.isEmpty { WorkspaceSummary(store: store) }
             }
-        }.padding(.top, 6).padding(.bottom, 6)
+        }.padding(.top, Space.s).padding(.bottom, Space.s)
     }
     private func headingCopy(overview: Bool, pending: Int) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: Space.xxl) {
             WorkspaceHeading(title: title, subtitle: store.project.isEmpty ? nil : store.project)
             if overview && pending > 0 {
                 Button("Review requests", systemImage: "arrow.up.right") { store.selection = "needs"; store.search = "" }
@@ -220,7 +220,7 @@ struct AgentOverview: View {
     var compact = false
     private var agents: [String] { ["claude"] + ["codex", "antigravity"].filter { store.state.agents[$0] != nil } }
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Space.l) {
             Text("Agents").font(Typeface.section)
             if compact { compactAgents }
             else {
@@ -237,11 +237,11 @@ struct AgentOverview: View {
         VStack(spacing: 0) {
             ForEach(agents, id: \.self) { agent in
                 // Usage sits further from the agent's row than its own label from its bar, as on the cards.
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack(spacing: 10) {
-                        AgentMark(agent: agent, size: 20)
+                VStack(alignment: .leading, spacing: Space.l) {
+                    HStack(spacing: Space.ml) {
+                        AgentMark(agent: agent, size: MarkSize.list)
                         // The name as on the cards, with the role beside it: the row has room across, not down.
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        HStack(alignment: .firstTextBaseline, spacing: Space.m) {
                             Text(agentName(agent)).font(Typeface.cardTitle).fixedSize()
                             Text(agentRole(agent, store: store)).font(Typeface.caption).foregroundStyle(.secondary).fadeTruncated()
                         }
@@ -258,8 +258,8 @@ struct AgentOverview: View {
                         StatusLabel(state: mark, title: waiting ? "Needs you" : stalled ? "May be stuck" : store.state.agents[agent]?.enabled == false ? "Disabled" : count > 0 ? "Working" : "Ready")
                     }
                     if let usage = store.usage, usage.source != "none" { AgentUsageView(store: store, agent: agent) }
-                }.padding(.horizontal, WorkspaceStyle.cardPadding).padding(.vertical, 11)
-                if agent != agents.last { Divider().padding(.leading, WorkspaceStyle.cardPadding + 30) }
+                }.padding(.horizontal, WorkspaceStyle.cardPadding).padding(.vertical, Space.l)
+                if agent != agents.last { Divider().padding(.leading, WorkspaceStyle.cardPadding + MarkSize.list + Space.ml) }
             }
         }.card(padding: 0)
     }
@@ -293,11 +293,11 @@ private struct AgentCard: View {
         return "\(count) active \(noun)\(count == 1 ? "" : "s")" + (idle > 0 ? " · \(idle) idle" : "")
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: Space.xl) {
             // The mark and the status sit on the middle of the name and role together, not on the name alone.
-            HStack(alignment: .center, spacing: 10) {
-                AgentMark(agent: agent, size: 22)
-                VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .center, spacing: Space.ml) {
+                AgentMark(agent: agent, size: MarkSize.card)
+                VStack(alignment: .leading, spacing: Space.xxs) {
                     Text(agentName(agent)).font(Typeface.cardTitle).fixedSize()
                     // The role truncates and claims no width of its own, so the name and status set
                     // the card's minimum and the cards give way to the list only when those no longer fit.
@@ -315,7 +315,7 @@ private struct AgentCard: View {
             // Cards in a row share a height; usage sits at the bottom, so one bar lines up with the last of two.
             if let usage = store.usage, usage.source != "none" {
                 // Set apart from the activity line above, which is about the work, not the account.
-                AgentUsageView(store: store, agent: agent).padding(.top, 8).frame(maxHeight: .infinity, alignment: .bottom)
+                AgentUsageView(store: store, agent: agent).padding(.top, Space.m).frame(maxHeight: .infinity, alignment: .bottom)
             }
         }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).card()
     }
@@ -336,10 +336,10 @@ struct MissionPanel: View {
         ].compactMap { $0 }.joined(separator: " · ")
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: Space.xl) {
             // Progress, status and the controls sit on the middle of the title and its meta line together.
-            HStack(alignment: .center, spacing: 8) {
-                VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .center, spacing: Space.m) {
+                VStack(alignment: .leading, spacing: Space.xs) {
                     // One line each, so cards side by side keep the same height whatever their titles.
                     Text(mission.title).font(Typeface.title).fadeTruncated().help(mission.title)
                     HStack(spacing: 0) {
@@ -354,41 +354,28 @@ struct MissionPanel: View {
                 if mission.looksFinished(jobs: store.state.jobs, now: store.now, lead: store.state.claude.first { $0.id == mission.owner }) {
                     Text("Looks finished").font(Typeface.caption).foregroundStyle(.secondary)
                 }
-                // Bordered circles, so each control shows its hit area; equal glyph frames keep them the same size.
-                HStack(spacing: 6) {
-                    Button { toggle() } label: {
-                        Image(systemName: "chevron.down").font(.system(size: 11, weight: .semibold))
-                            .rotationEffect(.degrees(expanded ? 0 : -90)).frame(width: 16, height: 16)
-                    }.buttonStyle(.bordered).buttonBorderShape(.circle).accessibilityLabel(expanded ? "Collapse mission" : "Expand mission").help(expanded ? "Collapse" : "Expand")
-                    if mission.state == "active" {
-                        Menu {
-                            Button("Mark done", systemImage: "checkmark.circle") { Task { await store.markDone(mission) } }
-                                .disabled(!store.connected || store.actions["dismiss:\(mission.id)"]?.locked == true)
-                            Button("Stop tracking", systemImage: "xmark.circle") { Task { await store.dismiss(mission) } }
-                                .help("Stops tracking without marking done. Its jobs keep running.")
-                                .disabled(!store.connected || store.actions["dismiss:\(mission.id)"]?.locked == true)
-                        } label: {
-                            Image(systemName: "ellipsis").font(.system(size: 11, weight: .semibold)).frame(width: 16, height: 16)
-                        }.menuStyle(.button).buttonStyle(.bordered).buttonBorderShape(.circle).menuIndicator(.hidden).fixedSize().help("Mission options")
-                    }
-                }
+                // A bordered circle, so the control shows its hit area.
+                Button { toggle() } label: {
+                    Image(systemName: "chevron.down").font(Symbol.control)
+                        .rotationEffect(.degrees(expanded ? 0 : -90)).frame(width: Symbol.controlFrame, height: Symbol.controlFrame)
+                }.buttonStyle(.bordered).buttonBorderShape(.circle).accessibilityLabel(expanded ? "Collapse mission" : "Expand mission").help(expanded ? "Collapse" : "Expand")
             }
-            // The title row opens and closes the card; its buttons and menu keep their own clicks.
+            // The title row opens and closes the card; its button keeps its own click.
             .contentShape(Rectangle())
             .onTapGesture(perform: toggle)
             if expanded {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: Space.xl) {
                     ForEach(Array((mission.notes ?? []).enumerated()), id: \.offset) { _, note in
                         Text(note.text).font(Typeface.callout).textSelection(.enabled)
                     }
-                    MissionTrack(mission: mission).padding(.vertical, 4)
-                    VStack(spacing: 4) {
+                    MissionTrack(mission: mission).padding(.vertical, Space.xs)
+                    VStack(spacing: WorkspaceStyle.rowGap) {
                         ForEach(mission.stops.indices, id: \.self) { index in
                             let mine = jobs.filter { mission.jobStep($0) == index }
                             let lead = mission.state == "active" && index == mission.step ? store.state.claude.first { $0.id == mission.owner } : nil
                             if !mine.isEmpty || lead != nil {
                                 Text(mission.stops[index]).font(Typeface.captionStrong).foregroundStyle(.secondary)
-                                    .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 8)
+                                    .frame(maxWidth: .infinity, alignment: .leading).padding(.top, Space.m)
                                 if let lead {
                                     SessionRow(session: lead, selected: store.selectedSession == lead.id, store: store) { store.toggleSession(lead.id) }
                                 }
@@ -397,6 +384,10 @@ struct MissionPanel: View {
                         }
                     }
                     if !mission.outcome.isEmpty { Text(mission.outcome).font(Typeface.callout).textSelection(.enabled) }
+                    // The mission's own controls sit with its contents, shown when the card is open.
+                    if mission.state == "active" {
+                        HStack(spacing: Space.m) { actions }.pillButton().padding(.top, Space.xs)
+                    }
                 }
                 .transition(reduceMotion ? .opacity : .asymmetric(
                     // In after the card has started to open; out quickly, before the card closes over it.
@@ -412,6 +403,12 @@ struct MissionPanel: View {
         // and the job rows and sessions keep their clicks.
         .contentShape(RoundedRectangle(cornerRadius: WorkspaceStyle.cardRadius))
         .gesture(TapGesture().onEnded(toggle), including: expanded ? .subviews : .all)
+    }
+    @ViewBuilder private var actions: some View {
+        let locked = !store.connected || store.actions["dismiss:\(mission.id)"]?.locked == true
+        Button("Mark done", systemImage: "checkmark.circle") { Task { await store.markDone(mission) } }.disabled(locked)
+        Button("Stop tracking", systemImage: "xmark.circle") { Task { await store.dismiss(mission) } }
+            .help("Stops tracking without marking done. Its jobs keep running.").disabled(locked)
     }
     /// Animated from here rather than inside the card, so the cards below move with it instead of jumping.
     private func toggle() {
@@ -438,19 +435,18 @@ struct NeedsYouView: View {
         } else if jobs.isEmpty && sessions.isEmpty {
             EmptyState(title: "No matching requests", symbol: "magnifyingglass")
         }
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 420, maximum: 620), spacing: 16)], alignment: .leading, spacing: 16) {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 420, maximum: 620), spacing: WorkspaceStyle.cardGap)], alignment: .leading, spacing: WorkspaceStyle.cardGap) {
             ForEach(jobs) { job in
-                VStack(alignment: .leading, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: Space.xl) {
+                    VStack(alignment: .leading, spacing: Space.ml) {
+                        HStack(spacing: Space.ml) {
                             StatusLabel(state: "waiting", title: job.waiting?.type == "approval" ? "Approval" : "Question")
-                            HStack(spacing: 5) {
-                                AgentMark(agent: job.agent, size: 13)
+                            HStack(spacing: Space.s) {
+                                AgentMark(agent: job.agent, size: MarkSize.inline)
                                 Text("\(agentName(job.agent)) · \(projectName(job.projectPath, among: store.projects))").lineLimit(1)
                             }.font(Typeface.chip).foregroundStyle(.secondary).help(job.projectPath)
                             Spacer(minLength: 8)
-                            Button("Details", systemImage: "arrow.up.right") { store.openJob(job.id) }
-                                .buttonStyle(.bordered).controlSize(.small).font(Typeface.caption)
+                            Button("Details", systemImage: "arrow.up.right") { store.openJob(job.id) }.pillButton()
                         }
                         Text(job.title).font(Typeface.callout).foregroundStyle(.secondary).lineLimit(2).help(job.title)
                     }
@@ -505,11 +501,11 @@ struct ProjectSidebar: View {
             Button(action: openSettings) {
                 Label("Settings", systemImage: "gearshape").font(Typeface.bodyStrong)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 10).padding(.vertical, 7).contentShape(Rectangle())
+                    .padding(.horizontal, Space.ml).padding(.vertical, Space.m).contentShape(Rectangle())
             }
             .buttonStyle(.plain).foregroundStyle(.secondary)
             .disabled(store.state.roles.isEmpty).help("Settings (⌘,)")
-            .padding(.horizontal, 10).padding(.bottom, 10)
+            .padding(.horizontal, Space.ml).padding(.bottom, Space.ml)
         }
         .navigationSplitViewColumnWidth(min: 180, ideal: 210, max: 300)
     }

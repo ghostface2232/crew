@@ -15,27 +15,27 @@ struct CrewSettingsView: View {
                     Text("Instructions").tag("instructions")
                     if model.presets != nil { Text("Presets").tag("presets") }
                 }.pickerStyle(.segmented).labelsHidden().frame(width: model.presets == nil ? 210 : 300)
-            }.padding(.horizontal, 28).padding(.top, 46).padding(.bottom, 22)
+            }.padding(.horizontal, Space.x4l).padding(.top, 46).padding(.bottom, Space.xxl) // The top clears the window's transparent title bar.
             Group {
                 if tab == "roles" { roles } else if tab == "presets" { presets } else { instructions }
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
-            HStack(spacing: 12) {
+            HStack(spacing: Space.l) {
                 if model.loading && tab == "instructions" { ProgressView().controlSize(.small) }
                 Text(tab == "roles" ? model.roleStatus : tab == "presets" ? model.presetStatus : model.textStatus).font(Typeface.callout).foregroundStyle(.secondary).textSelection(.enabled)
                 if tab == "roles" ? model.roles != model.savedRoles : tab == "presets" ? model.preset != model.savedPreset : model.text != model.savedText {
-                    Label("Unsaved changes", systemImage: "circle.fill").font(Typeface.calloutStrong).foregroundStyle(.orange)
+                    Label("Unsaved changes", systemImage: "circle.fill").font(Typeface.calloutStrong).foregroundStyle(Palette.warning)
                         .labelStyle(UnsavedLabelStyle())
                 }
                 Spacer()
                 if tab == "instructions" && !model.loaded && !model.loading {
-                    Button("Retry Loading") { Task { await model.load(scope: model.scope) } }
+                    Button("Retry Loading") { Task { await model.load(scope: model.scope) } }.pillButton()
                 }
                 Button(tab == "roles" ? (model.savingRoles ? "Saving…" : "Save Roles") : tab == "presets" ? (model.savingPreset ? "Saving…" : "Save Preset") : (model.savingText ? "Saving…" : "Save Instructions")) {
                     Task { if tab == "roles" { await model.saveRoles() } else if tab == "presets" { await model.savePreset() } else { await model.saveInstructions() } }
                 }
                 .buttonStyle(.glassProminent).controlSize(.large).keyboardShortcut("s")
                 .disabled(!store.connected || (tab == "roles" ? model.savingRoles : tab == "presets" ? model.savingPreset : !model.loaded || model.savingText))
-            }.padding(.horizontal, 28).padding(.vertical, 18)
+            }.padding(.horizontal, Space.x4l).padding(.vertical, Space.xxl)
         }
         .ignoresSafeArea(.container, edges: .top)
         .background(WorkspaceStyle.canvas.ignoresSafeArea())
@@ -44,11 +44,11 @@ struct CrewSettingsView: View {
     }
     private var roles: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: Space.l) {
                 ForEach(roleOrder, id: \.self) { role in
-                    VStack(alignment: .leading, spacing: 16) {
-                        HStack(spacing: 10) {
-                            AgentMark(agent: model.roles[role]?.agent ?? "codex", size: 23)
+                    VStack(alignment: .leading, spacing: Space.xl) {
+                        HStack(spacing: Space.ml) {
+                            AgentMark(agent: model.roles[role]?.agent ?? "codex", size: MarkSize.card)
                             Text(roleNames[role]!).font(Typeface.cardTitle)
                             Spacer()
                             Picker("Agent for \(roleNames[role]!)", selection: roleBinding(role, \.agent)) {
@@ -57,26 +57,26 @@ struct CrewSettingsView: View {
                                 }
                             }.labelsHidden().frame(width: 180)
                         }
-                        HStack(spacing: 20) {
-                            VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: Space.xxl) {
+                            VStack(alignment: .leading, spacing: Space.s) {
                                 Text("Model").font(Typeface.captionStrong).foregroundStyle(.secondary)
                                 TextField("Agent default", text: optionalRoleBinding(role, \.model)).accessibilityLabel("\(roleNames[role]!) model")
                             }
-                            VStack(alignment: .leading, spacing: 6) {
+                            VStack(alignment: .leading, spacing: Space.s) {
                                 Text("Reasoning effort").font(Typeface.captionStrong).foregroundStyle(.secondary)
                                 TextField("Agent default", text: optionalRoleBinding(role, \.effort)).accessibilityLabel("\(roleNames[role]!) reasoning effort")
                             }
                         }.textFieldStyle(.roundedBorder)
                     }.card()
                 }
-            }.padding(.horizontal, 28).padding(.bottom, 8)
+            }.padding(.horizontal, Space.x4l).padding(.bottom, Space.m)
         }
     }
     private var presets: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(spacing: 10) {
-                    Image(systemName: "slider.horizontal.3").font(.system(size: 17, weight: .medium)).foregroundStyle(.tint).frame(width: 23)
+        VStack(alignment: .leading, spacing: Space.l) {
+            VStack(alignment: .leading, spacing: Space.xl) {
+                HStack(spacing: Space.ml) {
+                    Image(systemName: "slider.horizontal.3").font(Symbol.large).foregroundStyle(.tint).frame(width: MarkSize.card)
                     Text("Model preset").font(Typeface.cardTitle)
                     Spacer()
                     Picker("Model preset", selection: $model.preset) {
@@ -91,10 +91,10 @@ struct CrewSettingsView: View {
                 Text("A model or effort set on a role overrides the preset.").font(Typeface.caption).foregroundStyle(.tertiary)
             }.card()
             Spacer()
-        }.padding(.horizontal, 28)
+        }.padding(.horizontal, Space.x4l)
     }
     private var instructions: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: Space.xl) {
             HStack {
                 Text("Shared instructions").font(Typeface.cardTitle)
                 Spacer()
@@ -106,13 +106,13 @@ struct CrewSettingsView: View {
             Text("Given to every agent with its next job and to Claude sessions when they start.")
                 .font(Typeface.callout).foregroundStyle(.secondary)
             TextEditor(text: $model.text).font(Typeface.code)
-                .scrollContentBackground(.hidden).padding(14)
+                .scrollContentBackground(.hidden).padding(Space.xl)
                 .background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: WorkspaceStyle.fieldRadius))
                 .overlay(RoundedRectangle(cornerRadius: WorkspaceStyle.fieldRadius).strokeBorder(WorkspaceStyle.hairline))
                 .accessibilityLabel("Shared instructions").disabled(!model.loaded)
             Text(model.file).font(Typeface.codeSmall).foregroundStyle(.tertiary).textSelection(.enabled)
             if model.text.count > 9000 { Label("Claude sessions will be pointed to this file because it is longer than 9,000 characters.", systemImage: "info.circle").font(Typeface.callout).foregroundStyle(.secondary) }
-        }.padding(.horizontal, 28)
+        }.padding(.horizontal, Space.x4l)
     }
     private func changeScope(_ scope: String) {
         guard scope != model.scope else { return }
@@ -136,7 +136,7 @@ struct CrewSettingsView: View {
 /// A small dot before the words, sized to the text.
 private struct UnsavedLabelStyle: LabelStyle {
     func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: 5) { configuration.icon.font(.system(size: 6)); configuration.title }
+        HStack(spacing: Space.s) { configuration.icon.font(.system(size: 6)); configuration.title }
     }
 }
 

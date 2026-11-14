@@ -15,7 +15,7 @@ import { writeFakeBin } from './fake-bin.ts';
 
 // Exercise the public Jobs API over the same executable boundary as adapters.test.ts.
 function harness(t: TestContext, source: string, agent: WorkerAgent = 'codex') {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-contract-'));
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-contract-')));
   const bin = path.join(home, 'agent');
   writeFakeBin(bin, source);
   const config = resolveConfig({

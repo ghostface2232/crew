@@ -26,7 +26,7 @@ function harness(t: TestContext) {
   const config = resolveConfig({ notify: false });
   const hooks = { onEvent: (e: CrewEvent) => events.push(e), onJob: () => {}, onAttention: () => {} };
   const jobs = new Jobs(home, () => config, { codex: adapter, antigravity: adapter }, hooks);
-  t.after(() => { jobs.flush(); fs.rmSync(home, { recursive: true, force: true }); });
+  t.after(() => { jobs.flush(); fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }); });
   const create = (spec = {}) => jobs.create({ kind: 'delegate', cwd: home, isolation: 'in_place', task: 'test', ...spec });
   return { home, jobs, workers, events, create, restore: () => new Jobs(home, () => config, { codex: adapter, antigravity: adapter }, hooks) };
 }
@@ -202,7 +202,7 @@ async function daemon(t: TestContext) {
   fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ notify: false, codex: { bin } }));
   const env = { ...process.env, CREW_HOME: home, CREW_PORT: String(port), CLAUDE_PROJECT_DIR: home, CREW_AGENTGAUGE_DIR: path.join(home, 'gauge') };
   const child = spawn(process.execPath, [path.resolve('plugin/bridge/daemon.ts')], { env, stdio: ['ignore', 'pipe', 'pipe'] });
-  t.after(async () => { await stop(child); fs.rmSync(home, { recursive: true, force: true }); });
+  t.after(async () => { await stop(child); fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }); });
   await new Promise<void>((resolve, reject) => {
     child.stdout.on('data', (chunk) => { if (String(chunk).includes('listening on')) resolve(); });
     child.stderr.on('data', (chunk) => reject(new Error(String(chunk))));

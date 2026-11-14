@@ -80,7 +80,7 @@ function harness(source: string, agent: WorkerAgent = 'codex', roles: Parameters
 
 test('routes a child approval and preserves overlapping approvals and the full command', { timeout: 5000 }, async (t) => {
   const { adapter, home, jobs } = harness(stub);
-  t.after(() => { adapter.shutdown(); jobs.flush(); fs.rmSync(home, { recursive: true, force: true }); });
+  t.after(() => { adapter.shutdown(); jobs.flush(); fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }); });
   const job = await jobs.create({ kind: 'delegate', cwd: home, isolation: 'in_place', task: 'test' });
   const waiting = async () => {
     while (!job.waiting) await jobs.wait(job.id, job.seq, 1000);
@@ -108,7 +108,7 @@ test('routes a child approval and preserves overlapping approvals and the full c
 
 test('a hung initialize fails the job and the next job can start a fresh server', { timeout: 5000 }, async (t) => {
   const { adapter, bin, home, jobs } = harness('process.stdin.resume();');
-  t.after(() => { adapter.shutdown(); jobs.flush(); fs.rmSync(home, { recursive: true, force: true }); });
+  t.after(() => { adapter.shutdown(); jobs.flush(); fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }); });
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const job = await jobs.create({ kind: 'delegate', cwd: home, isolation: 'in_place', task: 'test' });
   t.mock.timers.tick(30_001);
@@ -147,7 +147,7 @@ test('Antigravity uses the advertised restore method and waits for cancellation'
     adapter.shutdown();
     await new Promise((resolve) => setImmediate(resolve));
     jobs.flush();
-    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
   });
   const job = await jobs.create({ kind: 'polish', cwd: home, isolation: 'in_place', targets: ['README.md'] });
   while (job.phase === 'starting') await jobs.wait(job.id, job.seq, 1000);
@@ -199,7 +199,7 @@ function cleanup(t: { after(fn: () => unknown): void }, h: ReturnType<typeof har
     h.adapter.shutdown();
     await new Promise((resolve) => setImmediate(resolve));
     h.jobs.flush();
-    fs.rmSync(h.home, { recursive: true, force: true });
+    fs.rmSync(h.home, { recursive: true, force: true, maxRetries: 5 });
   });
 }
 
@@ -328,7 +328,7 @@ test('Codex runs an app job with network access and reports what its reviewer re
       send({ method: 'turn/completed', params: { threadId: 'thread', turn: { id: 'turn', status: 'completed' } } });
     });
   `);
-  t.after(() => { adapter.shutdown(); jobs.flush(); fs.rmSync(home, { recursive: true, force: true }); });
+  t.after(() => { adapter.shutdown(); jobs.flush(); fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }); });
   const job = await jobs.create({ kind: 'delegate', cwd: home, isolation: 'in_place', task: 'test', runsApp: true });
   const ended = async () => {
     while (!job.endedAt) await jobs.wait(job.id, job.seq, 1000);
@@ -364,7 +364,7 @@ test('Codex runs an app job with network access and reports what its reviewer re
 
 test('a read-only question never prompts and never asks the user to allow a write', { timeout: 5000 }, async (t) => {
   const { adapter, home, jobs } = harness(stub);
-  t.after(() => { adapter.shutdown(); jobs.flush(); fs.rmSync(home, { recursive: true, force: true }); });
+  t.after(() => { adapter.shutdown(); jobs.flush(); fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }); });
   const job = await jobs.create({ kind: 'delegate', ask: true, cwd: home, task: 'what does this do?' });
   assert.equal(job.sandbox, 'read-only');
   let waited = false;

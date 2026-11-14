@@ -27,7 +27,8 @@ function harness(t: TestContext) {
   const config = resolveConfig({ notify: false });
   const hooks = { onEvent: (_: CrewEvent) => {}, onJob: () => {}, onAttention: () => {} };
   const jobs = new Jobs(home, () => config, { codex: adapter, antigravity: adapter }, hooks);
-  t.after(() => { jobs.flush(); fs.rmSync(home, { recursive: true, force: true }); });
+  // Retried: the bridge may still be appending to its event log or clearing a turn's scratch.
+  t.after(() => { jobs.flush(); fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }); });
   const create = (spec = {}) => jobs.create({ kind: 'delegate', cwd: home, isolation: 'in_place', task: 'test', ...spec });
   const image = (name: string) => {
     const file = path.join(home, name);

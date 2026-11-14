@@ -38,7 +38,7 @@ function fixture(t: TestContext, platform: NodeJS.Platform = process.platform) {
     // 15-second check and saved into the removed home once a slow run passes that mark.
     for (const job of jobs.list()) job.state = 'done';
     jobs.flush();
-    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
   });
   return { home, repo, git, jobs, job, adapter };
 }

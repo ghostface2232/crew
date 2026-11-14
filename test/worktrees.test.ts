@@ -15,7 +15,7 @@ import { buildPrompt } from '../plugin/bridge/prompts.ts';
 for (const code of ['ENOTSUP', 'EOPNOTSUPP', 'EXDEV', 'ENOSYS', 'EINVAL']) {
   test(`included directories are shared read-only when cloning returns ${code}`, async (t) => {
     const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-include-')));
-    t.after(async () => { if (process.platform === 'win32') await detachLinks(home); fs.rmSync(home, { recursive: true, force: true }); });
+    t.after(async () => { if (process.platform === 'win32') await detachLinks(home); fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }); });
     const repo = path.join(home, 'repo');
     fs.mkdirSync(repo);
     const git = (...args: string[]) => execFileSync('git', args, { cwd: repo });
@@ -83,7 +83,7 @@ for (const code of ['ENOTSUP', 'EOPNOTSUPP', 'EXDEV', 'ENOSYS', 'EINVAL']) {
 
 test('a linked dependency path that Git already ignores is not named in a pathspec, so the commit still works', async (t) => {
   const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-ignored-link-')));
-  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }));
   const repo = path.join(home, 'repo');
   fs.mkdirSync(path.join(repo, 'deps'), { recursive: true });
   fs.writeFileSync(path.join(repo, 'deps', 'tool'), 'keep');
@@ -106,7 +106,7 @@ test('a linked dependency path that Git already ignores is not named in a pathsp
 
 test('included directory clone success keeps a private copy, and permission errors do not become links', async (t) => {
   const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-clone-')));
-  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }));
   execFileSync('git', ['init', '-q'], { cwd: home });
   fs.writeFileSync(path.join(home, '.gitignore'), 'deps/\n');
   fs.writeFileSync(path.join(home, '.worktreeinclude'), 'deps\n');
@@ -166,7 +166,7 @@ test('nested APFS includes create missing destination parents before cloning', {
 
 test('Windows clears read-only directories and files in both trees before Git removal, after detaching links', async (t) => {
   const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-readonly-')));
-  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); fs.rmSync(home, { recursive: true, force: true }); });
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }); });
   const repo = path.join(home, 'repo');
   fs.mkdirSync(repo);
   execFileSync('git', ['init', '-q'], { cwd: repo });
@@ -227,7 +227,7 @@ test('Windows clears read-only directories and files in both trees before Git re
 
 test('directory-style Windows junctions are detached non-recursively', async (t) => {
   const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-junction-')));
-  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }));
   const dir = path.join(home, 'tree');
   const outside = path.join(home, 'outside');
   fs.mkdirSync(dir);
@@ -249,7 +249,7 @@ test('directory-style Windows junctions are detached non-recursively', async (t)
 
 for (const code of ['EBUSY', 'EPERM', 'EACCES', 'ENOTEMPTY']) test(`Windows removal retries ${code} with bounded backoff`, async (t) => {
   const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-retry-')));
-  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }));
   // A missing root needs no attrib command.
   const dir = path.join(home, 'missing');
   const waits: number[] = [];
@@ -263,7 +263,7 @@ for (const code of ['EBUSY', 'EPERM', 'EACCES', 'ENOTEMPTY']) test(`Windows remo
 
 test('Windows preparation refuses a Git admin path outside common/worktrees before detaching anything', async (t) => {
   const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-admin-guard-')));
-  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }));
   const repo = path.join(home, 'repo');
   fs.mkdirSync(repo);
   execFileSync('git', ['init', '-q'], { cwd: repo });
@@ -347,7 +347,7 @@ for (const { name, output, failed, root } of attribErrors) {
 
 test('removeEmptyLeftover removes only an empty directory inside the worktree directory', async (t) => {
   const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-leftover-')));
-  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }));
   const worktrees = path.join(home, 'worktrees');
   const empty = path.join(worktrees, 'repo-1', 'cx-aaaaaa');
   const full = path.join(worktrees, 'repo-1', 'cx-bbbbbb');

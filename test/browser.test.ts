@@ -59,7 +59,7 @@ test('a running app job gets a browser outside its sandbox for the turn, and onl
     // A failed assertion must not leave a server running, which would keep the test process alive.
     for (const [id, ctl] of workers) if (jobs.get(id).state === 'running') ctl.done('stopped');
     jobs.flush();
-    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
   });
   fs.writeFileSync(tokenFile(home), 'daemon-secret');
 

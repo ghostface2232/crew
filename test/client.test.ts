@@ -14,7 +14,7 @@ process.env.CREW_PORT = '1';
 const { ensureDaemon, stopDaemon } = await import('../plugin/bridge/client.ts');
 const { PLUGIN_ROOT } = await import('../plugin/bridge/config.ts');
 const file = path.join(home, 'daemon.json');
-after(() => fs.rmSync(home, { recursive: true, force: true }));
+after(() => fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }));
 
 function fastWaits(t: TestContext) {
   let now = Date.now();

@@ -72,7 +72,7 @@ for (const operation of ['reply', 'sync', 'round'] as const) test(`incomplete cl
     fs.appendFileSync(path.join(ctl.job.cwd, 'README.md'), 'changed\n');
     ctl.done('done');
   });
-  t.after(() => { jobs.flush(); fs.rmSync(home, { recursive: true, force: true }); fs.rmSync(repo, { recursive: true, force: true }); });
+  t.after(() => { jobs.flush(); fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }); fs.rmSync(repo, { recursive: true, force: true }); });
   const job = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'edit' }));
   const before = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: job.cwd, encoding: 'utf8' });
   job.cleanupPending = [`directory ${job.cwd}`];
@@ -155,7 +155,7 @@ test('a job belongs to the project of the session that started it', async () => 
 test('jobs persist the mission occurrence captured when they were requested', async (t) => {
   const repo = tempRepo();
   const { jobs, home } = harness((ctl) => ctl.done('ok'));
-  t.after(() => { jobs.flush(); fs.rmSync(home, { recursive: true, force: true }); fs.rmSync(repo, { recursive: true, force: true }); });
+  t.after(() => { jobs.flush(); fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }); fs.rmSync(repo, { recursive: true, force: true }); });
   const review = { target: { type: 'uncommittedChanges' as const }, mode: 'adversarial' as const };
   const first = await settled(jobs, await jobs.create({ kind: 'review', cwd: repo, review, mission: 'm', missionStep: 1 }));
   const second = await settled(jobs, await jobs.create({ kind: 'review', cwd: repo, review, mission: 'm', missionStep: 3 }));
@@ -1409,7 +1409,7 @@ test('a conflicting sync still delivers the follow-up and leaves the worktree an
   });
   t.after(() => {
     jobs.flush();
-    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
     fs.rmSync(repo, { recursive: true, force: true });
   });
   const job = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'change x' }));
@@ -1465,7 +1465,7 @@ test('sync failures without conflicted files still refuse the follow-up', async 
   });
   t.after(() => {
     jobs.flush();
-    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
     fs.rmSync(repo, { recursive: true, force: true });
   });
   const job = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'x' }));
@@ -1556,7 +1556,7 @@ test('a job still being set up counts as active, so the daemon is not replaced u
   const { jobs, home } = harness((ctl) => ctl.done('ok'));
   t.after(() => {
     jobs.flush();
-    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
     fs.rmSync(repo, { recursive: true, force: true });
   });
   const creating = jobs.create({ kind: 'delegate', cwd: repo, task: 'x' });
@@ -1583,7 +1583,7 @@ test('Windows worktree removal recovers from a failed git removal and preserves 
   t.after(() => {
     t.mock.restoreAll();
     syncBuiltinESMExports();
-    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
     fs.rmSync(repo, { recursive: true, force: true });
   });
   const wt = await createWorktree(repo, 'cx-123abc', 'HEAD', home);
@@ -1639,7 +1639,7 @@ test('a review follow-up retries removal of its previous snapshot', async (t) =>
   const { jobs, home, calls } = harness((ctl) => { worker = ctl; });
   t.after(() => {
     jobs.flush();
-    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
     fs.rmSync(repo, { recursive: true, force: true });
   });
   const job = await jobs.create({ kind: 'review', cwd: repo, runsApp: true, review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } });
@@ -1678,7 +1678,7 @@ for (const replaceRoot of [false, true]) {
     const { jobs, home } = harness((ctl) => { worker = ctl; });
     t.after(() => {
       jobs.flush();
-      fs.rmSync(home, { recursive: true, force: true });
+      fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
       fs.rmSync(repo, { recursive: true, force: true });
     });
     const outside = path.join(repo, 'node_modules', '.bin');
@@ -1705,7 +1705,7 @@ test('worktree safety checks run before detaching links or deleting files', asyn
   const repo = tempRepo();
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-remove-safety-'));
   t.after(() => {
-    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
     fs.rmSync(repo, { recursive: true, force: true });
   });
   const wt = await createWorktree(repo, 'cx-123abc', 'HEAD', home);
@@ -1735,7 +1735,7 @@ test('result uses kept commits after a no-change follow-up and omits an unknown 
     fs.appendFileSync(path.join(ctl.job.cwd, 'README.md'), 'improved\n');
     ctl.done('edited');
   });
-  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); fs.rmSync(repo, { recursive: true, force: true }); });
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true, maxRetries: 5 }); fs.rmSync(repo, { recursive: true, force: true }); });
   const job = await settled(h.jobs, await h.jobs.create({ kind: 'polish', cwd: repo, targets: ['README.md'] }));
   const first = job.result!.commit!;
   await h.jobs.reply(job.id, { message: 'check again' });
@@ -1752,7 +1752,7 @@ test('result uses kept commits after a no-change follow-up and omits an unknown 
 
 test('only the latest turn refusal qualifies a no-change result, including repeated notes', async (t) => {
   const h = harness((ctl) => { ctl.note('The bridge refused an action.', { declined: true }); ctl.done('no changes'); });
-  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); });
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true, maxRetries: 5 }); });
   const job = await settled(h.jobs, await h.jobs.create({ kind: 'polish', cwd: h.home, isolation: 'in_place', targets: ['README.md'] }));
   assert.match(describe(job), /changes: none — .*refused or declined.*notes below/);
   await h.jobs.reply(job.id, { message: 'again' });
@@ -1771,7 +1771,7 @@ test('only the latest turn refusal qualifies a no-change result, including repea
 
 test('read-only jobs reject explicitly named plugins before starting', async (t) => {
   const h = harness((ctl) => ctl.done('done'));
-  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); });
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true, maxRetries: 5 }); });
   const review = { target: { type: 'uncommittedChanges' as const }, mode: 'adversarial' as const };
   for (const plugins of [['browser'], ['computer-use']]) {
     await assert.rejects(h.jobs.create({ kind: 'review', cwd: h.home, review, plugins }), /runs_app.*[Dd]rop plugins/);
@@ -1791,7 +1791,7 @@ test('global Codex plugins layer with app and explicit plugins only for eligible
   const config = resolveConfig({ notify: false, codex: { plugins: ['browser', 'github'], appPlugins: ['computer-use', 'browser'] }, roles: { polish: { agent: 'codex' } } });
   const h = harness((ctl) => ctl.done('done'), () => config);
   const repo = tempRepo();
-  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); fs.rmSync(repo, { recursive: true, force: true }); });
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true, maxRetries: 5 }); fs.rmSync(repo, { recursive: true, force: true }); });
   const create = async (spec: Partial<JobSpec>) => settled(h.jobs, await h.jobs.create({ kind: 'delegate', cwd: repo, isolation: 'in_place', task: 'test', ...spec }));
   assert.deepEqual((await create({})).plugins, ['browser', 'github']);
   const combined = await create({ runsApp: true, plugins: ['github', 'figma'] });
@@ -1810,7 +1810,7 @@ test('global Codex plugins layer with app and explicit plugins only for eligible
 
 test('notes do not infer a declined action from their wording', async (t) => {
   const h = harness((ctl) => { ctl.note('Connection refused'); ctl.done('no changes'); });
-  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); });
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true, maxRetries: 5 }); });
   const job = await settled(h.jobs, await h.jobs.create({ kind: 'polish', cwd: h.home, isolation: 'in_place', targets: ['README.md'] }));
   assert.equal(job.declinedTurn, undefined);
   assert.doesNotMatch(describe(job), /changes: .*refused or declined/);
@@ -1821,7 +1821,7 @@ test('a locked worktree keeps its directory, links, branch and registration', as
   for (const platform of ['darwin', 'linux', 'win32'] as const) {
     const repo = tempRepo();
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-locked-'));
-    t.after(() => { fs.rmSync(home, { recursive: true, force: true }); fs.rmSync(repo, { recursive: true, force: true }); });
+    t.after(() => { fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }); fs.rmSync(repo, { recursive: true, force: true }); });
     const wt = await createWorktree(repo, 'cx-123abc', 'HEAD', home);
     fs.symlinkSync(repo, path.join(wt.path, 'link'), 'junction');
     execFileSync('git', ['worktree', 'lock', '--reason', 'keep this tree', wt.path], { cwd: repo });
@@ -1842,7 +1842,7 @@ test('failed worktree removal keeps the Git error and only Windows falls back', 
   t.after(() => {
     t.mock.restoreAll();
     syncBuiltinESMExports();
-    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
     fs.rmSync(repo, { recursive: true, force: true });
   });
   const wt = await createWorktree(repo, 'cx-123abc', 'HEAD', home);
@@ -1880,7 +1880,7 @@ test('failed worktree removal keeps the Git error and only Windows falls back', 
 test('writable Codex jobs recreate and retire their scratch on every turn', async (t) => {
   let worker!: JobCtl;
   const h = harness((ctl) => { worker = ctl; });
-  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); });
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true, maxRetries: 5 }); });
   const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' });
   assert.equal(job.scratch, path.join(h.home, 'scratch', job.id));
   assert.ok(fs.statSync(job.scratch!).isDirectory());
@@ -1919,5 +1919,5 @@ test('on Windows, an empty worktree folder left by a held handle is removed when
   assert.equal(restored.cleanupPending, undefined);
   assert.ok(restored.notes.includes('Worktree leftovers removed after a delay.'));
   jobs.flush();
-  fs.rmSync(home, { recursive: true, force: true });
+  fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
 });

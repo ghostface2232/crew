@@ -107,7 +107,7 @@ function harness(t: TestContext) {
   const missions = new Missions(home, (mission) => changes.push({ ...mission }));
   t.after(() => {
     missions.flush();
-    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
   });
   return { home, missions, changes };
 }
@@ -268,7 +268,7 @@ test('flushing and reloading preserves active missions, activity, finished resul
 
 test('unparsable and wrongly shaped mission files throw with their path and remain untouched', (t) => {
   const home = tempDir();
-  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }));
   const file = path.join(home, 'missions.json');
   for (const content of ['{ not json', '{}', 'null', '[]', '"text"', '{"missions":{}}', '{"missions":null}']) {
     fs.writeFileSync(file, content);
@@ -328,7 +328,7 @@ test('changes and silent touches are saved after the debounce delay', async (t) 
 
 test('what is saved keeps the last finished missions of every project, by when they ended', (t) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-missions-'));
-  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }));
   const missions = new Missions(home, () => {});
   const quiet = [1, 2, 3].map((n) => missions.start({ title: `quiet ${n}`, project: '/quiet', root: '/quiet' }));
   // Ended in reverse of creation: the per-project choice must follow endedAt.
@@ -345,7 +345,7 @@ test('what is saved keeps the last finished missions of every project, by when t
 
 test('a stored record that is not a mission is refused, since records are rendered on the board', (t) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-missions-'));
-  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }));
   const file = path.join(home, 'missions.json');
   const good = { id: 'm-000001', title: 't', project: '/p', root: '/p', stage: 'plan', state: 'active', outcome: '', createdAt: 1, updatedAt: 1, endedAt: null };
   for (const bad of [{ ...good, createdAt: '1" onmouseover="x' }, { ...good, stage: 'nope' }, { ...good, stages: [] }, { ...good, stages: ['plan'], stageIndex: 1 }, { ...good, stages: ['plan'], stageIndex: 0.5 }, { ...good, stageIndex: 0 }, { ...good, stages: ['unknown'] }, { ...good, endedAt: 'soon' }, { ...good, title: 5 }, null]) {

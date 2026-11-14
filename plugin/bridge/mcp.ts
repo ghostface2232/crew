@@ -194,7 +194,7 @@ const TOOLS = [
   {
     name: 'answer',
     title: 'Answer a worker question',
-    description: 'Answer a lead question without ending or restarting the worker turn, then call wait again.',
+    description: 'Answer a lead question without ending or restarting the worker turn. Then end your turn: you are woken when the worker ends or needs you.',
     inputSchema: {
       type: 'object',
       properties: { job_id: { type: 'string' }, question_id: { type: 'string' }, answer: { type: 'string' } },

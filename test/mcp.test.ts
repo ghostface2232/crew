@@ -62,3 +62,11 @@ test('polish advertises the shared model option and forwards it to the job', asy
   assert.equal((await run({ targets: ['README.md'], model: 'selected-model' })).model, 'selected-model');
   assert.equal((await run({ targets: ['README.md'] })).model, undefined);
 });
+
+test('the wake hook follows every tool that can leave a job running, answer included', () => {
+  const hooks = JSON.parse(fs.readFileSync(new URL('../plugin/hooks/hooks.json', import.meta.url), 'utf8')).hooks;
+  const wake = (hooks.PostToolUse as any[]).find((entry) => entry.hooks.some((hook: any) => hook.asyncRewake));
+  const matcher = new RegExp(`^(?:${wake.matcher})$`);
+  // answer used to be missing, so a lead that answered a question and ended its turn was never woken again.
+  for (const tool of ['delegate', 'review', 'polish', 'reply', 'wait', 'answer']) assert.ok(matcher.test(`mcp__plugin_crew_crew__${tool}`), tool);
+});

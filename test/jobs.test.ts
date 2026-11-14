@@ -1898,3 +1898,25 @@ test('writable Codex jobs recreate and retire their scratch on every turn', asyn
   await settled(h.jobs, job);
   assert.ok(!fs.existsSync(job.scratch!));
 });
+
+test('on Windows, an empty worktree folder left by a held handle is removed when the bridge starts', async () => {
+  const repo = tempRepo();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-leftover-'));
+  const dir = path.join(home, 'worktrees', 'repo-00000000', 'cx-abcdef');
+  fs.mkdirSync(dir, { recursive: true });
+  const job = {
+    id: 'cx-abcdef', kind: 'delegate', agent: 'codex', title: 'left', state: 'done', phase: 'done', project: repo, cwd: dir, repo,
+    worktree: { path: dir, branch: 'crew-cx-abcdef', base: 'HEAD' }, cleanupPending: [`directory ${dir}`],
+    notes: [], seq: 1, delivered: 1, turns: 1, createdAt: 1, activeAt: 1, endedAt: 2,
+  };
+  fs.writeFileSync(path.join(home, 'jobs.json'), JSON.stringify({ seq: 1, jobs: [job] }));
+  const jobs = new Jobs(home, () => config, {} as never, { onEvent: () => {}, onJob: () => {}, onAttention: () => {} }, 'win32');
+  for (let i = 0; i < 100 && fs.existsSync(dir); i++) await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(fs.existsSync(dir), false);
+  const restored = jobs.get('cx-abcdef');
+  assert.equal(restored.worktree, null);
+  assert.equal(restored.cleanupPending, undefined);
+  assert.ok(restored.notes.includes('Worktree leftovers removed after a delay.'));
+  jobs.flush();
+  fs.rmSync(home, { recursive: true, force: true });
+});

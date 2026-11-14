@@ -53,7 +53,7 @@
         ]
       },
       {
-        "matcher": "mcp__plugin_crew_crew__(delegate|review|polish|reply|wait)",
+        "matcher": "mcp__plugin_crew_crew__(delegate|review|polish|reply|wait|answer)",
         "hooks": [
           {
             "type": "command",

@@ -710,7 +710,9 @@ export class Jobs {
     } catch (err) {
       if (err instanceof WorktreeCleanupError) {
         job.cleanupPending = err.leftovers;
-        job.notes.push(`Cleanup left: ${err.leftovers.join('; ') || 'Git registration could not be confirmed'}. Run crew gc to remove leftovers later. ${err.message}`);
+        if (!this.onlyDirectoryLeft(job)) {
+          job.notes.push(`Cleanup left: ${err.leftovers.join('; ') || 'Git registration could not be confirmed'}. Run crew gc to remove leftovers later. ${err.message}`);
+        }
         this.changed(job);
         this.flush();
         this.retryLeftover(job, [30_000, 120_000]);
@@ -793,7 +795,16 @@ export class Jobs {
       // A review snapshot may be on its way out already; removing it twice would fail on the branch.
       await this.snapshots.get(id);
       if (job.worktree && job.repo) {
-        await this.removeJobWorktree(job);
+        try {
+          await this.removeJobWorktree(job);
+        } catch (err) {
+          // Windows can hold the emptied folder for a while; the delayed retries finish it, so this is not a failure.
+          if (!this.onlyDirectoryLeft(job)) throw err;
+          job.notes.push('Worktree files, Git metadata and branch removed. Windows still holds the empty folder; it is removed automatically within about two minutes.');
+          this.changed(job);
+          this.flush();
+          return job;
+        }
         job.worktree = null;
         job.notes.push('Worktree and branch removed.');
         this.changed(job);

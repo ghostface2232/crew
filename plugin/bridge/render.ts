@@ -31,7 +31,7 @@ export function describe(job: JobView, waitingHint?: string): string {
     if (question.answer !== undefined) continue;
     lines.push(`ASKS YOU: [${question.id}] ${question.text}`);
     if (question.blocks) lines.push(`Blocks: ${question.blocks}`);
-    lines.push(`Call answer with job_id "${job.id}", question_id "${question.id}" and your answer, then wait again.`);
+    lines.push(`Call answer with job_id "${job.id}", question_id "${question.id}" and your answer, then end your turn; you are woken when it ends or needs you.`);
   }
 
   if (job.state === 'running') {

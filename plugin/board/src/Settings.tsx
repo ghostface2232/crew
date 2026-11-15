@@ -185,7 +185,13 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
       return on ? rest : parent?.length ? { ...rest, agents: parent } : own;
     });
   const editSetting = (role: Role, agent: WorkerAgent, key: keyof AgentSettings, value: string) =>
-    setEntry(role, (own) => ({ ...own, [agent]: { ...own[agent], [key]: value } }));
+    setEntry(role, (own) => {
+      const settings = { ...own[agent], [key]: value };
+      // A new model drops an effort it does not accept, rather than send the pair.
+      const accepts = models(agent).find((choice) => choice.id === value)?.efforts;
+      if (key === 'model' && settings.effort && accepts?.length && !accepts.includes(settings.effort)) delete settings.effort;
+      return { ...own, [agent]: settings };
+    });
   const savePreset = async () => {
     if (presetLock.current) return;
     presetLock.current = true;
@@ -345,7 +351,9 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
       const offered = models(agent);
       if (!offered.length) return <input aria-label={label} value={value} placeholder={blank(agent, key)} onChange={(event) => change(event.target.value)} />;
       const model = own[agent]?.model || inherited(agent, 'model');
-      const efforts = offered.find((choice) => choice.id === model)?.efforts ?? [...new Set(offered.flatMap((choice) => choice.efforts ?? []))];
+      // A model that lists no efforts says nothing about them, so every offered effort stays a choice.
+      const listed = offered.find((choice) => choice.id === model)?.efforts;
+      const efforts = listed?.length ? listed : [...new Set(offered.flatMap((choice) => choice.efforts ?? []))];
       const options = key === 'model' ? offered.map((choice) => [choice.id, choice.name]) : efforts.map((effort) => [effort, effort]);
       if (value && !options.some(([id]) => id === value)) options.push([value, value]);
       return (

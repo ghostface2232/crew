@@ -9,15 +9,17 @@ struct JobDispatch {
         let order = info?.kind == "polish" ? ["antigravity", "codex"] : ["codex", "antigravity"]
         return order.filter { assignment?.agents.contains($0) == true && workers[$0] != nil }
     }
+    /// With no worker able, a role Claude holds is the lead's, as the daemon would decide.
+    private var claudeHolds: Bool { assignment?.agents.contains("claude") == true }
     var agent: String? {
         picked.flatMap { holders.contains($0) ? $0 : nil }
             ?? holders.first { workers[$0]?.enabled == true && info?.unable?.contains($0) != true }
-            ?? holders.first
+            ?? (claudeHolds ? nil : holders.first)
     }
     var submissionAgent: String? { agent }
     var worker: Worker? { agent.flatMap { workers[$0] } }
     var canSend: Bool { worker?.enabled == true }
-    var requiresClaude: Bool { assignment != nil && holders.isEmpty }
+    var requiresClaude: Bool { assignment != nil && agent == nil && claudeHolds }
 }
 
 struct DispatchView: View {
@@ -126,7 +128,8 @@ struct DispatchView: View {
     private var assignedTo: some View {
         field("Assigned to") {
             if dispatch.holders.count > 1 {
-                Picker("Assigned to", selection: Binding(get: { dispatch.agent ?? "" }, set: { pickedAgent = $0 })) {
+                Picker("Assigned to", selection: Binding(get: { dispatch.agent ?? "" }, set: { pickedAgent = $0.isEmpty ? nil : $0 })) {
+                    if dispatch.agent == nil { Text("Claude (lead)").tag("") }
                     ForEach(dispatch.holders, id: \.self) { holder in Text(workerLabel(holder)).tag(holder) }
                 }.labelsHidden().fixedSize()
             } else {

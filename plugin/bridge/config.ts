@@ -381,7 +381,7 @@ function resolvePresets(user: UserConfig): Pick<Config, 'preset' | 'presets'> {
  */
 export function effectiveRole(config: Config, role: Role, preset: PresetName | null = config.preset, agent?: WorkerAgent): { agent: WorkerAgent; model?: string; effort?: string } {
   const assignment = config.roles[role];
-  const holder = agent ?? workersFor(role, assignment)[0];
+  const holder = agent ?? workersFor(role, assignment, disabledAgents(config))[0];
   if (!holder) throw new Error(`${role} is held by Claude, the lead, which does the work itself; no worker takes it.`);
   const own: AgentSettings = assignment[holder] ?? {};
   const chosen = preset ? config.presets[preset][holder] : undefined;

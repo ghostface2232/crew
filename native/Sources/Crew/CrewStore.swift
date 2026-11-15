@@ -362,7 +362,9 @@ final class SettingsModel {
         if key == \.effort {
             let model = roleSettings[role]?[agent]?.model.flatMap { $0.isEmpty ? nil : $0 }
                 ?? inheritedValue(role, agent: agent, \.model)
-            let efforts = models.first { $0.id == model }?.efforts ?? models.flatMap { $0.efforts ?? [] }
+            // A model that lists no efforts says nothing about them, so every offered effort stays a choice.
+            let listed = models.first { $0.id == model }?.efforts ?? []
+            let efforts = listed.isEmpty ? models.flatMap { $0.efforts ?? [] } : listed
             choices = []
             for effort in efforts where !choices.contains(where: { $0.id == effort }) {
                 choices.append(ModelChoice(id: effort, name: effort))
@@ -402,12 +404,17 @@ final class SettingsModel {
         }
         storeRole(role, setting)
     }
-    func setRole(_ role: String, agent: String, _ key: WritableKeyPath<RoleAgentSettings, String?>, to value: String) {
+    func setRole(_ role: String, agent: String, _ key: WritableKeyPath<RoleAgentSettings, String?>, to value: String, offered: [ModelChoice] = []) {
         guard assignment(for: role)?.workerHolders.contains(agent) == true,
               agent == "codex" || key == \.model else { return }
         var setting = roleSettings[role] ?? RoleSetting()
         var fields = setting[agent] ?? RoleAgentSettings()
         fields[keyPath: key] = value.isEmpty ? nil : value
+        // A new model drops an effort it does not accept, rather than send the pair.
+        if key == \.model, let effort = fields.effort, let accepts = offered.first(where: { $0.id == value })?.efforts,
+           !accepts.isEmpty, !accepts.contains(effort) {
+            fields.effort = nil
+        }
         setting[agent] = fields
         storeRole(role, setting)
     }

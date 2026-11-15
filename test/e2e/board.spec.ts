@@ -525,7 +525,11 @@ test('models and efforts are picked from what each agent offers, and a hand-writ
   await openSettings(page);
   const model = page.getByLabel('Implementation Codex model');
   await expect(model).toHaveValue('gpt-custom');
+  // A model that does not accept the chosen effort drops it.
+  await model.selectOption('gpt-sol');
+  await page.getByLabel('Implementation Codex reasoning effort').selectOption('high');
   await model.selectOption('gpt-luna');
+  await expect(page.getByLabel('Implementation Codex reasoning effort')).toHaveValue('');
   // The efforts follow the chosen model; a following role offers its parent's value as its blank.
   const effort = page.getByLabel('Implementation Codex reasoning effort');
   await expect(effort.locator('option')).toHaveText(['Agent default', 'low']);

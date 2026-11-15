@@ -40,9 +40,11 @@ export function Dispatch({
   const [picked, setPicked] = useState<WorkerAgent | ''>('');
   // Unless another is chosen, the first that can take the work, as the daemon would pick.
   const able = workers.filter((holder) => state.agents[holder].enabled && !info?.unable?.includes(holder));
-  const agent = picked && workers.includes(picked) ? picked : able[0] ?? workers[0];
+  // With no worker able, a role Claude holds is the lead's, as the daemon would decide.
+  const claudeHolds = holdersOf(assignment).includes('claude');
+  const agent = picked && workers.includes(picked) ? picked : able[0] ?? (claudeHolds ? undefined : workers[0]);
   const worker = agent ? state.agents[agent] : undefined;
-  const leadOnly = Boolean(assignment) && !workers.length;
+  const leadOnly = Boolean(assignment) && !agent && claudeHolds;
   const missions = state.missions.filter((mission) => mission.state === 'active' && projectOf(mission) === cwd.trim());
   const dirty = intent !== 'command' || destination !== 'project' || text !== '' || targets !== ''
     || role !== 'delegate' || directory !== initialDirectory.current || picked !== '';
@@ -152,7 +154,8 @@ export function Dispatch({
               {workers.length > 1 ? (
                 <label className="field">
                   <span>Assigned to</span>
-                  <select value={agent} onChange={(event) => setPicked(event.target.value as WorkerAgent)}>
+                  <select value={agent ?? ''} onChange={(event) => setPicked(event.target.value as WorkerAgent)}>
+                    {!agent && <option value="">Claude, the lead</option>}
                     {workers.map((id) => (
                       <option key={id} value={id}>{state.agents[id].name}{state.agents[id].enabled ? '' : ' (disabled)'}</option>
                     ))}

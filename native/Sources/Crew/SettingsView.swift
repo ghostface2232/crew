@@ -209,7 +209,7 @@ struct CrewSettingsView: View {
     }
     private func roleBinding(_ role: RoleInfo, agent: String, _ key: WritableKeyPath<RoleAgentSettings, String?>) -> Binding<String> {
         Binding(get: { model.roleSettings[role.role]?[agent]?[keyPath: key] ?? "" },
-                set: { model.setRole(role.role, agent: agent, key, to: $0) })
+                set: { model.setRole(role.role, agent: agent, key, to: $0, offered: store.state.agents[agent]?.models ?? []) })
     }
     @ViewBuilder private func roleField(_ role: RoleInfo, agent: String, _ key: WritableKeyPath<RoleAgentSettings, String?>) -> some View {
         let title = "\(agentName(agent)) \(key == \.model ? "model" : "reasoning effort")"

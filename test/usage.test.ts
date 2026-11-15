@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { DEFAULT_ROLES, defaultHolder, resolveConfig, ROLES, workersFor } from '../plugin/bridge/config.ts';
+import { DEFAULT_ROLES, defaultHolder, effectiveRole, resolveConfig, ROLES, workersFor } from '../plugin/bridge/config.ts';
 import { describeUsage, fromCodexLimits, openHistory, parseCache, projectExhaustion, route, STALE_MS, UsageMonitor, UsageTracker } from '../plugin/bridge/usage.ts';
 import type { Sample, Usage, UsageStatus } from '../plugin/bridge/usage.ts';
 
@@ -399,6 +399,9 @@ test('with no holder named, wording goes to Antigravity and other work to Codex,
   assert.equal(defaultHolder('delegate', roles.delegate), 'codex');
   assert.equal(defaultHolder('polish', roles.polish), 'antigravity');
   assert.equal(defaultHolder('polish', roles.polish, ['antigravity']), 'codex');
+  // A job's settings come from the worker it goes to, which skips a disabled one too.
+  const off = resolveConfig({ antigravity: { bin: 'agy', enabled: false }, roles: { polish: { agents: ['codex', 'antigravity'] } } });
+  assert.equal(effectiveRole(off, 'polish').agent, 'codex');
   // verify follows review, but Antigravity cannot run the app.
   assert.deepEqual(workersFor('verify', roles.verify), ['codex']);
   const lone = resolveConfig({ roles: { verify: { agents: ['antigravity', 'claude'] }, debate: { agents: ['antigravity'] } } }).roles;

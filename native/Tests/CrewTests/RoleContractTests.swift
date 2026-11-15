@@ -225,18 +225,19 @@ import Testing
         #expect(dispatch.agent == "codex")
         dispatch.picked = nil
         dispatch.workers["codex"]?.enabled = false
-        #expect(dispatch.agent == "antigravity" && !dispatch.canSend)
+        // With no worker able, the role is Claude's, as the daemon decides.
+        #expect(dispatch.agent == nil && dispatch.requiresClaude && !dispatch.canSend)
         dispatch.workers = state.agents
         dispatch.info = state.availableRoles.first { $0.role == "delegate" }
         dispatch.workers["codex"]?.enabled = false
         #expect(dispatch.agent == "antigravity")
         dispatch.info = state.availableRoles.first { $0.role == "verify" }
-        #expect(dispatch.agent == "codex" && !dispatch.canSend)
+        #expect(dispatch.agent == nil && dispatch.requiresClaude)
         dispatch.workers["codex"]?.enabled = true
         dispatch.info?.unable = ["codex"]
         #expect(dispatch.agent == "antigravity")
         dispatch.workers["antigravity"] = nil
-        #expect(dispatch.holders == ["codex"] && dispatch.agent == "codex")
+        #expect(dispatch.holders == ["codex"] && dispatch.agent == nil && dispatch.requiresClaude)
     }
     @Test @MainActor func unableHoldersCanOnlyBeUncheckedAndKeepTheLastHolder() throws {
         let state = try fixture("state-extended")
@@ -266,8 +267,14 @@ import Testing
         #expect(settings.fieldChoices("refactor", agent: "codex", \.effort, models: models).map(\.id) == ["low", "medium"])
         settings.setRole("refactor", agent: "codex", \.effort, to: "custom-effort")
         #expect(settings.fieldChoices("refactor", agent: "codex", \.effort, models: models).map(\.id) == ["low", "medium", "custom-effort"])
+        settings.setRole("refactor", agent: "codex", \.effort, to: "high")
+        settings.setRole("refactor", agent: "codex", \.model, to: "quick-model", offered: models)
+        // A model that does not accept the effort drops it.
+        #expect(settings.roleSettings["refactor"]?.codex?.effort == nil)
+        settings.setRole("refactor", agent: "codex", \.effort, to: "custom-effort")
         settings.setRole("refactor", agent: "codex", \.model, to: "no-effort")
-        #expect(settings.fieldChoices("refactor", agent: "codex", \.effort, models: models).map(\.id) == ["custom-effort"])
+        // A model that lists no efforts leaves every offered effort a choice.
+        #expect(settings.fieldChoices("refactor", agent: "codex", \.effort, models: models).map(\.id) == ["low", "high", "medium", "custom-effort"])
         settings.setRole("refactor", agent: "codex", \.model, to: "custom-model")
         #expect(settings.fieldChoices("refactor", agent: "codex", \.model, models: models).last == ModelChoice(id: "custom-model", name: "custom-model"))
         #expect(settings.fieldChoices("refactor", agent: "codex", \.effort, models: models).map(\.id) == ["low", "high", "medium", "custom-effort"])

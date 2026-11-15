@@ -233,12 +233,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         guard !store.state.roles.isEmpty else { show(); return }
         let model = SettingsModel(api: store.api, roles: store.state.roles, roleSettings: store.state.roleSettings, roleInfo: store.state.roleInfo, preset: store.state.preset, presets: store.state.presets)
         let controller = NSHostingController(rootView: CrewSettingsView(model: model, store: store).buttonBorderShape(.capsule))
+        // Laid out like System Settings: the sidebar runs up under the window controls, and a unified toolbar shows
+        // the page's title. A real toolbar is what gives the page the system's soft scroll edge.
+        controller.sceneBridgingOptions = [.toolbars]
         let window = NSWindow(contentViewController: controller)
-        window.title = "Crew Settings"
-        // The content runs under a transparent title bar, so the window reads as one surface like the main window.
-        window.styleMask = [.titled, .closable, .resizable, .fullSizeContentView]
-        window.titlebarAppearsTransparent = true
-        window.titleVisibility = .hidden
+        window.title = "Settings"
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
+        let toolbar = NSToolbar(identifier: "CrewSettings")
+        // The default display mode reserves a label row, which makes the toolbar taller than System Settings'.
+        toolbar.displayMode = .iconOnly
+        window.toolbar = toolbar
+        window.toolbarStyle = .unified
         window.setContentSize(WorkspaceStyle.settingsSize)
         window.minSize = WorkspaceStyle.settingsMinSize
         window.isReleasedWhenClosed = false

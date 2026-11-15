@@ -65,4 +65,25 @@ import Testing
         #expect(settings.roleSettings["verify"]?.agent == nil)
         #expect(settings.roleSettings["debate"] == nil)
     }
+    @Test @MainActor func fieldsThatEndEditingUnchangedLeaveSettingsClean() throws {
+        let state = try fixture("state-extended")
+        let settings = SettingsModel(api: CrewAPI(port: 0), roles: state.roles, roleSettings: state.roleSettings, roleInfo: state.roleInfo)
+        // Focus leaving each empty field writes its value back unchanged, as closing the window does.
+        for role in settings.roleInfo.map(\.role) {
+            settings.setRole(role, \.model, to: settings.roleSettings[role]?.model ?? "")
+            settings.setRole(role, \.effort, to: settings.roleSettings[role]?.effort ?? "")
+        }
+        #expect(!settings.dirty)
+        // The picker of a role without a parent shows its resolved agent; choosing it again is no change.
+        if settings.roleSettings["review"]?.agent == nil, let agent = state.roles["review"]?.agent {
+            settings.setRole("review", \.agent, to: agent)
+            #expect(!settings.dirty)
+        }
+        settings.setRole("refactor", \.effort, to: "high")
+        #expect(settings.dirty)
+        // Clearing it again is the same as never having set it.
+        settings.setRole("refactor", \.effort, to: "")
+        #expect(settings.roleSettings["refactor"] == nil)
+        #expect(!settings.dirty)
+    }
 }

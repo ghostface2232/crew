@@ -1,137 +1,166 @@
 import SwiftUI
 
+/// One page of the settings window, listed in the sidebar: the roles by kind of work, then what every agent shares.
+enum SettingsPane: String, CaseIterable, Identifiable, Hashable {
+    case build, review, edit, presets, instructions
+    var id: String { rawValue }
+    static let roles: [SettingsPane] = [.build, .review, .edit]
+    static let shared: [SettingsPane] = [.presets, .instructions]
+    /// The role group (`RoleInfo.group`) a roles page shows; nil for the shared pages.
+    var group: String? { switch self { case .build: "Build"; case .review: "Review"; case .edit: "Edit"; default: nil } }
+    var title: String { group ?? (self == .presets ? "Presets" : "Instructions") }
+    var systemImage: String {
+        switch self {
+        case .build: "hammer.fill"
+        case .review: "checkmark.shield.fill"
+        case .edit: "textformat"
+        case .presets: "slider.horizontal.3"
+        case .instructions: "doc.text.fill"
+        }
+    }
+    var tint: Color {
+        switch self {
+        case .build: .blue
+        case .review: .green
+        case .edit: .orange
+        case .presets: .gray
+        case .instructions: .indigo
+        }
+    }
+}
+
+/// Laid out like System Settings: a sidebar of pages, and a grouped form whose page title sits in the unified
+/// toolbar, where the system's soft scroll edge takes over from a hard cut.
 struct CrewSettingsView: View {
-    /// The tab control's width with two or three tabs, and the scope picker's.
-    private static let tabsWidth = (two: CGFloat(210), three: CGFloat(300))
-    private static let scopeWidth: CGFloat = 250
+    private static let sidebarWidth = (min: CGFloat(190), ideal: CGFloat(200), max: CGFloat(260))
+    private static let editorHeight: CGFloat = 260
     @Bindable var model: SettingsModel
     var store: CrewStore
-    @State private var tab = "roles"
+    @State private var selection: SettingsPane? = .build
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // The window has no title bar of its own: the heading sits on the canvas under the window controls.
-            HStack(alignment: .center) {
-                Text("Settings").font(Typeface.windowTitle).accessibilityAddTraits(.isHeader).padding(.leading, WorkspaceStyle.titleInset)
-                Spacer()
-                Picker("Settings section", selection: $tab) {
-                    Text("Roles").tag("roles")
-                    Text("Instructions").tag("instructions")
-                    if model.presets != nil { Text("Presets").tag("presets") }
-                }.pickerStyle(.segmented).labelsHidden().frame(width: model.presets == nil ? Self.tabsWidth.two : Self.tabsWidth.three)
-            }.padding(.horizontal, Space.x4l).padding(.top, 46).padding(.bottom, Space.xxl) // The top clears the window's transparent title bar.
-            Group {
-                if tab == "roles" { roles } else if tab == "presets" { presets } else { instructions }
-            }.frame(maxWidth: .infinity, maxHeight: .infinity)
-            HStack(spacing: Space.l) {
-                if model.loading && tab == "instructions" { ProgressView().controlSize(.small) }
-                Text(tab == "roles" ? model.roleStatus : tab == "presets" ? model.presetStatus : model.textStatus).font(Typeface.callout).foregroundStyle(.secondary).textSelection(.enabled)
-                if tab == "roles" ? model.roleSettings != model.savedRoleSettings : tab == "presets" ? model.preset != model.savedPreset : model.text != model.savedText {
-                    Label("Unsaved changes", systemImage: "circle.fill").font(Typeface.calloutStrong).foregroundStyle(Palette.warning)
-                        .labelStyle(UnsavedLabelStyle())
-                }
-                Spacer()
-                if tab == "instructions" && !model.loaded && !model.loading {
-                    Button("Retry Loading") { Task { await model.load(scope: model.scope) } }.pillButton()
-                }
-                Button(tab == "roles" ? (model.savingRoles ? "Saving…" : "Save Roles") : tab == "presets" ? (model.savingPreset ? "Saving…" : "Save Preset") : (model.savingText ? "Saving…" : "Save Instructions")) {
-                    Task { if tab == "roles" { await model.saveRoles() } else if tab == "presets" { await model.savePreset() } else { await model.saveInstructions() } }
-                }
-                .glassPillButton().morphs(on: [model.savingRoles, model.savingPreset, model.savingText]).keyboardShortcut("s")
-                .disabled(!store.connected || (tab == "roles" ? model.savingRoles : tab == "presets" ? model.savingPreset : !model.loaded || model.savingText))
-            }.padding(.horizontal, Space.x4l).padding(.vertical, Space.xxl)
+        NavigationSplitView {
+            List(selection: $selection) {
+                SettingsAppRow().selectionDisabled()
+                Section("Roles") { ForEach(SettingsPane.roles) { paneRow($0) } }
+                Section("Shared") { ForEach(SettingsPane.shared.filter { $0 != .presets || model.presets != nil }) { paneRow($0) } }
+            }
+            .listStyle(.sidebar)
+            .navigationSplitViewColumnWidth(min: Self.sidebarWidth.min, ideal: Self.sidebarWidth.ideal, max: Self.sidebarWidth.max)
+            .toolbar(removing: .sidebarToggle)
+        } detail: {
+            let pane = selection ?? .build
+            Form { content(pane) }
+                .formStyle(.grouped)
+                .scrollEdgeEffectStyle(.soft, for: .top)
+                .safeAreaBar(edge: .bottom) { saveBar(pane) }
+                .navigationTitle(pane.title)
+                // NSHostingController does not carry navigationTitle into the window, so the toolbar would be blank.
+                .background(WindowTitleSetter(title: pane.title))
         }
-        .ignoresSafeArea(.container, edges: .top)
-        .background(WorkspaceStyle.canvas.ignoresSafeArea())
         .frame(minWidth: WorkspaceStyle.settingsMinSize.width, idealWidth: WorkspaceStyle.settingsSize.width, minHeight: WorkspaceStyle.settingsMinSize.height, idealHeight: WorkspaceStyle.settingsSize.height)
         .task { if !model.loaded && !model.loading { await model.load(scope: model.scope) } }
     }
-    private var roles: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Space.x3l) {
-                ForEach(["Build", "Review", "Edit"], id: \.self) { group in
-                    VStack(alignment: .leading, spacing: Space.l) {
-                        Text(group).font(Typeface.section).padding(.leading, WorkspaceStyle.titleInset)
-                        ForEach(model.roleInfo.filter { $0.group == group }) { role in
-                            roleRow(role)
-                        }
-                    }
-                }
-            }.padding(.horizontal, Space.x4l).padding(.bottom, Space.m)
+    private func paneRow(_ pane: SettingsPane) -> some View {
+        Label { Text(pane.title) } icon: { SettingsPaneIcon(pane: pane) }.tag(pane)
+    }
+    @ViewBuilder private func content(_ pane: SettingsPane) -> some View {
+        if let group = pane.group {
+            ForEach(model.roleInfo.filter { $0.group == group }) { roleSection($0) }
+        } else if pane == .presets {
+            presets
+        } else {
+            instructions
         }
     }
-    private func roleRow(_ role: RoleInfo) -> some View {
-        VStack(alignment: .leading, spacing: Space.xl) {
+    private func roleSection(_ role: RoleInfo) -> some View {
+        Section {
+            Picker("Agent", selection: roleBinding(role, \.agent)) {
+                if let parent = role.parent {
+                    Text("Same as \(model.roleInfo.first { $0.role == parent }?.label ?? parent)").tag("")
+                }
+                ForEach(store.state.agents.keys.sorted(), id: \.self) { id in
+                    Text("\(agentName(id))\(store.state.agents[id]?.enabled == false ? " (disabled)" : "")").tag(id)
+                }
+            }.accessibilityLabel("Agent for \(role.label)")
+            TextField("Model", text: roleBinding(role, \.model), prompt: Text(inheritedValue(role, \.model)))
+                .accessibilityLabel("\(role.label) model")
+            TextField("Reasoning effort", text: roleBinding(role, \.effort), prompt: Text(inheritedValue(role, \.effort)))
+                .accessibilityLabel("\(role.label) reasoning effort")
+        } header: {
             HStack(spacing: Space.ml) {
                 AgentMark(agent: model.assignment(for: role.role)?.agent ?? "codex", size: MarkSize.card)
-                VStack(alignment: .leading, spacing: Space.s) {
-                    Text(role.label).font(Typeface.cardTitle)
-                    Text(role.summary).font(Typeface.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(role.label).font(.headline).foregroundStyle(.primary)
+                    Text(role.summary).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
-                Spacer(minLength: Space.m)
-                Picker("Agent for \(role.label)", selection: roleBinding(role, \.agent)) {
-                    if let parent = role.parent {
-                        Text("Same as \(model.roleInfo.first { $0.role == parent }?.label ?? parent)").tag("")
-                    }
-                    ForEach(store.state.agents.keys.sorted(), id: \.self) { id in
-                        Text("\(agentName(id))\(store.state.agents[id]?.enabled == false ? " (disabled)" : "")").tag(id)
-                    }
-                }.labelsHidden().fixedSize().frame(minWidth: WorkspaceStyle.pickerWidth, alignment: .trailing)
-            }
-            HStack(spacing: Space.xxl) {
-                VStack(alignment: .leading, spacing: Space.s) {
-                    Text("Model").font(Typeface.captionStrong).foregroundStyle(.secondary)
-                    TextField(inheritedValue(role, \.model), text: roleBinding(role, \.model)).accessibilityLabel("\(role.label) model")
-                }
-                VStack(alignment: .leading, spacing: Space.s) {
-                    Text("Reasoning effort").font(Typeface.captionStrong).foregroundStyle(.secondary)
-                    TextField(inheritedValue(role, \.effort), text: roleBinding(role, \.effort)).accessibilityLabel("\(role.label) reasoning effort")
-                }
-            }.textFieldStyle(.roundedBorder)
-        }.card()
+            }.textCase(nil)
+        }
     }
-    private var presets: some View {
-        VStack(alignment: .leading, spacing: Space.l) {
-            VStack(alignment: .leading, spacing: Space.xl) {
-                HStack(spacing: Space.ml) {
-                    Image(systemName: "slider.horizontal.3").font(Symbol.large).foregroundStyle(.tint).frame(width: MarkSize.card)
-                    Text("Model preset").font(Typeface.cardTitle)
-                    Spacer()
-                    Picker("Model preset", selection: $model.preset) {
-                        Text("None").tag(nil as PresetName?)
-                        ForEach(PresetName.allCases, id: \.self) { name in
-                            Text(name.rawValue.capitalized).tag(Optional(name))
-                        }
-                    }.labelsHidden().frame(width: WorkspaceStyle.pickerWidth)
+    @ViewBuilder private var presets: some View {
+        Section {
+            Picker("Global preset", selection: $model.preset) {
+                Text("None").tag(nil as PresetName?)
+                ForEach(PresetName.allCases, id: \.self) { name in
+                    Text(name.rawValue.capitalized).tag(Optional(name))
                 }
-                Text(model.preset.flatMap { model.presets?[$0.rawValue]?.description } ?? "Uses each agent's configured model and effort.")
-                    .font(Typeface.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                Text("A model or effort set on a role overrides the preset.").font(Typeface.caption).foregroundStyle(.tertiary)
-                Text("A mission can use its own preset. The lead passes the preset you name for a command, overriding this global preset for that mission's new jobs.")
-                    .font(Typeface.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            }.card()
-            Spacer()
-        }.padding(.horizontal, Space.x4l)
-    }
-    private var instructions: some View {
-        VStack(alignment: .leading, spacing: Space.xl) {
-            HStack {
-                Text("Shared instructions").font(Typeface.cardTitle)
-                Spacer()
-                Picker("Applies to", selection: Binding(get: { model.scope }, set: changeScope)) {
-                    Text("Every project").tag("")
-                    ForEach(store.projects, id: \.self) { Text(projectName($0, among: store.projects)).tag($0) }
-                }.frame(maxWidth: Self.scopeWidth).disabled(model.savingText)
             }
-            Text("Given to every agent with its next job and to Claude sessions when they start.")
-                .font(Typeface.callout).foregroundStyle(.secondary)
+        } footer: {
+            Text(model.preset.flatMap { model.presets?[$0.rawValue]?.description } ?? "Uses each agent's configured model and effort.")
+                .settingsFootnote()
+        }
+        Section {
+            LabeledContent("A role's own model or effort", value: "Wins over any preset")
+            LabeledContent("A mission's preset", value: "Replaces this one for its new jobs")
+        } footer: {
+            Text("The lead gives a mission the preset you name for a command; you can also change it from the mission.").settingsFootnote()
+        }
+    }
+    @ViewBuilder private var instructions: some View {
+        Section {
+            Picker("Applies to", selection: Binding(get: { model.scope }, set: changeScope)) {
+                Text("Every project").tag("")
+                ForEach(store.projects, id: \.self) { Text(projectName($0, among: store.projects)).tag($0) }
+            }.disabled(model.savingText)
+        } footer: {
+            Text("Given to every agent with its next job and to Claude sessions when they start.").settingsFootnote()
+        }
+        Section {
             TextEditor(text: $model.text).font(Typeface.code)
-                .scrollContentBackground(.hidden).padding(Space.xl)
-                .background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: WorkspaceStyle.fieldRadius))
-                .overlay(RoundedRectangle(cornerRadius: WorkspaceStyle.fieldRadius).strokeBorder(WorkspaceStyle.hairline))
+                .scrollContentBackground(.hidden)
+                .frame(minHeight: Self.editorHeight)
                 .accessibilityLabel("Shared instructions").disabled(!model.loaded)
-            Text(model.file).font(Typeface.codeSmall).foregroundStyle(.tertiary).textSelection(.enabled)
-            if model.text.count > 9000 { Label("Claude sessions will be pointed to this file because it is longer than 9,000 characters.", systemImage: "info.circle").font(Typeface.callout).foregroundStyle(.secondary) }
-        }.padding(.horizontal, Space.x4l)
+        } footer: {
+            VStack(alignment: .leading, spacing: Space.s) {
+                Text(model.file).font(Typeface.codeSmall).foregroundStyle(.tertiary).textSelection(.enabled)
+                if model.text.count > 9000 {
+                    Label("Claude sessions will be pointed to this file because it is longer than 9,000 characters.", systemImage: "info.circle").settingsFootnote()
+                }
+            }
+        }
+    }
+    /// The page's status and its save button. The three roles pages edit one table, so they share one save.
+    private func saveBar(_ pane: SettingsPane) -> some View {
+        let roles = pane.group != nil
+        let status = roles ? model.roleStatus : pane == .presets ? model.presetStatus : model.textStatus
+        let unsaved = roles ? model.roleSettings != model.savedRoleSettings : pane == .presets ? model.preset != model.savedPreset : model.text != model.savedText
+        let saving = roles ? model.savingRoles : pane == .presets ? model.savingPreset : model.savingText
+        return HStack(spacing: Space.l) {
+            if model.loading && pane == .instructions { ProgressView().controlSize(.small) }
+            Text(status).font(Typeface.callout).foregroundStyle(.secondary).textSelection(.enabled)
+            if unsaved {
+                Label("Unsaved changes", systemImage: "circle.fill").font(Typeface.calloutStrong).foregroundStyle(Palette.warning)
+                    .labelStyle(UnsavedLabelStyle())
+            }
+            Spacer()
+            if pane == .instructions && !model.loaded && !model.loading {
+                Button("Retry Loading") { Task { await model.load(scope: model.scope) } }.pillButton()
+            }
+            Button(saving ? "Saving…" : roles ? "Save Roles" : pane == .presets ? "Save Preset" : "Save Instructions") {
+                Task { if roles { await model.saveRoles() } else if pane == .presets { await model.savePreset() } else { await model.saveInstructions() } }
+            }
+            .glassPillButton().morphs(on: [model.savingRoles, model.savingPreset, model.savingText]).keyboardShortcut("s")
+            .disabled(!store.connected || saving || (pane == .instructions && !model.loaded))
+        }.padding(.horizontal, Space.x3l).padding(.vertical, Space.xl)
     }
     private func changeScope(_ scope: String) {
         guard scope != model.scope else { return }
@@ -142,16 +171,57 @@ struct CrewSettingsView: View {
         Binding(get: {
             model.roleSettings[role.role]?[keyPath: key]
                 ?? (key == \.agent && role.parent == nil ? model.assignment(for: role.role)?.agent : nil) ?? ""
-        }, set: { value in
-            var setting = model.roleSettings[role.role] ?? RoleSetting()
-            setting[keyPath: key] = value.isEmpty ? nil : value
-            model.roleSettings[role.role] = setting
-        })
+        }, set: { model.setRole(role.role, key, to: $0) })
     }
     private func inheritedValue(_ role: RoleInfo, _ key: KeyPath<RoleAssignment, String?>) -> String {
         guard model.roleSettings[role.role]?.agent == nil, let parent = role.parent else { return "Agent default" }
         return model.assignment(for: parent)?[keyPath: key] ?? "Agent default"
     }
+}
+
+/// The colored rounded-square icon System Settings puts beside each page.
+private struct SettingsPaneIcon: View {
+    let pane: SettingsPane
+    var size: CGFloat = 20
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: size * 0.26, style: .continuous)
+        shape.fill(pane.tint.gradient).frame(width: size, height: size)
+            .overlay { Image(systemName: pane.systemImage).font(.system(size: size * 0.5, weight: .semibold)).foregroundStyle(.white) }
+            // A light rim keeps a blue tile apart from the blue selection behind it.
+            .overlay { shape.strokeBorder(.white.opacity(0.25), lineWidth: 0.5) }
+            .shadow(color: .black.opacity(0.2), radius: 0.75, y: 0.5)
+            .accessibilityHidden(true)
+    }
+}
+
+/// The app's icon and name at the top of the sidebar, where System Settings shows the account.
+private struct SettingsAppRow: View {
+    private let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+    var body: some View {
+        HStack(spacing: Space.ml) {
+            Image(nsImage: NSApp.applicationIconImage).resizable().interpolation(.high).scaledToFit()
+                .frame(width: 36, height: 36).accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Crew").font(.body.weight(.semibold))
+                if let version { Text("v\(version)").font(.subheadline).foregroundStyle(.secondary) }
+            }
+        }.padding(.vertical, Space.xs)
+    }
+}
+
+/// Sets the hosting window's title, which the unified toolbar shows.
+private struct WindowTitleSetter: NSViewRepresentable {
+    let title: String
+    func makeNSView(context: Context) -> NSView { NSView() }
+    func updateNSView(_ nsView: NSView, context: Context) {
+        let title = title
+        // The view has no window until it is in the hierarchy.
+        DispatchQueue.main.async { nsView.window?.title = title }
+    }
+}
+
+private extension View {
+    func settingsFootnote() -> some View { font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
 }
 
 /// A small dot before the words, sized to the text.

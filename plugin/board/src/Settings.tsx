@@ -51,6 +51,9 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
   // On a phone the sidebar is a list of its own, and a page replaces it; wider, both show.
   const [view, setView] = useState<'list' | 'page'>('list');
   const back = useRef<HTMLButtonElement>(null);
+  const scroller = useRef<HTMLDivElement>(null);
+  // The title's blur shows only once the page has scrolled under it.
+  const [scrolled, setScrolled] = useState(false);
   const [roles, setRoles] = useState<RoleSettings>(() => editableRoles(state));
   const [savedRoles, setSavedRoles] = useState<RoleSettings>(() => editableRoles(state));
   const info = rolesOf(state);
@@ -237,6 +240,11 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
     window.addEventListener('keydown', shortcut);
     return () => window.removeEventListener('keydown', shortcut);
   });
+  // Each page opens at its top.
+  useEffect(() => {
+    if (scroller.current) scroller.current.scrollTop = 0;
+    setScrolled(false);
+  }, [current]);
   const open = (next: Pane) => {
     const nextScope = next === 'instructions' ? '' : next.startsWith('project:') ? next.slice('project:'.length) : null;
     // Another set of instructions loads in place of the one being edited, so unsaved edits are asked about first.
@@ -326,8 +334,8 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
           )}
         </nav>
         <div className={styles.detail}>
-          <div className={styles.scroll}>
-            <header className={styles.pageHead}>
+          <div className={styles.scroll} ref={scroller} onScroll={(event) => setScrolled(event.currentTarget.scrollTop > 0)}>
+            <header className={styles.pageHead} data-scrolled={scrolled || undefined}>
               <button type="button" ref={back} className={`borderless ${styles.back}`} onClick={() => setView('list')}>
                 <Icon icon={ChevronLeft} />
                 Settings

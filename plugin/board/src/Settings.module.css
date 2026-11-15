@@ -36,11 +36,15 @@
   padding: 20px 26px 30px;
   /* Overlaps the content only by what is clear of the fade, so nothing sits faded before it is scrolled. */
   margin-bottom: -6px;
+  transition: background-color 150ms ease-out, backdrop-filter 150ms ease-out;
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent);
+}
+/* At rest the title sits on the page itself; the blur appears only once something scrolls under it. */
+.pageHead[data-scrolled] {
   background: color-mix(in srgb, var(--canvas) 70%, transparent);
   -webkit-backdrop-filter: blur(16px) saturate(1.6);
   backdrop-filter: blur(16px) saturate(1.6);
-  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent);
-  mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent);
 }
 .pageTitle { flex: 1; min-width: 0; font: 600 20px/1.2 var(--rounded); overflow-wrap: anywhere; }
 .back { display: none; }

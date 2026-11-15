@@ -1101,7 +1101,7 @@ for (const width of [390, 1440]) {
     session.workflows = [{ id: 'run-1', name: 'Review a very long workflow name '.repeat(8), startedAt: NOW - 120_000, activeAt: NOW, done: 7 }];
     session.agents = Array.from({ length: 14 }, (_, index) => ({
       id: `agent-${index}`, type: 'reviewer', title: `Agent ${index}: ${'A long description '.repeat(15)}`,
-      phase: 'Bash npm test '.repeat(10), inTool: true, startedAt: NOW - 60_000,
+      phase: 'Bash npm test '.repeat(10), inTool: true, startedAt: NOW - 60_000, activeAt: NOW,
       ...(index >= 2 ? { workflow: 'run-1', stage: index < 5 ? 'Review' : 'Verify' } : {}),
     }));
     await request.post('/__push', { data: { type: 'state', data } });

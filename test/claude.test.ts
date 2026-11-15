@@ -117,7 +117,8 @@ test('a sub-agent moving on clears the prompt it raised', () => {
   assert.equal(s.waitingId, undefined);
 });
 
-test('workflow agents take their run and label from the run journal', () => {
+test('workflow agents take their run and label from the run journal', (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: 1_000_000 });
   const projects = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-claude-'));
   try {
     const session = path.join(projects, 's1');
@@ -132,6 +133,10 @@ test('workflow agents take their run and label from the run journal', () => {
     assert.equal(s.agents[0].title, 'workflow-subagent');
 
     fs.writeFileSync(path.join(run, 'journal.jsonl'), `${JSON.stringify({ type: 'started', agentId: 'w1', label: 'probe-1' })}\n`);
+    // The journals are read again only after a pause, however many events come in.
+    hook('PostToolUse', { agent_id: 'w1', agent_type: 'workflow-subagent', transcript_path, tool_name: 'Bash' });
+    assert.equal(s.agents[0].title, 'workflow-subagent');
+    t.mock.timers.tick(2_000);
     hook('PreToolUse', { agent_id: 'w1', agent_type: 'workflow-subagent', transcript_path, tool_name: 'Bash', tool_input: { command: 'echo' } });
     assert.equal(s.agents[0].title, 'probe-1');
     assert.equal(s.agents[0].workflow, 'wf_1');
@@ -143,4 +148,58 @@ test('workflow agents take their run and label from the run journal', () => {
   } finally {
     fs.rmSync(projects, { recursive: true, force: true });
   }
+});
+
+test('a sub-agent clears only the prompt it raised', () => {
+  const { sessions, hook } = tracker();
+  hook('SubagentStart', { agent_id: 'a1', agent_type: 'Explore' });
+  hook('SubagentStart', { agent_id: 'a2', agent_type: 'Explore' });
+  hook('Notification', { notification_type: 'permission_prompt', message: 'Allow Edit?' });
+  const s = sessions.sessions.get('s1')!;
+  hook('PostToolUse', { agent_id: 'a1', tool_name: 'Read' });
+  assert.equal(s.state, 'waiting');
+
+  hook('Notification', { notification_type: 'permission_prompt', message: 'Allow Bash?', agent_id: 'a1' });
+  hook('PreToolUse', { agent_id: 'a2', tool_name: 'Grep' });
+  assert.equal(s.waitingFor, 'Allow Bash?');
+  hook('PreToolUse', { agent_id: 'a1', tool_name: 'Bash' });
+  assert.equal(s.state, 'working');
+});
+
+test('a sub-agent whose stop was missed is dropped after an hour of silence, and a new process starts with none', (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setInterval'], now: 1_000_000 });
+  const { sessions, hook } = tracker();
+  hook('SubagentStart', { agent_id: 'a1', agent_type: 'Explore' });
+  hook('PreToolUse', { agent_id: 'a1', tool_name: 'Bash' });
+  hook('Stop');
+  const s = sessions.sessions.get('s1')!;
+  assert.equal(s.state, 'working');
+  t.mock.timers.tick(60 * 60_000);
+  assert.deepEqual(s.agents, []);
+  assert.equal(s.state, 'idle');
+
+  hook('SubagentStart', { agent_id: 'a2', agent_type: 'Explore' });
+  hook('SessionStart', { source: 'resume' });
+  assert.deepEqual(s.agents, []);
+});
+
+test('a failed Agent call gives its title to no sub-agent, nor does one of another type', () => {
+  const { sessions, hook } = tracker();
+  hook('PreToolUse', { tool_name: 'Agent', tool_use_id: 't1', tool_input: { description: 'Old', subagent_type: 'Explore' } });
+  hook('PostToolUseFailure', { tool_name: 'Agent', tool_use_id: 't1' });
+  hook('PreToolUse', { tool_name: 'Agent', tool_use_id: 't2', tool_input: { description: 'New', subagent_type: 'Explore' } });
+  hook('PreToolUse', { tool_name: 'Agent', tool_use_id: 't3', tool_input: { description: 'Plan it', subagent_type: 'Plan' } });
+  hook('SubagentStart', { agent_id: 'a1', agent_type: 'Explore' });
+  hook('SubagentStart', { agent_id: 'a2', agent_type: 'general-purpose' });
+  const s = sessions.sessions.get('s1')!;
+  assert.deepEqual(s.agents.map((a) => a.title), ['New', 'general-purpose']);
+});
+
+test('a sub-agent first seen without its type takes it from a later event', () => {
+  const { sessions, hook } = tracker();
+  hook('PreToolUse', { agent_id: 'a1', tool_name: 'Read' });
+  hook('SubagentStart', { agent_id: 'a1', agent_type: 'Explore' });
+  const agent = sessions.sessions.get('s1')!.agents[0];
+  assert.equal(agent.type, 'Explore');
+  assert.equal(agent.title, 'Explore');
 });

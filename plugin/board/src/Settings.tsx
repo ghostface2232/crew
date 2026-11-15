@@ -419,8 +419,8 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
               {kind && info.filter((role) => role.kind === kind).map(roleGroup)}
               {kind && (
                 <p className={styles.footnote}>
-                  The lead picks one of a role's holders for each job, Codex before Antigravity when it names none. Claude means the
-                  lead does the work itself or in a subagent. Each agent's model and effort apply when it takes the role's work.
+                  The lead picks one of a role's holders for each job, using Codex before Antigravity when none is named. Claude means the
+                  lead does the work itself or in a subagent. Each agent's model and effort apply when it runs the role.
                 </p>
               )}
               {current === 'presets' && (

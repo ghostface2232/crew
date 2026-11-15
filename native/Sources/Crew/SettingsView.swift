@@ -99,7 +99,7 @@ struct CrewSettingsView: View {
         if let group = pane.group {
             ForEach(model.roleInfo.filter { $0.group == group }) { roleSection($0) }
             Section {} footer: {
-                Text("The lead picks one of a role's holders for each job, using Codex before Antigravity when it names none. Claude means the lead does the work itself or in a subagent. Each agent's model and effort apply when it takes the role's work.").settingsFootnote()
+                Text("The lead picks one of a role's holders for each job, using Codex before Antigravity when none is named. Claude means the lead does the work itself or in a subagent. Each agent's model and effort apply when it runs the role.").settingsFootnote()
             }
         } else if pane == .presets {
             presets

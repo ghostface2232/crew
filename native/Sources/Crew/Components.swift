@@ -267,7 +267,12 @@ struct SessionRow: View {
                 AgentMark(agent: "claude", size: MarkSize.row).frame(width: WorkspaceStyle.iconColumn)
                 VStack(alignment: .leading, spacing: Space.xs) {
                     Text(session.title).font(Typeface.bodyStrong).foregroundStyle(.primary).lineLimit(2)
-                    if !detail.isEmpty { Text(detail).font(Typeface.caption).foregroundStyle(.secondary).lineLimit(1) }
+                    // A new status line swaps in over the old one rather than cutting to it.
+                    ZStack(alignment: .leading) {
+                        if !detail.isEmpty {
+                            Text(detail).font(Typeface.caption).foregroundStyle(.secondary).lineLimit(1).id(detail).transition(.wordSwap(anchor: .leading))
+                        }
+                    }
                 }
                 Spacer(minLength: WorkspaceStyle.rowSpacer)
                 StatusLabel(state: session.stalled ? "stalled" : session.state, title: session.stalled ? "May be stuck" : session.state.capitalized)

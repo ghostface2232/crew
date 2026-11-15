@@ -370,18 +370,27 @@ private struct PillWords<Label: View>: View {
     var body: some View {
         label.hidden().accessibilityHidden(true)
             .overlay {
-                label.fixedSize().id(swap)
-                    .transition(.asymmetric(insertion: Self.swapping.animation(Motion.swapIn), removal: Self.swapping.animation(Motion.swapOut)))
+                label.fixedSize().id(swap).transition(.wordSwap)
             }
     }
-    /// Words come and go softly: faded, slightly shrunk and blurred.
-    private static var swapping: AnyTransition { .modifier(active: Swapping(shown: false), identity: Swapping(shown: true)) }
+}
+
+extension AnyTransition {
+    /// Words come and go softly: faded, slightly shrunk and blurred. It carries its own timing, so text that changes
+    /// on its own, such as a live status line, swaps the same way a pill's words do. Leading-aligned text shrinks
+    /// toward its leading edge, so it does not drift sideways.
+    static var wordSwap: AnyTransition { wordSwap(anchor: .center) }
+    static func wordSwap(anchor: UnitPoint) -> AnyTransition {
+        let swapping = AnyTransition.modifier(active: Swapping(shown: false, anchor: anchor), identity: Swapping(shown: true, anchor: anchor))
+        return .asymmetric(insertion: swapping.animation(Motion.swapIn), removal: swapping.animation(Motion.swapOut))
+    }
 }
 
 private struct Swapping: ViewModifier {
     let shown: Bool
+    let anchor: UnitPoint
     func body(content: Content) -> some View {
-        content.opacity(shown ? 1 : 0).scaleEffect(shown ? 1 : 0.9).blur(radius: shown ? 0 : 2)
+        content.opacity(shown ? 1 : 0).scaleEffect(shown ? 1 : 0.9, anchor: anchor).blur(radius: shown ? 0 : 2)
     }
 }
 

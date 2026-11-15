@@ -115,11 +115,8 @@ const server = http.createServer(async (req, res) => {
     return json(found);
   }
   if (url.pathname === '/api/roles') {
-    // Blank fields are dropped as the daemon drops them (saveRoles in settings.ts).
-    const written = Object.fromEntries(Object.entries(body.roles as Record<string, Record<string, string>>)
-      .map(([role, entry]) => [role, Object.fromEntries(Object.entries(entry).filter(([, value]) => value !== ''))])
-      .filter(([, entry]) => Object.keys(entry).length));
-    const resolved = resolveConfig({ roles: written });
+    // The board sends its table without blank fields, as the daemon would store it.
+    const resolved = resolveConfig({ roles: body.roles });
     state.roles = resolved.roles;
     state.roleSettings = resolved.roleSettings;
     send('roles', state.roles);

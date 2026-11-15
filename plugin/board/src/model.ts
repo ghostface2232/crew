@@ -1,9 +1,16 @@
-import type { Holder, Role, RoleAssignment, RoleInfo, RoleSettings } from '../../bridge/config.ts';
+import type { AgentSettings, Holder, Role, RoleAssignment, RoleInfo, RoleSettings, WorkerAgent } from '../../bridge/config.ts';
 import type { BoardJob, BoardState, ClaudeSession, Mission } from './types.ts';
 
 export const NAMES = { claude: 'Claude', codex: 'Codex', antigravity: 'Antigravity' };
-/** Every holder of a role, the default first, as config.ts holdersOf lists them. */
-export const holdersOf = (assignment?: Pick<RoleAssignment, 'agent' | 'also'>): Holder[] => (assignment ? [assignment.agent, ...(assignment.also ?? [])] : []);
+/** Every holder, in the order a role lists them, as config.ts HOLDERS does. */
+export const HOLDERS: Holder[] = ['codex', 'antigravity', 'claude'];
+export const holdersOf = (assignment?: Pick<RoleAssignment, 'agents'>): Holder[] => assignment?.agents ?? [];
+export const sortHolders = (agents: Holder[]) => HOLDERS.filter((holder) => agents.includes(holder));
+/** An agent's settings without blank fields, or nothing when none is left: a blank field is one never set. */
+export function agentSettings(settings?: AgentSettings): AgentSettings | undefined {
+  const kept = Object.fromEntries(Object.entries(settings ?? {}).filter(([, value]) => value !== undefined && value !== ''));
+  return Object.keys(kept).length ? kept : undefined;
+}
 /** The roles a daemon that predates the role registry knows; it sends no roleInfo. */
 const LEGACY_ROLES: RoleInfo[] = [
   { role: 'delegate', kind: 'delegate', label: 'Implementation', summary: 'Builds separable pieces of a change.' },
@@ -24,14 +31,14 @@ export const jobRole = (job: Pick<BoardJob, 'role' | 'kind' | 'debate' | 'runsAp
 export function resolveDraft(info: RoleInfo[], draft: RoleSettings, saved: BoardState['roles']): Partial<Record<Role, RoleAssignment>> {
   const resolved: Partial<Record<Role, RoleAssignment>> = {};
   for (const { role, parent } of info) {
-    const { agent, ...own } = Object.fromEntries(Object.entries(draft[role] ?? {}).filter(([, value]) => value !== undefined && value !== '')) as Partial<RoleAssignment>;
-    const base = agent ? { agent } : parent ? resolved[parent] : saved[role] && { agent: saved[role].agent };
+    const own = draft[role] ?? {};
+    const base = own.agents?.length ? { agents: sortHolders(own.agents) } : parent ? resolved[parent] : saved[role] && { agents: saved[role].agents };
     if (!base) continue;
-    const merged: RoleAssignment = { ...base, ...own };
-    // Each holder counts once, and the default is not listed again among the others.
-    const also = [...new Set(merged.also ?? [])].filter((holder) => holder !== merged.agent);
-    if (also.length) merged.also = also;
-    else delete merged.also;
+    const merged: RoleAssignment = { agents: base.agents };
+    for (const agent of base.agents.filter((holder): holder is WorkerAgent => holder !== 'claude')) {
+      const settings = agentSettings({ ...base[agent], ...agentSettings(own[agent]) });
+      if (settings) merged[agent] = settings;
+    }
     resolved[role] = merged;
   }
   return resolved;

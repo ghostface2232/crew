@@ -81,8 +81,8 @@ export function Dispatch({
         close();
         return;
       }
-      // The default holder is the daemon's own choice; another one is named.
-      const named = agent && agent !== assignment?.agent ? { agent } : {};
+      // With one worker holder the daemon picks it anyway; among several, the one shown is named.
+      const named = agent && workers.length > 1 ? { agent } : {};
       if (intent === 'question') {
         const job = await request<BoardJob>('/api/jobs', { kind: 'delegate', ask: true, task, cwd: cwd.trim(), ...named });
         openJob(job.id);

@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { ChevronLeft, ChevronRight, FileText, Folder, Hammer, Info, ShieldCheck, SlidersHorizontal, Type } from 'lucide-react';
 import type { Preset, PresetName, Snapshot } from './types.ts';
-import type { Holder, JobKind, Role, RoleAssignment, RoleInfo, RoleSettings } from '../../bridge/config.ts';
+import type { AgentSettings, Holder, JobKind, Role, RoleAssignment, RoleInfo, RoleSettings, WorkerAgent } from '../../bridge/config.ts';
 import { request } from './api.ts';
 import { board } from './store.ts';
-import { knownProjects, NAMES, projectNames, resolveDraft, rolesOf } from './model.ts';
+import { agentSettings, HOLDERS, knownProjects, NAMES, projectNames, resolveDraft, rolesOf, sortHolders } from './model.ts';
 import { AgentMark, CloseButton, Dialog, Icon } from './ui.tsx';
 import styles from './Settings.module.css';
 
@@ -40,10 +40,20 @@ const PROJECT_TINT = '#30b0c7';
  */
 const editableRoles = (state: Snapshot): RoleSettings => structuredClone(state.roleInfo ? state.roleSettings ?? {} : state.roles);
 
-/** Two role tables say the same when every role sets the same fields, whatever the order they were written in. */
+/** A role's entry as the daemon would store it: holders in order, blank fields and empty settings left out. */
+function cleanEntry(entry: Partial<RoleAssignment> = {}): Partial<RoleAssignment> {
+  const clean: Partial<RoleAssignment> = entry.agents ? { agents: sortHolders(entry.agents) } : {};
+  for (const agent of ['codex', 'antigravity'] as const) {
+    const settings = agentSettings(entry[agent]);
+    if (settings) clean[agent] = settings;
+  }
+  return clean;
+}
+
+/** Two role tables say the same when every role sets the same things, whatever the order they were written in. */
 function sameRoles(a: RoleSettings, b: RoleSettings) {
   const canonical = (table: RoleSettings) => JSON.stringify(Object.entries(table)
-    .map(([role, entry]) => [role, Object.entries(entry ?? {}).filter(([, value]) => value !== undefined && value !== '').sort()] as const)
+    .map(([role, entry]) => [role, Object.entries(cleanEntry(entry)).sort()] as const)
     .filter(([, entry]) => entry.length)
     .sort());
   return canonical(a) === canonical(b);
@@ -141,51 +151,39 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
   const closeSettings = () => {
     if ((!dirty && !saving && !savingRoles && !savingPreset) || confirm('Close without saving your changes?')) close();
   };
-  /**
-   * A blank field is the same as one never set, so clearing it again leaves nothing behind. Back to what was saved,
-   * a field is written as it was saved: a role without a parent shows the agent it resolves to when none is written.
-   */
-  const editRole = (role: Role, key: 'agent' | 'model' | 'effort', value: string) =>
+  /** Replaces a role's entry in the draft, dropping it when nothing is left. */
+  const setEntry = (role: Role, change: (own: Partial<RoleAssignment>) => Partial<RoleAssignment>) =>
     setRoles((current) => {
-      const saved = savedRoles[role]?.[key];
-      const savedShown = saved ?? (key === 'agent' && !info.find((other) => other.role === role)?.parent ? state.roles[role]?.agent : undefined);
-      const next = value === (savedShown ?? '') ? saved ?? '' : value;
-      const rest: Partial<RoleAssignment> = { ...current[role] };
-      delete rest[key];
-      if (key === 'agent') {
-        // The default cannot also be a further holder. Back at the agent it had, the list comes back as it was saved.
-        const strip = (list: Holder[] | undefined, agent: string | undefined) => list?.filter((holder) => holder !== agent);
-        const savedAlso = savedRoles[role]?.also;
-        const untouched = savedAlso && (rest.also ?? []).join() === (strip(savedAlso, current[role]?.agent) ?? []).join();
-        const also = next ? strip(untouched ? savedAlso : rest.also, next) : untouched ? savedAlso : rest.also;
-        if (also?.length || (!next && also)) rest.also = also;
-        else delete rest.also;
-      }
-      const entry = next ? { ...rest, [key]: next } : rest;
+      const entry = cleanEntry(change({ ...current[role] }));
       const { [role]: _entry, ...others } = current;
       return Object.keys(entry).length ? { ...others, [role]: entry } : others;
     });
   /**
-   * Turns one of a role's further holders on or off. Back to what was saved, the list is written as it was saved;
-   * a role following its parent that comes back to its parent's list follows it again.
+   * Turns a holder on or off; a role keeps at least one. A role without a parent that comes back to the holders it
+   * resolves to unwritten writes none, as it was saved.
    */
-  const toggleAlso = (role: RoleInfo, holder: Holder) =>
-    setRoles((current) => {
-      const own = current[role.role] ?? {};
-      const following = role.parent && !own.agent ? resolved[role.parent]?.also ?? [] : [];
-      const shown = own.also ?? following;
-      const saved = savedRoles[role.role]?.also;
-      // The order is the preference the lead tries, so a holder turned back on returns to where it was saved.
-      const order = saved ?? following;
-      const rank = (other: Holder) => (order.includes(other) ? order.indexOf(other) : order.length);
-      const next = shown.includes(holder) ? shown.filter((other) => other !== holder) : [...shown, holder].sort((a, b) => rank(a) - rank(b));
-      const same = (a: Holder[], b: Holder[]) => a.length === b.length && a.every((other, index) => other === b[index]);
-      const value = same(next, saved ?? following) ? saved : next.length || following.length ? next : undefined;
-      const { also: _old, ...rest } = own;
-      const entry = value ? { ...rest, also: value } : rest;
-      const { [role.role]: _entry, ...others } = current;
-      return Object.keys(entry).length ? { ...others, [role.role]: entry } : others;
+  const toggleHolder = (role: RoleInfo, holder: Holder) =>
+    setEntry(role.role, (own) => {
+      const shown = resolved[role.role]?.agents ?? [];
+      const next = shown.includes(holder) ? shown.filter((other) => other !== holder) : sortHolders([...shown, holder]);
+      if (!next.length) return own;
+      if (holder !== 'claude' && !next.includes(holder)) delete own[holder];
+      const unwritten = !role.parent && !savedRoles[role.role]?.agents ? state.roles[role.role]?.agents : undefined;
+      if (unwritten && unwritten.join() === next.join()) delete own.agents;
+      else own.agents = next;
+      return own;
     });
+  /** Follows the parent's holders, or starts from them as the role's own. */
+  const follow = (role: RoleInfo, on: boolean) =>
+    setEntry(role.role, (own) => {
+      const parent = resolved[role.parent!]?.agents ?? [];
+      if (!on) return { ...own, agents: parent };
+      delete own.agents;
+      for (const agent of ['codex', 'antigravity'] as const) if (!parent.includes(agent)) delete own[agent];
+      return own;
+    });
+  const editSetting = (role: Role, agent: WorkerAgent, key: keyof AgentSettings, value: string) =>
+    setEntry(role, (own) => ({ ...own, [agent]: { ...own[agent], [key]: value } }));
   const savePreset = async () => {
     if (presetLock.current) return;
     presetLock.current = true;
@@ -319,57 +317,69 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
       </button>
     );
   };
-  const holders: Holder[] = [...(Object.keys(state.agents) as Holder[]).sort(), 'claude'];
+  // An older daemon may not know every agent; Claude is always one.
+  const holders = HOLDERS.filter((holder) => holder === 'claude' || holder in state.agents);
+  const holderLabel = (holder: Holder) => holder === 'claude' ? 'Claude (the lead)' : `${state.agents[holder].name}${state.agents[holder].enabled ? '' : ' (disabled)'}`;
   const roleGroup = (role: RoleInfo) => {
     const own = roles[role.role] ?? {};
-    const inherited = role.parent ? resolved[role.parent] : undefined;
-    const following = Boolean(role.parent && !own.agent);
+    const parentLabel = info.find((other) => other.role === role.parent)?.label ?? role.parent;
+    const following = Boolean(role.parent && !own.agents);
     const shown = resolved[role.role];
+    // What a field shows when left blank: the parent's setting for that agent, if the role takes it.
+    const inherited = (agent: WorkerAgent, key: keyof AgentSettings) => (role.parent && resolved[role.parent]?.[agent]?.[key]) || 'Agent default';
+    const workers = (shown?.agents ?? []).filter((holder): holder is WorkerAgent => holder !== 'claude' && holder in state.agents);
     return (
       <section className={styles.group} key={role.role} aria-label={role.label}>
         <header className={styles.groupHead}>
-          <AgentMark agent={shown?.agent ?? 'codex'} size={22} />
+          <AgentMark agent={shown?.agents[0] ?? 'codex'} size={22} />
           <div>
             <h3 className={styles.groupTitle}>{role.label}</h3>
             {state.roleInfo && <p className={styles.footnote}>{role.summary}</p>}
           </div>
         </header>
         <div className={styles.rows}>
-          <label className={styles.row}>
-            <span>Agent</span>
-            <select aria-label={`${role.label} agent`} value={own.agent ?? (role.parent ? '' : shown?.agent ?? '')} onChange={(event) => editRole(role.role, 'agent', event.target.value)}>
-              {role.parent && <option value="">Same as {info.find((other) => other.role === role.parent)?.label ?? role.parent}</option>}
-              {Object.entries(state.agents).sort(([a], [b]) => a.localeCompare(b)).map(([id, agent]) => (
-                <option key={id} value={id}>{agent.name}{agent.enabled ? '' : ' (disabled)'}</option>
-              ))}
-              <option value="claude">Claude (the lead)</option>
-            </select>
-          </label>
+          {role.parent && (
+            <label className={styles.row}>
+              <span>Same as {parentLabel}</span>
+              <input type="checkbox" className={styles.switch} checked={following} onChange={(event) => follow(role, event.target.checked)} />
+            </label>
+          )}
           <div className={styles.row}>
-            <span id={`${role.role}-also`}>Also</span>
-            <span className={styles.chips} role="group" aria-labelledby={`${role.role}-also`}>
-              {holders.filter((holder) => holder !== shown?.agent).map((holder) => (
-                <button
-                  type="button"
-                  key={holder}
-                  className={styles.chip}
-                  aria-pressed={(shown?.also ?? []).includes(holder)}
-                  aria-label={`${role.label} also ${NAMES[holder]}`}
-                  onClick={() => toggleAlso(role, holder)}
-                >
-                  {NAMES[holder]}
-                </button>
-              ))}
+            <span id={`${role.role}-agents`}>Agents</span>
+            <span className={styles.checks} role="group" aria-labelledby={`${role.role}-agents`}>
+              {holders.map((holder) => {
+                const held = shown?.agents.includes(holder) ?? false;
+                return (
+                  <label key={holder} className={styles.check}>
+                    <input
+                      type="checkbox"
+                      aria-label={`${role.label}: ${NAMES[holder]}`}
+                      checked={held}
+                      // A role keeps at least one holder, and a following role shows its parent's.
+                      disabled={following || (held && shown?.agents.length === 1)}
+                      onChange={() => toggleHolder(role, holder)}
+                    />
+                    {holderLabel(holder)}
+                  </label>
+                );
+              })}
             </span>
           </div>
-          <label className={styles.row}>
-            <span>Model</span>
-            <input aria-label={`${role.label} model`} value={own.model ?? ''} placeholder={(following && inherited?.model) || 'Agent default'} onChange={(event) => editRole(role.role, 'model', event.target.value)} />
-          </label>
-          <label className={styles.row}>
-            <span>Reasoning effort</span>
-            <input aria-label={`${role.label} reasoning effort`} value={own.effort ?? ''} placeholder={(following && inherited?.effort) || 'Agent default'} onChange={(event) => editRole(role.role, 'effort', event.target.value)} />
-          </label>
+          {workers.map((agent) => (
+            <Fragment key={agent}>
+              <label className={styles.row}>
+                <span>{NAMES[agent]} model</span>
+                <input aria-label={`${role.label} ${NAMES[agent]} model`} value={own[agent]?.model ?? ''} placeholder={inherited(agent, 'model')} onChange={(event) => editSetting(role.role, agent, 'model', event.target.value)} />
+              </label>
+              {/* Antigravity has no effort setting. */}
+              {agent === 'codex' && (
+                <label className={styles.row}>
+                  <span>{NAMES[agent]} reasoning effort</span>
+                  <input aria-label={`${role.label} ${NAMES[agent]} reasoning effort`} value={own[agent]?.effort ?? ''} placeholder={inherited(agent, 'effort')} onChange={(event) => editSetting(role.role, agent, 'effort', event.target.value)} />
+                </label>
+              )}
+            </Fragment>
+          ))}
         </div>
       </section>
     );
@@ -407,8 +417,8 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
               {kind && info.filter((role) => role.kind === kind).map(roleGroup)}
               {kind && (
                 <p className={styles.footnote}>
-                  The lead picks one of a role's holders for each job, the first by default. Claude means the lead does the work
-                  itself or in a subagent. A role's model and effort apply to its first holder.
+                  The lead picks one of a role's holders for each job, Codex before Antigravity when it names none. Claude means the
+                  lead does the work itself or in a subagent. Each agent's model and effort apply when it takes the role's work.
                 </p>
               )}
               {current === 'presets' && (

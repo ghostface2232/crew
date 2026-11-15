@@ -413,36 +413,41 @@ test('roles settings group every role, let one follow its parent, and save what 
   await openSettings(page);
   const nav = page.getByRole('navigation', { name: 'Settings pages' });
   for (const name of ['Build', 'Review', 'Edit', 'Presets', 'Instructions', 'Crew', 'Other']) await expect(nav.getByRole('button', { name, exact: true })).toBeVisible();
-  const refactor = page.getByLabel('Refactoring agent');
-  await expect(refactor).toHaveValue('');
-  await expect(refactor.locator('option').first()).toHaveText('Same as Implementation');
+  const refactor = page.getByRole('region', { name: 'Refactoring' });
+  await expect(refactor.getByRole('checkbox', { name: 'Same as Implementation' })).toBeChecked();
+  await expect(page.getByRole('checkbox', { name: 'Refactoring: Codex' })).toBeDisabled();
   // A debate cannot be started from New Job, but it can be assigned here.
-  await expect(page.getByLabel('Debate agent')).toBeVisible();
-  await page.getByLabel('Implementation reasoning effort').fill('high');
-  await expect(page.getByLabel('Refactoring reasoning effort')).toHaveAttribute('placeholder', 'high');
+  await expect(page.getByRole('checkbox', { name: 'Debate: Codex' })).toBeVisible();
+  await page.getByLabel('Implementation Codex reasoning effort').fill('high');
+  await expect(page.getByLabel('Refactoring Codex reasoning effort')).toHaveAttribute('placeholder', 'high');
   await settingsPage(page, 'Review');
-  await page.getByLabel('Review that runs the app agent').selectOption('codex');
-  await page.getByLabel('Cross-review agent').selectOption('antigravity');
+  await page.getByRole('region', { name: 'Review that runs the app' }).getByRole('checkbox', { name: 'Same as Cross-review' }).uncheck();
+  await page.getByRole('checkbox', { name: 'Cross-review: Antigravity' }).check();
+  await page.getByRole('checkbox', { name: 'Cross-review: Codex' }).uncheck();
+  // Antigravity has no effort setting.
+  await expect(page.getByLabel('Cross-review Antigravity model')).toBeVisible();
+  await expect(page.getByLabel('Cross-review Antigravity reasoning effort')).toHaveCount(0);
   await page.getByRole('button', { name: 'Save Roles' }).click();
   await expect(page.getByText('Unsaved changes')).toHaveCount(0);
   const calls = await (await request.get('/__requests')).json();
   expect(calls.findLast((call: { route: string }) => call.route === '/api/roles').body).toEqual({
-    roles: { delegate: { effort: 'high' }, verify: { agent: 'codex' }, review: { agent: 'antigravity' } },
+    roles: { delegate: { codex: { effort: 'high' } }, verify: { agents: ['codex'] }, review: { agents: ['antigravity'] } },
   });
   await settingsPage(page, 'Build');
-  await expect(refactor).toHaveValue('');
+  await expect(refactor.getByRole('checkbox', { name: 'Same as Implementation' })).toBeChecked();
 });
 
 test('a setting changed and changed back is no change, and closing then asks nothing', async ({ page }) => {
   await openSettings(page);
-  await page.getByLabel('Implementation reasoning effort').fill('high');
+  await page.getByLabel('Implementation Codex reasoning effort').fill('high');
   await expect(page.getByText('Unsaved changes')).toBeVisible();
-  await page.getByLabel('Implementation reasoning effort').fill('');
-  // A role without a parent shows the agent it resolves to; trying another and choosing it again changes nothing.
-  await page.getByLabel('Implementation agent').selectOption('antigravity');
-  await page.getByLabel('Implementation agent').selectOption('codex');
-  await page.getByLabel('Refactoring agent').selectOption('antigravity');
-  await page.getByLabel('Refactoring agent').selectOption('');
+  await page.getByLabel('Implementation Codex reasoning effort').fill('');
+  // Holders turned on and off again, and a role that stops and starts following its parent, change nothing.
+  await page.getByRole('checkbox', { name: 'Implementation: Antigravity' }).check();
+  await page.getByRole('checkbox', { name: 'Implementation: Antigravity' }).uncheck();
+  const same = page.getByRole('region', { name: 'Refactoring' }).getByRole('checkbox', { name: 'Same as Implementation' });
+  await same.uncheck();
+  await same.check();
   await expect(page.getByText('Unsaved changes')).toHaveCount(0);
   let asked = false;
   page.once('dialog', (dialog) => { asked = true; void dialog.dismiss(); });
@@ -466,43 +471,37 @@ test('on a phone, settings move between the list and a page with focus kept, and
   await expect(page.getByRole('button', { name: 'Show sidebar' })).toBeFocused();
 });
 
-test('a role can hold Claude and further holders, and changing them back is no change', async ({ page, request }) => {
+test('a role can hold Claude and several workers, each with its own settings, and keeps at least one', async ({ page, request }) => {
   await openSettings(page, 'Review');
-  const also = page.getByRole('button', { name: 'Cross-review also Claude' });
-  await expect(also).toHaveAttribute('aria-pressed', 'false');
-  await also.click();
-  await expect(also).toHaveAttribute('aria-pressed', 'true');
+  const claude = page.getByRole('checkbox', { name: 'Cross-review: Claude' });
+  await claude.check();
   await expect(page.getByText('Unsaved changes')).toBeVisible();
-  await also.click();
+  await claude.uncheck();
   await expect(page.getByText('Unsaved changes')).toHaveCount(0);
+  // The only holder cannot be turned off.
+  await expect(page.getByRole('checkbox', { name: 'Cross-review: Codex' })).toBeDisabled();
   // The verify role follows review, its holders included, until it is given its own.
-  await also.click();
-  await expect(page.getByRole('button', { name: 'Review that runs the app also Claude' })).toHaveAttribute('aria-pressed', 'true');
+  await claude.check();
+  await expect(page.getByRole('checkbox', { name: 'Review that runs the app: Claude' })).toBeChecked();
+  await page.getByRole('checkbox', { name: 'Cross-review: Antigravity' }).check();
+  await page.getByLabel('Cross-review Antigravity model').fill('gemini-y');
+  await page.getByLabel('Cross-review Codex model').fill('gpt-x');
+  // Turning an agent off drops its settings.
+  await page.getByRole('checkbox', { name: 'Cross-review: Codex' }).uncheck();
   await settingsPage(page, 'Edit');
-  await page.getByLabel('Wording agent').selectOption('claude');
+  await page.getByRole('checkbox', { name: 'Wording: Claude' }).check();
+  await page.getByRole('checkbox', { name: 'Wording: Antigravity' }).uncheck();
   await page.getByRole('button', { name: 'Save Roles' }).click();
   await expect(page.getByText('Unsaved changes')).toHaveCount(0);
   const calls = await (await request.get('/__requests')).json();
   expect(calls.findLast((call: { route: string }) => call.route === '/api/roles').body).toEqual({
-    roles: { review: { also: ['claude'] }, polish: { agent: 'claude' } },
+    roles: { review: { agents: ['antigravity', 'claude'], antigravity: { model: 'gemini-y' } }, polish: { agents: ['claude'] } },
   });
-});
-
-test('making a further holder the default takes it off the further holders', async ({ page, request }) => {
-  await openSettings(page, 'Review');
-  await page.getByRole('button', { name: 'Cross-review also Claude' }).click();
-  const agent = page.getByLabel('Cross-review agent');
-  await agent.selectOption('claude');
-  await expect(page.getByRole('button', { name: 'Cross-review also Codex' })).toHaveAttribute('aria-pressed', 'false');
-  await page.getByRole('button', { name: 'Save Roles' }).click();
-  await expect(page.getByText('Unsaved changes')).toHaveCount(0);
-  const calls = await (await request.get('/__requests')).json();
-  expect(calls.findLast((call: { route: string }) => call.route === '/api/roles').body).toEqual({ roles: { review: { agent: 'claude' } } });
 });
 
 test('New Job picks among a role\'s worker holders, and a role only Claude holds starts from Claude', async ({ page, request }) => {
   const data = fixture();
-  data.roles = resolveConfig({ roles: { delegate: { agent: 'codex', also: ['antigravity'] }, polish: { agent: 'claude' } } }).roles;
+  data.roles = resolveConfig({ roles: { delegate: { agents: ['codex', 'antigravity'] }, polish: { agents: ['claude'] } } }).roles;
   await request.post('/__push', { data: { type: 'state', data } });
   await newJob(page);
   await page.getByRole('textbox', { name: 'Project directory' }).fill('/workspace/Crew');

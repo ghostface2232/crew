@@ -32,6 +32,7 @@ export interface Notice {
   key: string;
   title: string;
   body: string;
+  /** The detail panel a click opens: a job's id, or `session:<id>` for a Claude session. */
   jobId?: string;
 }
 
@@ -70,7 +71,7 @@ export function planNotifications(previous: PlanMemory, state: Snapshot, options
   }
   for (const session of state.claude) {
     if (session.state === 'waiting') {
-      request({ key: `session:${session.id}:${session.waitingFor ?? ''}`, title: 'Claude needs your input', body: session.waitingFor ?? session.title });
+      request({ key: `session:${session.id}:${session.waitingFor ?? ''}`, title: 'Claude needs your input', body: session.waitingFor ?? session.title, jobId: `session:${session.id}` });
     }
   }
   return {

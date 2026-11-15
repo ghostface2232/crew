@@ -5,10 +5,10 @@ import { Check, ChevronDown, ChevronRight, CircleCheck, CircleX, Ellipsis, Flag,
 import type { BoardJob, ClaudeSession, Mission, PresetName } from './types.ts';
 import { actions, request } from './api.ts';
 import {
-  elapsed, jobLabel, jobRole, missionJobStep, missionLooksFinished, missionProgress, missionStep, missionStopPosition,
+  agentSummary, elapsed, jobLabel, jobRole, missionJobStep, missionLooksFinished, missionProgress, missionStep, missionStopPosition,
   missionStops, NAMES, roleLabel,
 } from './model.ts';
-import { ActionStatus, AgentMark, Chip, Icon, Menu, useAction, useNow } from './ui.tsx';
+import { ActionStatus, AgentMark, Chip, Icon, Menu, useAction, useFade, useNow } from './ui.tsx';
 
 const capitalized = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 export const jobStatusState = (job: BoardJob) => (job.stalled ? 'stalled' : job.state);
@@ -58,11 +58,83 @@ export function JobRow({ job, selected, openJob, showsKind = true, index = 0 }: 
   );
 }
 
+type SessionAgent = ClaudeSession['agents'][number];
+
+/** Sub-agents, each as what it is and what it is doing, with how long it has run. */
+export function SessionAgents({ agents, now, label }: { agents: SessionAgent[]; now: number; label: string }) {
+  return (
+    <ul className="session-agents" aria-label={label}>
+      {agents.map((agent) => (
+        <li key={agent.id}>
+          <span>
+            <span title={agent.title}>{agent.title}</span>
+            <span className="caption secondary" title={agent.phase}>{agent.phase}</span>
+          </span>
+          <span className="caption secondary">{elapsed(now - agent.startedAt)}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * One square per agent of a run, finished ones first and running ones pulsing after them. The total is not known
+ * ahead, so there are no empty squares for agents to come; past STRIP_LIMIT, the oldest finished ones give way to a count.
+ */
+const STRIP_LIMIT = 30;
+function WorkflowStrip({ done, running }: { done: number; running: number }) {
+  const shownRunning = Math.min(running, STRIP_LIMIT);
+  const shownDone = Math.min(done, STRIP_LIMIT - shownRunning);
+  const hidden = done + running - shownDone - shownRunning;
+  return (
+    <span className="workflow-strip" aria-hidden="true">
+      {hidden > 0 && <small>+{hidden}</small>}
+      {Array.from({ length: shownDone }, (_, index) => <i key={`d${index}`} />)}
+      {Array.from({ length: shownRunning }, (_, index) => <i key={`r${index}`} data-running="" style={{ '--i': index } as CSSProperties} />)}
+    </span>
+  );
+}
+
+/** A workflow run, which can hold dozens of agents: the first few by stage, and the rest on request. */
+export function SessionWorkflow({ run, agents, now }: { run: ClaudeSession['workflows'][number]; agents: SessionAgent[]; now: number }) {
+  const [expanded, setExpanded] = useState(false);
+  const fadeName = useFade<HTMLSpanElement>();
+  const visible = expanded ? agents : agents.slice(0, 5);
+  // Grouped after the cut, so the folded view keeps start order across stages; one stage needs no headings.
+  const staged = new Set(agents.map((agent) => agent.stage)).size > 1;
+  const groups = new Map<string, SessionAgent[]>();
+  for (const agent of visible) groups.set(agent.stage ?? '', [...(groups.get(agent.stage ?? '') ?? []), agent]);
+  return (
+    <section className="detail-section session-workflow" aria-label={run.name}>
+      <h3>
+        <span className="fade-line" ref={fadeName} title={run.name}>{run.name}</span>
+        <span className="caption secondary digits">{elapsed((agents.length ? now : run.activeAt) - run.startedAt)}</span>
+      </h3>
+      <p className="session-workflow-counts caption secondary">
+        <WorkflowStrip done={run.done} running={agents.length} />
+        <span>{agents.length} running · {run.done} done</span>
+      </p>
+      {agents.length === 0 && <p className="callout secondary">No agent running: between phases, or finished.</p>}
+      {[...groups].map(([stage, group]) => (
+        <div className="session-stage" key={stage}>
+          {staged && stage && <p className="caption secondary" title={stage}>{stage}</p>}
+          <SessionAgents agents={group} now={now} label={staged && stage ? `${run.name}: ${stage}` : run.name} />
+        </div>
+      ))}
+      {agents.length > 5 && (
+        <button className="reveal-toggle" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
+          {expanded ? 'Show fewer agents' : `Show all ${agents.length} agents`}
+        </button>
+      )}
+    </section>
+  );
+}
+
 /** A Claude session as a row like a job's, opening its own detail panel. */
 export function SessionRow({ session, selected, openSession }: { session: ClaudeSession; selected?: boolean; openSession: (id: string) => void }) {
   const now = useNow();
   // The mark names the agent, so the detail line says only what the session is doing.
-  const detail = [session.waitingFor ?? (session.state === 'idle' ? null : session.phase), session.inTool ? 'Running a tool' : null]
+  const detail = [session.waitingFor ?? (session.state === 'idle' ? null : session.phase), session.inTool ? 'Running a tool' : null, agentSummary(session)]
     .filter(Boolean).join(' · ');
   return (
     <button
@@ -185,6 +257,8 @@ export function MissionPanel({
   // A daemon without the role registry ignores a mission's preset.
   const presets = Boolean(board.getSnapshot().roleInfo);
   const finished = missionLooksFinished(mission, allJobs, now, lead);
+  const fadeTitle = useFade<HTMLHeadingElement>();
+  const fadeMeta = useFade<HTMLParagraphElement>();
   const presetName = PRESETS.find(([preset]) => preset === (mission.preset ?? null))?.[1] ?? 'Global';
   return (
     <section
@@ -206,8 +280,8 @@ export function MissionPanel({
       >
         <span className="mission-icon" aria-hidden="true"><Icon icon={Flag} size={14} /></span>
         <div className="mission-heading">
-          <h2 className="title selectable fade-line" title={mission.title}>{mission.title}</h2>
-          <p className="mission-meta fade-line" title={mission.root}>{meta}</p>
+          <h2 className="title selectable fade-line" ref={fadeTitle} title={mission.title}>{mission.title}</h2>
+          <p className="mission-meta fade-line" ref={fadeMeta} title={mission.root}>{meta}</p>
         </div>
         <span className="mission-progress digits" title="Mission progress" style={{ '--progress': progress } as CSSProperties}>
           {Math.round(progress * 100)}%

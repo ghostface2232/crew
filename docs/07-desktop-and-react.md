@@ -101,7 +101,7 @@ The original 79 tests and typecheck passed before migration. The final unit suit
 npm test
 npm run typecheck
 npm run build:desktop
-npx playwright install chromium webkit
+npx playwright install chromium
 npm run test:e2e
 node scripts/smoke-desktop.mjs
 ```

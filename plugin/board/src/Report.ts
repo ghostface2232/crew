@@ -48,8 +48,9 @@ export function inlineMarkdown(text: string): InlineNode[] {
   }
   function underscoreBoundary(start: number, length: number, opening: boolean): boolean {
     if (text[start - 1] === '_' || text[start + length] === '_') return false;
-    const before = Array.from(text.slice(0, start)).at(-1) ?? '';
-    const after = Array.from(text.slice(start + length))[0] ?? '';
+    // Only the neighboring code points matter; two code units cover a surrogate pair.
+    const before = Array.from(text.slice(Math.max(0, start - 2), start)).at(-1) ?? '';
+    const after = Array.from(text.slice(start + length, start + length + 2))[0] ?? '';
     const beforeSpace = !before || /\s/u.test(before);
     const afterSpace = !after || /\s/u.test(after);
     const beforePunctuation = /[\p{P}\p{S}]/u.test(before);

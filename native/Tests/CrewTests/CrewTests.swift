@@ -419,6 +419,16 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
         session.waitingId = "second"
         #expect(session.notificationKey != key)
     }
+    @Test func sessionSummarizesItsSubAgentsAndWorkflows() throws {
+        var session = try fixture().claude[0]
+        #expect(session.agentSummary == nil)
+        let agent = SubAgent(id: "a", type: "Explore", title: "Find it", phase: "started", startedAt: 0)
+        session.agents = [agent, { var a = agent; a.id = "w1"; a.workflow = "wf"; return a }(), { var a = agent; a.id = "w2"; a.workflow = "wf"; return a }()]
+        session.workflows = [WorkflowRun(id: "wf", name: "review", startedAt: 0, activeAt: 0, done: 3)]
+        #expect(session.agentSummary == "1 sub-agent · review 2 running")
+        session.agents = [agent, agent]
+        #expect(session.agentSummary == "2 sub-agents")
+    }
 }
 
 private final class MockProtocol: URLProtocol, @unchecked Sendable {

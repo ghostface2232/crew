@@ -513,3 +513,18 @@ export function CopyMenu({ text, label, children }: { text: string; label: strin
     </div>
   );
 }
+/**
+ * A ref for one line of text that fades at its end only when it is cut, as the app's fadeTruncated does; text
+ * that fits keeps every letter.
+ */
+export function useFade<T extends HTMLElement>() {
+  const observer = useRef<ResizeObserver>(null);
+  return (element: T | null) => {
+    observer.current?.disconnect();
+    if (!element) return;
+    const check = () => element.toggleAttribute('data-cut', element.scrollWidth > element.clientWidth + 1);
+    observer.current = new ResizeObserver(check);
+    observer.current.observe(element);
+    check();
+  };
+}

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import {
   ArrowRight, ArrowUpRight, ChevronDown, ChevronUp, CircleAlert, CircleCheck, CircleDot, Layers, MessagesSquare, Plus, Search,
@@ -11,7 +11,7 @@ import {
   dailyCounts, elapsed, endedPerHour, holdersOf, jobLabel, NAMES, projectOf, relativeDuration, rolesOf, runningPerHour,
   usageWindowName, unsettled,
 } from './model.ts';
-import { AgentMark, Chip, EmptyState, Icon, RollingNumber, useNow } from './ui.tsx';
+import { AgentMark, Chip, EmptyState, Icon, RollingNumber, useFade, useNow } from './ui.tsx';
 import { JobRow, jobKind, jobStatusState, MissionPanel, SessionRow } from './Missions.tsx';
 
 export interface Scope {
@@ -73,7 +73,7 @@ export function Kpis({ state, project }: { state: Snapshot; project: string }) {
     // Lead sessions count like jobs, as they already do under Needs you.
     { label: 'In progress', state: 'working', count: jobs.filter((job) => job.state === 'running').length + sessions.filter((session) => session.state === 'working').length,
       spark: runningPerHour(jobs, now), unit: 'running', foot: `${sessions.filter((session) => session.state === 'working').length} lead sessions` },
-    { label: 'Needs you', state: 'waiting', count: waiting.length, foot: waiting.length ? `Oldest waiting ${elapsed(now - Math.min(...waiting))}` : 'Nothing waiting' },
+    { label: 'Needs you', state: 'waiting', count: waiting.length, marks: [...jobs.filter((job) => job.state === 'waiting').map((job) => job.agent), ...sessions.filter((session) => session.state === 'waiting').map(() => 'claude')], foot: waiting.length ? `Oldest waiting ${elapsed(now - Math.min(...waiting))}` : 'Nothing waiting' },
     // Settled jobs stay in the list but leave the totals, which would otherwise only grow.
     { label: 'Finished', state: 'done', count: jobs.filter((job) => job.state === 'done' && unsettled(job)).length,
       spark: endedPerHour(jobs, 'done', now), unit: 'finished', foot: `${jobs.filter((job) => job.state === 'done').length} in all` },
@@ -90,7 +90,13 @@ export function Kpis({ state, project }: { state: Snapshot; project: string }) {
             <span className="label">{metric.label}</span>
             <div className="kpi-figure">
               <RollingNumber value={metric.count} className="kpi-number" />
-              {metric.spark ? <Spark values={metric.spark} label={metric.unit!} /> : <span className="kpi-pulse" aria-hidden="true" />}
+              {metric.spark ? <Spark values={metric.spark} label={metric.unit!} /> : (
+                // Who is waiting, one mark per request.
+                <span className="kpi-marks" aria-hidden="true">
+                  {metric.marks!.slice(0, 4).map((agent, index) => <span key={index} style={{ '--i': index } as CSSProperties}><AgentMark agent={agent} size={14} /></span>)}
+                  {metric.marks!.length > 4 && <span className="kpi-more">+{metric.marks!.length - 4}</span>}
+                </span>
+              )}
             </div>
             <span className="kpi-foot">{metric.foot}</span>
           </li>
@@ -196,6 +202,11 @@ function agentActivity(state: Snapshot, project: string, agent: string) {
   return { line, mark, title };
 }
 
+function FadeCaption({ text }: { text: string }) {
+  const fade = useFade<HTMLParagraphElement>();
+  return <p className="caption fade-line" ref={fade} title={text}>{text}</p>;
+}
+
 export function AgentPanel({ state, project }: { state: Snapshot; project: string }) {
   const agents = ['claude', ...(['codex', 'antigravity'] as const).filter((agent) => state.agents[agent])];
   const measured = state.usage != null && state.usage.source !== 'none';
@@ -221,7 +232,7 @@ export function AgentPanel({ state, project }: { state: Snapshot; project: strin
                 <span className="agent-avatar" data-state={mark}><AgentMark agent={agent} size={18} /></span>
                 <div>
                   <h3 className="card-title">{NAMES[agent as keyof typeof NAMES]}</h3>
-                  <p className="caption fade-line" title={role}>{role}</p>
+                  <FadeCaption text={role} />
                 </div>
                 <Chip state={mark}>{title}</Chip>
               </div>
@@ -246,6 +257,11 @@ export function Heatmap({ times, weeks, label }: { times: number[]; weeks: numbe
   const days = useMemo(() => dailyCounts(times, now, weeks), [times, Math.floor(now / 3_600_000), weeks]);
   const [at, setAt] = useState<number | null>(null);
   const grid = useRef<HTMLDivElement>(null);
+  const frame = useRef<HTMLDivElement>(null);
+  // The newest weeks are the ones to see; a narrow card scrolls back for the older ones.
+  useLayoutEffect(() => {
+    if (frame.current) frame.current.scrollLeft = frame.current.scrollWidth;
+  }, [weeks, days.length]);
   const max = Math.max(1, ...days.map((day) => day.count));
   const total = days.reduce((sum, day) => sum + day.count, 0);
   const months = days
@@ -256,6 +272,7 @@ export function Heatmap({ times, weeks, label }: { times: number[]; weeks: numbe
   return (
     <div className="heatmap" style={{ '--weeks': weeks } as CSSProperties}>
       <p className="heatmap-sum"><b className="digits">{total.toLocaleString()}</b> {label} in {weeks} weeks</p>
+      <div className="heatmap-frame" ref={frame}>
       <div className="heatmap-months" aria-hidden="true">
         {months.map((month) => <span key={month.column} style={{ '--col': month.column } as CSSProperties}>{month.name}</span>)}
       </div>
@@ -277,6 +294,7 @@ export function Heatmap({ times, weeks, label }: { times: number[]; weeks: numbe
             </span>
           )}
         </div>
+      </div>
       </div>
       <div className="heatmap-scale" aria-hidden="true">
         Less {[0, 1, 2, 3, 4].map((level) => <i key={level} data-level={level} />)} More
@@ -430,7 +448,7 @@ export function Workspace({ state, project, names, selected, openJob, openSessio
         <aside className="dash-side" aria-label="Agents and activity">
           <AgentPanel state={state} project={project} />
           <Panel label="Rhythm">
-            <Heatmap times={jobs.map((job) => job.createdAt)} weeks={17} label="jobs" />
+            <Heatmap times={jobs.map((job) => job.createdAt)} weeks={19} label="jobs" />
           </Panel>
           <Panel label="Live feed" action={<button className="link" onClick={() => openPage('activity')}>All <Icon icon={ArrowRight} size={12} /></button>}>
             {events.length ? <EventList events={events} openJob={openJob} limit={6} /> : <p className="secondary caption">Nothing has happened yet.</p>}
@@ -510,7 +528,7 @@ export function History({ state, project, names, selected, openJob, openSession 
               </thead>
               <tbody>
                 {rows.map((job, index) => (
-                  <tr key={job.id} aria-current={selected === job.id || undefined} style={{ '--i': Math.min(index, 16) } as CSSProperties} onClick={() => openJob(job.id)}>
+                  <tr key={job.id} data-opens-panel="" aria-current={selected === job.id || undefined} style={{ '--i': Math.min(index, 16) } as CSSProperties} onClick={() => openJob(job.id)}>
                     <td>
                       <button className="cell-title" data-job={job.id} data-opens-panel="" onClick={(event) => { event.stopPropagation(); openJob(job.id); }}>
                         <b>{job.title}</b>

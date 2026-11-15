@@ -326,6 +326,16 @@ struct SessionDetailView: View {
             fact("Last active", "\(elapsed(store.now - session.activeAt)) ago")
             if session.inTool { fact("Now", "Running a tool") }
         }.font(Typeface.callout).textSelection(.enabled).inset()
+        let agents = session.agents ?? []
+        let plain = agents.filter { $0.workflow == nil }
+        if !plain.isEmpty {
+            detailSection("Sub-agents", symbol: "person.2") {
+                ForEach(plain) { SubAgentRow(agent: $0, store: store) }
+            }
+        }
+        ForEach(session.workflows ?? []) { run in
+            WorkflowRunSection(run: run, agents: agents.filter { $0.workflow == run.id }, store: store)
+        }
         let missions = store.state.missions.filter { $0.owner == session.id }.sorted { $0.createdAt > $1.createdAt }
         if !missions.isEmpty {
             detailSection("Missions", symbol: "flag") {
@@ -341,6 +351,98 @@ struct SessionDetailView: View {
         DetailFooter(id: session.id) {
             CopyButton(title: "Resume command", text: "claude --resume \(session.id)", help: "Copy the command that resumes this session")
         }
+    }
+}
+
+/// A sub-agent as one line of what it is and one of what it is doing.
+private struct SubAgentRow: View {
+    let agent: SubAgent
+    let store: CrewStore
+    var body: some View {
+        HStack(spacing: Space.ml) {
+            VStack(alignment: .leading, spacing: Space.xxs) {
+                Text(agent.title).font(Typeface.callout).lineLimit(1)
+                Text(agent.phase).font(Typeface.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: WorkspaceStyle.rowSpacer)
+            ElapsedText(store: store, start: agent.startedAt, end: nil)
+                .monospacedDigit().font(Typeface.caption).foregroundStyle(.secondary)
+        }.accessibilityElement(children: .combine)
+    }
+}
+
+/// A workflow run, which can hold dozens of agents: the first few by stage, and the rest on request.
+private struct WorkflowRunSection: View {
+    let run: WorkflowRun
+    let agents: [SubAgent]
+    let store: CrewStore
+    @State private var shown = false
+    private static let folded = 5
+    private struct Stage: Identifiable { var id: String?; var agents: [SubAgent] }
+    /// Stages in the order their first agent started.
+    private func stages(_ agents: [SubAgent]) -> [Stage] {
+        var out: [Stage] = []
+        for agent in agents {
+            if let index = out.firstIndex(where: { $0.id == agent.stage }) { out[index].agents.append(agent) } else { out.append(Stage(id: agent.stage, agents: [agent])) }
+        }
+        return out
+    }
+    var body: some View {
+        detailSection(run.name, symbol: "point.3.connected.trianglepath.dotted", content: {
+            HStack(spacing: Space.ml) {
+                WorkflowStrip(done: run.done, running: agents.count)
+                Text("\(agents.count) running · \(run.done) done").font(Typeface.caption).monospacedDigit().foregroundStyle(.secondary).fixedSize()
+            }
+            if agents.isEmpty {
+                Text("No agent running: between phases, or finished.").font(Typeface.callout).foregroundStyle(.secondary)
+            } else {
+                // Grouped after the cut, so the folded view keeps start order across stages.
+                let groups = stages(shown ? agents : Array(agents.prefix(Self.folded)))
+                // A run in one stage needs no stage headings.
+                let staged = Set(agents.map(\.stage)).count > 1
+                ForEach(groups) { stage in
+                    if staged, let name = stage.id {
+                        Text(name).font(Typeface.captionStrong).foregroundStyle(.secondary)
+                    }
+                    ForEach(stage.agents) { SubAgentRow(agent: $0, store: store) }
+                }
+                if agents.count > Self.folded { RevealToggle(show: "Show all \(agents.count)", subject: run.name, shown: $shown) }
+            }
+        }) {
+            ElapsedText(store: store, start: run.startedAt, end: agents.isEmpty ? run.activeAt : nil)
+                .monospacedDigit().font(Typeface.caption).foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// One square per agent of a run, finished ones first and running ones pulsing after them. The total is not known ahead,
+/// so there are no empty squares for agents to come; past `limit` squares, the oldest finished ones give way to a count.
+private struct WorkflowStrip: View {
+    let done: Int
+    let running: Int
+    private static let limit = 30
+    private static let side: CGFloat = 7
+    @State private var dim = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var body: some View {
+        let shownRunning = min(running, Self.limit)
+        let shownDone = min(done, Self.limit - shownRunning)
+        let hidden = done + running - shownDone - shownRunning
+        HStack(spacing: Space.xxs) {
+            if hidden > 0 { Text("+\(hidden)").font(Typeface.micro).monospacedDigit().foregroundStyle(.secondary).padding(.trailing, Space.xxs) }
+            ForEach(0..<shownDone, id: \.self) { _ in square(.secondary.opacity(0.35)) }
+            HStack(spacing: Space.xxs) {
+                ForEach(0..<shownRunning, id: \.self) { _ in square(Palette.accent) }
+            }.opacity(dim ? 0.45 : 1)
+        }
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { dim = true }
+        }
+        .accessibilityHidden(true)
+    }
+    private func square(_ fill: some ShapeStyle) -> some View {
+        RoundedRectangle(cornerRadius: 2, style: .continuous).fill(fill).frame(width: Self.side, height: Self.side)
     }
 }
 

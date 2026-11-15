@@ -10,77 +10,80 @@
 
 :root {
   color-scheme: light dark;
-  --canvas: #f2f2ef;
+  /* The Mac app's tokens (native/Sources/Crew/DesignTokens.swift): WorkspaceStyle surfaces, system colors, Space. */
+  --canvas: #f4f4f6;
   --surface: #fff;
-  --surface-2: #f7f7f4;
+  /* WorkspaceStyle.rowFill: rows and insets inside a card. */
+  --surface-2: rgb(0 0 0 / 0.04);
   --sidebar: transparent;
-  --row: rgb(19 19 22 / 0.035);
-  --hairline: rgb(19 19 22 / 0.08);
-  --hairline-strong: rgb(19 19 22 / 0.14);
-  --fill: rgb(19 19 22 / 0.05);
-  --fill-strong: rgb(19 19 22 / 0.085);
-  --label: #131316;
-  --secondary: rgb(19 19 22 / 0.56);
-  --tertiary: rgb(19 19 22 / 0.36);
-  --quaternary: rgb(19 19 22 / 0.09);
-  /* The strongest control: ink on paper here, a lime highlight in the dark. */
-  --ink: #131316;
+  --row: rgb(0 0 0 / 0.04);
+  --hairline: rgb(0 0 0 / 0.08);
+  --hairline-strong: rgb(0 0 0 / 0.13);
+  /* Pill.fill */
+  --fill: rgb(0 0 0 / 0.06);
+  --fill-strong: rgb(0 0 0 / 0.1);
+  --label: rgb(0 0 0 / 0.85);
+  --secondary: rgb(0 0 0 / 0.5);
+  --tertiary: rgb(0 0 0 / 0.28);
+  --quaternary: rgb(0 0 0 / 0.1);
+  /* Palette.accent: the prominent control, as the app's prominent pills are. */
+  --accent: #007aff;
+  --ink: var(--accent);
   --on-ink: #fff;
-  --accent: #4655f0;
-  --orange: #ee6a12;
-  --red: #e2434b;
-  --green: #17955a;
-  /* Status text is darkened in light mode so it reaches about 3:1 on its own tint. */
-  --tone-darken: 18%;
-  --heat-0: rgb(19 19 22 / 0.06);
-  --heat-1: rgb(19 19 22 / 0.16);
-  --heat-2: rgb(19 19 22 / 0.32);
-  --heat-3: rgb(19 19 22 / 0.58);
-  --heat-4: #131316;
-  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.03);
-  --shadow-pop: 0 0 0 1px var(--hairline), 0 24px 60px -18px rgb(0 0 0 / 0.28), 0 8px 20px -10px rgb(0 0 0 / 0.12);
+  --orange: #ff9500;
+  --red: #ff3b30;
+  --green: #34c759;
+  /* Status text is darkened in light mode so it reaches about 3:1 on its own tint, as on the app's chips. */
+  --tone-darken: 22%;
+  --heat-0: rgb(0 0 0 / 0.05);
+  --heat-1: color-mix(in srgb, var(--accent) 22%, transparent);
+  --heat-2: color-mix(in srgb, var(--accent) 45%, transparent);
+  --heat-3: color-mix(in srgb, var(--accent) 72%, transparent);
+  --heat-4: var(--accent);
+  --shadow-card: 0 0 0 transparent;
+  /* Palette.panelShadow, cast down and away from the edge the panel floats beside. */
+  --shadow-pop: 0 0 0 1px var(--hairline), -8px 8px 26px rgb(0 0 0 / 0.14);
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  /* Space and WorkspaceStyle layout */
+  --page-margin: 40px;
   --card-padding: 20px;
-  --card-gap: 14px;
+  --card-gap: 16px;
+  --panel-padding: 24px;
+  --section-gap: 28px;
   --card-radius: 20px;
   --row-radius: 12px;
-  --field-radius: 12px;
-  --panel-radius: 22px;
-  --sidebar-width: 248px;
-  --text-face: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
-  --display: var(--text-face);
-  --rounded: var(--text-face);
+  --field-radius: 14px;
+  --panel-radius: 18px;
+  --window-inset: 8px;
+  --sidebar-width: 232px;
+  /* Typeface: titles and numbers in SF Pro Rounded, the rest in SF Pro. */
+  --text-face: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --display: "SF Pro Display", -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI Variable Display", system-ui, sans-serif;
+  --rounded: ui-rounded, "SF Pro Rounded", -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
   --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, "Cascadia Mono", Consolas, monospace;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --canvas: #0c0c0e;
-    --surface: #151518;
-    --surface-2: #1b1b1f;
-    --row: rgb(255 255 255 / 0.035);
-    --hairline: rgb(255 255 255 / 0.075);
-    --hairline-strong: rgb(255 255 255 / 0.13);
-    --fill: rgb(255 255 255 / 0.06);
-    --fill-strong: rgb(255 255 255 / 0.1);
-    --label: rgb(255 255 255 / 0.93);
-    --secondary: rgb(255 255 255 / 0.56);
-    --tertiary: rgb(255 255 255 / 0.34);
-    --quaternary: rgb(255 255 255 / 0.09);
-    --ink: #dcf25a;
-    --on-ink: #11130a;
-    --accent: #7c86ff;
-    --orange: #ff8a3d;
-    --red: #ff6168;
-    --green: #3ccf8c;
+    --canvas: #121213;
+    --surface: #292929;
+    --surface-2: rgb(255 255 255 / 0.06);
+    --row: rgb(255 255 255 / 0.06);
+    --hairline: rgb(255 255 255 / 0.08);
+    --hairline-strong: rgb(255 255 255 / 0.14);
+    --fill: rgb(255 255 255 / 0.08);
+    --fill-strong: rgb(255 255 255 / 0.13);
+    --label: rgb(255 255 255 / 0.88);
+    --secondary: rgb(255 255 255 / 0.55);
+    --tertiary: rgb(255 255 255 / 0.3);
+    --quaternary: rgb(255 255 255 / 0.12);
+    --accent: #0a84ff;
+    --orange: #ff9f0a;
+    --red: #ff453a;
+    --green: #30d158;
     --tone-darken: 0%;
-    --heat-0: rgb(255 255 255 / 0.05);
-    --heat-1: rgb(220 242 90 / 0.18);
-    --heat-2: rgb(220 242 90 / 0.36);
-    --heat-3: rgb(220 242 90 / 0.62);
-    --heat-4: #dcf25a;
-    --shadow-card: 0 1px 0 rgb(255 255 255 / 0.03) inset;
-    --shadow-pop: 0 0 0 1px var(--hairline-strong), 0 28px 70px -18px rgb(0 0 0 / 0.7);
+    --heat-0: rgb(255 255 255 / 0.06);
+    --shadow-pop: 0 0 0 1px var(--hairline-strong), -8px 8px 26px rgb(0 0 0 / 0.4);
   }
 }
 @media (prefers-contrast: more) {
@@ -94,7 +97,6 @@ body {
   background: var(--canvas);
   color: var(--label);
   font: 13px/1.45 var(--text-face);
-  font-feature-settings: "cv11", "ss03";
   font-synthesis: none;
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
@@ -122,9 +124,9 @@ kbd {
 ::selection { background: color-mix(in srgb, var(--accent) 22%, transparent); }
 
 /* --- Type --- */
-.page-title { font: 600 34px/1.08 var(--display); letter-spacing: -0.03em; }
-.title { font: 600 16px/1.3 var(--display); letter-spacing: -0.01em; }
-.card-title { font: 600 14px/1.3 var(--display); }
+.page-title { font: 600 38px/1.1 var(--rounded); letter-spacing: -0.01em; }
+.title { font: 600 17px/1.28 var(--rounded); }
+.card-title { font: 600 15px/1.28 var(--rounded); }
 .headline { font: 500 15px/1.45 var(--display); letter-spacing: -0.005em; }
 .label { color: var(--secondary); font: 500 10.5px/1.2 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
 .callout { font-size: 12.5px; }
@@ -137,10 +139,9 @@ kbd {
 .digits { font-variant-numeric: tabular-nums; }
 .selectable { -webkit-user-select: text; user-select: text; }
 .error { color: var(--red); }
-/* One line that fades at its end instead of an ellipsis, as the app truncates titles. */
-.fade-line {
-  overflow: hidden;
-  white-space: nowrap;
+/* One line that fades at its end instead of an ellipsis, as the app truncates titles: only once it is cut. */
+.fade-line { overflow: hidden; white-space: nowrap; }
+.fade-line[data-cut] {
   -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent);
   mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent);
 }
@@ -350,9 +351,9 @@ dialog.sheet::backdrop { background: rgb(10 10 12 / 0.28); -webkit-backdrop-filt
 /* The detail panel: a card over the page's right edge that leaves the page usable beside it. */
 dialog.detail-panel {
   position: fixed;
-  inset: 64px 16px 16px auto;
+  inset: 64px var(--window-inset) var(--window-inset) auto;
   z-index: 6;
-  width: min(var(--panel-width, 440px), calc(100vw - 32px));
+  width: min(var(--panel-width, 420px), calc(100vw - 2 * var(--window-inset)));
   height: auto;
   max-height: none;
   margin: 0;
@@ -393,7 +394,7 @@ html[data-resizing] dialog.detail-panel { transition: none; }
   z-index: 1;
   display: grid;
   gap: 8px;
-  padding: 16px 20px 14px 22px;
+  padding: 18px var(--panel-padding) 12px;
   border-radius: var(--panel-radius) var(--panel-radius) 0 0;
   transition: box-shadow 200ms ease-out, background-color 200ms ease-out;
 }
@@ -404,24 +405,23 @@ html[data-resizing] dialog.detail-panel { transition: none; }
   box-shadow: 0 1px 0 var(--hairline);
 }
 .detail-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.detail-heading { font-size: 18px; letter-spacing: -0.015em; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; outline: 0; }
+.detail-heading { font-size: 19px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; outline: 0; }
 .detail-subtitle { font-size: 12px; overflow-wrap: anywhere; }
-.detail-scroll { flex: 1; min-height: 0; overflow-y: auto; display: grid; align-content: start; gap: 24px; padding: 6px 22px 22px; border-radius: 0 0 var(--panel-radius) var(--panel-radius); }
+.detail-scroll { flex: 1; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: var(--section-gap); padding: 4px var(--panel-padding) var(--panel-padding); border-radius: 0 0 var(--panel-radius) var(--panel-radius); }
 .detail-title { display: grid; gap: 8px; }
 .detail-title p { font-size: 12px; overflow-wrap: anywhere; }
 .facts {
   display: grid;
   grid-template-columns: minmax(72px, auto) minmax(0, 1fr);
   gap: 9px 16px;
-  padding: 14px 16px;
-  border-radius: 14px;
+  padding: 12px;
+  border-radius: var(--row-radius);
   background: var(--surface-2);
-  box-shadow: inset 0 0 0 1px var(--hairline);
   font-size: 12px;
 }
 .facts dt { color: var(--secondary); }
 .facts dd { overflow-wrap: anywhere; white-space: pre-wrap; }
-.detail-section { display: grid; gap: 12px; }
+.detail-section { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; min-width: 0; }
 .detail-section > h3 { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; font-size: 13px; font-weight: 600; }
 .detail-section > h3 svg { width: 14px; height: 14px; color: var(--secondary); }
 .detail-section pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
@@ -476,7 +476,6 @@ html[data-resizing] dialog.detail-panel { transition: none; }
 .detail-foot .copy-menu { flex: 1 1 80px; min-width: 80px; }
 .detail-id { display: block; color: var(--tertiary); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
 .detail-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-inline-start: auto; }
-.session-mark { display: inline-flex; color: var(--secondary); }
 .copy-button { background: var(--fill); }
 
 /* Debates: rounds that fold to their heading and stances, the lead's voice on an accent edge. */
@@ -511,6 +510,27 @@ dialog.detail-panel { container: panel / inline-size; }
 .answering { display: flex; align-items: center; gap: 8px; }
 .dots { width: 18px; height: 6px; background: radial-gradient(circle, currentColor 2px, transparent 2.5px) 0 50% / 6px 6px repeat-x; animation: dots 1.2s steps(4) infinite; clip-path: inset(0 100% 0 0); }
 @keyframes dots { to { clip-path: inset(0 -6px 0 0); } }
+
+/* A session's sub-agents and workflow runs, in its detail panel. */
+.session-agents { display: grid; gap: 8px; margin: 0; padding: 12px; border-radius: var(--row-radius); background: var(--surface-2); list-style: none; }
+.session-agents > li { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; min-width: 0; }
+.session-agents > li > span:first-child { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; flex: 1; min-width: 0; font-size: 12.5px; }
+.session-agents > li > span:first-child > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-agents > li > span:last-child { flex: none; font-variant-numeric: tabular-nums; }
+.session-workflow > h3 { flex-wrap: nowrap; justify-content: space-between; }
+.session-workflow > h3 > span:first-child { min-width: 0; }
+.session-workflow-counts { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.session-workflow-counts > span:last-child { flex: none; font-variant-numeric: tabular-nums; }
+.session-stage { display: grid; gap: 6px; min-width: 0; }
+.session-stage > p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.workflow-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; min-width: 0; }
+.workflow-strip > i { width: 7px; height: 7px; border-radius: 2px; background: color-mix(in srgb, var(--secondary) 45%, transparent); animation: fade 400ms ease-out both; }
+.workflow-strip > i[data-running] { background: var(--accent); }
+.workflow-strip > small { margin-inline-end: 2px; font-size: 10px; font-weight: 600; color: var(--secondary); font-variant-numeric: tabular-nums; }
+@media (prefers-reduced-motion: no-preference) {
+  .workflow-strip > i[data-running] { animation: strip-pulse 1.8s var(--ease-in-out) infinite; animation-delay: calc(var(--i, 0) * 60ms); }
+}
+@keyframes strip-pulse { 50% { opacity: 0.45; } }
 
 /* --- Shell: sidebar, top bar, page --- */
 .app { display: grid; grid-template-columns: var(--sidebar-width) minmax(0, 1fr); min-height: 100vh; }
@@ -631,7 +651,7 @@ dialog.detail-panel { container: panel / inline-size; }
   align-items: center;
   gap: 10px;
   min-height: 60px;
-  padding: 12px 28px;
+  padding: 12px max(var(--page-margin), calc((100% - 1400px) / 2));
   background: color-mix(in srgb, var(--canvas) 80%, transparent);
   -webkit-backdrop-filter: blur(20px) saturate(1.5);
   backdrop-filter: blur(20px) saturate(1.5);
@@ -676,14 +696,14 @@ dialog.detail-panel { container: panel / inline-size; }
   flex-direction: column;
   gap: var(--card-gap);
   width: 100%;
-  max-width: 1480px;
+  max-width: calc(1400px + 2 * var(--page-margin));
   margin: 0 auto;
-  padding: 6px 28px 56px;
+  padding: 0 var(--page-margin) var(--page-margin);
 }
 .banner { display: flex; align-items: center; gap: 10px; padding: 12px 14px 12px 16px; border-radius: 14px; background: color-mix(in srgb, var(--orange) 10%, transparent); color: color-mix(in srgb, var(--orange), black var(--tone-darken)); font-size: 12.5px; animation: reveal 400ms var(--ease-out); }
 .banner > span { flex: 1; overflow-wrap: anywhere; }
 .banner svg { flex: none; width: 15px; height: 15px; }
-.page-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px 24px; padding: 14px 2px 10px; animation: rise 520ms var(--ease-out) both; }
+.page-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px 24px; padding: 12px 6px 8px; animation: rise 520ms var(--ease-out) both; }
 .page-head-copy { display: grid; gap: 8px; min-width: 0; }
 .page-head-copy .page-title { overflow-wrap: anywhere; }
 .eyebrow { display: flex; align-items: center; gap: 6px; color: var(--secondary); font-size: 12.5px; }
@@ -720,7 +740,7 @@ dialog.detail-panel { container: panel / inline-size; }
 .kpi .label::before { content: ""; width: 6px; height: 6px; border-radius: 2px; background: var(--tone); }
 .kpi[data-zero] .label::before { background: var(--quaternary); }
 .kpi-figure { display: flex; align-items: flex-end; justify-content: space-between; gap: 14px; min-height: 46px; }
-.kpi-number { font: 500 46px/1 var(--display); letter-spacing: -0.04em; }
+.kpi-number { font: 400 40px/1 var(--rounded); }
 .kpi[data-zero] .kpi-number { color: var(--tertiary); }
 .kpi-foot { color: var(--secondary); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .spark { position: relative; flex: 0 1 132px; display: flex; align-items: flex-end; gap: 2px; height: 36px; min-width: 60px; }
@@ -754,9 +774,10 @@ dialog.detail-panel { container: panel / inline-size; }
   transition: left 140ms var(--ease-out);
   animation: fade 160ms ease-out;
 }
-.kpi-pulse { width: 46px; height: 46px; border-radius: 50%; background: radial-gradient(circle, color-mix(in srgb, var(--tone) 40%, transparent) 0 6px, transparent 7px); }
-.kpi:not([data-zero]) .kpi-pulse { animation: halo 2.6s var(--ease-in-out) infinite; }
-@keyframes halo { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--tone) 28%, transparent); } 50% { box-shadow: 0 0 0 12px color-mix(in srgb, var(--tone) 0%, transparent); } }
+.kpi-marks { display: flex; align-items: center; padding-bottom: 4px; }
+.kpi-marks > span { display: grid; place-items: center; width: 30px; height: 30px; margin-inline-start: -8px; border-radius: 50%; background: var(--surface); box-shadow: 0 0 0 2px var(--surface), inset 0 0 0 1px color-mix(in srgb, var(--tone) 40%, transparent); color: var(--label); animation: swap 420ms var(--ease-out) both; animation-delay: calc(var(--i, 0) * 60ms + 200ms); }
+.kpi-marks > span:first-child { margin-inline-start: 0; }
+.kpi-marks > .kpi-more { color: var(--secondary); font-size: 11px; font-weight: 600; }
 .share { display: grid; gap: 10px; padding: 14px 22px 18px; border-top: 1px solid var(--hairline); }
 .share-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; font-size: 12px; color: var(--secondary); }
 .share-legend > span { display: inline-flex; align-items: center; gap: 6px; }
@@ -802,7 +823,7 @@ dialog.detail-panel { container: panel / inline-size; }
 /* A tick meter: the used share fills its ticks. */
 .usage-bar {
   position: relative;
-  height: 12px;
+  height: 8px;
   background: var(--quaternary);
   -webkit-mask: repeating-linear-gradient(90deg, #000 0 2px, transparent 2px 5px);
   mask: repeating-linear-gradient(90deg, #000 0 2px, transparent 2px 5px);
@@ -955,7 +976,7 @@ dialog.detail-panel { container: panel / inline-size; }
 .track > li[data-current] .track-name { font-weight: 600; }
 .track > li[data-pos="now"] .track-name { color: var(--label); }
 .stage-groups { display: grid; gap: 6px; }
-.stage-name { padding: 10px 2px 2px; color: var(--tertiary); font: 500 10.5px/1.2 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+.stage-name { padding: 10px 4px 2px; color: var(--tertiary); font: 500 10.5px/1.2 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
 
 /* Rows */
 .rows { display: grid; gap: 4px; }
@@ -964,7 +985,7 @@ dialog.detail-panel { container: panel / inline-size; }
   gap: 12px;
   width: 100%;
   min-height: 0;
-  padding: 10px 12px 10px 10px;
+  padding: 10px 12px;
   border-radius: var(--row-radius);
   background: var(--row);
   color: var(--label);
@@ -979,7 +1000,8 @@ dialog.detail-panel { container: panel / inline-size; }
   .job-row:not(:disabled):hover { background: var(--fill-strong); }
   .job-row:hover .row-chevron { translate: 2px 0; color: var(--secondary); }
 }
-.row-mark { display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 9px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--hairline); color: var(--label); }
+/* WorkspaceStyle.iconColumn: the mark sits in a column so titles line up. */
+.row-mark { display: grid; place-items: center; flex: none; width: 20px; color: var(--label); }
 .job-row-text { flex: 1; min-width: 0; display: grid; gap: 2px; }
 .job-row-text b { font-weight: 500; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .job-row-text span { color: var(--secondary); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -988,7 +1010,7 @@ dialog.detail-panel { container: panel / inline-size; }
 .row-chevron { width: 12px !important; height: 12px !important; color: var(--tertiary); transition: translate 220ms var(--ease-out), color 160ms; }
 
 /* History table */
-.toolbar-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; animation: rise 520ms var(--ease-out) both; }
+.toolbar-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding-inline: 2px; animation: rise 520ms var(--ease-out) both; }
 .filter { position: relative; flex: 0 1 280px; min-width: 180px; }
 .filter svg { position: absolute; left: 11px; top: 50%; translate: 0 -50%; width: 14px; height: 14px; color: var(--tertiary); pointer-events: none; }
 .filter input { min-height: 32px; padding-inline-start: 32px; border-radius: 999px; background: var(--surface); border-color: var(--hairline); }
@@ -1150,12 +1172,12 @@ dialog.palette-layer::backdrop { background: rgb(10 10 12 / 0.16); animation: fa
   }
   .sidebar[data-open] { translate: 0 0; visibility: visible; transition: translate 420ms var(--ease-out); }
   .sidebar > .nav:first-of-type { display: none; }
-  .topbar { gap: 8px; min-height: 54px; padding: 8px 12px; }
+  .topbar { gap: 8px; min-height: 54px; padding: 8px 16px; }
   .topbar-sidebar { display: inline-flex; }
   .connection { padding: 0 6px; }
   .new-job { width: 34px; padding: 0; }
   .new-job-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-  .page { padding: 4px 14px 104px; }
+  .page { padding: 0 16px 104px; }
   .page-title { font-size: 28px; }
   .kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .kpi:nth-child(3) { box-shadow: inset 0 1px 0 var(--hairline); }
@@ -1163,7 +1185,6 @@ dialog.palette-layer::backdrop { background: rgb(10 10 12 / 0.16); animation: fa
   .kpi { padding: 16px; }
   .kpi-number { font-size: 36px; }
   .spark { display: none; }
-  .kpi-pulse { display: none; }
   .dash-side { grid-template-columns: minmax(0, 1fr); }
   dialog.detail-panel { inset: 8px; width: auto; }
   .panel-grip { display: none; }
@@ -1206,3 +1227,5 @@ dialog.palette-layer::backdrop { background: rgb(10 10 12 / 0.16); animation: fa
 @media (forced-colors: active) {
   .agent-mark, .share-bar i, .usage-bar i, .connection > i, .nav-dot, .heatmap-grid > i, .spark > i { forced-color-adjust: none; background: CanvasText; }
 }
+/* The agent rows carry their own padding for the hover fill, so the label sits closer above them. */
+.agents.panel { gap: 6px; }

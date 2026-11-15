@@ -54,6 +54,7 @@ export function Palette({ state, names, projects, origin, close, actions }: {
   const box = useRef<HTMLDivElement>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   const closing = useRef(false);
+  const pressed = useRef(false);
   const width = Math.min(760, innerWidth - 24);
   const height = Math.min(500, innerHeight - 96);
   // Anchored to the search control's right edge, growing down and to the left from it; centered without one.
@@ -143,7 +144,7 @@ export function Palette({ state, names, projects, origin, close, actions }: {
       });
     }
     return list;
-  }, [state, names, projects]);
+  }, [state, names, projects, now]);
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   const shown = words.length
     ? entries.filter((entry) => words.every((word) => `${entry.title} ${entry.subtitle} ${entry.group}`.toLowerCase().includes(word))).slice(0, 60)
@@ -168,9 +169,16 @@ export function Palette({ state, names, projects, origin, close, actions }: {
   };
   useLayoutEffect(() => {
     const element = box.current!;
-    dialog.current!.showModal();
+    const layer = dialog.current!;
+    const previous = document.activeElement as HTMLElement | null;
+    // StrictMode mounts twice; a second showModal on an open dialog would throw in some engines.
+    if (!layer.open) layer.showModal();
     element.querySelector('input')?.focus();
-    if (reducedMotion()) return;
+    const restore = () => {
+      layer.close();
+      previous?.focus({ preventScroll: true });
+    };
+    if (reducedMotion()) return restore;
     const from = origin ?? new DOMRect(left + width / 2 - 20, top + 8, 40, 40);
     element.animate(
       [
@@ -182,6 +190,7 @@ export function Palette({ state, names, projects, origin, close, actions }: {
     element.querySelectorAll<HTMLElement>('.palette-item').forEach((item, index) =>
       item.animate([{ opacity: 0, translate: '0 4px' }, { opacity: 0, translate: '0 4px' }, { opacity: 1, translate: '0 0' }], { duration: 360 + Math.min(index, 10) * 24, easing: EASE_OUT }),
     );
+    return restore;
   }, []);
   useLayoutEffect(() => {
     box.current?.querySelector(`[data-index="${active}"]`)?.scrollIntoView({ block: 'nearest' });
@@ -198,8 +207,25 @@ export function Palette({ state, names, projects, origin, close, actions }: {
         event.preventDefault();
         finish();
       }}
+      onClose={() => {
+        // Escape can close a modal without a cancel event; the board must still forget the palette.
+        if (closing.current) return;
+        closing.current = true;
+        close();
+      }}
+      onKeyDown={(event) => {
+        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+          event.preventDefault();
+          event.stopPropagation();
+          finish();
+        }
+      }}
+      onPointerDown={(event) => {
+        pressed.current = event.target === event.currentTarget;
+      }}
       onClick={(event) => {
-        if (event.target === event.currentTarget) finish();
+        // Only a press that began outside the panel closes it, not a text selection dragged past its edge.
+        if (pressed.current && event.target === event.currentTarget) finish();
       }}
     >
       <div className="palette" ref={box} style={{ left, top, width, height }}>

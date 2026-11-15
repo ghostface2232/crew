@@ -115,8 +115,8 @@ export function App() {
   const openSession = (id: string) => show(detail === `session:${id}` ? '' : `session:${id}`);
   const closeDetail = () => show('');
   /** After New Job, the job's own project, so the new job is in view, as the app goes there. */
-  const openNewJob = (id: string, cwd?: string) => {
-    if (cwd && project !== cwd) select(`project:${cwd}`);
+  const openNewJob = (id: string, root?: string) => {
+    if (root && project !== root) select(`project:${root}`);
     show(id);
   };
   const newJob = (origin?: Element | null) => {
@@ -141,7 +141,8 @@ export function App() {
     if (event.defaultPrevented || state.connection === 'unauthorized') return;
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
       event.preventDefault();
-      if (!document.querySelector('dialog[open]:modal')) palette ? setPalette(null) : openPalette();
+      // An open palette closes itself on ⌘K, shrinking back; another modal keeps the key.
+      if (!palette && !document.querySelector('dialog[open]:modal')) openPalette();
       return;
     }
     if (event.metaKey || event.ctrlKey || event.altKey || typing(event.target) || document.querySelector('dialog[open]:modal')) return;

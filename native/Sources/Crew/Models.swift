@@ -212,8 +212,41 @@ struct ClaudeSession: Codable, Sendable, Identifiable, Equatable {
     var stalled: Bool
     var startedAt: Double
     var activeAt: Double
+    /// Missing from a daemon older than sub-agent tracking, as are the workflows.
+    var agents: [SubAgent]?
+    var workflows: [WorkflowRun]?
     var projectPath: String { root ?? cwd }
+    /// "2 sub-agents · review 12 running", or nil with none running.
+    var agentSummary: String? {
+        let agents = self.agents ?? []
+        let plain = agents.filter { $0.workflow == nil }.count
+        let runs = (workflows ?? []).filter { run in agents.contains { $0.workflow == run.id } }
+        let running = agents.count - plain
+        let parts = [plain > 0 ? "\(plain) sub-agent\(plain == 1 ? "" : "s")" : nil,
+                     runs.isEmpty ? nil : "\(runs.count == 1 ? runs[0].name : "\(runs.count) workflows") \(running) running"]
+        let summary = parts.compactMap { $0 }.joined(separator: " · ")
+        return summary.isEmpty ? nil : summary
+    }
     var notificationKey: String { "session:\(id):\(waitingId ?? waitingFor ?? "")" }
+}
+struct SubAgent: Codable, Sendable, Identifiable, Equatable {
+    var id: String
+    var type: String
+    var title: String
+    var phase: String
+    var startedAt: Double
+    /// The id of the workflow run it belongs to.
+    var workflow: String?
+    /// The workflow phase it was started in.
+    var stage: String?
+}
+/// A run's running agents are the session's agents that name it; the total is not known ahead.
+struct WorkflowRun: Codable, Sendable, Identifiable, Equatable {
+    var id: String
+    var name: String
+    var startedAt: Double
+    var activeAt: Double
+    var done: Int
 }
 struct ModelChoice: Codable, Sendable, Identifiable, Equatable { var id: String; var name: String; var efforts: [String]? }
 struct Worker: Codable, Sendable, Equatable { var name: String; var resume: String; var enabled: Bool; var models: [ModelChoice]? }

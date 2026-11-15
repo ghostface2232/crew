@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import {
   BadgeCheck, BadgeHelp, Check, CircleCheck, CircleDashed, CircleDot, CircleMinus, CircleStop, CircleX, Clock, FileText, Flag, FlagTriangleRight, GitBranch, GitFork,
-  History, Images, MessageSquare, NotebookText, RotateCcw, ShieldAlert, ShieldCheck, TextAlignStart, TriangleAlert, Undo2, X, Zap,
+  History, Images, MessageSquare, NotebookText, RotateCcw, ShieldAlert, ShieldCheck, TextAlignStart, TriangleAlert, Undo2, Users, X, Zap,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
@@ -11,13 +11,16 @@ import type { BoardJob, CrewEvent, Snapshot } from './types.ts';
 import { actions, drafts, request } from './api.ts';
 import { board, mergeEvents } from './store.ts';
 import { elapsed, jobLabel, jobRole, NAMES, projectOf, roleLabel } from './model.ts';
-import { ActionStatus, AgentMark, CloseButton, CopyButton, CopyMenu, Dialog, Icon, Chip, useAction, useDraft, useNow } from './ui.tsx';
-import { ReportText } from './Report.ts';
+import { ActionStatus, CloseButton, CopyButton, CopyMenu, Dialog, Icon, Chip, useAction, useDraft, useNow } from './ui.tsx';
+import { ReportText as RenderReport } from './Report.ts';
 import { debatePoints, stanceCounts } from './debate.ts';
 import type { Stance } from './debate.ts';
 import { Answer } from './NeedsYou.tsx';
 import { EventList } from './Overview.tsx';
-import { jobStatusState } from './Missions.tsx';
+import { jobStatusState, SessionAgents, SessionWorkflow } from './Missions.tsx';
+
+/** Reports are parsed once per text, not on every clock tick the panel renders for. */
+const ReportText = memo(RenderReport);
 
 function Section({ title, icon, children }: { title: string; icon: LucideIcon; children: ReactNode }) {
   return (
@@ -329,11 +332,13 @@ function DebateSection({ job }: { job: BoardJob }) {
           <DebateRound key={turn} job={job} turn={turn} label={label} final={turn === debate?.rounds} last={turn === turns.at(-1)} />
         ))}
       </ol>
-      {settled && (
-        <p className="callout secondary concluded"><Icon icon={CircleCheck} size={13} />This debate has used all its rounds. Decide from it, or start a new debate.</p>
-      )}
+      {settled && <ConcludedNote />}
     </section>
   );
+}
+
+function ConcludedNote() {
+  return <p className="callout secondary concluded"><Icon icon={CircleCheck} size={13} />This debate has used all its rounds. Decide from it, or start a new debate.</p>;
 }
 
 function FollowUp({ job }: { job: BoardJob }) {
@@ -491,10 +496,16 @@ export function JobDrawer({ id, state, close }: { id: string; state: Snapshot; c
               ))}
             </Section>
           )}
-          {hasConversation(job) ? <DebateSection job={job} /> : job.report && (
-            <Section title="Report" icon={FileText}>
-              <ReportText text={job.report} />
-            </Section>
+          {hasConversation(job) ? <DebateSection job={job} /> : (
+            <>
+              {job.report && (
+                <Section title="Report" icon={FileText}>
+                  <ReportText text={job.report} />
+                </Section>
+              )}
+              {/* A debate begun before conversations were kept still says why there is no Reply. */}
+              {debateConcluded(job) && <ConcludedNote />}
+            </>
           )}
           {!debateConcluded(job) && job.sessionId && job.state !== 'waiting' && <FollowUp key={job.id} job={job} />}
           {job.prompt && <OriginalTask text={job.prompt} />}
@@ -570,7 +581,7 @@ function OriginalTask({ text }: { text: string }) {
         // Folded, a click anywhere opens it; open, the text is selectable instead.
         onClick={() => long && !shown && setShown(true)}
       >
-        {long && !shown ? <span aria-hidden="true">{text}</span> : <span className="selectable">{text}</span>}
+        {long && !shown ? text : <span className="selectable">{text}</span>}
       </pre>
       {long && <button className="reveal-toggle" aria-expanded={shown} onClick={() => setShown(!shown)}>{shown ? 'Hide the original task' : 'Show the original task'}</button>}
     </section>
@@ -615,6 +626,9 @@ function DetailPanel({ label, close, chip, title, subtitle, children }: {
 }) {
   const [width, setWidth] = useState(storedWidth);
   const [scrolled, setScrolled] = useState(false);
+  /** Ends a drag in progress; the panel can close or switch jobs in the middle of one. */
+  const endDrag = useRef<() => void>(undefined);
+  useEffect(() => () => endDrag.current?.(), []);
   const { min, max } = panelBounds();
   const shown = Math.max(min, Math.min(max, width));
   const save = (value: number) => {
@@ -646,6 +660,7 @@ function DetailPanel({ label, close, chip, title, subtitle, children }: {
           }
         }}
         onPointerDown={(event) => {
+          if (event.button !== 0) return;
           event.preventDefault();
           const grip = event.currentTarget;
           grip.setPointerCapture(event.pointerId);
@@ -656,12 +671,16 @@ function DetailPanel({ label, close, chip, title, subtitle, children }: {
             grip.removeEventListener('pointermove', move);
             grip.removeEventListener('pointerup', up);
             grip.removeEventListener('pointercancel', up);
+            grip.removeEventListener('lostpointercapture', up);
             document.documentElement.removeAttribute('data-resizing');
+            endDrag.current = undefined;
           };
+          endDrag.current = up;
           document.documentElement.setAttribute('data-resizing', '');
           grip.addEventListener('pointermove', move);
           grip.addEventListener('pointerup', up);
           grip.addEventListener('pointercancel', up);
+          grip.addEventListener('lostpointercapture', up);
         }}
       />
       <header className="detail-head" data-scrolled={scrolled || undefined}>
@@ -689,6 +708,7 @@ export function SessionDrawer({ id, state, close }: { id: string; state: Snapsho
   const session = state.claude.find((item) => item.id === id);
   const missions = state.missions.filter((mission) => mission.owner === id).sort((a, b) => b.createdAt - a.createdAt);
   const status = session && (session.stalled ? 'stalled' : session.state);
+  const plainAgents = (session?.agents ?? []).filter((agent) => !agent.workflow);
   return (
     <DetailPanel
       label={session?.title ?? 'Session details'}
@@ -717,6 +737,14 @@ export function SessionDrawer({ id, state, close }: { id: string; state: Snapsho
               ...(session.inTool ? [['Now', 'Running a tool'] as [string, string]] : []),
             ]}
           />
+          {plainAgents.length > 0 && (
+            <Section title="Sub-agents" icon={Users}>
+              <SessionAgents agents={plainAgents} now={now} label="Sub-agents" />
+            </Section>
+          )}
+          {(session.workflows ?? []).map((run) => (
+            <SessionWorkflow key={run.id} run={run} agents={(session.agents ?? []).filter((agent) => agent.workflow === run.id)} now={now} />
+          ))}
           {missions.length > 0 && (
             <Section title="Missions" icon={Flag}>
               {missions.map((mission) => (
@@ -728,7 +756,6 @@ export function SessionDrawer({ id, state, close }: { id: string; state: Snapsho
             </Section>
           )}
           <Footer id={session.id}>
-            <span className="session-mark"><AgentMark agent="claude" size={13} /></span>
             <CopyButton text={`claude --resume ${session.id}`}>Resume command</CopyButton>
           </Footer>
         </>

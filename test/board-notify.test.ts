@@ -55,10 +55,10 @@ test('waiting requests show once, change with request id, and expire when answer
 test('waiting sessions use their id and reason, fall back to title, and expire', () => {
   const session = { id: 'lead', state: 'waiting', waitingFor: 'Approve?', title: 'Lead session' } as ClaudeSession;
   const first = planNotifications({}, snapshot([], [session]), options);
-  assert.deepEqual(first.show, [{ key: 'session:lead:Approve?', title: 'Claude needs your input', body: 'Approve?' }]);
+  assert.deepEqual(first.show, [{ key: 'session:lead:Approve?', title: 'Claude needs your input', body: 'Approve?', jobId: 'session:lead' }]);
   assert.deepEqual(planNotifications(first.memory, snapshot([], [session]), options).show, []);
   const next = planNotifications(first.memory, snapshot([], [{ ...session, waitingFor: null }]), options);
   assert.deepEqual(next.expire, ['session:lead:Approve?']);
-  assert.deepEqual(next.show, [{ key: 'session:lead:', title: 'Claude needs your input', body: 'Lead session' }]);
+  assert.deepEqual(next.show, [{ key: 'session:lead:', title: 'Claude needs your input', body: 'Lead session', jobId: 'session:lead' }]);
   assert.deepEqual(planNotifications(next.memory, snapshot([], [{ ...session, state: 'idle' }]), options).expire, ['session:lead:']);
 });

@@ -173,9 +173,23 @@ export function dailyCounts(times: number[], now: number, weeks: number) {
   const counts = new Map<number, number>();
   for (const time of times) counts.set(startOfDay(time), (counts.get(startOfDay(time)) ?? 0) + 1);
   const days: { day: number; count: number }[] = [];
-  for (const date = new Date(monday); date.getTime() <= today; date.setDate(date.getDate() + 1)) {
-    const day = date.getTime();
+  // Each step lands on its own local midnight, even past a day whose midnight a clock change skipped.
+  for (let index = 0; ; index++) {
+    const day = startOfDay(new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + index).getTime());
+    if (day > today) break;
     days.push({ day, count: counts.get(day) ?? 0 });
   }
   return days;
+}
+
+/** What a session's sub-agents add to its row, as the app says it: "2 sub-agents · review 12 running". */
+export function agentSummary(session: Pick<ClaudeSession, 'agents' | 'workflows'>) {
+  const agents = session.agents ?? [];
+  const plain = agents.filter((agent) => !agent.workflow);
+  const running = agents.length - plain.length;
+  const active = (session.workflows ?? []).filter((run) => agents.some((agent) => agent.workflow === run.id));
+  return [
+    plain.length > 0 ? `${plain.length} sub-agent${plain.length === 1 ? '' : 's'}` : '',
+    active.length > 0 ? `${active.length === 1 ? active[0].name : `${active.length} workflows`} ${running} running` : '',
+  ].filter(Boolean).join(' · ');
 }

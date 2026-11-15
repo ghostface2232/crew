@@ -20,7 +20,7 @@ export function Dispatch({
   /** The control the sheet grows out of. */
   origin?: DOMRect;
   /** Opens the new job, in its project's page. */
-  openJob: (id: string, cwd: string) => void;
+  openJob: (id: string, project: string) => void;
   close: () => void;
 }) {
   const initialDirectory = useRef(project);
@@ -94,7 +94,7 @@ export function Dispatch({
       const named = agent && workers.length > 1 ? { agent } : {};
       if (intent === 'question') {
         const job = await request<BoardJob>('/api/jobs', { kind: 'delegate', ask: true, task, cwd: cwd.trim(), ...named });
-        openJob(job.id, cwd.trim());
+        openJob(job.id, projectOf(job));
         close();
         return;
       }
@@ -110,7 +110,8 @@ export function Dispatch({
         ...(kind === 'review' ? { review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } } : {}),
         ...(kind === 'polish' ? { targets: allowed } : {}),
       });
-      openJob(job.id, cwd.trim());
+      // The job's project is its repository root, which may differ from the directory typed.
+      openJob(job.id, projectOf(job));
       close();
     } catch (error) {
       setError((error as Error).message);

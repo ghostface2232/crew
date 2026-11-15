@@ -48,8 +48,10 @@ struct ModelPodium: View {
         .padding(.horizontal, top.count == 2 ? 80 : 12)
         .padding(.top, Space.xxl)
         .frame(maxWidth: .infinity)
-        .background(alignment: .top) {
-            RadialGradient(colors: [medals[0].opacity(0.12), .clear], center: .top, startRadius: 0, endRadius: 260)
+        // Fades out inside the row's frame on every side: the list insets the row within its card, so a glow still lit
+        // at the frame's edge shows as a hard line.
+        .background {
+            EllipticalGradient(colors: [medals[0].opacity(0.14), .clear], center: .center, startRadiusFraction: 0, endRadiusFraction: 0.5)
         }
         .listRowInsets(EdgeInsets())
         .accessibilityElement(children: .contain)

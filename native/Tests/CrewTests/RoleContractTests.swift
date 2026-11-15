@@ -18,10 +18,10 @@ import Testing
         #expect(current.availableRoles.map(\.group) == ["Build", "Build", "Build", "Build", "Review", "Review", "Edit"])
         #expect(current.roleInfo?.first { $0.role == "verify" }?.parent == "review")
         #expect(current.roleSettings?["refactor"] == nil)
-        #expect(current.roleSettings?["release"]?.agent == nil)
-        #expect(current.roleSettings?["release"]?.model == "release-model")
+        #expect(current.roleSettings?["release"]?.agents == nil)
+        #expect(current.roleSettings?["release"]?.codex?.model == "release-model")
         #expect(current.roleSettings?["verify"] == RoleSetting())
-        #expect(current.roles["refactor"]?.agent == "codex")
+        #expect(current.roles["refactor"]?.holders == ["codex"])
         #expect(current.jobs[0].role == "delegate" && current.jobs[0].preset == "economy")
         #expect(current.jobs[1].role == "verify" && current.jobs[1].preset == nil)
         #expect(current.missions[0].preset == .best)
@@ -49,176 +49,161 @@ import Testing
             #expect((body["review"] != nil) == (info.kind == "review"))
         }
     }
-    @Test @MainActor func settingsResolveInheritedDraftsWithoutMaterializingThem() throws {
+    @Test func legacyHoldersAndWorkerSettingsDecodeIntoTheNewShape() throws {
+        for agent in RoleAssignment.holderOrder {
+            let data = Data("{\"agent\":\"\(agent)\",\"also\":[\"claude\",\"antigravity\",\"codex\",\"codex\"],\"model\":\"legacy-model\",\"effort\":\"high\"}".utf8)
+            let assignment = try JSONDecoder().decode(RoleAssignment.self, from: data)
+            #expect(assignment.holders == RoleAssignment.holderOrder)
+            #expect(assignment.workerHolders == ["codex", "antigravity"])
+            #expect(assignment.codex == (agent == "codex" ? RoleAgentSettings(model: "legacy-model", effort: "high") : nil))
+            #expect(assignment.antigravity == (agent == "antigravity" ? RoleAgentSettings(model: "legacy-model") : nil))
+            #expect(try JSONDecoder().decode(RoleSetting.self, from: data) == RoleSetting(assignment))
+            let body = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(assignment)) as? [String: Any])
+            #expect(body["agents"] as? [String] == RoleAssignment.holderOrder)
+            #expect(body["agent"] == nil && body["also"] == nil && body["model"] == nil && body["effort"] == nil)
+        }
+        let single = try JSONDecoder().decode(RoleAssignment.self, from: Data(#"{"agent":"antigravity"}"#.utf8))
+        #expect(single.holders == ["antigravity"] && single.antigravity == nil)
+        #expect(throws: DecodingError.self) { try JSONDecoder().decode(RoleAssignment.self, from: Data(#"{"agents":[]}"#.utf8)) }
+    }
+    @Test func currentAssignmentsKeepEachWorkersSettingsAndCanonicalHolderOrder() throws {
+        let data = Data(#"{"agents":["claude","antigravity","codex"],"codex":{"model":"codex-model","effort":"high"},"antigravity":{"model":"agy-model"}}"#.utf8)
+        let assignment = try JSONDecoder().decode(RoleAssignment.self, from: data)
+        #expect(assignment.agents == RoleAssignment.holderOrder)
+        #expect(assignment.codex == RoleAgentSettings(model: "codex-model", effort: "high"))
+        #expect(assignment.antigravity == RoleAgentSettings(model: "agy-model"))
+        #expect(try JSONDecoder().decode(RoleSetting.self, from: data) == RoleSetting(assignment))
+        #expect(try JSONDecoder().decode(RoleAssignment.self, from: JSONEncoder().encode(assignment)) == assignment)
+    }
+    @Test @MainActor func settingsResolvePerAgentInheritanceAndExplicitHoldersStartFresh() throws {
         let state = try fixture("state-extended")
         let settings = SettingsModel(api: CrewAPI(port: 0), roles: state.roles, roleSettings: state.roleSettings, roleInfo: state.roleInfo)
-        // Only blanks are dropped: an empty role entry is the same as one left out.
         #expect(settings.roleSettings == SettingsModel.normalized(state.roleSettings ?? [:]))
         #expect(settings.assignment(for: "refactor") == state.roles["delegate"])
-        #expect(settings.assignment(for: "release")?.model == "release-model")
+        #expect(settings.assignment(for: "release")?.codex?.model == "release-model")
         #expect(settings.assignment(for: "verify") == state.roles["review"])
-        settings.roleSettings["delegate"] = RoleSetting(agent: "antigravity", model: "new-model", effort: "low")
-        #expect(settings.assignment(for: "refactor")?.agent == "antigravity")
-        #expect(settings.assignment(for: "refactor")?.model == "new-model")
-        #expect(settings.assignment(for: "release")?.model == "release-model")
-        settings.roleSettings["refactor"] = RoleSetting(agent: "codex")
-        #expect(settings.assignment(for: "refactor") == RoleAssignment(agent: "codex"))
-        #expect(settings.roleSettings["verify"]?.agent == nil)
+        settings.roleSettings["delegate"] = RoleSetting(agents: ["codex", "antigravity", "claude"], codex: .init(model: "build", effort: "high"), antigravity: .init(model: "review"))
+        settings.roleSettings["refactor"] = RoleSetting(codex: .init(effort: "low"), antigravity: .init(model: "child"))
+        #expect(settings.assignment(for: "refactor") == RoleAssignment(agents: RoleAssignment.holderOrder, codex: .init(model: "build", effort: "low"), antigravity: .init(model: "child")))
+        #expect(settings.assignment(for: "release")?.codex == RoleAgentSettings(model: "release-model", effort: "high"))
+        settings.roleSettings["refactor"] = RoleSetting(agents: ["codex"], antigravity: .init(model: "ignored"))
+        #expect(settings.assignment(for: "refactor") == RoleAssignment(agents: ["codex"]))
         #expect(settings.roleSettings["debate"] == nil)
     }
-    @Test @MainActor func aParentlessRolesShownAgentIsNoChange() throws {
+    @Test @MainActor func holderTogglesKeepOneHolderAndReturnToClean() throws {
         let state = try fixture("state-extended")
-        // No agent written for any role: each parentless picker shows the agent its role resolves to.
-        let settings = SettingsModel(api: CrewAPI(port: 0), roles: state.roles, roleSettings: [:], roleInfo: state.roleInfo)
-        let agent = try #require(state.roles["review"]?.agent)
-        settings.setRole("review", \.agent, to: agent)
-        #expect(!settings.dirty)
-        settings.setRole("review", \.agent, to: agent == "codex" ? "antigravity" : "codex")
-        #expect(settings.dirty)
-        settings.setRole("review", \.agent, to: agent)
-        #expect(settings.roleSettings["review"] == nil && !settings.dirty)
+        for raw in [[:], ["delegate": RoleSetting(agents: ["claude", "codex"], codex: .init(model: "saved", effort: "high"))]] {
+            let settings = SettingsModel(api: CrewAPI(port: 0), roles: state.roles, roleSettings: raw, roleInfo: state.roleInfo)
+            let saved = settings.savedRoleSettings
+            let checked = settings.assignment(for: "delegate")?.holders.contains("claude") == true
+            settings.setHolder("delegate", holder: "claude", enabled: !checked)
+            #expect(settings.dirty)
+            settings.setHolder("delegate", holder: "claude", enabled: checked)
+            #expect(settings.roleSettings == saved && !settings.dirty)
+            settings.setHolder("delegate", holder: "codex", enabled: false)
+            #expect(settings.assignment(for: "delegate")?.holders.isEmpty == false)
+            if checked {
+                #expect(settings.roleSettings["delegate"]?.codex == nil)
+                settings.setHolder("delegate", holder: "codex", enabled: true)
+                #expect(settings.roleSettings == saved && !settings.dirty)
+            } else {
+                #expect(settings.assignment(for: "delegate")?.holders == ["codex"] && !settings.dirty)
+            }
+        }
     }
-    @Test @MainActor func fieldsThatEndEditingUnchangedLeaveSettingsClean() throws {
+    @Test @MainActor func followParentCopiesCurrentHoldersAndPreservesOwnAgentOverrides() throws {
+        let state = try fixture("state-extended")
+        let settings = SettingsModel(api: CrewAPI(port: 0), roles: state.roles, roleSettings: [:], roleInfo: state.roleInfo)
+        #expect(settings.followsParent("refactor") && !settings.followsParent("delegate"))
+        settings.setHolder("refactor", holder: "claude", enabled: true)
+        #expect(!settings.dirty)
+        settings.setHolder("delegate", holder: "antigravity", enabled: true)
+        settings.setRole("delegate", agent: "codex", \.model, to: "parent-model")
+        settings.setRole("refactor", agent: "codex", \.effort, to: "low")
+        settings.setFollowParent("refactor", enabled: false)
+        #expect(settings.roleSettings["refactor"]?.agents == ["codex", "antigravity"])
+        #expect(settings.assignment(for: "refactor")?.codex == RoleAgentSettings(effort: "low"))
+        settings.setHolder("delegate", holder: "antigravity", enabled: false)
+        #expect(settings.assignment(for: "refactor")?.holders == ["codex", "antigravity"])
+        settings.setFollowParent("refactor", enabled: true)
+        #expect(settings.roleSettings["refactor"]?.agents == nil)
+        #expect(settings.assignment(for: "refactor")?.holders == ["codex"])
+        #expect(settings.assignment(for: "refactor")?.codex == RoleAgentSettings(model: "parent-model", effort: "low"))
+        settings.setRole("delegate", agent: "codex", \.model, to: "")
+        settings.setRole("refactor", agent: "codex", \.effort, to: "")
+        #expect(!settings.dirty)
+    }
+    @Test @MainActor func uncheckingAWorkerDropsOnlyItsOwnSettings() throws {
+        let state = try fixture("state-extended")
+        let settings = SettingsModel(api: CrewAPI(port: 0), roles: state.roles, roleSettings: [:], roleInfo: state.roleInfo)
+        settings.roleSettings["delegate"] = RoleSetting(agents: RoleAssignment.holderOrder, codex: .init(model: "codex-model", effort: "high"), antigravity: .init(model: "agy-model"))
+        settings.setHolder("delegate", holder: "codex", enabled: false)
+        #expect(settings.roleSettings["delegate"]?.codex == nil)
+        #expect(settings.roleSettings["delegate"]?.antigravity?.model == "agy-model")
+        settings.setHolder("delegate", holder: "antigravity", enabled: false)
+        #expect(settings.roleSettings["delegate"]?.antigravity == nil)
+        #expect(settings.assignment(for: "delegate")?.holders == ["claude"])
+        settings.setHolder("delegate", holder: "claude", enabled: false)
+        #expect(settings.assignment(for: "delegate")?.holders == ["claude"])
+    }
+    @Test @MainActor func perAgentFieldsAndNormalizedTablesReturnToClean() throws {
         let state = try fixture("state-extended")
         let settings = SettingsModel(api: CrewAPI(port: 0), roles: state.roles, roleSettings: state.roleSettings, roleInfo: state.roleInfo)
-        // Focus leaving each empty field writes its value back unchanged, as closing the window does.
         for role in settings.roleInfo.map(\.role) {
-            settings.setRole(role, \.model, to: settings.roleSettings[role]?.model ?? "")
-            settings.setRole(role, \.effort, to: settings.roleSettings[role]?.effort ?? "")
+            for agent in settings.assignment(for: role)?.workerHolders ?? [] {
+                settings.setRole(role, agent: agent, \.model, to: settings.roleSettings[role]?[agent]?.model ?? "")
+                settings.setRole(role, agent: agent, \.effort, to: settings.roleSettings[role]?[agent]?.effort ?? "")
+            }
         }
         #expect(!settings.dirty)
-        // A role saved as an empty entry, as a hand-edited config.json may hold, comes back clean after an undone edit.
-        #expect(state.roleSettings?["verify"] == RoleSetting())
-        settings.setRole("verify", \.effort, to: "high")
-        settings.setRole("verify", \.effort, to: "")
-        #expect(!settings.dirty)
-        settings.setRole("refactor", \.effort, to: "high")
+        settings.setRole("delegate", agent: "codex", \.model, to: "changed")
         #expect(settings.dirty)
-        // Trying another agent and coming back to the saved one is no change, written or shown.
-        if let agent = state.roles["review"]?.agent {
-            settings.setRole("review", \.agent, to: agent == "codex" ? "antigravity" : "codex")
-            #expect(settings.dirty)
-            settings.setRole("review", \.agent, to: agent)
-            #expect(settings.roleSettings["review"] == settings.savedRoleSettings["review"])
-        }
-        settings.setRole("refactor", \.agent, to: "antigravity")
-        settings.setRole("refactor", \.agent, to: "")
-        #expect(settings.roleSettings["refactor"]?.agent == nil)
-        // Clearing it again is the same as never having set it.
-        settings.setRole("refactor", \.effort, to: "")
-        #expect(settings.roleSettings["refactor"] == nil)
+        settings.setRole("delegate", agent: "codex", \.model, to: "build-model")
+        settings.setRole("release", agent: "codex", \.effort, to: "low")
+        settings.setRole("release", agent: "codex", \.effort, to: "")
+        settings.setRole("verify", agent: "antigravity", \.model, to: "changed")
+        settings.setRole("verify", agent: "antigravity", \.model, to: "")
         #expect(!settings.dirty)
+        settings.roleSettings["delegate"]?.agents = ["codex", "codex"]
+        settings.roleSettings["verify"] = RoleSetting(codex: .init(model: "", effort: ""), antigravity: .init())
+        #expect(!settings.rolesDirty)
+        let clean = SettingsModel.normalized(["delegate": RoleSetting(agents: ["claude", "antigravity", "codex", "codex"], codex: .init(model: "", effort: "high"), antigravity: .init(model: "", effort: "ignored")), "refactor": RoleSetting(codex: .init())])
+        #expect(clean == ["delegate": RoleSetting(agents: RoleAssignment.holderOrder, codex: .init(effort: "high"))])
     }
-    @Test func holderFieldsDecodeWithAndWithoutAlso() throws {
-        for agent in ["codex", "antigravity", "claude"] {
-            let legacy = Data("{\"agent\":\"\(agent)\"}".utf8)
-            #expect(try JSONDecoder().decode(RoleAssignment.self, from: legacy).also == nil)
-            #expect(try JSONDecoder().decode(RoleSetting.self, from: legacy).also == nil)
-            let current = Data("{\"agent\":\"\(agent)\",\"also\":[\"antigravity\",\"codex\"]}".utf8)
-            let assignment = try JSONDecoder().decode(RoleAssignment.self, from: current)
-            #expect(assignment.agent == agent && assignment.also == ["antigravity", "codex"])
-            #expect(try JSONDecoder().decode(RoleSetting.self, from: current) == RoleSetting(assignment))
-        }
-    }
-    @Test @MainActor func alsoFollowsTheWholeAssignmentUntilReplacedOrAnAgentIsNamed() throws {
-        let state = try fixture("state-extended")
-        let settings = SettingsModel(api: CrewAPI(port: 0), roles: state.roles, roleSettings: [:], roleInfo: state.roleInfo)
-        settings.roleSettings["delegate"] = RoleSetting(agent: "claude", model: "lead-model", effort: "high", also: ["antigravity", "codex", "antigravity", "claude"])
-        #expect(settings.assignment(for: "refactor") == RoleAssignment(agent: "claude", model: "lead-model", effort: "high", also: ["antigravity", "codex"]))
-        settings.roleSettings["refactor"] = RoleSetting(effort: "low", also: ["codex", "claude", "codex"])
-        #expect(settings.assignment(for: "refactor") == RoleAssignment(agent: "claude", model: "lead-model", effort: "low", also: ["codex"]))
-        settings.roleSettings["refactor"] = RoleSetting(agent: "codex")
-        #expect(settings.assignment(for: "refactor") == RoleAssignment(agent: "codex"))
-        settings.roleSettings["refactor"] = RoleSetting(also: [])
-        #expect(settings.assignment(for: "refactor")?.also == nil)
-    }
-    @Test @MainActor func togglingAlsoBackRestoresSavedOrderAndLeavesNoEmptyEntries() throws {
-        let state = try fixture("state-extended")
-        for raw in [[:], ["delegate": RoleSetting(agent: "claude", also: ["antigravity", "codex"])]] {
-            let settings = SettingsModel(api: CrewAPI(port: 0), roles: state.roles, roleSettings: raw, roleInfo: state.roleInfo)
-            let holder = raw.isEmpty ? "claude" : "antigravity"
-            let enabled = settings.assignment(for: "delegate")?.also?.contains(holder) == true
-            settings.setAlso("delegate", holder: holder, enabled: !enabled)
-            #expect(settings.dirty)
-            settings.setAlso("delegate", holder: holder, enabled: enabled)
-            #expect(settings.roleSettings == settings.savedRoleSettings && !settings.dirty)
-        }
-        // An empty list replaces the parent's further holders, so it is kept as written.
-        #expect(SettingsModel.normalized(["refactor": RoleSetting(also: [])]) == ["refactor": RoleSetting(also: [])])
-        let settings = SettingsModel(api: CrewAPI(port: 0), roles: state.roles, roleSettings: ["delegate": RoleSetting(agent: "codex", also: ["claude"])], roleInfo: state.roleInfo)
-        settings.setAlso("refactor", holder: "claude", enabled: false)
-        #expect(settings.assignment(for: "refactor")?.also == nil)
-        #expect(settings.roleSettings["refactor"]?.also == [])
-        // Naming no holder must not turn the parent's default into a further holder once that default changes.
-        settings.setRole("delegate", \.agent, to: "antigravity")
-        #expect(settings.assignment(for: "refactor")?.also == nil)
-        settings.setRole("delegate", \.agent, to: "codex")
-        settings.setAlso("refactor", holder: "claude", enabled: true)
-        #expect(settings.roleSettings["refactor"] == nil && !settings.dirty)
-        settings.setAlso("refactor", holder: "codex", enabled: true)
-        #expect(!settings.dirty)
-    }
-    @Test @MainActor func inheritedAlsoCanBeOverriddenAfterEditingItsParent() throws {
-        let state = try fixture("state-extended")
-        let settings = SettingsModel(api: CrewAPI(port: 0), roles: state.roles, roleSettings: ["delegate": RoleSetting(agent: "codex", also: ["claude"])], roleInfo: state.roleInfo)
-        settings.setAlso("delegate", holder: "antigravity", enabled: true)
-        settings.setAlso("refactor", holder: "antigravity", enabled: false)
-        #expect(settings.assignment(for: "refactor")?.also == ["claude"])
-        settings.setAlso("refactor", holder: "antigravity", enabled: true)
-        #expect(settings.roleSettings["refactor"] == nil)
-        settings.setAlso("delegate", holder: "antigravity", enabled: false)
-        #expect(!settings.dirty)
-        settings.setRole("delegate", \.agent, to: "claude")
-        settings.setAlso("delegate", holder: "antigravity", enabled: true)
-        settings.setAlso("delegate", holder: "antigravity", enabled: false)
-        #expect(settings.roleSettings["delegate"]?.also == nil)
-        settings.setRole("delegate", \.agent, to: "codex")
-        #expect(!settings.dirty)
-    }
-    @Test @MainActor func changingTheDefaultRemovesDuplicateHoldersAndUndoRestoresThem() throws {
-        let state = try fixture("state-extended")
-        let saved = ["delegate": RoleSetting(agent: "claude", also: ["antigravity", "codex"]),
-                     "refactor": RoleSetting(agent: "codex", model: "own-model")]
-        let settings = SettingsModel(api: CrewAPI(port: 0), roles: state.roles, roleSettings: saved, roleInfo: state.roleInfo)
-        settings.setRole("delegate", \.agent, to: "codex")
-        #expect(settings.roleSettings["delegate"]?.also == ["antigravity"])
-        settings.setRole("delegate", \.agent, to: "claude")
-        #expect(!settings.dirty)
-        settings.setRole("refactor", \.agent, to: "")
-        #expect(settings.roleSettings["refactor"]?.model == nil)
-        settings.setRole("refactor", \.agent, to: "codex")
-        #expect(settings.roleSettings == settings.savedRoleSettings && !settings.dirty)
-    }
-    @Test func dispatchSelectsOnlyWorkerHoldersAndEncodesThePick() throws {
+    @Test func dispatchSelectsOnlyWorkerHoldersAndEncodesEveryPick() throws {
         let state = try fixture()
-        let assignment = RoleAssignment(agent: "claude", also: ["antigravity", "codex"])
-        var dispatch = JobDispatch(assignment: assignment, workers: state.agents)
-        #expect(dispatch.holders == ["antigravity", "codex"])
-        #expect(dispatch.agent == "antigravity")
-        dispatch.picked = "codex"
-        #expect(dispatch.agent == "codex" && dispatch.canSend)
-        let submission = JobSubmission(role: state.availableRoles[0], cwd: "/project", project: "/project", task: "Build", agent: dispatch.submissionAgent)
-        let body = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(submission)) as? [String: Any])
-        #expect(body["agent"] as? String == "codex")
-        dispatch.assignment = RoleAssignment(agent: "antigravity")
-        #expect(dispatch.agent == "antigravity" && dispatch.submissionAgent == nil)
-        dispatch.assignment = RoleAssignment(agent: "claude", also: ["antigravity"])
+        var dispatch = JobDispatch(assignment: RoleAssignment(agents: ["claude", "antigravity", "codex"]), workers: state.agents)
+        #expect(dispatch.holders == ["codex", "antigravity"])
+        #expect(dispatch.agent == "codex" && dispatch.submissionAgent == "codex")
+        for picked in ["codex", "antigravity"] {
+            dispatch.picked = picked
+            #expect(dispatch.agent == picked && dispatch.canSend)
+            let submission = JobSubmission(role: state.availableRoles[0], cwd: "/project", project: "/project", task: "Build", agent: dispatch.submissionAgent)
+            let body = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(submission)) as? [String: Any])
+            #expect(body["agent"] as? String == picked)
+        }
+        dispatch.assignment = RoleAssignment(agents: ["codex"])
+        #expect(dispatch.agent == "codex" && dispatch.submissionAgent == "codex" && dispatch.canSend)
+        dispatch.assignment = RoleAssignment(agents: ["claude", "antigravity"])
         #expect(dispatch.submissionAgent == "antigravity")
         dispatch.workers["antigravity"]?.enabled = false
         #expect(!dispatch.canSend)
-        dispatch.assignment = RoleAssignment(agent: "claude")
-        #expect(dispatch.holders.isEmpty && dispatch.agent == nil && !dispatch.canSend && dispatch.requiresClaude)
+        dispatch.assignment = RoleAssignment(agents: ["claude"])
+        #expect(dispatch.holders.isEmpty && dispatch.agent == nil && dispatch.submissionAgent == nil && !dispatch.canSend && dispatch.requiresClaude)
+        dispatch.assignment = nil
+        #expect(!dispatch.canSend && !dispatch.requiresClaude)
     }
     @Test @MainActor func overviewListsEveryHolderAndOmitsUnchangedInheritedHolders() throws {
         let state = try fixture("state-extended")
         let store = CrewStore(api: CrewAPI(port: 0))
         store.state.roleInfo = state.roleInfo
-        let assignment = RoleAssignment(agent: "claude", also: ["codex", "antigravity"])
-        store.state.roles = ["delegate": assignment, "refactor": assignment, "release": RoleAssignment(agent: "codex", also: ["claude"])]
+        let assignment = RoleAssignment(agents: RoleAssignment.holderOrder)
+        store.state.roles = ["delegate": assignment, "refactor": assignment, "release": RoleAssignment(agents: ["codex", "claude"])]
         let delegate = state.roleLabel("delegate"), release = state.roleLabel("release")
         #expect(agentRole("claude", store: store) == "Lead · \(delegate) · \(release)")
         #expect(agentRole("codex", store: store) == "\(delegate) · \(release)")
         #expect(agentRole("antigravity", store: store) == delegate)
+        store.state.roleSettings = ["refactor": RoleSetting(agents: RoleAssignment.holderOrder)]
+        #expect(agentRole("antigravity", store: store) == "\(delegate) · \(state.roleLabel("refactor"))")
     }
-
 }

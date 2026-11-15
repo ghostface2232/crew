@@ -217,23 +217,73 @@ struct ClaudeSession: Codable, Sendable, Identifiable, Equatable {
 }
 struct Worker: Codable, Sendable, Equatable { var name: String; var resume: String; var enabled: Bool }
 struct RoleAssignment: Codable, Sendable, Equatable {
-    var agent: String
+    static let holderOrder = ["codex", "antigravity", "claude"]
+    var agents: [String]
+    var codex: RoleAgentSettings?
+    var antigravity: RoleAgentSettings?
+    var holders: [String] { Self.holderOrder.filter { agents.contains($0) } }
+    var workerHolders: [String] { holders.filter { $0 == "codex" || $0 == "antigravity" } }
+    init(agents: [String], codex: RoleAgentSettings? = nil, antigravity: RoleAgentSettings? = nil) {
+        self.agents = Self.holderOrder.filter { agents.contains($0) }
+        self.codex = codex; self.antigravity = antigravity
+    }
+    init(from decoder: Decoder) throws {
+        let setting = try RoleSetting(from: decoder)
+        guard let agents = setting.agents, !agents.isEmpty else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "A resolved role needs at least one holder."))
+        }
+        self.init(agents: agents, codex: setting.codex, antigravity: setting.antigravity)
+    }
+    func encode(to encoder: Encoder) throws { try RoleSetting(self).encode(to: encoder) }
+}
+struct RoleAgentSettings: Codable, Sendable, Equatable {
     var model: String?
     var effort: String?
-    var also: [String]?
-    var holders: [String] { [agent] + (also ?? []) }
-    var workerHolders: [String] { holders.filter { $0 == "codex" || $0 == "antigravity" } }
+    func normalized(effort allowed: Bool = true) -> Self? {
+        let clean = Self(model: model?.isEmpty == true ? nil : model, effort: allowed && effort?.isEmpty != true ? effort : nil)
+        return clean == Self() ? nil : clean
+    }
 }
 struct RoleSetting: Codable, Sendable, Equatable {
-    var agent: String?
-    var model: String?
-    var effort: String?
-    var also: [String]?
-    init(agent: String? = nil, model: String? = nil, effort: String? = nil, also: [String]? = nil) {
-        self.agent = agent; self.model = model; self.effort = effort; self.also = also
+    var agents: [String]?
+    var codex: RoleAgentSettings?
+    var antigravity: RoleAgentSettings?
+    init(agents: [String]? = nil, codex: RoleAgentSettings? = nil, antigravity: RoleAgentSettings? = nil) {
+        self.agents = agents; self.codex = codex; self.antigravity = antigravity
     }
     init(_ assignment: RoleAssignment) {
-        agent = assignment.agent; model = assignment.model; effort = assignment.effort; also = assignment.also
+        agents = assignment.holders; codex = assignment.codex; antigravity = assignment.antigravity
+    }
+    subscript(agent: String) -> RoleAgentSettings? {
+        get { agent == "codex" ? codex : agent == "antigravity" ? antigravity : nil }
+        set { if agent == "codex" { codex = newValue } else if agent == "antigravity" { antigravity = newValue } }
+    }
+    var normalized: Self {
+        Self(agents: agents.map { agents in RoleAssignment.holderOrder.filter { agents.contains($0) } },
+             codex: codex?.normalized(), antigravity: antigravity?.normalized(effort: false))
+    }
+    private enum CodingKeys: String, CodingKey { case agents, codex, antigravity, agent, also, model, effort }
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        agents = try values.decodeIfPresent([String].self, forKey: .agents)
+        codex = try values.decodeIfPresent(RoleAgentSettings.self, forKey: .codex)
+        antigravity = try values.decodeIfPresent(RoleAgentSettings.self, forKey: .antigravity)
+        if agents == nil, let agent = try values.decodeIfPresent(String.self, forKey: .agent) {
+            agents = [agent] + (try values.decodeIfPresent([String].self, forKey: .also) ?? [])
+        }
+        if values.contains(.model) || values.contains(.effort) {
+            // Legacy entries without an agent used the role's default worker, or Codex for a following child.
+            let owner = try values.decodeIfPresent(String.self, forKey: .agent) ?? (decoder.codingPath.last?.stringValue == "polish" ? "antigravity" : "codex")
+            self[owner] = try RoleAgentSettings(model: values.decodeIfPresent(String.self, forKey: .model), effort: values.decodeIfPresent(String.self, forKey: .effort))
+        }
+        self = normalized
+    }
+    func encode(to encoder: Encoder) throws {
+        let clean = normalized
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encodeIfPresent(clean.agents, forKey: .agents)
+        try values.encodeIfPresent(clean.codex, forKey: .codex)
+        try values.encodeIfPresent(clean.antigravity, forKey: .antigravity)
     }
 }
 struct RoleInfo: Codable, Sendable, Identifiable, Equatable {

@@ -178,7 +178,9 @@ enum Typeface {
     /// For layout that counts lines of `callout`.
     static let calloutSize: CGFloat = 13
     static let captionStrong = Font.system(size: 12, weight: .semibold)
-    static let chip = Font.system(size: 12, weight: .medium)
+    static let chip = Font.system(size: chipSize, weight: .medium)
+    /// For layout that measures `chip` text.
+    static let chipSize: CGFloat = 12
     static let caption = Font.system(size: captionSize)
     /// For layout that counts lines of caption type.
     static let captionSize: CGFloat = 12

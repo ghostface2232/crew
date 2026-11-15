@@ -23,6 +23,12 @@ struct WorkspaceHeading: View {
 }
 
 struct WorkspaceSummary: View {
+    /// The narrowest card that keeps every label on one line in four equal columns, with room for a label's symbol and gap.
+    static let minimumWidth: CGFloat = {
+        let font = NSFont.systemFont(ofSize: Typeface.chipSize, weight: .medium)
+        let widest = ["In progress", "Needs you", "Finished", "Failed"].map { ($0 as NSString).size(withAttributes: [.font: font]).width }.max() ?? 0
+        return ceil(4 * (widest + Typeface.chipSize * 2) + 3 * Space.xl + 2 * WorkspaceStyle.cardPadding)
+    }()
     var store: CrewStore
     private var jobs: [Job] { store.state.jobs.filter { store.project.isEmpty || $0.projectPath == store.project } }
     private var metrics: [(String, Int, String, Color)] {
@@ -41,7 +47,7 @@ struct WorkspaceSummary: View {
                     let metric = metrics[index]
                     // A count above zero colors its label too; an empty one fades back.
                     VStack(alignment: .leading, spacing: Space.m) {
-                        Label(metric.0, systemImage: metric.2).font(Typeface.chip)
+                        Label(metric.0, systemImage: metric.2).font(Typeface.chip).lineLimit(1)
                             .foregroundStyle(metric.1 == 0 ? AnyShapeStyle(.tertiary) : AnyShapeStyle(metric.3))
                         Text(metric.1.formatted()).font(Typeface.number).monospacedDigit()
                             .foregroundStyle(metric.1 == 0 ? Color.secondary.opacity(0.4) : metric.3)

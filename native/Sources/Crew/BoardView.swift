@@ -150,7 +150,7 @@ struct BoardView: View {
                         .frame(minWidth: Self.headingCopyWidth, idealWidth: Self.headingCopyWidth, maxWidth: .infinity)
                         // Align the title's cap height, not its line box, with the top of the summary card.
                         .alignmentGuide(.top) { $0[.firstTextBaseline] - Typeface.pageTitleCapHeight }
-                    WorkspaceSummary(store: store).frame(minWidth: Self.summaryWidth.lowerBound, maxWidth: Self.summaryWidth.upperBound)
+                    WorkspaceSummary(store: store).frame(minWidth: max(Self.summaryWidth.lowerBound, WorkspaceSummary.minimumWidth), maxWidth: max(Self.summaryWidth.upperBound, WorkspaceSummary.minimumWidth))
                 }
             }
             VStack(alignment: .leading, spacing: Space.x3l) {

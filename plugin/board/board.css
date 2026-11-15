@@ -503,6 +503,9 @@ dialog.detail-panel::backdrop { background: transparent; }
 .session > summary::before { content: ""; width: 6px; height: 6px; border-right: 1.5px solid var(--secondary); border-bottom: 1.5px solid var(--secondary); rotate: -45deg; transition: rotate 200ms ease-out; margin-inline-end: 2px; }
 .session[open] > summary::before { rotate: 45deg; }
 .session-body { display: grid; gap: 8px; padding-top: 8px; overflow-wrap: anywhere; }
+.session-agents { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.session-agents > li { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.session-agents > li > span:first-child { display: grid; min-width: 0; }
 .session-row { padding: 10px 12px; border-radius: var(--row-radius); background: var(--row); }
 .panel-list { display: grid; gap: 14px; }
 

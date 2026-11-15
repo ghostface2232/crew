@@ -85,6 +85,8 @@ export function fixture(): BoardState {
         stalled: false,
         startedAt: NOW - 600_000,
         activeAt: NOW - 1000,
+        agents: [],
+        workflows: [],
       },
       {
         id: 'lead-2',
@@ -97,6 +99,8 @@ export function fixture(): BoardState {
         stalled: false,
         startedAt: NOW - 600_000,
         activeAt: NOW - 1000,
+        agents: [],
+        workflows: [],
       },
     ],
     agents: {

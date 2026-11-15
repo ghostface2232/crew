@@ -47,6 +47,7 @@ export function JobRow({ job, selected, openJob }: { job: BoardJob; selected?: b
 }
 
 export function SessionView({ session }: { session: ClaudeSession }) {
+  const now = useNow();
   return (
     <details className="session">
       <summary>
@@ -64,6 +65,19 @@ export function SessionView({ session }: { session: ClaudeSession }) {
           <p className="caption">
             <Icon icon={Wrench} size={11} /> A tool is running
           </p>
+        )}
+        {session.agents.length > 0 && (
+          <ul className="session-agents" aria-label="Sub-agents">
+            {session.agents.map((agent) => (
+              <li key={agent.id}>
+                <span>
+                  {agent.title}
+                  <span className="caption secondary">{agent.phase}</span>
+                </span>
+                <span className="caption secondary">{elapsed(now - agent.startedAt)}</span>
+              </li>
+            ))}
+          </ul>
         )}
       </div>
     </details>

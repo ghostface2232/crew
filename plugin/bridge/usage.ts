@@ -355,7 +355,7 @@ const name = (agent: Agent) => (agent === 'claude' ? 'Claude' : WORKERS[agent].n
  * It only ever answers with the role's holder or the lead: it never gives an agent a role the user
  * did not assign. A stale or unknown reading changes nothing, so the default roles are followed.
  */
-export function route(kind: RouteKind, usage: Usage, roles: Config['roles']): RouteDecision {
+export function route(kind: RouteKind, usage: Usage, roles: Config['roles'], disabled: Agent[] = []): RouteDecision {
   const of = (agent: Agent) => usage.providers.find((p) => p.agent === agent);
   const status = (agent: Agent): UsageStatus => of(agent)?.status ?? 'unknown';
   const short = (agent: Agent) => status(agent) === 'tight' || status(agent) === 'exhausted';
@@ -370,23 +370,35 @@ export function route(kind: RouteKind, usage: Usage, roles: Config['roles']): Ro
   const keeps = (agent: Agent) => (status(agent) === 'ok' ? `${name(agent)} holds the role and has room.` : `${name(agent)} holds the role. Its usage is not known (${of(agent)?.reason ?? 'no reading.'}), so the assignment is followed.`);
 
   if (kind === 'lead') {
-    const engineer = roles.delegate.agent;
+    // The engineer is the first worker holding implementation: Claude may hold it too, and cannot hand work to itself.
+    const engineer = holdersOf(roles.delegate).find((agent) => agent !== LEAD && !disabled.includes(agent));
     if (status(LEAD) === 'exhausted') {
       // Handing the session over is not undone lightly: only to an engineer measured to have room.
       const takeover = engineer === 'codex' && status('codex') === 'ok';
       return { kind, assignee: takeover ? 'codex' : LEAD, reason: `${why(LEAD)} ${takeover ? 'Write a handoff note and hand the session to Codex.' : 'No other agent can lead; stop and tell the user.'}`, fallback: [], degraded: true, deferUntil: resets(LEAD) };
     }
-    if (status(LEAD) === 'tight') return plain(LEAD, `${why(LEAD)} Keep to planning and merge decisions, and hand more implementation to ${name(engineer)}.`, short(engineer) ? [] : [engineer]);
+    if (status(LEAD) === 'tight') {
+      if (!engineer) return plain(LEAD, `${why(LEAD)} Keep to planning and merge decisions, and give more implementation to subagents.`);
+      return plain(LEAD, `${why(LEAD)} Keep to planning and merge decisions, and hand more implementation to ${name(engineer)}.`, short(engineer) ? [] : [engineer]);
+    }
     return plain(LEAD, status(LEAD) === 'ok' ? `${name(LEAD)} has room; lead as usual.` : `${name(LEAD)}'s usage is not known (${of(LEAD)?.reason ?? 'no reading.'}); lead as usual.`);
   }
 
   const holders = holdersOf(roles[kind]);
-  // The user's order decides; a holder short of usage gives way to the next one with room.
-  const holder = holders.find((agent) => !short(agent)) ?? holders[0];
   const listed = holders.map((agent) => ({ agent, status: status(agent) }));
-  const moved = holder === holders[0] ? '' : `${why(holders[0])} ${name(holder)} also holds the role. `;
+  // A holder that cannot do this kind of work is never suggested: a disabled agent, or one that cannot run the app for verify.
+  const able = (agent: Agent) => agent === LEAD || (!disabled.includes(agent) && (kind !== 'verify' || WORKERS[agent].reviewerRunsGit));
+  const usable = holders.filter(able);
+  if (!usable.length) {
+    const who = holders.map(name).join(' and ');
+    return { kind, assignee: LEAD, reason: `${who} cannot take ${kind} work now (disabled, or unable to run the app). Do it yourself, and say that the cross-check was skipped.`, fallback: [], degraded: true, deferUntil: null, holders: listed };
+  }
+  // The user's order decides; a holder short of usage gives way to the next one with room.
+  const holder = usable.find((agent) => !short(agent)) ?? usable[0];
+  const moved = holder === holders[0] ? '' : able(holders[0]) ? `${why(holders[0])} ` : `${name(holders[0])} cannot take ${kind} work now. `;
   const decision = decide(holder);
-  return { ...decision, reason: `${moved}${decision.reason}`, fallback: [...new Set([...decision.fallback, ...holders.filter((agent) => agent !== decision.assignee)])], holders: listed };
+  const others = usable.filter((agent) => agent !== decision.assignee && status(agent) !== 'exhausted');
+  return { ...decision, reason: `${moved}${decision.reason}`, fallback: [...new Set([...decision.fallback, ...others])], holders: listed };
 
   function decide(holder: Agent): RouteDecision {
   if (holder === LEAD) return plain(LEAD, 'Claude holds the role: do the work yourself, or in a subagent.');

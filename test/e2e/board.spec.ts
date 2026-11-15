@@ -488,6 +488,18 @@ test('a role can hold Claude and further holders, and changing them back is no c
   });
 });
 
+test('making a further holder the default takes it off the further holders', async ({ page, request }) => {
+  await openSettings(page, 'Review');
+  await page.getByRole('button', { name: 'Cross-review also Claude' }).click();
+  const agent = page.getByLabel('Cross-review agent');
+  await agent.selectOption('claude');
+  await expect(page.getByRole('button', { name: 'Cross-review also Codex' })).toHaveAttribute('aria-pressed', 'false');
+  await page.getByRole('button', { name: 'Save Roles' }).click();
+  await expect(page.getByText('Unsaved changes')).toHaveCount(0);
+  const calls = await (await request.get('/__requests')).json();
+  expect(calls.findLast((call: { route: string }) => call.route === '/api/roles').body).toEqual({ roles: { review: { agent: 'claude' } } });
+});
+
 test('New Job picks among a role\'s worker holders, and a role only Claude holds starts from Claude', async ({ page, request }) => {
   const data = fixture();
   data.roles = resolveConfig({ roles: { delegate: { agent: 'codex', also: ['antigravity'] }, polish: { agent: 'claude' } } }).roles;

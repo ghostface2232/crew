@@ -366,7 +366,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       if (id && !mission) throw new HttpError(400, `No mission with id "${id}" is known any more.`);
       // The preset the next job would run under, so the lead can pick its own subagents' models to match.
       const preset = missionPreset(mission, live.preset);
-      return { ...routeWork(kind as RouteKind, usage.current(), live.roles), preset, policy: preset ? live.presets[preset] : null };
+      return { ...routeWork(kind as RouteKind, usage.current(), live.roles, live.antigravity.enabled ? [] : ['antigravity']), preset, policy: preset ? live.presets[preset] : null };
     }
     if (pathname === '/api/stream') {
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });

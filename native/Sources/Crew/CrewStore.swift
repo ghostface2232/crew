@@ -334,7 +334,7 @@ final class SettingsModel {
     static func normalized(_ table: [String: RoleSetting]) -> [String: RoleSetting] {
         table.compactMapValues { setting in
             let blank: (String?) -> String? = { $0?.isEmpty == true ? nil : $0 }
-            let clean = RoleSetting(agent: blank(setting.agent), model: blank(setting.model), effort: blank(setting.effort), also: setting.also?.isEmpty == true ? nil : setting.also)
+            let clean = RoleSetting(agent: blank(setting.agent), model: blank(setting.model), effort: blank(setting.effort), also: setting.also)
             return clean == RoleSetting() ? nil : clean
         }
     }
@@ -389,10 +389,10 @@ final class SettingsModel {
         if Set(also) == Set(restoredAlso) {
             setting.also = restored.also
         } else {
-            // With no agent, naming only the inherited default replaces the parent's also with no extra holders.
+            // A role following its parent writes an empty list to drop the parent's further holders, which nil would inherit.
             let inheritsAlso = setting.agent == nil && roleInfo.first(where: { $0.role == role })?.parent
                 .flatMap { self.assignment(for: $0)?.also }?.isEmpty == false
-            setting.also = also.isEmpty ? (inheritsAlso ? [assignment.agent] : nil) : also
+            setting.also = also.isEmpty && !inheritsAlso ? nil : also
         }
         roleSettings[role] = setting == RoleSetting() ? nil : setting
     }

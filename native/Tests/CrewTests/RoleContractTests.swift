@@ -143,11 +143,16 @@ import Testing
             settings.setAlso("delegate", holder: holder, enabled: enabled)
             #expect(settings.roleSettings == settings.savedRoleSettings && !settings.dirty)
         }
-        #expect(SettingsModel.normalized(["delegate": RoleSetting(also: [])]).isEmpty)
+        // An empty list replaces the parent's further holders, so it is kept as written.
+        #expect(SettingsModel.normalized(["refactor": RoleSetting(also: [])]) == ["refactor": RoleSetting(also: [])])
         let settings = SettingsModel(api: CrewAPI(port: 0), roles: state.roles, roleSettings: ["delegate": RoleSetting(agent: "codex", also: ["claude"])], roleInfo: state.roleInfo)
         settings.setAlso("refactor", holder: "claude", enabled: false)
         #expect(settings.assignment(for: "refactor")?.also == nil)
-        #expect(settings.roleSettings["refactor"]?.also == ["codex"])
+        #expect(settings.roleSettings["refactor"]?.also == [])
+        // Naming no holder must not turn the parent's default into a further holder once that default changes.
+        settings.setRole("delegate", \.agent, to: "antigravity")
+        #expect(settings.assignment(for: "refactor")?.also == nil)
+        settings.setRole("delegate", \.agent, to: "codex")
         settings.setAlso("refactor", holder: "claude", enabled: true)
         #expect(settings.roleSettings["refactor"] == nil && !settings.dirty)
         settings.setAlso("refactor", holder: "codex", enabled: true)

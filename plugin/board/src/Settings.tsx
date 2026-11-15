@@ -145,12 +145,22 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
    * A blank field is the same as one never set, so clearing it again leaves nothing behind. Back to what was saved,
    * a field is written as it was saved: a role without a parent shows the agent it resolves to when none is written.
    */
-  const editRole = (role: Role, key: keyof RoleAssignment, value: string) =>
+  const editRole = (role: Role, key: 'agent' | 'model' | 'effort', value: string) =>
     setRoles((current) => {
       const saved = savedRoles[role]?.[key];
       const savedShown = saved ?? (key === 'agent' && !info.find((other) => other.role === role)?.parent ? state.roles[role]?.agent : undefined);
       const next = value === (savedShown ?? '') ? saved ?? '' : value;
-      const { [key]: _old, ...rest } = current[role] ?? {};
+      const rest: Partial<RoleAssignment> = { ...current[role] };
+      delete rest[key];
+      if (key === 'agent') {
+        // The default cannot also be a further holder. Back at the agent it had, the list comes back as it was saved.
+        const strip = (list: Holder[] | undefined, agent: string | undefined) => list?.filter((holder) => holder !== agent);
+        const savedAlso = savedRoles[role]?.also;
+        const untouched = savedAlso && (rest.also ?? []).join() === (strip(savedAlso, current[role]?.agent) ?? []).join();
+        const also = next ? strip(untouched ? savedAlso : rest.also, next) : untouched ? savedAlso : rest.also;
+        if (also?.length || (!next && also)) rest.also = also;
+        else delete rest.also;
+      }
       const entry = next ? { ...rest, [key]: next } : rest;
       const { [role]: _entry, ...others } = current;
       return Object.keys(entry).length ? { ...others, [role]: entry } : others;

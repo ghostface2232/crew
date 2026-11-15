@@ -225,11 +225,36 @@ test('a role\'s holders are tried in the user\'s order, and Claude holding it me
   const roles = resolveConfig({ roles: { review: { agent: 'codex', also: ['antigravity'] }, polish: { agent: 'claude', also: ['antigravity'] } } }).roles;
   const moved = route('review', usageOf({ codex: 'exhausted' }), roles);
   assert.equal(moved.assignee, 'antigravity');
-  assert.match(moved.reason, /Codex is exhausted[^]*Antigravity also holds the role/);
+  assert.match(moved.reason, /^Codex is exhausted[^]*Antigravity holds the role and has room\.$/);
   assert.deepEqual(moved.holders, [{ agent: 'codex', status: 'exhausted' }, { agent: 'antigravity', status: 'ok' }]);
   const own = route('polish', usageOf({}), roles);
   assert.deepEqual([own.assignee, own.reason], ['claude', 'Claude holds the role: do the work yourself, or in a subagent.']);
   assert.ok(own.fallback.includes('antigravity'));
+});
+
+test('a holder that cannot do the work is never suggested, nor an exhausted one as fallback', () => {
+  // verify follows review, but Antigravity cannot run the app, so it is skipped there and the review policy holds.
+  const roles = resolveConfig({ roles: { review: { agent: 'codex', also: ['antigravity'] } } }).roles;
+  const verify = route('verify', usageOf({ codex: 'exhausted' }), roles);
+  assert.deepEqual([verify.assignee, verify.degraded], ['claude', true]);
+  assert.match(verify.reason, /Run the app in your own self-review/);
+  assert.ok(!verify.fallback.includes('antigravity'));
+  const onlyAntigravity = resolveConfig({ roles: { verify: { agent: 'antigravity' } } }).roles;
+  assert.deepEqual([route('verify', usageOf({}), onlyAntigravity).assignee, route('verify', usageOf({}), onlyAntigravity).degraded], ['claude', true]);
+  // A disabled agent is skipped too.
+  const off = route('review', usageOf({ codex: 'exhausted' }), roles, ['antigravity']);
+  assert.equal(off.assignee, 'claude');
+  // An exhausted holder is not offered as the next try.
+  const both = resolveConfig({ roles: { review: { agent: 'antigravity', also: ['codex'] } } }).roles;
+  assert.ok(!route('review', usageOf({ codex: 'exhausted' }), both).fallback.includes('codex'));
+});
+
+test('the lead hands implementation to the first worker holding it, never to itself', () => {
+  const roles = resolveConfig({ roles: { delegate: { agent: 'claude', also: ['codex'] } } }).roles;
+  assert.match(route('lead', usageOf({ claude: 'tight' }), roles).reason, /hand more implementation to Codex/);
+  assert.equal(route('lead', usageOf({ claude: 'exhausted' }), roles).assignee, 'codex');
+  const alone = resolveConfig({ roles: { delegate: { agent: 'claude' } } }).roles;
+  assert.match(route('lead', usageOf({ claude: 'tight' }), alone).reason, /give more implementation to subagents/);
 });
 
 test('a short lead hands off implementation, and an exhausted one hands the session to Codex if it can', () => {

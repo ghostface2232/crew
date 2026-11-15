@@ -254,12 +254,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
     }
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         if sender === settingsWindow {
-            guard canLeaveSettings() else { return false }
+            guard leaveSettings(then: { [weak self] in self?.dismissSettings() }) else { return false }
             settingsWindow = nil; settings = nil
             return true
         }
-        if !quitting { store.windowVisible = false; sender.orderOut(nil); return false }
+        // Settings leave with the window, so closing it leaves nothing of the app on screen.
+        if !quitting {
+            guard leaveSettings(then: { [weak self] in self?.dismissSettings(); self?.hideMain(sender) }) else { return false }
+            dismissSettings()
+            hideMain(sender)
+            return false
+        }
         return true
+    }
+    private func hideMain(_ window: NSWindow) { store.windowVisible = false; window.orderOut(nil) }
+    /// Closes the settings window without asking again; whoever calls it has already settled any unsaved changes.
+    private func dismissSettings() {
+        guard let window = settingsWindow else { return }
+        settingsWindow = nil; settings = nil
+        window.close()
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { show(); return false }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
@@ -301,7 +314,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         }
     }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard canLeaveSettings() else { return .terminateCancel }
+        guard leaveSettings(then: { [weak self] in self?.dismissSettings(); NSApp.terminate(nil) }) else { return .terminateCancel }
         quitting = true
         let announced = store.connected && store.notificationsAllowed
         store.stop()
@@ -313,7 +326,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         }
         return .terminateLater
     }
-    private func canLeaveSettings() -> Bool {
+    /**
+     Whether settings can go now. Unsaved changes are asked about once: Don't Save leaves at once; Save saves them and,
+     when every save worked, runs `leave` (the caller then gets false and does nothing itself); Cancel stays.
+     */
+    private func leaveSettings(then leave: @escaping @MainActor () -> Void) -> Bool {
         guard let settings else { return true }
         if settings.busy {
             let alert = NSAlert()
@@ -322,7 +339,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             alert.runModal()
             return false
         }
-        return !settings.dirty || confirmDiscard("Discard unsaved settings?")
+        guard settings.dirty else { return true }
+        settingsWindow?.makeKeyAndOrderFront(nil)
+        let alert = NSAlert()
+        alert.messageText = "Save changes to Settings?"
+        alert.informativeText = "Your changes will be lost if you don't save them."
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Don't Save")
+        alert.addButton(withTitle: "Cancel")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            // A save that fails keeps the window open with its error showing, so nothing is lost silently.
+            Task { if await settings.saveAll() { leave() } }
+            return false
+        case .alertSecondButtonReturn:
+            return true
+        default:
+            return false
+        }
     }
     private func updateNotifications() {
         let badge = store.state.pendingCount > 0 ? String(store.state.pendingCount) : nil

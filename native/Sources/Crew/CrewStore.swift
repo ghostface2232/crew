@@ -408,6 +408,13 @@ final class SettingsModel {
         } catch { presetStatus = error.localizedDescription }
         savingPreset = false
     }
+    /// Saves every page with unsaved changes; true when nothing is left unsaved.
+    func saveAll() async -> Bool {
+        if roleSettings != savedRoleSettings { await saveRoles() }
+        if preset != savedPreset && presets != nil { await savePreset() }
+        if text != savedText && loaded { await saveInstructions() }
+        return !dirty
+    }
     func saveRoles() async {
         guard !savingRoles else { return }
         savingRoles = true; roleStatus = ""

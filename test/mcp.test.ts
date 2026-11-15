@@ -217,3 +217,35 @@ test('a role the lead holds starts no worker, and a pick outside the holders is 
   assert.match(pick('polish', undefined).yours, /^polish is yours/);
   assert.throws(() => pick('review', 'antigravity'), /antigravity does not hold review; its holders are codex or claude/);
 });
+
+test('work started after a done mission opens a follow-up mission named after it', async () => {
+  const source = fs.readFileSync(new URL('../plugin/bridge/mcp.ts', import.meta.url), 'utf8');
+  const mission = source.slice(source.indexOf('function describeMission('), source.indexOf('function describeJob'));
+  const jobs = source.slice(source.indexOf('function followUpTitle('), source.indexOf('async function followOne'));
+  const calls: { route: string; body: any }[] = [];
+  const context: Record<string, unknown> = {
+    STAGES, normalizeTitle, SESSION: 'lead', PROJECT: '/project', missionId: 'm1', closedElsewhere: null, costMission: 'm1', fresh: false, lastDone: null,
+    SUPERSEDED: 'Superseded by a new mission.', currentPolicy: () => 'policy', globalPreset: () => null,
+    ownMission: async () => (context.missionId ? { id: context.missionId, title: '역할 정리', state: 'active', stage: 'final' } : null),
+    reattach: async () => {}, withMission: (call: () => unknown) => call(), describeJob: (job: Job) => `job ${job.id}`,
+    api: async (_method: string, route: string, body: any) => {
+      calls.push({ route, body });
+      if (route === '/api/missions') return { id: 'm2', title: body.title, stage: 'implement', stages: body.stages, state: 'active' };
+      if (route === '/api/jobs') return { id: 'cx-1', mission: body.mission };
+      return { id: 'm1', title: '역할 정리', state: 'done', stage: 'final' };
+    },
+  };
+  const { reportMission, runJob, followUpTitle } = vm.runInNewContext(`${stripTypeScriptTypes(mission + jobs)}; ({ reportMission, runJob, followUpTitle })`, context);
+  assert.equal(followUpTitle('Fix the toolbar'), 'Follow-up: Fix the toolbar');
+  assert.equal(followUpTitle('후속 작업: 역할 정리'), '후속 작업: 역할 정리');
+  assert.equal(followUpTitle('Follow-up: 역할 정리'), '후속 작업: 역할 정리');
+  await reportMission({ done: true, outcome: 'ok' });
+  const first = await runJob({ kind: 'delegate', task: 'more' }, true, { jobs: [] });
+  assert.match(first, /^Opened mission m2 "후속 작업: 역할 정리"/);
+  assert.deepEqual([...calls.find((call) => call.route === '/api/missions')?.body.stages], ['implement', 'final']);
+  assert.equal(calls.at(-1)?.body.mission, 'm2');
+  // Further work joins it, and an abandoned mission or one the lead opens itself needs none.
+  assert.doesNotMatch(await runJob({ kind: 'delegate', task: 'again' }, true, { jobs: [] }), /Opened mission/);
+  await reportMission({ abandoned: true });
+  assert.doesNotMatch(await runJob({ kind: 'delegate', task: 'after abandon' }, true, { jobs: [] }), /Opened mission/);
+});

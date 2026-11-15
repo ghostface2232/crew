@@ -87,7 +87,7 @@ How jobs work:
 - This machine is shared. Workers are told to start their own isolated instance of anything they run (free port, own data directory, headless browser) and to measure nothing unless the job runs alone. A job that has to start the app takes runs_app: its sandbox then has network access, and a review runs in a snapshot of the change. Without it a worker's review is static. Work whose result only shows while it runs (how it looks, interaction and timing, traffic between processes, startup and builds, concurrency and recovery), or whose checks need a server, browser, or app, always takes runs_app, and so does one reviewer of it: reading code and mocked tests do not show these. Pure logic that tests can check in the sandbox does not need it. Only one reviewer of a change runs the app: if the cross-review does, tell your self-review subagent to stay static, and the other way round. A delegate job that measures performance takes exclusive: it is refused while other jobs are active, so wait for them first.
 - Workers save screenshots and recordings in the job's evidence directory, which is kept with the job: results list them and show the latest turn's images, and the board shows them all. To show a worker an image (a design, a screenshot of the problem), pass its path in attachments with delegate, review, reply, or answer.
 - When to review while you run the Crew pipeline (/crew:run), without being asked: one review (your crew:self-reviewer subagent or \`review\`, not both) when a substantial piece of implementation reaches a stopping point; before you push or open a pull request, a review of whatever is going out that no review has covered since it last changed substantially (both in parallel for security, concurrency, or data loss; fixes for a review's findings count as covered); none for small fixes and wording. Reviewers that run in parallel are static unless exactly one of them is told it may run the app. The user's own request for a review, or for none, comes first. Outside the pipeline, review only when the user asks: do not hold back a commit or a push for one.
-- When you take a user's command through several steps, call \`mission\` with title and planned stages first, with stage as you move on, and with done as soon as the work finishes. Pass stages again with what remains to add or drop future steps. The board then shows the command as one unit with its jobs under it. Skip it for a single delegated job.
+- When you take a user's command through several steps, call \`mission\` with title and planned stages first, with stage as you move on, and with done as soon as the work finishes. Pass stages again with what remains to add or drop future steps. The board then shows the command as one unit with its jobs under it. Skip it for a single delegated job. When the user asks for more work after you finished a mission, start a new mission for it before handing any of it out; a job started without one gets a follow-up mission named after the finished one.
 - Usage is measured by AgentGauge. In the pipeline, call \`route\` once at each stage boundary before you hand out work (not on every turn) with the role you are about to hand out, and follow its assignee and reason; when it says degraded, say in your report what was skipped. Outside the pipeline, follow the roles unless a job fails on a limit.${PRESET_LINE}
 
 The user can watch every agent live on the status board at ${BASE_URL}.`;
@@ -470,6 +470,8 @@ let missionId: string | null = null;
  * the mission or opens another.
  */
 let costMission: string | null = null;
+/** The mission this session last finished as done, until work after it opens a follow-up mission or the lead opens one. */
+let lastDone: Mission | null = null;
 /** Set when this session's mission was closed from outside (dismissed on the board, or left too long), until the lead has been told. */
 let closedElsewhere: Mission | null = null;
 /**
@@ -574,6 +576,7 @@ async function reportMission(args: any): Promise<string> {
     missionId = opened.id;
     costMission = opened.id;
     closedElsewhere = null;
+    lastDone = null;
     if (current) await api('POST', `/api/missions/${current.id}`, { abandoned: true, outcome: SUPERSEDED }).catch(() => {});
     return `${describeMission(opened)}\nJobs you start now are shown under it. Report each step with stage (no title needed), and finish with done.`;
   }
@@ -592,6 +595,7 @@ async function reportMission(args: any): Promise<string> {
     const ended: Mission = await api('POST', `/api/missions/${current.id}`, { done: Boolean(args.done), abandoned: Boolean(args.abandoned), outcome: args.outcome, record: args.record });
     missionId = null;
     costMission = null;
+    lastDone = args.done ? ended : null;
     return describeMission(ended);
   }
   if (!args.stage && args.stages === undefined && args.preset === undefined) return describeMission(current);
@@ -605,11 +609,32 @@ function describeJob(job: JobView, ctx: CallContext): string {
   return `${paged ? `Read the full report with status: job_id "${job.id}", report_offset: 0.\n` : ''}${describe(job)}`;
 }
 
+/** A follow-up's title in the language of the mission it follows: Korean for a Korean title, English otherwise. */
+function followUpTitle(title: string): string {
+  const base = title.replace(/^(후속 작업|Follow-up): /, '');
+  return /[\u1100-\u11ff\u3130-\u318f\uac00-\ud7af]/.test(base) ? `후속 작업: ${base}` : `Follow-up: ${base}`;
+}
+
+/**
+ * Work the lead starts after finishing its mission, without opening another, gets a follow-up mission, so it shows on
+ * the board under a mission rather than among loose jobs. The lead reports it like any other.
+ */
+async function followUp(): Promise<string> {
+  if (costMission || !lastDone || !SESSION) return '';
+  const after = lastDone;
+  const opened: Mission = await api('POST', '/api/missions', { title: followUpTitle(after.title), project: PROJECT, owner: SESSION, stages: ['implement', 'final'] });
+  missionId = opened.id;
+  costMission = opened.id;
+  lastDone = null;
+  return `Opened mission ${opened.id} "${opened.title}" for this work, since "${after.title}" was done. Report its stage and done as usual, and pass stages to change its plan.\n`;
+}
+
 async function runJob(spec: JobSpec, background: boolean, ctx: CallContext): Promise<string> {
   await reattach();
+  const opened = await followUp();
   // The id is sent as it is known: the daemon applies the mission's preset, and lets the job stand on its own if the mission has ended.
   const job: JobView = await withMission(() => api('POST', '/api/jobs', { ...spec, lead: SESSION, project: PROJECT, mission: costMission ?? undefined }));
-  return background ? describeJob(job, ctx) : followOne(job.id, ctx);
+  return opened + await (background ? describeJob(job, ctx) : followOne(job.id, ctx));
 }
 
 async function followOne(id: string, ctx: CallContext): Promise<string> {

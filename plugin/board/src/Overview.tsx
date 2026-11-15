@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import {
   ArrowRight, ArrowUpRight, ChevronDown, ChevronUp, CircleAlert, CircleCheck, CircleDot, Layers, MessagesSquare, Plus, Search,
@@ -275,8 +275,11 @@ export function Heatmap({ title, times, most, label, one }: { title: string; tim
     fit();
     return () => observer.disconnect();
   }, [most]);
-  const days = useMemo(() => dailyCounts(times, now, weeks), [times, Math.floor(now / 3_600_000), weeks]);
+  // Recounted when the local day turns, not the UTC hour, which some zones' midnight falls inside.
+  const days = useMemo(() => dailyCounts(times, now, weeks), [times, new Date(now).toDateString(), weeks]);
   const [at, setAt] = useState<number | null>(null);
+  // A narrower card shows fewer days; a square under the pointer may be gone.
+  useEffect(() => setAt(null), [weeks]);
   const grid = useRef<HTMLDivElement>(null);
   const frame = useRef<HTMLDivElement>(null);
   // The newest weeks are the ones to see; a narrow card scrolls back for the older ones.
@@ -327,7 +330,7 @@ export function Heatmap({ title, times, most, label, one }: { title: string; tim
         </div>
       </div>
       </div>
-      {at !== null && (
+      {at !== null && days[at] && (
         <span className="heatmap-tip" ref={tip}>
           <b>{days[at].count}</b> {days[at].count === 1 ? one : label} · {new Date(days[at].day).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}
         </span>

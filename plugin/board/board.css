@@ -471,7 +471,7 @@ html[data-resizing] dialog.detail-panel { transition: none; }
 .approval > div { display: grid; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
 .answer-card { background: color-mix(in srgb, var(--orange) 7%, var(--surface)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--orange) 22%, transparent); }
 .session-mission { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12.5px; }
-.detail-foot { display: grid; gap: 10px; padding-top: 16px; border-top: 1px solid var(--hairline); font-size: 12px; }
+.detail-foot { display: grid; gap: 10px; padding-top: var(--panel-padding); border-top: 1px solid var(--hairline); font-size: 12px; }
 .detail-foot > div { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .detail-foot .copy-menu { flex: 1 1 80px; min-width: 80px; }
 .detail-id { display: block; color: var(--tertiary); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
@@ -546,7 +546,7 @@ dialog.detail-panel { container: panel / inline-size; }
   border-inline-end: 1px solid var(--hairline);
   overflow-y: auto;
 }
-.brand { display: flex; align-items: center; gap: 10px; padding: 2px 6px; }
+.brand { display: flex; align-items: center; gap: 10px; padding: 2px 0; }
 .brand-mark { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; background: var(--ink); color: var(--on-ink); }
 .brand-name { font: 600 15px/1 var(--display); letter-spacing: -0.01em; }
 .search-trigger {
@@ -630,10 +630,13 @@ dialog.detail-panel { container: panel / inline-size; }
   box-shadow: var(--shadow-pop);
   pointer-events: none;
   transition: top 340ms var(--ease-out);
+  transform-origin: left center;
   animation: peek-in 420ms var(--ease-out);
 }
-@keyframes peek-in { from { clip-path: inset(0 100% 0 0 round 18px); opacity: 0.4; } to { clip-path: inset(0 0 0 0 round 18px); } }
-.peek-inner { display: grid; gap: 6px; animation: swap 320ms var(--ease-out); }
+/* The card, shadow and all, grows out from the sidebar; only its contents are wiped in, so the shadow never pops. */
+@keyframes peek-in { from { opacity: 0; translate: -10px 0; scale: 0.96; } }
+.peek-inner { display: grid; gap: 6px; animation: peek-wipe 460ms var(--ease-out); }
+@keyframes peek-wipe { from { clip-path: inset(0 100% 0 0); opacity: 0; translate: -4px 0; } to { clip-path: inset(0 -20px 0 0); } }
 .peek-name { font: 600 15px/1.25 var(--display); letter-spacing: -0.01em; }
 .peek-path { color: var(--tertiary); font: 11px var(--mono); overflow-wrap: anywhere; }
 .peek-stats { display: flex; gap: 14px; margin: 6px 0 2px; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
@@ -660,7 +663,7 @@ dialog.detail-panel { container: panel / inline-size; }
 .topbar-sidebar { display: none; }
 .topbar-spacer { flex: 1; }
 .crumbs { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--tertiary); font-size: 13px; }
-.crumb { min-height: 26px; padding: 0 6px; margin-inline-start: -6px; background: none; color: var(--secondary); font-weight: 450; }
+.crumb { min-height: 26px; padding: 0 6px; margin-inline-start: 0; background: none; color: var(--secondary); font-weight: 450; }
 .crumb:disabled { opacity: 1; cursor: default; }
 .crumb-current { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--label); font-weight: 500; }
 .search-pill {
@@ -703,7 +706,7 @@ dialog.detail-panel { container: panel / inline-size; }
 .banner { display: flex; align-items: center; gap: 10px; padding: 12px 14px 12px 16px; border-radius: 14px; background: color-mix(in srgb, var(--orange) 10%, transparent); color: color-mix(in srgb, var(--orange), black var(--tone-darken)); font-size: 12.5px; animation: reveal 400ms var(--ease-out); }
 .banner > span { flex: 1; overflow-wrap: anywhere; }
 .banner svg { flex: none; width: 15px; height: 15px; }
-.page-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px 24px; padding: 12px 6px 8px; animation: rise 520ms var(--ease-out) both; }
+.page-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px 24px; padding: 12px 0 8px 6px; animation: rise 520ms var(--ease-out) both; }
 .page-head-copy { display: grid; gap: 8px; min-width: 0; }
 .page-head-copy .page-title { overflow-wrap: anywhere; }
 .eyebrow { display: flex; align-items: center; gap: 6px; color: var(--secondary); font-size: 12.5px; }
@@ -734,7 +737,7 @@ dialog.detail-panel { container: panel / inline-size; }
 /* KPIs: one card, four cells split by hairlines, each with its last day by the hour. */
 .kpis { display: grid; border-radius: var(--card-radius); background: var(--surface); box-shadow: inset 0 0 0 1px var(--hairline), var(--shadow-card); overflow: hidden; animation: rise 560ms var(--ease-out) both; }
 .kpi-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
-.kpi { display: grid; gap: 12px; align-content: start; min-width: 0; padding: 20px 22px 16px; }
+.kpi { display: grid; gap: 12px; align-content: start; min-width: 0; padding: 20px 22px 18px; }
 .kpi + .kpi { box-shadow: inset 1px 0 0 var(--hairline); }
 .kpi .label { display: flex; align-items: center; gap: 7px; }
 .kpi .label::before { content: ""; width: 6px; height: 6px; border-radius: 2px; background: var(--tone); }
@@ -778,7 +781,7 @@ dialog.detail-panel { container: panel / inline-size; }
 .kpi-marks > span { display: grid; place-items: center; width: 30px; height: 30px; margin-inline-start: -8px; border-radius: 50%; background: var(--surface); box-shadow: 0 0 0 2px var(--surface), inset 0 0 0 1px color-mix(in srgb, var(--tone) 40%, transparent); color: var(--label); animation: swap 420ms var(--ease-out) both; animation-delay: calc(var(--i, 0) * 60ms + 200ms); }
 .kpi-marks > span:first-child { margin-inline-start: 0; }
 .kpi-marks > .kpi-more { color: var(--secondary); font-size: 11px; font-weight: 600; }
-.share { display: grid; gap: 10px; padding: 14px 22px 18px; border-top: 1px solid var(--hairline); }
+.share { display: grid; gap: 10px; padding: 16px 22px 20px; border-top: 1px solid var(--hairline); }
 .share-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; font-size: 12px; color: var(--secondary); }
 .share-legend > span { display: inline-flex; align-items: center; gap: 6px; }
 .share-legend > span > i { width: 8px; height: 8px; border-radius: 50%; background: var(--tone); }
@@ -803,7 +806,10 @@ dialog.detail-panel { container: panel / inline-size; }
 .agent-cards { display: grid; gap: 4px; }
 .agent-card { display: grid; gap: 12px; padding: 12px; margin-inline: -12px; border-radius: 14px; transition: background-color 200ms ease-out; }
 @media (hover: hover) { .agent-card:hover { background: var(--surface-2); } }
-.agent-card + .agent-card { box-shadow: 0 -1px 0 var(--hairline); }
+.agent-cards { margin-block: -4px -12px; }
+/* A divider within the text's width, not the rounded hover fill's. */
+.agent-card { position: relative; }
+.agent-card + .agent-card::before { content: ""; position: absolute; top: -2px; left: 12px; right: 12px; height: 1px; background: var(--hairline); }
 .agent-card-head { display: flex; align-items: center; gap: 11px; min-width: 0; }
 .agent-card-head > div { flex: 1; min-width: 0; display: grid; gap: 1px; }
 .agent-card-head .caption { color: var(--secondary); }
@@ -847,7 +853,7 @@ dialog.detail-panel { container: panel / inline-size; }
 .heatmap-days > span:nth-child(2) { grid-row: 3; }
 .heatmap-days > span:nth-child(3) { grid-row: 5; }
 .heatmap-grid { position: relative; display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, var(--cell)); grid-auto-columns: var(--cell); gap: var(--gap); }
-.heatmap-grid > i { border-radius: 3px; background: var(--heat-0); transition: scale 160ms var(--ease-out), box-shadow 160ms; animation: fade 600ms ease-out both; animation-delay: calc(var(--d) * 3ms + 120ms); }
+.heatmap-grid > i { border-radius: 3px; background: var(--heat-0); transition: scale 160ms var(--ease-out), box-shadow 160ms; animation: fade 600ms ease-out both; animation-delay: calc(var(--d) * 1.6ms + 100ms); }
 .heatmap-grid > i[data-level="1"] { background: var(--heat-1); }
 .heatmap-grid > i[data-level="2"] { background: var(--heat-2); }
 .heatmap-grid > i[data-level="3"] { background: var(--heat-3); }
@@ -875,13 +881,13 @@ dialog.detail-panel { container: panel / inline-size; }
 /* Events */
 .events { position: relative; display: grid; gap: 14px; }
 .event { position: relative; display: flex; align-items: flex-start; gap: 12px; animation: rise 460ms var(--ease-out) both; animation-delay: calc(var(--i, 0) * 30ms); }
-.event + .event::before { content: ""; position: absolute; left: 9px; top: -14px; height: 14px; width: 1px; background: var(--hairline-strong); }
-.event-mark { display: grid; place-items: center; flex: none; width: 19px; height: 19px; border-radius: 50%; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--hairline); color: var(--secondary); }
+.event + .event::before { content: ""; position: absolute; left: 9px; top: -14px; height: 16px; width: 1px; background: var(--hairline-strong); }
+.event-mark { display: grid; place-items: center; flex: none; width: 19px; height: 19px; margin-top: 2.5px; border-radius: 50%; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--hairline); color: var(--secondary); }
 .event-mark svg { width: 11px; height: 11px; }
 .event[data-kind="error"] .event-mark { color: var(--red); }
 .event[data-kind="done"] .event-mark { color: var(--green); }
 .event > div { flex: 1; min-width: 0; display: grid; gap: 3px; }
-.event-head { display: flex; align-items: center; gap: 8px; min-height: 19px; }
+.event-head { display: flex; align-items: center; gap: 8px; min-height: 24px; }
 .event-head b { font-size: 12px; font-weight: 600; }
 .event-head time { color: var(--tertiary); font-size: 11px; font-variant-numeric: tabular-nums; }
 .event-head button { margin-inline-start: auto; opacity: 0; transition: opacity 160ms ease-out; }
@@ -936,7 +942,7 @@ dialog.detail-panel { container: panel / inline-size; }
 [aria-expanded="false"] > .disclosure { rotate: -90deg; }
 .mission-note, .mission-outcome { font-size: 12.5px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .mission-note { padding: 10px 12px; border-radius: 12px; background: var(--surface-2); color: var(--secondary); }
-.mission-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; padding-top: 14px; border-top: 1px solid var(--hairline); }
+.mission-foot { margin-top: 4px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; padding-top: var(--card-padding); border-top: 1px solid var(--hairline); }
 .mission-outcome { flex: 1 1 240px; color: var(--secondary); }
 .mission-foot-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; margin-inline-start: auto; }
 .menu-pill { gap: 6px; min-height: 26px; padding: 0 9px 0 10px; font-size: 12px; color: var(--secondary); }
@@ -968,12 +974,12 @@ dialog.detail-panel { container: panel / inline-size; }
 .track[data-abandoned] > li[data-pos="past"] .track-node b, .track[data-abandoned] > li[data-pos="stopped"] .track-node b { background: transparent; box-shadow: inset 0 0 0 1.5px var(--tertiary); color: var(--tertiary); }
 .track > li[data-pos="now"] .track-node b { background: var(--accent); box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 16%, transparent); color: #fff; animation: halo-accent 2.4s var(--ease-in-out) infinite; }
 @keyframes halo-accent { 50% { box-shadow: 0 0 0 8px color-mix(in srgb, var(--accent) 6%, transparent); } }
-.track-name { max-width: 100%; padding-inline: 4px; color: var(--secondary); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
+.track-name { max-width: 100%; padding-inline: 4px; color: var(--secondary); font-size: 11px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
 .track > li[data-current] .track-name { font-weight: 600; }
 .track > li[data-pos="now"] .track-name { color: var(--label); }
 .stage-groups { display: grid; gap: 6px; }
 /* The first stage sits as far under the track as the track sits under the title. */
-.stage-groups > .rows:first-child > .stage-name { padding-top: 4px; }
+.stage-groups > .rows:first-child > .stage-name { padding-top: 0; }
 .stage-name { padding: 10px 4px 2px; color: var(--tertiary); font: 500 10.5px/1.2 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
 
 /* Rows */
@@ -1008,7 +1014,7 @@ dialog.detail-panel { container: panel / inline-size; }
 .row-chevron { width: 12px !important; height: 12px !important; color: var(--tertiary); transition: translate 220ms var(--ease-out), color 160ms; }
 
 /* History table */
-.toolbar-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding-inline: 2px; animation: rise 520ms var(--ease-out) both; }
+.toolbar-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; animation: rise 520ms var(--ease-out) both; }
 .filter { position: relative; flex: 0 1 280px; min-width: 180px; }
 .filter svg { position: absolute; left: 11px; top: 50%; translate: 0 -50%; width: 14px; height: 14px; color: var(--tertiary); pointer-events: none; }
 .filter input { min-height: 32px; padding-inline-start: 32px; border-radius: 999px; background: var(--surface); border-color: var(--hairline); }
@@ -1046,7 +1052,8 @@ th[aria-sort] .sort { color: var(--label); }
 .answer { display: grid; gap: 14px; }
 .answer > p { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.55; }
 .answer .callout svg { vertical-align: -2px; }
-.answer-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.answer-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.answer-actions > .action-message { flex: 1 1 auto; min-width: 0; }
 .answer-actions button { font-size: 12.5px; }
 .composer { position: relative; display: grid; border-radius: var(--field-radius); background: var(--surface); box-shadow: inset 0 0 0 1px var(--hairline-strong); transition: box-shadow 160ms ease-out; }
 .composer textarea { min-height: 60px; max-height: 160px; padding: 11px 46px 9px 14px; border: 0; background: none; box-shadow: none !important; }

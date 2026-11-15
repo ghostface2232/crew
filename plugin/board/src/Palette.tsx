@@ -55,6 +55,7 @@ export function Palette({ state, names, projects, origin, close, actions }: {
   const dialog = useRef<HTMLDialogElement>(null);
   const closing = useRef(false);
   const pressed = useRef(false);
+  const unmounting = useRef(false);
   const width = Math.min(760, innerWidth - 24);
   const height = Math.min(500, innerHeight - 96);
   // Anchored to the search control's right edge, growing down and to the left from it; centered without one.
@@ -171,10 +172,12 @@ export function Palette({ state, names, projects, origin, close, actions }: {
     const element = box.current!;
     const layer = dialog.current!;
     const previous = document.activeElement as HTMLElement | null;
+    unmounting.current = false;
     // StrictMode mounts twice; a second showModal on an open dialog would throw in some engines.
     if (!layer.open) layer.showModal();
     element.querySelector('input')?.focus();
     const restore = () => {
+      unmounting.current = true;
       layer.close();
       previous?.focus({ preventScroll: true });
     };
@@ -207,9 +210,10 @@ export function Palette({ state, names, projects, origin, close, actions }: {
         event.preventDefault();
         finish();
       }}
-      onClose={() => {
-        // Escape can close a modal without a cancel event; the board must still forget the palette.
-        if (closing.current) return;
+      onClose={(event) => {
+        // Escape can close a modal without a cancel event; the board must still forget the palette. A close from
+        // StrictMode's remount arrives with the dialog open again, and one from unmounting needs nothing.
+        if (closing.current || unmounting.current || event.currentTarget.open) return;
         closing.current = true;
         close();
       }}

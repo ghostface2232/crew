@@ -62,3 +62,11 @@ test('waiting sessions use their id and reason, fall back to title, and expire',
   assert.deepEqual(next.show, [{ key: 'session:lead:', title: 'Claude needs your input', body: 'Lead session', jobId: 'session:lead' }]);
   assert.deepEqual(planNotifications(next.memory, snapshot([], [{ ...session, state: 'idle' }]), options).expire, ['session:lead:']);
 });
+
+test('a session request is told apart by its id, as the app keys it, even when its words repeat', () => {
+  const session = { id: 'lead', state: 'waiting', waitingFor: 'Approve?', waitingId: 'request-1', title: 'Lead' } as ClaudeSession;
+  const first = planNotifications({}, snapshot([], [session]), options);
+  const next = planNotifications(first.memory, snapshot([], [{ ...session, waitingId: 'request-2' }]), options);
+  assert.deepEqual(next.expire, ['session:lead:request-1']);
+  assert.equal(next.show[0]?.key, 'session:lead:request-2');
+});

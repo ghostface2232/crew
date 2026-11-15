@@ -350,7 +350,8 @@ function ProjectNav({ projects, names, project, state, select }: {
         heading="Projects"
         items={[
           { id: '', label: 'All projects', icon: SquareStack },
-          ...projects.map((dir) => ({ id: dir, label: names.get(dir) ?? dir, icon: FolderClosed, title: dir, dot: activity(dir) })),
+          // No tooltip: the preview beside the list shows the path, and a tooltip would cover it.
+          ...projects.map((dir) => ({ id: dir, label: names.get(dir) ?? dir, icon: FolderClosed, dot: activity(dir) })),
         ]}
         current={project}
         onSelect={(id) => {

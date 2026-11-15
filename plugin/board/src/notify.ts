@@ -71,7 +71,7 @@ export function planNotifications(previous: PlanMemory, state: Snapshot, options
   }
   for (const session of state.claude) {
     if (session.state === 'waiting') {
-      request({ key: `session:${session.id}:${session.waitingFor ?? ''}`, title: 'Claude needs your input', body: session.waitingFor ?? session.title, jobId: `session:${session.id}` });
+      request({ key: `session:${session.id}:${session.waitingId ?? session.waitingFor ?? ''}`, title: 'Claude needs your input', body: session.waitingFor ?? session.title, jobId: `session:${session.id}` });
     }
   }
   return {
@@ -92,14 +92,15 @@ export class Notifier {
   }
 
   update(state: Snapshot, focused: boolean): void {
-    const settings = (state as Snapshot & { notifications?: { onDone?: boolean } }).notifications;
+    const settings = (state as Snapshot & { notifications?: { enabled?: boolean; onDone?: boolean } }).notifications;
     const plan = planNotifications(this.memory, state, { onDone: settings?.onDone ?? this.options.onDone ?? false });
     this.memory = plan.memory;
     for (const key of plan.expire) {
       this.notifications.get(key)?.close();
       this.notifications.delete(key);
     }
-    if (notificationPermission() !== 'granted' || !notificationsWanted() || focused) return;
+    // The daemon's own switch, which the app follows too, comes before this browser's opt-in.
+    if (settings?.enabled === false || notificationPermission() !== 'granted' || !notificationsWanted() || focused) return;
     for (const notice of plan.show) {
       try {
         const notification = new Notification(notice.title, { body: notice.body, tag: notice.key });

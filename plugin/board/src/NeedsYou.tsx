@@ -46,6 +46,8 @@ export function Answer({ job }: { job: BoardJob }) {
             onSend={(message) => reply({ message })}
           />
           <div className="answer-actions">
+            {/* Sent or an error shows at the leading edge of the buttons' row. */}
+            <ActionStatus actionKey={key} />
             {/* The completing answer comes last, at the trailing edge, as in the app. */}
             {button('No', 'deny', false)}
             {button('Yes', 'approve', false)}
@@ -53,11 +55,11 @@ export function Answer({ job }: { job: BoardJob }) {
         </>
       ) : (
         <div className="answer-actions" data-approval>
+          <ActionStatus actionKey={key} />
           {button('Deny', 'deny', false)}
           {button('Approve', 'approve', true)}
         </div>
       )}
-      <ActionStatus actionKey={key} />
     </div>
   );
 }

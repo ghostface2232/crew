@@ -135,13 +135,18 @@ struct JobDetailView: View {
                 ForEach(Array(job.notes.enumerated()), id: \.offset) { _, note in Text(noteText(note)).font(Typeface.callout).textSelection(.enabled) }
             }
         }
-        if job.hasConversation, let exchange = job.exchange {
-            detailSection(job.debate != nil ? "Debate" : "Conversation", symbol: "bubble.left.and.bubble.right") {
-                DebateView(job: job, rounds: job.debate?.rounds, entries: exchange)
-            } accessory: {
-                if let rounds = job.debate?.rounds {
-                    DebateStepper(rounds: rounds, entries: exchange, current: min(job.turns, rounds), working: job.isActive, concluded: job.debateConcluded)
+        let conversation = job.hasConversation ? job.exchange : nil
+        if let exchange = conversation {
+            // A concluded debate's note belongs to the debate, so it sits closer to it than the next section does.
+            VStack(alignment: .leading, spacing: Space.l) {
+                detailSection(job.debate != nil ? "Debate" : "Conversation", symbol: "bubble.left.and.bubble.right") {
+                    DebateView(job: job, rounds: job.debate?.rounds, entries: exchange)
+                } accessory: {
+                    if let rounds = job.debate?.rounds {
+                        DebateStepper(rounds: rounds, entries: exchange, current: min(job.turns, rounds), working: job.isActive, concluded: job.debateConcluded)
+                    }
                 }
+                if job.debateConcluded { DebateConcludedNote() }
             }
         } else if !job.report.isEmpty {
             detailSection("Report", symbol: "doc.text") {
@@ -149,8 +154,7 @@ struct JobDetailView: View {
             }
         }
         if job.debateConcluded {
-            Label("This debate has used all its rounds. Decide from it, or start a new debate.", systemImage: "checkmark.bubble")
-                .font(Typeface.callout).foregroundStyle(.secondary).inset()
+            if conversation == nil { DebateConcludedNote() }
         } else if job.sessionId != nil && job.state != "waiting" {
             detailSection(job.isActive ? "Steer" : job.debate != nil ? "Reply" : "Follow up", symbol: "bubble.left") {
                 let key = "followup:\(job.id)"
@@ -520,6 +524,13 @@ private struct VerificationView: View {
     }
 }
 
+private struct DebateConcludedNote: View {
+    var body: some View {
+        Label("This debate has used all its rounds. Decide from it, or start a new debate.", systemImage: "checkmark.bubble")
+            .font(Typeface.callout).foregroundStyle(.secondary).inset()
+    }
+}
+
 /// A conversation by turn: each pairs the lead's message with the reply, whose numbered points read as
 /// stance-marked headlines with the full text one disclosure away.
 /// Turns recorded before conversations were kept are left out rather than shown empty.
@@ -608,20 +619,22 @@ private struct DebateRound: View {
     var body: some View {
         let points = reply.map { debatePoints($0.text) } ?? []
         let opened = Binding(get: { open ?? last }, set: { open = $0 })
-        VStack(alignment: .leading, spacing: Space.ml) {
-            HStack(spacing: Space.m) {
-                Text(final ? "\(label) \(turn) · final" : "\(label) \(turn)").font(Typeface.headline)
-                // Folded, the title carries the reply's stances beside it, as the worker's name does when open.
-                if !opened.wrappedValue { stances(points) }
-                Spacer(minLength: 0)
+        // The toggle pads its own hit area, so the divider below it sits closer than the rounds' spacing.
+        VStack(alignment: .leading, spacing: Space.s) {
+            VStack(alignment: .leading, spacing: Space.ml) {
+                HStack(spacing: Space.l) {
+                    Text(final ? "\(label) \(turn) · final" : "\(label) \(turn)").font(Typeface.headline)
+                    // Folded, the title carries the reply's stances beside it, as the worker's name does when open.
+                    if !opened.wrappedValue { HStack(spacing: Space.m) { stances(points) } }
+                    Spacer(minLength: 0)
+                }
+                if opened.wrappedValue { exchange(points) }
+                RevealToggle(show: "Show this \(label.lowercased())", hide: "Hide this \(label.lowercased())", shown: opened)
             }
-            if opened.wrappedValue { exchange(points) }
-            RevealToggle(show: "Show this \(label.lowercased())", hide: "Hide this \(label.lowercased())", shown: opened)
+            // Fixed when the round first appears, so a new round arriving does not fold the one being read.
+            .onAppear { if open == nil { open = last } }
+            if !last { Divider() }
         }
-        // Fixed when the round first appears, so a new round arriving does not fold the one being read.
-        .onAppear { if open == nil { open = last } }
-        // The toggle above already pads its own hit area, so the divider adds none.
-        if !last { Divider() }
     }
 
     /// One mark per stance the reply takes, with its count.

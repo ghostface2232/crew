@@ -40,6 +40,7 @@ struct ModelPodium: View {
     @State private var shown: Bool
     init(top: [ModelScore], settled: Bool = false) { self.top = top; _shown = State(initialValue: settled) }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var scheme
     private static let heights: [CGFloat] = [92, 68, 52]
     var body: some View {
         HStack(alignment: .bottom, spacing: 6) {
@@ -80,7 +81,8 @@ struct ModelPodium: View {
                         .contentTransition(.numericText(value: score.score ?? 0))
                     Text("/10").font(.system(size: 11, weight: .medium, design: .rounded)).opacity(0.7)
                 }
-                .foregroundStyle(score.tone)
+                // Darkened in light mode, as a chip's text is, so green and orange stay legible on the light glass.
+                .foregroundStyle(scheme == .light ? score.tone.mix(with: .black, by: 0.22) : score.tone)
                 .padding(.horizontal, 10).padding(.vertical, 4)
                 .glassEffect(.regular.tint(score.tone.opacity(0.2)), in: .capsule)
             }
@@ -89,7 +91,9 @@ struct ModelPodium: View {
             UnevenRoundedRectangle(topLeadingRadius: 12, topTrailingRadius: 12, style: .continuous)
                 .fill(LinearGradient(colors: [medal.opacity(0.32), medal.opacity(0)], startPoint: .top, endPoint: .bottom))
                 .overlay(alignment: .top) {
-                    Text("\(index + 1)").font(.system(size: 30, weight: .semibold, design: .rounded)).foregroundStyle(medal.mix(with: .black, by: 0.3).opacity(0.6)).padding(.top, Space.s)
+                    Text("\(index + 1)").font(.system(size: 30, weight: .semibold, design: .rounded))
+                        // On a dark surface a darkened numeral sinks into its pedestal, so it takes the medal itself.
+                        .foregroundStyle(scheme == .dark ? medal.opacity(0.7) : medal.mix(with: .black, by: 0.3).opacity(0.6)).padding(.top, Space.s)
                 }
                 .frame(height: Self.heights[index])
                 .scaleEffect(x: 1, y: shown ? 1 : 0.001, anchor: .bottom)
@@ -141,6 +145,7 @@ struct ModelScoreRow: View {
     let rank: Int?
     let score: ModelScore
     var settled = false
+    @Environment(\.colorScheme) private var scheme
     var body: some View {
         HStack(alignment: .center, spacing: Space.l) {
             Text(rank.map(String.init) ?? "").font(.system(size: 15, weight: .semibold, design: .rounded)).monospacedDigit().foregroundStyle(.secondary).frame(width: 18)
@@ -149,7 +154,7 @@ struct ModelScoreRow: View {
                 HStack(spacing: Space.s) {
                     Text(score.model).font(.body.weight(.medium)).lineLimit(1).textSelection(.enabled)
                     if let band = score.band {
-                        Text(band.word).font(.caption.weight(.semibold)).foregroundStyle(band.tone)
+                        Text(band.word).font(.caption.weight(.semibold)).foregroundStyle(scheme == .light ? band.tone.mix(with: .black, by: 0.22) : band.tone)
                             .padding(.horizontal, 7).padding(.vertical, 1).background(Palette.chip(band.tone), in: Capsule())
                     }
                 }

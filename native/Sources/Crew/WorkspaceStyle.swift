@@ -136,8 +136,10 @@ struct MissionTrack: View {
         return ZStack {
             Circle().fill(current && mission.state == "active" ? Palette.accent : stopped && !outlined ? passedColor : .clear)
             if mission.passed(index) {
-                if outlined { Circle().strokeBorder(passedColor, lineWidth: Self.line) } else { Circle().fill(passedColor) }
-                Image(systemName: "checkmark").font(Symbol.badge).foregroundStyle(glyph)
+                // A passed step is a glass bead with the check in the passed color, rather than a solid disc that
+                // glares in dark mode and outweighs the step in progress.
+                if outlined { Circle().strokeBorder(passedColor, lineWidth: Self.line) } else { Color.clear.glassEffect(.regular, in: .circle) }
+                Image(systemName: "checkmark").font(Symbol.badge).foregroundStyle(passedColor)
             } else {
                 Circle().strokeBorder(stopped && outlined ? passedColor : current ? .clear : Self.upcoming, lineWidth: Self.line)
                 Text(String(index + 1)).font(Typeface.chip)

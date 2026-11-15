@@ -511,6 +511,10 @@ struct NeedsYouView: View {
                                 Text("\(agentName(job.agent)) · \(projectName(job.projectPath, among: store.projects))").lineLimit(1)
                             }.font(Typeface.chip).foregroundStyle(.secondary).help(job.projectPath)
                             Spacer(minLength: WorkspaceStyle.rowSpacer)
+                            // How long the request has waited, as the web board's request cards show.
+                            if let since = job.waiting?.since {
+                                ElapsedText(store: store, start: since, end: nil).font(Typeface.chip).monospacedDigit().foregroundStyle(.secondary)
+                            }
                             Button("Details", systemImage: "arrow.up.right") { store.openJob(job.id) }.pillButton()
                         }
                         Text(job.title).font(Typeface.callout).foregroundStyle(.secondary).lineLimit(2).help(job.title)

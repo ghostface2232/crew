@@ -53,7 +53,7 @@ enum WorkspaceStyle {
     /// Rows and insets inside a card.
     static let rowFill = dynamic(light: NSColor(calibratedWhite: 0, alpha: 0.04), dark: NSColor(calibratedWhite: 1, alpha: 0.06))
     static let hairline = dynamic(light: NSColor(calibratedWhite: 0, alpha: 0.08), dark: NSColor(calibratedWhite: 1, alpha: 0.08))
-    private static func dynamic(light: NSColor, dark: NSColor) -> Color {
+    fileprivate static func dynamic(light: NSColor, dark: NSColor) -> Color {
         Color(nsColor: NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light })
     }
 
@@ -156,7 +156,8 @@ enum Palette {
     static let selection = accent.opacity(0.09)
     /// Outlines when the user asks for more contrast.
     static let contrastStroke = Color.primary.opacity(0.25)
-    static let panelShadow = Color.black.opacity(0.14)
+    /// Deeper in dark mode, where a light-mode shadow vanishes into the canvas (as --shadow-pop does on the web board).
+    static let panelShadow = WorkspaceStyle.dynamic(light: NSColor(calibratedWhite: 0, alpha: 0.14), dark: NSColor(calibratedWhite: 0, alpha: 0.4))
 }
 
 /// The type scale. Titles are SF Pro Rounded, headlines SF Pro Display, body text SF Pro Text, source text SF Mono.

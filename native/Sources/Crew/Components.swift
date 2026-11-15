@@ -156,18 +156,18 @@ struct AnswerView: View {
                 if waiting.type == "question" {
                     composer
                     // Quick replies sit apart from the composer so they don't read as part of sending.
-                    HStack(spacing: Space.m) {
+                    GlassEffectContainer { HStack(spacing: Space.m) {
                         Spacer(minLength: 0)
                         decision("No", symbol: "xmark", value: "deny", prominent: false)
                         decision("Yes", symbol: "checkmark", value: "approve", prominent: false)
-                    }
+                    } }
                 } else {
                     // At the trailing edge with the completing action last, as everywhere a choice ends something.
-                    HStack(spacing: Space.m) {
+                    GlassEffectContainer { HStack(spacing: Space.m) {
                         Spacer(minLength: 0)
                         decision("Deny", symbol: "xmark", value: "deny", prominent: false)
                         decision("Approve", symbol: "checkmark", value: "approve", prominent: true)
-                    }
+                    } }
                 }
                 ActionMessage(state: store.actions[job.requestKey])
             }
@@ -203,7 +203,8 @@ struct AnswerView: View {
         // A draft typed before a quick reply goes along with it rather than being discarded.
         let note = draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
         Button(title, systemImage: symbol) { Task { await store.answer(job, decision: value, message: note.isEmpty ? nil : note) } }
-            .pillButton(prominent: prominent).disabled(locked)
+            // Liquid Glass, as the app's other primary choices are; the container lets neighboring buttons blend.
+            .glassPillButton(prominent: prominent).disabled(locked)
     }
 }
 
@@ -372,10 +373,10 @@ struct AgentUsageView: View {
                 }.joined(separator: "\n"))
         }
     }
-    /// AgentGauge's thresholds: caution from 70% used, danger from 90% or when the limit was hit.
+    /// AgentGauge's thresholds: caution from 70% used or when it reports the window tight, danger from 90% or when the limit was hit.
     private func tint(_ used: Double, _ status: UsageStatus) -> Color {
         if status == .exhausted || used >= 0.9 { return Palette.danger }
-        return used >= 0.7 ? Palette.warning : .secondary
+        return used >= 0.7 || status == .tight ? Palette.warning : .secondary
     }
 }
 

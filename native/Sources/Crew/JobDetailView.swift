@@ -557,7 +557,7 @@ private struct VerificationView: View {
                 DetailItem(title: checkTitle(check), symbol: checkSymbol(check), tint: receipt.stale != nil ? .secondary : checkColor(check)) {
                     if let skipped = check.skipped { Text(skipped.prefix(1).uppercased() + skipped.dropFirst() + ".").font(Typeface.caption).foregroundStyle(.secondary) }
                     Text(check.command).font(Typeface.code).textSelection(.enabled)
-                    Text(caption(receipt, extra: check.skipped == nil ? duration(check.ms) : nil)).font(Typeface.caption).foregroundStyle(.secondary)
+                    Text(caption(receipt, extra: check.skipped == nil ? duration(check.ms) + (check.sandboxed ? "" : " · not sandboxed") : nil)).font(Typeface.caption).foregroundStyle(.secondary)
                     if check.skipped == nil && check.exit != 0 && !check.output.isEmpty {
                         if outputShown {
                             Text(check.output.split(separator: "\n", omittingEmptySubsequences: false).suffix(15).joined(separator: "\n"))

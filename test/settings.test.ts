@@ -219,3 +219,16 @@ test('project keys have one spelling whether git or Claude Code reported them', 
   assert.equal(canonicalPath('/Users/me/repo/', 'darwin'), '/Users/me/repo');
   assert.equal(canonicalPath('/Users/me/x/../repo', 'linux'), '/Users/me/repo');
 });
+
+test('a role may hold Claude and further holders, whose settings stay their own', () => {
+  const config = resolveConfig({ roles: { review: { agent: 'codex', also: ['claude', 'antigravity'], model: 'gpt-x' }, polish: { agent: 'claude' } } });
+  assert.deepEqual(config.roles.review, { agent: 'codex', also: ['claude', 'antigravity'], model: 'gpt-x' });
+  // The verify role follows review whole, holders included.
+  assert.deepEqual(config.roles.verify.also, ['claude', 'antigravity']);
+  // The role's model was written for its default holder, so another holder never receives it.
+  assert.deepEqual(effectiveRole(config, 'review', null, 'antigravity'), { agent: 'antigravity' });
+  assert.deepEqual(effectiveRole(config, 'review', null), { agent: 'codex', model: 'gpt-x' });
+  assert.throws(() => effectiveRole(config, 'polish'), /held by Claude, the lead/);
+  assert.throws(() => resolveConfig({ roles: { review: { also: ['cursor'] } } as never }), /roles\.review\.also must be a list of: codex, antigravity, claude/);
+  assert.throws(() => resolveConfig({ roles: { review: { agent: 'codex', also: ['codex'] } } }), /names a holder twice/);
+});

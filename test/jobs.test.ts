@@ -1013,6 +1013,20 @@ test('each job goes to its role\'s holder, gets the role\'s brief, and refuses a
   assert.equal(jobRole({ kind: 'polish' }), 'polish');
 });
 
+test('the lead picks one of a role\'s holders per job, and a role Claude holds starts no worker', async (t) => {
+  const repo = tempRepo();
+  const held = resolveConfig({ notify: false, codex: config.codex, roles: { delegate: { agent: 'codex', also: ['antigravity', 'claude'] }, polish: { agent: 'claude' } } });
+  const { jobs, home } = harness((ctl) => ctl.done('ok'), () => held);
+  t.after(() => { jobs.flush(); fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }); });
+  assert.equal((await jobs.create({ kind: 'delegate', cwd: repo, task: 'x', isolation: 'in_place' })).agent, 'codex');
+  assert.equal((await jobs.create({ kind: 'delegate', cwd: repo, task: 'x', isolation: 'in_place', agent: 'antigravity' })).agent, 'antigravity');
+  const notHeld = resolveConfig({ notify: false, codex: config.codex });
+  const plain = harness((ctl) => ctl.done('ok'), () => notHeld);
+  t.after(() => { plain.jobs.flush(); fs.rmSync(plain.home, { recursive: true, force: true, maxRetries: 5 }); });
+  await assert.rejects(plain.jobs.create({ kind: 'delegate', cwd: repo, task: 'x', isolation: 'in_place', agent: 'antigravity' }), /antigravity does not hold delegate; its holders are: codex/);
+  await assert.rejects(jobs.create({ kind: 'polish', cwd: repo, targets: ['README.md'], isolation: 'in_place' }), /polish is held by Claude, the lead: start it from a Claude session/);
+});
+
 test('a job runs under the preset it was given and keeps it, capping its tier by that preset', async (t) => {
   const repo = tempRepo();
   const best = resolveConfig({ notify: false, codex: config.codex, preset: 'best' });

@@ -221,6 +221,17 @@ test('every role has its own policy when its holder runs out', () => {
   assert.doesNotMatch(route('refactor', usageOf({ codex: 'tight' }), DEFAULT_ROLES).reason, /Polish/);
 });
 
+test('a role\'s holders are tried in the user\'s order, and Claude holding it means the lead does it', () => {
+  const roles = resolveConfig({ roles: { review: { agent: 'codex', also: ['antigravity'] }, polish: { agent: 'claude', also: ['antigravity'] } } }).roles;
+  const moved = route('review', usageOf({ codex: 'exhausted' }), roles);
+  assert.equal(moved.assignee, 'antigravity');
+  assert.match(moved.reason, /Codex is exhausted[^]*Antigravity also holds the role/);
+  assert.deepEqual(moved.holders, [{ agent: 'codex', status: 'exhausted' }, { agent: 'antigravity', status: 'ok' }]);
+  const own = route('polish', usageOf({}), roles);
+  assert.deepEqual([own.assignee, own.reason], ['claude', 'Claude holds the role: do the work yourself, or in a subagent.']);
+  assert.ok(own.fallback.includes('antigravity'));
+});
+
 test('a short lead hands off implementation, and an exhausted one hands the session to Codex if it can', () => {
   assert.match(route('lead', usageOf({ claude: 'tight' }), DEFAULT_ROLES).reason, /hand more implementation to Codex/);
   const handoff = route('lead', usageOf({ claude: 'exhausted' }), DEFAULT_ROLES);

@@ -43,6 +43,9 @@ export type JobKind = 'delegate' | 'review' | 'polish';
  * docs/06-roadmap.md describes what another lead would need.
  */
 export const LEAD = 'claude' as const;
+/** Who may hold a role: a worker, or the lead itself, which does the work in its own session or a subagent. */
+export type Holder = WorkerAgent | typeof LEAD;
+export const isHolder = (value: unknown): value is Holder => value === LEAD || Object.hasOwn(WORKERS, value as string);
 
 /**
  * A role is a kind of work the user assigns to an agent. Parents come before their children: a role the user
@@ -95,11 +98,17 @@ export function runsCommands(agent: WorkerAgent, spec: { kind: JobKind; ask?: bo
 }
 
 export interface RoleAssignment {
-  agent: WorkerAgent;
-  /** Override the agent's own model and effort settings for this role. */
+  /** The default holder: who takes the role's work unless the lead picks another of its holders for a job. */
+  agent: Holder;
+  /** Other holders the lead may pick for a job, in the user's order of preference. */
+  also?: Holder[];
+  /** Override the default holder's own model and effort settings for this role. */
   model?: string;
   effort?: string;
 }
+
+/** Every holder of a role, the default first. */
+export const holdersOf = (assignment: RoleAssignment): Holder[] => [assignment.agent, ...(assignment.also ?? [])];
 
 export type RoleSettings = Partial<Record<Role, Partial<RoleAssignment>>>;
 
@@ -203,7 +212,12 @@ function resolveRoles(settings: RoleSettings): Record<Role, RoleAssignment> {
     const { agent, ...own } = settings[role] ?? {};
     const parent = roleInfo(role).parent;
     const base: RoleAssignment = agent ? { agent } : parent ? roles[parent] : { agent: BASE_HOLDERS[role]! };
-    roles[role] = { ...base, ...own };
+    const merged: RoleAssignment = { ...base, ...own };
+    // A role that follows its parent's default may list that same agent among its own: each holder counts once.
+    const also = [...new Set(merged.also ?? [])].filter((holder) => holder !== merged.agent);
+    if (also.length) merged.also = also;
+    else delete merged.also;
+    roles[role] = merged;
   }
   return roles;
 }
@@ -219,12 +233,18 @@ export function resolveConfig(user: UserConfig): Config {
   for (const [role, entry] of Object.entries(given)) {
     if (!isRole(role)) throw new Error(`roles.${role} is not a role; use one of: ${ROLES.join(', ')}.`);
     if (!isObject(entry)) throw new Error(`roles.${role} must be an object such as {"agent": "codex"}.`);
+    const holders = [...Object.keys(WORKERS), LEAD].join(', ');
     for (const [key, value] of Object.entries(entry)) {
-      if (!['agent', 'model', 'effort'].includes(key)) throw new Error(`roles.${role}.${key} is not a setting; use agent, model, or effort.`);
-      if (typeof value !== 'string') throw new Error(`roles.${role}.${key} must be a string.`);
+      if (!['agent', 'also', 'model', 'effort'].includes(key)) throw new Error(`roles.${role}.${key} is not a setting; use agent, also, model, or effort.`);
+      if (key === 'also') {
+        if (!Array.isArray(value) || value.some((holder) => !isHolder(holder))) throw new Error(`roles.${role}.also must be a list of: ${holders}.`);
+      } else if (typeof value !== 'string') throw new Error(`roles.${role}.${key} must be a string.`);
     }
-    if (entry.agent !== undefined && !Object.hasOwn(WORKERS, entry.agent as string)) {
-      throw new Error(`roles.${role}.agent is "${entry.agent}"; use one of: ${Object.keys(WORKERS).join(', ')}.`);
+    if (entry.agent !== undefined && !isHolder(entry.agent)) {
+      throw new Error(`roles.${role}.agent is "${entry.agent}"; use one of: ${holders}.`);
+    }
+    if (Array.isArray(entry.also) && new Set([entry.agent, ...entry.also].filter(Boolean)).size !== entry.also.length + (entry.agent ? 1 : 0)) {
+      throw new Error(`roles.${role}.also names a holder twice, or the default agent again.`);
     }
     // A model names one agent's model. Following the parent, the agent can change under it and receive a model it does not have.
     const parent = roleInfo(role).parent;
@@ -286,12 +306,16 @@ function resolvePresets(user: UserConfig): Pick<Config, 'preset' | 'presets'> {
  * The agent, model, and effort a job of this role runs with. A setting on the role wins over the preset,
  * and the preset over the agent's own. `preset` is the job's: its mission's when the mission sets one.
  */
-export function effectiveRole(config: Config, role: Role, preset: PresetName | null = config.preset): RoleAssignment {
+export function effectiveRole(config: Config, role: Role, preset: PresetName | null = config.preset, agent?: WorkerAgent): { agent: WorkerAgent; model?: string; effort?: string } {
   const assignment = config.roles[role];
-  const chosen = preset ? config.presets[preset][assignment.agent] : undefined;
-  const effort = assignment.effort ?? (chosen as { effort?: string } | undefined)?.effort;
-  const model = assignment.model ?? chosen?.model;
-  return { agent: assignment.agent, ...(model ? { model } : {}), ...(effort ? { effort } : {}) };
+  const holder = agent ?? assignment.agent;
+  if (holder === LEAD) throw new Error(`${role} is held by Claude, the lead, which does the work itself; no worker takes it.`);
+  // The role's model and effort were written for its default holder; another holder runs on its own settings.
+  const own: Partial<RoleAssignment> = holder === assignment.agent ? assignment : {};
+  const chosen = preset ? config.presets[preset][holder] : undefined;
+  const effort = own.effort ?? (chosen as { effort?: string } | undefined)?.effort;
+  const model = own.model ?? chosen?.model;
+  return { agent: holder, ...(model ? { model } : {}), ...(effort ? { effort } : {}) };
 }
 
 export function loadConfig(): Config {

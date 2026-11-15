@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { LEAD, WORKERS } from './config.ts';
+import { holdersOf, LEAD, WORKERS } from './config.ts';
 import type { Config, Role } from './config.ts';
 import type { Agent } from './jobs.ts';
 
@@ -63,6 +63,8 @@ export interface RouteDecision {
   degraded: boolean;
   /** Epoch ms after which deferred work (polish) should be tried again; null when nothing is deferred. */
   deferUntil: number | null;
+  /** For a role: every holder the user gave it, default first, with its usage, so the lead can pick one for the job. */
+  holders?: { agent: Agent; status: UsageStatus }[];
 }
 
 // --- Reading AgentGauge ----------------------------------------------------
@@ -378,10 +380,19 @@ export function route(kind: RouteKind, usage: Usage, roles: Config['roles']): Ro
     return plain(LEAD, status(LEAD) === 'ok' ? `${name(LEAD)} has room; lead as usual.` : `${name(LEAD)}'s usage is not known (${of(LEAD)?.reason ?? 'no reading.'}); lead as usual.`);
   }
 
-  const holder = roles[kind].agent;
+  const holders = holdersOf(roles[kind]);
+  // The user's order decides; a holder short of usage gives way to the next one with room.
+  const holder = holders.find((agent) => !short(agent)) ?? holders[0];
+  const listed = holders.map((agent) => ({ agent, status: status(agent) }));
+  const moved = holder === holders[0] ? '' : `${why(holders[0])} ${name(holder)} also holds the role. `;
+  const decision = decide(holder);
+  return { ...decision, reason: `${moved}${decision.reason}`, fallback: [...new Set([...decision.fallback, ...holders.filter((agent) => agent !== decision.assignee)])], holders: listed };
+
+  function decide(holder: Agent): RouteDecision {
+  if (holder === LEAD) return plain(LEAD, 'Claude holds the role: do the work yourself, or in a subagent.');
   // Each role names its policy, so a new role never falls through to another's.
   const policy: Record<Role, 'build' | 'review' | 'debate' | 'polish'> = { delegate: 'build', refactor: 'build', release: 'build', review: 'review', verify: 'review', debate: 'debate', polish: 'polish' };
-  switch (policy[kind]) {
+  switch (policy[kind as Role]) {
     case 'build': {
       // The lead taking over keeps the role's scope: release work stays preparation.
       const yourself = kind === 'release' ? 'Prepare the release yourself, and publish or deploy nothing.' : 'Do this piece yourself, in a subagent if it is large.';
@@ -411,6 +422,7 @@ export function route(kind: RouteKind, usage: Usage, roles: Config['roles']): Ro
         return { kind, assignee: holder, reason: `${why(holder)} Polish can wait until its usage resets; make an urgent wording fix yourself.`, fallback: [LEAD], degraded: false, deferUntil: resets(holder) };
       }
       return plain(holder, keeps(holder));
+    }
   }
 }
 

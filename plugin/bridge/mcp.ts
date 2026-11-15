@@ -1,11 +1,11 @@
 import readline from 'node:readline';
 import { clipped, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, REPORT_PAGE_BYTES, textPage, unread } from './delivery.ts';
 import { api, ensureDaemon } from './client.ts';
-import { BASE_URL, canonicalPath, DEFAULT_ROLES, loadConfig, MAX_DEBATE_ROUNDS, PRESET_NAMES, ROLE_INFO, ROLES, VERSION, WORKERS } from './config.ts';
+import { BASE_URL, canonicalPath, DEFAULT_ROLES, holdersOf, LEAD, loadConfig, MAX_DEBATE_ROUNDS, PRESET_NAMES, ROLE_INFO, ROLES, VERSION, WORKERS } from './config.ts';
 import { listSkills } from './skills.ts';
 import { describeUsage } from './usage.ts';
 import type { RouteDecision, Usage } from './usage.ts';
-import type { Preset, PresetName, Role } from './config.ts';
+import type { Holder, Preset, PresetName, Role, RoleAssignment } from './config.ts';
 import type { CrewEvent, JobSpec } from './jobs.ts';
 import { normalizeTitle, STAGES } from './missions.ts';
 import type { Mission } from './missions.ts';
@@ -36,7 +36,12 @@ const started = (() => {
   }
 })();
 const roles = started?.roles ?? DEFAULT_ROLES;
-const holder = (role: Role) => WORKERS[roles[role].agent].name;
+const holderName = (agent: Holder) => (agent === LEAD ? 'you, Claude' : WORKERS[agent].name);
+/** A role's holders as the user listed them: the default, then any others the lead may pick. */
+const holder = (role: Role, table: Record<Role, RoleAssignment> = roles) => {
+  const [first, ...rest] = holdersOf(table[role]);
+  return `${holderName(first)}${rest.length ? `, or ${rest.map(holderName).join(' or ')}` : ''}`;
+};
 
 /** What a preset asks of the lead and its workers, said wherever the preset in effect is reported. */
 function presetPolicy(name: PresetName | null, preset: Preset | undefined, whose: string): string {
@@ -69,6 +74,7 @@ const INSTRUCTIONS = `Crew connects this session to other coding agents that run
 Roles (assigned by the user in the settings or ~/.crew/config.json; each job goes to the agent holding its role, and you do not reassign them). As of this session's start:
 ${ROLE_LINES}
 \`delegate\` takes role delegate, refactor, or release; \`review\` is the review role, or verify with runs_app; \`debate\` and \`polish\` are their own roles. Each job's result names the agent that took it.
+A role may have several holders: the first is its default, and you pick another for a job with \`agent\` when it fits better. Give work that operates the screen (computer use) or must run the app to Codex when it holds the role. When a second view is worth the usage, run the job with two holders at once. Picking yourself (\`claude\`) starts no worker: do the work in this session, or in a subagent (\`crew:self-reviewer\` for a review).
 
 How jobs work:
 - delegate and polish run in their own git worktree and branch (crew-<job id>) created from HEAD, so commit anything the worker needs first. Gitignored files it needs (node_modules, .env) are copied in if the repository lists them in .worktreeinclude. The bridge commits the worker's changes on that branch; you inspect the diff and merge or reject it. Nothing reaches your branch unless you merge it.
@@ -110,6 +116,9 @@ const skillsProp = installedSkills.length ? {
 const attachmentsProp = {
   attachments: { type: 'array', items: { type: 'string' }, maxItems: 10, description: 'Absolute paths of images or recordings (PNG, JPEG, GIF, WebP, WebM, MP4) the worker should see, such as a design or a screenshot of the problem. They are copied into the job\'s evidence and shown on the board.' },
 };
+const agentProp = {
+  agent: { type: 'string', enum: [...Object.keys(WORKERS), LEAD], description: 'One of the role\'s holders to take this job instead of its default; the roles in your instructions list them. claude starts no worker: you do it.' },
+};
 const modelProps = {
   tier: { type: 'string', enum: [...TIERS], description: 'How demanding the job is; Crew picks the model from it. standard (the default): most work, including most UI changes. frontier: only especially hard or complex work, or a UI rebuilt from scratch or a very large UI change. light: simple, well-specified tasks. fast: plain searches and lookups. For Codex these are Sol, Astra, Terra and Luna; for Antigravity, Argon for frontier (literary or very complex documents) and Hydrogen otherwise. Newer models of each family are picked up automatically.' },
   model: { type: 'string', description: 'Exact model for this job, overriding tier. Rarely needed; prefer tier.' },
@@ -131,6 +140,7 @@ const TOOLS = [
         check: { type: 'string', description: 'A shell command (e.g. "npm test") the bridge itself runs in the worktree after every turn, so the result shows an observed exit status instead of the worker\'s word. Runs with the worker\'s file limits, up to 10 minutes. Needs a worktree.' },
         ...worktreeProps,
         ...modelProps,
+        ...agentProp,
         ...runsAppProp('do or verify the work'),
         ...attachmentsProp,
         ...aloneProp,
@@ -156,6 +166,7 @@ const TOOLS = [
         ...runsAppProp('judge the change. It then goes to the verify role and runs in a snapshot worktree holding the change; your own self-review must stay static'),
         ...attachmentsProp,
         ...modelProps,
+        ...agentProp,
         ...skillsProp,
         ...common,
       },
@@ -174,6 +185,7 @@ const TOOLS = [
         ...worktreeProps,
         tier: { ...modelProps.tier, description: 'standard (the default, Hydrogen for Antigravity) for nearly all wording work; frontier (Argon) only for literary or very complex, difficult documents.' },
         model: modelProps.model,
+        ...agentProp,
         ...skillsProp,
         ...common,
       },
@@ -192,6 +204,7 @@ const TOOLS = [
         rounds: { type: 'integer', minimum: 1, maximum: MAX_DEBATE_ROUNDS, description: 'How many exchanges at most, counting the first. Default 3.' },
         title: { type: 'string', description: 'Short label shown on the status board.' },
         ...modelProps,
+        ...agentProp,
         ...common,
       },
       required: ['topic', 'position'],
@@ -620,13 +633,50 @@ function render(job: JobView): string {
   return describe(job, hint);
 }
 
+/** What the lead does with a role it holds itself, by the kind of work. */
+const YOURS: Partial<Record<Role, string>> = {
+  delegate: 'Do it in this session, or hand it to a subagent if it is large and separable.',
+  refactor: 'Do it in this session or a subagent, keeping behavior unchanged and running the checks before and after.',
+  release: 'Prepare the release in this session or a subagent; publish, push, and deploy nothing.',
+  debate: 'Test your position with a fresh-context subagent told to argue against it, then decide.',
+  review: 'Run the crew:self-reviewer subagent on the change.',
+  verify: 'Run the crew:self-reviewer subagent, telling it that it may run the app in its own isolated instance.',
+  polish: 'Make the wording changes yourself, changing no logic or structure.',
+};
+
+/**
+ * Settles which holder takes a job: the lead's pick, else the role's default. A role the lead holds itself starts no
+ * worker, so the answer is what to do instead; a worker pick goes on to the daemon, which checks it again.
+ */
+function pickHolder(role: Role, wanted: unknown): { agent?: Holder; yours?: string } {
+  let table = roles;
+  try {
+    table = loadConfig().roles;
+  } catch {
+    /* The daemon reports an unreadable config when the job starts. */
+  }
+  // An unknown role is the daemon's to refuse, with its own message.
+  if (!table[role]) return { agent: wanted as Holder | undefined };
+  const holders = holdersOf(table[role]);
+  const agent = (wanted ?? holders[0]) as Holder;
+  if (!holders.includes(agent)) throw new Error(`${String(wanted)} does not hold ${role}; its holders are ${holder(role, table)}.`);
+  if (agent !== LEAD) return { agent };
+  return { yours: `${role} is yours: no worker was started. ${YOURS[role]} Its other holders: ${holders.filter((h) => h !== LEAD).map(holderName).join(', ') || 'none'}.` };
+}
+
 async function callTool(name: string, args: any, ctx: CallContext): Promise<string> {
   const cwd: string = args.cwd ?? PROJECT;
+  if (['delegate', 'review', 'polish', 'debate'].includes(name)) {
+    const role: Role = name === 'debate' ? 'debate' : name === 'polish' ? 'polish' : name === 'review' ? (args.runs_app ? 'verify' : 'review') : (args.role ?? 'delegate');
+    const picked = pickHolder(role, args.agent);
+    if (picked.yours) return picked.yours;
+    args = { ...args, agent: picked.agent };
+  }
   switch (name) {
     case 'debate':
-      return runJob({ kind: 'delegate', role: 'debate', cwd, title: args.title ?? `Debate: ${String(args.topic).split('\n')[0].slice(0, 60)}`, task: `${args.topic}\n\n# The lead's position\n${args.position}`, debate: { rounds: args.rounds ?? 3 }, tier: args.tier, model: args.model, effort: args.effort }, args.background !== false, ctx);
+      return runJob({ kind: 'delegate', role: 'debate', cwd, title: args.title ?? `Debate: ${String(args.topic).split('\n')[0].slice(0, 60)}`, task: `${args.topic}\n\n# The lead's position\n${args.position}`, debate: { rounds: args.rounds ?? 3 }, agent: args.agent, tier: args.tier, model: args.model, effort: args.effort }, args.background !== false, ctx);
     case 'delegate':
-      return runJob({ kind: 'delegate', role: args.role ?? 'delegate', cwd, title: args.title, task: args.task, done_when: args.done_when, check: args.check, base: args.base, isolation: args.isolation, tier: args.tier, model: args.model, effort: args.effort, exclusive: Boolean(args.exclusive), runsApp: Boolean(args.runs_app), plugins: args.plugins, skills: args.skills, attachments: args.attachments }, args.background !== false, ctx);
+      return runJob({ kind: 'delegate', role: args.role ?? 'delegate', cwd, title: args.title, task: args.task, done_when: args.done_when, check: args.check, base: args.base, isolation: args.isolation, agent: args.agent, tier: args.tier, model: args.model, effort: args.effort, exclusive: Boolean(args.exclusive), runsApp: Boolean(args.runs_app), plugins: args.plugins, skills: args.skills, attachments: args.attachments }, args.background !== false, ctx);
     case 'review': {
       const kind = args.target ?? 'uncommitted';
       if (kind === 'branch' && !args.base) throw new Error('target "branch" needs base (the branch to compare against, e.g. main).');
@@ -634,11 +684,11 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       const target = kind === 'branch' ? { type: 'baseBranch' as const, branch: args.base } : kind === 'commit' ? { type: 'commit' as const, sha: args.commit } : { type: 'uncommittedChanges' as const };
       // The focus can be long; the board title only needs to say what is under review.
       const title = `Review of ${kind === 'branch' ? `the branch against ${args.base}` : kind === 'commit' ? `commit ${args.commit.slice(0, 8)}` : 'uncommitted changes'}`;
-      return runJob({ kind: 'review', role: args.runs_app ? 'verify' : 'review', cwd, title, task: args.focus, done_when: args.done_when, review: { target, mode: args.mode ?? 'adversarial' }, tier: args.tier, model: args.model, effort: args.effort, runsApp: Boolean(args.runs_app), plugins: args.plugins, skills: args.skills, attachments: args.attachments }, args.background !== false, ctx);
+      return runJob({ kind: 'review', role: args.runs_app ? 'verify' : 'review', cwd, title, task: args.focus, done_when: args.done_when, review: { target, mode: args.mode ?? 'adversarial' }, agent: args.agent, tier: args.tier, model: args.model, effort: args.effort, runsApp: Boolean(args.runs_app), plugins: args.plugins, skills: args.skills, attachments: args.attachments }, args.background !== false, ctx);
     }
     case 'polish':
       if (args.exclusive) throw new Error('polish cannot run alone: an editor measures nothing. Drop exclusive.');
-      return runJob({ kind: 'polish', role: 'polish', cwd, title: args.title ?? `Polish ${args.targets.join(', ')}`, task: args.guidance, targets: args.targets, base: args.base, isolation: args.isolation, tier: args.tier, model: args.model, skills: args.skills }, args.background !== false, ctx);
+      return runJob({ kind: 'polish', role: 'polish', cwd, title: args.title ?? `Polish ${args.targets.join(', ')}`, task: args.guidance, targets: args.targets, base: args.base, isolation: args.isolation, agent: args.agent, tier: args.tier, model: args.model, skills: args.skills }, args.background !== false, ctx);
     case 'mission':
       return reportMission(args);
     case 'route': {
@@ -654,6 +704,8 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       if (decision.degraded) lines.push('Degraded: the usual cross-check is missing. Say so in your report.');
       if (decision.deferUntil) lines.push(`Can wait until ${new Date(decision.deferUntil).toISOString()}.`);
       if (decision.fallback.length) lines.push(`If that fails: ${decision.fallback.map((a) => (a === 'claude' ? 'you' : WORKERS[a].name)).join(', then ')}.`);
+      // A daemon that predates holders lists none.
+      if ((decision.holders?.length ?? 0) > 1) lines.push(`Holders you may pick with agent: ${decision.holders!.map((h) => `${h.agent} (${h.status})`).join(', ')}.`);
       // A daemon that predates mission presets sends none; the session's instructions then still hold.
       if (decision.preset !== undefined) lines.push(presetPolicy(decision.preset, decision.policy ?? undefined, ' for the next job'));
       return lines.join('\n');
@@ -688,7 +740,7 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       if (elsewhere) lines.push(`(${elsewhere} active job(s) belong to other projects; they are on the board.)`);
       if (recent.length) lines.push('', 'Recent:', ...recent.map(summarize));
       // A daemon that predates the role table reports none.
-      if (state.roles) lines.push('', `Roles: ${(Object.keys(state.roles) as Role[]).map((role) => `${role} → ${WORKERS[state.roles[role].agent as keyof typeof WORKERS].name}`).join(', ')}`);
+      if (state.roles) lines.push('', `Roles: ${(Object.keys(state.roles) as Role[]).map((role) => `${role} → ${holder(role, state.roles)}`).join(', ')}`);
       // A daemon that predates AgentGauge support reports no usage; Codex's own figures are then all there is.
       const measured = state.usage ? describeUsage(state.usage as Usage) : [];
       if (measured.length) lines.push('', 'Usage (AgentGauge):', ...measured);

@@ -92,7 +92,7 @@ test('polish advertises the shared model option and forwards it to the job', asy
   const modelProps = vm.runInNewContext(`(${source.match(/const modelProps = (\{[^]*?\n\});/)![1]})`, { TIERS });
   const schema = source.slice(source.indexOf("    name: 'polish',"), source.indexOf("    name: 'debate',"));
   const tool = vm.runInNewContext(`({${schema.slice(0, schema.lastIndexOf('\n  },'))}})`, {
-    holder: () => 'Antigravity', worktreeProps: {}, skillsProp: {}, common: {}, modelProps,
+    holder: () => 'Antigravity', worktreeProps: {}, skillsProp: {}, common: {}, modelProps, agentProp: {},
   });
   assert.deepEqual(tool.inputSchema.properties.model, modelProps.model);
   assert.deepEqual([...tool.inputSchema.properties.tier.enum], [...TIERS]);
@@ -202,4 +202,17 @@ test('status pages the latest full report during a follow-up and retained debate
   assert.equal(restored, report);
   assert.match(await run({ job_id: job.id, report_offset: 0, turn: 1 }), /first answer/);
   await assert.rejects(run({ job_id: job.id, report_offset: 0, turn: 99 }), /not retained/);
+});
+
+test('a role the lead holds starts no worker, and a pick outside the holders is refused', () => {
+  const source = fs.readFileSync(new URL('../plugin/bridge/mcp.ts', import.meta.url), 'utf8');
+  const code = source.slice(source.indexOf('/** What the lead does with a role it holds itself'), source.indexOf('async function callTool'));
+  const roles = { review: { agent: 'codex', also: ['claude'] }, polish: { agent: 'claude' } };
+  const pick = vm.runInNewContext(`const holderName = (a) => a === 'claude' ? 'you, Claude' : a; const holder = (r, t) => [t[r].agent, ...(t[r].also ?? [])].join(' or '); ${stripTypeScriptTypes(code)}; pickHolder`, {
+    roles, LEAD: 'claude', holdersOf: (a: any) => [a.agent, ...(a.also ?? [])], loadConfig: () => ({ roles }),
+  });
+  assert.deepEqual({ ...pick('review', undefined) }, { agent: 'codex' });
+  assert.match(pick('review', 'claude').yours, /no worker was started\. Run the crew:self-reviewer subagent[^]*other holders: codex/);
+  assert.match(pick('polish', undefined).yours, /^polish is yours/);
+  assert.throws(() => pick('review', 'antigravity'), /antigravity does not hold review; its holders are codex or claude/);
 });

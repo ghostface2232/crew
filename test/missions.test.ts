@@ -484,4 +484,13 @@ test('a lead whose latest mission ended done is reminded to open one for more wo
   missions.finish(swept.id, { reopen: true });
   assert.equal(swept.state, 'done');
   assert.equal(missions.followUpHint('lead'), '');
+  // A newer mission done while an older one is still open, as after a restart of the MCP server: the open one stands.
+  const older = missions.start({ ...input, title: 'Older', owner: 'lead' });
+  older.createdAt = first.createdAt + 4;
+  const newer = missions.start({ ...input, title: 'Newer', owner: 'lead' });
+  newer.createdAt = first.createdAt + 5;
+  missions.finish(newer.id, { byLead: true });
+  assert.equal(missions.followUpHint('lead'), '');
+  missions.finish(older.id, { abandoned: true });
+  assert.match(missions.followUpHint('lead'), /"Newer" is done/);
 });

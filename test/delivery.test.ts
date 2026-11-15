@@ -271,13 +271,16 @@ test('watch hook adopts the jobs its Crew call showed, waits after losing an off
 
 test('sync Stop guards continuation; subagents never arm a lead watcher; context is not an offer', async () => {
   const calls: string[] = [];
-  const request = (async (_method: string, route: string) => { calls.push(route); return { text: 'news ids' }; }) as typeof api;
+  const bodies: any[] = [];
+  const request = (async (_method: string, route: string, body: unknown) => { calls.push(route); bodies.push(body); return { text: 'news ids' }; }) as typeof api;
   assert.deepEqual(await leadHook({ session_id: 'lead', stop_hook_active: true }, 'stop', request), { code: 0 });
   assert.deepEqual(await leadHook({ session_id: 'lead', agent_id: 'child' }, 'watch', request), { code: 0 });
   assert.deepEqual(calls, []);
   const context = await leadHook({ session_id: 'lead', hook_event_name: 'UserPromptSubmit' }, 'context', request);
   assert.equal(JSON.parse(context.stdout!).hookSpecificOutput.additionalContext, 'news ids');
   assert.deepEqual(calls, ['/api/lead/context']);
+  // The daemon adds the follow-up reminder only for this event.
+  assert.equal(bodies[0].event, 'UserPromptSubmit');
 });
 
 test('notification routes require authentication; hook ingestion cannot ACK; shutdown fences delayed delivery', async (t) => {
@@ -296,7 +299,7 @@ test('notification routes require authentication; hook ingestion cannot ACK; shu
     readJson: async (req: any) => { reads++; if (req.stopDuringBody) context.stopping = true; return req.body; },
     jobs: h.jobs, view: (job: unknown) => job, broadcast: () => {},
     claude: { sessions: new Map(), ingest: () => { ingested++; } }, locate: () => {},
-    missions: { followUpHint: (session: string) => `hint for ${session}` },
+    missions: { followUpHint: (session: string) => `hint for ${session}`, finish: (id: string, input: unknown) => ({ id, input }) },
   });
   const route = vm.runInContext(`${stripTypeScriptTypes(handler)}; route`, context);
   for (const action of ['context', 'watch', 'heartbeat', 'release', 'offer', 'ack']) {
@@ -306,6 +309,9 @@ test('notification routes require authentication; hook ingestion cannot ACK; shu
   // Only a user's prompt carries the follow-up reminder, after any news.
   assert.match((await route({ method: 'POST', url: '/api/lead/context', auth: true, body: { session: 'lead', event: 'UserPromptSubmit' } }, {})).text, new RegExp(`${job.id}[^]*\\nhint for lead$`));
   assert.doesNotMatch((await route({ method: 'POST', url: '/api/lead/context', auth: true, body: { session: 'lead', event: 'SessionStart' } }, {})).text, /hint/);
+  // Only the lead's own done marks a mission done by the lead; the board's does not.
+  assert.equal((await route({ method: 'POST', url: '/api/missions/m-1', auth: true, body: { done: true, by: 'lead' } }, {})).input.byLead, true);
+  assert.equal((await route({ method: 'POST', url: '/api/missions/m-1', auth: true, body: { done: true } }, {})).input.byLead, false);
   await route({ method: 'POST', url: '/api/hooks/claude', body: { session_id: 'lead', ack: receipt } }, {});
   assert.equal(ingested, 1);
   assert.equal(job.ackedSeq, 0);

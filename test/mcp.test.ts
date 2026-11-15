@@ -240,6 +240,8 @@ test('work started after a done mission opens a follow-up mission named after it
   assert.equal(followUpTitle('후속 작업: 역할 정리'), '후속 작업: 역할 정리');
   assert.equal(followUpTitle('Follow-up: 역할 정리'), '후속 작업: 역할 정리');
   await reportMission({ done: true, outcome: 'ok' });
+  // The daemon tells the lead's own done from the board's by this, and reminds only after the lead's.
+  assert.equal(calls.at(-1)?.body.by, 'lead');
   const first = await runJob({ kind: 'delegate', task: 'more' }, true, { jobs: [] });
   assert.match(first, /^Opened mission m2 "후속 작업: 역할 정리"/);
   assert.deepEqual([...calls.find((call) => call.route === '/api/missions')?.body.stages], ['implement', 'final']);

@@ -249,9 +249,13 @@ export class Missions {
    * starts no job, so the follow-up fallback in the MCP server never sees it; only a reminder at the prompt can catch it.
    * It reminds rather than opens: only the lead can tell a request for work from a question. A mission the user
    * marked done on the board gets none, since the lead is told to carry on with that work without a new mission.
+   * Any open mission of the session suppresses it: after a restart the MCP server reattaches to an older open
+   * mission even when a newer one is done.
    */
   followUpHint(owner: string, now = Date.now()): string {
-    const latest = this.list().find((mission) => mission.owner === owner);
+    const mine = this.list().filter((mission) => mission.owner === owner);
+    if (mine.some((mission) => mission.state === 'active')) return '';
+    const latest = mine[0];
     if (latest?.state !== 'done' || !latest.doneByLead || now - (latest.endedAt ?? 0) >= STALE_MS) return '';
     return `Crew: your mission "${latest.title}" is done. Only if this message clearly asks for new work (changing files, or starting a job), call \`mission\` with a title and stages before you start it, even work you will do yourself: "${followUpTitle(latest.title)}" for more of the same command, or a title of its own for a new one. A question, an explanation, or a reply opens none, even about that mission.`;
   }

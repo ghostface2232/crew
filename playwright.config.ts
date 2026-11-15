@@ -4,11 +4,11 @@ import os from 'node:os';
 import path from 'node:path';
 
 // Each project gets its own fixture server on a free port, so projects run side by side and concurrent
-// worktrees never collide. Workers inherit the ports the main process picked. Firefox is left out: Playwright's
-// Firefox 159 does not start on macOS 27 ("Could not find profile folder").
+// worktrees never collide. Workers inherit the ports the main process picked. Firefox and WebKit are left out, as
+// neither starts on macOS 27: Playwright's Firefox 159 finds no profile folder, and its WebKit 2388 aborts at launch
+// (`_WKBrowserContext` is missing from the system WebKit), raising a crash dialog each time.
 const PROJECTS = [
   { name: 'chromium', use: devices['Desktop Chrome'] },
-  { name: 'webkit', use: devices['Desktop Safari'] },
   // A development build keeps React's StrictMode checks, such as mounting effects twice.
   { name: 'development', use: devices['Desktop Chrome'], plugin: '.e2e/development' },
 ];

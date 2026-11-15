@@ -410,7 +410,7 @@ export function route(kind: RouteKind, usage: Usage, roles: Config['roles'], dis
       const yourself = kind === 'release' ? 'Prepare the release yourself, and publish or deploy nothing.' : 'Do this piece yourself, in a subagent if it is large.';
       if (status(holder) === 'exhausted') return plain(LEAD, `${why(holder)} ${yourself}`);
       if (status(holder) === 'tight' && !short(LEAD)) {
-        return plain(LEAD, `${why(holder)} Take this work yourself or in subagents${roles.review.agent === holder ? `, and keep what ${name(holder)} has left for the cross-review` : ''}.`, [holder]);
+        return plain(LEAD, `${why(holder)} Take this work yourself or in subagents${holdersOf(roles.review).includes(holder) ? `, and keep what ${name(holder)} has left for the cross-review` : ''}.`, [holder]);
       }
       return plain(holder, short(LEAD) && !short(holder) ? `${why(LEAD)} Hand ${name(holder)} as much of this work as separates cleanly.` : keeps(holder), [LEAD]);
     }

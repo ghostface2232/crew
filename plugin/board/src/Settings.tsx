@@ -174,8 +174,11 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
       const own = current[role.role] ?? {};
       const following = role.parent && !own.agent ? resolved[role.parent]?.also ?? [] : [];
       const shown = own.also ?? following;
-      const next = shown.includes(holder) ? shown.filter((other) => other !== holder) : [...shown, holder];
       const saved = savedRoles[role.role]?.also;
+      // The order is the preference the lead tries, so a holder turned back on returns to where it was saved.
+      const order = saved ?? following;
+      const rank = (other: Holder) => (order.includes(other) ? order.indexOf(other) : order.length);
+      const next = shown.includes(holder) ? shown.filter((other) => other !== holder) : [...shown, holder].sort((a, b) => rank(a) - rank(b));
       const same = (a: Holder[], b: Holder[]) => a.length === b.length && a.every((other, index) => other === b[index]);
       const value = same(next, saved ?? following) ? saved : next.length || following.length ? next : undefined;
       const { also: _old, ...rest } = own;

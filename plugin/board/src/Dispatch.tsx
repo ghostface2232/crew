@@ -42,7 +42,7 @@ export function Dispatch({
   const leadOnly = Boolean(assignment) && !workers.length;
   const missions = state.missions.filter((mission) => mission.state === 'active' && projectOf(mission) === cwd.trim());
   const dirty = intent !== 'command' || destination !== 'project' || text !== '' || targets !== ''
-    || role !== 'delegate' || directory !== initialDirectory.current;
+    || role !== 'delegate' || directory !== initialDirectory.current || picked !== '';
   const canSend = !sending && state.connection === 'live' && Boolean(text.trim())
     && (intent === 'information' && destination === 'global'
       || Boolean(cwd.trim()) && (intent === 'information'
@@ -121,7 +121,7 @@ export function Dispatch({
           label="Intent"
           value={intent}
           options={[['command', 'Command'], ['question', 'Question'], ['information', 'Information']]}
-          onChange={setIntent}
+          onChange={(next) => { setIntent(next); setPicked(''); }}
         />
         <div className={styles.fields}>
           <label className="field">
@@ -140,7 +140,7 @@ export function Dispatch({
             <div className={styles.assignment}>
               <label className="field">
                 <span>Role</span>
-                <select value={role} onChange={(event) => setRole(event.target.value as Role)}>
+                <select value={role} onChange={(event) => { setRole(event.target.value as Role); setPicked(''); }}>
                   {choices.map((info) => (
                     <option key={info.role} value={info.role}>{info.label}</option>
                   ))}

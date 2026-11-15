@@ -181,6 +181,9 @@ test('a tight engineer keeps its usage for the review, and an exhausted one lose
   assert.match(implement.reason, /keep what Codex has left for the cross-review/);
   assert.deepEqual(implement.fallback, ['codex']);
   assert.equal(route('review', tight, DEFAULT_ROLES).assignee, 'codex');
+  // A further review holder saves its usage too.
+  const furtherReviewer = { ...DEFAULT_ROLES, review: { agent: 'antigravity' as const, also: ['codex' as const] } };
+  assert.match(route('delegate', tight, furtherReviewer).reason, /keep what Codex has left for the cross-review/);
 
   const gone = usageOf({ codex: 'exhausted' });
   assert.equal(route('delegate', gone, DEFAULT_ROLES).assignee, 'claude');

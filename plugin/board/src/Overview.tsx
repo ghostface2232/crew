@@ -157,7 +157,8 @@ export function AgentOverview({ state, project }: { state: Snapshot; project: st
           const noun = agent === 'claude' ? 'session' : 'job';
           // A role that follows its parent to the same holders adds nothing to say.
           const held = rolesOf(state)
-            .filter(({ role, parent }) => holdersOf(state.roles[role]).includes(agent as Holder) && !(parent && holdersOf(state.roles[parent]).includes(agent as Holder)))
+            .filter(({ role, parent }) => holdersOf(state.roles[role]).includes(agent as Holder)
+              && !(parent && holdersOf(state.roles[parent]).join() === holdersOf(state.roles[role]).join()))
             .map(({ label }) => label);
           const role = [...(agent === 'claude' ? ['Lead'] : []), ...held].join(' · ');
           return (

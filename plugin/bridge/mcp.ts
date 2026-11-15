@@ -36,7 +36,8 @@ const started = (() => {
   }
 })();
 const roles = started?.roles ?? DEFAULT_ROLES;
-const holderName = (agent: Holder) => (agent === LEAD ? 'you, Claude' : WORKERS[agent].name);
+// A daemon of another version may name a holder this session does not know.
+const holderName = (agent: Holder) => (agent === LEAD ? 'you, Claude' : WORKERS[agent]?.name ?? String(agent));
 /** A role's holders as the user listed them: the default, then any others the lead may pick. */
 const holder = (role: Role, table: Record<Role, RoleAssignment> = roles) => {
   const [first, ...rest] = holdersOf(table[role]);
@@ -668,6 +669,7 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
   const cwd: string = args.cwd ?? PROJECT;
   if (['delegate', 'review', 'polish', 'debate'].includes(name)) {
     const role: Role = name === 'debate' ? 'debate' : name === 'polish' ? 'polish' : name === 'review' ? (args.runs_app ? 'verify' : 'review') : (args.role ?? 'delegate');
+    if (name === 'delegate' && !['delegate', 'refactor', 'release'].includes(role)) throw new Error(`delegate takes role delegate, refactor or release, not ${String(role)}.`);
     const picked = pickHolder(role, args.agent);
     if (picked.yours) return picked.yours;
     args = { ...args, agent: picked.agent };

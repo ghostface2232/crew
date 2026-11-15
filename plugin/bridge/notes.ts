@@ -83,7 +83,7 @@ function wellFormed(models: Record<string, any>): Record<string, ModelNote> {
   const kept: Record<string, ModelNote> = {};
   for (const [model, note] of Object.entries(models)) {
     if (!note || !HOLDERS.includes(note.agent) || !Array.isArray(note.evidence)) continue;
-    const evidence = note.evidence.filter((e: any) => e && typeof e.id === 'string' && Number.isFinite(e.at) && HOLDERS.includes(e.reviewer)
+    const evidence = note.evidence.filter((e: any) => e && typeof e.id === 'string' && Number.isFinite(e.at) && e.model === model && e.agent === note.agent && HOLDERS.includes(e.reviewer)
       && CHANGE_SIZES.includes(e.size) && NOTE_ROLES.includes(e.role) && (e.tier === undefined || TIERS.includes(e.tier))
       && (e.role === 'build' || FIX_OUTCOMES.includes(e.outcome)) && typeof e.text === 'string' && e.findings
       && ['high', 'medium', 'low'].every((key) => Number.isInteger(e.findings[key]) && e.findings[key] >= 0));
@@ -136,8 +136,9 @@ export function addEvidence(home: string, input: Omit<Evidence, 'id' | 'at'> & {
   const ids = new Set(Object.values(file.models).flatMap((m) => m.evidence.map((e) => e.id)));
   do { id = `ev-${randomBytes(3).toString('hex')}`; } while (ids.has(id));
   const evidence: Evidence = { ...input, model, findings, text, id, at };
-  // Noting a job again (a retried call, a resumed session) corrects its line rather than counting the job twice.
-  note.evidence = note.evidence.filter((e) => !(input.job && e.job === input.job && e.role === input.role));
+  // Noting a job again (a retried call, a resumed session, a model the session reported later) corrects its line
+  // rather than counting the job twice, under whichever model it was first noted.
+  if (input.job) for (const other of Object.values(file.models)) other.evidence = other.evidence.filter((e) => !(e.job === input.job && e.role === input.role));
   note.evidence.push(evidence);
   Object.defineProperty(file.models, model, { value: note, enumerable: true, configurable: true, writable: true });
   save(home, file);

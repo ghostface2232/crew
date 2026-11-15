@@ -682,7 +682,8 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
           model,
           agent: job ? job.agent : 'claude',
           ...(job ? (job.resolvedEffort ?? job.effort ? { effort: job.resolvedEffort ?? job.effort } : {}) : {}),
-          ...(job?.tier ?? body.tier ? { tier: job?.tier ?? body.tier } : {}),
+          // A job's difficulty is its own record's; a job named by model has no tier and counts as standard.
+          ...((job ? job.tier : body.tier) ? { tier: job ? job.tier : body.tier } : {}),
           size: body.size,
           role: body.role ?? (job?.role === 'fix' ? 'fix' : 'build'),
           ...(job ? { job: job.id } : {}),

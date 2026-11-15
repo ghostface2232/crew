@@ -157,6 +157,11 @@ test('noting the same job and role again replaces its line, while another role o
   addEvidence(dir, { ...input, text: 'no job' });
   addEvidence(dir, { ...input, text: 'no job again' });
   assert.deepEqual(loadNotes(dir).models['model-a'].evidence.map((e) => e.text), ['corrected', 'fixed', 'no job', 'no job again']);
+  // Noted again under the model the session reported later, the job leaves its first model.
+  addEvidence(dir, { ...input, model: 'model-b', job: 'cx-1', text: 'under its real model' });
+  const file = loadNotes(dir);
+  assert.deepEqual(file.models['model-a'].evidence.map((e) => e.text), ['fixed', 'no job', 'no job again']);
+  assert.deepEqual(file.models['model-b'].evidence.map((e) => e.text), ['under its real model']);
 });
 
 test('incomplete entries and lines are skipped and the rest keeps the shape readers expect', (t) => {
@@ -164,7 +169,7 @@ test('incomplete entries and lines are skipped and the rest keeps the shape read
   fs.mkdirSync(dir, { recursive: true });
   const good = { ...input, id: 'ev-1', at: 1 };
   fs.writeFileSync(notesFile(dir), JSON.stringify({ version: 1, models: {
-    'model-a': { model: 'model-a', agent: 'codex', evidence: [good, { ...good, id: 'ev-2', size: 'huge' }, { ...good, id: 'ev-3', findings: { high: -1 } }, { ...good, id: 'ev-4', role: 'fix' }] },
+    'model-a': { model: 'model-a', agent: 'codex', evidence: [good, { ...good, id: 'ev-2', size: 'huge' }, { ...good, id: 'ev-3', findings: { high: -1 } }, { ...good, id: 'ev-4', role: 'fix' }, { ...good, id: 'ev-5', agent: undefined }, { ...good, id: 'ev-6', model: 'model-x' }] },
     'model-b': { model: 'model-b', agent: 'cursor', evidence: [] },
     'model-c': { model: 'model-c', agent: 'claude' },
   } }));

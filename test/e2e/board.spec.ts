@@ -1092,3 +1092,44 @@ test('an unreachable stream stays a connection failure and can recover', async (
   await page.unroute('**/api/state');
   await expect(page.getByText('Live', { exact: true })).toBeVisible();
 });
+
+for (const width of [390, 1440]) {
+  test(`session workflows stay bounded at ${width}px`, async ({ page, request }) => {
+    await page.setViewportSize({ width, height: 1000 });
+    const data = fixture();
+    const session = data.claude[0];
+    session.workflows = [{ id: 'run-1', name: 'Review a very long workflow name '.repeat(8), startedAt: NOW - 120_000, activeAt: NOW, done: 7 }];
+    session.agents = Array.from({ length: 14 }, (_, index) => ({
+      id: `agent-${index}`, type: 'reviewer', title: `Agent ${index}: ${'A long description '.repeat(15)}`,
+      phase: 'Bash npm test '.repeat(10), inTool: true, startedAt: NOW - 60_000,
+      ...(index >= 2 ? { workflow: 'run-1', stage: index < 5 ? 'Review' : 'Verify' } : {}),
+    }));
+    await request.post('/__push', { data: { type: 'state', data } });
+    const view = page.locator('.session').filter({ has: page.getByText(session.title, { exact: true }) }).first();
+    await expect(view.locator('summary')).toContainText('2 sub-agents · 12 workflow running');
+    expect(await view.locator('summary > span:not(.chip)').evaluate((el) => el.clientWidth)).toBeGreaterThan(80);
+    await view.locator('summary').click();
+    await expect(view.getByRole('list', { name: 'Sub-agents', exact: true }).locator('li')).toHaveCount(2);
+    const run = view.getByRole('region', { name: session.workflows[0].name });
+    await expect(run).toContainText('12 running · 7 done');
+    await expect(run.locator('li')).toHaveCount(5);
+    await expect(run.getByRole('list')).toHaveCount(2);
+    const toggle = run.getByRole('button');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(run.locator('li')).toHaveCount(12);
+    await toggle.click();
+    await expect(run.locator('li')).toHaveCount(5);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    expect(await run.locator('.session-agents > li > span:first-child > span:first-child').first().evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+    if (process.env.CREW_WORKFLOW_EVIDENCE && test.info().project.name === 'chromium') {
+      await page.screenshot({ path: `${process.env.CREW_WORKFLOW_EVIDENCE}/workflow-${width}.png`, fullPage: true });
+    }
+    session.agents = session.agents.filter((agent) => !agent.workflow);
+    await request.post('/__push', { data: { type: 'state', data } });
+    await expect(run).toContainText('0 running · 7 done');
+    await expect(run).toContainText('Between phases or finished');
+    await expect(run.getByRole('button')).toHaveCount(0);
+  });
+}

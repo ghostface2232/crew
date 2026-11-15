@@ -505,7 +505,20 @@ dialog.detail-panel::backdrop { background: transparent; }
 .session-body { display: grid; gap: 8px; padding-top: 8px; overflow-wrap: anywhere; }
 .session-agents { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .session-agents > li { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
-.session-agents > li > span:first-child { display: grid; min-width: 0; }
+.session-agents > li > span:first-child { display: grid; min-width: 0; flex: 1; }
+.session-agents > li > span:first-child > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-agents > li > span:last-child { flex: none; font-variant-numeric: tabular-nums; }
+.session > summary:has(.session-count) { display: grid; grid-template-columns: 8px 14px minmax(0, 1fr) auto; gap: 4px 10px; }
+.session-count { grid-column: 3 / -1; grid-row: 2; min-width: 0; font-size: 11px; }
+.session > summary > .chip { grid-column: 4; grid-row: 1; }
+.session-workflow { display: grid; gap: 6px; min-width: 0; margin-block-start: 8px; padding: 12px; border-radius: var(--row-radius); background: var(--row); }
+.session-workflow-head { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.session-workflow-head b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.session-workflow-head > span { flex: none; }
+.session-stage { display: grid; gap: 6px; min-width: 0; margin-block-start: 6px; }
+.session-stage > p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-workflow > button { justify-self: start; margin-block-start: 6px; }
+.session > summary > .chip, .session > summary::before { flex-shrink: 0; }
 .session-row { padding: 10px 12px; border-radius: var(--row-radius); background: var(--row); }
 .panel-list { display: grid; gap: 14px; }
 

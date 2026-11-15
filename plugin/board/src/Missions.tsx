@@ -46,13 +46,60 @@ export function JobRow({ job, selected, openJob }: { job: BoardJob; selected?: b
   );
 }
 
+type SessionAgent = ClaudeSession['agents'][number];
+
+function SessionAgents({ agents, now, label }: { agents: SessionAgent[]; now: number; label: string }) {
+  return <ul className="session-agents" aria-label={label}>
+    {agents.map((agent) => <li key={agent.id}>
+      <span>
+        <span title={agent.title} tabIndex={0}>{agent.title}</span>
+        <span className="caption secondary" title={agent.phase} tabIndex={0}>{agent.phase}</span>
+      </span>
+      <span className="caption secondary">{elapsed(now - agent.startedAt)}</span>
+    </li>)}
+  </ul>;
+}
+
+function SessionWorkflow({ run, agents, now }: { run: ClaudeSession['workflows'][number]; agents: SessionAgent[]; now: number }) {
+  const [expanded, setExpanded] = useState(false);
+  const visible = expanded ? agents : agents.slice(0, 5);
+  const groups = new Map<string, SessionAgent[]>();
+  for (const agent of visible) {
+    const stage = agent.stage || 'Other agents';
+    const group = groups.get(stage) ?? [];
+    group.push(agent);
+    groups.set(stage, group);
+  }
+  return <section className="session-workflow" aria-label={run.name}>
+    <div className="session-workflow-head">
+      <b title={run.name} tabIndex={0}>{run.name}</b>
+      <span className="caption secondary">{elapsed(now - run.startedAt)}</span>
+    </div>
+    <p className="caption secondary">{agents.length} running · {run.done} done</p>
+    {agents.length === 0 && <p className="caption secondary">Between phases or finished</p>}
+    {[...groups].map(([stage, group]) => <div className="session-stage" key={stage}>
+      <p className="caption secondary" title={stage}>{stage}</p>
+      <SessionAgents agents={group} now={now} label={`${run.name}: ${stage}`} />
+    </div>)}
+    {agents.length > 5 && <button className="small" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
+      {expanded ? 'Show fewer agents' : `Show all ${agents.length} agents`}
+    </button>}
+  </section>;
+}
+
 export function SessionView({ session }: { session: ClaudeSession }) {
   const now = useNow();
+  const plain = session.agents.filter((agent) => !agent.workflow);
+  const running = session.agents.length - plain.length;
   return (
     <details className="session">
       <summary>
         <AgentMark agent="claude" size={14} />
         <span>{session.title}</span>
+        {(plain.length > 0 || session.workflows.length > 0) && <small className="session-count secondary">
+          {[plain.length > 0 ? `${plain.length} sub-agent${plain.length === 1 ? '' : 's'}` : '',
+            session.workflows.length > 0 ? `${running} workflow running` : ''].filter(Boolean).join(' · ')}
+        </small>}
         <Chip state={session.stalled ? 'stalled' : session.state}>
           {session.stalled ? 'May be stuck' : capitalized(session.state)}
         </Chip>
@@ -66,19 +113,9 @@ export function SessionView({ session }: { session: ClaudeSession }) {
             <Icon icon={Wrench} size={11} /> A tool is running
           </p>
         )}
-        {session.agents.length > 0 && (
-          <ul className="session-agents" aria-label="Sub-agents">
-            {session.agents.map((agent) => (
-              <li key={agent.id}>
-                <span>
-                  {agent.title}
-                  <span className="caption secondary">{agent.phase}</span>
-                </span>
-                <span className="caption secondary">{elapsed(now - agent.startedAt)}</span>
-              </li>
-            ))}
-          </ul>
-        )}
+        {plain.length > 0 && <SessionAgents agents={plain} now={now} label="Sub-agents" />}
+        {session.workflows.map((run) => <SessionWorkflow key={run.id} run={run}
+          agents={session.agents.filter((agent) => agent.workflow === run.id)} now={now} />)}
       </div>
     </details>
   );

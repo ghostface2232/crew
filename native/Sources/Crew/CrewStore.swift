@@ -15,14 +15,15 @@ struct Reply: Encodable, Sendable {
 struct JobSubmission: Encodable, Sendable {
     var kind: String?
     var role: String
+    var agent: String?
     var cwd: String
     var project: String
     var task: String
     var isolation = "worktree"
     var targets: [String]?
     var review: Review?
-    init(role: RoleInfo, cwd: String, project: String, task: String, targets: [String]? = nil) {
-        self.role = role.role
+    init(role: RoleInfo, cwd: String, project: String, task: String, targets: [String]? = nil, agent: String? = nil) {
+        self.role = role.role; self.agent = agent
         kind = roleOrder.contains(role.role) ? role.kind : nil
         self.cwd = cwd; self.project = project; self.task = task; self.targets = targets
         review = role.kind == "review" ? Review() : nil
@@ -260,9 +261,9 @@ final class CrewStore {
             applyJob(updated, since: version)
         }
     }
-    func submitQuestion(_ text: String, project: String) async throws -> Job {
-        struct Question: Encodable, Sendable { var role = "delegate"; var kind = "delegate"; var ask = true; var task: String; var cwd: String }
-        let job: Job = try await api.post("/api/jobs", Question(task: text, cwd: project))
+    func submitQuestion(_ text: String, project: String, agent: String? = nil) async throws -> Job {
+        struct Question: Encodable, Sendable { var role = "delegate"; var kind = "delegate"; var ask = true; var task: String; var cwd: String; var agent: String? }
+        let job: Job = try await api.post("/api/jobs", Question(task: text, cwd: project, agent: agent))
         applyJob(job, since: 0)
         return job
     }
@@ -333,7 +334,7 @@ final class SettingsModel {
     static func normalized(_ table: [String: RoleSetting]) -> [String: RoleSetting] {
         table.compactMapValues { setting in
             let blank: (String?) -> String? = { $0?.isEmpty == true ? nil : $0 }
-            let clean = RoleSetting(agent: blank(setting.agent), model: blank(setting.model), effort: blank(setting.effort))
+            let clean = RoleSetting(agent: blank(setting.agent), model: blank(setting.model), effort: blank(setting.effort), also: setting.also?.isEmpty == true ? nil : setting.also)
             return clean == RoleSetting() ? nil : clean
         }
     }
@@ -348,18 +349,65 @@ final class SettingsModel {
         if next == savedShown { next = saved }
         var setting = roleSettings[role] ?? RoleSetting()
         guard setting[keyPath: key] != next else { return }
-        setting[keyPath: key] = next
+        if key == \.agent {
+            func changingAgent(_ source: RoleSetting, to agent: String?) -> RoleSetting {
+                var changed = source
+                changed.agent = agent
+                if let agent {
+                    changed.also = changed.also?.filter { $0 != agent }
+                    if changed.also?.isEmpty == true { changed.also = nil }
+                } else if roleInfo.first(where: { $0.role == role })?.parent != nil {
+                    changed.model = nil
+                }
+                return changed
+            }
+            let savedSetting = savedRoleSettings[role] ?? RoleSetting()
+            setting = next == saved && setting == changingAgent(savedSetting, to: setting.agent)
+                ? savedSetting : changingAgent(setting, to: next)
+        } else {
+            setting[keyPath: key] = next
+        }
         // A role with nothing set is the same as one left out, which is how the daemon stores it.
         roleSettings[role] = setting == RoleSetting() ? nil : setting
     }
-    func assignment(for role: String) -> RoleAssignment? {
+    func setAlso(_ role: String, holder: String, enabled: Bool) {
+        guard let assignment = assignment(for: role), holder != assignment.agent else { return }
+        var also = assignment.also ?? []
+        guard also.contains(holder) != enabled else { return }
+        if enabled { also.append(holder) } else { also.removeAll { $0 == holder } }
+        var setting = roleSettings[role] ?? RoleSetting()
+        var restored = setting
+        restored.also = savedRoleSettings[role]?.also
+        if let agent = restored.agent {
+            restored.also = restored.also?.filter { $0 != agent }
+            if restored.also?.isEmpty == true { restored.also = nil }
+        }
+        // Compare the saved field against the current parent and default, which may also have draft edits.
+        var restoredSettings = roleSettings
+        restoredSettings[role] = restored
+        let restoredAlso = self.assignment(for: role, settings: restoredSettings)?.also ?? []
+        if Set(also) == Set(restoredAlso) {
+            setting.also = restored.also
+        } else {
+            // With no agent, naming only the inherited default replaces the parent's also with no extra holders.
+            let inheritsAlso = setting.agent == nil && roleInfo.first(where: { $0.role == role })?.parent
+                .flatMap { self.assignment(for: $0)?.also }?.isEmpty == false
+            setting.also = also.isEmpty ? (inheritsAlso ? [assignment.agent] : nil) : also
+        }
+        roleSettings[role] = setting == RoleSetting() ? nil : setting
+    }
+    func assignment(for role: String) -> RoleAssignment? { assignment(for: role, settings: roleSettings) }
+    private func assignment(for role: String, settings: [String: RoleSetting]) -> RoleAssignment? {
         var resolved: [String: RoleAssignment] = [:]
         for info in roleInfo {
-            let setting = roleSettings[info.role] ?? RoleSetting()
+            let setting = settings[info.role] ?? RoleSetting()
             let base = setting.agent.map { RoleAssignment(agent: $0) }
                 ?? info.parent.flatMap { resolved[$0] }
                 ?? resolvedRoles[info.role].map { RoleAssignment(agent: $0.agent) }
             if var assignment = base {
+                var seen: Set<String> = [assignment.agent]
+                let also = (setting.also ?? assignment.also ?? []).filter { seen.insert($0).inserted }
+                assignment.also = also.isEmpty ? nil : also
                 assignment.model = setting.model ?? assignment.model
                 assignment.effort = setting.effort ?? assignment.effort
                 resolved[info.role] = assignment

@@ -220,16 +220,20 @@ struct RoleAssignment: Codable, Sendable, Equatable {
     var agent: String
     var model: String?
     var effort: String?
+    var also: [String]?
+    var holders: [String] { [agent] + (also ?? []) }
+    var workerHolders: [String] { holders.filter { $0 == "codex" || $0 == "antigravity" } }
 }
 struct RoleSetting: Codable, Sendable, Equatable {
     var agent: String?
     var model: String?
     var effort: String?
-    init(agent: String? = nil, model: String? = nil, effort: String? = nil) {
-        self.agent = agent; self.model = model; self.effort = effort
+    var also: [String]?
+    init(agent: String? = nil, model: String? = nil, effort: String? = nil, also: [String]? = nil) {
+        self.agent = agent; self.model = model; self.effort = effort; self.also = also
     }
     init(_ assignment: RoleAssignment) {
-        agent = assignment.agent; model = assignment.model; effort = assignment.effort
+        agent = assignment.agent; model = assignment.model; effort = assignment.effort; also = assignment.also
     }
 }
 struct RoleInfo: Codable, Sendable, Identifiable, Equatable {

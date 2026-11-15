@@ -838,6 +838,18 @@ private final class MockProtocol: URLProtocol, @unchecked Sendable {
         #expect(created.kindTitle == "Question")
         #expect(store.state.jobs.contains { $0.id == "new-question" && $0.ask == true })
     }
+    @Test func questionSendsThePickedDelegateHolder() async throws {
+        let response = try JSONEncoder().encode(fixture().jobs[0])
+        let api = api { request in
+            let body = try requestBody(request)
+            #expect(body["role"] as? String == "delegate")
+            #expect(body["ask"] as? Bool == true)
+            #expect(body["agent"] as? String == "antigravity")
+            return (200, response, 0)
+        }
+        let store = try store(api: api)
+        _ = try await store.submitQuestion("Why?", project: "/project", agent: "antigravity")
+    }
     @Test func informationSendsMissionNotesOrScopedInstructionAppend() async throws {
         var mission = try fixture().missions[0]
         mission.notes = [MissionNote(text: "Remember this", at: 1)]

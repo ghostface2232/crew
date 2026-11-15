@@ -1,5 +1,17 @@
 import SwiftUI
 
+struct JobDispatch {
+    var assignment: RoleAssignment?
+    var workers: [String: Worker]
+    var picked: String?
+    var holders: [String] { assignment?.workerHolders ?? [] }
+    var agent: String? { picked.flatMap { holders.contains($0) ? $0 : nil } ?? holders.first }
+    var submissionAgent: String? { holders.count > 1 || assignment?.agent == "claude" ? agent : nil }
+    var worker: Worker? { agent.flatMap { workers[$0] } }
+    var canSend: Bool { worker?.enabled == true }
+    var requiresClaude: Bool { assignment?.agent == "claude" && holders.isEmpty }
+}
+
 struct DispatchView: View {
     /// A read-only value lines up with the pickers beside it.
     private static let fieldHeight: CGFloat = 22
@@ -9,6 +21,7 @@ struct DispatchView: View {
     @State private var intent = "command"
     @State private var destination = "project"
     @State private var role = "delegate"
+    @State private var pickedAgent: String?
     @State private var targets = ""
     @State private var task = ""
     @State private var sending = false
@@ -16,8 +29,8 @@ struct DispatchView: View {
     @State private var confirmingDiscard = false
     private let initialDirectory: String
     init(store: CrewStore) { self.store = store; initialDirectory = store.project; _directory = State(initialValue: store.project) }
-    private var dirty: Bool { intent != "command" || destination != "project" || !task.isEmpty || !targets.isEmpty || role != "delegate" || directory != initialDirectory }
-    private var worker: Worker? { store.state.roles[intent == "question" ? "delegate" : role].flatMap { store.state.agents[$0.agent] } }
+    private var dirty: Bool { intent != "command" || destination != "project" || !task.isEmpty || !targets.isEmpty || role != "delegate" || directory != initialDirectory || pickedAgent != nil }
+    private var dispatch: JobDispatch { JobDispatch(assignment: store.state.roles[intent == "question" ? "delegate" : role], workers: store.state.agents, picked: pickedAgent) }
     private var selectedRole: RoleInfo? { store.state.availableRoles.first { $0.role == role } }
     private var missions: [Mission] { store.state.missions.filter { $0.state == "active" && $0.root == directory.trimmingCharacters(in: .whitespacesAndNewlines) } }
     private var canSend: Bool {
@@ -27,7 +40,7 @@ struct DispatchView: View {
         if intent == "information" {
             return destination == "project" || missions.contains { "mission:\($0.id)" == destination }
         }
-        return worker?.enabled == true
+        return dispatch.canSend
     }
     var body: some View {
         VStack(alignment: .leading, spacing: Space.xxl) {
@@ -54,16 +67,18 @@ struct DispatchView: View {
                             }
                                 .labelsHidden().fixedSize()
                         }
-                        field("Assigned to") {
-                            Text(worker.map { "\($0.name)\($0.enabled ? "" : " (disabled)")" } ?? "No agent assigned")
-                                .font(Typeface.body).frame(minHeight: Self.fieldHeight)
-                        }
+                        assignedTo
                     }
                     if role == "polish" {
                         field("Allowed files or directories") {
                             TextField("One path per line", text: $targets, axis: .vertical).textFieldStyle(.roundedBorder).lineLimit(3...6)
                         }
                     }
+                }
+                if intent == "question" { assignedTo }
+                if intent != "information" && dispatch.requiresClaude {
+                    Text("Start this job from a Claude session. Claude does the work itself or in a subagent.")
+                        .font(Typeface.caption).foregroundStyle(.secondary)
                 }
                 if intent == "information" {
                     field("Add to") {
@@ -88,11 +103,28 @@ struct DispatchView: View {
                     .glassPillButton().morphs(on: sending).disabled(!canSend)
             }
         }.padding(WorkspaceStyle.panelPadding).frame(width: WorkspaceStyle.sheetWidth).disabled(sending).interactiveDismissDisabled(sending || dirty)
+        .onChange(of: role) { pickedAgent = nil }
+        .onChange(of: intent) { pickedAgent = nil }
         .onChange(of: directory) { if destination.hasPrefix("mission:") { destination = "project" } }
         .alert("Discard this job draft?", isPresented: $confirmingDiscard) {
             Button("Keep Editing", role: .cancel) {}
             Button("Discard Draft", role: .destructive) { dismiss() }
         } message: { Text("Your instructions and job options have not been sent.") }
+    }
+    private var assignedTo: some View {
+        field("Assigned to") {
+            if dispatch.holders.count > 1 {
+                Picker("Assigned to", selection: Binding(get: { dispatch.agent ?? "" }, set: { pickedAgent = $0 == dispatch.holders.first ? nil : $0 })) {
+                    ForEach(dispatch.holders, id: \.self) { holder in Text(workerLabel(holder)).tag(holder) }
+                }.labelsHidden().fixedSize()
+            } else {
+                Text(dispatch.agent.map(workerLabel) ?? (dispatch.requiresClaude ? "Claude (lead)" : "No agent assigned"))
+                    .font(Typeface.body).frame(minHeight: Self.fieldHeight)
+            }
+        }
+    }
+    private func workerLabel(_ agent: String) -> String {
+        "\(store.state.agents[agent]?.name ?? agentName(agent))\(store.state.agents[agent]?.enabled == false ? " (disabled)" : "")"
     }
     private func field<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: Space.s) {
@@ -107,7 +139,7 @@ struct DispatchView: View {
         if panel.runModal() == .OK, let url = panel.url { directory = url.path }
     }
     private func send() async {
-        guard !sending else { return }
+        guard canSend else { return }
         let allowed = targets.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         if intent == "command" && role == "polish" && allowed.isEmpty { error = "List the files or directories the editor may change."; return }
         sending = true; error = ""
@@ -117,11 +149,11 @@ struct DispatchView: View {
                 try await store.addInformation(task, mission: destination.hasPrefix("mission:") ? String(destination.dropFirst(8)) : nil, project: destination == "shared" ? nil : cwd)
                 dismiss()
             } else if intent == "question" {
-                let job = try await store.submitQuestion(task, project: cwd)
+                let job = try await store.submitQuestion(task, project: cwd, agent: dispatch.submissionAgent)
                 store.openJob(job.id, navigate: true); dismiss()
             } else {
                 guard let selectedRole else { throw CrewFailure("Choose a role for this job.") }
-                let job: Job = try await store.api.post("/api/jobs", JobSubmission(role: selectedRole, cwd: cwd, project: cwd, task: task, targets: role == "polish" ? allowed : nil))
+                let job: Job = try await store.api.post("/api/jobs", JobSubmission(role: selectedRole, cwd: cwd, project: cwd, task: task, targets: role == "polish" ? allowed : nil, agent: dispatch.submissionAgent))
                 store.applyJob(job, since: 0); store.openJob(job.id, navigate: true); dismiss()
             }
         } catch { self.error = error.localizedDescription }

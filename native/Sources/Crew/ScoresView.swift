@@ -17,6 +17,17 @@ extension ModelScore {
         }
     }
     var tone: Color { band?.tone ?? Color.secondary.opacity(0.5) }
+    /// Build and fix counts apart, since only builds rank a model; an older daemon gives one total.
+    var countsText: String {
+        guard let builds = buildSamples, let fixes = fixSamples else { return "\(statusText) · \(samples) \(samples == 1 ? "review" : "reviews")" }
+        return "\(statusText) · \(builds) \(builds == 1 ? "build" : "builds") · \(fixes) \(fixes == 1 ? "fix" : "fixes")"
+    }
+    /// Mirrors adoptionText in Scores.tsx.
+    var adoptionText: String? {
+        guard let a = adoption else { return nil }
+        return (["Merged \(a.asIs) of \(a.judged) as is", "\(a.afterReply) after a reply"] + (a.partly > 0 ? ["\(a.partly) in part"] : []) + (a.rejected > 0 ? ["\(a.rejected) rejected"] : [])
+            + ["\(a.rounds) \(a.rounds == 1 ? "follow-up" : "follow-ups")"]).joined(separator: " · ")
+    }
     var statusText: String { status == "settled" ? "Settled" : status == "on trial" ? "On trial" : "Too few reviews" }
 }
 
@@ -141,7 +152,10 @@ struct ModelScoreRow: View {
                             .padding(.horizontal, 7).padding(.vertical, 1).background(Palette.chip(band.tone), in: Capsule())
                     }
                 }
-                Text("\(score.statusText) · \(score.samples) \(score.samples == 1 ? "review" : "reviews")").font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
+                Text(score.countsText).font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
+                if let adoption = score.adoptionText {
+                    Text(adoption).font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
+                }
                 HStack(spacing: Space.xl) {
                     ScoreBar(label: "Build", value: score.build)
                     ScoreBar(label: "Fix", value: score.fix)
@@ -156,6 +170,6 @@ struct ModelScoreRow: View {
         .padding(.vertical, Space.s)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(rank.map { "Rank \($0): " } ?? "")\(score.model), \(agentName(score.agent)), \(score.shown) out of 10\(score.band.map { ", \($0.word)" } ?? "")")
-        .accessibilityValue(["\(score.statusText), \(score.samples) reviews", "build \(score.build.map { ModelScore.shown($0) } ?? "none")", "fix \(score.fix.map { ModelScore.shown($0) } ?? "none")", score.summary].filter { !$0.isEmpty }.joined(separator: ". "))
+        .accessibilityValue([score.countsText, score.adoptionText ?? "", "build \(score.build.map { ModelScore.shown($0) } ?? "none")", "fix \(score.fix.map { ModelScore.shown($0) } ?? "none")", score.summary].filter { !$0.isEmpty }.joined(separator: ". "))
     }
 }

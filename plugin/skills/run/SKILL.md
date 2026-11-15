@@ -83,8 +83,8 @@ One review round is the default. Run a second only if the fixes were substantial
 
 Then record what the review showed with `note`, one call per model judged:
 
-- The builder's line (`role: "build"`): `job_id` of the job that built the work (never the review's), or `model` with your own model id for work done here or in a subagent. A result merged from several jobs gets one line per job, each with the findings in its part. Give `reviewer`, the change's `size`, the findings you accepted by severity (declined ones do not count), and one line of facts.
-- The fixer's line (`role: "fix"`): `outcome` is `root-cause`, `patch`, or `another-review` when the fix needed another round.
+- The builder's line (`role: "build"`): `job_id` of the job that built the work (never the review's), or `model` with your own model id for work done here or in a subagent. A result merged from several jobs gets one line per job, each with the findings in its part; a finding that spans the pieces goes on your own line. For a delegated job, also give `adoption`: how you took its work (`as-is`, `after-reply`, `partly`, `rejected`); issues you found in its diff count as findings, with `reviewer: "claude"` if no other review covered it. Give `reviewer`, the change's `size`, the findings you accepted by severity, the ones you `declined`, and one line of facts. When several reviews covered the work, note it once with every accepted finding counted once, naming as `reviewer` one from another agent if any ran.
+- The fixer's line (`role: "fix"`): `outcome` is `root-cause`, `patch`, or `another-review` when the fix needed another round, and `findings` are what the check of the fix raised.
 
 Facts only, never impressions. When a response says a model's summary is due, rewrite it with `note` (`model` and `summary`) from its evidence lines. The notes inform which tier and holder you pick; the roles and presets stay the user's.
 

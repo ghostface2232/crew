@@ -419,6 +419,12 @@ struct ModelScore: Codable, Sendable, Equatable, Identifiable {
     var build: Double?
     var fix: Double?
     var samples: Int
+    /// Absent from a daemon that predates split counts.
+    var buildSamples: Int?
+    var fixSamples: Int?
+    /// How the lead took the model's delegated work; absent from an older daemon, null when none says.
+    var adoption: Adoption?
+    struct Adoption: Codable, Sendable, Equatable { var judged: Int; var asIs: Int; var afterReply: Int; var partly: Int; var rejected: Int; var rounds: Int }
     var status: String
     var summary: String
     var id: String { model }

@@ -685,10 +685,14 @@ test('model notes take a job\'s own model, refuse a model it did not run, and re
   const review = (await h.api('POST', '/api/jobs', { kind: 'review', cwd: h.home, project: h.home, review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } })).body;
   assert.match((await h.api('POST', '/api/notes', { job: review.id, reviewer: 'claude', size: 'small', text: 'x' })).body.error, /builds nothing to judge/);
   assert.match((await h.api('POST', '/api/notes', { model: model, summary: null })).body.error, /summary must be text/);
-  // Noting the job again corrects its line, and its difficulty stays the job's own whatever the call says.
+  // Noting the job again corrects its line, and its tier stays the job's own whatever the call says.
   assert.equal((await h.api('POST', '/api/notes', { job: job.id, reviewer: 'claude', size: 'small', tier: 'frontier', text: 'one edge case' })).body.samples, 1);
   const line = JSON.parse(fs.readFileSync(path.join(h.home, 'model-notes.json'), 'utf8')).models[model].evidence[0];
   assert.equal(line.tier, ran.tier);
+  // How the lead took a job's work is the lead's word; its follow-up rounds are the job's own record.
+  const adopted = (await h.api('POST', '/api/notes', { job: job.id, reviewer: 'claude', size: 'xlarge', adoption: 'after-reply', text: 'one edge case' })).body;
+  assert.deepEqual(adopted.adoption, { judged: 1, asIs: 0, afterReply: 1, partly: 0, rejected: 0, rounds: ran.turns - 1 });
+  assert.match((await h.api('POST', '/api/notes', { model: 'claude-test', reviewer: 'codex', size: 'small', adoption: 'as-is', text: 'x' })).body.error, /delegated job/);
   // Work done in the lead's session names its own model and is the lead's.
   const own = (await h.api('POST', '/api/notes', { model: 'claude-test', role: 'fix', outcome: 'root-cause', reviewer: 'codex', size: 'medium', text: 'fixed at the cause' })).body;
   assert.deepEqual([own.agent, own.fixSamples], ['claude', 1]);

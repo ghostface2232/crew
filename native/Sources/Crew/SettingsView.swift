@@ -197,7 +197,7 @@ struct CrewSettingsView: View {
             }
         }
         Section {} footer: {
-            Text("After each review and its fix, the lead notes the findings it accepted and how the fix went. A score out of 10 weighs those notes across every job, corrected for each job's tier and size and for how harsh each reviewer tends to be. A review by the model's own agent counts half. A model starts where the others stand, and is ranked once it has three reviews. The lead reads these notes when it picks a tier or holder; your roles and presets still decide.")
+            Text("After each review and its fix, the lead notes the findings it accepted and how the fix went. A model's score out of 10 follows how many findings its builds drew for their size, across every job; how it fixes is scored apart and does not change its rank. A review by the model's own agent counts half. Scores reflect the work each model was given, so a model on harder work may score lower. A model starts where the others stand, and is ranked once it has three build reviews. The lead reads these notes when it picks a tier or holder; your roles and presets still decide.")
                 .settingsFootnote()
         }
     }

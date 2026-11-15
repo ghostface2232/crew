@@ -15,8 +15,11 @@ function band(score: ModelScore): { word: string; tone: string } | null {
   if (score.score >= 6) return { word: 'Mixed', tone: 'var(--orange)' };
   return { word: 'Shaky', tone: 'var(--red)' };
 }
+const counted = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 const toneOf = (score: ModelScore) => band(score)?.tone ?? 'var(--tertiary)';
 const statusText = (score: ModelScore) => (score.status === 'settled' ? 'Settled' : score.status === 'on trial' ? 'On trial' : 'Too few reviews');
+/** How the lead took a model's delegated work; an older daemon, or a model never delegated to, has none. */
+const adoptionText = ({ adoption: a }: ModelScore) => a && `Merged ${a.asIs} of ${a.judged} as is · ${a.afterReply} after a reply${a.partly ? ` · ${a.partly} in part` : ''}${a.rejected ? ` · ${a.rejected} rejected` : ''} · ${counted(a.rounds, 'follow-up', 'follow-ups')}`;
 
 /** The score as a ring filling out of 10, with the number in its middle. */
 function Ring({ score, size = 52 }: { score: ModelScore; size?: number }) {
@@ -86,7 +89,8 @@ function Row({ score, rank, index }: { score: ModelScore; rank?: number; index: 
           <span className={styles.rowName}>{score.model}<span className={styles.hidden}>, {NAMES[score.agent]}</span></span>
           {word && <span className={styles.word} style={{ '--tone': word.tone } as CSSProperties}>{word.word}</span>}
         </div>
-        <span className={styles.meta}>{statusText(score)} · {score.samples} {score.samples === 1 ? 'review' : 'reviews'}</span>
+        <span className={styles.meta}>{statusText(score)} · {counted(score.buildSamples, 'build', 'builds')} · {counted(score.fixSamples, 'fix', 'fixes')}</span>
+        {adoptionText(score) && <span className={styles.meta}>{adoptionText(score)}</span>}
         <div className={styles.bars}>
           <Bar label="Build" value={score.build} />
           <Bar label="Fix" value={score.fix} />

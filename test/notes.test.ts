@@ -47,6 +47,10 @@ test('invalid evidence is refused without changing storage', (t) => {
     [{ findings: { high: -1 } }, /high/], [{ findings: { low: 0.5 } }, /low/], [{ findings: { medium: null } }, /medium/],
     [{ agent: 'claude' }, /already belongs/], [{ model: ' ' }, /model/], [{ text: ' ' }, /text/],
     [{ tier: 'wrong' }, /tier/], [{ size: 'wrong' }, /size/], [{ role: 'wrong' }, /role/], [{ at: NaN }, /timestamp/],
+    [{ declined: { high: -1 } }, /declined\.high/], [{ declined: { low: 0.5 } }, /declined\.low/],
+    [{ adoption: 'as-is' }, /delegated job/], [{ job: 'cx-1', adoption: 'merged' }, /delegated job/],
+    [{ job: 'cx-1', role: 'fix', outcome: 'patch', adoption: 'as-is' }, /delegated job/],
+    [{ job: 'cx-1', rounds: 1 }, /rounds/], [{ job: 'cx-1', adoption: 'as-is', rounds: -1 }, /rounds/],
   ];
   for (const [change, error] of cases) assert.throws(() => addEvidence(dir, { ...input, ...change }), error);
   assert.equal(fs.readFileSync(notesFile(dir), 'utf8'), before);
@@ -70,48 +74,56 @@ test('corrupt JSON names the file and stays untouched', (t) => {
   assert.equal(fs.readFileSync(notesFile(dir), 'utf8'), '{broken');
 });
 
-test('build scores use difficulty, self-review weight and prior', () => {
-  // Alone, a model starts at 0.7 with the weight of four jobs: (1 + 2.8) / 5 = 0.76.
+test('build scores a finding rate over exposure, with self-review weight and a prior, and no tier or clamp', () => {
+  // Alone, a model starts at the reference rate 0.36 with the weight of three medium changes: 1.08 / 4 = 0.27, 10·e^-0.27.
   assert.equal(scoreAll(fixture([{}]))[0].score, 7.6);
-  // (0.5 + 2.8) / 4.5 = 0.733.
+  // A self-review counts half: 1.08 / 3.5.
   assert.equal(scoreAll(fixture([{ reviewer: 'codex' }]))[0].score, 7.3);
-  assert.equal(scoreAll(fixture([{ findings: { high: 1, medium: 0, low: 0 } }]))[0].score, 6.9);
-  // d = 1.625; weighted quality = d - 0.35; (1.275 + 2.8) / 5.625.
-  assert.equal(scoreAll(fixture([{ tier: 'frontier', size: 'large', findings: { high: 1, medium: 0, low: 0 } }]))[0].score, 7.2);
-  assert.equal(scoreAll(fixture([{ findings: { high: 100, medium: 0, low: 0 } }]))[0].score, 5.6);
+  assert.equal(scoreAll(fixture([{ findings: { high: 1, medium: 0, low: 0 } }]))[0].score, 7.0);
+  // A large change has twice the exposure; the tier changes nothing.
+  const large = scoreAll(fixture([{ size: 'large', findings: { high: 1, medium: 0, low: 0 } }]))[0].score;
+  assert.equal(large, 7.5);
+  for (const tier of ['fast', 'frontier'] as const) assert.equal(scoreAll(fixture([{ tier, size: 'large', findings: { high: 1, medium: 0, low: 0 } }]))[0].score, large);
+  // Every further finding costs more: nothing is clamped.
+  const highs = [3, 10, 100].map((high) => scoreAll(fixture([{ findings: { high, medium: 0, low: 0 } }]))[0].score!);
+  assert.deepEqual(highs, [5.9, 3.2, 0]);
 });
 
-test('fix outcomes score independently and overall combines roles', () => {
-  for (const [outcome, expected] of [['root-cause', 7.6], ['patch', 6.7], ['another-review', 6.1]] as const) {
+test('fix scores apart from build and never moves the score or the rank', () => {
+  for (const [outcome, expected] of [['root-cause', 7.7], ['patch', 6.6], ['another-review', 5.9]] as const) {
     const s = scoreAll(fixture([{ role: 'fix', outcome }]))[0];
-    assert.equal(s.fix, expected);
-    assert.equal(s.build, null);
-    assert.equal(s.score, expected);
+    assert.deepEqual([s.fix, s.build, s.score], [expected, null, null]);
   }
-  const s = scoreAll(fixture([{}, { role: 'fix', outcome: 'patch' }]))[0];
-  assert.equal(s.score, 7.3);
-  assert.equal(s.buildSamples, 1);
-  assert.equal(s.fixSamples, 1);
+  // Findings the check of the fix raised lower it.
+  assert.equal(scoreAll(fixture([{ role: 'fix', outcome: 'root-cause', findings: { high: 1, medium: 0, low: 0 } }]))[0].fix, 7.0);
+  const file = fixture(Array(8).fill({ findings: { high: 1, medium: 0, low: 0 } }));
+  file.models.fixer = { model: 'fixer', agent: 'codex', summary: '', summaryAt: null,
+    evidence: fixture([...Array(8).fill({ findings: { high: 1, medium: 0, low: 0 } }), ...Array(8).fill({ role: 'fix', outcome: 'root-cause' })]).models['model-a'].evidence };
+  const scores = scoreAll(file);
+  const [a, b] = ['model-a', 'fixer'].map((model) => scores.find((s) => s.model === model)!);
+  assert.equal(a.score, b.score);
+  assert.deepEqual([b.buildSamples, b.fixSamples], [8, 8]);
 });
 
-test('calibration uses all builds and starts at five per reviewer', () => {
-  const harsh = { reviewer: 'claude' as const, findings: { high: 2, medium: 0, low: 0 } };
-  const clean = { reviewer: 'antigravity' as const };
-  // Four harsh and four clean: no calibration; (4 * 0.3 + 4 + 2.8) / 12.
-  assert.equal(scoreAll(fixture([...Array(4).fill(harsh), ...Array(4).fill(clean)]))[0].score, 6.7);
-  // Five each: global mean .35, harsh mean .7 => c clamped to .75; (5 * 0.475 + 5 + 2.8) / 14.
-  assert.equal(scoreAll(fixture([...Array(5).fill(harsh), ...Array(5).fill(clean)]))[0].score, 7.3);
-  const file = fixture(Array(5).fill(harsh));
-  file.models.other = { model: 'other', agent: 'codex', summary: '', summaryAt: null, evidence: fixture(Array(5).fill(clean)).models['model-a'].evidence };
-  // model-a starts where the other model stands, (5 + 2.8) / 9: (5 * 0.475 + 4 * 0.867) / 9.
-  assert.equal(scoreAll(file).find((s) => s.model === 'model-a')!.score, 6.5);
-  assert.equal(scoreAll(fixture(Array(5).fill({})))[0].score, 8.7);
+test('reviewers are not calibrated, and each other model counts once in the start', () => {
+  // The same findings score the same whoever reviewed them, apart from a self-review's half weight.
+  const harsh = { reviewer: 'antigravity' as const, findings: { high: 2, medium: 0, low: 0 } };
+  assert.equal(scoreAll(fixture(Array(5).fill(harsh)))[0].score, scoreAll(fixture(Array(5).fill({ ...harsh, reviewer: 'claude' })))[0].score);
+  // A busy clean model and a sparse poor one set the start together, not by their line counts.
+  const file = fixture([{}, {}, {}]);
+  const lines = (n: number, e: Partial<Evidence>) => fixture(Array(n).fill(e)).models['model-a'].evidence;
+  file.models.busy = { model: 'busy', agent: 'codex', summary: '', summaryAt: null, evidence: lines(100, {}) };
+  file.models.sparse = { model: 'sparse', agent: 'codex', summary: '', summaryAt: null, evidence: lines(5, { findings: { high: 2, medium: 0, low: 0 } }) };
+  assert.deepEqual(scoreAll(file).map((s) => [s.model, s.score]), [['busy', 9.9], ['model-a', 8.5], ['sparse', 6]]);
 });
 
-test('sample status thresholds and consolidation follow timestamps', (t) => {
+test('status counts build reviews, a self-review as half, and consolidation follows timestamps', (t) => {
   for (const [n, status] of [[0, 'too few samples'], [2, 'too few samples'], [3, 'on trial'], [7, 'on trial'], [8, 'settled']] as const) {
     assert.equal(scoreAll(fixture(Array(n).fill({})))[0].status, status);
   }
+  assert.equal(scoreAll(fixture(Array(5).fill({ reviewer: 'codex' })))[0].status, 'too few samples');
+  assert.equal(scoreAll(fixture(Array(6).fill({ reviewer: 'codex' })))[0].status, 'on trial');
+  assert.equal(scoreAll(fixture(Array(9).fill({ role: 'fix', outcome: 'root-cause' })))[0].status, 'too few samples');
   const dir = home(t);
   for (let at = 1; at <= 9; at++) addEvidence(dir, { ...input, at });
   assert.equal(scoreAll(loadNotes(dir))[0].consolidate, false);
@@ -125,13 +137,14 @@ test('sample status thresholds and consolidation follow timestamps', (t) => {
 
 test('rendering filters models and agents and shows latest evidence and null scores', () => {
   const at = new Date(2026, 10, 15).getTime();
-  const file = fixture([{ at, text: 'Latest.', job: 'cx-123' }, { at: at - 86400000, text: 'Older.' }]);
+  const file = fixture([{ at, text: 'Latest.', job: 'cx-123', tier: 'frontier', declined: { high: 0, medium: 2, low: 1 } }, { at: at - 86400000, text: 'Older.' }]);
   file.models.empty = { model: 'empty', agent: 'claude', summary: '', summaryAt: null, evidence: [] };
   const scores = scoreAll(file);
   const text = renderNotes(scores, file, { models: ['model-a'], evidence: 1 });
-  assert.match(text, /### model-a \(codex\)/);
-  assert.match(text, /build 8\.0 · fix —/);
-  assert.match(text, /2026-11-15 cx-123 \(claude reviewed, build, standard\/medium\): Latest\./);
+  assert.match(text, /### model-a \(codex\) — 8\.1\/10, too few samples, 2 build\(s\), 0 fix\(es\)/);
+  assert.match(text, /build 8\.1 · fix —/);
+  assert.match(text, /builds by tier: frontier 1/);
+  assert.match(text, /2026-11-15 cx-123 \(claude reviewed, build, frontier\/medium, declined 2 medium 1 low\): Latest\./);
   assert.doesNotMatch(text, /Older/);
   assert.match(renderNotes(scores, file, { agents: ['claude'] }), /—\/10.*No summary yet\./s);
   assert.equal(renderNotes(scores, file, { models: [] }), '');
@@ -141,7 +154,7 @@ test('rendering filters models and agents and shows latest evidence and null sco
   assert.match(renderNotes(scores, file), /Summary is due: rewrite it from the evidence\./);
 });
 
-test('scores sort descending, then by model with null last', () => {
+test('scores sort by unrounded rate, then by model, with fix-only models and then empty ones last', () => {
   const file = fixture([{}]);
   for (const model of ['z', 'b', 'empty-z', 'empty-a']) file.models[model] = {
     model, agent: 'codex', summary: '', summaryAt: null,
@@ -149,6 +162,11 @@ test('scores sort descending, then by model with null last', () => {
   };
   assert.deepEqual(scoreAll(file).map((s) => s.model), ['b', 'model-a', 'z', 'empty-a', 'empty-z']);
   assert.equal(scoreAll(file).at(-1)!.lastAt, null);
+  // Both show 9.0; the one with fewer findings comes first, whatever its name.
+  const low = { findings: { high: 0, medium: 0, low: 1 } };
+  const tie = fixture([...Array(7).fill(low), { findings: { high: 0, medium: 0, low: 2 } }]);
+  tie.models.b = { model: 'b', agent: 'codex', summary: '', summaryAt: null, evidence: fixture(Array(8).fill(low)).models['model-a'].evidence };
+  assert.deepEqual(scoreAll(tie).map((s) => [s.model, s.score]), [['b', 9], ['model-a', 9]]);
 });
 
 test('noting the same job and role again replaces its line, while another role or no job adds one', (t) => {
@@ -164,6 +182,25 @@ test('noting the same job and role again replaces its line, while another role o
   const file = loadNotes(dir);
   assert.deepEqual(file.models['model-a'].evidence.map((e) => e.text), ['fixed', 'no job', 'no job again']);
   assert.deepEqual(file.models['model-b'].evidence.map((e) => e.text), ['under its real model']);
+  // A model the move leaves with no lines goes; one that had none already stays.
+  const saved = loadNotes(dir);
+  saved.models.idle = { model: 'idle', agent: 'codex', summary: 'Kept.', summaryAt: 1, evidence: [] };
+  fs.writeFileSync(notesFile(dir), JSON.stringify(saved));
+  addEvidence(dir, { ...input, model: 'model-c', job: 'cx-1', text: 'moved again' });
+  assert.deepEqual(Object.keys(loadNotes(dir).models), ['model-a', 'idle', 'model-c']);
+});
+
+test('a job noted twice by a hand edit counts once, by its latest line', (t) => {
+  const dir = home(t);
+  fs.mkdirSync(dir, { recursive: true });
+  const line = (id: string, at: number, model = 'model-a', role = 'build') => ({ ...input, model, role, ...(role === 'fix' ? { outcome: 'patch' } : {}), id, at, job: 'cx-9' });
+  fs.writeFileSync(notesFile(dir), JSON.stringify({ version: 1, models: {
+    'model-a': { model: 'model-a', agent: 'codex', evidence: [line('ev-1', 1), line('ev-3', 3, 'model-a', 'fix'), { ...line('ev-4', 4), size: 'huge' }] },
+    'model-b': { model: 'model-b', agent: 'codex', evidence: [line('ev-2', 2, 'model-b')] },
+  } }));
+  const file = loadNotes(dir);
+  // The malformed later line does not hide the valid one before it.
+  assert.deepEqual([file.models['model-a'].evidence.map((e) => e.id), file.models['model-b'].evidence.map((e) => e.id)], [['ev-3'], ['ev-2']]);
 });
 
 test('incomplete entries and lines are skipped and the rest keeps the shape readers expect', (t) => {
@@ -201,10 +238,10 @@ test('a model with few reviews starts where the others stand and ranks after eve
   const file = fixture(Array(8).fill({ findings: { high: 0, medium: 1, low: 0 } }));
   file.models.fresh = { model: 'fresh', agent: 'codex', summary: '', summaryAt: null, evidence: fixture([{}, {}]).models['model-a'].evidence };
   const [settled, fresh] = scoreAll(file);
-  // The settled model's eight lines at 0.85 set the fresh one's start: (6.8 + 2.8) / 12 = 0.8.
+  // The fresh one starts between the settled model's rate, (1.2 + 1.08) / 11, and the reference 0.36.
   assert.deepEqual([settled.model, settled.score, settled.status], ['model-a', 8.3, 'settled']);
   // Two clean reviews lift it above the settled model's score, but not above it in the ranking.
-  assert.deepEqual([fresh.model, fresh.score, fresh.status], ['fresh', 8.7, 'too few samples']);
+  assert.deepEqual([fresh.model, fresh.score, fresh.status], ['fresh', 8.4, 'too few samples']);
 });
 
 test('a save stops when the copy of skipped lines cannot be made, so nothing is erased', (t) => {
@@ -217,4 +254,33 @@ test('a save stops when the copy of skipped lines cannot be made, so nothing is 
   t.mock.method(fs, 'copyFileSync', () => { throw new Error('No space left'); });
   assert.throws(() => addEvidence(dir, { ...input, text: 'more' }), /No space left/);
   assert.equal(fs.readFileSync(notesFile(dir), 'utf8'), raw);
+});
+
+test('an xlarge change carries twice a large one\'s exposure', () => {
+  const rate = (size: Evidence['size']) => scoreAll(fixture(Array.from({ length: 20 }, () => ({ size, findings: { high: 0, medium: 2, low: 0 } }))))[0].score!;
+  // The same findings on bigger changes are a lower rate: (6 + 3·0.36) / (40 + 3) for large, / (80 + 3) for xlarge.
+  assert.deepEqual([rate('large'), rate('xlarge')], [8.5, 9.2]);
+});
+
+test('adoption is totalled per model, shown in the notes, and not scored', () => {
+  const lines: Partial<Evidence>[] = [
+    { job: 'cx-1', adoption: 'as-is', rounds: 0 }, { job: 'cx-2', adoption: 'after-reply', rounds: 2 },
+    { job: 'cx-3', adoption: 'rejected', rounds: 1 }, { job: 'cx-4' },
+  ];
+  const file = fixture(lines);
+  const [score] = scoreAll(file);
+  assert.deepEqual(score.adoption, { judged: 3, asIs: 1, afterReply: 1, partly: 0, rejected: 1, rounds: 3 });
+  assert.equal(score.score, scoreAll(fixture(lines.map(({ job }) => ({ job }))))[0].score);
+  assert.equal(scoreAll(fixture([{}]))[0].adoption, null);
+  const text = renderNotes([score], file);
+  assert.match(text, /adopted: 1 as is, 1 after a reply, 0 in part, 1 rejected, of 3; 3 follow-up round\(s\)/);
+  assert.match(text, /cx-2 \(claude reviewed, build, medium, after-reply after 2 round\(s\)\)/);
+});
+
+test('loading drops an adoption the writer would refuse', (t) => {
+  const dir = home(t);
+  fs.mkdirSync(dir, { recursive: true });
+  const bad: Partial<Evidence>[] = [{ adoption: 'as-is' }, { job: 'cx-2', adoption: 'merged' as Evidence['adoption'] }, { job: 'cx-3', rounds: 1 }, { job: 'cx-4', adoption: 'partly', rounds: 1 }];
+  fs.writeFileSync(notesFile(dir), JSON.stringify(fixture(bad)));
+  assert.deepEqual(loadNotes(dir).models['model-a'].evidence.map((e) => e.job), ['cx-4']);
 });

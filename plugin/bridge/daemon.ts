@@ -682,14 +682,17 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
           model,
           agent: job ? job.agent : 'claude',
           ...(job ? (job.resolvedEffort ?? job.effort ? { effort: job.resolvedEffort ?? job.effort } : {}) : {}),
-          // A job's difficulty is its own record's; a job named by model has no tier and counts as standard.
+          // A job's tier is its own record's. It is kept to show what work a model was given, not scored.
           ...((job ? job.tier : body.tier) ? { tier: job ? job.tier : body.tier } : {}),
           size: body.size,
           role: body.role ?? (job?.role === 'fix' ? 'fix' : 'build'),
           ...(job ? { job: job.id } : {}),
           reviewer: body.reviewer,
           findings: body.findings ?? {},
+          ...(body.declined !== undefined ? { declined: body.declined } : {}),
           ...(body.outcome !== undefined ? { outcome: body.outcome } : {}),
+          // The follow-up turns come from the job's own record, so the lead names only how it took the work.
+          ...(body.adoption !== undefined ? { adoption: body.adoption, ...(job ? { rounds: Math.max(0, (job.turns ?? 1) - 1) } : {}) } : {}),
           text: body.text,
         }).score;
       }

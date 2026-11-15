@@ -5,28 +5,30 @@ import type { Holder } from './config.ts';
 import { TIERS } from './tiers.ts';
 import type { Tier } from './tiers.ts';
 
-// Difficulty adjusts both the penalty and the evidence weight.
-const TIER_FACTOR: Record<Tier, number> = { fast: 0.7, light: 0.85, standard: 1, frontier: 1.25 };
-// Larger changes carry more evidence and soften finding penalties.
-const SIZE_FACTOR = { small: 0.8, medium: 1, large: 1.3 };
-// Accepted findings reduce build quality by severity.
-const PENALTY = { high: 0.35, medium: 0.15, low: 0.05 };
-// Fix quality records whether the underlying cause was resolved.
+// A build line's finding load: the accepted findings by severity.
+const LOAD = { high: 0.35, medium: 0.15, low: 0.05 };
+// Exposure units of a change, so a large change may carry more findings than a small one. Chosen units, not a measured
+// difficulty. Tier is not used: for Codex it picks the model, so it would act as a fixed bonus per model.
+const EXPOSURE = { small: 0.5, medium: 1, large: 2, xlarge: 4 };
+// A fix line's quality by outcome, lowered by the findings the check of the fix raised.
 const FIX_QUALITY = { 'root-cause': 1, patch: 0.55, 'another-review': 0.25 };
-// A model starts where the other models stand, as if it had four average jobs behind it, so a few clean
-// reviews cannot lift it above a model with a long record. With no other models to compare, it starts at 70 percent.
-const K = 4, P = 0.7;
-// A reviewer needs five builds before calibration applies.
-const CALIBRATE_AFTER = 5;
+// Where a model starts with nothing to compare: a build rate of one high per medium change (7.0), a fix quality of 0.7.
+const REFERENCE = { build: 0.36, fix: 0.7 };
+// The start weighs as much as three medium changes (or three fixes) of the model's own.
+const PRIOR_WEIGHT = 3;
+// A review by the builder's own agent counts half.
+const SELF_REVIEW = 0.5;
 // Ten new evidence lines call for a new prose summary.
 export const CONSOLIDATE_AFTER = 10;
 
 export type NoteRole = 'build' | 'fix';
 export type FixOutcome = 'root-cause' | 'patch' | 'another-review';
-export type ChangeSize = 'small' | 'medium' | 'large';
+export type ChangeSize = 'small' | 'medium' | 'large' | 'xlarge';
+export type Adoption = 'as-is' | 'after-reply' | 'partly' | 'rejected';
 export const NOTE_ROLES = ['build', 'fix'] as const;
 export const FIX_OUTCOMES = ['root-cause', 'patch', 'another-review'] as const;
-export const CHANGE_SIZES = ['small', 'medium', 'large'] as const;
+export const CHANGE_SIZES = ['small', 'medium', 'large', 'xlarge'] as const;
+export const ADOPTIONS = ['as-is', 'after-reply', 'partly', 'rejected'] as const;
 export interface Findings { high: number; medium: number; low: number }
 export interface Evidence {
   id: string;
@@ -40,7 +42,12 @@ export interface Evidence {
   job?: string;
   reviewer: Holder;
   findings: Findings;
+  /** Findings the lead declined, kept so its triage can be checked; not scored. */
+  declined?: Findings;
   outcome?: FixOutcome;
+  /** How the lead took a delegated job's work, and the follow-up turns it took; shown, not scored. */
+  adoption?: Adoption;
+  rounds?: number;
   text: string;
 }
 export interface ModelNote { model: string; agent: Holder; summary: string; summaryAt: number | null; evidence: Evidence[] }
@@ -59,6 +66,8 @@ export interface ModelScore {
   summary: string;
   lastAt: number | null;
   consolidate: boolean;
+  /** Delegated builds by how the lead took them, or null when none says. */
+  adoption: { judged: number; asIs: number; afterReply: number; partly: number; rejected: number; rounds: number } | null;
 }
 export const notesFile = (home: string) => path.join(home, 'model-notes.json');
 
@@ -75,6 +84,7 @@ export function loadNotes(home: string): NotesFile {
 }
 
 const HOLDERS = ['codex', 'antigravity', 'claude'];
+const counts = (f: any) => f && typeof f === 'object' && ['high', 'medium', 'low'].every((key) => Number.isInteger(f[key]) && f[key] >= 0);
 
 /**
  * Drops entries and lines a hand edit or an older writer left incomplete, so one bad line cannot stop the scores,
@@ -86,13 +96,22 @@ function wellFormed(models: Record<string, any>): Record<string, ModelNote> {
     if (!note || !HOLDERS.includes(note.agent) || !Array.isArray(note.evidence)) continue;
     const evidence = note.evidence.filter((e: any) => e && typeof e.id === 'string' && Number.isFinite(e.at) && e.model === model && e.agent === note.agent && HOLDERS.includes(e.reviewer)
       && CHANGE_SIZES.includes(e.size) && NOTE_ROLES.includes(e.role) && (e.tier === undefined || TIERS.includes(e.tier))
-      && (e.role === 'build' || FIX_OUTCOMES.includes(e.outcome)) && typeof e.text === 'string' && e.findings
-      && ['high', 'medium', 'low'].every((key) => Number.isInteger(e.findings[key]) && e.findings[key] >= 0));
+      && (e.role === 'build' || FIX_OUTCOMES.includes(e.outcome)) && typeof e.text === 'string'
+      && counts(e.findings) && (e.declined === undefined || counts(e.declined))
+      && (e.adoption === undefined || (e.role === 'build' && typeof e.job === 'string' && ADOPTIONS.includes(e.adoption)))
+      && (e.rounds === undefined || (e.adoption !== undefined && Number.isInteger(e.rounds) && e.rounds >= 0)));
     Object.defineProperty(kept, model, {
       value: { model, agent: note.agent, summary: typeof note.summary === 'string' ? note.summary : '', summaryAt: Number.isFinite(note.summaryAt) ? note.summaryAt : null, evidence },
       enumerable: true, configurable: true, writable: true,
     });
   }
+  // A hand edit may leave a job noted twice; only its latest line counts, as noting it again would leave it.
+  const latest = new Map<string, Evidence>();
+  for (const e of Object.values(kept).flatMap((m) => m.evidence)) {
+    const key = `${e.job}\0${e.role}`;
+    if (typeof e.job === 'string' && (latest.get(key)?.at ?? -Infinity) <= e.at) latest.set(key, e);
+  }
+  for (const m of Object.values(kept)) m.evidence = m.evidence.filter((e) => typeof e.job !== 'string' || latest.get(`${e.job}\0${e.role}`) === e);
   return kept;
 }
 
@@ -133,11 +152,22 @@ export function addEvidence(home: string, input: Omit<Evidence, 'id' | 'at'> & {
   if (input.tier !== undefined && !TIERS.includes(input.tier)) throw new Error('Invalid tier.');
   if (input.role === 'fix' && !FIX_OUTCOMES.includes(input.outcome!)) throw new Error('fix requires a valid outcome.');
   if (input.role === 'build' && input.outcome !== undefined) throw new Error('build forbids outcome.');
+  if (input.adoption !== undefined && (input.role !== 'build' || !input.job || !ADOPTIONS.includes(input.adoption))) throw new Error('adoption is for a delegated job\'s build line: as-is, after-reply, partly, or rejected.');
+  if (input.rounds !== undefined && (input.adoption === undefined || !Number.isInteger(input.rounds) || input.rounds < 0)) throw new Error('rounds must be a non-negative integer, given with adoption.');
   const findings = {} as Findings;
   for (const key of ['high', 'medium', 'low'] as const) {
     const count = input.findings?.[key] === undefined ? 0 : input.findings[key];
     if (!Number.isInteger(count) || count < 0) throw new Error(`findings.${key} must be a non-negative integer.`);
     findings[key] = count;
+  }
+  let declined: Findings | undefined;
+  if (input.declined !== undefined) {
+    declined = {} as Findings;
+    for (const key of ['high', 'medium', 'low'] as const) {
+      const count = input.declined?.[key] ?? 0;
+      if (!Number.isInteger(count) || count < 0) throw new Error(`declined.${key} must be a non-negative integer.`);
+      declined[key] = count;
+    }
   }
   const text = cleanText(input.text, 'text', 300, true);
   const at = input.at ?? Date.now();
@@ -149,10 +179,14 @@ export function addEvidence(home: string, input: Omit<Evidence, 'id' | 'at'> & {
   let id: string;
   const ids = new Set(Object.values(file.models).flatMap((m) => m.evidence.map((e) => e.id)));
   do { id = `ev-${randomBytes(3).toString('hex')}`; } while (ids.has(id));
-  const evidence: Evidence = { ...input, model, findings, text, id, at };
-  // Noting a job again (a retried call, a resumed session, a model the session reported later) corrects its line
-  // rather than counting the job twice, under whichever model it was first noted.
-  if (input.job) for (const other of Object.values(file.models)) other.evidence = other.evidence.filter((e) => !(e.job === input.job && e.role === input.role));
+  const evidence: Evidence = { ...input, model, findings, ...(declined ? { declined } : {}), text, id, at };
+  // Noting a job again (a retried call, a resumed session, a model the session reported later) replaces its line
+  // rather than counting the job twice; the line moves to the model named now, and a model it leaves empty goes.
+  if (input.job) for (const other of Object.values(file.models)) {
+    const before = other.evidence.length;
+    other.evidence = other.evidence.filter((e) => !(e.job === input.job && e.role === input.role));
+    if (before && !other.evidence.length && other !== existing) delete file.models[other.model];
+  }
   note.evidence.push(evidence);
   Object.defineProperty(file.models, model, { value: note, enumerable: true, configurable: true, writable: true });
   save(home, file);
@@ -169,72 +203,94 @@ export function setSummary(home: string, model: string, summary: string, at = Da
   return scoreAll(file).find((s) => s.model === model)!;
 }
 
-const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
-const penalty = (e: Evidence) => PENALTY.high * e.findings.high + PENALTY.medium * e.findings.medium + PENALTY.low * e.findings.low;
+const load = (f: Findings) => LOAD.high * f.high + LOAD.medium * f.medium + LOAD.low * f.low;
+const weight = (e: Evidence) => (e.reviewer === e.agent ? SELF_REVIEW : 1);
+type Scope = 'build' | 'fix';
+/** A role's evidence as a ratio: build is finding load over exposure, fix is quality over lines. */
+function sums(lines: Evidence[], scope: Scope): { num: number; den: number } {
+  let num = 0, den = 0;
+  for (const e of lines) {
+    const w = weight(e);
+    if (scope === 'build') { num += w * load(e.findings); den += w * EXPOSURE[e.size]; }
+    else { num += w * FIX_QUALITY[e.outcome!] * Math.exp(-load(e.findings)); den += w; }
+  }
+  return { num, den };
+}
+const shrink = (s: { num: number; den: number }, prior: number) => (s.num + PRIOR_WEIGHT * prior) / (s.den + PRIOR_WEIGHT);
 
+/**
+ * Scores each model per role. Build: the rate of accepted finding load per exposure unit, drawn toward a start, shown
+ * as 10·exp(−rate), so more findings always cost more and nothing is clamped. Fix: mean quality, drawn the same way.
+ * The start is the mean of the other models' own estimates (each counted once, so a busy model cannot set everyone's
+ * start) and the reference, which counts as one more model. Reviewers are not calibrated: the data cannot tell a harsh
+ * reviewer from one that was given worse work. `score` is the build score; fix is shown beside it, never pooled.
+ */
 export function scoreAll(file: NotesFile): ModelScore[] {
-  const builds = Object.values(file.models).flatMap((m) => m.evidence.filter((e) => e.role === 'build'));
-  const globalMean = builds.length ? builds.reduce((sum, e) => sum + penalty(e), 0) / builds.length : 0;
-  const calibration = new Map<Holder, number>();
-  for (const reviewer of ['codex', 'antigravity', 'claude'] as const) {
-    const lines = builds.filter((e) => e.reviewer === reviewer);
-    const mean = lines.length ? lines.reduce((sum, e) => sum + penalty(e), 0) / lines.length : 0;
-    calibration.set(reviewer, lines.length < CALIBRATE_AFTER ? 1 : mean === 0 ? (globalMean > 0 ? 1.25 : 1) : clamp(globalMean / mean, 0.75, 1.25));
+  const models = Object.values(file.models);
+  const roleLines = (m: ModelNote, scope: Scope) => m.evidence.filter((e) => e.role === scope);
+  const own = new Map<Scope, Map<string, { num: number; den: number }>>();
+  for (const scope of ['build', 'fix'] as const) {
+    own.set(scope, new Map(models.filter((m) => roleLines(m, scope).length).map((m) => [m.model, sums(roleLines(m, scope), scope)])));
   }
-  /** Weighted quality and total weight of some lines. */
-  function sums(lines: Evidence[]): { weighted: number; weights: number } {
-    let weighted = 0, weights = 0;
-    for (const e of lines) {
-      const d = TIER_FACTOR[e.tier ?? 'standard'] * SIZE_FACTOR[e.size];
-      const q = e.role === 'build' ? clamp(1 - penalty(e) * calibration.get(e.reviewer)! / d, 0, 1) : FIX_QUALITY[e.outcome!];
-      const w = d * (e.reviewer === e.agent ? 0.5 : 1);
-      weighted += w * q;
-      weights += w;
-    }
-    return { weighted, weights };
+  /** A model's estimate for a role, unrounded, or null with no lines. */
+  function estimate(model: string, scope: Scope): number | null {
+    const mine = own.get(scope)!.get(model);
+    if (!mine) return null;
+    const others = [...own.get(scope)!].filter(([name]) => name !== model).map(([, s]) => shrink(s, REFERENCE[scope]));
+    const start = (others.reduce((sum, v) => sum + v, 0) + REFERENCE[scope]) / (others.length + 1);
+    return shrink(mine, start);
   }
-  const all = Object.values(file.models).flatMap((m) => m.evidence);
-  const totals = { all: sums(all), build: sums(all.filter((e) => e.role === 'build')), fix: sums(all.filter((e) => e.role === 'fix')) };
-  /**
-   * One set of a model's lines, drawn toward the same set's mean over the other models (itself left out, so it cannot set
-   * its own start). That mean is itself drawn toward 0.7, so one line from another model cannot set every start.
-   */
-  function score(lines: Evidence[], scope: keyof typeof totals): number | null {
-    if (!lines.length) return null;
-    const own = sums(lines);
-    const others = { weighted: totals[scope].weighted - own.weighted, weights: totals[scope].weights - own.weights };
-    // A small epsilon, not zero: float subtraction leaves crumbs when no other model has lines.
-    const prior = others.weights > 1e-9 ? (others.weighted + K * P) / (others.weights + K) : P;
-    return Math.round((own.weighted + K * prior) / (own.weights + K) * 100) / 10;
-  }
-  const ranked = (s: ModelScore) => (s.score === null ? 2 : s.status === 'too few samples' ? 1 : 0);
-  return Object.values(file.models).map((m): ModelScore => {
-    const build = m.evidence.filter((e) => e.role === 'build');
-    const fix = m.evidence.filter((e) => e.role === 'fix');
+  const tenth = (n: number) => Math.round(n * 10) / 10;
+  const rates = new Map<string, number | null>(models.map((m) => [m.model, estimate(m.model, 'build')]));
+  const group = (s: ModelScore) => (s.score !== null ? (s.status === 'too few samples' ? 1 : 0) : s.samples ? 2 : 3);
+  const byRate = (a: ModelScore, b: ModelScore) => (rates.get(a.model) ?? 0) - (rates.get(b.model) ?? 0);
+  return models.map((m): ModelScore => {
+    const build = roleLines(m, 'build');
+    const fix = roleLines(m, 'fix');
+    const rate = rates.get(m.model)!;
+    const quality = estimate(m.model, 'fix');
+    // Status counts build reviews, a self-review as half, since only build sets the score.
+    const reviews = build.reduce((sum, e) => sum + weight(e), 0);
     const samples = m.evidence.length;
+    const buildScore = rate === null ? null : tenth(10 * Math.exp(-rate));
+    const adopted = build.filter((e) => e.adoption);
+    const taken = (a: Adoption) => adopted.filter((e) => e.adoption === a).length;
     return {
-      model: m.model, agent: m.agent, score: score(m.evidence, 'all'), build: score(build, 'build'), fix: score(fix, 'fix'),
+      model: m.model, agent: m.agent, score: buildScore, build: buildScore, fix: quality === null ? null : tenth(10 * quality),
       samples, buildSamples: build.length, fixSamples: fix.length,
-      status: samples < 3 ? 'too few samples' : samples < 8 ? 'on trial' : 'settled', summary: m.summary,
+      status: reviews < 3 ? 'too few samples' : reviews < 8 ? 'on trial' : 'settled', summary: m.summary,
       lastAt: samples ? m.evidence.reduce((latest, e) => Math.max(latest, e.at), -Infinity) : null,
       consolidate: m.evidence.filter((e) => m.summaryAt === null || e.at > m.summaryAt).length >= CONSOLIDATE_AFTER,
+      adoption: adopted.length ? {
+        judged: adopted.length, asIs: taken('as-is'), afterReply: taken('after-reply'), partly: taken('partly'), rejected: taken('rejected'),
+        rounds: adopted.reduce((sum, e) => sum + (e.rounds ?? 0), 0),
+      } : null,
     };
-  // Models with too few reviews come after every ranked one, whatever their score; models with none come last.
-  }).sort((a, b) => ranked(a) - ranked(b) || (b.score ?? 0) - (a.score ?? 0) || a.model.localeCompare(b.model));
+  // Models with too few reviews come after every ranked one, whatever their score; then models with fixes only, and
+  // last models with no lines. Within a group the unrounded rate decides, so a tie on the shown score is not left to the name.
+  }).sort((a, b) => group(a) - group(b) || byRate(a, b) || a.model.localeCompare(b.model));
 }
 
 export function renderNotes(scores: ModelScore[], file: NotesFile, options: { models?: string[]; agents?: Holder[]; evidence?: number } = {}): string {
   const number = (n: number | null) => n === null ? '—' : n.toFixed(1);
   return scores.filter((s) => (!options.models || options.models.includes(s.model)) && (!options.agents || options.agents.includes(s.agent))).map((s) => {
-    const lines = [`### ${s.model} (${s.agent}) — ${number(s.score)}/10, ${s.status}, ${s.samples} samples`];
+    const lines = [`### ${s.model} (${s.agent}) — ${number(s.score)}/10, ${s.status}, ${s.buildSamples} build(s), ${s.fixSamples} fix(es)`];
     if (s.build !== null || s.fix !== null) lines.push(`build ${number(s.build)} · fix ${number(s.fix)}`);
+    // Scores are finding rates on the work each model was given; the tiers say what that work was.
+    const tiers = new Map<string, number>();
+    for (const e of file.models[s.model].evidence) if (e.role === 'build' && e.tier) tiers.set(e.tier, (tiers.get(e.tier) ?? 0) + 1);
+    if (tiers.size) lines.push(`builds by tier: ${TIERS.filter((t) => tiers.has(t)).map((t) => `${t} ${tiers.get(t)}`).join(', ')}`);
+    const a = s.adoption;
+    if (a) lines.push(`adopted: ${a.asIs} as is, ${a.afterReply} after a reply, ${a.partly} in part, ${a.rejected} rejected, of ${a.judged}; ${a.rounds} follow-up round(s)`);
     lines.push(s.summary || 'No summary yet.');
     const count = Math.max(0, Math.floor(options.evidence ?? 5));
     const evidence = [...file.models[s.model].evidence].sort((a, b) => b.at - a.at).slice(0, count);
     for (const e of evidence) {
       const date = new Date(e.at);
       const day = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-      lines.push(`- ${day} ${e.job || '—'} (${e.reviewer} reviewed, ${e.role}, ${e.tier ?? 'standard'}/${e.size}): ${e.text}`);
+      const declined = e.declined && load(e.declined) ? `, declined ${(['high', 'medium', 'low'] as const).filter((k) => e.declined![k]).map((k) => `${e.declined![k]} ${k}`).join(' ')}` : '';
+      const adoption = e.adoption ? `, ${e.adoption}${e.rounds ? ` after ${e.rounds} round(s)` : ''}` : '';
+      lines.push(`- ${day} ${e.job || '—'} (${e.reviewer} reviewed, ${e.role}, ${e.tier ? `${e.tier}/` : ''}${e.size}${declined}${adoption}): ${e.text}`);
     }
     if (s.consolidate) lines.push('Summary is due: rewrite it from the evidence.');
     return lines.join('\n\n');

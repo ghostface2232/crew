@@ -177,17 +177,27 @@ struct CrewSettingsView: View {
     }
     @ViewBuilder private var modelScores: some View {
         let scores = store.state.modelScores ?? []
-        let scored = scores.filter { $0.score != nil }
-        if scored.count >= 2 {
-            Section { ModelPodium(top: Array(scored.prefix(3))) }
+        // Only models with enough reviews are ranked, so a few clean reviews never put one ahead of a model with a record.
+        let ranked = scores.filter { $0.score != nil && $0.status != "too few samples" }
+        let early = scores.filter { score in !ranked.contains { $0.id == score.id } }
+        if ranked.count >= 2 {
+            Section { ModelPodium(top: Array(ranked.prefix(3))) }
         }
-        Section {
-            if scores.isEmpty {
-                Text("No reviews noted yet.").foregroundStyle(.secondary)
+        if scores.isEmpty {
+            Section { Text("No reviews noted yet.").foregroundStyle(.secondary) }
+        }
+        if !ranked.isEmpty {
+            Section {
+                ForEach(Array(ranked.enumerated()), id: \.element.id) { index, score in ModelScoreRow(rank: index + 1, score: score) }
             }
-            ForEach(Array(scores.enumerated()), id: \.element.id) { index, score in ModelScoreRow(rank: index + 1, score: score) }
-        } footer: {
-            Text("After each review and its fix, the lead notes the findings it accepted and how the fix went. A score out of 10 weighs those notes across every job, corrected for each job's tier and size and for how harsh each reviewer tends to be. A review by the model's own agent counts half, and a model with few reviews stays close to 7.0. The lead reads these notes when it picks a tier or holder; your roles and presets still decide.")
+        }
+        if !early.isEmpty {
+            Section("Too early to rank") {
+                ForEach(early) { ModelScoreRow(rank: nil, score: $0) }
+            }
+        }
+        Section {} footer: {
+            Text("After each review and its fix, the lead notes the findings it accepted and how the fix went. A score out of 10 weighs those notes across every job, corrected for each job's tier and size and for how harsh each reviewer tends to be. A review by the model's own agent counts half. A model starts where the others stand, and is ranked once it has three reviews. The lead reads these notes when it picks a tier or holder; your roles and presets still decide.")
                 .settingsFootnote()
         }
     }

@@ -814,8 +814,10 @@ test('model scores list each model with its score, counts and summary, and have 
   await expect(sol.getByText('Strong')).toBeVisible();
   await expect(sol.getByText('Settled · 12 reviews')).toBeVisible();
   await expect(sol.getByText('Solid logic; misses time zone edge cases.')).toBeVisible();
-  // A model short of reviews gets no verdict word.
-  const opus = standings.getByRole('article').filter({ hasText: 'claude-opus-5-5' });
+  // A model short of reviews is not ranked and gets no verdict word.
+  await expect(standings.getByRole('article')).toHaveCount(3);
+  const opus = page.getByRole('region', { name: 'Too early to rank' }).getByRole('article').filter({ hasText: 'claude-opus-5-5' });
+  await expect(opus.getByLabel(/^Rank/)).toHaveCount(0);
   await expect(opus.getByText('Too few reviews · 2 reviews')).toBeVisible();
   await expect(opus.getByText(/Strong|Solid|Mixed|Shaky|Outstanding/)).toHaveCount(0);
   await expect(page.getByRole('button', { name: /^Save/ })).toHaveCount(0);

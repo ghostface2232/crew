@@ -68,6 +68,8 @@ const MAX_PROMPT = 2000;
 /** Agent calls whose sub-agent has not started yet, per session; a denied call never starts one. */
 const KEEP_PENDING = 20;
 const WORKFLOW_AGENT = 'workflow-subagent';
+/** The desktop app's end-of-turn box; its ask is a question to the user. */
+const WRAP_UP = 'mcp__ccd_turn__wrap_up';
 /** A run with no agent running is kept this long, through the gap between its phases, then dropped. */
 const KEEP_WORKFLOW_MS = 10 * 60_000;
 /** A sub-agent with no event for this long is dropped: its SubagentStop was missed, say across a daemon restart. */
@@ -103,6 +105,11 @@ export class ClaudeSessions {
   private journals = new Map<string, { entries: Map<string, JournalEntry>; readAt: number }>();
   /** Sessions whose main loop has ended its turn; they stay working while sub-agents run. */
   private resting = new Set<string>();
+  /**
+   * The question a session's turn ended on, from the desktop app's wrap-up box. No hook reports it as a prompt,
+   * and Stop would clear it, so it is kept to show the session as waiting until the user answers.
+   */
+  private asked = new Map<string, string>();
   private hooks: ClaudeHooks;
   private stallMs: number;
 
@@ -143,6 +150,7 @@ export class ClaudeSessions {
         break;
       case 'UserPromptSubmit':
         this.resting.delete(id);
+        this.asked.delete(id);
         s.state = 'working';
         s.waitingFor = null;
         s.phase = 'reading the prompt';
@@ -171,6 +179,7 @@ export class ClaudeSessions {
       case 'PostToolUseFailure':
         s.state = 'working';
         s.inTool = false;
+        if (p.tool_name === WRAP_UP && typeof p.tool_input?.ask === 'string' && p.tool_input.ask.trim()) this.asked.set(id, oneLine(p.tool_input.ask));
         // A failed Agent call starts no sub-agent, so its title must not go to the next one.
         if (p.hook_event_name === 'PostToolUseFailure' && typeof p.tool_use_id === 'string') {
           this.pending.set(id, (this.pending.get(id) ?? []).filter((c) => c.call !== p.tool_use_id));
@@ -183,6 +192,7 @@ export class ClaudeSessions {
         const type = p.notification_type;
         if (type === 'idle_prompt') {
           this.resting.add(id);
+          if (this.asked.has(id)) break;
           s.state = s.agents.length ? 'working' : 'idle';
         } else if (type === 'permission_prompt' || type === 'agent_needs_input' || type === 'elicitation_dialog') {
           const message = oneLine(p.message ?? 'needs input');
@@ -201,6 +211,13 @@ export class ClaudeSessions {
         s.waitingFor = null;
         s.phase = 'finished the turn';
         this.hooks.onEvent(s, 'done', oneLine(p.last_assistant_message ?? 'turn finished'));
+        if (this.asked.has(id)) {
+          s.waitingId = randomUUID();
+          this.waitingFrom.set(id, '');
+          s.state = 'waiting';
+          s.waitingFor = this.asked.get(id)!;
+          this.hooks.onEvent(s, 'waiting', s.waitingFor);
+        }
         break;
       case 'StopFailure': {
         const limit = p.error === 'rate_limit' || p.error === 'billing_error';
@@ -232,6 +249,7 @@ export class ClaudeSessions {
     this.prompts.delete(id);
     this.pending.delete(id);
     this.resting.delete(id);
+    this.asked.delete(id);
     this.waitingFrom.delete(id);
     this.journals.delete(id);
   }

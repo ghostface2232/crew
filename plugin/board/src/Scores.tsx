@@ -74,36 +74,54 @@ function Podium({ top }: { top: ModelScore[] }) {
   );
 }
 
-/** Every model ranked, with its ring, its build and fix bars, and the lead's summary. */
+/** One model's standing: its ring, its build and fix bars, and the lead's summary. A model not yet ranked shows no rank. */
+function Row({ score, rank, index }: { score: ModelScore; rank?: number; index: number }) {
+  const word = band(score);
+  return (
+    <article className={styles.row} data-status={score.status} style={{ '--i': index } as CSSProperties}>
+      <span className={styles.rank} aria-label={rank ? `Rank ${rank}` : undefined}>{rank ?? ''}</span>
+      <span className={styles.rowAvatar}><AgentMark agent={score.agent} size={18} /></span>
+      <div className={styles.rowText}>
+        <div className={styles.rowHead}>
+          <span className={styles.rowName}>{score.model}<span className={styles.hidden}>, {NAMES[score.agent]}</span></span>
+          {word && <span className={styles.word} style={{ '--tone': word.tone } as CSSProperties}>{word.word}</span>}
+        </div>
+        <span className={styles.meta}>{statusText(score)} · {score.samples} {score.samples === 1 ? 'review' : 'reviews'}</span>
+        <div className={styles.bars}>
+          <Bar label="Build" value={score.build} />
+          <Bar label="Fix" value={score.fix} />
+        </div>
+        {score.summary && <p className={styles.summary}>{score.summary}</p>}
+      </div>
+      <Ring score={score} />
+    </article>
+  );
+}
+
+/**
+ * Models with enough reviews, ranked, the best three on a podium; then the ones too early to rank, so a few clean
+ * reviews never put a model ahead of one with a record.
+ */
 export function Scores({ scores }: { scores: ModelScore[] }) {
-  const scored = scores.filter((score) => score.score !== null);
+  const ranked = scores.filter((score) => score.score !== null && score.status !== 'too few samples');
+  const early = scores.filter((score) => !ranked.includes(score));
   return (
     <>
-      {scored.length >= 2 && <Podium top={scored.slice(0, 3)} />}
-      <section className={styles.standings} aria-label="Standings">
-        {scores.length ? scores.map((score, index) => {
-          const word = band(score);
-          return (
-            <article className={styles.row} key={score.model} data-status={score.status} style={{ '--i': index } as CSSProperties}>
-              <span className={styles.rank} aria-label={`Rank ${index + 1}`}>{index + 1}</span>
-              <span className={styles.rowAvatar}><AgentMark agent={score.agent} size={18} /></span>
-              <div className={styles.rowText}>
-                <div className={styles.rowHead}>
-                  <span className={styles.rowName}>{score.model}<span className={styles.hidden}>, {NAMES[score.agent]}</span></span>
-                  {word && <span className={styles.word} style={{ '--tone': word.tone } as CSSProperties}>{word.word}</span>}
-                </div>
-                <span className={styles.meta}>{statusText(score)} · {score.samples} {score.samples === 1 ? 'review' : 'reviews'}</span>
-                <div className={styles.bars}>
-                  <Bar label="Build" value={score.build} />
-                  <Bar label="Fix" value={score.fix} />
-                </div>
-                {score.summary && <p className={styles.summary}>{score.summary}</p>}
-              </div>
-              <Ring score={score} />
-            </article>
-          );
-        }) : <p className={styles.empty}>No reviews noted yet.</p>}
-      </section>
+      {ranked.length >= 2 && <Podium top={ranked.slice(0, 3)} />}
+      {!scores.length && <section className={styles.standings}><p className={styles.empty}>No reviews noted yet.</p></section>}
+      {ranked.length > 0 && (
+        <section className={styles.standings} aria-label="Standings">
+          {ranked.map((score, index) => <Row key={score.model} score={score} rank={index + 1} index={index} />)}
+        </section>
+      )}
+      {early.length > 0 && (
+        <section className={styles.early} aria-labelledby="scores-early">
+          <h3 className={styles.earlyTitle} id="scores-early">Too early to rank</h3>
+          <div className={styles.standings}>
+            {early.map((score, index) => <Row key={score.model} score={score} index={ranked.length + index} />)}
+          </div>
+        </section>
+      )}
     </>
   );
 }

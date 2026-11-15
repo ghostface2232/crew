@@ -13,8 +13,9 @@ const SIZE_FACTOR = { small: 0.8, medium: 1, large: 1.3 };
 const PENALTY = { high: 0.35, medium: 0.15, low: 0.05 };
 // Fix quality records whether the underlying cause was resolved.
 const FIX_QUALITY = { 'root-cause': 1, patch: 0.55, 'another-review': 0.25 };
-// Two prior samples temper early scores toward 70 percent.
-const K = 2, P = 0.7;
+// A model starts where the other models stand, as if it had four average jobs behind it, so a few clean
+// reviews cannot lift it above a model with a long record. With no other models to compare, it starts at 70 percent.
+const K = 4, P = 0.7;
 // A reviewer needs five builds before calibration applies.
 const CALIBRATE_AFTER = 5;
 // Ten new evidence lines call for a new prose summary.
@@ -95,9 +96,20 @@ function wellFormed(models: Record<string, any>): Record<string, ModelNote> {
   return kept;
 }
 
+const lines = (models: Record<string, any>) => Object.values(models).reduce((sum, note) => sum + 1 + (Array.isArray(note?.evidence) ? note.evidence.length : 0), 0);
+
+/** Loading skips what it cannot read, so a save would erase it; keep the file as it was first. */
+function keepDropped(target: string): void {
+  try {
+    const models = JSON.parse(fs.readFileSync(target, 'utf8')).models;
+    if (lines(wellFormed(models)) < lines(models)) fs.copyFileSync(target, `${target}.dropped-${Date.now()}`);
+  } catch { /* Nothing to keep: no file yet, or one loadNotes already refuses. */ }
+}
+
 function save(home: string, file: NotesFile): void {
   fs.mkdirSync(home, { recursive: true });
   const target = notesFile(home);
+  keepDropped(target);
   fs.writeFileSync(`${target}.tmp`, JSON.stringify(file));
   fs.renameSync(`${target}.tmp`, target);
 }
@@ -167,8 +179,8 @@ export function scoreAll(file: NotesFile): ModelScore[] {
     const mean = lines.length ? lines.reduce((sum, e) => sum + penalty(e), 0) / lines.length : 0;
     calibration.set(reviewer, lines.length < CALIBRATE_AFTER ? 1 : mean === 0 ? (globalMean > 0 ? 1.25 : 1) : clamp(globalMean / mean, 0.75, 1.25));
   }
-  function score(lines: Evidence[]): number | null {
-    if (!lines.length) return null;
+  /** Weighted quality and total weight of some lines. */
+  function sums(lines: Evidence[]): { weighted: number; weights: number } {
     let weighted = 0, weights = 0;
     for (const e of lines) {
       const d = TIER_FACTOR[e.tier ?? 'standard'] * SIZE_FACTOR[e.size];
@@ -177,20 +189,33 @@ export function scoreAll(file: NotesFile): ModelScore[] {
       weighted += w * q;
       weights += w;
     }
-    return Math.round((weighted + K * P) / (weights + K) * 100) / 10;
+    return { weighted, weights };
   }
+  const all = Object.values(file.models).flatMap((m) => m.evidence);
+  const totals = { all: sums(all), build: sums(all.filter((e) => e.role === 'build')), fix: sums(all.filter((e) => e.role === 'fix')) };
+  /** One set of a model's lines, drawn toward the same set's mean over the other models (itself left out, so it cannot set its own start). */
+  function score(lines: Evidence[], scope: keyof typeof totals): number | null {
+    if (!lines.length) return null;
+    const own = sums(lines);
+    const others = { weighted: totals[scope].weighted - own.weighted, weights: totals[scope].weights - own.weights };
+    // A small epsilon, not zero: float subtraction leaves crumbs when no other model has lines.
+    const prior = others.weights > 1e-9 ? (others.weighted + K * P) / (others.weights + K) : P;
+    return Math.round((own.weighted + K * prior) / (own.weights + K) * 100) / 10;
+  }
+  const ranked = (s: ModelScore) => (s.score === null ? 2 : s.status === 'too few samples' ? 1 : 0);
   return Object.values(file.models).map((m): ModelScore => {
     const build = m.evidence.filter((e) => e.role === 'build');
     const fix = m.evidence.filter((e) => e.role === 'fix');
     const samples = m.evidence.length;
     return {
-      model: m.model, agent: m.agent, score: score(m.evidence), build: score(build), fix: score(fix),
+      model: m.model, agent: m.agent, score: score(m.evidence, 'all'), build: score(build, 'build'), fix: score(fix, 'fix'),
       samples, buildSamples: build.length, fixSamples: fix.length,
       status: samples < 3 ? 'too few samples' : samples < 8 ? 'on trial' : 'settled', summary: m.summary,
       lastAt: samples ? m.evidence.reduce((latest, e) => Math.max(latest, e.at), -Infinity) : null,
       consolidate: m.evidence.filter((e) => m.summaryAt === null || e.at > m.summaryAt).length >= CONSOLIDATE_AFTER,
     };
-  }).sort((a, b) => (b.score ?? -Infinity) - (a.score ?? -Infinity) || a.model.localeCompare(b.model));
+  // Models with too few reviews come after every ranked one, whatever their score; models with none come last.
+  }).sort((a, b) => ranked(a) - ranked(b) || (b.score ?? 0) - (a.score ?? 0) || a.model.localeCompare(b.model));
 }
 
 export function renderNotes(scores: ModelScore[], file: NotesFile, options: { models?: string[]; agents?: Holder[]; evidence?: number } = {}): string {

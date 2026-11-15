@@ -126,12 +126,12 @@ private struct ScoreBar: View {
 
 /// One model's standing: rank, mark, verdict word, counts, build and fix bars, the lead's summary, and the ring.
 struct ModelScoreRow: View {
-    let rank: Int
+    let rank: Int?
     let score: ModelScore
     var settled = false
     var body: some View {
         HStack(alignment: .center, spacing: Space.l) {
-            Text("\(rank)").font(.system(size: 15, weight: .semibold, design: .rounded)).monospacedDigit().foregroundStyle(.secondary).frame(width: 18)
+            Text(rank.map(String.init) ?? "").font(.system(size: 15, weight: .semibold, design: .rounded)).monospacedDigit().foregroundStyle(.secondary).frame(width: 18)
             Circle().fill(.quaternary).frame(width: 34, height: 34).overlay { AgentMark(agent: score.agent, size: 18) }
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: Space.s) {
@@ -155,7 +155,7 @@ struct ModelScoreRow: View {
         }
         .padding(.vertical, Space.s)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Rank \(rank): \(score.model), \(agentName(score.agent)), \(score.shown) out of 10\(score.band.map { ", \($0.word)" } ?? "")")
+        .accessibilityLabel("\(rank.map { "Rank \($0): " } ?? "")\(score.model), \(agentName(score.agent)), \(score.shown) out of 10\(score.band.map { ", \($0.word)" } ?? "")")
         .accessibilityValue(["\(score.statusText), \(score.samples) reviews", "build \(score.build.map { ModelScore.shown($0) } ?? "none")", "fix \(score.fix.map { ModelScore.shown($0) } ?? "none")", score.summary].filter { !$0.isEmpty }.joined(separator: ". "))
     }
 }

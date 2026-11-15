@@ -127,6 +127,8 @@
 .bar[data-empty] .barValue { color: var(--tertiary); }
 .summary { margin-top: 4px; color: var(--secondary); font-size: 12px; line-height: 1.4; white-space: pre-line; overflow-wrap: anywhere; }
 .empty { padding: 14px 16px; color: var(--secondary); }
+.early { display: grid; gap: 8px; margin-top: 8px; }
+.earlyTitle { padding: 0 4px; color: var(--secondary); font-size: 12px; font-weight: 600; }
 
 .ring { position: relative; display: grid; flex: none; place-items: center; width: var(--size); height: var(--size); }
 .ring svg { position: absolute; inset: 0; rotate: -90deg; }

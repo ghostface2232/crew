@@ -500,8 +500,8 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
                   <p className={styles.footnote}>
                     After each review and its fix, the lead notes the findings it accepted and how the fix went. A score out of 10 weighs
                     those notes across every job, corrected for each job's tier and size and for how harsh each reviewer tends to be. A
-                    review by the model's own agent counts half, and a model with few reviews stays close to 7.0. The lead reads these notes
-                    when it picks a tier or holder; your roles and presets still decide.
+                    review by the model's own agent counts half. A model starts where the others stand, and is ranked once it has three
+                    reviews. The lead reads these notes when it picks a tier or holder; your roles and presets still decide.
                   </p>
                 </section>
               )}

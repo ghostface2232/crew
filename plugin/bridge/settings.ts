@@ -43,13 +43,20 @@ export function saveRoles(home: string, roles: unknown): Pick<Config, 'roles' | 
   const cleaned = roles && typeof roles === 'object' && !Array.isArray(roles)
     ? Object.fromEntries(Object.entries(roles).map(([role, entry]) => [
         role,
-        entry && typeof entry === 'object' && !Array.isArray(entry) ? Object.fromEntries(Object.entries(entry).filter(([, value]) => value !== '')) : entry,
+        entry && typeof entry === 'object' && !Array.isArray(entry) ? blankless(entry) : entry,
       ]).filter(([, entry]) => !(entry && typeof entry === 'object' && !Array.isArray(entry) && !Object.keys(entry).length)))
     : roles;
   const next = { ...current, roles: cleaned };
   const resolved = resolveConfig(next as never);
   writeAtomic(file, `${JSON.stringify(next, null, 2)}\n`);
   return { roles: resolved.roles, roleSettings: resolved.roleSettings };
+}
+
+/** An entry without blank fields, or agent settings left empty by them: a blank field is one never set. */
+function blankless(entry: object): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(entry)
+    .map(([key, value]) => [key, value && typeof value === 'object' && !Array.isArray(value) ? blankless(value) : value] as const)
+    .filter(([, value]) => value !== '' && !(value && typeof value === 'object' && !Array.isArray(value) && !Object.keys(value).length)));
 }
 
 /** Sets or clears the preset in config.json, keeping every other setting. Refused without writing if it is not a preset. */

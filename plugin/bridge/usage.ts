@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { holdersOf, LEAD, WORKERS } from './config.ts';
+import { LEAD, WORKERS } from './config.ts';
 import type { Config, Role } from './config.ts';
 import type { Agent } from './jobs.ts';
 
@@ -371,7 +371,7 @@ export function route(kind: RouteKind, usage: Usage, roles: Config['roles'], dis
 
   if (kind === 'lead') {
     // The engineer is the first worker holding implementation: Claude may hold it too, and cannot hand work to itself.
-    const engineer = holdersOf(roles.delegate).find((agent) => agent !== LEAD && !disabled.includes(agent));
+    const engineer = roles.delegate.agents.find((agent) => agent !== LEAD && !disabled.includes(agent));
     if (status(LEAD) === 'exhausted') {
       // Handing the session over is not undone lightly: only to an engineer measured to have room.
       const takeover = engineer === 'codex' && status('codex') === 'ok';
@@ -384,7 +384,7 @@ export function route(kind: RouteKind, usage: Usage, roles: Config['roles'], dis
     return plain(LEAD, status(LEAD) === 'ok' ? `${name(LEAD)} has room; lead as usual.` : `${name(LEAD)}'s usage is not known (${of(LEAD)?.reason ?? 'no reading.'}); lead as usual.`);
   }
 
-  const holders = holdersOf(roles[kind]);
+  const holders = roles[kind].agents;
   const listed = holders.map((agent) => ({ agent, status: status(agent) }));
   // A holder that cannot do this kind of work is never suggested: a disabled agent, or one that cannot run the app for verify.
   const able = (agent: Agent) => agent === LEAD || (!disabled.includes(agent) && (kind !== 'verify' || WORKERS[agent].reviewerRunsGit));
@@ -393,7 +393,7 @@ export function route(kind: RouteKind, usage: Usage, roles: Config['roles'], dis
     const who = holders.map(name).join(' and ');
     return { kind, assignee: LEAD, reason: `${who} cannot take ${kind} work now (disabled, or unable to run the app). Do it yourself, and say that the cross-check was skipped.`, fallback: [], degraded: true, deferUntil: null, holders: listed };
   }
-  // The user's order decides; a holder short of usage gives way to the next one with room.
+  // Workers come before the lead; a holder short of usage gives way to the next one with room.
   const holder = usable.find((agent) => !short(agent)) ?? usable[0];
   const moved = holder === holders[0] ? '' : able(holders[0]) ? `${why(holders[0])} ` : `${name(holders[0])} cannot take ${kind} work now. `;
   const decision = decide(holder);
@@ -410,7 +410,7 @@ export function route(kind: RouteKind, usage: Usage, roles: Config['roles'], dis
       const yourself = kind === 'release' ? 'Prepare the release yourself, and publish or deploy nothing.' : 'Do this piece yourself, in a subagent if it is large.';
       if (status(holder) === 'exhausted') return plain(LEAD, `${why(holder)} ${yourself}`);
       if (status(holder) === 'tight' && !short(LEAD)) {
-        return plain(LEAD, `${why(holder)} Take this work yourself or in subagents${holdersOf(roles.review).includes(holder) ? `, and keep what ${name(holder)} has left for the cross-review` : ''}.`, [holder]);
+        return plain(LEAD, `${why(holder)} Take this work yourself or in subagents${roles.review.agents.includes(holder) ? `, and keep what ${name(holder)} has left for the cross-review` : ''}.`, [holder]);
       }
       return plain(holder, short(LEAD) && !short(holder) ? `${why(LEAD)} Hand ${name(holder)} as much of this work as separates cleanly.` : keeps(holder), [LEAD]);
     }

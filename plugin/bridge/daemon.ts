@@ -145,7 +145,7 @@ function loadMissions(): Missions {
 const missions = loadMissions();
 
 const usage = new UsageMonitor(agentGaugeDir(), (latest) => broadcast('usage', latest));
-const usageModels = (live: Config) => ({ antigravity: live.roles.polish.agent === 'antigravity' ? live.roles.polish.model ?? live.antigravity.model : live.antigravity.model });
+const usageModels = (live: Config) => ({ antigravity: live.roles.polish.antigravity?.model ?? live.antigravity.model });
 usage.setModels(usageModels(config));
 usage.start().catch((err) => log('usage monitor could not start:', err));
 codex.onLimits = (limits) => {

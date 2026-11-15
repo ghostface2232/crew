@@ -24,23 +24,23 @@ test('saving roles keeps every other setting, drops blank fields, and returns th
   const file = path.join(home, 'config.json');
   fs.writeFileSync(file, JSON.stringify({ notify: false, codex: { bin: '/opt/codex', model: 'm' }, roles: { review: { agent: 'antigravity' } } }));
 
-  const saved = saveRoles(home, { delegate: { agent: 'codex', model: '', effort: 'high' }, polish: { agent: 'codex', model: '', effort: '' }, refactor: { agent: '', model: '' } });
-  assert.deepEqual(saved.roleSettings, { delegate: { agent: 'codex', effort: 'high' }, polish: { agent: 'codex' } });
+  const saved = saveRoles(home, { delegate: { agents: ['codex'], codex: { model: '', effort: 'high' } }, polish: { agents: ['codex'], codex: { model: '', effort: '' } }, refactor: { codex: { model: '' } } });
+  const delegate = { agents: ['codex'], codex: { effort: 'high' } };
+  assert.deepEqual(saved.roleSettings, { delegate, polish: { agents: ['codex'] } });
   assert.deepEqual(saved.roles, {
-    delegate: { agent: 'codex', effort: 'high' }, refactor: { agent: 'codex', effort: 'high' }, release: { agent: 'codex', effort: 'high' },
-    debate: { agent: 'codex', effort: 'high' }, review: { agent: 'codex' }, verify: { agent: 'codex' }, polish: { agent: 'codex' },
+    delegate, refactor: delegate, release: delegate, debate: delegate, review: { agents: ['codex'] }, verify: { agents: ['codex'] }, polish: { agents: ['codex'] },
   });
   // The table is replaced as a whole: a role left out goes back to its default.
   assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), {
     notify: false,
     codex: { bin: '/opt/codex', model: 'm' },
-    roles: { delegate: { agent: 'codex', effort: 'high' }, polish: { agent: 'codex' } },
+    roles: { delegate, polish: { agents: ['codex'] } },
   });
 
   // Works with no config file yet.
   const fresh = tempDir();
-  saveRoles(fresh, { polish: { agent: 'codex' } });
-  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(fresh, 'config.json'), 'utf8')), { roles: { polish: { agent: 'codex' } } });
+  saveRoles(fresh, { polish: { agents: ['codex'] } });
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(fresh, 'config.json'), 'utf8')), { roles: { polish: { agents: ['codex'] } } });
 });
 
 test('an invalid role table or an unparsable config is refused without touching the file', () => {
@@ -138,7 +138,7 @@ test('no preset is set by default, and a setting on the role wins over the prese
   assert.equal(plain.preset, null);
   assert.deepEqual(effectiveRole(plain, 'delegate'), { agent: 'codex' });
 
-  const best = resolveConfig({ preset: 'best', roles: { review: { effort: 'low' }, delegate: { model: 'own' } } });
+  const best = resolveConfig({ preset: 'best', roles: { review: { codex: { effort: 'low' } }, delegate: { codex: { model: 'own' } } } });
   assert.deepEqual(effectiveRole(best, 'delegate'), { agent: 'codex', model: 'own', effort: 'high' });
   assert.deepEqual(effectiveRole(best, 'review'), { agent: 'codex', effort: 'low' });
   // Antigravity has no effort setting, and the built-in presets name no models.
@@ -152,23 +152,23 @@ test('no preset is set by default, and a setting on the role wins over the prese
   assert.deepEqual(tuned.presets.best, PRESETS.best);
 });
 
-test('a role without an agent follows its parent whole; one with an agent starts fresh', () => {
-  const config = resolveConfig({ roles: { delegate: { model: 'gpt-x', effort: 'high' }, refactor: { agent: 'antigravity' }, debate: { effort: 'medium' }, review: { agent: 'antigravity' } } });
-  // The parent's model is meant for its agent, so it never reaches a role given another agent.
-  assert.deepEqual(config.roles.refactor, { agent: 'antigravity' });
-  assert.deepEqual(config.roles.release, { agent: 'codex', model: 'gpt-x', effort: 'high' });
-  assert.deepEqual(config.roles.debate, { agent: 'codex', model: 'gpt-x', effort: 'medium' });
-  assert.deepEqual(config.roles.verify, { agent: 'antigravity' });
-  assert.deepEqual(config.roleSettings, { delegate: { model: 'gpt-x', effort: 'high' }, refactor: { agent: 'antigravity' }, debate: { effort: 'medium' }, review: { agent: 'antigravity' } });
-  assert.throws(() => resolveConfig({ roles: { deploy: { agent: 'codex' } } as never }), /roles\.deploy is not a role; use one of: delegate, refactor, release, debate, review, verify, polish/);
+test('a role without agents follows its parent; one with agents starts fresh', () => {
+  const config = resolveConfig({ roles: { delegate: { codex: { model: 'gpt-x', effort: 'high' } }, refactor: { agents: ['antigravity'] }, debate: { codex: { effort: 'medium' } }, review: { agents: ['antigravity'] } } });
+  // The parent's settings belong to its agents, so they never reach a role given other agents.
+  assert.deepEqual(config.roles.refactor, { agents: ['antigravity'] });
+  assert.deepEqual(config.roles.release, { agents: ['codex'], codex: { model: 'gpt-x', effort: 'high' } });
+  assert.deepEqual(config.roles.debate, { agents: ['codex'], codex: { model: 'gpt-x', effort: 'medium' } });
+  assert.deepEqual(config.roles.verify, { agents: ['antigravity'] });
+  assert.throws(() => resolveConfig({ roles: { deploy: { agents: ['codex'] } } as never }), /roles\.deploy is not a role; use one of: delegate, refactor, release, debate, review, verify, polish/);
   assert.throws(() => resolveConfig({ roles: { verify: { agent: 'cursor' } } as never }), /roles\.verify\.agent is "cursor"/);
-  // A model that follows its parent's agent could reach an agent that does not have it.
+  // Written before agents, a model that follows its parent's agent could reach an agent that does not have it.
   assert.throws(() => resolveConfig({ roles: { delegate: { agent: 'antigravity' }, refactor: { model: 'gpt-x' } } }), /roles\.refactor\.model needs roles\.refactor\.agent/);
-  assert.deepEqual(resolveConfig({ roles: { refactor: { agent: 'codex', model: 'gpt-x' } } }).roles.refactor, { agent: 'codex', model: 'gpt-x' });
+  // Following its parent, a role's settings apply only while that agent holds it.
+  assert.deepEqual(resolveConfig({ roles: { delegate: { agents: ['antigravity'] }, refactor: { codex: { model: 'gpt-x' } } } }).roles.refactor, { agents: ['antigravity'] });
 });
 
 test('a mission\'s preset replaces the global one for its jobs', () => {
-  const config = resolveConfig({ preset: 'best', roles: { review: { effort: 'low' } } });
+  const config = resolveConfig({ preset: 'best', roles: { review: { codex: { effort: 'low' } } } });
   assert.deepEqual(effectiveRole(config, 'delegate', 'economy'), { agent: 'codex', effort: 'low' });
   assert.deepEqual(effectiveRole(config, 'delegate', null), { agent: 'codex' });
   // A role's own setting still wins.
@@ -220,15 +220,34 @@ test('project keys have one spelling whether git or Claude Code reported them', 
   assert.equal(canonicalPath('/Users/me/x/../repo', 'linux'), '/Users/me/repo');
 });
 
-test('a role may hold Claude and further holders, whose settings stay their own', () => {
-  const config = resolveConfig({ roles: { review: { agent: 'codex', also: ['claude', 'antigravity'], model: 'gpt-x' }, polish: { agent: 'claude' } } });
-  assert.deepEqual(config.roles.review, { agent: 'codex', also: ['claude', 'antigravity'], model: 'gpt-x' });
-  // The verify role follows review whole, holders included.
-  assert.deepEqual(config.roles.verify.also, ['claude', 'antigravity']);
-  // The role's model was written for its default holder, so another holder never receives it.
-  assert.deepEqual(effectiveRole(config, 'review', null, 'antigravity'), { agent: 'antigravity' });
-  assert.deepEqual(effectiveRole(config, 'review', null), { agent: 'codex', model: 'gpt-x' });
+test('a role may hold Claude and several workers, each with its own settings', () => {
+  const config = resolveConfig({ roles: {
+    review: { agents: ['claude', 'antigravity', 'codex'], codex: { model: 'gpt-x', effort: 'high' }, antigravity: { model: 'gemini-y' } },
+    verify: { codex: { effort: 'low' } },
+    polish: { agents: ['claude'] },
+  } });
+  // Listed in one order whatever order they were written in, workers first.
+  assert.deepEqual(config.roles.review, { agents: ['codex', 'antigravity', 'claude'], codex: { model: 'gpt-x', effort: 'high' }, antigravity: { model: 'gemini-y' } });
+  // verify follows review's holders, with its own settings laid over review's for the same agent.
+  assert.deepEqual(config.roles.verify, { agents: ['codex', 'antigravity', 'claude'], codex: { model: 'gpt-x', effort: 'low' }, antigravity: { model: 'gemini-y' } });
+  assert.deepEqual(effectiveRole(config, 'review', null, 'antigravity'), { agent: 'antigravity', model: 'gemini-y' });
+  // Named no holder, a job goes to the first worker.
+  assert.deepEqual(effectiveRole(config, 'review', null), { agent: 'codex', model: 'gpt-x', effort: 'high' });
   assert.throws(() => effectiveRole(config, 'polish'), /held by Claude, the lead/);
+  assert.throws(() => resolveConfig({ roles: { review: { agents: ['cursor'] } } as never }), /roles\.review\.agents must be a non-empty list of: codex, antigravity, claude/);
+  assert.throws(() => resolveConfig({ roles: { review: { agents: [] } } }), /non-empty list/);
+  assert.throws(() => resolveConfig({ roles: { review: { agents: ['codex', 'codex'] } } }), /names a holder twice/);
+  assert.throws(() => resolveConfig({ roles: { review: { agents: ['codex'], antigravity: { effort: 'high' } } } as never }), /antigravity\.effort is not a setting/);
+  assert.throws(() => resolveConfig({ roles: { review: { agent: 'codex', agents: ['codex'] } } as never }), /mixes agent with agents/);
+  // Settings for an agent that does not hold the role are left out.
+  assert.deepEqual(resolveConfig({ roles: { review: { agents: ['codex'], antigravity: { model: 'gemini-y' } } } }).roles.review, { agents: ['codex'] });
+});
+
+test('a role written before agents becomes a list of holders, the model going to its agent', () => {
+  const config = resolveConfig({ roles: { review: { agent: 'antigravity', also: ['claude', 'codex'], model: 'gemini-y', effort: 'high' }, polish: { agent: 'claude', model: 'x' } } });
+  assert.deepEqual(config.roles.review, { agents: ['codex', 'antigravity', 'claude'], antigravity: { model: 'gemini-y' } });
+  assert.deepEqual(config.roleSettings.review, { agents: ['codex', 'antigravity', 'claude'], antigravity: { model: 'gemini-y' } });
+  assert.deepEqual(config.roles.polish, { agents: ['claude'] });
   assert.throws(() => resolveConfig({ roles: { review: { also: ['cursor'] } } as never }), /roles\.review\.also must be a list of: codex, antigravity, claude/);
-  assert.throws(() => resolveConfig({ roles: { review: { agent: 'codex', also: ['codex'] } } }), /names a holder twice/);
+  assert.throws(() => resolveConfig({ roles: { review: { also: ['codex'] } } }), /also needs roles\.review\.agent/);
 });

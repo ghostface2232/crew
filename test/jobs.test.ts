@@ -517,9 +517,9 @@ test('a role assigned to a disabled or unknown agent fails with the reason, and 
 
   assert.throws(() => resolveConfig({ roles: { review: { agent: 'cursor' as never } } }), /roles\.review\.agent is "cursor"; use one of: codex, antigravity/);
   // Unset roles keep their defaults, and roles added later follow their parents.
-  assert.deepEqual(resolveConfig({ roles: { polish: { model: 'm' } } }).roles, {
-    delegate: { agent: 'codex' }, refactor: { agent: 'codex' }, release: { agent: 'codex' }, debate: { agent: 'codex' },
-    review: { agent: 'codex' }, verify: { agent: 'codex' }, polish: { agent: 'antigravity', model: 'm' },
+  assert.deepEqual(resolveConfig({ roles: { polish: { antigravity: { model: 'm' } } } }).roles, {
+    delegate: { agents: ['codex'] }, refactor: { agents: ['codex'] }, release: { agents: ['codex'] }, debate: { agents: ['codex'] },
+    review: { agents: ['codex'] }, verify: { agents: ['codex'] }, polish: { agents: ['antigravity'], antigravity: { model: 'm' } },
   });
 
   // A table that is not exactly right must not quietly fall back to the defaults.
@@ -1408,7 +1408,8 @@ for (const agent of ['codex', 'antigravity'] as const) {
     assert.equal(job.ask, true);
     assert.equal(job.agent, agent);
     assert.equal(job.model, 'question-model');
-    assert.equal(job.effort, 'high');
+    // Antigravity takes no effort, so a role written before agents gives it none.
+    assert.equal(job.effort, agent === 'codex' ? 'high' : undefined);
     assert.equal(job.nativeReview, null);
     assert.equal(job.report, 'The answer.');
     assert.equal(job.result, null);
@@ -2083,7 +2084,7 @@ test('global Codex plugins layer with app and explicit plugins only for eligible
   for (const spec of [{ ask: true }, { kind: 'review' as const, review }, { kind: 'polish' as const, targets: ['README.md'] }]) {
     assert.equal((await create(spec)).plugins, undefined);
   }
-  config.roles.delegate = { agent: 'antigravity' };
+  config.roles.delegate = { agents: ['antigravity'] };
   assert.equal((await create({ runsApp: true })).plugins, undefined);
 });
 

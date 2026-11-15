@@ -6,7 +6,7 @@ import { addNews, Delivery, deliveryPosition, leadSession, unread } from './deli
 import type { DeliveryState, News } from './delivery.ts';
 import { runCheck } from './check.ts';
 import type { CheckResult } from './check.ts';
-import { canonicalPath, effectiveRole, holdersOf, isRole, LEAD, MAX_DEBATE_ROUNDS, PORT, roleInfo, ROLES, runsCommands, WORKERS } from './config.ts';
+import { canonicalPath, effectiveRole, isRole, LEAD, MAX_DEBATE_ROUNDS, PORT, roleInfo, ROLES, runsCommands, WORKERS, workersOf } from './config.ts';
 import type { Config, JobKind, PresetName, Role, WorkerAgent } from './config.ts';
 import { carryUncommitted, changesSince, commitAll, commitChanges, copyIncluded, createWorktree, currentBranch, dirtyCount, git, mergeInto, isInside, projectRoot, realpath, removeDirectory, removeEmptyLeftover, removeWorktree, repoRoot, revertCommit, revertsSince, reviewDiff, WorktreeCleanupError } from './git.ts';
 import { collectGarbage } from './gc.ts';
@@ -548,8 +548,9 @@ export class Jobs {
     }
     const config = this.readConfig();
     const preset = spec.preset === undefined ? config.preset : spec.preset;
-    const holders = holdersOf(config.roles[roleName]);
-    const picked = spec.agent ?? config.roles[roleName].agent;
+    const holders = config.roles[roleName].agents;
+    // Named no holder, the job goes to the role's first worker.
+    const picked = spec.agent ?? (workersOf(config.roles[roleName])[0] as WorkerAgent | undefined) ?? LEAD;
     if (!holders.includes(picked)) throw new Error(`${spec.agent} does not hold ${roleName}; its holders are: ${holders.join(', ')}. Pick one of them, or change the role in the settings.`);
     if (picked === LEAD) throw new Error(`${roleName} is held by Claude, the lead: start it from a Claude session, which does the work itself or in a subagent.`);
     const role = effectiveRole(config, roleName, preset, picked);

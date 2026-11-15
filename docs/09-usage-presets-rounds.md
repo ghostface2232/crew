@@ -285,23 +285,23 @@ Added 2026-11-15. A role is a kind of work the user assigns to an agent. Each ru
 | `verify` | review | `review` | Review that runs the app in a snapshot of the change |
 | `polish` | polish | | Wording |
 
-A role the user has not assigned, or assigned without an `agent`, takes its parent's whole assignment, with its own `effort` laid over it. A role that names an `agent` starts fresh, so a model meant for the parent's agent never reaches another agent. A model belongs to one agent, so a role with a parent that sets `model` must set `agent` too; otherwise the config is refused. A config written for the original three roles therefore behaves as before.
+A role the user has not assigned, or assigned without `agents`, takes its parent's holders, with its own settings for each agent laid over the parent's. A role that lists `agents` starts fresh. Settings are kept per agent, so they never reach another agent; settings for an agent that does not hold the role are left out. A config written for the original three roles therefore behaves as before.
 
 ```json
-{ "roles": { "review": { "agent": "antigravity" }, "verify": { "agent": "codex" } } }
+{ "roles": { "review": { "agents": ["antigravity"] }, "verify": { "agents": ["codex"] } } }
 ```
 
 Static reviews then go to Antigravity and reviews that run the app to Codex.
 
-Added 2026-11-15: a role may have several holders, and Claude may be one of them.
+Added 2026-11-15: a role may have several holders, and Claude may be one of them. No holder is a default.
 
 ```json
-{ "roles": { "review": { "agent": "codex", "also": ["claude"] }, "polish": { "agent": "claude" } } }
+{ "roles": { "review": { "agents": ["codex", "claude"], "codex": { "effort": "high" } }, "polish": { "agents": ["claude"] } } }
 ```
 
-`agent` is the default holder and `also` lists the others, in the user's order. `claude` means the lead does the work in its own session or a subagent; no worker runs it. The lead picks a holder for each job with `agent` on `delegate`, `review`, `polish`, and `debate`; it gives work that operates the screen or runs the app to Codex where Codex holds the role, and may run the same job with two holders at once when a second view is worth the usage. Picking `claude` starts no job: the tool says what to do instead (for a review, the `crew:self-reviewer` subagent). A role's own `model` and `effort` apply to its default holder; another holder runs on its own settings. A role that follows its parent takes its holders too, until it lists its own. `route` tries the holders in the user's order, passing one that is short of usage, and lists each with its status. `POST /api/jobs` takes `agent`, which must be one of the role's worker holders; a role whose default holder is Claude is refused unless a worker holder is named, so the board's New Job says it starts from a Claude session. A role assigned to an agent that cannot do it (`verify` on Antigravity, which runs no commands as a reviewer) is refused when the job starts, never moved to another agent.
+`agents` lists the holders, kept in one order: Codex, Antigravity, then Claude. `codex` and `antigravity` hold that agent's `model` (and Codex's `effort`) for the role. `claude` means the lead does the work in its own session or a subagent; no worker runs it. The lead picks a holder for each job with `agent` on `delegate`, `review`, `polish`, and `debate`; it gives work that operates the screen or runs the app to Codex where Codex holds the role, and may run the same job with two holders at once when a second view is worth the usage. Picking `claude` starts no job: the tool says what to do instead (for a review, the `crew:self-reviewer` subagent). Each worker holder runs on the role's settings for that agent. A role that follows its parent takes its holders too, until it lists its own. `route` tries the workers first, passing one that is short of usage, and lists each holder with its status. `POST /api/jobs` takes `agent`, which must be one of the role's worker holders; without it the job goes to the role's first worker, and a role only Claude holds is refused, so the board's New Job says it starts from a Claude session. The form written before `agents` (`agent` as the default, `also` for the others, one `model` and `effort` for the default) is still read: its holders become `agents` and its model and effort that agent's settings. A role assigned to an agent that cannot do it (`verify` on Antigravity, which runs no commands as a reviewer) is refused when the job starts, never moved to another agent.
 
-The daemon sends both tables: `roles` resolved (every role, `agent` required) and `roleSettings` as written (`agent` optional), with `roleInfo` describing each role in display order. Settings edits and saves `roleSettings`, so a role left to follow its parent keeps following it.
+The daemon sends both tables: `roles` resolved (every role, `agents` required) and `roleSettings` as written (`agents` optional, the old form converted), with `roleInfo` describing each role in display order. Settings edits and saves `roleSettings`, so a role left to follow its parent keeps following it.
 
 A job settles its role once, when it is created (`resolveRole` in `jobs.ts`). `POST /api/jobs` may send `role` without `kind`. A `kind: "review"` job with `runs_app` resolves to `verify`; explicitly passing `role: "review"` with `runs_app`, a role whose kind differs from the given `kind`, or debate rounds on any role other than `debate` are all refused. Jobs saved before roles were recorded derive theirs: `debate` if they were a debate, `verify` if a review ran the app, else their kind.
 

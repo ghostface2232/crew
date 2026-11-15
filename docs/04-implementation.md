@@ -66,19 +66,19 @@ Digests contain at most eight snapshots and fit within 8 KiB after JSON escaping
 
 ### 2.1 Role assignments
 
-Each tool is a role, and `roles` in `~/.crew/config.json` names the agent that holds it. With no `roles` entry the defaults apply, which are the original fixed roles (requirement R3).
+Each tool is a role, and `roles` in `~/.crew/config.json` names the agents that hold it. With no `roles` entry the defaults apply, which are the original fixed roles (requirement R3).
 
 ```json
 {
   "roles": {
-    "delegate": { "agent": "codex" },
-    "review": { "agent": "codex", "effort": "high" },
-    "polish": { "agent": "antigravity" }
+    "delegate": { "agents": ["codex"] },
+    "review": { "agents": ["codex"], "codex": { "effort": "high" } },
+    "polish": { "agents": ["antigravity"] }
   }
 }
 ```
 
-- `agent` is `codex` or `antigravity`. `model` and `effort` are optional and override the agent's own settings for that role; a `model` or `effort` passed to the tool overrides both. Antigravity has no effort setting.
+- `agents` lists `codex`, `antigravity`, or `claude` ([09](09-usage-presets-rounds.md) section 15). `codex` (`model`, `effort`) and `antigravity` (`model`) are optional and override that agent's own settings for that role; a `model` or `effort` passed to the tool overrides both. Antigravity has no effort setting. The form before `agents` (`agent`, `also`, `model`, `effort`) is still read.
 - `polish` takes `model` like `delegate` and `review`. Text results put `model:` right after the title. Optional `resolvedModel` and `resolvedEffort` fields keep the model and effective effort the session reported, falling back to what was configured; when neither is known the result reads `unknown (agent default)`. Older saved jobs still load. Codex reports both when starting or resuming a thread; Antigravity reports its model in the ACP session config or legacy model state, and on config updates.
 - When a job changes nothing and its latest turn had a refusal or a declined action, the result says so and points to the refusals/notes; notes from earlier turns do not count. The acceptance lines list the kept round commits for cherry-picking, and omit that hint when no commit is known.
 - Antigravity allows Crew's five worker tools (`ask_lead`, `lead_answers`, `siblings`, `search`, `recent_changes`) when named in MCP metadata or by an exact `mcp_crew_<tool>` title (with or without a `Run ` prefix). Title matching applies only to `other` calls with no conflicting MCP metadata and no command input (a `rawInput` string, `command`, or `CommandLine`); `execute` calls and other unrecognized editor calls still follow the role policy. The Windows refusal that prompted this had no captured ACP request, so the title form is covered by a fixture rather than a live run.

@@ -1,7 +1,7 @@
 import readline from 'node:readline';
 import { clipped, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, REPORT_PAGE_BYTES, textPage, unread } from './delivery.ts';
 import { api, ensureDaemon } from './client.ts';
-import { BASE_URL, canonicalPath, DEFAULT_ROLES, holdersOf, LEAD, loadConfig, MAX_DEBATE_ROUNDS, PRESET_NAMES, ROLE_INFO, ROLES, VERSION, WORKERS } from './config.ts';
+import { BASE_URL, canonicalPath, DEFAULT_ROLES, LEAD, loadConfig, MAX_DEBATE_ROUNDS, PRESET_NAMES, ROLE_INFO, ROLES, VERSION, WORKERS } from './config.ts';
 import { listSkills } from './skills.ts';
 import { describeUsage } from './usage.ts';
 import type { RouteDecision, Usage } from './usage.ts';
@@ -38,11 +38,8 @@ const started = (() => {
 const roles = started?.roles ?? DEFAULT_ROLES;
 // A daemon of another version may name a holder this session does not know.
 const holderName = (agent: Holder) => (agent === LEAD ? 'you, Claude' : WORKERS[agent]?.name ?? String(agent));
-/** A role's holders as the user listed them: the default, then any others the lead may pick. */
-const holder = (role: Role, table: Record<Role, RoleAssignment> = roles) => {
-  const [first, ...rest] = holdersOf(table[role]);
-  return `${holderName(first)}${rest.length ? `, or ${rest.map(holderName).join(' or ')}` : ''}`;
-};
+/** A role's holders, any of whom the lead may pick for a job. */
+const holder = (role: Role, table: Record<Role, RoleAssignment> = roles) => table[role].agents.map(holderName).join(' or ');
 
 /** What a preset asks of the lead and its workers, said wherever the preset in effect is reported. */
 function presetPolicy(name: PresetName | null, preset: Preset | undefined, whose: string): string {
@@ -75,7 +72,7 @@ const INSTRUCTIONS = `Crew connects this session to other coding agents that run
 Roles (assigned by the user in the settings or ~/.crew/config.json; each job goes to the agent holding its role, and you do not reassign them). As of this session's start:
 ${ROLE_LINES}
 \`delegate\` takes role delegate, refactor, or release; \`review\` is the review role, or verify with runs_app; \`debate\` and \`polish\` are their own roles. Each job's result names the agent that took it.
-A role may have several holders: the first is its default, and you pick another for a job with \`agent\` when it fits better. Give work that operates the screen (computer use) or must run the app to Codex when it holds the role. When a second view is worth the usage, run the job with two holders at once. Picking yourself (\`claude\`) starts no worker: do the work in this session, or in a subagent (\`crew:self-reviewer\` for a review).
+A role may have several holders: pick one for each job with \`agent\` (\`route\` says who has room); without it the job goes to the role's first worker, Codex before Antigravity. Give work that operates the screen (computer use) or must run the app to Codex when it holds the role. When a second view is worth the usage, run the job with two holders at once. Picking yourself (\`claude\`) starts no worker: do the work in this session, or in a subagent (\`crew:self-reviewer\` for a review).
 
 How jobs work:
 - delegate and polish run in their own git worktree and branch (crew-<job id>) created from HEAD, so commit anything the worker needs first. Gitignored files it needs (node_modules, .env) are copied in if the repository lists them in .worktreeinclude. The bridge commits the worker's changes on that branch; you inspect the diff and merge or reject it. Nothing reaches your branch unless you merge it.
@@ -118,7 +115,7 @@ const attachmentsProp = {
   attachments: { type: 'array', items: { type: 'string' }, maxItems: 10, description: 'Absolute paths of images or recordings (PNG, JPEG, GIF, WebP, WebM, MP4) the worker should see, such as a design or a screenshot of the problem. They are copied into the job\'s evidence and shown on the board.' },
 };
 const agentProp = {
-  agent: { type: 'string', enum: [...Object.keys(WORKERS), LEAD], description: 'One of the role\'s holders to take this job instead of its default; the roles in your instructions list them. claude starts no worker: you do it.' },
+  agent: { type: 'string', enum: [...Object.keys(WORKERS), LEAD], description: 'Which of the role\'s holders takes this job; the roles in your instructions list them. Without it, the role\'s first worker. claude starts no worker: you do it.' },
 };
 const modelProps = {
   tier: { type: 'string', enum: [...TIERS], description: 'How demanding the job is; Crew picks the model from it. standard (the default): most work, including most UI changes. frontier: only especially hard or complex work, or a UI rebuilt from scratch or a very large UI change. light: simple, well-specified tasks. fast: plain searches and lookups. For Codex these are Sol, Astra, Terra and Luna; for Antigravity, Argon for frontier (literary or very complex documents) and Hydrogen otherwise. Newer models of each family are picked up automatically.' },
@@ -646,7 +643,7 @@ const YOURS: Partial<Record<Role, string>> = {
 };
 
 /**
- * Settles which holder takes a job: the lead's pick, else the role's default. A role the lead holds itself starts no
+ * Settles which holder takes a job: the lead's pick, else the role's first worker. A role the lead holds itself starts no
  * worker, so the answer is what to do instead; a worker pick goes on to the daemon, which checks it again.
  */
 function pickHolder(role: Role, wanted: unknown): { agent?: Holder; yours?: string } {
@@ -658,8 +655,8 @@ function pickHolder(role: Role, wanted: unknown): { agent?: Holder; yours?: stri
   }
   // An unknown role is the daemon's to refuse, with its own message.
   if (!table[role]) return { agent: wanted as Holder | undefined };
-  const holders = holdersOf(table[role]);
-  const agent = (wanted ?? holders[0]) as Holder;
+  const holders = table[role].agents;
+  const agent = (wanted ?? holders.find((h) => h !== LEAD) ?? LEAD) as Holder;
   if (!holders.includes(agent)) throw new Error(`${String(wanted)} does not hold ${role}; its holders are ${holder(role, table)}.`);
   if (agent !== LEAD) return { agent };
   return { yours: `${role} is yours: no worker was started. ${YOURS[role]} Its other holders: ${holders.filter((h) => h !== LEAD).map(holderName).join(', ') || 'none'}.` };
@@ -707,8 +704,8 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       if (decision.deferUntil) lines.push(`Can wait until ${new Date(decision.deferUntil).toISOString()}.`);
       if (decision.fallback.length) lines.push(`If that fails: ${decision.fallback.map((a) => (a === 'claude' ? 'you' : WORKERS[a].name)).join(', then ')}.`);
       // A daemon that predates holders lists none.
-      // Without agent a job goes to the default holder, which route may have just skipped.
-      if (decision.holders?.length && decision.assignee !== 'claude' && decision.assignee !== decision.holders[0].agent) lines.push(`Pass agent: ${decision.assignee}.`);
+      // Without agent a job goes to the role's first worker, which route may have just skipped.
+      if (decision.assignee !== 'claude' && decision.assignee !== decision.holders?.find((h) => h.agent !== 'claude')?.agent) lines.push(`Pass agent: ${decision.assignee}.`);
       if ((decision.holders?.length ?? 0) > 1) lines.push(`Holders you may pick with agent: ${decision.holders!.map((h) => `${h.agent} (${h.status})`).join(', ')}.`);
       // A daemon that predates mission presets sends none; the session's instructions then still hold.
       if (decision.preset !== undefined) lines.push(presetPolicy(decision.preset, decision.policy ?? undefined, ' for the next job'));

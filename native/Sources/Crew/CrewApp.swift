@@ -231,7 +231,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
     func openSettings() {
         if let window = settingsWindow { window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return }
         guard !store.state.roles.isEmpty else { show(); return }
-        let model = SettingsModel(api: store.api, roles: store.state.roles, preset: store.state.preset, presets: store.state.presets)
+        let model = SettingsModel(api: store.api, roles: store.state.roles, roleSettings: store.state.roleSettings, roleInfo: store.state.roleInfo, preset: store.state.preset, presets: store.state.presets)
         let controller = NSHostingController(rootView: CrewSettingsView(model: model, store: store).buttonBorderShape(.capsule))
         let window = NSWindow(contentViewController: controller)
         window.title = "Crew Settings"

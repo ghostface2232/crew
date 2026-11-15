@@ -58,7 +58,9 @@
           "revert": "revert2",
           "at": 1794999900000
         }
-      ]
+      ],
+      "role": "delegate",
+      "preset": "economy"
     },
     {
       "id": "cx-question",
@@ -98,7 +100,10 @@
       "error": null,
       "tokens": 12000,
       "seq": 1,
-      "delivered": 0
+      "delivered": 0,
+      "role": "verify",
+      "runsApp": true,
+      "preset": null
     }
   ],
   "missions": [
@@ -119,7 +124,8 @@
           "text": "Preserve compatibility.",
           "at": 1794999900000
         }
-      ]
+      ],
+      "preset": "best"
     }
   ],
   "claude": [
@@ -167,10 +173,32 @@
   },
   "roles": {
     "delegate": {
-      "agent": "codex"
+      "agent": "codex",
+      "model": "build-model",
+      "effort": "high"
+    },
+    "refactor": {
+      "agent": "codex",
+      "model": "build-model",
+      "effort": "high"
+    },
+    "release": {
+      "agent": "codex",
+      "model": "release-model",
+      "effort": "high"
+    },
+    "debate": {
+      "agent": "codex",
+      "model": "build-model",
+      "effort": "high"
     },
     "review": {
-      "agent": "codex"
+      "agent": "antigravity",
+      "model": "review-model"
+    },
+    "verify": {
+      "agent": "antigravity",
+      "model": "review-model"
     },
     "polish": {
       "agent": "antigravity"
@@ -287,5 +315,71 @@
       },
       "subagentModel": "large"
     }
-  }
+  },
+  "roleSettings": {
+    "delegate": {
+      "agent": "codex",
+      "model": "build-model",
+      "effort": "high"
+    },
+    "release": {
+      "model": "release-model"
+    },
+    "review": {
+      "agent": "antigravity",
+      "model": "review-model"
+    },
+    "verify": {},
+    "polish": {
+      "agent": "antigravity"
+    }
+  },
+  "roleInfo": [
+    {
+      "role": "delegate",
+      "kind": "delegate",
+      "label": "Implementation",
+      "summary": "Builds separable pieces of a change."
+    },
+    {
+      "role": "refactor",
+      "kind": "delegate",
+      "parent": "delegate",
+      "label": "Refactoring",
+      "summary": "Restructures code without changing what it does."
+    },
+    {
+      "role": "release",
+      "kind": "delegate",
+      "parent": "delegate",
+      "label": "Release preparation",
+      "summary": "Prepares a release: version, changelog, build, and the steps to publish. It does not publish or deploy."
+    },
+    {
+      "role": "debate",
+      "kind": "delegate",
+      "parent": "delegate",
+      "label": "Debate",
+      "summary": "Tests the lead's position on a hard decision, read-only."
+    },
+    {
+      "role": "review",
+      "kind": "review",
+      "label": "Cross-review",
+      "summary": "Reviews a change by reading it and running checks."
+    },
+    {
+      "role": "verify",
+      "kind": "review",
+      "parent": "review",
+      "label": "Review that runs the app",
+      "summary": "Reviews a change by starting the app in a snapshot of it."
+    },
+    {
+      "role": "polish",
+      "kind": "polish",
+      "label": "Wording",
+      "summary": "Improves UI strings, comments, and docs."
+    }
+  ]
 }

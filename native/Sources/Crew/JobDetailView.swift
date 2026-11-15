@@ -60,7 +60,8 @@ struct JobDetailView: View {
         Grid(alignment: .leading, horizontalSpacing: WorkspaceStyle.factColumnGap, verticalSpacing: WorkspaceStyle.factRowGap) {
             // The model the session reported, else the configured one.
             fact("Agent", [agentName(job.agent), job.resolvedModel ?? job.model, (job.resolvedEffort ?? job.effort).map { "\($0) effort" }, job.tier.map { "\($0) tier" }].compactMap { $0 }.joined(separator: " · "))
-            fact("Role", job.kindTitle)
+            fact("Role", store.state.roleLabel(job.assignedRole))
+            if let preset = job.preset { fact("Preset", preset.capitalized) }
             fact("Project", job.projectPath)
             fact("Duration", elapsed((job.endedAt ?? store.now) - job.createdAt))
             if let worktree = job.worktree { fact("Branch", "\(worktree.branch) (from \(worktree.base.prefix(8)))") }

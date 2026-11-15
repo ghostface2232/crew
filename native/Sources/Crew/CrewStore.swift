@@ -13,17 +13,32 @@ struct Reply: Encodable, Sendable {
     var message: String?
 }
 struct JobSubmission: Encodable, Sendable {
-    var kind: String
+    var kind: String?
+    var role: String
     var cwd: String
     var project: String
     var task: String
     var isolation = "worktree"
     var targets: [String]?
     var review: Review?
+    init(role: RoleInfo, cwd: String, project: String, task: String, targets: [String]? = nil) {
+        self.role = role.role
+        kind = roleOrder.contains(role.role) ? role.kind : nil
+        self.cwd = cwd; self.project = project; self.task = task; self.targets = targets
+        review = role.kind == "review" ? Review() : nil
+    }
     struct Review: Encodable, Sendable {
         var target = Target()
         var mode = "adversarial"
         struct Target: Encodable, Sendable { var type = "uncommittedChanges" }
+    }
+}
+struct PresetSelection: Encodable, Sendable {
+    var preset: PresetName?
+    enum CodingKeys: String, CodingKey { case preset }
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(preset, forKey: .preset)
     }
 }
 
@@ -229,6 +244,13 @@ final class CrewStore {
             upsert(&state.missions, updated)
         }
     }
+    func setPreset(_ preset: PresetName?, for mission: Mission) async {
+        guard mission.state == "active" else { return }
+        await run(mission.actionKey) {
+            let updated: Mission = try await api.post("/api/missions/\(mission.id)", PresetSelection(preset: preset))
+            upsert(&state.missions, updated)
+        }
+    }
     func setRound(_ job: Job, turn: Int, undo: Bool) async {
         guard job.roundUnavailableReason == nil else { return }
         struct Change: Encodable, Sendable { var undo: Bool?; var keep: Bool? }
@@ -239,7 +261,7 @@ final class CrewStore {
         }
     }
     func submitQuestion(_ text: String, project: String) async throws -> Job {
-        struct Question: Encodable, Sendable { var kind = "delegate"; var ask = true; var task: String; var cwd: String }
+        struct Question: Encodable, Sendable { var role = "delegate"; var kind = "delegate"; var ask = true; var task: String; var cwd: String }
         let job: Job = try await api.post("/api/jobs", Question(task: text, cwd: project))
         applyJob(job, since: 0)
         return job
@@ -276,8 +298,10 @@ final class CrewStore {
 
 @MainActor @Observable
 final class SettingsModel {
-    var roles: [String: RoleAssignment] = [:]
-    var savedRoles: [String: RoleAssignment] = [:]
+    var roleSettings: [String: RoleSetting] = [:]
+    var savedRoleSettings: [String: RoleSetting] = [:]
+    var resolvedRoles: [String: RoleAssignment]
+    let roleInfo: [RoleInfo]
     var preset: PresetName?
     var savedPreset: PresetName?
     var presets: [String: Preset]?
@@ -295,11 +319,29 @@ final class SettingsModel {
     var roleStatus = ""
     private var generation = 0
     private let api: CrewAPI
-    var dirty: Bool { text != savedText || roles != savedRoles || preset != savedPreset }
+    var dirty: Bool { text != savedText || roleSettings != savedRoleSettings || preset != savedPreset }
     var busy: Bool { savingText || savingRoles || savingPreset }
-    init(api: CrewAPI, roles: [String: RoleAssignment], preset: PresetName? = nil, presets: [String: Preset]? = nil) {
-        self.api = api; self.roles = roles; self.savedRoles = roles
+    init(api: CrewAPI, roles: [String: RoleAssignment], roleSettings: [String: RoleSetting]? = nil, roleInfo: [RoleInfo]? = nil, preset: PresetName? = nil, presets: [String: Preset]? = nil) {
+        self.api = api; self.resolvedRoles = roles
+        self.roleInfo = roleInfo ?? RoleInfo.legacy
+        self.roleSettings = roleSettings ?? roles.mapValues(RoleSetting.init)
+        self.savedRoleSettings = self.roleSettings
         self.preset = preset; self.savedPreset = preset; self.presets = presets
+    }
+    func assignment(for role: String) -> RoleAssignment? {
+        var resolved: [String: RoleAssignment] = [:]
+        for info in roleInfo {
+            let setting = roleSettings[info.role] ?? RoleSetting()
+            let base = setting.agent.map { RoleAssignment(agent: $0) }
+                ?? info.parent.flatMap { resolved[$0] }
+                ?? resolvedRoles[info.role].map { RoleAssignment(agent: $0.agent) }
+            if var assignment = base {
+                assignment.model = setting.model ?? assignment.model
+                assignment.effort = setting.effort ?? assignment.effort
+                resolved[info.role] = assignment
+            }
+        }
+        return resolved[role]
     }
     func load(scope next: String) async {
         generation += 1
@@ -335,16 +377,8 @@ final class SettingsModel {
         guard presets != nil && !savingPreset else { return }
         savingPreset = true; presetStatus = ""
         let draft = preset
-        struct Save: Encodable, Sendable {
-            var preset: PresetName?
-            enum CodingKeys: String, CodingKey { case preset }
-            func encode(to encoder: Encoder) throws {
-                var values = encoder.container(keyedBy: CodingKeys.self)
-                try values.encode(preset, forKey: .preset)
-            }
-        }
         do {
-            let result: PresetState = try await api.post("/api/preset", Save(preset: draft))
+            let result: PresetState = try await api.post("/api/preset", PresetSelection(preset: draft))
             if preset == draft { preset = result.preset }
             savedPreset = result.preset; presets = result.presets; presetStatus = "Saved"
         } catch { presetStatus = error.localizedDescription }
@@ -353,12 +387,12 @@ final class SettingsModel {
     func saveRoles() async {
         guard !savingRoles else { return }
         savingRoles = true; roleStatus = ""
-        let draft = roles
-        struct Save: Encodable, Sendable { var roles: [String: RoleAssignment] }
+        let draft = roleSettings
+        struct Save: Encodable, Sendable { var roles: [String: RoleSetting] }
         do {
-            let normalized: [String: RoleAssignment] = try await api.post("/api/roles", Save(roles: draft))
-            if roles == draft { roles = normalized }
-            savedRoles = normalized; roleStatus = "Saved"
+            let result: RoleState = try await api.post("/api/roles", Save(roles: draft))
+            if roleSettings == draft { roleSettings = result.roleSettings }
+            resolvedRoles = result.roles; savedRoleSettings = result.roleSettings; roleStatus = "Saved"
         } catch { roleStatus = error.localizedDescription }
         savingRoles = false
     }

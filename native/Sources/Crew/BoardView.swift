@@ -272,9 +272,12 @@ struct AgentOverview: View {
     }
 }
 
-/// The roles an agent holds, as the user assigned them; Claude always leads.
+/// The roles an agent holds, as the user assigned them; Claude always leads. A role that follows its parent to the same agent adds nothing to say.
 @MainActor private func agentRole(_ agent: String, store: CrewStore) -> String {
-    agent == "claude" ? "Lead" : roleOrder.filter { store.state.roles[$0]?.agent == agent }.compactMap { roleNames[$0] }.joined(separator: " · ")
+    let roles = store.state.roles
+    return agent == "claude" ? "Lead" : store.state.availableRoles
+        .filter { roles[$0.role]?.agent == agent && !($0.parent.map { roles[$0]?.agent == agent } ?? false) }
+        .map(\.label).joined(separator: " · ")
 }
 
 /// Claude sessions open in this scope but between turns.
@@ -373,6 +376,22 @@ struct MissionPanel: View {
             .onTapGesture(perform: toggle)
             if expanded {
                 VStack(alignment: .leading, spacing: Space.xl) {
+                    VStack(alignment: .leading, spacing: Space.s) {
+                        if mission.state == "active" {
+                            Picker("Mission preset", selection: Binding(get: { mission.preset }, set: { preset in
+                                Task { await store.setPreset(preset, for: mission) }
+                            })) {
+                                Text("Global preset").tag(nil as PresetName?)
+                                ForEach(PresetName.allCases, id: \.self) { preset in
+                                    Text(preset.rawValue.capitalized).tag(Optional(preset))
+                                }
+                            }.fixedSize().disabled(!store.connected || store.actions[mission.actionKey]?.locked == true)
+                        } else {
+                            Text(mission.preset.map { "\($0.rawValue.capitalized) preset" } ?? "Global preset")
+                                .font(Typeface.callout).foregroundStyle(.secondary)
+                        }
+                        Text("Applies to new jobs. Running jobs keep their preset.").font(Typeface.caption).foregroundStyle(.secondary)
+                    }.padding(.leading, WorkspaceStyle.rowTitleInset)
                     ForEach(Array((mission.notes ?? []).enumerated()), id: \.offset) { _, note in
                         Text(note.text).font(Typeface.callout).textSelection(.enabled).padding(.leading, WorkspaceStyle.rowTitleInset)
                     }

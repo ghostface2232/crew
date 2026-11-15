@@ -18,6 +18,7 @@ struct DispatchView: View {
     init(store: CrewStore) { self.store = store; initialDirectory = store.project; _directory = State(initialValue: store.project) }
     private var dirty: Bool { intent != "command" || destination != "project" || !task.isEmpty || !targets.isEmpty || role != "delegate" || directory != initialDirectory }
     private var worker: Worker? { store.state.roles[intent == "question" ? "delegate" : role].flatMap { store.state.agents[$0.agent] } }
+    private var selectedRole: RoleInfo? { store.state.availableRoles.first { $0.role == role } }
     private var missions: [Mission] { store.state.missions.filter { $0.state == "active" && $0.root == directory.trimmingCharacters(in: .whitespacesAndNewlines) } }
     private var canSend: Bool {
         guard !sending, store.connected, !task.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
@@ -48,7 +49,9 @@ struct DispatchView: View {
                 if intent == "command" {
                     HStack(alignment: .top, spacing: Space.x3l) {
                         field("Role") {
-                            Picker("Role", selection: $role) { ForEach(roleOrder, id: \.self) { Text(roleNames[$0]!).tag($0) } }
+                            Picker("Role", selection: $role) {
+                                ForEach(store.state.availableRoles.filter { $0.role != "debate" }) { Text($0.label).tag($0.role) }
+                            }
                                 .labelsHidden().fixedSize()
                         }
                         field("Assigned to") {
@@ -71,9 +74,9 @@ struct DispatchView: View {
                         }.labelsHidden()
                     }
                 }
-                field(intent == "question" ? "What would you like to know?" : intent == "information" ? "What should be remembered?" : role == "review" ? "What should be checked?" : "What needs to be done?") {
+                field(intent == "question" ? "What would you like to know?" : intent == "information" ? "What should be remembered?" : selectedRole?.kind == "review" ? "What should be checked?" : "What needs to be done?") {
                     MessageEditor(title: "New job instructions", text: $task)
-                    Text(intent == "information" ? "Adds information only. This starts no work." : intent == "question" ? "Answers the question in read-only mode." : role == "review" ? "Reviews uncommitted changes in read-only mode." : "Changes stay on an isolated worktree branch until reviewed and merged.")
+                    Text(intent == "information" ? "Adds information only. This starts no work." : intent == "question" ? "Answers the question in read-only mode." : role == "verify" ? "Reviews uncommitted changes by running the app in a snapshot." : selectedRole?.kind == "review" ? "Reviews uncommitted changes in read-only mode." : "Changes stay on an isolated worktree branch until reviewed and merged.")
                         .font(Typeface.caption).foregroundStyle(.secondary)
                 }
             }
@@ -117,7 +120,8 @@ struct DispatchView: View {
                 let job = try await store.submitQuestion(task, project: cwd)
                 store.openJob(job.id, navigate: true); dismiss()
             } else {
-                let job: Job = try await store.api.post("/api/jobs", JobSubmission(kind: role, cwd: cwd, project: cwd, task: task, targets: role == "polish" ? allowed : nil, review: role == "review" ? .init() : nil))
+                guard let selectedRole else { throw CrewFailure("Choose a role for this job.") }
+                let job: Job = try await store.api.post("/api/jobs", JobSubmission(role: selectedRole, cwd: cwd, project: cwd, task: task, targets: role == "polish" ? allowed : nil))
                 store.applyJob(job, since: 0); store.openJob(job.id, navigate: true); dismiss()
             }
         } catch { self.error = error.localizedDescription }

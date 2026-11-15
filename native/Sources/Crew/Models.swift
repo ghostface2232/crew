@@ -3,6 +3,8 @@ import Foundation
 struct Job: Codable, Sendable, Identifiable, Equatable {
     var id: String
     var kind: String
+    var role: String?
+    var preset: String?
     var agent: String
     var title: String
     var state: String
@@ -63,6 +65,7 @@ struct Job: Codable, Sendable, Identifiable, Equatable {
     /// Ended, but its worktree still awaits a merge or discard, or the lead has not read its result.
     var isUnsettled: Bool { worktree != nil || seq > (delivered ?? seq) }
     var kindTitle: String { debate != nil ? "Debate" : ask == true ? "Question" : roleNames[kind] ?? kind }
+    var assignedRole: String { role ?? (debate != nil ? "debate" : kind == "review" && runsApp == true ? "verify" : kind) }
     var roundUnavailableReason: String? {
         if state == "running" || state == "waiting" { return "Wait until the job has stopped before changing rounds." }
         if worktree == nil { return "This job has no worktree." }
@@ -151,6 +154,7 @@ struct Mission: Codable, Sendable, Identifiable, Equatable {
     var notes: [MissionNote]?
     var stages: [String]?
     var stageIndex: Int?
+    var preset: PresetName?
     private static let stopOfStage = ["plan": 0, "implement": 1, "self-review": 2, "cross-review": 2, "fix": 3, "polish": 4, "final": 5]
     var step: Int { stages.map { stageIndex ?? $0.firstIndex(of: stage) ?? 0 } ?? Self.stopOfStage[stage] ?? 0 }
     static let steps = ["Plan", "Build", "Review", "Fix", "Polish", "Final"]
@@ -216,6 +220,46 @@ struct RoleAssignment: Codable, Sendable, Equatable {
     var agent: String
     var model: String?
     var effort: String?
+}
+struct RoleSetting: Codable, Sendable, Equatable {
+    var agent: String?
+    var model: String?
+    var effort: String?
+    init(agent: String? = nil, model: String? = nil, effort: String? = nil) {
+        self.agent = agent; self.model = model; self.effort = effort
+    }
+    init(_ assignment: RoleAssignment) {
+        agent = assignment.agent; model = assignment.model; effort = assignment.effort
+    }
+}
+struct RoleInfo: Codable, Sendable, Identifiable, Equatable {
+    var role: String
+    var kind: String
+    var parent: String?
+    var label: String
+    var summary: String
+    var id: String { role }
+    var group: String { kind == "delegate" ? "Build" : kind == "review" ? "Review" : "Edit" }
+    static let legacy = [
+        RoleInfo(role: "delegate", kind: "delegate", label: "Implementation", summary: "Builds separable pieces of a change."),
+        RoleInfo(role: "review", kind: "review", label: "Read-only review", summary: "Reviews a change without modifying it."),
+        RoleInfo(role: "polish", kind: "polish", label: "Wording polish", summary: "Improves UI strings, comments, and docs."),
+    ]
+}
+struct RoleState: Decodable, Sendable {
+    var roles: [String: RoleAssignment]
+    var roleSettings: [String: RoleSetting]
+    private enum CodingKeys: String, CodingKey { case roles, roleSettings }
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        if values.contains(.roles) {
+            roles = try values.decode([String: RoleAssignment].self, forKey: .roles)
+            roleSettings = try values.decodeIfPresent([String: RoleSetting].self, forKey: .roleSettings) ?? roles.mapValues(RoleSetting.init)
+        } else {
+            roles = try [String: RoleAssignment](from: decoder)
+            roleSettings = roles.mapValues(RoleSetting.init)
+        }
+    }
 }
 // The legacy limit event reports a window length only when the provider does.
 struct LimitWindow: Codable, Sendable, Equatable { var usedPercent: Double; var minutes: Double? }
@@ -285,12 +329,19 @@ struct BoardState: Codable, Sendable, Equatable {
     var claude: [ClaudeSession] = []
     var agents: [String: Worker] = [:]
     var roles: [String: RoleAssignment] = [:]
+    var roleSettings: [String: RoleSetting]?
+    var roleInfo: [RoleInfo]?
     var limits: [String: LimitUsage?] = [:]
     var events: [CrewEvent] = []
     var notifications: NotificationPreferences?
     var usage: Usage?
     var preset: PresetName?
     var presets: [String: Preset]?
+    var availableRoles: [RoleInfo] { roleInfo ?? RoleInfo.legacy }
+    var editableRoleSettings: [String: RoleSetting] { roleSettings ?? roles.mapValues(RoleSetting.init) }
+    func roleLabel(_ role: String) -> String {
+        availableRoles.first { $0.role == role }?.label ?? roleNames[role] ?? role.capitalized
+    }
     var projects: [String] {
         Array(Set(jobs.map(\.projectPath) + missions.map(\.root) + claude.map(\.projectPath))).filter { !$0.isEmpty }.sorted()
     }
@@ -316,6 +367,7 @@ struct BoardState: Codable, Sendable, Equatable {
             let change = try decoder.decode(PresetState.self, from: event.data)
             preset = change.preset; presets = change.presets
         case "roles": roles = try decoder.decode([String: RoleAssignment].self, from: event.data)
+        case "roleSettings": roleSettings = try decoder.decode([String: RoleSetting].self, from: event.data)
         default: break
         }
         return nil
@@ -332,7 +384,7 @@ func mergeEvents(_ previous: [CrewEvent], _ incoming: [CrewEvent], limit: Int = 
     return Array(byID.values.sorted { $0.seq < $1.seq }.suffix(limit))
 }
 func agentName(_ id: String) -> String { ["claude": "Claude", "codex": "Codex", "antigravity": "Antigravity"][id] ?? id }
-let roleNames = ["delegate": "Implementation", "review": "Read-only review", "polish": "Wording polish"]
+let roleNames = ["delegate": "Implementation", "refactor": "Refactoring", "release": "Release preparation", "debate": "Debate", "review": "Read-only review", "verify": "Review that runs the app", "polish": "Wording polish"]
 let roleOrder = ["delegate", "review", "polish"]
 func projectName(_ path: String, among paths: [String]) -> String {
     let name = URL(fileURLWithPath: path).lastPathComponent

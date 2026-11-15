@@ -79,12 +79,13 @@ struct ModelPodium: View {
                 HStack(alignment: .firstTextBaseline, spacing: 2) {
                     Text(score.shown).font(.system(size: 17, weight: .semibold, design: .rounded)).monospacedDigit()
                         .contentTransition(.numericText(value: score.score ?? 0))
-                    Text("/10").font(.system(size: 11, weight: .medium, design: .rounded)).opacity(0.7)
+                    Text("/10").font(.system(size: 11, weight: .medium, design: .rounded)).foregroundStyle(.secondary)
                 }
-                // Darkened in light mode, as a chip's text is, so green and orange stay legible on the light glass.
-                .foregroundStyle(scheme == .light ? score.tone.mix(with: .black, by: 0.22) : score.tone)
+                // The glass carries the tone; the number stays in the label color, since a toned number on toned
+                // glass falls under 2:1 (blue measured 1.8:1 in dark).
+                .foregroundStyle(.primary)
                 .padding(.horizontal, 10).padding(.vertical, 4)
-                .glassEffect(.regular.tint(score.tone.opacity(0.2)), in: .capsule)
+                .glassEffect(.regular.tint(score.tone.opacity(0.3)), in: .capsule)
             }
             .opacity(shown ? 1 : 0).offset(y: shown ? 0 : 10).blur(radius: shown ? 0 : 4)
             .animation(reduceMotion ? nil : .spring(duration: 0.55, bounce: 0.15).delay(0.26 + order * 0.09), value: shown)
@@ -154,7 +155,7 @@ struct ModelScoreRow: View {
                 HStack(spacing: Space.s) {
                     Text(score.model).font(.body.weight(.medium)).lineLimit(1).textSelection(.enabled)
                     if let band = score.band {
-                        Text(band.word).font(.caption.weight(.semibold)).foregroundStyle(scheme == .light ? band.tone.mix(with: .black, by: 0.22) : band.tone)
+                        Text(band.word).font(.caption.weight(.semibold)).foregroundStyle(band.tone.ink(scheme))
                             .padding(.horizontal, 7).padding(.vertical, 1).background(Palette.chip(band.tone), in: Capsule())
                     }
                 }

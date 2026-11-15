@@ -53,6 +53,8 @@ enum WorkspaceStyle {
     /// Rows and insets inside a card.
     static let rowFill = dynamic(light: NSColor(calibratedWhite: 0, alpha: 0.04), dark: NSColor(calibratedWhite: 1, alpha: 0.06))
     static let hairline = dynamic(light: NSColor(calibratedWhite: 0, alpha: 0.08), dark: NSColor(calibratedWhite: 1, alpha: 0.08))
+    /// For tokens kept beside the view that uses them.
+    static func dynamicColor(light: NSColor, dark: NSColor) -> Color { dynamic(light: light, dark: dark) }
     fileprivate static func dynamic(light: NSColor, dark: NSColor) -> Color {
         Color(nsColor: NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light })
     }
@@ -158,6 +160,12 @@ enum Palette {
     static let contrastStroke = Color.primary.opacity(0.25)
     /// Deeper in dark mode, where a light-mode shadow vanishes into the canvas (as --shadow-pop does on the web board).
     static let panelShadow = WorkspaceStyle.dynamic(light: NSColor(calibratedWhite: 0, alpha: 0.14), dark: NSColor(calibratedWhite: 0, alpha: 0.4))
+}
+
+extension Color {
+    /// A status color as text: darkened in light mode and lightened in dark mode, so it reads on its own tint and on
+    /// gray rows (about 3:1 on chips, 4.5:1 for red captions on rows in dark).
+    func ink(_ scheme: ColorScheme) -> Color { scheme == .light ? mix(with: .black, by: 0.22) : mix(with: .white, by: 0.35) }
 }
 
 /// The type scale. Titles are SF Pro Rounded, headlines SF Pro Display, body text SF Pro Text, source text SF Mono.
@@ -337,7 +345,7 @@ struct PillButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         let status: Color? = configuration.role == .destructive ? Palette.danger : kind == .warning ? Palette.warning : nil
         // As on chips: darkened in light mode so the tinted label stays readable on its tint.
-        let tinted = status.map { scheme == .light ? $0.mix(with: .black, by: 0.22) : $0 }
+        let tinted = status.map { $0.ink(scheme) }
         let text: Color = kind == .prominent && status == nil ? .white : tinted ?? .primary
         let fill: Color = status.map(Palette.chip) ?? (kind == .prominent ? Palette.accent : Pill.fill)
         PillWords(label: configuration.label)

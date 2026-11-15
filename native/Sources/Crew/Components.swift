@@ -37,8 +37,7 @@ struct StatusLabel: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(\.colorSchemeContrast) private var contrast
     var body: some View {
-        // Darkened in light mode so orange and green text reach about 3:1 on the tint; dark mode already does.
-        let text = scheme == .light ? color.mix(with: .black, by: 0.22) : color
+        let text = color.ink(scheme)
         Label(title ?? state.capitalized, systemImage: symbol)
             .font(Typeface.chip).foregroundStyle(text).lineLimit(1).fixedSize()
             .padding(Chip.insets)
@@ -228,6 +227,7 @@ struct JobRow: View {
     var showsKind = true
     let store: CrewStore
     var open: () -> Void
+    @Environment(\.colorScheme) private var scheme
     var body: some View {
         let detail = [showsKind ? job.kindTitle : job.debate != nil ? "Debate" : job.ask == true ? "Question" : nil, job.error?.message ?? (job.isActive ? job.phase : nil),
                       job.runsApp == true ? "Runs the app" : nil, job.exclusive == true ? "Runs alone" : nil]
@@ -238,7 +238,7 @@ struct JobRow: View {
                 VStack(alignment: .leading, spacing: Space.xs) {
                     Text(job.title).font(Typeface.bodyStrong).foregroundStyle(.primary).lineLimit(2)
                     if !detail.isEmpty {
-                        Text(detail).font(Typeface.caption).foregroundStyle(job.error == nil ? Color.secondary : Palette.danger).lineLimit(1)
+                        Text(detail).font(Typeface.caption).foregroundStyle(job.error == nil ? Color.secondary : Palette.danger.ink(scheme)).lineLimit(1)
                     }
                 }
                 Spacer(minLength: WorkspaceStyle.rowSpacer)

@@ -46,6 +46,10 @@
   --lift: rgb(0 0 0 / 0.08);
   /* Status text is darkened in light mode so it reaches about 3:1 on its own tint, as on the app's chips. */
   --tone-darken: 22%;
+  /* What status text mixes toward: black in light mode, white in dark, where it measured under 3:1 on its tint. */
+  --tone-ink: black;
+  /* Steps not reached yet on a mission track. */
+  --track: var(--quaternary);
   --heat-0: rgb(0 0 0 / 0.05);
   --heat-1: color-mix(in srgb, var(--accent) 22%, transparent);
   --heat-2: color-mix(in srgb, var(--accent) 45%, transparent);
@@ -86,7 +90,8 @@
     --fill-strong: rgb(255 255 255 / 0.13);
     --label: rgb(255 255 255 / 0.88);
     --secondary: rgb(255 255 255 / 0.55);
-    --tertiary: rgb(255 255 255 / 0.3);
+    /* Times, paths and table heads use it; 0.3 measured 2.65:1 on a card. */
+    --tertiary: rgb(255 255 255 / 0.45);
     --quaternary: rgb(255 255 255 / 0.12);
     --accent: #0a84ff;
     --orange: #ff9f0a;
@@ -100,7 +105,9 @@
     --scrim: rgb(0 0 0 / 0.5);
     --scrim-light: rgb(0 0 0 / 0.36);
     --lift: rgb(0 0 0 / 0.4);
-    --tone-darken: 0%;
+    --tone-darken: 35%;
+    --tone-ink: white;
+    --track: rgb(255 255 255 / 0.22);
     --heat-0: rgb(255 255 255 / 0.06);
     --shadow-pop: 0 0 0 1px var(--hairline-strong), -8px 8px 26px rgb(0 0 0 / 0.4);
   }
@@ -182,7 +189,7 @@ kbd {
   padding: 0 8px 0 7px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--tone, var(--secondary)) 11%, transparent);
-  color: color-mix(in srgb, var(--tone, var(--secondary)), black var(--tone-darken));
+  color: color-mix(in srgb, var(--tone, var(--secondary)), var(--tone-ink) var(--tone-darken));
   font-size: 11px;
   font-weight: 500;
   line-height: 1;
@@ -233,7 +240,7 @@ button.link svg { transition: translate 220ms var(--ease-out); }
 button.icon { flex: none; width: 30px; padding: 0; background: var(--fill); color: var(--label); }
 button.icon.small { width: 24px; min-height: 24px; }
 button.destructive { color: var(--red); }
-button.pill-warning { background: color-mix(in srgb, var(--orange) 14%, transparent); color: color-mix(in srgb, var(--orange), black var(--tone-darken)); }
+button.pill-warning { background: color-mix(in srgb, var(--orange) 14%, transparent); color: color-mix(in srgb, var(--orange), var(--tone-ink) var(--tone-darken)); }
 button:disabled { opacity: 0.4; cursor: default; }
 button:focus-visible, summary:focus-visible, [role="tab"]:focus-visible, [role="separator"]:focus-visible {
   outline: 2px solid var(--accent);
@@ -481,7 +488,7 @@ html[data-resizing] dialog.detail-panel { transition: none; }
 .round-head span { color: var(--secondary); font-size: 11px; display: inline-flex; gap: 4px; align-items: center; }
 .round-head button { margin-inline-start: auto; }
 .receipt { display: grid; gap: 6px; padding: 12px 14px; border-radius: 12px; background: var(--surface-2); }
-.receipt-status { display: inline-flex; align-items: center; gap: 6px; color: color-mix(in srgb, var(--tone), black var(--tone-darken)); font-size: 12px; font-weight: 600; }
+.receipt-status { display: inline-flex; align-items: center; gap: 6px; color: color-mix(in srgb, var(--tone), var(--tone-ink) var(--tone-darken)); font-size: 12px; font-weight: 600; }
 .receipt code { font-size: 12px; overflow-wrap: anywhere; }
 .receipt .stale { display: flex; align-items: center; gap: 5px; color: var(--orange); }
 .receipt .output { padding: 8px 10px; border-radius: 8px; background: var(--fill); font-size: 11.5px; }
@@ -722,7 +729,7 @@ dialog.detail-panel { container: panel / inline-size; }
   margin: 0 auto;
   padding: 0 var(--page-margin) var(--page-margin);
 }
-.banner { display: flex; align-items: center; gap: 10px; padding: 12px 14px 12px 16px; border-radius: 14px; background: color-mix(in srgb, var(--orange) 10%, transparent); color: color-mix(in srgb, var(--orange), black var(--tone-darken)); font-size: 12.5px; animation: reveal 400ms var(--ease-out); }
+.banner { display: flex; align-items: center; gap: 10px; padding: 12px 14px 12px 16px; border-radius: 14px; background: color-mix(in srgb, var(--orange) 10%, transparent); color: color-mix(in srgb, var(--orange), var(--tone-ink) var(--tone-darken)); font-size: 12.5px; animation: reveal 400ms var(--ease-out); }
 .banner > span { flex: 1; overflow-wrap: anywhere; }
 .banner svg { flex: none; width: 15px; height: 15px; }
 .page-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px 24px; padding: 12px 0 8px 6px; animation: rise 520ms var(--ease-out) both; }
@@ -923,7 +930,7 @@ dialog.detail-panel { container: panel / inline-size; }
 @media (hover: hover) { .mission:not([data-expanded]):hover { box-shadow: inset 0 0 0 1px var(--hairline-strong), 0 6px 20px -12px color-mix(in srgb, var(--lift), black 10%); } }
 .mission-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .mission[data-expanded] .mission-head { cursor: pointer; }
-.mission-icon { display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 10px; background: color-mix(in srgb, var(--tone, var(--accent)) 12%, transparent); color: color-mix(in srgb, var(--tone, var(--accent)), black var(--tone-darken)); }
+.mission-icon { display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 10px; background: color-mix(in srgb, var(--tone, var(--accent)) 12%, transparent); color: color-mix(in srgb, var(--tone, var(--accent)), var(--tone-ink) var(--tone-darken)); }
 .mission[data-state="active"] { --tone: var(--accent); }
 .mission[data-state="done"] { --tone: var(--green); }
 .mission[data-state="abandoned"] { --tone: var(--secondary); }
@@ -970,7 +977,7 @@ dialog.detail-panel { container: panel / inline-size; }
 .track { display: grid; grid-template-columns: repeat(var(--steps), minmax(0, 1fr)); padding: 8px 0 0; --passed: var(--label); }
 .mission:not([data-state="active"]) .track { --passed: var(--secondary); }
 .track > li { position: relative; display: grid; justify-items: center; gap: 8px; min-width: 0; }
-.track > li + li::before { content: ""; position: absolute; top: 12px; right: calc(50% + 16px); width: calc(100% - 32px); height: 2px; border-radius: 2px; background: var(--quaternary); transition: background-color 400ms ease-out; }
+.track > li + li::before { content: ""; position: absolute; top: 12px; right: calc(50% + 16px); width: calc(100% - 32px); height: 2px; border-radius: 2px; background: var(--track); transition: background-color 400ms ease-out; }
 .track > li[data-pos="past"] + li::before, .track > li[data-pos="past"] + li[data-pos="now"]::before { background: color-mix(in srgb, var(--passed) 55%, transparent); }
 .track-node b {
   display: grid;
@@ -978,7 +985,7 @@ dialog.detail-panel { container: panel / inline-size; }
   width: 26px;
   height: 26px;
   border-radius: 50%;
-  box-shadow: inset 0 0 0 1.5px var(--quaternary);
+  box-shadow: inset 0 0 0 1.5px var(--track);
   color: var(--secondary);
   font-size: 11px;
   font-weight: 600;
@@ -999,7 +1006,7 @@ dialog.detail-panel { container: panel / inline-size; }
 }
 .track > li[data-pos="stopped"] .track-node b { background: var(--secondary); box-shadow: none; color: var(--surface); }
 .track[data-abandoned] > li[data-pos="past"] .track-node b, .track[data-abandoned] > li[data-pos="stopped"] .track-node b { background: transparent; box-shadow: inset 0 0 0 1.5px var(--tertiary); color: var(--tertiary); }
-.track > li[data-pos="now"] .track-node b { background: var(--accent); box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 16%, transparent); color: #fff; animation: halo-accent 2.4s var(--ease-in-out) infinite; }
+.track > li[data-pos="now"] .track-node b { background: linear-gradient(to bottom, rgb(255 255 255 / 0.34), rgb(255 255 255 / 0) 62%), var(--accent); box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 16%, transparent); color: #fff; animation: halo-accent 2.4s var(--ease-in-out) infinite; }
 @keyframes halo-accent { 50% { box-shadow: 0 0 0 8px color-mix(in srgb, var(--accent) 6%, transparent); } }
 .track-name { max-width: 100%; padding-inline: 4px; color: var(--secondary); font-size: 11px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
 .track > li[data-current] .track-name { font-weight: 600; }

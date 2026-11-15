@@ -2,12 +2,14 @@ import type { Job, CrewEvent } from '../../bridge/jobs.ts';
 import type { ClaudeSession } from '../../bridge/claude.ts';
 import type { Mission } from '../../bridge/missions.ts';
 import type { Config, Preset, PresetName, RoleInfo, RoleSettings, Worker, WorkerAgent } from '../../bridge/config.ts';
+import type { ModelChoice } from '../../bridge/tiers.ts';
 import type { Usage } from '../../bridge/usage.ts';
 
 export type BoardJob = Omit<Job, 'prompt' | 'instructions'> & Partial<Pick<Job, 'prompt' | 'instructions'>>;
 export type { CrewEvent, ClaudeSession, Mission, WorkerAgent, Usage, Preset, PresetName };
 export type Roles = Config['roles'];
-export type Agents = Record<WorkerAgent, Worker & { enabled: boolean }>;
+/** An older daemon sends no models; the settings then take a typed model and effort. */
+export type Agents = Record<WorkerAgent, Worker & { enabled: boolean; models?: ModelChoice[] }>;
 export interface BoardState {
   now: number;
   jobs: BoardJob[];

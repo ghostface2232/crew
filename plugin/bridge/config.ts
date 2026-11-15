@@ -64,6 +64,8 @@ export interface RoleInfo {
   role: Role;
   kind: JobKind;
   parent?: Role;
+  /** Workers that cannot do the role's work, so they never take it: running the app needs a reviewer that runs commands. */
+  unable?: WorkerAgent[];
   label: string;
   summary: string;
 }
@@ -75,7 +77,7 @@ export const ROLE_INFO: RoleInfo[] = [
   { role: 'release', kind: 'delegate', parent: 'delegate', label: 'Release preparation', summary: 'Prepares a release: version, changelog, build, and the steps to publish. It does not publish or deploy.' },
   { role: 'debate', kind: 'delegate', parent: 'delegate', label: 'Debate', summary: 'Tests the lead\'s position on a hard decision, read-only.' },
   { role: 'review', kind: 'review', label: 'Cross-review', summary: 'Reviews a change by reading it and running checks.' },
-  { role: 'verify', kind: 'review', parent: 'review', label: 'Review that runs the app', summary: 'Reviews a change by starting the app in a snapshot of it.' },
+  { role: 'verify', kind: 'review', parent: 'review', label: 'Review that runs the app', summary: 'Reviews a change by starting the app in a snapshot of it.', unable: ['antigravity'] },
   { role: 'polish', kind: 'polish', label: 'Wording', summary: 'Improves UI strings, comments, and docs.' },
 ];
 export const roleInfo = (role: Role): RoleInfo => ROLE_INFO.find((info) => info.role === role)!;
@@ -115,8 +117,23 @@ export interface RoleAssignment {
   antigravity?: AgentSettings;
 }
 
-/** The workers among a role's holders, in order: the first takes a job the lead names no holder for. */
+/** The workers among a role's holders. */
 export const workersOf = (assignment: Pick<RoleAssignment, 'agents'>): WorkerAgent[] => assignment.agents.filter((agent): agent is WorkerAgent => agent !== LEAD);
+
+/** Workers in the order a role prefers them when the lead names none: wording goes to Antigravity first, other work to Codex. */
+export const preferenceOf = (role: Role): WorkerAgent[] => (roleInfo(role).kind === 'polish' ? ['antigravity', 'codex'] : ['codex', 'antigravity']);
+export const disabledAgents = (config: Pick<Config, 'antigravity'>): WorkerAgent[] => (config.antigravity.enabled ? [] : ['antigravity']);
+
+/** The role's worker holders that can take its work now, in its order of preference: the first takes a job the lead names no holder for. */
+export const workersFor = (role: Role, assignment: Pick<RoleAssignment, 'agents'>, disabled: WorkerAgent[] = []): WorkerAgent[] =>
+  preferenceOf(role).filter((agent) => assignment.agents.includes(agent) && !roleInfo(role).unable?.includes(agent) && !disabled.includes(agent));
+
+/**
+ * Who takes a job the lead names no holder for: the first worker that can, else Claude when it holds the role, else the
+ * first worker anyway, so the job is refused with the reason it cannot run.
+ */
+export const defaultHolder = (role: Role, assignment: Pick<RoleAssignment, 'agents'>, disabled: WorkerAgent[] = []): Holder =>
+  workersFor(role, assignment, disabled)[0] ?? (assignment.agents.includes(LEAD) ? LEAD : workersOf(assignment)[0]);
 
 export type RoleSettings = Partial<Record<Role, Partial<RoleAssignment>>>;
 
@@ -364,7 +381,7 @@ function resolvePresets(user: UserConfig): Pick<Config, 'preset' | 'presets'> {
  */
 export function effectiveRole(config: Config, role: Role, preset: PresetName | null = config.preset, agent?: WorkerAgent): { agent: WorkerAgent; model?: string; effort?: string } {
   const assignment = config.roles[role];
-  const holder = agent ?? workersOf(assignment)[0];
+  const holder = agent ?? workersFor(role, assignment)[0];
   if (!holder) throw new Error(`${role} is held by Claude, the lead, which does the work itself; no worker takes it.`);
   const own: AgentSettings = assignment[holder] ?? {};
   const chosen = preset ? config.presets[preset][holder] : undefined;

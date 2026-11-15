@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import { STAGES, normalizeTitle } from '../plugin/bridge/missions.ts';
 import type { Mission } from '../plugin/bridge/missions.ts';
 import { TIERS } from '../plugin/bridge/tiers.ts';
+import { defaultHolder, disabledAgents } from '../plugin/bridge/config.ts';
 import { addNews, clipped, Delivery, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, REPORT_PAGE_BYTES, textPage, unread } from '../plugin/bridge/delivery.ts';
 import type { Job } from '../plugin/bridge/jobs.ts';
 
@@ -209,7 +210,7 @@ test('a role the lead holds starts no worker, and a pick outside the holders is 
   const code = source.slice(source.indexOf('/** What the lead does with a role it holds itself'), source.indexOf('async function callTool'));
   const roles = { review: { agents: ['codex', 'claude'] }, polish: { agents: ['claude'] } };
   const pick = vm.runInNewContext(`const holderName = (a) => a === 'claude' ? 'you, Claude' : a; const holder = (r, t) => t[r].agents.join(' or '); ${stripTypeScriptTypes(code)}; pickHolder`, {
-    roles, LEAD: 'claude', loadConfig: () => ({ roles }),
+    roles, LEAD: 'claude', loadConfig: () => ({ roles, antigravity: { enabled: true } }), defaultHolder, disabledAgents,
   });
   assert.deepEqual({ ...pick('review', undefined) }, { agent: 'codex' });
   assert.match(pick('review', 'claude').yours, /no worker was started\. Run the crew:self-reviewer subagent[^]*other holders: codex/);

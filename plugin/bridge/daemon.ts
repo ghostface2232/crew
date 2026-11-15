@@ -17,6 +17,7 @@ import { isTerminal, Jobs } from './jobs.ts';
 import { missionPreset, Missions, STAGES } from './missions.ts';
 import type { Mission } from './missions.ts';
 import { runbook } from './runbook.ts';
+import { ANTIGRAVITY_MODELS, codexModels } from './tiers.ts';
 import { appendInstructions, instructionsFile, readInstructions, savePreset, saveRoles, writeInstructions } from './settings.ts';
 import { agentGaugeDir, fromCodexLimits, route as routeWork, UsageMonitor } from './usage.ts';
 import type { RouteKind } from './usage.ts';
@@ -203,8 +204,8 @@ function state() {
     claude: [...claude.sessions.values()],
     limits: { codex: codex.limits },
     agents: {
-      codex: { ...WORKERS.codex, enabled: true },
-      antigravity: { ...WORKERS.antigravity, enabled: live.antigravity.enabled },
+      codex: { ...WORKERS.codex, enabled: true, models: codexModels() },
+      antigravity: { ...WORKERS.antigravity, enabled: live.antigravity.enabled, models: ANTIGRAVITY_MODELS },
     },
     roles: live.roles,
     roleSettings: live.roleSettings,

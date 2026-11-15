@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { codexModel, defaultTier, pickModel, tierEffort, tierModel, tierOf } from '../plugin/bridge/tiers.ts';
+import { ANTIGRAVITY_MODELS, codexModel, codexModels, defaultTier, pickModel, tierEffort, tierModel, tierOf } from '../plugin/bridge/tiers.ts';
 
 function cache(t: { after: (fn: () => void) => void }, models: unknown): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-tiers-'));
@@ -53,4 +53,19 @@ test('effort is medium by default and high at the frontier; a question defaults 
   assert.deepEqual(['fast', 'light', 'standard', 'frontier'].map((tier) => tierEffort(tier as never)), ['medium', 'medium', 'medium', 'high']);
   assert.equal(defaultTier({}), 'standard');
   assert.equal(defaultTier({ ask: true }), 'light');
+});
+
+test('the settings offer the models Codex lists, with the efforts each accepts, and Antigravity\'s families', () => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-models-')), 'models_cache.json');
+  fs.writeFileSync(file, JSON.stringify({ models: [
+    { slug: 'gpt-6.1-sol', display_name: 'GPT-6.1-Sol', visibility: 'list', supported_reasoning_levels: [{ effort: 'low' }, { effort: 'high' }] },
+    { slug: 'codex-auto-review', display_name: 'Codex Auto Review', visibility: 'hide', supported_reasoning_levels: [{ effort: 'low' }] },
+    { slug: 'gpt-6-luna', visibility: 'list' },
+  ] }));
+  assert.deepEqual(codexModels(file), [
+    { id: 'gpt-6.1-sol', name: 'GPT-6.1-Sol', efforts: ['low', 'high'] },
+    { id: 'gpt-6-luna', name: 'gpt-6-luna', efforts: [] },
+  ]);
+  assert.deepEqual(codexModels(path.join(os.tmpdir(), 'no-such-cache.json')), []);
+  assert.deepEqual(ANTIGRAVITY_MODELS, [{ id: 'hydrogen', name: 'Hydrogen' }, { id: 'argon', name: 'Argon' }]);
 });

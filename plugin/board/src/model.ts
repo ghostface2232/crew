@@ -6,6 +6,9 @@ export const NAMES = { claude: 'Claude', codex: 'Codex', antigravity: 'Antigravi
 export const HOLDERS: Holder[] = ['codex', 'antigravity', 'claude'];
 export const holdersOf = (assignment?: Pick<RoleAssignment, 'agents'>): Holder[] => assignment?.agents ?? [];
 export const sortHolders = (agents: Holder[]) => HOLDERS.filter((holder) => agents.includes(holder));
+/** A role's worker holders in the order it prefers them when no holder is named, as config.ts preferenceOf has it. */
+export const preferredWorkers = (info: Pick<RoleInfo, 'kind'> | undefined, agents: Holder[]): WorkerAgent[] =>
+  (info?.kind === 'polish' ? ['antigravity', 'codex'] as const : ['codex', 'antigravity'] as const).filter((agent) => agents.includes(agent));
 /** An agent's settings without blank fields, or nothing when none is left: a blank field is one never set. */
 export function agentSettings(settings?: AgentSettings): AgentSettings | undefined {
   const kept = Object.fromEntries(Object.entries(settings ?? {}).filter(([, value]) => value !== undefined && value !== ''));

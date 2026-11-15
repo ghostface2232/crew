@@ -419,7 +419,7 @@ test('roles settings group every role, let one follow its parent, and save what 
   // A debate cannot be started from New Job, but it can be assigned here.
   await expect(page.getByRole('checkbox', { name: 'Debate: Codex' })).toBeVisible();
   await page.getByLabel('Implementation Codex reasoning effort').fill('high');
-  await expect(page.getByLabel('Refactoring Codex reasoning effort')).toHaveAttribute('placeholder', 'high');
+  await expect(page.getByLabel('Refactoring Codex reasoning effort')).toHaveAttribute('placeholder', 'high (same as Implementation)');
   await settingsPage(page, 'Review');
   await page.getByRole('region', { name: 'Review that runs the app' }).getByRole('checkbox', { name: 'Same as Cross-review' }).uncheck();
   await page.getByRole('checkbox', { name: 'Cross-review: Antigravity' }).check();
@@ -512,6 +512,48 @@ test('an agent turned off and on again gets its saved settings back', async ({ p
   await antigravity.check();
   await expect(page.getByLabel('Cross-review Antigravity model')).toHaveValue('gemini-y');
   await expect(page.getByText('Unsaved changes')).toHaveCount(0);
+});
+
+test('models and efforts are picked from what each agent offers, and a hand-written one stays', async ({ page, request }) => {
+  const data = fixture();
+  data.agents.codex.models = [{ id: 'gpt-sol', name: 'GPT Sol', efforts: ['low', 'high'] }, { id: 'gpt-luna', name: 'GPT Luna', efforts: ['low'] }];
+  data.agents.antigravity.models = [{ id: 'hydrogen', name: 'Hydrogen' }, { id: 'argon', name: 'Argon' }];
+  const config = resolveConfig({ roles: { delegate: { agents: ['codex', 'antigravity'], codex: { model: 'gpt-custom' } } } });
+  data.roles = config.roles;
+  data.roleSettings = config.roleSettings;
+  await request.post('/__push', { data: { type: 'state', data } });
+  await openSettings(page);
+  const model = page.getByLabel('Implementation Codex model');
+  await expect(model).toHaveValue('gpt-custom');
+  await model.selectOption('gpt-luna');
+  // The efforts follow the chosen model; a following role offers its parent's value as its blank.
+  const effort = page.getByLabel('Implementation Codex reasoning effort');
+  await expect(effort.locator('option')).toHaveText(['Agent default', 'low']);
+  await effort.selectOption('low');
+  await expect(page.getByLabel('Refactoring Codex reasoning effort').locator('option').first()).toHaveText('low (same as Implementation)');
+  await page.getByLabel('Implementation Antigravity model').selectOption('argon');
+  // Antigravity cannot run the app, so it is not offered for that review.
+  await settingsPage(page, 'Review');
+  const verify = page.getByRole('region', { name: 'Review that runs the app' });
+  await verify.getByRole('checkbox', { name: 'Same as Cross-review' }).uncheck();
+  await expect(page.getByRole('checkbox', { name: 'Review that runs the app: Antigravity' })).toBeDisabled();
+  await page.getByRole('button', { name: 'Save Roles' }).click();
+  await expect(page.getByText('Unsaved changes')).toHaveCount(0);
+  const calls = await (await request.get('/__requests')).json();
+  expect(calls.findLast((call: { route: string }) => call.route === '/api/roles').body).toEqual({
+    roles: { delegate: { agents: ['codex', 'antigravity'], codex: { model: 'gpt-luna', effort: 'low' }, antigravity: { model: 'argon' } }, verify: { agents: ['codex'] } },
+  });
+});
+
+test('New Job gives wording to Antigravity and other work to Codex when a role has both', async ({ page }) => {
+  const data = fixture();
+  data.roles = resolveConfig({ roles: { delegate: { agents: ['codex', 'antigravity'] }, polish: { agents: ['codex', 'antigravity'] } } }).roles;
+  await page.request.post('/__push', { data: { type: 'state', data } });
+  await newJob(page);
+  const assigned = page.getByRole('combobox', { name: 'Assigned to' });
+  await expect(assigned).toHaveValue('codex');
+  await page.getByRole('combobox', { name: 'Role', exact: true }).selectOption('polish');
+  await expect(assigned).toHaveValue('antigravity');
 });
 
 test('New Job picks among a role\'s worker holders, and a role only Claude holds starts from Claude', async ({ page, request }) => {

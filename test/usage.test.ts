@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { DEFAULT_ROLES, resolveConfig, ROLES } from '../plugin/bridge/config.ts';
+import { DEFAULT_ROLES, defaultHolder, resolveConfig, ROLES, workersFor } from '../plugin/bridge/config.ts';
 import { describeUsage, fromCodexLimits, openHistory, parseCache, projectExhaustion, route, STALE_MS, UsageMonitor, UsageTracker } from '../plugin/bridge/usage.ts';
 import type { Sample, Usage, UsageStatus } from '../plugin/bridge/usage.ts';
 
@@ -392,4 +392,20 @@ test('empty family names and empty alternatives match no model', () => {
     ])]));
     assert.equal(tracker.classify(raw, none, NOW).providers.find((p) => p.agent === 'antigravity')!.status, 'ok', groupLabel);
   }
+});
+
+test('with no holder named, wording goes to Antigravity and other work to Codex, past one that is disabled or cannot do it', () => {
+  const roles = resolveConfig({ roles: { delegate: { agents: ['codex', 'antigravity'] }, review: { agents: ['antigravity', 'codex'] }, polish: { agents: ['codex', 'antigravity', 'claude'] } } }).roles;
+  assert.equal(defaultHolder('delegate', roles.delegate), 'codex');
+  assert.equal(defaultHolder('polish', roles.polish), 'antigravity');
+  assert.equal(defaultHolder('polish', roles.polish, ['antigravity']), 'codex');
+  // verify follows review, but Antigravity cannot run the app.
+  assert.deepEqual(workersFor('verify', roles.verify), ['codex']);
+  const lone = resolveConfig({ roles: { verify: { agents: ['antigravity', 'claude'] }, debate: { agents: ['antigravity'] } } }).roles;
+  assert.equal(defaultHolder('verify', lone.verify), 'claude');
+  // With nothing able left, the first worker is named anyway, so the job is refused with its reason.
+  assert.equal(defaultHolder('debate', lone.debate, ['antigravity']), 'antigravity');
+  // route tries the role's preferred worker first.
+  assert.equal(route('polish', usageOf({}), roles).assignee, 'antigravity');
+  assert.deepEqual(route('polish', usageOf({}), roles).holders?.map((h) => h.agent), ['antigravity', 'codex', 'claude']);
 });

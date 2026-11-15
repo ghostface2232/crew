@@ -3,7 +3,7 @@ import { ArrowUp, CircleAlert, Send } from 'lucide-react';
 import type { Role, WorkerAgent } from '../../bridge/config.ts';
 import type { BoardJob, Mission, Snapshot } from './types.ts';
 import { request } from './api.ts';
-import { holdersOf, projectOf, rolesOf } from './model.ts';
+import { holdersOf, preferredWorkers, projectOf, rolesOf } from './model.ts';
 import { board } from './store.ts';
 import { Dialog, Icon, Segmented } from './ui.tsx';
 import styles from './Dispatch.module.css';
@@ -35,9 +35,12 @@ export function Dispatch({
   const kind = choices.find((info) => info.role === role)?.kind ?? 'delegate';
   // The role's holders that are workers; Claude holding it means the lead does it, from a Claude session.
   const assignment = state.roles[intent === 'question' ? 'delegate' : role];
-  const workers = holdersOf(assignment).filter((holder): holder is WorkerAgent => holder in state.agents);
+  const info = rolesOf(state).find((other) => other.role === (intent === 'question' ? 'delegate' : role));
+  const workers = preferredWorkers(info, holdersOf(assignment)).filter((holder) => holder in state.agents);
   const [picked, setPicked] = useState<WorkerAgent | ''>('');
-  const agent = picked && workers.includes(picked) ? picked : workers[0];
+  // Unless another is chosen, the first that can take the work, as the daemon would pick.
+  const able = workers.filter((holder) => state.agents[holder].enabled && !info?.unable?.includes(holder));
+  const agent = picked && workers.includes(picked) ? picked : able[0] ?? workers[0];
   const worker = agent ? state.agents[agent] : undefined;
   const leadOnly = Boolean(assignment) && !workers.length;
   const missions = state.missions.filter((mission) => mission.state === 'active' && projectOf(mission) === cwd.trim());

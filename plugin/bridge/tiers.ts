@@ -63,6 +63,36 @@ export function codexModel(family: string, cache = codexCache()): string | undef
   return matches[0];
 }
 
+/** A model the settings offer for an agent, with the efforts it accepts (Antigravity takes none). */
+export interface ModelChoice {
+  id: string;
+  name: string;
+  efforts?: string[];
+}
+
+/** The models this Codex account lists, in Codex's own order, read from its model cache; none without a cache. */
+export function codexModels(cache = codexCache()): ModelChoice[] {
+  let listed: unknown;
+  try {
+    listed = JSON.parse(fs.readFileSync(cache, 'utf8'));
+  } catch {
+    return [];
+  }
+  const models = Array.isArray(listed) ? listed : (listed as { models?: unknown })?.models;
+  if (!Array.isArray(models)) return [];
+  return models
+    .filter((m) => typeof m?.slug === 'string' && m.visibility !== 'hide')
+    .map((m) => ({
+      id: m.slug as string,
+      name: typeof m.display_name === 'string' ? m.display_name : m.slug,
+      efforts: Array.isArray(m.supported_reasoning_levels) ? m.supported_reasoning_levels.map((level: { effort?: unknown }) => level?.effort).filter((e: unknown): e is string => typeof e === 'string') : [],
+    }));
+}
+
+/** Antigravity's models are matched by family against the session's own list, so its choices are the families. */
+export const ANTIGRAVITY_MODELS: ModelChoice[] = [...new Set(Object.values(TIER_FAMILIES.antigravity))]
+  .map((family) => ({ id: family, name: family[0].toUpperCase() + family.slice(1) }));
+
 /** The model a tier gives an agent's job. For Antigravity it is the family, matched against the session's own list. */
 export function tierModel(agent: WorkerAgent, tier: Tier, cache?: string): string | undefined {
   const family = TIER_FAMILIES[agent][tier];

@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { LEAD, WORKERS } from './config.ts';
-import type { Config, Role } from './config.ts';
+import { LEAD, roleInfo, WORKERS, workersFor } from './config.ts';
+import type { Config, Role, WorkerAgent } from './config.ts';
 import type { Agent } from './jobs.ts';
 
 /**
@@ -355,7 +355,7 @@ const name = (agent: Agent) => (agent === 'claude' ? 'Claude' : WORKERS[agent].n
  * It only ever answers with the role's holder or the lead: it never gives an agent a role the user
  * did not assign. A stale or unknown reading changes nothing, so the default roles are followed.
  */
-export function route(kind: RouteKind, usage: Usage, roles: Config['roles'], disabled: Agent[] = []): RouteDecision {
+export function route(kind: RouteKind, usage: Usage, roles: Config['roles'], disabled: WorkerAgent[] = []): RouteDecision {
   const of = (agent: Agent) => usage.providers.find((p) => p.agent === agent);
   const status = (agent: Agent): UsageStatus => of(agent)?.status ?? 'unknown';
   const short = (agent: Agent) => status(agent) === 'tight' || status(agent) === 'exhausted';
@@ -371,7 +371,7 @@ export function route(kind: RouteKind, usage: Usage, roles: Config['roles'], dis
 
   if (kind === 'lead') {
     // The engineer is the first worker holding implementation: Claude may hold it too, and cannot hand work to itself.
-    const engineer = roles.delegate.agents.find((agent) => agent !== LEAD && !disabled.includes(agent));
+    const engineer = workersFor('delegate', roles.delegate, disabled)[0];
     if (status(LEAD) === 'exhausted') {
       // Handing the session over is not undone lightly: only to an engineer measured to have room.
       const takeover = engineer === 'codex' && status('codex') === 'ok';
@@ -384,11 +384,13 @@ export function route(kind: RouteKind, usage: Usage, roles: Config['roles'], dis
     return plain(LEAD, status(LEAD) === 'ok' ? `${name(LEAD)} has room; lead as usual.` : `${name(LEAD)}'s usage is not known (${of(LEAD)?.reason ?? 'no reading.'}); lead as usual.`);
   }
 
-  const holders = roles[kind].agents;
+  // The role's preferred worker first, the lead last.
+  const holders = [...workersFor(kind, roles[kind]), ...roles[kind].agents.filter((agent) => agent === LEAD || roleInfo(kind).unable?.includes(agent))];
   const listed = holders.map((agent) => ({ agent, status: status(agent) }));
   // A holder that cannot do this kind of work is never suggested: a disabled agent, or one that cannot run the app for verify.
-  const able = (agent: Agent) => agent === LEAD || (!disabled.includes(agent) && (kind !== 'verify' || WORKERS[agent].reviewerRunsGit));
-  const usable = holders.filter(able);
+  const usable: Agent[] = workersFor(kind, roles[kind], disabled);
+  if (roles[kind].agents.includes(LEAD)) usable.push(LEAD);
+  const able = (agent: Agent) => usable.includes(agent);
   if (!usable.length) {
     const who = holders.map(name).join(' and ');
     return { kind, assignee: LEAD, reason: `${who} cannot take ${kind} work now (disabled, or unable to run the app). Do it yourself, and say that the cross-check was skipped.`, fallback: [], degraded: true, deferUntil: null, holders: listed };

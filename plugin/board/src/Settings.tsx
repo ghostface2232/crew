@@ -321,14 +321,40 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
   };
   // An older daemon may not know every agent; Claude is always one.
   const holders = HOLDERS.filter((holder) => holder === 'claude' || holder in state.agents);
+  const models = (agent: WorkerAgent) => state.agents[agent]?.models ?? [];
   const holderLabel = (holder: Holder) => holder === 'claude' ? 'Claude (the lead)' : `${state.agents[holder].name}${state.agents[holder].enabled ? '' : ' (disabled)'}`;
   const roleGroup = (role: RoleInfo) => {
     const own = roles[role.role] ?? {};
     const parentLabel = info.find((other) => other.role === role.parent)?.label ?? role.parent;
     const following = Boolean(role.parent && !own.agents);
     const shown = resolved[role.role];
-    // What a field shows when left blank: the parent's setting for that agent while the role follows it.
-    const inherited = (agent: WorkerAgent, key: keyof AgentSettings) => (following && resolved[role.parent!]?.[agent]?.[key]) || 'Agent default';
+    // What a field means when left blank: the parent's setting for that agent while the role follows it.
+    const inherited = (agent: WorkerAgent, key: keyof AgentSettings) => (following ? resolved[role.parent!]?.[agent]?.[key] : undefined);
+    const blank = (agent: WorkerAgent, key: keyof AgentSettings) => {
+      const value = inherited(agent, key);
+      return value ? `${models(agent).find((model) => model.id === value)?.name ?? value} (same as ${parentLabel})` : 'Agent default';
+    };
+    /**
+     * A model or effort picked from what the agent offers, or typed when the daemon offers nothing. A value written by
+     * hand that is not offered stays a choice, so opening the settings never changes it.
+     */
+    const field = (agent: WorkerAgent, key: keyof AgentSettings) => {
+      const label = `${role.label} ${NAMES[agent]} ${key === 'model' ? 'model' : 'reasoning effort'}`;
+      const value = own[agent]?.[key] ?? '';
+      const change = (next: string) => editSetting(role.role, agent, key, next);
+      const offered = models(agent);
+      if (!offered.length) return <input aria-label={label} value={value} placeholder={blank(agent, key)} onChange={(event) => change(event.target.value)} />;
+      const model = own[agent]?.model || inherited(agent, 'model');
+      const efforts = offered.find((choice) => choice.id === model)?.efforts ?? [...new Set(offered.flatMap((choice) => choice.efforts ?? []))];
+      const options = key === 'model' ? offered.map((choice) => [choice.id, choice.name]) : efforts.map((effort) => [effort, effort]);
+      if (value && !options.some(([id]) => id === value)) options.push([value, value]);
+      return (
+        <select aria-label={label} value={value} onChange={(event) => change(event.target.value)}>
+          <option value="">{blank(agent, key)}</option>
+          {options.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+        </select>
+      );
+    };
     const workers = (shown?.agents ?? []).filter((holder): holder is WorkerAgent => holder !== 'claude' && holder in state.agents);
     return (
       <section className={styles.group} key={role.role} aria-label={role.label}>
@@ -351,6 +377,8 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
             <span className={styles.checks} role="group" aria-labelledby={`${role.role}-agents`}>
               {holders.map((holder) => {
                 const held = shown?.agents.includes(holder) ?? false;
+                // An agent that cannot do the role's work is not offered, though one already held can be turned off.
+                const unable = holder !== 'claude' && Boolean(role.unable?.includes(holder));
                 return (
                   <label key={holder} className={styles.check}>
                     <input
@@ -358,7 +386,7 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
                       aria-label={`${role.label}: ${holderLabel(holder)}`}
                       checked={held}
                       // A role keeps at least one holder, and a following role shows its parent's.
-                      disabled={following || (held && shown?.agents.length === 1)}
+                      disabled={following || (held && shown?.agents.length === 1) || (unable && !held)}
                       onChange={() => toggleHolder(role, holder)}
                     />
                     {holderLabel(holder)}
@@ -371,13 +399,13 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
             <Fragment key={agent}>
               <label className={styles.row}>
                 <span>{NAMES[agent]} model</span>
-                <input aria-label={`${role.label} ${NAMES[agent]} model`} value={own[agent]?.model ?? ''} placeholder={inherited(agent, 'model')} onChange={(event) => editSetting(role.role, agent, 'model', event.target.value)} />
+                {field(agent, 'model')}
               </label>
               {/* Antigravity has no effort setting. */}
               {agent === 'codex' && (
                 <label className={styles.row}>
                   <span>{NAMES[agent]} reasoning effort</span>
-                  <input aria-label={`${role.label} ${NAMES[agent]} reasoning effort`} value={own[agent]?.effort ?? ''} placeholder={inherited(agent, 'effort')} onChange={(event) => editSetting(role.role, agent, 'effort', event.target.value)} />
+                  {field(agent, 'effort')}
                 </label>
               )}
             </Fragment>
@@ -419,8 +447,9 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
               {kind && info.filter((role) => role.kind === kind).map(roleGroup)}
               {kind && (
                 <p className={styles.footnote}>
-                  The lead picks one of a role's holders for each job, using Codex before Antigravity when none is named. Claude means the
-                  lead does the work itself or in a subagent. Each agent's model and effort apply when it runs the role.
+                  The lead picks one of a role's holders for each job. When none is named, Antigravity takes wording and Codex other
+                  work, passing over one that is disabled or cannot do the role. Claude means the lead does the work itself or in a
+                  subagent. Each agent's model and effort apply when it runs the role.
                 </p>
               )}
               {current === 'presets' && (

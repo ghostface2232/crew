@@ -1,7 +1,9 @@
-import type { Role, RoleAssignment, RoleInfo, RoleSettings } from '../../bridge/config.ts';
+import type { Holder, Role, RoleAssignment, RoleInfo, RoleSettings } from '../../bridge/config.ts';
 import type { BoardJob, BoardState, ClaudeSession, Mission } from './types.ts';
 
 export const NAMES = { claude: 'Claude', codex: 'Codex', antigravity: 'Antigravity' };
+/** Every holder of a role, the default first, as config.ts holdersOf lists them. */
+export const holdersOf = (assignment?: Pick<RoleAssignment, 'agent' | 'also'>): Holder[] => (assignment ? [assignment.agent, ...(assignment.also ?? [])] : []);
 /** The roles a daemon that predates the role registry knows; it sends no roleInfo. */
 const LEGACY_ROLES: RoleInfo[] = [
   { role: 'delegate', kind: 'delegate', label: 'Implementation', summary: 'Builds separable pieces of a change.' },
@@ -22,9 +24,15 @@ export const jobRole = (job: Pick<BoardJob, 'role' | 'kind' | 'debate' | 'runsAp
 export function resolveDraft(info: RoleInfo[], draft: RoleSettings, saved: BoardState['roles']): Partial<Record<Role, RoleAssignment>> {
   const resolved: Partial<Record<Role, RoleAssignment>> = {};
   for (const { role, parent } of info) {
-    const { agent, ...own } = Object.fromEntries(Object.entries(draft[role] ?? {}).filter(([, value]) => value)) as Partial<RoleAssignment>;
+    const { agent, ...own } = Object.fromEntries(Object.entries(draft[role] ?? {}).filter(([, value]) => value !== undefined && value !== '')) as Partial<RoleAssignment>;
     const base = agent ? { agent } : parent ? resolved[parent] : saved[role] && { agent: saved[role].agent };
-    if (base) resolved[role] = { ...base, ...own };
+    if (!base) continue;
+    const merged: RoleAssignment = { ...base, ...own };
+    // Each holder counts once, and the default is not listed again among the others.
+    const also = [...new Set(merged.also ?? [])].filter((holder) => holder !== merged.agent);
+    if (also.length) merged.also = also;
+    else delete merged.also;
+    resolved[role] = merged;
   }
   return resolved;
 }

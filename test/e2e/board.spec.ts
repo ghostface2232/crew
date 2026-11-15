@@ -1,4 +1,5 @@
 import { test, expect, type Locator, type Page } from '@playwright/test';
+import { resolveConfig } from '../../plugin/bridge/config.ts';
 import { fixture, job, NOW, TEST_TOKEN } from './fixtures.ts';
 
 test.beforeEach(async ({ page, request }) => {
@@ -463,6 +464,48 @@ test('on a phone, settings move between the list and a page with focus kept, and
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Show sidebar' })).toBeFocused();
+});
+
+test('a role can hold Claude and further holders, and changing them back is no change', async ({ page, request }) => {
+  await openSettings(page, 'Review');
+  const also = page.getByRole('button', { name: 'Cross-review also Claude' });
+  await expect(also).toHaveAttribute('aria-pressed', 'false');
+  await also.click();
+  await expect(also).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByText('Unsaved changes')).toBeVisible();
+  await also.click();
+  await expect(page.getByText('Unsaved changes')).toHaveCount(0);
+  // The verify role follows review, its holders included, until it is given its own.
+  await also.click();
+  await expect(page.getByRole('button', { name: 'Review that runs the app also Claude' })).toHaveAttribute('aria-pressed', 'true');
+  await settingsPage(page, 'Edit');
+  await page.getByLabel('Wording agent').selectOption('claude');
+  await page.getByRole('button', { name: 'Save Roles' }).click();
+  await expect(page.getByText('Unsaved changes')).toHaveCount(0);
+  const calls = await (await request.get('/__requests')).json();
+  expect(calls.findLast((call: { route: string }) => call.route === '/api/roles').body).toEqual({
+    roles: { review: { also: ['claude'] }, polish: { agent: 'claude' } },
+  });
+});
+
+test('New Job picks among a role\'s worker holders, and a role only Claude holds starts from Claude', async ({ page, request }) => {
+  const data = fixture();
+  data.roles = resolveConfig({ roles: { delegate: { agent: 'codex', also: ['antigravity'] }, polish: { agent: 'claude' } } }).roles;
+  await request.post('/__push', { data: { type: 'state', data } });
+  await newJob(page);
+  await page.getByRole('textbox', { name: 'Project directory' }).fill('/workspace/Crew');
+  const assigned = page.getByRole('combobox', { name: 'Assigned to' });
+  await expect(assigned).toHaveValue('codex');
+  await assigned.selectOption('antigravity');
+  await page.getByRole('textbox', { name: 'New job instructions' }).fill('Build the piece');
+  await page.getByRole('combobox', { name: 'Role', exact: true }).selectOption('polish');
+  await expect(page.getByText('Claude, the lead', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Send Job' })).toBeDisabled();
+  await page.getByRole('combobox', { name: 'Role', exact: true }).selectOption('delegate');
+  await page.getByRole('button', { name: 'Send Job' }).click();
+  await expect(page.getByRole('button', { name: 'Close details' })).toBeVisible();
+  const calls = await (await request.get('/__requests')).json();
+  expect(calls.find((call: { route: string }) => call.route === '/api/jobs').body).toMatchObject({ role: 'delegate', agent: 'antigravity' });
 });
 
 test('each project has its own instructions page', async ({ page, request }) => {

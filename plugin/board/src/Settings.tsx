@@ -2,10 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { ChevronLeft, ChevronRight, FileText, Folder, Hammer, Info, ShieldCheck, SlidersHorizontal, Type } from 'lucide-react';
 import type { Preset, PresetName, Snapshot } from './types.ts';
-import type { JobKind, Role, RoleAssignment, RoleInfo, RoleSettings } from '../../bridge/config.ts';
+import type { Holder, JobKind, Role, RoleAssignment, RoleInfo, RoleSettings } from '../../bridge/config.ts';
 import { request } from './api.ts';
 import { board } from './store.ts';
-import { knownProjects, projectNames, resolveDraft, rolesOf } from './model.ts';
+import { knownProjects, NAMES, projectNames, resolveDraft, rolesOf } from './model.ts';
 import { AgentMark, CloseButton, Dialog, Icon } from './ui.tsx';
 import styles from './Settings.module.css';
 
@@ -43,7 +43,7 @@ const editableRoles = (state: Snapshot): RoleSettings => structuredClone(state.r
 /** Two role tables say the same when every role sets the same fields, whatever the order they were written in. */
 function sameRoles(a: RoleSettings, b: RoleSettings) {
   const canonical = (table: RoleSettings) => JSON.stringify(Object.entries(table)
-    .map(([role, entry]) => [role, Object.entries(entry ?? {}).filter(([, value]) => value).sort()] as const)
+    .map(([role, entry]) => [role, Object.entries(entry ?? {}).filter(([, value]) => value !== undefined && value !== '').sort()] as const)
     .filter(([, entry]) => entry.length)
     .sort());
   return canonical(a) === canonical(b);
@@ -154,6 +154,24 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
       const entry = next ? { ...rest, [key]: next } : rest;
       const { [role]: _entry, ...others } = current;
       return Object.keys(entry).length ? { ...others, [role]: entry } : others;
+    });
+  /**
+   * Turns one of a role's further holders on or off. Back to what was saved, the list is written as it was saved;
+   * a role following its parent that comes back to its parent's list follows it again.
+   */
+  const toggleAlso = (role: RoleInfo, holder: Holder) =>
+    setRoles((current) => {
+      const own = current[role.role] ?? {};
+      const following = role.parent && !own.agent ? resolved[role.parent]?.also ?? [] : [];
+      const shown = own.also ?? following;
+      const next = shown.includes(holder) ? shown.filter((other) => other !== holder) : [...shown, holder];
+      const saved = savedRoles[role.role]?.also;
+      const same = (a: Holder[], b: Holder[]) => a.length === b.length && a.every((other, index) => other === b[index]);
+      const value = same(next, saved ?? following) ? saved : next.length || following.length ? next : undefined;
+      const { also: _old, ...rest } = own;
+      const entry = value ? { ...rest, also: value } : rest;
+      const { [role.role]: _entry, ...others } = current;
+      return Object.keys(entry).length ? { ...others, [role.role]: entry } : others;
     });
   const savePreset = async () => {
     if (presetLock.current) return;
@@ -288,6 +306,7 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
       </button>
     );
   };
+  const holders: Holder[] = [...(Object.keys(state.agents) as Holder[]).sort(), 'claude'];
   const roleGroup = (role: RoleInfo) => {
     const own = roles[role.role] ?? {};
     const inherited = role.parent ? resolved[role.parent] : undefined;
@@ -310,8 +329,26 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
               {Object.entries(state.agents).sort(([a], [b]) => a.localeCompare(b)).map(([id, agent]) => (
                 <option key={id} value={id}>{agent.name}{agent.enabled ? '' : ' (disabled)'}</option>
               ))}
+              <option value="claude">Claude (the lead)</option>
             </select>
           </label>
+          <div className={styles.row}>
+            <span id={`${role.role}-also`}>Also</span>
+            <span className={styles.chips} role="group" aria-labelledby={`${role.role}-also`}>
+              {holders.filter((holder) => holder !== shown?.agent).map((holder) => (
+                <button
+                  type="button"
+                  key={holder}
+                  className={styles.chip}
+                  aria-pressed={(shown?.also ?? []).includes(holder)}
+                  aria-label={`${role.label} also ${NAMES[holder]}`}
+                  onClick={() => toggleAlso(role, holder)}
+                >
+                  {NAMES[holder]}
+                </button>
+              ))}
+            </span>
+          </div>
           <label className={styles.row}>
             <span>Model</span>
             <input aria-label={`${role.label} model`} value={own.model ?? ''} placeholder={(following && inherited?.model) || 'Agent default'} onChange={(event) => editRole(role.role, 'model', event.target.value)} />
@@ -355,6 +392,12 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
             </header>
             <div className={styles.body}>
               {kind && info.filter((role) => role.kind === kind).map(roleGroup)}
+              {kind && (
+                <p className={styles.footnote}>
+                  The lead picks one of a role's holders for each job, the first by default. Claude means the lead does the work
+                  itself or in a subagent. A role's model and effort apply to its first holder.
+                </p>
+              )}
               {current === 'presets' && (
                 <>
                   <section className={styles.group}>

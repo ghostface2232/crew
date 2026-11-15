@@ -1,9 +1,9 @@
 import { useRef, useState } from 'react';
 import { ArrowUp, CircleAlert, Send } from 'lucide-react';
-import type { Role } from '../../bridge/config.ts';
+import type { Role, WorkerAgent } from '../../bridge/config.ts';
 import type { BoardJob, Mission, Snapshot } from './types.ts';
 import { request } from './api.ts';
-import { projectOf, rolesOf } from './model.ts';
+import { holdersOf, projectOf, rolesOf } from './model.ts';
 import { board } from './store.ts';
 import { Dialog, Icon, Segmented } from './ui.tsx';
 import styles from './Dispatch.module.css';
@@ -33,8 +33,13 @@ export function Dispatch({
   // A debate needs the lead to answer each round, so it is not started from here.
   const choices = rolesOf(state).filter((info) => info.role !== 'debate');
   const kind = choices.find((info) => info.role === role)?.kind ?? 'delegate';
-  const agent = state.roles[intent === 'question' ? 'delegate' : role]?.agent;
+  // The role's holders that are workers; Claude holding it means the lead does it, from a Claude session.
+  const assignment = state.roles[intent === 'question' ? 'delegate' : role];
+  const workers = holdersOf(assignment).filter((holder): holder is WorkerAgent => holder in state.agents);
+  const [picked, setPicked] = useState<WorkerAgent | ''>('');
+  const agent = picked && workers.includes(picked) ? picked : workers[0];
   const worker = agent ? state.agents[agent] : undefined;
+  const leadOnly = Boolean(assignment) && !workers.length;
   const missions = state.missions.filter((mission) => mission.state === 'active' && projectOf(mission) === cwd.trim());
   const dirty = intent !== 'command' || destination !== 'project' || text !== '' || targets !== ''
     || role !== 'delegate' || directory !== initialDirectory.current;
@@ -53,6 +58,8 @@ export function Dispatch({
     try {
       if (!(intent === 'information' && target === 'global') && !cwd.trim())
         throw new Error('Enter a project directory first.');
+      if (intent !== 'information' && leadOnly)
+        throw new Error('Claude, the lead, holds this role: start it from a Claude session.');
       if (intent !== 'information' && !worker?.enabled)
         throw new Error('The assigned agent is unavailable. Choose an enabled agent in Settings.');
       const allowed = targets
@@ -74,8 +81,10 @@ export function Dispatch({
         close();
         return;
       }
+      // The default holder is the daemon's own choice; another one is named.
+      const named = agent && agent !== assignment?.agent ? { agent } : {};
       if (intent === 'question') {
-        const job = await request<BoardJob>('/api/jobs', { kind: 'delegate', ask: true, task, cwd: cwd.trim() });
+        const job = await request<BoardJob>('/api/jobs', { kind: 'delegate', ask: true, task, cwd: cwd.trim(), ...named });
         openJob(job.id);
         close();
         return;
@@ -88,6 +97,7 @@ export function Dispatch({
         project: cwd.trim(),
         task,
         isolation: 'worktree',
+        ...named,
         ...(kind === 'review' ? { review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } } : {}),
         ...(kind === 'polish' ? { targets: allowed } : {}),
       });
@@ -136,12 +146,23 @@ export function Dispatch({
                   ))}
                 </select>
               </label>
-              <div className="field">
-                <span>Assigned to</span>
-                <p className={styles.worker}>
-                  {worker ? `${worker.name}${worker.enabled ? '' : ' (disabled)'}` : 'No agent assigned'}
-                </p>
-              </div>
+              {workers.length > 1 ? (
+                <label className="field">
+                  <span>Assigned to</span>
+                  <select value={agent} onChange={(event) => setPicked(event.target.value as WorkerAgent)}>
+                    {workers.map((id) => (
+                      <option key={id} value={id}>{state.agents[id].name}{state.agents[id].enabled ? '' : ' (disabled)'}</option>
+                    ))}
+                  </select>
+                </label>
+              ) : (
+                <div className="field">
+                  <span>Assigned to</span>
+                  <p className={styles.worker}>
+                    {worker ? `${worker.name}${worker.enabled ? '' : ' (disabled)'}` : leadOnly ? 'Claude, the lead' : 'No agent assigned'}
+                  </p>
+                </div>
+              )}
             </div>
           )}
           {intent === 'command' && kind === 'polish' && (

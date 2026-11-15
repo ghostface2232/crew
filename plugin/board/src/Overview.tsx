@@ -1,7 +1,8 @@
 import { ArrowUpRight, BellDot, CircleAlert, CircleCheck, CircleDot, CircleDotDashed, Layers, MessagesSquare, Plus, Search, SquareStack } from 'lucide-react';
 import type { ProviderUsage } from '../../bridge/usage.ts';
+import type { Holder } from '../../bridge/config.ts';
 import type { BoardJob, ClaudeSession, CrewEvent, Mission, Snapshot, WorkerAgent } from './types.ts';
-import { NAMES, projectOf, relativeDuration, rolesOf, usageWindowName, unsettled } from './model.ts';
+import { holdersOf, NAMES, projectOf, relativeDuration, rolesOf, usageWindowName, unsettled } from './model.ts';
 import { AgentMark, Chip, ContentPanel, EmptyState, Icon, useNow } from './ui.tsx';
 import { JobRow, MissionPanel, SessionView } from './Missions.tsx';
 
@@ -154,14 +155,11 @@ export function AgentOverview({ state, project }: { state: Snapshot; project: st
         {agents.map((agent) => {
           const { count, mark, title } = agentActivity(state, project, agent);
           const noun = agent === 'claude' ? 'session' : 'job';
-          const role =
-            agent === 'claude'
-              ? 'Lead'
-              // A role that follows its parent to the same agent adds nothing to say.
-              : rolesOf(state)
-                  .filter(({ role, parent }) => state.roles[role]?.agent === agent && !(parent && state.roles[parent]?.agent === agent))
-                  .map(({ label }) => label)
-                  .join(' · ');
+          // A role that follows its parent to the same holders adds nothing to say.
+          const held = rolesOf(state)
+            .filter(({ role, parent }) => holdersOf(state.roles[role]).includes(agent as Holder) && !(parent && holdersOf(state.roles[parent]).includes(agent as Holder)))
+            .map(({ label }) => label);
+          const role = [...(agent === 'claude' ? ['Lead'] : []), ...held].join(' · ');
           return (
             <li className="card agent-card" key={agent} data-agent={agent}>
               <div className="agent-card-head">

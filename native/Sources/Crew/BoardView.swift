@@ -352,6 +352,8 @@ struct MissionPanel: View {
             tokens > 0 ? "\(tokens.formatted()) tokens" : nil,
             store.project.isEmpty ? projectName(mission.root, among: store.projects) : nil,
             "\(jobs.count) \(jobs.count == 1 ? "job" : "jobs")",
+            // An active mission shows its preset on its menu; an ended one names it here unless it was the global one.
+            mission.state == "active" ? nil : mission.preset.map { "\($0.rawValue.capitalized) preset" },
         ].compactMap { $0 }.joined(separator: " · ")
     }
     var body: some View {
@@ -383,22 +385,6 @@ struct MissionPanel: View {
             .onTapGesture(perform: toggle)
             if expanded {
                 VStack(alignment: .leading, spacing: Space.xl) {
-                    VStack(alignment: .leading, spacing: Space.s) {
-                        if mission.state == "active" {
-                            Picker("Mission preset", selection: Binding(get: { mission.preset }, set: { preset in
-                                Task { await store.setPreset(preset, for: mission) }
-                            })) {
-                                Text("Global preset").tag(nil as PresetName?)
-                                ForEach(PresetName.allCases, id: \.self) { preset in
-                                    Text(preset.rawValue.capitalized).tag(Optional(preset))
-                                }
-                            }.fixedSize().disabled(!store.connected || store.actions[mission.actionKey]?.locked == true)
-                        } else {
-                            Text(mission.preset.map { "\($0.rawValue.capitalized) preset" } ?? "Global preset")
-                                .font(Typeface.callout).foregroundStyle(.secondary)
-                        }
-                        Text("Applies to new jobs. Running jobs keep their preset.").font(Typeface.caption).foregroundStyle(.secondary)
-                    }.padding(.leading, WorkspaceStyle.rowTitleInset)
                     ForEach(Array((mission.notes ?? []).enumerated()), id: \.offset) { _, note in
                         Text(note.text).font(Typeface.callout).textSelection(.enabled).padding(.leading, WorkspaceStyle.rowTitleInset)
                     }
@@ -418,21 +404,21 @@ struct MissionPanel: View {
                         }
                     }
                     // The outcome and the mission's own controls share its last row: the outcome leads, the
-                    // controls end it at the trailing edge, centered on one line. Controls are offered once an active
-                    // mission looks finished; an abandoned one, superseded or gone quiet, can still be marked done.
+                    // controls end it at the trailing edge, centered on one line. An active mission always offers its
+                    // preset; done and stop are offered once it looks finished, and an abandoned one, superseded or gone
+                    // quiet, can still be marked done.
                     let offered = (mission.state == "active" && finished) || mission.state == "abandoned"
-                    if !mission.outcome.isEmpty || offered {
+                    if !mission.outcome.isEmpty || offered || mission.state == "active" {
                         HStack(alignment: .center, spacing: Space.m) {
                             if !mission.outcome.isEmpty {
                                 Text(mission.outcome).font(Typeface.callout).textSelection(.enabled).padding(.leading, WorkspaceStyle.rowTitleInset)
                             }
                             Spacer(minLength: 0)
-                            if offered {
-                                if mission.state == "active" {
-                                    Text("Looks finished").font(Typeface.caption).foregroundStyle(.secondary)
-                                }
-                                actions
+                            if offered && mission.state == "active" {
+                                Text("Looks finished").font(Typeface.caption).foregroundStyle(.secondary)
                             }
+                            if mission.state == "active" { presetMenu }
+                            if offered { actions }
                         }
                     }
                 }
@@ -453,6 +439,24 @@ struct MissionPanel: View {
     }
     private var finished: Bool {
         mission.looksFinished(jobs: store.state.jobs, now: store.now, lead: store.state.claude.first { $0.id == mission.owner })
+    }
+    /// Which preset the mission's new jobs take; jobs already running keep theirs.
+    private var presetMenu: some View {
+        Menu {
+            Picker("Preset", selection: Binding(get: { mission.preset }, set: { preset in
+                Task { await store.setPreset(preset, for: mission) }
+            })) {
+                Text("Global").tag(nil as PresetName?)
+                ForEach(PresetName.allCases, id: \.self) { preset in
+                    Text(preset.rawValue.capitalized).tag(Optional(preset))
+                }
+            }.pickerStyle(.inline)
+        } label: {
+            Label("\(mission.preset?.rawValue.capitalized ?? "Global") preset", systemImage: "slider.horizontal.3")
+        }
+        .menuStyle(.button).menuIndicator(.hidden).pillButton().morphs(on: mission.preset).fixedSize()
+        .disabled(!store.connected || store.actions[mission.actionKey]?.locked == true)
+        .help("The preset this mission's new jobs take")
     }
     @ViewBuilder private var actions: some View {
         let locked = !store.connected || store.actions[mission.actionKey]?.locked == true

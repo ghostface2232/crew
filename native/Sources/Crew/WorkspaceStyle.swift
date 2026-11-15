@@ -104,8 +104,11 @@ struct MissionTrack: View {
                         .position(x: center(index) + span / 2, y: Self.marker / 2)
                 }
                 ForEach(Array(mission.stops.enumerated()), id: \.offset) { index, title in
+                    // The step in progress, or the one an ended mission stopped on unpassed. A mission marked done
+                    // can keep its step on an earlier stop, and that stop is passed like the rest.
+                    let emphasized = index == mission.step && (mission.state == "active" || !mission.passed(index))
                     marker(index).position(x: center(index), y: Self.marker / 2)
-                    Text(title).font(index == mission.step ? Typeface.captionStrong : Typeface.caption)
+                    Text(title).font(emphasized ? Typeface.captionStrong : Typeface.caption)
                         .foregroundStyle(index == mission.step && mission.state == "active" ? .primary : .secondary)
                         .lineLimit(1).frame(maxWidth: count > 1 ? max(0, span - Space.xs) : nil)
                         .position(x: center(index), y: Self.marker + Space.m + Self.labelHeight / 2)

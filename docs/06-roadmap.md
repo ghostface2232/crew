@@ -84,6 +84,42 @@ Injection keeps the decision recorded in [04-implementation.md](04-implementatio
 - Whether effort is encoded in the model id is unverified.
 - Whether the terms allow a third-party client to run the CLI, as was checked for Antigravity in 04 section 6.
 
+### D. Learning from reviews
+
+Proposed 2026-11-15. Not implemented. The lead picks a tier and a holder for each job with no memory of how earlier jobs went. D1 gives it that memory, and D2 makes fixing a review's findings a role of its own, so how well a model fixes is judged apart from how well it builds.
+
+**D1. Model notes.** A short document the lead reads before it hands out work, instead of a score. Patterns ("solid logic, misses time zone and empty-state edge cases"; "good UI, edits beyond the task") steer the next assignment better than a number. Prose can also carry the context that a formula cannot correct for: task difficulty, which agent reviewed, who fixed.
+
+- Where: `~/.crew/model-notes.md`, one section per model. The model is the one the session reported (`resolvedModel`), with its agent and effort.
+- Each section has three parts:
+  - **Summary**: three to five lines on what the model does well, where it is weak, and what to give it.
+  - **Evidence**: one dated line per reviewed job, with the job id, for example `2026-11-15 cx-74bcd0 (Codex review, Claude fixed): Markdown parser, no findings, one follow-up on underscore boundaries`. Every claim in the summary must trace back to evidence lines.
+  - **Status**: settled, on trial (a new model), or too few samples.
+- Writing: after a job's review and fix, the lead adds one evidence line with a short tool call, like `mission`'s `record`. Lines carry facts from the review only: how serious the findings were, whether they were reproduced, read or suspected, whether the fix was a root-cause fix or a patch, who reviewed, and who fixed. Impressions are not evidence. Findings from the lead's own self-reviewer subagent count too, since the daemon never sees them otherwise.
+- Consolidation: when a section passes a set number of evidence lines, the lead rewrites its summary and compresses old lines. This keeps the file short and stops contradicting notes from piling up.
+- Reading: `route` and `delegate` attach the summaries of the role's holders to their answer, so the lead does not have to look them up.
+- New models: when `tiers.ts` picks up a newer model, it gets an on-trial section. The lead gives it work under the existing preset, alternating with the model it would replace. Once enough evidence lines exist, the lead writes a verdict and proposes a change of preference to the user. Nothing switches by itself.
+- Authority: the notes inform the lead's choice of tier and holder within what the user configured. Role assignments and presets remain the user's (A1, A3).
+- Pitfalls to design against:
+  - Harder work goes to stronger tiers and draws more findings, so compare within a tier and a change size.
+  - A reviewer may be lenient or harsh toward its own family, so each line names the reviewer.
+  - Fix quality belongs to whoever fixed, usually the lead today, not the model that built the change (see D2).
+  - A few samples are noise. A section below a minimum sample stays "too few samples" and does not shift preference.
+
+**D2. Fix role.** Fixing review findings is the lead's step today. Add `fix` to the role registry (A1), holdable by any agent including Claude. It defaults to Claude, so an unconfigured install behaves as it does now, and it may follow Implementation as its parent.
+
+- Triage stays with the lead. Which findings to accept, and which to decline with a reason, needs the user's intent and this conversation's context. The fix holder receives the accepted findings, the lead's decisions, a map of the files involved, and a `done_when`.
+- Where the fix goes:
+  - A change a worker built goes back to that worker's session with `reply`, as today, because its context is intact.
+  - The fix role is for the lead's own code, or for a result merged from several jobs. It runs in a fresh worktree, and the lead reads the diff before merging.
+  - Giving the fix to a model other than the one that built the change also lowers the chance that a model misses its own mistakes again.
+- `route` gains a `fix` kind, with the usual fallback to the lead when the holder is out of usage.
+- Each fix adds an evidence line to the fixer's notes (D1): root-cause fix, patch, or needed another review. Building quality and fixing quality stay separate.
+- The review-round limit is unchanged: one round by default, at most two, whoever fixes.
+- Risk: a thin brief invites fixes that only hide symptoms. The brief must carry the findings and the reasons, not just the file names.
+
+Order: D1's evidence lines first, so data builds up, then the D1 summaries in `route` and `delegate`, then D2.
+
 ## 5. Long-term plan
 
 **L1. The lead as an adapter.** Only three parts are tied to Claude Code: the MCP server, the hooks, and the skills. Jobs, events, and the board belong to the daemon. Defining the lead as the role that plans and decides merges lets Codex or a headless Claude take it. This also resolves the "Codex as temporary lead when Claude is nearly exhausted" case in 03 section 8.2.
@@ -135,3 +171,5 @@ Requirements R4 and R6 (computer use, side chat, visibility in the desktop app) 
 - 2026-11-13: Implemented C1 phase G1, A3 presets, and the open parts of B2. The macOS cache format was rechecked against AgentGauge 0.8.2. C2, L1, the rest of L2, L3, and L4 are unchanged.
 
 - 2026-11-15: The user asked for roles beyond the original three, easier reassignment, a preset per mission, and, later, a lead other than Claude. Roles became a registry with inheritance (refactor, release preparation, debate, and review that runs the app join the three), missions carry their own preset, and L1 gained its groundwork and an ordered plan. Executing a release (push, publish, deploy) is not part of the release role; it needs its own permission, network, and approval design. Decided after debating the design with Codex (Astra and Sol, independently). See [09](09-usage-presets-rounds.md) sections 8 and 15.
+
+- 2026-11-15: The user proposed remembering which models draw few or light review findings and which fix at the root, so the lead can consult it when it picks a model, with a few trial runs under the existing preset when a new model arrives. They preferred a short document a model reads over a score, and asked for fixing to become a role of its own. Recorded as D1 (model notes) and D2 (fix role). Documented only; nothing is implemented.

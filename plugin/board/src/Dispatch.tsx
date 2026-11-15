@@ -140,7 +140,7 @@ export function Dispatch({
             <div className={styles.assignment}>
               <label className="field">
                 <span>Role</span>
-                <select value={role} onChange={(event) => { setRole(event.target.value as Role); setPicked(''); }}>
+                <select value={role} onChange={(event) => setRole(event.target.value as Role)}>
                   {choices.map((info) => (
                     <option key={info.role} value={info.role}>{info.label}</option>
                   ))}

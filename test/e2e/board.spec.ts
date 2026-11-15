@@ -648,6 +648,23 @@ test('Return adds a newline in an answer and the next question gets a fresh draf
   expect(calls[0].body).toMatchObject({ message: '새 답변', request_id: 'request-2' });
 });
 
+test('the toolbar keeps its actions on one row at every width, moving only the search below', async ({ page }) => {
+  const toolbar = page.locator('.toolbar');
+  const split: number[] = [];
+  for (let width = 320; width <= 1000; width += 10) {
+    await page.setViewportSize({ width, height: 800 });
+    const rows = await toolbar.evaluate((element) => {
+      const middle = (selector: string) => {
+        const box = element.querySelector(selector)!.getBoundingClientRect();
+        return Math.round(box.top + box.height / 2);
+      };
+      return { tabs: middle('[role="tablist"]'), newJob: middle('button[title="New job"]'), search: middle('.search') };
+    });
+    if (rows.newJob !== rows.tabs || !(rows.search === rows.tabs || rows.search > rows.tabs + 20)) split.push(width);
+  }
+  expect(split, 'widths where the toolbar splits its actions').toEqual([]);
+});
+
 test('320px sheets keep controls within the viewport and support reduced motion', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 800 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);

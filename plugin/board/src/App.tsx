@@ -51,7 +51,6 @@ export function App() {
   const waitingSessions = state.claude.filter((session) => session.state === 'waiting');
   const pending = waitingJobs.length + waitingSessions.length;
   const live = state.connection === 'live';
-  // The connection shows in the sidebar, or in the toolbar once narrow windows hide the sidebar: one place at a time.
   const narrow = useNarrow();
   // Narrow windows keep the sidebar folded away until its button brings it out over the page.
   const [drawer, setDrawer] = useState(false);
@@ -79,11 +78,6 @@ export function App() {
     window.addEventListener('keydown', escape);
     return () => window.removeEventListener('keydown', escape);
   }, [drawer]);
-  const connection = (
-    <p className="connection" role="status" data-state={state.connection}>
-      {live ? 'Live' : state.connection === 'lost' ? 'Reconnecting…' : 'Connecting…'}
-    </p>
-  );
   useEffect(() => board.connect(), []);
   useEffect(() => {
     document.title = pending ? `(${pending}) Crew` : 'Crew';
@@ -152,7 +146,9 @@ export function App() {
             </button>
           ))}
           <div className="sidebar-foot">
-            {!narrow && connection}
+            <p className="connection" role="status" data-state={state.connection}>
+              {live ? 'Live' : state.connection === 'lost' ? 'Reconnecting…' : 'Connecting…'}
+            </p>
             <button className="sidebar-item" id="open-settings" disabled={!Object.keys(state.roles).length} onClick={() => {
               // First, so the settings dialog returns focus to the drawer's button when it closes.
               fold();
@@ -217,7 +213,6 @@ export function App() {
                 onChange={(event) => setSearch(event.target.value)}
               />
             </label>
-            {narrow && connection}
             <button className="glass" disabled={!live} title="New job" onClick={() => setDispatching(true)}>
               <Icon icon={Plus} />
               <span className="toolbar-label">New Job</span>

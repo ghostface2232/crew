@@ -33,6 +33,17 @@
   --orange: #ff9500;
   --red: #ff3b30;
   --green: #34c759;
+  /* Settings tiles: the system colors SettingsView.swift uses. */
+  --gray: #8e8e93;
+  --purple: #af52de;
+  --indigo: #5856d6;
+  --teal: #30b0c7;
+  /* Text on an orange badge: white reaches only about 2:1 there. */
+  --on-orange: rgb(0 0 0 / 0.82);
+  /* Backdrops behind sheets and the palette, and the faint drop under raised controls. */
+  --scrim: rgb(10 10 12 / 0.28);
+  --scrim-light: rgb(10 10 12 / 0.16);
+  --lift: rgb(0 0 0 / 0.08);
   /* Status text is darkened in light mode so it reaches about 3:1 on its own tint, as on the app's chips. */
   --tone-darken: 22%;
   --heat-0: rgb(0 0 0 / 0.05);
@@ -81,6 +92,14 @@
     --orange: #ff9f0a;
     --red: #ff453a;
     --green: #30d158;
+    --gray: #98989d;
+    --purple: #bf5af2;
+    --indigo: #5e5ce6;
+    --teal: #40c8e0;
+    /* A dark canvas swallows light-mode scrims and drops, so both deepen. */
+    --scrim: rgb(0 0 0 / 0.5);
+    --scrim-light: rgb(0 0 0 / 0.36);
+    --lift: rgb(0 0 0 / 0.4);
     --tone-darken: 0%;
     --heat-0: rgb(255 255 255 / 0.06);
     --shadow-pop: 0 0 0 1px var(--hairline-strong), -8px 8px 26px rgb(0 0 0 / 0.4);
@@ -258,7 +277,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 .segmented > button[aria-selected="true"], .segmented > button[aria-checked="true"] {
   background: var(--surface);
   color: var(--label);
-  box-shadow: 0 0 0 0.5px var(--hairline), 0 1px 3px rgb(0 0 0 / 0.08);
+  box-shadow: 0 0 0 0.5px var(--hairline), 0 1px 3px var(--lift);
 }
 @media (prefers-color-scheme: dark) {
   .segmented > button[aria-selected="true"], .segmented > button[aria-checked="true"] { background: rgb(255 255 255 / 0.14); }
@@ -338,7 +357,7 @@ dialog.sheet {
   box-shadow: var(--shadow-pop);
   overflow: auto;
 }
-dialog.sheet::backdrop { background: rgb(10 10 12 / 0.28); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); }
+dialog.sheet::backdrop { background: var(--scrim); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); }
 @media (prefers-reduced-motion: no-preference) {
   dialog.sheet[open] { animation: sheet-in 420ms var(--ease-out); }
   dialog.sheet[open]::backdrop { animation: fade 300ms ease-out; }
@@ -598,14 +617,14 @@ dialog.detail-panel { container: panel / inline-size; }
 }
 .nav-item svg { width: 16px; height: 16px; }
 .nav-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.nav-item[aria-current="true"] { color: var(--label); font-weight: 550; background: var(--surface) !important; box-shadow: inset 0 0 0 1px var(--hairline), 0 1px 2px rgb(0 0 0 / 0.04); }
+.nav-item[aria-current="true"] { color: var(--label); font-weight: 550; background: var(--surface) !important; box-shadow: inset 0 0 0 1px var(--hairline), 0 1px 2px var(--lift); }
 /* The others dim while the pointer rests on one, as the reference menus do. */
 .nav-list[data-hovering] .nav-item:not(:hover):not([aria-current="true"]) { opacity: 0.55; }
 @media (hover: hover) { .nav-item:hover { color: var(--label); } }
 .nav-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--tone); box-shadow: 0 0 0 3px color-mix(in srgb, var(--tone) 18%, transparent); }
 .nav-dot[data-state="working"] { animation: pulse 2.4s var(--ease-in-out) infinite; }
 @keyframes pulse { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--tone) 0%, transparent); } }
-.nav-count { min-width: 20px; height: 18px; padding: 0 6px; border-radius: 999px; background: var(--orange); color: #fff; font-size: 10.5px; font-weight: 600; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; animation: swap 360ms var(--ease-out); }
+.nav-count { min-width: 20px; height: 18px; padding: 0 6px; border-radius: 999px; background: var(--orange); color: var(--on-orange); font-size: 10.5px; font-weight: 600; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; animation: swap 360ms var(--ease-out); }
 .nav-key { opacity: 0; transition: opacity 160ms ease-out; }
 @media (hover: hover) { .nav-item:hover .nav-key { opacity: 1; } }
 .sidebar-foot { display: grid; gap: 6px; margin-top: auto; padding-top: 10px; border-top: 1px solid var(--hairline); }
@@ -615,7 +634,7 @@ dialog.detail-panel { container: panel / inline-size; }
   .sidebar-item:not(:disabled):hover { color: var(--label); }
   .sidebar-item:not(:disabled):hover svg { rotate: 60deg; }
 }
-.sidebar-scrim { position: fixed; inset: 0; z-index: 4; background: rgb(0 0 0 / 0.12); animation: fade 260ms ease-out; }
+.sidebar-scrim { position: fixed; inset: 0; z-index: 4; background: var(--scrim-light); animation: fade 260ms ease-out; }
 
 /* A project's preview beside the sidebar: it opens from its leading edge and glides between projects. */
 .peek {
@@ -681,7 +700,7 @@ dialog.detail-panel { container: panel / inline-size; }
 .search-pill > span { flex: 1; text-align: start; overflow: hidden; text-overflow: ellipsis; }
 .search-pill svg { color: var(--secondary); }
 .search-pill[data-hidden] { opacity: 0; }
-@media (hover: hover) { .search-pill:hover { box-shadow: inset 0 0 0 1px var(--hairline-strong), 0 2px 8px -4px rgb(0 0 0 / 0.12); } }
+@media (hover: hover) { .search-pill:hover { box-shadow: inset 0 0 0 1px var(--hairline-strong), 0 2px 8px -4px var(--lift); } }
 .connection { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 11px; border-radius: 999px; color: var(--secondary); font-size: 12px; white-space: nowrap; }
 .connection > i { position: relative; width: 7px; height: 7px; border-radius: 50%; background: var(--tertiary); }
 .connection[data-state="live"] > i { background: var(--green); }
@@ -721,7 +740,7 @@ dialog.detail-panel { container: panel / inline-size; }
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--orange) 24%, transparent);
   color: var(--label);
 }
-.attention-count { display: grid; place-items: center; min-width: 28px; height: 28px; padding: 0 8px; border-radius: 999px; background: var(--orange); color: #fff; font-size: 13px; font-weight: 600; }
+.attention-count { display: grid; place-items: center; min-width: 28px; height: 28px; padding: 0 8px; border-radius: 999px; background: var(--orange); color: var(--on-orange); font-size: 13px; font-weight: 600; }
 .attention > svg { color: var(--orange); transition: translate 260ms var(--ease-out); }
 @media (hover: hover) {
   .attention:hover { background: color-mix(in srgb, var(--orange) 16%, var(--surface)) !important; }
@@ -858,7 +877,7 @@ dialog.detail-panel { container: panel / inline-size; }
 .heatmap-grid > i[data-level="2"] { background: var(--heat-2); }
 .heatmap-grid > i[data-level="3"] { background: var(--heat-3); }
 .heatmap-grid > i[data-level="4"] { background: var(--heat-4); }
-.heatmap-grid > i[data-today] { box-shadow: 0 0 0 1.5px var(--canvas), 0 0 0 2.5px var(--accent); }
+.heatmap-grid > i[data-today] { box-shadow: 0 0 0 1.5px var(--surface), 0 0 0 2.5px var(--accent); }
 .heatmap-grid > i:hover { scale: 1.35; z-index: 1; }
 .heatmap-tip {
   position: absolute;
@@ -901,7 +920,7 @@ dialog.detail-panel { container: panel / inline-size; }
 /* Mission panel */
 .mission { display: grid; gap: 14px; transition: box-shadow 200ms ease-out; }
 .mission:not([data-expanded]) { cursor: pointer; }
-@media (hover: hover) { .mission:not([data-expanded]):hover { box-shadow: inset 0 0 0 1px var(--hairline-strong), 0 6px 20px -12px rgb(0 0 0 / 0.18); } }
+@media (hover: hover) { .mission:not([data-expanded]):hover { box-shadow: inset 0 0 0 1px var(--hairline-strong), 0 6px 20px -12px color-mix(in srgb, var(--lift), black 10%); } }
 .mission-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .mission[data-expanded] .mission-head { cursor: pointer; }
 .mission-icon { display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 10px; background: color-mix(in srgb, var(--tone, var(--accent)) 12%, transparent); color: color-mix(in srgb, var(--tone, var(--accent)), black var(--tone-darken)); }
@@ -966,7 +985,18 @@ dialog.detail-panel { container: panel / inline-size; }
   transition: background-color 400ms var(--ease-out), box-shadow 400ms, color 400ms;
 }
 .track-node b svg { width: 12px; height: 12px; stroke-width: 3; }
-.track > li[data-pos="past"] .track-node b { background: var(--passed); box-shadow: none; color: var(--surface); }
+/* A passed step is a glass bead, as in the app: a lit top edge and a soft drop instead of a solid disc. */
+.track > li[data-pos="past"] .track-node b {
+  background: linear-gradient(to bottom, rgb(255 255 255 / 0.5), rgb(255 255 255 / 0.08)), var(--fill-strong);
+  box-shadow: inset 0 0.5px 0 rgb(255 255 255 / 0.7), inset 0 0 0 0.5px var(--hairline-strong), 0 1px 3px var(--lift);
+  color: var(--passed);
+}
+@media (prefers-color-scheme: dark) {
+  .track > li[data-pos="past"] .track-node b {
+    background: linear-gradient(to bottom, rgb(255 255 255 / 0.16), rgb(255 255 255 / 0.03)), var(--fill-strong);
+    box-shadow: inset 0 0.5px 0 rgb(255 255 255 / 0.28), inset 0 0 0 0.5px var(--hairline-strong), 0 1px 3px var(--lift);
+  }
+}
 .track > li[data-pos="stopped"] .track-node b { background: var(--secondary); box-shadow: none; color: var(--surface); }
 .track[data-abandoned] > li[data-pos="past"] .track-node b, .track[data-abandoned] > li[data-pos="stopped"] .track-node b { background: transparent; box-shadow: inset 0 0 0 1.5px var(--tertiary); color: var(--tertiary); }
 .track > li[data-pos="now"] .track-node b { background: var(--accent); box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 16%, transparent); color: #fff; animation: halo-accent 2.4s var(--ease-in-out) infinite; }
@@ -1104,7 +1134,7 @@ dialog.palette-layer {
   background: transparent;
   overflow: hidden;
 }
-dialog.palette-layer::backdrop { background: rgb(10 10 12 / 0.16); animation: fade 300ms ease-out; }
+dialog.palette-layer::backdrop { background: var(--scrim-light); animation: fade 300ms ease-out; }
 .palette { position: absolute; overflow: hidden; border-radius: 20px; background: var(--surface); box-shadow: var(--shadow-pop); }
 .palette-content { display: grid; grid-template-rows: auto minmax(0, 1fr); }
 .palette-search { display: flex; align-items: center; gap: 10px; padding: 0 14px 0 16px; height: 54px; border-bottom: 1px solid var(--hairline); color: var(--secondary); }

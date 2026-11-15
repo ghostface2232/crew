@@ -212,7 +212,8 @@ private func noteText(_ text: String, limit: Int = 2_000) -> String {
             Spacer(minLength: 0)
             accessory()
         }
-        .padding(.leading, WorkspaceStyle.rowTitleInset)
+        // The accessory steps in from the card's edge as the title does, so the heading sits inside the card's corners.
+        .padding(.horizontal, WorkspaceStyle.rowTitleInset)
         VStack(alignment: .leading, spacing: Space.l) { content() }.inset()
     }.frame(maxWidth: .infinity, alignment: .leading)
 }
@@ -653,21 +654,22 @@ private struct DebateRound: View {
                     ReportText(report: reply.text).lineLimit(replyShown ? nil : 8)
                     RevealToggle(subject: "the reply", shown: $replyShown)
                 } else {
-                    // Each point leads with its stance as a list marker, so wrapped lines hang under the text, and
-                    // ends with how it is known in a quieter caption.
+                    // The points sit on a card as a list: each row leads with its stance, so wrapped lines hang under
+                    // the text. How each is known stays in the full reply.
                     // A reply may repeat a numbered list, so numbers are not unique.
-                    VStack(alignment: .leading, spacing: Space.s) {
-                        ForEach(Array(points.enumerated()), id: \.offset) { _, point in
-                            HStack(alignment: .firstTextBaseline, spacing: Space.s) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(points.enumerated()), id: \.offset) { index, point in
+                            if index > 0 { Rectangle().fill(WorkspaceStyle.hairline).frame(height: 1).padding(.horizontal, Space.l) }
+                            HStack(alignment: .firstTextBaseline, spacing: Space.ml) {
                                 StanceMark(stance: point.stance, count: nil)
                                 Text(point.title).font(Typeface.callout).textSelection(.enabled)
                                     .frame(maxWidth: .infinity, alignment: .leading)
-                                if let basis = point.basis {
-                                    Text(basis).font(Typeface.caption).foregroundStyle(.secondary).fixedSize()
-                                }
                             }
+                            .padding(WorkspaceStyle.rowInsets)
                         }
                     }
+                    .background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius, style: .continuous))
+                    .padding(.vertical, Space.xs)
                     if replyShown { ReportText(report: reply.text) }
                     RevealToggle(show: "Show the full reply", hide: "Hide the full reply", shown: $replyShown)
                 }

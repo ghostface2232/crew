@@ -1,11 +1,11 @@
 import { useState, useSyncExternalStore } from 'react';
 import { board } from './store.ts';
-import { Check, ChevronDown, ChevronRight, CircleCheck, CircleX, Ellipsis, Hammer, MessageCircleQuestion, MessagesSquare, ShieldCheck, SpellCheck, Wrench } from 'lucide-react';
-import type { BoardJob, ClaudeSession, Mission } from './types.ts';
+import { Check, ChevronDown, ChevronRight, CircleCheck, CircleX, Ellipsis, Gauge, Hammer, MessageCircleQuestion, MessagesSquare, ShieldCheck, SpellCheck, Wrench } from 'lucide-react';
+import type { BoardJob, ClaudeSession, Mission, PresetName } from './types.ts';
 import { actions, request } from './api.ts';
 import {
-  elapsed, jobLabel, missionJobStep, missionLooksFinished, missionProgress, missionStep, missionStopPosition,
-  missionStops, NAMES,
+  elapsed, jobLabel, jobRole, missionJobStep, missionLooksFinished, missionProgress, missionStep, missionStopPosition,
+  missionStops, NAMES, roleLabel,
 } from './model.ts';
 import { ActionStatus, AgentMark, Chip, Icon, Menu, useAction, useNow } from './ui.tsx';
 
@@ -15,9 +15,11 @@ export const jobStatusState = (job: BoardJob) => (job.stalled ? 'stalled' : job.
 export function JobRow({ job, selected, openJob }: { job: BoardJob; selected?: boolean; openJob: (id: string) => void }) {
   const now = useNow();
   const active = job.endedAt == null;
+  const role = jobRole(job);
   const detail = [
     NAMES[job.agent],
-    job.debate ? 'Debate' : job.ask ? 'Question' : null,
+    // The three original roles show as the row's icon; the others are named.
+    job.ask && !job.debate ? 'Question' : ['delegate', 'review', 'polish'].includes(role) ? null : roleLabel(board.getSnapshot(), role),
     job.error?.message ?? (active ? job.phase : null),
     job.runsApp ? 'Runs the app' : null,
     job.exclusive ? 'Runs alone' : null,
@@ -128,6 +130,7 @@ export function MissionPanel({
     tokens > 0 ? `${tokens.toLocaleString()} tokens` : null,
     projectName,
     `${jobs.length} ${jobs.length === 1 ? 'job' : 'jobs'}`,
+    mission.preset ? `${capitalized(mission.preset)} preset` : null,
   ].filter(Boolean).join(' · ');
   const progress = missionProgress(mission, jobs);
   const live = useSyncExternalStore(board.subscribe, () => board.getSnapshot().connection === 'live');
@@ -176,6 +179,24 @@ export function MissionPanel({
                   <Icon icon={CircleX} />
                   Stop tracking
                 </button>
+              )}
+              {mission.state === 'active' && (
+                <>
+                  <hr />
+                  {([['economy', 'Economy'], ['balanced', 'Balanced'], ['best', 'Best'], [null, 'Global preset']] as [PresetName | null, string][]).map(([preset, name]) => (
+                    <button
+                      key={name}
+                      role="menuitemradio"
+                      aria-checked={(mission.preset ?? null) === preset}
+                      disabled={locked}
+                      title="Applies to the mission's next jobs. Jobs already started keep theirs."
+                      onClick={() => update({ preset }, preset ? `${name} preset for new jobs` : 'Global preset for new jobs')}
+                    >
+                      <Icon icon={(mission.preset ?? null) === preset ? Check : Gauge} />
+                      {preset ? `${name} preset` : name}
+                    </button>
+                  ))}
+                </>
               )}
             </Menu>
           )}

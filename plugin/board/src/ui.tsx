@@ -248,7 +248,7 @@ export function Menu({ label, icon, children }: { label: string; icon: LucideIco
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
-  const items = () => [...(ref.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? [])];
+  const items = () => [...(ref.current?.querySelectorAll<HTMLButtonElement>('[role^="menuitem"]:not(:disabled)') ?? [])];
   const close = (refocus: boolean) => {
     setOpen(false);
     if (refocus) button.current?.focus();

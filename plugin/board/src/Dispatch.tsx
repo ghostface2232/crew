@@ -3,7 +3,7 @@ import { ArrowUp, CircleAlert, Send } from 'lucide-react';
 import type { Role } from '../../bridge/config.ts';
 import type { BoardJob, Mission, Snapshot } from './types.ts';
 import { request } from './api.ts';
-import { projectOf, ROLE_NAMES } from './model.ts';
+import { projectOf, rolesOf } from './model.ts';
 import { board } from './store.ts';
 import { Dialog, Icon, Segmented } from './ui.tsx';
 import styles from './Dispatch.module.css';
@@ -30,6 +30,9 @@ export function Dispatch({
   const sendingLock = useRef(false);
   const [error, setError] = useState('');
   const cwd = directory;
+  // A debate needs the lead to answer each round, so it is not started from here.
+  const choices = rolesOf(state).filter((info) => info.role !== 'debate');
+  const kind = choices.find((info) => info.role === role)?.kind ?? 'delegate';
   const agent = state.roles[intent === 'question' ? 'delegate' : role]?.agent;
   const worker = agent ? state.agents[agent] : undefined;
   const missions = state.missions.filter((mission) => mission.state === 'active' && projectOf(mission) === cwd.trim());
@@ -56,7 +59,7 @@ export function Dispatch({
         .split('\n')
         .map((value) => value.trim())
         .filter(Boolean);
-      if (intent === 'command' && role === 'polish' && !allowed.length)
+      if (intent === 'command' && kind === 'polish' && !allowed.length)
         throw new Error('List the files or directories the editor may change.');
       sendingLock.current = true;
       setSending(true);
@@ -78,13 +81,15 @@ export function Dispatch({
         return;
       }
       const job = await request<BoardJob>('/api/jobs', {
-        kind: role,
+        // A daemon without the registry knows only the kind, which for its three roles names the role.
+        ...(state.roleInfo ? { role } : {}),
+        kind,
         cwd: cwd.trim(),
         project: cwd.trim(),
         task,
         isolation: 'worktree',
-        ...(role === 'review' ? { review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } } : {}),
-        ...(role === 'polish' ? { targets: allowed } : {}),
+        ...(kind === 'review' ? { review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } } : {}),
+        ...(kind === 'polish' ? { targets: allowed } : {}),
       });
       openJob(job.id);
       close();
@@ -126,8 +131,8 @@ export function Dispatch({
               <label className="field">
                 <span>Role</span>
                 <select value={role} onChange={(event) => setRole(event.target.value as Role)}>
-                  {(Object.keys(ROLE_NAMES) as Role[]).map((role) => (
-                    <option key={role} value={role}>{ROLE_NAMES[role]}</option>
+                  {choices.map((info) => (
+                    <option key={info.role} value={info.role}>{info.label}</option>
                   ))}
                 </select>
               </label>
@@ -139,7 +144,7 @@ export function Dispatch({
               </div>
             </div>
           )}
-          {intent === 'command' && role === 'polish' && (
+          {intent === 'command' && kind === 'polish' && (
             <label className="field">
               <span>Allowed files or directories</span>
               <textarea
@@ -170,7 +175,7 @@ export function Dispatch({
             <span>
               {intent === 'question' ? 'What would you like to know?'
                 : intent === 'information' ? 'What should be remembered?'
-                  : role === 'review' ? 'What should be checked?' : 'What needs to be done?'}
+                  : kind === 'review' ? 'What should be checked?' : 'What needs to be done?'}
             </span>
             <textarea
               className={styles.editor}
@@ -183,7 +188,9 @@ export function Dispatch({
             <span className="caption secondary" id="dispatch-caption">
               {intent === 'information' ? 'Adds information only. This starts no work.'
                 : intent === 'question' ? 'Answers the question in read-only mode.'
-                  : role === 'review' ? 'Reviews uncommitted changes in read-only mode.'
+                  : role === 'verify' ? 'Reviews uncommitted changes by running the app in a snapshot of them.'
+                    : kind === 'review' ? 'Reviews uncommitted changes in read-only mode.'
+                    : role === 'release' ? 'Prepares the release on an isolated worktree branch. Nothing is published or deployed.'
                     : 'Changes stay on an isolated worktree branch until reviewed and merged.'}
             </span>
           </label>

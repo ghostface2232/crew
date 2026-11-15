@@ -42,7 +42,7 @@ crew board
 
 `crew gc` previews orphan worktrees, Git metadata, and unused worker branches, including whether each branch is merged into `HEAD`. Use `crew gc --apply` to remove orphan directories and prune metadata; add `--branches` to delete only branches merged into `HEAD`. Unmerged branches are kept, with a `git branch -D <name>` command shown for manual removal. Active and owned worktrees are protected. Windows cleanup failures name their leftovers in job status and notes.
 
-The status board runs at http://127.0.0.1:47615. Open it with `crew board` or from the app, which sign it in; the daemon answers only requests that carry the secret in `~/.crew/token` ([docs/09-usage-presets-rounds.md](docs/09-usage-presets-rounds.md) section 12). Each command run with `/crew:run` appears as a single unit with its jobs grouped under it, and a line at the top lists anything waiting on you. Click a job to read its report, changed files, and activity, or to send it a follow-up. Settings on the board edits roles, the preset, and shared instructions.
+The status board runs at http://127.0.0.1:47615. Open it with `crew board` or from the app, which sign it in; the daemon answers only requests that carry the secret in `~/.crew/token` ([docs/09-usage-presets-rounds.md](docs/09-usage-presets-rounds.md) section 12). Each command run with `/crew:run` appears as a single unit with its jobs grouped under it, and a line at the top lists anything waiting on you. Click a job to read its report, changed files, and activity, or to send it a follow-up. Settings on the board edits roles, the preset, and shared instructions. Roles cover implementation, refactoring, release preparation, debate, cross-review, review that runs the app, and wording; one you leave alone follows its parent. A mission can run under its own preset when you name one for the command ("economy" for a simple one, "best" for a deep one) or set it from the mission's menu.
 
 If [AgentGauge](https://github.com/ghostface2232/AgentGauge) is installed, each agent's card shows its remaining usage, and `/crew:run` routes work accordingly: when an agent runs low, the lead takes over or defers the work and says so. A job's turns appear as rounds that can be undone or kept one by one, and Send work also accepts a read-only question or a piece of information to pin ([docs/09-usage-presets-rounds.md](docs/09-usage-presets-rounds.md)).
 
@@ -56,7 +56,7 @@ npm run desktop
 
 Build a local macOS 26+ app bundle with `npm run package:desktop`; it is written to `release/Crew.app`. Building requires Xcode 26+ and a standalone Node.js distribution. The app bundles Node for the existing TypeScript daemon. Closing the window hides it to the tray; quitting the app leaves jobs running. The app restores its window and opens approval notifications at the relevant job. The web board stays available.
 
-The board can send implementation, read-only review, and wording jobs directly through the configured roles. Full missions still begin in the Claude lead session. See [the native macOS implementation and verification notes](docs/08-native-macos.md) for development, tests, resource measurements and distribution limits.
+The board can send jobs for any role but debate directly through the configured roles. Full missions still begin in the Claude lead session. See [the native macOS implementation and verification notes](docs/08-native-macos.md) for development, tests, resource measurements and distribution limits.
 
 ## How it works
 
@@ -77,7 +77,7 @@ Using Antigravity carries a Terms of Service risk; read [docs/04-implementation.
 | `plugin/bridge/` | Daemon, MCP server, agent adapters, CLI (TypeScript, no build step) |
 | `plugin/board/` | React + TypeScript board, shared CSS tokens and Vite output |
 | `native/`, `desktop/`, `scripts/` | SwiftUI/AppKit app, app artwork, build/packaging and desktop verification |
-| `plugin/roles/` | Role instructions (engineer, reviewer, editor) injected into whichever agent holds the role, on every job |
+| `plugin/roles/` | Role instructions (engineer, reviewer, editor, and additions for refactoring and release preparation) injected into whichever agent holds the role, on every job |
 | `plugin/skills/`, `plugin/agents/`, `plugin/hooks/` | `/crew:run`, `/crew:debate`, `/crew:review`, `/crew:board`, self-reviewer subagent, hooks |
 | `test/` | Unit tests (`npm test`) and Playwright regressions (`npm run test:e2e`) |
 

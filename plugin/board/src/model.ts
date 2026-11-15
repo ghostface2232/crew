@@ -1,7 +1,31 @@
+import type { Role, RoleAssignment, RoleInfo, RoleSettings } from '../../bridge/config.ts';
 import type { BoardJob, BoardState, ClaudeSession, Mission } from './types.ts';
 
 export const NAMES = { claude: 'Claude', codex: 'Codex', antigravity: 'Antigravity' };
-export const ROLE_NAMES = { delegate: 'Implementation', review: 'Read-only review', polish: 'Wording polish' };
+/** The roles a daemon that predates the role registry knows; it sends no roleInfo. */
+const LEGACY_ROLES: RoleInfo[] = [
+  { role: 'delegate', kind: 'delegate', label: 'Implementation', summary: 'Builds separable pieces of a change.' },
+  { role: 'review', kind: 'review', label: 'Read-only review', summary: 'Reviews a change by reading it and running checks.' },
+  { role: 'polish', kind: 'polish', label: 'Wording polish', summary: 'Improves UI strings, comments, and docs.' },
+];
+export const rolesOf = (state: Pick<BoardState, 'roleInfo'>): RoleInfo[] => (state.roleInfo?.length ? state.roleInfo : LEGACY_ROLES);
+export const roleLabel = (state: Pick<BoardState, 'roleInfo'>, role: string) => rolesOf(state).find((info) => info.role === role)?.label ?? role;
+/** A job's role; jobs saved before roles were recorded get theirs from what they were, as the daemon does. */
+export const jobRole = (job: Pick<BoardJob, 'role' | 'kind' | 'debate' | 'runsApp'>): Role =>
+  job.role ?? (job.debate ? 'debate' : job.kind === 'review' && job.runsApp ? 'verify' : job.kind);
+/**
+ * What each role resolves to under a draft of the settings, so the form shows what an inherited role will
+ * get before it is saved. The daemon applies the same rule (resolveRoles in config.ts).
+ */
+export function resolveDraft(info: RoleInfo[], draft: RoleSettings, saved: BoardState['roles']): Partial<Record<Role, RoleAssignment>> {
+  const resolved: Partial<Record<Role, RoleAssignment>> = {};
+  for (const { role, parent } of info) {
+    const { agent, ...own } = Object.fromEntries(Object.entries(draft[role] ?? {}).filter(([, value]) => value)) as Partial<RoleAssignment>;
+    const base = agent ? { agent } : parent ? resolved[parent] : saved[role] && { agent: saved[role].agent };
+    if (base) resolved[role] = { ...base, ...own };
+  }
+  return resolved;
+}
 export const STOPS = ['Plan', 'Build', 'Review', 'Fix', 'Polish', 'Final'];
 export const STOP_OF_STAGE = {
   plan: 0,

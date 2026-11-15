@@ -5,7 +5,7 @@ import type { ReactNode } from 'react';
 import type { BoardJob, CrewEvent, Snapshot } from './types.ts';
 import { actions, drafts, request } from './api.ts';
 import { board, mergeEvents } from './store.ts';
-import { elapsed, jobLabel, NAMES, projectOf, ROLE_NAMES } from './model.ts';
+import { elapsed, jobLabel, jobRole, NAMES, projectOf, roleLabel } from './model.ts';
 import { ActionStatus, CloseButton, CopyButton, Dialog, Icon, Chip, useAction, useDraft, useNow } from './ui.tsx';
 import { Answer } from './NeedsYou.tsx';
 import { EventList } from './Overview.tsx';
@@ -274,7 +274,8 @@ export function JobDrawer({ id, state, close }: { id: string; state: Snapshot; c
     ? [
         // The model the session reported, else the configured one.
         ['Agent', [NAMES[job.agent], job.resolvedModel ?? job.model, (job.resolvedEffort ?? job.effort) && `${job.resolvedEffort ?? job.effort} effort`].filter(Boolean).join(' · ')],
-        ['Role', job.debate ? 'Debate' : job.ask ? 'Question' : (ROLE_NAMES[job.kind] ?? job.kind)],
+        ['Role', job.ask && !job.debate ? 'Question' : roleLabel(state, jobRole(job))],
+        ...(job.preset ? [['Preset', job.preset[0].toUpperCase() + job.preset.slice(1)] as [string, string]] : []),
         ['Project', projectOf(job)],
         ['Duration', elapsed((job.endedAt ?? now) - job.createdAt)],
         ...(job.worktree ? [['Branch', `${job.worktree.branch} (from ${job.worktree.base.slice(0, 8)})`] as [string, string]] : []),

@@ -1,7 +1,7 @@
 import type { Job, CrewEvent } from '../../bridge/jobs.ts';
 import type { ClaudeSession } from '../../bridge/claude.ts';
 import type { Mission } from '../../bridge/missions.ts';
-import type { Config, Preset, PresetName, Worker, WorkerAgent } from '../../bridge/config.ts';
+import type { Config, Preset, PresetName, RoleInfo, RoleSettings, Worker, WorkerAgent } from '../../bridge/config.ts';
 import type { Usage } from '../../bridge/usage.ts';
 
 export type BoardJob = Omit<Job, 'prompt' | 'instructions'> & Partial<Pick<Job, 'prompt' | 'instructions'>>;
@@ -15,6 +15,9 @@ export interface BoardState {
   claude: ClaudeSession[];
   agents: Agents;
   roles: Roles;
+  /** The roles as the user wrote them, and what each role is; absent from a daemon that predates the role registry. */
+  roleSettings?: RoleSettings;
+  roleInfo?: RoleInfo[];
   limits: { codex?: { windows?: { usedPercent: number; minutes: number }[] } | null };
   events: CrewEvent[];
   /** Absent from a daemon that predates AgentGauge support. */

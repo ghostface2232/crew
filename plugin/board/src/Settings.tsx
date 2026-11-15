@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { Info, SlidersHorizontal } from 'lucide-react';
-import type { Preset, PresetName, Roles, Snapshot } from './types.ts';
-import type { Role, RoleAssignment } from '../../bridge/config.ts';
+import type { Preset, PresetName, Snapshot } from './types.ts';
+import type { JobKind, Role, RoleAssignment, RoleSettings } from '../../bridge/config.ts';
 import { request } from './api.ts';
 import { board } from './store.ts';
-import { knownProjects, projectNames, ROLE_NAMES } from './model.ts';
+import { knownProjects, projectNames, resolveDraft, rolesOf } from './model.ts';
 import { AgentMark, CloseButton, Dialog, Icon, Segmented } from './ui.tsx';
 import styles from './Settings.module.css';
 
@@ -18,10 +18,20 @@ function presetDescription(preset: Preset) {
     ...(preset.maxTier ? [`Workers up to the ${preset.maxTier} tier`] : []),
   ].join('; ');
 }
+const ROLE_GROUPS: [JobKind, string][] = [['delegate', 'Build'], ['review', 'Review'], ['polish', 'Edit']];
+
+/**
+ * The role table the form edits: what the user wrote, so a role left to follow its parent keeps following it.
+ * A daemon without the registry sends only the resolved table, which for its three roles is the same thing.
+ */
+const editableRoles = (state: Snapshot): RoleSettings => structuredClone(state.roleInfo ? state.roleSettings ?? {} : state.roles);
+
 export function Settings({ state, close }: { state: Snapshot; close: () => void }) {
   const [tab, setTab] = useState('roles');
-  const [roles, setRoles] = useState<Roles>(() => structuredClone(state.roles));
-  const [savedRoles, setSavedRoles] = useState(() => JSON.stringify(state.roles));
+  const [roles, setRoles] = useState<RoleSettings>(() => editableRoles(state));
+  const [savedRoles, setSavedRoles] = useState(() => JSON.stringify(editableRoles(state)));
+  const info = rolesOf(state);
+  const resolved = resolveDraft(info, roles, state.roles);
   const [roleStatus, setRoleStatus] = useState('');
   const [savingRoles, setSavingRoles] = useState(false);
   const roleLock = useRef(false);
@@ -90,7 +100,7 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
     if ((!dirty && !saving && !savingRoles && !savingPreset) || confirm('Close without saving your changes?')) close();
   };
   const editRole = (role: Role, key: keyof RoleAssignment, value: string) =>
-    setRoles((current) => ({ ...current, [role]: { ...current[role], [key]: value } }));
+    setRoles((current) => ({ ...current, [role]: { ...current[role], [key]: value } as Partial<RoleAssignment> }));
   const savePreset = async () => {
     if (presetLock.current) return;
     presetLock.current = true;
@@ -117,8 +127,15 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
     setRoleStatus('Saving…');
     const submitted = JSON.stringify(roles);
     try {
-      await request('/api/roles', { roles });
-      setSavedRoles(submitted);
+      const result = await request<{ roles?: Snapshot['roles']; roleSettings?: RoleSettings }>('/api/roles', { roles });
+      if (result.roleSettings && result.roles) {
+        // Blank fields come back dropped; the form shows what was stored, unless it was edited meanwhile.
+        const stored = JSON.stringify(result.roleSettings);
+        setRoles((current) => (JSON.stringify(current) === submitted ? structuredClone(result.roleSettings!) : current));
+        setSavedRoles(stored);
+        board.receive('roles', result.roles);
+        board.receive('roleSettings', result.roleSettings);
+      } else setSavedRoles(submitted);
       setRoleStatus('Saved');
     } catch (error) {
       setRoleStatus((error as Error).message);
@@ -196,43 +213,58 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
         <div className={styles.content}>
           {currentTab === 'roles' && (
             <div className={styles.roles}>
-              {(Object.keys(ROLE_NAMES) as Role[]).map((role) => (
-                <section className={`card ${styles.role}`} key={role} aria-label={ROLE_NAMES[role]}>
-                  <div className={styles.roleHeader}>
-                    <AgentMark agent={roles[role]?.agent ?? 'codex'} size={23} />
-                    <h3 className="card-title">{ROLE_NAMES[role]}</h3>
-                    <select
-                      aria-label={`${ROLE_NAMES[role]} agent`}
-                      value={roles[role]?.agent ?? ''}
-                      onChange={(event) => editRole(role, 'agent', event.target.value)}
-                    >
-                      {Object.entries(state.agents).sort(([a], [b]) => a.localeCompare(b)).map(([id, agent]) => (
-                        <option key={id} value={id}>
-                          {agent.name}{agent.enabled ? '' : ' (disabled)'}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className={styles.roleFields}>
-                    <label className="field">
-                      <span>Model</span>
-                      <input
-                        aria-label={`${ROLE_NAMES[role]} model`}
-                        value={roles[role]?.model ?? ''}
-                        placeholder="Agent default"
-                        onChange={(event) => editRole(role, 'model', event.target.value)}
-                      />
-                    </label>
-                    <label className="field">
-                      <span>Reasoning effort</span>
-                      <input
-                        aria-label={`${ROLE_NAMES[role]} reasoning effort`}
-                        value={roles[role]?.effort ?? ''}
-                        placeholder="Agent default"
-                        onChange={(event) => editRole(role, 'effort', event.target.value)}
-                      />
-                    </label>
-                  </div>
+              {ROLE_GROUPS.map(([kind, group]) => (
+                <section className={styles.group} key={kind} aria-label={group}>
+                  {state.roleInfo && <h3 className="section-title">{group}</h3>}
+                  {info.filter((role) => role.kind === kind).map(({ role, label, summary, parent }) => {
+                    const own = roles[role] ?? {};
+                    const inherited = parent ? resolved[parent] : undefined;
+                    const following = Boolean(parent && !own.agent);
+                    const shown = resolved[role];
+                    return (
+                      <section className={`card ${styles.role}`} key={role} aria-label={label}>
+                        <div className={styles.roleHeader}>
+                          <AgentMark agent={shown?.agent ?? 'codex'} size={23} />
+                          <div className={styles.roleTitle}>
+                            <h3 className="card-title">{label}</h3>
+                            {state.roleInfo && <p className="caption secondary">{summary}</p>}
+                          </div>
+                          <select
+                            aria-label={`${label} agent`}
+                            value={own.agent ?? (parent ? '' : shown?.agent ?? '')}
+                            onChange={(event) => editRole(role, 'agent', event.target.value)}
+                          >
+                            {parent && <option value="">Same as {info.find((other) => other.role === parent)?.label ?? parent}</option>}
+                            {Object.entries(state.agents).sort(([a], [b]) => a.localeCompare(b)).map(([id, agent]) => (
+                              <option key={id} value={id}>
+                                {agent.name}{agent.enabled ? '' : ' (disabled)'}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className={styles.roleFields}>
+                          <label className="field">
+                            <span>Model</span>
+                            <input
+                              aria-label={`${label} model`}
+                              value={own.model ?? ''}
+                              placeholder={(following && inherited?.model) || 'Agent default'}
+                              onChange={(event) => editRole(role, 'model', event.target.value)}
+                            />
+                          </label>
+                          <label className="field">
+                            <span>Reasoning effort</span>
+                            <input
+                              aria-label={`${label} reasoning effort`}
+                              value={own.effort ?? ''}
+                              placeholder={(following && inherited?.effort) || 'Agent default'}
+                              onChange={(event) => editRole(role, 'effort', event.target.value)}
+                            />
+                          </label>
+                        </div>
+                      </section>
+                    );
+                  })}
                 </section>
               ))}
             </div>
@@ -253,7 +285,7 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
                 <p className="callout secondary">
                   {selectedPreset ? presetDescription(selectedPreset) : "Uses each agent's configured model and effort."}
                 </p>
-                <p className="caption tertiary">A model or effort set on a role overrides the preset.</p>
+                <p className="caption tertiary">A model or effort set on a role overrides the preset. A mission can run under its own preset instead, when you name one for the command or set it on the mission.</p>
               </section>
             </div>
           )}

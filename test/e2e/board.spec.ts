@@ -396,10 +396,54 @@ test('project filtering keeps global requests visible and New Job follows roles'
   const calls = await (await request.get('/__requests')).json();
   const created = calls.find((call: { route: string }) => call.route === '/api/jobs');
   expect(created.body).toMatchObject({
+    role: 'review',
     kind: 'review',
     cwd: '/workspace/Other',
     review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' },
   });
+});
+
+test('roles settings group every role, let one follow its parent, and save what the user wrote', async ({ page, request }) => {
+  await openSettings(page);
+  const dialog = page.getByRole('dialog');
+  for (const group of ['Build', 'Review', 'Edit']) await expect(dialog.getByRole('heading', { name: group, exact: true })).toBeVisible();
+  const refactor = page.getByLabel('Refactoring agent');
+  await expect(refactor).toHaveValue('');
+  await expect(refactor.locator('option').first()).toHaveText('Same as Implementation');
+  // A debate cannot be started from New Job, but it can be assigned here.
+  await expect(page.getByLabel('Debate agent')).toBeVisible();
+  await page.getByLabel('Implementation reasoning effort').fill('high');
+  await expect(page.getByLabel('Refactoring reasoning effort')).toHaveAttribute('placeholder', 'high');
+  await page.getByLabel('Review that runs the app agent').selectOption('codex');
+  await page.getByLabel('Cross-review agent').selectOption('antigravity');
+  await page.getByRole('button', { name: 'Save Roles' }).click();
+  await expect(page.getByText('Unsaved changes')).toHaveCount(0);
+  const calls = await (await request.get('/__requests')).json();
+  expect(calls.findLast((call: { route: string }) => call.route === '/api/roles').body).toEqual({
+    roles: { delegate: { effort: 'high' }, verify: { agent: 'codex' }, review: { agent: 'antigravity' } },
+  });
+  await expect(refactor).toHaveValue('');
+});
+
+test('a mission\'s preset can be chosen from its menu', async ({ page, request }) => {
+  const mission = page.locator('.mission[data-state="active"]').first();
+  await mission.getByRole('button', { name: 'Mission options' }).click();
+  await mission.getByRole('menuitemradio', { name: 'Economy preset' }).click();
+  const calls = await (await request.get('/__requests')).json();
+  expect(calls.findLast((call: { route: string }) => call.route.startsWith('/api/missions/')).body).toEqual({ preset: 'economy' });
+});
+
+test('New Job sends the role, so a review that runs the app goes to its holder', async ({ page, request }) => {
+  await newJob(page);
+  await page.getByRole('textbox', { name: 'Project directory' }).fill('/workspace/Crew');
+  await page.getByRole('combobox', { name: 'Role', exact: true }).selectOption('verify');
+  await expect(page.locator('#dispatch-caption')).toHaveText('Reviews uncommitted changes by running the app in a snapshot of them.');
+  await expect(page.getByRole('combobox', { name: 'Role', exact: true }).locator('option[value="debate"]')).toHaveCount(0);
+  await page.getByRole('textbox', { name: 'New job instructions' }).fill('Check the board runs');
+  await page.getByRole('button', { name: 'Send Job' }).click();
+  await expect(page.getByRole('button', { name: 'Close details' })).toBeVisible();
+  const calls = await (await request.get('/__requests')).json();
+  expect(calls.find((call: { route: string }) => call.route === '/api/jobs').body).toMatchObject({ role: 'verify', kind: 'review' });
 });
 
 test('a chosen project survives reload and All projects lets New Job go elsewhere', async ({ page, request }) => {
@@ -633,7 +677,7 @@ test('command intent retains the existing implementation request', async ({ page
   await expect(page.getByRole('button', { name: 'Close details' })).toBeVisible();
   const calls = await (await request.get('/__requests')).json();
   expect(calls.find((call: { route: string }) => call.route === '/api/jobs').body).toEqual({
-    kind: 'delegate', cwd: '/workspace/Crew', project: '/workspace/Crew', task: 'Implement the feature', isolation: 'worktree',
+    role: 'delegate', kind: 'delegate', cwd: '/workspace/Crew', project: '/workspace/Crew', task: 'Implement the feature', isolation: 'worktree',
   });
 });
 

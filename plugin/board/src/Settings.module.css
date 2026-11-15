@@ -4,10 +4,12 @@
 .header :global(.segmented) { width: 300px; max-width: 100%; }
 .header :global(.segmented) > button { flex: 1; min-width: 0; }
 .content { flex: 1; min-height: 0; overflow: auto; padding: 0 26px 4px; }
-.roles { display: grid; gap: 12px; }
+.roles { display: grid; gap: 24px; }
+.group { display: grid; gap: 12px; }
+.roleTitle { display: grid; gap: 2px; min-width: 0; }
 .role { display: grid; gap: 16px; }
-.roleHeader { display: grid; grid-template-columns: 23px minmax(0, 1fr) 180px; align-items: center; gap: 10px; }
-.roleHeader h3 { overflow-wrap: anywhere; }
+.roleHeader { display: grid; grid-template-columns: 23px minmax(0, 1fr) 216px; align-items: center; gap: 10px; }
+.roleHeader h3, .roleTitle p { overflow-wrap: anywhere; }
 .roleFields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
 .presets { display: grid; gap: 14px; overflow-wrap: anywhere; }
 .instructions { display: flex; flex-direction: column; gap: 14px; min-height: 100%; }

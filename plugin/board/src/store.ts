@@ -51,6 +51,8 @@ export class BoardStore {
           missions: state.missions ?? [],
           agents: state.agents ?? {},
           roles: state.roles ?? {},
+          roleSettings: state.roleSettings,
+          roleInfo: state.roleInfo,
           connection: 'live',
           revision: current.revision + 1,
           clockSkew: state.now - Date.now(),
@@ -72,6 +74,9 @@ export class BoardStore {
       }
       case 'roles':
         this.update({ roles: value as BoardState['roles'] });
+        break;
+      case 'roleSettings':
+        this.update({ roleSettings: value as BoardState['roleSettings'] });
         break;
       case 'usage':
         this.update({ usage: value as BoardState['usage'] });
@@ -121,7 +126,7 @@ export class BoardStore {
         this.receive('state', state);
         const source = create('/api/stream');
         stream = source;
-        for (const type of ['state', 'job', 'mission', 'claude', 'roles', 'limits', 'usage', 'preset', 'event']) {
+        for (const type of ['state', 'job', 'mission', 'claude', 'roles', 'roleSettings', 'limits', 'usage', 'preset', 'event']) {
           source.addEventListener(type, (event) => {
             if (current !== generation || source !== stream) return;
             try {

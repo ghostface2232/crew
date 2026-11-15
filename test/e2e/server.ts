@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fixture, job, TEST_TOKEN } from './fixtures.ts';
 import { boardAsset, BOARD_CSP } from '../../plugin/bridge/assets.ts';
+import { resolveConfig } from '../../plugin/bridge/config.ts';
 
 let state = fixture();
 let instructions = 'Prefer minimal changes.\n';
@@ -112,9 +113,16 @@ const server = http.createServer(async (req, res) => {
     return json(found);
   }
   if (url.pathname === '/api/roles') {
-    state.roles = body.roles;
+    // Blank fields are dropped as the daemon drops them (saveRoles in settings.ts).
+    const written = Object.fromEntries(Object.entries(body.roles as Record<string, Record<string, string>>)
+      .map(([role, entry]) => [role, Object.fromEntries(Object.entries(entry).filter(([, value]) => value !== ''))])
+      .filter(([, entry]) => Object.keys(entry).length));
+    const resolved = resolveConfig({ roles: written });
+    state.roles = resolved.roles;
+    state.roleSettings = resolved.roleSettings;
     send('roles', state.roles);
-    return json(state.roles);
+    send('roleSettings', state.roleSettings);
+    return json({ roles: state.roles, roleSettings: state.roleSettings });
   }
   if (url.pathname === '/api/jobs' && req.method === 'POST') {
     const created = job({ id: 'cx-direct', mission: undefined, title: body.task, kind: body.kind,

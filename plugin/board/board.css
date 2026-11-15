@@ -553,6 +553,7 @@ dialog.detail-panel::backdrop { background: transparent; }
 }
 .menu-list button { justify-content: flex-start; min-height: 26px; padding: 0 8px; border-radius: 6px; background: none; color: var(--label); font-weight: 400; white-space: nowrap; }
 @media (hover: hover) { .menu-list button:not(:disabled):hover { background: var(--accent); color: #fff; } }
+.menu-list hr { height: 1px; margin: 4px 8px; border: 0; background: var(--hairline); }
 
 /* Job details */
 .detail-head { display: flex; align-items: center; gap: 8px; padding: 20px 24px 4px; }

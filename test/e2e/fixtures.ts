@@ -1,3 +1,4 @@
+import { resolveConfig, ROLE_INFO } from '../../plugin/bridge/config.ts';
 import type { BoardJob, BoardState } from '../../plugin/board/src/types.ts';
 
 export const NOW = 1_795_000_000_000;
@@ -108,7 +109,9 @@ export function fixture(): BoardState {
         enabled: true,
       },
     },
-    roles: { delegate: { agent: 'codex' }, review: { agent: 'codex' }, polish: { agent: 'antigravity' } },
+    roles: resolveConfig({}).roles,
+    roleSettings: {},
+    roleInfo: ROLE_INFO,
     limits: { codex: { windows: [{ usedPercent: 42, minutes: 300 }] } },
     preset: 'balanced',
     presets: {

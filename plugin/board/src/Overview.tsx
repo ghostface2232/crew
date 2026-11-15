@@ -1,7 +1,7 @@
 import { ArrowUpRight, BellDot, CircleAlert, CircleCheck, CircleDot, CircleDotDashed, Layers, MessagesSquare, Plus, Search, SquareStack } from 'lucide-react';
 import type { ProviderUsage } from '../../bridge/usage.ts';
 import type { BoardJob, ClaudeSession, CrewEvent, Mission, Snapshot, WorkerAgent } from './types.ts';
-import { NAMES, projectOf, relativeDuration, ROLE_NAMES, usageWindowName, unsettled } from './model.ts';
+import { NAMES, projectOf, relativeDuration, rolesOf, usageWindowName, unsettled } from './model.ts';
 import { AgentMark, Chip, ContentPanel, EmptyState, Icon, useNow } from './ui.tsx';
 import { JobRow, MissionPanel, SessionView } from './Missions.tsx';
 
@@ -157,9 +157,10 @@ export function AgentOverview({ state, project }: { state: Snapshot; project: st
           const role =
             agent === 'claude'
               ? 'Lead'
-              : (Object.keys(ROLE_NAMES) as (keyof typeof ROLE_NAMES)[])
-                  .filter((key) => state.roles[key]?.agent === agent)
-                  .map((key) => ROLE_NAMES[key])
+              // A role that follows its parent to the same agent adds nothing to say.
+              : rolesOf(state)
+                  .filter(({ role, parent }) => state.roles[role]?.agent === agent && !(parent && state.roles[parent]?.agent === agent))
+                  .map(({ label }) => label)
                   .join(' · ');
           return (
             <li className="card agent-card" key={agent} data-agent={agent}>

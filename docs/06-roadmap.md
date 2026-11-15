@@ -88,6 +88,14 @@ Injection keeps the decision recorded in [04-implementation.md](04-implementatio
 
 **L1. The lead as an adapter.** Only three parts are tied to Claude Code: the MCP server, the hooks, and the skills. Jobs, events, and the board belong to the daemon. Defining the lead as the role that plans and decides merges lets Codex or a headless Claude take it. This also resolves the "Codex as temporary lead when Claude is nearly exhausted" case in 03 section 8.2.
 
+Groundwork done 2026-11-15: worker roles are a registry the user assigns in the settings ([09](09-usage-presets-rounds.md) section 15), and routing names the lead through one constant (`LEAD` in `config.ts`) instead of spelling out Claude. No setting chooses the lead yet: one that nothing can honor would mislead. What a lead other than Claude Code needs, in order, each verified before the next:
+
+1. Lead identity as a property of the connected session, not a global setting, so leads of different kinds can run at once. Today a session is known by `CLAUDE_CODE_SESSION_ID`.
+2. The MCP server driven by another client (Codex supports MCP servers), with the session id passed in.
+3. Waking the lead when a job ends or needs it. Today Claude Code's hooks (`plugin/hooks`) do this, and they also record the user's own words, which `approved_by_user` is checked against; the new lead needs both.
+4. Relaying approvals and questions to the user through that client.
+5. A Claude worker adapter, needed only once Claude is to hold a worker role under another lead.
+
 **L2. Own main screen.** Partially implemented 2026-11-12: React board, role-based direct jobs and Electron shell; see [07-desktop-and-react.md](07-desktop-and-react.md). Mission start with a lead, lead selection and merge execution remain open. Original plan: After B1 and B2 the board is close to a control screen. Add mission start, the command bar for direct dispatch (the daemon already accepts `POST /api/jobs`), lead selection, and merge execution, then wrap it in a thin native window. Deferred discussion on 2026-11-12: evaluate Electron as a thin client of the existing daemon, with one app instance, window-state restoration, a tray, and actionable approval notifications. Closing the board must not stop jobs; keep the web board available. The earlier Tauri preference (02 section 5) is not a final choice. Measure resource costs and consider packaging and updates before selecting the shell; avoid a heavy wrapper (05 section 6).
 
 **L3. Usage-based routing.** With AgentGauge G3 (threshold hooks), handoff starts before the lead's limit runs out.
@@ -125,3 +133,5 @@ Requirements R4 and R6 (computer use, side chat, visibility in the desktop app) 
 - 2026-11-13: The user requested a native macOS desktop client. SwiftUI and AppKit replace Electron, with Swift 6 and macOS 26+ support. The TypeScript daemon and React browser board are retained. This changes the L2 desktop shell and native presentation, not lead selection or mission orchestration. See [08-native-macos.md](08-native-macos.md).
 
 - 2026-11-13: Implemented C1 phase G1, A3 presets, and the open parts of B2. The macOS cache format was rechecked against AgentGauge 0.8.2. C2, L1, the rest of L2, L3, and L4 are unchanged.
+
+- 2026-11-15: The user asked for roles beyond the original three, easier reassignment, a preset per mission, and, later, a lead other than Claude. Roles became a registry with inheritance (refactor, release preparation, debate, and review that runs the app join the three), missions carry their own preset, and L1 gained its groundwork and an ordered plan. Executing a release (push, publish, deploy) is not part of the release role; it needs its own permission, network, and approval design. Decided after debating the design with Codex (Astra and Sol, independently). See [09](09-usage-presets-rounds.md) sections 8 and 15.

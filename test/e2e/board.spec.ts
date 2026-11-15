@@ -1144,3 +1144,77 @@ for (const width of [390, 1440]) {
     await expect(run.getByRole('button')).toHaveCount(0);
   });
 }
+
+test('a session row opens its own panel and closes it again, as job rows do', async ({ page }) => {
+  const row = page.locator('button[data-session="lead-1"]').last();
+  await row.click();
+  const panel = page.getByRole('dialog');
+  await expect(panel.getByText('Claude · Lead', { exact: true })).toBeVisible();
+  await expect(panel.getByRole('button', { name: 'Resume command' })).toBeVisible();
+  // The page beside the panel stays usable: the same row closes it.
+  await row.click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+});
+
+test('the panel resizes from its edge and keeps the width', async ({ page }) => {
+  await page.locator('button[data-job="cx-build"]').click();
+  const grip = page.getByRole('separator', { name: 'Panel width' });
+  const before = Number(await grip.getAttribute('aria-valuenow'));
+  await grip.focus();
+  await page.keyboard.press('ArrowLeft');
+  await expect(grip).toHaveAttribute('aria-valuenow', String(before + 40));
+  await page.getByRole('button', { name: 'Close details' }).click();
+  await page.locator('button[data-job="cx-build"]').click();
+  await expect(page.getByRole('separator', { name: 'Panel width' })).toHaveAttribute('aria-valuenow', String(before + 40));
+});
+
+test('a closed mission opens from a click anywhere on it and closes from its title row', async ({ page }) => {
+  const card = page.locator('[data-key="mission-1"]');
+  await card.getByRole('button', { name: 'Collapse mission' }).click();
+  await expect(card.locator('.track')).toHaveCount(0);
+  await card.locator('.mission-meta').click();
+  await expect(card.locator('.track')).toBeVisible();
+  await card.locator('.mission-heading').click();
+  await expect(card.locator('.track')).toHaveCount(0);
+});
+
+test('a finished-looking mission offers Mark done beside its outcome, and a dropped one marks its stopping step', async ({ page, request }) => {
+  const data = fixture();
+  data.missions[0].stages = ['implement', 'cross-review', 'final'];
+  data.missions[0].stage = 'cross-review';
+  data.missions[0].updatedAt = NOW - 20 * 60_000;
+  data.jobs.forEach((job) => { job.state = 'done'; job.endedAt = NOW - 60_000; job.waiting = null; });
+  data.claude.forEach((session) => { session.state = 'idle'; });
+  await request.post('/__push', { data: { type: 'state', data } });
+  const card = page.locator('[data-key="mission-1"]');
+  await card.locator('.mission-foot').getByRole('button', { name: 'Mark done' }).click();
+  await expect(card.locator('.mission-head .chip')).toHaveText('Done');
+  data.missions[0] = { ...data.missions[0], state: 'abandoned', endedAt: NOW };
+  await request.post('/__push', { data: { type: 'state', data } });
+  await card.getByRole('button', { name: 'Expand mission' }).click();
+  await expect(card.locator('.track > li[data-pos="stopped"] .track-name')).toHaveText('Review');
+  await expect(card.locator('.track > li[data-current]')).toHaveCount(1);
+});
+
+test('a job\'s facts name its tier, and a long note is cut with what was left out', async ({ page, request }) => {
+  await request.post('/__push', { data: { type: 'job', data: { id: 'cx-build', tier: 'standard', model: 'sol', notes: [`${'a'.repeat(2000)}\nsecond\nthird`] } } });
+  await page.locator('button[data-job="cx-build"]').click();
+  const panel = page.getByRole('dialog');
+  await expect(panel.locator('.facts')).toContainText('Codex · sol · standard tier');
+  await expect(panel.getByRole('region', { name: 'Notes' })).toContainText('… and 3 more lines');
+});
+
+test('New Job shows who takes a question, and says when only the lead can', async ({ page, request }) => {
+  await newJob(page);
+  await page.getByRole('radio', { name: 'Question' }).click();
+  await expect(page.getByRole('dialog').getByText('Assigned to')).toBeVisible();
+  // A changed intent is a draft, so leaving asks first.
+  page.once('dialog', (prompt) => void prompt.accept());
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  const data = fixture();
+  data.roles = { ...data.roles, delegate: { agents: ['claude'] } };
+  await request.post('/__push', { data: { type: 'state', data } });
+  await newJob(page);
+  await page.getByRole('radio', { name: 'Question' }).click();
+  await expect(page.getByText('Start this job from a Claude session. Claude does the work itself or in a subagent.')).toBeVisible();
+});

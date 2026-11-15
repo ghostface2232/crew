@@ -313,7 +313,6 @@ export function MissionPanel({
           </button>
         </span>
       </div>
-      <div className="mission-progress-bar" aria-hidden="true"><i style={{ width: `${progress * 100}%` }} /></div>
       {expanded && (
         <div className="mission-body reveal">
           {mission.notes?.map((note, noteIndex) => (

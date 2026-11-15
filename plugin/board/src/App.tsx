@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { flushSync } from 'react-dom';
 import {
   ArrowRight, Bell, Clock, Command, FolderClosed, LayoutGrid, LockKeyhole, PanelLeft, Plus, RotateCw, Search,
   Settings as SettingsIcon, SquareStack, WifiOff, Zap,
@@ -73,7 +74,9 @@ export function App() {
   /** Folds the drawer away and gives focus back to its button, which would otherwise fall to the page as the drawer turns inert. */
   const fold = () => {
     if (!drawer) return;
-    setDrawer(false);
+    // Committed at once, so the page behind is no longer inert and its button takes focus now, before a dialog
+    // opened next records where to return focus.
+    flushSync(() => setDrawer(false));
     toggle.current?.focus();
   };
   useEffect(() => {
@@ -82,7 +85,7 @@ export function App() {
     const escape = (event: KeyboardEvent) => {
       // A dialog opened over the page handles its own Escape.
       if (event.key !== 'Escape' || event.defaultPrevented || document.querySelector('dialog[open]')) return;
-      setDrawer(false);
+      flushSync(() => setDrawer(false));
       toggle.current?.focus();
     };
     window.addEventListener('keydown', escape);
@@ -211,7 +214,8 @@ export function App() {
           </div>
         </aside>
         {drawer && <div className="sidebar-scrim" aria-hidden="true" onClick={fold} />}
-        <div className="workspace">
+        {/* While the drawer is out over it, the page is out of reach, so Tab stays in the drawer. */}
+        <div className="workspace" inert={drawer}>
           <header className="topbar">
             <button
               className="icon topbar-sidebar"
@@ -273,11 +277,14 @@ export function App() {
                 <h1 className="page-title">{title}</h1>
               </div>
               {pending > 0 && page !== 'needs' && (
-                <button className="attention" onClick={() => select('needs')}>
+                <button
+                  className="attention"
+                  // The count already shows in the badge; the name still says it in full.
+                  aria-label={`${pending} ${pending === 1 ? 'request needs' : 'requests need'} your attention`}
+                  onClick={() => select('needs')}
+                >
                   <span className="attention-count"><RollingNumber value={pending} /></span>
-                  <span>
-                    {pending} {pending === 1 ? 'request needs' : 'requests need'} your attention
-                  </span>
+                  <span>Needs you</span>
                   <Icon icon={ArrowRight} />
                 </button>
               )}

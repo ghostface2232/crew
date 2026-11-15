@@ -923,10 +923,7 @@ dialog.detail-panel { container: panel / inline-size; }
   transition: background 600ms var(--ease-out);
 }
 .mission-controls { display: flex; gap: 6px; }
-.mission-progress-bar { height: 3px; border-radius: 999px; background: var(--quaternary); overflow: hidden; }
-.mission-progress-bar i { display: block; height: 100%; border-radius: inherit; background: var(--tone); transition: width 700ms var(--ease-out); }
-.mission[data-expanded] .mission-progress-bar { display: none; }
-.mission-hint { margin-top: -6px; }
+.mission-hint { margin-top: -6px; padding-inline-start: 40px; }
 .mission-body { display: grid; gap: 16px; }
 @container page (max-width: 600px) {
   .mission-head { flex-wrap: wrap; }

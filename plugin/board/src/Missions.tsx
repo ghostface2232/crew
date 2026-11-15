@@ -135,7 +135,10 @@ export function MissionPanel({
   const progress = missionProgress(mission, jobs);
   const live = useSyncExternalStore(board.subscribe, () => board.getSnapshot().connection === 'live');
   const locked = action.pending || action.accepted || !live;
-  const update = (body: object, done: string) => void actions.run(key, () => request(`/api/missions/${mission.id}`, body), { done });
+  // Done and Stop tracking change the state, and with it the key; a preset leaves both, so its action must not lock the menu.
+  const update = (body: object, done: string, once = true) => void actions.run(key, () => request(`/api/missions/${mission.id}`, body), { done, once });
+  // A daemon without the role registry ignores a mission's preset.
+  const presets = Boolean(board.getSnapshot().roleInfo);
   return (
     <section className="card mission" data-key={mission.id} data-state={mission.state}>
       <div className="mission-head">
@@ -180,7 +183,7 @@ export function MissionPanel({
                   Stop tracking
                 </button>
               )}
-              {mission.state === 'active' && (
+              {mission.state === 'active' && presets && (
                 <>
                   <hr />
                   {([['economy', 'Economy'], ['balanced', 'Balanced'], ['best', 'Best'], [null, 'Global preset']] as [PresetName | null, string][]).map(([preset, name]) => (
@@ -190,7 +193,7 @@ export function MissionPanel({
                       aria-checked={(mission.preset ?? null) === preset}
                       disabled={locked}
                       title="Applies to the mission's next jobs. Jobs already started keep theirs."
-                      onClick={() => update({ preset }, preset ? `${name} preset for new jobs` : 'Global preset for new jobs')}
+                      onClick={() => update({ preset }, preset ? `${name} preset for new jobs` : 'Global preset for new jobs', false)}
                     >
                       <Icon icon={(mission.preset ?? null) === preset ? Check : Gauge} />
                       {preset ? `${name} preset` : name}

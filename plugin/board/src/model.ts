@@ -9,7 +9,9 @@ const LEGACY_ROLES: RoleInfo[] = [
   { role: 'polish', kind: 'polish', label: 'Wording polish', summary: 'Improves UI strings, comments, and docs.' },
 ];
 export const rolesOf = (state: Pick<BoardState, 'roleInfo'>): RoleInfo[] => (state.roleInfo?.length ? state.roleInfo : LEGACY_ROLES);
-export const roleLabel = (state: Pick<BoardState, 'roleInfo'>, role: string) => rolesOf(state).find((info) => info.role === role)?.label ?? role;
+/** Names for the roles an older daemon's jobs can have without listing them as roles to assign. */
+const LEGACY_LABELS: Record<string, string> = { debate: 'Debate', verify: 'Review that runs the app' };
+export const roleLabel = (state: Pick<BoardState, 'roleInfo'>, role: string) => rolesOf(state).find((info) => info.role === role)?.label ?? LEGACY_LABELS[role] ?? role;
 /** A job's role; jobs saved before roles were recorded get theirs from what they were, as the daemon does. */
 export const jobRole = (job: Pick<BoardJob, 'role' | 'kind' | 'debate' | 'runsApp'>): Role =>
   job.role ?? (job.debate ? 'debate' : job.kind === 'review' && job.runsApp ? 'verify' : job.kind);

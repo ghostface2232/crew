@@ -226,6 +226,11 @@ export function resolveConfig(user: UserConfig): Config {
     if (entry.agent !== undefined && !Object.hasOwn(WORKERS, entry.agent as string)) {
       throw new Error(`roles.${role}.agent is "${entry.agent}"; use one of: ${Object.keys(WORKERS).join(', ')}.`);
     }
+    // A model names one agent's model. Following the parent, the agent can change under it and receive a model it does not have.
+    const parent = roleInfo(role).parent;
+    if (parent && entry.model !== undefined && entry.agent === undefined) {
+      throw new Error(`roles.${role}.model needs roles.${role}.agent: a model belongs to one agent, and a role that follows ${parent} can change agents. Set the agent too, or leave the model to ${parent}.`);
+    }
     roleSettings[role] = entry as Partial<RoleAssignment>;
   }
   const roles = resolveRoles(roleSettings);

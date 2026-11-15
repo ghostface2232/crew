@@ -429,8 +429,15 @@ test('a mission\'s preset can be chosen from its menu', async ({ page, request }
   const mission = page.locator('.mission[data-state="active"]').first();
   await mission.getByRole('button', { name: 'Mission options' }).click();
   await mission.getByRole('menuitemradio', { name: 'Economy preset' }).click();
+  await expect(mission.locator('.mission-meta')).toContainText('Economy preset');
+  // The menu stays usable after a preset change, and the choice shows.
+  await mission.getByRole('button', { name: 'Mission options' }).click();
+  await expect(mission.getByRole('menuitemradio', { name: 'Economy preset' })).toHaveAttribute('aria-checked', 'true');
+  await mission.getByRole('menuitemradio', { name: 'Global preset' }).click();
+  await expect(mission.locator('.mission-meta')).not.toContainText('preset');
   const calls = await (await request.get('/__requests')).json();
-  expect(calls.findLast((call: { route: string }) => call.route.startsWith('/api/missions/')).body).toEqual({ preset: 'economy' });
+  const sent = calls.filter((call: { route: string }) => call.route.startsWith('/api/missions/')).map((call: { body: unknown }) => call.body);
+  expect(sent.slice(-2)).toEqual([{ preset: 'economy' }, { preset: null }]);
 });
 
 test('New Job sends the role, so a review that runs the app goes to its holder', async ({ page, request }) => {

@@ -162,6 +162,9 @@ test('a role without an agent follows its parent whole; one with an agent starts
   assert.deepEqual(config.roleSettings, { delegate: { model: 'gpt-x', effort: 'high' }, refactor: { agent: 'antigravity' }, debate: { effort: 'medium' }, review: { agent: 'antigravity' } });
   assert.throws(() => resolveConfig({ roles: { deploy: { agent: 'codex' } } as never }), /roles\.deploy is not a role; use one of: delegate, refactor, release, debate, review, verify, polish/);
   assert.throws(() => resolveConfig({ roles: { verify: { agent: 'cursor' } } as never }), /roles\.verify\.agent is "cursor"/);
+  // A model that follows its parent's agent could reach an agent that does not have it.
+  assert.throws(() => resolveConfig({ roles: { delegate: { agent: 'antigravity' }, refactor: { model: 'gpt-x' } } }), /roles\.refactor\.model needs roles\.refactor\.agent/);
+  assert.deepEqual(resolveConfig({ roles: { refactor: { agent: 'codex', model: 'gpt-x' } } }).roles.refactor, { agent: 'codex', model: 'gpt-x' });
 });
 
 test('a mission\'s preset replaces the global one for its jobs', () => {

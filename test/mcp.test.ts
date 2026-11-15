@@ -16,7 +16,7 @@ test('mission forwards plans on start, revision, repeated titles and reattachmen
   let saved: Mission[] = [];
   const calls: { method: string; route: string; body: any }[] = [];
   const run = vm.runInNewContext(`${stripTypeScriptTypes(handler)}; reportMission`, {
-    STAGES, normalizeTitle, SESSION: 'lead', PROJECT: '/project', missionId: null, closedElsewhere: null, costMission: null,
+    STAGES, normalizeTitle, SESSION: 'lead', PROJECT: '/project', missionId: null, closedElsewhere: null, costMission: null, fresh: false,
     SUPERSEDED: 'Superseded by a new mission.', currentPolicy: () => 'policy', globalPreset: () => null,
     ownMission: async () => current,
     api: async (method: string, route: string, body: any) => {
@@ -58,6 +58,32 @@ test('mission forwards plans on start, revision, repeated titles and reattachmen
   const describe = vm.runInNewContext(`${stripTypeScriptTypes(handler.slice(0, handler.indexOf('async function reportMission')))}; describeMission`, { STAGES, currentPolicy: () => 'policy', globalPreset: () => null });
   assert.match(describe({ id: 'm', title: 'Review', state: 'active', stage: 'self-review', stageIndex: 2,
     stages: ['self-review', 'fix', 'self-review'] }), /Plan: self-review → fix → self-review \(current\)/);
+});
+
+test('only a restarted server takes a closed mission of this session for one it lost track of', async () => {
+  const source = fs.readFileSync(new URL('../plugin/bridge/mcp.ts', import.meta.url), 'utf8');
+  const handler = source.slice(source.indexOf('function describeMission('), source.indexOf('function describeJob'));
+  const saved = [{ id: 'm0', title: 'Fix X', owner: 'lead', project: '/project', state: 'abandoned', outcome: 'Dismissed on the board.', createdAt: 1, stage: 'plan' }];
+  const start = (fresh: boolean) => {
+    const calls: string[] = [];
+    const context = {
+      STAGES, normalizeTitle, SESSION: 'lead', PROJECT: '/project', missionId: null, closedElsewhere: null, costMission: null, fresh,
+      SUPERSEDED: 'Superseded by a new mission.', currentPolicy: () => 'policy', globalPreset: () => null, ownMission: async () => null,
+      api: async (method: string, route: string, body: any) => {
+        calls.push(`${method} ${route}`);
+        return method === 'GET' ? { missions: saved } : { id: 'm1', title: body.title, stage: 'plan', state: 'active' };
+      },
+    };
+    return { run: vm.runInNewContext(`${stripTypeScriptTypes(handler)}; reportMission`, context), calls, context };
+  };
+  const restarted = start(true);
+  assert.match(await restarted.run({ title: 'Fix X' }), /closed outside this session/);
+  assert.equal(restarted.context.costMission, 'm0');
+  // A server that saw the mission end opens a new one when asked, as when the lead abandoned its own.
+  const live = start(false);
+  await live.run({ title: 'Fix X' });
+  assert.ok(live.calls.includes('POST /api/missions'));
+  assert.equal(live.context.costMission, 'm1');
 });
 
 test('polish advertises the shared model option and forwards it to the job', async () => {

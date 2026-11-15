@@ -533,6 +533,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       delete spec.missionStep;
       const mission = missions.list().find((m) => m.id === spec.mission);
       // The mission's preset is a cost the user chose; running on the global one instead would quietly change it.
+      if (spec.mission == null) delete spec.mission;
       if (spec.mission !== undefined && !mission) throw new HttpError(400, `No mission with id "${spec.mission}" is known any more, so its preset cannot be applied. Start the job without it, or open a new mission.`);
       spec.preset = missionPreset(mission, liveConfig().preset);
       // A job outlives its mission's tracking: it still runs under the mission's preset, on its own, and says why.

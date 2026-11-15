@@ -998,6 +998,8 @@ test('each job goes to its role\'s holder, gets the role\'s brief, and refuses a
   await assert.rejects(jobs.create({ kind: 'delegate', role: 'debate', cwd: repo, task: 'x' }), /needs debate rounds/);
   await assert.rejects(jobs.create({ kind: 'delegate', role: 'release', cwd: repo, task: 'x', ask: true }), /cannot be a question/);
   await assert.rejects(jobs.create({ kind: 'delegate', role: 'deploy' as never, cwd: repo, task: 'x' }), /role must be one of/);
+  await assert.rejects(jobs.create({ kind: 'delegate', role: 'delegate', cwd: repo, task: 'x', debate: { rounds: 2 } }), /A debate is the debate role, not delegate/);
+  await assert.rejects(jobs.create({ kind: 'deploy' as never, cwd: repo, task: 'x' }), /kind must be one of: delegate, review, polish/);
 
   // Verify on an agent that cannot run commands is refused, never moved to another agent.
   const stuck = resolveConfig({ notify: false, codex: config.codex, roles: { review: { agent: 'antigravity' } } });

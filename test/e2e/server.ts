@@ -92,6 +92,8 @@ const server = http.createServer(async (req, res) => {
       if (mission.state !== 'active') return json({ error: 'Mission is not active' }, 409);
       mission.notes = [...mission.notes ?? [], { text: body.note, at: state.now }];
     }
+    if (body.preset === null) delete mission.preset;
+    else if (body.preset) mission.preset = body.preset;
     if (body.abandoned) mission.state = 'abandoned';
     if (body.done) mission.state = 'done';
     if (body.done || body.abandoned) {

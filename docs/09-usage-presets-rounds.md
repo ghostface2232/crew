@@ -33,6 +33,7 @@ Added 2026-11-15 for roles and mission presets (sections 8 and 15): state gains 
 | `POST /api/preset` | `{ "preset": "economy" \| "balanced" \| "best" \| null }` | `{ preset, presets }`; writes `preset` in `~/.crew/config.json` |
 | `POST /api/missions/:id` | `{ "note": "text" }` | The mission, with the note appended. Refused for a mission that is not active |
 | `POST /api/missions/:id` | `{ "preset": "economy" \| "balanced" \| "best" \| null }` | The mission. A name sets its preset, `null` clears it, and leaving it out changes nothing. Refused for a mission that is not active. Applies to the mission's next jobs |
+| `POST /api/missions` | adds `"preset"` | A new mission may start with a preset |
 | `POST /api/roles` | `{ "roles": <raw table> }` | `{ roles, roleSettings }`: the resolved and the stored table (section 15) |
 | `POST /api/instructions` | `{ "append": "text", "project": path \| null }` | `{ file, text }`; adds the text as a new paragraph to the shared instructions |
 | `POST /api/jobs` | `{ "kind": "delegate", "ask": true, "task": "question", "cwd": path }` | A read-only job whose report is the answer. Any job may add `"skills": [names]` (section 14) |
@@ -134,7 +135,7 @@ The built-in presets name no worker models, because which models an account has 
 
 Added 2026-11-15. A mission can carry its own `preset`, which replaces the global one for the jobs started under it; nothing else in the order above changes, so a role's own model or effort still wins. The lead passes `preset` to `mission` only when the user names one for the command ("this one is simple: economy"); it never picks one itself. The user can also change it from the mission's menu on the board. A change applies to the mission's next jobs: a job records the preset it started under (`Job.preset`) and keeps it, with its model, for its follow-up turns.
 
-The preset belongs to the work, not to the mission card. When the user stops tracking a mission on the board, the lead session keeps sending its id with new jobs, and they still run under its preset; the link is dropped only when the lead finishes the mission or opens another. A job that names a mission the daemon no longer knows is refused rather than run on the global preset. After the MCP server restarts, a lead that resends its mission's title reattaches to it; if the user stopped tracking it meanwhile, the lead keeps its preset without reopening the card.
+The preset belongs to the work, not to the mission card. When the user stops tracking a mission on the board, the lead session keeps sending its id with new jobs, and they still run under its preset; the link is dropped only when the lead finishes the mission or opens another. A job that names a mission the daemon no longer knows is refused rather than run on the global preset; the lead is told once, and its next job runs under the global preset. After the MCP server restarts, the session's one open mission is picked up again with its next job or `route`, and a lead that resends its mission's title reattaches to it. If the mission was closed while the server was down, the lead keeps its preset without reopening the card.
 
 Session instructions are fixed when a session starts, so they state only the global preset and these rules. `mission` and `route` responses state the preset in effect and what it asks of the lead's subagents; the lead follows the latest one it was told.
 
@@ -284,7 +285,7 @@ Added 2026-11-15. A role is a kind of work the user assigns to an agent. Each ru
 | `verify` | review | `review` | Review that runs the app in a snapshot of the change |
 | `polish` | polish | | Wording |
 
-A role the user has not assigned, or assigned without an `agent`, takes its parent's whole assignment, with its own `model` and `effort` laid over it. A role that names an `agent` starts fresh, so a model meant for the parent's agent never reaches another agent. A config written for the original three roles therefore behaves as before.
+A role the user has not assigned, or assigned without an `agent`, takes its parent's whole assignment, with its own `effort` laid over it. A role that names an `agent` starts fresh, so a model meant for the parent's agent never reaches another agent. A model belongs to one agent, so a role with a parent that sets `model` must set `agent` too; otherwise the config is refused. A config written for the original three roles therefore behaves as before.
 
 ```json
 { "roles": { "review": { "agent": "antigravity" }, "verify": { "agent": "codex" } } }
@@ -294,6 +295,6 @@ Static reviews then go to Antigravity and reviews that run the app to Codex. A r
 
 The daemon sends both tables: `roles` resolved (every role, `agent` required) and `roleSettings` as written (`agent` optional), with `roleInfo` describing each role in display order. Settings edit and save `roleSettings`, so a role left to follow its parent keeps following it.
 
-A job settles its role once, when it is created (`resolveRole` in `jobs.ts`). `POST /api/jobs` may send `role` without `kind`. A review with `runs_app` is `verify`; `review` with `runs_app`, or a role whose kind differs from the given one, is refused. Jobs saved before roles were recorded derive theirs: `debate` if they were a debate, `verify` if a review ran the app, else their kind.
+A job settles its role once, when it is created (`resolveRole` in `jobs.ts`). `POST /api/jobs` may send `role` without `kind`. A review with `runs_app` is `verify`; `review` with `runs_app`, a role whose kind differs from the given one, and debate rounds on any role but `debate` are refused. Jobs saved before roles were recorded derive theirs: `debate` if they were a debate, `verify` if a review ran the app, else their kind.
 
 The lead's tools map onto roles: `delegate` takes `role` (`delegate`, `refactor`, or `release`), `review` is `review` or, with `runs_app`, `verify`, and `debate` and `polish` are their own roles. The board's New Job offers every role except `debate`, which needs a lead to answer each round.

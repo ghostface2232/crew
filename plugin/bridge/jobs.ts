@@ -375,10 +375,12 @@ export function jobRole(job: Pick<Job, 'role' | 'kind' | 'debate' | 'runsApp'>):
 export function resolveRole(spec: JobSpec): Role {
   if (spec.role !== undefined && !isRole(spec.role)) throw new Error(`role must be one of: ${ROLES.join(', ')}.`);
   const role = jobRole(spec);
+  if (!isRole(role)) throw new Error(`kind must be one of: delegate, review, polish; or pass a role (${ROLES.join(', ')}).`);
   const info = roleInfo(role);
   spec.kind ??= info.kind;
   if (spec.kind !== info.kind) throw new Error(`The ${role} role runs as a ${info.kind} job, not ${spec.kind}.`);
   if (role === 'debate' && !spec.debate) throw new Error('A debate job needs debate rounds; start it with the debate tool.');
+  if (spec.debate !== undefined && role !== 'debate') throw new Error(`A debate is the debate role, not ${role}.`);
   if (role === 'verify') {
     spec.runsApp ??= true;
     if (!spec.runsApp) throw new Error('The verify role runs the app; use the review role for a static review.');

@@ -461,6 +461,38 @@ let missionId: string | null = null;
 let costMission: string | null = null;
 /** Set when this session's mission was closed from outside (dismissed on the board, or left too long), until the lead has been told. */
 let closedElsewhere: Mission | null = null;
+/**
+ * True until this server has dealt with a mission. Only then can a closed mission of this session be one it lost
+ * track of in a restart; afterwards a closed one is one this server saw end.
+ */
+let fresh = true;
+
+/**
+ * After a restart the server no longer knows its mission. A lead that goes straight on with its work, without
+ * reporting the mission again, still means this session's one open mission, and its jobs keep that mission's preset.
+ */
+async function reattach(): Promise<void> {
+  if (!fresh || costMission || !SESSION) return;
+  fresh = false;
+  const open = ((await api('GET', '/api/state')).missions as Mission[] ?? []).filter((m) => m.owner === SESSION && m.project === PROJECT && m.state === 'active');
+  if (open.length === 1 && !costMission) {
+    missionId = open[0].id;
+    costMission = open[0].id;
+  }
+}
+
+/** The daemon no longer knows the mission whose preset this session's jobs ran under: say so once, then go on without it. */
+async function withMission<T>(call: () => Promise<T>): Promise<T> {
+  try {
+    return await call();
+  } catch (err) {
+    if (!costMission || !/is known any more/.test((err as Error).message)) throw err;
+    const lost = costMission;
+    costMission = null;
+    if (missionId === lost) missionId = null;
+    throw new Error(`Mission ${lost} is no longer known to Crew, so its preset cannot be applied. Try again to run under the global preset, or start a new mission with the preset the user named.`);
+  }
+}
 
 /** This session's mission if it is still open. A mission closed from outside is forgotten and remembered as such. */
 async function ownMission(): Promise<Mission | null> {
@@ -497,6 +529,8 @@ function describeMission(mission: Mission): string {
 
 async function reportMission(args: any): Promise<string> {
   if (args.done && args.abandoned) throw new Error('Pass done or abandoned, not both.');
+  const restarted = fresh;
+  fresh = false;
   const ending = Boolean(args.done || args.abandoned);
   const current = await ownMission();
 
@@ -518,8 +552,8 @@ async function reportMission(args: any): Promise<string> {
       costMission = lost.id;
       return describeMission(args.stage || args.preset !== undefined ? await api('POST', `/api/missions/${lost.id}`, { stage: args.stage, preset: args.preset }) : lost);
     }
-    // Closed on the board while this server was down: the work goes on under the preset the user chose for it.
-    const closed = !costMission && mine.filter((m) => m.state === 'abandoned' && m.outcome !== SUPERSEDED).sort((a, b) => b.createdAt - a.createdAt)[0];
+    // Closed while this server was down, as on the board: the work goes on under the preset the user chose for it.
+    const closed = restarted && !costMission && mine.filter((m) => m.state === 'abandoned' && m.outcome !== SUPERSEDED).sort((a, b) => b.createdAt - a.createdAt)[0];
     if (closed) {
       costMission = closed.id;
       return `Mission ${closed.id} was closed outside this session (${closed.outcome || closed.state}). Carry on with the work and do not open a new mission for it.\n${describeMission(closed)}`;
@@ -561,8 +595,9 @@ function describeJob(job: JobView, ctx: CallContext): string {
 }
 
 async function runJob(spec: JobSpec, background: boolean, ctx: CallContext): Promise<string> {
+  await reattach();
   // The id is sent as it is known: the daemon applies the mission's preset, and lets the job stand on its own if the mission has ended.
-  const job: JobView = await api('POST', '/api/jobs', { ...spec, lead: SESSION, project: PROJECT, mission: costMission ?? undefined });
+  const job: JobView = await withMission(() => api('POST', '/api/jobs', { ...spec, lead: SESSION, project: PROJECT, mission: costMission ?? undefined }));
   return background ? describeJob(job, ctx) : followOne(job.id, ctx);
 }
 
@@ -611,8 +646,9 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
         const measured = describeUsage(await api('GET', '/api/usage'));
         return measured.length ? measured.join('\n') : 'AgentGauge has no usage data on this machine, so the roles are followed as assigned.';
       }
+      await reattach();
       const query = `kind=${encodeURIComponent(args.kind)}${costMission ? `&mission=${encodeURIComponent(costMission)}` : ''}`;
-      const decision: RouteDecision & { preset?: PresetName | null; policy?: Preset | null } = await api('GET', `/api/route?${query}`);
+      const decision: RouteDecision & { preset?: PresetName | null; policy?: Preset | null } = await withMission(() => api('GET', `/api/route?${query}`));
       const who = decision.assignee === 'claude' ? 'you (the lead)' : WORKERS[decision.assignee].name;
       const lines = [`${args.kind} → ${who}`, decision.reason];
       if (decision.degraded) lines.push('Degraded: the usual cross-check is missing. Say so in your report.');

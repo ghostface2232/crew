@@ -19,12 +19,13 @@ enum SettingsPane: Hashable, Identifiable {
         case .edit: "textformat"
         case .presets: "slider.horizontal.3"
         case .instructions: "doc.text.fill"
-        case .project: "folder"
+        case .project: "folder.fill"
         }
     }
     var tint: Color {
         switch self {
-        case .build, .project: .blue
+        case .build: .blue
+        case .project: .teal
         case .review: .green
         case .edit: .orange
         case .presets: .gray
@@ -89,8 +90,7 @@ struct CrewSettingsView: View {
         Label {
             Text(title(pane))
         } icon: {
-            // Projects carry the folder the main window's sidebar gives them, not a settings tile.
-            if case .project = pane { Image(systemName: pane.systemImage).foregroundStyle(.tint) } else { SettingsPaneIcon(pane: pane) }
+            SettingsPaneIcon(pane: pane)
         }.tag(pane)
     }
     @ViewBuilder private func content(_ pane: SettingsPane) -> some View {

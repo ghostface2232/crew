@@ -31,6 +31,9 @@ const PANES: Record<Fixed, { title: string; icon: LucideIcon; tint: string; kind
   instructions: { title: 'Instructions', icon: FileText, tint: '#5856d6' },
 };
 
+/** Projects share one tile, apart from the roles' colors. */
+const PROJECT_TINT = '#30b0c7';
+
 /**
  * The role table the form edits: what the user wrote, so a role left to follow its parent keeps following it.
  * A daemon without the registry sends only the resolved table, which for its three roles is the same thing.
@@ -269,10 +272,7 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
         onClick={() => open(id)}
         title={dir ?? undefined}
       >
-        {page
-          ? <span className={styles.tile} style={{ background: page.tint }}><Icon icon={page.icon} /></span>
-          // Projects carry the folder the board's sidebar gives them, not a settings tile.
-          : <span className={styles.folder}><Icon icon={Folder} /></span>}
+        <span className={styles.tile} style={{ background: page?.tint ?? PROJECT_TINT }}><Icon icon={page?.icon ?? Folder} /></span>
         <span className={styles.itemTitle}>{page?.title ?? names.get(dir!) ?? dir}</span>
         <Icon icon={ChevronRight} className={styles.chevron} />
       </button>

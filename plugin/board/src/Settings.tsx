@@ -129,9 +129,14 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
     window.addEventListener('beforeunload', guard);
     return () => window.removeEventListener('beforeunload', guard);
   }, [dirty, saving, savingRoles, savingPreset]);
-  // Opening a page on a phone moves focus to its way back, as a pushed screen does.
+  // On a phone, opening a page moves focus to its way back, as a pushed screen does, and going back returns it to the page's row.
+  const nav = useRef<HTMLElement>(null);
+  const pushed = useRef(false);
   useEffect(() => {
-    if (view === 'page' && back.current?.offsetParent) back.current.focus();
+    if (view === 'page') {
+      pushed.current = true;
+      if (back.current?.offsetParent) back.current.focus();
+    } else if (pushed.current) nav.current?.querySelector<HTMLButtonElement>('[aria-current="page"]')?.focus();
   }, [view, pane]);
   const closeSettings = () => {
     if ((!dirty && !saving && !savingRoles && !savingPreset) || confirm('Close without saving your changes?')) close();
@@ -250,12 +255,14 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
   useEffect(() => {
     if (scroller.current) scroller.current.scrollTop = 0;
     setScrolled(false);
-  }, [current]);
+  }, [current, view]);
   const open = (next: Pane) => {
     const nextScope = next === 'instructions' ? '' : next.startsWith('project:') ? next.slice('project:'.length) : null;
     // Another set of instructions loads in place of the one being edited, so unsaved edits are asked about first.
     if (nextScope !== null && nextScope !== scope) {
       if (text !== saved && !confirm('Discard the unsaved changes to these instructions?')) return;
+      // Discarded now, not when the next set arrives: nothing is left to ask about meanwhile.
+      setText(saved);
       setScope(nextScope);
     }
     setPane(next);
@@ -320,7 +327,7 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
   return (
     <Dialog labelId="settings-title" onClose={closeSettings}>
       <div className={styles.panel} data-view={view}>
-        <nav className={styles.sidebar} aria-label="Settings pages">
+        <nav className={styles.sidebar} aria-label="Settings pages" ref={nav}>
           <header className={styles.sidebarHead}>
             <h2 className={styles.windowTitle} id="settings-title">Settings</h2>
             <span className={styles.listClose}><CloseButton label="Close settings" onClose={closeSettings} /></span>

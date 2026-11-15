@@ -443,9 +443,26 @@ test('a setting changed and changed back is no change, and closing then asks not
   await page.getByLabel('Refactoring agent').selectOption('antigravity');
   await page.getByLabel('Refactoring agent').selectOption('');
   await expect(page.getByText('Unsaved changes')).toHaveCount(0);
-  page.once('dialog', () => { throw new Error('closing asked to discard nothing'); });
+  let asked = false;
+  page.once('dialog', (dialog) => { asked = true; void dialog.dismiss(); });
   await page.getByRole('button', { name: 'Close settings' }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect(asked).toBe(false);
+});
+
+test('on a phone, settings move between the list and a page with focus kept, and the drawer hands focus back', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 800 });
+  await page.getByRole('button', { name: 'Show sidebar' }).click();
+  await page.getByRole('navigation', { name: 'Projects' }).getByRole('button', { name: 'Settings', exact: true }).click();
+  const back = page.getByRole('dialog').getByRole('button', { name: 'Settings', exact: true });
+  await page.getByRole('navigation', { name: 'Settings pages' }).getByRole('button', { name: 'Review', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Review', level: 2 })).toBeVisible();
+  await expect(back).toBeFocused();
+  await back.click();
+  await expect(page.getByRole('navigation', { name: 'Settings pages' }).getByRole('button', { name: 'Review', exact: true })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Show sidebar' })).toBeFocused();
 });
 
 test('each project has its own instructions page', async ({ page, request }) => {

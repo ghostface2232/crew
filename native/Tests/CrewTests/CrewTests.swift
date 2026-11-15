@@ -477,7 +477,7 @@ private final class MockProtocol: URLProtocol, @unchecked Sendable {
         settings.roleSettings["polish"] = RoleSetting(agent: "codex")
         await save.value
         #expect(settings.roleSettings["polish"]?.agent == "codex")
-        #expect(settings.savedRoleSettings == normalized)
+        #expect(settings.savedRoleSettings == SettingsModel.normalized(normalized))
         #expect(settings.resolvedRoles == state.roles)
         #expect(settings.dirty && settings.roleStatus == "Saved")
         settings.roleSettings = normalized
@@ -519,7 +519,7 @@ private final class MockProtocol: URLProtocol, @unchecked Sendable {
         let settings = SettingsModel(api: api, roles: state.roles, roleSettings: state.roleSettings, roleInfo: state.roleInfo)
         settings.roleSettings["verify"] = RoleSetting(effort: "low")
         await settings.saveRoles()
-        #expect(settings.savedRoleSettings == state.roleSettings)
+        #expect(settings.savedRoleSettings == SettingsModel.normalized(state.roleSettings ?? [:]))
         #expect(settings.roleSettings["verify"] == RoleSetting(effort: "low"))
         #expect(settings.dirty && !settings.busy && settings.roleStatus == "Cannot save roles")
         await settings.saveRoles()

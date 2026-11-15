@@ -46,6 +46,8 @@ struct CrewSettingsView: View {
     private var pages: Binding<SettingsPane?> {
         Binding(get: { selection }, set: { next in
             if let scope = next?.scope, scope != model.scope {
+                // Text being saved is not unsaved; the next set loads once the save is done.
+                if model.savingText { return }
                 if model.text != model.savedText && !confirmDiscard("Discard unsaved instructions?") { return }
                 Task { await model.load(scope: scope) }
             }

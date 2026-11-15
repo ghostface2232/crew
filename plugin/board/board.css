@@ -654,5 +654,5 @@ dialog.detail-panel::backdrop { background: transparent; }
   .spinner { animation-duration: 0.8s !important; }
 }
 @media (forced-colors: active) {
-  .agent-mark, .summary-bar i, .usage-bar i, .connection::before, .tab-badge::after { forced-color-adjust: none; background: CanvasText; }
+  .agent-mark, .summary-bar i, .usage-bar i, .connection::before, .tab-badge::after, .segmented.tabs > button:has(> .tab-badge)::after { forced-color-adjust: none; background: CanvasText; }
 }

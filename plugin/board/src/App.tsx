@@ -61,11 +61,18 @@ export function App() {
   useEffect(() => {
     if (!narrow) setDrawer(false);
   }, [narrow]);
+  /** Folds the drawer away and gives focus back to its button, which would otherwise fall to the page as the drawer turns inert. */
+  const fold = () => {
+    if (!drawer) return;
+    setDrawer(false);
+    toggle.current?.focus();
+  };
   useEffect(() => {
     if (!drawer) return;
     sidebar.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
     const escape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
+      // A dialog opened over the page handles its own Escape.
+      if (event.key !== 'Escape' || event.defaultPrevented || document.querySelector('dialog[open]')) return;
       setDrawer(false);
       toggle.current?.focus();
     };
@@ -88,7 +95,7 @@ export function App() {
   }, []);
   const select = (value: string) => {
     setSelection(value);
-    setDrawer(false);
+    fold();
     try {
       localStorage.setItem('crew.selection', value);
     } catch {
@@ -146,13 +153,17 @@ export function App() {
           ))}
           <div className="sidebar-foot">
             {!narrow && connection}
-            <button className="sidebar-item" id="open-settings" disabled={!Object.keys(state.roles).length} onClick={() => { setDrawer(false); setSettings(true); }}>
+            <button className="sidebar-item" id="open-settings" disabled={!Object.keys(state.roles).length} onClick={() => {
+              // First, so the settings dialog returns focus to the drawer's button when it closes.
+              fold();
+              setSettings(true);
+            }}>
               <Icon icon={SettingsIcon} />
               <span>Settings</span>
             </button>
           </div>
         </nav>
-        {drawer && <div className="sidebar-scrim" aria-hidden="true" onClick={() => setDrawer(false)} />}
+        {drawer && <div className="sidebar-scrim" aria-hidden="true" onClick={fold} />}
         <div className="workspace">
           <header className="toolbar">
             <button

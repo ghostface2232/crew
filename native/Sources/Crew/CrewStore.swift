@@ -324,9 +324,18 @@ final class SettingsModel {
     init(api: CrewAPI, roles: [String: RoleAssignment], roleSettings: [String: RoleSetting]? = nil, roleInfo: [RoleInfo]? = nil, preset: PresetName? = nil, presets: [String: Preset]? = nil) {
         self.api = api; self.resolvedRoles = roles
         self.roleInfo = roleInfo ?? RoleInfo.legacy
-        self.roleSettings = roleSettings ?? roles.mapValues(RoleSetting.init)
+        self.roleSettings = Self.normalized(roleSettings ?? roles.mapValues(RoleSetting.init))
         self.savedRoleSettings = self.roleSettings
         self.preset = preset; self.savedPreset = preset; self.presets = presets
+    }
+    /// The table as the daemon would store it: a blank field is no field, and a role with none is left out. A hand-edited
+    /// config.json may hold either, which would otherwise never compare equal to what an edit leaves behind.
+    static func normalized(_ table: [String: RoleSetting]) -> [String: RoleSetting] {
+        table.compactMapValues { setting in
+            let blank: (String?) -> String? = { $0?.isEmpty == true ? nil : $0 }
+            let clean = RoleSetting(agent: blank(setting.agent), model: blank(setting.model), effort: blank(setting.effort))
+            return clean == RoleSetting() ? nil : clean
+        }
     }
     /// Edits one field of a role as the user wrote it. A field ends editing with its value unchanged when focus
     /// leaves it, as it does when the window closes; that must leave no trace, or closing asks to discard nothing.
@@ -406,8 +415,9 @@ final class SettingsModel {
         struct Save: Encodable, Sendable { var roles: [String: RoleSetting] }
         do {
             let result: RoleState = try await api.post("/api/roles", Save(roles: draft))
-            if roleSettings == draft { roleSettings = result.roleSettings }
-            resolvedRoles = result.roles; savedRoleSettings = result.roleSettings; roleStatus = "Saved"
+            let stored = Self.normalized(result.roleSettings)
+            if roleSettings == draft { roleSettings = stored }
+            resolvedRoles = result.roles; savedRoleSettings = stored; roleStatus = "Saved"
         } catch { roleStatus = error.localizedDescription }
         savingRoles = false
     }

@@ -52,7 +52,8 @@ import Testing
     @Test @MainActor func settingsResolveInheritedDraftsWithoutMaterializingThem() throws {
         let state = try fixture("state-extended")
         let settings = SettingsModel(api: CrewAPI(port: 0), roles: state.roles, roleSettings: state.roleSettings, roleInfo: state.roleInfo)
-        #expect(settings.roleSettings == state.roleSettings)
+        // Only blanks are dropped: an empty role entry is the same as one left out.
+        #expect(settings.roleSettings == SettingsModel.normalized(state.roleSettings ?? [:]))
         #expect(settings.assignment(for: "refactor") == state.roles["delegate"])
         #expect(settings.assignment(for: "release")?.model == "release-model")
         #expect(settings.assignment(for: "verify") == state.roles["review"])
@@ -65,6 +66,18 @@ import Testing
         #expect(settings.roleSettings["verify"]?.agent == nil)
         #expect(settings.roleSettings["debate"] == nil)
     }
+    @Test @MainActor func aParentlessRolesShownAgentIsNoChange() throws {
+        let state = try fixture("state-extended")
+        // No agent written for any role: each parentless picker shows the agent its role resolves to.
+        let settings = SettingsModel(api: CrewAPI(port: 0), roles: state.roles, roleSettings: [:], roleInfo: state.roleInfo)
+        let agent = try #require(state.roles["review"]?.agent)
+        settings.setRole("review", \.agent, to: agent)
+        #expect(!settings.dirty)
+        settings.setRole("review", \.agent, to: agent == "codex" ? "antigravity" : "codex")
+        #expect(settings.dirty)
+        settings.setRole("review", \.agent, to: agent)
+        #expect(settings.roleSettings["review"] == nil && !settings.dirty)
+    }
     @Test @MainActor func fieldsThatEndEditingUnchangedLeaveSettingsClean() throws {
         let state = try fixture("state-extended")
         let settings = SettingsModel(api: CrewAPI(port: 0), roles: state.roles, roleSettings: state.roleSettings, roleInfo: state.roleInfo)
@@ -74,11 +87,11 @@ import Testing
             settings.setRole(role, \.effort, to: settings.roleSettings[role]?.effort ?? "")
         }
         #expect(!settings.dirty)
-        // The picker of a role without a parent shows its resolved agent; choosing it again is no change.
-        if settings.roleSettings["review"]?.agent == nil, let agent = state.roles["review"]?.agent {
-            settings.setRole("review", \.agent, to: agent)
-            #expect(!settings.dirty)
-        }
+        // A role saved as an empty entry, as a hand-edited config.json may hold, comes back clean after an undone edit.
+        #expect(state.roleSettings?["verify"] == RoleSetting())
+        settings.setRole("verify", \.effort, to: "high")
+        settings.setRole("verify", \.effort, to: "")
+        #expect(!settings.dirty)
         settings.setRole("refactor", \.effort, to: "high")
         #expect(settings.dirty)
         // Trying another agent and coming back to the saved one is no change, written or shown.

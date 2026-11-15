@@ -291,7 +291,15 @@ A role the user has not assigned, or assigned without an `agent`, takes its pare
 { "roles": { "review": { "agent": "antigravity" }, "verify": { "agent": "codex" } } }
 ```
 
-Static reviews then go to Antigravity and reviews that run the app to Codex. A role assigned to an agent that cannot do it (`verify` on Antigravity, which runs no commands as a reviewer) is refused when the job starts, never moved to another agent.
+Static reviews then go to Antigravity and reviews that run the app to Codex.
+
+Added 2026-11-15: a role may have several holders, and Claude may be one of them.
+
+```json
+{ "roles": { "review": { "agent": "codex", "also": ["claude"] }, "polish": { "agent": "claude" } } }
+```
+
+`agent` is the default holder and `also` lists the others, in the user's order. `claude` means the lead does the work in its own session or a subagent; no worker runs it. The lead picks a holder for each job with `agent` on `delegate`, `review`, `polish`, and `debate`; it gives work that operates the screen or runs the app to Codex where Codex holds the role, and may run the same job with two holders at once when a second view is worth the usage. Picking `claude` starts no job: the tool says what to do instead (for a review, the `crew:self-reviewer` subagent). A role's own `model` and `effort` apply to its default holder; another holder runs on its own settings. A role that follows its parent takes its holders too, until it lists its own. `route` tries the holders in the user's order, passing one that is short of usage, and lists each with its status. `POST /api/jobs` takes `agent`, which must be one of the role's worker holders; a role whose default holder is Claude is refused unless a worker holder is named, so the board's New Job says it starts from a Claude session. A role assigned to an agent that cannot do it (`verify` on Antigravity, which runs no commands as a reviewer) is refused when the job starts, never moved to another agent.
 
 The daemon sends both tables: `roles` resolved (every role, `agent` required) and `roleSettings` as written (`agent` optional), with `roleInfo` describing each role in display order. Settings edits and saves `roleSettings`, so a role left to follow its parent keeps following it.
 

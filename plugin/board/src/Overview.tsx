@@ -252,8 +252,29 @@ export function AgentPanel({ state, project }: { state: Snapshot; project: strin
 }
 
 /** Days as squares, weeks as columns; the darker, the more work started. One tooltip glides between squares. */
-export function Heatmap({ times, weeks, label }: { times: number[]; weeks: number; label: string }) {
+/**
+ * Days as squares, weeks as columns, as many recent weeks as fit the card up to `most`; the darker, the more work
+ * started. Its title row carries the total, and one tooltip glides between squares.
+ */
+export function Heatmap({ title, times, most, label, one }: { title: string; times: number[]; most: number; label: string; one: string }) {
   const now = useNow();
+  const [weeks, setWeeks] = useState(most);
+  const root = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const element = root.current!;
+    const fit = () => {
+      const style = getComputedStyle(element);
+      const cell = parseFloat(style.getPropertyValue('--cell')) || 11;
+      const gap = parseFloat(style.getPropertyValue('--gap')) || 3;
+      // Less the day names' column and its gap.
+      const room = element.clientWidth - 28;
+      setWeeks(Math.max(4, Math.min(most, Math.floor((room + gap) / (cell + gap)))));
+    };
+    const observer = new ResizeObserver(fit);
+    observer.observe(element);
+    fit();
+    return () => observer.disconnect();
+  }, [most]);
   const days = useMemo(() => dailyCounts(times, now, weeks), [times, Math.floor(now / 3_600_000), weeks]);
   const [at, setAt] = useState<number | null>(null);
   const grid = useRef<HTMLDivElement>(null);
@@ -268,10 +289,25 @@ export function Heatmap({ times, weeks, label }: { times: number[]; weeks: numbe
     .map((day, index) => ({ index, date: new Date(day.day) }))
     .filter(({ date, index }) => index % 7 === 0 && date.getDate() <= 7)
     .map(({ index, date }) => ({ column: index / 7, name: date.toLocaleDateString([], { month: 'short' }) }));
-  const cell = at !== null ? grid.current?.children[at] as HTMLElement | undefined : undefined;
+  const tip = useRef<HTMLSpanElement>(null);
+  // The tooltip sits outside the scrolling frame so it is never cut off, kept within the heatmap's own width.
+  useLayoutEffect(() => {
+    const cell = at !== null ? grid.current?.children[at] : undefined;
+    if (!cell || !tip.current || !root.current) return;
+    const box = root.current.getBoundingClientRect();
+    const square = cell.getBoundingClientRect();
+    const width = tip.current.offsetWidth;
+    const left = Math.max(0, Math.min(box.width - width, square.left + square.width / 2 - box.left - width / 2));
+    tip.current.style.setProperty('--x', `${left}px`);
+    tip.current.style.setProperty('--y', `${square.top - box.top}px`);
+  }, [at]);
   return (
-    <div className="heatmap" style={{ '--weeks': weeks } as CSSProperties}>
-      <p className="heatmap-sum"><b className="digits">{total.toLocaleString()}</b> {label} in {weeks} weeks</p>
+    <div className="heatmap" ref={root} style={{ '--weeks': weeks } as CSSProperties}>
+      {/* No legend: a square's tooltip gives its count, and darker reads as more without one. */}
+      <header className="panel-head">
+        <h2 className="label">{title}</h2>
+        <p className="heatmap-sum"><b className="digits">{total.toLocaleString()}</b> {total === 1 ? one : label} · {weeks} weeks</p>
+      </header>
       <div className="heatmap-frame" ref={frame}>
       <div className="heatmap-months" aria-hidden="true">
         {months.map((month) => <span key={month.column} style={{ '--col': month.column } as CSSProperties}>{month.name}</span>)}
@@ -288,17 +324,14 @@ export function Heatmap({ times, weeks, label }: { times: number[]; weeks: numbe
               onPointerEnter={() => setAt(index)}
             />
           ))}
-          {cell && at !== null && (
-            <span className="heatmap-tip" style={{ '--x': `${cell.offsetLeft + cell.offsetWidth / 2}px`, '--y': `${cell.offsetTop}px` } as CSSProperties}>
-              <b>{days[at].count}</b> {label} · {new Date(days[at].day).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}
-            </span>
-          )}
         </div>
       </div>
       </div>
-      <div className="heatmap-scale" aria-hidden="true">
-        Less {[0, 1, 2, 3, 4].map((level) => <i key={level} data-level={level} />)} More
-      </div>
+      {at !== null && (
+        <span className="heatmap-tip" ref={tip}>
+          <b>{days[at].count}</b> {days[at].count === 1 ? one : label} · {new Date(days[at].day).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}
+        </span>
+      )}
     </div>
   );
 }
@@ -356,9 +389,9 @@ export function Activity({ state, openJob }: Pick<Scope, 'state' | 'openJob'>) {
   const times = [...state.jobs.map((job) => job.createdAt), ...state.missions.map((mission) => mission.createdAt)];
   return (
     <>
-      <Panel label="Work started" className="activity-map">
-        <Heatmap times={times} weeks={52} label="jobs and missions" />
-      </Panel>
+      <section className="card panel activity-map" aria-label="Work started" style={{ '--i': 0 } as CSSProperties}>
+        <Heatmap title="Work started" times={times} most={53} label="jobs and missions" one="job or mission" />
+      </section>
       <Panel
         label="Events"
         action={<Pills label="Agent" value={agent} options={AGENT_FILTERS.map(([id, name]) => [id, name, state.events.filter((event) => !id || event.agent === id).length])} onChange={setAgent} />}
@@ -447,9 +480,9 @@ export function Workspace({ state, project, names, selected, openJob, openSessio
         </div>
         <aside className="dash-side" aria-label="Agents and activity">
           <AgentPanel state={state} project={project} />
-          <Panel label="Rhythm">
-            <Heatmap times={jobs.map((job) => job.createdAt)} weeks={19} label="jobs" />
-          </Panel>
+          <section className="card panel" aria-label="Rhythm" style={{ '--i': 1 } as CSSProperties}>
+            <Heatmap title="Rhythm" times={jobs.map((job) => job.createdAt)} most={26} label="jobs" one="job" />
+          </section>
           <Panel label="Live feed" action={<button className="link" onClick={() => openPage('activity')}>All <Icon icon={ArrowRight} size={12} /></button>}>
             {events.length ? <EventList events={events} openJob={openJob} limit={6} /> : <p className="secondary caption">Nothing has happened yet.</p>}
           </Panel>

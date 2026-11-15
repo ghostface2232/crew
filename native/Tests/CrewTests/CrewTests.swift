@@ -366,10 +366,16 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
         3. [alternative] Use a lease with generation
         - 4. **alternative** — cap the digest
         5. Plain point without a stance
+        6. **agree** · **inferred** — split the registry from the job kinds.
+        7. disagree — Read the docs before choosing.
         """
         let points = debatePoints(reply)
-        #expect(points.map(\.number) == [1, 2, 3, 4])
-        #expect(points.map(\.stance) == [.agree, .disagree, .alternative, .alternative])
+        #expect(points.map(\.number) == [1, 2, 3, 4, 6, 7])
+        #expect(points.map(\.stance) == [.agree, .disagree, .alternative, .alternative, .agree, .disagree])
+        #expect(points[4].title == "split the registry from the job kinds.")
+        #expect(points[4].basis == "inferred")
+        #expect(points[5].title == "Read the docs before choosing.")
+        #expect(points[5].basis == nil)
         #expect(points[0].title == "The ledger belongs to the daemon.")
         #expect(points[1].title == "A later hook event is not proof of receipt: the watcher can die first.")
         #expect(points[3].title == "cap the digest")

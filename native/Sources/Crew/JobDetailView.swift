@@ -138,6 +138,10 @@ struct JobDetailView: View {
         if job.hasConversation, let exchange = job.exchange {
             detailSection(job.debate != nil ? "Debate" : "Conversation", symbol: "bubble.left.and.bubble.right") {
                 DebateView(job: job, rounds: job.debate?.rounds, entries: exchange)
+            } accessory: {
+                if let rounds = job.debate?.rounds {
+                    DebateStepper(rounds: rounds, entries: exchange, current: min(job.turns, rounds), working: job.isActive, concluded: job.debateConcluded)
+                }
             }
         } else if !job.report.isEmpty {
             detailSection("Report", symbol: "doc.text") {
@@ -196,8 +200,19 @@ private func noteText(_ text: String, limit: Int = 2_000) -> String {
 }
 /// A titled section whose contents sit in a gray inset, as a mission card's rows do, so sections read apart.
 @MainActor private func detailSection<Content: View>(_ title: String, symbol: String, @ViewBuilder content: () -> Content) -> some View {
+    detailSection(title, symbol: symbol, content: content) { EmptyView() }
+}
+
+/// A section whose heading carries a trailing accessory, such as a debate's progress.
+@MainActor private func detailSection<Content: View, Accessory: View>(_ title: String, symbol: String, @ViewBuilder content: () -> Content,
+                                                                     @ViewBuilder accessory: () -> Accessory) -> some View {
     VStack(alignment: .leading, spacing: Space.ml) {
-        Label(title, systemImage: symbol).font(Typeface.subheadline).padding(.leading, WorkspaceStyle.rowTitleInset)
+        HStack(spacing: Space.l) {
+            Label(title, systemImage: symbol).font(Typeface.subheadline)
+            Spacer(minLength: 0)
+            accessory()
+        }
+        .padding(.leading, WorkspaceStyle.rowTitleInset)
         VStack(alignment: .leading, spacing: Space.l) { content() }.inset()
     }.frame(maxWidth: .infinity, alignment: .leading)
 }
@@ -505,7 +520,7 @@ private struct VerificationView: View {
 }
 
 /// A conversation by turn: each pairs the lead's message with the reply, whose numbered points read as
-/// stance-marked headlines with the full text one disclosure away. A debate adds a stepper over its rounds.
+/// stance-marked headlines with the full text one disclosure away.
 /// Turns recorded before conversations were kept are left out rather than shown empty.
 private struct DebateView: View {
     let job: Job
@@ -513,12 +528,7 @@ private struct DebateView: View {
     let rounds: Int?
     let entries: [ExchangeEntry]
 
-    private var replied: Int { entries.filter { $0.from == "worker" }.map(\.turn).max() ?? 0 }
-
     var body: some View {
-        if let rounds {
-            DebateStepper(rounds: rounds, replied: replied, current: min(job.turns, rounds), working: job.isActive, concluded: job.debateConcluded)
-        }
         let turns = Array(Set(entries.map(\.turn))).sorted()
         // A job that began before the bridge kept its conversation has its first turns missing; say so rather than
         // start the story partway through.
@@ -536,12 +546,16 @@ private struct DebateView: View {
     }
 }
 
+/// A debate's progress over its rounds, beside the section heading. It stays gray so it does not read as the
+/// rounds' stance counts below.
 private struct DebateStepper: View {
     let rounds: Int
-    let replied: Int
+    let entries: [ExchangeEntry]
     let current: Int
     let working: Bool
     let concluded: Bool
+
+    private var replied: Int { entries.filter { $0.from == "worker" }.map(\.turn).max() ?? 0 }
 
     var body: some View {
         // A narrow panel drops the step names before anything overflows; the symbols keep the progress.
@@ -556,23 +570,22 @@ private struct DebateStepper: View {
 
     private func steps(named: Bool) -> some View {
         HStack(spacing: Space.s) {
-            // Done steps take the done color and the step in progress the accent, as mission stops do.
             ForEach(1...rounds, id: \.self) { round in
                 step(round <= replied ? "checkmark.circle.fill" : round == current && working ? "circle.dotted.circle" : "circle",
-                     "Round \(round)", named: named, color: round <= replied ? Palette.success : round == current && working ? Palette.accent : nil)
+                     "Round \(round)", named: named)
                 Rectangle().fill(WorkspaceStyle.hairline).frame(height: 1).frame(maxWidth: Space.x4l)
             }
-            step(concluded ? "flag.checkered.circle.fill" : "flag.circle", "Conclusion", named: named, color: concluded ? Palette.success : nil)
+            step(concluded ? "flag.checkered.circle.fill" : "flag.circle", "Conclusion", named: named)
         }
     }
 
-    @ViewBuilder private func step(_ symbol: String, _ title: String, named: Bool, color: Color?) -> some View {
+    @ViewBuilder private func step(_ symbol: String, _ title: String, named: Bool) -> some View {
         let label = Label(title, systemImage: symbol)
         Group {
             if named { label.labelStyle(.titleAndIcon) } else { label.labelStyle(.iconOnly) }
         }
         .lineLimit(1).fixedSize()
-        .foregroundStyle(color.map(AnyShapeStyle.init) ?? AnyShapeStyle(.secondary))
+        .foregroundStyle(.secondary)
         .help(title)
     }
 }
@@ -609,11 +622,11 @@ private struct DebateRound: View {
         if !last { Divider().padding(.vertical, Space.xs) }
     }
 
-    /// One mark per stance the reply takes, counted when it takes it more than once.
+    /// One mark per stance the reply takes, with its count.
     @ViewBuilder private func stances(_ points: [DebatePoint]) -> some View {
         ForEach([DebatePoint.Stance.agree, .disagree, .alternative], id: \.self) { stance in
             let count = points.filter { $0.stance == stance }.count
-            if count > 0 { StanceMark(stance: stance, count: count > 1 ? count : nil) }
+            if count > 0 { StanceMark(stance: stance, count: count) }
         }
     }
 
@@ -640,15 +653,19 @@ private struct DebateRound: View {
                     ReportText(report: reply.text).lineLimit(replyShown ? nil : 8)
                     RevealToggle(subject: "the reply", shown: $replyShown)
                 } else {
-                    // Each point reads from the leading edge like any body text. Its own stance ends the line only
-                    // when the reply mixes stances; otherwise the mark by the name already says it.
-                    let mixed = Set(points.map(\.stance)).count > 1
+                    // Each point leads with its stance as a list marker, so wrapped lines hang under the text, and
+                    // ends with how it is known in a quieter caption.
                     // A reply may repeat a numbered list, so numbers are not unique.
-                    ForEach(Array(points.enumerated()), id: \.offset) { _, point in
-                        HStack(alignment: .firstTextBaseline, spacing: WorkspaceStyle.rowSpacer) {
-                            Text(point.title).font(Typeface.callout).textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            if mixed { StanceMark(stance: point.stance, count: nil) }
+                    VStack(alignment: .leading, spacing: Space.s) {
+                        ForEach(Array(points.enumerated()), id: \.offset) { _, point in
+                            HStack(alignment: .firstTextBaseline, spacing: Space.s) {
+                                StanceMark(stance: point.stance, count: nil)
+                                Text(point.title).font(Typeface.callout).textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                if let basis = point.basis {
+                                    Text(basis).font(Typeface.caption).foregroundStyle(.secondary).fixedSize()
+                                }
+                            }
                         }
                     }
                     if replyShown { ReportText(report: reply.text) }
@@ -666,7 +683,7 @@ private struct DebateRound: View {
 }
 
 /// A point's stance as a colored symbol: green agree, red disagree, accent alternative. Not a chip, which would read
-/// as a button. It ends a point's line, and in a round's heading it is followed by its count.
+/// as a button. It leads a point's line, and in a round's heading it is followed by its count.
 private struct StanceMark: View {
     let stance: DebatePoint.Stance
     let count: Int?

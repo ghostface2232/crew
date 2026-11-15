@@ -351,23 +351,34 @@ struct DebatePoint: Equatable, Sendable {
     var number: Int
     var stance: Stance
     var title: String
+    /// How the worker knows it, as the debater role asks: verified, read or inferred.
+    var basis: String? = nil
 }
 
-/// The points a reply marks agree, disagree or alternative: "1. **[agree]** Title…", "2. [disagree] …", "3. **disagree** — …".
+/// The points a reply marks agree, disagree or alternative: "1. **[agree]** Title…", "2. [disagree] …", "3. **disagree** — …",
+/// optionally followed by how it is known: "4. agree · inferred — …".
 /// Only the first sentence of each is kept, as a headline; the full reply stays one disclosure away.
 func debatePoints(_ text: String) -> [DebatePoint] {
-    let pattern = /^\s*(?:[-*]\s*)?(\d+)\.\s*(?:\*\*)?\[?(agree|disagree|alternative)\b\]?(?:\*\*)?[\s:.\-—–]*(.*)$/.ignoresCase()
+    let pattern = /^\s*(?:[-*]\s*)?(\d+)\.\s*(?:\*\*)?\[?(agree|disagree|alternative)\b\]?(?:\*\*)?[\s:.\-—–·,]*(.*)$/.ignoresCase()
+    // A basis must be followed by a separator, so a headline that starts with "Read" stays whole.
+    let basisPattern = /^[(\[]?(?:\*\*)?(verified|read|inferred)(?:\*\*)?[)\]]?\s*[:\-—–·,]+\s*(.*)$/.ignoresCase()
     var points: [DebatePoint] = []
     for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
         guard let match = String(line).wholeMatch(of: pattern), let number = Int(match.1),
               let stance = DebatePoint.Stance(rawValue: match.2.lowercased()) else { continue }
-        var title = String(match.3).replacingOccurrences(of: "**", with: "").replacingOccurrences(of: "`", with: "")
+        var title = String(match.3)
+        var basis: String?
+        if let found = title.wholeMatch(of: basisPattern) {
+            basis = found.1.lowercased()
+            title = String(found.2)
+        }
+        title = title.replacingOccurrences(of: "**", with: "").replacingOccurrences(of: "`", with: "")
             .trimmingCharacters(in: .whitespaces)
         if let end = title.firstIndex(where: { ".!?。".contains($0) }), title.distance(from: title.startIndex, to: end) > 12 {
             title = String(title[...end])
         }
         if title.count > 140 { title = String(title.prefix(139)) + "…" }
-        points.append(DebatePoint(number: number, stance: stance, title: title))
+        points.append(DebatePoint(number: number, stance: stance, title: title, basis: basis))
     }
     return points
 }

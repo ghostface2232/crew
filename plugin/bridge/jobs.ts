@@ -596,113 +596,129 @@ export class Jobs {
     let worktree: Worktree | null = null;
     let cwd = spec.cwd;
 
-    if (!spec.ask && spec.kind !== 'review' && (spec.isolation ?? 'worktree') === 'worktree') {
-      if (!repo) {
-        throw new Error(`${spec.cwd} is not inside a git repository, so there is no worktree to isolate the worker in. Pass isolation: "in_place" to let it edit that directory directly.`);
+    let registered = false;
+    try {
+      if (!spec.ask && spec.kind !== 'review' && (spec.isolation ?? 'worktree') === 'worktree') {
+        if (!repo) {
+          throw new Error(`${spec.cwd} is not inside a git repository, so there is no worktree to isolate the worker in. Pass isolation: "in_place" to let it edit that directory directly.`);
+        }
+        const base = spec.base ?? 'HEAD';
+        worktree = await createWorktree(repo, id, base, this.home);
+        cwd = worktree.path;
+        const included = await copyIncluded(repo, worktree.path);
+        worktree.linked = included.linked;
+        if (included.linked.length) notes.push(`Shared read-only from .worktreeinclude: ${included.linked.join(', ')}`);
+        if (included.copied.length) notes.push(`Copied from .worktreeinclude: ${included.copied.join(', ')}`);
+        if (included.failed.length) notes.push(`Could not copy from .worktreeinclude: ${included.failed.join('; ')}`);
+        const dirty = await dirtyCount(repo);
+        if (dirty > 0) notes.push(`${dirty} uncommitted path(s) in the main tree are not in this worktree, which starts from ${base} (${worktree.base.slice(0, 8)}). Commit first if the worker needs them.`);
       }
-      const base = spec.base ?? 'HEAD';
-      worktree = await createWorktree(repo, id, base, this.home);
-      cwd = worktree.path;
-      const included = await copyIncluded(repo, worktree.path);
-      worktree.linked = included.linked;
-      if (included.linked.length) notes.push(`Shared read-only from .worktreeinclude: ${included.linked.join(', ')}`);
-      if (included.copied.length) notes.push(`Copied from .worktreeinclude: ${included.copied.join(', ')}`);
-      if (included.failed.length) notes.push(`Could not copy from .worktreeinclude: ${included.failed.join('; ')}`);
-      const dirty = await dirtyCount(repo);
-      if (dirty > 0) notes.push(`${dirty} uncommitted path(s) in the main tree are not in this worktree, which starts from ${base} (${worktree.base.slice(0, 8)}). Commit first if the worker needs them.`);
+
+      if (spec.kind === 'review' && spec.runsApp) {
+        if (!repo) throw new Error(`${spec.cwd} is not inside a git repository, so there is no snapshot to run the app in. Drop runs_app.`);
+        worktree = await this.snapshot(repo, id, spec.review!.target, notes);
+        cwd = worktree.path;
+      }
+
+      let diffFile: string | null = null;
+      if (spec.kind === 'review' && !WORKERS[agent].reviewerRunsGit) {
+        if (!repo) throw new Error(`review is assigned to ${WORKERS[agent].name}, which has to be handed the diff, and ${spec.cwd} is not inside a git repository.`);
+        diffFile = this.diffFile(id);
+        fs.mkdirSync(path.dirname(diffFile), { recursive: true });
+        fs.writeFileSync(diffFile, await reviewDiff(repo, spec.review!.target));
+        notes.push(`${WORKERS[agent].name} cannot run commands as a reviewer: it was given the diff as a file and could not run tests or checks.`);
+      }
+      if (spec.review?.mode === 'standard' && agent !== 'codex') notes.push(`The standard review mode is Codex's own; ${WORKERS[agent].name} ran the adversarial review instead.`);
+      const scratch = agent === 'codex' ? this.scratchDir(id) : undefined;
+      if (scratch) fs.mkdirSync(scratch, { recursive: true });
+      const evidenceDir = this.evidenceDir(id);
+      fs.mkdirSync(evidenceDir, { recursive: true });
+      const attached = attachEvidence(evidenceDir, attachments, 1);
+      if (attached.length) spec.task = `${spec.task ?? ''}${attachmentsNote(attached)}`;
+
+      // Diffs name files relative to the repo root, so scope targets must be too.
+      const targetRoot = repo ?? spec.cwd;
+      spec.targets = spec.targets?.map((t) => path.relative(targetRoot, path.resolve(spec.cwd, t)));
+
+      const title = (spec.title ?? spec.task ?? spec.targets?.join(', ') ?? spec.kind).split('\n')[0].slice(0, 80);
+      const now = Date.now();
+      const job: Job = {
+        id,
+        lead: spec.lead,
+        newsSeq: 0,
+        ackedSeq: 0,
+        news: [],
+        kind: spec.kind,
+        role: roleName,
+        preset,
+        agent,
+        title,
+        state: 'running',
+        phase: 'starting',
+        repo,
+        project: canonicalPath(spec.project ?? repo ?? spec.cwd),
+        root: canonicalPath(root),
+        mission: spec.mission,
+        missionStep: spec.missionStep,
+        exclusive: Boolean(spec.exclusive) || undefined,
+        runsApp: Boolean(spec.runsApp) || undefined,
+        ask: Boolean(spec.ask) || undefined,
+        debate: spec.debate ? { rounds: spec.debate.rounds } : undefined,
+        plugins: plugins.length ? plugins : undefined,
+        requestedPlugins,
+        cwd,
+        worktree,
+        sandbox: spec.ask || (spec.kind === 'review' && !spec.runsApp) ? 'read-only' : 'workspace-write',
+        scratch,
+        evidenceDir,
+        evidence: attached.length ? attached : undefined,
+        ...buildPrompt(spec, worktree, diffFile, shared.text, scratch, runsCommands(agent, spec), skills, evidenceDir),
+        shared: shared.sources,
+        // Only Codex has a built-in review mode; other agents get the prompted review.
+        nativeReview: spec.kind === 'review' && agent === 'codex' && spec.review?.mode === 'standard' ? spec.review.target : null,
+        reviewTarget: spec.review?.target,
+        targets: spec.targets ?? [],
+        check: spec.check?.trim() || undefined,
+        ...pickModel(agent, spec, role, config, preset),
+        sessionId: null,
+        createdAt: now,
+        activeAt: now,
+        endedAt: null,
+        turns: 1,
+        stalled: false,
+        waiting: null,
+        report: '',
+        result: null,
+        notes,
+        error: null,
+        tokens: null,
+        seq: 0,
+        delivered: 0,
+      };
+      exchanged(job, 'lead', spec.task ?? '');
+      this.jobs.set(id, job);
+      if (job.kind === 'review' && repo) await this.recordReviewed(job, repo);
+      this.event(job, 'started', `${spec.kind}: ${title}`);
+      this.flush();
+      registered = true;
+
+      const ctl = this.ctl(job);
+      // Session setup can take seconds; the caller gets the job id right away and follows via wait.
+      this.adapters[agent].start(ctl).catch((err) => ctl.fail(String(err?.message ?? err)));
+      return job;
+    } catch (err) {
+      if (!registered) {
+        this.jobs.delete(id);
+        if (worktree) {
+          try {
+            await removeWorktree(repo!, worktree, id, this.home, this.platform);
+          } catch (cleanup) {
+            throw new Error(`${(err as Error).message}; worktree cleanup failed: ${(cleanup as Error).message}`, { cause: err });
+          }
+        }
+      }
+      throw err;
     }
-
-    if (spec.kind === 'review' && spec.runsApp) {
-      if (!repo) throw new Error(`${spec.cwd} is not inside a git repository, so there is no snapshot to run the app in. Drop runs_app.`);
-      worktree = await this.snapshot(repo, id, spec.review!.target, notes);
-      cwd = worktree.path;
-    }
-
-    let diffFile: string | null = null;
-    if (spec.kind === 'review' && !WORKERS[agent].reviewerRunsGit) {
-      if (!repo) throw new Error(`review is assigned to ${WORKERS[agent].name}, which has to be handed the diff, and ${spec.cwd} is not inside a git repository.`);
-      diffFile = this.diffFile(id);
-      fs.mkdirSync(path.dirname(diffFile), { recursive: true });
-      fs.writeFileSync(diffFile, await reviewDiff(repo, spec.review!.target));
-      notes.push(`${WORKERS[agent].name} cannot run commands as a reviewer: it was given the diff as a file and could not run tests or checks.`);
-    }
-    if (spec.review?.mode === 'standard' && agent !== 'codex') notes.push(`The standard review mode is Codex's own; ${WORKERS[agent].name} ran the adversarial review instead.`);
-    const scratch = agent === 'codex' ? this.scratchDir(id) : undefined;
-    if (scratch) fs.mkdirSync(scratch, { recursive: true });
-    const evidenceDir = this.evidenceDir(id);
-    fs.mkdirSync(evidenceDir, { recursive: true });
-    const attached = attachEvidence(evidenceDir, attachments, 1);
-    if (attached.length) spec.task = `${spec.task ?? ''}${attachmentsNote(attached)}`;
-
-    // Diffs name files relative to the repo root, so scope targets must be too.
-    const targetRoot = repo ?? spec.cwd;
-    spec.targets = spec.targets?.map((t) => path.relative(targetRoot, path.resolve(spec.cwd, t)));
-
-    const title = (spec.title ?? spec.task ?? spec.targets?.join(', ') ?? spec.kind).split('\n')[0].slice(0, 80);
-    const now = Date.now();
-    const job: Job = {
-      id,
-      lead: spec.lead,
-      newsSeq: 0,
-      ackedSeq: 0,
-      news: [],
-      kind: spec.kind,
-      role: roleName,
-      preset,
-      agent,
-      title,
-      state: 'running',
-      phase: 'starting',
-      repo,
-      project: canonicalPath(spec.project ?? repo ?? spec.cwd),
-      root: canonicalPath(root),
-      mission: spec.mission,
-      missionStep: spec.missionStep,
-      exclusive: Boolean(spec.exclusive) || undefined,
-      runsApp: Boolean(spec.runsApp) || undefined,
-      ask: Boolean(spec.ask) || undefined,
-      debate: spec.debate ? { rounds: spec.debate.rounds } : undefined,
-      plugins: plugins.length ? plugins : undefined,
-      requestedPlugins,
-      cwd,
-      worktree,
-      sandbox: spec.ask || (spec.kind === 'review' && !spec.runsApp) ? 'read-only' : 'workspace-write',
-      scratch,
-      evidenceDir,
-      evidence: attached.length ? attached : undefined,
-      ...buildPrompt(spec, worktree, diffFile, shared.text, scratch, runsCommands(agent, spec), skills, evidenceDir),
-      shared: shared.sources,
-      // Only Codex has a built-in review mode; other agents get the prompted review.
-      nativeReview: spec.kind === 'review' && agent === 'codex' && spec.review?.mode === 'standard' ? spec.review.target : null,
-      reviewTarget: spec.review?.target,
-      targets: spec.targets ?? [],
-      check: spec.check?.trim() || undefined,
-      ...pickModel(agent, spec, role, config, preset),
-      sessionId: null,
-      createdAt: now,
-      activeAt: now,
-      endedAt: null,
-      turns: 1,
-      stalled: false,
-      waiting: null,
-      report: '',
-      result: null,
-      notes,
-      error: null,
-      tokens: null,
-      seq: 0,
-      delivered: 0,
-    };
-    exchanged(job, 'lead', spec.task ?? '');
-    this.jobs.set(id, job);
-    if (job.kind === 'review' && repo) await this.recordReviewed(job, repo);
-    this.event(job, 'started', `${spec.kind}: ${title}`);
-    this.flush();
-
-    const ctl = this.ctl(job);
-    // Session setup can take seconds; the caller gets the job id right away and follows via wait.
-    this.adapters[agent].start(ctl).catch((err) => ctl.fail(String(err?.message ?? err)));
-    return job;
   }
 
   async reply(id: string, input: { message?: string; decision?: 'approve' | 'deny'; request_id?: string; approved_by_user?: string; lead_session?: string; sync?: boolean | string; attachments?: string[] }): Promise<Job> {
@@ -752,6 +768,16 @@ export class Jobs {
       const message = input.message;
       await this.sendWith(job, attachments, (note) => adapter.reply(ctl, message + note));
       return job;
+    }
+    if (job.worktree && job.rounds?.length) {
+      this.preparingReviews.add(id);
+      try {
+        if (fs.lstatSync(job.worktree.path).isSymbolicLink()) throw new Error(`Job ${id}'s worktree path is now a link to somewhere else.`);
+        if ((await currentBranch(job.worktree.path)) !== job.worktree.branch) throw new Error(`Job ${id}'s worktree is not on ${job.worktree.branch}.`);
+        await this.reconcileRounds(job);
+      } finally {
+        this.preparingReviews.delete(id);
+      }
     }
     // The worker started from an older commit. Merging the lead's branch in first gives it what was committed since,
     // and moves the base, so the job's result stays the worker's own changes.
@@ -932,7 +958,11 @@ export class Jobs {
       const failed = `Could not copy from .worktreeinclude: ${included.failed.join('; ')}`;
       if (included.failed.length && !notes.includes(failed)) notes.push(failed);
     } catch (err) {
-      await removeWorktree(repo, worktree, id, this.home, this.platform).catch(() => {});
+      try {
+        await removeWorktree(repo, worktree, id, this.home, this.platform);
+      } catch (cleanup) {
+        throw new Error(`${(err as Error).message}; worktree cleanup failed: ${(cleanup as Error).message}`, { cause: err });
+      }
       throw err;
     }
     return worktree;
@@ -1139,12 +1169,13 @@ export class Jobs {
   private async reconcileRounds(job: Job): Promise<void> {
     const rounds = job.rounds ?? [];
     const same = (a: string, b: string) => a.startsWith(b) || b.startsWith(a);
-    const before = JSON.stringify(rounds);
+    const before = JSON.stringify(rounds.map(({ state, revert }) => [state, revert]));
+    const history = await revertsSince(job.worktree!.path, job.roundsBase ?? job.worktree!.base);
     for (const round of rounds) {
       round.state = 'kept';
       delete round.revert;
     }
-    for (const { commit, reverts } of await revertsSince(job.worktree!.path, job.roundsBase ?? job.worktree!.base)) {
+    for (const { commit, reverts } of history) {
       for (const round of rounds) {
         if (round.state === 'kept' && same(reverts, round.commit)) {
           round.state = 'undone';
@@ -1155,7 +1186,8 @@ export class Jobs {
         }
       }
     }
-    if (JSON.stringify(rounds) === before) return;
+    if (JSON.stringify(rounds.map(({ state, revert }) => [state, revert])) === before) return;
+    staleReceipts(job, 'round state recovered from git');
     job.result = await this.worktreeResult(job, job.result?.commit ?? null);
     this.flush();
   }
@@ -1575,11 +1607,25 @@ export class Jobs {
   private save(): void {
     let history = 0;
     const keep = this.list().filter((job) =>
-      job.worktree || !isTerminal(job) || (unread(job).length > 0 && Date.now() - (job.endedAt ?? 0) < UNREAD_KEEP_MS) || (job.mission !== undefined && this.hooks.keepsMission?.(job.mission)) || history++ < KEEP_JOBS,
+      job.worktree || job.cleanupPending || !isTerminal(job) || this.finalizing.has(job.id) || this.cancelling.has(job.id)
+      || this.discarding.has(job.id) || this.changingRounds.has(job.id) || this.preparingReviews.has(job.id)
+      || this.snapshots.has(job.id) || this.checks.has(job.id) || (unread(job).length > 0 && Date.now() - (job.endedAt ?? 0) < UNREAD_KEEP_MS) || (job.mission !== undefined && this.hooks.keepsMission?.(job.mission)) || history++ < KEEP_JOBS,
     );
     const file = path.join(this.home, 'jobs.json');
     fs.writeFileSync(`${file}.tmp`, JSON.stringify({ seq: this.seq, jobs: keep, delivery: this.delivery.state }));
     fs.renameSync(`${file}.tmp`, file);
+    const kept = new Set(keep.map((job) => job.id));
+    for (const id of this.jobs.keys()) {
+      if (kept.has(id)) continue;
+      this.jobs.delete(id);
+      this.workerTokens.delete(id);
+      this.touchedFiles.delete(id);
+      this.turnStartTokens.delete(id);
+      for (const wake of this.waiters.get(id) ?? []) wake();
+      this.waiters.delete(id);
+      this.snapshots.delete(id);
+      this.checks.delete(id);
+    }
   }
 
   flush(): void {

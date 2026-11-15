@@ -257,11 +257,21 @@ class HttpError extends Error {
 function readJson(req: http.IncomingMessage): Promise<any> {
   return new Promise((resolve, reject) => {
     let body = '';
+    let bytes = 0;
+    let overflow = false;
     req.on('data', (chunk) => {
+      if (overflow) return;
+      bytes += Buffer.byteLength(chunk);
+      if (bytes > 4 * 1024 * 1024) {
+        overflow = true;
+        body = '';
+        reject(new HttpError(413, 'body too large'));
+        return;
+      }
       body += chunk;
-      if (body.length > 4 * 1024 * 1024) reject(new HttpError(413, 'body too large'));
     });
     req.on('end', () => {
+      if (overflow) return;
       try {
         resolve(body ? JSON.parse(body) : {});
       } catch {

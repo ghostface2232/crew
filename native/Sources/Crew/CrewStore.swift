@@ -331,11 +331,14 @@ final class SettingsModel {
     /// Edits one field of a role as the user wrote it. A field ends editing with its value unchanged when focus
     /// leaves it, as it does when the window closes; that must leave no trace, or closing asks to discard nothing.
     func setRole(_ role: String, _ key: WritableKeyPath<RoleSetting, String?>, to value: String) {
-        let next = value.isEmpty ? nil : value
+        var next = value.isEmpty ? nil : value
+        // Back to what was saved, it is written as it was saved. A role without a parent shows the agent it resolves to
+        // when none is written, so choosing that agent again, after trying another, is no change either.
+        let saved = savedRoleSettings[role]?[keyPath: key]
+        let savedShown = saved ?? (key == \.agent && roleInfo.first(where: { $0.role == role })?.parent == nil ? resolvedRoles[role]?.agent : nil)
+        if next == savedShown { next = saved }
         var setting = roleSettings[role] ?? RoleSetting()
         guard setting[keyPath: key] != next else { return }
-        // A role without a parent shows the agent it resolves to when none is written; picking that agent again changes nothing.
-        if key == \.agent, setting.agent == nil, roleInfo.first(where: { $0.role == role })?.parent == nil, next == resolvedRoles[role]?.agent { return }
         setting[keyPath: key] = next
         // A role with nothing set is the same as one left out, which is how the daemon stores it.
         roleSettings[role] = setting == RoleSetting() ? nil : setting

@@ -81,6 +81,16 @@ import Testing
         }
         settings.setRole("refactor", \.effort, to: "high")
         #expect(settings.dirty)
+        // Trying another agent and coming back to the saved one is no change, written or shown.
+        if let agent = state.roles["review"]?.agent {
+            settings.setRole("review", \.agent, to: agent == "codex" ? "antigravity" : "codex")
+            #expect(settings.dirty)
+            settings.setRole("review", \.agent, to: agent)
+            #expect(settings.roleSettings["review"] == settings.savedRoleSettings["review"])
+        }
+        settings.setRole("refactor", \.agent, to: "antigravity")
+        settings.setRole("refactor", \.agent, to: "")
+        #expect(settings.roleSettings["refactor"]?.agent == nil)
         // Clearing it again is the same as never having set it.
         settings.setRole("refactor", \.effort, to: "")
         #expect(settings.roleSettings["refactor"] == nil)

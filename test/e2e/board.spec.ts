@@ -10,8 +10,9 @@ test.beforeEach(async ({ page, request }) => {
 const needsYou = (page: Page) => page.getByRole('tab', { name: 'Needs You' }).click();
 const openSettings = async (page: Page, tab?: string) => {
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  if (tab) await page.getByRole('radio', { name: tab }).click();
+  if (tab) await settingsPage(page, tab);
 };
+const settingsPage = (page: Page, name: string) => page.getByRole('navigation', { name: 'Settings pages' }).getByRole('button', { name, exact: true }).click();
 const newJob = (page: Page) => page.getByRole('button', { name: 'New Job', exact: true }).click();
 const stage = (card: Locator, name: string) =>
   card.locator('.stage-groups > .rows').filter({ has: card.page().getByRole('heading', { name, exact: true }) });
@@ -188,11 +189,12 @@ test('the scope cannot change during a save and failed loads cannot be saved', a
   await expect(field).toBeEnabled();
   await field.fill('Old text');
   await page.getByRole('button', { name: 'Save Instructions' }).click();
-  // As in the app, the scope is locked while its save is in flight.
-  await expect(page.getByLabel('Applies to')).toBeDisabled();
+  // As in the app, other instructions cannot load while these are being saved.
+  const other = page.getByRole('navigation', { name: 'Settings pages' }).getByRole('button', { name: 'Other', exact: true });
+  await expect(other).toBeDisabled();
   release();
   await expect(page.getByText('Unsaved changes')).toHaveCount(0);
-  await page.getByLabel('Applies to').selectOption('/workspace/Other');
+  await other.click();
   await expect(field).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Save Instructions' })).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Retry Loading' })).toBeVisible();
@@ -202,7 +204,7 @@ test('settings can retry failed saves and confirm unsaved close', async ({ page 
   // Open from the keyboard: Safari does not focus a clicked button, so there would be no focus to return to.
   await page.getByRole('button', { name: 'Settings', exact: true }).focus();
   await page.keyboard.press('Enter');
-  await page.getByRole('radio', { name: 'Instructions' }).click();
+  await settingsPage(page, 'Instructions');
   const field = page.getByRole('textbox', { name: 'Shared instructions' });
   await expect(field).toBeEnabled();
   await field.fill('Draft');
@@ -405,8 +407,8 @@ test('project filtering keeps global requests visible and New Job follows roles'
 
 test('roles settings group every role, let one follow its parent, and save what the user wrote', async ({ page, request }) => {
   await openSettings(page);
-  const dialog = page.getByRole('dialog');
-  for (const group of ['Build', 'Review', 'Edit']) await expect(dialog.getByRole('heading', { name: group, exact: true })).toBeVisible();
+  const nav = page.getByRole('navigation', { name: 'Settings pages' });
+  for (const name of ['Build', 'Review', 'Edit', 'Presets', 'Instructions', 'Crew', 'Other']) await expect(nav.getByRole('button', { name, exact: true })).toBeVisible();
   const refactor = page.getByLabel('Refactoring agent');
   await expect(refactor).toHaveValue('');
   await expect(refactor.locator('option').first()).toHaveText('Same as Implementation');
@@ -414,6 +416,7 @@ test('roles settings group every role, let one follow its parent, and save what 
   await expect(page.getByLabel('Debate agent')).toBeVisible();
   await page.getByLabel('Implementation reasoning effort').fill('high');
   await expect(page.getByLabel('Refactoring reasoning effort')).toHaveAttribute('placeholder', 'high');
+  await settingsPage(page, 'Review');
   await page.getByLabel('Review that runs the app agent').selectOption('codex');
   await page.getByLabel('Cross-review agent').selectOption('antigravity');
   await page.getByRole('button', { name: 'Save Roles' }).click();
@@ -422,7 +425,40 @@ test('roles settings group every role, let one follow its parent, and save what 
   expect(calls.findLast((call: { route: string }) => call.route === '/api/roles').body).toEqual({
     roles: { delegate: { effort: 'high' }, verify: { agent: 'codex' }, review: { agent: 'antigravity' } },
   });
+  await settingsPage(page, 'Build');
   await expect(refactor).toHaveValue('');
+});
+
+test('a setting changed and changed back is no change, and closing then asks nothing', async ({ page }) => {
+  await openSettings(page);
+  await page.getByLabel('Implementation reasoning effort').fill('high');
+  await expect(page.getByText('Unsaved changes')).toBeVisible();
+  await page.getByLabel('Implementation reasoning effort').fill('');
+  // A role without a parent shows the agent it resolves to; trying another and choosing it again changes nothing.
+  await page.getByLabel('Implementation agent').selectOption('antigravity');
+  await page.getByLabel('Implementation agent').selectOption('codex');
+  await page.getByLabel('Refactoring agent').selectOption('antigravity');
+  await page.getByLabel('Refactoring agent').selectOption('');
+  await expect(page.getByText('Unsaved changes')).toHaveCount(0);
+  page.once('dialog', () => { throw new Error('closing asked to discard nothing'); });
+  await page.getByRole('button', { name: 'Close settings' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+});
+
+test('each project has its own instructions page', async ({ page, request }) => {
+  await openSettings(page, 'Other');
+  await expect(page.getByRole('heading', { name: 'Other', exact: true, level: 2 })).toBeVisible();
+  const field = page.getByRole('textbox', { name: 'Shared instructions' });
+  await expect(field).toBeEnabled();
+  await field.fill('Use tabs here.');
+  // Leaving for another set of instructions asks first; staying keeps the draft.
+  page.once('dialog', (dialog) => dialog.dismiss());
+  await settingsPage(page, 'Instructions');
+  await expect(field).toHaveValue('Use tabs here.');
+  await page.getByRole('button', { name: 'Save Instructions' }).click();
+  await expect(page.getByText('Unsaved changes')).toHaveCount(0);
+  const calls = await (await request.get('/__requests')).json();
+  expect(calls.findLast((call: { route: string }) => call.route === '/api/instructions').body).toEqual({ project: '/workspace/Other', text: 'Use tabs here.' });
 });
 
 test('a mission\'s preset can be chosen from its menu', async ({ page, request }) => {

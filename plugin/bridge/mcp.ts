@@ -615,26 +615,42 @@ function followUpTitle(title: string): string {
   return /[\u1100-\u11ff\u3130-\u318f\uac00-\ud7af]/.test(base) ? `후속 작업: ${base}` : `Follow-up: ${base}`;
 }
 
+/** The follow-up mission being opened, which a job started meanwhile waits for. */
+let opening: Promise<string> | null = null;
 /**
  * Work the lead starts after finishing its mission, without opening another, gets a follow-up mission, so it shows on
  * the board under a mission rather than among loose jobs. The lead reports it like any other.
  */
 async function followUp(): Promise<string> {
+  // Jobs started together share one follow-up; only the call that opened it says so.
+  if (opening) return opening.then(() => '');
   if (costMission || !lastDone || !SESSION) return '';
   const after = lastDone;
-  const opened: Mission = await api('POST', '/api/missions', { title: followUpTitle(after.title), project: PROJECT, owner: SESSION, stages: ['implement', 'final'] });
-  missionId = opened.id;
-  costMission = opened.id;
-  lastDone = null;
-  return `Opened mission ${opened.id} "${opened.title}" for this work, since "${after.title}" was done. Report its stage and done as usual, and pass stages to change its plan.\n`;
+  opening = api('POST', '/api/missions', { title: followUpTitle(after.title), project: PROJECT, owner: SESSION, stages: ['implement', 'final'] }).then((opened: Mission) => {
+    missionId = opened.id;
+    costMission = opened.id;
+    lastDone = null;
+    return `Opened mission ${opened.id} "${opened.title}" for this work, since "${after.title}" was done. Report its stage and done as usual, and pass stages to change its plan.\n`;
+  });
+  try {
+    return await opening;
+  } finally {
+    opening = null;
+  }
 }
 
 async function runJob(spec: JobSpec, background: boolean, ctx: CallContext): Promise<string> {
   await reattach();
   const opened = await followUp();
-  // The id is sent as it is known: the daemon applies the mission's preset, and lets the job stand on its own if the mission has ended.
-  const job: JobView = await withMission(() => api('POST', '/api/jobs', { ...spec, lead: SESSION, project: PROJECT, mission: costMission ?? undefined }));
-  return opened + await (background ? describeJob(job, ctx) : followOne(job.id, ctx));
+  try {
+    // The id is sent as it is known: the daemon applies the mission's preset, and lets the job stand on its own if the mission has ended.
+    const job: JobView = await withMission(() => api('POST', '/api/jobs', { ...spec, lead: SESSION, project: PROJECT, mission: costMission ?? undefined }));
+    return opened + await (background ? describeJob(job, ctx) : followOne(job.id, ctx));
+  } catch (err) {
+    // The mission is open either way, so the lead hears of it even when the job fails.
+    if (opened) throw new Error(`${opened}${(err as Error).message}`, { cause: err });
+    throw err;
+  }
 }
 
 async function followOne(id: string, ctx: CallContext): Promise<string> {

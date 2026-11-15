@@ -244,6 +244,24 @@ test('work started after a done mission opens a follow-up mission named after it
   assert.match(first, /^Opened mission m2 "후속 작업: 역할 정리"/);
   assert.deepEqual([...calls.find((call) => call.route === '/api/missions')?.body.stages], ['implement', 'final']);
   assert.equal(calls.at(-1)?.body.mission, 'm2');
+  // Jobs started together open one follow-up, and a job that fails still tells the lead of the mission it opened.
+  context.missionId = 'm1';
+  context.costMission = 'm1';
+  await reportMission({ done: true, outcome: 'ok' });
+  const opens = calls.filter((call) => call.route === '/api/missions').length;
+  const together = await Promise.all([runJob({ kind: 'delegate', task: 'a' }, true, { jobs: [] }), runJob({ kind: 'delegate', task: 'b' }, true, { jobs: [] })]);
+  assert.equal(calls.filter((call) => call.route === '/api/missions').length, opens + 1);
+  assert.equal(together.filter((text: string) => text.startsWith('Opened mission')).length, 1);
+  context.missionId = 'm1';
+  context.costMission = 'm1';
+  await reportMission({ done: true, outcome: 'ok' });
+  const api = context.api as (method: string, route: string, body: any) => Promise<unknown>;
+  context.api = async (method: string, route: string, body: any) => {
+    if (route === '/api/jobs') throw new Error('Another job is running.');
+    return api(method, route, body);
+  };
+  await assert.rejects(runJob({ kind: 'delegate', task: 'alone', exclusive: true }, true, { jobs: [] }), /^Error: Opened mission m2[^]*Another job is running\./);
+  context.api = api;
   // Further work joins it, and an abandoned mission or one the lead opens itself needs none.
   assert.doesNotMatch(await runJob({ kind: 'delegate', task: 'again' }, true, { jobs: [] }), /Opened mission/);
   await reportMission({ abandoned: true });

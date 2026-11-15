@@ -371,6 +371,7 @@ test('the history limit does not hide old worktrees or undelivered jobs after a 
   first.jobs.flush();
   const second = new Jobs(first.home, () => config, {} as never, { onEvent: () => {}, onJob: () => {}, onAttention: () => {} });
   assert.equal(second.list().length, 202);
+  assert.deepEqual(first.jobs.list().map((job) => job.id), second.list().map((job) => job.id));
   assert.ok(second.get('unread').seq > second.get('unread').delivered);
   await second.discard(job.id);
   assert.equal(fs.existsSync(worktree.path), false);
@@ -684,6 +685,7 @@ test('a job carries its mission and starting notes, and is kept with a mission t
   jobs.flush();
   const reloaded = make();
   assert.ok(reloaded.jobs.has(first.id), 'the job of a kept mission survives the history limit');
+  assert.deepEqual(jobs.list().map((job) => job.id), reloaded.list().map((job) => job.id));
   assert.ok(!reloaded.jobs.has(dropped.id));
 });
 
@@ -2279,4 +2281,168 @@ test('cancelling a job while its check runs stops the check and still collects t
   assert.equal(job.report, 'built it');
   assert.equal(job.receipts?.at(-1)?.check?.exit, null);
   assert.match(job.receipts?.at(-1)?.check?.output ?? '', /stopped: the job was cancelled/);
+});
+
+for (const kind of ['delegate', 'review'] as const) test(`failed ${kind} setup rolls back its worktree and branch`, async (t) => {
+  const repo = tempRepo();
+  const { jobs, home } = harness(() => assert.fail('worker must not start'));
+  t.after(() => { jobs.flush(); fs.rmSync(home, { recursive: true, force: true }); fs.rmSync(repo, { recursive: true, force: true }); });
+  fs.mkdirSync(path.join(repo, '.worktreeinclude'));
+  const listed = () => execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: repo, encoding: 'utf8' });
+  const before = listed();
+  await assert.rejects(jobs.create({ kind, cwd: repo, task: 'x', ...(kind === 'review' ? { runsApp: true, review: { target: { type: 'commit', sha: 'HEAD' }, mode: 'adversarial' } } : {}) }), /worktreeinclude/);
+  assert.equal(jobs.list().length, 0);
+  assert.equal(listed(), before);
+  assert.equal(execFileSync('git', ['branch', '--list', 'crew-*'], { cwd: repo, encoding: 'utf8' }), '');
+  const repos = fs.readdirSync(path.join(home, 'worktrees'));
+  for (const name of repos) assert.deepEqual(fs.readdirSync(path.join(home, 'worktrees', name)), []);
+});
+
+test('job setup reports the original error and a rollback failure', async (t) => {
+  const repo = tempRepo();
+  const { jobs, home } = harness(() => assert.fail('worker must not start'));
+  t.after(() => { jobs.flush(); fs.rmSync(home, { recursive: true, force: true }); fs.rmSync(repo, { recursive: true, force: true }); });
+  const mkdir = fs.mkdirSync;
+  t.mock.method(fs, 'mkdirSync', (...args: Parameters<typeof mkdir>) => {
+    if (String(args[0]).startsWith(path.join(home, 'scratch') + path.sep)) {
+      const wt = execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: repo, encoding: 'utf8' }).match(/worktree (.+)/g)!.at(-1)!.slice(9);
+      execFileSync('git', ['worktree', 'lock', wt], { cwd: repo });
+      throw new Error('included setup failed');
+    }
+    return mkdir(...args);
+  });
+  await assert.rejects(jobs.create({ kind: 'delegate', cwd: repo, task: 'x' }), (err: Error) => {
+    assert.match(err.message, /included setup failed/);
+    assert.match(err.message, /cleanup.*locked/is);
+    assert.equal((err.cause as Error).message, 'included setup failed');
+    return true;
+  });
+  assert.equal(jobs.list().length, 0);
+});
+
+test('history retention prunes memory and per-job maps to match persistence', async (t) => {
+  const repo = tempRepo();
+  const { jobs, home } = harness((ctl) => ctl.done('ok'));
+  t.after(() => { jobs.flush(); fs.rmSync(home, { recursive: true, force: true }); fs.rmSync(repo, { recursive: true, force: true }); });
+  const base = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, isolation: 'in_place', task: 'x' }));
+  jobs.jobs.clear();
+  for (let i = 0; i < 251; i++) {
+    const id = `history-${i}`;
+    jobs.jobs.set(id, { ...base, id, createdAt: i, endedAt: i });
+    for (const key of ['workerTokens', 'touchedFiles', 'turnStartTokens']) (jobs as any)[key].set(id, key === 'turnStartTokens' ? 1 : key === 'workerTokens' ? 'token' : new Set());
+  }
+  const waiting = jobs.wait('history-0', base.seq, 1000);
+  jobs.flush();
+  const saved = JSON.parse(fs.readFileSync(path.join(home, 'jobs.json'), 'utf8')).jobs as Job[];
+  assert.equal(jobs.list().length, 200);
+  assert.deepEqual(jobs.list().map((job) => job.id), saved.map((job) => job.id));
+  for (const key of ['workerTokens', 'touchedFiles', 'turnStartTokens', 'waiters', 'snapshots', 'checks']) {
+    assert.equal((jobs as any)[key].has('history-0'), false, key);
+  }
+  assert.ok((jobs as any).turnStartTokens.has('history-250'));
+  await waiting;
+});
+
+for (const action of ['undo', 'keep'] as const) test(`reply recovers a round ${action} committed before the last save`, async (t) => {
+  const repo = tempRepo();
+  const first = harness((ctl) => {
+    fs.writeFileSync(path.join(ctl.job.cwd, 'round.js'), 'round\n');
+    ctl.done('done');
+  });
+  let restored: Jobs | undefined;
+  t.after(async () => {
+    if (restored) { await restored.discard(job.id); restored.flush(); }
+    first.jobs.flush();
+    fs.rmSync(first.home, { recursive: true, force: true });
+    fs.rmSync(repo, { recursive: true, force: true });
+  });
+  const job = await settled(first.jobs, await first.jobs.create({ kind: 'delegate', cwd: repo, task: 'x' }));
+  if (action === 'keep') {
+    await first.jobs.round(job.id, 1, 'undo');
+    await settled(first.jobs, await first.jobs.reply(job.id, { message: 'acknowledge undo' }));
+  }
+  first.jobs.flush();
+  const file = path.join(first.home, 'jobs.json');
+  const saved = fs.readFileSync(file, 'utf8');
+  await first.jobs.round(job.id, 1, action);
+  fs.writeFileSync(file, saved);
+  first.calls.length = 0;
+  restored = new Jobs(first.home, () => config, { codex: first.adapter, antigravity: first.adapter }, { onEvent: () => {}, onJob: () => {}, onAttention: () => {} });
+  await settled(restored, await restored.reply(job.id, { message: 'continue' }));
+  const recovered = restored.get(job.id);
+  assert.equal(recovered.rounds![0].state, action === 'undo' ? 'undone' : 'kept');
+  assert.match(first.calls[0], action === 'undo' ? /undone/ : /were restored/);
+  assert.equal(fs.existsSync(path.join(recovered.cwd, 'round.js')), action === 'keep');
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).jobs[0].rounds[0].state, action === 'undo' ? 'undone' : 'kept');
+});
+
+test('retention preserves work, unread results, kept missions and pending operations in memory', async (t) => {
+  const repo = tempRepo();
+  const { jobs, home } = harness((ctl) => ctl.done('ok'));
+  t.after(() => { jobs.flush(); fs.rmSync(home, { recursive: true, force: true }); fs.rmSync(repo, { recursive: true, force: true }); });
+  const base = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, isolation: 'in_place', task: 'x' }));
+  jobs.jobs.clear();
+  (jobs as any).hooks.keepsMission = (id: string) => id === 'kept';
+  const protectedJobs: Record<string, Partial<Job>> = {
+    running: { state: 'running' },
+    unread: { endedAt: Date.now(), news: [{ seq: 1, eventSeq: 1, kind: 'done', state: 'done', turn: 1, reason: 'done', acked: false, offers: 0 }] },
+    owned: { worktree: { path: path.join(home, 'owned'), branch: 'crew-owned', base: 'base' } },
+    mission: { mission: 'kept' },
+    cleanup: { cleanupPending: ['branch crew-leftover'] },
+  };
+  const operations = ['finalizing', 'cancelling', 'discarding', 'changingRounds', 'preparingReviews', 'snapshots', 'checks'];
+  for (const key of operations) {
+    protectedJobs[key] = {};
+    if (key === 'snapshots') (jobs as any)[key].set(key, Promise.resolve());
+    else if (key === 'checks') (jobs as any)[key].set(key, new AbortController());
+    else (jobs as any)[key].add(key);
+  }
+  for (const [id, fields] of Object.entries(protectedJobs)) jobs.jobs.set(id, { ...base, id, createdAt: 0, endedAt: 0, ...fields });
+  for (let i = 1; i <= 251; i++) jobs.jobs.set(`history-${i}`, { ...base, id: `history-${i}`, createdAt: i });
+  jobs.flush();
+  for (const id of Object.keys(protectedJobs)) assert.ok(jobs.jobs.has(id), id);
+  assert.equal(jobs.list().length, 200 + Object.keys(protectedJobs).length);
+  const saved = JSON.parse(fs.readFileSync(path.join(home, 'jobs.json'), 'utf8')).jobs as Job[];
+  assert.deepEqual(jobs.list().map((job) => job.id), saved.map((job) => job.id));
+});
+
+test('failed snapshot setup reports its cleanup failure', async (t) => {
+  const repo = tempRepo();
+  const { jobs, home } = harness(() => assert.fail('worker must not start'));
+  t.after(() => { jobs.flush(); fs.rmSync(home, { recursive: true, force: true }); fs.rmSync(repo, { recursive: true, force: true }); });
+  fs.mkdirSync(path.join(repo, '.worktreeinclude'));
+  const stat = fs.promises.stat;
+  t.mock.method(fs.promises, 'stat', async (...args: Parameters<typeof stat>) => {
+    if (String(args[0]) === path.join(repo, '.worktreeinclude')) {
+      const wt = execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: repo, encoding: 'utf8' }).match(/worktree (.+)/g)!.at(-1)!.slice(9);
+      execFileSync('git', ['worktree', 'lock', wt], { cwd: repo });
+    }
+    return stat(...args);
+  });
+  await assert.rejects(jobs.create({ kind: 'review', cwd: repo, runsApp: true, review: { target: { type: 'commit', sha: 'HEAD' }, mode: 'adversarial' } }), (err: Error) => {
+    assert.match(err.message, /worktreeinclude.*cleanup.*locked/is);
+    assert.match((err.cause as Error).message, /worktreeinclude/);
+    return true;
+  });
+  assert.equal(jobs.list().length, 0);
+});
+
+test('a job that cannot be persisted rolls back its worktree and branch', async (t) => {
+  const repo = tempRepo();
+  const { jobs, home } = harness(() => assert.fail('worker must not start'));
+  t.after(() => { jobs.flush(); fs.rmSync(home, { recursive: true, force: true }); fs.rmSync(repo, { recursive: true, force: true }); });
+  const rename = fs.renameSync;
+  let failed = false;
+  t.mock.method(fs, 'renameSync', (...args: Parameters<typeof rename>) => {
+    if (!failed && args[1] === path.join(home, 'jobs.json')) {
+      failed = true;
+      throw new Error('cannot persist job');
+    }
+    return rename(...args);
+  });
+  const before = execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: repo, encoding: 'utf8' });
+  await assert.rejects(jobs.create({ kind: 'delegate', cwd: repo, task: 'x' }), /cannot persist job/);
+  assert.equal(jobs.list().length, 0);
+  assert.equal(execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: repo, encoding: 'utf8' }), before);
+  assert.equal(execFileSync('git', ['branch', '--list', 'crew-*'], { cwd: repo, encoding: 'utf8' }), '');
 });

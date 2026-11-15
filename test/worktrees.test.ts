@@ -388,3 +388,40 @@ test('only a clone refusal, not another error mixed into it, falls back to shari
   assert.equal(cloneRefused('cp: /src/deps: Operation not permitted\n'), false);
   assert.equal(cloneRefused(''), false);
 });
+
+test('transport commits skip post-commit and post-index-change hooks', async (t) => {
+  const repo = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-commit-hooks-')));
+  t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: repo });
+  git('init', '-q');
+  git('config', 'user.name', 'Test');
+  git('config', 'user.email', 't@example.com');
+  const hooks = path.join(repo, '.git', 'hooks');
+  git('config', 'core.hooksPath', hooks);
+  for (const hook of ['post-commit', 'post-index-change']) {
+    fs.writeFileSync(path.join(hooks, hook), `#!/bin/sh\necho ran > ${hook}.marker\n`, { mode: 0o755 });
+  }
+  fs.writeFileSync(path.join(repo, 'work.txt'), 'work');
+  assert.ok(await commitAll(repo, 'transport'));
+  for (const hook of ['post-commit', 'post-index-change']) assert.equal(fs.existsSync(path.join(repo, `${hook}.marker`)), false, hook);
+});
+
+test('included paths preserve non-ASCII and newline filenames with quotePath enabled', async (t) => {
+  const repo = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-unicode-include-')));
+  t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+  execFileSync('git', ['init', '-q'], { cwd: repo });
+  execFileSync('git', ['config', 'core.quotePath', 'true'], { cwd: repo });
+  const wt = path.join(repo, 'worker');
+  fs.mkdirSync(wt);
+  const names = ['캐시', ...(process.platform === 'win32' ? [] : ['line\nbreak', ' space '])];
+  fs.writeFileSync(path.join(repo, '.gitignore'), names.map((name) => name.includes('\n') ? 'line*break/' : `${name.replace(/ $/, '\\ ')}/`).join('\n') + '\n');
+  fs.writeFileSync(path.join(repo, '.worktreeinclude'), fs.readFileSync(path.join(repo, '.gitignore')));
+  for (const name of names) {
+    fs.mkdirSync(path.join(repo, name));
+    fs.writeFileSync(path.join(repo, name, 'file'), name);
+  }
+  const result = await copyIncluded(repo, wt, async (source, dest) => fs.promises.cp(source, dest, { recursive: true }));
+  assert.deepEqual(result.failed, []);
+  assert.deepEqual(result.copied.sort(), names.map((name) => `${name}/`).sort());
+  for (const name of names) assert.equal(fs.readFileSync(path.join(wt, name, 'file'), 'utf8'), name);
+});

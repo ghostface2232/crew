@@ -10,7 +10,7 @@ export function git(cwd: string, args: string[], stdin?: string): Promise<string
   return new Promise((resolve, reject) => {
     const child = execFile('git', args, { cwd, maxBuffer: 16 * 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
       if (err) reject(new Error(`git ${args[0]}: ${(stderr || err.message).trim()}`));
-      else resolve(stdout.trim());
+      else resolve(stdout.endsWith('\0') ? stdout : stdout.trim());
     });
     if (stdin !== undefined) child.stdin?.end(stdin);
   });
@@ -131,10 +131,10 @@ export async function copyIncluded(root: string, wt: string, clone: (source: str
   const result = { copied: [] as string[], linked: [] as string[], failed: [] as string[] };
   if (!(await fs.stat(path.join(root, '.worktreeinclude')).catch(() => null))) return result;
   // Let git apply the patterns, so the syntax is exactly .gitignore's.
-  const matched = await git(root, ['ls-files', '--others', '--ignored', '--exclude-from=.worktreeinclude', '--directory']);
+  const matched = await git(root, ['ls-files', '--others', '--ignored', '--exclude-from=.worktreeinclude', '--directory', '-z']);
   if (!matched) return result;
-  const ignored = await git(root, ['check-ignore', '--stdin'], matched).catch(() => '');
-  for (const entry of ignored.split('\n').filter(Boolean)) {
+  const ignored = await git(root, ['check-ignore', '--stdin', '-z'], matched).catch(() => '');
+  for (const entry of ignored.split('\0').filter(Boolean)) {
     const rel = entry.replace(/\/$/, '');
     const source = path.join(root, rel);
     const dest = path.join(wt, rel);
@@ -219,10 +219,10 @@ export function realpath(target: string): string {
  * missing identity falls back to Crew's.
  */
 export async function commitAll(wt: string, message: string, linked: string[] = []): Promise<string | null> {
-  await git(wt, ['add', '-A', ...await besides(wt, linked)]);
+  await git(wt, ['-c', `core.hooksPath=${os.devNull}`, 'add', '-A', ...await besides(wt, linked)]);
   const staged = await git(wt, ['diff', '--cached', '--name-only']);
   if (!staged) return null;
-  await git(wt, [...await commitSettings(wt), 'commit', '--no-verify', '-m', message]);
+  await git(wt, [...await commitSettings(wt), '-c', `core.hooksPath=${os.devNull}`, 'commit', '--no-verify', '-m', message]);
   return git(wt, ['rev-parse', '--short', 'HEAD']);
 }
 

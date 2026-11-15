@@ -8,6 +8,7 @@ struct BoardView: View {
     @State private var wide = false
     /// The page column's width, the panel floating over its trailing part; it bounds how wide the panel may be dragged.
     @State private var pageWidth: CGFloat = 0
+    @State private var scroll = ScrollPosition(edge: .top)
     var body: some View {
         NavigationSplitView {
             ProjectSidebar(store: store, openSettings: openSettings)
@@ -31,7 +32,10 @@ struct BoardView: View {
                 }
         }
         .frame(minHeight: WorkspaceStyle.windowMinHeight)
-        .onChange(of: store.selection) { store.persistSelection() }
+        .onChange(of: store.selection) {
+            store.persistSelection()
+            scroll.scrollTo(edge: .top)
+        }
         .onExitCommand { store.closeDetail() }
         .sheet(isPresented: $store.showingDispatch) { DispatchView(store: store) }
     }
@@ -50,13 +54,16 @@ struct BoardView: View {
             .background(OverlayScrollers())
             .padding(.horizontal, WorkspaceStyle.pageMargin).padding(.top, WorkspaceStyle.pageTop).padding(.bottom, WorkspaceStyle.pageMargin)
             .frame(maxWidth: WorkspaceStyle.pageMaxWidth).frame(maxWidth: .infinity)
+            // Only the contents change with the tab. Replacing the scroll view itself left the toolbar's scroll edge
+            // effect with nothing under it for a few frames, which showed as a light flash at the top.
+            .id(store.selection ?? "overview")
+            // A crossfade layers two full pages at once; only the incoming page animates.
+            .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 6)), removal: .identity))
+            // Tied to the page itself, so tabs, the sidebar and keyboard shortcuts all get the same entrance;
+            // a withAnimation in the AppKit tab control's action did not reach this view.
+            .animation(Motion.reduced(Motion.page, reduceMotion), value: store.selection)
         }
-        .id(store.selection ?? "overview")
-        // A crossfade layers two full pages at once; only the incoming page animates.
-        .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 6)), removal: .identity))
-        // Tied to the page itself, so tabs, the sidebar and keyboard shortcuts all get the same entrance;
-        // a withAnimation in the AppKit tab control's action did not reach this view.
-        .animation(Motion.reduced(Motion.page, reduceMotion), value: store.selection)
+        .scrollPosition($scroll)
         // The page keeps scrolling and working beside the open panel. A click on it that no control takes
         // closes the panel; one on another job opens that job instead. The sidebar is another column.
         .contentShape(Rectangle())

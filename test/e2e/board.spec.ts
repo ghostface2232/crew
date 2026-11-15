@@ -8,7 +8,8 @@ test.beforeEach(async ({ page, request }) => {
   await page.goto('/');
   await expect(page.getByText('Live', { exact: true })).toBeVisible();
 });
-const needsYou = (page: Page) => page.getByRole('tab', { name: 'Needs You' }).click();
+// The pages sit in the sidebar, or in the dock on narrow windows; only one of them shows.
+const needsYou = (page: Page) => page.getByRole('navigation', { name: 'Pages' }).getByRole('button', { name: /^Needs You/ }).filter({ visible: true }).click();
 const openSettings = async (page: Page, tab?: string) => {
   // Narrow windows fold the sidebar away behind its toolbar button.
   const toggle = page.getByRole('button', { name: 'Show sidebar' });
@@ -230,9 +231,9 @@ test('settings can retry failed saves and confirm unsaved close', async ({ page 
 test('detail panel cancels, follows up, and escapes task text', async ({ page, request }) => {
   await page.locator('button[data-job="cx-build"]').click();
   const drawer = page.getByRole('dialog');
-  await expect(drawer.getByText('Inspect the existing implementation first. <task>')).toBeHidden();
-  await drawer.getByText('Original task', { exact: true }).click();
+  // A short task shows whole, with nothing to unfold; its markup stays text.
   await expect(drawer.getByText('Inspect the existing implementation first. <task>')).toBeVisible();
+  await expect(drawer.getByRole('button', { name: 'Show the original task' })).toHaveCount(0);
   const message = drawer.getByRole('textbox', { name: 'Message to Codex' });
   await message.fill('Check the narrow layout');
   // Return adds a newline; only the button sends.
@@ -339,7 +340,7 @@ test('the detail panel shows what verified the result and nothing for jobs witho
   await expect(section.getByText('Check passed')).toBeVisible();
   await expect(section.getByText('npm test', { exact: true })).toBeVisible();
   await expect(section.getByText('Turn 1 · f00dbabe · 4s')).toBeVisible();
-  await expect(section.getByText('Output (end)')).toHaveCount(0);
+  await expect(section.getByRole('button', { name: 'Show the end of the output' })).toHaveCount(0);
   await expect(section.getByText('writes in the worktree only · no network · plugins figma (act outside the sandbox)')).toBeVisible();
   await expect(section.getByText('Approval relayed for turn 1 — the user’s own words went with it, and the quote matches them.')).toBeVisible();
   await expect(section.getByText('“go ahead and push”')).toBeVisible();
@@ -349,7 +350,7 @@ test('the detail panel shows what verified the result and nothing for jobs witho
   await expect(section.getByText('Check failed with exit code 1')).toBeVisible();
   await expect(section.getByText('No longer current: turn 2 was undone')).toBeVisible();
   await expect(section.getByText('Expected 2, received 3')).toBeHidden();
-  await section.getByText('Output (end)').click();
+  await section.getByRole('button', { name: 'Show the end of the output' }).click();
   await expect(section.getByText('Expected 2, received 3')).toBeVisible();
   await expect(section.getByText(/no messages of the user were recorded/)).toBeVisible();
   await expect(section.getByText('Runs with')).toHaveCount(0);
@@ -374,6 +375,10 @@ test('the detail panel shows what verified the result and nothing for jobs witho
 
   // A debate reads as the conversation, in order, instead of only the last report.
   const debate = (await open('cx-debate')).getByRole('region', { name: 'Debate · round 2 of 2 · concluded' });
+  // The latest round starts open; earlier ones fold to their heading and stances.
+  await expect(debate.locator('.exchange-entry')).toHaveCount(2);
+  await expect(debate.getByRole('button', { name: /^Round 1/ })).toHaveAccessibleName(/1 disagree/);
+  await debate.getByRole('button', { name: /^Round 1/ }).click();
   await expect(debate.locator('.exchange-entry')).toHaveCount(4);
   await expect(debate.locator('.exchange-entry').first()).toContainText('Lead · round 1');
   await expect(debate.locator('.exchange-entry').nth(1)).toContainText('Codex · round 1');
@@ -385,6 +390,8 @@ test('the detail panel shows what verified the result and nothing for jobs witho
 
   // A job the lead followed up shows its conversation; one with a single task and report keeps the plain report.
   const followed = (await open('cx-failed')).getByRole('region', { name: 'Conversation' });
+  await expect(followed.locator('.exchange-entry').first()).toContainText('Lead · turn 2');
+  await followed.getByRole('button', { name: /^Turn 1/ }).click();
   await expect(followed.locator('.exchange-entry')).toHaveCount(3);
   await expect(followed.locator('.exchange-entry').nth(2)).toContainText('Lead · turn 2');
 });
@@ -459,7 +466,7 @@ test('a setting changed and changed back is no change, and closing then asks not
 test('on a phone, settings move between the list and a page with focus kept, and the drawer hands focus back', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 800 });
   await page.getByRole('button', { name: 'Show sidebar' }).click();
-  await page.getByRole('navigation', { name: 'Projects' }).getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('complementary', { name: 'Sidebar' }).getByRole('button', { name: 'Settings', exact: true }).click();
   const back = page.getByRole('dialog').getByRole('button', { name: 'Settings', exact: true });
   await page.getByRole('navigation', { name: 'Settings pages' }).getByRole('button', { name: 'Review', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Review', level: 2 })).toBeVisible();
@@ -596,16 +603,20 @@ test('each project has its own instructions page', async ({ page, request }) => 
   expect(calls.findLast((call: { route: string }) => call.route === '/api/instructions').body).toEqual({ project: '/workspace/Other', text: 'Use tabs here.' });
 });
 
-test('a mission\'s preset can be chosen from its menu', async ({ page, request }) => {
+test('a mission\'s preset can be chosen from its pill menu', async ({ page, request }) => {
   const mission = page.locator('.mission[data-state="active"]').first();
-  await mission.getByRole('button', { name: 'Mission options' }).click();
+  const pill = mission.locator('.mission-foot .menu-pill');
+  await expect(pill).toHaveText('Global preset');
+  await pill.click();
   await mission.getByRole('menuitemradio', { name: 'Economy preset' }).click();
-  await expect(mission.locator('.mission-meta')).toContainText('Economy preset');
+  await expect(pill).toHaveText('Economy preset');
+  // An active mission's meta leaves the preset to its menu.
+  await expect(mission.locator('.mission-meta')).not.toContainText('preset');
   // The menu stays usable after a preset change, and the choice shows.
-  await mission.getByRole('button', { name: 'Mission options' }).click();
+  await pill.click();
   await expect(mission.getByRole('menuitemradio', { name: 'Economy preset' })).toHaveAttribute('aria-checked', 'true');
   await mission.getByRole('menuitemradio', { name: 'Global preset' }).click();
-  await expect(mission.locator('.mission-meta')).not.toContainText('preset');
+  await expect(pill).toHaveText('Global preset');
   const calls = await (await request.get('/__requests')).json();
   const sent = calls.filter((call: { route: string }) => call.route.startsWith('/api/missions/')).map((call: { body: unknown }) => call.body);
   expect(sent.slice(-2)).toEqual([{ preset: 'economy' }, { preset: null }]);
@@ -625,7 +636,7 @@ test('New Job sends the role, so a review that runs the app goes to its holder',
 });
 
 test('a chosen project survives reload and All projects lets New Job go elsewhere', async ({ page, request }) => {
-  await page.getByRole('navigation').getByRole('button', { name: 'Crew', exact: true }).click();
+  await page.getByRole('navigation', { name: 'Projects' }).getByRole('button', { name: 'Crew', exact: true }).click();
   await page.reload();
   await expect(page.getByText('Live', { exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Crew', exact: true, level: 1 })).toBeVisible();
@@ -644,7 +655,8 @@ test('a chosen project survives reload and All projects lets New Job go elsewher
   expect(calls.find((call: { route: string }) => call.route === '/api/jobs').body).toMatchObject({
     cwd: '/workspace/New', project: '/workspace/New',
   });
-  expect(await page.evaluate(() => localStorage.getItem('crew.selection'))).toBe('overview');
+  // The new job's project opens, so the job is in view, as the app goes there.
+  expect(await page.evaluate(() => localStorage.getItem('crew.selection'))).toBe('project:/workspace/New');
 });
 
 test('a closed slow drawer never opens itself again', async ({ page }) => {
@@ -708,22 +720,21 @@ test('Return adds a newline in an answer and the next question gets a fresh draf
   expect(calls[0].body).toMatchObject({ message: '새 답변', request_id: 'request-2' });
 });
 
-test('the toolbar keeps its actions on one row at every width, moving only the search below', async ({ page }) => {
-  const toolbar = page.locator('.toolbar');
+test('the top bar keeps its controls on one row at every width', async ({ page }) => {
+  const bar = page.locator('.topbar');
   const split: number[] = [];
   for (let width = 320; width <= 1000; width += 10) {
     await page.setViewportSize({ width, height: 800 });
-    const rows = await toolbar.evaluate((element) => {
+    const rows = await bar.evaluate((element) => {
       const middle = (selector: string) => {
         const box = element.querySelector(selector)!.getBoundingClientRect();
         return Math.round(box.top + box.height / 2);
       };
-      return { tabs: middle('[role="tablist"]'), newJob: middle('button[title="New job"]'), search: middle('.search') };
+      return [middle('.search-pill'), middle('.connection'), middle('.new-job'), middle('.crumbs')];
     });
-    const sameRow = (a: number, b: number) => Math.abs(a - b) <= 2;
-    if (!sameRow(rows.newJob, rows.tabs) || !(sameRow(rows.search, rows.tabs) || rows.search > rows.tabs + 20)) split.push(width);
+    if (rows.some((row) => Math.abs(row - rows[0]) > 2) || await bar.evaluate((element) => element.scrollWidth > element.clientWidth)) split.push(width);
   }
-  expect(split, 'widths where the toolbar splits its actions').toEqual([]);
+  expect(split, 'widths where the top bar splits or overflows').toEqual([]);
 });
 
 test('320px sheets keep controls within the viewport and support reduced motion', async ({ page }) => {
@@ -1105,10 +1116,12 @@ for (const width of [390, 1440]) {
       ...(index >= 2 ? { workflow: 'run-1', stage: index < 5 ? 'Review' : 'Verify' } : {}),
     }));
     await request.post('/__push', { data: { type: 'state', data } });
-    const view = page.locator('.session').filter({ has: page.getByText(session.title, { exact: true }) }).first();
-    await expect(view.locator('.session-count')).toHaveText(`2 sub-agents · ${session.workflows[0].name} 12 running`);
-    expect(await view.locator('summary > span:not(.chip)').evaluate((el) => el.clientWidth)).toBeGreaterThan(80);
-    await view.locator('summary').click();
+    // The row sums the sub-agents up, as the app's does; its panel lists them.
+    const row = page.locator(`button[data-session="${session.id}"]`).last();
+    await expect(row.locator('.job-row-text > span')).toContainText(`2 sub-agents · ${session.workflows[0].name} 12 running`);
+    expect(await row.locator('.job-row-text b').evaluate((el) => el.clientWidth)).toBeGreaterThan(80);
+    await row.click();
+    const view = page.getByRole('dialog');
     await expect(view.getByRole('list', { name: 'Sub-agents', exact: true }).locator('li')).toHaveCount(2);
     const run = view.getByRole('region', { name: session.workflows[0].name });
     await expect(run).toContainText('12 running · 7 done');
@@ -1127,7 +1140,81 @@ for (const width of [390, 1440]) {
     await request.post('/__push', { data: { type: 'state', data } });
     await expect(run).toContainText('0 running · 7 done');
     await expect(run).toContainText('No agent running: between phases, or finished.');
-    await expect(view.locator('.session-count')).toHaveText('2 sub-agents');
+    await expect(row.locator('.job-row-text > span')).toHaveText('Reviewing the implementation · 2 sub-agents');
     await expect(run.getByRole('button')).toHaveCount(0);
   });
 }
+
+test('a session row opens its own panel and closes it again, as job rows do', async ({ page }) => {
+  const row = page.locator('button[data-session="lead-1"]').last();
+  await row.click();
+  const panel = page.getByRole('dialog');
+  await expect(panel.getByText('Claude · Lead', { exact: true })).toBeVisible();
+  await expect(panel.getByRole('button', { name: 'Resume command' })).toBeVisible();
+  // The page beside the panel stays usable: the same row closes it.
+  await row.click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+});
+
+test('the panel resizes from its edge and keeps the width', async ({ page }) => {
+  await page.locator('button[data-job="cx-build"]').click();
+  const grip = page.getByRole('separator', { name: 'Panel width' });
+  const before = Number(await grip.getAttribute('aria-valuenow'));
+  await grip.focus();
+  await page.keyboard.press('ArrowLeft');
+  await expect(grip).toHaveAttribute('aria-valuenow', String(before + 40));
+  await page.getByRole('button', { name: 'Close details' }).click();
+  await page.locator('button[data-job="cx-build"]').click();
+  await expect(page.getByRole('separator', { name: 'Panel width' })).toHaveAttribute('aria-valuenow', String(before + 40));
+});
+
+test('a closed mission opens from a click anywhere on it and closes from its title row', async ({ page }) => {
+  const card = page.locator('[data-key="mission-1"]');
+  await card.getByRole('button', { name: 'Collapse mission' }).click();
+  await expect(card.locator('.track')).toHaveCount(0);
+  await card.locator('.mission-meta').click();
+  await expect(card.locator('.track')).toBeVisible();
+  await card.locator('.mission-heading').click();
+  await expect(card.locator('.track')).toHaveCount(0);
+});
+
+test('a finished-looking mission offers Mark done beside its outcome, and a dropped one marks its stopping step', async ({ page, request }) => {
+  const data = fixture();
+  data.missions[0].stages = ['implement', 'cross-review', 'final'];
+  data.missions[0].stage = 'cross-review';
+  data.missions[0].updatedAt = NOW - 20 * 60_000;
+  data.jobs.forEach((job) => { job.state = 'done'; job.endedAt = NOW - 60_000; job.waiting = null; });
+  data.claude.forEach((session) => { session.state = 'idle'; });
+  await request.post('/__push', { data: { type: 'state', data } });
+  const card = page.locator('[data-key="mission-1"]');
+  await card.locator('.mission-foot').getByRole('button', { name: 'Mark done' }).click();
+  await expect(card.locator('.mission-head .chip')).toHaveText('Done');
+  data.missions[0] = { ...data.missions[0], state: 'abandoned', endedAt: NOW };
+  await request.post('/__push', { data: { type: 'state', data } });
+  await card.getByRole('button', { name: 'Expand mission' }).click();
+  await expect(card.locator('.track > li[data-pos="stopped"] .track-name')).toHaveText('Review');
+  await expect(card.locator('.track > li[data-current]')).toHaveCount(1);
+});
+
+test('a job\'s facts name its tier, and a long note is cut with what was left out', async ({ page, request }) => {
+  await request.post('/__push', { data: { type: 'job', data: { id: 'cx-build', tier: 'standard', model: 'sol', notes: [`${'a'.repeat(2000)}\nsecond\nthird`] } } });
+  await page.locator('button[data-job="cx-build"]').click();
+  const panel = page.getByRole('dialog');
+  await expect(panel.locator('.facts')).toContainText('Codex · sol · standard tier');
+  await expect(panel.getByRole('region', { name: 'Notes' })).toContainText('… and 3 more lines');
+});
+
+test('New Job shows who takes a question, and says when only the lead can', async ({ page, request }) => {
+  await newJob(page);
+  await page.getByRole('radio', { name: 'Question' }).click();
+  await expect(page.getByRole('dialog').getByText('Assigned to')).toBeVisible();
+  // A changed intent is a draft, so leaving asks first.
+  page.once('dialog', (prompt) => void prompt.accept());
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  const data = fixture();
+  data.roles = { ...data.roles, delegate: { agents: ['claude'] } };
+  await request.post('/__push', { data: { type: 'state', data } });
+  await newJob(page);
+  await page.getByRole('radio', { name: 'Question' }).click();
+  await expect(page.getByText('Start this job from a Claude session. Claude does the work itself or in a subagent.')).toBeVisible();
+});

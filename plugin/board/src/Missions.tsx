@@ -1,63 +1,80 @@
 import { useState, useSyncExternalStore } from 'react';
+import type { CSSProperties } from 'react';
 import { board } from './store.ts';
-import { Check, ChevronDown, ChevronRight, CircleCheck, CircleX, Ellipsis, Gauge, Hammer, MessageCircleQuestion, MessagesSquare, ShieldCheck, SpellCheck, Wrench } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, CircleCheck, CircleX, Ellipsis, Flag, Gauge } from 'lucide-react';
 import type { BoardJob, ClaudeSession, Mission, PresetName } from './types.ts';
 import { actions, request } from './api.ts';
 import {
-  elapsed, jobLabel, jobRole, missionJobStep, missionLooksFinished, missionProgress, missionStep, missionStopPosition,
+  agentSummary, elapsed, jobLabel, jobRole, missionJobStep, missionLooksFinished, missionProgress, missionStep, missionStopPosition,
   missionStops, NAMES, roleLabel,
 } from './model.ts';
-import { ActionStatus, AgentMark, Chip, Icon, Menu, useAction, useNow } from './ui.tsx';
+import { ActionStatus, AgentMark, Chip, Icon, Menu, useAction, useFade, useNow } from './ui.tsx';
 
 const capitalized = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 export const jobStatusState = (job: BoardJob) => (job.stalled ? 'stalled' : job.state);
+/** What a job is, as the app names it in a row: its role, or Question for a question. */
+export function jobKind(job: BoardJob) {
+  return job.debate ? 'Debate' : job.ask ? 'Question' : roleLabel(board.getSnapshot(), jobRole(job));
+}
 
-export function JobRow({ job, selected, openJob }: { job: BoardJob; selected?: boolean; openJob: (id: string) => void }) {
+/** A job: the agent's mark leads, the kind and phase follow the title, then status and time. */
+export function JobRow({ job, selected, openJob, showsKind = true, index = 0 }: {
+  job: BoardJob;
+  selected?: boolean;
+  openJob: (id: string) => void;
+  /** Under a mission's stage, which already names the kind. */
+  showsKind?: boolean;
+  index?: number;
+}) {
   const now = useNow();
   const active = job.endedAt == null;
-  const role = jobRole(job);
   const detail = [
-    NAMES[job.agent],
-    // The three original roles show as the row's icon; the others are named.
-    job.ask && !job.debate ? 'Question' : ['delegate', 'review', 'polish'].includes(role) ? null : roleLabel(board.getSnapshot(), role),
+    showsKind ? jobKind(job) : job.debate ? 'Debate' : job.ask ? 'Question' : null,
     job.error?.message ?? (active ? job.phase : null),
     job.runsApp ? 'Runs the app' : null,
     job.exclusive ? 'Runs alone' : null,
   ].filter(Boolean).join(' · ');
-  const kind = job.debate ? MessagesSquare : job.ask ? MessageCircleQuestion : job.kind === 'review' ? ShieldCheck : job.kind === 'polish' ? SpellCheck : Hammer;
   return (
     <button
       className="job-row"
       data-job={job.id}
+      data-opens-panel=""
       data-state={jobStatusState(job)}
       data-waiting={job.state === 'waiting' ? '' : undefined}
       aria-current={selected || undefined}
+      aria-description={NAMES[job.agent]}
+      style={{ '--i': index } as CSSProperties}
       onClick={() => openJob(job.id)}
     >
-      <Icon icon={kind} />
+      <span className="row-mark" title={NAMES[job.agent]}><AgentMark agent={job.agent} size={16} /></span>
       <span className="job-row-text">
         <b>{job.title}</b>
-        <span data-error={job.error ? '' : undefined}>{detail}</span>
+        {detail && <span data-error={job.error ? '' : undefined} key={detail} className="swap">{detail}</span>}
       </span>
       <Chip state={jobStatusState(job)}>{jobLabel(job)}</Chip>
       <span className="job-row-time">{elapsed((job.endedAt ?? now) - job.createdAt)}</span>
-      <Icon icon={ChevronRight} />
+      <Icon icon={ChevronRight} className="row-chevron" />
     </button>
   );
 }
 
 type SessionAgent = ClaudeSession['agents'][number];
 
-function SessionAgents({ agents, now, label }: { agents: SessionAgent[]; now: number; label: string }) {
-  return <ul className="session-agents" aria-label={label}>
-    {agents.map((agent) => <li key={agent.id}>
-      <span>
-        <span title={agent.title}>{agent.title}</span>
-        <span className="caption secondary" title={agent.phase}>{agent.phase}</span>
-      </span>
-      <span className="caption secondary">{elapsed(now - agent.startedAt)}</span>
-    </li>)}
-  </ul>;
+/** Sub-agents, each as what it is and what it is doing, with how long it has run. */
+export function SessionAgents({ agents, now, label }: { agents: SessionAgent[]; now: number; label: string }) {
+  return (
+    <ul className="session-agents" aria-label={label}>
+      {agents.map((agent) => (
+        <li key={agent.id}>
+          <span>
+            <span title={agent.title}>{agent.title}</span>
+            <span className="caption secondary" title={agent.phase}>{agent.phase}</span>
+          </span>
+          <span className="caption secondary">{elapsed(now - agent.startedAt)}</span>
+        </li>
+      ))}
+    </ul>
+  );
 }
 
 /**
@@ -69,90 +86,91 @@ function WorkflowStrip({ done, running }: { done: number; running: number }) {
   const shownRunning = Math.min(running, STRIP_LIMIT);
   const shownDone = Math.min(done, STRIP_LIMIT - shownRunning);
   const hidden = done + running - shownDone - shownRunning;
-  return <span className="workflow-strip" aria-hidden="true">
-    {hidden > 0 && <small>+{hidden}</small>}
-    {Array.from({ length: shownDone }, (_, index) => <i key={`d${index}`} />)}
-    {Array.from({ length: shownRunning }, (_, index) => <i key={`r${index}`} data-running="" />)}
-  </span>;
+  return (
+    <span className="workflow-strip" aria-hidden="true">
+      {hidden > 0 && <small>+{hidden}</small>}
+      {Array.from({ length: shownDone }, (_, index) => <i key={`d${index}`} />)}
+      {Array.from({ length: shownRunning }, (_, index) => <i key={`r${index}`} data-running="" style={{ '--i': index } as CSSProperties} />)}
+    </span>
+  );
 }
 
-function SessionWorkflow({ run, agents, now }: { run: ClaudeSession['workflows'][number]; agents: SessionAgent[]; now: number }) {
+/** A workflow run, which can hold dozens of agents: the first few by stage, and the rest on request. */
+export function SessionWorkflow({ run, agents, now }: { run: ClaudeSession['workflows'][number]; agents: SessionAgent[]; now: number }) {
   const [expanded, setExpanded] = useState(false);
+  const fadeName = useFade<HTMLSpanElement>();
   const visible = expanded ? agents : agents.slice(0, 5);
   // Grouped after the cut, so the folded view keeps start order across stages; one stage needs no headings.
   const staged = new Set(agents.map((agent) => agent.stage)).size > 1;
   const groups = new Map<string, SessionAgent[]>();
-  for (const agent of visible) {
-    const stage = agent.stage ?? '';
-    const group = groups.get(stage) ?? [];
-    group.push(agent);
-    groups.set(stage, group);
-  }
-  return <section className="session-workflow" aria-label={run.name}>
-    <div className="session-workflow-head">
-      <b title={run.name}>{run.name}</b>
-      <span className="caption secondary">{elapsed(now - run.startedAt)}</span>
-    </div>
-    <p className="session-workflow-counts caption secondary">
-      <WorkflowStrip done={run.done} running={agents.length} />
-      <span>{agents.length} running · {run.done} done</span>
-    </p>
-    {agents.length === 0 && <p className="caption secondary">No agent running: between phases, or finished.</p>}
-    {[...groups].map(([stage, group]) => <div className="session-stage" key={stage}>
-      {staged && stage && <p className="caption secondary" title={stage}>{stage}</p>}
-      <SessionAgents agents={group} now={now} label={staged && stage ? `${run.name}: ${stage}` : run.name} />
-    </div>)}
-    {agents.length > 5 && <button className="small" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
-      {expanded ? 'Show fewer agents' : `Show all ${agents.length} agents`}
-    </button>}
-  </section>;
+  for (const agent of visible) groups.set(agent.stage ?? '', [...(groups.get(agent.stage ?? '') ?? []), agent]);
+  return (
+    <section className="detail-section session-workflow" aria-label={run.name}>
+      <h3>
+        <span className="fade-line" ref={fadeName} title={run.name}>{run.name}</span>
+        <span className="caption secondary digits">{elapsed((agents.length ? now : run.activeAt) - run.startedAt)}</span>
+      </h3>
+      <p className="session-workflow-counts caption secondary">
+        <WorkflowStrip done={run.done} running={agents.length} />
+        <span>{agents.length} running · {run.done} done</span>
+      </p>
+      {agents.length === 0 && <p className="callout secondary">No agent running: between phases, or finished.</p>}
+      {[...groups].map(([stage, group]) => (
+        <div className="session-stage" key={stage}>
+          {staged && stage && <p className="caption secondary" title={stage}>{stage}</p>}
+          <SessionAgents agents={group} now={now} label={staged && stage ? `${run.name}: ${stage}` : run.name} />
+        </div>
+      ))}
+      {agents.length > 5 && (
+        <button className="reveal-toggle" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
+          {expanded ? 'Show fewer agents' : `Show all ${agents.length} agents`}
+        </button>
+      )}
+    </section>
+  );
 }
 
-export function SessionView({ session }: { session: ClaudeSession }) {
+/** A Claude session as a row like a job's, opening its own detail panel. */
+export function SessionRow({ session, selected, openSession }: { session: ClaudeSession; selected?: boolean; openSession: (id: string) => void }) {
   const now = useNow();
-  const plain = session.agents.filter((agent) => !agent.workflow);
-  const running = session.agents.length - plain.length;
-  const active = session.workflows.filter((run) => session.agents.some((agent) => agent.workflow === run.id));
-  // Matches the Mac app's row: "2 sub-agents · review 12 running".
-  const count = [
-    plain.length > 0 ? `${plain.length} sub-agent${plain.length === 1 ? '' : 's'}` : '',
-    active.length > 0 ? `${active.length === 1 ? active[0].name : `${active.length} workflows`} ${running} running` : '',
-  ].filter(Boolean).join(' · ');
+  // The mark names the agent, so the detail line says only what the session is doing.
+  const detail = [session.waitingFor ?? (session.state === 'idle' ? null : session.phase), session.inTool ? 'Running a tool' : null, agentSummary(session)]
+    .filter(Boolean).join(' · ');
   return (
-    <details className="session">
-      <summary>
-        <AgentMark agent="claude" size={14} />
-        <span>{session.title}</span>
-        {count && <small className="session-count secondary" title={count}>{count}</small>}
-        <Chip state={session.stalled ? 'stalled' : session.state}>
-          {session.stalled ? 'May be stuck' : capitalized(session.state)}
-        </Chip>
-      </summary>
-      <div className="session-body selectable">
-        <p>{session.waitingFor ?? session.phase}</p>
-        <p className="caption secondary">{session.cwd}</p>
-        {session.state === 'waiting' && <p className="secondary">Answer in Claude.</p>}
-        {session.inTool && (
-          <p className="caption">
-            <Icon icon={Wrench} size={11} /> A tool is running
-          </p>
-        )}
-        {plain.length > 0 && <SessionAgents agents={plain} now={now} label="Sub-agents" />}
-        {session.workflows.map((run) => <SessionWorkflow key={run.id} run={run}
-          agents={session.agents.filter((agent) => agent.workflow === run.id)} now={now} />)}
-      </div>
-    </details>
+    <button
+      className="job-row"
+      data-session={session.id}
+      data-opens-panel=""
+      data-state={session.stalled ? 'stalled' : session.state}
+      data-waiting={session.state === 'waiting' ? '' : undefined}
+      aria-current={selected || undefined}
+      aria-description="Claude"
+      onClick={() => openSession(session.id)}
+    >
+      <span className="row-mark"><AgentMark agent="claude" size={16} /></span>
+      <span className="job-row-text">
+        <b>{session.title}</b>
+        {detail && <span key={detail} className="swap">{detail}</span>}
+      </span>
+      <Chip state={session.stalled ? 'stalled' : session.state}>{session.stalled ? 'May be stuck' : capitalized(session.state)}</Chip>
+      {/* An idle session stops its clock at its last activity. */}
+      <span className="job-row-time">{elapsed((session.state === 'idle' ? session.activeAt : now) - session.startedAt)}</span>
+      <Icon icon={ChevronRight} className="row-chevron" />
+    </button>
   );
 }
 
 export function MissionTrack({ mission }: { mission: Mission }) {
   const stops = missionStops(mission);
   const at = missionStep(mission);
+  const active = mission.state === 'active';
   return (
     <ol
       className="track"
       // One element for assistive technology, as the app's track is.
       role="img"
+      data-abandoned={mission.state === 'abandoned' || undefined}
+      style={{ '--steps': stops.length } as CSSProperties}
       aria-label={
         mission.state === 'done'
           ? `Done, all ${stops.length} steps passed`
@@ -160,12 +178,19 @@ export function MissionTrack({ mission }: { mission: Mission }) {
       }
     >
       {stops.map(({ name }, index) => {
-        const pos = missionStopPosition(mission, index);
+        const position = missionStopPosition(mission, index);
+        // An ended mission's step it stopped on is filled, not left to do.
+        const pos = !active && mission.state !== 'done' && index === at ? 'stopped' : position;
         return (
-          <li key={index} data-pos={pos} data-current={index === at ? '' : undefined} aria-hidden="true">
+          <li
+            key={index}
+            data-pos={pos}
+            // A done mission's last step is not bolded, as it is past like the others.
+            data-current={index === at && (active || pos !== 'past') ? '' : undefined}
+            aria-hidden="true"
+          >
             <span className="track-node">
               <b>{pos === 'past' ? <Icon icon={Check} /> : index + 1}</b>
-              {index < stops.length - 1 && <i />}
             </span>
             <span className="track-name">{name}</span>
           </li>
@@ -175,58 +200,108 @@ export function MissionTrack({ mission }: { mission: Mission }) {
   );
 }
 
+/** Open or closed per mission, kept across pages and layout changes, as the app keeps it. */
+const expandedMissions = new Map<string, boolean>();
+const PRESETS: [PresetName | null, string][] = [[null, 'Global'], ['economy', 'Economy'], ['balanced', 'Balanced'], ['best', 'Best']];
+
 export function MissionPanel({
   mission,
   jobs,
   allJobs,
   lead,
   projectName,
-  selectedJob,
+  selected,
   openJob,
+  openSession,
+  index = 0,
 }: {
   mission: Mission;
   jobs: BoardJob[];
   allJobs: BoardJob[];
   lead?: ClaudeSession;
   projectName?: string;
-  selectedJob: string;
+  selected: string;
   openJob: (id: string) => void;
+  openSession: (id: string) => void;
+  index?: number;
 }) {
   const now = useNow();
-  const [expanded, setExpanded] = useState(mission.state === 'active');
+  const [expanded, setExpandedState] = useState(() => expandedMissions.get(mission.id) ?? mission.state === 'active');
+  const setExpanded = (value: boolean) => {
+    expandedMissions.set(mission.id, value);
+    setExpandedState(value);
+  };
   // Keyed by state as in the app: once a mission is abandoned, Mark done takes a fresh lock.
   const key = `mission:${mission.id}:${mission.state}`;
   const action = useAction(key);
+  const presetKey = `mission-preset:${mission.id}`;
+  const presetAction = useAction(presetKey);
   const stops = missionStops(mission);
   const at = missionStep(mission);
   const tokens = jobs.reduce((sum, job) => sum + (job.tokens ?? 0), 0);
+  const active = mission.state === 'active';
   const meta = [
     elapsed((mission.endedAt ?? now) - mission.createdAt),
     tokens > 0 ? `${tokens.toLocaleString()} tokens` : null,
     projectName,
     `${jobs.length} ${jobs.length === 1 ? 'job' : 'jobs'}`,
-    mission.preset ? `${capitalized(mission.preset)} preset` : null,
+    // An active mission shows its preset in its menu instead.
+    mission.preset && !active ? `${capitalized(mission.preset)} preset` : null,
   ].filter(Boolean).join(' · ');
   const progress = missionProgress(mission, jobs);
   const live = useSyncExternalStore(board.subscribe, () => board.getSnapshot().connection === 'live');
   const locked = action.pending || action.accepted || !live;
-  // Done and Stop tracking change the state, and with it the key; a preset leaves both, so its action must not lock the menu.
-  const update = (body: object, done: string, once = true) => void actions.run(key, () => request(`/api/missions/${mission.id}`, body), { done, once });
+  const update = (body: object, done: string) => void actions.run(key, () => request(`/api/missions/${mission.id}`, body), { done });
+  const markDone = () => update({ done: true, ...(mission.state === 'abandoned' ? { reopen: true } : {}), outcome: 'Marked done on the board.' }, 'Marked done');
+  const stopTracking = () => update({ abandoned: true, outcome: 'Dismissed on the board.' }, 'Dismissed');
   // A daemon without the role registry ignores a mission's preset.
   const presets = Boolean(board.getSnapshot().roleInfo);
+  const finished = missionLooksFinished(mission, allJobs, now, lead);
+  const fadeTitle = useFade<HTMLHeadingElement>();
+  const fadeMeta = useFade<HTMLParagraphElement>();
+  const presetName = PRESETS.find(([preset]) => preset === (mission.preset ?? null))?.[1] ?? 'Global';
   return (
-    <section className="card mission" data-key={mission.id} data-state={mission.state}>
-      <div className="mission-head">
-        <div>
-          <h2 className="title selectable">{mission.title}</h2>
-          <p className="mission-meta" title={mission.root}>{meta}</p>
+    <section
+      className="card mission"
+      data-key={mission.id}
+      data-state={mission.state}
+      data-expanded={expanded || undefined}
+      style={{ '--i': index } as CSSProperties}
+      // A closed card opens from a click anywhere on it, as the app's does.
+      onClick={(event) => {
+        if (!expanded && !(event.target as Element).closest('button, [role="menu"]')) setExpanded(true);
+      }}
+    >
+      <div
+        className="mission-head"
+        onClick={(event) => {
+          if (expanded && !(event.target as Element).closest('button, [role="menu"]')) setExpanded(false);
+        }}
+      >
+        <span className="mission-icon" aria-hidden="true"><Icon icon={Flag} size={14} /></span>
+        <div className="mission-heading">
+          <h2 className="title selectable fade-line" ref={fadeTitle} title={mission.title}>{mission.title}</h2>
+          <p className="mission-meta fade-line" ref={fadeMeta} title={mission.root}>{meta}</p>
         </div>
-        <span className="caption secondary digits mission-progress" title="Mission progress">
+        <span className="mission-progress digits" title="Mission progress" style={{ '--progress': progress } as CSSProperties}>
           {Math.round(progress * 100)}%
         </span>
-        <Chip state={mission.state === 'active' ? 'running' : mission.state}>{capitalized(mission.state)}</Chip>
-        {missionLooksFinished(mission, allJobs, now, lead) && <span className="caption secondary">Looks finished</span>}
+        <Chip state={active ? 'running' : mission.state}>{capitalized(mission.state)}</Chip>
         <span className="mission-controls">
+          {(active || mission.state === 'abandoned') && (
+            <Menu label="Mission options" icon={Ellipsis}>
+              <button role="menuitem" disabled={locked} onClick={markDone}>
+                <Icon icon={CircleCheck} />
+                Mark done
+              </button>
+              {active && (
+                <button role="menuitem" disabled={locked} title="Stops tracking without marking done. Its jobs keep running." onClick={stopTracking}>
+                  <Icon icon={CircleX} />
+                  Stop tracking
+                </button>
+              )}
+            </Menu>
+          )}
           <button
             className="icon"
             aria-expanded={expanded}
@@ -236,79 +311,67 @@ export function MissionPanel({
           >
             <Icon icon={ChevronDown} className="disclosure" />
           </button>
-          {(mission.state === 'active' || mission.state === 'abandoned') && (
-            <Menu label="Mission options" icon={Ellipsis}>
-              <button
-                role="menuitem"
-                disabled={locked}
-                // The daemon reopens an abandoned mission only when asked to explicitly.
-                onClick={() => update({ done: true, ...(mission.state === 'abandoned' ? { reopen: true } : {}), outcome: 'Marked done on the board.' }, 'Marked done')}
-              >
-                <Icon icon={CircleCheck} />
-                Mark done
-              </button>
-              {mission.state === 'active' && (
-                <button
-                  role="menuitem"
-                  disabled={locked}
-                  title="Stops tracking without marking done. Its jobs keep running."
-                  onClick={() => update({ abandoned: true, outcome: 'Dismissed on the board.' }, 'Dismissed')}
-                >
-                  <Icon icon={CircleX} />
-                  Stop tracking
-                </button>
-              )}
-              {mission.state === 'active' && presets && (
-                <>
-                  <hr />
-                  {([['economy', 'Economy'], ['balanced', 'Balanced'], ['best', 'Best'], [null, 'Global preset']] as [PresetName | null, string][]).map(([preset, name]) => (
-                    <button
-                      key={name}
-                      role="menuitemradio"
-                      aria-checked={(mission.preset ?? null) === preset}
-                      disabled={locked}
-                      title="Applies to the mission's next jobs. Jobs already started keep theirs."
-                      onClick={() => update({ preset }, preset ? `${name} preset for new jobs` : 'Global preset for new jobs', false)}
-                    >
-                      <Icon icon={(mission.preset ?? null) === preset ? Check : Gauge} />
-                      {preset ? `${name} preset` : name}
-                    </button>
-                  ))}
-                </>
-              )}
-            </Menu>
-          )}
         </span>
       </div>
       {expanded && (
-        <>
-          {mission.notes?.map((note, index) => (
-            <p className="mission-note selectable" key={`${note.at}:${index}`}>{note.text}</p>
+        <div className="mission-body reveal">
+          {mission.notes?.map((note, noteIndex) => (
+            <p className="mission-note selectable" key={`${note.at}:${noteIndex}`}>{note.text}</p>
           ))}
           <MissionTrack mission={mission} />
           <div className="stage-groups">
-            {stops.map(({ name }, index) => {
-              const mine = jobs.filter((job) => missionJobStep(mission, job) === index);
-              const stageLead = mission.state === 'active' && index === at ? lead : undefined;
+            {stops.map(({ name }, stopIndex) => {
+              const mine = jobs.filter((job) => missionJobStep(mission, job) === stopIndex);
+              const stageLead = active && stopIndex === at ? lead : undefined;
               if (!mine.length && !stageLead) return null;
               return (
-                <div className="rows" key={index}>
+                <div className="rows" key={stopIndex}>
                   <h3 className="stage-name">{name}</h3>
-                  {stageLead && (
-                    <div className="session-row">
-                      <SessionView session={stageLead} />
-                    </div>
-                  )}
-                  {mine.map((job) => (
-                    <JobRow key={job.id} job={job} selected={selectedJob === job.id} openJob={openJob} />
+                  {stageLead && <SessionRow session={stageLead} selected={selected === `session:${stageLead.id}`} openSession={openSession} />}
+                  {mine.map((job, rowIndex) => (
+                    <JobRow key={job.id} job={job} selected={selected === job.id} openJob={openJob} showsKind={false} index={rowIndex} />
                   ))}
                 </div>
               );
             })}
           </div>
-          {mission.outcome && <p className="mission-outcome selectable">{mission.outcome}</p>}
-        </>
+          {(mission.outcome || finished || mission.state === 'abandoned' || (active && presets)) && (
+            <div className="mission-foot">
+              {mission.outcome ? <p className="mission-outcome selectable">{mission.outcome}</p> : <span />}
+              <div className="mission-foot-actions">
+                {finished && <span className="caption secondary">Looks finished</span>}
+                {finished && active && (
+                  <button className="pill-warning small" disabled={locked} onClick={stopTracking}>Stop tracking</button>
+                )}
+                {(finished || mission.state === 'abandoned') && (
+                  <button className="prominent small" disabled={locked} onClick={markDone}>Mark done</button>
+                )}
+                {active && presets && (
+                  <Menu label="Mission preset" icon={Gauge} text={`${presetName} preset`}>
+                    {PRESETS.map(([preset, name]) => (
+                      <button
+                        key={name}
+                        role="menuitemradio"
+                        aria-checked={(mission.preset ?? null) === preset}
+                        disabled={presetAction.pending || !live}
+                        title="Applies to the mission's next jobs. Jobs already started keep theirs."
+                        onClick={() => void actions.run(presetKey, () => request(`/api/missions/${mission.id}`, { preset }), {
+                          done: preset ? `${name} preset for new jobs` : 'Global preset for new jobs', once: false,
+                        })}
+                      >
+                        <Icon icon={(mission.preset ?? null) === preset ? Check : Gauge} />
+                        {preset ? `${name} preset` : 'Global preset'}
+                      </button>
+                    ))}
+                  </Menu>
+                )}
+              </div>
+            </div>
+          )}
+          <ActionStatus actionKey={presetKey} />
+        </div>
       )}
+      {!expanded && finished && <span className="caption secondary mission-hint">Looks finished</span>}
       <ActionStatus actionKey={key} />
     </section>
   );

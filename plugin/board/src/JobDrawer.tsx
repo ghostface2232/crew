@@ -1,15 +1,26 @@
-import { useEffect, useState } from 'react';
-import { Check, CircleMinus, CircleStop, Clock, FileText, GitBranch, History, Images, MessageSquare, NotebookText, RotateCcw, ShieldAlert, ShieldCheck, TriangleAlert, Undo2, X, Zap } from 'lucide-react';
+import { memo, useEffect, useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
+import {
+  BadgeCheck, BadgeHelp, Check, CircleCheck, CircleDashed, CircleDot, CircleMinus, CircleStop, CircleX, Clock, FileText, Flag, FlagTriangleRight, GitBranch, GitFork,
+  History, Images, MessageSquare, NotebookText, RotateCcw, ShieldAlert, ShieldCheck, TextAlignStart, TriangleAlert, Undo2, Users, X, Zap,
+} from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { ChevronDown } from 'lucide-react';
 import type { BoardJob, CrewEvent, Snapshot } from './types.ts';
 import { actions, drafts, request } from './api.ts';
 import { board, mergeEvents } from './store.ts';
 import { elapsed, jobLabel, jobRole, NAMES, projectOf, roleLabel } from './model.ts';
-import { ActionStatus, CloseButton, CopyButton, Dialog, Icon, Chip, useAction, useDraft, useNow } from './ui.tsx';
+import { ActionStatus, CloseButton, CopyButton, CopyMenu, Dialog, Icon, Chip, useAction, useDraft, useNow } from './ui.tsx';
+import { ReportText as RenderReport } from './Report.ts';
+import { debatePoints, stanceCounts } from './debate.ts';
+import type { Stance } from './debate.ts';
 import { Answer } from './NeedsYou.tsx';
 import { EventList } from './Overview.tsx';
-import { jobStatusState } from './Missions.tsx';
+import { jobStatusState, SessionAgents, SessionWorkflow } from './Missions.tsx';
+
+/** Reports are parsed once per text, not on every clock tick the panel renders for. */
+const ReportText = memo(RenderReport);
 
 function Section({ title, icon, children }: { title: string; icon: LucideIcon; children: ReactNode }) {
   return (
@@ -135,15 +146,14 @@ function ReceiptView({ receipt }: { receipt: NonNullable<BoardJob['receipts']>[n
         {reviewed?.diff && ` · diff ${reviewed.diff}`}
       </p>
       {stale && (
-        <p className="callout secondary selectable">
-          <Icon icon={History} size={11} /> No longer current: {stale}
+        <p className="callout stale selectable">
+          <Icon icon={History} size={12} /> No longer current: {stale}
         </p>
       )}
       {check && !check.skipped && !passed && check.output && (
-        <details className="disclosure-group">
-          <summary>Output (end)</summary>
-          <pre className="selectable">{check.output.split('\n').slice(-15).join('\n')}</pre>
-        </details>
+        <Reveal show="Show the end of the output" hide="Hide the output">
+          <pre className="selectable output">{check.output.split('\n').slice(-15).join('\n')}</pre>
+        </Reveal>
       )}
     </div>
   );
@@ -178,8 +188,11 @@ function VerificationSection({ job }: { job: BoardJob }) {
       )}
       {approvals.map((approval, index) => (
         <div className="approval selectable" key={index}>
-          <p className="callout">Approval relayed for turn {approval.turn} — {approvalBasis(approval)}.</p>
-          <p className="caption secondary">“{approval.quote}”</p>
+          <Icon icon={approval.recorded ? BadgeCheck : BadgeHelp} />
+          <div>
+            <p className="callout">Approval relayed for turn {approval.turn} — {approvalBasis(approval)}.</p>
+            <p className="callout secondary">“{approval.quote}”</p>
+          </div>
         </div>
       ))}
     </Section>
@@ -192,22 +205,140 @@ const hasConversation = (job: BoardJob) => job.debate ? Boolean(job.exchange?.le
 /** A debate that has had its rounds and stopped: the daemon refuses another reply, whatever state it ended in. */
 const debateConcluded = (job: BoardJob) => Boolean(job.debate && job.state !== 'running' && job.state !== 'waiting' && job.turns >= job.debate.rounds);
 
+const STANCES: Record<Stance, [string, typeof CircleCheck]> = { agree: ['Agree', CircleCheck], disagree: ['Disagree', CircleX], alternative: ['Alternative', GitFork] };
+/** A point's stance as a colored mark, followed in a round's heading by its count. */
+function StanceMark({ stance, count }: { stance: Stance; count?: number }) {
+  const [title, icon] = STANCES[stance];
+  return (
+    <span className="stance" data-stance={stance} title={title} role="img" aria-label={count === undefined ? title : `${count} ${title.toLowerCase()}`}>
+      <Icon icon={icon} size={13} />
+      {count !== undefined && <b className="digits">{count}</b>}
+    </span>
+  );
+}
+function Stances({ text }: { text: string }) {
+  const counts = stanceCounts(debatePoints(text));
+  return <>{(Object.keys(counts) as Stance[]).map((stance) => counts[stance] > 0 && <StanceMark key={stance} stance={stance} count={counts[stance]} />)}</>;
+}
+/** A show/hide toggle under folded content, as the app's RevealToggle is. */
+function Reveal({ show, hide, open, children }: { show: string; hide: string; open?: boolean; children: ReactNode }) {
+  const [shown, setShown] = useState(open ?? false);
+  return (
+    <>
+      {shown && <div className="reveal">{children}</div>}
+      <button className="reveal-toggle" aria-expanded={shown} onClick={() => setShown(!shown)}>{shown ? hide : show}</button>
+    </>
+  );
+}
+/** Text cut to a few lines with its end fading, opened in full by its toggle. */
+function Clamp({ text, lines, show, hide }: { text: string; lines: number; show: string; hide: string }) {
+  const [shown, setShown] = useState(false);
+  const long = text.split('\n').length > lines || text.length > lines * 90;
+  return (
+    <>
+      <div className="clamp" data-clamped={long && !shown || undefined} style={{ '--lines': lines } as CSSProperties}>
+        <ReportText text={text} />
+      </div>
+      {long && <button className="reveal-toggle" aria-expanded={shown} onClick={() => setShown(!shown)}>{shown ? hide : show}</button>}
+    </>
+  );
+}
+
+function DebateRound({ job, turn, label, final, last }: { job: BoardJob; turn: number; label: string; final: boolean; last: boolean }) {
+  const entries = job.exchange ?? [];
+  const lead = entries.findLast((entry) => entry.turn === turn && entry.from === 'lead');
+  const reply = entries.findLast((entry) => entry.turn === turn && entry.from === 'worker');
+  // Earlier rounds start folded to their heading and stances; the latest starts open.
+  const [open, setOpen] = useState(last);
+  const points = reply ? debatePoints(reply.text) : [];
+  const working = job.endedAt == null && turn === job.turns;
+  const name = NAMES[job.agent];
+  return (
+    <li className="debate-round" data-open={open || undefined}>
+      <button className="debate-round-head" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <b>{final ? `${label} ${turn} · final` : `${label} ${turn}`}</b>
+        {!open && reply && <Stances text={reply.text} />}
+        <Icon icon={ChevronDown} className="disclosure" />
+      </button>
+      {open && (
+        <div className="debate-round-body reveal">
+          {lead && (
+            <div className="exchange-entry" data-from="lead">
+              <div className="caption voice">Lead · {label.toLowerCase()} {turn}</div>
+              <Clamp text={lead.text} lines={4} show="Show the lead's message" hide="Hide the lead's message" />
+            </div>
+          )}
+          {reply ? (
+            <div className="exchange-entry" data-from="worker">
+              <div className="caption voice">{name} · {label.toLowerCase()} {turn} <Stances text={reply.text} /></div>
+              {points.length ? (
+                <>
+                  <ol className="points">
+                    {points.map((point, index) => (
+                      <li key={index}><StanceMark stance={point.stance} /><span className="selectable">{point.title}</span></li>
+                    ))}
+                  </ol>
+                  <Reveal show="Show the full reply" hide="Hide the full reply"><ReportText text={reply.text} /></Reveal>
+                </>
+              ) : (
+                <Clamp text={reply.text} lines={8} show="Show the reply" hide="Hide the reply" />
+              )}
+            </div>
+          ) : working && <p className="caption secondary answering"><i className="dots" aria-hidden="true" />{name} is answering…</p>}
+        </div>
+      )}
+    </li>
+  );
+}
+
+/** A debate's progress over its rounds: done, in progress, then the conclusion. */
+function DebateStepper({ job }: { job: BoardJob }) {
+  const rounds = job.debate!.rounds;
+  const replied = Math.max(0, ...(job.exchange ?? []).filter((entry) => entry.from === 'worker').map((entry) => entry.turn));
+  const concluded = debateConcluded(job);
+  return (
+    <ol className="stepper" role="img" aria-label={concluded ? `Debate concluded after ${rounds} rounds` : `Debate, round ${Math.min(job.turns, rounds)} of ${rounds}`}>
+      {Array.from({ length: rounds }, (_, index) => index + 1).map((round) => (
+        <li key={round} data-done={round <= replied || undefined}>
+          <Icon icon={round <= replied ? CircleCheck : round === job.turns && job.endedAt == null ? CircleDashed : CircleDot} size={13} />
+          <span>Round {round}</span>
+        </li>
+      ))}
+      <li data-done={concluded || undefined}>
+        <Icon icon={concluded ? FlagTriangleRight : Flag} size={13} />
+        <span>Conclusion</span>
+      </li>
+    </ol>
+  );
+}
+
 function DebateSection({ job }: { job: BoardJob }) {
   const debate = job.debate;
   const settled = debateConcluded(job);
   const title = debate ? `Debate · round ${Math.min(job.turns, debate.rounds)} of ${debate.rounds}${settled ? ' · concluded' : ''}` : 'Conversation';
+  const turns = [...new Set((job.exchange ?? []).map((entry) => entry.turn))].sort((a, b) => a - b);
+  const label = debate ? 'Round' : 'Turn';
   return (
-    <Section title={title} icon={MessageSquare}>
+    <section className="detail-section" aria-label={title}>
+      <h3>
+        <Icon icon={MessageSquare} />
+        {debate ? 'Debate' : 'Conversation'}
+        {debate && <DebateStepper job={job} />}
+      </h3>
+      {/* A job begun before conversations were kept has its first turns missing; say so rather than start partway. */}
+      {turns[0] > 1 && <p className="caption secondary">{turns[0] === 2 ? `${label} 1 was not recorded.` : `${label}s 1–${turns[0] - 1} were not recorded.`}</p>}
       <ol className="exchange">
-        {(job.exchange ?? []).map((entry, index) => (
-          <li className="exchange-entry" data-from={entry.from} key={index}>
-            <div className="caption">{entry.from === 'lead' ? 'Lead' : NAMES[job.agent]} · {debate ? 'round' : 'turn'} {entry.turn}</div>
-            <pre className="report selectable">{entry.text}</pre>
-          </li>
+        {turns.map((turn) => (
+          <DebateRound key={turn} job={job} turn={turn} label={label} final={turn === debate?.rounds} last={turn === turns.at(-1)} />
         ))}
       </ol>
-    </Section>
+      {settled && <ConcludedNote />}
+    </section>
   );
+}
+
+function ConcludedNote() {
+  return <p className="callout secondary concluded"><Icon icon={CircleCheck} size={13} />This debate has used all its rounds. Decide from it, or start a new debate.</p>;
 }
 
 function FollowUp({ job }: { job: BoardJob }) {
@@ -216,7 +347,7 @@ function FollowUp({ job }: { job: BoardJob }) {
   const state = useAction(key);
   const name = NAMES[job.agent];
   return (
-    <Section title={job.endedAt == null ? 'Steer' : 'Follow up'} icon={MessageSquare}>
+    <Section title={job.debate ? 'Reply' : job.endedAt == null ? 'Steer' : 'Follow up'} icon={MessageSquare}>
       <textarea aria-label={`Message to ${name}`} value={draft} onChange={(event) => setDraft(event.target.value)} />
       <div>
         <button
@@ -273,7 +404,7 @@ export function JobDrawer({ id, state, close }: { id: string; state: Snapshot; c
   const facts: [string, string][] = job
     ? [
         // The model the session reported, else the configured one.
-        ['Agent', [NAMES[job.agent], job.resolvedModel ?? job.model, (job.resolvedEffort ?? job.effort) && `${job.resolvedEffort ?? job.effort} effort`].filter(Boolean).join(' · ')],
+        ['Agent', [NAMES[job.agent], job.resolvedModel ?? job.model, job.tier && `${job.tier} tier`, (job.resolvedEffort ?? job.effort) && `${job.resolvedEffort ?? job.effort} effort`].filter(Boolean).join(' · ')],
         ['Role', job.ask && !job.debate ? 'Question' : roleLabel(state, jobRole(job))],
         ...(job.preset ? [['Preset', job.preset[0].toUpperCase() + job.preset.slice(1)] as [string, string]] : []),
         ['Project', projectOf(job)],
@@ -290,137 +421,345 @@ export function JobDrawer({ id, state, close }: { id: string; state: Snapshot; c
   const result = job?.result;
   const files = result ? [...new Set([...result.files, ...result.outOfScope])].sort() : [];
   return (
-    <Dialog variant="detail-panel" label={job?.title ?? 'Job details'} onClose={close}>
-      <div className="detail-head">
-        {job ? <Chip state={jobStatusState(job)}>{jobLabel(job)}</Chip> : <span />}
-        <CloseButton label="Close details" onClose={close} />
-      </div>
-      <div className="detail-scroll">
-        {error && (
-          <div role="alert" className="detail-title">
-            <p className="error selectable">{error}</p>
-            <div>
-              <button onClick={() => setRetry((value) => value + 1)}>
-                <Icon icon={RotateCcw} />
-                Retry
-              </button>
-            </div>
+    <DetailPanel
+      label={job?.title ?? 'Job details'}
+      close={close}
+      chip={job && <Chip state={jobStatusState(job)}>{jobLabel(job)}</Chip>}
+      title={job?.title}
+      subtitle={job?.endedAt == null ? job?.phase : undefined}
+    >
+      {error && (
+        <div role="alert" className="detail-title">
+          <p className="error selectable">{error}</p>
+          <div>
+            <button onClick={() => setRetry((value) => value + 1)}>
+              <Icon icon={RotateCcw} />
+              Retry
+            </button>
           </div>
-        )}
-        {!job && !error && (
-          <p className="secondary" role="status">
-            Loading details…
-          </p>
-        )}
-        {job && (
-          <>
-            <div className="detail-title">
-              <h2 className="title selectable" id="drawer-title">{job.title}</h2>
-              {job.endedAt == null && <p className="secondary selectable">{job.phase}</p>}
-              {job.error && <p className="error selectable">{job.error.message}</p>}
+        </div>
+      )}
+      {!job && !error && (
+        <p className="secondary" role="status">
+          Loading details…
+        </p>
+      )}
+      {job && (
+        <>
+          {job.error && <p className="error selectable">{job.error.message}</p>}
+          {job.state === 'waiting' && (
+            <div className="card answer-card">
+              <Answer job={job} />
             </div>
-            {job.state === 'waiting' && (
-              <div className="card answer-card">
-                <Answer job={job} />
-              </div>
-            )}
-            <dl className="facts selectable">
-              {facts.map(([label, value]) => (
-                <div key={label} style={{ display: 'contents' }}>
-                  <dt>{label}</dt>
-                  <dd>{value}</dd>
+          )}
+          <Facts facts={facts} />
+          {result && (
+            <Section title="Changes" icon={GitBranch}>
+              <pre className="selectable">{result.stat || 'No files changed'}</pre>
+              {result.commit && <p className="caption selectable">Commit {result.commit}</p>}
+              {files.map((file) => (
+                <div className="file" key={file}>
+                  <code className="selectable">{file}</code>
+                  {result.outOfScope.includes(file) && (
+                    <span className="caption error">
+                      <Icon icon={TriangleAlert} size={11} />{' '}
+                      {result.files.includes(file) ? 'Outside the allowed targets' : 'Outside the workspace'}
+                    </span>
+                  )}
                 </div>
               ))}
-            </dl>
-            {result && (
-              <Section title="Changes" icon={GitBranch}>
-                <pre className="selectable">{result.stat || 'No files changed'}</pre>
-                {result.commit && <p className="caption selectable">Commit {result.commit}</p>}
-                {files.map((file) => (
-                  <div className="file" key={file}>
-                    <code className="selectable">{file}</code>
-                    {result.outOfScope.includes(file) && (
-                      <span className="caption error">
-                        <Icon icon={TriangleAlert} size={11} />{' '}
-                        {result.files.includes(file) ? 'Outside the allowed targets' : 'Outside the workspace'}
-                      </span>
-                    )}
-                  </div>
-                ))}
-                {job.worktree && result.files.length > 0 && (
-                  <div>
-                    <CopyButton text={`git diff ${job.worktree.base.slice(0, 8)}..${job.worktree.branch}`}>Copy diff command</CopyButton>
-                  </div>
-                )}
-              </Section>
+            </Section>
+          )}
+          <VerificationSection job={job} />
+          <EvidenceSection job={job} />
+          {!!job.rounds?.length && (
+            <Section title="Rounds" icon={RotateCcw}>
+              {job.rounds.toSorted((a, b) => a.turn - b.turn).map((round) => (
+                <RoundRow key={round.turn} job={job} round={round} />
+              ))}
+            </Section>
+          )}
+          {refusals.length > 0 && (
+            <Section title="Automatic review" icon={ShieldAlert}>
+              {refusals.map((refusal, index) => (
+                <p className="callout error selectable" key={index}>
+                  {refusal.action} — {refusal.reason}
+                </p>
+              ))}
+              {job.retrying && <p className="callout secondary">Sent back once with your approval.</p>}
+            </Section>
+          )}
+          {job.notes.length > 0 && (
+            <Section title="Notes" icon={NotebookText}>
+              {job.notes.map((note, index) => (
+                <p className="callout selectable" key={index}>{trimNote(note)}</p>
+              ))}
+            </Section>
+          )}
+          {hasConversation(job) ? <DebateSection job={job} /> : (
+            <>
+              {job.report && (
+                <Section title="Report" icon={FileText}>
+                  <ReportText text={job.report} />
+                </Section>
+              )}
+              {/* A debate begun before conversations were kept still says why there is no Reply. */}
+              {debateConcluded(job) && <ConcludedNote />}
+            </>
+          )}
+          {!debateConcluded(job) && job.sessionId && job.state !== 'waiting' && <FollowUp key={job.id} job={job} />}
+          {job.prompt && <OriginalTask text={job.prompt} />}
+          {events.length > 0 && (
+            <Section title="Activity" icon={Zap}>
+              <EventList events={events} />
+            </Section>
+          )}
+          <Footer id={job.id} status={<ActionStatus actionKey={cancelKey} />}>
+            {job.sessionId && state.agents[job.agent] && (
+              <CopyButton text={`${state.agents[job.agent].resume} ${job.sessionId}`}>Resume command</CopyButton>
             )}
-            <VerificationSection job={job} />
-            <EvidenceSection job={job} />
-            {!!job.rounds?.length && (
-              <Section title="Rounds" icon={RotateCcw}>
-                {job.rounds.toSorted((a, b) => a.turn - b.turn).map((round) => (
-                  <RoundRow key={round.turn} job={job} round={round} />
-                ))}
-              </Section>
+            {job.worktree && result && result.files.length > 0 && (
+              <CopyButton text={`git diff ${job.worktree.base.slice(0, 8)}..${job.worktree.branch}`}>Diff command</CopyButton>
             )}
-            {refusals.length > 0 && (
-              <Section title="Automatic review" icon={ShieldAlert}>
-                {refusals.map((refusal, index) => (
-                  <p className="callout error selectable" key={index}>
-                    {refusal.action} — {refusal.reason}
-                  </p>
-                ))}
-                {job.retrying && <p className="callout secondary">Sent back once with your approval.</p>}
-              </Section>
+            {job.endedAt == null && (
+              <button
+                className="destructive"
+                disabled={!live || cancelling.pending || cancelling.accepted}
+                onClick={() => void actions.run(cancelKey, () => request(`/api/jobs/${job.id}/cancel`, {}), { done: 'Cancelled' })}
+              >
+                <Icon icon={CircleStop} />
+                Cancel Job
+              </button>
             )}
-            {job.notes.length > 0 && (
-              <Section title="Notes" icon={NotebookText}>
-                {job.notes.map((note, index) => (
-                  <p className="callout selectable" key={index}>{note}</p>
-                ))}
-              </Section>
-            )}
-            {hasConversation(job) ? <DebateSection job={job} /> : job.report && (
-              <Section title="Report" icon={FileText}>
-                <pre className="report selectable">{job.report}</pre>
-              </Section>
-            )}
-            {debateConcluded(job) ? (
-              <p className="callout secondary">This debate has used all its rounds. Decide from it, or start a new debate.</p>
-            ) : job.sessionId && job.state !== 'waiting' && <FollowUp key={job.id} job={job} />}
-            {job.prompt && (
-              <details className="disclosure-group">
-                <summary>Original task</summary>
-                <pre className="callout selectable">{job.prompt}</pre>
-              </details>
-            )}
-            {events.length > 0 && (
-              <Section title="Activity" icon={Zap}>
-                <EventList events={events} />
-              </Section>
-            )}
-            <footer className="detail-foot">
-              <div>
-                {job.sessionId && state.agents[job.agent] && (
-                  <CopyButton text={`${state.agents[job.agent].resume} ${job.sessionId}`}>Copy resume command</CopyButton>
-                )}
-                {job.endedAt == null && (
-                  <button
-                    className="destructive"
-                    disabled={!live || cancelling.pending || cancelling.accepted}
-                    onClick={() => void actions.run(cancelKey, () => request(`/api/jobs/${job.id}/cancel`, {}), { done: 'Cancelled' })}
-                  >
-                    <Icon icon={CircleStop} />
-                    Cancel Job
-                  </button>
-                )}
-              </div>
-              <ActionStatus actionKey={cancelKey} />
-              <code className="selectable">{job.id}</code>
-            </footer>
-          </>
+          </Footer>
+        </>
+      )}
+    </DetailPanel>
+  );
+}
+
+/** A long note is cut, saying how much was left out, as the app cuts it. */
+function trimNote(note: string) {
+  if (note.length <= 2000) return note;
+  const rest = note.slice(2000).split('\n').length;
+  return `${note.slice(0, 2000)}… and ${rest} more line${rest === 1 ? '' : 's'}`;
+}
+
+function Facts({ facts }: { facts: [string, string][] }) {
+  return (
+    <dl className="facts selectable">
+      {facts.map(([label, value]) => (
+        <div key={label} style={{ display: 'contents' }}>
+          <dt>{label}</dt>
+          <dd>{value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+/** The task as the worker received it: three lines, the last fading, and all of it from a click anywhere on it. */
+function OriginalTask({ text }: { text: string }) {
+  const [shown, setShown] = useState(false);
+  const body = useRef<HTMLPreElement>(null);
+  const [long, setLong] = useState(true);
+  useEffect(() => {
+    const element = body.current;
+    if (element) setLong(element.scrollHeight > element.clientHeight + 1 || shown);
+  }, [text]);
+  return (
+    <section className="detail-section original" aria-label="Original task">
+      <h3>
+        <button className="section-toggle" aria-expanded={shown} onClick={() => long && setShown(!shown)}>
+          <Icon icon={TextAlignStart} />Original task
+        </button>
+      </h3>
+      <pre
+        ref={body}
+        className="callout task"
+        data-folded={long && !shown || undefined}
+        // Folded, a click anywhere opens it; open, the text is selectable instead.
+        onClick={() => long && !shown && setShown(true)}
+      >
+        {long && !shown ? text : <span className="selectable">{text}</span>}
+      </pre>
+      {long && <button className="reveal-toggle" aria-expanded={shown} onClick={() => setShown(!shown)}>{shown ? 'Hide the original task' : 'Show the original task'}</button>}
+    </section>
+  );
+}
+
+/** The panel's last row: the id at the leading edge, its menu copying it, and the actions at the trailing edge. */
+function Footer({ id, status, children }: { id: string; status?: ReactNode; children: ReactNode }) {
+  return (
+    <footer className="detail-foot">
+      <div>
+        <CopyMenu text={id} label="Copy ID">
+          <code className="selectable detail-id" title={id}>{id}</code>
+        </CopyMenu>
+        <span className="detail-actions">{children}</span>
+      </div>
+      {status}
+    </footer>
+  );
+}
+
+const PANEL_WIDTH = 'crew.panelWidth';
+const panelBounds = () => ({ min: 360, max: Math.max(360, Math.min(760, innerWidth - 120)) });
+const storedWidth = () => {
+  try {
+    return Number(localStorage.getItem(PANEL_WIDTH)) || 440;
+  } catch {
+    return 440;
+  }
+};
+/**
+ * The detail panel: a card over the page's right edge that leaves the page usable. Its header stays put with the
+ * title in it while the details scroll under a soft blur, and its leading edge drags to resize, remembered.
+ */
+function DetailPanel({ label, close, chip, title, subtitle, children }: {
+  label: string;
+  close: () => void;
+  chip?: ReactNode;
+  title?: string;
+  subtitle?: string;
+  children: ReactNode;
+}) {
+  const [width, setWidth] = useState(storedWidth);
+  const [scrolled, setScrolled] = useState(false);
+  /** Ends a drag in progress; the panel can close or switch jobs in the middle of one. */
+  const endDrag = useRef<() => void>(undefined);
+  useEffect(() => () => endDrag.current?.(), []);
+  const { min, max } = panelBounds();
+  const shown = Math.max(min, Math.min(max, width));
+  const save = (value: number) => {
+    const next = Math.max(min, Math.min(max, Math.round(value)));
+    setWidth(next);
+    try {
+      localStorage.setItem(PANEL_WIDTH, String(next));
+    } catch {
+      /* Storage may be off. */
+    }
+  };
+  return (
+    <Dialog variant="detail-panel" label={label} onClose={close} style={{ '--panel-width': `${shown}px` } as CSSProperties}>
+      <div
+        className="panel-grip"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Panel width"
+        aria-valuemin={min}
+        aria-valuemax={max}
+        aria-valuenow={shown}
+        tabIndex={0}
+        title="Drag to resize, double-click to reset"
+        onDoubleClick={() => save(440)}
+        onKeyDown={(event) => {
+          if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+            event.preventDefault();
+            save(shown + (event.key === 'ArrowLeft' ? 40 : -40));
+          }
+        }}
+        onPointerDown={(event) => {
+          if (event.button !== 0) return;
+          event.preventDefault();
+          const grip = event.currentTarget;
+          grip.setPointerCapture(event.pointerId);
+          const start = event.clientX;
+          const from = shown;
+          const move = (next: PointerEvent) => save(from + start - next.clientX);
+          const up = () => {
+            grip.removeEventListener('pointermove', move);
+            grip.removeEventListener('pointerup', up);
+            grip.removeEventListener('pointercancel', up);
+            grip.removeEventListener('lostpointercapture', up);
+            document.documentElement.removeAttribute('data-resizing');
+            endDrag.current = undefined;
+          };
+          endDrag.current = up;
+          document.documentElement.setAttribute('data-resizing', '');
+          grip.addEventListener('pointermove', move);
+          grip.addEventListener('pointerup', up);
+          grip.addEventListener('pointercancel', up);
+          grip.addEventListener('lostpointercapture', up);
+        }}
+      />
+      <header className="detail-head" data-scrolled={scrolled || undefined}>
+        <div className="detail-bar">
+          {chip ?? <span />}
+          <CloseButton label="Close details" onClose={close} />
+        </div>
+        {title && (
+          <CopyMenu text={title} label="Copy Title">
+            <h2 className="title selectable detail-heading" id="drawer-title" tabIndex={-1} data-autofocus title={title}>{title}</h2>
+          </CopyMenu>
         )}
+        {subtitle && <p className="secondary selectable detail-subtitle swap" key={subtitle}>{subtitle}</p>}
+      </header>
+      <div className="detail-scroll" onScroll={(event) => setScrolled(event.currentTarget.scrollTop > 1)}>
+        {children}
       </div>
     </Dialog>
+  );
+}
+
+/** A Claude session's details, as the app shows them: what it waits on, its facts and missions, and how to resume it. */
+export function SessionDrawer({ id, state, close }: { id: string; state: Snapshot; close: () => void }) {
+  const now = useNow();
+  const session = state.claude.find((item) => item.id === id);
+  const missions = state.missions.filter((mission) => mission.owner === id).sort((a, b) => b.createdAt - a.createdAt);
+  const status = session && (session.stalled ? 'stalled' : session.state);
+  const plainAgents = (session?.agents ?? []).filter((agent) => !agent.workflow);
+  return (
+    <DetailPanel
+      label={session?.title ?? 'Session details'}
+      close={close}
+      chip={session && <Chip state={status!}>{session.stalled ? 'May be stuck' : session.state[0].toUpperCase() + session.state.slice(1)}</Chip>}
+      title={session?.title}
+      subtitle={session?.state === 'working' ? session.phase : undefined}
+    >
+      {!session ? (
+        <p className="secondary">This session has ended.</p>
+      ) : (
+        <>
+          {session.state === 'waiting' && (
+            <div className="card answer-card answer">
+              <p className="headline selectable">{session.waitingFor ?? 'Claude needs your input.'}</p>
+              <p className="callout secondary">Answer in Claude.</p>
+            </div>
+          )}
+          <Facts
+            facts={[
+              ['Agent', 'Claude · Lead'],
+              ['Project', projectOf(session)],
+              ...(session.cwd !== projectOf(session) ? [['Directory', session.cwd] as [string, string]] : []),
+              ['Started', `${elapsed(now - session.startedAt)} ago`],
+              ['Last active', `${elapsed(now - session.activeAt)} ago`],
+              ...(session.inTool ? [['Now', 'Running a tool'] as [string, string]] : []),
+            ]}
+          />
+          {plainAgents.length > 0 && (
+            <Section title="Sub-agents" icon={Users}>
+              <SessionAgents agents={plainAgents} now={now} label="Sub-agents" />
+            </Section>
+          )}
+          {(session.workflows ?? []).map((run) => (
+            <SessionWorkflow key={run.id} run={run} agents={(session.agents ?? []).filter((agent) => agent.workflow === run.id)} now={now} />
+          ))}
+          {missions.length > 0 && (
+            <Section title="Missions" icon={Flag}>
+              {missions.map((mission) => (
+                <div className="session-mission" key={mission.id}>
+                  <span>{mission.title}</span>
+                  <Chip state={mission.state === 'active' ? 'running' : mission.state}>{mission.state[0].toUpperCase() + mission.state.slice(1)}</Chip>
+                </div>
+              ))}
+            </Section>
+          )}
+          <Footer id={session.id}>
+            <CopyButton text={`claude --resume ${session.id}`}>Resume command</CopyButton>
+          </Footer>
+        </>
+      )}
+    </DetailPanel>
   );
 }

@@ -206,3 +206,15 @@ test('a model with few reviews starts where the others stand and ranks after eve
   // Two clean reviews lift it above the settled model's score, but not above it in the ranking.
   assert.deepEqual([fresh.model, fresh.score, fresh.status], ['fresh', 8.7, 'too few samples']);
 });
+
+test('a save stops when the copy of skipped lines cannot be made, so nothing is erased', (t) => {
+  const dir = home(t);
+  addEvidence(dir, input);
+  const saved = JSON.parse(fs.readFileSync(notesFile(dir), 'utf8'));
+  saved.models['model-a'].evidence.push({ ...saved.models['model-a'].evidence[0], id: 'ev-old', size: 'huge' });
+  const raw = JSON.stringify(saved);
+  fs.writeFileSync(notesFile(dir), raw);
+  t.mock.method(fs, 'copyFileSync', () => { throw new Error('No space left'); });
+  assert.throws(() => addEvidence(dir, { ...input, text: 'more' }), /No space left/);
+  assert.equal(fs.readFileSync(notesFile(dir), 'utf8'), raw);
+});

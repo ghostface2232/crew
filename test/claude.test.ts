@@ -203,3 +203,33 @@ test('a sub-agent first seen without its type takes it from a later event', () =
   assert.equal(agent.type, 'Explore');
   assert.equal(agent.title, 'Explore');
 });
+
+test('a question asked in the wrap-up box keeps the session waiting after the turn ends, until the turn goes on', () => {
+  const { sessions, events, hook } = tracker();
+  hook('UserPromptSubmit', { prompt: 'Review it' });
+  hook('PostToolUse', { tool_name: 'mcp__ccd_turn__wrap_up', tool_input: { recap: 'Done.', ask: 'Which finding first?\n' } });
+  hook('Stop', { last_assistant_message: 'Done.' });
+  const s = sessions.sessions.get('s1')!;
+  assert.equal(s.state, 'waiting');
+  assert.equal(s.waitingFor, 'Which finding first?');
+  assert.ok(s.waitingId);
+  assert.ok(events.includes('waiting:Which finding first?'));
+  hook('Notification', { notification_type: 'idle_prompt' });
+  assert.equal(s.state, 'waiting');
+  hook('UserPromptSubmit', { prompt: 'The first' });
+  assert.equal(s.state, 'working');
+  assert.equal(s.waitingFor, null);
+  // A recap with no question leaves the turn as finished.
+  hook('PostToolUse', { tool_name: 'mcp__ccd_turn__wrap_up', tool_input: { recap: 'Done.' } });
+  hook('Stop', {});
+  assert.equal(s.state, 'idle');
+  // A question the turn moved past, by a tool call or a restart of the session, is not asked again at the next stop.
+  for (const moved of [() => hook('PreToolUse', { tool_name: 'Read', tool_input: {} }), () => hook('SessionStart', { source: 'compact' })]) {
+    hook('PostToolUse', { tool_name: 'mcp__ccd_turn__wrap_up', tool_input: { recap: 'Done.', ask: 'Again?' } });
+    hook('Stop', {});
+    assert.equal(s.state, 'waiting');
+    moved();
+    hook('Stop', {});
+    assert.equal(s.state, 'idle');
+  }
+});

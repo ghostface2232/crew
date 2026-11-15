@@ -145,6 +145,7 @@ export class ClaudeSessions {
           s.agents = [];
           this.resting.add(id);
         }
+        this.asked.delete(id);
         s.state = 'idle';
         s.phase = p.source === 'compact' ? 'context compacted' : 'session started';
         break;
@@ -163,6 +164,8 @@ export class ClaudeSessions {
         break;
       case 'PreToolUse':
         this.resting.delete(id);
+        // The main loop went on, so the question was answered, whatever path the answer took.
+        this.asked.delete(id);
         s.state = 'working';
         s.waitingFor = null;
         s.inTool = true;

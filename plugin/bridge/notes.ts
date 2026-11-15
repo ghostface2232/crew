@@ -100,10 +100,12 @@ const lines = (models: Record<string, any>) => Object.values(models).reduce((sum
 
 /** Loading skips what it cannot read, so a save would erase it; keep the file as it was first. */
 function keepDropped(target: string): void {
+  let models: Record<string, any>;
   try {
-    const models = JSON.parse(fs.readFileSync(target, 'utf8')).models;
-    if (lines(wellFormed(models)) < lines(models)) fs.copyFileSync(target, `${target}.dropped-${Date.now()}`);
-  } catch { /* Nothing to keep: no file yet, or one loadNotes already refuses. */ }
+    models = JSON.parse(fs.readFileSync(target, 'utf8')).models;
+  } catch { return; /* Nothing to keep: no file yet, or one loadNotes already refuses. */ }
+  // A failed copy must stop the save, or the lines are lost with no copy.
+  if (lines(wellFormed(models)) < lines(models)) fs.copyFileSync(target, `${target}.dropped-${Date.now()}`);
 }
 
 function save(home: string, file: NotesFile): void {
@@ -193,7 +195,10 @@ export function scoreAll(file: NotesFile): ModelScore[] {
   }
   const all = Object.values(file.models).flatMap((m) => m.evidence);
   const totals = { all: sums(all), build: sums(all.filter((e) => e.role === 'build')), fix: sums(all.filter((e) => e.role === 'fix')) };
-  /** One set of a model's lines, drawn toward the same set's mean over the other models (itself left out, so it cannot set its own start). */
+  /**
+   * One set of a model's lines, drawn toward the same set's mean over the other models (itself left out, so it cannot set
+   * its own start). That mean is itself drawn toward 0.7, so one line from another model cannot set every start.
+   */
   function score(lines: Evidence[], scope: keyof typeof totals): number | null {
     if (!lines.length) return null;
     const own = sums(lines);

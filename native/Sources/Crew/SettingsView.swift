@@ -39,7 +39,8 @@ enum SettingsPane: Hashable, Identifiable {
 /// Laid out like System Settings: a sidebar of pages, and a grouped form whose page title sits in the unified
 /// toolbar, where the system's soft scroll edge takes over from a hard cut.
 struct CrewSettingsView: View {
-    private static let sidebarWidth = (min: CGFloat(190), ideal: CGFloat(200), max: CGFloat(260))
+    /// Fixed, as in System Settings; the window pins it (CrewApp.openSettings).
+    static let sidebarWidth: CGFloat = 180
     private static let editorHeight: CGFloat = 260
     @Bindable var model: SettingsModel
     var store: CrewStore
@@ -67,7 +68,9 @@ struct CrewSettingsView: View {
                 }
             }
             .listStyle(.sidebar)
-            .navigationSplitViewColumnWidth(min: Self.sidebarWidth.min, ideal: Self.sidebarWidth.ideal, max: Self.sidebarWidth.max)
+            // A split view hosted in an NSWindow ignores the column width alone; the sidebar's own frame holds it.
+            .frame(width: Self.sidebarWidth)
+            .navigationSplitViewColumnWidth(Self.sidebarWidth)
             .toolbar(removing: .sidebarToggle)
         } detail: {
             // A page the daemon no longer offers (after reconnecting to an older one) falls back to the first.

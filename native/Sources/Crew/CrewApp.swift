@@ -251,6 +251,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         settings = model; settingsWindow = window
         window.center(); window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        DispatchQueue.main.async { Self.pinSidebar(in: window) }
+    }
+    /// SwiftUI has no way to stop a split view's divider: without this the sidebar could be resized, and dragged
+    /// shut with no toggle to bring it back. Pinned in the split view SwiftUI built, as System Settings' is.
+    private static func pinSidebar(in window: NSWindow) {
+        func split(in view: NSView) -> NSSplitView? { view as? NSSplitView ?? view.subviews.lazy.compactMap(split).first }
+        guard let view = window.contentView.flatMap(split), let controller = view.delegate as? NSSplitViewController,
+              let sidebar = controller.splitViewItems.first else { NSLog("Crew: settings sidebar not pinned; no split view controller found"); return }
+        for item in controller.splitViewItems { item.canCollapse = false }
+        sidebar.minimumThickness = CrewSettingsView.sidebarWidth
+        sidebar.maximumThickness = CrewSettingsView.sidebarWidth
     }
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         if sender === settingsWindow {

@@ -48,12 +48,11 @@ struct ModelPodium: View {
         .padding(.horizontal, top.count == 2 ? 80 : 12)
         .padding(.top, Space.xxl)
         .frame(maxWidth: .infinity)
-        // Fades out inside the row's frame on every side: the list insets the row within its card, so a glow still lit
-        // at the frame's edge shows as a hard line.
+        // A grouped Form insets the row within its card and ignores listRowInsets and listRowBackground, so nothing
+        // here may stay lit up to the row's edge: the glow fades out inside the row, as the pedestals do at their foot.
         .background {
             EllipticalGradient(colors: [medals[0].opacity(0.14), .clear], center: .center, startRadiusFraction: 0, endRadiusFraction: 0.5)
         }
-        .listRowInsets(EdgeInsets())
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Top models")
         .onAppear { if reduceMotion { shown = true } else { withAnimation(.spring(duration: 0.6, bounce: 0.18)) { shown = true } } }
@@ -83,12 +82,12 @@ struct ModelPodium: View {
                 }
                 .foregroundStyle(score.tone)
                 .padding(.horizontal, 10).padding(.vertical, 4)
-                .background(score.tone.opacity(0.14), in: Capsule())
+                .glassEffect(.regular.tint(score.tone.opacity(0.2)), in: .capsule)
             }
             .opacity(shown ? 1 : 0).offset(y: shown ? 0 : 10).blur(radius: shown ? 0 : 4)
             .animation(reduceMotion ? nil : .spring(duration: 0.55, bounce: 0.15).delay(0.26 + order * 0.09), value: shown)
             UnevenRoundedRectangle(topLeadingRadius: 12, topTrailingRadius: 12, style: .continuous)
-                .fill(LinearGradient(colors: [medal.opacity(0.32), medal.opacity(0.06)], startPoint: .top, endPoint: .bottom))
+                .fill(LinearGradient(colors: [medal.opacity(0.32), medal.opacity(0)], startPoint: .top, endPoint: .bottom))
                 .overlay(alignment: .top) {
                     Text("\(index + 1)").font(.system(size: 30, weight: .semibold, design: .rounded)).foregroundStyle(medal.mix(with: .black, by: 0.3).opacity(0.6)).padding(.top, Space.s)
                 }
@@ -166,7 +165,8 @@ struct ModelScoreRow: View {
                     Text(score.summary).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true).padding(.top, Space.xs)
                 }
             }
-            Spacer(minLength: Space.l)
+            // The text takes every point the ring leaves, so a line wraps only when the row is really that narrow.
+            .frame(maxWidth: .infinity, alignment: .leading)
             ScoreRing(score: score, settled: settled)
         }
         .padding(.vertical, Space.s)

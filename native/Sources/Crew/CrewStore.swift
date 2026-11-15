@@ -320,7 +320,8 @@ final class SettingsModel {
     var roleStatus = ""
     private var generation = 0
     private let api: CrewAPI
-    var dirty: Bool { text != savedText || roleSettings != savedRoleSettings || preset != savedPreset }
+    var rolesDirty: Bool { Self.normalized(roleSettings) != Self.normalized(savedRoleSettings) }
+    var dirty: Bool { text != savedText || rolesDirty || preset != savedPreset }
     var busy: Bool { savingText || savingRoles || savingPreset }
     init(api: CrewAPI, roles: [String: RoleAssignment], roleSettings: [String: RoleSetting]? = nil, roleInfo: [RoleInfo]? = nil, preset: PresetName? = nil, presets: [String: Preset]? = nil) {
         self.api = api; self.resolvedRoles = roles
@@ -329,87 +330,74 @@ final class SettingsModel {
         self.savedRoleSettings = self.roleSettings
         self.preset = preset; self.savedPreset = preset; self.presets = presets
     }
-    /// The table as the daemon would store it: a blank field is no field, and a role with none is left out. A hand-edited
-    /// config.json may hold either, which would otherwise never compare equal to what an edit leaves behind.
+    /// Compare and save the same canonical table the daemon stores.
     static func normalized(_ table: [String: RoleSetting]) -> [String: RoleSetting] {
         table.compactMapValues { setting in
-            let blank: (String?) -> String? = { $0?.isEmpty == true ? nil : $0 }
-            let clean = RoleSetting(agent: blank(setting.agent), model: blank(setting.model), effort: blank(setting.effort), also: setting.also)
+            let clean = setting.normalized
             return clean == RoleSetting() ? nil : clean
         }
     }
-    /// Edits one field of a role as the user wrote it. A field ends editing with its value unchanged when focus
-    /// leaves it, as it does when the window closes; that must leave no trace, or closing asks to discard nothing.
-    func setRole(_ role: String, _ key: WritableKeyPath<RoleSetting, String?>, to value: String) {
-        var next = value.isEmpty ? nil : value
-        // Back to what was saved, it is written as it was saved. A role without a parent shows the agent it resolves to
-        // when none is written, so choosing that agent again, after trying another, is no change either.
-        let saved = savedRoleSettings[role]?[keyPath: key]
-        let savedShown = saved ?? (key == \.agent && roleInfo.first(where: { $0.role == role })?.parent == nil ? resolvedRoles[role]?.agent : nil)
-        if next == savedShown { next = saved }
-        var setting = roleSettings[role] ?? RoleSetting()
-        guard setting[keyPath: key] != next else { return }
-        if key == \.agent {
-            func changingAgent(_ source: RoleSetting, to agent: String?) -> RoleSetting {
-                var changed = source
-                changed.agent = agent
-                if let agent {
-                    changed.also = changed.also?.filter { $0 != agent }
-                    if changed.also?.isEmpty == true { changed.also = nil }
-                } else if roleInfo.first(where: { $0.role == role })?.parent != nil {
-                    changed.model = nil
-                }
-                return changed
-            }
-            let savedSetting = savedRoleSettings[role] ?? RoleSetting()
-            setting = next == saved && setting == changingAgent(savedSetting, to: setting.agent)
-                ? savedSetting : changingAgent(setting, to: next)
-        } else {
-            setting[keyPath: key] = next
-        }
-        // A role with nothing set is the same as one left out, which is how the daemon stores it.
-        roleSettings[role] = setting == RoleSetting() ? nil : setting
+    func followsParent(_ role: String) -> Bool {
+        roleInfo.first { $0.role == role }?.parent != nil && roleSettings[role]?.agents == nil
     }
-    func setAlso(_ role: String, holder: String, enabled: Bool) {
-        guard let assignment = assignment(for: role), holder != assignment.agent else { return }
-        var also = assignment.also ?? []
-        guard also.contains(holder) != enabled else { return }
-        if enabled { also.append(holder) } else { also.removeAll { $0 == holder } }
+    func setFollowParent(_ role: String, enabled: Bool) {
+        guard let parent = roleInfo.first(where: { $0.role == role })?.parent,
+              followsParent(role) != enabled, let inherited = assignment(for: parent) else { return }
         var setting = roleSettings[role] ?? RoleSetting()
-        var restored = setting
-        restored.also = savedRoleSettings[role]?.also
-        if let agent = restored.agent {
-            restored.also = restored.also?.filter { $0 != agent }
-            if restored.also?.isEmpty == true { restored.also = nil }
-        }
-        // Compare the saved field against the current parent and default, which may also have draft edits.
-        var restoredSettings = roleSettings
-        restoredSettings[role] = restored
-        let restoredAlso = self.assignment(for: role, settings: restoredSettings)?.also ?? []
-        if Set(also) == Set(restoredAlso) {
-            setting.also = restored.also
-        } else {
-            // A role following its parent writes an empty list to drop the parent's further holders, which nil would inherit.
-            let inheritsAlso = setting.agent == nil && roleInfo.first(where: { $0.role == role })?.parent
-                .flatMap { self.assignment(for: $0)?.also }?.isEmpty == false
-            setting.also = also.isEmpty && !inheritsAlso ? nil : also
-        }
-        roleSettings[role] = setting == RoleSetting() ? nil : setting
+        setting.agents = enabled ? nil : inherited.holders
+        storeRole(role, setting)
     }
-    func assignment(for role: String) -> RoleAssignment? { assignment(for: role, settings: roleSettings) }
-    private func assignment(for role: String, settings: [String: RoleSetting]) -> RoleAssignment? {
+    func setHolder(_ role: String, holder: String, enabled: Bool) {
+        guard RoleAssignment.holderOrder.contains(holder), !followsParent(role),
+              let assignment = assignment(for: role), assignment.holders.contains(holder) != enabled else { return }
+        var holders = assignment.holders
+        if enabled { holders.append(holder) } else {
+            guard holders.count > 1 else { return }
+            holders.removeAll { $0 == holder }
+        }
+        var setting = roleSettings[role] ?? RoleSetting()
+        setting.agents = RoleAssignment.holderOrder.filter { holders.contains($0) }
+        if enabled {
+            setting[holder] = setting[holder] ?? savedRoleSettings[role]?[holder]
+        } else {
+            setting[holder] = nil
+        }
+        // A root with no written holders returns to that form when its original holders are checked again.
+        if roleInfo.first(where: { $0.role == role })?.parent == nil,
+           savedRoleSettings[role]?.agents == nil, setting.agents == resolvedRoles[role]?.holders {
+            setting.agents = nil
+        }
+        storeRole(role, setting)
+    }
+    func setRole(_ role: String, agent: String, _ key: WritableKeyPath<RoleAgentSettings, String?>, to value: String) {
+        guard assignment(for: role)?.workerHolders.contains(agent) == true,
+              agent == "codex" || key == \.model else { return }
+        var setting = roleSettings[role] ?? RoleSetting()
+        var fields = setting[agent] ?? RoleAgentSettings()
+        fields[keyPath: key] = value.isEmpty ? nil : value
+        setting[agent] = fields
+        storeRole(role, setting)
+    }
+    private func storeRole(_ role: String, _ setting: RoleSetting) {
+        let clean = setting.normalized
+        roleSettings[role] = clean == RoleSetting() ? nil : clean
+    }
+    func assignment(for role: String) -> RoleAssignment? {
+        let settings = Self.normalized(roleSettings)
         var resolved: [String: RoleAssignment] = [:]
         for info in roleInfo {
             let setting = settings[info.role] ?? RoleSetting()
-            let base = setting.agent.map { RoleAssignment(agent: $0) }
+            let base = setting.agents.map { RoleAssignment(agents: $0) }
                 ?? info.parent.flatMap { resolved[$0] }
-                ?? resolvedRoles[info.role].map { RoleAssignment(agent: $0.agent) }
+                ?? resolvedRoles[info.role].map { RoleAssignment(agents: $0.holders) }
             if var assignment = base {
-                var seen: Set<String> = [assignment.agent]
-                let also = (setting.also ?? assignment.also ?? []).filter { seen.insert($0).inserted }
-                assignment.also = also.isEmpty ? nil : also
-                assignment.model = setting.model ?? assignment.model
-                assignment.effort = setting.effort ?? assignment.effort
+                for agent in assignment.workerHolders {
+                    let inherited = RoleSetting(assignment)[agent]
+                    let own = setting[agent]
+                    let merged = RoleAgentSettings(model: own?.model ?? inherited?.model, effort: own?.effort ?? inherited?.effort)
+                    if agent == "codex" { assignment.codex = merged.normalized() }
+                    else { assignment.antigravity = merged.normalized(effort: false) }
+                }
                 resolved[info.role] = assignment
             }
         }
@@ -458,7 +446,7 @@ final class SettingsModel {
     }
     /// Saves every page with unsaved changes; true when nothing is left unsaved.
     func saveAll() async -> Bool {
-        if roleSettings != savedRoleSettings { await saveRoles() }
+        if rolesDirty { await saveRoles() }
         if preset != savedPreset && presets != nil { await savePreset() }
         if text != savedText && loaded { await saveInstructions() }
         return !dirty
@@ -466,12 +454,12 @@ final class SettingsModel {
     func saveRoles() async {
         guard !savingRoles else { return }
         savingRoles = true; roleStatus = ""
-        let draft = roleSettings
+        let draft = Self.normalized(roleSettings)
         struct Save: Encodable, Sendable { var roles: [String: RoleSetting] }
         do {
             let result: RoleState = try await api.post("/api/roles", Save(roles: draft))
             let stored = Self.normalized(result.roleSettings)
-            if roleSettings == draft { roleSettings = stored }
+            if Self.normalized(roleSettings) == draft { roleSettings = stored }
             resolvedRoles = result.roles; savedRoleSettings = stored; roleStatus = "Saved"
         } catch { roleStatus = error.localizedDescription }
         savingRoles = false

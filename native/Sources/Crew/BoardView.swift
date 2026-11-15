@@ -284,7 +284,7 @@ struct AgentOverview: View {
     let roles = store.state.roles
     let labels = store.state.availableRoles.filter { info in
         guard let assignment = roles[info.role], assignment.holders.contains(agent) else { return false }
-        if store.state.roleSettings?[info.role]?.agent == nil, let parent = info.parent, let inherited = roles[parent],
+        if store.state.roleSettings?[info.role]?.agents == nil, let parent = info.parent, let inherited = roles[parent],
            Set(assignment.holders) == Set(inherited.holders) { return false }
         return true
     }.map(\.label)

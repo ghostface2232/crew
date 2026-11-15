@@ -173,35 +173,61 @@
   },
   "roles": {
     "delegate": {
-      "agent": "codex",
-      "model": "build-model",
-      "effort": "high"
+      "agents": [
+        "codex"
+      ],
+      "codex": {
+        "model": "build-model",
+        "effort": "high"
+      }
     },
     "refactor": {
-      "agent": "codex",
-      "model": "build-model",
-      "effort": "high"
+      "agents": [
+        "codex"
+      ],
+      "codex": {
+        "model": "build-model",
+        "effort": "high"
+      }
     },
     "release": {
-      "agent": "codex",
-      "model": "release-model",
-      "effort": "high"
+      "agents": [
+        "codex"
+      ],
+      "codex": {
+        "model": "release-model",
+        "effort": "high"
+      }
     },
     "debate": {
-      "agent": "codex",
-      "model": "build-model",
-      "effort": "high"
+      "agents": [
+        "codex"
+      ],
+      "codex": {
+        "model": "build-model",
+        "effort": "high"
+      }
     },
     "review": {
-      "agent": "antigravity",
-      "model": "review-model"
+      "agents": [
+        "antigravity"
+      ],
+      "antigravity": {
+        "model": "review-model"
+      }
     },
     "verify": {
-      "agent": "antigravity",
-      "model": "review-model"
+      "agents": [
+        "antigravity"
+      ],
+      "antigravity": {
+        "model": "review-model"
+      }
     },
     "polish": {
-      "agent": "antigravity"
+      "agents": [
+        "antigravity"
+      ]
     }
   },
   "limits": {
@@ -318,20 +344,32 @@
   },
   "roleSettings": {
     "delegate": {
-      "agent": "codex",
-      "model": "build-model",
-      "effort": "high"
+      "agents": [
+        "codex"
+      ],
+      "codex": {
+        "model": "build-model",
+        "effort": "high"
+      }
     },
     "release": {
-      "model": "release-model"
+      "codex": {
+        "model": "release-model"
+      }
     },
     "review": {
-      "agent": "antigravity",
-      "model": "review-model"
+      "agents": [
+        "antigravity"
+      ],
+      "antigravity": {
+        "model": "review-model"
+      }
     },
     "verify": {},
     "polish": {
-      "agent": "antigravity"
+      "agents": [
+        "antigravity"
+      ]
     }
   },
   "roleInfo": [

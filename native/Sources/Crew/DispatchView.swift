@@ -6,10 +6,10 @@ struct JobDispatch {
     var picked: String?
     var holders: [String] { assignment?.workerHolders ?? [] }
     var agent: String? { picked.flatMap { holders.contains($0) ? $0 : nil } ?? holders.first }
-    var submissionAgent: String? { holders.count > 1 || assignment?.agent == "claude" ? agent : nil }
+    var submissionAgent: String? { agent }
     var worker: Worker? { agent.flatMap { workers[$0] } }
     var canSend: Bool { worker?.enabled == true }
-    var requiresClaude: Bool { assignment?.agent == "claude" && holders.isEmpty }
+    var requiresClaude: Bool { assignment?.holders == ["claude"] }
 }
 
 struct DispatchView: View {
@@ -114,7 +114,7 @@ struct DispatchView: View {
     private var assignedTo: some View {
         field("Assigned to") {
             if dispatch.holders.count > 1 {
-                Picker("Assigned to", selection: Binding(get: { dispatch.agent ?? "" }, set: { pickedAgent = $0 == dispatch.holders.first ? nil : $0 })) {
+                Picker("Assigned to", selection: Binding(get: { dispatch.agent ?? "" }, set: { pickedAgent = $0 })) {
                     ForEach(dispatch.holders, id: \.self) { holder in Text(workerLabel(holder)).tag(holder) }
                 }.labelsHidden().fixedSize()
             } else {

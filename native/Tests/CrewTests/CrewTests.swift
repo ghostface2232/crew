@@ -463,34 +463,38 @@ private final class MockProtocol: URLProtocol, @unchecked Sendable {
         let api = api { request in
             #expect(request.url?.path == "/api/roles")
             let body = try requestBody(request)
-            let roles = try #require(body["roles"] as? [String: [String: String]])
+            let roles = try #require(body["roles"] as? [String: [String: Any]])
             #expect(roles["refactor"] == nil)
-            #expect(roles["verify"]?["agent"] == nil)
-            #expect(roles["release"]?["agent"] == nil)
-            #expect(roles["release"]?["model"] == "release-model")
+            #expect(roles["verify"]?["agents"] == nil)
+            #expect(roles["release"]?["agents"] == nil)
+            #expect((roles["release"]?["codex"] as? [String: String])?["model"] == "release-model")
+            #expect(roles["verify"] == nil)
+            for role in roles.values {
+                #expect(Set(role.keys).isSubset(of: ["agents", "codex", "antigravity"]))
+            }
             return (200, response, 0.05)
         }
         let settings = SettingsModel(api: api, roles: state.roles, roleSettings: normalized, roleInfo: state.roleInfo)
-        settings.roleSettings["verify"] = RoleSetting(model: "")
+        settings.roleSettings["verify"] = RoleSetting(codex: .init(model: ""), antigravity: .init())
         let save = Task { await settings.saveRoles() }
         try await Task.sleep(for: .milliseconds(10))
-        settings.roleSettings["polish"] = RoleSetting(agent: "codex")
+        settings.roleSettings["polish"] = RoleSetting(agents: ["codex"])
         await save.value
-        #expect(settings.roleSettings["polish"]?.agent == "codex")
+        #expect(settings.roleSettings["polish"]?.agents == ["codex"])
         #expect(settings.savedRoleSettings == SettingsModel.normalized(normalized))
         #expect(settings.resolvedRoles == state.roles)
         #expect(settings.dirty && settings.roleStatus == "Saved")
         settings.roleSettings = normalized
         await settings.saveRoles()
-        #expect(!settings.dirty && settings.roleSettings["verify"]?.agent == nil)
+        #expect(!settings.dirty && settings.roleSettings["verify"]?.agents == nil)
     }
     @Test func legacyRoleSaveUsesResolvedAssignmentsAsRawSettings() async throws {
         let state = try fixture()
-        let response = try JSONEncoder().encode(state.roles)
+        let response = Data(#"{"delegate":{"agent":"codex"},"review":{"agent":"codex"},"polish":{"agent":"antigravity"}}"#.utf8)
         let api = api { request in
             let body = try requestBody(request)
-            let roles = try #require(body["roles"] as? [String: [String: String]])
-            #expect(roles["delegate"]?["agent"] == state.roles["delegate"]?.agent)
+            let roles = try #require(body["roles"] as? [String: [String: Any]])
+            #expect(roles["delegate"]?["agents"] as? [String] == state.roles["delegate"]?.holders)
             #expect(Set(roles.keys) == Set(roleOrder))
             return (200, response, 0)
         }
@@ -501,26 +505,53 @@ private final class MockProtocol: URLProtocol, @unchecked Sendable {
         #expect(settings.savedRoleSettings == settings.roleSettings && !settings.dirty)
         #expect(settings.roleStatus == "Saved")
     }
+    @Test func roleSaveWritesTheWholeCanonicalTableWithPerAgentSettings() async throws {
+        var state = try fixture("state-extended")
+        let draft = ["delegate": RoleSetting(agents: ["claude", "antigravity", "codex", "codex"], codex: .init(model: "", effort: "high"), antigravity: .init(model: "agy-model")),
+                     "release": RoleSetting(codex: .init(model: "release-model")), "verify": RoleSetting(antigravity: .init())]
+        state.roleSettings = SettingsModel.normalized(draft)
+        let response = try JSONEncoder().encode(state)
+        let api = api { request in
+            #expect(request.url?.path == "/api/roles")
+            let body = try requestBody(request)
+            #expect(Set(body.keys) == ["roles"])
+            let roles = try #require(body["roles"] as? [String: [String: Any]])
+            #expect(Set(roles.keys) == ["delegate", "release"])
+            let delegate = try #require(roles["delegate"])
+            #expect(Set(delegate.keys) == ["agents", "codex", "antigravity"])
+            #expect(delegate["agents"] as? [String] == RoleAssignment.holderOrder)
+            #expect(delegate["codex"] as? [String: String] == ["effort": "high"])
+            #expect(delegate["antigravity"] as? [String: String] == ["model": "agy-model"])
+            #expect(roles["release"]?["agents"] == nil)
+            #expect((roles["release"]?["codex"] as? [String: String]) == ["model": "release-model"])
+            return (200, response, 0)
+        }
+        let settings = SettingsModel(api: api, roles: state.roles, roleSettings: [:], roleInfo: state.roleInfo)
+        settings.roleSettings = draft
+        await settings.saveRoles()
+        #expect(!settings.dirty && settings.roleStatus == "Saved")
+        #expect(settings.roleSettings == state.roleSettings)
+    }
     @Test func failedRoleSaveRetainsInheritedDraftAndCanRetry() async throws {
         let state = try fixture("state-extended")
         var updated = state
-        updated.roleSettings?["verify"] = RoleSetting(effort: "low")
+        updated.roleSettings?["verify"] = RoleSetting(antigravity: .init(model: "verify-model"))
         let response = try JSONEncoder().encode(updated)
         let calls = Mutex(0)
         let api = api { request in
             let body = try requestBody(request)
-            let roles = try #require(body["roles"] as? [String: [String: String]])
-            #expect(roles["verify"]?["agent"] == nil && roles["verify"]?["effort"] == "low")
+            let roles = try #require(body["roles"] as? [String: [String: Any]])
+            #expect(roles["verify"]?["agents"] == nil && (roles["verify"]?["antigravity"] as? [String: String])?["model"] == "verify-model")
             if calls.withLock({ $0 += 1; return $0 }) == 1 {
                 return (400, Data(#"{"error":"Cannot save roles"}"#.utf8), 0)
             }
             return (200, response, 0)
         }
         let settings = SettingsModel(api: api, roles: state.roles, roleSettings: state.roleSettings, roleInfo: state.roleInfo)
-        settings.roleSettings["verify"] = RoleSetting(effort: "low")
+        settings.roleSettings["verify"] = RoleSetting(antigravity: .init(model: "verify-model"))
         await settings.saveRoles()
         #expect(settings.savedRoleSettings == SettingsModel.normalized(state.roleSettings ?? [:]))
-        #expect(settings.roleSettings["verify"] == RoleSetting(effort: "low"))
+        #expect(settings.roleSettings["verify"] == RoleSetting(antigravity: .init(model: "verify-model")))
         #expect(settings.dirty && !settings.busy && settings.roleStatus == "Cannot save roles")
         await settings.saveRoles()
         #expect(calls.withLock { $0 } == 2)
@@ -530,11 +561,11 @@ private final class MockProtocol: URLProtocol, @unchecked Sendable {
         let store = try store()
         let state = try fixture("state-extended")
         try store.receive(event("state", state))
-        let raw = ["delegate": RoleSetting(agent: "antigravity"), "refactor": RoleSetting()]
+        let raw = ["delegate": RoleSetting(agents: ["antigravity"]), "refactor": RoleSetting()]
         try store.receive(event("roleSettings", raw))
         #expect(store.state.roleSettings == raw)
         #expect(store.state.roles == state.roles)
-        let resolved = ["delegate": RoleAssignment(agent: "antigravity")]
+        let resolved = ["delegate": RoleAssignment(agents: ["antigravity"])]
         try store.receive(event("roles", resolved))
         #expect(store.state.roles == resolved && store.state.roleSettings == raw)
         try store.receive(event("state", fixture()))

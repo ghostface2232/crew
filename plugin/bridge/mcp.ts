@@ -305,13 +305,13 @@ const TOOLS = [
   {
     name: 'reply',
     title: 'Reply to a worker',
-    description: 'Send a follow-up message that continues the same worker session, e.g. to request fixes after reviewing its diff. Also passes on a decision the user gave you for a waiting job (decision: approve or deny); to have the user asked, call wait instead. With approved_by_user it sends back an action the worker\'s automatic reviewer refused.',
+    description: 'Send a follow-up message that continues the same worker session, e.g. to request fixes after reviewing its diff. Also passes on a decision the user gave you for a waiting job (decision: approve or deny, or allow_for_job when the status offers it); to have the user asked, call wait instead. With approved_by_user it sends back an action the worker\'s automatic reviewer refused.',
     inputSchema: {
       type: 'object',
       properties: {
         job_id: { type: 'string' },
         message: { type: 'string', description: 'Follow-up instruction, or the answer to the worker\'s question.' },
-        decision: { type: 'string', enum: ['approve', 'deny'], description: 'The user\'s decision for a job waiting on approval.' },
+        decision: { type: 'string', enum: ['approve', 'deny', 'allow_for_job'], description: 'The user\'s decision for a job waiting on approval. allow_for_job approves this request and the job\'s later ones on the same target without asking; only for a request whose status offers it, and only when the user said so.' },
         request_id: { type: 'string', description: 'Required when forwarding an answer. Use the request ID shown in the job status.' },
         sync: { type: 'boolean', description: 'For a finished delegate or polish job: first merge your current HEAD into the worker\'s branch, so the next turn sees what you committed since it started (a fix it was waiting for, an interface you changed). Commit first. If the merge conflicts, it is aborted; the message is still sent, naming the conflicting files, and the job\'s result notes the failed sync.' },
         ...attachmentsProp,
@@ -353,12 +353,12 @@ let canElicit = false;
 const dismissed = new Set<string>();
 const failed = new Map<string, string>();
 
-const APPROVAL_FORM = {
+const approvalForm = (grant?: string) => ({
   type: 'object',
   // A plain enum is the one choice schema every protocol version with elicitation accepts.
-  properties: { decision: { type: 'string', title: 'Decision', enum: ['approve', 'deny'] } },
+  properties: { decision: { type: 'string', title: 'Decision', enum: grant ? ['approve', 'deny', 'allow_for_job'] : ['approve', 'deny'] } },
   required: ['decision'],
-};
+});
 const ANSWER_FORM = { type: 'object', properties: { answer: { type: 'string', title: 'Answer' } }, required: ['answer'] };
 
 let promptQueue: Promise<unknown> = Promise.resolve();
@@ -383,8 +383,8 @@ async function askUser(job: JobView, signal: AbortSignal): Promise<'settled' | '
 
   const approval = waiting.type === 'approval';
   const prompt = request('elicitation/create', {
-    message: `${WORKERS[job.agent].name} (${job.title}) ${approval ? 'requests approval' : 'asks a question'}\n\n${waiting.reason}`,
-    requestedSchema: approval ? APPROVAL_FORM : ANSWER_FORM,
+    message: `${WORKERS[job.agent].name} (${job.title}) ${approval ? 'requests approval' : 'asks a question'}\n\n${waiting.reason}${approval && waiting.grant ? `\n\nallow_for_job also allows its later requests for ${waiting.grant} in this job.` : ''}`,
+    requestedSchema: approval ? approvalForm(waiting.grant) : ANSWER_FORM,
   });
 
   // The same request can be answered on the status board, or the call can be cancelled; then the prompt is moot.
@@ -416,7 +416,7 @@ async function askUser(job: JobView, signal: AbortSignal): Promise<'settled' | '
   }
   const answer = result.action === 'accept' ? result.content : null;
   const body = approval
-    ? (answer?.decision === 'approve' || answer?.decision === 'deny') && { decision: answer.decision }
+    ? (answer?.decision === 'approve' || answer?.decision === 'deny' || (answer?.decision === 'allow_for_job' && waiting.grant)) && { decision: answer.decision }
     : typeof answer?.answer === 'string' && answer.answer.trim() && { message: answer.answer };
   if (!body) return 'dismissed';
   // Already answered elsewhere in the meantime is fine: the worker has its decision.

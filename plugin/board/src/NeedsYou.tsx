@@ -1,4 +1,4 @@
-import { ArrowUpRight, Check, CircleCheck, MessagesSquare, Search, X } from 'lucide-react';
+import { ArrowUpRight, Check, CheckCheck, CircleCheck, MessagesSquare, Search, X } from 'lucide-react';
 import { useSyncExternalStore } from 'react';
 import type { CSSProperties } from 'react';
 import type { BoardJob, ClaudeSession } from './types.ts';
@@ -17,16 +17,18 @@ export function Answer({ job }: { job: BoardJob }) {
   if (job.state !== 'waiting' || !waiting) return null;
   const locked = state.pending || state.accepted || !live;
   const reply = (body: object) => request(`/api/jobs/${job.id}/reply`, { ...body, request_id: waiting.id });
-  const decide = (decision: 'approve' | 'deny') => {
+  type Decision = 'approve' | 'deny' | 'allow_for_job';
+  const decide = (decision: Decision) => {
     // A draft typed before a quick reply goes along with it rather than being discarded.
     const note = draft.trim();
     void actions.run(key, () => reply({ decision, ...(note ? { message: note } : {}) })).then((sent) => {
       if (sent) setDraft('');
     });
   };
-  const button = (label: string, decision: 'approve' | 'deny', prominent: boolean) => (
-    <button className={prominent ? 'prominent' : ''} disabled={locked} onClick={() => decide(decision)}>
-      <Icon icon={decision === 'approve' ? Check : X} />
+  const icons = { approve: Check, deny: X, allow_for_job: CheckCheck };
+  const button = (label: string, decision: Decision, prominent: boolean, title?: string) => (
+    <button className={prominent ? 'prominent' : ''} disabled={locked} title={title} onClick={() => decide(decision)}>
+      <Icon icon={icons[decision]} />
       {label}
     </button>
   );
@@ -57,6 +59,7 @@ export function Answer({ job }: { job: BoardJob }) {
         <div className="answer-actions" data-approval>
           <ActionStatus actionKey={key} />
           {button('Deny', 'deny', false)}
+          {waiting.grant && button('Allow for this job', 'allow_for_job', false, `Also allow this job's later requests for ${waiting.grant}, without asking`)}
           {button('Approve', 'approve', true)}
         </div>
       )}

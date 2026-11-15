@@ -10,12 +10,15 @@ import type { Adapter, Capabilities, Job, JobCtl, Probe } from '../jobs.ts';
 import { PLUGIN_USER_APP } from '../prompts.ts';
 import { RPC_TIMEOUT_MS, RpcError, RpcPeer, RpcTimeoutError } from '../rpc.ts';
 
-type Answer = { approve: boolean; message?: string; cancelled?: boolean };
+type Answer = { approve: boolean; message?: string; cancelled?: boolean; forJob?: boolean };
+/** A plugin tool approval the user may allow for the rest of the job: `key` matches later requests, `label` names what it covers. */
+interface Grant { key: string; label: string }
 interface Pending {
   id: string | number;
   threadId: string;
   type: 'approval' | 'question';
   reason: string;
+  grant?: Grant;
   resolve(answer: Answer | null): void;
 }
 
@@ -45,6 +48,8 @@ interface Run {
   held: any | null;
   /** A turn the status check found over without its end; a turn/completed for it arriving later is ignored. */
   lost: string | null;
+  /** Keys of plugin tool approvals the user allowed for this job. */
+  grants: Set<string>;
 }
 
 export interface CodexLimits {
@@ -144,10 +149,11 @@ export class CodexAdapter implements Adapter {
     }
   }
 
-  async answer(ctl: JobCtl, approve: boolean, message?: string): Promise<void> {
+  async answer(ctl: JobCtl, approve: boolean, message?: string, opts?: { forJob?: boolean }): Promise<void> {
     const run = this.runs.get(ctl.job.sessionId ?? '');
     if (!run?.pending.length) throw new Error('The request this job was waiting on is no longer pending.');
-    this.settleRequest(run, 0, { approve, message });
+    if (opts?.forJob && !run.pending[0].grant) throw new Error('This request cannot be allowed for the whole job. Approve or deny it.');
+    this.settleRequest(run, 0, { approve, message, forJob: opts?.forJob });
   }
 
   async cancel(ctl: JobCtl): Promise<void> {
@@ -347,7 +353,7 @@ export class CodexAdapter implements Adapter {
   }
 
   private openRun(ctl: JobCtl, threadId: string, pluginsEnabled = false): Run {
-    const run: Run = { ctl, pluginsEnabled, turnId: null, awaitingTurn: false, interrupt: null, message: '', pending: [], crewCalls: new Set(), items: new Map(), busyChildren: new Map(), held: null, lost: null };
+    const run: Run = { ctl, pluginsEnabled, turnId: null, awaitingTurn: false, interrupt: null, message: '', pending: [], crewCalls: new Set(), items: new Map(), busyChildren: new Map(), held: null, lost: null, grants: new Set() };
     this.runs.set(threadId, run);
     return run;
   }
@@ -634,9 +640,22 @@ export class CodexAdapter implements Adapter {
       run.ctl.note(`The user declined an action: ${request.reason}\nDo it another way within the job permissions, or report what could not be verified.`, { declined: true });
     }
     request.resolve(answer);
-    if (index !== 0) return;
+    let head = index === 0;
+    if (answer?.forJob && request.grant) {
+      run.grants.add(request.grant.key);
+      run.ctl.progress(`allowed for this job: ${request.grant.label}`);
+      // Requests already queued for the same target are covered by the same grant.
+      for (let i = run.pending.length - 1; i >= 0; i--) {
+        const queued = run.pending[i];
+        if (queued.grant?.key !== request.grant.key) continue;
+        run.pending.splice(i, 1);
+        queued.resolve({ approve: true });
+        if (i === 0) head = true;
+      }
+    }
+    if (!head) return;
     const next = run.pending[0];
-    if (next) run.ctl.waiting(next.type, next.reason);
+    if (next) run.ctl.waiting(next.type, next.reason, next.grant?.label);
     else run.ctl.resumed();
   }
 
@@ -649,7 +668,7 @@ export class CodexAdapter implements Adapter {
     const threadId = p?.threadId;
     const run = this.runs.get(threadId) ?? this.children.get(threadId);
     const item = this.itemDetails(run, p);
-    const ask = (type: 'approval' | 'question', reason: string) => {
+    const ask = (type: 'approval' | 'question', reason: string, grant?: Grant) => {
       reason = detail(reason, 8000);
       if (!run || isTerminal(run.ctl.job)) return Promise.resolve<Answer>({ approve: false });
       if (run.interrupt) return Promise.resolve<Answer>({ approve: false, cancelled: true });
@@ -660,8 +679,8 @@ export class CodexAdapter implements Adapter {
       }
       if (this.children.has(threadId)) reason = `Sub-agent request\n${reason}`;
       return new Promise<Answer | null>((resolve) => {
-        run.pending.push({ id, threadId, type, reason, resolve });
-        if (run.pending.length === 1) run.ctl.waiting(type, reason);
+        run.pending.push({ id, threadId, type, reason, grant, resolve });
+        if (run.pending.length === 1) run.ctl.waiting(type, reason, grant?.label);
       });
     };
     const why = p?.reason ? `\nReason: ${detail(p.reason, 2000)}` : '';
@@ -718,7 +737,12 @@ export class CodexAdapter implements Adapter {
         // Plugin tools ask for approval before running; forward those to the user like commands,
         // and decline requests from other servers when no plugins are enabled.
         if (run?.pluginsEnabled && p._meta?.codex_approval_kind === 'mcp_tool_call') {
-          const answer = await ask('approval', toolRequest(p, item));
+          const grant = toolGrant(p);
+          if (grant && run.grants.has(grant.key) && !isTerminal(run.ctl.job) && !run.interrupt && run.ctl.job.sandbox !== 'read-only') {
+            run.ctl.progress(`allowed for this job: ${detail(p._meta?.tool_name ?? 'tool', 200)} · ${grant.label}`);
+            return { action: 'accept', content: {}, _meta: null };
+          }
+          const answer = await ask('approval', toolRequest(p, item), grant);
           if (!answer) return;
           return { action: answer.cancelled ? 'cancel' : answer.approve ? 'accept' : 'decline', content: answer.approve ? {} : null, _meta: null };
         }
@@ -792,6 +816,20 @@ function toolInput(action: any, item?: ItemDetails): string {
 function toolRequest(params: any, item?: ItemDetails): string {
   const action = { server: params.serverName, toolName: params._meta?.tool_name, arguments: params.arguments };
   return detail(`Use the tool ${detail(action.server ?? '(server missing)')}.${detail(action.toolName ?? '(unnamed)')}\nArguments:\n${toolInput(action, item)}${params.message ? `\nMessage: ${detail(params.message, 2000)}` : ''}${params.reason ? `\nReason: ${detail(params.reason, 2000)}` : ''}`, 8000);
+}
+
+/**
+ * What a plugin tool approval is about, when the request names it in a stable form. Computer use asks
+ * `Allow Computer Use to use "<App>"?` on every call; the server and that message (not the tool) are the key,
+ * so another app, or another server, still asks. Requests without such a target cannot be allowed for a job.
+ */
+function toolGrant(params: any): Grant | undefined {
+  const server = params?.serverName;
+  const message = params?.message;
+  if (typeof server !== 'string' || !server || typeof message !== 'string') return;
+  const target = /^Allow (.{1,100}?) to use "([^"\n]{1,200})"\?$/.exec(message);
+  if (!target) return;
+  return { key: `${server}\0${message}`, label: `${target[1]} using "${target[2]}"` };
 }
 
 /** Keep action fields useful to a decision, without protocol ids or environment metadata. */

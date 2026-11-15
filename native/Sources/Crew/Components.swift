@@ -166,6 +166,10 @@ struct AnswerView: View {
                     GlassEffectContainer { HStack(spacing: Space.m) {
                         Spacer(minLength: 0)
                         decision("Deny", symbol: "xmark", value: "deny", prominent: false)
+                        if let grant = waiting.grant {
+                            decision("Allow for this job", symbol: "checkmark.circle", value: "allow_for_job", prominent: false)
+                                .help("Also allow this job's later requests for \(grant), without asking")
+                        }
                         decision("Approve", symbol: "checkmark", value: "approve", prominent: true)
                     } }
                 }

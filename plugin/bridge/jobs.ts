@@ -266,7 +266,8 @@ export interface Job {
   endedAt: number | null;
   turns: number;
   stalled: boolean;
-  waiting: { type: 'approval' | 'question'; reason: string; id: string; since: number } | null;
+  /** grant: what "Allow for this job" would cover; set only for a plugin tool approval that names its target. */
+  waiting: { type: 'approval' | 'question'; reason: string; id: string; since: number; grant?: string } | null;
   /** The worker's final message for the latest turn. */
   report: string;
   questions?: LeadQuestion[];
@@ -304,7 +305,7 @@ export interface JobCtl {
   /** The agent's automatic reviewer refused an action in this turn. */
   refused(action: string, reason: string): void;
   tokens(total: number, parts?: { input: number; cachedInput: number; output: number }): void;
-  waiting(type: 'approval' | 'question', reason: string): void;
+  waiting(type: 'approval' | 'question', reason: string, grant?: string): void;
   resumed(): void;
   done(report: string): void;
   fail(message: string, opts?: { limit?: boolean }): void;
@@ -316,8 +317,8 @@ export interface Adapter {
   start(ctl: JobCtl): Promise<void>;
   /** Sends a follow-up message, steering the active turn or starting a new one. */
   reply(ctl: JobCtl, message: string): Promise<void>;
-  /** Resolves the pending approval or question. */
-  answer(ctl: JobCtl, approve: boolean, message?: string): Promise<void>;
+  /** Resolves the pending approval or question. forJob also allows later requests with the same grant in this job. */
+  answer(ctl: JobCtl, approve: boolean, message?: string, opts?: { forJob?: boolean }): Promise<void>;
   cancel(ctl: JobCtl): Promise<void>;
   /** Releases a finished session before removing its workspace. */
   release?(ctl: JobCtl): Promise<void>;
@@ -729,7 +730,7 @@ export class Jobs {
     }
   }
 
-  async reply(id: string, input: { message?: string; decision?: 'approve' | 'deny'; request_id?: string; approved_by_user?: string; lead_session?: string; sync?: boolean | string; attachments?: string[] }): Promise<Job> {
+  async reply(id: string, input: { message?: string; decision?: 'approve' | 'deny' | 'allow_for_job'; request_id?: string; approved_by_user?: string; lead_session?: string; sync?: boolean | string; attachments?: string[] }): Promise<Job> {
     if (this.collecting) throw new Error('Crew gc is running. Try again when it finishes.');
     const job = this.get(id);
     if (job.cleanupPending) throw new Error(`Job ${id} has incomplete cleanup. Run crew gc to resolve it before continuing.`);
@@ -744,8 +745,8 @@ export class Jobs {
     if (input.request_id !== undefined && input.request_id !== job.waiting?.id) {
       throw new Error('That request is no longer pending. Check the current job before answering.');
     }
-    if (input.decision !== undefined && input.decision !== 'approve' && input.decision !== 'deny') {
-      throw new Error('Pass decision "approve" or "deny".');
+    if (input.decision !== undefined && !['approve', 'deny', 'allow_for_job'].includes(input.decision)) {
+      throw new Error('Pass decision "approve", "deny", or "allow_for_job".');
     }
     if (job.waiting) {
       if (input.approved_by_user !== undefined) throw new Error(`Job ${id} is waiting on the user (${job.waiting.reason}). approved_by_user is for an action the automatic reviewer refused in a finished turn; call wait so the user is asked.`);
@@ -753,7 +754,9 @@ export class Jobs {
       // A message alone must never count as approval: the lead may only be asking the worker why.
       if (job.waiting.type === 'approval' && !input.decision) throw new Error(`Job ${id} is waiting for approval (${job.waiting.reason}). Pass decision "approve" or "deny".`);
       if (!input.decision && !input.message?.trim()) throw new Error(`Job ${id} asked a question (${job.waiting.reason}). Pass a message with the answer, or a decision.`);
-      await this.sendWith(job, attachments, (note) => adapter.answer(ctl, input.decision !== 'deny', note ? `${input.message ?? ''}${note}` : input.message));
+      if (input.decision === 'allow_for_job' && !job.waiting.grant) throw new Error(`Job ${id}'s request cannot be allowed for the whole job. Pass decision "approve" or "deny".`);
+      const forJob = input.decision === 'allow_for_job' ? { forJob: true } : undefined;
+      await this.sendWith(job, attachments, (note) => adapter.answer(ctl, input.decision !== 'deny', note ? `${input.message ?? ''}${note}` : input.message, forJob));
       return job;
     }
     if (input.decision !== undefined) throw new Error(`Job ${id} is not waiting for a decision.`);
@@ -1364,11 +1367,11 @@ export class Jobs {
         job.tokens = total;
         if (parts) job.tokenUse = { ...parts, turn: total - (this.turnStartTokens.get(job.id) ?? 0) };
       },
-      waiting: (type, reason) => {
+      waiting: (type, reason, grant) => {
         if (!live()) return;
         job.state = 'waiting';
         job.stalled = false;
-        job.waiting = { type, reason, id: randomUUID(), since: Date.now() };
+        job.waiting = { type, reason, id: randomUUID(), since: Date.now(), ...(grant ? { grant } : {}) };
         job.phase = type === 'approval' ? 'needs approval' : 'has a question';
         this.event(job, 'waiting', reason);
         this.hooks.onAttention(job, 'waiting', reason);

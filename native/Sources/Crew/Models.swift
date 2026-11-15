@@ -103,7 +103,11 @@ struct Evidence: Codable, Sendable, Equatable {
     var isVideo: Bool { ["webm", "mp4"].contains((file as NSString).pathExtension.lowercased()) }
 }
 struct Worktree: Codable, Sendable, Equatable { var path: String; var branch: String; var base: String }
-struct Waiting: Codable, Sendable, Equatable { var type: String; var reason: String; var id: String; var since: Double }
+struct Waiting: Codable, Sendable, Equatable {
+    var type: String; var reason: String; var id: String; var since: Double
+    /// What "Allow for this job" covers; present only on plugin tool approvals that name their target.
+    var grant: String?
+}
 struct JobResult: Codable, Sendable, Equatable { var files: [String]; var stat: String; var commit: String?; var outOfScope: [String] }
 struct JobError: Codable, Sendable, Equatable { var message: String; var limit: Bool }
 struct Refusal: Codable, Sendable, Equatable { var action: String; var reason: String; var turn: Int }

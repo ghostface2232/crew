@@ -113,7 +113,7 @@ struct CrewSettingsView: View {
                 Toggle("Same as \(model.roleInfo.first { $0.role == parent }?.label ?? parent)", isOn: Binding(
                     get: { model.followsParent(role.role) },
                     set: { model.setFollowParent(role.role, enabled: $0) }
-                )).toggleStyle(.checkbox).accessibilityLabel("Follow parent for \(role.label)")
+                )).toggleStyle(.checkbox)
             }
             LabeledContent("Agents") {
                 HStack(spacing: Space.l) {
@@ -121,7 +121,7 @@ struct CrewSettingsView: View {
                         Toggle(holderLabel(holder), isOn: Binding(
                             get: { model.assignment(for: role.role)?.holders.contains(holder) == true },
                             set: { model.setHolder(role.role, holder: holder, enabled: $0) }
-                        )).toggleStyle(.checkbox).accessibilityLabel("\(agentName(holder)) for \(role.label)")
+                        )).toggleStyle(.checkbox).accessibilityLabel("\(role.label): \(holderLabel(holder))")
                             .disabled(model.assignment(for: role.role)?.holders == [holder])
                     }
                 }.disabled(model.followsParent(role.role))

@@ -167,20 +167,22 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
       const shown = resolved[role.role]?.agents ?? [];
       const next = shown.includes(holder) ? shown.filter((other) => other !== holder) : sortHolders([...shown, holder]);
       if (!next.length) return own;
-      if (holder !== 'claude' && !next.includes(holder)) delete own[holder];
+      // Off, an agent's settings go; back on, they come back as saved.
+      if (holder !== 'claude') {
+        if (next.includes(holder)) own[holder] ??= savedRoles[role.role]?.[holder];
+        else delete own[holder];
+      }
       const unwritten = !role.parent && !savedRoles[role.role]?.agents ? state.roles[role.role]?.agents : undefined;
       if (unwritten && unwritten.join() === next.join()) delete own.agents;
       else own.agents = next;
       return own;
     });
-  /** Follows the parent's holders, or starts from them as the role's own. */
+  /** Follows the parent's holders, or starts from them as the role's own. Settings for an agent the parent lacks stay, unused. */
   const follow = (role: RoleInfo, on: boolean) =>
     setEntry(role.role, (own) => {
-      const parent = resolved[role.parent!]?.agents ?? [];
-      if (!on) return { ...own, agents: parent };
-      delete own.agents;
-      for (const agent of ['codex', 'antigravity'] as const) if (!parent.includes(agent)) delete own[agent];
-      return own;
+      const { agents: _agents, ...rest } = own;
+      const parent = resolved[role.parent!]?.agents;
+      return on ? rest : parent?.length ? { ...rest, agents: parent } : own;
     });
   const editSetting = (role: Role, agent: WorkerAgent, key: keyof AgentSettings, value: string) =>
     setEntry(role, (own) => ({ ...own, [agent]: { ...own[agent], [key]: value } }));
@@ -353,7 +355,7 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
                   <label key={holder} className={styles.check}>
                     <input
                       type="checkbox"
-                      aria-label={`${role.label}: ${NAMES[holder]}`}
+                      aria-label={`${role.label}: ${holderLabel(holder)}`}
                       checked={held}
                       // A role keeps at least one holder, and a following role shows its parent's.
                       disabled={following || (held && shown?.agents.length === 1)}

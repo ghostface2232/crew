@@ -238,7 +238,7 @@ function resolveRoles(settings: RoleSettings): Record<Role, RoleAssignment> {
  * One role's entry as the user wrote it, in the current form. The form before agents named a default agent with
  * the others in also, and one model and effort for the default; they become that agent's settings.
  */
-function roleEntry(role: Role, entry: Record<string, unknown>): Partial<RoleAssignment> {
+function roleEntry(role: Role, entry: Record<string, unknown>, inherited: RoleAssignment): Partial<RoleAssignment> {
   const holders = HOLDERS.join(', ');
   const legacy = ['agent', 'also', 'model', 'effort'].filter((key) => key in entry);
   const current = ['agents', 'codex', 'antigravity'].filter((key) => key in entry);
@@ -260,12 +260,15 @@ function roleEntry(role: Role, entry: Record<string, unknown>): Partial<RoleAssi
       throw new Error(`roles.${role}.model needs roles.${role}.agent: a model belongs to one agent, and a role that follows ${parent} can change agents. Set the agent too, or leave the model to ${parent}.`);
     }
     if (agent !== undefined) result.agents = sortHolders([agent as Holder, ...((also as Holder[] | undefined) ?? [])]);
-    else if (also !== undefined) throw new Error(`roles.${role}.also needs roles.${role}.agent; write the agents list instead.`);
+    else if (also !== undefined) {
+      // Further holders on top of those the role had unwritten, whose settings it kept too.
+      Object.assign(result, structuredClone(inherited), { agents: sortHolders([...inherited.agents, ...(also as Holder[])]) });
+    }
     // The settings were the default's: the agent named, else the role's own default, else (only effort may follow a parent) Codex's.
     const owner = (agent ?? BASE_HOLDERS[role] ?? 'codex') as Holder;
     if (owner !== LEAD && (model !== undefined || effort !== undefined)) {
       const settings: AgentSettings = { ...(model !== undefined ? { model: model as string } : {}), ...(effort !== undefined && owner === 'codex' ? { effort: effort as string } : {}) };
-      if (Object.keys(settings).length) result[owner] = settings;
+      if (Object.keys(settings).length) result[owner] = { ...result[owner], ...settings };
     }
     return result;
   }
@@ -297,10 +300,14 @@ export function resolveConfig(user: UserConfig): Config {
   const given: unknown = user.roles ?? {};
   if (!isObject(given)) throw new Error('roles must be an object such as {"polish": {"agents": ["codex"]}}.');
   const roleSettings: RoleSettings = {};
-  for (const [role, entry] of Object.entries(given)) {
-    if (!isRole(role)) throw new Error(`roles.${role} is not a role; use one of: ${ROLES.join(', ')}.`);
+  for (const role of Object.keys(given)) if (!isRole(role)) throw new Error(`roles.${role} is not a role; use one of: ${ROLES.join(', ')}.`);
+  // Parents first, so an old entry that added holders to its parent's can be read against the parent.
+  for (const role of ROLES) {
+    const entry = given[role];
+    if (entry === undefined) continue;
     if (!isObject(entry)) throw new Error(`roles.${role} must be an object such as {"agents": ["codex"]}.`);
-    roleSettings[role] = roleEntry(role, entry);
+    // What the role would get unwritten: its parent's holders, or its own default.
+    roleSettings[role] = roleEntry(role, entry, resolveRoles({ ...roleSettings, [role]: undefined })[role]);
   }
   const roles = resolveRoles(roleSettings);
   for (const key of ['plugins', 'appPlugins'] as const) {

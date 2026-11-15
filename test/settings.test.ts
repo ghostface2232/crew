@@ -249,5 +249,8 @@ test('a role written before agents becomes a list of holders, the model going to
   assert.deepEqual(config.roleSettings.review, { agents: ['codex', 'antigravity', 'claude'], antigravity: { model: 'gemini-y' } });
   assert.deepEqual(config.roles.polish, { agents: ['claude'] });
   assert.throws(() => resolveConfig({ roles: { review: { also: ['cursor'] } } as never }), /roles\.review\.also must be a list of: codex, antigravity, claude/);
-  assert.throws(() => resolveConfig({ roles: { review: { also: ['codex'] } } }), /also needs roles\.review\.agent/);
+  // also alone added holders to those the role had unwritten, keeping their settings.
+  const added = resolveConfig({ roles: { delegate: { agent: 'antigravity', model: 'gemini-y' }, refactor: { also: ['codex'], effort: 'low' }, review: { also: ['claude'] } } });
+  assert.deepEqual(added.roles.refactor, { agents: ['codex', 'antigravity'], antigravity: { model: 'gemini-y' }, codex: { effort: 'low' } });
+  assert.deepEqual(added.roles.review, { agents: ['codex', 'claude'] });
 });

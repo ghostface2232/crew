@@ -499,6 +499,21 @@ test('a role can hold Claude and several workers, each with its own settings, an
   });
 });
 
+test('an agent turned off and on again gets its saved settings back', async ({ page, request }) => {
+  const data = fixture();
+  const config = resolveConfig({ roles: { review: { agents: ['codex', 'antigravity'], antigravity: { model: 'gemini-y' } } } });
+  data.roles = config.roles;
+  data.roleSettings = config.roleSettings;
+  await request.post('/__push', { data: { type: 'state', data } });
+  await openSettings(page, 'Review');
+  const antigravity = page.getByRole('checkbox', { name: 'Cross-review: Antigravity' });
+  await antigravity.uncheck();
+  await expect(page.getByLabel('Cross-review Antigravity model')).toHaveCount(0);
+  await antigravity.check();
+  await expect(page.getByLabel('Cross-review Antigravity model')).toHaveValue('gemini-y');
+  await expect(page.getByText('Unsaved changes')).toHaveCount(0);
+});
+
 test('New Job picks among a role\'s worker holders, and a role only Claude holds starts from Claude', async ({ page, request }) => {
   const data = fixture();
   data.roles = resolveConfig({ roles: { delegate: { agents: ['codex', 'antigravity'] }, polish: { agents: ['claude'] } } }).roles;

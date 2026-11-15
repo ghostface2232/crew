@@ -98,6 +98,9 @@ struct CrewSettingsView: View {
     @ViewBuilder private func content(_ pane: SettingsPane) -> some View {
         if let group = pane.group {
             ForEach(model.roleInfo.filter { $0.group == group }) { roleSection($0) }
+            Section {} footer: {
+                Text("The lead picks among a role's holders for each job. Claude does the work itself or in a subagent. A role's model and effort apply to its default holder.").settingsFootnote()
+            }
         } else if pane == .presets {
             presets
         } else {
@@ -110,12 +113,30 @@ struct CrewSettingsView: View {
                 if let parent = role.parent {
                     Text("Same as \(model.roleInfo.first { $0.role == parent }?.label ?? parent)").tag("")
                 }
-                ForEach(store.state.agents.keys.sorted(), id: \.self) { id in
-                    Text("\(agentName(id))\(store.state.agents[id]?.enabled == false ? " (disabled)" : "")").tag(id)
+                ForEach(["codex", "antigravity", "claude"], id: \.self) { id in
+                    Text(holderLabel(id)).tag(id)
                 }
             }.accessibilityLabel("Agent for \(role.label)")
+            LabeledContent("Also") {
+                VStack(alignment: .trailing, spacing: Space.s) {
+                    HStack(spacing: Space.l) {
+                        ForEach(["codex", "antigravity", "claude"].filter { $0 != model.assignment(for: role.role)?.agent }, id: \.self) { holder in
+                            Toggle(holderLabel(holder), isOn: Binding(
+                                get: { model.assignment(for: role.role)?.also?.contains(holder) == true },
+                                set: { model.setAlso(role.role, holder: holder, enabled: $0) }
+                            )).toggleStyle(.checkbox).accessibilityLabel("Also \(agentName(holder)) for \(role.label)")
+                        }
+                    }
+                    if model.roleSettings[role.role]?.agent == nil, model.roleSettings[role.role]?.also == nil, let parent = role.parent {
+                        Text("Same as \(model.roleInfo.first { $0.role == parent }?.label ?? parent): \(model.assignment(for: parent)?.holders.map(agentName).joined(separator: ", ") ?? "None")")
+                            .font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
             TextField("Model", text: roleBinding(role, \.model), prompt: Text(inheritedValue(role, \.model)))
                 .accessibilityLabel("\(role.label) model")
+                .disabled(role.parent != nil && model.roleSettings[role.role]?.agent == nil)
+                .help("Choose an agent to set this role's model.")
             TextField("Reasoning effort", text: roleBinding(role, \.effort), prompt: Text(inheritedValue(role, \.effort)))
                 .accessibilityLabel("\(role.label) reasoning effort")
         } header: {
@@ -189,6 +210,9 @@ struct CrewSettingsView: View {
             .glassPillButton().morphs(on: [model.savingRoles, model.savingPreset, model.savingText]).keyboardShortcut("s")
             .disabled(!store.connected || saving || (pane.scope != nil && !model.loaded))
         }.padding(.horizontal, Space.x3l).padding(.vertical, Space.xl)
+    }
+    private func holderLabel(_ holder: String) -> String {
+        holder == "claude" ? "Claude (you)" : "\(agentName(holder))\(store.state.agents[holder]?.enabled == false ? " (disabled)" : "")"
     }
     private func roleBinding(_ role: RoleInfo, _ key: WritableKeyPath<RoleSetting, String?>) -> Binding<String> {
         Binding(get: {

@@ -279,12 +279,16 @@ struct AgentOverview: View {
     }
 }
 
-/// The roles an agent holds, as the user assigned them; Claude always leads. A role that follows its parent to the same agent adds nothing to say.
-@MainActor private func agentRole(_ agent: String, store: CrewStore) -> String {
+/// A role following its parent to the same holders adds nothing to the overview.
+@MainActor func agentRole(_ agent: String, store: CrewStore) -> String {
     let roles = store.state.roles
-    return agent == "claude" ? "Lead" : store.state.availableRoles
-        .filter { roles[$0.role]?.agent == agent && !($0.parent.map { roles[$0]?.agent == agent } ?? false) }
-        .map(\.label).joined(separator: " · ")
+    let labels = store.state.availableRoles.filter { info in
+        guard let assignment = roles[info.role], assignment.holders.contains(agent) else { return false }
+        if store.state.roleSettings?[info.role]?.agent == nil, let parent = info.parent, let inherited = roles[parent],
+           Set(assignment.holders) == Set(inherited.holders) { return false }
+        return true
+    }.map(\.label)
+    return ((agent == "claude" ? ["Lead"] : []) + labels).joined(separator: " · ")
 }
 
 /// Claude sessions open in this scope but between turns.

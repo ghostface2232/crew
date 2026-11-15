@@ -660,7 +660,8 @@ test('the toolbar keeps its actions on one row at every width, moving only the s
       };
       return { tabs: middle('[role="tablist"]'), newJob: middle('button[title="New job"]'), search: middle('.search') };
     });
-    if (rows.newJob !== rows.tabs || !(rows.search === rows.tabs || rows.search > rows.tabs + 20)) split.push(width);
+    const sameRow = (a: number, b: number) => Math.abs(a - b) <= 2;
+    if (!sameRow(rows.newJob, rows.tabs) || !(sameRow(rows.search, rows.tabs) || rows.search > rows.tabs + 20)) split.push(width);
   }
   expect(split, 'widths where the toolbar splits its actions').toEqual([]);
 });

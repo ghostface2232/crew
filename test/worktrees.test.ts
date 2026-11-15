@@ -398,12 +398,14 @@ test('transport commits skip post-commit and post-index-change hooks', async (t)
   git('config', 'user.email', 't@example.com');
   const hooks = path.join(repo, '.git', 'hooks');
   git('config', 'core.hooksPath', hooks);
-  for (const hook of ['post-commit', 'post-index-change']) {
+  for (const hook of ['post-commit', 'post-index-change', 'fsmonitor']) {
     fs.writeFileSync(path.join(hooks, hook), `#!/bin/sh\necho ran > ${hook}.marker\n`, { mode: 0o755 });
   }
+  // An fsmonitor command runs on every read of the index, whatever core.hooksPath says.
+  git('config', 'core.fsmonitor', path.join(hooks, 'fsmonitor'));
   fs.writeFileSync(path.join(repo, 'work.txt'), 'work');
   assert.ok(await commitAll(repo, 'transport'));
-  for (const hook of ['post-commit', 'post-index-change']) assert.equal(fs.existsSync(path.join(repo, `${hook}.marker`)), false, hook);
+  for (const hook of ['post-commit', 'post-index-change', 'fsmonitor']) assert.equal(fs.existsSync(path.join(repo, `${hook}.marker`)), false, hook);
 });
 
 test('included paths preserve non-ASCII and newline filenames with quotePath enabled', async (t) => {
@@ -424,4 +426,20 @@ test('included paths preserve non-ASCII and newline filenames with quotePath ena
   assert.deepEqual(result.failed, []);
   assert.deepEqual(result.copied.sort(), names.map((name) => `${name}/`).sort());
   for (const name of names) assert.equal(fs.readFileSync(path.join(wt, name, 'file'), 'utf8'), name);
+});
+
+test('a worktree that git creates before a hook fails is removed with its branch', async (t) => {
+  const repo = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-failed-add-')));
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-failed-add-home-')));
+  t.after(() => { fs.rmSync(repo, { recursive: true, force: true }); fs.rmSync(home, { recursive: true, force: true }); });
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
+  git('init', '-q');
+  git('-c', 'user.name=Test', '-c', 'user.email=t@example.com', 'commit', '-q', '--allow-empty', '-m', 'base');
+  const hooks = path.join(repo, '.git', 'hooks');
+  git('config', 'core.hooksPath', hooks);
+  fs.writeFileSync(path.join(hooks, 'post-checkout'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+  const before = git('worktree', 'list', '--porcelain');
+  await assert.rejects(createWorktree(repo, 'cx-hook', 'HEAD', home), /git worktree/);
+  assert.equal(git('worktree', 'list', '--porcelain'), before);
+  assert.equal(git('branch', '--list', 'crew-cx-hook'), '');
 });

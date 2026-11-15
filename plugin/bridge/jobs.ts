@@ -353,6 +353,8 @@ function exchanged(job: Job, from: ExchangeEntry['from'], text: string): void {
 const KEEP_JOBS = 200;
 /** Unacknowledged news keeps a finished job past the history limit, but not forever: a lead that never echoed it is gone. */
 const UNREAD_KEEP_MS = 7 * 24 * 60 * 60_000;
+/** A job that ended this recently stays, whatever its age, so whoever waited on it can read it. */
+const RECENT_MS = 60 * 60_000;
 const KEEP_EVENTS = 5000;
 
 /**
@@ -1606,10 +1608,14 @@ export class Jobs {
 
   private save(): void {
     let history = 0;
+    // A receipt the lead has not echoed yet still names its jobs, which an ack must find.
+    const named = new Set(Object.values(this.delivery.state.receipts).filter((receipt) => !receipt.acknowledged).flatMap((receipt) => receipt.items.map((item) => item.jobId)));
     const keep = this.list().filter((job) =>
       job.worktree || job.cleanupPending || !isTerminal(job) || this.finalizing.has(job.id) || this.cancelling.has(job.id)
       || this.discarding.has(job.id) || this.changingRounds.has(job.id) || this.preparingReviews.has(job.id)
-      || this.snapshots.has(job.id) || this.checks.has(job.id) || (unread(job).length > 0 && Date.now() - (job.endedAt ?? 0) < UNREAD_KEEP_MS) || (job.mission !== undefined && this.hooks.keepsMission?.(job.mission)) || history++ < KEEP_JOBS,
+      || this.snapshots.has(job.id) || this.checks.has(job.id) || Boolean(this.waiters.get(job.id)?.size) || named.has(job.id)
+      // Just ended, its caller has yet to read the result.
+      || Date.now() - (job.endedAt ?? 0) < RECENT_MS || (unread(job).length > 0 && Date.now() - (job.endedAt ?? 0) < UNREAD_KEEP_MS) || (job.mission !== undefined && this.hooks.keepsMission?.(job.mission)) || history++ < KEEP_JOBS,
     );
     const file = path.join(this.home, 'jobs.json');
     fs.writeFileSync(`${file}.tmp`, JSON.stringify({ seq: this.seq, jobs: keep, delivery: this.delivery.state }));
@@ -1621,10 +1627,7 @@ export class Jobs {
       this.workerTokens.delete(id);
       this.touchedFiles.delete(id);
       this.turnStartTokens.delete(id);
-      for (const wake of this.waiters.get(id) ?? []) wake();
       this.waiters.delete(id);
-      this.snapshots.delete(id);
-      this.checks.delete(id);
     }
   }
 

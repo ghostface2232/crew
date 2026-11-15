@@ -318,8 +318,8 @@ dialog.detail-panel::backdrop { background: transparent; }
 /* Nothing in the toolbar wraps inside itself; as room runs out, the search narrows and the tabs keep only symbols. */
 .toolbar { container-type: inline-size; }
 .toolbar button, .toolbar .segmented > button { flex: none; white-space: nowrap; }
-/* At least the narrow-window breakpoint, so a toolbar that may wrap has dropped the tab names first. */
-@container (max-width: 760px) {
+/* The widest a narrow window's toolbar gets (760px less its padding), so a toolbar that may wrap has dropped the tab names first. */
+@container (max-width: 728px) {
   .segmented.tabs > button > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .segmented.tabs > button { padding: 0 10px; }
   .segmented.tabs > button:has(> .tab-badge) { position: relative; }

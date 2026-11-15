@@ -6,6 +6,9 @@ import os from 'node:os';
 import path from 'node:path';
 import type { ReviewTarget } from './jobs.ts';
 
+/** Transport commits run none of the repository's hooks; an fsmonitor command is a hook too, run on every index read. */
+const NO_HOOKS = ['-c', `core.hooksPath=${os.devNull}`, '-c', 'core.fsmonitor=false'];
+
 export function git(cwd: string, args: string[], stdin?: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = execFile('git', args, { cwd, maxBuffer: 16 * 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
@@ -94,7 +97,18 @@ export async function createWorktree(root: string, id: string, baseRef: string, 
   await fs.mkdir(path.dirname(wtPath), { recursive: true });
   // Flat rather than `crew/<id>`: a repository with a branch named `crew` cannot also have `crew/...`.
   const branch = `crew-${id}`;
-  await git(root, ['worktree', 'add', '-b', branch, wtPath, base]);
+  try {
+    await git(root, ['worktree', 'add', '-b', branch, wtPath, base]);
+  } catch (err) {
+    // `worktree add` can fail after creating both, as when a post-checkout hook fails. Without the directory it failed
+    // before creating anything, and a branch of that name was already there and is not ours.
+    if (!existsSync(wtPath)) throw err;
+    const left: string[] = [];
+    await git(root, ['worktree', 'remove', '--force', wtPath]).catch((cleanup) => left.push(String(cleanup?.message ?? cleanup)));
+    await git(root, ['branch', '-D', branch]).catch((cleanup) => left.push(String(cleanup?.message ?? cleanup)));
+    if (left.length) throw new Error(`${(err as Error).message}; worktree cleanup failed: ${left.join('; ')}`, { cause: err });
+    throw err;
+  }
   return { path: wtPath, branch, base };
 }
 
@@ -219,10 +233,10 @@ export function realpath(target: string): string {
  * missing identity falls back to Crew's.
  */
 export async function commitAll(wt: string, message: string, linked: string[] = []): Promise<string | null> {
-  await git(wt, ['-c', `core.hooksPath=${os.devNull}`, 'add', '-A', ...await besides(wt, linked)]);
-  const staged = await git(wt, ['diff', '--cached', '--name-only']);
+  await git(wt, [...NO_HOOKS, 'add', '-A', ...await besides(wt, linked)]);
+  const staged = await git(wt, [...NO_HOOKS, 'diff', '--cached', '--name-only']);
   if (!staged) return null;
-  await git(wt, [...await commitSettings(wt), '-c', `core.hooksPath=${os.devNull}`, 'commit', '--no-verify', '-m', message]);
+  await git(wt, [...await commitSettings(wt), ...NO_HOOKS, 'commit', '--no-verify', '-m', message]);
   return git(wt, ['rev-parse', '--short', 'HEAD']);
 }
 
@@ -249,7 +263,7 @@ export async function mergeInto(wt: string, repo: string, ref: string, linked: s
   const commit = await git(repo, ['rev-parse', '--verify', `${ref}^{commit}`]);
   if (await dirtyCount(wt, linked)) throw new Error('The worktree has uncommitted changes, so nothing was merged into it.');
   try {
-    await git(wt, [...await commitSettings(wt), '-c', `core.hooksPath=${os.devNull}`, 'merge', '--no-edit', commit]);
+    await git(wt, [...await commitSettings(wt), ...NO_HOOKS, 'merge', '--no-edit', commit]);
   } catch (err) {
     const conflicts = (await git(wt, ['diff', '--name-only', '--diff-filter=U', '-z'])).split('\0').filter(Boolean);
     await git(wt, ['merge', '--abort']).catch((abort) => {
@@ -280,7 +294,7 @@ export async function revertsSince(wt: string, base: string): Promise<{ commit: 
 export async function revertCommit(wt: string, commit: string, linked: string[] = []): Promise<string> {
   if (await dirtyCount(wt, linked)) throw new Error('The worktree has uncommitted changes; commit or remove them before changing a round.');
   try {
-    await git(wt, [...await commitSettings(wt), '-c', `core.hooksPath=${os.devNull}`, 'revert', '--no-edit', commit]);
+    await git(wt, [...await commitSettings(wt), ...NO_HOOKS, 'revert', '--no-edit', commit]);
   } catch (err) {
     const conflicts = (await git(wt, ['diff', '--name-only', '--diff-filter=U', '-z'])).split('\0').filter(Boolean);
     // A preflight failure may not have opened a revert, so abort has nothing to do in that case.

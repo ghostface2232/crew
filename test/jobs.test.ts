@@ -366,7 +366,7 @@ test('the history limit does not hide old worktrees or undelivered jobs after a 
   first.jobs.jobs.set('unread', { ...job, id: 'unread', worktree: null, delivered: 0, ackedSeq: 0, news: job.news!.map((news) => ({ ...news, acked: false })) });
   for (let i = 0; i < 201; i++) {
     const id = `history-${i}`;
-    first.jobs.jobs.set(id, { ...job, id, worktree: null, createdAt: job.createdAt + i + 1 });
+    first.jobs.jobs.set(id, { ...job, id, worktree: null, createdAt: job.createdAt + i + 1, endedAt: 1 });
   }
   first.jobs.flush();
   const second = new Jobs(first.home, () => config, {} as never, { onEvent: () => {}, onJob: () => {}, onAttention: () => {} });
@@ -675,12 +675,14 @@ test('a job carries its mission and starting notes, and is kept with a mission t
   // Notes that are not a list of strings must not stop the job.
   const odd = await settled(jobs, await jobs.create({ kind: 'review', cwd: repo, review, notes: 'not a list' as never }));
   assert.deepEqual(odd.notes, []);
-  for (const job of [first, dropped, odd]) acknowledge(jobs, job);
+  // Ended long ago, so only the history limit and the mission decide.
+  for (const job of [first, dropped, odd]) { acknowledge(jobs, job); job.endedAt = 1; }
 
   // Push both past the history limit with newer finished jobs.
   for (let i = 0; i < 201; i++) {
     const job = await settled(jobs, await jobs.create({ kind: 'review', cwd: repo, review }));
     acknowledge(jobs, job);
+    job.endedAt = 1;
   }
   jobs.flush();
   const reloaded = make();
@@ -2331,15 +2333,19 @@ test('history retention prunes memory and per-job maps to match persistence', as
     jobs.jobs.set(id, { ...base, id, createdAt: i, endedAt: i });
     for (const key of ['workerTokens', 'touchedFiles', 'turnStartTokens']) (jobs as any)[key].set(id, key === 'turnStartTokens' ? 1 : key === 'workerTokens' ? 'token' : new Set());
   }
+  // Someone waiting on a job keeps it: the waiter reads it once woken.
   const waiting = jobs.wait('history-0', base.seq, 1000);
   jobs.flush();
   const saved = JSON.parse(fs.readFileSync(path.join(home, 'jobs.json'), 'utf8')).jobs as Job[];
-  assert.equal(jobs.list().length, 200);
+  assert.equal(jobs.list().length, 201);
+  assert.ok(jobs.jobs.has('history-0'));
   assert.deepEqual(jobs.list().map((job) => job.id), saved.map((job) => job.id));
-  for (const key of ['workerTokens', 'touchedFiles', 'turnStartTokens', 'waiters', 'snapshots', 'checks']) {
-    assert.equal((jobs as any)[key].has('history-0'), false, key);
+  for (const key of ['workerTokens', 'touchedFiles', 'turnStartTokens']) {
+    assert.equal((jobs as any)[key].has('history-1'), false, key);
   }
   assert.ok((jobs as any).turnStartTokens.has('history-250'));
+  jobs.get('history-0').seq += 1;
+  (jobs as any).waiters.get('history-0')?.forEach((wake: () => void) => wake());
   await waiting;
 });
 
@@ -2398,7 +2404,7 @@ test('retention preserves work, unread results, kept missions and pending operat
     else (jobs as any)[key].add(key);
   }
   for (const [id, fields] of Object.entries(protectedJobs)) jobs.jobs.set(id, { ...base, id, createdAt: 0, endedAt: 0, ...fields });
-  for (let i = 1; i <= 251; i++) jobs.jobs.set(`history-${i}`, { ...base, id: `history-${i}`, createdAt: i });
+  for (let i = 1; i <= 251; i++) jobs.jobs.set(`history-${i}`, { ...base, id: `history-${i}`, createdAt: i, endedAt: i });
   jobs.flush();
   for (const id of Object.keys(protectedJobs)) assert.ok(jobs.jobs.has(id), id);
   assert.equal(jobs.list().length, 200 + Object.keys(protectedJobs).length);
@@ -2445,4 +2451,22 @@ test('a job that cannot be persisted rolls back its worktree and branch', async 
   assert.equal(jobs.list().length, 0);
   assert.equal(execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: repo, encoding: 'utf8' }), before);
   assert.equal(execFileSync('git', ['branch', '--list', 'crew-*'], { cwd: repo, encoding: 'utf8' }), '');
+});
+
+test('retention keeps a job that just ended and one an unechoed receipt names, however old', async (t) => {
+  const repo = tempRepo();
+  let worker!: JobCtl;
+  const { jobs, home } = harness((ctl) => { worker = ctl; });
+  t.after(() => { jobs.flush(); fs.rmSync(home, { recursive: true, force: true }); fs.rmSync(repo, { recursive: true, force: true }); });
+  const job = await jobs.create({ kind: 'delegate', cwd: repo, isolation: 'in_place', task: 'long task' });
+  job.createdAt = 1;
+  for (let i = 0; i < 200; i++) jobs.jobs.set(`newer-${i}`, { ...job, id: `newer-${i}`, createdAt: i + 2, state: 'done', endedAt: 1, news: [] });
+  jobs.jobs.set('named', { ...job, id: 'named', createdAt: 0, state: 'done', endedAt: 1, news: [] });
+  jobs.delivery.state.receipts['receipt-1'] = { session: 'lead', items: [{ jobId: 'named', newsSeq: 1 }], text: 'news', at: Date.now() };
+  const read = jobs.wait(job.id, job.seq, 1000).then(() => jobs.get(job.id));
+  worker.done('completed long task');
+  assert.equal((await read).state, 'done');
+  jobs.flush();
+  assert.ok(jobs.jobs.has(job.id));
+  assert.ok(jobs.jobs.has('named'));
 });

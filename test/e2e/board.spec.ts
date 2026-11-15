@@ -1106,7 +1106,7 @@ for (const width of [390, 1440]) {
     }));
     await request.post('/__push', { data: { type: 'state', data } });
     const view = page.locator('.session').filter({ has: page.getByText(session.title, { exact: true }) }).first();
-    await expect(view.locator('summary')).toContainText('2 sub-agents · 12 workflow running');
+    await expect(view.locator('.session-count')).toHaveText(`2 sub-agents · ${session.workflows[0].name} 12 running`);
     expect(await view.locator('summary > span:not(.chip)').evaluate((el) => el.clientWidth)).toBeGreaterThan(80);
     await view.locator('summary').click();
     await expect(view.getByRole('list', { name: 'Sub-agents', exact: true }).locator('li')).toHaveCount(2);
@@ -1123,13 +1123,11 @@ for (const width of [390, 1440]) {
     await expect(run.locator('li')).toHaveCount(5);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     expect(await run.locator('.session-agents > li > span:first-child > span:first-child').first().evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
-    if (process.env.CREW_WORKFLOW_EVIDENCE && test.info().project.name === 'chromium') {
-      await page.screenshot({ path: `${process.env.CREW_WORKFLOW_EVIDENCE}/workflow-${width}.png`, fullPage: true });
-    }
     session.agents = session.agents.filter((agent) => !agent.workflow);
     await request.post('/__push', { data: { type: 'state', data } });
     await expect(run).toContainText('0 running · 7 done');
-    await expect(run).toContainText('Between phases or finished');
+    await expect(run).toContainText('No agent running: between phases, or finished.');
+    await expect(view.locator('.session-count')).toHaveText('2 sub-agents');
     await expect(run.getByRole('button')).toHaveCount(0);
   });
 }

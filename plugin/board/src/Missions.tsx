@@ -52,8 +52,8 @@ function SessionAgents({ agents, now, label }: { agents: SessionAgent[]; now: nu
   return <ul className="session-agents" aria-label={label}>
     {agents.map((agent) => <li key={agent.id}>
       <span>
-        <span title={agent.title} tabIndex={0}>{agent.title}</span>
-        <span className="caption secondary" title={agent.phase} tabIndex={0}>{agent.phase}</span>
+        <span title={agent.title}>{agent.title}</span>
+        <span className="caption secondary" title={agent.phase}>{agent.phase}</span>
       </span>
       <span className="caption secondary">{elapsed(now - agent.startedAt)}</span>
     </li>)}
@@ -63,23 +63,25 @@ function SessionAgents({ agents, now, label }: { agents: SessionAgent[]; now: nu
 function SessionWorkflow({ run, agents, now }: { run: ClaudeSession['workflows'][number]; agents: SessionAgent[]; now: number }) {
   const [expanded, setExpanded] = useState(false);
   const visible = expanded ? agents : agents.slice(0, 5);
+  // Grouped after the cut, so the folded view keeps start order across stages; one stage needs no headings.
+  const staged = new Set(agents.map((agent) => agent.stage)).size > 1;
   const groups = new Map<string, SessionAgent[]>();
   for (const agent of visible) {
-    const stage = agent.stage || 'Other agents';
+    const stage = agent.stage ?? '';
     const group = groups.get(stage) ?? [];
     group.push(agent);
     groups.set(stage, group);
   }
   return <section className="session-workflow" aria-label={run.name}>
     <div className="session-workflow-head">
-      <b title={run.name} tabIndex={0}>{run.name}</b>
+      <b title={run.name}>{run.name}</b>
       <span className="caption secondary">{elapsed(now - run.startedAt)}</span>
     </div>
     <p className="caption secondary">{agents.length} running · {run.done} done</p>
-    {agents.length === 0 && <p className="caption secondary">Between phases or finished</p>}
+    {agents.length === 0 && <p className="caption secondary">No agent running: between phases, or finished.</p>}
     {[...groups].map(([stage, group]) => <div className="session-stage" key={stage}>
-      <p className="caption secondary" title={stage}>{stage}</p>
-      <SessionAgents agents={group} now={now} label={`${run.name}: ${stage}`} />
+      {staged && stage && <p className="caption secondary" title={stage}>{stage}</p>}
+      <SessionAgents agents={group} now={now} label={staged && stage ? `${run.name}: ${stage}` : run.name} />
     </div>)}
     {agents.length > 5 && <button className="small" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
       {expanded ? 'Show fewer agents' : `Show all ${agents.length} agents`}
@@ -91,15 +93,18 @@ export function SessionView({ session }: { session: ClaudeSession }) {
   const now = useNow();
   const plain = session.agents.filter((agent) => !agent.workflow);
   const running = session.agents.length - plain.length;
+  const active = session.workflows.filter((run) => session.agents.some((agent) => agent.workflow === run.id));
+  // Matches the Mac app's row: "2 sub-agents · review 12 running".
+  const count = [
+    plain.length > 0 ? `${plain.length} sub-agent${plain.length === 1 ? '' : 's'}` : '',
+    active.length > 0 ? `${active.length === 1 ? active[0].name : `${active.length} workflows`} ${running} running` : '',
+  ].filter(Boolean).join(' · ');
   return (
     <details className="session">
       <summary>
         <AgentMark agent="claude" size={14} />
         <span>{session.title}</span>
-        {(plain.length > 0 || session.workflows.length > 0) && <small className="session-count secondary">
-          {[plain.length > 0 ? `${plain.length} sub-agent${plain.length === 1 ? '' : 's'}` : '',
-            session.workflows.length > 0 ? `${running} workflow running` : ''].filter(Boolean).join(' · ')}
-        </small>}
+        {count && <small className="session-count secondary" title={count}>{count}</small>}
         <Chip state={session.stalled ? 'stalled' : session.state}>
           {session.stalled ? 'May be stuck' : capitalized(session.state)}
         </Chip>

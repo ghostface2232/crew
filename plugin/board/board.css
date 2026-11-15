@@ -509,7 +509,7 @@ dialog.detail-panel::backdrop { background: transparent; }
 .session-agents > li > span:first-child > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-agents > li > span:last-child { flex: none; font-variant-numeric: tabular-nums; }
 .session > summary:has(.session-count) { display: grid; grid-template-columns: 8px 14px minmax(0, 1fr) auto; gap: 4px 10px; }
-.session-count { grid-column: 3 / -1; grid-row: 2; min-width: 0; font-size: 11px; }
+.session-count { grid-column: 3 / -1; grid-row: 2; min-width: 0; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session > summary > .chip { grid-column: 4; grid-row: 1; }
 .session-workflow { display: grid; gap: 6px; min-width: 0; margin-block-start: 8px; padding: 12px; border-radius: var(--row-radius); background: var(--row); }
 .session-workflow-head { display: flex; align-items: baseline; gap: 10px; min-width: 0; }

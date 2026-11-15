@@ -260,7 +260,7 @@ struct SessionRow: View {
     var open: () -> Void
     var body: some View {
         // The mark names the agent, so the detail line says only what the session is doing.
-        let detail = [session.waitingFor ?? (session.state == "idle" ? nil : session.phase), session.inTool ? "Running a tool" : nil]
+        let detail = [session.waitingFor ?? (session.state == "idle" ? nil : session.phase), session.inTool ? "Running a tool" : nil, session.agentSummary]
             .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
         Button(action: open) {
             HStack(spacing: Space.l) {

@@ -340,6 +340,39 @@ final class SettingsModel {
     func followsParent(_ role: String) -> Bool {
         roleInfo.first { $0.role == role }?.parent != nil && roleSettings[role]?.agents == nil
     }
+    func canToggleHolder(_ role: String, holder: String) -> Bool {
+        guard !followsParent(role), let assignment = assignment(for: role) else { return false }
+        let held = assignment.holders.contains(holder)
+        return assignment.holders != [holder] && (held || roleInfo.first { $0.role == role }?.unable?.contains(holder) != true)
+    }
+    func inheritedValue(_ role: String, agent: String, _ key: KeyPath<RoleAgentSettings, String?>) -> String? {
+        guard followsParent(role), let parent = roleInfo.first(where: { $0.role == role })?.parent,
+              let assignment = assignment(for: parent) else { return nil }
+        return RoleSetting(assignment)[agent]?[keyPath: key]
+    }
+    func blankTitle(_ role: String, agent: String, _ key: KeyPath<RoleAgentSettings, String?>, models: [ModelChoice]) -> String {
+        guard let value = inheritedValue(role, agent: agent, key), !value.isEmpty,
+              let parent = roleInfo.first(where: { $0.role == role })?.parent else { return "Agent default" }
+        let name = models.first { $0.id == value }?.name ?? value
+        let label = roleInfo.first { $0.role == parent }?.label ?? parent
+        return "\(name) (same as \(label))"
+    }
+    func fieldChoices(_ role: String, agent: String, _ key: KeyPath<RoleAgentSettings, String?>, models: [ModelChoice]) -> [ModelChoice] {
+        var choices = models
+        if key == \.effort {
+            let model = roleSettings[role]?[agent]?.model.flatMap { $0.isEmpty ? nil : $0 }
+                ?? inheritedValue(role, agent: agent, \.model)
+            let efforts = models.first { $0.id == model }?.efforts ?? models.flatMap { $0.efforts ?? [] }
+            choices = []
+            for effort in efforts where !choices.contains(where: { $0.id == effort }) {
+                choices.append(ModelChoice(id: effort, name: effort))
+            }
+        }
+        if let value = roleSettings[role]?[agent]?[keyPath: key], !value.isEmpty, !choices.contains(where: { $0.id == value }) {
+            choices.append(ModelChoice(id: value, name: value))
+        }
+        return choices
+    }
     func setFollowParent(_ role: String, enabled: Bool) {
         guard let parent = roleInfo.first(where: { $0.role == role })?.parent,
               followsParent(role) != enabled, let inherited = assignment(for: parent) else { return }
@@ -348,7 +381,7 @@ final class SettingsModel {
         storeRole(role, setting)
     }
     func setHolder(_ role: String, holder: String, enabled: Bool) {
-        guard RoleAssignment.holderOrder.contains(holder), !followsParent(role),
+        guard RoleAssignment.holderOrder.contains(holder), canToggleHolder(role, holder: holder),
               let assignment = assignment(for: role), assignment.holders.contains(holder) != enabled else { return }
         var holders = assignment.holders
         if enabled { holders.append(holder) } else {

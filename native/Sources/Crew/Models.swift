@@ -215,7 +215,8 @@ struct ClaudeSession: Codable, Sendable, Identifiable, Equatable {
     var projectPath: String { root ?? cwd }
     var notificationKey: String { "session:\(id):\(waitingId ?? waitingFor ?? "")" }
 }
-struct Worker: Codable, Sendable, Equatable { var name: String; var resume: String; var enabled: Bool }
+struct ModelChoice: Codable, Sendable, Identifiable, Equatable { var id: String; var name: String; var efforts: [String]? }
+struct Worker: Codable, Sendable, Equatable { var name: String; var resume: String; var enabled: Bool; var models: [ModelChoice]? }
 struct RoleAssignment: Codable, Sendable, Equatable {
     static let holderOrder = ["codex", "antigravity", "claude"]
     var agents: [String]
@@ -292,6 +293,7 @@ struct RoleInfo: Codable, Sendable, Identifiable, Equatable {
     var parent: String?
     var label: String
     var summary: String
+    var unable: [String]?
     var id: String { role }
     var group: String { kind == "delegate" ? "Build" : kind == "review" ? "Review" : "Edit" }
     static let legacy = [

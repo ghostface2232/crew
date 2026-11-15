@@ -26,11 +26,12 @@ function writeAtomic(file: string, text: string): void {
 }
 
 /**
- * Replaces the role table in config.json, keeping every other setting. Blank model and effort
- * fields are dropped, meaning "use the agent's own". Throws without writing if the table is invalid
+ * Replaces the role table in config.json, keeping every other setting. `roles` is the table as the user
+ * writes it, so a role left out or without an agent keeps following its parent. Blank fields are dropped:
+ * a blank agent means "same as the parent", a blank model or effort "use the agent's own". Throws without writing if the table is invalid
  * or if the existing file cannot be parsed, so a save never destroys what it could not read.
  */
-export function saveRoles(home: string, roles: unknown): Config['roles'] {
+export function saveRoles(home: string, roles: unknown): Pick<Config, 'roles' | 'roleSettings'> {
   const file = path.join(home, 'config.json');
   let current: Record<string, unknown> = {};
   try {
@@ -43,12 +44,12 @@ export function saveRoles(home: string, roles: unknown): Config['roles'] {
     ? Object.fromEntries(Object.entries(roles).map(([role, entry]) => [
         role,
         entry && typeof entry === 'object' && !Array.isArray(entry) ? Object.fromEntries(Object.entries(entry).filter(([, value]) => value !== '')) : entry,
-      ]))
+      ]).filter(([, entry]) => !(entry && typeof entry === 'object' && !Array.isArray(entry) && !Object.keys(entry).length)))
     : roles;
   const next = { ...current, roles: cleaned };
   const resolved = resolveConfig(next as never);
   writeAtomic(file, `${JSON.stringify(next, null, 2)}\n`);
-  return resolved.roles;
+  return { roles: resolved.roles, roleSettings: resolved.roleSettings };
 }
 
 /** Sets or clears the preset in config.json, keeping every other setting. Refused without writing if it is not a preset. */

@@ -9,12 +9,12 @@ import { AntigravityAdapter } from './adapters/antigravity.ts';
 import { CodexAdapter } from './adapters/codex.ts';
 import { ClaudeSessions } from './claude.ts';
 import type { ClaudeSession } from './claude.ts';
-import { canonicalPath, HOME, installed, loadConfig, PLUGIN_ROOT, PORT, VERSION, WORKERS } from './config.ts';
+import { canonicalPath, HOME, installed, isRole, loadConfig, PLUGIN_ROOT, PORT, ROLE_INFO, ROLES, VERSION, WORKERS } from './config.ts';
 import type { Config } from './config.ts';
 import { evidenceType, openEvidence } from './evidence.ts';
 import { projectRoot } from './git.ts';
 import { isTerminal, Jobs } from './jobs.ts';
-import { Missions, STAGES } from './missions.ts';
+import { missionPreset, Missions, STAGES } from './missions.ts';
 import type { Mission } from './missions.ts';
 import { runbook } from './runbook.ts';
 import { appendInstructions, instructionsFile, readInstructions, savePreset, saveRoles, writeInstructions } from './settings.ts';
@@ -180,6 +180,7 @@ const jobs = new Jobs(HOME, loadConfig, { codex, antigravity }, {
 fs.watchFile(path.join(HOME, 'config.json'), { interval: 2000 }, () => {
   const live = liveConfig();
   broadcast('roles', live.roles);
+  broadcast('roleSettings', live.roleSettings);
   broadcast('preset', { preset: live.preset, presets: live.presets });
   usage.setModels(usageModels(live));
 });
@@ -206,6 +207,8 @@ function state() {
       antigravity: { ...WORKERS.antigravity, enabled: live.antigravity.enabled },
     },
     roles: live.roles,
+    roleSettings: live.roleSettings,
+    roleInfo: ROLE_INFO,
     usage: usage.current(),
     preset: live.preset,
     presets: live.presets,
@@ -355,9 +358,15 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     if (pathname === '/api/usage') return usage.current();
     if (pathname === '/api/route') {
       const kind = url.searchParams.get('kind');
-      if (!['delegate', 'review', 'polish', 'lead'].includes(kind ?? '')) throw new HttpError(400, 'kind must be one of: delegate, review, polish, lead');
+      if (kind !== 'lead' && !isRole(kind)) throw new HttpError(400, `kind must be one of: ${ROLES.join(', ')}, lead`);
       // The config on disk, not the one for display: an invalid role table must fail the question as it would fail a job.
-      return routeWork(kind as RouteKind, usage.current(), loadConfig().roles);
+      const live = loadConfig();
+      const id = url.searchParams.get('mission');
+      const mission = id ? missions.list().find((m) => m.id === id) : undefined;
+      if (id && !mission) throw new HttpError(400, `No mission with id "${id}" is known any more.`);
+      // The preset the next job would run under, so the lead can pick its own subagents' models to match.
+      const preset = missionPreset(mission, live.preset);
+      return { ...routeWork(kind as RouteKind, usage.current(), live.roles), preset, policy: preset ? live.presets[preset] : null };
     }
     if (pathname === '/api/stream') {
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
@@ -487,7 +496,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     if (body.done && body.abandoned) throw new HttpError(400, 'pass done or abandoned, not both');
     if (body.done || body.abandoned) return missions.finish(id, { outcome: text(body.outcome, 'outcome'), record: text(body.record, 'record'), abandoned: Boolean(body.abandoned), reopen: body.reopen === true });
     if (body.note !== undefined) return missions.note(id, text(body.note, 'note') ?? '');
-    return missions.update(id, { stage: stage(body.stage), stages: body.stages, title: text(body.title, 'title') });
+    return missions.update(id, { stage: stage(body.stage), stages: body.stages, title: text(body.title, 'title'), preset: body.preset });
   }
 
   if (method === 'POST') {
@@ -517,15 +526,18 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       const body = await readJson(req);
       if (typeof body.project !== 'string' || !body.project) throw new HttpError(400, 'project must be the lead session\'s project directory');
       const first = stage(body.stage);
-      return missions.start({ title: text(body.title, 'title') ?? '', project: body.project, root: (await projectRoot(body.project).catch(() => null)) ?? body.project, owner: text(body.owner, 'owner'), stage: first, stages: body.stages });
+      return missions.start({ title: text(body.title, 'title') ?? '', project: body.project, root: (await projectRoot(body.project).catch(() => null)) ?? body.project, owner: text(body.owner, 'owner'), stage: first, stages: body.stages, preset: body.preset });
     }
     if (pathname === '/api/jobs') {
       const spec = await readJson(req);
       delete spec.missionStep;
       const mission = missions.list().find((m) => m.id === spec.mission);
-      // A job outlives a wrong link: it still runs, on its own, and says why it is not shown with a mission.
-      if (spec.mission !== undefined && mission?.state !== 'active') {
-        spec.notes = [...(spec.notes ?? []), `Mission ${spec.mission} is not active, so this job is shown on its own.`];
+      // The mission's preset is a cost the user chose; running on the global one instead would quietly change it.
+      if (spec.mission !== undefined && !mission) throw new HttpError(400, `No mission with id "${spec.mission}" is known any more, so its preset cannot be applied. Start the job without it, or open a new mission.`);
+      spec.preset = missionPreset(mission, liveConfig().preset);
+      // A job outlives its mission's tracking: it still runs under the mission's preset, on its own, and says why.
+      if (mission && mission.state !== 'active') {
+        spec.notes = [...(spec.notes ?? []), `Mission ${spec.mission} is ${mission.state}, so this job is shown on its own.`];
         delete spec.mission;
       }
       if (mission?.state === 'active' && mission.stages) spec.missionStep = mission.stageIndex ?? mission.stages.indexOf(mission.stage);
@@ -584,9 +596,10 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       return {};
     }
     if (pathname === '/api/roles') {
-      const roles = saveRoles(HOME, (await readJson(req)).roles);
-      broadcast('roles', roles);
-      return roles;
+      const saved = saveRoles(HOME, (await readJson(req)).roles);
+      broadcast('roles', saved.roles);
+      broadcast('roleSettings', saved.roleSettings);
+      return saved;
     }
     if (pathname === '/api/instructions') {
       const body = await readJson(req);

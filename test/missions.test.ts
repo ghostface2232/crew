@@ -5,7 +5,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import { canonicalPath } from '../plugin/bridge/config.ts';
-import { Missions, STAGES, STALE_MS } from '../plugin/bridge/missions.ts';
+import { missionPreset, Missions, STAGES, STALE_MS } from '../plugin/bridge/missions.ts';
 import type { Mission } from '../plugin/bridge/missions.ts';
 
 const tempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'crew-missions-'));
@@ -440,4 +440,22 @@ test('saved missions get canonical project keys when they load', (t) => {
   saved.missions[0].project = '/project/worktree/';
   fs.writeFileSync(file, JSON.stringify(saved));
   assert.equal(new Missions(home, () => {}).get(mission.id).project, canonicalPath('/project/worktree'));
+});
+
+test('a mission keeps the preset it was given until it is changed or cleared, and refuses one that is not a preset', (t) => {
+  const { home, missions } = harness(t);
+  const mission = missions.start({ ...input, preset: 'economy' });
+  assert.equal(mission.preset, 'economy');
+  assert.equal(missionPreset(mission, 'best'), 'economy');
+  // Left out means unchanged, as when a step is reported.
+  assert.equal(missions.update(mission.id, { stage: 'implement' }).preset, 'economy');
+  assert.equal(missions.update(mission.id, { preset: 'best' }).preset, 'best');
+  assert.equal(Object.hasOwn(missions.update(mission.id, { preset: null }), 'preset'), false);
+  assert.equal(missionPreset(missions.get(mission.id), 'balanced'), 'balanced');
+  assert.throws(() => missions.update(mission.id, { preset: 'cheap' }), /preset must be one of: economy, balanced, best, or null/);
+  assert.throws(() => missions.start({ ...input, preset: 'cheap' }), /preset must be one of/);
+  missions.update(mission.id, { preset: 'economy' });
+  missions.flush();
+  // Kept across a restart.
+  assert.equal(new Missions(home, () => {}).get(mission.id).preset, 'economy');
 });

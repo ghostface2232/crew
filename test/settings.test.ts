@@ -24,8 +24,12 @@ test('saving roles keeps every other setting, drops blank fields, and returns th
   const file = path.join(home, 'config.json');
   fs.writeFileSync(file, JSON.stringify({ notify: false, codex: { bin: '/opt/codex', model: 'm' }, roles: { review: { agent: 'antigravity' } } }));
 
-  const roles = saveRoles(home, { delegate: { agent: 'codex', model: '', effort: 'high' }, polish: { agent: 'codex', model: '', effort: '' } });
-  assert.deepEqual(roles, { delegate: { agent: 'codex', effort: 'high' }, review: { agent: 'codex' }, polish: { agent: 'codex' } });
+  const saved = saveRoles(home, { delegate: { agent: 'codex', model: '', effort: 'high' }, polish: { agent: 'codex', model: '', effort: '' }, refactor: { agent: '', model: '' } });
+  assert.deepEqual(saved.roleSettings, { delegate: { agent: 'codex', effort: 'high' }, polish: { agent: 'codex' } });
+  assert.deepEqual(saved.roles, {
+    delegate: { agent: 'codex', effort: 'high' }, refactor: { agent: 'codex', effort: 'high' }, release: { agent: 'codex', effort: 'high' },
+    debate: { agent: 'codex', effort: 'high' }, review: { agent: 'codex' }, verify: { agent: 'codex' }, polish: { agent: 'codex' },
+  });
   // The table is replaced as a whole: a role left out goes back to its default.
   assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), {
     notify: false,
@@ -146,6 +150,26 @@ test('no preset is set by default, and a setting on the role wins over the prese
   assert.deepEqual(effectiveRole(tuned, 'delegate'), { agent: 'codex', model: 'small', effort: 'low' });
   assert.deepEqual(effectiveRole(tuned, 'polish'), { agent: 'antigravity', model: 'flash' });
   assert.deepEqual(tuned.presets.best, PRESETS.best);
+});
+
+test('a role without an agent follows its parent whole; one with an agent starts fresh', () => {
+  const config = resolveConfig({ roles: { delegate: { model: 'gpt-x', effort: 'high' }, refactor: { agent: 'antigravity' }, debate: { effort: 'medium' }, review: { agent: 'antigravity' } } });
+  // The parent's model is meant for its agent, so it never reaches a role given another agent.
+  assert.deepEqual(config.roles.refactor, { agent: 'antigravity' });
+  assert.deepEqual(config.roles.release, { agent: 'codex', model: 'gpt-x', effort: 'high' });
+  assert.deepEqual(config.roles.debate, { agent: 'codex', model: 'gpt-x', effort: 'medium' });
+  assert.deepEqual(config.roles.verify, { agent: 'antigravity' });
+  assert.deepEqual(config.roleSettings, { delegate: { model: 'gpt-x', effort: 'high' }, refactor: { agent: 'antigravity' }, debate: { effort: 'medium' }, review: { agent: 'antigravity' } });
+  assert.throws(() => resolveConfig({ roles: { deploy: { agent: 'codex' } } as never }), /roles\.deploy is not a role; use one of: delegate, refactor, release, debate, review, verify, polish/);
+  assert.throws(() => resolveConfig({ roles: { verify: { agent: 'cursor' } } as never }), /roles\.verify\.agent is "cursor"/);
+});
+
+test('a mission\'s preset replaces the global one for its jobs', () => {
+  const config = resolveConfig({ preset: 'best', roles: { review: { effort: 'low' } } });
+  assert.deepEqual(effectiveRole(config, 'delegate', 'economy'), { agent: 'codex', effort: 'low' });
+  assert.deepEqual(effectiveRole(config, 'delegate', null), { agent: 'codex' });
+  // A role's own setting still wins.
+  assert.deepEqual(effectiveRole(config, 'review', 'balanced'), { agent: 'codex', effort: 'low' });
 });
 
 test('a preset that is not exactly valid is refused', () => {

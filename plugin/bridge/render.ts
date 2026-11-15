@@ -1,7 +1,7 @@
 import { unread } from './delivery.ts';
 import { checkLine } from './check.ts';
 import { WORKERS } from './config.ts';
-import { openRefusals } from './jobs.ts';
+import { jobRole, openRefusals } from './jobs.ts';
 import type { Job } from './jobs.ts';
 
 /** Text renderings of a job, shared by the MCP tools, the wake hook, and the CLI. */
@@ -25,11 +25,11 @@ export const needsLead = (job: JobView) => job.state !== 'running' || unread(job
 /** `waitingHint` replaces the default advice on how to settle a waiting job. */
 export function describe(job: JobView, waitingHint?: string): string {
   const elapsed = duration((job.endedAt ?? Date.now()) - job.createdAt);
-  const kind = job.debate ? `debate, round ${job.turns} of ${job.debate.rounds}` : job.kind;
+  const kind = job.debate ? `debate, round ${job.turns} of ${job.debate.rounds}` : jobRole(job);
   const lines = [`[${job.id}] ${WORKERS[job.agent].name} · ${kind} · ${job.state.toUpperCase()} (${elapsed}) — ${job.title}`];
 
   const effort = job.resolvedEffort ?? (job.agent === 'codex' && !job.nativeReview ? job.effort : undefined);
-  lines.push(`model: ${job.resolvedModel ?? job.model ?? 'unknown (agent default)'}${effort ? ` · effort: ${effort}` : ''}${job.tier && job.tier !== 'standard' ? ` · tier: ${job.tier}` : ''}`);
+  lines.push(`model: ${job.resolvedModel ?? job.model ?? 'unknown (agent default)'}${effort ? ` · effort: ${effort}` : ''}${job.tier && job.tier !== 'standard' ? ` · tier: ${job.tier}` : ''}${job.preset ? ` · preset: ${job.preset}` : ''}`);
 
   for (const question of job.questions ?? []) {
     if (question.answer !== undefined) continue;
@@ -152,5 +152,5 @@ function heldFolderOnly(job: JobView): boolean {
 export function summarize(job: JobView): string {
   const tail = job.state === 'running' ? job.phase : job.state === 'waiting' ? `needs a decision: ${job.waiting!.reason}` : (job.error?.message ?? job.result?.stat ?? '');
   const unread = job.endedAt && job.seq > job.delivered ? ' (result not read yet)' : '';
-  return `[${job.id}] ${WORKERS[job.agent].name} · ${job.debate ? 'debate' : job.kind} · ${job.state} (${duration((job.endedAt ?? Date.now()) - job.createdAt)}) — ${job.title}${tail ? ` — ${tail}` : ''}${unread}${job.cleanupPending ? heldFolderOnly(job) ? ' — empty worktree folder still held; removed automatically' : ` — cleanup incomplete (${job.cleanupPending.join('; ')}); run crew gc` : ''}`;
+  return `[${job.id}] ${WORKERS[job.agent].name} · ${jobRole(job)} · ${job.state} (${duration((job.endedAt ?? Date.now()) - job.createdAt)}) — ${job.title}${tail ? ` — ${tail}` : ''}${unread}${job.cleanupPending ? heldFolderOnly(job) ? ' — empty worktree folder still held; removed automatically' : ` — cleanup incomplete (${job.cleanupPending.join('; ')}); run crew gc` : ''}`;
 }

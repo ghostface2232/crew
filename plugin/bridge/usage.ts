@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { WORKERS } from './config.ts';
+import { LEAD, WORKERS } from './config.ts';
 import type { Config, Role } from './config.ts';
 import type { Agent } from './jobs.ts';
 
@@ -369,34 +369,49 @@ export function route(kind: RouteKind, usage: Usage, roles: Config['roles']): Ro
 
   if (kind === 'lead') {
     const engineer = roles.delegate.agent;
-    if (status('claude') === 'exhausted') {
+    if (status(LEAD) === 'exhausted') {
       // Handing the session over is not undone lightly: only to an engineer measured to have room.
       const takeover = engineer === 'codex' && status('codex') === 'ok';
-      return { kind, assignee: takeover ? 'codex' : 'claude', reason: `${why('claude')} ${takeover ? 'Write a handoff note and hand the session to Codex.' : 'No other agent can lead; stop and tell the user.'}`, fallback: [], degraded: true, deferUntil: resets('claude') };
+      return { kind, assignee: takeover ? 'codex' : LEAD, reason: `${why(LEAD)} ${takeover ? 'Write a handoff note and hand the session to Codex.' : 'No other agent can lead; stop and tell the user.'}`, fallback: [], degraded: true, deferUntil: resets(LEAD) };
     }
-    if (status('claude') === 'tight') return plain('claude', `${why('claude')} Keep to planning and merge decisions, and hand more implementation to ${name(engineer)}.`, short(engineer) ? [] : [engineer]);
-    return plain('claude', status('claude') === 'ok' ? 'Claude has room; lead as usual.' : `Claude's usage is not known (${of('claude')?.reason ?? 'no reading.'}); lead as usual.`);
+    if (status(LEAD) === 'tight') return plain(LEAD, `${why(LEAD)} Keep to planning and merge decisions, and hand more implementation to ${name(engineer)}.`, short(engineer) ? [] : [engineer]);
+    return plain(LEAD, status(LEAD) === 'ok' ? `${name(LEAD)} has room; lead as usual.` : `${name(LEAD)}'s usage is not known (${of(LEAD)?.reason ?? 'no reading.'}); lead as usual.`);
   }
 
   const holder = roles[kind].agent;
-  if (kind === 'delegate') {
-    if (status(holder) === 'exhausted') return plain('claude', `${why(holder)} Do this piece yourself, in a subagent if it is large.`);
-    if (status(holder) === 'tight' && !short('claude')) {
-      return plain('claude', `${why(holder)} Take implementation yourself or in subagents${roles.review.agent === holder ? `, and keep what ${name(holder)} has left for the cross-review` : ''}.`, [holder]);
+  // Each role names its policy, so a new role never falls through to another's.
+  const policy: Record<Role, 'build' | 'review' | 'debate' | 'polish'> = { delegate: 'build', refactor: 'build', release: 'build', review: 'review', verify: 'review', debate: 'debate', polish: 'polish' };
+  switch (policy[kind]) {
+    case 'build': {
+      // The lead taking over keeps the role's scope: release work stays preparation.
+      const yourself = kind === 'release' ? 'Prepare the release yourself, and publish or deploy nothing.' : 'Do this piece yourself, in a subagent if it is large.';
+      if (status(holder) === 'exhausted') return plain(LEAD, `${why(holder)} ${yourself}`);
+      if (status(holder) === 'tight' && !short(LEAD)) {
+        return plain(LEAD, `${why(holder)} Take this work yourself or in subagents${roles.review.agent === holder ? `, and keep what ${name(holder)} has left for the cross-review` : ''}.`, [holder]);
+      }
+      return plain(holder, short(LEAD) && !short(holder) ? `${why(LEAD)} Hand ${name(holder)} as much of this work as separates cleanly.` : keeps(holder), [LEAD]);
     }
-    return plain(holder, short('claude') && !short(holder) ? `${why('claude')} Hand ${name(holder)} as much implementation as separates cleanly.` : keeps(holder), ['claude']);
-  }
-  if (kind === 'review') {
-    if (status(holder) === 'exhausted') {
-      return { kind, assignee: 'claude', reason: `${why(holder)} Run the self-review a second time with the review focus, and say that the cross-review was skipped.`, fallback: [], degraded: true, deferUntil: resets(holder) };
+    case 'review': {
+      if (status(holder) === 'exhausted') {
+        const instead = kind === 'verify' ? 'Run the app in your own self-review instead' : 'Run the self-review a second time with the review focus';
+        return { kind, assignee: LEAD, reason: `${why(holder)} ${instead}, and say that the cross-review was skipped.`, fallback: [], degraded: true, deferUntil: resets(holder) };
+      }
+      return plain(holder, status(holder) === 'tight' ? `${why(holder)} The cross-review still goes to it; keep it to one round.` : keeps(holder), [LEAD]);
     }
-    return plain(holder, status(holder) === 'tight' ? `${why(holder)} The cross-review still goes to it; keep it to one round.` : keeps(holder), ['claude']);
+    case 'debate': {
+      // Deciding alone loses the independent challenge a debate is for, so it is degraded rather than reassigned.
+      if (status(holder) === 'exhausted') {
+        return { kind, assignee: LEAD, reason: `${why(holder)} Decide yourself, and say that the debate was skipped.`, fallback: [], degraded: true, deferUntil: resets(holder) };
+      }
+      return plain(holder, status(holder) === 'tight' ? `${why(holder)} Keep the debate to one or two rounds.` : keeps(holder), [LEAD]);
+    }
+    case 'polish':
+      // Polish is not a merge gate, so it can wait for the reset.
+      if (short(holder)) {
+        return { kind, assignee: holder, reason: `${why(holder)} Polish can wait until its usage resets; make an urgent wording fix yourself.`, fallback: [LEAD], degraded: false, deferUntil: resets(holder) };
+      }
+      return plain(holder, keeps(holder));
   }
-  // Polish is not a merge gate, so it can wait for the reset.
-  if (short(holder)) {
-    return { kind, assignee: holder, reason: `${why(holder)} Polish can wait until its usage resets; make an urgent wording fix yourself.`, fallback: ['claude'], degraded: false, deferUntil: resets(holder) };
-  }
-  return plain(holder, keeps(holder));
 }
 
 /** One line per agent, for the lead's status output. */

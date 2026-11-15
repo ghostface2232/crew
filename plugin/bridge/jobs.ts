@@ -6,8 +6,8 @@ import { addNews, Delivery, deliveryPosition, leadSession, unread } from './deli
 import type { DeliveryState, News } from './delivery.ts';
 import { runCheck } from './check.ts';
 import type { CheckResult } from './check.ts';
-import { canonicalPath, effectiveRole, MAX_DEBATE_ROUNDS, PORT, runsCommands, WORKERS } from './config.ts';
-import type { Config, Role, WorkerAgent } from './config.ts';
+import { canonicalPath, effectiveRole, isRole, MAX_DEBATE_ROUNDS, PORT, roleInfo, ROLES, runsCommands, WORKERS } from './config.ts';
+import type { Config, JobKind, PresetName, Role, WorkerAgent } from './config.ts';
 import { carryUncommitted, changesSince, commitAll, commitChanges, copyIncluded, createWorktree, currentBranch, dirtyCount, git, mergeInto, isInside, projectRoot, realpath, removeDirectory, removeEmptyLeftover, removeWorktree, repoRoot, revertCommit, revertsSince, reviewDiff, WorktreeCleanupError } from './git.ts';
 import { collectGarbage } from './gc.ts';
 import { BrowserServers, jobWritable } from './browser.ts';
@@ -23,7 +23,7 @@ import type { Tier } from './tiers.ts';
 
 export type { WorkerAgent };
 export type Agent = 'claude' | WorkerAgent;
-export type JobKind = Role;
+export type { JobKind, Role };
 export type JobState = 'running' | 'waiting' | 'done' | 'failed' | 'cancelled';
 export type EventKind = 'started' | 'progress' | 'waiting' | 'error' | 'limit' | 'stalled' | 'done' | 'cancelled';
 
@@ -45,7 +45,12 @@ export type ReviewTarget =
 export interface JobSpec {
   /** Starting Claude session; absent for board and other unowned jobs. */
   lead?: string;
+  /** How the job runs. Taken from the role when only the role is given. */
   kind: JobKind;
+  /** Whose work it is, and so which agent takes it; see resolveRole. */
+  role?: Role;
+  /** The preset the job runs under: its mission's, else the global one. Set by the daemon, never by a caller. */
+  preset?: PresetName | null;
   cwd: string;
   /** Project directory of the session that started the job. */
   project?: string;
@@ -167,6 +172,10 @@ export interface Job {
   news?: News[];
   id: string;
   kind: JobKind;
+  /** Absent on jobs saved before roles were recorded; jobRole() derives it for them. */
+  role?: Role;
+  /** The preset the job's model and effort were picked under, kept for its follow-up turns. */
+  preset?: PresetName | null;
   agent: WorkerAgent;
   title: string;
   state: JobState;
@@ -354,14 +363,40 @@ export function openRefusals(job: Pick<Job, 'refusals' | 'turns' | 'retrying' | 
   return (job.retrying ?? []).map((action) => ({ action }));
 }
 
+/** A saved job's role, derived for jobs saved before roles were recorded. */
+export function jobRole(job: Pick<Job, 'role' | 'kind' | 'debate' | 'runsApp'>): Role {
+  return job.role ?? (job.debate ? 'debate' : job.kind === 'review' && job.runsApp ? 'verify' : job.kind);
+}
+
+/**
+ * Settles a new job's role and fills what the role implies, refusing a combination that contradicts it. Every
+ * entry point goes through here, so a role decides the agent whoever starts the job.
+ */
+export function resolveRole(spec: JobSpec): Role {
+  if (spec.role !== undefined && !isRole(spec.role)) throw new Error(`role must be one of: ${ROLES.join(', ')}.`);
+  const role = jobRole(spec);
+  const info = roleInfo(role);
+  spec.kind ??= info.kind;
+  if (spec.kind !== info.kind) throw new Error(`The ${role} role runs as a ${info.kind} job, not ${spec.kind}.`);
+  if (role === 'debate' && !spec.debate) throw new Error('A debate job needs debate rounds; start it with the debate tool.');
+  if (role === 'verify') {
+    spec.runsApp ??= true;
+    if (!spec.runsApp) throw new Error('The verify role runs the app; use the review role for a static review.');
+  }
+  if (role === 'review' && spec.runsApp) throw new Error('A review that runs the app is the verify role. Drop runs_app, or use role verify.');
+  if ((role === 'refactor' || role === 'release') && spec.ask) throw new Error(`A ${role} job changes files, so it cannot be a question.`);
+  spec.role = role;
+  return role;
+}
+
 /**
  * Model for a new job, in this order: what the lead named for the job, the tier the lead named, what the user
  * configured (role, preset, or the agent's own setting in config.json), and last the default tier. Effort differs:
  * a role's or preset's effort holds over a named tier's.
  */
-function pickModel(agent: WorkerAgent, spec: JobSpec, role: { model?: string; effort?: string }, config: Config): { model?: string; effort?: string; tier?: Tier; agentDefault?: boolean } {
+function pickModel(agent: WorkerAgent, spec: JobSpec, role: { model?: string; effort?: string }, config: Config, preset: PresetName | null): { model?: string; effort?: string; tier?: Tier; agentDefault?: boolean } {
   const configured = { model: role.model ?? config[agent].model, effort: role.effort ?? (agent === 'codex' ? config.codex.effort : undefined) };
-  const cap = config.preset ? config.presets[config.preset].maxTier : undefined;
+  const cap = preset ? config.presets[preset].maxTier : undefined;
   const wanted = spec.tier ?? (configured.model ? undefined : defaultTier(spec));
   const tier = wanted && cap && TIERS.indexOf(wanted) > TIERS.indexOf(cap) ? cap : wanted;
   let model = spec.model ?? (tier ? tierModel(agent, tier) : undefined) ?? configured.model;
@@ -487,6 +522,7 @@ export class Jobs {
 
   private async start(spec: JobSpec): Promise<Job> {
     if (this.collecting) throw new Error('Crew gc is running. Try again when it finishes.');
+    const roleName = resolveRole(spec);
     if (spec.debate !== undefined) {
       const rounds = spec.debate?.rounds;
       if (!Number.isInteger(rounds) || rounds < 1 || rounds > MAX_DEBATE_ROUNDS) throw new Error(`A debate takes 1 to ${MAX_DEBATE_ROUNDS} rounds.`);
@@ -505,14 +541,15 @@ export class Jobs {
       throw new Error(`A ${spec.kind} job cannot run alone, because it has nothing to measure with. Measure with delegate and exclusive, or drop exclusive.`);
     }
     const config = this.readConfig();
-    const role = effectiveRole(config, spec.kind);
+    const preset = spec.preset === undefined ? config.preset : spec.preset;
+    const role = effectiveRole(config, roleName, preset);
     const { agent } = role;
     if (spec.runsApp && spec.kind === 'polish') throw new Error('A polish job cannot run the app: an editor only changes wording. Drop runs_app.');
     if (spec.runsApp && spec.kind === 'review' && !WORKERS[agent].reviewerRunsGit) {
-      throw new Error(`review is assigned to ${WORKERS[agent].name}, which cannot run commands as a reviewer, so it cannot run the app. Drop runs_app, or run the app in your own review.`);
+      throw new Error(`${roleName} is assigned to ${WORKERS[agent].name}, which cannot run commands as a reviewer, so it cannot run the app. Assign verify to an agent that can in the settings, or run the app in your own review.`);
     }
     if (agent === 'antigravity' && !config.antigravity.enabled) {
-      throw new Error(`${spec.kind} is assigned to Antigravity, which is disabled in ~/.crew/config.json (antigravity.enabled).`);
+      throw new Error(`${roleName} is assigned to Antigravity, which is disabled in ~/.crew/config.json (antigravity.enabled).`);
     }
     if (!fs.existsSync(spec.cwd)) throw new Error(`cwd does not exist: ${spec.cwd}`);
     if (spec.skills !== undefined && (!Array.isArray(spec.skills) || spec.skills.some((name) => typeof name !== 'string'))) {
@@ -602,6 +639,8 @@ export class Jobs {
       ackedSeq: 0,
       news: [],
       kind: spec.kind,
+      role: roleName,
+      preset,
       agent,
       title,
       state: 'running',
@@ -630,7 +669,7 @@ export class Jobs {
       reviewTarget: spec.review?.target,
       targets: spec.targets ?? [],
       check: spec.check?.trim() || undefined,
-      ...pickModel(agent, spec, role, config),
+      ...pickModel(agent, spec, role, config, preset),
       sessionId: null,
       createdAt: now,
       activeAt: now,

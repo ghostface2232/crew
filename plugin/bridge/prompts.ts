@@ -97,7 +97,9 @@ function assignment(spec: JobSpec, worktree: Worktree | null, diffFile: string |
     const parts = [`# Task\n${spec.task}`];
     if (spec.done_when) parts.push(`# Done when\n${spec.done_when}`);
     parts.push(`# Workspace\n${where}`);
-    return { instructions: role(ROLE_FILES.delegate), prompt: parts.join('\n\n') };
+    // Refactoring and release preparation are an engineer's work with a narrower brief, so their text adds to the engineer's.
+    const extra = spec.role === 'refactor' || spec.role === 'release' ? `\n\n${role(spec.role)}` : '';
+    return { instructions: `${role(ROLE_FILES.delegate)}${extra}`, prompt: parts.join('\n\n') };
   }
 
   if (spec.kind === 'review') {

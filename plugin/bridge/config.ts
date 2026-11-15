@@ -35,8 +35,43 @@ export const PORT = Number(process.env.CREW_PORT ?? 47615);
 export const BASE_URL = `http://127.0.0.1:${PORT}`;
 
 export type WorkerAgent = 'codex' | 'antigravity';
-/** A role is the kind of job a worker is given; the lead's tools are named after them. */
-export type Role = 'delegate' | 'review' | 'polish';
+/** How a job runs: its sandbox, workspace, and base prompt. Each role runs as one of these. */
+export type JobKind = 'delegate' | 'review' | 'polish';
+
+/**
+ * Who leads. Only Claude Code can today: the plugin's hooks wake it and record the user's words.
+ * docs/06-roadmap.md describes what another lead would need.
+ */
+export const LEAD = 'claude' as const;
+
+/**
+ * A role is a kind of work the user assigns to an agent. Parents come before their children: a role the user
+ * has not assigned takes its parent's whole assignment, so a config written for the first three roles keeps
+ * working as it did.
+ */
+export const ROLES = ['delegate', 'refactor', 'release', 'debate', 'review', 'verify', 'polish'] as const;
+export type Role = (typeof ROLES)[number];
+
+export interface RoleInfo {
+  role: Role;
+  kind: JobKind;
+  parent?: Role;
+  label: string;
+  summary: string;
+}
+
+/** Ordered as the settings show them. */
+export const ROLE_INFO: RoleInfo[] = [
+  { role: 'delegate', kind: 'delegate', label: 'Implementation', summary: 'Builds separable pieces of a change.' },
+  { role: 'refactor', kind: 'delegate', parent: 'delegate', label: 'Refactoring', summary: 'Restructures code without changing what it does.' },
+  { role: 'release', kind: 'delegate', parent: 'delegate', label: 'Release preparation', summary: 'Prepares a release: version, changelog, build, and the steps to publish. It does not publish or deploy.' },
+  { role: 'debate', kind: 'delegate', parent: 'delegate', label: 'Debate', summary: 'Tests the lead\'s position on a hard decision, read-only.' },
+  { role: 'review', kind: 'review', label: 'Cross-review', summary: 'Reviews a change by reading it and running checks.' },
+  { role: 'verify', kind: 'review', parent: 'review', label: 'Review that runs the app', summary: 'Reviews a change by starting the app in a snapshot of it.' },
+  { role: 'polish', kind: 'polish', label: 'Wording', summary: 'Improves UI strings, comments, and docs.' },
+];
+export const roleInfo = (role: Role): RoleInfo => ROLE_INFO.find((info) => info.role === role)!;
+export const isRole = (value: unknown): value is Role => ROLES.includes(value as Role);
 
 export interface Worker {
   name: string;
@@ -55,7 +90,7 @@ export const WORKERS: Record<WorkerAgent, Worker> = {
 };
 
 /** Antigravity's commands are refused in every job but an engineer's (`decide` in adapters/antigravity.ts). */
-export function runsCommands(agent: WorkerAgent, spec: { kind: Role; ask?: boolean }): boolean {
+export function runsCommands(agent: WorkerAgent, spec: { kind: JobKind; ask?: boolean }): boolean {
   return (spec.kind === 'delegate' && !spec.ask) || WORKERS[agent].reviewerRunsGit;
 }
 
@@ -65,6 +100,8 @@ export interface RoleAssignment {
   model?: string;
   effort?: string;
 }
+
+export type RoleSettings = Partial<Record<Role, Partial<RoleAssignment>>>;
 
 /** A debate longer than this has stopped converging; the lead should decide or start over. */
 export const MAX_DEBATE_ROUNDS = 6;
@@ -112,8 +149,10 @@ export interface Config {
     /** Value for the ACP "model" config option, e.g. "gemini-3.8-flash". */
     model?: string;
   };
-  /** Which worker takes each role. Read when a job starts, so edits apply to the next job. */
+  /** Which worker takes each role, with inheritance resolved. Read when a job starts, so edits apply to the next job. */
   roles: Record<Role, RoleAssignment>;
+  /** The roles as the user wrote them: a role without `agent` inherits from its parent. Settings edit this, not `roles`. */
+  roleSettings: RoleSettings;
   /** The preset in effect; none by default, so an unconfigured install runs each agent's own settings. */
   preset: PresetName | null;
   /** What each preset sets. The built-in ones set effort only; a user's entry replaces fields of the same name. */
@@ -129,7 +168,11 @@ export const PRESETS: Record<PresetName, Preset> = {
   balanced: { codex: { effort: 'medium' }, subagentModel: 'sonnet' },
   best: { codex: { effort: 'high' }, subagentModel: 'inherit' },
 };
-const PRESET_NAMES = Object.keys(PRESETS) as PresetName[];
+export const PRESET_NAMES = Object.keys(PRESETS) as PresetName[];
+export const isPresetName = (value: unknown): value is PresetName => PRESET_NAMES.includes(value as PresetName);
+
+/** Holders of the roles that have no parent, when the user names none. */
+const BASE_HOLDERS: Partial<Record<Role, WorkerAgent>> = { delegate: 'codex', review: 'codex', polish: 'antigravity' };
 
 const defaults: Config = {
   stallSeconds: 300,
@@ -137,38 +180,55 @@ const defaults: Config = {
   notifyOnDone: false,
   codex: { bin: 'codex', approvalPolicy: 'on-request', approvalsReviewer: 'auto_review', plugins: ['browser'], appPlugins: ['computer-use', 'unified-computer-use'] },
   antigravity: { bin: 'agy', enabled: true },
-  roles: { delegate: { agent: 'codex' }, review: { agent: 'codex' }, polish: { agent: 'antigravity' } },
+  roles: resolveRoles({}),
+  roleSettings: {},
   preset: null,
   presets: PRESETS,
 };
 
 export const DEFAULT_ROLES = defaults.roles;
 
-type UserConfig = Partial<Omit<Config, 'roles' | 'presets' | 'codex'>> & { codex?: Partial<Config['codex']>; roles?: Partial<Record<Role, Partial<RoleAssignment>>>; presets?: Partial<Record<PresetName, Preset>> };
+type UserConfig = Partial<Omit<Config, 'roles' | 'roleSettings' | 'presets' | 'codex'>> & { codex?: Partial<Config['codex']>; roles?: RoleSettings; presets?: Partial<Record<PresetName, Preset>> };
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * Each role's assignment from what the user wrote. A role that names its agent starts fresh, so a model meant
+ * for the parent's agent never reaches another agent; one that does not takes its parent's assignment, with
+ * its own model and effort laid over it.
+ */
+function resolveRoles(settings: RoleSettings): Record<Role, RoleAssignment> {
+  const roles = {} as Record<Role, RoleAssignment>;
+  for (const role of ROLES) {
+    const { agent, ...own } = settings[role] ?? {};
+    const parent = roleInfo(role).parent;
+    const base: RoleAssignment = agent ? { agent } : parent ? roles[parent] : { agent: BASE_HOLDERS[role]! };
+    roles[role] = { ...base, ...own };
+  }
+  return roles;
+}
 
 /**
  * Fills a user's partial config with defaults. A role table that is not exactly what it should be
  * throws: quietly keeping a default would run a job on an agent the user did not choose.
  */
 export function resolveConfig(user: UserConfig): Config {
-  const roles = { ...defaults.roles };
   const given: unknown = user.roles ?? {};
   if (!isObject(given)) throw new Error('roles must be an object such as {"polish": {"agent": "codex"}}.');
+  const roleSettings: RoleSettings = {};
   for (const [role, entry] of Object.entries(given)) {
-    if (!Object.hasOwn(roles, role)) throw new Error(`roles.${role} is not a role; use one of: ${Object.keys(roles).join(', ')}.`);
+    if (!isRole(role)) throw new Error(`roles.${role} is not a role; use one of: ${ROLES.join(', ')}.`);
     if (!isObject(entry)) throw new Error(`roles.${role} must be an object such as {"agent": "codex"}.`);
     for (const [key, value] of Object.entries(entry)) {
       if (!['agent', 'model', 'effort'].includes(key)) throw new Error(`roles.${role}.${key} is not a setting; use agent, model, or effort.`);
       if (typeof value !== 'string') throw new Error(`roles.${role}.${key} must be a string.`);
     }
-    const merged = { ...roles[role as Role], ...entry } as RoleAssignment;
-    if (!Object.hasOwn(WORKERS, merged.agent)) {
-      throw new Error(`roles.${role}.agent is "${merged.agent}"; use one of: ${Object.keys(WORKERS).join(', ')}.`);
+    if (entry.agent !== undefined && !Object.hasOwn(WORKERS, entry.agent as string)) {
+      throw new Error(`roles.${role}.agent is "${entry.agent}"; use one of: ${Object.keys(WORKERS).join(', ')}.`);
     }
-    roles[role as Role] = merged;
+    roleSettings[role] = entry as Partial<RoleAssignment>;
   }
+  const roles = resolveRoles(roleSettings);
   for (const key of ['plugins', 'appPlugins'] as const) {
     const names: unknown = user.codex?.[key] === undefined ? defaults.codex[key] : user.codex[key];
     if (!Array.isArray(names) || names.some((name) => typeof name !== 'string')) throw new Error(`codex.${key} must be a list of plugin names such as ["computer-use"].`);
@@ -179,6 +239,7 @@ export function resolveConfig(user: UserConfig): Config {
     codex: { ...defaults.codex, ...user.codex },
     antigravity: { ...defaults.antigravity, ...user.antigravity },
     roles,
+    roleSettings,
     ...resolvePresets(user),
   };
 }
@@ -186,7 +247,7 @@ export function resolveConfig(user: UserConfig): Config {
 /** Like the role table, a preset that is not exactly valid throws: a job must not run on settings the user did not choose. */
 function resolvePresets(user: UserConfig): Pick<Config, 'preset' | 'presets'> {
   const preset: unknown = user.preset ?? null;
-  if (preset !== null && !PRESET_NAMES.includes(preset as PresetName)) throw new Error(`preset is "${String(preset)}"; use one of: ${PRESET_NAMES.join(', ')}, or leave it out.`);
+  if (preset !== null && !isPresetName(preset)) throw new Error(`preset is "${String(preset)}"; use one of: ${PRESET_NAMES.join(', ')}, or leave it out.`);
   const given: unknown = user.presets ?? {};
   if (!isObject(given)) throw new Error('presets must be an object such as {"best": {"codex": {"model": "..."}}}.');
   const presets = { ...PRESETS };
@@ -218,13 +279,13 @@ function resolvePresets(user: UserConfig): Pick<Config, 'preset' | 'presets'> {
 
 /**
  * The agent, model, and effort a job of this role runs with. A setting on the role wins over the preset,
- * and the preset over the agent's own.
+ * and the preset over the agent's own. `preset` is the job's: its mission's when the mission sets one.
  */
-export function effectiveRole(config: Config, role: Role): RoleAssignment {
+export function effectiveRole(config: Config, role: Role, preset: PresetName | null = config.preset): RoleAssignment {
   const assignment = config.roles[role];
-  const preset = config.preset ? config.presets[config.preset][assignment.agent] : undefined;
-  const effort = assignment.effort ?? (preset as { effort?: string } | undefined)?.effort;
-  const model = assignment.model ?? preset?.model;
+  const chosen = preset ? config.presets[preset][assignment.agent] : undefined;
+  const effort = assignment.effort ?? (chosen as { effort?: string } | undefined)?.effort;
+  const model = assignment.model ?? chosen?.model;
   return { agent: assignment.agent, ...(model ? { model } : {}), ...(effort ? { effort } : {}) };
 }
 

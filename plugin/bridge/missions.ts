@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { canonicalPath } from './config.ts';
+import { canonicalPath, isPresetName, PRESET_NAMES } from './config.ts';
+import type { PresetName } from './config.ts';
 
 export const STAGES = ['plan', 'implement', 'self-review', 'cross-review', 'fix', 'polish', 'final'] as const;
 export type Stage = (typeof STAGES)[number];
@@ -31,6 +32,8 @@ export interface Mission {
   record?: string;
   /** Oldest first; absent on missions without any. */
   notes?: MissionNote[];
+  /** The preset this mission's new jobs run under instead of the global one; absent to use the global one. */
+  preset?: PresetName;
   createdAt: number;
   updatedAt: number;
   endedAt: number | null;
@@ -58,6 +61,7 @@ function isMission(m: any): m is Mission {
     && (m.stages === undefined || isPlan(m.stages))
     && (m.stageIndex === undefined || (m.stages && Number.isInteger(m.stageIndex) && m.stageIndex >= 0
       && m.stageIndex < m.stages.length && m.stages[m.stageIndex] === m.stage))
+    && (m.preset === undefined || isPresetName(m.preset))
     && (m.notes === undefined || (Array.isArray(m.notes) && m.notes.every((n: any) => n && typeof n.text === 'string' && Number.isFinite(n.at))))
     && STAGES.includes(m.stage) && ['active', 'done', 'abandoned'].includes(m.state)
     && Number.isFinite(m.createdAt) && Number.isFinite(m.updatedAt) && (m.endedAt === null || Number.isFinite(m.endedAt));
@@ -80,6 +84,22 @@ function planOf(stages: unknown, allowEmpty = false): Stage[] | undefined {
 function stageOf(stage: string): Stage {
   if (!STAGES.includes(stage as Stage)) throw new Error(`Invalid mission stage "${stage}"; use one of: ${STAGES.join(', ')}.`);
   return stage as Stage;
+}
+
+/** Omitted leaves the preset as it is, null clears it so the global one applies, and a name sets it. */
+function presetOf(value: unknown): PresetName | null | undefined {
+  if (value === undefined || value === null || isPresetName(value)) return value;
+  throw new Error(`preset must be one of: ${PRESET_NAMES.join(', ')}, or null to use the global one.`);
+}
+
+function setPreset(mission: Mission, value: PresetName | null | undefined): void {
+  if (value === null) delete mission.preset;
+  else if (value !== undefined) mission.preset = value;
+}
+
+/** The preset a mission's new jobs run under: its own, else the global one. */
+export function missionPreset(mission: Pick<Mission, 'preset'> | undefined, global: PresetName | null): PresetName | null {
+  return mission?.preset ?? global;
 }
 
 function titleOf(text: string): string {
@@ -110,8 +130,9 @@ export class Missions {
     return mission;
   }
 
-  start(input: { title: string; project: string; root: string; owner?: string; stage?: string; stages?: unknown }): Mission {
+  start(input: { title: string; project: string; root: string; owner?: string; stage?: string; stages?: unknown; preset?: unknown }): Mission {
     const title = titleOf(input.title);
+    const preset = presetOf(input.preset);
     const stages = planOf(input.stages);
     const first = stages?.[0] ?? 'plan';
     const stage = input.stage === undefined ? first : stageOf(input.stage);
@@ -134,6 +155,7 @@ export class Missions {
       ...(input.owner ? { owner: input.owner } : {}),
       stage,
       ...(stages ? { stages, stageIndex } : {}),
+      ...(preset ? { preset } : {}),
       state: 'active',
       outcome: '',
       createdAt: now,
@@ -145,10 +167,11 @@ export class Missions {
     return mission;
   }
 
-  update(id: string, input: { stage?: string; stages?: unknown; title?: string }): Mission {
+  update(id: string, input: { stage?: string; stages?: unknown; title?: string; preset?: unknown }): Mission {
     const mission = this.get(id);
     if (mission.state !== 'active') throw new Error(`Mission ${id} is already ${mission.state}.`);
     const title = input.title === undefined ? mission.title : titleOf(input.title);
+    const preset = presetOf(input.preset);
     const remaining = planOf(input.stages, true);
     const stage = input.stage === undefined ? undefined : stageOf(input.stage);
     let stages = mission.stages?.slice();
@@ -175,6 +198,7 @@ export class Missions {
       mission.stage = stages[index];
     } else if (stage !== undefined) mission.stage = stage;
     mission.title = title;
+    setPreset(mission, preset);
     mission.updatedAt = Date.now();
     this.changed(mission);
     return mission;

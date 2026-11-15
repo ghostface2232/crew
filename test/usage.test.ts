@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { DEFAULT_ROLES } from '../plugin/bridge/config.ts';
+import { DEFAULT_ROLES, resolveConfig, ROLES } from '../plugin/bridge/config.ts';
 import { describeUsage, fromCodexLimits, openHistory, parseCache, projectExhaustion, route, STALE_MS, UsageMonitor, UsageTracker } from '../plugin/bridge/usage.ts';
 import type { Sample, Usage, UsageStatus } from '../plugin/bridge/usage.ts';
 
@@ -196,14 +196,29 @@ test('polish waits for the reset, and routing never hands a role to an agent the
   assert.deepEqual([polish.assignee, polish.deferUntil, polish.fallback], ['antigravity', NOW + 60 * MIN, ['claude']]);
 
   const statuses: UsageStatus[] = ['ok', 'tight', 'exhausted', 'stale', 'unknown'];
+  const mixed = resolveConfig({ roles: { refactor: { agent: 'antigravity' }, review: { agent: 'antigravity' }, verify: { agent: 'codex' } } }).roles;
   for (const claude of statuses) for (const codex of statuses) for (const antigravity of statuses) {
     const usage = usageOf({ claude, codex, antigravity });
-    for (const kind of ['delegate', 'review', 'polish'] as const) {
-      const { assignee, fallback } = route(kind, usage, DEFAULT_ROLES);
-      for (const agent of [assignee, ...fallback]) assert.ok(agent === 'claude' || agent === DEFAULT_ROLES[kind].agent, `${kind} went to ${agent}`);
+    for (const roles of [DEFAULT_ROLES, mixed]) for (const kind of ROLES) {
+      const { assignee, fallback } = route(kind, usage, roles);
+      for (const agent of [assignee, ...fallback]) assert.ok(agent === 'claude' || agent === roles[kind].agent, `${kind} went to ${agent}`);
     }
     assert.notEqual(route('lead', usage, DEFAULT_ROLES).assignee, 'antigravity');
   }
+});
+
+test('every role has its own policy when its holder runs out', () => {
+  const gone = usageOf({ codex: 'exhausted' });
+  const verify = route('verify', gone, DEFAULT_ROLES);
+  assert.deepEqual([verify.assignee, verify.degraded], ['claude', true]);
+  assert.match(verify.reason, /Run the app in your own self-review/);
+  const debate = route('debate', gone, DEFAULT_ROLES);
+  assert.deepEqual([debate.assignee, debate.degraded], ['claude', true]);
+  assert.match(debate.reason, /Decide yourself, and say that the debate was skipped/);
+  // The lead taking release work over keeps it to preparation.
+  assert.match(route('release', gone, DEFAULT_ROLES).reason, /publish or deploy nothing/);
+  assert.equal(route('refactor', gone, DEFAULT_ROLES).degraded, false);
+  assert.doesNotMatch(route('refactor', usageOf({ codex: 'tight' }), DEFAULT_ROLES).reason, /Polish/);
 });
 
 test('a short lead hands off implementation, and an exhausted one hands the session to Codex if it can', () => {

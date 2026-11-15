@@ -16,7 +16,8 @@ test('mission forwards plans on start, revision, repeated titles and reattachmen
   let saved: Mission[] = [];
   const calls: { method: string; route: string; body: any }[] = [];
   const run = vm.runInNewContext(`${stripTypeScriptTypes(handler)}; reportMission`, {
-    STAGES, normalizeTitle, SESSION: 'lead', PROJECT: '/project', missionId: null, closedElsewhere: null,
+    STAGES, normalizeTitle, SESSION: 'lead', PROJECT: '/project', missionId: null, closedElsewhere: null, costMission: null,
+    SUPERSEDED: 'Superseded by a new mission.', currentPolicy: () => 'policy', globalPreset: () => null,
     ownMission: async () => current,
     api: async (method: string, route: string, body: any) => {
       calls.push({ method, route, body });
@@ -40,13 +41,21 @@ test('mission forwards plans on start, revision, repeated titles and reattachmen
   await run({ title: 'Review', stages });
   assert.equal(calls.length, before);
   await run({ title: 'Review', stage: 'fix', stages });
-  assert.deepEqual({ ...calls.at(-1)?.body }, { stage: 'fix' });
+  assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1)?.body)), { stage: 'fix' });
+  // A preset the user names reaches the mission on every path, and one left out changes nothing.
+  await run({ title: 'Review', preset: 'economy' });
+  assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1)?.body)), { preset: 'economy' });
+  await run({ preset: null });
+  assert.deepEqual({ ...calls.at(-1)?.body }, { stage: undefined, stages: undefined, preset: null });
   current = null;
   saved = [{ id: 'lost', title: 'Review', owner: 'lead', project: '/project', state: 'active' } as Mission];
   await run({ title: 'Review', stage: 'fix', stages });
   assert.equal(calls.at(-1)?.route, '/api/missions/lost');
-  assert.deepEqual({ ...calls.at(-1)?.body }, { stage: 'fix' });
-  const describe = vm.runInNewContext(`${stripTypeScriptTypes(handler.slice(0, handler.indexOf('async function reportMission')))}; describeMission`, { STAGES });
+  assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1)?.body)), { stage: 'fix' });
+  saved = [];
+  await run({ title: 'Cheap', stages, preset: 'economy' });
+  assert.equal(calls.at(-1)?.body.preset, 'economy');
+  const describe = vm.runInNewContext(`${stripTypeScriptTypes(handler.slice(0, handler.indexOf('async function reportMission')))}; describeMission`, { STAGES, currentPolicy: () => 'policy', globalPreset: () => null });
   assert.match(describe({ id: 'm', title: 'Review', state: 'active', stage: 'self-review', stageIndex: 2,
     stages: ['self-review', 'fix', 'self-review'] }), /Plan: self-review → fix → self-review \(current\)/);
 });

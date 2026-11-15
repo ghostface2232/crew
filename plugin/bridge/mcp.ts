@@ -1,11 +1,11 @@
 import readline from 'node:readline';
 import { clipped, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, REPORT_PAGE_BYTES, textPage, unread } from './delivery.ts';
 import { api, ensureDaemon } from './client.ts';
-import { BASE_URL, canonicalPath, DEFAULT_ROLES, loadConfig, MAX_DEBATE_ROUNDS, VERSION, WORKERS } from './config.ts';
+import { BASE_URL, canonicalPath, DEFAULT_ROLES, loadConfig, MAX_DEBATE_ROUNDS, PRESET_NAMES, ROLE_INFO, ROLES, VERSION, WORKERS } from './config.ts';
 import { listSkills } from './skills.ts';
 import { describeUsage } from './usage.ts';
 import type { RouteDecision, Usage } from './usage.ts';
-import type { Role } from './config.ts';
+import type { Preset, PresetName, Role } from './config.ts';
 import type { CrewEvent, JobSpec } from './jobs.ts';
 import { normalizeTitle, STAGES } from './missions.ts';
 import type { Mission } from './missions.ts';
@@ -37,20 +37,38 @@ const started = (() => {
 })();
 const roles = started?.roles ?? DEFAULT_ROLES;
 const holder = (role: Role) => WORKERS[roles[role].agent].name;
-/** The model the preset asks the lead to give its subagents; none when no preset is set or it leaves them alone. */
-const subagentModel = started?.preset ? started.presets[started.preset].subagentModel : undefined;
-const subagentMax = started?.preset ? started.presets[started.preset].subagentMax : undefined;
-const maxTier = started?.preset ? started.presets[started.preset].maxTier : undefined;
-const PRESET_LINE = started?.preset
-  ? `\n- The user chose the "${started.preset}" preset. Workers get its model and effort automatically. ${subagentModel && subagentModel !== 'inherit' ? `Start your own subagents (including crew:self-reviewer) with model "${subagentModel}"${subagentMax ? `, or "${subagentMax}" when the work needs more, and never a larger model,` : ''} unless the user asks otherwise.` : 'Your own subagents stay on your model.'}${maxTier ? ` Worker models are capped at the ${maxTier} tier: a higher tier or a larger model you name is lowered to it. Leave effort out to keep the preset's, or name one when a job needs it.` : ''}`
-  : '';
+
+/** What a preset asks of the lead and its workers, said wherever the preset in effect is reported. */
+function presetPolicy(name: PresetName | null, preset: Preset | undefined, whose: string): string {
+  if (!name || !preset) return `No preset is in effect${whose}: workers use their configured models, and your own subagents stay on your model.`;
+  const subagents = preset.subagentModel && preset.subagentModel !== 'inherit'
+    ? `Start your own subagents (including crew:self-reviewer) with model "${preset.subagentModel}"${preset.subagentMax ? `, or "${preset.subagentMax}" when the work needs more, and never a larger model,` : ''} unless the user asks otherwise.`
+    : 'Your own subagents stay on your model.';
+  const cap = preset.maxTier ? ` Worker models are capped at the ${preset.maxTier} tier: a higher tier or a larger model you name is lowered to it. Leave effort out to keep the preset's, or name one when a job needs it.` : '';
+  return `The "${name}" preset is in effect${whose}. Workers get its model and effort when their job starts. ${subagents}${cap}`;
+}
+
+/** The preset policy as the config on disk has it now; the session's starting copy may be out of date. */
+function currentPolicy(name: PresetName | null, whose: string): string {
+  let presets: Record<PresetName, Preset> | undefined;
+  try {
+    presets = loadConfig().presets;
+  } catch {
+    presets = started?.presets;
+  }
+  return presetPolicy(name, name ? presets?.[name] : undefined, whose);
+}
+
+const PRESET_LINE = `\n- Presets set the cost of a command. The global one is ${started?.preset ? `"${started.preset}"` : 'not set'}. When the user names a preset for a command (${PRESET_NAMES.join(', ')}), pass it as \`preset\` when you start its mission; never pick one yourself. \`mission\` and \`route\` responses state the preset in effect and what it asks of your subagents; the latest one you were told holds. A setting the user gave a role wins over any preset.`;
+
+/** One line per role: who holds it now, as of this session's start. */
+const ROLE_LINES = ROLE_INFO.map((info) => `- ${info.label} (\`${info.role}\`) — ${holder(info.role)}. ${info.summary}`).join('\n');
 
 const INSTRUCTIONS = `Crew connects this session to other coding agents that run in the background. You are the lead: you plan, do the main implementation, review, and decide what is merged.
 
-Roles (assigned by the user in ~/.crew/config.json; each tool goes to the agent holding that role, and you do not reassign them):
-- \`delegate\` — supporting engineer, currently ${holder('delegate')}. Give it a separable piece of implementation.
-- \`review\` — cross-reviewer, currently ${holder('review')}. Ask it for an adversarial review.
-- \`polish\` — editor, currently ${holder('polish')}. It improves UI strings, comments, and docs, and must not change logic or structure.
+Roles (assigned by the user in the settings or ~/.crew/config.json; each job goes to the agent holding its role, and you do not reassign them). As of this session's start:
+${ROLE_LINES}
+\`delegate\` takes role delegate, refactor, or release; \`review\` is the review role, or verify with runs_app; \`debate\` and \`polish\` are their own roles. Each job's result names the agent that took it.
 
 How jobs work:
 - delegate and polish run in their own git worktree and branch (crew-<job id>) created from HEAD, so commit anything the worker needs first. Gitignored files it needs (node_modules, .env) are copied in if the repository lists them in .worktreeinclude. The bridge commits the worker's changes on that branch; you inspect the diff and merge or reject it. Nothing reaches your branch unless you merge it.
@@ -66,7 +84,7 @@ How jobs work:
 - Workers save screenshots and recordings in the job's evidence directory, which is kept with the job: results list them and show the latest turn's images, and the board shows them all. To show a worker an image (a design, a screenshot of the problem), pass its path in attachments with delegate, review, reply, or answer.
 - When to review while you run the Crew pipeline (/crew:run), without being asked: one review (your crew:self-reviewer subagent or \`review\`, not both) when a substantial piece of implementation reaches a stopping point; before you push or open a pull request, a review of whatever is going out that no review has covered since it last changed substantially (both in parallel for security, concurrency, or data loss; fixes for a review's findings count as covered); none for small fixes and wording. Reviewers that run in parallel are static unless exactly one of them is told it may run the app. The user's own request for a review, or for none, comes first. Outside the pipeline, review only when the user asks: do not hold back a commit or a push for one.
 - When you take a user's command through several steps, call \`mission\` with title and planned stages first, with stage as you move on, and with done as soon as the work finishes. Pass stages again with what remains to add or drop future steps. The board then shows the command as one unit with its jobs under it. Skip it for a single delegated job.
-- Usage is measured by AgentGauge. In the pipeline, call \`route\` once at each stage boundary before you hand out work (not on every turn) and follow its assignee and reason; when it says degraded, say in your report what was skipped. Outside the pipeline, follow the roles unless a job fails on a limit.${PRESET_LINE}
+- Usage is measured by AgentGauge. In the pipeline, call \`route\` once at each stage boundary before you hand out work (not on every turn) with the role you are about to hand out, and follow its assignee and reason; when it says degraded, say in your report what was skipped. Outside the pipeline, follow the roles unless a job fails on a limit.${PRESET_LINE}
 
 The user can watch every agent live on the status board at ${BASE_URL}.`;
 
@@ -101,11 +119,12 @@ const modelProps = {
 const TOOLS = [
   {
     name: 'delegate',
-    title: `Delegate to ${holder('delegate')}`,
-    description: `Hand a separable piece of implementation to the supporting engineer (${holder('delegate')}). It works in its own git worktree and reports back; its changes land on a crew-<job id> branch for you to review and merge.`,
+    title: 'Delegate work',
+    description: `Hand a separable piece of work to the agent holding its role: implementation (${holder('delegate')}), refactoring (${holder('refactor')}), or release preparation (${holder('release')}). It works in its own git worktree and reports back; its changes land on a crew-<job id> branch for you to review and merge.`,
     inputSchema: {
       type: 'object',
       properties: {
+        role: { type: 'string', enum: ['delegate', 'refactor', 'release'], description: 'delegate (default): implementation. refactor: restructure code without changing behavior, with the checks run before and after. release: prepare a release (version, changelog, build, checks, and written steps to publish); it publishes, pushes, and deploys nothing.' },
         task: { type: 'string', description: 'What to build, with the context the engineer needs: relevant files, constraints, interfaces to match. It has not seen this conversation. If the result must match something (a design, screenshots, another implementation), name it by file path and commit; the engineer can open images by path.' },
         title: { type: 'string', description: 'Short label shown on the status board.' },
         done_when: { type: 'string', description: 'Concrete completion criteria the engineer can check, e.g. tests that must pass, or what must be true on screen and at which widths.' },
@@ -123,8 +142,8 @@ const TOOLS = [
   },
   {
     name: 'review',
-    title: `Review by ${holder('review')}`,
-    description: `Ask the cross-reviewer (${holder('review')}) for a review of changes in this repository; it changes nothing in your tree. By default it is static and read-only: the worker reads the change and runs checks that end by themselves. In the pipeline, one review (this or your own self-review) covers a stopping point or a push; before a push or pull request, review only what no review has covered, and run both together where security, concurrency, or data loss is involved. Do not loop reviews.`,
+    title: 'Cross-review',
+    description: `Ask the cross-reviewer (${holder('review')}; with runs_app, the verify role, ${holder('verify')}) for a review of changes in this repository; it changes nothing in your tree. By default it is static and read-only: the worker reads the change and runs checks that end by themselves. In the pipeline, one review (this or your own self-review) covers a stopping point or a push; before a push or pull request, review only what no review has covered, and run both together where security, concurrency, or data loss is involved. Do not loop reviews.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -134,7 +153,7 @@ const TOOLS = [
         focus: { type: 'string', description: 'What to scrutinize: the design decisions, assumptions or risks you are least sure about.' },
         mode: { type: 'string', enum: ['adversarial', 'standard'], description: 'adversarial (default): challenges design and assumptions. standard: Codex\'s built-in code review; other agents run the adversarial review instead.' },
         done_when: { type: 'string', description: 'Acceptance criteria to verify in adversarial mode.' },
-        ...runsAppProp('judge the change. The review then runs in a snapshot worktree holding the change, and your own self-review must stay static'),
+        ...runsAppProp('judge the change. It then goes to the verify role and runs in a snapshot worktree holding the change; your own self-review must stay static'),
         ...attachmentsProp,
         ...modelProps,
         ...skillsProp,
@@ -144,7 +163,7 @@ const TOOLS = [
   },
   {
     name: 'polish',
-    title: `Polish by ${holder('polish')}`,
+    title: 'Polish wording',
     description: `Have the editor (${holder('polish')}) improve UI strings, comments, and documentation in the given files, in its own worktree. It may not change logic or structure. Not a merge gate: run it after the code is settled.`,
     inputSchema: {
       type: 'object',
@@ -163,8 +182,8 @@ const TOOLS = [
   },
   {
     name: 'debate',
-    title: `Debate with ${holder('delegate')}`,
-    description: `Debate a hard, tricky, or important decision with the supporting engineer (${holder('delegate')}) before acting on it: a design, a risky change, a diagnosis you are unsure of. It reads the code and docs, tests your position, and answers point by point, changing nothing. Continue with reply (a message) for each further round, up to the round limit; the last round ends with a conclusion. Use it only where a second view is worth several turns; routine work does not need it. Record what was decided in the mission's record.`,
+    title: 'Debate a decision',
+    description: `Debate a hard, tricky, or important decision with the agent holding the debate role (${holder('debate')}) before acting on it: a design, a risky change, a diagnosis you are unsure of. It reads the code and docs, tests your position, and answers point by point, changing nothing. Continue with reply (a message) for each further round, up to the round limit; the last round ends with a conclusion. Use it only where a second view is worth several turns; routine work does not need it. Record what was decided in the mission's record.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -192,6 +211,7 @@ const TOOLS = [
         abandoned: { type: 'boolean', description: 'The command was dropped before it finished.' },
         outcome: { type: 'string', description: 'With done or abandoned: one line on how it ended.' },
         record: { type: 'string', description: 'Optional, with done: the decisions taken and why, approaches that failed, and prerequisites the next person would need. A few short lines; `crew export <mission>` turns it and the jobs into a runbook.' },
+        preset: { type: ['string', 'null'], enum: [...PRESET_NAMES, null], description: 'Only when the user names a preset for this command: the mission\'s new jobs run under it instead of the global one. null returns to the global one; leave it out to keep what is set. Never choose one yourself.' },
       },
     },
   },
@@ -202,7 +222,7 @@ const TOOLS = [
     annotations: { readOnlyHint: true },
     inputSchema: {
       type: 'object',
-      properties: { kind: { type: 'string', enum: ['lead', 'delegate', 'review', 'polish'], description: 'What you are about to hand out. lead asks whether you yourself should carry on.' } },
+      properties: { kind: { type: 'string', enum: ['lead', ...ROLES], description: 'The role you are about to hand out (verify for a review with runs_app, refactor or release for those delegate roles). lead asks whether you yourself should carry on.' } },
     },
   },
   {
@@ -430,7 +450,15 @@ function showEvidence(ctx: CallContext, job: JobView): void {
 /** The mission this session opened and is carrying out. Only this session's own mission is ever advanced or closed from here. */
 /** The Claude session this server belongs to; it outlives a restart of the server. Unset in clients that do not pass it on. */
 const SESSION = process.env.CLAUDE_CODE_SESSION_ID || undefined;
+/** How a mission replaced by this session's next one ends; such a mission carries no work on. */
+const SUPERSEDED = 'Superseded by a new mission.';
 let missionId: string | null = null;
+/**
+ * The mission whose preset this session's jobs run under. It outlives tracking: when the user closes the mission
+ * on the board, the remaining work keeps the preset they chose for it. Cleared only when this session finishes
+ * the mission or opens another.
+ */
+let costMission: string | null = null;
 /** Set when this session's mission was closed from outside (dismissed on the board, or left too long), until the lead has been told. */
 let closedElsewhere: Mission | null = null;
 
@@ -449,12 +477,22 @@ async function ownMission(): Promise<Mission | null> {
   return null;
 }
 
+/** The global preset as the config on disk has it; null when it cannot be read, as jobs would then fail anyway. */
+function globalPreset(): PresetName | null {
+  try {
+    return loadConfig().preset;
+  } catch {
+    return started?.preset ?? null;
+  }
+}
+
 function describeMission(mission: Mission): string {
   const stages = mission.stages ?? STAGES;
   const index = mission.stageIndex ?? stages.indexOf(mission.stage);
   const state = mission.state === 'active' ? `${mission.stage} (step ${index + 1} of ${stages.length})` : mission.state;
   const plan = stages.map((stage, at) => `${stage}${at === index && mission.state === 'active' ? ' (current)' : ''}`).join(' → ');
-  return `Mission ${mission.id} · ${state} — ${mission.title}\nPlan: ${plan}`;
+  const policy = mission.preset ? currentPolicy(mission.preset, ' for this mission') : currentPolicy(globalPreset(), ' (the global preset; the mission sets none)');
+  return `Mission ${mission.id} · ${state} — ${mission.title}\nPlan: ${plan}\n${policy}`;
 }
 
 async function reportMission(args: any): Promise<string> {
@@ -468,21 +506,30 @@ async function reportMission(args: any): Promise<string> {
     // The same title again is the same command: report the step, do not open a second card for it.
     // A resumed lead may resend its whole starting call; its plan is not a revision, so stages are ignored here.
     if (current && current.title === title) {
-      return describeMission(args.stage ? await api('POST', `/api/missions/${current.id}`, { stage: args.stage }) : current);
+      return describeMission(args.stage || args.preset !== undefined ? await api('POST', `/api/missions/${current.id}`, { stage: args.stage, preset: args.preset }) : current);
     }
     // After this server restarts it no longer knows its mission. An open one this session opened under the same title is
     // that mission. The title alone proves nothing: another session in the project may be carrying out a command of the same name.
     const all: Mission[] = current || !SESSION ? [] : ((await api('GET', '/api/state')).missions ?? []);
-    const lost = all.find((m) => m.owner === SESSION && m.project === PROJECT && m.state === 'active' && m.title === title);
+    const mine = all.filter((m) => m.owner === SESSION && m.project === PROJECT && m.title === title);
+    const lost = mine.find((m) => m.state === 'active');
     if (lost) {
       missionId = lost.id;
-      return describeMission(args.stage ? await api('POST', `/api/missions/${lost.id}`, { stage: args.stage }) : lost);
+      costMission = lost.id;
+      return describeMission(args.stage || args.preset !== undefined ? await api('POST', `/api/missions/${lost.id}`, { stage: args.stage, preset: args.preset }) : lost);
+    }
+    // Closed on the board while this server was down: the work goes on under the preset the user chose for it.
+    const closed = !costMission && mine.filter((m) => m.state === 'abandoned' && m.outcome !== SUPERSEDED).sort((a, b) => b.createdAt - a.createdAt)[0];
+    if (closed) {
+      costMission = closed.id;
+      return `Mission ${closed.id} was closed outside this session (${closed.outcome || closed.state}). Carry on with the work and do not open a new mission for it.\n${describeMission(closed)}`;
     }
     // Opened before the previous one is closed, so a refused title leaves the previous mission as it was.
-    const opened: Mission = await api('POST', '/api/missions', { title: args.title, project: PROJECT, stage: args.stage, stages: args.stages, owner: SESSION });
+    const opened: Mission = await api('POST', '/api/missions', { title: args.title, project: PROJECT, stage: args.stage, stages: args.stages, owner: SESSION, preset: args.preset ?? undefined });
     missionId = opened.id;
+    costMission = opened.id;
     closedElsewhere = null;
-    if (current) await api('POST', `/api/missions/${current.id}`, { abandoned: true, outcome: 'Superseded by a new mission.' }).catch(() => {});
+    if (current) await api('POST', `/api/missions/${current.id}`, { abandoned: true, outcome: SUPERSEDED }).catch(() => {});
     return `${describeMission(opened)}\nJobs you start now are shown under it. Report each step with stage (no title needed), and finish with done.`;
   }
 
@@ -491,17 +538,19 @@ async function reportMission(args: any): Promise<string> {
       const gone = closedElsewhere;
       closedElsewhere = null;
       // Reopening it would bring back a card the user closed. The work goes on; only the reporting stops.
-      return `Mission ${gone.id} was closed outside this session (${gone.outcome || gone.state}). Carry on with the work and do not open a new mission for it.`;
+      return `Mission ${gone.id} was closed outside this session (${gone.outcome || gone.state}). Carry on with the work and do not open a new mission for it.\n${describeMission(gone)}`;
     }
+    if (args.preset !== undefined && costMission) throw new Error('This session\'s mission was closed outside it, so its preset can no longer change. Carry on under it, or start a new mission with the preset the user named.');
     throw new Error('This session has no open mission. Start one by passing title; if the work is already under way without one, carry on without reporting.');
   }
   if (ending) {
     const ended: Mission = await api('POST', `/api/missions/${current.id}`, { done: Boolean(args.done), abandoned: Boolean(args.abandoned), outcome: args.outcome, record: args.record });
     missionId = null;
+    costMission = null;
     return describeMission(ended);
   }
-  if (!args.stage && args.stages === undefined) return describeMission(current);
-  return describeMission(await api('POST', `/api/missions/${current.id}`, { stage: args.stage, stages: args.stages }));
+  if (!args.stage && args.stages === undefined && args.preset === undefined) return describeMission(current);
+  return describeMission(await api('POST', `/api/missions/${current.id}`, { stage: args.stage, stages: args.stages, preset: args.preset }));
 }
 
 function describeJob(job: JobView, ctx: CallContext): string {
@@ -512,8 +561,8 @@ function describeJob(job: JobView, ctx: CallContext): string {
 }
 
 async function runJob(spec: JobSpec, background: boolean, ctx: CallContext): Promise<string> {
-  // The id is sent as it is known: the daemon checks it and lets the job stand on its own if the mission has ended.
-  const job: JobView = await api('POST', '/api/jobs', { ...spec, lead: SESSION, project: PROJECT, mission: missionId ?? undefined });
+  // The id is sent as it is known: the daemon applies the mission's preset, and lets the job stand on its own if the mission has ended.
+  const job: JobView = await api('POST', '/api/jobs', { ...spec, lead: SESSION, project: PROJECT, mission: costMission ?? undefined });
   return background ? describeJob(job, ctx) : followOne(job.id, ctx);
 }
 
@@ -540,9 +589,9 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
   const cwd: string = args.cwd ?? PROJECT;
   switch (name) {
     case 'debate':
-      return runJob({ kind: 'delegate', cwd, title: args.title ?? `Debate: ${String(args.topic).split('\n')[0].slice(0, 60)}`, task: `${args.topic}\n\n# The lead's position\n${args.position}`, debate: { rounds: args.rounds ?? 3 }, tier: args.tier, model: args.model, effort: args.effort }, args.background !== false, ctx);
+      return runJob({ kind: 'delegate', role: 'debate', cwd, title: args.title ?? `Debate: ${String(args.topic).split('\n')[0].slice(0, 60)}`, task: `${args.topic}\n\n# The lead's position\n${args.position}`, debate: { rounds: args.rounds ?? 3 }, tier: args.tier, model: args.model, effort: args.effort }, args.background !== false, ctx);
     case 'delegate':
-      return runJob({ kind: 'delegate', cwd, title: args.title, task: args.task, done_when: args.done_when, check: args.check, base: args.base, isolation: args.isolation, tier: args.tier, model: args.model, effort: args.effort, exclusive: Boolean(args.exclusive), runsApp: Boolean(args.runs_app), plugins: args.plugins, skills: args.skills, attachments: args.attachments }, args.background !== false, ctx);
+      return runJob({ kind: 'delegate', role: args.role ?? 'delegate', cwd, title: args.title, task: args.task, done_when: args.done_when, check: args.check, base: args.base, isolation: args.isolation, tier: args.tier, model: args.model, effort: args.effort, exclusive: Boolean(args.exclusive), runsApp: Boolean(args.runs_app), plugins: args.plugins, skills: args.skills, attachments: args.attachments }, args.background !== false, ctx);
     case 'review': {
       const kind = args.target ?? 'uncommitted';
       if (kind === 'branch' && !args.base) throw new Error('target "branch" needs base (the branch to compare against, e.g. main).');
@@ -550,11 +599,11 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       const target = kind === 'branch' ? { type: 'baseBranch' as const, branch: args.base } : kind === 'commit' ? { type: 'commit' as const, sha: args.commit } : { type: 'uncommittedChanges' as const };
       // The focus can be long; the board title only needs to say what is under review.
       const title = `Review of ${kind === 'branch' ? `the branch against ${args.base}` : kind === 'commit' ? `commit ${args.commit.slice(0, 8)}` : 'uncommitted changes'}`;
-      return runJob({ kind: 'review', cwd, title, task: args.focus, done_when: args.done_when, review: { target, mode: args.mode ?? 'adversarial' }, tier: args.tier, model: args.model, effort: args.effort, runsApp: Boolean(args.runs_app), plugins: args.plugins, skills: args.skills, attachments: args.attachments }, args.background !== false, ctx);
+      return runJob({ kind: 'review', role: args.runs_app ? 'verify' : 'review', cwd, title, task: args.focus, done_when: args.done_when, review: { target, mode: args.mode ?? 'adversarial' }, tier: args.tier, model: args.model, effort: args.effort, runsApp: Boolean(args.runs_app), plugins: args.plugins, skills: args.skills, attachments: args.attachments }, args.background !== false, ctx);
     }
     case 'polish':
       if (args.exclusive) throw new Error('polish cannot run alone: an editor measures nothing. Drop exclusive.');
-      return runJob({ kind: 'polish', cwd, title: args.title ?? `Polish ${args.targets.join(', ')}`, task: args.guidance, targets: args.targets, base: args.base, isolation: args.isolation, tier: args.tier, model: args.model, skills: args.skills }, args.background !== false, ctx);
+      return runJob({ kind: 'polish', role: 'polish', cwd, title: args.title ?? `Polish ${args.targets.join(', ')}`, task: args.guidance, targets: args.targets, base: args.base, isolation: args.isolation, tier: args.tier, model: args.model, skills: args.skills }, args.background !== false, ctx);
     case 'mission':
       return reportMission(args);
     case 'route': {
@@ -562,12 +611,15 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
         const measured = describeUsage(await api('GET', '/api/usage'));
         return measured.length ? measured.join('\n') : 'AgentGauge has no usage data on this machine, so the roles are followed as assigned.';
       }
-      const decision: RouteDecision = await api('GET', `/api/route?kind=${encodeURIComponent(args.kind)}`);
+      const query = `kind=${encodeURIComponent(args.kind)}${costMission ? `&mission=${encodeURIComponent(costMission)}` : ''}`;
+      const decision: RouteDecision & { preset?: PresetName | null; policy?: Preset | null } = await api('GET', `/api/route?${query}`);
       const who = decision.assignee === 'claude' ? 'you (the lead)' : WORKERS[decision.assignee].name;
       const lines = [`${args.kind} → ${who}`, decision.reason];
       if (decision.degraded) lines.push('Degraded: the usual cross-check is missing. Say so in your report.');
       if (decision.deferUntil) lines.push(`Can wait until ${new Date(decision.deferUntil).toISOString()}.`);
       if (decision.fallback.length) lines.push(`If that fails: ${decision.fallback.map((a) => (a === 'claude' ? 'you' : WORKERS[a].name)).join(', then ')}.`);
+      // A daemon that predates mission presets sends none; the session's instructions then still hold.
+      if (decision.preset !== undefined) lines.push(presetPolicy(decision.preset, decision.policy ?? undefined, ' for the next job'));
       return lines.join('\n');
     }
     case 'status': {

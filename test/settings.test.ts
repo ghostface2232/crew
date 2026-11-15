@@ -28,7 +28,7 @@ test('saving roles keeps every other setting, drops blank fields, and returns th
   const delegate = { agents: ['codex'], codex: { effort: 'high' } };
   assert.deepEqual(saved.roleSettings, { delegate, polish: { agents: ['codex'] } });
   assert.deepEqual(saved.roles, {
-    delegate, refactor: delegate, release: delegate, debate: delegate, review: { agents: ['codex'] }, verify: { agents: ['codex'] }, polish: { agents: ['codex'] },
+    delegate, refactor: delegate, release: delegate, debate: delegate, review: { agents: ['codex'] }, verify: { agents: ['codex'] }, fix: { agents: ['claude'] }, polish: { agents: ['codex'] },
   });
   // The table is replaced as a whole: a role left out goes back to its default.
   assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), {
@@ -159,7 +159,7 @@ test('a role without agents follows its parent; one with agents starts fresh', (
   assert.deepEqual(config.roles.release, { agents: ['codex'], codex: { model: 'gpt-x', effort: 'high' } });
   assert.deepEqual(config.roles.debate, { agents: ['codex'], codex: { model: 'gpt-x', effort: 'medium' } });
   assert.deepEqual(config.roles.verify, { agents: ['antigravity'] });
-  assert.throws(() => resolveConfig({ roles: { deploy: { agents: ['codex'] } } as never }), /roles\.deploy is not a role; use one of: delegate, refactor, release, debate, review, verify, polish/);
+  assert.throws(() => resolveConfig({ roles: { deploy: { agents: ['codex'] } } as never }), /roles\.deploy is not a role; use one of: delegate, refactor, release, debate, review, verify, fix, polish/);
   assert.throws(() => resolveConfig({ roles: { verify: { agent: 'cursor' } } as never }), /roles\.verify\.agent is "cursor"/);
   // Written before agents, a model that follows its parent's agent could reach an agent that does not have it.
   assert.throws(() => resolveConfig({ roles: { delegate: { agent: 'antigravity' }, refactor: { model: 'gpt-x' } } }), /roles\.refactor\.model needs roles\.refactor\.agent/);

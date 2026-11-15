@@ -582,6 +582,16 @@ private final class MockProtocol: URLProtocol, @unchecked Sendable {
         #expect(store.state.roleSettings == nil && store.state.roleInfo == nil)
         #expect(store.state.availableRoles == RoleInfo.legacy)
     }
+    @Test func modelScoresArriveByEventAndFixSitsWithReviews() throws {
+        let store = try store()
+        try store.receive(event("state", fixture()))
+        #expect(store.state.modelScores == nil)
+        let scores = [ModelScore(model: "gpt-x", agent: "codex", score: 8.4, build: 8.6, fix: nil, samples: 12, status: "settled", summary: "Solid.")]
+        try store.receive(event("modelScores", scores))
+        #expect(store.state.modelScores == scores)
+        #expect(RoleInfo(role: "fix", kind: "delegate", label: "Fix", summary: "").group == "Review")
+        #expect(RoleInfo(role: "release", kind: "delegate", label: "Release", summary: "").group == "Build")
+    }
     @Test func missionPresetSendsNameOrNullAndOnlyChangesActiveMissions() async throws {
         let original = try fixture().missions[0]
         let calls = Mutex(0)

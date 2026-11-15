@@ -1,0 +1,161 @@
+/* Model scores: a podium for the leaders, then every model's standing. */
+
+/* --- Podium --- */
+.podium {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: end;
+  gap: 6px;
+  padding: 28px 24px 0;
+  border-radius: var(--row-radius);
+  background:
+    radial-gradient(120% 90% at 50% 0%, color-mix(in srgb, #ffcc00 10%, transparent), transparent 62%),
+    var(--surface);
+  box-shadow: 0 0 0 1px var(--hairline);
+  overflow: hidden;
+}
+/* With two models, the pair sits in the middle two-thirds. */
+.podium:has(> .place:nth-child(2):last-child) { grid-template-columns: repeat(2, minmax(0, 1fr)); padding-inline: 18%; }
+.place { --medal: #c7c7cc; display: grid; justify-items: center; gap: 12px; min-width: 0; }
+.place[data-place="1"] { --medal: #ffcc00; }
+.place[data-place="3"] { --medal: #d39a6a; }
+.contender {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  animation: score-rise 520ms var(--ease-out) both;
+  animation-delay: calc(var(--order) * 90ms + 260ms);
+}
+.trophy { display: grid; place-items: center; color: #e6b800; margin-bottom: 2px; }
+.trophy svg { fill: color-mix(in srgb, #ffcc00 35%, transparent); }
+.avatar {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--fill);
+  color: var(--label);
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px color-mix(in srgb, var(--medal) 80%, transparent);
+}
+.place[data-place="1"] .avatar { width: 64px; height: 64px; }
+.medal {
+  position: absolute;
+  inset-inline-end: -4px;
+  bottom: -4px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--medal);
+  box-shadow: 0 0 0 2px var(--surface);
+  color: rgb(0 0 0 / 0.72);
+  font: 700 11px/1 var(--rounded);
+}
+.podiumName {
+  max-width: 100%;
+  margin-top: 4px;
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pill {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--tone) 14%, transparent);
+  color: color-mix(in srgb, var(--tone), black var(--tone-darken));
+}
+.pillNumber { font: 600 17px/1 var(--rounded); }
+.pillUnit { font: 500 11px/1 var(--rounded); opacity: 0.7; }
+.pedestal {
+  display: grid;
+  place-items: start center;
+  width: 100%;
+  height: 52px;
+  padding-top: 8px;
+  border-radius: 12px 12px 0 0;
+  background: linear-gradient(to bottom, color-mix(in srgb, var(--medal) 26%, var(--surface)), color-mix(in srgb, var(--medal) 6%, var(--surface)));
+  box-shadow: inset 0 1px color-mix(in srgb, white 60%, transparent);
+  transform-origin: bottom;
+  animation: score-grow 620ms var(--ease-out) both;
+  animation-delay: calc(var(--order) * 90ms);
+}
+.place[data-place="1"] .pedestal { height: 92px; }
+.place[data-place="2"] .pedestal { height: 68px; }
+.pedestal span { color: color-mix(in srgb, var(--medal), black 30%); font: 600 30px/1 var(--rounded); opacity: 0.55; }
+
+/* --- Standings --- */
+.standings { border-radius: var(--row-radius); background: var(--surface); box-shadow: 0 0 0 1px var(--hairline); overflow: hidden; }
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px 14px 12px;
+  animation: score-rise 420ms var(--ease-out) both;
+  animation-delay: calc(var(--i) * 50ms + 120ms);
+}
+.row + .row { box-shadow: inset 0 1px var(--hairline); }
+.rank { flex: none; width: 20px; color: var(--secondary); font: 600 15px/1 var(--rounded); font-variant-numeric: tabular-nums; text-align: center; }
+.rowAvatar { display: grid; flex: none; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--fill); color: var(--label); }
+.rowText { position: relative; display: grid; gap: 3px; flex: 1; min-width: 0; }
+.rowHead { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.rowName { min-width: 0; overflow: hidden; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.word {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--tone) 12%, transparent);
+  color: color-mix(in srgb, var(--tone), black var(--tone-darken));
+  font-size: 11px;
+  font-weight: 600;
+}
+.meta { color: var(--secondary); font-size: 12px; font-variant-numeric: tabular-nums; }
+.bars { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 3px; }
+.bar { display: inline-flex; align-items: center; gap: 6px; color: var(--secondary); font-size: 11px; font-variant-numeric: tabular-nums; }
+.barLabel { width: 28px; }
+.barTrack { position: relative; width: 72px; height: 4px; border-radius: 2px; background: var(--fill); overflow: hidden; }
+.barTrack i { position: absolute; inset: 0; border-radius: inherit; background: var(--label); opacity: 0.7; transform-origin: left; scale: var(--value) 1; animation: score-grow-x 700ms var(--ease-out) both; animation-delay: calc(var(--i) * 50ms + 260ms); }
+.barValue { width: 22px; color: var(--label); }
+.bar[data-empty] .barValue { color: var(--tertiary); }
+.summary { margin-top: 4px; color: var(--secondary); font-size: 12px; line-height: 1.4; white-space: pre-line; overflow-wrap: anywhere; }
+.empty { padding: 14px 16px; color: var(--secondary); }
+
+.ring { position: relative; display: grid; flex: none; place-items: center; width: var(--size); height: var(--size); }
+.ring svg { position: absolute; inset: 0; rotate: -90deg; }
+.ring circle { fill: none; stroke-width: 3.2; }
+.track { stroke: var(--fill); }
+.arc {
+  stroke: var(--tone);
+  stroke-linecap: round;
+  stroke-dasharray: var(--value) 100;
+  animation: ring-fill 900ms var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * 50ms + 200ms);
+}
+@keyframes ring-fill { from { stroke-dasharray: 0 100; } }
+@keyframes score-rise { from { opacity: 0; translate: 0 10px; filter: blur(4px); } }
+@keyframes score-grow { from { scale: 1 0; } }
+@keyframes score-grow-x { from { scale: 0 1; } }
+.ringValue { font: 600 15px/1 var(--rounded); font-variant-numeric: tabular-nums; }
+.row:not([data-status="settled"]) .ringValue { color: var(--secondary); }
+
+.hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+@media (max-width: 520px) {
+  .podium { gap: 4px; padding: 22px 12px 0; }
+  .place[data-place="1"] .avatar { width: 54px; height: 54px; }
+  .avatar { width: 44px; height: 44px; }
+  .bars { gap: 4px 12px; }
+  .barTrack { width: 52px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .contender, .pedestal, .row, .barTrack i, .arc { animation: none; }
+}

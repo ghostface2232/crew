@@ -669,3 +669,35 @@ test('gc requires the user secret and the CLI prints a readable dry run', { time
   assert.match(applied.out, /^Crew gc: applying cleanup/);
   assert.equal((await cli(['--unknown'])).code, 1);
 });
+
+test('model notes take a job\'s own model, refuse a model it did not run, and reach the state and the lead\'s view', { timeout: 15000 }, async (t) => {
+  const h = await daemon(t);
+  const { job } = await h.create();
+  const ran = (await h.api('GET', `/api/jobs/${job.id}`)).body;
+  const model = ran.resolvedModel ?? ran.model;
+  assert.ok(model, 'the fake worker reports a model');
+  const noted = await h.api('POST', '/api/notes', { job: job.id, reviewer: 'claude', size: 'small', findings: { medium: 1 }, text: 'one edge case' });
+  assert.equal(noted.status, 200, JSON.stringify(noted.body));
+  assert.deepEqual([noted.body.model, noted.body.agent, noted.body.samples], [model, 'codex', 1]);
+  assert.match((await h.api('POST', '/api/notes', { job: job.id, model: 'other-model', reviewer: 'claude', size: 'small', text: 'x' })).body.error, /ran on .*, not other-model/);
+  assert.match((await h.api('POST', '/api/notes', { job: 'cx-none', reviewer: 'claude', size: 'small', text: 'x' })).body.error, /No job with id/);
+  // A review built nothing, so it cannot be noted as a build; a summary must be text.
+  const review = (await h.api('POST', '/api/jobs', { kind: 'review', cwd: h.home, project: h.home, review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } })).body;
+  assert.match((await h.api('POST', '/api/notes', { job: review.id, reviewer: 'claude', size: 'small', text: 'x' })).body.error, /builds nothing to judge/);
+  assert.match((await h.api('POST', '/api/notes', { model: model, summary: null })).body.error, /summary must be text/);
+  // Noting the job again corrects its line.
+  assert.equal((await h.api('POST', '/api/notes', { job: job.id, reviewer: 'claude', size: 'small', text: 'one edge case' })).body.samples, 1);
+  // Work done in the lead's session names its own model and is the lead's.
+  const own = (await h.api('POST', '/api/notes', { model: 'claude-test', role: 'fix', outcome: 'root-cause', reviewer: 'codex', size: 'medium', text: 'fixed at the cause' })).body;
+  assert.deepEqual([own.agent, own.fixSamples], ['claude', 1]);
+  assert.equal((await h.api('POST', '/api/notes', { model: 'claude-test', summary: 'Fixes at the cause.' })).body.summary, 'Fixes at the cause.');
+  assert.deepEqual((await h.api('GET', '/api/state')).body.modelScores.map((s: any) => s.model).sort(), ['claude-test', model].sort());
+  const view = (await h.api('GET', '/api/notes?agents=claude&evidence=1')).body.text;
+  assert.match(view, /### claude-test \(claude\)[^]*Fixes at the cause\.[^]*fixed at the cause/);
+  assert.doesNotMatch(view, /one edge case/);
+  // An unreadable file is set aside, and noting starts afresh.
+  fs.writeFileSync(path.join(h.home, 'model-notes.json'), '{broken');
+  assert.deepEqual((await h.api('GET', '/api/state')).body.modelScores, []);
+  assert.ok(fs.readdirSync(h.home).some((name) => name.startsWith('model-notes.json.unreadable-')));
+  assert.equal((await h.api('POST', '/api/notes', { model: 'claude-test', reviewer: 'codex', size: 'small', text: 'after' })).status, 200);
+});

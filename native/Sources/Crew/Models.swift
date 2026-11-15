@@ -328,7 +328,8 @@ struct RoleInfo: Codable, Sendable, Identifiable, Equatable {
     var summary: String
     var unable: [String]?
     var id: String { role }
-    var group: String { kind == "delegate" ? "Build" : kind == "review" ? "Review" : "Edit" }
+    /// Fixing review findings sits with the reviews it answers, though it runs as a build job.
+    var group: String { role == "fix" || kind == "review" ? "Review" : kind == "delegate" ? "Build" : "Edit" }
     static let legacy = [
         RoleInfo(role: "delegate", kind: "delegate", label: "Implementation", summary: "Builds separable pieces of a change."),
         RoleInfo(role: "review", kind: "review", label: "Read-only review", summary: "Reviews a change without modifying it."),
@@ -410,6 +411,18 @@ struct Preset: Codable, Sendable, Equatable {
     }
 }
 struct PresetState: Codable, Sendable, Equatable { var preset: PresetName?; var presets: [String: Preset] }
+/// One model's standing from its review notes (plugin/bridge/notes.ts).
+struct ModelScore: Codable, Sendable, Equatable, Identifiable {
+    var model: String
+    var agent: String
+    var score: Double?
+    var build: Double?
+    var fix: Double?
+    var samples: Int
+    var status: String
+    var summary: String
+    var id: String { model }
+}
 struct NotificationPreferences: Codable, Sendable, Equatable { var enabled: Bool; var onDone: Bool }
 struct BoardState: Codable, Sendable, Equatable {
     var now: Double = 0
@@ -426,6 +439,8 @@ struct BoardState: Codable, Sendable, Equatable {
     var usage: Usage?
     var preset: PresetName?
     var presets: [String: Preset]?
+    /// Absent from a daemon that predates model notes.
+    var modelScores: [ModelScore]?
     var availableRoles: [RoleInfo] { roleInfo ?? RoleInfo.legacy }
     var editableRoleSettings: [String: RoleSetting] { roleSettings ?? roles.mapValues(RoleSetting.init) }
     func roleLabel(_ role: String) -> String {
@@ -455,6 +470,7 @@ struct BoardState: Codable, Sendable, Equatable {
         case "preset":
             let change = try decoder.decode(PresetState.self, from: event.data)
             preset = change.preset; presets = change.presets
+        case "modelScores": modelScores = try decoder.decode([ModelScore].self, from: event.data)
         case "roles": roles = try decoder.decode([String: RoleAssignment].self, from: event.data)
         case "roleSettings": roleSettings = try decoder.decode([String: RoleSetting].self, from: event.data)
         default: break
@@ -473,7 +489,7 @@ func mergeEvents(_ previous: [CrewEvent], _ incoming: [CrewEvent], limit: Int = 
     return Array(byID.values.sorted { $0.seq < $1.seq }.suffix(limit))
 }
 func agentName(_ id: String) -> String { ["claude": "Claude", "codex": "Codex", "antigravity": "Antigravity"][id] ?? id }
-let roleNames = ["delegate": "Implementation", "refactor": "Refactoring", "release": "Release preparation", "debate": "Debate", "review": "Read-only review", "verify": "Review that runs the app", "polish": "Wording polish"]
+let roleNames = ["delegate": "Implementation", "refactor": "Refactoring", "release": "Release preparation", "debate": "Debate", "review": "Read-only review", "verify": "Review that runs the app", "fix": "Fix", "polish": "Wording polish"]
 let roleOrder = ["delegate", "review", "polish"]
 func projectName(_ path: String, among paths: [String]) -> String {
     let name = URL(fileURLWithPath: path).lastPathComponent

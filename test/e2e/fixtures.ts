@@ -117,6 +117,12 @@ export function fixture(): BoardState {
     roleSettings: {},
     roleInfo: ROLE_INFO,
     limits: { codex: { windows: [{ usedPercent: 42, minutes: 300 }] } },
+    modelScores: [
+      { model: 'gpt-6.1-sol', agent: 'codex', score: 8.4, build: 8.6, fix: 7.9, samples: 12, buildSamples: 9, fixSamples: 3, status: 'settled', summary: 'Solid logic; misses time zone edge cases.', lastAt: NOW, consolidate: false },
+      { model: 'gemini-4-hydrogen', agent: 'antigravity', score: 7.8, build: 7.8, fix: null, samples: 5, buildSamples: 5, fixSamples: 0, status: 'on trial', summary: '', lastAt: NOW, consolidate: false },
+      { model: 'gpt-6-astra', agent: 'codex', score: 6.4, build: 6.1, fix: 7.2, samples: 9, buildSamples: 6, fixSamples: 3, status: 'settled', summary: 'Ambitious UI work; often edits beyond the task.', lastAt: NOW, consolidate: false },
+      { model: 'claude-opus-5-5', agent: 'claude', score: 7.6, build: null, fix: 7.6, samples: 2, buildSamples: 0, fixSamples: 2, status: 'too few samples', summary: '', lastAt: NOW, consolidate: false },
+    ],
     preset: 'balanced',
     presets: {
       economy: { codex: { model: 'small', effort: 'low' }, antigravity: { model: 'flash' }, subagentModel: 'haiku' },

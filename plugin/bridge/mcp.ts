@@ -71,7 +71,7 @@ const INSTRUCTIONS = `Crew connects this session to other coding agents that run
 
 Roles (assigned by the user in the settings or ~/.crew/config.json; each job goes to the agent holding its role, and you do not reassign them). As of this session's start:
 ${ROLE_LINES}
-\`delegate\` takes role delegate, refactor, or release; \`review\` is the review role, or verify with runs_app; \`debate\` and \`polish\` are their own roles. Each job's result names the agent that took it.
+\`delegate\` takes role delegate, refactor, release, or fix; \`review\` is the review role, or verify with runs_app; \`debate\` and \`polish\` are their own roles. Each job's result names the agent that took it.
 A role may have several holders: pick one for each job with \`agent\` (\`route\` says who has room); without it, wording goes to Antigravity and other work to Codex, among the role's holders that can take it. Give work that operates the screen (computer use) or must run the app to Codex when it holds the role. When a second view is worth the usage, run the job with two holders at once. Picking yourself (\`claude\`) starts no worker: do the work in this session, or in a subagent (\`crew:self-reviewer\` for a review).
 
 How jobs work:
@@ -88,6 +88,8 @@ How jobs work:
 - Workers save screenshots and recordings in the job's evidence directory, which is kept with the job: results list them and show the latest turn's images, and the board shows them all. To show a worker an image (a design, a screenshot of the problem), pass its path in attachments with delegate, review, reply, or answer.
 - When to review while you run the Crew pipeline (/crew:run), without being asked: one review (your crew:self-reviewer subagent or \`review\`, not both) when a substantial piece of implementation reaches a stopping point; before you push or open a pull request, a review of whatever is going out that no review has covered since it last changed substantially (both in parallel for security, concurrency, or data loss; fixes for a review's findings count as covered); none for small fixes and wording. Reviewers that run in parallel are static unless exactly one of them is told it may run the app. The user's own request for a review, or for none, comes first. Outside the pipeline, review only when the user asks: do not hold back a commit or a push for one.
 - When you take a user's command through several steps, call \`mission\` with title and planned stages first, with stage as you move on, and with done as soon as the work finishes. Pass stages again with what remains to add or drop future steps. The board then shows the command as one unit with its jobs under it. Skip it for a single delegated job. When the user asks for more work after you finished a mission, start a new mission for it before handing any of it out; a job started without one gets a follow-up mission named after the finished one.
+- Fixing a review's findings: triage stays yours. Decide which findings to accept and which to decline with a reason; the user's intent and this conversation decide that. A change a worker built goes back to that worker with \`reply\`, since its context is intact. The fix role is for your own code or a result merged from several jobs: when a worker holds it, \`delegate\` with role fix and give it the accepted findings with their reasons, your decisions, a map of the files involved, and a done_when; a brief of file names alone invites fixes that only hide symptoms. The review-round limit is the same whoever fixes.
+- Model notes: after each review and its fix, record what happened with \`note\`, one line per model judged: the builder's line (role build) with the findings you accepted, and the fixer's line (role fix) with how the fix went. Facts from the review only, never impressions; findings from your own crew:self-reviewer count too. \`route\` shows the role holders' notes: let them inform your choice of tier and holder within the roles and presets the user set, which stay theirs. When a note says its summary is due, rewrite it with \`note\` (model and summary) from the evidence.
 - Usage is measured by AgentGauge. In the pipeline, call \`route\` once at each stage boundary before you hand out work (not on every turn) with the role you are about to hand out, and follow its assignee and reason; when it says degraded, say in your report what was skipped. Outside the pipeline, follow the roles unless a job fails on a limit.${PRESET_LINE}
 
 The user can watch every agent live on the status board at ${BASE_URL}.`;
@@ -127,11 +129,11 @@ const TOOLS = [
   {
     name: 'delegate',
     title: 'Delegate work',
-    description: `Hand a separable piece of work to the agent holding its role: implementation (${holder('delegate')}), refactoring (${holder('refactor')}), or release preparation (${holder('release')}). It works in its own git worktree and reports back; its changes land on a crew-<job id> branch for you to review and merge.`,
+    description: `Hand a separable piece of work to the agent holding its role: implementation (${holder('delegate')}), refactoring (${holder('refactor')}), release preparation (${holder('release')}), or fixing review findings (${holder('fix')}). It works in its own git worktree and reports back; its changes land on a crew-<job id> branch for you to review and merge.`,
     inputSchema: {
       type: 'object',
       properties: {
-        role: { type: 'string', enum: ['delegate', 'refactor', 'release'], description: 'delegate (default): implementation. refactor: restructure code without changing behavior, with the checks run before and after. release: prepare a release (version, changelog, build, checks, and written steps to publish); it publishes, pushes, and deploys nothing.' },
+        role: { type: 'string', enum: ['delegate', 'refactor', 'release', 'fix'], description: 'delegate (default): implementation. refactor: restructure code without changing behavior, with the checks run before and after. release: prepare a release (version, changelog, build, checks, and written steps to publish); it publishes, pushes, and deploys nothing. fix: fix the review findings you accepted in your own code or a merged result; give the findings with their reasons and your decisions. A worker\'s own change goes back to it with reply instead.' },
         task: { type: 'string', description: 'What to build, with the context the engineer needs: relevant files, constraints, interfaces to match. It has not seen this conversation. If the result must match something (a design, screenshots, another implementation), name it by file path and commit; the engineer can open images by path.' },
         title: { type: 'string', description: 'Short label shown on the status board.' },
         done_when: { type: 'string', description: 'Concrete completion criteria the engineer can check, e.g. tests that must pass, or what must be true on screen and at which widths.' },
@@ -233,7 +235,31 @@ const TOOLS = [
     annotations: { readOnlyHint: true },
     inputSchema: {
       type: 'object',
-      properties: { kind: { type: 'string', enum: ['lead', ...ROLES], description: 'The role you are about to hand out (verify for a review with runs_app, refactor or release for those delegate roles). lead asks whether you yourself should carry on.' } },
+      properties: { kind: { type: 'string', enum: ['lead', ...ROLES], description: 'The role you are about to hand out (verify for a review with runs_app, refactor, release or fix for those delegate roles). lead asks whether you yourself should carry on.' } },
+    },
+  },
+  {
+    name: 'note',
+    title: 'Note a review result',
+    description: 'Record one line of evidence in a model\'s notes after a review and its fix: who built or fixed, who reviewed, the findings you accepted, and how the fix went. The notes score each model out of 10, corrected for task difficulty and for how harsh each reviewer is, and \`route\` shows them. Or, with model and summary only, rewrite a model\'s summary from its evidence.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        job_id: { type: 'string', description: 'The job whose work was reviewed or that did the fix; its model, agent, tier and effort are read from it.' },
+        model: { type: 'string', description: 'Without job_id: the exact model of work done in this session or your subagent (yours, e.g. your own model id). With summary: the model whose summary to rewrite.' },
+        role: { type: 'string', enum: ['build', 'fix'], description: 'build (default; fix for a fix-role job): the model built the change under review. fix: the model fixed the accepted findings.' },
+        reviewer: { type: 'string', enum: [...Object.keys(WORKERS), LEAD], description: 'Who reviewed the work (for a fix, who checked it): the cross-reviewer\'s agent, or claude for your crew:self-reviewer.' },
+        size: { type: 'string', enum: ['small', 'medium', 'large'], description: 'Size of the change: small (a few lines or one function), medium (a feature in a few files), large (many files or a new subsystem).' },
+        tier: { type: 'string', enum: [...TIERS], description: 'Without job_id: how demanding the work was, as you would have given it a tier.' },
+        findings: {
+          type: 'object',
+          properties: { high: { type: 'integer', minimum: 0 }, medium: { type: 'integer', minimum: 0 }, low: { type: 'integer', minimum: 0 } },
+          description: 'For build: the findings you accepted, by severity (high: wrong behavior, data loss, security; medium: a real bug in an edge case; low: minor). Declined findings do not count. For fix: the findings the check of the fix raised (recorded as facts; the score of a fix line rests on outcome).',
+        },
+        outcome: { type: 'string', enum: ['root-cause', 'patch', 'another-review'], description: 'Required for fix: root-cause (fixed the cause), patch (handled the case without the cause), another-review (the fix needed another round).' },
+        text: { type: 'string', description: 'One line of facts from the review, e.g. "Markdown parser, no findings, one follow-up on underscore boundaries". No impressions.' },
+        summary: { type: 'string', description: 'With model only: the model\'s new summary, three to five lines on what it does well, where it is weak, and what to give it. Every claim must trace back to its evidence lines.' },
+      },
     },
   },
   {
@@ -680,6 +706,7 @@ const YOURS: Partial<Record<Role, string>> = {
   debate: 'Test your position with a fresh-context subagent told to argue against it, then decide.',
   review: 'Run the crew:self-reviewer subagent on the change.',
   verify: 'Run the crew:self-reviewer subagent, telling it that it may run the app in its own isolated instance.',
+  fix: 'Fix the accepted findings yourself, at their cause.',
   polish: 'Make the wording changes yourself, changing no logic or structure.',
 };
 
@@ -706,11 +733,25 @@ function pickHolder(role: Role, wanted: unknown): { agent?: Holder; yours?: stri
   return { yours: `${role} is yours: no worker was started. ${YOURS[role]} Its other holders: ${holders.filter((h) => h !== LEAD).map(holderName).join(', ') || 'none'}.` };
 }
 
+/**
+ * Appends the notes of these holders' most recently noted models, so the lead sees how they did before it picks a tier or holder.
+ * Notes are advice: a daemon without them, or one that fails to read them, leaves the answer as it was.
+ */
+async function withNotes(text: string, agents: Holder[], evidence: number): Promise<string> {
+  if (!agents.length) return text;
+  try {
+    const notes: { text: string } = await api('GET', `/api/notes?agents=${agents.map(encodeURIComponent).join(',')}&evidence=${evidence}`);
+    return notes.text ? `${text}\n\nModel notes (advice; the roles and presets stay the user's):\n${notes.text}` : text;
+  } catch {
+    return text;
+  }
+}
+
 async function callTool(name: string, args: any, ctx: CallContext): Promise<string> {
   const cwd: string = args.cwd ?? PROJECT;
   if (['delegate', 'review', 'polish', 'debate'].includes(name)) {
     const role: Role = name === 'debate' ? 'debate' : name === 'polish' ? 'polish' : name === 'review' ? (args.runs_app ? 'verify' : 'review') : (args.role ?? 'delegate');
-    if (name === 'delegate' && !['delegate', 'refactor', 'release'].includes(role)) throw new Error(`delegate takes role delegate, refactor or release, not ${String(role)}.`);
+    if (name === 'delegate' && !['delegate', 'refactor', 'release', 'fix'].includes(role)) throw new Error(`delegate takes role delegate, refactor, release or fix, not ${String(role)}.`);
     const picked = pickHolder(role, args.agent);
     if (picked.yours) return picked.yours;
     args = { ...args, agent: picked.agent };
@@ -719,7 +760,7 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
     case 'debate':
       return runJob({ kind: 'delegate', role: 'debate', cwd, title: args.title ?? `Debate: ${String(args.topic).split('\n')[0].slice(0, 60)}`, task: `${args.topic}\n\n# The lead's position\n${args.position}`, debate: { rounds: args.rounds ?? 3 }, agent: args.agent, tier: args.tier, model: args.model, effort: args.effort }, args.background !== false, ctx);
     case 'delegate':
-      return runJob({ kind: 'delegate', role: args.role ?? 'delegate', cwd, title: args.title, task: args.task, done_when: args.done_when, check: args.check, base: args.base, isolation: args.isolation, agent: args.agent, tier: args.tier, model: args.model, effort: args.effort, exclusive: Boolean(args.exclusive), runsApp: Boolean(args.runs_app), plugins: args.plugins, skills: args.skills, attachments: args.attachments }, args.background !== false, ctx);
+      return withNotes(await runJob({ kind: 'delegate', role: args.role ?? 'delegate', cwd, title: args.title, task: args.task, done_when: args.done_when, check: args.check, base: args.base, isolation: args.isolation, agent: args.agent, tier: args.tier, model: args.model, effort: args.effort, exclusive: Boolean(args.exclusive), runsApp: Boolean(args.runs_app), plugins: args.plugins, skills: args.skills, attachments: args.attachments }, args.background !== false, ctx), [args.agent], 2);
     case 'review': {
       const kind = args.target ?? 'uncommitted';
       if (kind === 'branch' && !args.base) throw new Error('target "branch" needs base (the branch to compare against, e.g. main).');
@@ -753,7 +794,16 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       if ((decision.holders?.length ?? 0) > 1) lines.push(`Holders you may pick with agent: ${decision.holders!.map((h) => `${h.agent} (${h.status})`).join(', ')}.`);
       // A daemon that predates mission presets sends none; the session's instructions then still hold.
       if (decision.preset !== undefined) lines.push(presetPolicy(decision.preset, decision.policy ?? undefined, ' for the next job'));
-      return lines.join('\n');
+      return withNotes(lines.join('\n'), args.kind === 'lead' ? [] : decision.holders?.map((h) => h.agent) ?? roles[args.kind as Role]?.agents ?? [], 2);
+    }
+    case 'note': {
+      if (args.summary !== undefined && args.job_id !== undefined) throw new Error('A summary is rewritten with model and summary alone; note the job in a separate call.');
+      const body = args.summary !== undefined
+        ? { model: args.model, summary: args.summary }
+        : { job: args.job_id, model: args.model, role: args.role, reviewer: args.reviewer, size: args.size, tier: args.tier, findings: args.findings, outcome: args.outcome, text: args.text };
+      const score = await api('POST', '/api/notes', body);
+      const shown = score.score === null ? '—' : score.score.toFixed(1);
+      return `Noted. ${score.model} (${score.agent}): ${shown}/10, ${score.status}, ${score.samples} sample(s).${score.consolidate ? ' Its summary is due: rewrite it from the evidence with note (model and summary).' : ''}`;
     }
     case 'status': {
       if (args.job_id) {

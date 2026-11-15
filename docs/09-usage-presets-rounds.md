@@ -283,6 +283,7 @@ Added 2026-11-15. A role is a kind of work the user assigns to an agent. Each ru
 | `debate` | delegate (read-only) | `delegate` | Tests the lead's position on a decision |
 | `review` | review | | Static cross-review |
 | `verify` | review | `review` | Review that runs the app in a snapshot of the change |
+| `fix` | delegate | | Fixing the review findings the lead accepted, in its own code or a merged result; plus `roles/fix.md`. Held by Claude by default |
 | `polish` | polish | | Wording |
 
 A role the user has not assigned, or assigned without `agents`, takes its parent's holders, with its own settings for each agent laid over the parent's. A role that lists `agents` starts fresh. Settings are kept per agent, so they never reach another agent; settings for an agent that does not hold the role are left out. A config written for the original three roles therefore behaves as before.
@@ -311,4 +312,17 @@ The daemon sends both tables: `roles` resolved (every role, `agents` required) a
 
 A job settles its role once, when it is created (`resolveRole` in `jobs.ts`). `POST /api/jobs` may send `role` without `kind`. A `kind: "review"` job with `runs_app` resolves to `verify`; explicitly passing `role: "review"` with `runs_app`, a role whose kind differs from the given `kind`, or debate rounds on any role other than `debate` are all refused. Jobs saved before roles were recorded derive theirs: `debate` if they were a debate, `verify` if a review ran the app, else their kind.
 
-The lead's tools map onto roles: `delegate` takes `role` (`delegate`, `refactor`, or `release`), `review` is `review` or, with `runs_app`, `verify`, and `debate` and `polish` are their own roles. The board's New Job offers every role except `debate`, which needs a lead to answer each round.
+The lead's tools map onto roles: `delegate` takes `role` (`delegate`, `refactor`, `release`, or `fix`), `review` is `review` or, with `runs_app`, `verify`, and `debate` and `polish` are their own roles. The board's New Job offers every role except `debate`, which needs a lead to answer each round.
+
+## 16. Model notes and scores
+
+Added 2026-11-15 (roadmap D1 and D2). After a review and its fix, the lead records one line of evidence per model with the `note` tool: who built or fixed, who reviewed, the size of the change, the findings it accepted by severity, and for a fix whether it reached the cause. A line for a job takes the model, agent, tier, and effort from the job's own record, so the lead names a model only for work done in its session (`POST /api/notes`). The daemon is the only writer of `~/.crew/model-notes.json` (`notes.ts`); the board and the app show the scores under Settings, Model Scores, from `modelScores` in the state and its event.
+
+Each model gets a score out of 10, to one decimal, over every job noted for it:
+
+- A build line starts at 1 and loses 0.35 per high, 0.15 per medium, and 0.05 per low finding. The loss is divided by the job's difficulty (tier: fast 0.7, light 0.85, standard 1, frontier 1.25; times size: small 0.8, medium 1, large 1.3), so harder work is judged more softly and counts for more.
+- Cross-evaluation: a reviewer with at least five build lines is calibrated against all reviewers, scaling its findings by the ratio of the overall mean to its own (0.75 to 1.25), so a harsh reviewer weighs less and a lenient one more. A review by the model's own agent counts half.
+- A fix line scores 1 for a root-cause fix, 0.55 for a patch, and 0.25 when it needed another review. Build and fix are also scored apart, so fixing quality stays separate from building quality.
+- The weighted mean is drawn toward 0.7 with the weight of two jobs, so a model with few lines stays near 7.0. Under three lines a model has too few samples, under eight it is on trial, and after that settled.
+
+The lead also keeps a short prose summary per model, rewritten from the evidence once ten lines have come in since the last one. `route` adds the summaries and latest two lines of the role's holders' three most recently noted models to its answer, before the lead hands the work out. Noting the same job and role again replaces its line, so a retried call never counts a job twice; a review or debate job cannot be noted, since it built nothing. A notes file that cannot be read is set aside as `model-notes.json.unreadable-<time>`, and incomplete entries are skipped. A model id belongs to one agent. The notes are advice for picking a tier and a holder: role assignments and presets stay the user's, and nothing switches by itself.

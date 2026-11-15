@@ -57,7 +57,7 @@ export const HOLDERS: Holder[] = ['codex', 'antigravity', LEAD];
  * has not assigned takes its parent's whole assignment, so a config written for the first three roles keeps
  * working as it did.
  */
-export const ROLES = ['delegate', 'refactor', 'release', 'debate', 'review', 'verify', 'polish'] as const;
+export const ROLES = ['delegate', 'refactor', 'release', 'debate', 'review', 'verify', 'fix', 'polish'] as const;
 export type Role = (typeof ROLES)[number];
 
 export interface RoleInfo {
@@ -78,6 +78,7 @@ export const ROLE_INFO: RoleInfo[] = [
   { role: 'debate', kind: 'delegate', parent: 'delegate', label: 'Debate', summary: 'Tests the lead\'s position on a hard decision, read-only.' },
   { role: 'review', kind: 'review', label: 'Cross-review', summary: 'Reviews a change by reading it and running checks.' },
   { role: 'verify', kind: 'review', parent: 'review', label: 'Review that runs the app', summary: 'Reviews a change by starting the app in a snapshot of it.', unable: ['antigravity'] },
+  { role: 'fix', kind: 'delegate', label: 'Fix', summary: 'Fixes the review findings the lead accepted, in the lead\'s own code or a merged result.' },
   { role: 'polish', kind: 'polish', label: 'Wording', summary: 'Improves UI strings, comments, and docs.' },
 ];
 export const roleInfo = (role: Role): RoleInfo => ROLE_INFO.find((info) => info.role === role)!;
@@ -205,8 +206,11 @@ export const PRESETS: Record<PresetName, Preset> = {
 export const PRESET_NAMES = Object.keys(PRESETS) as PresetName[];
 export const isPresetName = (value: unknown): value is PresetName => PRESET_NAMES.includes(value as PresetName);
 
-/** Holders of the roles that have no parent, when the user names none. */
-const BASE_HOLDERS: Partial<Record<Role, WorkerAgent>> = { delegate: 'codex', review: 'codex', polish: 'antigravity' };
+/**
+ * Holders of the roles that have no parent, when the user names none. Fixing stays with the lead, as it was before it
+ * became a role: triage needs the conversation, and the fix often does too.
+ */
+const BASE_HOLDERS: Partial<Record<Role, Holder>> = { delegate: 'codex', review: 'codex', fix: LEAD, polish: 'antigravity' };
 const sortHolders = (agents: Holder[]) => HOLDERS.filter((holder) => agents.includes(holder));
 
 const defaults: Config = {

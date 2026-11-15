@@ -519,7 +519,7 @@ test('a role assigned to a disabled or unknown agent fails with the reason, and 
   // Unset roles keep their defaults, and roles added later follow their parents.
   assert.deepEqual(resolveConfig({ roles: { polish: { antigravity: { model: 'm' } } } }).roles, {
     delegate: { agents: ['codex'] }, refactor: { agents: ['codex'] }, release: { agents: ['codex'] }, debate: { agents: ['codex'] },
-    review: { agents: ['codex'] }, verify: { agents: ['codex'] }, polish: { agents: ['antigravity'], antigravity: { model: 'm' } },
+    review: { agents: ['codex'] }, verify: { agents: ['codex'] }, fix: { agents: ['claude'] }, polish: { agents: ['antigravity'], antigravity: { model: 'm' } },
   });
 
   // A table that is not exactly right must not quietly fall back to the defaults.
@@ -527,7 +527,7 @@ test('a role assigned to a disabled or unknown agent fails with the reason, and 
   assert.throws(bad('codex'), /roles must be an object/);
   assert.throws(bad({ delegate: 'antigravity' }), /roles\.delegate must be an object/);
   assert.throws(bad({ delegate: null }), /roles\.delegate must be an object/);
-  assert.throws(bad({ reviewer: { agent: 'codex' } }), /roles\.reviewer is not a role; use one of: delegate, refactor, release, debate, review, verify, polish/);
+  assert.throws(bad({ reviewer: { agent: 'codex' } }), /roles\.reviewer is not a role; use one of: delegate, refactor, release, debate, review, verify, fix, polish/);
   assert.throws(bad({ review: { agent: 'codex', model: 5 } }), /roles\.review\.model must be a string/);
   assert.throws(bad({ review: { agnt: 'codex' } }), /roles\.review\.agnt is not a setting/);
 
@@ -976,7 +976,7 @@ test('a job\'s model comes from the lead\'s model, then its tier, then the user\
 
 test('each job goes to its role\'s holder, gets the role\'s brief, and refuses a role its options contradict', async (t) => {
   const repo = tempRepo();
-  const roles = resolveConfig({ notify: false, codex: config.codex, roles: { refactor: { agent: 'antigravity' }, review: { agent: 'antigravity' }, verify: { agent: 'codex' } } });
+  const roles = resolveConfig({ notify: false, codex: config.codex, roles: { refactor: { agent: 'antigravity' }, review: { agent: 'antigravity' }, verify: { agent: 'codex' }, fix: { agents: ['codex'] } } });
   const { jobs, home } = harness((ctl) => ctl.done('ok'), () => roles);
   t.after(() => { jobs.flush(); fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }); });
   const review = { target: { type: 'uncommittedChanges' as const }, mode: 'adversarial' as const };
@@ -987,6 +987,9 @@ test('each job goes to its role\'s holder, gets the role\'s brief, and refuses a
   const release = await jobs.create({ kind: 'delegate', role: 'release', cwd: repo, task: 'cut 1.2', isolation: 'in_place' });
   assert.deepEqual([release.role, release.agent], ['release', 'codex']);
   assert.match(release.instructions, /# This job: release preparation[^]*Do not push, tag, publish/);
+  const fix = await jobs.create({ kind: 'delegate', role: 'fix', cwd: repo, task: 'fix the two findings', isolation: 'in_place' });
+  assert.deepEqual([fix.role, fix.agent], ['fix', 'codex']);
+  assert.match(fix.instructions, /# Role: supporting engineer[^]*# This job: fixing review findings[^]*fix its cause/);
   // A review that runs the app is the verify role, so it can go to an agent that runs commands while static review does not.
   const verify = await jobs.create({ kind: 'review', cwd: repo, review, runsApp: true });
   assert.deepEqual([verify.role, verify.agent], ['verify', 'codex']);
@@ -1001,6 +1004,7 @@ test('each job goes to its role\'s holder, gets the role\'s brief, and refuses a
   await assert.rejects(jobs.create({ kind: 'review', role: 'verify', cwd: repo, review, runsApp: false }), /verify role runs the app/);
   await assert.rejects(jobs.create({ kind: 'delegate', role: 'debate', cwd: repo, task: 'x' }), /needs debate rounds/);
   await assert.rejects(jobs.create({ kind: 'delegate', role: 'release', cwd: repo, task: 'x', ask: true }), /cannot be a question/);
+  await assert.rejects(jobs.create({ kind: 'delegate', role: 'fix', cwd: repo, task: 'x', ask: true }), /cannot be a question/);
   await assert.rejects(jobs.create({ kind: 'delegate', role: 'deploy' as never, cwd: repo, task: 'x' }), /role must be one of/);
   await assert.rejects(jobs.create({ kind: 'delegate', role: 'delegate', cwd: repo, task: 'x', debate: { rounds: 2 } }), /A debate is the debate role, not delegate/);
   await assert.rejects(jobs.create({ kind: 'deploy' as never, cwd: repo, task: 'x' }), /kind must be one of: delegate, review, polish/);

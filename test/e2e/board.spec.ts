@@ -803,6 +803,27 @@ for (const source of ['absent', 'none'])
     await expect(page.getByLabel('Model preset')).toHaveCount(0);
   });
 
+test('model scores list each model with its score, counts and summary, and have nothing to save', async ({ page }) => {
+  await openSettings(page, 'Model Scores');
+  // The best three stand on a podium, first in the middle.
+  const podium = page.getByRole('region', { name: 'Top models' });
+  await expect(podium.getByText(/^gpt-6\.1-sol$|^gemini-4-hydrogen$|^gpt-6-astra$/)).toHaveText(['gemini-4-hydrogen', 'gpt-6.1-sol', 'gpt-6-astra']);
+  const standings = page.getByRole('region', { name: 'Standings' });
+  const sol = standings.getByRole('article').filter({ hasText: 'gpt-6.1-sol' });
+  await expect(sol.getByRole('img', { name: '8.4 out of 10' })).toBeVisible();
+  await expect(sol.getByText('Strong')).toBeVisible();
+  await expect(sol.getByText('Settled · 12 reviews')).toBeVisible();
+  await expect(sol.getByText('Solid logic; misses time zone edge cases.')).toBeVisible();
+  // A model short of reviews gets no verdict word.
+  const opus = standings.getByRole('article').filter({ hasText: 'claude-opus-5-5' });
+  await expect(opus.getByText('Too few reviews · 2 reviews')).toBeVisible();
+  await expect(opus.getByText(/Strong|Solid|Mixed|Shaky|Outstanding/)).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /^Save/ })).toHaveCount(0);
+  // Fixing is assigned with the reviews it answers.
+  await settingsPage(page, 'Review');
+  await expect(page.getByRole('checkbox', { name: 'Fix: Claude (the lead)' })).toBeChecked();
+});
+
 test('preset saves its selection, describes its models, and permits none', async ({ page, request }) => {
   await openSettings(page, 'Presets');
   const select = page.getByLabel('Model preset');

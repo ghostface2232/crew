@@ -405,11 +405,11 @@ export function route(kind: RouteKind, usage: Usage, roles: Config['roles'], dis
   function decide(holder: Agent): RouteDecision {
   if (holder === LEAD) return plain(LEAD, 'Claude holds the role: do the work yourself, or in a subagent.');
   // Each role names its policy, so a new role never falls through to another's.
-  const policy: Record<Role, 'build' | 'review' | 'debate' | 'polish'> = { delegate: 'build', refactor: 'build', release: 'build', review: 'review', verify: 'review', debate: 'debate', polish: 'polish' };
+  const policy: Record<Role, 'build' | 'review' | 'debate' | 'polish'> = { delegate: 'build', refactor: 'build', release: 'build', fix: 'build', review: 'review', verify: 'review', debate: 'debate', polish: 'polish' };
   switch (policy[kind as Role]) {
     case 'build': {
       // The lead taking over keeps the role's scope: release work stays preparation.
-      const yourself = kind === 'release' ? 'Prepare the release yourself, and publish or deploy nothing.' : 'Do this piece yourself, in a subagent if it is large.';
+      const yourself = kind === 'release' ? 'Prepare the release yourself, and publish or deploy nothing.' : kind === 'fix' ? 'Fix the findings yourself.' : 'Do this piece yourself, in a subagent if it is large.';
       if (status(holder) === 'exhausted') return plain(LEAD, `${why(holder)} ${yourself}`);
       if (status(holder) === 'tight' && !short(LEAD)) {
         return plain(LEAD, `${why(holder)} Take this work yourself or in subagents${roles.review.agents.includes(holder) ? `, and keep what ${name(holder)} has left for the cross-review` : ''}.`, [holder]);

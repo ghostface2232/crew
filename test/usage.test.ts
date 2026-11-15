@@ -221,6 +221,13 @@ test('every role has its own policy when its holder runs out', () => {
   // The lead taking release work over keeps it to preparation.
   assert.match(route('release', gone, DEFAULT_ROLES).reason, /publish or deploy nothing/);
   assert.equal(route('refactor', gone, DEFAULT_ROLES).degraded, false);
+  // Fixing stays with the lead unless the user gives it to a worker; a worker out of usage hands it back.
+  assert.equal(route('fix', usageOf({}), DEFAULT_ROLES).assignee, 'claude');
+  const given = { ...DEFAULT_ROLES, fix: { agents: ['codex' as const] } };
+  assert.equal(route('fix', usageOf({}), given).assignee, 'codex');
+  const out = route('fix', gone, given);
+  assert.equal(out.assignee, 'claude');
+  assert.match(out.reason, /Fix the findings yourself\.$/);
   assert.doesNotMatch(route('refactor', usageOf({ codex: 'tight' }), DEFAULT_ROLES).reason, /Polish/);
 });
 

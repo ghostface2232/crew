@@ -267,3 +267,24 @@ test('work started after a done mission opens a follow-up mission named after it
   await reportMission({ abandoned: true });
   assert.doesNotMatch(await runJob({ kind: 'delegate', task: 'after abandon' }, true, { jobs: [] }), /Opened mission/);
 });
+
+test('model notes are appended to an answer, and a daemon that cannot give them leaves it as it was', async () => {
+  const source = fs.readFileSync(new URL('../plugin/bridge/mcp.ts', import.meta.url), 'utf8');
+  const handler = source.slice(source.indexOf('async function withNotes('), source.indexOf('async function callTool('));
+  const routes: string[] = [];
+  let reply: unknown = { text: 'codex-model: 7.0/10' };
+  const withNotes = vm.runInNewContext(`${stripTypeScriptTypes(handler)}; withNotes`, {
+    api: async (_method: string, route: string) => {
+      routes.push(route);
+      if (reply instanceof Error) throw reply;
+      return reply;
+    },
+  });
+  assert.match(await withNotes('Started.', ['codex'], 2), /^Started\.\n\nModel notes[^]*codex-model: 7\.0\/10$/);
+  assert.equal(routes[0], '/api/notes?agents=codex&evidence=2');
+  assert.equal(await withNotes('Started.', [], 2), 'Started.');
+  reply = { text: '' };
+  assert.equal(await withNotes('Started.', ['codex'], 2), 'Started.');
+  reply = new Error('old daemon');
+  assert.equal(await withNotes('Started.', ['codex'], 2), 'Started.');
+});

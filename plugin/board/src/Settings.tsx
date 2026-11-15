@@ -1,12 +1,13 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import type { LucideIcon } from 'lucide-react';
-import { ChevronLeft, ChevronRight, FileText, Folder, Hammer, Info, ShieldCheck, SlidersHorizontal, Type } from 'lucide-react';
+import { ChevronLeft, ChevronRight, FileText, Folder, Gauge, Hammer, Info, ShieldCheck, SlidersHorizontal, Type } from 'lucide-react';
 import type { Preset, PresetName, Snapshot } from './types.ts';
 import type { AgentSettings, Holder, JobKind, Role, RoleAssignment, RoleInfo, RoleSettings, WorkerAgent } from '../../bridge/config.ts';
 import { request } from './api.ts';
 import { board } from './store.ts';
 import { agentSettings, HOLDERS, knownProjects, NAMES, projectNames, resolveDraft, rolesOf, sortHolders } from './model.ts';
 import { AgentMark, CloseButton, Dialog, Icon } from './ui.tsx';
+import { Scores } from './Scores.tsx';
 import styles from './Settings.module.css';
 
 /** The app's one-line summary of a preset. */
@@ -21,15 +22,19 @@ function presetDescription(preset: Preset) {
 }
 
 /** One page of settings, listed in the sidebar: the roles by kind of work, what every agent shares, then each project's own instructions. */
-type Fixed = 'build' | 'review' | 'edit' | 'presets' | 'instructions';
+type Fixed = 'build' | 'review' | 'edit' | 'presets' | 'models' | 'instructions';
 type Pane = Fixed | `project:${string}`;
 const PANES: Record<Fixed, { title: string; icon: LucideIcon; tint: string; kind?: JobKind }> = {
   build: { title: 'Build', icon: Hammer, tint: 'var(--accent)', kind: 'delegate' },
   review: { title: 'Review', icon: ShieldCheck, tint: 'var(--green)', kind: 'review' },
   edit: { title: 'Edit', icon: Type, tint: 'var(--orange)', kind: 'polish' },
   presets: { title: 'Presets', icon: SlidersHorizontal, tint: '#8e8e93' },
+  models: { title: 'Model Scores', icon: Gauge, tint: '#af52de' },
   instructions: { title: 'Instructions', icon: FileText, tint: '#5856d6' },
 };
+
+/** Fixing review findings sits with the reviews it answers, though it runs as a build job. */
+const paneKind = (role: RoleInfo): JobKind => (role.role === 'fix' ? 'review' : role.kind);
 
 /** Projects share one tile, apart from the roles' colors. */
 const PROJECT_TINT = '#30b0c7';
@@ -260,7 +265,8 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
       }
     }
   };
-  const current: Pane = pane === 'presets' && !state.presets ? 'build' : pane;
+  // A daemon without presets or notes has no page for them.
+  const current: Pane = (pane === 'presets' && !state.presets) || (pane === 'models' && !state.modelScores) ? 'build' : pane;
   const project = current.startsWith('project:') ? current.slice('project:'.length) : null;
   const fixed = project === null ? PANES[current as Fixed] : undefined;
   const kind = fixed?.kind;
@@ -271,7 +277,8 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
   const paneSaving = kind ? savingRoles : current === 'presets' ? savingPreset : saving;
   const paneDirty = kind ? rolesDirty : current === 'presets' ? preset !== savedPreset : text !== saved;
   const paneStatus = kind ? roleStatus : current === 'presets' ? presetStatus : load === 'loading' ? 'Loading…' : status;
-  const canSave = state.connection === 'live' && !paneSaving && (pageScope === null || (load === 'ready' && loadedScope === pageScope));
+  const readOnly = current === 'models';
+  const canSave = !readOnly && state.connection === 'live' && !paneSaving && (pageScope === null || (load === 'ready' && loadedScope === pageScope));
   const saveCurrent = async () => {
     if (!canSave) return;
     if (kind) await saveRoles();
@@ -433,7 +440,9 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
           <p className={styles.sectionLabel}>Roles</p>
           <div className={styles.section}>{(['build', 'review', 'edit'] as Pane[]).map(item)}</div>
           <p className={styles.sectionLabel}>Shared</p>
-          <div className={styles.section}>{(state.presets ? ['presets', 'instructions'] : ['instructions'] as Pane[]).map((id) => item(id as Pane))}</div>
+          <div className={styles.section}>
+            {([...(state.presets ? ['presets'] : []), ...(state.modelScores ? ['models'] : []), 'instructions'] as Pane[]).map(item)}
+          </div>
           {dirs.length > 0 && (
             <>
               <p className={styles.sectionLabel}>Projects</p>
@@ -452,7 +461,7 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
               <span className={styles.pageClose}><CloseButton label="Close settings" onClose={closeSettings} /></span>
             </header>
             <div className={styles.body}>
-              {kind && info.filter((role) => role.kind === kind).map(roleGroup)}
+              {kind && info.filter((role) => paneKind(role) === kind).map(roleGroup)}
               {kind && (
                 <p className={styles.footnote}>
                   The lead picks one of a role's holders for each job. When none is named, Antigravity takes wording and Codex other
@@ -485,6 +494,17 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
                   </section>
                 </>
               )}
+              {current === 'models' && (
+                <section className={styles.group}>
+                  <Scores scores={state.modelScores!} />
+                  <p className={styles.footnote}>
+                    After each review and its fix, the lead notes the findings it accepted and how the fix went. A score out of 10 weighs
+                    those notes across every job, corrected for each job's tier and size and for how harsh each reviewer tends to be. A
+                    review by the model's own agent counts half, and a model with few reviews stays close to 7.0. The lead reads these notes
+                    when it picks a tier or holder; your roles and presets still decide.
+                  </p>
+                </section>
+              )}
               {pageScope !== null && (
                 <>
                   <p className={styles.footnote} id="instructions-hint">
@@ -516,7 +536,7 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
               )}
             </div>
           </div>
-          <footer className={styles.footer}>
+          {!readOnly && <footer className={styles.footer}>
             <div className={styles.status} role="status">
               {paneStatus && <span className="callout secondary">{paneStatus}</span>}
               {paneDirty && <span className="unsaved">Unsaved changes</span>}
@@ -529,7 +549,7 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
                 {paneSaving ? 'Saving…' : kind ? 'Save Roles' : current === 'presets' ? 'Save Preset' : 'Save Instructions'}
               </button>
             </div>
-          </footer>
+          </footer>}
         </div>
       </div>
     </Dialog>

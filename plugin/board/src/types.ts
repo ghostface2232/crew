@@ -4,9 +4,10 @@ import type { Mission } from '../../bridge/missions.ts';
 import type { Config, Preset, PresetName, RoleInfo, RoleSettings, Worker, WorkerAgent } from '../../bridge/config.ts';
 import type { ModelChoice } from '../../bridge/tiers.ts';
 import type { Usage } from '../../bridge/usage.ts';
+import type { ModelScore } from '../../bridge/notes.ts';
 
 export type BoardJob = Omit<Job, 'prompt' | 'instructions'> & Partial<Pick<Job, 'prompt' | 'instructions'>>;
-export type { CrewEvent, ClaudeSession, Mission, WorkerAgent, Usage, Preset, PresetName };
+export type { CrewEvent, ClaudeSession, Mission, WorkerAgent, Usage, Preset, PresetName, ModelScore };
 export type Roles = Config['roles'];
 /** An older daemon sends no models; the settings then take a typed model and effort. */
 export type Agents = Record<WorkerAgent, Worker & { enabled: boolean; models?: ModelChoice[] }>;
@@ -27,6 +28,8 @@ export interface BoardState {
   /** The preset in effect, or null when none is set. */
   preset?: PresetName | null;
   presets?: Record<PresetName, Preset>;
+  /** Each model's score from its review notes; absent from a daemon that predates model notes. */
+  modelScores?: ModelScore[];
 }
 export type Connection = 'connecting' | 'live' | 'lost' | 'unauthorized';
 export interface Snapshot extends BoardState {

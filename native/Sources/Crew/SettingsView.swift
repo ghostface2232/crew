@@ -3,11 +3,11 @@ import SwiftUI
 /// One page of the settings window, listed in the sidebar: the roles by kind of work, what every agent shares,
 /// then each project's own instructions.
 enum SettingsPane: Hashable, Identifiable {
-    case build, review, edit, presets, instructions
+    case build, review, edit, presets, models, instructions
     case project(String)
     var id: Self { self }
     static let roles: [SettingsPane] = [.build, .review, .edit]
-    static let shared: [SettingsPane] = [.presets, .instructions]
+    static let shared: [SettingsPane] = [.presets, .models, .instructions]
     /// The role group (`RoleInfo.group`) a roles page shows; nil for the other pages.
     var group: String? { switch self { case .build: "Build"; case .review: "Review"; case .edit: "Edit"; default: nil } }
     /// The instructions a page edits: "" for every project, a project's path for its own; nil for the other pages.
@@ -18,6 +18,7 @@ enum SettingsPane: Hashable, Identifiable {
         case .review: "checkmark.shield.fill"
         case .edit: "textformat"
         case .presets: "slider.horizontal.3"
+        case .models: "gauge.with.dots.needle.67percent"
         case .instructions: "doc.text.fill"
         case .project: "folder.fill"
         }
@@ -29,6 +30,7 @@ enum SettingsPane: Hashable, Identifiable {
         case .review: .green
         case .edit: .orange
         case .presets: .gray
+        case .models: .purple
         case .instructions: .indigo
         }
     }
@@ -59,7 +61,7 @@ struct CrewSettingsView: View {
             List(selection: pages) {
                 SettingsAppRow().selectionDisabled()
                 Section("Roles") { ForEach(SettingsPane.roles) { paneRow($0) } }
-                Section("Shared") { ForEach(SettingsPane.shared.filter { $0 != .presets || model.presets != nil }) { paneRow($0) } }
+                Section("Shared") { ForEach(SettingsPane.shared.filter(available)) { paneRow($0) } }
                 if !store.projects.isEmpty {
                     Section("Projects") { ForEach(store.projects.map(SettingsPane.project)) { paneRow($0) } }
                 }
@@ -68,11 +70,12 @@ struct CrewSettingsView: View {
             .navigationSplitViewColumnWidth(min: Self.sidebarWidth.min, ideal: Self.sidebarWidth.ideal, max: Self.sidebarWidth.max)
             .toolbar(removing: .sidebarToggle)
         } detail: {
-            let pane = selection ?? .build
+            // A page the daemon no longer offers (after reconnecting to an older one) falls back to the first.
+            let pane = selection.flatMap { available($0) ? $0 : nil } ?? .build
             Form { content(pane) }
                 .formStyle(.grouped)
                 .scrollEdgeEffectStyle(.soft, for: .top)
-                .safeAreaBar(edge: .bottom) { saveBar(pane) }
+                .safeAreaBar(edge: .bottom) { if pane != .models { saveBar(pane) } }
                 .navigationTitle(title(pane))
                 // NSHostingController does not carry navigationTitle into the window, so the toolbar would be blank.
                 .background(WindowTitleSetter(title: title(pane)))
@@ -80,9 +83,18 @@ struct CrewSettingsView: View {
         .frame(minWidth: WorkspaceStyle.settingsMinSize.width, idealWidth: WorkspaceStyle.settingsSize.width, minHeight: WorkspaceStyle.settingsMinSize.height, idealHeight: WorkspaceStyle.settingsSize.height)
         .task { if !model.loaded && !model.loading { await model.load(scope: model.scope) } }
     }
+    /// A daemon without presets or model notes has no page for them.
+    private func available(_ pane: SettingsPane) -> Bool {
+        switch pane {
+        case .presets: model.presets != nil
+        case .models: store.state.modelScores != nil
+        default: true
+        }
+    }
     private func title(_ pane: SettingsPane) -> String {
         switch pane {
         case .presets: "Presets"
+        case .models: "Model Scores"
         case .instructions: "Instructions"
         case .project(let path): projectName(path, among: store.projects)
         default: pane.group ?? ""
@@ -103,6 +115,8 @@ struct CrewSettingsView: View {
             }
         } else if pane == .presets {
             presets
+        } else if pane == .models {
+            modelScores
         } else {
             instructions(pane)
         }
@@ -159,6 +173,22 @@ struct CrewSettingsView: View {
             LabeledContent("A mission's preset", value: "Replaces this one for its new jobs")
         } footer: {
             Text("The lead gives a mission the preset you name for a command; you can also change it from the mission.").settingsFootnote()
+        }
+    }
+    @ViewBuilder private var modelScores: some View {
+        let scores = store.state.modelScores ?? []
+        let scored = scores.filter { $0.score != nil }
+        if scored.count >= 2 {
+            Section { ModelPodium(top: Array(scored.prefix(3))) }
+        }
+        Section {
+            if scores.isEmpty {
+                Text("No reviews noted yet.").foregroundStyle(.secondary)
+            }
+            ForEach(Array(scores.enumerated()), id: \.element.id) { index, score in ModelScoreRow(rank: index + 1, score: score) }
+        } footer: {
+            Text("After each review and its fix, the lead notes the findings it accepted and how the fix went. A score out of 10 weighs those notes across every job, corrected for each job's tier and size and for how harsh each reviewer tends to be. A review by the model's own agent counts half, and a model with few reviews stays close to 7.0. The lead reads these notes when it picks a tier or holder; your roles and presets still decide.")
+                .settingsFootnote()
         }
     }
     @ViewBuilder private func instructions(_ pane: SettingsPane) -> some View {

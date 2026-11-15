@@ -16,6 +16,8 @@ import { projectRoot } from './git.ts';
 import { isTerminal, Jobs } from './jobs.ts';
 import { missionPreset, Missions, STAGES } from './missions.ts';
 import type { Mission } from './missions.ts';
+import { addEvidence, loadNotes, notesFile, renderNotes, scoreAll, setSummary } from './notes.ts';
+import type { NotesFile } from './notes.ts';
 import { runbook } from './runbook.ts';
 import { ANTIGRAVITY_MODELS, codexModels } from './tiers.ts';
 import { appendInstructions, instructionsFile, readInstructions, savePreset, saveRoles, writeInstructions } from './settings.ts';
@@ -213,9 +215,36 @@ function state() {
     usage: usage.current(),
     preset: live.preset,
     presets: live.presets,
+    modelScores: modelScores(),
     events: jobs.recent.slice(-200),
   };
 }
+
+/**
+ * The model notes. A file that cannot be read is set aside, as missions.json is, so the board still shows scores and
+ * the lead can keep noting; if it cannot even be moved, the error stands and noting fails with it.
+ */
+function readNotes(): NotesFile {
+  try {
+    return loadNotes(HOME);
+  } catch (err) {
+    const aside = `${notesFile(HOME)}.unreadable-${Date.now()}`;
+    fs.renameSync(notesFile(HOME), aside);
+    log(`model-notes.json could not be used and was set aside as ${aside}; starting with no notes. Cause: ${(err as Error).message}`);
+    return loadNotes(HOME);
+  }
+}
+
+function modelScores() {
+  try {
+    return scoreAll(readNotes());
+  } catch {
+    return [];
+  }
+}
+
+/** Models the lead is shown at most per answer: the most recently noted, so the answer stays short as models come and go. */
+const NOTES_SHOWN = 3;
 
 /** Finds a new session's project once, so the board can group it with that project's jobs. */
 function locate(session: ClaudeSession | undefined): void {
@@ -378,6 +407,15 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       // The preset the next job would run under, so the lead can pick its own subagents' models to match.
       const preset = missionPreset(mission, live.preset);
       return { ...routeWork(kind as RouteKind, usage.current(), live.roles, live.antigravity.enabled ? [] : ['antigravity']), preset, policy: preset ? live.presets[preset] : null };
+    }
+    if (pathname === '/api/notes') {
+      // The lead's view of the notes, for route and delegate: the named agents' models, or every model.
+      const agents = url.searchParams.get('agents')?.split(',').filter(Boolean);
+      const evidence = Number(url.searchParams.get('evidence') ?? 5);
+      const file = readNotes();
+      const scores = scoreAll(file);
+      const models = scores.filter((s) => !agents || agents.includes(s.agent)).sort((a, b) => (b.lastAt ?? 0) - (a.lastAt ?? 0)).slice(0, NOTES_SHOWN).map((s) => s.model);
+      return { scores, text: renderNotes(scores, file, { models, evidence: Number.isInteger(evidence) && evidence >= 0 ? evidence : 5 }) };
     }
     if (pathname === '/api/stream') {
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
@@ -622,6 +660,40 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       if (appending) appendInstructions(file, body.append);
       else writeInstructions(file, body.text);
       return { file, text: readInstructions(file) };
+    }
+    if (pathname === '/api/notes') {
+      const body = await readJson(req);
+      let score;
+      readNotes();
+      if (body.summary !== undefined) {
+        if (typeof body.model !== 'string' || !body.model) throw new HttpError(400, 'A summary needs the model it is about.');
+        if (typeof body.summary !== 'string') throw new HttpError(400, 'summary must be text.');
+        score = setSummary(HOME, body.model, body.summary);
+      } else {
+        // A job's own record says which model did the work; the lead names it only for work done in its session.
+        const job = typeof body.job === 'string' && body.job ? jobs.get(body.job) : undefined;
+        // A reviewer's or debater's job built nothing: the line belongs to the job whose work was reviewed.
+        if (job && (job.kind === 'review' || job.role === 'debate')) throw new HttpError(400, `Job ${job.id} is a ${job.role ?? job.kind}, which builds nothing to judge. Note the job whose work it reviewed, and name its agent as the reviewer.`);
+        // Antigravity's configured model is a family name; only the model the session reported names one model.
+        const model = job ? job.resolvedModel ?? (job.agent === 'codex' ? job.model : undefined) : body.model;
+        if (job && !model) throw new HttpError(400, `Job ${job.id} has no recorded model, so it cannot be noted.`);
+        if (job && body.model !== undefined && body.model !== model) throw new HttpError(400, `Job ${job.id} ran on ${model}, not ${String(body.model)}.`);
+        score = addEvidence(HOME, {
+          model,
+          agent: job ? job.agent : 'claude',
+          ...(job ? (job.resolvedEffort ?? job.effort ? { effort: job.resolvedEffort ?? job.effort } : {}) : {}),
+          ...(job?.tier ?? body.tier ? { tier: job?.tier ?? body.tier } : {}),
+          size: body.size,
+          role: body.role ?? (job?.role === 'fix' ? 'fix' : 'build'),
+          ...(job ? { job: job.id } : {}),
+          reviewer: body.reviewer,
+          findings: body.findings ?? {},
+          ...(body.outcome !== undefined ? { outcome: body.outcome } : {}),
+          text: body.text,
+        }).score;
+      }
+      broadcast('modelScores', modelScores());
+      return score;
     }
     if (pathname === '/api/preset') {
       const saved = savePreset(HOME, (await readJson(req)).preset);

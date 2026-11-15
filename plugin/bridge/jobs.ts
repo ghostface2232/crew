@@ -390,7 +390,7 @@ export function resolveRole(spec: JobSpec): Role {
     if (!spec.runsApp) throw new Error('The verify role runs the app; use the review role for a static review.');
   }
   if (role === 'review' && spec.runsApp) throw new Error('A review that runs the app is the verify role. Drop runs_app, or use role verify.');
-  if ((role === 'refactor' || role === 'release') && spec.ask) throw new Error(`A ${role} job changes files, so it cannot be a question.`);
+  if ((role === 'refactor' || role === 'release' || role === 'fix') && spec.ask) throw new Error(`A ${role} job changes files, so it cannot be a question.`);
   spec.role = role;
   return role;
 }

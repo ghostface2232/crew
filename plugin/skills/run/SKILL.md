@@ -12,13 +12,13 @@ You are the lead. Take the task through the steps below, using the `crew` MCP to
 
 When a tool response or wake digest includes a receipt, pass `ack: "<receipt>"` with your next Crew call (or an array for several receipts). Only that echo acknowledges the snapshots shown; a tool read or hook event does not. Automatic offers stop after two attempts, but pending news stays in `status` and on the board. Read long reports with `status`, `job_id`, and `report_offset: 0`, then follow the next offset.
 
-The user assigns each role to an agent in the settings. `delegate` defaults to the implementation role, or takes `role: "refactor"` for restructuring that keeps behavior or `role: "release"` for release preparation (it publishes and deploys nothing; you and the user run the steps it reports). `review` is the cross-review, or with `runs_app` the review that runs the app (`verify`). `debate` and `polish` are their own roles. Pick the role that matches the work; each job's result names the agent that took it. A role may have several holders: pick one per job with `agent` (without it, Antigravity takes wording and Codex other work). Give computer use and work that runs the app to Codex where it holds the role, and run two holders at once when a second view is worth the usage. When you hold a role yourself (`claude`), the tool starts nothing: do the work in this session or a subagent. Role assignments are the user's; never give a role's work to an agent that does not hold it.
+The user assigns each role to an agent in the settings. `delegate` defaults to the implementation role, or takes `role: "refactor"` for restructuring that keeps behavior, `role: "release"` for release preparation (it publishes and deploys nothing; you and the user run the steps it reports), or `role: "fix"` for fixing review findings (step 5). `review` is the cross-review, or with `runs_app` the review that runs the app (`verify`). `debate` and `polish` are their own roles. Pick the role that matches the work; each job's result names the agent that took it. A role may have several holders: pick one per job with `agent` (without it, Antigravity takes wording and Codex other work). Give computer use and work that runs the app to Codex where it holds the role, and run two holders at once when a second view is worth the usage. When you hold a role yourself (`claude`), the tool starts nothing: do the work in this session or a subagent. Role assignments are the user's; never give a role's work to an agent that does not hold it.
 
 If the user names a preset for this command (economy, balanced, or best), pass it as `preset` when you start the mission; never choose one yourself. The mission's response says which preset is in effect and what model to give your own subagents; follow the latest one you were told.
 
 Start `mission` with the task as `title` and `stages`: only the stages this command needs, in order (`plan`, `implement`, `self-review`, `cross-review`, `fix`, `polish`, `final`). A review-only command might use `["cross-review", "fix", "final"]`; a small change may need no polish. At any time, pass `stages` again with only what remains to add, drop or reorder future steps (`[]` drops them all); passed and current steps stay. Report `stage` to move on: it advances to the next occurrence or inserts one, so add another review, fix or polish whenever results call for it. Call `mission` with `done: true` and a one-line `outcome` as soon as the real work is finished, whatever stage you are at (or `abandoned: true` if the task is dropped). When the work turned on decisions, failed approaches, or prerequisites worth keeping, pass them as a short `record` with `done`; `crew export` turns it into a runbook. Each is one short call. If the user asks for more work after you called `done`, start a new mission for it before you delegate or review anything: jobs started after `done` without one are put under a follow-up mission named after the finished one ("후속 작업: …" or "Follow-up: …").
 
-At the start of step 1, call `route` with `lead`; at the start of steps 2, 3, and 6, call it with the role you are about to hand out (`delegate`, `refactor`, `release`, `review`, `verify`, `polish`; `debate` before a debate). `route` checks each agent's remaining usage from AgentGauge and returns who should take the work: the role's holder or you. Follow the returned assignee and reason. When the result is marked `degraded`, continue and note what was skipped in the final report; when `route` gives a wait time for `polish`, skip polish and report when it can run. Call `route` once per step, not on every turn. If AgentGauge has no data, `route` returns the role's holder as before.
+At the start of step 1, call `route` with `lead`; at the start of steps 2, 3, 5, and 6, call it with the role you are about to hand out (`delegate`, `refactor`, `release`, `review`, `verify`, `fix`, `polish`; `debate` before a debate). `route` checks each agent's remaining usage from AgentGauge and returns who should take the work: the role's holder or you. Follow the returned assignee and reason. When the result is marked `degraded`, continue and note what was skipped in the final report; when `route` gives a wait time for `polish`, skip polish and report when it can run. Call `route` once per step, not on every turn. If AgentGauge has no data, `route` returns the role's holder as before.
 
 Skip a step only when it has nothing to act on (for example, no separable piece to delegate, or no user-facing text to polish), and say that you skipped it.
 
@@ -70,9 +70,23 @@ Whenever more than one reviewer runs, start them in one step, then end your turn
 
 Report the step to `mission` as `self-review` or `cross-review`, whichever ran; as `self-review` when both did.
 
-## 5. Fix (you)
+## 5. Fix
 
-Take the reports together and fix once. Address the findings you agree with, and tell the user about any you decline and why. One review round is the default. Run a second only if the fixes were substantial; never more than two, because review loops burn both agents' usage limits.
+Take the reports together and triage them yourself: decide which findings to accept, and tell the user about any you decline and why. Triage stays with you whoever holds the fix role, because it needs the user's intent and this conversation.
+
+Then fix once, at the cause:
+
+- A change a worker built goes back to that worker with `reply`, since its context is intact.
+- Your own code, or a result merged from several jobs, goes to the fix role. Call `route` with `fix`. When it returns you (the default), fix it yourself. When it returns a worker, `delegate` with `role: "fix"` and give it the accepted findings with their reasons and how they were found, your decisions on the declined ones, a map of the files involved, and a `done_when`. A brief of file names alone invites fixes that only hide symptoms. Read its diff before you merge, as in step 2.
+
+One review round is the default. Run a second only if the fixes were substantial; never more than two, because review loops burn both agents' usage limits.
+
+Then record what the review showed with `note`, one call per model judged:
+
+- The builder's line (`role: "build"`): `job_id` of the job that built the work (never the review's), or `model` with your own model id for work done here or in a subagent. A result merged from several jobs gets one line per job, each with the findings in its part. Give `reviewer`, the change's `size`, the findings you accepted by severity (declined ones do not count), and one line of facts.
+- The fixer's line (`role: "fix"`): `outcome` is `root-cause`, `patch`, or `another-review` when the fix needed another round.
+
+Facts only, never impressions. When a response says a model's summary is due, rewrite it with `note` (`model` and `summary`) from its evidence lines. The notes inform which tier and holder you pick; the roles and presets stay the user's.
 
 ## 6. Polish
 

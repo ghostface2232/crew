@@ -59,8 +59,8 @@ export function shrinkTo(element: HTMLElement, to: DOMRect | undefined, { durati
     .finished.then(() => undefined, () => undefined);
 }
 /** A number whose digits roll to their new value, each column on its own. */
-export function RollingNumber({ value, className }: { value: number; className?: string }) {
-  const text = value.toLocaleString();
+export function RollingNumber({ value, className, format }: { value: number; className?: string; format?: (value: number) => string }) {
+  const text = format ? format(value) : value.toLocaleString();
   return (
     <span className={`rolling ${className ?? ''}`} aria-label={text} role="img">
       {[...text].map((character, index) =>

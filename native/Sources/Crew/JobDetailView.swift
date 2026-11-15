@@ -616,11 +616,12 @@ private struct DebateRound: View {
                 Spacer(minLength: 0)
             }
             if opened.wrappedValue { exchange(points) }
-            if !last { RevealToggle(show: "Show this \(label.lowercased())", hide: "Hide this \(label.lowercased())", shown: opened) }
+            RevealToggle(show: "Show this \(label.lowercased())", hide: "Hide this \(label.lowercased())", shown: opened)
         }
         // Fixed when the round first appears, so a new round arriving does not fold the one being read.
         .onAppear { if open == nil { open = last } }
-        if !last { Divider().padding(.vertical, Space.xs) }
+        // The toggle above already pads its own hit area, so the divider adds none.
+        if !last { Divider() }
     }
 
     /// One mark per stance the reply takes, with its count.

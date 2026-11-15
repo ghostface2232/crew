@@ -1,6 +1,6 @@
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import {
-  ArrowUpRight, Bell, BellDot, ChevronRight, Clock, Folder, LayoutGrid, LockKeyhole, Plus, RotateCw, Search,
+  ArrowUpRight, Bell, BellDot, ChevronRight, Clock, Folder, LayoutGrid, LockKeyhole, PanelLeft, Plus, RotateCw, Search,
   Settings as SettingsIcon, SquareStack, WifiOff, Zap,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -51,6 +51,32 @@ export function App() {
   const waitingSessions = state.claude.filter((session) => session.state === 'waiting');
   const pending = waitingJobs.length + waitingSessions.length;
   const live = state.connection === 'live';
+  // The connection shows in the sidebar, or in the toolbar once narrow windows hide the sidebar: one place at a time.
+  const narrow = useNarrow();
+  // Narrow windows keep the sidebar folded away until its button brings it out over the page.
+  const [drawer, setDrawer] = useState(false);
+  const toggle = useRef<HTMLButtonElement>(null);
+  const sidebar = useRef<HTMLElement>(null);
+  const folded = narrow && !drawer;
+  useEffect(() => {
+    if (!narrow) setDrawer(false);
+  }, [narrow]);
+  useEffect(() => {
+    if (!drawer) return;
+    sidebar.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setDrawer(false);
+      toggle.current?.focus();
+    };
+    window.addEventListener('keydown', escape);
+    return () => window.removeEventListener('keydown', escape);
+  }, [drawer]);
+  const connection = (
+    <p className="connection" role="status" data-state={state.connection}>
+      {live ? 'Live' : state.connection === 'lost' ? 'Reconnecting…' : 'Connecting…'}
+    </p>
+  );
   useEffect(() => board.connect(), []);
   useEffect(() => {
     document.title = pending ? `(${pending}) Crew` : 'Crew';
@@ -62,6 +88,7 @@ export function App() {
   }, []);
   const select = (value: string) => {
     setSelection(value);
+    setDrawer(false);
     try {
       localStorage.setItem('crew.selection', value);
     } catch {
@@ -101,7 +128,7 @@ export function App() {
   return (
     <ClockProvider skew={state.clockSkew}>
       <div className="app">
-        <nav className="sidebar" aria-label="Projects">
+        <nav className="sidebar" id="sidebar" aria-label="Projects" ref={sidebar} data-open={drawer || undefined} inert={folded}>
           <p className="brand">
             <AgentMark agent="crew" size={18} />
             Crew
@@ -118,27 +145,27 @@ export function App() {
             </button>
           ))}
           <div className="sidebar-foot">
-            <button className="sidebar-item" id="open-settings" disabled={!Object.keys(state.roles).length} onClick={() => setSettings(true)}>
+            {!narrow && connection}
+            <button className="sidebar-item" id="open-settings" disabled={!Object.keys(state.roles).length} onClick={() => { setDrawer(false); setSettings(true); }}>
               <Icon icon={SettingsIcon} />
               <span>Settings</span>
             </button>
           </div>
         </nav>
+        {drawer && <div className="sidebar-scrim" aria-hidden="true" onClick={() => setDrawer(false)} />}
         <div className="workspace">
           <header className="toolbar">
-            <select
-              className="toolbar-project"
-              aria-label="Project"
-              value={project}
-              onChange={(event) => select(event.target.value ? `project:${event.target.value}` : 'overview')}
+            <button
+              className="icon toolbar-sidebar"
+              ref={toggle}
+              aria-label={drawer ? 'Hide sidebar' : 'Show sidebar'}
+              title={drawer ? 'Hide sidebar' : 'Show sidebar'}
+              aria-expanded={drawer}
+              aria-controls="sidebar"
+              onClick={() => setDrawer(!drawer)}
             >
-              <option value="">All projects</option>
-              {projects.map((dir) => (
-                <option key={dir} value={dir}>
-                  {names.get(dir)}
-                </option>
-              ))}
-            </select>
+              <Icon icon={PanelLeft} />
+            </button>
             <div
               className="segmented tabs"
               role="tablist"
@@ -161,6 +188,8 @@ export function App() {
                   aria-selected={page === id}
                   tabIndex={page === id ? 0 : -1}
                   onClick={() => select(id)}
+                  // Narrow toolbars keep only the symbol; the name is then the tooltip.
+                  title={label}
                 >
                   <Icon icon={icon} size={13} />
                   <span className={id === 'needs' && pending ? 'tab-badge' : undefined}>{label}</span>
@@ -177,16 +206,10 @@ export function App() {
                 onChange={(event) => setSearch(event.target.value)}
               />
             </label>
-            <p className="connection" role="status" data-state={state.connection}>
-              {live ? 'Live' : state.connection === 'lost' ? 'Reconnecting…' : 'Connecting…'}
-            </p>
-            {/* The sidebar is hidden in narrow windows, so Settings moves here. */}
-            <button className="icon toolbar-settings" aria-label="Settings" title="Settings" disabled={!Object.keys(state.roles).length} onClick={() => setSettings(true)}>
-              <Icon icon={SettingsIcon} />
-            </button>
+            {narrow && connection}
             <button className="glass" disabled={!live} title="New job" onClick={() => setDispatching(true)}>
               <Icon icon={Plus} />
-              New Job
+              <span className="toolbar-label">New Job</span>
             </button>
           </header>
           <main className="page" key={selection}>
@@ -251,4 +274,17 @@ export function App() {
       </div>
     </ClockProvider>
   );
+}
+
+/** Below this width the sidebar is hidden (board.css); kept in step with its media query. */
+const NARROW = '(max-width: 760px)';
+function useNarrow() {
+  const [narrow, setNarrow] = useState(() => matchMedia(NARROW).matches);
+  useEffect(() => {
+    const query = matchMedia(NARROW);
+    const change = () => setNarrow(query.matches);
+    query.addEventListener('change', change);
+    return () => query.removeEventListener('change', change);
+  }, []);
+  return narrow;
 }

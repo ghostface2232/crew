@@ -295,7 +295,8 @@ dialog.detail-panel::backdrop { background: transparent; }
 .sidebar-item svg { color: var(--accent); width: 16px; height: 16px; }
 .sidebar-item span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-item[aria-current="true"] { background: var(--fill-strong); font-weight: 500; }
-.sidebar-foot { margin-top: auto; padding-top: 10px; }
+.sidebar-foot { display: grid; gap: 6px; margin-top: auto; padding-top: 10px; }
+.sidebar-foot .connection { padding: 0 10px; }
 .sidebar-foot .sidebar-item { color: var(--secondary); font-weight: 500; }
 .sidebar-foot .sidebar-item svg { color: inherit; }
 
@@ -314,11 +315,22 @@ dialog.detail-panel::backdrop { background: transparent; }
   backdrop-filter: blur(20px) saturate(1.6);
 }
 .toolbar .segmented { margin-inline: auto; }
+/* Nothing in the toolbar wraps inside itself; as room runs out, the search narrows and the tabs keep only symbols. */
+.toolbar { container-type: inline-size; }
+.toolbar button, .toolbar .segmented > button { flex: none; white-space: nowrap; }
+@container (max-width: 700px) {
+  .segmented.tabs > button > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .segmented.tabs > button { padding: 0 10px; }
+  .segmented.tabs > button:has(> .tab-badge) { position: relative; }
+  .segmented.tabs > button:has(> .tab-badge)::after { content: ""; position: absolute; top: 3px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--orange); }
+}
+@container (max-width: 360px) {
+  .toolbar-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+}
 .tab-badge { position: relative; }
 .tab-badge::after { content: ""; position: absolute; top: 1px; right: -7px; width: 6px; height: 6px; border-radius: 50%; background: var(--orange); }
-.toolbar-project { display: none; max-width: 200px; }
-.toolbar-settings { display: none; }
-.search { position: relative; width: 200px; }
+.toolbar-sidebar { display: none; }
+.search { position: relative; flex: 0 1 200px; min-width: 120px; }
 .search svg { position: absolute; left: 8px; top: 50%; translate: 0 -50%; width: 14px; height: 14px; color: var(--secondary); pointer-events: none; }
 .search input { min-height: 28px; padding-inline-start: 26px; border-radius: 999px; background: var(--fill); border-color: transparent; }
 .connection { display: inline-flex; align-items: center; gap: 6px; color: var(--secondary); font-size: 12px; white-space: nowrap; }
@@ -606,20 +618,35 @@ dialog.detail-panel::backdrop { background: transparent; }
 /* Narrow windows: the sidebar gives way to a project picker in the toolbar, and the tabs keep only symbols. */
 @media (max-width: 760px) {
   .app { grid-template-columns: minmax(0, 1fr); }
-  .sidebar { display: none; }
+  /* The sidebar floats over the page from the leading edge, out of view until its toolbar button brings it out. */
+  .sidebar {
+    position: fixed;
+    inset: 8px auto 8px 8px;
+    z-index: 5;
+    width: min(260px, calc(100vw - 48px));
+    height: auto;
+    border: 0;
+    border-radius: 18px;
+    background: color-mix(in srgb, var(--canvas) 86%, transparent);
+    -webkit-backdrop-filter: blur(24px) saturate(1.6);
+    backdrop-filter: blur(24px) saturate(1.6);
+    box-shadow: 0 0 0 1px var(--hairline), var(--shadow-panel);
+    translate: calc(-100% - 16px) 0;
+    visibility: hidden;
+    transition: translate 260ms cubic-bezier(0.2, 0.9, 0.3, 1), visibility 0s 260ms;
+  }
+  .sidebar[data-open] { translate: 0 0; visibility: visible; transition: translate 260ms cubic-bezier(0.2, 0.9, 0.3, 1); }
+  .sidebar-scrim { position: fixed; inset: 0; z-index: 4; }
   .toolbar { flex-wrap: wrap; padding: 8px 16px; }
-  .toolbar-project, .toolbar-settings { display: inline-flex; }
-  .toolbar-project { display: block; flex: 1; }
-  .toolbar .segmented { order: 3; margin-inline: 0; }
-  .search { order: 4; flex: 1; width: auto; }
+  .toolbar-sidebar { display: inline-flex; }
   .page { padding: 8px 16px 32px; }
   .page-title { font-size: 30px; }
   .metric b { font-size: 32px; }
   dialog.detail-panel { inset: 8px; width: auto; }
 }
 @media (max-width: 560px) {
-  .segmented.tabs > button > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-  .segmented.tabs > button { padding: 0 10px; }
+  /* The search takes a row of its own under the tabs and actions. */
+  .search { order: 1; flex: 1 1 100%; }
   .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (prefers-reduced-motion: reduce) {

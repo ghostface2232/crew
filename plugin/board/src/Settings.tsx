@@ -71,6 +71,8 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
   const presetLock = useRef(false);
   const selectedPreset = preset ? state.presets?.[preset] : undefined;
   const [scope, setScope] = useState('');
+  // Whose instructions the editor holds; until a newly chosen set arrives, it still holds the previous one.
+  const [loadedScope, setLoadedScope] = useState<string | null>(null);
   const [text, setText] = useState('');
   const [saved, setSaved] = useState('');
   const [file, setFile] = useState('');
@@ -101,6 +103,7 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
         setText(result.text);
         setSaved(result.text);
         setFile(result.file);
+        setLoadedScope(scope);
         setLoad('ready');
       },
       (error: Error) => {
@@ -226,7 +229,7 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
   const paneSaving = kind ? savingRoles : current === 'presets' ? savingPreset : saving;
   const paneDirty = kind ? rolesDirty : current === 'presets' ? preset !== savedPreset : text !== saved;
   const paneStatus = kind ? roleStatus : current === 'presets' ? presetStatus : load === 'loading' ? 'Loading…' : status;
-  const canSave = state.connection === 'live' && !paneSaving && (pageScope === null || (load === 'ready' && scope === pageScope));
+  const canSave = state.connection === 'live' && !paneSaving && (pageScope === null || (load === 'ready' && loadedScope === pageScope));
   const saveCurrent = async () => {
     if (!canSave) return;
     if (kind) await saveRoles();
@@ -387,7 +390,7 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
                       spellCheck={false}
                       value={text}
                       onChange={(event) => setText(event.target.value)}
-                      disabled={load !== 'ready' || scope !== pageScope}
+                      disabled={load !== 'ready' || loadedScope !== pageScope}
                     />
                     <p className={`${styles.footnote} ${styles.file}`}>{file}</p>
                     {text.length > 9000 && (

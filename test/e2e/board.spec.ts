@@ -9,6 +9,9 @@ test.beforeEach(async ({ page, request }) => {
 });
 const needsYou = (page: Page) => page.getByRole('tab', { name: 'Needs You' }).click();
 const openSettings = async (page: Page, tab?: string) => {
+  // Narrow windows fold the sidebar away behind its toolbar button.
+  const toggle = page.getByRole('button', { name: 'Show sidebar' });
+  if (await toggle.isVisible()) await toggle.click();
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   if (tab) await settingsPage(page, tab);
 };
@@ -576,9 +579,19 @@ test('Return adds a newline in an answer and the next question gets a fresh draf
 test('320px sheets keep controls within the viewport and support reduced motion', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 800 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.getByRole('combobox', { name: 'Project' }).selectOption('/workspace/Crew');
+  // The sidebar floats out over the page and folds away again once a project is chosen.
+  const toggle = page.getByRole('button', { name: 'Show sidebar' });
+  await expect(page.getByRole('navigation', { name: 'Projects' })).toBeHidden();
+  await toggle.click();
+  await expect(page.getByRole('button', { name: 'Hide sidebar' })).toHaveAttribute('aria-expanded', 'true');
+  await page.getByRole('navigation', { name: 'Projects' }).getByRole('button', { name: 'Crew', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Crew', level: 1 })).toBeVisible();
-  await page.getByRole('combobox', { name: 'Project' }).selectOption('');
+  await expect(page.getByRole('navigation', { name: 'Projects' })).toBeHidden();
+  await toggle.click();
+  await page.keyboard.press('Escape');
+  await expect(toggle).toBeFocused();
+  await toggle.click();
+  await page.getByRole('navigation', { name: 'Projects' }).getByRole('button', { name: 'All projects' }).click();
   await newJob(page);
   const job = page.getByRole('dialog');
   expect(await job.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);

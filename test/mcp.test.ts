@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import { stripTypeScriptTypes } from 'node:module';
 import { test } from 'node:test';
-import { STAGES, normalizeTitle } from '../plugin/bridge/missions.ts';
+import { followUpTitle, STAGES, normalizeTitle } from '../plugin/bridge/missions.ts';
 import type { Mission } from '../plugin/bridge/missions.ts';
 import { TIERS } from '../plugin/bridge/tiers.ts';
 import { defaultHolder, disabledAgents } from '../plugin/bridge/config.ts';
@@ -221,10 +221,10 @@ test('a role the lead holds starts no worker, and a pick outside the holders is 
 test('work started after a done mission opens a follow-up mission named after it', async () => {
   const source = fs.readFileSync(new URL('../plugin/bridge/mcp.ts', import.meta.url), 'utf8');
   const mission = source.slice(source.indexOf('function describeMission('), source.indexOf('function describeJob'));
-  const jobs = source.slice(source.indexOf('function followUpTitle('), source.indexOf('async function followOne'));
+  const jobs = source.slice(source.indexOf('/** The follow-up mission being opened'), source.indexOf('async function followOne'));
   const calls: { route: string; body: any }[] = [];
   const context: Record<string, unknown> = {
-    STAGES, normalizeTitle, SESSION: 'lead', PROJECT: '/project', missionId: 'm1', closedElsewhere: null, costMission: 'm1', fresh: false, lastDone: null,
+    STAGES, normalizeTitle, followUpTitle, SESSION: 'lead', PROJECT: '/project', missionId: 'm1', closedElsewhere: null, costMission: 'm1', fresh: false, lastDone: null,
     SUPERSEDED: 'Superseded by a new mission.', currentPolicy: () => 'policy', globalPreset: () => null,
     ownMission: async () => (context.missionId ? { id: context.missionId, title: '역할 정리', state: 'active', stage: 'final' } : null),
     reattach: async () => {}, withMission: (call: () => unknown) => call(), describeJob: (job: Job) => `job ${job.id}`,
@@ -235,7 +235,7 @@ test('work started after a done mission opens a follow-up mission named after it
       return { id: 'm1', title: '역할 정리', state: 'done', stage: 'final' };
     },
   };
-  const { reportMission, runJob, followUpTitle } = vm.runInNewContext(`${stripTypeScriptTypes(mission + jobs)}; ({ reportMission, runJob, followUpTitle })`, context);
+  const { reportMission, runJob } = vm.runInNewContext(`${stripTypeScriptTypes(mission + jobs)}; ({ reportMission, runJob })`, context);
   assert.equal(followUpTitle('Fix the toolbar'), 'Follow-up: Fix the toolbar');
   assert.equal(followUpTitle('후속 작업: 역할 정리'), '후속 작업: 역할 정리');
   assert.equal(followUpTitle('Follow-up: 역할 정리'), '후속 작업: 역할 정리');

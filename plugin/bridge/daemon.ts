@@ -610,7 +610,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
           for (const id of adopted) broadcast('job', view(jobs.get(id)));
           return { adopted };
         }
-        case 'context': return { text: delivery.context(session) };
+        case 'context': return { text: [delivery.context(session), missions.followUpHint(session)].filter(Boolean).join('\n') };
         case 'watch': return { watch: delivery.watch(session, body.deadline) };
         case 'heartbeat': return { watch: delivery.heartbeat(session, body.generation) };
         case 'release':

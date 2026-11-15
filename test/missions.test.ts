@@ -459,3 +459,18 @@ test('a mission keeps the preset it was given until it is changed or cleared, an
   // Kept across a restart.
   assert.equal(new Missions(home, () => {}).get(mission.id).preset, 'economy');
 });
+
+test('a lead whose latest mission ended done is reminded to open one for more work', (t) => {
+  const { missions } = harness(t);
+  const first = missions.start({ ...input, title: '역할 정리', owner: 'lead' });
+  assert.equal(missions.followUpHint('lead'), '', 'an open mission needs no reminder');
+  missions.finish(first.id);
+  assert.match(missions.followUpHint('lead'), /"역할 정리" is done[^]*"후속 작업: 역할 정리"/);
+  assert.equal(missions.followUpHint('other'), '', 'only the session that finished it is reminded');
+  assert.equal(missions.followUpHint('lead', first.endedAt! + STALE_MS), '', 'a mission done long ago is left alone');
+  const next = missions.start({ ...input, title: 'Next', owner: 'lead' });
+  next.createdAt = first.createdAt + 1;
+  assert.equal(missions.followUpHint('lead'), '');
+  missions.finish(next.id, { abandoned: true });
+  assert.equal(missions.followUpHint('lead'), '', 'a dropped command opens nothing');
+});

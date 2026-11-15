@@ -52,6 +52,12 @@ export function normalizeTitle(text: unknown): string {
   return typeof text === 'string' ? text.split(/\r\n|\r|\n/)[0].trim().slice(0, 120).trim() : '';
 }
 
+/** A follow-up's title in the language of the mission it follows: Korean for a Korean title, English otherwise. */
+export function followUpTitle(title: string): string {
+  const base = title.replace(/^(후속 작업|Follow-up): /, '');
+  return /[\u1100-\u11ff\u3130-\u318f\uac00-\ud7af]/.test(base) ? `후속 작업: ${base}` : `Follow-up: ${base}`;
+}
+
 /** A stored record is rendered on the board, so one with the wrong shape is refused rather than trusted. */
 function isMission(m: any): m is Mission {
   return Boolean(m) && typeof m === 'object'
@@ -232,6 +238,17 @@ export class Missions {
     mission.updatedAt = Date.now();
     this.changed(mission);
     return mission;
+  }
+
+  /**
+   * Added to each prompt of a lead session whose latest mission ended done. Work the lead then does itself starts no
+   * job, so the follow-up fallback in the MCP server never sees it; only a reminder at the prompt can catch it.
+   * It reminds rather than opens: only the lead can tell a request for work from a question.
+   */
+  followUpHint(owner: string, now = Date.now()): string {
+    const latest = this.list().find((mission) => mission.owner === owner);
+    if (latest?.state !== 'done' || now - (latest.endedAt ?? 0) >= STALE_MS) return '';
+    return `Crew: your mission "${latest.title}" is done. Only if this message clearly asks for new work (changing files, or starting a job), call \`mission\` with a title and stages before you start it, even work you will do yourself: "${followUpTitle(latest.title)}" for more of the same command, or a title of its own for a new one. A question, an explanation, or a reply opens none, even about that mission.`;
   }
 
   touch(id: string): void {

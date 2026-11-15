@@ -155,3 +155,57 @@ test('Codex refusal notes and automatic actions omit protocol data and bound fre
   assert.match(h.refusals[2].action, /… \(truncated\)/);
   assert.match(h.refusals[2].reason, /… \(truncated\)/);
 });
+
+test('plugin tool approvals allowed for the job cover later calls on the same app only, in that job only', async () => {
+  const h = harness();
+  const asked: { text: string; grant?: string }[] = [];
+  const progress: string[] = [];
+  Object.assign(h.ctl, { waiting: (_type: string, text: string, grant?: string) => asked.push({ text, grant }), progress: (text: string) => progress.push(text) });
+  const tool = (tool_name: string, app: string, threadId = 'parent') => h.internal.onRequest('mcpServer/elicitation/request', {
+    threadId, turnId: 'turn', serverName: 'cua_repl', mode: 'form', _meta: { codex_approval_kind: 'mcp_tool_call', tool_name },
+    message: `Allow Computer Use to use "${app}"?`, requestedSchema: { type: 'object' },
+  }, tool_name);
+
+  const first = tool('get_app_state', 'CrewAuditDark');
+  assert.equal(asked.length, 1);
+  assert.equal(asked[0].grant, 'Computer Use using "CrewAuditDark"');
+  // Queued behind the first, for the same app: the grant settles it too.
+  const queued = tool('scroll', 'CrewAuditDark');
+  await h.adapter.answer(h.ctl as any, true, undefined, { forJob: true });
+  assert.equal((await first).action, 'accept');
+  assert.equal((await queued).action, 'accept');
+
+  assert.equal((await tool('click', 'CrewAuditDark')).action, 'accept');
+  assert.equal(asked.length, 1, 'a granted app is not asked about again');
+  assert.ok(progress.some((line) => /allowed for this job: click · Computer Use using "CrewAuditDark"/.test(line)));
+
+  // Another app in the same job still asks.
+  const other = tool('click', 'Finder');
+  assert.equal(asked.length, 2);
+  assert.equal(asked[1].grant, 'Computer Use using "Finder"');
+  await h.adapter.answer(h.ctl as any, false);
+  assert.equal((await other).action, 'decline');
+
+  // Another job asks about the same app.
+  const otherAsked: string[] = [];
+  const otherCtl = { ...h.ctl, job: { ...h.job, sessionId: 'second' }, waiting: (_type: string, text: string) => otherAsked.push(text) };
+  h.internal.openRun(otherCtl, 'second', true);
+  const elsewhere = tool('click', 'CrewAuditDark', 'second');
+  assert.equal(otherAsked.length, 1);
+  await h.adapter.answer(otherCtl as any, false);
+  assert.equal((await elsewhere).action, 'decline');
+});
+
+test('plugin tool approvals without a parsed target cannot be allowed for the job', async () => {
+  const h = harness();
+  const grants: (string | undefined)[] = [];
+  Object.assign(h.ctl, { waiting: (_type: string, _text: string, grant?: string) => grants.push(grant) });
+  const pending = h.request('mcpServer/elicitation/request', {
+    serverName: 'cua_repl', _meta: { codex_approval_kind: 'mcp_tool_call', tool_name: 'js' }, message: 'Run this script?',
+  });
+  assert.deepEqual(grants, [undefined]);
+  await assert.rejects(h.adapter.answer(h.ctl as any, true, undefined, { forJob: true }), /cannot be allowed for the whole job/);
+  await h.adapter.answer(h.ctl as any, true);
+  assert.equal((await pending).action, 'accept');
+  assert.equal(h.internal.runs.get('parent').grants.size, 0);
+});

@@ -543,7 +543,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     const body = await readJson(req);
     const id = missionRoute[1];
     if (body.done && body.abandoned) throw new HttpError(400, 'pass done or abandoned, not both');
-    if (body.done || body.abandoned) return missions.finish(id, { outcome: text(body.outcome, 'outcome'), record: text(body.record, 'record'), abandoned: Boolean(body.abandoned), reopen: body.reopen === true });
+    if (body.done || body.abandoned) return missions.finish(id, { outcome: text(body.outcome, 'outcome'), record: text(body.record, 'record'), abandoned: Boolean(body.abandoned), reopen: body.reopen === true, byLead: body.by === 'lead' });
     if (body.note !== undefined) return missions.note(id, text(body.note, 'note') ?? '');
     return missions.update(id, { stage: stage(body.stage), stages: body.stages, title: text(body.title, 'title'), preset: body.preset });
   }
@@ -610,7 +610,8 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
           for (const id of adopted) broadcast('job', view(jobs.get(id)));
           return { adopted };
         }
-        case 'context': return { text: [delivery.context(session), missions.followUpHint(session)].filter(Boolean).join('\n') };
+        // The reminder speaks of "this message", so only a prompt from the user carries it, not a session start or compaction.
+        case 'context': return { text: [delivery.context(session), body.event === 'UserPromptSubmit' ? missions.followUpHint(session) : ''].filter(Boolean).join('\n') };
         case 'watch': return { watch: delivery.watch(session, body.deadline) };
         case 'heartbeat': return { watch: delivery.heartbeat(session, body.generation) };
         case 'release':

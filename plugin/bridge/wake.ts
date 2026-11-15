@@ -28,7 +28,7 @@ export async function leadHook(input: HookInput, mode: string, request: typeof a
   if (!session || input.agent_id) return { code: 0 };
   const send = (action: string, body: object = {}) => request('POST', `/api/lead/${action}`, { session, ...body }, AbortSignal.timeout(Math.max(1, Math.min(25_000, deadline - Date.now()))));
   if (mode === 'context') {
-    const { text } = await send('context');
+    const { text } = await send('context', { event: input.hook_event_name });
     return { code: 0, ...(text ? { stdout: JSON.stringify({ hookSpecificOutput: { hookEventName: input.hook_event_name, additionalContext: text } }) } : {}) };
   }
   if (mode === 'stop') {

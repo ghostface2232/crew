@@ -30,6 +30,8 @@ export interface Mission {
   outcome: string;
   /** What the lead recorded when it finished: decisions taken, approaches that failed, prerequisites. For the runbook. */
   record?: string;
+  /** Set when the lead itself finished it as done, not the user on the board, who may mark it done while the lead works on. */
+  doneByLead?: true;
   /** Oldest first; absent on missions without any. */
   notes?: MissionNote[];
   /** The preset this mission's new jobs run under instead of the global one; absent to use the global one. */
@@ -64,6 +66,7 @@ function isMission(m: any): m is Mission {
     && ['id', 'title', 'project', 'root', 'outcome'].every((key) => typeof m[key] === 'string')
     && (m.owner === undefined || typeof m.owner === 'string')
     && (m.record === undefined || typeof m.record === 'string')
+    && (m.doneByLead === undefined || m.doneByLead === true)
     && (m.stages === undefined || isPlan(m.stages))
     && (m.stageIndex === undefined || (m.stages && Number.isInteger(m.stageIndex) && m.stageIndex >= 0
       && m.stageIndex < m.stages.length && m.stages[m.stageIndex] === m.stage))
@@ -210,7 +213,7 @@ export class Missions {
     return mission;
   }
 
-  finish(id: string, input: { outcome?: string; abandoned?: boolean; record?: string; reopen?: boolean } = {}): Mission {
+  finish(id: string, input: { outcome?: string; abandoned?: boolean; record?: string; reopen?: boolean; byLead?: boolean } = {}): Mission {
     const mission = this.get(id);
     // A finished mission stays as it ended. Only an explicit reopen marks an abandoned one done: a lead's late
     // `done`, or a board still showing it active, must not undo the user's Stop tracking.
@@ -221,6 +224,7 @@ export class Missions {
     mission.outcome = outcome;
     const record = input.record?.trim().slice(0, MAX_RECORD);
     if (record) mission.record = record;
+    if (mission.state === 'done' && input.byLead) mission.doneByLead = true;
     mission.updatedAt = Date.now();
     mission.endedAt = mission.updatedAt;
     this.changed(mission);
@@ -241,13 +245,14 @@ export class Missions {
   }
 
   /**
-   * Added to each prompt of a lead session whose latest mission ended done. Work the lead then does itself starts no
-   * job, so the follow-up fallback in the MCP server never sees it; only a reminder at the prompt can catch it.
-   * It reminds rather than opens: only the lead can tell a request for work from a question.
+   * Added to each prompt of a lead session whose latest mission it finished as done. Work the lead then does itself
+   * starts no job, so the follow-up fallback in the MCP server never sees it; only a reminder at the prompt can catch it.
+   * It reminds rather than opens: only the lead can tell a request for work from a question. A mission the user
+   * marked done on the board gets none, since the lead is told to carry on with that work without a new mission.
    */
   followUpHint(owner: string, now = Date.now()): string {
     const latest = this.list().find((mission) => mission.owner === owner);
-    if (latest?.state !== 'done' || now - (latest.endedAt ?? 0) >= STALE_MS) return '';
+    if (latest?.state !== 'done' || !latest.doneByLead || now - (latest.endedAt ?? 0) >= STALE_MS) return '';
     return `Crew: your mission "${latest.title}" is done. Only if this message clearly asks for new work (changing files, or starting a job), call \`mission\` with a title and stages before you start it, even work you will do yourself: "${followUpTitle(latest.title)}" for more of the same command, or a title of its own for a new one. A question, an explanation, or a reply opens none, even about that mission.`;
   }
 

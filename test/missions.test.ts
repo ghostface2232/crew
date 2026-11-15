@@ -464,7 +464,7 @@ test('a lead whose latest mission ended done is reminded to open one for more wo
   const { missions } = harness(t);
   const first = missions.start({ ...input, title: '역할 정리', owner: 'lead' });
   assert.equal(missions.followUpHint('lead'), '', 'an open mission needs no reminder');
-  missions.finish(first.id);
+  missions.finish(first.id, { byLead: true });
   assert.match(missions.followUpHint('lead'), /"역할 정리" is done[^]*"후속 작업: 역할 정리"/);
   assert.equal(missions.followUpHint('other'), '', 'only the session that finished it is reminded');
   assert.equal(missions.followUpHint('lead', first.endedAt! + STALE_MS), '', 'a mission done long ago is left alone');
@@ -473,4 +473,15 @@ test('a lead whose latest mission ended done is reminded to open one for more wo
   assert.equal(missions.followUpHint('lead'), '');
   missions.finish(next.id, { abandoned: true });
   assert.equal(missions.followUpHint('lead'), '', 'a dropped command opens nothing');
+  // Marked done on the board, or reopened as done there after the sweep: the lead carries on without a new mission.
+  const board = missions.start({ ...input, title: 'Board', owner: 'lead' });
+  board.createdAt = first.createdAt + 2;
+  missions.finish(board.id, { outcome: 'Marked done on the board.' });
+  assert.equal(missions.followUpHint('lead'), '');
+  const swept = missions.start({ ...input, title: 'Swept', owner: 'lead' });
+  swept.createdAt = first.createdAt + 3;
+  missions.finish(swept.id, { abandoned: true, outcome: 'No update for 12 hours.' });
+  missions.finish(swept.id, { reopen: true });
+  assert.equal(swept.state, 'done');
+  assert.equal(missions.followUpHint('lead'), '');
 });

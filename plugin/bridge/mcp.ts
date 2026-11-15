@@ -624,7 +624,7 @@ async function reportMission(args: any): Promise<string> {
     throw new Error('This session has no open mission. Start one by passing title; if the work is already under way without one, carry on without reporting.');
   }
   if (ending) {
-    const ended: Mission = await api('POST', `/api/missions/${current.id}`, { done: Boolean(args.done), abandoned: Boolean(args.abandoned), outcome: args.outcome, record: args.record });
+    const ended: Mission = await api('POST', `/api/missions/${current.id}`, { done: Boolean(args.done), abandoned: Boolean(args.abandoned), outcome: args.outcome, record: args.record, by: 'lead' });
     missionId = null;
     costMission = null;
     lastDone = args.done ? ended : null;

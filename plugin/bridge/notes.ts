@@ -98,7 +98,7 @@ function wellFormed(models: Record<string, any>): Record<string, ModelNote> {
       && CHANGE_SIZES.includes(e.size) && NOTE_ROLES.includes(e.role) && (e.tier === undefined || TIERS.includes(e.tier))
       && (e.role === 'build' || FIX_OUTCOMES.includes(e.outcome)) && typeof e.text === 'string'
       && counts(e.findings) && (e.declined === undefined || counts(e.declined))
-      && (e.adoption === undefined || (e.role === 'build' && typeof e.job === 'string' && ADOPTIONS.includes(e.adoption)))
+      && (e.adoption === undefined || (e.role === 'build' && typeof e.job === 'string' && e.job && ADOPTIONS.includes(e.adoption)))
       && (e.rounds === undefined || (e.adoption !== undefined && Number.isInteger(e.rounds) && e.rounds >= 0)));
     Object.defineProperty(kept, model, {
       value: { model, agent: note.agent, summary: typeof note.summary === 'string' ? note.summary : '', summaryAt: Number.isFinite(note.summaryAt) ? note.summaryAt : null, evidence },

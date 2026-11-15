@@ -368,6 +368,11 @@ export function openRefusals(job: Pick<Job, 'refusals' | 'turns' | 'retrying' | 
 }
 
 /** A saved job's role, derived for jobs saved before roles were recorded. */
+/** The turns the lead sent the worker back for: every turn after the first, less the retries of a refused action. */
+export function followUps(job: Pick<Job, 'turns' | 'approvals'>): number {
+  return Math.max(0, (job.turns ?? 1) - 1 - (job.approvals?.length ?? 0));
+}
+
 export function jobRole(job: Pick<Job, 'role' | 'kind' | 'debate' | 'runsApp'>): Role {
   return job.role ?? (job.debate ? 'debate' : job.kind === 'review' && job.runsApp ? 'verify' : job.kind);
 }

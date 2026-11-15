@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import { canonicalPath, resolveConfig } from '../plugin/bridge/config.ts';
 import type { Config } from '../plugin/bridge/config.ts';
 import { leadContext } from '../plugin/bridge/instructions.ts';
-import { jobRole, Jobs, outOfScope } from '../plugin/bridge/jobs.ts';
+import { followUps, jobRole, Jobs, outOfScope } from '../plugin/bridge/jobs.ts';
 import type { Adapter, CrewEvent, Job, JobCtl, JobSpec, Probe, ReviewTarget } from '../plugin/bridge/jobs.ts';
 import { describe, needsLead } from '../plugin/bridge/render.ts';
 import { tierModel } from '../plugin/bridge/tiers.ts';
@@ -2474,4 +2474,12 @@ test('retention keeps a job that just ended and one an unechoed receipt names, h
   jobs.flush();
   assert.ok(jobs.jobs.has(job.id));
   assert.ok(jobs.jobs.has('named'));
+});
+
+test('follow-ups count the turns the lead sent a worker back for, not retries of a refused action', () => {
+  const approval = { turn: 2 } as never;
+  assert.equal(followUps({ turns: 1 }), 0);
+  assert.equal(followUps({ turns: 3 }), 2);
+  assert.equal(followUps({ turns: 3, approvals: [approval] }), 1);
+  assert.equal(followUps({ turns: 2, approvals: [approval, approval] }), 0);
 });

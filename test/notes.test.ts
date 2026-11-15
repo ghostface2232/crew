@@ -280,7 +280,7 @@ test('adoption is totalled per model, shown in the notes, and not scored', () =>
 test('loading drops an adoption the writer would refuse', (t) => {
   const dir = home(t);
   fs.mkdirSync(dir, { recursive: true });
-  const bad: Partial<Evidence>[] = [{ adoption: 'as-is' }, { job: 'cx-2', adoption: 'merged' as Evidence['adoption'] }, { job: 'cx-3', rounds: 1 }, { job: 'cx-4', adoption: 'partly', rounds: 1 }];
+  const bad: Partial<Evidence>[] = [{ adoption: 'as-is' }, { job: '', adoption: 'as-is' }, { job: 'cx-2', adoption: 'merged' as Evidence['adoption'] }, { job: 'cx-3', rounds: 1 }, { job: 'cx-4', adoption: 'partly', rounds: 1 }];
   fs.writeFileSync(notesFile(dir), JSON.stringify(fixture(bad)));
   assert.deepEqual(loadNotes(dir).models['model-a'].evidence.map((e) => e.job), ['cx-4']);
 });

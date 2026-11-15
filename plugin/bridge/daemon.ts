@@ -13,7 +13,7 @@ import { canonicalPath, HOME, installed, isRole, loadConfig, PLUGIN_ROOT, PORT, 
 import type { Config } from './config.ts';
 import { evidenceType, openEvidence } from './evidence.ts';
 import { projectRoot } from './git.ts';
-import { isTerminal, Jobs } from './jobs.ts';
+import { followUps, isTerminal, Jobs } from './jobs.ts';
 import { missionPreset, Missions, STAGES } from './missions.ts';
 import type { Mission } from './missions.ts';
 import { addEvidence, loadNotes, notesFile, renderNotes, scoreAll, setSummary } from './notes.ts';
@@ -692,7 +692,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
           ...(body.declined !== undefined ? { declined: body.declined } : {}),
           ...(body.outcome !== undefined ? { outcome: body.outcome } : {}),
           // The follow-up turns come from the job's own record, so the lead names only how it took the work.
-          ...(body.adoption !== undefined ? { adoption: body.adoption, ...(job ? { rounds: Math.max(0, (job.turns ?? 1) - 1) } : {}) } : {}),
+          ...(body.adoption !== undefined ? { adoption: body.adoption, ...(job ? { rounds: followUps(job) } : {}) } : {}),
           text: body.text,
         }).score;
       }

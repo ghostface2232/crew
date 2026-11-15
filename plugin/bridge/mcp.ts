@@ -261,7 +261,7 @@ const TOOLS = [
           properties: { high: { type: 'integer', minimum: 0 }, medium: { type: 'integer', minimum: 0 }, low: { type: 'integer', minimum: 0 } },
           description: 'For build: the findings you declined, by the severity the reviewer gave. Not scored; kept so your triage can be checked.',
         },
-        adoption: { type: 'string', enum: ['as-is', 'after-reply', 'partly', 'rejected'], description: 'For a delegated job\'s build line: how you took its work. as-is (merged as delivered), after-reply (merged after you sent it back), partly (merged in part), rejected. Its follow-up rounds are read from the job. Shown with the notes, not scored.' },
+        adoption: { type: 'string', enum: ['as-is', 'after-reply', 'partly', 'rejected'], description: 'For a delegated job\'s build line: how you took its work. as-is (merged as delivered), after-reply (merged after you sent it back), partly (merged in part), rejected. Its follow-up rounds are read from the job. Noting the job again replaces its line, so give adoption again. Shown with the notes, not scored.' },
         outcome: { type: 'string', enum: ['root-cause', 'patch', 'another-review'], description: 'Required for fix: root-cause (fixed the cause), patch (handled the case without the cause), another-review (the fix needed another round).' },
         text: { type: 'string', description: 'One line of facts from the review, e.g. "Markdown parser, no findings, one follow-up on underscore boundaries". No impressions.' },
         summary: { type: 'string', description: 'With model only: the model\'s new summary, three to five lines on what it does well, where it is weak, and what to give it. Every claim must trace back to its evidence lines.' },

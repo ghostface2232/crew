@@ -325,8 +325,8 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
     const parentLabel = info.find((other) => other.role === role.parent)?.label ?? role.parent;
     const following = Boolean(role.parent && !own.agents);
     const shown = resolved[role.role];
-    // What a field shows when left blank: the parent's setting for that agent, if the role takes it.
-    const inherited = (agent: WorkerAgent, key: keyof AgentSettings) => (role.parent && resolved[role.parent]?.[agent]?.[key]) || 'Agent default';
+    // What a field shows when left blank: the parent's setting for that agent while the role follows it.
+    const inherited = (agent: WorkerAgent, key: keyof AgentSettings) => (following && resolved[role.parent!]?.[agent]?.[key]) || 'Agent default';
     const workers = (shown?.agents ?? []).filter((holder): holder is WorkerAgent => holder !== 'claude' && holder in state.agents);
     return (
       <section className={styles.group} key={role.role} aria-label={role.label}>

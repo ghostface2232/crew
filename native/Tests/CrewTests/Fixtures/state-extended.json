@@ -161,14 +161,23 @@
       "idPrefix": "cx",
       "resume": "codex resume",
       "reviewerRunsGit": true,
-      "enabled": true
+      "enabled": true,
+      "models": [
+        { "id": "build-model", "name": "Build model", "efforts": ["low", "high"] },
+        { "id": "quick-model", "name": "Quick model", "efforts": ["low", "medium"] },
+        { "id": "no-effort", "name": "No effort", "efforts": [] }
+      ]
     },
     "antigravity": {
       "name": "Antigravity",
       "idPrefix": "ag",
       "resume": "agy --conversation",
       "reviewerRunsGit": false,
-      "enabled": true
+      "enabled": true,
+      "models": [
+        { "id": "hydrogen", "name": "Hydrogen" },
+        { "id": "argon", "name": "Argon" }
+      ]
     }
   },
   "roles": {
@@ -410,6 +419,7 @@
       "role": "verify",
       "kind": "review",
       "parent": "review",
+      "unable": ["antigravity"],
       "label": "Review that runs the app",
       "summary": "Reviews a change by starting the app in a snapshot of it."
     },

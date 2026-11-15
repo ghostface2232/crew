@@ -99,7 +99,7 @@ struct CrewSettingsView: View {
         if let group = pane.group {
             ForEach(model.roleInfo.filter { $0.group == group }) { roleSection($0) }
             Section {} footer: {
-                Text("The lead picks one of a role's holders for each job, using Codex before Antigravity when none is named. Claude means the lead does the work itself or in a subagent. Each agent's model and effort apply when it runs the role.").settingsFootnote()
+                Text("The lead picks one of a role's holders for each job. When none is named, Antigravity takes wording and Codex other work, passing over one that is disabled or cannot do the role. Claude means the lead does the work itself or in a subagent. Each agent's model and effort apply when it runs the role.").settingsFootnote()
             }
         } else if pane == .presets {
             presets
@@ -122,16 +122,14 @@ struct CrewSettingsView: View {
                             get: { model.assignment(for: role.role)?.holders.contains(holder) == true },
                             set: { model.setHolder(role.role, holder: holder, enabled: $0) }
                         )).toggleStyle(.checkbox).accessibilityLabel("\(role.label): \(holderLabel(holder))")
-                            .disabled(model.assignment(for: role.role)?.holders == [holder])
+                            .disabled(!model.canToggleHolder(role.role, holder: holder))
                     }
                 }.disabled(model.followsParent(role.role))
             }
             ForEach(model.assignment(for: role.role)?.workerHolders ?? [], id: \.self) { agent in
-                TextField("\(agentName(agent)) model", text: roleBinding(role, agent: agent, \.model), prompt: Text(inheritedValue(role, agent: agent, \.model)))
-                    .accessibilityLabel("\(role.label) \(agentName(agent)) model")
+                roleField(role, agent: agent, \.model)
                 if agent == "codex" {
-                    TextField("Codex reasoning effort", text: roleBinding(role, agent: agent, \.effort), prompt: Text(inheritedValue(role, agent: agent, \.effort)))
-                        .accessibilityLabel("\(role.label) Codex reasoning effort")
+                    roleField(role, agent: agent, \.effort)
                 }
             }
         } header: {
@@ -213,9 +211,21 @@ struct CrewSettingsView: View {
         Binding(get: { model.roleSettings[role.role]?[agent]?[keyPath: key] ?? "" },
                 set: { model.setRole(role.role, agent: agent, key, to: $0) })
     }
-    private func inheritedValue(_ role: RoleInfo, agent: String, _ key: KeyPath<RoleAgentSettings, String?>) -> String {
-        guard model.followsParent(role.role), let parent = role.parent, let assignment = model.assignment(for: parent) else { return "Agent default" }
-        return RoleSetting(assignment)[agent]?[keyPath: key] ?? "Agent default"
+    @ViewBuilder private func roleField(_ role: RoleInfo, agent: String, _ key: WritableKeyPath<RoleAgentSettings, String?>) -> some View {
+        let title = "\(agentName(agent)) \(key == \.model ? "model" : "reasoning effort")"
+        let offered = store.state.agents[agent]?.models ?? []
+        let blank = model.blankTitle(role.role, agent: agent, key, models: offered)
+        if offered.isEmpty {
+            TextField(title, text: roleBinding(role, agent: agent, key), prompt: Text(blank))
+                .accessibilityLabel("\(role.label) \(title)")
+        } else {
+            Picker(title, selection: roleBinding(role, agent: agent, key)) {
+                Text(blank).tag("")
+                ForEach(model.fieldChoices(role.role, agent: agent, key, models: offered)) { choice in
+                    Text(choice.name).tag(choice.id)
+                }
+            }.accessibilityLabel("\(role.label) \(title)")
+        }
     }
 }
 

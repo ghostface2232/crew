@@ -27,6 +27,20 @@ import Testing
         #expect(current.missions[0].preset == .best)
         #expect(current.roleLabel(current.jobs[1].assignedRole) == "Review that runs the app")
     }
+    @Test func workerModelsAndUnableDecodeWithoutRequiringNewDaemonFields() throws {
+        let legacy = try fixture()
+        #expect(legacy.agents.values.allSatisfy { $0.models == nil })
+        #expect(legacy.availableRoles.allSatisfy { $0.unable == nil })
+        let current = try fixture("state-extended")
+        #expect(current.availableRoles.first { $0.role == "verify" }?.unable == ["antigravity"])
+        #expect(current.availableRoles.first { $0.role == "delegate" }?.unable == nil)
+        let codex = try #require(current.agents["codex"])
+        #expect(codex.models?.first == ModelChoice(id: "build-model", name: "Build model", efforts: ["low", "high"]))
+        #expect(current.agents["antigravity"]?.models == [ModelChoice(id: "hydrogen", name: "Hydrogen"), ModelChoice(id: "argon", name: "Argon")])
+        #expect(try JSONDecoder().decode(Worker.self, from: JSONEncoder().encode(codex)) == codex)
+        let empty = try JSONDecoder().decode(Worker.self, from: Data(#"{"name":"Codex","resume":"codex resume","enabled":true,"models":[]}"#.utf8))
+        #expect(empty.models == [])
+    }
     @Test func olderJobsDeriveTheirRoleAndExplicitRolesTakePrecedence() throws {
         var job = try fixture().jobs[0]
         #expect(job.assignedRole == "delegate")
@@ -192,6 +206,82 @@ import Testing
         #expect(dispatch.holders.isEmpty && dispatch.agent == nil && dispatch.submissionAgent == nil && !dispatch.canSend && dispatch.requiresClaude)
         dispatch.assignment = nil
         #expect(!dispatch.canSend && !dispatch.requiresClaude)
+    }
+    @Test func dispatchDefaultsFollowRolePreferenceAndSkipDisabledOrUnableWorkers() throws {
+        let state = try fixture("state-extended")
+        let assignment = RoleAssignment(agents: RoleAssignment.holderOrder)
+        for info in state.availableRoles {
+            let dispatch = JobDispatch(assignment: assignment, workers: state.agents, info: info)
+            let expected = info.kind == "polish" ? ["antigravity", "codex"] : ["codex", "antigravity"]
+            #expect(dispatch.holders == expected)
+            #expect(dispatch.agent == expected.first && dispatch.submissionAgent == expected.first)
+        }
+        var dispatch = JobDispatch(assignment: assignment, workers: state.agents, info: state.availableRoles.first { $0.kind == "polish" })
+        dispatch.workers["antigravity"]?.enabled = false
+        #expect(dispatch.agent == "codex" && dispatch.canSend)
+        dispatch.picked = "antigravity"
+        #expect(dispatch.agent == "antigravity" && !dispatch.canSend)
+        dispatch.picked = "claude"
+        #expect(dispatch.agent == "codex")
+        dispatch.picked = nil
+        dispatch.workers["codex"]?.enabled = false
+        #expect(dispatch.agent == "antigravity" && !dispatch.canSend)
+        dispatch.workers = state.agents
+        dispatch.info = state.availableRoles.first { $0.role == "delegate" }
+        dispatch.workers["codex"]?.enabled = false
+        #expect(dispatch.agent == "antigravity")
+        dispatch.info = state.availableRoles.first { $0.role == "verify" }
+        #expect(dispatch.agent == "codex" && !dispatch.canSend)
+        dispatch.workers["codex"]?.enabled = true
+        dispatch.info?.unable = ["codex"]
+        #expect(dispatch.agent == "antigravity")
+        dispatch.workers["antigravity"] = nil
+        #expect(dispatch.holders == ["codex"] && dispatch.agent == "codex")
+    }
+    @Test @MainActor func unableHoldersCanOnlyBeUncheckedAndKeepTheLastHolder() throws {
+        let state = try fixture("state-extended")
+        let settings = SettingsModel(api: CrewAPI(port: 0), roles: state.roles, roleSettings: [:], roleInfo: state.roleInfo)
+        #expect(!settings.canToggleHolder("verify", holder: "antigravity"))
+        settings.setFollowParent("verify", enabled: false)
+        #expect(!settings.canToggleHolder("verify", holder: "antigravity"))
+        settings.setHolder("verify", holder: "codex", enabled: true)
+        #expect(settings.canToggleHolder("verify", holder: "antigravity"))
+        settings.setHolder("verify", holder: "antigravity", enabled: false)
+        #expect(settings.assignment(for: "verify")?.holders == ["codex"])
+        #expect(!settings.canToggleHolder("verify", holder: "antigravity"))
+        settings.setHolder("verify", holder: "antigravity", enabled: true)
+        #expect(settings.assignment(for: "verify")?.holders == ["codex"])
+        #expect(settings.canToggleHolder("verify", holder: "claude"))
+    }
+    @Test @MainActor func effortChoicesFollowOwnOrInheritedModelAndPreserveWrittenValues() throws {
+        let state = try fixture("state-extended")
+        let settings = SettingsModel(api: CrewAPI(port: 0), roles: state.roles, roleSettings: state.roleSettings, roleInfo: state.roleInfo)
+        let models = try #require(state.agents["codex"]?.models)
+        #expect(settings.fieldChoices("refactor", agent: "codex", \.effort, models: models).map(\.id) == ["low", "high"])
+        #expect(settings.blankTitle("refactor", agent: "codex", \.model, models: models) == "Build model (same as Implementation)")
+        #expect(settings.blankTitle("refactor", agent: "codex", \.effort, models: models) == "high (same as Implementation)")
+        #expect(settings.blankTitle("delegate", agent: "codex", \.model, models: models) == "Agent default")
+        #expect(!settings.dirty)
+        settings.setRole("refactor", agent: "codex", \.model, to: "quick-model")
+        #expect(settings.fieldChoices("refactor", agent: "codex", \.effort, models: models).map(\.id) == ["low", "medium"])
+        settings.setRole("refactor", agent: "codex", \.effort, to: "custom-effort")
+        #expect(settings.fieldChoices("refactor", agent: "codex", \.effort, models: models).map(\.id) == ["low", "medium", "custom-effort"])
+        settings.setRole("refactor", agent: "codex", \.model, to: "no-effort")
+        #expect(settings.fieldChoices("refactor", agent: "codex", \.effort, models: models).map(\.id) == ["custom-effort"])
+        settings.setRole("refactor", agent: "codex", \.model, to: "custom-model")
+        #expect(settings.fieldChoices("refactor", agent: "codex", \.model, models: models).last == ModelChoice(id: "custom-model", name: "custom-model"))
+        #expect(settings.fieldChoices("refactor", agent: "codex", \.effort, models: models).map(\.id) == ["low", "high", "medium", "custom-effort"])
+        settings.setRole("refactor", agent: "codex", \.model, to: "")
+        settings.setRole("refactor", agent: "codex", \.effort, to: "")
+        settings.setFollowParent("refactor", enabled: false)
+        #expect(settings.fieldChoices("refactor", agent: "codex", \.effort, models: models).map(\.id) == ["low", "high", "medium"])
+        #expect(settings.blankTitle("refactor", agent: "codex", \.model, models: models) == "Agent default")
+        settings.setFollowParent("refactor", enabled: true)
+        settings.setRole("delegate", agent: "codex", \.model, to: "custom-parent")
+        #expect(settings.blankTitle("refactor", agent: "codex", \.model, models: models) == "custom-parent (same as Implementation)")
+        #expect(settings.fieldChoices("refactor", agent: "codex", \.effort, models: models).map(\.id) == ["low", "high", "medium"])
+        settings.setRole("delegate", agent: "codex", \.model, to: "build-model")
+        #expect(!settings.dirty)
     }
     @Test @MainActor func overviewListsEveryHolderAndOmitsUnchangedInheritedHolders() throws {
         let state = try fixture("state-extended")

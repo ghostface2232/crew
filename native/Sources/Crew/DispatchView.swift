@@ -3,13 +3,21 @@ import SwiftUI
 struct JobDispatch {
     var assignment: RoleAssignment?
     var workers: [String: Worker]
+    var info: RoleInfo?
     var picked: String?
-    var holders: [String] { assignment?.workerHolders ?? [] }
-    var agent: String? { picked.flatMap { holders.contains($0) ? $0 : nil } ?? holders.first }
+    var holders: [String] {
+        let order = info?.kind == "polish" ? ["antigravity", "codex"] : ["codex", "antigravity"]
+        return order.filter { assignment?.agents.contains($0) == true && workers[$0] != nil }
+    }
+    var agent: String? {
+        picked.flatMap { holders.contains($0) ? $0 : nil }
+            ?? holders.first { workers[$0]?.enabled == true && info?.unable?.contains($0) != true }
+            ?? holders.first
+    }
     var submissionAgent: String? { agent }
     var worker: Worker? { agent.flatMap { workers[$0] } }
     var canSend: Bool { worker?.enabled == true }
-    var requiresClaude: Bool { assignment?.holders == ["claude"] }
+    var requiresClaude: Bool { assignment != nil && holders.isEmpty }
 }
 
 struct DispatchView: View {
@@ -30,7 +38,11 @@ struct DispatchView: View {
     private let initialDirectory: String
     init(store: CrewStore) { self.store = store; initialDirectory = store.project; _directory = State(initialValue: store.project) }
     private var dirty: Bool { intent != "command" || destination != "project" || !task.isEmpty || !targets.isEmpty || role != "delegate" || directory != initialDirectory || pickedAgent != nil }
-    private var dispatch: JobDispatch { JobDispatch(assignment: store.state.roles[intent == "question" ? "delegate" : role], workers: store.state.agents, picked: pickedAgent) }
+    private var dispatch: JobDispatch {
+        let role = intent == "question" ? "delegate" : role
+        return JobDispatch(assignment: store.state.roles[role], workers: store.state.agents,
+                           info: store.state.availableRoles.first { $0.role == role }, picked: pickedAgent)
+    }
     private var selectedRole: RoleInfo? { store.state.availableRoles.first { $0.role == role } }
     private var missions: [Mission] { store.state.missions.filter { $0.state == "active" && $0.root == directory.trimmingCharacters(in: .whitespacesAndNewlines) } }
     private var canSend: Bool {

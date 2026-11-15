@@ -28,7 +28,7 @@ Added 2026-11-15 for roles and mission presets (sections 8 and 15): state gains 
 | Request | Body | Result |
 | --- | --- | --- |
 | `GET /api/usage` | | `Usage` |
-| `GET /api/route?kind=<role>\|lead&mission=<id>` | | `RouteDecision`, plus `preset` and `policy`: the preset the next job of that mission (or with none, the global one) would run under, and what it sets. `mission` is optional; an unknown one is refused |
+| `GET /api/route?kind=<role>\|lead&mission=<id>` | | `RouteDecision`, plus `preset` and `policy`: the preset the next job of that mission (or the global preset, if no mission is given) would run under, and what it sets. `mission` is optional; an unknown id is refused |
 | `POST /api/gc` | `{ "apply": false, "branches": false }` (both optional) | `{ text }`; user secret required; dry run unless `apply`, branches deleted only with both flags |
 | `POST /api/preset` | `{ "preset": "economy" \| "balanced" \| "best" \| null }` | `{ preset, presets }`; writes `preset` in `~/.crew/config.json` |
 | `POST /api/missions/:id` | `{ "note": "text" }` | The mission, with the note appended. Refused for a mission that is not active |
@@ -135,7 +135,7 @@ The built-in presets name no worker models, because which models an account has 
 
 Added 2026-11-15. A mission can carry its own `preset`, which replaces the global one for the jobs started under it; nothing else in the order above changes, so a role's own model or effort still wins. The lead passes `preset` to `mission` only when the user names one for the command ("this one is simple: economy"); it never picks one itself. The user can also change it from the mission's menu on the board. A change applies to the mission's next jobs: a job records the preset it started under (`Job.preset`) and keeps it, with its model, for its follow-up turns.
 
-The preset belongs to the work, not to the mission card. When the user stops tracking a mission on the board, the lead session keeps sending its id with new jobs, and they still run under its preset; the link is dropped only when the lead finishes the mission or opens another. A job that names a mission the daemon no longer knows is refused rather than run on the global preset; the lead is told once, and its next job runs under the global preset. After the MCP server restarts, the session's one open mission is picked up again with its next job or `route`, and a lead that resends its mission's title reattaches to it. If the mission was closed while the server was down, the lead keeps its preset without reopening the card.
+The preset belongs to the work, not to the mission card. When the user stops tracking a mission on the board, the lead session keeps sending its id with new jobs, and they still run under its preset; the link is dropped only when the lead finishes the mission or opens another. A job that names a mission the daemon no longer knows is refused rather than run under the global preset; the lead is told once, and its next job runs under the global preset. After the MCP server restarts, the session's one open mission is picked up again with its next job or `route`, and a lead that resends its mission's title reattaches to it. If the mission was closed while the server was down, the lead keeps its preset without reopening the card.
 
 Session instructions are fixed when a session starts, so they state only the global preset and these rules. `mission` and `route` responses state the preset in effect and what it asks of the lead's subagents; the lead follows the latest one it was told.
 
@@ -293,8 +293,8 @@ A role the user has not assigned, or assigned without an `agent`, takes its pare
 
 Static reviews then go to Antigravity and reviews that run the app to Codex. A role assigned to an agent that cannot do it (`verify` on Antigravity, which runs no commands as a reviewer) is refused when the job starts, never moved to another agent.
 
-The daemon sends both tables: `roles` resolved (every role, `agent` required) and `roleSettings` as written (`agent` optional), with `roleInfo` describing each role in display order. Settings edit and save `roleSettings`, so a role left to follow its parent keeps following it.
+The daemon sends both tables: `roles` resolved (every role, `agent` required) and `roleSettings` as written (`agent` optional), with `roleInfo` describing each role in display order. Settings edits and saves `roleSettings`, so a role left to follow its parent keeps following it.
 
-A job settles its role once, when it is created (`resolveRole` in `jobs.ts`). `POST /api/jobs` may send `role` without `kind`. A review with `runs_app` is `verify`; `review` with `runs_app`, a role whose kind differs from the given one, and debate rounds on any role but `debate` are refused. Jobs saved before roles were recorded derive theirs: `debate` if they were a debate, `verify` if a review ran the app, else their kind.
+A job settles its role once, when it is created (`resolveRole` in `jobs.ts`). `POST /api/jobs` may send `role` without `kind`. A `kind: "review"` job with `runs_app` resolves to `verify`; explicitly passing `role: "review"` with `runs_app`, a role whose kind differs from the given `kind`, or debate rounds on any role other than `debate` are all refused. Jobs saved before roles were recorded derive theirs: `debate` if they were a debate, `verify` if a review ran the app, else their kind.
 
 The lead's tools map onto roles: `delegate` takes `role` (`delegate`, `refactor`, or `release`), `review` is `review` or, with `runs_app`, `verify`, and `debate` and `polish` are their own roles. The board's New Job offers every role except `debate`, which needs a lead to answer each round.

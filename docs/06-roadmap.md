@@ -88,7 +88,7 @@ Injection keeps the decision recorded in [04-implementation.md](04-implementatio
 
 **L1. The lead as an adapter.** Only three parts are tied to Claude Code: the MCP server, the hooks, and the skills. Jobs, events, and the board belong to the daemon. Defining the lead as the role that plans and decides merges lets Codex or a headless Claude take it. This also resolves the "Codex as temporary lead when Claude is nearly exhausted" case in 03 section 8.2.
 
-Groundwork done 2026-11-15: worker roles are a registry the user assigns in the settings ([09](09-usage-presets-rounds.md) section 15), and routing names the lead through one constant (`LEAD` in `config.ts`) instead of spelling out Claude. No setting chooses the lead yet: one that nothing can honor would mislead. What a lead other than Claude Code needs, in order, each verified before the next:
+Groundwork done 2026-11-15: worker roles are a registry the user assigns in the settings ([09](09-usage-presets-rounds.md) section 15), and routing names the lead through one constant (`LEAD` in `config.ts`) instead of spelling out Claude. No setting chooses the lead yet, because nothing can honor it. What a lead other than Claude Code needs, in order, each verified before the next:
 
 1. Lead identity as a property of the connected session, not a global setting, so leads of different kinds can run at once. Today a session is known by `CLAUDE_CODE_SESSION_ID`.
 2. The MCP server driven by another client (Codex supports MCP servers), with the session id passed in.

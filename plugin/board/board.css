@@ -518,6 +518,16 @@ dialog.detail-panel::backdrop { background: transparent; }
 .session-stage { display: grid; gap: 6px; min-width: 0; margin-block-start: 6px; }
 .session-stage > p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-workflow > button { justify-self: start; margin-block-start: 6px; }
+.session-workflow-counts { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.session-workflow-counts > span:last-child { flex: none; font-variant-numeric: tabular-nums; }
+.workflow-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; min-width: 0; }
+.workflow-strip > i { width: 7px; height: 7px; border-radius: 2px; background: var(--tertiary); }
+.workflow-strip > i[data-running] { background: var(--accent); }
+.workflow-strip > small { margin-inline-end: 2px; font-size: 10px; color: var(--secondary); font-variant-numeric: tabular-nums; }
+@media (prefers-reduced-motion: no-preference) {
+  .workflow-strip > i[data-running] { animation: strip-pulse 1.8s ease-in-out infinite; }
+}
+@keyframes strip-pulse { 50% { opacity: 0.45; } }
 .session > summary > .chip, .session > summary::before { flex-shrink: 0; }
 .session-row { padding: 10px 12px; border-radius: var(--row-radius); background: var(--row); }
 .panel-list { display: grid; gap: 14px; }

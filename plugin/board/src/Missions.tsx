@@ -60,6 +60,22 @@ function SessionAgents({ agents, now, label }: { agents: SessionAgent[]; now: nu
   </ul>;
 }
 
+/**
+ * One square per agent of a run, finished ones first and running ones pulsing after them. The total is not known
+ * ahead, so there are no empty squares for agents to come; past STRIP_LIMIT, the oldest finished ones give way to a count.
+ */
+const STRIP_LIMIT = 30;
+function WorkflowStrip({ done, running }: { done: number; running: number }) {
+  const shownRunning = Math.min(running, STRIP_LIMIT);
+  const shownDone = Math.min(done, STRIP_LIMIT - shownRunning);
+  const hidden = done + running - shownDone - shownRunning;
+  return <span className="workflow-strip" aria-hidden="true">
+    {hidden > 0 && <small>+{hidden}</small>}
+    {Array.from({ length: shownDone }, (_, index) => <i key={`d${index}`} />)}
+    {Array.from({ length: shownRunning }, (_, index) => <i key={`r${index}`} data-running="" />)}
+  </span>;
+}
+
 function SessionWorkflow({ run, agents, now }: { run: ClaudeSession['workflows'][number]; agents: SessionAgent[]; now: number }) {
   const [expanded, setExpanded] = useState(false);
   const visible = expanded ? agents : agents.slice(0, 5);
@@ -77,7 +93,10 @@ function SessionWorkflow({ run, agents, now }: { run: ClaudeSession['workflows']
       <b title={run.name}>{run.name}</b>
       <span className="caption secondary">{elapsed(now - run.startedAt)}</span>
     </div>
-    <p className="caption secondary">{agents.length} running · {run.done} done</p>
+    <p className="session-workflow-counts caption secondary">
+      <WorkflowStrip done={run.done} running={agents.length} />
+      <span>{agents.length} running · {run.done} done</span>
+    </p>
     {agents.length === 0 && <p className="caption secondary">No agent running: between phases, or finished.</p>}
     {[...groups].map(([stage, group]) => <div className="session-stage" key={stage}>
       {staged && stage && <p className="caption secondary" title={stage}>{stage}</p>}

@@ -389,6 +389,10 @@ private struct WorkflowRunSection: View {
     }
     var body: some View {
         detailSection(run.name, symbol: "point.3.connected.trianglepath.dotted", content: {
+            HStack(spacing: Space.ml) {
+                WorkflowStrip(done: run.done, running: agents.count)
+                Text("\(agents.count) running · \(run.done) done").font(Typeface.caption).monospacedDigit().foregroundStyle(.secondary).fixedSize()
+            }
             if agents.isEmpty {
                 Text("No agent running: between phases, or finished.").font(Typeface.callout).foregroundStyle(.secondary)
             } else {
@@ -405,12 +409,40 @@ private struct WorkflowRunSection: View {
                 if agents.count > Self.folded { RevealToggle(show: "Show all \(agents.count)", subject: run.name, shown: $shown) }
             }
         }) {
-            // The total is not known ahead, so the heading says what ran rather than a share of it.
-            HStack(spacing: Space.xs) {
-                Text("\(agents.count) running · \(run.done) done ·")
-                ElapsedText(store: store, start: run.startedAt, end: agents.isEmpty ? run.activeAt : nil)
-            }.monospacedDigit().font(Typeface.caption).foregroundStyle(.secondary)
+            ElapsedText(store: store, start: run.startedAt, end: agents.isEmpty ? run.activeAt : nil)
+                .monospacedDigit().font(Typeface.caption).foregroundStyle(.secondary)
         }
+    }
+}
+
+/// One square per agent of a run, finished ones first and running ones pulsing after them. The total is not known ahead,
+/// so there are no empty squares for agents to come; past `limit` squares, the oldest finished ones give way to a count.
+private struct WorkflowStrip: View {
+    let done: Int
+    let running: Int
+    private static let limit = 30
+    private static let side: CGFloat = 7
+    @State private var dim = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var body: some View {
+        let shownRunning = min(running, Self.limit)
+        let shownDone = min(done, Self.limit - shownRunning)
+        let hidden = done + running - shownDone - shownRunning
+        HStack(spacing: Space.xxs) {
+            if hidden > 0 { Text("+\(hidden)").font(Typeface.micro).monospacedDigit().foregroundStyle(.secondary).padding(.trailing, Space.xxs) }
+            ForEach(0..<shownDone, id: \.self) { _ in square(.secondary.opacity(0.35)) }
+            HStack(spacing: Space.xxs) {
+                ForEach(0..<shownRunning, id: \.self) { _ in square(Palette.accent) }
+            }.opacity(dim ? 0.45 : 1)
+        }
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { dim = true }
+        }
+        .accessibilityHidden(true)
+    }
+    private func square(_ fill: some ShapeStyle) -> some View {
+        RoundedRectangle(cornerRadius: 2, style: .continuous).fill(fill).frame(width: Self.side, height: Self.side)
     }
 }
 

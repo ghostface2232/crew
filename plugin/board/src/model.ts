@@ -146,3 +146,36 @@ export function jobLabel(job: BoardJob) {
   if (job.error?.limit) return 'Usage limit reached';
   return { running: 'Working', done: 'Done', failed: 'Failed', cancelled: 'Cancelled' }[job.state];
 }
+
+const HOUR = 3_600_000;
+/** Counts per hour over the last `hours`, oldest first; the last bucket ends now. */
+export function hourly(now: number, hours: number, count: (start: number, end: number) => number) {
+  return Array.from({ length: hours }, (_, index) => {
+    const end = now - (hours - 1 - index) * HOUR;
+    return count(end - HOUR, end);
+  });
+}
+/** How many jobs were running at some point in each hour. */
+export const runningPerHour = (jobs: BoardJob[], now: number, hours = 24) =>
+  hourly(now, hours, (start, end) => jobs.filter((job) => job.createdAt < end && (job.endedAt ?? now) >= start).length);
+/** How many jobs ended in a state in each hour. */
+export const endedPerHour = (jobs: BoardJob[], state: BoardJob['state'], now: number, hours = 24) =>
+  hourly(now, hours, (start, end) => jobs.filter((job) => job.state === state && job.endedAt != null && job.endedAt >= start && job.endedAt < end).length);
+const startOfDay = (time: number) => new Date(time).setHours(0, 0, 0, 0);
+/**
+ * Items started on each day, in whole weeks from Monday so a heatmap's columns are weeks; days after today
+ * are left out. Each day is its local midnight.
+ */
+export function dailyCounts(times: number[], now: number, weeks: number) {
+  const today = startOfDay(now);
+  const monday = new Date(today);
+  monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7) - (weeks - 1) * 7);
+  const counts = new Map<number, number>();
+  for (const time of times) counts.set(startOfDay(time), (counts.get(startOfDay(time)) ?? 0) + 1);
+  const days: { day: number; count: number }[] = [];
+  for (const date = new Date(monday); date.getTime() <= today; date.setDate(date.getDate() + 1)) {
+    const day = date.getTime();
+    days.push({ day, count: counts.get(day) ?? 0 });
+  }
+  return days;
+}

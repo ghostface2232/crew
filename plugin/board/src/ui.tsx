@@ -1,7 +1,7 @@
-import { createContext, useContext, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import {
-  ArrowUp, BellDot, Check, Circle, CircleAlert, CircleCheck, CircleDotDashed, CircleStop, ClockAlert, Copy,
+  ArrowUp, BellDot, Check, ChevronDown, Circle, CircleAlert, CircleCheck, CircleDotDashed, CircleStop, ClockAlert, Copy,
   TriangleAlert, X,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -29,6 +29,62 @@ export function ClockProvider({ skew, children }: { skew: number; children: Reac
     };
   }, []);
   return <ClockContext value={now + skew}>{children}</ClockContext>;
+}
+/** The motion language: things open on a long, soft ease-out and close quicker, as the reference menus do. */
+export const EASE_OUT = 'cubic-bezier(0.22, 1, 0.36, 1)';
+export const EASE_IN_OUT = 'cubic-bezier(0.65, 0, 0.35, 1)';
+export const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+/**
+ * A container transform: the element grows out of the control that opened it. Only transform and opacity
+ * move, so text inside stays crisp once it lands; the contents fade in after the shape has mostly settled.
+ */
+export function growFrom(element: HTMLElement, from: DOMRect | undefined, { duration = 460 } = {}) {
+  if (!from || reducedMotion()) return;
+  const to = element.getBoundingClientRect();
+  if (!to.width || !to.height) return;
+  const transform = `translate(${from.left - to.left}px, ${from.top - to.top}px) scale(${from.width / to.width}, ${from.height / to.height})`;
+  element.animate([{ transform, transformOrigin: '0 0', opacity: 0.4 }, { transform: 'none', transformOrigin: '0 0', opacity: 1 }], { duration, easing: EASE_OUT });
+  for (const child of element.children)
+    (child as HTMLElement).animate([{ opacity: 0 }, { opacity: 0 }, { opacity: 1 }], { duration: duration * 0.75, easing: 'ease-out' });
+}
+/** The way back: the element shrinks into the control it came from, faster than it opened. */
+export function shrinkTo(element: HTMLElement, to: DOMRect | undefined, { duration = 240 } = {}) {
+  if (!to || reducedMotion() || !element.isConnected) return Promise.resolve();
+  const from = element.getBoundingClientRect();
+  if (!from.width || !from.height) return Promise.resolve();
+  const transform = `translate(${to.left - from.left}px, ${to.top - from.top}px) scale(${to.width / from.width}, ${to.height / from.height})`;
+  for (const child of element.children) (child as HTMLElement).animate([{ opacity: 1 }, { opacity: 0 }], { duration: duration * 0.5, fill: 'forwards' });
+  return element
+    .animate([{ transform: 'none', transformOrigin: '0 0', opacity: 1 }, { transform, transformOrigin: '0 0', opacity: 0 }], { duration, easing: EASE_IN_OUT, fill: 'forwards' })
+    .finished.then(() => undefined, () => undefined);
+}
+/** A number whose digits roll to their new value, each column on its own. */
+export function RollingNumber({ value, className }: { value: number; className?: string }) {
+  const text = value.toLocaleString();
+  return (
+    <span className={`rolling ${className ?? ''}`} aria-label={text} role="img">
+      {[...text].map((character, index) =>
+        /\d/.test(character) ? (
+          // Keyed from the right, so a new leading digit slides in without moving the others.
+          <span className="rolling-digit" key={text.length - index} aria-hidden="true">
+            <span style={{ translate: `0 ${-Number(character) * 10}%` }}>0123456789</span>
+          </span>
+        ) : (
+          <span key={`s${text.length - index}`} aria-hidden="true">{character}</span>
+        ),
+      )}
+    </span>
+  );
+}
+/** Words that settle in one after another, as a caption fades up under the reference's preview. */
+export function WordReveal({ text, className }: { text: string; className?: string }) {
+  return (
+    <span className={`word-reveal ${className ?? ''}`} key={text}>
+      {text.split(/(\s+)/).map((part, index) =>
+        /^\s+$/.test(part) ? part : <span key={index} style={{ '--i': index / 2 } as CSSProperties}>{part}</span>,
+      )}
+    </span>
+  );
 }
 export function Icon({ icon: Glyph, size = 15, className = '' }: { icon: LucideIcon; size?: number; className?: string }) {
   return <Glyph size={size} strokeWidth={1.75} aria-hidden="true" className={className} />;
@@ -63,7 +119,8 @@ export function Chip({ state, children }: { state: string; children?: ReactNode 
   return (
     <span className="chip" data-state={state}>
       <Icon icon={statusIcon(state)} />
-      {children ?? capitalized(state)}
+      {/* A new word swaps in over the old one rather than cutting to it. */}
+      <span className="swap" key={typeof children === 'string' ? children : state}>{children ?? capitalized(state)}</span>
     </span>
   );
 }
@@ -137,40 +194,75 @@ export function Composer({
   );
 }
 /**
- * Native dialogs supply focus containment, Escape, an inert page and focus restoration. A sheet is centered;
- * the detail panel sits over the page's right edge, and a click beside it closes it.
+ * Native dialogs supply focus containment, Escape, an inert page and focus restoration. A sheet is centered and
+ * may grow out of the control that opened it. The detail panel is not modal: the page beside it stays usable, as
+ * in the app, and Escape or a press outside it closes it; rows that open a panel are marked `data-opens-panel`
+ * so a press on one swaps the panel instead.
  */
 export function Dialog({
   label,
   labelId,
   onClose,
   variant = 'sheet',
+  origin,
+  className,
+  style,
   children,
 }: {
   label?: string;
   labelId?: string;
   onClose: () => void;
   variant?: 'sheet' | 'detail-panel';
+  origin?: DOMRect;
+  className?: string;
+  style?: CSSProperties;
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const pressed = useRef(false);
   const unmounting = useRef(false);
-  useEffect(() => {
+  const close = useRef(onClose);
+  close.current = onClose;
+  const modal = variant !== 'detail-panel';
+  useLayoutEffect(() => {
     const dialog = ref.current!;
     const previous = document.activeElement as HTMLElement | null;
     unmounting.current = false;
-    dialog.showModal();
+    if (modal) dialog.showModal();
+    else dialog.show();
+    if (origin) growFrom(dialog, origin);
+    if (!modal) dialog.querySelector<HTMLElement>('[data-autofocus]')?.focus({ preventScroll: true });
     return () => {
       unmounting.current = true;
       dialog.close();
-      previous?.focus({ preventScroll: true });
+      if (modal || dialog.contains(document.activeElement) || document.activeElement === document.body) previous?.focus({ preventScroll: true });
     };
   }, []);
+  useEffect(() => {
+    if (modal) return;
+    const dialog = ref.current!;
+    const escape = (event: KeyboardEvent) => {
+      // A modal opened over the page, or a menu inside the panel, handles its own Escape.
+      if (event.key !== 'Escape' || event.defaultPrevented || document.querySelector('dialog[open]:modal')) return;
+      close.current();
+    };
+    const away = (event: PointerEvent) => {
+      const target = event.target as Element;
+      if (dialog.contains(target) || target.closest?.('[data-opens-panel], dialog, .palette-layer, .menu-list')) return;
+      close.current();
+    };
+    document.addEventListener('keydown', escape);
+    document.addEventListener('pointerdown', away);
+    return () => {
+      document.removeEventListener('keydown', escape);
+      document.removeEventListener('pointerdown', away);
+    };
+  }, [modal]);
   return (
     <dialog
       ref={ref}
-      className={variant}
+      className={`${variant} ${className ?? ''}`}
+      style={style}
       aria-label={label}
       aria-labelledby={labelId}
       onCancel={(event) => {
@@ -178,6 +270,7 @@ export function Dialog({
         onClose();
       }}
       onClose={(event) => {
+        if (!modal) return;
         // Repeated Escape without user activation closes a dialog natively despite preventDefault.
         // The parent decides: if it still renders this dialog, show it again.
         // A close queued before a remount (StrictMode runs effects twice) arrives with the dialog open again.
@@ -192,7 +285,7 @@ export function Dialog({
         pressed.current = event.target === event.currentTarget;
       }}
       onClick={(event) => {
-        if (!pressed.current || event.target !== event.currentTarget) return;
+        if (!modal || !pressed.current || event.target !== event.currentTarget) return;
         // The backdrop shares the dialog as its target; only a click outside the dialog's box closes it.
         const box = event.currentTarget.getBoundingClientRect();
         const inside = event.clientX >= box.left && event.clientX <= box.right && event.clientY >= box.top && event.clientY <= box.bottom;
@@ -244,7 +337,7 @@ export function CopyButton({ text, children }: { text: string; children: string 
  * A pop-up menu: focus moves to its first item, arrows move between items, and a choice, Escape, a click
  * elsewhere or tabbing away closes it and returns focus to its button.
  */
-export function Menu({ label, icon, children }: { label: string; icon: LucideIcon; children: ReactNode }) {
+export function Menu({ label, icon, text, children }: { label: string; icon: LucideIcon; text?: string; children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
@@ -284,8 +377,18 @@ export function Menu({ label, icon, children }: { label: string; icon: LucideIco
         }
       }}
     >
-      <button ref={button} className="icon" aria-label={label} title={label} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
+      <button
+        ref={button}
+        className={text ? 'menu-pill' : 'icon'}
+        aria-label={text ? undefined : label}
+        title={label}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+      >
         <Icon icon={icon} />
+        {text}
+        {text && <ChevronDown className="menu-pill-chevron" size={12} aria-hidden="true" />}
       </button>
       {open && (
         <div
@@ -351,4 +454,62 @@ export function Segmented<T extends string>({
 export function useDraft(key: string): [string, (text: string) => void] {
   const text = useSyncExternalStore(drafts.subscribe, () => drafts.get(key));
   return [text, (value: string) => drafts.set(key, value)];
+}
+/** A context menu with one Copy item, as the app offers on paths, titles and ids. */
+export function CopyMenu({ text, label, children }: { text: string; label: string; children: ReactNode }) {
+  const [at, setAt] = useState<{ x: number; y: number } | null>(null);
+  const [copied, setCopied] = useState(false);
+  const item = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!at) return;
+    item.current?.focus();
+    const away = (event: Event) => {
+      if (!item.current?.contains(event.target as Node)) setAt(null);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      setAt(null);
+    };
+    document.addEventListener('pointerdown', away);
+    document.addEventListener('keydown', escape, true);
+    window.addEventListener('blur', away);
+    return () => {
+      document.removeEventListener('pointerdown', away);
+      document.removeEventListener('keydown', escape, true);
+      window.removeEventListener('blur', away);
+    };
+  }, [at]);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 1400);
+    return () => clearTimeout(timer);
+  }, [copied]);
+  return (
+    <div
+      className="copy-menu"
+      onContextMenu={(event) => {
+        event.preventDefault();
+        setAt({ x: Math.min(event.clientX, innerWidth - 168), y: Math.min(event.clientY, innerHeight - 48) });
+      }}
+    >
+      {children}
+      {at && (
+        <div className="menu-list context" role="menu" aria-label={label} style={{ left: at.x, top: at.y }}>
+          <button
+            ref={item}
+            role="menuitem"
+            onClick={() => {
+              void navigator.clipboard.writeText(text).then(() => setCopied(true), () => {});
+              setAt(null);
+            }}
+          >
+            <Icon icon={Copy} />
+            {label}
+          </button>
+        </div>
+      )}
+      {copied && <span className="toast" role="status"><Icon icon={Check} />Copied</span>}
+    </div>
+  );
 }

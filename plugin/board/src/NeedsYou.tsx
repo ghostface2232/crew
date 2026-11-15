@@ -1,10 +1,11 @@
 import { ArrowUpRight, Check, CircleCheck, MessagesSquare, Search, X } from 'lucide-react';
 import { useSyncExternalStore } from 'react';
+import type { CSSProperties } from 'react';
 import type { BoardJob, ClaudeSession } from './types.ts';
 import { board } from './store.ts';
 import { actions, answerKey, request } from './api.ts';
-import { NAMES, projectOf } from './model.ts';
-import { ActionStatus, AgentMark, Chip, Composer, ContentPanel, EmptyState, Icon, useAction, useDraft } from './ui.tsx';
+import { elapsed, NAMES, projectOf } from './model.ts';
+import { ActionStatus, AgentMark, Chip, Composer, EmptyState, Icon, useAction, useDraft, useNow } from './ui.tsx';
 
 /** AnswerView in the app: the request leads, then the reply controls. */
 export function Answer({ job }: { job: BoardJob }) {
@@ -12,8 +13,8 @@ export function Answer({ job }: { job: BoardJob }) {
   const key = answerKey(job.id, waiting?.id ?? '');
   const state = useAction(key);
   const [draft, setDraft] = useDraft(key);
-  if (job.state !== 'waiting' || !waiting) return null;
   const live = useSyncExternalStore(board.subscribe, () => board.getSnapshot().connection === 'live');
+  if (job.state !== 'waiting' || !waiting) return null;
   const locked = state.pending || state.accepted || !live;
   const reply = (body: object) => request(`/api/jobs/${job.id}/reply`, { ...body, request_id: waiting.id });
   const decide = (decision: 'approve' | 'deny') => {
@@ -45,14 +46,15 @@ export function Answer({ job }: { job: BoardJob }) {
             onSend={(message) => reply({ message })}
           />
           <div className="answer-actions">
-            {button('Yes', 'approve', false)}
+            {/* The completing answer comes last, at the trailing edge, as in the app. */}
             {button('No', 'deny', false)}
+            {button('Yes', 'approve', false)}
           </div>
         </>
       ) : (
         <div className="answer-actions" data-approval>
-          {button('Approve', 'approve', true)}
           {button('Deny', 'deny', false)}
+          {button('Approve', 'approve', true)}
         </div>
       )}
       <ActionStatus actionKey={key} />
@@ -66,13 +68,16 @@ export function NeedsYou({
   pending,
   names,
   openJob,
+  openSession,
 }: {
   jobs: BoardJob[];
   sessions: ClaudeSession[];
   pending: number;
   names: Map<string, string>;
   openJob: (id: string) => void;
+  openSession: (id: string) => void;
 }) {
+  const now = useNow();
   return (
     <>
       {pending === 0 ? (
@@ -80,10 +85,10 @@ export function NeedsYou({
       ) : (
         !jobs.length && !sessions.length && <EmptyState title="No matching requests" icon={Search} />
       )}
-      {jobs.length > 0 && (
+      {(jobs.length > 0 || sessions.length > 0) && (
         <div className="needs-grid">
-          {jobs.map((job) => (
-            <article className="card need" key={job.id} data-job={job.id}>
+          {jobs.map((job, index) => (
+            <article className="card need" key={job.id} data-job={job.id} style={{ '--i': index } as CSSProperties}>
               <div className="need-head">
                 <div className="need-bar">
                   <Chip state="waiting">{job.waiting?.type === 'approval' ? 'Approval' : 'Question'}</Chip>
@@ -93,7 +98,8 @@ export function NeedsYou({
                       {NAMES[job.agent]} · {names.get(projectOf(job)) ?? projectOf(job)}
                     </span>
                   </span>
-                  <button className="caption small" onClick={() => openJob(job.id)}>
+                  {job.waiting && <span className="need-age digits">{elapsed(now - job.waiting.since)}</span>}
+                  <button className="caption small" data-opens-panel="" onClick={() => openJob(job.id)}>
                     <Icon icon={ArrowUpRight} size={12} />
                     Details
                   </button>
@@ -103,15 +109,29 @@ export function NeedsYou({
               <Answer job={job} />
             </article>
           ))}
+          {sessions.map((session, index) => (
+            <article className="card need" key={session.id} data-session={session.id} style={{ '--i': jobs.length + index } as CSSProperties}>
+              <div className="need-head">
+                <div className="need-bar">
+                  <Chip state="waiting">Claude</Chip>
+                  <span className="need-who" title={projectOf(session)}>
+                    <AgentMark agent="claude" size={13} />
+                    <span>{session.title} · {names.get(projectOf(session)) ?? projectOf(session)}</span>
+                  </span>
+                  <button className="caption small" data-opens-panel="" onClick={() => openSession(session.id)}>
+                    <Icon icon={ArrowUpRight} size={12} />
+                    Details
+                  </button>
+                </div>
+              </div>
+              <div className="answer">
+                <p className="headline selectable">{session.waitingFor ?? 'Claude needs your input.'}</p>
+                <p className="callout secondary"><Icon icon={MessagesSquare} size={13} /> Answer in Claude.</p>
+              </div>
+            </article>
+          ))}
         </div>
       )}
-      {sessions.map((session) => (
-        <ContentPanel key={session.id} title={session.title} icon={MessagesSquare}>
-          <p className="selectable">{session.waitingFor ?? 'Claude needs your input.'}</p>
-          <p className="caption secondary">{projectOf(session)}</p>
-          <p className="callout secondary">Answer in Claude.</p>
-        </ContentPanel>
-      ))}
     </>
   );
 }

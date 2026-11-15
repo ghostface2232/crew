@@ -11,12 +11,16 @@ import styles from './Dispatch.module.css';
 export function Dispatch({
   state,
   project,
+  origin,
   openJob,
   close,
 }: {
   state: Snapshot;
   project: string;
-  openJob: (id: string) => void;
+  /** The control the sheet grows out of. */
+  origin?: DOMRect;
+  /** Opens the new job, in its project's page. */
+  openJob: (id: string, cwd: string) => void;
   close: () => void;
 }) {
   const initialDirectory = useRef(project);
@@ -54,7 +58,7 @@ export function Dispatch({
         ? destination === 'project' || missions.some((mission) => `mission:${mission.id}` === destination)
         : worker?.enabled === true));
   const closeDraft = () => {
-    if (!sendingLock.current && (!dirty || confirm('Discard this job draft?'))) close();
+    if (!sendingLock.current && (!dirty || confirm('Discard this job draft?\n\nYour instructions and job options have not been sent.'))) close();
   };
   const send = async () => {
     if (sendingLock.current || !canSend) return;
@@ -90,7 +94,7 @@ export function Dispatch({
       const named = agent && workers.length > 1 ? { agent } : {};
       if (intent === 'question') {
         const job = await request<BoardJob>('/api/jobs', { kind: 'delegate', ask: true, task, cwd: cwd.trim(), ...named });
-        openJob(job.id);
+        openJob(job.id, cwd.trim());
         close();
         return;
       }
@@ -106,7 +110,7 @@ export function Dispatch({
         ...(kind === 'review' ? { review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } } : {}),
         ...(kind === 'polish' ? { targets: allowed } : {}),
       });
-      openJob(job.id);
+      openJob(job.id, cwd.trim());
       close();
     } catch (error) {
       setError((error as Error).message);
@@ -116,7 +120,7 @@ export function Dispatch({
     }
   };
   return (
-    <Dialog labelId="dispatch-title" onClose={closeDraft}>
+    <Dialog labelId="dispatch-title" onClose={closeDraft} origin={origin}>
       <fieldset className={`sheet-body ${styles.body}`} disabled={sending}>
         <h2 className={`title ${styles.title}`} id="dispatch-title">
           <Icon icon={Send} size={18} />
@@ -141,16 +145,16 @@ export function Dispatch({
               }}
             />
           </label>
-          {intent === 'command' && (
+          {intent !== 'information' && (
             <div className={styles.assignment}>
-              <label className="field">
+              {intent === 'command' && <label className="field">
                 <span>Role</span>
                 <select value={role} onChange={(event) => setRole(event.target.value as Role)}>
                   {choices.map((info) => (
                     <option key={info.role} value={info.role}>{info.label}</option>
                   ))}
                 </select>
-              </label>
+              </label>}
               {workers.length > 1 ? (
                 <label className="field">
                   <span>Assigned to</span>
@@ -170,6 +174,9 @@ export function Dispatch({
                 </div>
               )}
             </div>
+          )}
+          {intent !== 'information' && leadOnly && (
+            <p className="callout secondary">Start this job from a Claude session. Claude does the work itself or in a subagent.</p>
           )}
           {intent === 'command' && kind === 'polish' && (
             <label className="field">

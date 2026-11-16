@@ -56,7 +56,7 @@ The user's path is: download the installer, run the app, sign in to whatever the
 1. Bundle the built plugin and a runtime in both apps; point the bundled plugin's MCP server, hooks and `crew` shim at that runtime.
 2. First-launch install and update of the marketplace and plugin, with the checklist screen.
 3. Windows installer and auto-update with electron-builder. Done: an NSIS installer and the app's own updater.
-4. GitHub Actions release workflow for both platforms, and release notes. Done: `.github/workflows/release.yml` runs on a pushed `v<version>` tag, checks the tag against both version fields, builds the macOS (arm64) and Windows apps, and publishes them with `.github/release-notes.md` above GitHub's generated change list.
+4. GitHub Actions release workflow for both platforms, and release notes. Done: `.github/workflows/release.yml` runs on a pushed `v<version>` tag, checks the tag against both version fields, builds the macOS (arm64) app on a self-hosted Mac runner with Xcode 27 (hosted runners have only Xcode 26, which cannot compile the app's Icon Composer icon) and the Windows app on a hosted runner, and publishes them with `.github/release-notes.md` above GitHub's generated change list.
 5. Signing: a Windows certificate, and an Apple Developer Program membership for macOS, when the audience calls for them.
 
 Review the design (step 1 especially: the runtime launcher and how Claude Code caches installed plugins) before building it.

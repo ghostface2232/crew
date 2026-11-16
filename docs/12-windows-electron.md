@@ -38,9 +38,17 @@ npm run desktop
 npm run package:desktop
 ```
 
-`npm run desktop`, `build:desktop`, `package:desktop`, and `test:desktop` go through `scripts/desktop.mjs`, which picks the native app on macOS and Electron elsewhere. The Electron build outputs to `desktop/build` and renders the icons from `plugin/board/src/icons/CrewAppIcon.svg` using Playwright's Chromium (`npx playwright install chromium`). The packaged executable is written to `release/Crew-win32-x64/Crew.exe`.
+`npm run desktop`, `build:desktop`, `package:desktop`, and `test:desktop` go through `scripts/desktop.mjs`, which picks the native app on macOS and Electron elsewhere. The Electron build outputs to `desktop/build` and renders the icons from `plugin/board/src/icons/CrewAppIcon.svg` using Playwright's Chromium (`npx playwright install chromium`). Packaging writes the per-user installer `release/Crew-Setup-<version>.exe` and unpacked executable `release/win-unpacked/Crew.exe`. The installer installs to `%LOCALAPPDATA%\Programs\Crew` and creates a Start menu shortcut and uninstaller.
 
-This produces a local, unsigned build with no installer, code signing, automatic updates, or launch-at-login support. Worker CLIs and git must still be installed and authenticated.
+This produces a local, unsigned installer without automatic updates or launch-at-login support. Packaging never publishes releases or generates `latest.yml`. Worker CLIs and git must still be installed and authenticated.
+
+For a silent update that restarts the app, run `Crew-Setup-<version>.exe /S --force-run --updated`. `/S` suppresses the installer UI; `--force-run` starts the app even in silent mode; `--updated` marks the update and is passed to the restarted app. The existing per-user install location is reused (unless `/D=` overrides it).
+
+These behaviors come from electron-builder's installed NSIS templates: `node_modules/app-builder-lib/templates/nsis/installSection.nsh` (silent launch condition), `common.nsh` (`StartApp` and `UNINSTALL_FILENAME`), and `multiUser.nsh` (`setInstallModePerUser`). The installed uninstaller is `Uninstall Crew.exe`, alongside `Crew.exe`; with `asar: false`, application files are under `%LOCALAPPDATA%\Programs\Crew\resources\app`.
+
+Before replacing files, `include/allowOnlyOneInstallerInstance.nsh` checks and stops running processes. Its PowerShell filter is `$$_.Path -and $$_.Path.StartsWith('$INSTDIR', 'CurrentCultureIgnoreCase')`, followed by `Stop-Process -Id $$_.ProcessId $0` (retried with `-Force`). This includes the background daemon running from that directory. If PowerShell is unavailable, the per-user fallback uses `taskkill /IM Crew.exe` filtered to the current user, excluding the parent PID; that fallback is not restricted to the install directory. The updater must account for daemon termination.
+
+The planned updater reads `https://api.github.com/repos/ghostface2232/crew/releases/latest`, selects `Crew-Setup-<version>.exe`, and verifies GitHub's SHA-256 digest before execution. It does not use electron-updater metadata.
 
 ## Verification
 
@@ -59,7 +67,7 @@ The smoke test (`scripts/smoke-electron.mjs`) runs the app against an isolated d
 - unobstructed UI controls at full and narrow widths (including with Settings open)
 - clipboard write permission, tray waiting counts, and drift-free window bounds restoration
 
-Set `CREW_APP_PATH` to `release/Crew-win32-x64/Crew.exe` to test the packaged app.
+Set `CREW_APP_PATH` to `release/win-unpacked/Crew.exe` to test the packaged app.
 
 On Windows, the daemon inherits the app's stdio handles, so Playwright's `close()` would hang waiting for the daemon; instead, the smoke test quits the app and waits for its own process to exit.
 

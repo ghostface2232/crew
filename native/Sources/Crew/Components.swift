@@ -37,8 +37,7 @@ struct StatusLabel: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(\.colorSchemeContrast) private var contrast
     var body: some View {
-        // Darkened in light mode so orange and green text reach about 3:1 on the tint; dark mode already does.
-        let text = scheme == .light ? color.mix(with: .black, by: 0.22) : color
+        let text = color.ink(scheme)
         Label(title ?? state.capitalized, systemImage: symbol)
             .font(Typeface.chip).foregroundStyle(text).lineLimit(1).fixedSize()
             .padding(Chip.insets)
@@ -90,8 +89,9 @@ struct ContentPanel<Content: View>: View {
 
 struct ActionMessage: View {
     var state: ActionState?
+    @Environment(\.colorScheme) private var scheme
     var body: some View {
-        if let error = state?.error { Label(error, systemImage: "exclamationmark.circle").foregroundStyle(Palette.danger).font(Typeface.callout).textSelection(.enabled) }
+        if let error = state?.error { Label(error, systemImage: "exclamationmark.circle").foregroundStyle(Palette.danger.ink(scheme)).font(Typeface.callout).textSelection(.enabled) }
         else if state?.pending == true { ProgressView().controlSize(.small).accessibilityLabel("Sending") }
         else if state?.accepted == true { Label("Sent", systemImage: "checkmark").foregroundStyle(.secondary).font(Typeface.callout) }
     }
@@ -156,18 +156,22 @@ struct AnswerView: View {
                 if waiting.type == "question" {
                     composer
                     // Quick replies sit apart from the composer so they don't read as part of sending.
-                    HStack(spacing: Space.m) {
+                    GlassEffectContainer(spacing: Space.xs) { HStack(spacing: Space.m) {
                         Spacer(minLength: 0)
                         decision("No", symbol: "xmark", value: "deny", prominent: false)
                         decision("Yes", symbol: "checkmark", value: "approve", prominent: false)
-                    }
+                    } }
                 } else {
                     // At the trailing edge with the completing action last, as everywhere a choice ends something.
-                    HStack(spacing: Space.m) {
+                    GlassEffectContainer(spacing: Space.xs) { HStack(spacing: Space.m) {
                         Spacer(minLength: 0)
                         decision("Deny", symbol: "xmark", value: "deny", prominent: false)
+                        if let grant = waiting.grant {
+                            decision("Allow for this job", symbol: "checkmark.circle", value: "allow_for_job", prominent: false)
+                                .help("Also allow this job's later requests for \(grant), without asking")
+                        }
                         decision("Approve", symbol: "checkmark", value: "approve", prominent: true)
-                    }
+                    } }
                 }
                 ActionMessage(state: store.actions[job.requestKey])
             }
@@ -203,7 +207,9 @@ struct AnswerView: View {
         // A draft typed before a quick reply goes along with it rather than being discarded.
         let note = draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
         Button(title, systemImage: symbol) { Task { await store.answer(job, decision: value, message: note.isEmpty ? nil : note) } }
-            .pillButton(prominent: prominent).disabled(locked)
+            // Liquid Glass, as the app's other primary choices are. Their container samples them together; its spacing, under
+            // their gap, keeps them apart at rest.
+            .glassPillButton(prominent: prominent).disabled(locked)
     }
 }
 
@@ -223,6 +229,7 @@ struct JobRow: View {
     var showsKind = true
     let store: CrewStore
     var open: () -> Void
+    @Environment(\.colorScheme) private var scheme
     var body: some View {
         let detail = [showsKind ? job.kindTitle : job.debate != nil ? "Debate" : job.ask == true ? "Question" : nil, job.error?.message ?? (job.isActive ? job.phase : nil),
                       job.runsApp == true ? "Runs the app" : nil, job.exclusive == true ? "Runs alone" : nil]
@@ -233,7 +240,7 @@ struct JobRow: View {
                 VStack(alignment: .leading, spacing: Space.xs) {
                     Text(job.title).font(Typeface.bodyStrong).foregroundStyle(.primary).lineLimit(2)
                     if !detail.isEmpty {
-                        Text(detail).font(Typeface.caption).foregroundStyle(job.error == nil ? Color.secondary : Palette.danger).lineLimit(1)
+                        Text(detail).font(Typeface.caption).foregroundStyle(job.error == nil ? Color.secondary : Palette.danger.ink(scheme)).lineLimit(1)
                     }
                 }
                 Spacer(minLength: WorkspaceStyle.rowSpacer)
@@ -313,6 +320,8 @@ struct EventList: View {
                         Text(event.detail).font(Typeface.callout).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                     }
                 }
+                // Eases in only where the caller animates the list's changes.
+                .transition(.card)
             }
         }
     }
@@ -372,10 +381,10 @@ struct AgentUsageView: View {
                 }.joined(separator: "\n"))
         }
     }
-    /// AgentGauge's thresholds: caution from 70% used, danger from 90% or when the limit was hit.
+    /// AgentGauge's thresholds: caution from 70% used or when it reports the window tight, danger from 90% or when the limit was hit.
     private func tint(_ used: Double, _ status: UsageStatus) -> Color {
         if status == .exhausted || used >= 0.9 { return Palette.danger }
-        return used >= 0.7 ? Palette.warning : .secondary
+        return used >= 0.7 || status == .tight ? Palette.warning : .secondary
     }
 }
 

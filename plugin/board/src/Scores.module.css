@@ -71,10 +71,10 @@
   padding: 4px 10px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--tone) 14%, transparent);
-  color: color-mix(in srgb, var(--tone), black var(--tone-darken));
+  color: color-mix(in srgb, var(--tone), var(--tone-ink) var(--tone-darken));
 }
 .pillNumber { font: 600 17px/1 var(--rounded); }
-.pillUnit { font: 500 11px/1 var(--rounded); opacity: 0.7; }
+.pillUnit { font: 500 11px/1 var(--rounded); }
 .pedestal {
   display: grid;
   place-items: start center;
@@ -91,6 +91,12 @@
 .place[data-place="1"] .pedestal { height: 92px; }
 .place[data-place="2"] .pedestal { height: 68px; }
 .pedestal span { color: color-mix(in srgb, var(--medal), black 30%); font: 600 30px/1 var(--rounded); opacity: 0.55; }
+/* On a dark surface the darkened numeral and the white top edge read as smudge and glare: the numeral takes the medal itself. */
+@media (prefers-color-scheme: dark) {
+  .trophy { color: #ffcc00; }
+  .pedestal { box-shadow: inset 0 1px color-mix(in srgb, var(--medal) 30%, transparent); }
+  .pedestal span { color: var(--medal); opacity: 0.7; }
+}
 
 /* --- Standings --- */
 .standings { border-radius: var(--row-radius); background: var(--surface); box-shadow: 0 0 0 1px var(--hairline); overflow: hidden; }
@@ -113,7 +119,7 @@
   padding: 1px 7px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--tone) 12%, transparent);
-  color: color-mix(in srgb, var(--tone), black var(--tone-darken));
+  color: color-mix(in srgb, var(--tone), var(--tone-ink) var(--tone-darken));
   font-size: 11px;
   font-weight: 600;
 }

@@ -50,7 +50,7 @@ export function describe(job: JobView, waitingHint?: string): string {
   }
   if (job.state === 'waiting') {
     lines.push(`NEEDS A DECISION:\n${job.waiting!.reason}`);
-    lines.push(waitingHint ?? `This is the user's call, not yours. Call wait with job id "${job.id}" so they are asked in the app; use reply only to pass on a decision they already gave you (decision "approve" or "deny"${job.waiting!.type === 'question' ? ', or a message with the answer' : ''}).`);
+    lines.push(waitingHint ?? `This is the user's call, not yours. Call wait with job id "${job.id}" so they are asked in the app; use reply only to pass on a decision they already gave you (decision "approve" or "deny"${job.waiting!.grant ? `, or "allow_for_job" if they allowed ${job.waiting!.grant} for the rest of this job` : ''}${job.waiting!.type === 'question' ? ', or a message with the answer' : ''}).`);
     lines.push(`When forwarding the answer, pass request_id: "${job.waiting!.id}".`);
   }
   const receipt = job.receipts?.at(-1);

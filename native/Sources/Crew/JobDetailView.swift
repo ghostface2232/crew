@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct JobDetailView: View {
+    @Environment(\.colorScheme) private var scheme
     @Bindable var store: CrewStore
     let id: String
     @State private var detail: Job?
@@ -17,7 +18,7 @@ struct JobDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: WorkspaceStyle.sectionGap) {
                 if !error.isEmpty {
-                    Text(error).foregroundStyle(Palette.danger).textSelection(.enabled)
+                    Text(error).foregroundStyle(Palette.danger.ink(scheme)).textSelection(.enabled)
                     Button("Retry") { retry += 1 }.pillButton()
                 }
                 if job == nil && error.isEmpty { ProgressView("Loading details…") }
@@ -52,7 +53,7 @@ struct JobDetailView: View {
         }
     }
     @ViewBuilder private func contents(_ job: Job) -> some View {
-        if let failure = job.error { Text(failure.message).font(Typeface.callout).foregroundStyle(Palette.danger).textSelection(.enabled) }
+        if let failure = job.error { Text(failure.message).font(Typeface.callout).foregroundStyle(Palette.danger.ink(scheme)).textSelection(.enabled) }
         if job.state == "waiting" {
             AnswerView(store: store, job: job)
                 .card(fill: Palette.attention(Palette.warning))
@@ -81,7 +82,7 @@ struct JobDetailView: View {
                         Text(file).font(Typeface.code).textSelection(.enabled)
                         if result.outOfScope.contains(file) {
                             Label(result.files.contains(file) ? "Outside the allowed targets" : "Outside the workspace", systemImage: "exclamationmark.triangle")
-                                .font(Typeface.caption).foregroundStyle(Palette.danger)
+                                .font(Typeface.caption).foregroundStyle(Palette.danger.ink(scheme))
                         }
                     }
                 }
@@ -126,7 +127,7 @@ struct JobDetailView: View {
         if !refusals.isEmpty {
             detailSection("Automatic review", symbol: "exclamationmark.shield") {
                 ForEach(Array(refusals.enumerated()), id: \.offset) { _, refusal in
-                    Text("\(refusal.action) — \(refusal.reason)").font(Typeface.callout).foregroundStyle(Palette.danger).textSelection(.enabled)
+                    Text("\(refusal.action) — \(refusal.reason)").font(Typeface.callout).foregroundStyle(Palette.danger.ink(scheme)).textSelection(.enabled)
                 }
                 if job.retrying != nil { Text("Sent back once with your approval.").font(Typeface.callout).foregroundStyle(.secondary) }
             }
@@ -557,7 +558,7 @@ private struct VerificationView: View {
                 DetailItem(title: checkTitle(check), symbol: checkSymbol(check), tint: receipt.stale != nil ? .secondary : checkColor(check)) {
                     if let skipped = check.skipped { Text(skipped.prefix(1).uppercased() + skipped.dropFirst() + ".").font(Typeface.caption).foregroundStyle(.secondary) }
                     Text(check.command).font(Typeface.code).textSelection(.enabled)
-                    Text(caption(receipt, extra: check.skipped == nil ? duration(check.ms) : nil)).font(Typeface.caption).foregroundStyle(.secondary)
+                    Text(caption(receipt, extra: check.skipped == nil ? duration(check.ms) + (check.sandboxed ? "" : " · not sandboxed") : nil)).font(Typeface.caption).foregroundStyle(.secondary)
                     if check.skipped == nil && check.exit != 0 && !check.output.isEmpty {
                         if outputShown {
                             Text(check.output.split(separator: "\n", omittingEmptySubsequences: false).suffix(15).joined(separator: "\n"))

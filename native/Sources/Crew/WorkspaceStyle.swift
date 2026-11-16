@@ -79,7 +79,8 @@ struct MissionTrack: View {
     /// Thick enough to read as a track rather than a hairline.
     static let line: CGFloat = 2
     /// Steps not reached yet: their outline and the track leading to them share one weight and color.
-    static let upcoming = Color.primary.opacity(0.12)
+    /// Stronger in dark mode, where 0.12 measured about 1.4:1 against the card.
+    static let upcoming = WorkspaceStyle.dynamic(light: NSColor(calibratedWhite: 0, alpha: 0.12), dark: NSColor(calibratedWhite: 1, alpha: 0.22))
     /// From the edge to the first and last markers' centers, so a name centered under an end marker has room.
     static let inset = Space.x3l
     /// One line of a step name in `Typeface.captionStrong`.
@@ -129,15 +130,19 @@ struct MissionTrack: View {
         let current = index == mission.step
         // The step a mission ended on without passing it is filled like the passed ones, not left blank.
         let stopped = current && mission.state != "active" && !mission.passed(index)
-        // An abandoned mission outlines its passed and stopped steps instead of filling them: its lighter color would
-        // leave a white glyph on it nearly unreadable.
+        // An abandoned mission outlines its passed and stopped steps instead of filling its stopped one: its lighter
+        // color would leave the surface-colored number on it nearly unreadable.
         let outlined = mission.state == "abandoned"
         let glyph = outlined ? passedColor : WorkspaceStyle.surface
         return ZStack {
-            Circle().fill(current && mission.state == "active" ? Palette.accent : stopped && !outlined ? passedColor : .clear)
+            // The step in progress is accent-tinted glass, the passed ones clear glass: one material along the track.
+            if current && mission.state == "active" { Color.clear.glassEffect(.regular.tint(Palette.accent), in: .circle) }
+            Circle().fill(stopped && !outlined ? passedColor : .clear)
             if mission.passed(index) {
-                if outlined { Circle().strokeBorder(passedColor, lineWidth: Self.line) } else { Circle().fill(passedColor) }
-                Image(systemName: "checkmark").font(Symbol.badge).foregroundStyle(glyph)
+                // A passed step is a glass bead with the check in the passed color, rather than a solid disc that
+                // glares in dark mode and outweighs the step in progress.
+                if outlined { Circle().strokeBorder(passedColor, lineWidth: Self.line) } else { Color.clear.glassEffect(.regular.tint(passedColor.opacity(0.12)), in: .circle) }
+                Image(systemName: "checkmark").font(Symbol.badge).foregroundStyle(passedColor)
             } else {
                 Circle().strokeBorder(stopped && outlined ? passedColor : current ? .clear : Self.upcoming, lineWidth: Self.line)
                 Text(String(index + 1)).font(Typeface.chip)

@@ -28,16 +28,16 @@ const PANES: Record<Fixed, { title: string; icon: LucideIcon; tint: string; kind
   build: { title: 'Build', icon: Hammer, tint: 'var(--accent)', kind: 'delegate' },
   review: { title: 'Review', icon: ShieldCheck, tint: 'var(--green)', kind: 'review' },
   edit: { title: 'Edit', icon: Type, tint: 'var(--orange)', kind: 'polish' },
-  presets: { title: 'Presets', icon: SlidersHorizontal, tint: '#8e8e93' },
-  models: { title: 'Model Scores', icon: Gauge, tint: '#af52de' },
-  instructions: { title: 'Instructions', icon: FileText, tint: '#5856d6' },
+  presets: { title: 'Presets', icon: SlidersHorizontal, tint: 'var(--gray)' },
+  models: { title: 'Model Scores', icon: Gauge, tint: 'var(--purple)' },
+  instructions: { title: 'Instructions', icon: FileText, tint: 'var(--indigo)' },
 };
 
 /** Fixing review findings sits with the reviews it answers, though it runs as a build job. */
 const paneKind = (role: RoleInfo): JobKind => (role.role === 'fix' ? 'review' : role.kind);
 
 /** Projects share one tile, apart from the roles' colors. */
-const PROJECT_TINT = '#30b0c7';
+const PROJECT_TINT = 'var(--teal)';
 
 /**
  * The role table the form edits: what the user wrote, so a role left to follow its parent keeps following it.

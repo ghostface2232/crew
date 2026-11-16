@@ -42,8 +42,8 @@ function harness(onStart: (ctl: JobCtl) => void, readConfig: () => Config = () =
       calls.push(`reply:${message}`);
       ctl.done('second report');
     },
-    answer: async (ctl, approve) => {
-      calls.push(`answer:${approve}`);
+    answer: async (ctl, approve, _message, opts) => {
+      calls.push(`answer:${approve}${opts?.forJob ? ':forJob' : ''}`);
       ctl.resumed();
       ctl.done('after decision');
     },
@@ -197,6 +197,19 @@ test('a waiting job resumes on a decision and reports the limit kind on failure'
   await settled(waiting.jobs, job);
   assert.equal(job.state, 'done');
   assert.deepEqual(waiting.calls, ['answer:true']);
+
+  const plain = harness((ctl) => ctl.waiting('approval', 'run: npm install'));
+  const unscoped = await plain.jobs.create({ kind: 'review', cwd: repo, review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } });
+  await plain.jobs.wait(unscoped.id, 0, 2000);
+  await assert.rejects(plain.jobs.reply(unscoped.id, { decision: 'allow_for_job', request_id: unscoped.waiting!.id }), /cannot be allowed for the whole job/);
+  assert.deepEqual(plain.calls, []);
+  const scoped = harness((ctl) => ctl.waiting('approval', 'Use the tool cua_repl.click', 'Computer Use using "App"'));
+  const tool = await scoped.jobs.create({ kind: 'review', cwd: repo, review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } });
+  await scoped.jobs.wait(tool.id, 0, 2000);
+  assert.equal(tool.waiting?.grant, 'Computer Use using "App"');
+  await scoped.jobs.reply(tool.id, { decision: 'allow_for_job', request_id: tool.waiting!.id });
+  await settled(scoped.jobs, tool);
+  assert.deepEqual(scoped.calls, ['answer:true:forJob']);
 
   const limited = harness((ctl) => ctl.fail('usage limit reached', { limit: true }));
   const failed = await settled(limited.jobs, await limited.jobs.create({ kind: 'review', cwd: repo, review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } }));

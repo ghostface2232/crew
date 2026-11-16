@@ -10,6 +10,8 @@ enum Motion {
     static let content = Animation.smooth(duration: 0.3)
     /// A card opening or closing, with the cards around it moving along.
     static let expand = Animation.smooth(duration: 0.38)
+    /// Work arriving or leaving on its own: cards and rows come and go, and the ones around them move into place.
+    static let reflow = Animation.smooth(duration: 0.42)
     /// The detail panel coming in or going out.
     static let panel = Animation.smooth(duration: 0.26, extraBounce: 0)
     /// A page replacing another.
@@ -45,15 +47,16 @@ enum Space {
 
 enum WorkspaceStyle {
     // MARK: Surfaces
-    // Dark mode keeps cards about 9% lighter than the canvas so they stay distinct without heavy borders.
+    // Dark mode follows Apple's own apps (Fitness, Health): a near-black canvas and #1C1C1E cards, set in sRGB so
+    // they render as written; calibrated grays came out lighter on screen (0.16 drew as #363636).
     static let canvas = dynamic(light: NSColor(calibratedRed: 0.955, green: 0.955, blue: 0.965, alpha: 1),
-                                dark: NSColor(calibratedRed: 0.07, green: 0.07, blue: 0.075, alpha: 1))
+                                dark: NSColor(srgbRed: 11 / 255, green: 11 / 255, blue: 12 / 255, alpha: 1))
     static let inverse = Color(nsColor: .windowBackgroundColor)
-    static let surface = dynamic(light: .white, dark: NSColor(calibratedWhite: 0.16, alpha: 1))
+    static let surface = dynamic(light: .white, dark: NSColor(srgbRed: 28 / 255, green: 28 / 255, blue: 30 / 255, alpha: 1))
     /// Rows and insets inside a card.
     static let rowFill = dynamic(light: NSColor(calibratedWhite: 0, alpha: 0.04), dark: NSColor(calibratedWhite: 1, alpha: 0.06))
     static let hairline = dynamic(light: NSColor(calibratedWhite: 0, alpha: 0.08), dark: NSColor(calibratedWhite: 1, alpha: 0.08))
-    private static func dynamic(light: NSColor, dark: NSColor) -> Color {
+    static func dynamic(light: NSColor, dark: NSColor) -> Color {
         Color(nsColor: NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light })
     }
 
@@ -156,7 +159,14 @@ enum Palette {
     static let selection = accent.opacity(0.09)
     /// Outlines when the user asks for more contrast.
     static let contrastStroke = Color.primary.opacity(0.25)
-    static let panelShadow = Color.black.opacity(0.14)
+    /// Deeper in dark mode, where a light-mode shadow vanishes into the canvas (as --shadow-pop does on the web board).
+    static let panelShadow = WorkspaceStyle.dynamic(light: NSColor(calibratedWhite: 0, alpha: 0.14), dark: NSColor(calibratedWhite: 0, alpha: 0.4))
+}
+
+extension Color {
+    /// A status color as text: darkened in light mode and lightened in dark mode, so it reads on its own tint and on
+    /// gray rows (about 3:1 on chips, 4.5:1 for red captions on rows in dark).
+    func ink(_ scheme: ColorScheme) -> Color { scheme == .light ? mix(with: .black, by: 0.22) : mix(with: .white, by: 0.35) }
 }
 
 /// The type scale. Titles are SF Pro Rounded, headlines SF Pro Display, body text SF Pro Text, source text SF Mono.
@@ -335,8 +345,8 @@ struct PillButtonStyle: ButtonStyle {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     func makeBody(configuration: Configuration) -> some View {
         let status: Color? = configuration.role == .destructive ? Palette.danger : kind == .warning ? Palette.warning : nil
-        // As on chips: darkened in light mode so the tinted label stays readable on its tint.
-        let tinted = status.map { scheme == .light ? $0.mix(with: .black, by: 0.22) : $0 }
+        // As on chips: inked toward black in light mode and white in dark, so the tinted label stays readable on its tint.
+        let tinted = status.map { $0.ink(scheme) }
         let text: Color = kind == .prominent && status == nil ? .white : tinted ?? .primary
         let fill: Color = status.map(Palette.chip) ?? (kind == .prominent ? Palette.accent : Pill.fill)
         PillWords(label: configuration.label)
@@ -385,6 +395,21 @@ extension AnyTransition {
     static func wordSwap(anchor: UnitPoint) -> AnyTransition {
         let swapping = AnyTransition.modifier(active: Swapping(shown: false, anchor: anchor), identity: Swapping(shown: true, anchor: anchor))
         return .asymmetric(insertion: swapping.animation(Motion.swapIn), removal: swapping.animation(Motion.swapOut))
+    }
+}
+
+extension AnyTransition {
+    /// A card or row arriving or leaving on its own, as work comes and goes: it settles in from slightly smaller
+    /// out of a soft blur, and leaves the same way, while `Motion.reflow` moves its neighbors into place.
+    static var card: AnyTransition {
+        .modifier(active: Arriving(shown: false), identity: Arriving(shown: true))
+    }
+}
+
+private struct Arriving: ViewModifier {
+    let shown: Bool
+    func body(content: Content) -> some View {
+        content.opacity(shown ? 1 : 0).scaleEffect(shown ? 1 : 0.96).blur(radius: shown ? 0 : 4)
     }
 }
 

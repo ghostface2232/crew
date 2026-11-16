@@ -46,7 +46,7 @@ The status board runs at http://127.0.0.1:47615. Open it with `crew board` or fr
 
 If [AgentGauge](https://github.com/ghostface2232/AgentGauge) is installed, each agent's card shows its remaining usage, and `/crew:run` routes work accordingly: when an agent runs low, the lead takes over or defers the work and says so. A job's turns appear as rounds that can be undone or kept one by one, and Send work also accepts a read-only question or a piece of information to pin ([docs/09-usage-presets-rounds.md](docs/09-usage-presets-rounds.md)).
 
-When a worker asks for approval or has a question, an input dialog pops up in the Claude app. You can also answer on the status board: approve or deny, or type an answer to a question. Codex's built-in automatic reviewer answers its approval requests first, so you are asked only about what it refuses twice ([docs/04-implementation.md](docs/04-implementation.md) section 5.1).
+When a worker asks for approval or has a question, an input dialog pops up in the Claude app. You can also answer on the status board: approve or deny, or type an answer to a question. A computer-use request about one app can be allowed for the rest of its job, so the worker stops asking about that app on every call. Codex's built-in automatic reviewer answers its approval requests first, so you are asked only about what it refuses twice ([docs/04-implementation.md](docs/04-implementation.md) section 5.1).
 
 ## Desktop app
 

@@ -27,6 +27,7 @@ struct DispatchView: View {
     private static let fieldHeight: CGFloat = 22
     @Bindable var store: CrewStore
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var scheme
     @State private var directory: String
     @State private var intent = "command"
     @State private var destination = "project"
@@ -105,11 +106,11 @@ struct DispatchView: View {
                 }
                 field(intent == "question" ? "What would you like to know?" : intent == "information" ? "What should be remembered?" : selectedRole?.kind == "review" ? "What should be checked?" : "What needs to be done?") {
                     MessageEditor(title: "New job instructions", text: $task)
-                    Text(intent == "information" ? "Adds information only. This starts no work." : intent == "question" ? "Answers the question in read-only mode." : role == "verify" ? "Reviews uncommitted changes by running the app in a snapshot." : selectedRole?.kind == "review" ? "Reviews uncommitted changes in read-only mode." : "Changes stay on an isolated worktree branch until reviewed and merged.")
+                    Text(intent == "information" ? "Adds information only. This starts no work." : intent == "question" ? "Answers the question in read-only mode." : role == "verify" ? "Reviews uncommitted changes by running the app in a snapshot." : selectedRole?.kind == "review" ? "Reviews uncommitted changes in read-only mode." : role == "release" ? "Prepares the release on an isolated worktree branch. Nothing is published or deployed." : "Changes stay on an isolated worktree branch until reviewed and merged.")
                         .font(Typeface.caption).foregroundStyle(.secondary)
                 }
             }
-            if !error.isEmpty { Label(error, systemImage: "exclamationmark.circle").foregroundStyle(Palette.danger).textSelection(.enabled) }
+            if !error.isEmpty { Label(error, systemImage: "exclamationmark.circle").foregroundStyle(Palette.danger.ink(scheme)).textSelection(.enabled) }
             HStack(spacing: Space.m) {
                 Spacer()
                 Button("Cancel") { if dirty { confirmingDiscard = true } else { dismiss() } }.pillButton().keyboardShortcut(.cancelAction).disabled(sending)

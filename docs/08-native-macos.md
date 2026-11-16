@@ -47,7 +47,7 @@ npm run desktop
 npm run package:desktop
 ```
 
-The development bundle is `native/build/Crew.app`; the release copy is `release/Crew.app`, with `release/Crew-macOS-<arch>-<version>.zip` beside it for a GitHub release (`arm64` or `x64`, matching the bundled Node runtime). The old Electron output directory is not overwritten. Open `native/Package.swift` in Xcode to edit Swift sources; use the packaging script to run with the bundled daemon and image assets.
+The development bundle is `native/build/Crew.app`; the release copy is `release/Crew.app`, with `release/Crew-macOS-<arch>-<version>.dmg` (for people to install from) and `.zip` (for the updater) beside it for a GitHub release (`arm64` or `x64`, matching the bundled Node runtime). The old Electron output directory is not overwritten. Open `native/Package.swift` in Xcode to edit Swift sources; use the packaging script to run with the bundled daemon and image assets.
 
 The build copies the current Node executable and its LICENSE. It rejects Node binaries linked against non-system libraries. `CREW_NODE_LICENSE` can specify the matching license path when the Node distribution uses a different directory layout. `CREW_BUILD_CONFIGURATION=debug` selects a debug build.
 

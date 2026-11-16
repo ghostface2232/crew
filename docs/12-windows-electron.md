@@ -19,6 +19,7 @@ Electron main (desktop/main.ts) ── ensureDaemon ── independent daemon �
 ## Window
 
 - No system title bar. `titleBarStyle: 'hidden'` with `titleBarOverlay` draws the Windows minimize, maximize, and close buttons over the board's 60px top bar using the board's canvas and label colors, following the system light or dark theme.
+- On Windows 11 22H2 (build 22621) and later the window uses the Mica backdrop: the page and top bar are transparent, as is the area behind the window buttons, while cards, panels and dialogs keep their own surfaces. Mica was chosen over Acrylic after comparing both; it tints with the desktop instead of showing the windows behind. Windows shows a solid color while the window is inactive. Older systems keep the board's canvas color.
 - The main process injects a small stylesheet so the top bar and sidebar brand drag the window while their controls remain clickable. The top bar keeps its right padding clear of the window buttons via `env(titlebar-area-*)`, and the detail panel and dialogs start below the window buttons even at narrow widths. The browser board is unchanged.
 - Closing the window hides it to the tray. Quitting leaves the daemon and its jobs running; reopening attaches to the same daemon. A second launch shows the first window.
 - Window bounds and maximized state are restored on launch. On scaled displays, Electron rounds bounds on the way in and out, so an unmoved window saves the exact bounds it was restored from rather than growing a few pixels on every launch.

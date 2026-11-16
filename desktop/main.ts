@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, Menu, nativeImage, nativeTheme, screen, session, shell, Tray } from 'electron';
 import type { Rectangle } from 'electron';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { readToken, SESSION_COOKIE } from '../plugin/bridge/auth.ts';
 import { api, ensureDaemon } from '../plugin/bridge/client.ts';
@@ -43,6 +44,12 @@ const FRAME_CSS = `
 }
 :root dialog.detail-panel { top: ${TOP_BAR_HEIGHT + 4}px; }
 :root dialog.sheet { max-height: calc(100vh - ${2 * (TOP_BAR_HEIGHT + 4)}px); }`;
+/** Windows 11 22H2 (build 22621) and later draw a backdrop material behind a transparent window; older systems keep the canvas. */
+const BACKDROP = process.platform === 'win32' && Number(os.release().split('.')[2]) >= 22621 ? 'mica' : null;
+/** The main window's colors: clear over the backdrop where there is one, the board's otherwise. */
+const frame = () => (BACKDROP ? { ...theme(), color: '#00000000' } : theme());
+/** Lets the backdrop show through the page; cards, panels and dialogs keep their own surfaces. */
+const BACKDROP_CSS = `:root body, :root .topbar { background: transparent; }`;
 
 /**
  * The bounds this launch restored, and what the window reported for them. Scaled displays round them on the way
@@ -95,18 +102,21 @@ function createWindow() {
     show: false,
     title: 'Crew',
     icon: asset('icon.png'),
-    backgroundColor: theme().color,
+    backgroundColor: frame().color,
+    ...(BACKDROP ? { backgroundMaterial: BACKDROP } : {}),
     autoHideMenuBar: true,
     // No system title bar: the board's top bar takes its place, with the window buttons drawn over it.
     titleBarStyle: 'hidden',
-    titleBarOverlay: { ...theme(), height: TOP_BAR_HEIGHT },
+    titleBarOverlay: { ...frame(), height: TOP_BAR_HEIGHT },
     webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true },
   });
   const settled = window.getNormalBounds();
   restored = { bounds: { ...settled, ...bounds }, settled };
   if (bounds.maximized) window.maximize();
   window.once('ready-to-show', () => show());
-  window.webContents.on('dom-ready', () => void window?.webContents.insertCSS(FRAME_CSS).catch(console.error));
+  window.webContents.on('dom-ready', () => {
+    void window?.webContents.insertCSS(BACKDROP ? FRAME_CSS + BACKDROP_CSS : FRAME_CSS).catch(console.error);
+  });
   // Report links open in the user's browser. Evidence needs the board's sign-in, so it opens in a window of its own.
   window.webContents.setWindowOpenHandler(({ url }) => {
     const target = linkTarget(url, BASE_URL);
@@ -223,8 +233,8 @@ async function startDesktop() {
   session.defaultSession.setPermissionCheckHandler((_contents, permission, origin) => allowed(permission, origin));
   nativeTheme.on('updated', () => {
     if (!window || window.isDestroyed()) return;
-    window.setBackgroundColor(theme().color);
-    window.setTitleBarOverlay({ ...theme(), height: TOP_BAR_HEIGHT });
+    window.setBackgroundColor(frame().color);
+    window.setTitleBarOverlay({ ...frame(), height: TOP_BAR_HEIGHT });
   });
   let ready = false;
   while (!ready) {

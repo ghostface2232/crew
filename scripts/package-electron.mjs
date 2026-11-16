@@ -23,6 +23,7 @@ const paths = await build({
       perMachine: false,
       allowElevation: false,
       createStartMenuShortcut: true,
+      include: 'desktop/installer.nsh',
       artifactName: 'Crew-Setup-${version}.exe',
     },
   },

@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import vm from 'node:vm';
+import { EventEmitter } from 'node:events';
 import { stripTypeScriptTypes } from 'node:module';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
@@ -357,6 +358,39 @@ test('a watcher that died without releasing is replaced once it stops beating', 
   const second = delivery.watch('lead', now + 3_600_000, now + 30_000);
   assert.ok(second && second.generation !== first.generation);
   assert.throws(() => delivery.heartbeat('lead', first.generation, now + 31_000), /expired or replaced/);
+});
+
+test('a watcher whose long poll was cut off is replaced at once, as after its session process was ended', async (t) => {
+  const h = harness(t);
+  const source = fs.readFileSync(new URL('../plugin/bridge/daemon.ts', import.meta.url), 'utf8');
+  const handler = source.slice(source.indexOf('function isOpen('), source.indexOf('\nlet stopping = false;'));
+  const context = vm.createContext({
+    URL, AbortController, PORT: 0, stopping: false, guard: () => {}, signedIn: () => true, WORKER_ROUTE: /^$/,
+    HttpError: class extends Error { status: number; constructor(status: number, message: string) { super(message); this.status = status; } },
+    readJson: async (req: any) => req.body, jobs: h.jobs, view: (job: unknown) => job, broadcast: () => {},
+  });
+  const route = vm.runInContext(`${stripTypeScriptTypes(handler)}; route`, context);
+  const lead = (action: string, body: object, res: object = {}) => route({ method: 'POST', url: `/api/lead/${action}`, body: { session: 'lead', ...body } }, res);
+  const deadline = Date.now() + 3_600_000;
+  const { watch } = await lead('watch', { deadline });
+  assert.equal((await lead('watch', { deadline })).watch, null, 'a live watcher is not duplicated');
+  // The app ending the lead's process closes the watcher's connection mid-poll; the lease used to block for 25 s.
+  const res = new EventEmitter();
+  const poll = lead('offer', { automatic: true, generation: watch.generation, wait: true }, res);
+  // Close once the poll is waiting, after the body has been read.
+  await new Promise((resolve) => setImmediate(resolve));
+  res.emit('close');
+  assert.equal((await poll).offer, null);
+  const resumed = (await lead('watch', { deadline })).watch;
+  assert.ok(resumed && resumed.generation !== watch.generation);
+  await assert.rejects(lead('heartbeat', { generation: watch.generation }), /expired or replaced/);
+  // A poll cut off for a watcher that lives on costs it nothing while no one replaced it.
+  const other = new EventEmitter();
+  const cut = lead('offer', { automatic: true, generation: resumed.generation, wait: true }, other);
+  await new Promise((resolve) => setImmediate(resolve));
+  other.emit('close');
+  await cut;
+  assert.ok((await lead('heartbeat', { generation: resumed.generation })).watch);
 });
 
 test('the wake hook takes over only the jobs a call named, never those a listing showed', async () => {

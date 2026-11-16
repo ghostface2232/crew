@@ -163,6 +163,16 @@ export class Delivery {
     return { ...watch };
   }
 
+  /**
+   * A watcher spends nearly all its life in a long poll, so a poll cut off before its answer most likely means
+   * the process died with its Claude Code session. Let the next watcher take over now instead of after
+   * WATCH_SILENT_MS. A watcher that is still alive keeps its lease with its next heartbeat unless replaced.
+   */
+  disconnected(session: string, generation: string): void {
+    const watch = this.watching.get(session);
+    if (watch?.generation === generation) watch.beat = -Infinity;
+  }
+
   release(session: string, generation: string, now = Date.now()): void {
     this.watcher(session, generation, now);
     this.watching.delete(session);

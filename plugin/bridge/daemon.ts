@@ -638,6 +638,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
               await delivery.wait(expiry > Date.now() ? Math.min(20_000, expiry - Date.now()) : 20_000, abort.signal);
               if (stopping) throw new HttpError(503, 'The Crew daemon is shutting down. Try again in a moment.');
               if (!abort.signal.aborted) offer = delivery.offer(session, options);
+              else if (typeof options.watcher === 'string') delivery.disconnected(session, options.watcher);
             } finally {
               res.off('close', closed);
             }

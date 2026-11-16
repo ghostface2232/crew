@@ -27,6 +27,7 @@ struct DispatchView: View {
     private static let fieldHeight: CGFloat = 22
     @Bindable var store: CrewStore
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var scheme
     @State private var directory: String
     @State private var intent = "command"
     @State private var destination = "project"
@@ -109,7 +110,7 @@ struct DispatchView: View {
                         .font(Typeface.caption).foregroundStyle(.secondary)
                 }
             }
-            if !error.isEmpty { Label(error, systemImage: "exclamationmark.circle").foregroundStyle(Palette.danger).textSelection(.enabled) }
+            if !error.isEmpty { Label(error, systemImage: "exclamationmark.circle").foregroundStyle(Palette.danger.ink(scheme)).textSelection(.enabled) }
             HStack(spacing: Space.m) {
                 Spacer()
                 Button("Cancel") { if dirty { confirmingDiscard = true } else { dismiss() } }.pillButton().keyboardShortcut(.cancelAction).disabled(sending)

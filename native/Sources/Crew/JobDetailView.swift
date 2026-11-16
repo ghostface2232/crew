@@ -18,7 +18,7 @@ struct JobDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: WorkspaceStyle.sectionGap) {
                 if !error.isEmpty {
-                    Text(error).foregroundStyle(Palette.danger).textSelection(.enabled)
+                    Text(error).foregroundStyle(Palette.danger.ink(scheme)).textSelection(.enabled)
                     Button("Retry") { retry += 1 }.pillButton()
                 }
                 if job == nil && error.isEmpty { ProgressView("Loading details…") }

@@ -53,9 +53,7 @@ enum WorkspaceStyle {
     /// Rows and insets inside a card.
     static let rowFill = dynamic(light: NSColor(calibratedWhite: 0, alpha: 0.04), dark: NSColor(calibratedWhite: 1, alpha: 0.06))
     static let hairline = dynamic(light: NSColor(calibratedWhite: 0, alpha: 0.08), dark: NSColor(calibratedWhite: 1, alpha: 0.08))
-    /// For tokens kept beside the view that uses them.
-    static func dynamicColor(light: NSColor, dark: NSColor) -> Color { dynamic(light: light, dark: dark) }
-    fileprivate static func dynamic(light: NSColor, dark: NSColor) -> Color {
+    static func dynamic(light: NSColor, dark: NSColor) -> Color {
         Color(nsColor: NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light })
     }
 
@@ -344,7 +342,7 @@ struct PillButtonStyle: ButtonStyle {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     func makeBody(configuration: Configuration) -> some View {
         let status: Color? = configuration.role == .destructive ? Palette.danger : kind == .warning ? Palette.warning : nil
-        // As on chips: darkened in light mode so the tinted label stays readable on its tint.
+        // As on chips: inked toward black in light mode and white in dark, so the tinted label stays readable on its tint.
         let tinted = status.map { $0.ink(scheme) }
         let text: Color = kind == .prominent && status == nil ? .white : tinted ?? .primary
         let fill: Color = status.map(Palette.chip) ?? (kind == .prominent ? Palette.accent : Pill.fill)

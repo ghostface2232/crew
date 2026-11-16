@@ -89,8 +89,9 @@ struct ContentPanel<Content: View>: View {
 
 struct ActionMessage: View {
     var state: ActionState?
+    @Environment(\.colorScheme) private var scheme
     var body: some View {
-        if let error = state?.error { Label(error, systemImage: "exclamationmark.circle").foregroundStyle(Palette.danger).font(Typeface.callout).textSelection(.enabled) }
+        if let error = state?.error { Label(error, systemImage: "exclamationmark.circle").foregroundStyle(Palette.danger.ink(scheme)).font(Typeface.callout).textSelection(.enabled) }
         else if state?.pending == true { ProgressView().controlSize(.small).accessibilityLabel("Sending") }
         else if state?.accepted == true { Label("Sent", systemImage: "checkmark").foregroundStyle(.secondary).font(Typeface.callout) }
     }
@@ -155,14 +156,14 @@ struct AnswerView: View {
                 if waiting.type == "question" {
                     composer
                     // Quick replies sit apart from the composer so they don't read as part of sending.
-                    GlassEffectContainer { HStack(spacing: Space.m) {
+                    GlassEffectContainer(spacing: Space.xs) { HStack(spacing: Space.m) {
                         Spacer(minLength: 0)
                         decision("No", symbol: "xmark", value: "deny", prominent: false)
                         decision("Yes", symbol: "checkmark", value: "approve", prominent: false)
                     } }
                 } else {
                     // At the trailing edge with the completing action last, as everywhere a choice ends something.
-                    GlassEffectContainer { HStack(spacing: Space.m) {
+                    GlassEffectContainer(spacing: Space.xs) { HStack(spacing: Space.m) {
                         Spacer(minLength: 0)
                         decision("Deny", symbol: "xmark", value: "deny", prominent: false)
                         if let grant = waiting.grant {
@@ -206,7 +207,8 @@ struct AnswerView: View {
         // A draft typed before a quick reply goes along with it rather than being discarded.
         let note = draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
         Button(title, systemImage: symbol) { Task { await store.answer(job, decision: value, message: note.isEmpty ? nil : note) } }
-            // Liquid Glass, as the app's other primary choices are; the container lets neighboring buttons blend.
+            // Liquid Glass, as the app's other primary choices are. Their container samples them together; its spacing, under
+            // their gap, keeps them apart at rest.
             .glassPillButton(prominent: prominent).disabled(locked)
     }
 }

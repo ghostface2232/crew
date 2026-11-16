@@ -98,15 +98,15 @@ Surfaces change between light and dark appearance. Status colors are system colo
 | `hairline` | Card and field outlines |
 | `Palette.accent` | Running work and the current step |
 | `Palette.success` | Done |
-| `Palette.warning` | Waiting, stalled, unsaved, usage at 70% or more |
+| `Palette.warning` | Waiting, stalled, unsaved, usage at 70% or more or a window reported tight |
 | `Palette.danger` | Failed, errors, refusals, usage at 90% or more or at its limit |
 | `Palette.attention(color)` | A row or card that needs attention, tinted 7% with its status color |
 | `Palette.chip(color)` | A chip's background, 12% of its status color |
 | `Palette.selection` | The row whose details are open |
 | `Palette.contrastStroke` | Outlines when Increase Contrast is on |
-| `Palette.panelShadow` | The detail panel's shadow |
+| `Palette.panelShadow` | The detail panel's shadow: black at 14% in light mode, 40% in dark, where a lighter shadow vanishes into the canvas |
 
-Chip text in light mode is the status color mixed 22% toward black, so orange and green reach about 3:1 contrast on their tint.
+Status text (chips, tinted pills, verdict words, red error text) goes through `Color.ink(_:)`: the status color mixed 22% toward black in light mode and 35% toward white in dark, so it reaches about 3:1 on its tint and red captions about 4.5:1 on gray rows.
 
 ## Type — `Typeface`
 
@@ -168,10 +168,10 @@ These views keep their own geometry next to their code, built from the tokens ab
 - Step markers are `marker` (24-point) circles. The first and last marker centers sit `inset` (24 points) in from the edges, and the other markers are spread evenly between them.
 - Each step name is centered under its marker and truncated to the space between markers.
 - Markers are joined by a `line` (2-point) track that runs under them. An outlined marker is filled with the card's surface, so the track does not show through it.
-- Steps not reached yet share one color, `upcoming` (12% primary), for both their outline and the track leading to them.
-- A passed step is filled with primary and shows a `Symbol.badge` checkmark. A done mission uses secondary instead. An abandoned one outlines its passed and stopped steps in a lighter secondary (55%), with the glyph in the same color, so the glyph stays legible.
+- Steps not reached yet share one color, `upcoming` (12% black in light mode, 22% white in dark), for both their outline and the track leading to them.
+- A passed step is a Liquid Glass bead, faintly tinted with the passed color, with a `Symbol.badge` checkmark in primary. A done mission uses secondary instead. An abandoned one outlines its passed and stopped steps in a lighter secondary (55%), with the glyph in the same color, so the glyph stays legible.
 - The space between markers never goes below zero, however narrow the card or long the plan.
-- The current step of an active mission is filled with `Palette.accent`. The step a mission ended on without passing it is filled like a passed step, with its number in the surface color.
+- The current step of an active mission is Liquid Glass tinted with `Palette.accent`, its number in white. The step a mission ended on without passing it is filled like a passed step, with its number in the surface color.
 
 **Summary bar (`WorkspaceSummary`).** The bar is `summaryBarHeight` (5 points) tall and made only of its colored parts, 4 points (`Space.xs`) apart. The bare `quaternary` track shows only when every count is zero.
 
@@ -234,7 +234,7 @@ Pill buttons use `PillButtonStyle`, not the system bordered style. The system's 
 | warning | `Palette.warning` | `Palette.chip(warning)` |
 | destructive role | `Palette.danger` | `Palette.chip(danger)` |
 
-When a pill's label starts with a symbol, the symbol's side has `Pill.symbolTrim` (3 points) less inset. A symbol's round shape sits inside its frame, so an even inset would look wider on that side. Text-only pills stay symmetric. The symbol and the title are `Pill.symbolGap` (6 points) apart. Glass pills use the same insets and label style. A tinted label is darkened 22% in light mode, as on chips. A pressed pill dims, and a disabled one fades to 45%. Under Increase Contrast, a pill gets an outline. A group's actions sit at its trailing edge, and the completing action comes last. A copy button names only what it copies, such as Resume command or Diff command. The copy symbol says the rest, its help gives the whole action, and VoiceOver hears Copy resume command.
+When a pill's label starts with a symbol, the symbol's side has `Pill.symbolTrim` (3 points) less inset. A symbol's round shape sits inside its frame, so an even inset would look wider on that side. Text-only pills stay symmetric. The symbol and the title are `Pill.symbolGap` (6 points) apart. Glass pills use the same insets and label style. A tinted label goes through `Color.ink(_:)`, as on chips. Needs You's decisions are glass pills. A pressed pill dims, and a disabled one fades to 45%. Under Increase Contrast, a pill gets an outline. A group's actions sit at its trailing edge, and the completing action comes last. A copy button names only what it copies, such as Resume command or Diff command. The copy symbol says the rest, its help gives the whole action, and VoiceOver hears Copy resume command.
 
 Placement follows two rules.
 - **Actions sit at the trailing edge.** An item's action sits on the item's header row, as Undo does on a round. A section's action sits on its own last row, as Copy diff command does, or shares that row with a closing line, as Mark done shares it with a mission's outcome, centered on that line. The panel's footer (`DetailFooter`) is one row: the job's or session's id at the leading edge and the actions at the trailing edge, with Cancel Job last. The id gives way first and shortens in the middle. When even 80 points of it would leave the actions too little room, it moves below them.

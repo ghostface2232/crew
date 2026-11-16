@@ -44,7 +44,7 @@
   --scrim: rgb(10 10 12 / 0.28);
   --scrim-light: rgb(10 10 12 / 0.16);
   --lift: rgb(0 0 0 / 0.08);
-  /* Status text is darkened in light mode so it reaches about 3:1 on its own tint, as on the app's chips. */
+  /* How far status text mixes toward --tone-ink, so it reaches about 3:1 on its own tint, as on the app's chips. */
   --tone-darken: 22%;
   /* What status text mixes toward: black in light mode, white in dark, where it measured under 3:1 on its tint. */
   --tone-ink: black;

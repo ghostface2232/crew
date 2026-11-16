@@ -1,7 +1,7 @@
 import { useState, useSyncExternalStore } from 'react';
 import type { CSSProperties } from 'react';
 import { board } from './store.ts';
-import { Check, ChevronDown, ChevronRight, CircleCheck, CircleX, Ellipsis, Flag, Gauge } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, CircleCheck, CircleX, Ellipsis, Gauge } from 'lucide-react';
 import type { BoardJob, ClaudeSession, Mission, PresetName } from './types.ts';
 import { actions, request } from './api.ts';
 import {
@@ -278,7 +278,6 @@ export function MissionPanel({
           if (expanded && !(event.target as Element).closest('button, [role="menu"]')) setExpanded(false);
         }}
       >
-        <span className="mission-icon" aria-hidden="true"><Icon icon={Flag} size={14} /></span>
         <div className="mission-heading">
           <h2 className="title selectable fade-line" ref={fadeTitle} title={mission.title}>{mission.title}</h2>
           <p className="mission-meta fade-line" ref={fadeMeta} title={mission.root}>{meta}</p>

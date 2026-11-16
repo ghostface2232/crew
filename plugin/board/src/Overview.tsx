@@ -229,7 +229,7 @@ export function AgentPanel({ state, project }: { state: Snapshot; project: strin
           return (
             <li className="agent-card" key={agent} data-agent={agent} style={{ '--i': index } as CSSProperties}>
               <div className="agent-card-head">
-                <span className="agent-avatar" data-state={mark}><AgentMark agent={agent} size={18} /></span>
+                <span className="agent-avatar" data-state={mark}><AgentMark agent={agent} size={26} /></span>
                 <div>
                   <h3 className="card-title">{NAMES[agent as keyof typeof NAMES]}</h3>
                   <FadeCaption text={role} />

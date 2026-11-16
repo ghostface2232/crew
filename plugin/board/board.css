@@ -591,10 +591,10 @@ dialog.detail-panel { container: panel / inline-size; }
 .search-trigger svg { width: 15px; height: 15px; color: var(--secondary); }
 .search-trigger kbd { margin-inline-start: auto; }
 .search-trigger kbd svg { width: 10px; height: 10px; color: inherit; }
-.nav { display: grid; gap: 4px; }
+.nav { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
 .nav-heading { padding: 6px 10px 4px; }
 .nav-heading { color: var(--tertiary); font: 500 10.5px/1.2 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
-.nav-list { position: relative; display: grid; gap: 1px; }
+.nav-list { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; }
 /* A soft highlight that glides to the item under the pointer. */
 .nav-glide {
   position: absolute;
@@ -624,7 +624,7 @@ dialog.detail-panel { container: panel / inline-size; }
   transition: opacity 180ms ease-out, color 160ms ease-out, background-color 200ms ease-out, box-shadow 200ms ease-out;
 }
 .nav-item svg { width: 16px; height: 16px; }
-.nav-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nav-label { flex: 1; min-width: 0; }
 .nav-item[aria-current="true"] { color: var(--label); font-weight: 550; background: var(--surface) !important; box-shadow: inset 0 0 0 1px var(--hairline), 0 1px 2px var(--lift); }
 /* The others dim while the pointer rests on one, as the reference menus do. */
 .nav-list[data-hovering] .nav-item:not(:hover):not([aria-current="true"]) { opacity: 0.55; }
@@ -635,7 +635,7 @@ dialog.detail-panel { container: panel / inline-size; }
 .nav-count { min-width: 20px; height: 18px; padding: 0 6px; border-radius: 999px; background: var(--orange); color: var(--on-orange); font-size: 10.5px; font-weight: 600; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; animation: swap 360ms var(--ease-out); }
 .nav-key { opacity: 0; transition: opacity 160ms ease-out; }
 @media (hover: hover) { .nav-item:hover .nav-key { opacity: 1; } }
-.sidebar-foot { display: grid; gap: 6px; margin-top: auto; padding-top: 10px; border-top: 1px solid var(--hairline); }
+.sidebar-foot { display: grid; gap: 6px; margin-top: auto; padding-top: 13px; border-top: 1px solid var(--hairline); }
 .sidebar-item { justify-content: flex-start; gap: 10px; width: 100%; min-height: 32px; padding: 0 10px; border-radius: 9px; background: none; color: var(--secondary); font-weight: 450; }
 .sidebar-item svg { width: 16px; height: 16px; transition: rotate 500ms var(--ease-out); }
 @media (hover: hover) {
@@ -698,7 +698,7 @@ dialog.detail-panel { container: panel / inline-size; }
   gap: 8px;
   width: 260px;
   min-height: 34px;
-  padding: 0 7px 0 12px;
+  padding: 0 12px;
   background: var(--surface);
   box-shadow: inset 0 0 0 1px var(--hairline);
   color: var(--tertiary);
@@ -840,10 +840,13 @@ dialog.detail-panel { container: panel / inline-size; }
 .agent-card-head { display: flex; align-items: center; gap: 11px; min-width: 0; }
 .agent-card-head > div { flex: 1; min-width: 0; display: grid; gap: 1px; }
 .agent-card-head .caption { color: var(--secondary); }
-.agent-avatar { position: relative; display: grid; place-items: center; flex: none; width: 34px; height: 34px; border-radius: 11px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--hairline); }
+.agent-avatar { position: relative; display: grid; place-items: center; flex: none; width: 26px; height: 26px; }
 .agent-avatar::after { content: ""; position: absolute; right: -2px; bottom: -2px; width: 10px; height: 10px; border-radius: 50%; background: var(--tone); box-shadow: 0 0 0 2px var(--surface); }
-.agent-avatar[data-state="idle"]::after { background: var(--quaternary); }
+/* Opaque, so the logo does not show through the idle dot. */
+.agent-avatar[data-state="idle"]::after { background: color-mix(in srgb, var(--label) 22%, var(--surface)); }
 .agent-card-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--secondary); font-variant-numeric: tabular-nums; }
+/* An unmeasured agent with nothing to say leaves the row empty; without this it still takes the card's gap. */
+.agent-card-row:empty { display: none; }
 .agent-activity { padding: 4px 9px; border-radius: 8px; background: var(--fill); }
 .usage { display: grid; gap: 9px; font-size: 11px; color: var(--secondary); }
 .usage-window { display: grid; gap: 5px; --tone: var(--label); }
@@ -931,7 +934,6 @@ dialog.detail-panel { container: panel / inline-size; }
 @media (hover: hover) { .mission:not([data-expanded]):hover { box-shadow: inset 0 0 0 1px var(--hairline-strong), 0 6px 20px -12px color-mix(in srgb, var(--lift), black 10%); } }
 .mission-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .mission[data-expanded] .mission-head { cursor: pointer; }
-.mission-icon { display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 10px; background: color-mix(in srgb, var(--tone, var(--accent)) 12%, transparent); color: color-mix(in srgb, var(--tone, var(--accent)), var(--tone-ink) var(--tone-darken)); }
 .mission[data-state="active"] { --tone: var(--accent); }
 .mission[data-state="done"] { --tone: var(--green); }
 .mission[data-state="abandoned"] { --tone: var(--secondary); }
@@ -954,7 +956,7 @@ dialog.detail-panel { container: panel / inline-size; }
 .mission-body { display: grid; gap: 16px; }
 @container page (max-width: 600px) {
   .mission-head { flex-wrap: wrap; }
-  .mission-heading { flex-basis: calc(100% - 40px); }
+  .mission-heading { flex-basis: 100%; }
   .mission-progress { margin-inline-start: 40px; }
   .mission-controls { margin-inline-start: auto; }
   .job-row { flex-wrap: wrap; row-gap: 6px; }

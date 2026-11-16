@@ -4,7 +4,7 @@ import type { LucideIcon } from 'lucide-react';
 import { CircleDotDashed, BellDot, Flag } from 'lucide-react';
 import type { Snapshot } from './types.ts';
 import { projectOf, relativeDuration } from './model.ts';
-import { Icon, useNow, WordReveal } from './ui.tsx';
+import { Icon, useFade, useNow, WordReveal } from './ui.tsx';
 
 export interface NavItem {
   id: string;
@@ -72,7 +72,7 @@ export function NavList({ label, heading, items, current, onSelect, onHover, sho
             onClick={() => onSelect(item.id)}
           >
             <Icon icon={item.icon} />
-            <span className="nav-label">{item.label}</span>
+            <NavLabel label={item.label} />
             {item.dot && <i className="nav-dot" data-state={item.dot} aria-hidden="true" />}
             {item.count ? <span className="nav-count" aria-label={`${item.count} waiting`}>{item.count}</span> : null}
             {shortcut && !item.count && <kbd className="nav-key" aria-hidden="true">{index + 1}</kbd>}
@@ -81,6 +81,12 @@ export function NavList({ label, heading, items, current, onSelect, onHover, sho
       </div>
     </nav>
   );
+}
+
+/** An item's name, fading at its end instead of widening the sidebar when it is too long for it. */
+function NavLabel({ label }: { label: string }) {
+  const fade = useFade<HTMLSpanElement>();
+  return <span className="nav-label fade-line" ref={fade}>{label}</span>;
 }
 
 /** A project's live state beside the sidebar, while the pointer rests on it in the list. */

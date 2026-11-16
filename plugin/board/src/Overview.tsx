@@ -202,6 +202,12 @@ function agentActivity(state: Snapshot, project: string, agent: string) {
   return { line, mark, title };
 }
 
+/** A table cell's text, fading at its end when the column is too narrow for it. */
+function FadeText({ text }: { text: string }) {
+  const fade = useFade<HTMLSpanElement>();
+  return <span className="fade-line" ref={fade} title={text}>{text}</span>;
+}
+
 function FadeCaption({ text }: { text: string }) {
   const fade = useFade<HTMLParagraphElement>();
   return <p className="caption fade-line" ref={fade} title={text}>{text}</p>;
@@ -572,7 +578,7 @@ export function History({ state, project, names, selected, openJob, openSession 
                       </button>
                     </td>
                     <td className="narrow-hide"><span className="cell-agent"><AgentMark agent={job.agent} size={14} />{NAMES[job.agent]}</span></td>
-                    {!project && <td className="narrow-hide cell-muted">{names.get(projectOf(job)) ?? projectOf(job)}</td>}
+                    {!project && <td className="narrow-hide cell-muted cell-project"><FadeText text={names.get(projectOf(job)) ?? projectOf(job)} /></td>}
                     <td><Chip state={jobStatusState(job)}>{jobLabel(job)}</Chip></td>
                     <td className="num cell-muted">{elapsed((job.endedAt ?? 0) - job.createdAt)}</td>
                     <td className="num cell-muted narrow-hide">{new Date(job.endedAt!).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</td>

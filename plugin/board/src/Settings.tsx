@@ -6,11 +6,17 @@ import type { AgentSettings, Holder, JobKind, Role, RoleAssignment, RoleInfo, Ro
 import { request } from './api.ts';
 import { board } from './store.ts';
 import { agentSettings, HOLDERS, knownProjects, NAMES, projectNames, resolveDraft, rolesOf, sortHolders } from './model.ts';
-import { AgentMark, CloseButton, Dialog, Icon } from './ui.tsx';
+import { AgentMark, CloseButton, Dialog, Icon, useFade } from './ui.tsx';
 import { Scores } from './Scores.tsx';
 import styles from './Settings.module.css';
 
 /** The app's one-line summary of a preset. */
+/** A sidebar item's name, fading at its end when it is too long for the sidebar. */
+function ItemTitle({ text }: { text: string }) {
+  const fade = useFade<HTMLSpanElement>();
+  return <span className={`${styles.itemTitle} fade-line`} ref={fade}>{text}</span>;
+}
+
 function presetDescription(preset: Preset) {
   const agents: [string, { model?: string; effort?: string } | undefined][] = [['Codex', preset.codex], ['Antigravity', preset.antigravity]];
   return [
@@ -327,7 +333,7 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
         title={dir ?? undefined}
       >
         <span className={styles.tile} style={{ background: page?.tint ?? PROJECT_TINT }}><Icon icon={page?.icon ?? Folder} /></span>
-        <span className={styles.itemTitle}>{page?.title ?? names.get(dir!) ?? dir}</span>
+        <ItemTitle text={page?.title ?? names.get(dir!) ?? dir!} />
         <Icon icon={ChevronRight} className={styles.chevron} />
       </button>
     );

@@ -9,7 +9,6 @@ import { actions, drafts } from './api.ts';
 import claudeMark from './icons/ClaudeCode.svg';
 import codexMark from './icons/Codex.svg';
 import antigravityMark from './icons/Antigravity.svg';
-import crewMark from './icons/crew_menubar.svg';
 
 export const ClockContext = createContext(Date.now());
 export const useNow = () => useContext(ClockContext);
@@ -89,7 +88,7 @@ export function WordReveal({ text, className }: { text: string; className?: stri
 export function Icon({ icon: Glyph, size = 15, className = '' }: { icon: LucideIcon; size?: number; className?: string }) {
   return <Glyph size={size} strokeWidth={1.75} aria-hidden="true" className={className} />;
 }
-const MARKS: Record<string, string> = { claude: claudeMark, codex: codexMark, antigravity: antigravityMark, crew: crewMark };
+const MARKS: Record<string, string> = { claude: claudeMark, codex: codexMark, antigravity: antigravityMark };
 /** The supplied service SVGs, drawn as template images in the current text color, as the app draws them. */
 export function AgentMark({ agent, size = 24 }: { agent: string; size?: number }) {
   return (

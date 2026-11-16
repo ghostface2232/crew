@@ -10,7 +10,7 @@
 .error svg { flex: none; }
 .footer { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
 @media (max-width: 480px) {
-  .body { padding: 20px; }
+  .body { padding: calc(20px - var(--panel-radius)) 20px; }
   .body :global(.segmented) > button { padding-inline: 6px; font-size: 12px; }
   .assignment { grid-template-columns: minmax(0, 1fr); gap: 16px; }
 }

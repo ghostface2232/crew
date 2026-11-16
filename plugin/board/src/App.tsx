@@ -7,7 +7,8 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import { board } from './store.ts';
 import { knownProjects, projectNames, projectOf } from './model.ts';
-import { AgentMark, ClockProvider, CopyMenu, Icon, RollingNumber } from './ui.tsx';
+import { ClockProvider, CopyMenu, Icon, RollingNumber } from './ui.tsx';
+import appIcon from './icons/CrewAppIcon.svg';
 import { Activity, History, Workspace } from './Overview.tsx';
 import { NeedsYou } from './NeedsYou.tsx';
 import { JobDrawer, SessionDrawer } from './JobDrawer.tsx';
@@ -196,7 +197,7 @@ export function App() {
       <div className="app">
         <aside className="sidebar" id="sidebar" aria-label="Sidebar" ref={sidebar} data-open={drawer || undefined} inert={folded}>
           <div className="brand">
-            <span className="brand-mark"><AgentMark agent="crew" size={16} /></span>
+            <img className="brand-mark" src={appIcon} alt="" />
             <span className="brand-name">Crew</span>
           </div>
           <button className="search-trigger" onClick={openPalette} aria-keyshortcuts="Meta+K /">

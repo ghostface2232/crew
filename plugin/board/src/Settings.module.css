@@ -22,7 +22,8 @@
 
 /* Page */
 .detail { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-.scroll { flex: 1; min-height: 0; overflow: auto; }
+/* A scrollbar sits inside the border, so this keeps its top clear of the dialog's rounded corner. */
+.scroll { flex: 1; min-height: 0; overflow: auto; border-block-start: var(--panel-radius) solid transparent; }
 /* The title stays while the page scrolls under it, blurred, then fading out below it, rather than cut off at an edge. */
 .pageHead {
   position: sticky;
@@ -31,7 +32,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 20px 26px 30px;
+  padding: calc(20px - var(--panel-radius)) 26px 30px;
   /* Overlaps the content only by what is clear of the fade, so nothing sits faded before it is scrolled. */
   margin-bottom: -6px;
   transition: background-color 150ms ease-out, backdrop-filter 150ms ease-out;

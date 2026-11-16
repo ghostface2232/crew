@@ -118,6 +118,10 @@
 }
 
 * { box-sizing: border-box; }
+/* A thin bar without arrows, drawn only while its area scrolls or the pointer is on the bar itself (main.tsx marks both). Hovering the
+   whole area would keep it up whenever the pointer rests on a modal. The gutter stays, so nothing shifts when it appears. */
+* { scrollbar-width: thin; scrollbar-color: transparent transparent; transition: scrollbar-color 250ms ease-out; }
+[data-scrolling], [data-scrollbar-hover] { scrollbar-color: var(--tertiary) transparent; }
 html { min-width: 320px; }
 body {
   margin: 0;
@@ -365,13 +369,15 @@ dialog.sheet {
   box-shadow: var(--shadow-pop);
   overflow: auto;
 }
+/* A scrollbar sits inside the border, so this keeps its ends clear of the rounded corners; the body's padding gives that space back. */
+dialog.sheet:has(> .sheet-body) { border-block: var(--panel-radius) solid transparent; }
 dialog.sheet::backdrop { background: var(--scrim); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); }
 @media (prefers-reduced-motion: no-preference) {
   dialog.sheet[open] { animation: sheet-in 420ms var(--ease-out); }
   dialog.sheet[open]::backdrop { animation: fade 300ms ease-out; }
 }
 @keyframes sheet-in { from { opacity: 0; scale: 0.97; translate: 0 8px; } }
-.sheet-body { display: grid; gap: 20px; padding: 24px; }
+.sheet-body { display: grid; gap: 20px; padding: calc(24px - var(--panel-radius)) 24px; }
 .sheet-head { display: flex; align-items: center; gap: 12px; }
 .sheet-head h2 { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 
@@ -434,7 +440,7 @@ html[data-resizing] dialog.detail-panel { transition: none; }
 .detail-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .detail-heading { font-size: 19px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; outline: 0; }
 .detail-subtitle { font-size: 12px; overflow-wrap: anywhere; }
-.detail-scroll { flex: 1; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: var(--section-gap); padding: 4px var(--panel-padding) var(--panel-padding); border-radius: 0 0 var(--panel-radius) var(--panel-radius); }
+.detail-scroll { flex: 1; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: var(--section-gap); padding: 4px var(--panel-padding) calc(var(--panel-padding) - var(--panel-radius)); border-radius: 0 0 var(--panel-radius) var(--panel-radius); border-block-end: var(--panel-radius) solid transparent; }
 .detail-title { display: grid; gap: 8px; }
 .detail-title p { font-size: 12px; overflow-wrap: anywhere; }
 .facts {
@@ -574,7 +580,7 @@ dialog.detail-panel { container: panel / inline-size; }
   overflow-y: auto;
 }
 .brand { display: flex; align-items: center; gap: 10px; padding: 2px 0; }
-.brand-mark { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; background: var(--ink); color: var(--on-ink); }
+.brand-mark { flex: none; width: 30px; height: 30px; }
 .brand-name { font: 600 15px/1 var(--display); letter-spacing: -0.01em; }
 .search-trigger {
   justify-content: flex-start;
@@ -1152,7 +1158,7 @@ dialog.palette-layer::backdrop { background: var(--scrim-light); animation: fade
 .palette-search { display: flex; align-items: center; gap: 10px; padding: 0 14px 0 16px; height: 54px; border-bottom: 1px solid var(--hairline); color: var(--secondary); }
 .palette-search input { flex: 1; min-height: 0; padding: 0; border: 0; background: none; font-size: 15px; box-shadow: none !important; }
 .palette-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 0.8fr); min-height: 0; }
-.palette-list { min-height: 0; overflow-y: auto; padding: 8px; scrollbar-width: thin; }
+.palette-list { min-height: 0; overflow-y: auto; padding: 8px; }
 .palette-group { padding: 10px 10px 5px; color: var(--tertiary); font: 500 10px/1.2 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
 .palette-item {
   display: flex;

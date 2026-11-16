@@ -133,6 +133,8 @@ test('answering in the detail panel locks the same request on Needs You', async 
   await drawer.getByRole('button', { name: 'Send your answer' }).click();
   await expect(drawer.getByRole('button', { name: 'Yes', exact: true })).toBeDisabled();
   await page.getByRole('button', { name: 'Close details' }).click();
+  // The panel plays a short exit before it leaves, with its own copy of the buttons.
+  await expect(drawer).toBeHidden();
   await expect(page.getByRole('button', { name: 'No', exact: true })).toBeDisabled();
   const calls = await (await request.get('/__requests')).json();
   expect(calls.filter((call: { route: string }) => call.route.endsWith('/reply'))).toHaveLength(1);
@@ -730,7 +732,7 @@ test('the top bar keeps its controls on one row at every width', async ({ page }
         const box = element.querySelector(selector)!.getBoundingClientRect();
         return Math.round(box.top + box.height / 2);
       };
-      return [middle('.search-pill'), middle('.connection'), middle('.new-job'), middle('.crumbs')];
+      return [middle('.search-pill'), middle('.new-job'), middle('.crumbs')];
     });
     if (rows.some((row) => Math.abs(row - rows[0]) > 2) || await bar.evaluate((element) => element.scrollWidth > element.clientWidth)) split.push(width);
   }
@@ -967,7 +969,8 @@ test('mission progress stays visible when collapsed and notes show when expanded
   await expect(card.getByText('Keep keyboard navigation available.')).toBeVisible();
   await card.getByRole('button', { name: 'Collapse mission' }).click();
   await expect(card.getByText('21%', { exact: true })).toBeVisible();
-  await expect(card.getByText('Keep keyboard navigation available.')).toHaveCount(0);
+  // A closed body stays mounted so it can animate; it is hidden, not removed.
+  await expect(card.getByText('Keep keyboard navigation available.')).toBeHidden();
 });
 
 test('rounds render oldest first and waiting jobs cannot change them', async ({ page, request }) => {
@@ -1195,11 +1198,11 @@ test('the panel resizes from its edge and keeps the width', async ({ page }) => 
 test('a closed mission opens from a click anywhere on it and closes from its title row', async ({ page }) => {
   const card = page.locator('[data-key="mission-1"]');
   await card.getByRole('button', { name: 'Collapse mission' }).click();
-  await expect(card.locator('.track')).toHaveCount(0);
+  await expect(card.locator('.track')).toBeHidden();
   await card.locator('.mission-meta').click();
   await expect(card.locator('.track')).toBeVisible();
   await card.locator('.mission-heading').click();
-  await expect(card.locator('.track')).toHaveCount(0);
+  await expect(card.locator('.track')).toBeHidden();
 });
 
 test('a finished-looking mission offers Mark done beside its outcome, and a dropped one marks its stopping step', async ({ page, request }) => {

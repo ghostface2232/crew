@@ -3,6 +3,7 @@ import { execFile, execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { api, ensureDaemon, health, stopDaemon } from './client.ts';
 import { boardUrl, readToken } from './auth.ts';
 import { agentCommand, agentEnv, BASE_URL, HOME, installed, loadConfig, PLUGIN_ROOT, VERSION } from './config.ts';
@@ -94,9 +95,17 @@ async function install(): Promise<void> {
     console.log(`${res.ok || /already/i.test(res.out) ? '✓' : '✗'} ${label}: ${res.out.split('\n').pop()}`);
   }
   const link = path.join(os.homedir(), '.local', 'bin', 'crew');
+  const cli = path.join(PLUGIN_ROOT, 'bridge', 'cli.ts');
   fs.mkdirSync(path.dirname(link), { recursive: true });
   fs.rmSync(link, { force: true });
-  fs.symlinkSync(path.join(PLUGIN_ROOT, 'bridge', 'cli.ts'), link);
+  if (process.platform === 'win32') {
+    // A symlink needs Developer Mode or an elevated shell. cmd.exe reads a .cmd file in the console code page,
+    // so the shims leave the path, which may not be ASCII, to a UTF-8 module beside them.
+    fs.writeFileSync(`${link}.mjs`, `import ${JSON.stringify(pathToFileURL(cli).href)};\n`);
+    fs.writeFileSync(`${link}.cmd`, '@node "%~dp0crew.mjs" %*\r\n');
+    // For Git Bash, which Claude Code's shell is on Windows.
+    fs.writeFileSync(link, '#!/bin/sh\nexec node "$(dirname "$0")/crew.mjs" "$@"\n');
+  } else fs.symlinkSync(cli, link);
   console.log(`✓ crew command: ${link}`);
   console.log('\nRestart Claude Code sessions (or run /reload-plugins) to load the plugin, then try /crew:run.');
 }
@@ -136,7 +145,10 @@ try {
         console.log(boardUrl(BASE_URL, readToken(HOME)));
         break;
       }
-      spawn('open', [boardUrl(BASE_URL, readToken(HOME))], { stdio: 'ignore', detached: true }).unref();
+      if (process.platform === 'win32') {
+        // start, not explorer, keeps the fragment that signs the page in. The address holds no cmd.exe syntax.
+        spawn('cmd.exe', ['/d', '/s', '/c', `start "" "${boardUrl(BASE_URL, readToken(HOME))}"`], { stdio: 'ignore', detached: true, windowsHide: true, windowsVerbatimArguments: true }).unref();
+      } else spawn('open', [boardUrl(BASE_URL, readToken(HOME))], { stdio: 'ignore', detached: true }).unref();
       console.log(BASE_URL);
       break;
     case 'doctor':

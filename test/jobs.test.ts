@@ -11,7 +11,10 @@ import { followUps, jobRole, Jobs, outOfScope } from '../plugin/bridge/jobs.ts';
 import type { Adapter, CrewEvent, Job, JobCtl, JobSpec, Probe, ReviewTarget } from '../plugin/bridge/jobs.ts';
 import { describe, needsLead } from '../plugin/bridge/render.ts';
 import { tierModel } from '../plugin/bridge/tiers.ts';
-import { checkLine, runCheck } from '../plugin/bridge/check.ts';
+import { checkLine, runCheck, windowsSandboxArgs } from '../plugin/bridge/check.ts';
+
+/** Where the bridge can hold a check to the worker's limits: macOS's sandbox-exec, or Codex's sandbox on Windows. */
+const SANDBOXED = process.platform === 'darwin' || process.platform === 'win32';
 
 const config = resolveConfig({ notify: false, codex: { bin: 'codex', approvalPolicy: 'never', approvalsReviewer: 'auto_review' } });
 
@@ -1098,7 +1101,7 @@ test('the bridge runs the lead\'s check after each turn and marks it stale when 
   assert.ok(job.result?.commit && first?.head?.startsWith(job.result.commit));
   assert.equal(first?.check?.exit, 0);
   assert.equal(first?.check?.output, 'checked');
-  assert.equal(first?.check?.sandboxed, process.platform === 'darwin');
+  assert.equal(first?.check?.sandboxed, SANDBOXED);
   assert.match(describe(job), /check by the bridge \(turn 1 at [0-9a-f]{8}\): `grep -q "x = 2" app\.js && echo checked` passed/);
 
   // Undoing the round leaves the check describing a tree that is gone.
@@ -1124,7 +1127,7 @@ test('the bridge runs the lead\'s check after each turn and marks it stale when 
   assert.equal(job.receipts?.at(-1)?.stale, 'the check itself changed app.js');
 });
 
-test('a check cannot rewrite .git, reach outside sockets, or outlive its run, and stops when cancelled', { skip: process.platform !== 'darwin' }, async () => {
+test('a check cannot rewrite .git, reach outside sockets, or outlive its run, and stops when cancelled', { skip: !SANDBOXED }, async () => {
   const repo = tempRepo();
   const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-check-tmp-')));
   const outside = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-outside-')));
@@ -1134,11 +1137,13 @@ test('a check cannot rewrite .git, reach outside sockets, or outlive its run, an
     const git = await runCheck('echo "gitdir: ./.evil" > .git/HEAD.lock && echo wrote', repo, tmp, []);
     assert.notEqual(git.exit, 0);
     assert.doesNotMatch(git.output, /wrote/);
-    const socket = await runCheck(`/usr/bin/nc -U ${JSON.stringify(path.join(outside, 'agent.sock'))} < /dev/null; echo "nc=$?"`, repo, tmp, []);
-    assert.match(socket.output, /Operation not permitted|nc=1/);
+    if (process.platform === 'darwin') {
+      const socket = await runCheck(`/usr/bin/nc -U ${JSON.stringify(path.join(outside, 'agent.sock'))} < /dev/null; echo "nc=$?"`, repo, tmp, []);
+      assert.match(socket.output, /Operation not permitted|nc=1/);
+    }
     // A process the check leaves behind is stopped with it.
-    await runCheck(`(sleep 2; touch ${JSON.stringify(marker)}) & echo started`, repo, tmp, []);
-    await new Promise((resolve) => setTimeout(resolve, 3000));
+    await runCheck(`(sleep 3; touch ${JSON.stringify(marker)}) & echo started`, repo, tmp, []);
+    await new Promise((resolve) => setTimeout(resolve, 4000));
     assert.equal(fs.existsSync(marker), false);
     const stop = new AbortController();
     const running = runCheck('sleep 30', repo, tmp, [], { signal: stop.signal });
@@ -1153,10 +1158,20 @@ test('a check cannot rewrite .git, reach outside sockets, or outlive its run, an
   }
 });
 
+test('Codex\'s Windows sandbox gets the macOS limits as literal TOML, or nothing for a path it cannot quote', () => {
+  const args = windowsSandboxArgs('C:\\wt', 'C:\\tmp\\c', ['C:\\home\\.crew\\token'], false)!;
+  assert.deepEqual(args.slice(0, 3), ['sandbox', '-c', "default_permissions='crew_check'"]);
+  const rules = path.win32.join('C:\\wt', '.git');
+  assert.equal(args[4], `permissions.crew_check.filesystem={':root'='read','C:\\wt'='write','C:\\tmp\\c'='write','${rules}'='read','C:\\home\\.crew\\token'='deny'}`);
+  assert.equal(args[6], 'permissions.crew_check.network.enabled=false');
+  assert.equal(windowsSandboxArgs('C:\\wt', 'C:\\tmp\\c', [], true)![6], 'permissions.crew_check.network.enabled=true');
+  assert.equal(windowsSandboxArgs("C:\\it's", 'C:\\tmp', [], false), null);
+});
+
 test('a check is not run where the worker\'s limits cannot be applied', async () => {
   const result = await runCheck('true', os.tmpdir(), os.tmpdir(), [], { platform: 'linux' });
   assert.equal(result.exit, null);
-  assert.match(checkLine(result), /^`true` not run: only macOS can hold the check to the worker's limits/);
+  assert.match(checkLine(result), /^`true` not run: only macOS and Windows can hold the check to the worker's limits/);
 });
 
 test('a review records what it read at the start of each turn', async () => {
@@ -2288,7 +2303,7 @@ test('a status check from an earlier stall cannot add news to a later one', asyn
   assert.equal((job.news ?? []).filter((news) => news.kind === 'stalled').length, 1);
 });
 
-test('cancelling a job while its check runs stops the check and still collects the turn', { skip: process.platform !== 'darwin' }, async () => {
+test('cancelling a job while its check runs stops the check and still collects the turn', { skip: !SANDBOXED }, async () => {
   const repo = tempRepo();
   const { jobs } = harness((ctl) => ctl.done('built it'));
   const job = await jobs.create({ kind: 'delegate', cwd: repo, task: 't', check: 'sleep 30' });

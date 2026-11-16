@@ -69,7 +69,8 @@ export class BrowserServers {
   private servers = new Map<string, { child: ChildProcess; endpoint: string; cwd: string }>();
 
   async start(id: string, options: { cwd: string; writable: string[]; unreadable: string[]; tmp: string }): Promise<string> {
-    if (process.platform !== 'darwin') throw new Error('Start the browser yourself: only macOS keeps it out of the sandbox.');
+    // Codex's Windows sandbox lets Chromium start (checked 2026-11-16 with codex-cli 0.166), so only macOS needs this.
+    if (process.platform !== 'darwin') throw new Error('Start the browser yourself, headless: on this system it starts inside your sandbox.');
     const running = this.servers.get(id);
     if (running && running.cwd === options.cwd && running.child.exitCode === null) return running.endpoint;
     this.stop(id);

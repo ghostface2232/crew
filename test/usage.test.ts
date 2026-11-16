@@ -19,6 +19,74 @@ function cache(snapshots: object[], version = 1): string {
 const snapshot = (tool: string, windows: object[], capturedAt = NOW - 2 * MIN) => ({ tool, plan: 'Pro', capturedAt: iso(capturedAt), windows });
 const weekly = (usedRatio: number, extra: object = {}) => ({ type: 'weekly', duration: 604800, resetTime: iso(NOW + 24 * 60 * MIN), usedRatio, ...extra });
 
+const windowsCache = (Tools: object[], Version = 4) => JSON.stringify({ Version, Tools });
+const windowsTool = (ToolName: string, Windows: object[], extra: object = {}) => ({ ToolName, Windows, Plan: 'Pro', CapturedAt: iso(NOW - 2 * MIN), ...extra });
+const windowsWeekly = (UsedRatio: number, extra: object = {}) => ({ Type: 'Weekly', UsedRatio, DurationSeconds: 604800, ResetTime: iso(NOW + 120 * MIN), ...extra });
+
+test('the Windows cache preserves history keys and normalizes window kinds', () => {
+  const raw = parseCache(windowsCache([
+    windowsTool('Claude', [windowsWeekly(0.39), windowsWeekly(0.43, { Id: 'claude-weekly-scoped-fable', GroupLabel: 'Fable' })]),
+    windowsTool('Codex', [windowsWeekly(0.01, { Type: 'BillingCycle' })]),
+    windowsTool('Antigravity', [windowsWeekly(0, { Id: 'gemini-5h', GroupLabel: 'Gemini', Type: 'FiveHour', DurationSeconds: 18000 })]),
+    windowsTool('Cursor', [windowsWeekly(1)]),
+    windowsTool('Copilot', [windowsWeekly(1)]),
+    windowsTool('Unknown', [windowsWeekly(1)]),
+  ]))!;
+  assert.deepEqual(raw.map((p) => [p.agent, p.plan, p.capturedAt]), [
+    ['claude', 'Pro', NOW - 2 * MIN], ['codex', 'Pro', NOW - 2 * MIN], ['antigravity', 'Pro', NOW - 2 * MIN],
+  ]);
+  assert.deepEqual(raw.flatMap((p) => p.windows.map((w) => [w.key, w.kind, w.group, w.usedRatio, w.durationSec, w.resetTime])), [
+    ['Weekly', 'weekly', null, 0.39, 604800, NOW + 120 * MIN],
+    ['claude-weekly-scoped-fable', 'weekly', 'Fable', 0.43, 604800, NOW + 120 * MIN],
+    ['BillingCycle', 'billingCycle', null, 0.01, 604800, NOW + 120 * MIN],
+    ['gemini-5h', 'fiveHour', 'Gemini', 0, 18000, NOW + 120 * MIN],
+  ]);
+  const usage = new UsageTracker().classify(raw, none, NOW);
+  assert.equal(usage.providers[0].reason, '39% of the weekly window used.');
+});
+
+test('signed-out Windows tools have no reading and unknown Windows shapes stay unknown', () => {
+  const raw = parseCache(windowsCache([windowsTool('Claude', [windowsWeekly(1)], { IsSignedOut: true })]));
+  assert.deepEqual(raw, []);
+  assert.equal(new UsageTracker().classify(raw, none, NOW).providers[0].status, 'unknown');
+  assert.equal(parseCache(windowsCache([], 5)), null);
+  assert.equal(parseCache(JSON.stringify({ Version: 4, snapshots: [] })), null);
+  assert.equal(parseCache(JSON.stringify({ Version: 4, Tools: {} })), null);
+});
+
+test('Windows PascalCase history samples feed projections without changing supplement keys', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-usage-windows-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const { DatabaseSync } = await import('node:sqlite');
+  const db = new DatabaseSync(path.join(dir, 'usage-history.db'));
+  try {
+    db.exec('CREATE TABLE samples (tool TEXT, window_key TEXT, captured_at INTEGER, used_ratio REAL, reset_time INTEGER)');
+    const insert = db.prepare('INSERT INTO samples VALUES (?, ?, ?, ?, ?)');
+    for (const [tool, key] of [['Claude', 'Weekly'], ['Antigravity', 'gemini-5h'], ['Codex', 'Weekly']]) {
+      for (const [i, ago] of [40, 20, 0].entries()) insert.run(tool, key, NOW - ago * MIN, 0.5 + i * 0.1, NOW + 120 * MIN);
+    }
+  } finally {
+    db.close();
+  }
+  const history = (await openHistory(dir))!;
+  assert.ok(history);
+  try {
+    const raw = parseCache(windowsCache([
+      windowsTool('Claude', [windowsWeekly(0.7)]),
+      windowsTool('Codex', [windowsWeekly(0.7)]),
+      windowsTool('Antigravity', [windowsWeekly(0.7, { Id: 'gemini-5h', Type: 'FiveHour' })]),
+    ]));
+    const usage = new UsageTracker().classify(raw, history.read, NOW);
+    for (const provider of usage.providers) assert.equal(provider.windows[0].projectedExhaustion, NOW + 60 * MIN);
+    const own = fromCodexLimits({ plan: 'Pro', windows: [{ minutes: 10080, usedPercent: 70, resetsAt: (NOW + 120 * MIN) / 1000 }] }, NOW);
+    assert.equal(own.windows[0].key, 'weekly');
+    const supplemented = new UsageTracker().classify([own], history.read, NOW);
+    assert.equal(supplemented.providers.find((p) => p.agent === 'codex')!.windows[0].projectedExhaustion, NOW + 60 * MIN);
+  } finally {
+    history.close();
+  }
+});
+
 test('the macOS cache is read into windows keyed as the history database keys them', () => {
   const raw = parseCache(cache([
     snapshot('claude', [weekly(0.89), weekly(0.42, { groupLabel: 'Fable', providerID: 'claude-weekly-scoped-fable' })]),

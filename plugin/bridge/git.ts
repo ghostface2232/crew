@@ -143,7 +143,10 @@ export function worktreePath(root: string, id: string, home: string): string {
 /** Copies included files, cloning directories when supported and otherwise sharing them read-only. */
 export async function copyIncluded(root: string, wt: string, clone: (source: string, dest: string) => Promise<void> = cloneDirectory): Promise<{ copied: string[]; linked: string[]; failed: string[] }> {
   const result = { copied: [] as string[], linked: [] as string[], failed: [] as string[] };
-  if (!(await fs.stat(path.join(root, '.worktreeinclude')).catch(() => null))) return result;
+  const include = await fs.stat(path.join(root, '.worktreeinclude')).catch(() => null);
+  if (!include) return result;
+  // Git for Windows reads a directory as an empty exclude file, where Git on macOS refuses it.
+  if (!include.isFile()) throw new Error('git: cannot use .worktreeinclude as an exclude file: it is not a file');
   // Let git apply the patterns, so the syntax is exactly .gitignore's.
   const matched = await git(root, ['ls-files', '--others', '--ignored', '--exclude-from=.worktreeinclude', '--directory', '-z']);
   if (!matched) return result;

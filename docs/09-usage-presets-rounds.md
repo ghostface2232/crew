@@ -88,7 +88,7 @@ Each client computes progress from data it already has using the same rule, so t
 | Codex's own rate limits (`account/rateLimits/*` on its app-server) | Codex, whenever newer than AgentGauge's reading | Live while a Codex job runs |
 | A job failing on a usage limit | Marks that agent exhausted at once | Immediate; lifted by a later reading that shows room in the applicable windows from section 3, or after 5 hours |
 
-Both files are opened read-only; Crew holds no provider credentials and makes no provider request. Only the macOS cache format (version 1, checked against AgentGauge 0.8.2) is read. On other platforms, or when the version differs, every agent is `unknown` and the roles are followed as assigned.
+Both files are opened read-only; Crew holds no provider credentials and makes no provider request. Two cache formats are read: macOS (version 1 under `~/Library/Application Support/AgentGauge`, checked against AgentGauge 0.8.2) and Windows (version 4 under `%APPDATA%\Gauge`, checked against a real install on 2026-11-16). Windows names tools and Id-less windows in PascalCase (`Claude`, `Weekly`); window kinds are normalized to the macOS spelling, and history lookups ignore case, so Codex's own readings find their samples on both. A signed-out tool has no reading. On other platforms, or when the version differs, every agent is `unknown` and the roles are followed as assigned.
 
 A reading older than 45 minutes is `stale`. Stale and unknown readings never move work: routing then answers with the role's holder and says that usage is not known.
 

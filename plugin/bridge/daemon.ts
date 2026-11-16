@@ -19,6 +19,7 @@ import type { Mission } from './missions.ts';
 import { addEvidence, loadNotes, notesFile, renderNotes, scoreAll, setSummary } from './notes.ts';
 import type { NotesFile } from './notes.ts';
 import { runbook } from './runbook.ts';
+import { toastCommand } from './toast.ts';
 import { ANTIGRAVITY_MODELS, codexModels } from './tiers.ts';
 import { appendInstructions, instructionsFile, readInstructions, savePreset, saveRoles, writeInstructions } from './settings.ts';
 import { agentGaugeDir, fromCodexLimits, route as routeWork, UsageMonitor } from './usage.ts';
@@ -95,9 +96,15 @@ let desktopSeenAt = 0;
 let desktopHandlesCompletion = false;
 
 function notify(agent: keyof typeof AGENT_NAMES, kind: EventKind, subject: string, detail: string): void {
-  if (!config.notify || process.platform !== 'darwin' || ((kind === 'waiting' || (kind === 'done' && desktopHandlesCompletion)) && Date.now() - desktopSeenAt < 15_000)) return;
+  if (!config.notify || (process.platform !== 'darwin' && process.platform !== 'win32') || ((kind === 'waiting' || (kind === 'done' && desktopHandlesCompletion)) && Date.now() - desktopSeenAt < 15_000)) return;
+  const title = `${AGENT_NAMES[agent]} ${NOTIFY_TITLES[kind] ?? kind}`;
+  if (process.platform === 'win32') {
+    const toast = toastCommand(title, subject, detail);
+    execFile(toast.bin, toast.args, { env: toast.env, windowsHide: true }, () => {});
+    return;
+  }
   const quote = (s: string) => `"${s.replace(/[\\"]/g, '\\$&').slice(0, 200)}"`;
-  const script = `display notification ${quote(detail)} with title ${quote(`${AGENT_NAMES[agent]} ${NOTIFY_TITLES[kind] ?? kind}`)} subtitle ${quote(subject)}`;
+  const script = `display notification ${quote(detail)} with title ${quote(title)} subtitle ${quote(subject)}`;
   execFile('osascript', ['-e', script], () => {});
 }
 

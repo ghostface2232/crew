@@ -16,7 +16,7 @@ node plugin/bridge/cli.ts install
 crew doctor
 ```
 
-`install` registers this folder as a Claude Code marketplace, installs the `crew` plugin, and links the `crew` command into `~/.local/bin`. Open a new Claude Code session (including Desktop) after installing for it to take effect.
+`install` registers this folder as a Claude Code marketplace, installs the `crew` plugin, and links the `crew` command into `~/.local/bin` (on Windows, `crew.cmd` for cmd and PowerShell and a `crew` script for Git Bash). Open a new Claude Code session (including Desktop) after installing for it to take effect.
 
 ## Usage
 

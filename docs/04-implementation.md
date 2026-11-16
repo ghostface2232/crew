@@ -159,7 +159,7 @@ Not verified: whether `SubagentStart` context reaches a real subagent (the hook'
 - Event shape adds `job_id` and a sequence number to the proposal in document 02: `{seq, ts, agent, session_id, job_id, kind, detail}`, where `kind` is `started`, `progress`, `waiting`, `error`, `limit`, `stalled`, `done`, or `cancelled`.
 - Quota exhaustion: emits a `limit` event based on `codexErrorInfo` (`usageLimitExceeded`, `rateLimitExceeded`, `sessionBudgetExceeded`) on turn errors for Codex, error text for Antigravity, and `error: rate_limit` from the `StopFailure` hook for Claude.
 - Stalls: a running job that emits no events for 5 minutes is marked `stalled`. For Claude sessions, the timer applies only when no tool call is actively running.
-- `waiting`, `error`, `limit`, and `stalled` also trigger macOS system notifications.
+- `waiting`, `error`, `limit`, and `stalled` also trigger system notifications: through `osascript` on macOS, and on Windows as a toast shown through Windows PowerShell 5.1 under its own app identity, with the text passed in environment variables.
 - Codex usage is read via `app-server`'s `account/rateLimits/read` and `account/rateLimits/updated` and shown on the board and in `status` (the supplemental path in document 03 section 9). It is not yet used for routing decisions.
 
 ### 5.1 Approval requests and questions
@@ -316,6 +316,8 @@ Not yet verified:
 3. Claude usage display: forward `rate_limits` from the statusline to the daemon and show it in the Claude lane.
 
 ## 10. Revision log
+
+- 2026-11-16: The bridge now does on Windows what it does on macOS, checked on Windows 11 with Codex CLI 0.166.0 and Git for Windows 2.53. A lead's `check` runs in Git for Windows' `sh` under `codex sandbox` with a permissions profile matching the macOS one: reads anywhere but the daemon token, writes only in the worktree and its temp directory, `.git` read-only, and outside network off unless `runs_app` (local servers stay reachable). Git's `/mingw64/bin` and `/usr/bin` come first on PATH, as `/bin/sh` has its utilities on macOS. Codex waits for every process holding its output pipes, a tree kill cannot reach a process whose parent has exited, and a process in the sandbox can end its parent so that Codex exits 0. So the check runs under a Windows PowerShell 5.1 host that puts itself and everything it starts in a job object with kill-on-close, and a wrapper runs the command in a separate `sh -c` and prints its status on a line marked with a secret read from stdin, which the command's processes never get. Only that line counts as the status; without it the check could not run. After it, the bridge allows the same 2-second grace as on macOS, then stops the host, which ends every process in the job, and waits for that before returning. Unlike macOS, `setsid` does not escape. `crew.browser` stays macOS-only: Chromium starts inside Codex's Windows sandbox, so workers start it themselves. Also: Windows toasts for notifications, AgentGauge's Windows files (document 09, section 6), `crew board` through `start`, `crew install` writing `crew.cmd` and a Git Bash script instead of a symlink, and a `.worktreeinclude` that is not a file refused as Git on macOS refuses it. The native desktop app stays macOS-only.
 
 - 2026-11-14: Added fluid per-command mission plans with repeated rounds, preserved history and job occurrences, plan-based tracks and progress with legacy fallback, a client-side Looks finished hint after 20 quiet minutes, and authenticated Mark done actions on the board and in Crew (section 5.3).
 

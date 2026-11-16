@@ -88,7 +88,8 @@ const REPORT_MS = 5 * 60 * 60_000;
 /** Where AgentGauge keeps its files on this platform; null where this version cannot read them. */
 export function agentGaugeDir(): string | null {
   if (process.env.CREW_AGENTGAUGE_DIR) return process.env.CREW_AGENTGAUGE_DIR;
-  // The Windows cache has another shape (version 4, a Tools array) that has not been verified here.
+  // Gauge is the Windows build of AgentGauge, with its files under roaming app data.
+  if (process.platform === 'win32') return process.env.APPDATA ? path.join(process.env.APPDATA, 'Gauge') : null;
   return process.platform === 'darwin' ? path.join(os.homedir(), 'Library', 'Application Support', 'AgentGauge') : null;
 }
 
@@ -129,13 +130,36 @@ const time = (value: unknown): number | null => {
   return Number.isFinite(ms) ? ms : null;
 };
 
-/** The macOS cache (version 1). Anything else, or a record of the wrong shape, yields null: unknown, never a guess. */
+/** The macOS cache (version 1) or Windows Gauge cache (version 4). Other shapes yield null: unknown, never a guess. */
 export function parseCache(text: string): RawProvider[] | null {
   let doc: any;
   try {
     doc = JSON.parse(text);
   } catch {
     return null;
+  }
+  if (doc?.Version === 4 && Array.isArray(doc.Tools)) {
+    const providers: RawProvider[] = [];
+    for (const tool of doc.Tools) {
+      const agent = typeof tool?.ToolName === 'string' ? tool.ToolName.toLowerCase() : null;
+      if (!AGENTS.includes(agent) || !Array.isArray(tool.Windows) || tool.IsSignedOut === true) continue;
+      providers.push({
+        agent,
+        plan: typeof tool.Plan === 'string' ? tool.Plan : null,
+        capturedAt: time(tool.CapturedAt),
+        windows: tool.Windows
+          .filter((w: any) => typeof w?.Type === 'string' && Number.isFinite(w.UsedRatio))
+          .map((w: any) => ({
+            key: typeof w.Id === 'string' ? w.Id : w.Type,
+            kind: w.Type.charAt(0).toLowerCase() + w.Type.slice(1),
+            group: typeof w.GroupLabel === 'string' ? w.GroupLabel : null,
+            usedRatio: Math.min(Math.max(w.UsedRatio, 0), 1),
+            resetTime: time(w.ResetTime),
+            durationSec: Number.isFinite(w.DurationSeconds) ? w.DurationSeconds : null,
+          })),
+      });
+    }
+    return providers;
   }
   if (doc?.version !== 1 || !Array.isArray(doc.snapshots)) return null;
   const providers: RawProvider[] = [];
@@ -252,7 +276,8 @@ export async function openHistory(dir: string): Promise<{ read: SampleReader; cl
   try {
     const { DatabaseSync } = await import('node:sqlite');
     const db = new DatabaseSync(file, { readOnly: true });
-    const query = db.prepare('SELECT captured_at AS at, used_ratio AS usedRatio, reset_time AS resetTime FROM samples WHERE tool = ? AND window_key = ? AND captured_at >= ? ORDER BY captured_at');
+    // Windows Gauge writes PascalCase tool names and Type-named keys; agent supplements use macOS casing.
+    const query = db.prepare('SELECT captured_at AS at, used_ratio AS usedRatio, reset_time AS resetTime FROM samples WHERE tool = ? COLLATE NOCASE AND window_key = ? COLLATE NOCASE AND captured_at >= ? ORDER BY captured_at');
     return {
       read: (agent, key, since) => {
         try {

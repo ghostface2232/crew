@@ -36,7 +36,7 @@
   place-items: center;
   width: 52px;
   height: 52px;
-  border-radius: 50%;
+  border-radius: 50%; corner-shape: round;
   background: var(--fill);
   color: var(--label);
   box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px color-mix(in srgb, var(--medal) 80%, transparent);
@@ -50,7 +50,7 @@
   place-items: center;
   width: 20px;
   height: 20px;
-  border-radius: 50%;
+  border-radius: 50%; corner-shape: round;
   background: var(--medal);
   box-shadow: 0 0 0 2px var(--surface);
   color: rgb(0 0 0 / 0.72);
@@ -69,7 +69,7 @@
   align-items: baseline;
   gap: 2px;
   padding: 4px 10px;
-  border-radius: 999px;
+  border-radius: 999px; corner-shape: round;
   background: color-mix(in srgb, var(--tone) 14%, transparent);
   color: color-mix(in srgb, var(--tone), var(--tone-ink) var(--tone-darken));
 }
@@ -110,14 +110,14 @@
 }
 .row + .row { box-shadow: inset 0 1px var(--hairline); }
 .rank { flex: none; width: 20px; color: var(--secondary); font: 600 15px/1 var(--rounded); font-variant-numeric: tabular-nums; text-align: center; }
-.rowAvatar { display: grid; flex: none; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--fill); color: var(--label); }
+.rowAvatar { display: grid; flex: none; place-items: center; width: 34px; height: 34px; border-radius: 50%; corner-shape: round; background: var(--fill); color: var(--label); }
 .rowText { position: relative; display: grid; gap: 3px; flex: 1; min-width: 0; }
 .rowHead { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .rowName { min-width: 0; overflow: hidden; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .word {
   flex: none;
   padding: 1px 7px;
-  border-radius: 999px;
+  border-radius: 999px; corner-shape: round;
   background: color-mix(in srgb, var(--tone) 12%, transparent);
   color: color-mix(in srgb, var(--tone), var(--tone-ink) var(--tone-darken));
   font-size: 11px;

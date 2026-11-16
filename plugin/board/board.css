@@ -118,6 +118,10 @@
 }
 
 * { box-sizing: border-box; }
+/* Corner smoothing on every radius. Circles and pills opt back out with `corner-shape: round`, which would otherwise squarish them;
+   a button's own rule sets the shape again where it overrides the pill radius, since `button` outranks `*`. */
+:root { --smooth: superellipse(1.35); }
+*, *::before, *::after { corner-shape: var(--smooth); }
 /* A thin bar without arrows, drawn only while its area scrolls or the pointer is on the bar itself (main.tsx marks both). Hovering the
    whole area would keep it up whenever the pointer rests on a modal. The gutter stays, so nothing shifts when it appears. */
 * { scrollbar-width: thin; scrollbar-color: transparent transparent; transition: scrollbar-color 250ms ease-out; }
@@ -165,7 +169,7 @@ kbd {
 .secondary { color: var(--secondary); }
 .tertiary { color: var(--tertiary); }
 .unsaved { display: inline-flex; align-items: center; gap: 5px; color: var(--orange); font-size: 12px; font-weight: 500; }
-.unsaved::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.unsaved::before { content: ""; width: 6px; height: 6px; border-radius: 50%; corner-shape: round; background: currentColor; }
 .mono { font-family: var(--mono); font-size: 12px; }
 .digits { font-variant-numeric: tabular-nums; }
 .selectable { -webkit-user-select: text; user-select: text; }
@@ -192,7 +196,7 @@ kbd {
   flex: none;
   height: 22px;
   padding: 0 8px 0 7px;
-  border-radius: 999px;
+  border-radius: 999px; corner-shape: round;
   background: color-mix(in srgb, var(--tone, var(--secondary)) 11%, transparent);
   color: color-mix(in srgb, var(--tone, var(--secondary)), var(--tone-ink) var(--tone-darken));
   font-size: 11px;
@@ -225,7 +229,7 @@ button {
   min-height: 30px;
   padding: 0 13px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 999px; corner-shape: round;
   background: var(--fill);
   color: var(--label);
   font: inherit;
@@ -284,8 +288,8 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 .field > span:first-child { color: var(--secondary); font-size: 11px; font-weight: 600; }
 
 /* The segmented control for pickers. */
-.segmented { display: inline-flex; gap: 2px; padding: 3px; border-radius: 999px; background: var(--fill); }
-.segmented > button { min-height: 26px; padding: 0 12px; border-radius: 999px; background: none; color: var(--secondary); font-weight: 500; }
+.segmented { display: inline-flex; gap: 2px; padding: 3px; border-radius: 999px; corner-shape: round; background: var(--fill); }
+.segmented > button { min-height: 26px; padding: 0 12px; border-radius: 999px; corner-shape: round; background: none; color: var(--secondary); font-weight: 500; }
 .segmented > button[aria-selected="true"], .segmented > button[aria-checked="true"] {
   background: var(--surface);
   color: var(--label);
@@ -316,7 +320,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 .panel-title { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
 .panel-title svg { width: 16px; height: 16px; color: var(--secondary); }
 .panel-list { display: grid; gap: 14px; }
-.spinner { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--quaternary); border-top-color: var(--secondary); animation: spin 0.8s linear infinite; }
+.spinner { width: 14px; height: 14px; border-radius: 50%; corner-shape: round; border: 2px solid var(--quaternary); border-top-color: var(--secondary); animation: spin 0.8s linear infinite; }
 @keyframes spin { to { rotate: 360deg; } }
 .action-message { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--secondary); overflow-wrap: anywhere; animation: swap 320ms var(--ease-out); }
 .action-message[data-tone="failed"] { color: var(--red); }
@@ -332,7 +336,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   align-items: center;
   gap: 6px;
   padding: 8px 14px;
-  border-radius: 999px;
+  border-radius: 999px; corner-shape: round;
   background: var(--ink);
   color: var(--on-ink);
   font-size: 12px;
@@ -412,7 +416,7 @@ dialog.detail-panel[open] { display: flex; flex-direction: column; }
   width: 4px;
   height: 40px;
   translate: 0 -50%;
-  border-radius: 999px;
+  border-radius: 999px; corner-shape: round;
   background: var(--hairline-strong);
   opacity: 0;
   transition: opacity 160ms ease-out, height 260ms var(--ease-out), background-color 160ms;
@@ -588,7 +592,7 @@ dialog.detail-panel { container: panel / inline-size; }
   width: 100%;
   min-height: 34px;
   padding: 0 8px 0 10px;
-  border-radius: 10px;
+  border-radius: 10px; corner-shape: var(--smooth);
   background: var(--surface);
   box-shadow: inset 0 0 0 1px var(--hairline);
   color: var(--tertiary);
@@ -622,7 +626,7 @@ dialog.detail-panel { container: panel / inline-size; }
   width: 100%;
   min-height: 32px;
   padding: 0 8px 0 10px;
-  border-radius: 9px;
+  border-radius: 9px; corner-shape: var(--smooth);
   background: none !important;
   color: var(--secondary);
   font-weight: 450;
@@ -635,14 +639,14 @@ dialog.detail-panel { container: panel / inline-size; }
 /* The others dim while the pointer rests on one, as the reference menus do. */
 .nav-list[data-hovering] .nav-item:not(:hover):not([aria-current="true"]) { opacity: 0.55; }
 @media (hover: hover) { .nav-item:hover { color: var(--label); } }
-.nav-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--tone); box-shadow: 0 0 0 3px color-mix(in srgb, var(--tone) 18%, transparent); }
+.nav-dot { width: 7px; height: 7px; border-radius: 50%; corner-shape: round; background: var(--tone); box-shadow: 0 0 0 3px color-mix(in srgb, var(--tone) 18%, transparent); }
 .nav-dot[data-state="working"] { animation: pulse 2.4s var(--ease-in-out) infinite; }
 @keyframes pulse { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--tone) 0%, transparent); } }
-.nav-count { min-width: 20px; height: 18px; padding: 0 6px; border-radius: 999px; background: var(--orange); color: var(--on-orange); font-size: 10.5px; font-weight: 600; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; animation: swap 360ms var(--ease-out); }
+.nav-count { min-width: 20px; height: 18px; padding: 0 6px; border-radius: 999px; corner-shape: round; background: var(--orange); color: var(--on-orange); font-size: 10.5px; font-weight: 600; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; animation: swap 360ms var(--ease-out); }
 .nav-key { opacity: 0; transition: opacity 160ms ease-out; }
 @media (hover: hover) { .nav-item:hover .nav-key { opacity: 1; } }
 .sidebar-foot { display: grid; gap: 6px; margin-top: auto; padding-top: 13px; border-top: 1px solid var(--hairline); }
-.sidebar-item { justify-content: flex-start; gap: 10px; width: 100%; min-height: 32px; padding: 0 10px; border-radius: 9px; background: none; color: var(--secondary); font-weight: 450; }
+.sidebar-item { justify-content: flex-start; gap: 10px; width: 100%; min-height: 32px; padding: 0 10px; border-radius: 9px; corner-shape: var(--smooth); background: none; color: var(--secondary); font-weight: 450; }
 .sidebar-item svg { width: 16px; height: 16px; transition: rotate 500ms var(--ease-out); }
 @media (hover: hover) {
   .sidebar-item:not(:disabled):hover { color: var(--label); }
@@ -715,10 +719,10 @@ dialog.detail-panel { container: panel / inline-size; }
 .search-pill svg { color: var(--secondary); }
 .search-pill[data-hidden] { opacity: 0; }
 @media (hover: hover) { .search-pill:hover { box-shadow: inset 0 0 0 1px var(--hairline-strong), 0 2px 8px -4px var(--lift); } }
-.connection { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 11px; border-radius: 999px; color: var(--secondary); font-size: 12px; white-space: nowrap; }
-.connection > i { position: relative; width: 7px; height: 7px; border-radius: 50%; background: var(--tertiary); }
+.connection { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 11px; border-radius: 999px; corner-shape: round; color: var(--secondary); font-size: 12px; white-space: nowrap; }
+.connection > i { position: relative; width: 7px; height: 7px; border-radius: 50%; corner-shape: round; background: var(--tertiary); }
 .connection[data-state="live"] > i { background: var(--green); }
-.connection[data-state="live"] > i::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: var(--green); animation: ping 2.4s var(--ease-out) infinite; }
+.connection[data-state="live"] > i::after { content: ""; position: absolute; inset: 0; border-radius: 50%; corner-shape: round; background: var(--green); animation: ping 2.4s var(--ease-out) infinite; }
 @keyframes ping { 0% { scale: 1; opacity: 0.6; } 70%, 100% { scale: 2.6; opacity: 0; } }
 .connection[data-state="lost"] { color: var(--orange); }
 .connection[data-state="lost"] > i { background: var(--orange); }
@@ -754,7 +758,7 @@ dialog.detail-panel { container: panel / inline-size; }
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--orange) 24%, transparent);
   color: var(--label);
 }
-.attention-count { display: grid; place-items: center; min-width: 28px; height: 28px; padding: 0 8px; border-radius: 999px; background: var(--orange); color: var(--on-orange); font-size: 13px; font-weight: 600; }
+.attention-count { display: grid; place-items: center; min-width: 28px; height: 28px; padding: 0 8px; border-radius: 999px; corner-shape: round; background: var(--orange); color: var(--on-orange); font-size: 13px; font-weight: 600; }
 .attention > svg { color: var(--orange); transition: translate 260ms var(--ease-out); }
 @media (hover: hover) {
   .attention:hover { background: color-mix(in srgb, var(--orange) 16%, var(--surface)) !important; }
@@ -811,19 +815,19 @@ dialog.detail-panel { container: panel / inline-size; }
   animation: fade 160ms ease-out;
 }
 .kpi-marks { display: flex; align-items: center; padding-bottom: 4px; }
-.kpi-marks > span { display: grid; place-items: center; width: 30px; height: 30px; margin-inline-start: -8px; border-radius: 50%; background: var(--surface); box-shadow: 0 0 0 2px var(--surface), inset 0 0 0 1px color-mix(in srgb, var(--tone) 40%, transparent); color: var(--label); animation: swap 420ms var(--ease-out) both; animation-delay: calc(var(--i, 0) * 60ms + 200ms); }
+.kpi-marks > span { display: grid; place-items: center; width: 30px; height: 30px; margin-inline-start: -8px; border-radius: 50%; corner-shape: round; background: var(--surface); box-shadow: 0 0 0 2px var(--surface), inset 0 0 0 1px color-mix(in srgb, var(--tone) 40%, transparent); color: var(--label); animation: swap 420ms var(--ease-out) both; animation-delay: calc(var(--i, 0) * 60ms + 200ms); }
 .kpi-marks > span:first-child { margin-inline-start: 0; }
 .kpi-marks > .kpi-more { color: var(--secondary); font-size: 11px; font-weight: 600; }
 .share { display: grid; gap: 10px; padding: 16px 22px 20px; border-top: 1px solid var(--hairline); }
 .share-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; font-size: 12px; color: var(--secondary); }
 .share-legend > span { display: inline-flex; align-items: center; gap: 6px; }
-.share-legend > span > i { width: 8px; height: 8px; border-radius: 50%; background: var(--tone); }
+.share-legend > span > i { width: 8px; height: 8px; border-radius: 50%; corner-shape: round; background: var(--tone); }
 .share-legend > span[data-zero] > i { background: var(--quaternary); }
 .share-legend b { color: var(--label); font-weight: 600; }
 .share-tokens { margin-inline-start: auto; color: var(--tertiary); }
 .share-bar { display: flex; gap: 4px; height: 8px; }
-.share-bar > i { min-width: 8px; border-radius: 999px; background: var(--tone); transition: flex-grow 800ms var(--ease-out); animation: grow-x 900ms var(--ease-out) both 200ms; transform-origin: left; }
-.share-bar[data-empty] { border-radius: 999px; background: var(--quaternary); }
+.share-bar > i { min-width: 8px; border-radius: 999px; corner-shape: round; background: var(--tone); transition: flex-grow 800ms var(--ease-out); animation: grow-x 900ms var(--ease-out) both 200ms; transform-origin: left; }
+.share-bar[data-empty] { border-radius: 999px; corner-shape: round; background: var(--quaternary); }
 @keyframes grow-x { from { scale: 0 1; } }
 
 /* The dashboard: what is going on, with the agents and the crew's rhythm beside it. */
@@ -847,7 +851,7 @@ dialog.detail-panel { container: panel / inline-size; }
 .agent-card-head > div { flex: 1; min-width: 0; display: grid; gap: 1px; }
 .agent-card-head .caption { color: var(--secondary); }
 .agent-avatar { position: relative; display: grid; place-items: center; flex: none; width: 26px; height: 26px; }
-.agent-avatar::after { content: ""; position: absolute; right: -2px; bottom: -2px; width: 10px; height: 10px; border-radius: 50%; background: var(--tone); box-shadow: 0 0 0 2px var(--surface); }
+.agent-avatar::after { content: ""; position: absolute; right: -2px; bottom: -2px; width: 10px; height: 10px; border-radius: 50%; corner-shape: round; background: var(--tone); box-shadow: 0 0 0 2px var(--surface); }
 /* Opaque, so the logo does not show through the idle dot. */
 .agent-avatar[data-state="idle"]::after { background: color-mix(in srgb, var(--label) 22%, var(--surface)); }
 .agent-card-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--secondary); font-variant-numeric: tabular-nums; }
@@ -918,7 +922,7 @@ dialog.detail-panel { container: panel / inline-size; }
 .events { position: relative; display: grid; gap: 14px; }
 .event { position: relative; display: flex; align-items: flex-start; gap: 12px; animation: rise 460ms var(--ease-out) both; animation-delay: calc(var(--i, 0) * 30ms); }
 .event + .event::before { content: ""; position: absolute; left: 9px; top: -14px; height: 16px; width: 1px; background: var(--hairline-strong); }
-.event-mark { display: grid; place-items: center; flex: none; width: 19px; height: 19px; margin-top: 2.5px; border-radius: 50%; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--hairline); color: var(--secondary); }
+.event-mark { display: grid; place-items: center; flex: none; width: 19px; height: 19px; margin-top: 2.5px; border-radius: 50%; corner-shape: round; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--hairline); color: var(--secondary); }
 .event-mark svg { width: 11px; height: 11px; }
 .event[data-kind="error"] .event-mark { color: var(--red); }
 .event[data-kind="done"] .event-mark { color: var(--green); }
@@ -951,7 +955,7 @@ dialog.detail-panel { container: panel / inline-size; }
   content: "";
   width: 16px;
   height: 16px;
-  border-radius: 50%;
+  border-radius: 50%; corner-shape: round;
   background: conic-gradient(var(--tone) calc(var(--progress) * 1turn), var(--quaternary) 0);
   -webkit-mask: radial-gradient(circle, transparent 4.5px, #000 5px);
   mask: radial-gradient(circle, transparent 4.5px, #000 5px);
@@ -992,7 +996,7 @@ dialog.detail-panel { container: panel / inline-size; }
   place-items: center;
   width: 26px;
   height: 26px;
-  border-radius: 50%;
+  border-radius: 50%; corner-shape: round;
   box-shadow: inset 0 0 0 1.5px var(--track);
   color: var(--secondary);
   font-size: 11px;
@@ -1032,7 +1036,7 @@ dialog.detail-panel { container: panel / inline-size; }
   width: 100%;
   min-height: 0;
   padding: 10px 12px;
-  border-radius: var(--row-radius);
+  border-radius: var(--row-radius); corner-shape: var(--smooth);
   background: var(--row);
   color: var(--label);
   font-weight: 400;
@@ -1059,7 +1063,7 @@ dialog.detail-panel { container: panel / inline-size; }
 .toolbar-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; animation: rise 520ms var(--ease-out) both; }
 .filter { position: relative; flex: 0 1 280px; min-width: 180px; }
 .filter svg { position: absolute; left: 11px; top: 50%; translate: 0 -50%; width: 14px; height: 14px; color: var(--tertiary); pointer-events: none; }
-.filter input { min-height: 32px; padding-inline-start: 32px; border-radius: 999px; background: var(--surface); border-color: var(--hairline); }
+.filter input { min-height: 32px; padding-inline-start: 32px; border-radius: 999px; corner-shape: round; background: var(--surface); border-color: var(--hairline); }
 .table-panel { padding-bottom: 8px; }
 .table-scroll { margin-inline: calc(var(--card-padding) * -1); overflow-x: auto; }
 .jobs-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12.5px; }
@@ -1133,7 +1137,7 @@ th[aria-sort] .sort { color: var(--label); }
 }
 .menu-list.context { position: fixed; right: auto; top: auto; transform-origin: top left; }
 @keyframes menu-in { from { opacity: 0; scale: 0.94; filter: blur(4px); } }
-.menu-list button { justify-content: flex-start; min-height: 30px; padding: 0 10px; border-radius: 9px; background: none; color: var(--label); font-weight: 400; white-space: nowrap; }
+.menu-list button { justify-content: flex-start; min-height: 30px; padding: 0 10px; border-radius: 9px; corner-shape: var(--smooth); background: none; color: var(--label); font-weight: 400; white-space: nowrap; }
 .menu-list button svg { color: var(--secondary); }
 @media (hover: hover) { .menu-list button:not(:disabled):hover { background: var(--fill-strong); } }
 .menu-list hr { height: 1px; margin: 4px 8px; border: 0; background: var(--hairline); }
@@ -1166,7 +1170,7 @@ dialog.palette-layer::backdrop { background: var(--scrim-light); animation: fade
   gap: 10px;
   min-height: 36px;
   padding: 0 10px;
-  border-radius: 10px;
+  border-radius: 10px; corner-shape: var(--smooth);
   color: var(--label);
   cursor: pointer;
   transition: opacity 140ms ease-out, background-color 140ms ease-out;
@@ -1245,9 +1249,12 @@ dialog.palette-layer::backdrop { background: var(--scrim-light); animation: fade
     bottom: max(12px, env(safe-area-inset-bottom));
     z-index: 5;
     display: block;
+    /* Sized by its items: a fixed box at left: 50% would otherwise be given only half the screen to fit them in. */
+    width: max-content;
+    max-width: calc(100vw - 24px);
     translate: -50% 0;
     padding: 5px;
-    border-radius: 999px;
+    border-radius: 999px; corner-shape: round;
     background: color-mix(in srgb, var(--surface) 82%, transparent);
     -webkit-backdrop-filter: blur(24px) saturate(1.6);
     backdrop-filter: blur(24px) saturate(1.6);
@@ -1256,7 +1263,7 @@ dialog.palette-layer::backdrop { background: var(--scrim-light); animation: fade
   }
   .dock .nav-list { display: flex; gap: 2px; }
   .dock .nav-glide { display: none; }
-  .dock .nav-item { width: auto; min-height: 40px; padding: 0 14px; border-radius: 999px; gap: 6px; }
+  .dock .nav-item { width: auto; min-height: 40px; padding: 0 14px; border-radius: 999px; corner-shape: round; gap: 6px; }
   .dock .nav-item[aria-current="true"] { background: var(--ink) !important; color: var(--on-ink); box-shadow: none; }
   /* Out of sight but still the item's name. */
   .dock .nav-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }

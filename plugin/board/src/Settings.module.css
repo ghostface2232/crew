@@ -9,7 +9,7 @@
 .windowTitle { flex: 1; min-width: 0; font: 600 20px/1.2 var(--rounded); }
 .sectionLabel { padding: 12px 8px 4px; color: var(--secondary); font-size: 11px; font-weight: 600; }
 .section { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
-.item { justify-content: flex-start; gap: 8px; width: 100%; min-height: 30px; padding: 0 8px; border-radius: 8px; background: none; color: var(--label); font-weight: 400; text-align: start; }
+.item { justify-content: flex-start; gap: 8px; width: 100%; min-height: 30px; padding: 0 8px; border-radius: 8px; corner-shape: var(--smooth); background: none; color: var(--label); font-weight: 400; text-align: start; }
 .item[aria-current="page"] { background: var(--fill-strong); font-weight: 500; }
 @media (hover: hover) { .item:not([aria-current="page"]):hover { background: var(--fill); } }
 .itemTitle { flex: 1; min-width: 0; }
@@ -92,7 +92,8 @@
   .tile { width: 26px; height: 26px; border-radius: 7px; }
   .tile svg { width: 15px; height: 15px; }
   .chevron { display: block; color: var(--tertiary); }
-  .pageHead { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); padding: 12px 12px 26px; margin-bottom: -2px; }
+  /* The buttons keep their width and the title takes the rest, so a long one is cut instead of covering them. */
+  .pageHead { display: grid; grid-template-columns: minmax(max-content, 1fr) minmax(0, auto) minmax(max-content, 1fr); padding: 12px 12px 26px; margin-bottom: -2px; }
   .back { display: inline-flex; justify-self: start; gap: 2px; padding-inline: 4px; }
   .listClose { display: contents; }
   .pageClose { justify-self: end; }

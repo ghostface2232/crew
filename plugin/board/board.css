@@ -1316,3 +1316,10 @@ dialog.palette-layer::backdrop { background: var(--scrim-light); animation: fade
 }
 /* The agent rows carry their own padding for the hover fill, so the label sits closer above them. */
 .agents.panel { gap: 6px; }
+
+.setup-actions { display: flex; align-items: center; gap: 8px; }
+.setup-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.setup-list li { display: grid; grid-template-columns: auto minmax(0, max-content) minmax(0, 1fr); align-items: baseline; gap: 8px; }
+.setup-list li svg { align-self: center; color: var(--red); }
+.setup-list li[data-ok] svg { color: var(--secondary); }
+.setup-list li .caption { overflow-wrap: anywhere; }

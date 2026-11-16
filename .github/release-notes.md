@@ -17,4 +17,4 @@ The apps are not yet signed by a recognized publisher, so the first launch may t
 
 After that, both apps update themselves from this page: a newer release downloads while you are away and installs only when you choose **Restart to Update**.
 
-The app does not install the Claude Code plugin yet. Install it from source as described in the [README](https://github.com/ghostface2232/crew#getting-started).
+On first launch the app installs the Crew plugin for Claude Code and the `crew` command, then lists anything else Crew needs: Claude Code, and the Codex and Antigravity CLIs signed in. Open a new Claude Code session afterwards to use `/crew:run`.

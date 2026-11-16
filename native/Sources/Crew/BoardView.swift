@@ -47,6 +47,7 @@ struct BoardView: View {
             LazyVStack(alignment: .leading, spacing: WorkspaceStyle.cardGap) {
                 if !store.connected { connectionBanner }
                 heading
+                if store.connected && store.project.isEmpty && (store.selection == "overview" || store.selection == nil) { SetupCard(api: store.api) }
                 if store.state.pendingCount > 0 && store.selection != "needs" && !store.project.isEmpty { attentionBanner.transition(.card) }
                 if store.selection == "needs" { NeedsYouView(store: store) }
                 else if store.selection == "activity" { activity }

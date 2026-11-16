@@ -2,18 +2,20 @@ import { chromium } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { bundlePlugin } from './bundle-plugin.mjs';
 
 // The Electron shell for Windows: compiled main process and bridge, the built board, and rendered icons.
 const root = path.resolve('desktop/build');
 fs.rmSync(root, { recursive: true, force: true });
 execFileSync(process.execPath, ['node_modules/typescript/bin/tsc', '-p', 'tsconfig.desktop.json'], { stdio: 'inherit' });
-for (const folder of ['roles', '.claude-plugin', 'board/dist']) {
-  fs.cpSync(`plugin/${folder}`, path.join(root, 'plugin', folder), { recursive: true });
-}
-// The compiled bridge carries the source's fingerprint, so the app and a plugin install agree on whose daemon is current.
-const { installed } = await import(pathToFileURL(path.resolve('plugin/bridge/config.ts')).href);
-fs.writeFileSync(path.join(root, 'plugin/.claude-plugin/build'), `${installed().build}\n`);
+await bundlePlugin(root, '../runtime/node.exe');
+// The plugin's hooks run on their own Node: Crew.exe runs as Node only with ELECTRON_RUN_AS_NODE set, and a hook
+// command cannot set its environment. Packaging copies this machine's Node, so it builds on Windows.
+if (process.platform === 'win32') {
+  fs.mkdirSync(path.join(root, 'runtime'), { recursive: true });
+  fs.copyFileSync(process.execPath, path.join(root, 'runtime/node.exe'));
+  fs.copyFileSync(path.resolve(path.dirname(process.execPath), 'LICENSE'), path.join(root, 'runtime/LICENSE'));
+} else console.warn('Not on Windows: the bundled plugin has no Node runtime in this build.');
 const version = JSON.parse(fs.readFileSync('package.json', 'utf8')).version;
 fs.writeFileSync(
   path.join(root, 'package.json'),
@@ -69,5 +71,6 @@ const licenses = ['react', 'react-dom', 'scheduler', 'lucide-react'].map(
   (name) => `${name}\n${fs.readFileSync(`node_modules/${name}/LICENSE`, 'utf8')}`,
 );
 licenses.push(`Inter\n${fs.readFileSync('plugin/board/inter-LICENSE.txt', 'utf8')}`);
+if (process.platform === 'win32') licenses.push(`Node.js ${process.version}\nSee runtime/LICENSE for Node.js and its bundled dependencies.`);
 fs.writeFileSync(path.join(root, 'THIRD-PARTY-NOTICES.txt'), licenses.join('\n\n'));
 console.log(root);

@@ -19,6 +19,8 @@ import type { Mission } from './missions.ts';
 import { addEvidence, loadNotes, notesFile, renderNotes, scoreAll, setSummary } from './notes.ts';
 import type { NotesFile } from './notes.ts';
 import { runbook } from './runbook.ts';
+import { checks as setupChecks, PACKAGED, register, registered } from './setup.ts';
+import type { Registration, SetupItem } from './setup.ts';
 import { toastCommand } from './toast.ts';
 import { ANTIGRAVITY_MODELS, codexModels } from './tiers.ts';
 import { appendInstructions, instructionsFile, readInstructions, savePreset, saveRoles, writeInstructions } from './settings.ts';
@@ -404,6 +406,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       return { file, text: readInstructions(file) };
     }
     if (pathname === '/api/usage') return usage.current();
+    if (pathname === '/api/setup') return setupState(url.searchParams.has('refresh'));
     if (pathname === '/api/route') {
       const kind = url.searchParams.get('kind');
       if (kind !== 'lead' && !isRole(kind)) throw new HttpError(400, `kind must be one of: ${ROLES.join(', ')}, lead`);
@@ -557,6 +560,10 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
   }
 
   if (method === 'POST') {
+    if (pathname === '/api/setup/repair') {
+      await registerPlugin();
+      return setupState(true);
+    }
     if (pathname === '/api/gc') {
       const body = await readJson(req);
       if (body.apply !== undefined && typeof body.apply !== 'boolean' || body.branches !== undefined && typeof body.branches !== 'boolean') {
@@ -740,6 +747,36 @@ function shutdown(): void {
 
 fs.writeFileSync(path.join(HOME, 'daemon.json'), JSON.stringify({ pid: process.pid, port: PORT, version: VERSION, build: BUILD, root: PLUGIN_ROOT }));
 log(`crew daemon ${VERSION} (${BUILD}) listening on http://127.0.0.1:${PORT}`);
+
+// The setup checklist: what Crew needs, checked by running each CLI, so it is cached for a minute.
+let registering: Promise<Registration> | null = null;
+let registration: Registration | undefined;
+let setupChecked: Promise<SetupItem[]> | null = null;
+let setupCheckedAt = 0;
+function registerPlugin(): Promise<Registration> {
+  registering ??= register()
+    .catch((err: Error): Registration => ({ ok: false, detail: err.message }))
+    .then((result) => {
+      registration = result;
+      log(`plugin registration: ${result.detail}`);
+      return result;
+    })
+    .finally(() => {
+      registering = null;
+      setupChecked = null;
+    });
+  return registering;
+}
+async function setupState(refresh: boolean): Promise<{ items: SetupItem[]; packaged: boolean; registering: boolean; registration?: Registration }> {
+  if (refresh || !setupChecked || Date.now() - setupCheckedAt > 60_000) {
+    setupCheckedAt = Date.now();
+    setupChecked = (registering ?? Promise.resolve()).then(() => setupChecks());
+  }
+  const items = await setupChecked;
+  return { items, packaged: PACKAGED, registering: registering !== null, registration };
+}
+// An app's copy registers itself on first launch and after each update, so its plugin matches its daemon.
+if (PACKAGED && !registered()) void registerPlugin();
 
 // Keeps idle SSE connections from being dropped by intermediaries and detects dead ones.
 setInterval(() => {

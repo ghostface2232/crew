@@ -4,6 +4,10 @@ A Claude Code plugin that divides roles across Claude, Codex, and Antigravity so
 
 ## Getting started
 
+Install the desktop app from [Releases](https://github.com/ghostface2232/crew/releases/latest) and open it. On first launch it installs the Crew plugin for Claude Code and the `crew` command, both running on the app's own Node, and its overview lists anything else Crew needs. Open a new Claude Code session afterwards. The app updates the plugin along with itself, but leaves a plugin installed from a source checkout alone.
+
+### From source
+
 Requirements: Node.js 22.18+, git, and authenticated `claude`, `codex`, and `agy` CLIs.
 
 ```bash

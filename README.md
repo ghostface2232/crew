@@ -1,6 +1,6 @@
 # Crew
 
-A Claude Code plugin that divides roles across Claude, Codex, and Antigravity so they collaborate as a three-agent crew. Claude acts as the lead and self-reviewer, Codex handles supporting implementation and cross-review, and Antigravity polishes UX copy, comments, and documentation. A native SwiftUI macOS app and a React web board show what all three agents are doing in real time.
+A Claude Code plugin that divides roles across Claude, Codex, and Antigravity so they collaborate as a three-agent crew. Claude acts as the lead and self-reviewer, Codex handles supporting implementation and cross-review, and Antigravity polishes UX copy, comments, and documentation. A native SwiftUI macOS app, a Windows Electron app, and a React web board show what all three agents are doing in real time.
 
 ## Getting started
 
@@ -54,9 +54,9 @@ When a worker asks for approval or has a question, an input dialog pops up in th
 npm run desktop
 ```
 
-Build a local macOS 26+ app bundle with `npm run package:desktop`; it is written to `release/Crew.app`. Building requires Xcode 26+ and a standalone Node.js distribution. The app bundles Node for the existing TypeScript daemon. Closing the window hides it to the tray; quitting the app leaves jobs running. The app restores its window and opens approval notifications at the relevant job. The web board stays available.
+On macOS, this builds the native SwiftUI app; on Windows, it builds an Electron app around the web board. `npm run package:desktop` writes `release/Crew.app` on macOS (Xcode 26+ and a standalone Node.js distribution required) or `release/Crew-win32-x64/Crew.exe` on Windows. Both apps run the existing TypeScript daemon without a separate Node install. Closing the window hides it to the tray; quitting the app leaves jobs running. Both restore their window; the macOS app also opens approval notifications at the relevant job. The web board stays available.
 
-The board can send jobs directly for any role except debate, using the configured roles. Full missions still begin in the Claude lead session. See [the native macOS implementation and verification notes](docs/08-native-macos.md) for development, tests, resource measurements and distribution limits.
+The board can send jobs directly for any role except debate, using the configured roles. Full missions still begin in the Claude lead session. See the [native macOS](docs/08-native-macos.md) and [Windows](docs/12-windows-electron.md) notes for development, tests, resource measurements, and distribution limits.
 
 ## How it works
 
@@ -76,7 +76,7 @@ Using Antigravity carries a Terms of Service risk; read [docs/04-implementation.
 | --- | --- |
 | `plugin/bridge/` | Daemon, MCP server, agent adapters, CLI (TypeScript, no build step) |
 | `plugin/board/` | React + TypeScript board, shared CSS tokens and Vite output |
-| `native/`, `desktop/`, `scripts/` | SwiftUI/AppKit app, app artwork, build/packaging and desktop verification |
+| `native/`, `desktop/`, `scripts/` | SwiftUI/AppKit macOS app, Electron Windows app, build/packaging, and desktop verification |
 | `plugin/roles/` | Role instructions (engineer, reviewer, editor, and additions for refactoring, release preparation, and fixing) injected into whichever agent holds the role, on every job |
 | `plugin/skills/`, `plugin/agents/`, `plugin/hooks/` | `/crew:run`, `/crew:debate`, `/crew:review`, `/crew:board`, self-reviewer subagent, hooks |
 | `test/` | Unit tests (`npm test`) and Playwright regressions (`npm run test:e2e`) |
@@ -94,6 +94,7 @@ Using Antigravity carries a Terms of Service risk; read [docs/04-implementation.
 | [docs/07-desktop-and-react.md](docs/07-desktop-and-react.md) | React migration and historical Electron implementation |
 | [docs/08-native-macos.md](docs/08-native-macos.md) | Native macOS app, Liquid Glass, Swift 6, packaging and verification |
 | [docs/09-usage-presets-rounds.md](docs/09-usage-presets-rounds.md) | AgentGauge usage and routing, presets, rounds, intents, and the API they share |
+| [docs/12-windows-electron.md](docs/12-windows-electron.md) | Windows Electron app, frameless window, notifications, packaging and verification |
 
 ## Current status
 

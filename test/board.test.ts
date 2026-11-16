@@ -56,7 +56,12 @@ test('repeatable follow-ups can be sent again after acceptance', async () => {
 
 test('elapsed time and project names use the app\'s labels', () => {
   assert.deepEqual([elapsed(42_000), elapsed(479_000), elapsed(3_780_000)], ['<1m', '7m', '1h 3m']);
-  assert.deepEqual([...projectNames(['/a/app', '/b/app', '/c/tool']).values()], ['/a/app', '/b/app', 'tool']);
+  assert.deepEqual([...projectNames(['/a/app', '/b/app', '/c/tool']).values()], ['a/app', 'b/app', 'tool']);
+  assert.deepEqual(
+    [...projectNames(['C:\\Users\\me\\OneDrive\\crew', 'C:\\Users\\me\\work\\site', 'D:\\x\\site', '/x/site']).values()],
+    ['crew', 'work\\site', 'D:\\x\\site', '/x/site'],
+  );
+  assert.deepEqual([...projectNames(['C:\\a\\app', 'D:\\b\\APP']).values()], ['a\\app', 'b\\APP']);
   assert.equal(jobLabel({ state: 'running', stalled: true } as BoardJob), 'May be stuck');
   assert.equal(jobLabel({ state: 'waiting', stalled: true, waiting: { type: 'approval' } } as BoardJob), 'Needs approval');
   assert.equal(STOP_OF_STAGE['self-review'], STOP_OF_STAGE['cross-review']);

@@ -382,6 +382,9 @@ dialog.sheet {
 /* A scrollbar sits inside the border, so this keeps its ends clear of the rounded corners; the body's padding gives that space back. */
 dialog.sheet:has(> .sheet-body) { border-block: var(--panel-radius) solid transparent; }
 dialog.sheet::backdrop { background: var(--scrim); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); }
+/* A backdrop stops at the page's scrollbar gutter, so the gutter's track takes the same scrim while a modal is open. */
+:root:has(dialog.sheet:modal) { scrollbar-color: transparent var(--scrim); }
+:root:has(dialog.palette-layer:modal) { scrollbar-color: transparent var(--scrim-light); }
 @media (prefers-reduced-motion: no-preference) {
   dialog.sheet[open] { animation: sheet-in 420ms var(--ease-out); }
   dialog.sheet[open]::backdrop { animation: fade 300ms ease-out; }
@@ -594,7 +597,8 @@ dialog.detail-panel { container: panel / inline-size; }
   display: flex;
   flex-direction: column;
   gap: 14px;
-  padding: 16px 14px 14px;
+  /* The brand row (34px tall with its padding) centers on the top bar's 60px row. */
+  padding: 13px 14px 14px;
   border-inline-end: 1px solid var(--hairline);
   overflow-y: auto;
 }
@@ -611,7 +615,7 @@ dialog.detail-panel { container: panel / inline-size; }
   padding: 0 8px 0 10px;
   border-radius: 13px; corner-shape: var(--smooth);
   background: var(--surface);
-  box-shadow: inset 0 0 0 1px var(--hairline);
+  box-shadow: inset 0 0 0 1px var(--hairline-strong);
   color: var(--tertiary);
   font-weight: 400;
 }
@@ -727,7 +731,8 @@ dialog.detail-panel { container: panel / inline-size; }
   min-height: 34px;
   padding: 0 12px;
   background: var(--surface);
-  box-shadow: inset 0 0 0 1px var(--hairline);
+  /* Outside the box: an inset ring eats the fill's edge and the pill reads smaller than the New Job button beside it. */
+  box-shadow: 0 0 0 1px var(--hairline-strong);
   color: var(--tertiary);
   font-weight: 400;
   transition: opacity 120ms ease-out, background-color 160ms ease-out, box-shadow 200ms ease-out;
@@ -735,7 +740,7 @@ dialog.detail-panel { container: panel / inline-size; }
 .search-pill > span { flex: 1; text-align: start; overflow: hidden; text-overflow: ellipsis; }
 .search-pill svg { color: var(--secondary); }
 .search-pill[data-hidden] { opacity: 0; }
-@media (hover: hover) { .search-pill:hover { box-shadow: inset 0 0 0 1px var(--hairline-strong), 0 2px 8px -4px var(--lift); } }
+@media (hover: hover) { .search-pill:hover { box-shadow: 0 0 0 1px var(--hairline-strong), 0 2px 8px -4px var(--lift); } }
 .connection { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 11px; border-radius: 999px; corner-shape: round; color: var(--secondary); font-size: 12px; white-space: nowrap; }
 .connection > i { position: relative; width: 7px; height: 7px; border-radius: 50%; corner-shape: round; background: var(--tertiary); }
 .connection[data-state="live"] > i { background: var(--green); }

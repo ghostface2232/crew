@@ -60,7 +60,15 @@ export function Palette({ state, names, projects, origin, close, actions }: {
   const height = Math.min(500, innerHeight - 96);
   // Anchored to the search control's right edge, growing down and to the left from it; centered without one.
   const left = origin ? Math.max(12, Math.min(origin.right - width, innerWidth - 12 - width)) : (innerWidth - width) / 2;
-  const top = origin ? Math.max(8, origin.top) : 72;
+  // Where the page draws the title bar (the Windows app), the window buttons keep their corner, so a palette reaching
+  // under them starts below them instead.
+  // Not yet in TypeScript's DOM types.
+  const overlay = (navigator as { windowControlsOverlay?: { visible: boolean; getTitlebarAreaRect(): DOMRect } }).windowControlsOverlay;
+  const bar = overlay?.visible ? overlay.getTitlebarAreaRect() : null;
+  const below = bar && left + width > bar.right ? bar.bottom + 8 : 0;
+  const top = Math.max(origin ? Math.max(8, origin.top) : 72, below);
+  // The morph to and from the search control would pass under those buttons, so a palette moved below them fades instead.
+  const anchor = below ? undefined : origin;
   const entries = useMemo(() => {
     const list: Entry[] = [];
     const notifyState = notificationPermission();
@@ -163,9 +171,9 @@ export function Palette({ state, names, projects, origin, close, actions }: {
     if (!element || reducedMotion()) return done();
     // The way back is quicker, and the contents go before the shape, which folds into the control.
     element.querySelector('.palette-content')?.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 120, fill: 'forwards' });
-    const to = origin ?? new DOMRect(left + width / 2 - 20, top, 40, 40);
+    const to = anchor ?? new DOMRect(left + width / 2 - 20, top, 40, 40);
     element
-      .animate([{}, { left: `${to.left}px`, top: `${to.top}px`, width: `${to.width}px`, height: `${to.height}px`, borderRadius: '999px', opacity: origin ? 1 : 0 }], { duration: 240, easing: EASE_IN_OUT, fill: 'forwards' })
+      .animate([{}, { left: `${to.left}px`, top: `${to.top}px`, width: `${to.width}px`, height: `${to.height}px`, borderRadius: '999px', opacity: anchor ? 1 : 0 }], { duration: 240, easing: EASE_IN_OUT, fill: 'forwards' })
       .finished.then(done, done);
   };
   useLayoutEffect(() => {
@@ -182,10 +190,10 @@ export function Palette({ state, names, projects, origin, close, actions }: {
       previous?.focus({ preventScroll: true });
     };
     if (reducedMotion()) return restore;
-    const from = origin ?? new DOMRect(left + width / 2 - 20, top + 8, 40, 40);
+    const from = anchor ?? new DOMRect(left + width / 2 - 20, top + 8, 40, 40);
     element.animate(
       [
-        { left: `${from.left}px`, top: `${from.top}px`, width: `${from.width}px`, height: `${from.height}px`, borderRadius: '999px', opacity: origin ? 1 : 0 },
+        { left: `${from.left}px`, top: `${from.top}px`, width: `${from.width}px`, height: `${from.height}px`, borderRadius: '999px', opacity: anchor ? 1 : 0 },
         { left: `${left}px`, top: `${top}px`, width: `${width}px`, height: `${height}px`, borderRadius: '26px', opacity: 1 },
       ],
       { duration: 520, easing: EASE_OUT },

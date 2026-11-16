@@ -13,7 +13,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       # Daemons compare these versions to decide which replaces which, so they must match the tag.
       - name: Check versions match the tag
         run: |
@@ -29,17 +29,17 @@ jobs:
     # whose actool cannot compile it. This runs on the maintainer's Mac with Xcode 27.
     runs-on: [self-hosted, macOS, ARM64]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       # The official Node.js tarball is standalone and ships its LICENSE one folder above bin/node,
       # which the build copies into the app.
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
       - run: xcodebuild -version
       - run: npm ci
       - run: npm run package:desktop
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: macos
           path: release/Crew-macOS-*.zip
@@ -49,8 +49,8 @@ jobs:
     needs: check
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -58,7 +58,7 @@ jobs:
       # The Electron build renders its icons with Playwright's Chromium.
       - run: npx playwright install chromium
       - run: npm run package:desktop
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows
           path: release/Crew-Setup-*.exe
@@ -70,8 +70,8 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/download-artifact@v5
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           path: assets
           merge-multiple: true

@@ -143,35 +143,37 @@ function cleanText(value: string, name: string, limit: number, oneLine = false):
 }
 
 export function addEvidence(home: string, input: Omit<Evidence, 'id' | 'at'> & { at?: number }): { evidence: Evidence; score: ModelScore } {
-  const model = cleanText(input.model, 'model', Infinity);
-  for (const key of ['agent', 'reviewer'] as const) {
-    if (!HOLDERS.includes(input[key])) throw new Error(`${key} must be a valid holder.`);
-  }
-  if (!CHANGE_SIZES.includes(input.size)) throw new Error('Invalid size.');
-  if (!NOTE_ROLES.includes(input.role)) throw new Error('Invalid role.');
-  if (input.tier !== undefined && !TIERS.includes(input.tier)) throw new Error('Invalid tier.');
-  if (input.role === 'fix' && !FIX_OUTCOMES.includes(input.outcome!)) throw new Error('fix requires a valid outcome.');
-  if (input.role === 'build' && input.outcome !== undefined) throw new Error('build forbids outcome.');
-  if (input.adoption !== undefined && (input.role !== 'build' || !input.job || !ADOPTIONS.includes(input.adoption))) throw new Error('adoption is for a delegated job\'s build line: as-is, after-reply, partly, or rejected.');
-  if (input.rounds !== undefined && (input.adoption === undefined || !Number.isInteger(input.rounds) || input.rounds < 0)) throw new Error('rounds must be a non-negative integer, given with adoption.');
-  const findings = {} as Findings;
-  for (const key of ['high', 'medium', 'low'] as const) {
-    const count = input.findings?.[key] === undefined ? 0 : input.findings[key];
-    if (!Number.isInteger(count) || count < 0) throw new Error(`findings.${key} must be a non-negative integer.`);
-    findings[key] = count;
-  }
-  let declined: Findings | undefined;
-  if (input.declined !== undefined) {
-    declined = {} as Findings;
+  // Every problem goes in one error with the values allowed, so a caller can correct the whole call in one retry.
+  const problems: string[] = [];
+  const check = (ok: boolean, problem: string) => { if (!ok) problems.push(problem); };
+  const nonEmpty = (value: unknown) => typeof value === 'string' && value.trim() !== '';
+  const oneOf = (values: readonly string[]) => `one of ${values.join(', ')}`;
+  check(nonEmpty(input.model), 'model (the exact model id)');
+  for (const key of ['agent', 'reviewer'] as const) check(HOLDERS.includes(input[key]), `${key} (${oneOf(HOLDERS)})`);
+  check(CHANGE_SIZES.includes(input.size), `size (${oneOf(CHANGE_SIZES)})`);
+  check(NOTE_ROLES.includes(input.role), `role (${oneOf(NOTE_ROLES)})`);
+  check(input.tier === undefined || TIERS.includes(input.tier), `tier (${oneOf(TIERS)})`);
+  if (input.role === 'fix') check(FIX_OUTCOMES.includes(input.outcome!), `outcome (required for fix: ${oneOf(FIX_OUTCOMES)})`);
+  if (input.role === 'build') check(input.outcome === undefined, 'outcome (only for fix; leave it out for build)');
+  check(input.adoption === undefined || (input.role === 'build' && Boolean(input.job) && ADOPTIONS.includes(input.adoption)), `adoption (only for a delegated job's build line: ${oneOf(ADOPTIONS)})`);
+  check(input.rounds === undefined || (input.adoption !== undefined && Number.isInteger(input.rounds) && input.rounds >= 0), 'rounds (a non-negative integer, given with adoption)');
+  const counted = (given: Partial<Findings> | undefined, name: string): Findings => {
+    const result = {} as Findings;
     for (const key of ['high', 'medium', 'low'] as const) {
-      const count = input.declined?.[key] ?? 0;
-      if (!Number.isInteger(count) || count < 0) throw new Error(`declined.${key} must be a non-negative integer.`);
-      declined[key] = count;
+      const count = given?.[key] === undefined ? 0 : given[key];
+      check(Number.isInteger(count) && count >= 0, `${name}.${key} (a non-negative integer)`);
+      result[key] = count as number;
     }
-  }
-  const text = cleanText(input.text, 'text', 300, true);
+    return result;
+  };
+  const findings = counted(input.findings, 'findings');
+  const declined = input.declined === undefined ? undefined : counted(input.declined, 'declined');
+  check(nonEmpty(input.text), 'text (one line of facts from the review)');
   const at = input.at ?? Date.now();
-  if (!Number.isFinite(at)) throw new Error('at must be a finite timestamp.');
+  check(Number.isFinite(at), 'at (a finite timestamp)');
+  if (problems.length) throw new Error(`Missing or invalid: ${problems.join('; ')}.`);
+  const model = cleanText(input.model, 'model', Infinity);
+  const text = cleanText(input.text, 'text', 300, true);
   const file = loadNotes(home);
   const existing = Object.hasOwn(file.models, model) ? file.models[model] : undefined;
   if (existing && existing.agent !== input.agent) throw new Error(`Model ${model} already belongs to agent ${existing.agent}.`);

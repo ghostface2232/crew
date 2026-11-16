@@ -89,7 +89,7 @@ How jobs work:
 - When to review while you run the Crew pipeline (/crew:run), without being asked: one review (your crew:self-reviewer subagent or \`review\`, not both) when a substantial piece of implementation reaches a stopping point; before you push or open a pull request, a review of whatever is going out that no review has covered since it last changed substantially (both in parallel for security, concurrency, or data loss; fixes for a review's findings count as covered); none for small fixes and wording. Reviewers that run in parallel are static unless exactly one of them is told it may run the app. The user's own request for a review, or for none, comes first. Outside the pipeline, review only when the user asks: do not hold back a commit or a push for one.
 - When you take a user's command through several steps, call \`mission\` with title and planned stages first, with stage as you move on, and with done as soon as the work finishes. Pass stages again with what remains to add or drop future steps. The board then shows the command as one unit with its jobs under it. Skip it for a single delegated job. When the user asks for more work after you finished a mission, start a new mission for it before you begin, including work you do yourself; a question or a reply needs none. A job started without one gets a follow-up mission named after the finished one.
 - Fixing a review's findings: triage stays yours. Decide which findings to accept and which to decline with a reason; the user's intent and this conversation decide that. A change a worker built goes back to that worker with \`reply\`, since its context is intact. The fix role is for your own code or a result merged from several jobs: when a worker holds it, \`delegate\` with role fix and give it the accepted findings with their reasons, your decisions, a map of the files involved, and a done_when; a brief of file names alone invites fixes that only hide symptoms. The review-round limit is the same whoever fixes.
-- Model notes: after each review and its fix, record what happened with \`note\`, one line per model judged: the builder's line (role build) with the findings you accepted and those you declined (several reviews of one piece of work make one line, each finding counted once; a merged result gets one line per job, with how you took a delegated job's work as adoption), and the fixer's line (role fix) with how the fix went. Facts from the review only, never impressions; findings from your own crew:self-reviewer count too. \`route\` shows the role holders' notes: let them inform your choice of tier and holder within the roles and presets the user set, which stay theirs. When a note says its summary is due, rewrite it with \`note\` (model and summary) from the evidence.
+- Model notes: after each review and its fix, record what happened with \`note\`, one line per model judged: the builder's line (role build) with the findings you accepted and those you declined (several reviews of one piece of work make one line, each finding counted once; a merged result gets one line per job, with how you took a delegated job's work as adoption), and the fixer's line (role fix) with how the fix went. Facts from the review only, never impressions; findings from your own crew:self-reviewer count too. \`route\` shows the role holders' notes: let them inform your choice of tier and holder within the roles and presets the user set, which stay theirs. When a note says its summary is due, rewrite it with \`note_summary\` from the evidence.
 - Usage is measured by AgentGauge. In the pipeline, call \`route\` once at each stage boundary before you hand out work (not on every turn) with the role you are about to hand out, and follow its assignee and reason; when it says degraded, say in your report what was skipped. Outside the pipeline, follow the roles unless a job fails on a limit.${PRESET_LINE}
 
 The user can watch every agent live on the status board at ${BASE_URL}.`;
@@ -241,12 +241,12 @@ const TOOLS = [
   {
     name: 'note',
     title: 'Note a review result',
-    description: 'Record one line of evidence in a model\'s notes after a review and its fix: who built or fixed, who reviewed, the findings you accepted, and how the fix went. The notes score each model out of 10 from the rate of accepted findings per change size (build) and from how its fixes went (fix, shown apart), and \`route\` shows them. Or, with model and summary only, rewrite a model\'s summary from its evidence.',
+    description: 'Record one line of evidence in a model\'s notes after a review and its fix: who built or fixed, who reviewed, the findings you accepted, and how the fix went. The notes score each model out of 10 from the rate of accepted findings per change size (build) and from how its fixes went (fix, shown apart), and \`route\` shows them. Give job_id or model. To rewrite a model\'s summary, use note_summary.',
     inputSchema: {
       type: 'object',
       properties: {
         job_id: { type: 'string', description: 'The job whose work was reviewed or that did the fix; its model, agent, tier and effort are read from it.' },
-        model: { type: 'string', description: 'Without job_id: the exact model of work done in this session or your subagent (yours, e.g. your own model id). With summary: the model whose summary to rewrite.' },
+        model: { type: 'string', description: 'Without job_id: the exact model of work done in this session or your subagent (yours, e.g. your own model id).' },
         role: { type: 'string', enum: ['build', 'fix'], description: 'build (default; fix for a fix-role job): the model built the change under review. fix: the model fixed the accepted findings.' },
         reviewer: { type: 'string', enum: [...Object.keys(WORKERS), LEAD], description: 'Who reviewed the work (for a fix, who checked it): the cross-reviewer\'s agent, or claude for your crew:self-reviewer.' },
         size: { type: 'string', enum: ['small', 'medium', 'large', 'xlarge'], description: 'Size of the change: small (a few lines or one function), medium (a feature in a few files), large (many files or a new subsystem), xlarge (several subsystems at once, roughly 1,500 changed lines or more).' },
@@ -264,8 +264,21 @@ const TOOLS = [
         adoption: { type: 'string', enum: ['as-is', 'after-reply', 'partly', 'rejected'], description: 'For a delegated job\'s build line: how you took its work. as-is (merged as delivered), after-reply (merged after you sent it back), partly (merged in part), rejected. Its follow-up rounds are read from the job. Noting the job again replaces its line, so give adoption again. Shown with the notes, not scored.' },
         outcome: { type: 'string', enum: ['root-cause', 'patch', 'another-review'], description: 'Required for fix: root-cause (fixed the cause), patch (handled the case without the cause), another-review (the fix needed another round).' },
         text: { type: 'string', description: 'One line of facts from the review, e.g. "Markdown parser, no findings, one follow-up on underscore boundaries". No impressions.' },
-        summary: { type: 'string', description: 'With model only: the model\'s new summary, three to five lines on what it does well, where it is weak, and what to give it. Every claim must trace back to its evidence lines.' },
       },
+      required: ['reviewer', 'size', 'text'],
+    },
+  },
+  {
+    name: 'note_summary',
+    title: 'Rewrite a model\'s summary',
+    description: 'Rewrite a model\'s summary in its notes from its evidence lines, when a note says the summary is due.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        model: { type: 'string', description: 'The exact model whose summary to rewrite, as the notes list it.' },
+        summary: { type: 'string', description: 'The model\'s new summary, three to five lines on what it does well, where it is weak, and what to give it. Every claim must trace back to its evidence lines.' },
+      },
+      required: ['model', 'summary'],
     },
   },
   {
@@ -796,14 +809,14 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       if (decision.preset !== undefined) lines.push(presetPolicy(decision.preset, decision.policy ?? undefined, ' for the next job'));
       return withNotes(lines.join('\n'), args.kind === 'lead' ? [] : decision.holders?.map((h) => h.agent) ?? roles[args.kind as Role]?.agents ?? [], 2);
     }
-    case 'note': {
-      if (args.summary !== undefined && args.job_id !== undefined) throw new Error('A summary is rewritten with model and summary alone; note the job in a separate call.');
-      const body = args.summary !== undefined
+    case 'note':
+    case 'note_summary': {
+      const body = name === 'note_summary'
         ? { model: args.model, summary: args.summary }
         : { job: args.job_id, model: args.model, role: args.role, reviewer: args.reviewer, size: args.size, tier: args.tier, findings: args.findings, declined: args.declined, adoption: args.adoption, outcome: args.outcome, text: args.text };
       const score = await api('POST', '/api/notes', body);
       const shown = score.score === null ? '—' : score.score.toFixed(1);
-      return `Noted. ${score.model} (${score.agent}): ${shown}/10, ${score.status}, ${score.buildSamples} build(s), ${score.fixSamples} fix(es).${score.consolidate ? ' Its summary is due: rewrite it from the evidence with note (model and summary).' : ''}`;
+      return `Noted. ${score.model} (${score.agent}): ${shown}/10, ${score.status}, ${score.buildSamples} build(s), ${score.fixSamples} fix(es).${score.consolidate ? ' Its summary is due: rewrite it from the evidence with note_summary.' : ''}`;
     }
     case 'status': {
       if (args.job_id) {

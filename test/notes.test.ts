@@ -53,6 +53,10 @@ test('invalid evidence is refused without changing storage', (t) => {
     [{ job: 'cx-1', rounds: 1 }, /rounds/], [{ job: 'cx-1', adoption: 'as-is', rounds: -1 }, /rounds/],
   ];
   for (const [change, error] of cases) assert.throws(() => addEvidence(dir, { ...input, ...change }), error);
+  // A call missing several fields is told all of them at once, with the values allowed.
+  const { size, reviewer, text, ...partial } = input;
+  assert.throws(() => addEvidence(dir, partial as typeof input),
+    /^Error: Missing or invalid: reviewer \(one of codex, antigravity, claude\); size \(one of small, medium, large, xlarge\); text \(one line of facts from the review\)\.$/);
   assert.equal(fs.readFileSync(notesFile(dir), 'utf8'), before);
 });
 

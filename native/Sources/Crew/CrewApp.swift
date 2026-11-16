@@ -384,6 +384,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         Task { await performUpdate(attempt) }
     }
     private func performUpdate(_ attempt: Int) async {
+        let installed = Bundle.main.bundleURL
+        if let reason = AppUpdater.canReplace(installed: installed) {
+            if attempt == installAttempt, updater.installing() { updater.failed(reason) }
+            return
+        }
         let first = await ownDaemon()
         if let active = first?.active, active > 0 {
             let alert = NSAlert()
@@ -464,10 +469,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         updater.stoppingDaemon()
         store.stop()
         paused = true
-        let installed = Bundle.main.bundleURL
         let pid = ProcessInfo.processInfo.processIdentifier
+        let result = updater.failureReport
         do {
-            handOver = try await Task.detached { try AppUpdater.handOver(archive: archive, version: version, installed: installed, processID: pid) }.value
+            handOver = try await Task.detached { try AppUpdater.handOver(archive: archive, version: version, installed: installed, processID: pid, result: result) }.value
+        } catch let error as AppUpdater.InvalidArchive {
+            updater.discard(error.localizedDescription)
+            return abandon()
         } catch {
             // The archive stays staged, so the update can be tried again.
             updater.failed(error.localizedDescription)

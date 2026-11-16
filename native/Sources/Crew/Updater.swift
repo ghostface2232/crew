@@ -94,12 +94,13 @@ enum Releases {
         phase = bundle.bundleURL.pathExtension == "app" ? .idle : .unsupported
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 30
-        configuration.timeoutIntervalForResource = 600
+        configuration.timeoutIntervalForResource = 6 * 3600
         configuration.httpAdditionalHeaders = ["User-Agent": "Crew-Desktop"]
         session = URLSession(configuration: configuration)
     }
 
     private var manifest: URL { directory.appending(path: "staged.json") }
+    var failureReport: URL { directory.appending(path: "failed.txt") }
     /// The staged archive, while one is ready or being installed.
     var archive: URL? {
         guard phase == .ready || phase == .installing, let latest else { return nil }
@@ -110,7 +111,13 @@ enum Releases {
 
     /// Picks up an archive an earlier launch staged; one no newer than this app, or no longer intact, is removed.
     func load() async {
-        guard phase != .unsupported else { return }
+        guard phase != .unsupported, !busy else { return }
+        busy = true
+        defer { busy = false }
+        if let reason = try? String(contentsOf: failureReport, encoding: .utf8) {
+            error = "Could not install the update: \(reason.trimmingCharacters(in: .whitespacesAndNewlines))"
+            try? FileManager.default.removeItem(at: failureReport)
+        }
         if let data = try? Data(contentsOf: manifest), let staged = try? JSONDecoder().decode(Staged.self, from: data),
            Releases.isVersion(staged.version), Releases.isNewer(staged.version, than: current) {
             let file = directory.appending(path: Releases.assetName(staged.version))
@@ -132,6 +139,7 @@ enum Releases {
         if !wasReady { phase = .checking }
         do {
             var request = URLRequest(url: feed)
+            request.timeoutInterval = 15
             request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
             let (data, response) = try await session.data(for: request)
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
@@ -218,9 +226,15 @@ enum Releases {
         phase = .ready; waiting = nil; error = message
     }
 
+    /// Invalid archives must be downloaded again, rather than offered for another install.
+    func discard(_ message: String) {
+        clean()
+        phase = .idle; latest = nil; page = nil; release = nil; waiting = nil; error = message
+    }
+
     /// Removes everything staged.
     private func clean() {
-        for name in (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? [] {
+        for name in (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? [] where name != "failed.txt" {
             try? FileManager.default.removeItem(at: directory.appending(path: name))
         }
     }
@@ -256,14 +270,25 @@ enum Releases {
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
+    nonisolated static func canReplace(installed: URL) -> String? {
+        let parent = installed.deletingLastPathComponent()
+        guard FileManager.default.isWritableFile(atPath: parent.path), FileManager.default.isWritableFile(atPath: installed.path) else {
+            return "Crew can’t replace itself in \(parent.path). Move Crew to a folder you can write to, such as Applications, and try again."
+        }
+        return nil
+    }
+
+    struct InvalidArchive: LocalizedError {
+        var version: String
+        var errorDescription: String? { "The downloaded update is not a valid Crew \(version)." }
+    }
+
     /// Unpacks the staged archive and checks that it is this app at the release's version, signed intact, then starts a
     /// helper that swaps it in for `installed` once this process exits and opens the new copy. The caller must then quit;
     /// it gets the helper's process and the staged bundle, to undo the hand-over if the quit is cancelled.
-    nonisolated static func handOver(archive: URL, version: String, installed: URL, processID: Int32) throws -> (helper: Int32, staged: URL, work: URL) {
+    nonisolated static func handOver(archive: URL, version: String, installed: URL, processID: Int32, result: URL) throws -> (helper: Int32, staged: URL, work: URL) {
+        if let reason = canReplace(installed: installed) { throw CrewFailure(reason) }
         let parent = installed.deletingLastPathComponent()
-        guard FileManager.default.isWritableFile(atPath: parent.path), FileManager.default.isWritableFile(atPath: installed.path) else {
-            throw CrewFailure("Crew can’t replace itself in \(parent.path). Move Crew to a folder you can write to, such as Applications, and try again.")
-        }
         let work = FileManager.default.temporaryDirectory.appending(path: "Crew-update-\(UUID().uuidString)", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
         var handedOff = false
@@ -272,7 +297,7 @@ enum Releases {
         let app = unpacked.appending(path: "Crew.app", directoryHint: .isDirectory)
         guard run("/usr/bin/ditto", ["-x", "-k", archive.path, unpacked.path]), isExpectedBundle(app, version: version),
               run("/usr/bin/codesign", ["--verify", "--deep", "--strict", app.path]) else {
-            throw CrewFailure("The downloaded update is not a valid Crew \(version).")
+            throw InvalidArchive(version: version)
         }
         // Staged beside the installed copy so the final move is a same-volume rename; named apart from an earlier
         // attempt's, whose helper may still be waiting to clean up.
@@ -283,7 +308,7 @@ enum Releases {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         // Paths travel as arguments, never interpolated into the script.
-        process.arguments = [helper.path, String(processID), installed.path, staged.path, work.path]
+        process.arguments = [helper.path, String(processID), installed.path, staged.path, work.path, result.path]
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
@@ -316,34 +341,44 @@ enum Releases {
         return process.terminationStatus == 0
     }
 
-    /// $1 the app's process, $2 the installed bundle, $3 the staged bundle, $4 the work folder (removed).
-    /// The old copy is kept until the new one is in place, and put back if the move fails. If the app has not quit within
+    /// $1 the app's process, $2 the installed bundle, $3 the staged bundle, $4 the work folder (removed), $5 the failure report.
+    /// The old copy is kept until the new one opens, and put back if the move or launch fails. If the app has not quit within
     /// a minute (its quit was cancelled), nothing is swapped: a running copy is never moved out from under itself.
     nonisolated static let swapScript = """
     #!/bin/sh
-    pid="$1"; target="$2"; staged="$3"; work="$4"
+    pid="$1"; target="$2"; staged="$3"; work="$4"; result="$5"
+    fail() {
+        printf '%s\\n' "$1" > "$result"
+        rm -rf "$staged" "$work"
+        if [ "${2:-}" != no ] && ! open "$target"; then
+            printf '%s\\n' "$1 The previous Crew app could not reopen." > "$result"
+        fi
+        exit 1
+    }
     i=0
     while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 300 ]; do sleep 0.2; i=$((i + 1)); done
     if kill -0 "$pid" 2>/dev/null; then
-        rm -rf "$staged" "$work"
-        exit 1
+        fail "Crew did not quit within 60 seconds." no
     fi
     backup="$target.previous"
     rm -rf "$backup"
-    if mv "$target" "$backup"; then
-        if mv "$staged" "$target"; then
-            rm -rf "$backup"
-            open "$target" --args --updated
-        else
-            mv "$backup" "$target"
-            rm -rf "$staged"
-            open "$target"
-        fi
-    else
-        rm -rf "$staged"
-        open "$target"
+    if [ -e "$backup" ] || [ -L "$backup" ]; then
+        fail "Could not remove the previous update backup."
     fi
-    rm -rf "$work"
+    if ! mv "$target" "$backup"; then
+        fail "Could not back up the installed Crew app."
+    fi
+    if ! mv "$staged" "$target"; then
+        mv "$backup" "$target" || fail "Could not restore Crew from its backup." no
+        fail "Could not move the updated Crew app into place."
+    fi
+    if ! open "$target" --args --updated; then
+        mv "$target" "$staged" || fail "Could not move the failed update aside; the previous Crew app is in its backup." no
+        mv "$backup" "$target" || fail "Could not restore Crew from its backup." no
+        fail "The updated Crew app could not open."
+    fi
+    # The update succeeded; a backup left behind here stops the next swap, which reports it then.
+    rm -rf "$backup" "$work"
     """
 }
 

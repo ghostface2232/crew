@@ -514,8 +514,9 @@ async function handOver() {
   if (!installer) return;
   try {
     // Paths travel in the environment, never in the script text.
-    const supervise = "$p = Start-Process -FilePath $env:CREW_INSTALLER -ArgumentList '/S','--force-run' -PassThru; $p.WaitForExit(); " +
-      'if ($p.ExitCode -ne 0 -and (Test-Path -LiteralPath $env:CREW_APP)) { Start-Process -FilePath $env:CREW_APP }';
+    const supervise = "$p = Start-Process -FilePath $env:CREW_INSTALLER -ArgumentList '/S','--force-run' -PassThru; $null = $p.Handle; $p.WaitForExit(); " +
+      'if ($p.ExitCode -ne 0) { if (Test-Path -LiteralPath $env:CREW_APP) { Start-Process -FilePath $env:CREW_APP } ' +
+      'else { Start-Process -FilePath $env:CREW_INSTALLER } }';
     // The supervisor must outlive the app, so it is detached: a child that is not is killed with the app (libuv's job).
     // But a detached PowerShell has no console and exits without running its script, so a detached cmd starts it in a
     // console of its own, which -WindowStyle Hidden then hides. The script is encoded so cmd does not parse it.

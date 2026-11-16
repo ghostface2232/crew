@@ -1327,7 +1327,8 @@ export class Jobs {
         if (!live()) return;
         job.activeAt = Date.now();
         job.stalled = false;
-        job.phase = detail;
+        // A waiting job's phase names what it waits on; a sub-agent's progress meanwhile goes to the activity log only.
+        if (job.state !== 'waiting') job.phase = detail;
         this.event(job, 'progress', detail);
       },
       session: (id) => {

@@ -739,7 +739,7 @@ export class CodexAdapter implements Adapter {
         if (run?.pluginsEnabled && p._meta?.codex_approval_kind === 'mcp_tool_call') {
           const grant = toolGrant(p);
           if (grant && run.grants.has(grant.key) && !isTerminal(run.ctl.job) && !run.interrupt && run.ctl.job.sandbox !== 'read-only') {
-            run.ctl.progress(`allowed for this job: ${detail(p._meta?.tool_name ?? 'tool', 200)} · ${grant.label}`);
+            run.ctl.progress(`${this.children.has(threadId) ? 'sub-agent ' : ''}allowed for this job: ${detail(p._meta?.tool_name ?? 'tool', 200)} · ${grant.label}`);
             return { action: 'accept', content: {}, _meta: null };
           }
           const answer = await ask('approval', toolRequest(p, item), grant);

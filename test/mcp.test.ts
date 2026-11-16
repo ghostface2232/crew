@@ -114,6 +114,17 @@ test('the wake hook follows every tool that can leave a job running, answer incl
   assert.ok(hooks.PostToolUseFailure.some((entry: any) => entry.hooks.some((hook: any) => hook.asyncRewake)));
 });
 
+test('a resumed lead process arms a watcher before any prompt, Stop, or Crew call', () => {
+  const hooks = JSON.parse(fs.readFileSync(new URL('../plugin/hooks/hooks.json', import.meta.url), 'utf8')).hooks;
+  // The desktop app ends idle sessions under memory pressure and resumes them later; the watcher dies with the
+  // old process. Without this, news that arrived after the resume waited for the user's next message.
+  const sources = ['startup', 'resume', 'clear'];
+  for (const source of sources) {
+    assert.ok((hooks.SessionStart as any[]).some((entry) => new RegExp(`^(?:${entry.matcher ?? '.*'})$`).test(source)
+      && entry.hooks.some((hook: any) => hook.asyncRewake && hook.args?.at(-1) === 'watch')), source);
+  }
+});
+
 test('MCP bounds a multi-job response and ACKs only echoed receipts before making a new offer', async () => {
   const source = fs.readFileSync(new URL('../plugin/bridge/mcp.ts', import.meta.url), 'utf8');
   const handler = source.slice(source.indexOf('async function handle('), source.indexOf('readline.createInterface'));

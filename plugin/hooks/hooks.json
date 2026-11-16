@@ -30,6 +30,16 @@
               "context"
             ],
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/bridge/wake.ts",
+              "watch"
+            ],
+            "timeout": 86400,
+            "asyncRewake": true
           }
         ]
       }

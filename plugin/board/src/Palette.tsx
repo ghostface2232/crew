@@ -60,7 +60,13 @@ export function Palette({ state, names, projects, origin, close, actions }: {
   const height = Math.min(500, innerHeight - 96);
   // Anchored to the search control's right edge, growing down and to the left from it; centered without one.
   const left = origin ? Math.max(12, Math.min(origin.right - width, innerWidth - 12 - width)) : (innerWidth - width) / 2;
-  const top = origin ? Math.max(8, origin.top) : 72;
+  // Where the page draws the title bar (the Windows app), the window buttons keep their corner, so a palette reaching
+  // under them starts below them instead.
+  // Not yet in TypeScript's DOM types.
+  const overlay = (navigator as { windowControlsOverlay?: { visible: boolean; getTitlebarAreaRect(): DOMRect } }).windowControlsOverlay;
+  const bar = overlay?.visible ? overlay.getTitlebarAreaRect() : null;
+  const below = bar && left + width > bar.right ? bar.bottom + 8 : 0;
+  const top = Math.max(origin ? Math.max(8, origin.top) : 72, below);
   const entries = useMemo(() => {
     const list: Entry[] = [];
     const notifyState = notificationPermission();

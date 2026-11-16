@@ -98,6 +98,13 @@ try {
   await expect(page.getByRole('button', { name: 'Close settings' }).first()).toBeVisible();
   expect(await covered()).toEqual([]);
   await page.keyboard.press('Escape');
+  await page.waitForTimeout(500);
+  await page.keyboard.press('Control+k');
+  await expect(page.locator('.palette')).toBeVisible();
+  await page.waitForTimeout(600); // Its opening motion starts at the search control.
+  expect(await covered()).toEqual([]);
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(500);
   await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setBounds({ x: 50, y: 60, width: 1100, height: 760 }));
 
   // External navigation is refused.
@@ -174,7 +181,7 @@ try {
       'single instance',
       'cancelled quit preserves unsaved settings',
       'external navigation blocked',
-      'no control under the window buttons, wide or narrow',
+      'no control under the window buttons, wide or narrow, with Settings or search open',
       'clipboard writes, evidence windows and browser links',
       'tray count follows waiting sessions',
       'window bounds restored without drift',

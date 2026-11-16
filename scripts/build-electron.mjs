@@ -25,7 +25,8 @@ fs.writeFileSync(
 );
 
 // Icons are rendered from the board's app mark; an .ico holds PNG images, which Windows reads since Vista.
-const appIcon = fs.readFileSync('plugin/board/src/icons/CrewAppIcon.svg', 'utf8');
+// The app mark is square art; its corners are cut here as the sidebar's .brand-mark cuts them (12px of 30px, smoothed).
+const appIcon = `<div style="width:100%;height:100%;overflow:hidden;border-radius:40%;corner-shape:superellipse(1.35)">${fs.readFileSync('plugin/board/src/icons/CrewAppIcon.svg', 'utf8')}</div>`;
 const badge = '<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><circle cx="8" cy="8" r="7" fill="#e5484d"/></svg>';
 const browser = await chromium.launch();
 const render = async (svg, size) => {

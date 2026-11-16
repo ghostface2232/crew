@@ -43,13 +43,22 @@ const FRAME_CSS = `
     calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) + 12px));
 }
 :root dialog.detail-panel { top: ${TOP_BAR_HEIGHT + 4}px; }
-:root dialog.sheet { max-height: calc(100vh - ${2 * (TOP_BAR_HEIGHT + 4)}px); }`;
+:root dialog.sheet { max-height: calc(100vh - ${2 * (TOP_BAR_HEIGHT + 4)}px); }
+/* Only the page below the top bar scrolls, so nothing passes under the bar and its scrollbar starts below the window
+   buttons. The page centers its content with padding rather than a maximum width, keeping that scrollbar at the edge. */
+:root, :root body { height: 100%; overflow: hidden; }
+:root .workspace { height: 100vh; }
+:root .topbar { position: static; flex: none; }
+:root .page { flex: 1; min-height: 0; overflow-y: auto; max-width: none; margin: 0; }
+@media (min-width: 761px) { :root .page { padding-inline: max(var(--page-margin), calc((100% - 1400px) / 2)); } }`;
 /** Windows 11 22H2 (build 22621) and later draw a backdrop material behind a transparent window; older systems keep the canvas. */
 const BACKDROP = process.platform === 'win32' && Number(os.release().split('.')[2]) >= 22621 ? 'mica' : null;
 /** The main window's colors: clear over the backdrop where there is one, the board's otherwise. */
 const frame = () => (BACKDROP ? { ...theme(), color: '#00000000' } : theme());
-/** Lets the backdrop show through the page; cards, panels and dialogs keep their own surfaces. */
-const BACKDROP_CSS = `:root body, :root .topbar { background: transparent; }`;
+/** Lets the backdrop show through the page and top bar; cards, panels and dialogs keep their own surfaces. */
+const BACKDROP_CSS = `
+:root body { background: transparent; }
+:root .topbar { background: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; }`;
 
 /**
  * The bounds this launch restored, and what the window reported for them. Scaled displays round them on the way

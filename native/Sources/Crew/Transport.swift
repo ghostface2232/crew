@@ -153,6 +153,12 @@ final class CrewAPI: Sendable {
 enum DaemonLauncher {
     static func start() async throws {
         if ProcessInfo.processInfo.environment["CREW_ATTACH_ONLY"] == "1" { return }
+        // A downloaded app opened where it was unpacked runs from a temporary read-only copy (App Translocation). The
+        // daemon outlives the app, so one started from there would keep the port after the copy is gone and stop
+        // answering, and no later launch could replace it.
+        if Bundle.main.bundlePath.contains("/AppTranslocation/") {
+            throw CrewFailure("Move Crew to the Applications folder, then open it from there.")
+        }
         guard let resources = Bundle.main.resourceURL else { throw CrewFailure("Missing application resources.") }
         let node = resources.appendingPathComponent("runtime/node")
         let cli = resources.appendingPathComponent("bridge/plugin/bridge/cli.js")

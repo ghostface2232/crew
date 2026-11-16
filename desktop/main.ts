@@ -17,6 +17,9 @@ import { isBoardNavigation, linkTarget, windowBounds } from './window-state.ts';
 
 // Test and alternate daemon profiles must not claim the user's normal desktop instance.
 if (process.env.CREW_HOME) app.setPath('userData', path.join(HOME, 'desktop'));
+// The Start menu shortcut's identity (electron-builder's appId), so a launch of Crew.exe itself, as the installer
+// does (desktop/installer.nsh), groups on the taskbar with the shortcut and its pin.
+if (process.platform === 'win32') app.setAppUserModelId('dev.crew.desktop');
 const locked = app.requestSingleInstanceLock();
 let window: BrowserWindow | null = null;
 let tray: Tray | null = null;

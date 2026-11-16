@@ -82,8 +82,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          sed "s/{version}/${GITHUB_REF_NAME#v}/g" .github/release-notes.md > "$RUNNER_TEMP/notes.md"
           gh release create "$GITHUB_REF_NAME" release/* \
             --verify-tag \
             --title "Crew ${GITHUB_REF_NAME#v}" \
-            --notes-file .github/release-notes.md \
+            --notes-file "$RUNNER_TEMP/notes.md" \
             --generate-notes

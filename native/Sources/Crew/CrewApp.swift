@@ -10,6 +10,7 @@ struct CrewApp: App {
             BoardView(store: delegate.store, openSettings: delegate.openSettings)
             // Small bordered buttons read as pills across the app; sheets inherit this.
             .buttonBorderShape(.capsule)
+            .environment(delegate.updater)
             .background(WindowAccessor { delegate.configure($0) })
         }
         .defaultSize(WorkspaceStyle.windowDefaultSize)
@@ -38,6 +39,7 @@ struct CrewApp: App {
         // The menu bar reads live state in its own views so the App body is not re-evaluated on every update.
         MenuBarExtra {
             MenuBarMenu(store: delegate.store, show: { delegate.show(job: $0) }, openSettings: delegate.openSettings)
+                .environment(delegate.updater)
         } label: {
             MenuBarLabel(store: delegate.store) { delegate.openMainWindow = $0 }
         }
@@ -48,6 +50,7 @@ private struct MenuBarMenu: View {
     let store: CrewStore
     let show: (String?) -> Void
     let openSettings: () -> Void
+    @Environment(AppUpdater.self) private var updater
     var body: some View {
         let waiting = store.state.waitingJobs
         let pending = store.state.pendingCount
@@ -63,6 +66,9 @@ private struct MenuBarMenu: View {
         Divider()
         SettingsCommand(store: store, open: openSettings)
         Button("Open Web Board") { NSWorkspace.shared.open(store.api.webBoardURL) }
+        if updater.phase == .ready {
+            Button("Restart to Update to \(updater.latest ?? "")") { updater.onInstall() }
+        }
         Divider()
         Button("Quit Crew — jobs keep running") { NSApp.terminate(nil) }
     }
@@ -111,6 +117,8 @@ private struct SettingsCommand: View {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUserNotificationCenterDelegate {
     let store: CrewStore
+    let updater = AppUpdater()
+    private var updateTask: Task<Void, Never>?
     private weak var mainWindow: NSWindow?
     /// Opens the main window scene when it does not exist: SwiftUI sometimes launches without
     /// presenting it, which leaves only the menu bar item.
@@ -185,6 +193,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         }
         store.onStateChange = { [weak self] in self?.updateNotifications() }
         store.start()
+        updater.onInstall = { [weak self] in self?.installUpdate() }
+        watchUpdates()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             guard let self, self.mainWindow == nil else { return }
             self.openMainWindow?(id: "main")
@@ -232,7 +242,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         if let window = settingsWindow { window.deminiaturize(nil); window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return }
         guard !store.state.roles.isEmpty else { show(); return }
         let model = SettingsModel(api: store.api, roles: store.state.roles, roleSettings: store.state.roleSettings, roleInfo: store.state.roleInfo, preset: store.state.preset, presets: store.state.presets)
-        let controller = NSHostingController(rootView: CrewSettingsView(model: model, store: store).buttonBorderShape(.capsule))
+        let controller = NSHostingController(rootView: CrewSettingsView(model: model, store: store).buttonBorderShape(.capsule).environment(updater))
         // Laid out like System Settings: the sidebar runs up under the window controls, and a unified toolbar shows
         // the page's title. A real toolbar is what gives the page the system's soft scroll edge.
         controller.sceneBridgingOptions = [.toolbars]
@@ -323,6 +333,100 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             let settings = await UNUserNotificationCenter.current().notificationSettings()
             store.notificationsAllowed = settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional
         }
+    }
+    /// Checks a minute after launch and then every six hours; a found release downloads only once the user has been away
+    /// from Crew for two minutes: the app in the background, or the Mac idle.
+    private func watchUpdates() {
+        updateTask = Task {
+            await updater.load()
+            var nextCheck = Date().addingTimeInterval(60)
+            var lastUsed = Date()
+            while !Task.isCancelled {
+                let now = Date()
+                if now >= nextCheck {
+                    await updater.check()
+                    nextCheck = now.addingTimeInterval(6 * 3600)
+                }
+                let idle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: ~0)!)
+                if NSApp.isActive && idle < 120 { lastUsed = now }
+                if now.timeIntervalSince(lastUsed) >= 120 { await updater.download() }
+                try? await Task.sleep(for: .seconds(15))
+            }
+        }
+    }
+    private struct DaemonHealth: Decodable, Sendable { var pid: Int; var active: Int?; var root: String? }
+    private func daemonHealth() async -> DaemonHealth? { try? await store.api.request("/api/health", timeout: 2) }
+    /// The daemon this app started runs its bundled Node and bridge from inside the bundle the update replaces.
+    private func ownsDaemon(_ health: DaemonHealth) -> Bool {
+        guard let root = health.root, let resources = Bundle.main.resourceURL else { return false }
+        let bundled = resources.appending(path: "bridge/plugin").resolvingSymlinksInPath().standardizedFileURL.path
+        return URL(fileURLWithPath: root).resolvingSymlinksInPath().standardizedFileURL.path == bundled
+    }
+    /// Installs the staged update without losing work, as the Windows app does. The daemon this app started runs from
+    /// the bundle being replaced, so it has to stop first, but it is only ever asked to stop while idle: it refuses while
+    /// a job runs or a change is being saved, and otherwise saves jobs and missions before it exits. Until then the
+    /// install waits, and the user can call it off. Jobs, missions and settings live in the Crew home, outside the bundle.
+    func installUpdate() {
+        guard updater.phase == .ready else { return }
+        guard leaveSettings(then: { [weak self] in self?.dismissSettings(); self?.installUpdate() }) else { return }
+        Task { await performUpdate() }
+    }
+    private func performUpdate() async {
+        var health = await daemonHealth()
+        if let running = health, ownsDaemon(running), let active = running.active, active > 0 {
+            let alert = NSAlert()
+            alert.messageText = "\(active) job\(active == 1 ? " is" : "s are") still running."
+            alert.informativeText = "Crew will install the update as soon as they finish. Nothing is stopped, and jobs, missions and settings are kept."
+            alert.addButton(withTitle: "Update When Finished")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
+        guard updater.installing(waiting: health.flatMap { ownsDaemon($0) ? $0.active : nil } ?? 0) else { return }
+        var refusals = 0
+        while let running = health, ownsDaemon(running) {
+            guard updater.phase == .installing, !quitting else { return }
+            let active = running.active ?? 0
+            if active == 0 {
+                // The store's reconnect loop would start the daemon again as soon as it stopped.
+                store.stop()
+                do {
+                    let _: EmptyReply = try await store.api.post("/api/shutdown", ["ifIdle": true], timeout: 10)
+                    var waited = 0.0
+                    while await daemonHealth()?.pid == running.pid {
+                        guard waited < 15 else { throw CrewFailure("The Crew daemon (process \(running.pid)) did not stop.") }
+                        try? await Task.sleep(for: .milliseconds(200))
+                        waited += 0.2
+                    }
+                    break
+                } catch {
+                    store.start()
+                    // Refused because work started meanwhile; a daemon that keeps refusing while idle is reported instead.
+                    refusals += 1
+                    if refusals >= 3 {
+                        updater.failed("Could not stop the Crew daemon for the update: \(error.localizedDescription)")
+                        return
+                    }
+                }
+            } else { refusals = 0 }
+            updater.installing(waiting: active)
+            try? await Task.sleep(for: .seconds(5))
+            health = await daemonHealth()
+        }
+        guard updater.phase == .installing, !quitting, let archive = updater.archive, let version = updater.latest else {
+            store.start()
+            return
+        }
+        let installed = Bundle.main.bundleURL
+        let pid = ProcessInfo.processInfo.processIdentifier
+        do {
+            try await Task.detached { try AppUpdater.handOver(archive: archive, version: version, installed: installed, processID: pid) }.value
+        } catch {
+            // The archive stays staged, so the update can be tried again; the store starts the daemon again.
+            updater.failed(error.localizedDescription)
+            store.start()
+            return
+        }
+        NSApp.terminate(nil)
     }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard leaveSettings(then: { [weak self] in self?.dismissSettings(); NSApp.terminate(nil) }) else { return .terminateCancel }

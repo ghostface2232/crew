@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { flushSync } from 'react-dom';
 import {
-  ArrowRight, Bell, Clock, Command, FolderClosed, LayoutGrid, LockKeyhole, PanelLeft, Plus, RotateCw, Search,
+  ArrowRight, Bell, CircleArrowDown, Clock, Command, FolderClosed, LayoutGrid, LockKeyhole, PanelLeft, Plus, RotateCw, Search,
   Settings as SettingsIcon, SquareStack, WifiOff, Zap,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -17,6 +17,7 @@ import { Dispatch } from './Dispatch.tsx';
 import { Palette } from './Palette.tsx';
 import { NavList, ProjectPeek } from './Shell.tsx';
 import { Notifier } from './notify.ts';
+import { desktop, useAppUpdate } from './desktop.ts';
 
 export type Page = 'overview' | 'needs' | 'activity' | 'history';
 export const PAGES: [Page, string, LucideIcon][] = [
@@ -47,6 +48,7 @@ export function App() {
   const state = useSyncExternalStore(board.subscribe, board.getSnapshot);
   const [selection, setSelection] = useState(storedSelection);
   const [settings, setSettings] = useState(false);
+  const update = useAppUpdate();
   /** Where a sheet grows from: the control that opened it, or nothing for a keyboard shortcut. */
   const [dispatching, setDispatching] = useState<{ origin?: DOMRect } | null>(null);
   const [palette, setPalette] = useState<{ origin?: DOMRect } | null>(null);
@@ -214,6 +216,19 @@ export function App() {
           {pageNav}
           <ProjectNav projects={projects} names={names} project={project} state={state} select={select} />
           <div className="sidebar-foot">
+            {(update?.state === 'ready' || update?.state === 'installing') && (
+              <button
+                className="sidebar-item sidebar-update"
+                id="install-update"
+                disabled={update.state === 'installing'}
+                title={`Restart Crew to install version ${update.latest}`}
+                onClick={() => void desktop?.update.install()}
+              >
+                <Icon icon={CircleArrowDown} />
+                <span>{update.state === 'ready' ? 'Restart to Update' : update.waiting ? `Waiting for ${update.waiting} job${update.waiting === 1 ? '' : 's'}…` : 'Updating…'}</span>
+                <span className="sidebar-update-version">{update.latest}</span>
+              </button>
+            )}
             <button className="sidebar-item" id="open-settings" disabled={!Object.keys(state.roles).length} onClick={openSettings}>
               <Icon icon={SettingsIcon} />
               <span>Settings</span>
@@ -324,7 +339,7 @@ export function App() {
             panel && <JobDrawer key={panel} id={panel} state={state} close={closeDetail} />
           )}
         </PanelLeavingContext>
-        {settings && <Settings state={state} close={() => setSettings(false)} />}
+        {settings && <Settings state={state} update={update} close={() => setSettings(false)} />}
       </div>
     </ClockProvider>
   );

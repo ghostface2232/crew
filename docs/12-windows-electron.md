@@ -13,7 +13,7 @@ Electron main (desktop/main.ts) ── ensureDaemon ── independent daemon �
 
 - The main process imports the bridge's own `client.ts`, so startup reuses `ensureDaemon`, including version negotiation and active-job protection. The daemon starts using the app's Electron executable in Node mode (`ELECTRON_RUN_AS_NODE`), so no separate Node install is needed.
 - Before loading the board, the main process sets the daemon's `crew_session` cookie from `~/.crew/token`. The secret never appears in a URL or browser history. The tray's Open in browser command uses the usual `#token=` launch fragment.
-- The renderer runs with `nodeIntegration: false`, `contextIsolation: true`, and `sandbox: true`, with no preload script. Navigation outside the board and webviews are denied. The only granted permission is clipboard write access for the board's origin, used by its copy buttons.
+- The renderer runs with `nodeIntegration: false`, `contextIsolation: true`, and `sandbox: true`. Its preload script (`desktop/preload.cts`) exposes only the updater, as `window.crewDesktop`, and the main process answers it only from the main window's board page. Navigation outside the board and webviews are denied. The only granted permission is clipboard write access for the board's origin, used by its copy buttons.
 - Links in reports open in the default browser. Evidence images require the board's sign-in, so they open in a separate sandboxed app window that cannot navigate. All other new-window requests are denied.
 
 ## Window
@@ -40,15 +40,21 @@ npm run package:desktop
 
 `npm run desktop`, `build:desktop`, `package:desktop`, and `test:desktop` go through `scripts/desktop.mjs`, which picks the native app on macOS and Electron elsewhere. The Electron build outputs to `desktop/build` and renders the icons from `plugin/board/src/icons/CrewAppIcon.svg` using Playwright's Chromium (`npx playwright install chromium`). Packaging writes the per-user installer `release/Crew-Setup-<version>.exe` and unpacked executable `release/win-unpacked/Crew.exe`. The installer installs to `%LOCALAPPDATA%\Programs\Crew` and creates a Start menu shortcut and uninstaller.
 
-This produces a local, unsigned installer without automatic updates or launch-at-login support. Packaging never publishes releases or generates `latest.yml`. Worker CLIs and git must still be installed and authenticated.
+This produces a local, unsigned installer without launch-at-login support; Windows SmartScreen warns on its first run. Packaging never publishes a release. Worker CLIs and git must still be installed and authenticated.
 
-For a silent update that restarts the app, run `Crew-Setup-<version>.exe /S --force-run --updated`. `/S` suppresses the installer UI; `--force-run` starts the app even in silent mode; `--updated` marks the update and is passed to the restarted app. The existing per-user install location is reused (unless `/D=` overrides it).
+## Updates
 
-These behaviors come from electron-builder's installed NSIS templates: `node_modules/app-builder-lib/templates/nsis/installSection.nsh` (silent launch condition), `common.nsh` (`StartApp` and `UNINSTALL_FILENAME`), and `multiUser.nsh` (`setInstallModePerUser`). The installed uninstaller is `Uninstall Crew.exe`, alongside `Crew.exe`; with `asar: false`, application files are under `%LOCALAPPDATA%\Programs\Crew\resources\app`.
+An installed copy updates itself from GitHub Releases (`desktop/updater.ts`). A copy run from `release/win-unpacked` or `desktop/build` has no `Uninstall Crew.exe` beside it and says in Settings that it cannot update itself.
 
-Before replacing files, `include/allowOnlyOneInstallerInstance.nsh` checks and stops running processes. Its PowerShell filter is `$$_.Path -and $$_.Path.StartsWith('$INSTDIR', 'CurrentCultureIgnoreCase')`, followed by `Stop-Process -Id $$_.ProcessId $0` (retried with `-Force`). This includes the background daemon running from that directory. If PowerShell is unavailable, the per-user fallback uses `taskkill /IM Crew.exe` filtered to the current user, excluding the parent PID; that fallback is not restricted to the install directory. The updater must account for daemon termination.
+- **Check.** A minute after launch, then every six hours, the app reads `https://api.github.com/repos/ghostface2232/crew/releases/latest`. That endpoint skips drafts and prereleases. A release counts when its tag is a newer dotted version and it has an asset named `Crew-Setup-<version>.exe` with GitHub's `sha256:` digest.
+- **Download while away.** A release on offer downloads only once the user has been away from Crew for two minutes: the window out of focus, or the system idle. **Check for Updates** in Settings downloads at once. The installer streams to a `.partial` file under `%APPDATA%\Crew\updates`, is checked against the digest, and is then renamed and recorded in `staged.json`. The digest proves the file is intact, not who published it: it comes over the same TLS connection as the link.
+- **Ready across launches.** At launch, a staged installer that is newer than the app and still matches its digest is offered again without downloading. Anything else in the folder is removed.
+- **Install on request.** When an installer is ready, **Restart to Update** appears above Settings in the sidebar, in Settings → About Crew, and in the tray menu. Nothing installs until the user picks it.
+- **No lost work.** The installer stops every process under the install folder, and the daemon this app started runs as that folder's `Crew.exe`, so it has to stop first. The app only ever asks it to stop while idle (`/api/shutdown` with `ifIdle`). The daemon refuses while a job runs or a change is being saved, and otherwise saves jobs and missions before it exits; it is never killed. While jobs run, the install waits for them, says so in the sidebar and Settings, and can be cancelled there or from the tray. Once the daemon has stopped, the app closes its windows. If the unsaved-settings prompt keeps the app open, the app restarts its daemon and the update stays ready. It then starts `Crew-Setup-<version>.exe /S --force-run`, which installs silently into the same per-user folder and starts the new version. A daemon started by another install is left alone. Jobs, missions and settings live in the Crew home (`~/.crew`) and `%APPDATA%\Crew`, which the installer does not touch. If the installer cannot start, the app reopens with the update still staged.
 
-The planned updater reads `https://api.github.com/repos/ghostface2232/crew/releases/latest`, selects `Crew-Setup-<version>.exe`, and verifies GitHub's SHA-256 digest before execution. It does not use electron-updater metadata.
+`CREW_UPDATE_FEED` points any build at another releases endpoint, and enables updates for it; the smoke test uses it with a local server. Plain HTTP is accepted only from a loopback address.
+
+The installer's behavior comes from electron-builder's NSIS templates in `node_modules/app-builder-lib/templates/nsis`. `installSection.nsh` starts the app after a silent install when `--force-run` is given. `include/allowOnlyOneInstallerInstance.nsh` stops processes whose path is under `$INSTDIR`, falling back to `taskkill /IM Crew.exe` for the current user when PowerShell is unavailable.
 
 ## Verification
 
@@ -66,6 +72,7 @@ The smoke test (`scripts/smoke-electron.mjs`) runs the app against an isolated d
 - blocked external navigation, browser-opened report links, and separate evidence windows
 - unobstructed UI controls at full and narrow widths (including with Settings open)
 - clipboard write permission, tray waiting counts, and drift-free window bounds restoration
+- the updater against a local feed: Check for Updates downloads and verifies the release, Restart to Update appears above Settings and again after a relaunch, and an evidence window cannot reach the updater
 
 Set `CREW_APP_PATH` to `release/win-unpacked/Crew.exe` to test the packaged app.
 

@@ -673,6 +673,13 @@ dialog.detail-panel { container: panel / inline-size; }
   .sidebar-item:not(:disabled):hover { color: var(--label); }
   .sidebar-item:not(:disabled):hover svg { rotate: 60deg; }
 }
+/* The desktop app's staged update, ready to install with one click. */
+.sidebar-update { color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); font-weight: 550; }
+.sidebar-update-version { margin-left: auto; color: color-mix(in srgb, var(--accent) 70%, transparent); font-size: 12px; font-variant-numeric: tabular-nums; }
+@media (hover: hover) {
+  .sidebar-update:not(:disabled):hover { color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+  .sidebar-update:not(:disabled):hover svg { rotate: none; }
+}
 .sidebar-scrim { position: fixed; inset: 0; z-index: 4; background: var(--scrim-light); animation: fade 260ms ease-out; }
 
 /* A project's preview beside the sidebar: it opens from its leading edge and glides between projects. */

@@ -12,7 +12,7 @@ GitHub Releases is the single channel. Pushing a version tag runs GitHub Actions
 
 | Platform | Artifact | Signing | Updates |
 | --- | --- | --- | --- |
-| Windows | `Crew-Setup-x.y.z.exe`, an NSIS installer built by electron-builder: per-user, no administrator rights, Start menu shortcut, uninstaller | Unsigned at first. SmartScreen warns on first run; the release notes explain "More info → Run anyway". A code signing certificate (for example Azure Trusted Signing, if available in the publisher's country) removes the warning later | electron-updater against GitHub Releases |
+| Windows | `Crew-Setup-x.y.z.exe`, an NSIS installer built by electron-builder: per-user, no administrator rights, Start menu shortcut, uninstaller | Unsigned at first. SmartScreen warns on first run; the release notes explain "More info → Run anyway". A code signing certificate (for example Azure Trusted Signing, if available in the publisher's country) removes the warning later | The app's own updater, from the GitHub Releases API: it downloads while the user is away and installs when they choose ([12-windows-electron.md](12-windows-electron.md#updates)) |
 | macOS | The native app, ad-hoc signed, as a zip or dmg | Without an Apple Developer Program membership the app cannot be notarized, so Gatekeeper blocks the first launch. The notes explain System Settings → Privacy & Security → Open Anyway. Building from source (`npm run package:desktop`, Xcode 26) avoids the block | Manual download until the app is signed and notarized |
 
 The Start menu shortcut also gives the Windows app the identity its own notifications need. Today notifications stay with the daemon's PowerShell toasts for that reason ([12-windows-electron.md](12-windows-electron.md)).
@@ -53,7 +53,7 @@ The user's path is: download the installer, run the app, sign in to whatever the
 
 1. Bundle the built plugin and a runtime in both apps; point the bundled plugin's MCP server, hooks and `crew` shim at that runtime.
 2. First-launch install and update of the marketplace and plugin, with the checklist screen.
-3. Windows installer and auto-update with electron-builder.
+3. Windows installer and auto-update with electron-builder. Done: an NSIS installer and the app's own updater.
 4. GitHub Actions release workflow for both platforms, and release notes.
 5. Signing: a Windows certificate, and an Apple Developer Program membership for macOS, when the audience calls for them.
 

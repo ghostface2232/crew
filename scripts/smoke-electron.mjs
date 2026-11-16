@@ -1,10 +1,12 @@
 import { _electron as electron, expect } from '@playwright/test';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
+import http from 'node:http';
 import { createRequire } from 'node:module';
 
 // Runs the Electron shell against its own daemon in a fresh home on a free port; it never starts workers.
@@ -16,7 +18,24 @@ probe.listen(0, '127.0.0.1');
 await once(probe, 'listening');
 const port = probe.address().port;
 await new Promise((resolve) => probe.close(resolve));
-const env = { ...process.env, CREW_HOME: home, CREW_PORT: String(port) };
+// A local releases feed offering a newer version, so the updater runs without GitHub.
+const installer = Buffer.from('not a real installer');
+const feed = http.createServer((req, res) => {
+  const origin = `http://127.0.0.1:${feed.address().port}`;
+  if (req.url === '/latest') {
+    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({
+      tag_name: 'v9.9.9', draft: false, prerelease: false, html_url: 'https://github.com/ghostface2232/crew/releases/tag/v9.9.9',
+      assets: [{
+        name: 'Crew-Setup-9.9.9.exe', browser_download_url: `${origin}/Crew-Setup-9.9.9.exe`, size: installer.length,
+        digest: `sha256:${createHash('sha256').update(installer).digest('hex')}`,
+      }],
+    }));
+  } else if (req.url === '/Crew-Setup-9.9.9.exe') res.writeHead(200, { 'content-length': installer.length }).end(installer);
+  else res.writeHead(404).end();
+});
+feed.listen(0, '127.0.0.1');
+await once(feed, 'listening');
+const env = { ...process.env, CREW_HOME: home, CREW_PORT: String(port), CREW_UPDATE_FEED: `http://127.0.0.1:${feed.address().port}/latest` };
 delete env.ELECTRON_RUN_AS_NODE;
 delete env.CREW_ATTACH_ONLY;
 const base = `http://127.0.0.1:${port}`;
@@ -119,6 +138,31 @@ try {
   await page.waitForTimeout(500);
   await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setBounds({ x: 50, y: 60, width: 1100, height: 760 }));
 
+  // About Crew checks the feed and downloads the release; the sidebar then offers it above Settings.
+  const version = JSON.parse(fs.readFileSync('package.json', 'utf8')).version;
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('navigation', { name: 'Settings pages' }).getByRole('button', { name: 'About Crew', exact: true }).click();
+  await expect(page.getByText(`Version ${version}`, { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Check for Updates' }).click();
+  await expect(page.getByText('Version 9.9.9 is ready to install')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole('link', { name: 'What’s new in 9.9.9' })).toBeVisible();
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.getByRole('button', { name: 'Close settings' }).click();
+  expect(await page.evaluate(() => [...document.querySelectorAll('.sidebar-foot > button')].map((button) => button.id)))
+    .toEqual(['install-update', 'open-settings']);
+  expect(fs.readFileSync(path.join(home, 'desktop', 'updates', 'Crew-Setup-9.9.9.exe'))).toEqual(installer);
+  // Only the main window reaches the updater: another window with the same preload, even on the board, is refused.
+  expect(await application.evaluate(async ({ app, BrowserWindow }, board) => {
+    const preload = `${app.getAppPath()}/desktop/preload.cjs`;
+    const other = new BrowserWindow({ show: false, webPreferences: { preload, sandbox: true, contextIsolation: true } });
+    try {
+      await other.loadURL(board);
+      return await other.webContents.executeJavaScript("window.crewDesktop ? window.crewDesktop.update.state().then(() => 'answered', () => 'refused') : 'no bridge'");
+    } finally {
+      other.destroy();
+    }
+  }, `${base}/`)).toBe('refused');
+
   // External navigation is refused.
   await page.evaluate(() => {
     location.href = 'https://example.com/';
@@ -171,7 +215,8 @@ try {
   // Scaled displays round bounds by a pixel or a few, but an unmoved window must not drift from launch to launch.
   const relaunchBounds = async () => {
     application = await launch();
-    await application.firstWindow();
+    // The staged update is still offered after a relaunch.
+    await expect((await application.firstWindow()).locator('#install-update')).toBeVisible({ timeout: 20_000 });
     const bounds = await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getNormalBounds());
     await quit(application);
     application = null;
@@ -198,6 +243,7 @@ try {
       'clipboard writes, evidence windows and browser links',
       'tray count follows waiting sessions',
       'window bounds restored without drift',
+      'update checked, downloaded and verified, offered above Settings and after a relaunch, only to the board window',
       'daemon survives quit and reopen',
     ],
     idleWorkingSetMiB,
@@ -216,5 +262,6 @@ try {
   }
   await fetch(`${base}/api/shutdown`, { method: 'POST', body: '{}', headers: { 'content-type': 'application/json', ...auth() } }).catch(() => {});
   await new Promise((resolve) => setTimeout(resolve, 1000));
+  feed.close();
   fs.rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 }

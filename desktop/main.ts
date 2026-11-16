@@ -1,12 +1,14 @@
-import { app, BrowserWindow, dialog, Menu, nativeImage, nativeTheme, screen, session, shell, Tray } from 'electron';
-import type { Rectangle } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, powerMonitor, screen, session, shell, Tray } from 'electron';
+import type { IpcMainInvokeEvent, MessageBoxOptions, Rectangle } from 'electron';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { readToken, SESSION_COOKIE } from '../plugin/bridge/auth.ts';
-import { api, ensureDaemon } from '../plugin/bridge/client.ts';
-import { BASE_URL, HOME } from '../plugin/bridge/config.ts';
+import { api, ensureDaemon, health } from '../plugin/bridge/client.ts';
+import { BASE_URL, HOME, PLUGIN_ROOT } from '../plugin/bridge/config.ts';
 import type { BoardState } from '../plugin/board/src/types.ts';
+import { Updater } from './updater.ts';
 import { isBoardNavigation, linkTarget, windowBounds } from './window-state.ts';
 
 // The Electron shell for Windows (and other non-macOS systems); macOS uses the native app in native/.
@@ -22,8 +24,31 @@ let quitting = false;
 let stopping = false;
 let timer: ReturnType<typeof setTimeout> | undefined;
 let pollAbort: AbortController | null = null;
+let pending = 0;
 const stateFile = path.join(app.getPath('userData'), 'window.json');
 const asset = (name: string) => path.join(import.meta.dirname, name);
+/** The window looks out of reach once it has been out of focus, or the system idle, this long; only then does an update download. */
+const AWAY_MS = 120_000;
+const CHECK_EVERY_MS = 6 * 3_600_000;
+/**
+ * An installed copy has the installer's uninstaller beside it; an unpacked or development build cannot update itself.
+ * CREW_UPDATE_FEED points any build at another releases endpoint, for testing against a local server.
+ */
+const updater = new Updater({
+  dir: path.join(app.getPath('userData'), 'updates'),
+  current: app.getVersion(),
+  feed: process.env.CREW_UPDATE_FEED,
+  supported: process.platform === 'win32' &&
+    (Boolean(process.env.CREW_UPDATE_FEED) || fs.existsSync(path.join(path.dirname(process.execPath), 'Uninstall Crew.exe'))),
+  onChange: (status) => {
+    if (window && !window.isDestroyed()) window.webContents.send('update:changed', status);
+    trayMenu();
+  },
+});
+const updateTimers: ReturnType<typeof setTimeout>[] = [];
+/** Set once the user chooses to install; the installer starts after the windows have closed. */
+let installRequested = false;
+let handedOver = false;
 /** The board's top bar height (`.topbar` in board.css), so the window buttons line up with it. */
 const TOP_BAR_HEIGHT = 60;
 /** The board's --canvas and --label colors (board.css), behind and on the window buttons. */
@@ -120,7 +145,7 @@ function createWindow() {
     // No system title bar: the board's top bar takes its place, with the window buttons drawn over it.
     titleBarStyle: 'hidden',
     titleBarOverlay: { ...frame(), height: TOP_BAR_HEIGHT },
-    webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true },
+    webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true, preload: asset('preload.cjs') },
   });
   const settled = window.getNormalBounds();
   restored = { bounds: { ...settled, ...bounds }, settled };
@@ -163,7 +188,15 @@ function createWindow() {
       buttons: ['Discard changes', 'Keep editing'], defaultId: 1, cancelId: 1,
     });
     if (choice === 0) event.preventDefault();
-    else quitting = false;
+    else {
+      quitting = false;
+      // The daemon was already stopped for the install; the app keeps running, so it needs its daemon back.
+      if (installRequested) {
+        installRequested = false;
+        updater.failed();
+        void ensureDaemon().catch(console.error);
+      }
+    }
   });
   window.webContents.on('will-attach-webview', (event) => event.preventDefault());
   window.on('close', (event) => {
@@ -178,13 +211,18 @@ function createWindow() {
   });
   void loadBoard().catch(console.error);
 }
-function trayMenu(pending = 0) {
+function trayMenu(waiting = pending) {
+  pending = waiting;
   tray?.setToolTip(pending ? `Crew · ${pending} need your input` : 'Crew');
   tray?.setContextMenu(
     Menu.buildFromTemplate([
       { label: pending ? `Open Crew (${pending} waiting)` : 'Open Crew', click: () => show() },
       { label: 'Open in browser', click: () => void openInBrowser() },
       { label: 'Reload board', click: () => void loadBoard().catch(console.error) },
+      ...(updater.status.state === 'ready' ? [{ label: `Restart to update to ${updater.status.latest}`, click: () => void installUpdate() }] : []),
+      ...(updater.status.state === 'installing' && updater.status.waiting
+        ? [{ label: `Cancel the update waiting for ${updater.status.waiting} job${updater.status.waiting === 1 ? '' : 's'}`, click: () => updater.failed() }]
+        : []),
       { type: 'separator' },
       { label: 'Quit Crew — jobs keep running', click: () => app.quit() },
     ]),
@@ -221,10 +259,16 @@ else {
     quitting = true;
     saveWindow();
   });
-  app.on('will-quit', () => {
+  app.on('will-quit', (event) => {
     stopping = true;
     clearTimeout(timer);
     pollAbort?.abort();
+    for (const handle of updateTimers) clearTimeout(handle);
+    if (installRequested && !handedOver) {
+      event.preventDefault();
+      handedOver = true;
+      void handOver().finally(() => app.quit());
+    }
   });
   app.on('window-all-closed', () => {
     /* The tray stays available; the daemon is independent. */
@@ -273,4 +317,122 @@ async function startDesktop() {
   createWindow();
   trayMenu();
   void poll();
+  watchUpdates();
+}
+
+/** Only the main window's board page may reach the updater. */
+function fromBoard(event: IpcMainInvokeEvent) {
+  const url = event.senderFrame?.url;
+  if (event.sender !== window?.webContents || !url || !URL.canParse(url) || new URL(url).origin !== BASE_URL) {
+    throw new Error('The updater answers only the Crew board.');
+  }
+}
+function watchUpdates() {
+  ipcMain.handle('update:state', (event) => {
+    fromBoard(event);
+    return updater.status;
+  });
+  // Asked for by the user, so a release on offer downloads at once.
+  ipcMain.handle('update:check', async (event) => {
+    fromBoard(event);
+    await updater.check();
+    await updater.download();
+  });
+  ipcMain.handle('update:install', async (event) => {
+    fromBoard(event);
+    await installUpdate();
+  });
+  ipcMain.handle('update:cancel', (event) => {
+    fromBoard(event);
+    // Only an install still waiting for jobs can be called off; past that, the daemon is already stopping.
+    if (updater.status.state === 'installing' && updater.status.waiting) updater.failed();
+  });
+  void updater.load().catch(console.error).then(() => {
+    const check = () => {
+      void updater.check();
+      updateTimers.push(setTimeout(check, CHECK_EVERY_MS));
+    };
+    updateTimers.push(setTimeout(check, 60_000));
+    // A found release downloads only once the user has been away from Crew for a while.
+    let lastUsed = Date.now();
+    const watch = () => {
+      if (window?.isFocused() && powerMonitor.getSystemIdleTime() * 1000 < AWAY_MS) lastUsed = Date.now();
+      if (Date.now() - lastUsed >= AWAY_MS) void updater.download();
+      updateTimers.push(setTimeout(watch, 15_000));
+    };
+    watch();
+  });
+}
+async function ask(options: MessageBoxOptions) {
+  return (window && !window.isDestroyed() ? await dialog.showMessageBox(window, options) : await dialog.showMessageBox(options)).response;
+}
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+/**
+ * Installs the staged update without losing work. The daemon this app started runs as this install's Crew.exe, which
+ * the installer replaces, so it has to stop first, but it is only ever asked to stop while idle: it refuses while a job
+ * runs or a change is being saved, and otherwise saves jobs and missions before it exits. Until then the install waits,
+ * and the user can call it off. A daemon from another install is left alone. Jobs, missions and settings live in the
+ * Crew home and the app's data folder, which the installer does not touch.
+ */
+async function installUpdate() {
+  if (updater.status.state !== 'ready') return;
+  let running = await health();
+  const ours = () => running !== null && running.root === PLUGIN_ROOT;
+  if (ours() && running!.active > 0) {
+    const response = await ask({
+      type: 'info',
+      message: `${running!.active} job${running!.active === 1 ? ' is' : 's are'} still running.`,
+      detail: 'Crew will install the update as soon as they finish. Nothing is stopped, and jobs, missions and settings are kept.',
+      buttons: ['Update When Finished', 'Cancel'], defaultId: 0, cancelId: 1,
+    });
+    if (response !== 0) return;
+  }
+  if (!updater.installing(ours() ? running!.active : 0)) return;
+  // Read afresh each time: the user can cancel while the install waits.
+  const installing = () => updater.status.state === 'installing';
+  let refusals = 0;
+  while (ours()) {
+    if (stopping || !installing()) return;
+    if (running!.active === 0) {
+      const pid = running!.pid;
+      try {
+        await api('POST', '/api/shutdown', { ifIdle: true });
+        for (let waited = 0; (await health())?.pid === pid; waited += 200) {
+          if (waited >= 15_000) throw new Error(`The Crew daemon (process ${pid}) did not stop.`);
+          await sleep(200);
+        }
+        break;
+      } catch (error) {
+        // Refused because work started meanwhile; a daemon that keeps refusing while idle is reported instead.
+        if (++refusals >= 3) {
+          updater.failed(`Could not stop the Crew daemon for the update: ${(error as Error).message}`);
+          return;
+        }
+      }
+    } else refusals = 0;
+    updater.installing(running!.active);
+    await sleep(5000);
+    running = await health();
+  }
+  if (stopping || !installing()) return;
+  installRequested = quitting = true;
+  app.quit();
+}
+/** Starts the installer silently, after the windows have closed; it installs into the same folder and starts the new version. */
+async function handOver() {
+  const installer = updater.installer;
+  if (!installer) return;
+  try {
+    const child = spawn(installer, ['/S', '--force-run'], { detached: true, stdio: 'ignore' });
+    await new Promise<void>((resolve, reject) => {
+      child.once('spawn', resolve);
+      child.once('error', reject);
+    });
+    child.unref();
+  } catch (error) {
+    // The staged installer stays, so the reopened app offers it again; the reopened app starts its daemon again.
+    updater.failed((error as Error).message);
+    dialog.showErrorBox('Crew could not update', `${(error as Error).message}\n\nCrew will reopen; try the update again from Settings.`);
+    app.relaunch();
+  }
 }

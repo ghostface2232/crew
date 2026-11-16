@@ -36,8 +36,19 @@ const markBar = (element: Element | null) => {
   element?.toggleAttribute('data-scrollbar-hover', true);
   overBar = element;
 };
-document.addEventListener('pointermove', (event) => markBar(event.target instanceof Element && gutter(event.target, event) ? event.target : null), { passive: true });
-document.documentElement.addEventListener('pointerleave', () => markBar(null));
+document.addEventListener(
+  'pointermove',
+  (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    const root = document.documentElement;
+    // Nothing over the page's own scrollbar reaches the page, so the pointer arriving at the window's edge stands in for it.
+    const atPageBar = root.scrollHeight > root.clientHeight && event.clientX >= root.clientWidth - 6;
+    markBar(target && gutter(target, event) ? target : atPageBar ? root : null);
+  },
+  { passive: true },
+);
+// Moving onto the page's bar also leaves the page, so that bar stays marked until the pointer is seen elsewhere.
+document.documentElement.addEventListener('pointerleave', () => overBar !== document.documentElement && markBar(null));
 
 async function start() {
   try {

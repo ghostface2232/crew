@@ -522,6 +522,13 @@ html[data-resizing] dialog.detail-panel { transition: none; }
 .detail-id { display: block; color: var(--tertiary); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
 .detail-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-inline-start: auto; }
 .copy-button { background: var(--fill); }
+/* Two commands and the id need 396px on a row. Narrower than that the buttons give up their second word instead of dropping to a line of their own. */
+.detail-foot { container-type: inline-size; }
+.label-short { display: none; }
+@container (max-width: 399px) {
+  .detail-actions:has(.copy-button ~ .copy-button) .label-long { display: none; }
+  .detail-actions:has(.copy-button ~ .copy-button) .label-short { display: inline; }
+}
 
 /* Debates: rounds that fold to their heading and stances, the lead's voice on an accent edge. */
 .exchange { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }

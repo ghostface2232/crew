@@ -516,10 +516,10 @@ export function JobDrawer({ id, state, close }: { id: string; state: Snapshot; c
           )}
           <Footer id={job.id} status={<ActionStatus actionKey={cancelKey} />}>
             {job.sessionId && state.agents[job.agent] && (
-              <CopyButton text={`${state.agents[job.agent].resume} ${job.sessionId}`}>Resume command</CopyButton>
+              <CopyButton text={`${state.agents[job.agent].resume} ${job.sessionId}`} short="Resume">Resume command</CopyButton>
             )}
             {job.worktree && result && result.files.length > 0 && (
-              <CopyButton text={`git diff ${job.worktree.base.slice(0, 8)}..${job.worktree.branch}`}>Diff command</CopyButton>
+              <CopyButton text={`git diff ${job.worktree.base.slice(0, 8)}..${job.worktree.branch}`} short="Diff">Diff command</CopyButton>
             )}
             {job.endedAt == null && (
               <button
@@ -756,7 +756,7 @@ export function SessionDrawer({ id, state, close }: { id: string; state: Snapsho
             </Section>
           )}
           <Footer id={session.id}>
-            <CopyButton text={`claude --resume ${session.id}`}>Resume command</CopyButton>
+            <CopyButton text={`claude --resume ${session.id}`} short="Resume">Resume command</CopyButton>
           </Footer>
         </>
       )}

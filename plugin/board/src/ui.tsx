@@ -358,7 +358,8 @@ export function CloseButton({ label, onClose }: { label: string; onClose: () => 
     </button>
   );
 }
-export function CopyButton({ text, children }: { text: string; children: string }) {
+/** `short` is the label to fall back to where the full one would not leave room; the full one stays its name and tooltip. */
+export function CopyButton({ text, short, children }: { text: string; short?: string; children: string }) {
   const [copied, setCopied] = useState(false);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
@@ -371,6 +372,7 @@ export function CopyButton({ text, children }: { text: string; children: string 
       <button
         className="copy-button"
         title={children}
+        aria-label={short && !copied ? children : undefined}
         onClick={async () => {
           try {
             await navigator.clipboard.writeText(text);
@@ -382,7 +384,7 @@ export function CopyButton({ text, children }: { text: string; children: string 
         }}
       >
         <Icon icon={copied ? Check : Copy} />
-        {copied ? 'Copied' : children}
+        {copied ? 'Copied' : short ? <><span className="label-long">{children}</span><span className="label-short" aria-hidden="true">{short}</span></> : children}
       </button>
       {failed && <span className="action-message selectable">Could not copy. Select and copy: {text}</span>}
     </>

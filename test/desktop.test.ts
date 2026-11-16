@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { windowBounds, isBoardNavigation } from '../desktop/window-state.ts';
+import { windowBounds, isBoardNavigation, linkTarget } from '../desktop/window-state.ts';
 import { boardAsset, BOARD_CSP } from '../plugin/bridge/assets.ts';
 
 test('restores visible bounds but recenters a removed monitor or malformed values', () => {
@@ -31,6 +31,15 @@ test('desktop navigation is confined to the board, never API routes or remote pa
     'http://user@127.0.0.1:47615/',
   ])
     assert.equal(isBoardNavigation(url, base), false);
+});
+
+test('new windows open only evidence in the app and send web links to the browser', () => {
+  const base = 'http://127.0.0.1:47615';
+  assert.equal(linkTarget(`${base}/api/jobs/cx-1/evidence/shot.png?v=2`, base), 'evidence');
+  assert.equal(linkTarget('https://example.com/docs', base), 'external');
+  assert.equal(linkTarget('mailto:a@example.com', base), 'external');
+  for (const url of [`${base}/api/state`, `${base}/`, 'file:///C:/x', 'javascript:alert(1)', 'http://user@example.com/', 'nonsense'])
+    assert.equal(linkTarget(url, base), null);
 });
 
 test('serves only built assets with explicit types and a renderer security policy', () => {

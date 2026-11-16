@@ -34,3 +34,15 @@ export function isBoardNavigation(candidate: string, base: string) {
     return false;
   }
 }
+/** Where a link the board opens in a new window goes: its own evidence viewer, the user's browser, or nowhere. */
+export function linkTarget(candidate: string, base: string): 'evidence' | 'external' | null {
+  let url: URL;
+  try {
+    url = new URL(candidate);
+  } catch {
+    return null;
+  }
+  if (url.username || url.password) return null;
+  if (url.origin === base) return /^\/api\/jobs\/[\w-]+\/evidence\/[^/]+$/.test(url.pathname) ? 'evidence' : null;
+  return ['http:', 'https:', 'mailto:'].includes(url.protocol) ? 'external' : null;
+}

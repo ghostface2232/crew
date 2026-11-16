@@ -126,7 +126,8 @@ export const knownProjects = (state: BoardState) =>
   [...new Set([...state.jobs, ...state.claude, ...state.missions].map(projectOf).filter(Boolean))].sort();
 /**
  * The folder name; when another project shares it, as many parent folders as tell them apart.
- * Paths may be POSIX or Windows, since the daemon reports them as its own platform writes them.
+ * Paths may be POSIX or Windows, since the daemon reports them as its own platform writes them. Names that differ
+ * only in case read as the same name, so they are told apart too.
  */
 export function projectNames(dirs: string[]) {
   const parts = (dir: string) => dir.split(/[\\/]/).filter(Boolean);
@@ -135,8 +136,8 @@ export function projectNames(dirs: string[]) {
     dirs.map((dir) => {
       const total = parts(dir).length;
       for (let count = 1; count <= total; count++) {
-        const key = tail(dir, count);
-        if (!dirs.some((other) => other !== dir && tail(other, count) === key)) {
+        const key = tail(dir, count).toLowerCase();
+        if (!dirs.some((other) => other !== dir && tail(other, count).toLowerCase() === key)) {
           return [dir, tail(dir, count, dir.includes('\\') ? '\\' : '/')];
         }
       }

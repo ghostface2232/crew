@@ -13,12 +13,13 @@ Electron main (desktop/main.ts) ── ensureDaemon ── independent daemon �
 
 - The main process imports the bridge's own `client.ts`, so startup reuses `ensureDaemon`, including version negotiation and active-job protection. The daemon is started with the app's Electron executable in Node mode (`ELECTRON_RUN_AS_NODE`), so a separate Node install is not needed to run it.
 - Before loading the board, the main process sets the daemon's `crew_session` cookie from `~/.crew/token`. The secret never appears in a URL or in history. The tray's Open in browser command uses the usual `#token=` launch fragment.
-- The renderer runs with `nodeIntegration: false`, `contextIsolation: true` and `sandbox: true`, and has no preload. Navigation outside the board, popups, webviews and permission requests are denied.
+- The renderer runs with `nodeIntegration: false`, `contextIsolation: true` and `sandbox: true`, and has no preload. Navigation outside the board and webviews are denied. The only permission granted is clipboard writing for the board's origin, which its copy buttons use.
+- Links in reports open in the user's browser. Evidence images need the board's sign-in, so they open in a separate sandboxed app window that cannot navigate. Every other new window is refused.
 
 ## Window
 
 - No system title bar. `titleBarStyle: 'hidden'` with `titleBarOverlay` draws Windows' minimize, maximize and close buttons over the board's 60px top bar, in the board's canvas and label colors, and follows the system light or dark theme.
-- The main process injects a small stylesheet: the top bar and the sidebar's brand drag the window, the controls in them stay clickable, and the top bar keeps its right padding clear of the window buttons through `env(titlebar-area-*)`. The browser board is unchanged.
+- The main process injects a small stylesheet: the top bar and the sidebar's brand drag the window, and the controls in them stay clickable. The top bar keeps its right padding clear of the window buttons through `env(titlebar-area-*)`. The detail panel and dialogs start below the window buttons, including at narrow widths. The browser board is unchanged.
 - Closing the window hides it to the tray. Quitting leaves the daemon and its jobs running; reopening attaches to the same daemon. A second launch shows the first window.
 - Bounds and maximized state are restored. On scaled displays, Electron rounds bounds on the way in and out, so an unmoved window is saved with the bounds it was restored from; otherwise it would grow a few pixels on every launch.
 - The tray tooltip and the taskbar overlay show how many jobs and Claude sessions are waiting.
@@ -26,7 +27,7 @@ Electron main (desktop/main.ts) ── ensureDaemon ── independent daemon �
 
 ## Notifications
 
-The daemon keeps notifications on Windows. Its PowerShell toasts need no Start menu shortcut or registered app identity, which an unpackaged or unsigned Electron build lacks. The app therefore sends no desktop heartbeat and denies the board's own browser notification permission. Approval buttons in notifications are not offered on Windows; open the app or board to answer.
+The daemon keeps notifications on Windows. Its PowerShell toasts need no Start menu shortcut or registered app identity, which an unpackaged or unsigned Electron build lacks. The app therefore sends no desktop heartbeat and denies the board's own browser notifications; the board recognizes the app and hides its Turn on notifications command. Approval buttons in notifications are not offered on Windows; open the app or board to answer.
 
 ## Build and run
 
@@ -48,7 +49,7 @@ npm run typecheck
 npm run test:desktop
 ```
 
-The smoke test (`scripts/smoke-electron.mjs`) runs the app against its own daemon in a temporary home on a free port and starts no workers. It checks cookie sign-in without a URL secret, renderer isolation, hide on close, single instance, a cancelled quit that keeps unsaved settings, blocked external navigation, the tray's waiting count, bounds restored without drift, and daemon survival across quit and reopen. Set `CREW_APP_PATH` to `release/Crew-win32-x64/Crew.exe` to check the packaged app.
+The smoke test (`scripts/smoke-electron.mjs`) runs the app against its own daemon in a temporary home on a free port and starts no workers. It checks cookie sign-in without a URL secret, renderer isolation, hide on close, single instance, a cancelled quit that keeps unsaved settings, blocked external navigation, that no control lies under the window buttons at full or narrow width with Settings open, clipboard writes, evidence windows and browser links, the tray's waiting count, bounds restored without drift, and daemon survival across quit and reopen. Set `CREW_APP_PATH` to `release/Crew-win32-x64/Crew.exe` to check the packaged app.
 
 On Windows the daemon inherits the app's stdio handles, so Playwright's `close()` would wait for the daemon too; the smoke test quits the app and waits for its own process to exit.
 

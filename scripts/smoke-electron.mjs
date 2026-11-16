@@ -80,12 +80,49 @@ try {
   page.once('dialog', (dialog) => dialog.accept());
   await page.getByRole('button', { name: 'Close settings' }).click();
 
+  // No control lies under the window buttons, including at a narrow width with Settings open.
+  const covered = () =>
+    page.evaluate(() => {
+      const bar = navigator.windowControlsOverlay.getTitlebarAreaRect();
+      return [...document.querySelectorAll('button, a, input, select, textarea')]
+        .map((element) => ({ element, rect: element.getBoundingClientRect() }))
+        .filter(({ rect }) => rect.width && rect.height && rect.right > bar.right && rect.top < bar.height)
+        .map(({ element }) => element.getAttribute('aria-label') || element.textContent.trim());
+    });
+  expect(await covered()).toEqual([]);
+  await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setBounds({ width: 700, height: 760 }));
+  await page.waitForTimeout(300);
+  expect(await covered()).toEqual([]);
+  await page.getByRole('button', { name: 'Show sidebar' }).click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Close settings' }).first()).toBeVisible();
+  expect(await covered()).toEqual([]);
+  await page.keyboard.press('Escape');
+  await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setBounds({ x: 50, y: 60, width: 1100, height: 760 }));
+
   // External navigation is refused.
   await page.evaluate(() => {
     location.href = 'https://example.com/';
   });
   await page.waitForTimeout(500);
   expect(await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.getURL())).toBe(`${base}/`);
+
+  // Copy buttons can write the clipboard; evidence opens in a signed-in window; web links go to the browser.
+  expect(await page.evaluate(() => navigator.clipboard.writeText('crew').then(() => 'ok', (error) => String(error)))).toBe('ok');
+  await application.evaluate(({ shell }) => {
+    globalThis.crewOpened = [];
+    shell.openExternal = async (url) => { globalThis.crewOpened.push(url); };
+  });
+  await page.evaluate(() => {
+    window.open('https://example.com/report', '_blank', 'noreferrer');
+    window.open('/api/state', '_blank', 'noreferrer');
+  });
+  await expect.poll(() => application.evaluate(() => globalThis.crewOpened)).toEqual(['https://example.com/report']);
+  expect(await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)).toBe(1);
+  await page.evaluate(() => window.open('/api/jobs/cx-none/evidence/shot.png', '_blank', 'noreferrer'));
+  await expect.poll(() => application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)).toBe(2);
+  await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().filter((w) => w.webContents.getURL().includes('/evidence/')).forEach((w) => w.destroy()));
+  expect(await page.evaluate(() => typeof Notification !== 'undefined' && Notification.permission)).toBe('denied');
 
   // The tray count follows waiting Claude sessions.
   const tooltip = () => application.evaluate(() => globalThis.crewTrayTooltip ?? null);
@@ -137,6 +174,8 @@ try {
       'single instance',
       'cancelled quit preserves unsaved settings',
       'external navigation blocked',
+      'no control under the window buttons, wide or narrow',
+      'clipboard writes, evidence windows and browser links',
       'tray count follows waiting sessions',
       'window bounds restored without drift',
       'daemon survives quit and reopen',
@@ -149,7 +188,12 @@ try {
   console.error(error);
   process.exitCode = 1;
 } finally {
-  if (application) await quit(application).catch(() => {});
+  if (application) {
+    // After a failure the app may be held by an unsaved-settings prompt; the test owns this instance, so end it.
+    const child = application.process();
+    await Promise.race([quit(application), new Promise((resolve) => setTimeout(resolve, 10_000))]).catch(() => {});
+    if (child.exitCode === null && child.signalCode === null) child.kill();
+  }
   await fetch(`${base}/api/shutdown`, { method: 'POST', body: '{}', headers: { 'content-type': 'application/json', ...auth() } }).catch(() => {});
   await new Promise((resolve) => setTimeout(resolve, 1000));
   fs.rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });

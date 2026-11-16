@@ -61,6 +61,7 @@ test('elapsed time and project names use the app\'s labels', () => {
     [...projectNames(['C:\\Users\\me\\OneDrive\\crew', 'C:\\Users\\me\\work\\site', 'D:\\x\\site', '/x/site']).values()],
     ['crew', 'work\\site', 'D:\\x\\site', '/x/site'],
   );
+  assert.deepEqual([...projectNames(['C:\\a\\app', 'D:\\b\\APP']).values()], ['a\\app', 'b\\APP']);
   assert.equal(jobLabel({ state: 'running', stalled: true } as BoardJob), 'May be stuck');
   assert.equal(jobLabel({ state: 'waiting', stalled: true, waiting: { type: 'approval' } } as BoardJob), 'Needs approval');
   assert.equal(STOP_OF_STAGE['self-review'], STOP_OF_STAGE['cross-review']);

@@ -6,7 +6,7 @@ import { readToken, SESSION_COOKIE } from '../plugin/bridge/auth.ts';
 import { api, ensureDaemon } from '../plugin/bridge/client.ts';
 import { BASE_URL, HOME } from '../plugin/bridge/config.ts';
 import type { BoardState } from '../plugin/board/src/types.ts';
-import { isBoardNavigation, windowBounds } from './window-state.ts';
+import { isBoardNavigation, linkTarget, windowBounds } from './window-state.ts';
 
 // The Electron shell for Windows (and other non-macOS systems); macOS uses the native app in native/.
 // It hosts the same React board the browser shows. Notifications stay with the daemon, whose Windows toasts
@@ -29,17 +29,20 @@ const TOP_BAR_HEIGHT = 60;
 const theme = () =>
   nativeTheme.shouldUseDarkColors ? { color: '#0b0b0c', symbolColor: '#e1e1e2' } : { color: '#f4f4f6', symbolColor: '#28282a' };
 /**
- * Lets the top bar and the sidebar's brand move the window, and keeps the top bar's controls clear of the
- * window buttons. Injected here rather than kept in board.css, since the browser board has a title bar of its own;
+ * Lets the top bar and the sidebar's brand move the window, and keeps the top bar's controls and the dialogs'
+ * close buttons clear of the window buttons. Injected here rather than kept in board.css, since the browser board has a title bar of its own;
  * injected sheets come before the page's, hence the extra specificity.
  */
 const FRAME_CSS = `
 .topbar, .brand { -webkit-app-region: drag; }
 .topbar :is(button, a, input, nav), .brand :is(button, a) { -webkit-app-region: no-drag; }
 :root .topbar {
+  min-height: ${TOP_BAR_HEIGHT}px;
   padding-inline-end: max(var(--page-margin), calc((100% - 1400px) / 2),
     calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) + 12px));
-}`;
+}
+:root dialog.detail-panel { top: ${TOP_BAR_HEIGHT + 4}px; }
+:root dialog.sheet { max-height: calc(100vh - ${2 * (TOP_BAR_HEIGHT + 4)}px); }`;
 
 /**
  * The bounds this launch restored, and what the window reported for them. Scaled displays round them on the way
@@ -104,7 +107,26 @@ function createWindow() {
   if (bounds.maximized) window.maximize();
   window.once('ready-to-show', () => show());
   window.webContents.on('dom-ready', () => void window?.webContents.insertCSS(FRAME_CSS).catch(console.error));
-  window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  // Report links open in the user's browser. Evidence needs the board's sign-in, so it opens in a window of its own.
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    const target = linkTarget(url, BASE_URL);
+    if (target === 'external') void shell.openExternal(url);
+    if (target !== 'evidence') return { action: 'deny' };
+    return {
+      action: 'allow',
+      overrideBrowserWindowOptions: {
+        autoHideMenuBar: true,
+        backgroundColor: theme().color,
+        icon: asset('icon.png'),
+        webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true },
+      },
+    };
+  });
+  window.webContents.on('did-create-window', (child) => {
+    child.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    child.webContents.on('will-navigate', (event) => event.preventDefault());
+    child.webContents.on('will-redirect', (event) => event.preventDefault());
+  });
   window.webContents.on('will-navigate', (event, url) => {
     if (!isBoardNavigation(url, BASE_URL)) event.preventDefault();
   });
@@ -194,9 +216,11 @@ else {
 async function startDesktop() {
   await app.whenReady();
   Menu.setApplicationMenu(Menu.buildFromTemplate([{ role: 'editMenu' }, { role: 'viewMenu' }, { role: 'windowMenu' }]));
-  // The board needs no browser permissions; notifications come from the daemon.
-  session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
-  session.defaultSession.setPermissionCheckHandler(() => false);
+  // The board's copy buttons are the only permission it needs; notifications come from the daemon.
+  const allowed = (permission: string, origin: string) => permission === 'clipboard-sanitized-write' && origin === BASE_URL;
+  session.defaultSession.setPermissionRequestHandler((_contents, permission, callback, details) =>
+    callback(allowed(permission, URL.canParse(details.requestingUrl) ? new URL(details.requestingUrl).origin : '')));
+  session.defaultSession.setPermissionCheckHandler((_contents, permission, origin) => allowed(permission, origin));
   nativeTheme.on('updated', () => {
     if (!window || window.isDestroyed()) return;
     window.setBackgroundColor(theme().color);

@@ -2,7 +2,9 @@ import { NAMES } from './model.ts';
 import type { BoardJob, Snapshot } from './types.ts';
 
 export function notificationPermission(): NotificationPermission | 'unsupported' {
-  return typeof Notification === 'undefined' ? 'unsupported' : Notification.permission;
+  // The Windows desktop app (desktop/main.ts) leaves notifications to the daemon and denies the page's own.
+  if (typeof Notification === 'undefined' || navigator.userAgent.includes(' Electron/')) return 'unsupported';
+  return Notification.permission;
 }
 
 export function notificationsWanted(): boolean {

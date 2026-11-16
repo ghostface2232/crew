@@ -124,10 +124,25 @@ export const projectOf = (item: { root?: string; project?: string; cwd?: string 
   item.root ?? item.project ?? item.cwd ?? '';
 export const knownProjects = (state: BoardState) =>
   [...new Set([...state.jobs, ...state.claude, ...state.missions].map(projectOf).filter(Boolean))].sort();
-/** The folder name, or the whole path when another project shares the name. */
+/**
+ * The folder name; when another project shares it, as many parent folders as tell them apart.
+ * Paths may be POSIX or Windows, since the daemon reports them as its own platform writes them.
+ */
 export function projectNames(dirs: string[]) {
-  const last = (dir: string) => dir.split('/').filter(Boolean).pop() ?? dir;
-  return new Map(dirs.map((dir) => [dir, dirs.filter((other) => last(other) === last(dir)).length > 1 ? dir : last(dir)]));
+  const parts = (dir: string) => dir.split(/[\\/]/).filter(Boolean);
+  const tail = (dir: string, count: number, separator = '/') => parts(dir).slice(-count).join(separator);
+  return new Map(
+    dirs.map((dir) => {
+      const total = parts(dir).length;
+      for (let count = 1; count <= total; count++) {
+        const key = tail(dir, count);
+        if (!dirs.some((other) => other !== dir && tail(other, count) === key)) {
+          return [dir, tail(dir, count, dir.includes('\\') ? '\\' : '/')];
+        }
+      }
+      return [dir, dir];
+    }),
+  );
 }
 /** The app's elapsed label: under a minute reads <1m. */
 export function elapsed(ms: number) {

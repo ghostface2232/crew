@@ -1,6 +1,6 @@
 # 07. React board and Electron desktop
 
-Historical implementation: the Electron shell was replaced on 2026-11-13 by the [native macOS app](08-native-macos.md). The React web board remains supported. Commands and desktop paths below describe the previous implementation.
+Historical implementation: the Electron shell was replaced on 2026-11-13 by the [native macOS app](08-native-macos.md). The React web board remains supported. Commands and desktop paths below describe the previous implementation. On 2026-11-16 an Electron shell returned for Windows only; see [12-windows-electron.md](12-windows-electron.md).
 
 Implemented 2026-11-12, Crew 0.2.0. This delivers the UI foundation in roadmap L5 and the desktop shell plus role-based direct dispatch from L2. Claude remains the pipeline lead. AgentGauge, Cursor, alternate leads, automatic merges, intent classification, and per-round undo are separate work.
 

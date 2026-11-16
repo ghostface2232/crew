@@ -8,7 +8,7 @@ import {
   agentSummary, elapsed, jobLabel, jobRole, missionJobStep, missionLooksFinished, missionProgress, missionStep, missionStopPosition,
   missionStops, NAMES, roleLabel,
 } from './model.ts';
-import { ActionStatus, AgentMark, Chip, Icon, Menu, useAction, useFade, useNow } from './ui.tsx';
+import { ActionStatus, AgentMark, Chip, Collapse, Icon, Menu, useAction, useFade, useNow } from './ui.tsx';
 
 const capitalized = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 export const jobStatusState = (job: BoardJob) => (job.stalled ? 'stalled' : job.state);
@@ -312,65 +312,63 @@ export function MissionPanel({
           </button>
         </span>
       </div>
-      {expanded && (
-        <div className="mission-body reveal">
-          {mission.notes?.map((note, noteIndex) => (
-            <p className="mission-note selectable" key={`${note.at}:${noteIndex}`}>{note.text}</p>
-          ))}
-          <MissionTrack mission={mission} />
-          <div className="stage-groups">
-            {stops.map(({ name }, stopIndex) => {
-              const mine = jobs.filter((job) => missionJobStep(mission, job) === stopIndex);
-              const stageLead = active && stopIndex === at ? lead : undefined;
-              if (!mine.length && !stageLead) return null;
-              return (
-                <div className="rows" key={stopIndex}>
-                  <h3 className="stage-name">{name}</h3>
-                  {stageLead && <SessionRow session={stageLead} selected={selected === `session:${stageLead.id}`} openSession={openSession} />}
-                  {mine.map((job, rowIndex) => (
-                    <JobRow key={job.id} job={job} selected={selected === job.id} openJob={openJob} showsKind={false} index={rowIndex} />
-                  ))}
-                </div>
-              );
-            })}
-          </div>
-          {(mission.outcome || finished || mission.state === 'abandoned' || (active && presets)) && (
-            <div className="mission-foot">
-              {mission.outcome ? <p className="mission-outcome selectable">{mission.outcome}</p> : <span />}
-              <div className="mission-foot-actions">
-                {finished && <span className="caption secondary">Looks finished</span>}
-                {finished && active && (
-                  <button className="pill-warning small" disabled={locked} onClick={stopTracking}>Stop tracking</button>
-                )}
-                {(finished || mission.state === 'abandoned') && (
-                  <button className="prominent small" disabled={locked} onClick={markDone}>Mark done</button>
-                )}
-                {active && presets && (
-                  <Menu label="Mission preset" icon={Gauge} text={`${presetName} preset`}>
-                    {PRESETS.map(([preset, name]) => (
-                      <button
-                        key={name}
-                        role="menuitemradio"
-                        aria-checked={(mission.preset ?? null) === preset}
-                        disabled={presetAction.pending || !live}
-                        title="Applies to the mission's next jobs. Jobs already started keep theirs."
-                        onClick={() => void actions.run(presetKey, () => request(`/api/missions/${mission.id}`, { preset }), {
-                          done: preset ? `${name} preset for new jobs` : 'Global preset for new jobs', once: false,
-                        })}
-                      >
-                        <Icon icon={(mission.preset ?? null) === preset ? Check : Gauge} />
-                        {preset ? `${name} preset` : 'Global preset'}
-                      </button>
-                    ))}
-                  </Menu>
-                )}
+      <Collapse open={expanded} className="mission-body">
+        {mission.notes?.map((note, noteIndex) => (
+          <p className="mission-note selectable" key={`${note.at}:${noteIndex}`}>{note.text}</p>
+        ))}
+        <MissionTrack mission={mission} />
+        <div className="stage-groups">
+          {stops.map(({ name }, stopIndex) => {
+            const mine = jobs.filter((job) => missionJobStep(mission, job) === stopIndex);
+            const stageLead = active && stopIndex === at ? lead : undefined;
+            if (!mine.length && !stageLead) return null;
+            return (
+              <div className="rows" key={stopIndex}>
+                <h3 className="stage-name">{name}</h3>
+                {stageLead && <SessionRow session={stageLead} selected={selected === `session:${stageLead.id}`} openSession={openSession} />}
+                {mine.map((job, rowIndex) => (
+                  <JobRow key={job.id} job={job} selected={selected === job.id} openJob={openJob} showsKind={false} index={rowIndex} />
+                ))}
               </div>
-            </div>
-          )}
-          <ActionStatus actionKey={presetKey} />
+            );
+          })}
         </div>
-      )}
-      {!expanded && finished && <span className="caption secondary mission-hint">Looks finished</span>}
+        {(mission.outcome || finished || mission.state === 'abandoned' || (active && presets)) && (
+          <div className="mission-foot">
+            {mission.outcome ? <p className="mission-outcome selectable">{mission.outcome}</p> : <span />}
+            <div className="mission-foot-actions">
+              {finished && <span className="caption secondary">Looks finished</span>}
+              {finished && active && (
+                <button className="pill-warning small" disabled={locked} onClick={stopTracking}>Stop tracking</button>
+              )}
+              {(finished || mission.state === 'abandoned') && (
+                <button className="prominent small" disabled={locked} onClick={markDone}>Mark done</button>
+              )}
+              {active && presets && (
+                <Menu label="Mission preset" icon={Gauge} text={`${presetName} preset`}>
+                  {PRESETS.map(([preset, name]) => (
+                    <button
+                      key={name}
+                      role="menuitemradio"
+                      aria-checked={(mission.preset ?? null) === preset}
+                      disabled={presetAction.pending || !live}
+                      title="Applies to the mission's next jobs. Jobs already started keep theirs."
+                      onClick={() => void actions.run(presetKey, () => request(`/api/missions/${mission.id}`, { preset }), {
+                        done: preset ? `${name} preset for new jobs` : 'Global preset for new jobs', once: false,
+                      })}
+                    >
+                      <Icon icon={(mission.preset ?? null) === preset ? Check : Gauge} />
+                      {preset ? `${name} preset` : 'Global preset'}
+                    </button>
+                  ))}
+                </Menu>
+              )}
+            </div>
+          </div>
+        )}
+        <ActionStatus actionKey={presetKey} />
+      </Collapse>
+      {!expanded && finished && <span className="caption secondary mission-hint reveal">Looks finished</span>}
       <ActionStatus actionKey={key} />
     </section>
   );

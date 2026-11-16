@@ -10,6 +10,47 @@ import claudeMark from './icons/ClaudeCode.svg';
 import codexMark from './icons/Codex.svg';
 import antigravityMark from './icons/Antigravity.svg';
 
+/**
+ * Content that opens and closes by height and fade, and stays mounted so it can do both. Closed, it is out of the tab order
+ * and the accessibility tree. Its spacing from what precedes it belongs in its own padding: a gap before an empty row would stay.
+ */
+export function Collapse({ open, className, children }: { open: boolean; className?: string; children: ReactNode }) {
+  return (
+    <div className="collapse" data-open={open || undefined}>
+      <div className="collapse-inner" inert={!open}>
+        <div className={className}>{children}</div>
+      </div>
+    </div>
+  );
+}
+
+/** How long a side panel takes to leave, shorter than it takes to arrive. */
+export const PANEL_EXIT_MS = 300;
+/** True while a side panel is still on screen only to play its exit; the Dialog inside reads it. */
+export const PanelLeavingContext = createContext(false);
+/**
+ * Keeps showing a value for `ms` after it is cleared, so what it names can animate out in place instead of vanishing. A new value
+ * replaces it at once. Returns what to show and whether it is only lingering.
+ */
+export function useLinger(value: string, ms: number): [string, boolean] {
+  const [kept, setKept] = useState(value);
+  const [leaving, setLeaving] = useState(false);
+  if (value && (value !== kept || leaving)) {
+    setKept(value);
+    setLeaving(false);
+  }
+  useEffect(() => {
+    if (value || !kept) return;
+    if (reducedMotion()) return setKept('');
+    setLeaving(true);
+    const timer = window.setTimeout(() => {
+      setKept('');
+      setLeaving(false);
+    }, ms);
+    return () => clearTimeout(timer);
+  }, [value]);
+  return [value || kept, leaving];
+}
 export const ClockContext = createContext(Date.now());
 export const useNow = () => useContext(ClockContext);
 export function ClockProvider({ skew, children }: { skew: number; children: ReactNode }) {
@@ -223,6 +264,21 @@ export function Dialog({
   const close = useRef(onClose);
   close.current = onClose;
   const modal = variant !== 'detail-panel';
+  const leaving = useContext(PanelLeavingContext);
+  useEffect(() => {
+    if (modal || !leaving) return;
+    const dialog = ref.current!;
+    // Out of reach while it goes: nothing it shows can be pressed any more.
+    dialog.inert = true;
+    const exit = dialog.animate(
+      [{ translate: '0 0', opacity: 1, filter: 'blur(0px)' }, { translate: '28px 0', opacity: 0, filter: 'blur(6px)' }],
+      { duration: PANEL_EXIT_MS, easing: EASE_IN_OUT, fill: 'forwards' },
+    );
+    return () => {
+      exit.cancel();
+      dialog.inert = false;
+    };
+  }, [leaving]);
   useLayoutEffect(() => {
     const dialog = ref.current!;
     const previous = document.activeElement as HTMLElement | null;

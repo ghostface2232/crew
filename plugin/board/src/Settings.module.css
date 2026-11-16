@@ -23,7 +23,7 @@
 /* Page */
 .detail { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 /* A scrollbar sits inside the border, so this keeps its top clear of the dialog's rounded corner. */
-.scroll { flex: 1; min-height: 0; overflow: auto; border-block-start: var(--panel-radius) solid transparent; }
+.scroll { scrollbar-gutter: stable; flex: 1; min-height: 0; overflow: auto; border-block-start: var(--panel-radius) solid transparent; }
 /* The title stays while the page scrolls under it, blurred, then fading out below it, rather than cut off at an edge. */
 .pageHead {
   position: sticky;
@@ -32,7 +32,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: max(0px, calc(20px - var(--panel-radius))) 26px 30px;
+  padding: max(0px, calc(20px - var(--panel-radius))) calc(26px - var(--scrollbar-w, 0px)) 30px 26px;
   /* Overlaps the content only by what is clear of the fade, so nothing sits faded before it is scrolled. */
   margin-bottom: -6px;
   transition: background-color 150ms ease-out, backdrop-filter 150ms ease-out;
@@ -47,7 +47,7 @@
 }
 .pageTitle { flex: 1; min-width: 0; font: 600 20px/1.2 var(--rounded); overflow-wrap: anywhere; }
 .back { display: none; }
-.body { display: grid; gap: 24px; padding: 0 26px 24px; }
+.body { display: grid; gap: 24px; padding: 0 calc(26px - var(--scrollbar-w, 0px)) 24px 26px; }
 
 /* Grouped rows, each a label with its control at the trailing edge. */
 .group { display: grid; gap: 8px; min-width: 0; }

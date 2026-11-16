@@ -5,6 +5,13 @@ import { initializeSession, UnauthorizedError } from './api.ts';
 import { board } from './store.ts';
 import '../board.css';
 
+// The thin bar's width, so a scrolling area can take it out of its padding and keep its content's edges even.
+const probe = document.createElement('div');
+probe.style.cssText = 'position:absolute;visibility:hidden;width:100px;height:100px;overflow:scroll;scrollbar-width:thin';
+document.body.append(probe);
+document.documentElement.style.setProperty('--scrollbar-w', `${probe.offsetWidth - probe.clientWidth}px`);
+probe.remove();
+
 // Marks whatever is scrolling for a moment, so its scrollbar can show only then; scroll events do not bubble.
 const scrolling = new WeakMap<Element, number>();
 document.addEventListener(

@@ -7,7 +7,7 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import { board } from './store.ts';
 import { knownProjects, projectNames, projectOf } from './model.ts';
-import { ClockProvider, CopyMenu, Icon, RollingNumber } from './ui.tsx';
+import { ClockProvider, CopyMenu, Icon, PANEL_EXIT_MS, PanelLeavingContext, RollingNumber, useLinger } from './ui.tsx';
 import appIcon from './icons/CrewAppIcon.svg';
 import { Activity, History, Workspace } from './Overview.tsx';
 import { NeedsYou } from './NeedsYou.tsx';
@@ -118,6 +118,8 @@ export function App() {
   const openJob = (id: string) => show(detail === id ? '' : id);
   const openSession = (id: string) => show(detail === `session:${id}` ? '' : `session:${id}`);
   const closeDetail = () => show('');
+  // A closed panel stays up while it slides out; a different one replaces it at once.
+  const [panel, panelLeaving] = useLinger(detail, PANEL_EXIT_MS);
   /** After New Job, the job's own project, so the new job is in view, as the app goes there. */
   const openNewJob = (id: string, root?: string) => {
     if (root && project !== root) select(`project:${root}`);
@@ -315,11 +317,13 @@ export function App() {
             actions={{ select, openJob: show, openSession: (id) => show(`session:${id}`), newJob: () => newJob(), settings: openSettings }}
           />
         )}
-        {detail.startsWith('session:') ? (
-          <SessionDrawer key={detail} id={detail.slice(8)} state={state} close={closeDetail} />
-        ) : (
-          detail && <JobDrawer key={detail} id={detail} state={state} close={closeDetail} />
-        )}
+        <PanelLeavingContext value={panelLeaving}>
+          {panel.startsWith('session:') ? (
+            <SessionDrawer key={panel} id={panel.slice(8)} state={state} close={closeDetail} />
+          ) : (
+            panel && <JobDrawer key={panel} id={panel} state={state} close={closeDetail} />
+          )}
+        </PanelLeavingContext>
         {settings && <Settings state={state} close={() => setSettings(false)} />}
       </div>
     </ClockProvider>

@@ -16,6 +16,17 @@ const MARKETPLACE = path.resolve(PLUGIN_ROOT, '..');
 /** A built copy of the plugin, as an app carries, rather than a source checkout. */
 export const PACKAGED = fs.existsSync(path.join(PLUGIN_ROOT, '.claude-plugin', 'build'));
 const RECORD = path.join(HOME, 'setup.json');
+/**
+ * On Windows the installer stops every process under the install folder and moves its files away, which would take
+ * down the MCP server of every open Claude Code session and any daemon one started. So an app's copy registers a copy
+ * of its plugin and runtime in the Crew home instead, one per build: open sessions keep running theirs through an
+ * update, and the updated app registers the next.
+ */
+const COPIED = PACKAGED && process.platform === 'win32';
+const COPIES = path.join(HOME, 'plugins');
+const samePath = (a: string, b: string) => path.relative(a, b) === '';
+/** The marketplace Claude Code runs this build's plugin from. */
+const registeredRoot = () => (COPIED ? path.join(COPIES, `${VERSION}-${installed().build}`) : MARKETPLACE);
 
 export function run(bin: string, args: string[], timeout = 20_000): Promise<{ ok: boolean; out: string }> {
   const env = agentEnv();
@@ -37,14 +48,65 @@ type Marketplace = { name: string; path?: string };
 type InstalledPlugin = { id: string; version?: string; readFromFolder?: string };
 
 /** The Node a built plugin runs on: the app's own, beside the plugin's folder. */
-function bundledRuntime(): string | null {
-  for (const file of [path.join(MARKETPLACE, '..', 'runtime', 'node'), path.join(MARKETPLACE, 'runtime', 'node.exe')]) {
+function bundledRuntime(root: string): string | null {
+  for (const file of [path.join(root, '..', 'runtime', 'node'), path.join(root, 'runtime', 'node.exe')]) {
     if (fs.existsSync(file)) return file;
   }
   return null;
 }
 
 export type Registration = { ok: boolean; detail: string };
+
+/** Copies a built marketplace's plugin and runtime to `dest`, whole or not at all. An existing `dest` is complete. */
+export function copyPlugin(from: string, dest: string): void {
+  if (fs.existsSync(dest)) return;
+  const partial = `${dest}.partial-${process.pid}`;
+  fs.rmSync(partial, { recursive: true, force: true });
+  for (const name of ['.claude-plugin', 'plugin', 'runtime']) {
+    if (fs.existsSync(path.join(from, name))) fs.cpSync(path.join(from, name), path.join(partial, name), { recursive: true });
+  }
+  try {
+    fs.renameSync(partial, dest);
+  } catch (err) {
+    fs.rmSync(partial, { recursive: true, force: true });
+    // Another process finished the same copy first.
+    if (!fs.existsSync(dest)) throw err;
+  }
+}
+
+/**
+ * Removes the plugin copies in `dir` other than `keep`, except those still running. Windows refuses to delete a
+ * running executable, so a copy whose runtime cannot be deleted is left to the session using it and tried again later.
+ */
+export function prunePlugins(dir = COPIES, keep = [registeredRoot(), MARKETPLACE]): void {
+  let names: string[];
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    const copy = path.join(dir, name);
+    if (keep.some((root) => samePath(root, copy))) continue;
+    const pid = Number(/\.partial-(\d+)$/.exec(name)?.[1]);
+    if (pid && alive(pid)) continue;
+    try {
+      fs.rmSync(path.join(copy, 'runtime'), { recursive: true, force: true });
+      fs.rmSync(copy, { recursive: true, force: true });
+    } catch {
+      /* In use. */
+    }
+  }
+}
+
+const alive = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM';
+  }
+};
 
 /**
  * Registers this copy's marketplace and installs or updates the plugin from it, then points the `crew` command here.
@@ -55,23 +117,28 @@ export async function register(): Promise<Registration> {
   if (!marketplaces) return { ok: false, detail: 'Claude Code was not found. Install it, then try again.' };
   const current = marketplaces.find((entry) => entry.name === 'crew');
   const fromSource = (folder: string) => fs.existsSync(folder) && !fs.existsSync(path.join(folder, 'plugin', '.claude-plugin', 'build'));
-  if (PACKAGED && current?.path && path.resolve(current.path) !== MARKETPLACE && fromSource(current.path)) {
+  const root = registeredRoot();
+  if (PACKAGED && current?.path && !samePath(current.path, root) && fromSource(current.path)) {
     return { ok: true, detail: `Registered from a source checkout (${current.path}); the app leaves it as it is.` };
   }
-  if (!current?.path || path.resolve(current.path) !== MARKETPLACE) {
+  if (COPIED) copyPlugin(MARKETPLACE, root);
+  if (!current?.path || !samePath(current.path, root)) {
     // Adding a marketplace under a name already taken points that name at the new folder.
-    const added = await run('claude', ['plugin', 'marketplace', 'add', MARKETPLACE], 60_000);
+    const added = await run('claude', ['plugin', 'marketplace', 'add', root], 60_000);
     if (!added.ok) return { ok: false, detail: `Could not register the marketplace: ${lastLine(added.out)}` };
   }
   const plugins = await claudeJSON<InstalledPlugin[]>(['plugin', 'list']);
   const plugin = plugins?.find((entry) => entry.id === 'crew@crew');
-  const step = !plugin ? ['install', 'crew@crew'] : plugin.version !== VERSION ? ['update', 'crew@crew'] : null;
+  // A copy of another build with the same version has Claude Code read the plugin from the new folder too.
+  const moved = plugin?.readFromFolder !== undefined && !samePath(plugin.readFromFolder, path.join(root, 'plugin'));
+  const step = !plugin ? ['install', 'crew@crew'] : plugin.version !== VERSION || (COPIED && moved) ? ['update', 'crew@crew'] : null;
   if (step) {
     const res = await run('claude', ['plugin', ...step], 60_000);
     if (!res.ok) return { ok: false, detail: `Could not ${step[0]} the plugin: ${lastLine(res.out)}` };
   }
-  linkCommand();
-  if (PACKAGED) fs.writeFileSync(RECORD, `${JSON.stringify({ root: MARKETPLACE, version: VERSION, build: installed().build }, null, 2)}\n`);
+  linkCommand(root);
+  if (PACKAGED) fs.writeFileSync(RECORD, `${JSON.stringify({ root, version: VERSION, build: installed().build }, null, 2)}\n`);
+  if (COPIED) prunePlugins();
   return { ok: true, detail: step ? 'Installed. Open a new Claude Code session, or run /reload-plugins, to load it.' : 'Up to date.' };
 }
 
@@ -82,7 +149,7 @@ export async function register(): Promise<Registration> {
 export function registered(): boolean {
   try {
     const record = JSON.parse(fs.readFileSync(RECORD, 'utf8'));
-    return record.root === MARKETPLACE && record.version === VERSION && record.build === installed().build;
+    return record.root === registeredRoot() && record.version === VERSION && record.build === installed().build;
   } catch {
     return false;
   }
@@ -91,19 +158,19 @@ export function registered(): boolean {
 const lastLine = (text: string) => text.split('\n').filter(Boolean).pop() ?? text;
 export const COMMAND = path.join(os.homedir(), '.local', 'bin', 'crew');
 
-/** Puts `crew` in ~/.local/bin, running this copy's CLI on its Node: the app's for a built copy, PATH's for source. */
-function linkCommand(): void {
-  const cli = path.join(PLUGIN_ROOT, 'bridge', `cli${path.extname(import.meta.filename)}`);
-  const runtime = bundledRuntime();
+/** Puts `crew` in ~/.local/bin, running the registered copy's CLI on its Node: the app's for a built copy, PATH's for source. */
+function linkCommand(root: string): void {
+  const cli = path.join(root, 'plugin', 'bridge', `cli${path.extname(import.meta.filename)}`);
+  const runtime = bundledRuntime(root);
   fs.mkdirSync(path.dirname(COMMAND), { recursive: true });
   for (const file of [COMMAND, `${COMMAND}.cmd`, `${COMMAND}.mjs`]) fs.rmSync(file, { force: true });
   if (process.platform === 'win32') {
     // A symlink needs Developer Mode or an elevated shell. cmd.exe reads a .cmd file in the console code page, so the
     // script's path, which may not be ASCII, is left to a UTF-8 module beside the shims; the runtime's path is written
-    // through %LOCALAPPDATA% where it can be.
-    const local = process.env.LOCALAPPDATA;
+    // through %LOCALAPPDATA% or %USERPROFILE% where it can be.
     const node = runtime ?? 'node';
-    const cmdNode = runtime && local && node.toLowerCase().startsWith(local.toLowerCase()) ? `%LOCALAPPDATA%${node.slice(local.length)}` : node;
+    const base = runtime ? ['LOCALAPPDATA', 'USERPROFILE'].find((name) => process.env[name] && node.toLowerCase().startsWith(process.env[name]!.toLowerCase())) : undefined;
+    const cmdNode = base ? `%${base}%${node.slice(process.env[base]!.length)}` : node;
     fs.writeFileSync(`${COMMAND}.mjs`, `import ${JSON.stringify(pathToFileURL(cli).href)};\n`);
     fs.writeFileSync(`${COMMAND}.cmd`, `@"${cmdNode}" "%~dp0crew.mjs" %*\r\n`);
     // For Git Bash, which Claude Code's shell is on Windows.
@@ -130,7 +197,7 @@ export async function checks(): Promise<SetupItem[]> {
     { id: 'claude', label: 'Claude Code', ok: claude.ok, detail: claude.ok ? claude.out : 'Not found. Install Claude Code from claude.com/code.' },
   ];
   const plugin = plugins?.find((entry) => entry.id === 'crew@crew');
-  const here = plugin?.readFromFolder && path.resolve(plugin.readFromFolder) === PLUGIN_ROOT;
+  const here = plugin?.readFromFolder && samePath(plugin.readFromFolder, path.join(registeredRoot(), 'plugin'));
   items.push({
     id: 'plugin',
     label: 'Crew plugin',

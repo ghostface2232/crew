@@ -1,6 +1,6 @@
 # 13. Distribution plan
 
-Recorded 2026-11-16. Not implemented. This records the agreed direction for releasing Crew to other users, so the work can start from it later.
+Recorded 2026-11-16. Steps 3 and 4 of the order of work are implemented; the others are not. This records the agreed direction for releasing Crew to other users.
 
 ## Goal
 
@@ -45,6 +45,8 @@ The user's path is: download the installer, run the app, sign in to whatever the
 
 ## Release housekeeping
 
+- To release, set both version fields below, commit to `main`, then push the tag: `git tag v<version> && git push origin v<version>`.
+
 - Keep `package.json` and `plugin/.claude-plugin/plugin.json` at the release tag's version, since daemons compare versions to decide which replaces which.
 - Release notes cover changes, installation, and the SmartScreen and Gatekeeper steps.
 - README: the plugin comes with the app; installing from source stays documented for development.
@@ -54,7 +56,7 @@ The user's path is: download the installer, run the app, sign in to whatever the
 1. Bundle the built plugin and a runtime in both apps; point the bundled plugin's MCP server, hooks and `crew` shim at that runtime.
 2. First-launch install and update of the marketplace and plugin, with the checklist screen.
 3. Windows installer and auto-update with electron-builder. Done: an NSIS installer and the app's own updater.
-4. GitHub Actions release workflow for both platforms, and release notes.
+4. GitHub Actions release workflow for both platforms, and release notes. Done: `.github/workflows/release.yml` runs on a pushed `v<version>` tag, checks the tag against both version fields, builds the macOS (arm64) and Windows apps, and publishes them with `.github/release-notes.md` above GitHub's generated change list.
 5. Signing: a Windows certificate, and an Apple Developer Program membership for macOS, when the audience calls for them.
 
 Review the design (step 1 especially: the runtime launcher and how Claude Code caches installed plugins) before building it.

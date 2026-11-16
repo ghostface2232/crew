@@ -95,7 +95,7 @@ Using Antigravity carries a Terms of Service risk; read [docs/04-implementation.
 | [docs/08-native-macos.md](docs/08-native-macos.md) | Native macOS app, Liquid Glass, Swift 6, packaging and verification |
 | [docs/09-usage-presets-rounds.md](docs/09-usage-presets-rounds.md) | AgentGauge usage and routing, presets, rounds, intents, and the API they share |
 | [docs/12-windows-electron.md](docs/12-windows-electron.md) | Windows Electron app, frameless window, notifications, packaging and verification |
-| [docs/13-distribution-plan.md](docs/13-distribution-plan.md) | Release plan: GitHub Releases, Windows installer, the app installing the plugin, first-run checklist (not implemented) |
+| [docs/13-distribution-plan.md](docs/13-distribution-plan.md) | Release plan: GitHub Releases, Windows installer, the app installing the plugin, first-run checklist (release workflow and installer implemented) |
 
 ## Current status
 

@@ -14,7 +14,10 @@ await bundlePlugin(root, '../runtime/node.exe');
 if (process.platform === 'win32') {
   fs.mkdirSync(path.join(root, 'runtime'), { recursive: true });
   fs.copyFileSync(process.execPath, path.join(root, 'runtime/node.exe'));
-  fs.copyFileSync(path.resolve(path.dirname(process.execPath), 'LICENSE'), path.join(root, 'runtime/LICENSE'));
+  // The Node.js installer (MSI) leaves its LICENSE out; the zip distribution, which CI uses, keeps it beside node.exe.
+  const license = process.env.CREW_NODE_LICENSE ?? path.resolve(path.dirname(process.execPath), 'LICENSE');
+  if (!fs.existsSync(license)) throw new Error('Set CREW_NODE_LICENSE to the LICENSE of this Node.js version (the zip distribution ships it beside node.exe).');
+  fs.copyFileSync(license, path.join(root, 'runtime/LICENSE'));
 } else console.warn('Not on Windows: the bundled plugin has no Node runtime in this build.');
 const version = JSON.parse(fs.readFileSync('package.json', 'utf8')).version;
 fs.writeFileSync(

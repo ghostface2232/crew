@@ -45,11 +45,12 @@ enum Space {
 
 enum WorkspaceStyle {
     // MARK: Surfaces
-    // Dark mode keeps cards about 9% lighter than the canvas so they stay distinct without heavy borders.
+    // Dark mode follows Apple's own apps (Fitness, Health): a near-black canvas and #1C1C1E cards, set in sRGB so
+    // they render as written; calibrated grays came out lighter on screen (0.16 drew as #363636).
     static let canvas = dynamic(light: NSColor(calibratedRed: 0.955, green: 0.955, blue: 0.965, alpha: 1),
-                                dark: NSColor(calibratedRed: 0.07, green: 0.07, blue: 0.075, alpha: 1))
+                                dark: NSColor(srgbRed: 11 / 255, green: 11 / 255, blue: 12 / 255, alpha: 1))
     static let inverse = Color(nsColor: .windowBackgroundColor)
-    static let surface = dynamic(light: .white, dark: NSColor(calibratedWhite: 0.16, alpha: 1))
+    static let surface = dynamic(light: .white, dark: NSColor(srgbRed: 28 / 255, green: 28 / 255, blue: 30 / 255, alpha: 1))
     /// Rows and insets inside a card.
     static let rowFill = dynamic(light: NSColor(calibratedWhite: 0, alpha: 0.04), dark: NSColor(calibratedWhite: 1, alpha: 0.06))
     static let hairline = dynamic(light: NSColor(calibratedWhite: 0, alpha: 0.08), dark: NSColor(calibratedWhite: 1, alpha: 0.08))

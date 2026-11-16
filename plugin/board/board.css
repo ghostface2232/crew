@@ -80,8 +80,9 @@
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --canvas: #121213;
-    --surface: #292929;
+    /* Apple's own apps: a near-black canvas and #1C1C1E cards, the same as the app. */
+    --canvas: #0b0b0c;
+    --surface: #1c1c1e;
     --surface-2: rgb(255 255 255 / 0.06);
     --row: rgb(255 255 255 / 0.06);
     --hairline: rgb(255 255 255 / 0.08);

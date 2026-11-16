@@ -62,4 +62,4 @@ Set `CREW_APP_PATH` to `release/Crew-win32-x64/Crew.exe` to test the packaged ap
 
 On Windows, the daemon inherits the app's stdio handles, so Playwright's `close()` would hang waiting for the daemon; instead, the smoke test quits the app and waits for its own process to exit.
 
-Verified on Windows 11 x64 at 150% display scaling, both unpackaged and packaged. The packaged app uses about 360 MB on disk, and an idle board measured about 520 MiB across all Electron process working sets under Playwright (note that working sets count shared pages more than once).
+Verified on Windows 11 x64 at 150% display scaling, both unpackaged and packaged. The packaged app uses about 360 MB on disk, and the smoke runs measured 520 to 710 MiB across all Electron process working sets under Playwright, after the checks above (note that working sets count shared pages more than once).

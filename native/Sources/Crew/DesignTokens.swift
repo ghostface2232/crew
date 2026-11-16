@@ -10,6 +10,8 @@ enum Motion {
     static let content = Animation.smooth(duration: 0.3)
     /// A card opening or closing, with the cards around it moving along.
     static let expand = Animation.smooth(duration: 0.38)
+    /// Work arriving or leaving on its own: cards and rows come and go, and the ones around them move into place.
+    static let reflow = Animation.smooth(duration: 0.42)
     /// The detail panel coming in or going out.
     static let panel = Animation.smooth(duration: 0.26, extraBounce: 0)
     /// A page replacing another.
@@ -393,6 +395,21 @@ extension AnyTransition {
     static func wordSwap(anchor: UnitPoint) -> AnyTransition {
         let swapping = AnyTransition.modifier(active: Swapping(shown: false, anchor: anchor), identity: Swapping(shown: true, anchor: anchor))
         return .asymmetric(insertion: swapping.animation(Motion.swapIn), removal: swapping.animation(Motion.swapOut))
+    }
+}
+
+extension AnyTransition {
+    /// A card or row arriving or leaving on its own, as work comes and goes: it settles in from slightly smaller
+    /// out of a soft blur, and leaves the same way, while `Motion.reflow` moves its neighbors into place.
+    static var card: AnyTransition {
+        .modifier(active: Arriving(shown: false), identity: Arriving(shown: true))
+    }
+}
+
+private struct Arriving: ViewModifier {
+    let shown: Bool
+    func body(content: Content) -> some View {
+        content.opacity(shown ? 1 : 0).scaleEffect(shown ? 1 : 0.96).blur(radius: shown ? 0 : 4)
     }
 }
 

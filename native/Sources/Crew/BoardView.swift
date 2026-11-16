@@ -9,6 +9,8 @@ struct BoardView: View {
     /// The page column's width, the panel floating over its trailing part; it bounds how wide the panel may be dragged.
     @State private var pageWidth: CGFloat = 0
     @State private var scroll = ScrollPosition(edge: .top)
+    /// Lets a card that changes column glide across instead of fading out of one and into the other.
+    @Namespace private var cards
     var body: some View {
         NavigationSplitView {
             ProjectSidebar(store: store, openSettings: openSettings)
@@ -45,12 +47,14 @@ struct BoardView: View {
             LazyVStack(alignment: .leading, spacing: WorkspaceStyle.cardGap) {
                 if !store.connected { connectionBanner }
                 heading
-                if store.state.pendingCount > 0 && store.selection != "needs" && !store.project.isEmpty { attentionBanner }
+                if store.state.pendingCount > 0 && store.selection != "needs" && !store.project.isEmpty { attentionBanner.transition(.card) }
                 if store.selection == "needs" { NeedsYouView(store: store) }
                 else if store.selection == "activity" { activity }
                 else { workspace }
             }
             .onGeometryChange(for: Bool.self) { $0.size.width >= Self.twoColumnWidth } action: { wide = $0 }
+            // The banner and the heading's review button come and go with requests; the page below makes room.
+            .animation(Motion.reduced(Motion.reflow, reduceMotion), value: store.state.pendingCount > 0)
             .background(OverlayScrollers())
             .padding(.horizontal, WorkspaceStyle.pageMargin).padding(.top, WorkspaceStyle.pageTop).padding(.bottom, WorkspaceStyle.pageMargin)
             .frame(maxWidth: WorkspaceStyle.pageMaxWidth).frame(maxWidth: .infinity)
@@ -107,13 +111,16 @@ struct BoardView: View {
             HStack(alignment: .top, spacing: WorkspaceStyle.cardGap) {
                 ForEach(columns.indices, id: \.self) { column in
                     LazyVStack(alignment: .leading, spacing: WorkspaceStyle.cardGap) {
-                        ForEach(columns[column]) { card($0) }
+                        ForEach(columns[column]) { placed(card($0), $0) }
                     }.frame(maxWidth: .infinity, alignment: .top)
                 }
             }
         } else {
-            ForEach(tiles + [left, right].compactMap { $0 }) { card($0) }
+            ForEach(tiles + [left, right].compactMap { $0 }) { placed(card($0), $0) }
         }
+    }
+    private func placed<Card: View>(_ card: Card, _ tile: Tile) -> some View {
+        card.matchedGeometryEffect(id: tile.id, in: cards).transition(.card)
     }
     private var title: String {
         if !store.project.isEmpty { return projectName(store.project, among: store.projects) }
@@ -191,33 +198,41 @@ struct BoardView: View {
         let recentJobs = history ? [] : Array(jobs.filter { !$0.isActive && $0.mission == nil }.sorted { ($0.endedAt ?? 0) > ($1.endedAt ?? 0) }.prefix(4))
         let sessions = history ? [] : store.state.claude.filter { (store.project.isEmpty || $0.projectPath == store.project) && matches($0.title) }
         let tiles: [Tile] = shownMissions.map(Tile.mission) + (loose.isEmpty ? [] : [.loose]) + recent.map(Tile.mission)
+        let emptyHistory = history && shownMissions.isEmpty && loose.isEmpty
+        let emptyWorkspace = !history && jobs.isEmpty && scopedMissions.isEmpty && !store.state.claude.contains { (store.project.isEmpty || $0.projectPath == store.project) && matches($0.title) }
+        // What is shown where. Work arriving or leaving changes it, and only then do the cards animate, so a status
+        // or timer updating in place does not set the page moving.
+        let missionsByID = Dictionary(shownMissions.map { ($0.id, $0) }) { first, _ in first }
+        let layout = tiles.map(\.id) + loose.map(\.id) + ["finished"] + recentJobs.map(\.id) + ["sessions"] + sessions.map(\.id)
+            + jobs.map { job in "\(job.id):\(job.mission.flatMap { missionsByID[$0]?.jobStep(job) } ?? -1)" }
+            + [emptyHistory || emptyWorkspace ? "empty" : ""]
+        Group {
         masonry(tiles, left: recentJobs.isEmpty ? nil : .finished, right: sessions.isEmpty ? nil : .sessions) { tile in
             switch tile {
             case .mission(let mission):
                 MissionPanel(store: store, mission: mission, jobs: missionJobs(mission))
             case .loose:
                 ContentPanel(title: history ? "Completed jobs" : "Other jobs", symbol: "rectangle.stack") {
-                    VStack(spacing: WorkspaceStyle.rowGap) { ForEach(loose) { job in JobRow(job: job, selected: store.selectedJob == job.id, store: store) { store.toggleJob(job.id) } } }
+                    VStack(spacing: WorkspaceStyle.rowGap) { ForEach(loose) { job in JobRow(job: job, selected: store.selectedJob == job.id, store: store) { store.toggleJob(job.id) }.transition(.card) } }
                 }
             case .finished:
                 ContentPanel(title: "Recently finished", symbol: "checkmark.circle") {
-                    VStack(spacing: WorkspaceStyle.rowGap) { ForEach(recentJobs) { job in JobRow(job: job, selected: store.selectedJob == job.id, store: store) { store.toggleJob(job.id) } } }
+                    VStack(spacing: WorkspaceStyle.rowGap) { ForEach(recentJobs) { job in JobRow(job: job, selected: store.selectedJob == job.id, store: store) { store.toggleJob(job.id) }.transition(.card) } }
                 }
             case .sessions:
                 ContentPanel(title: "Claude sessions", symbol: "bubble.left.and.bubble.right") {
-                    VStack(spacing: WorkspaceStyle.rowGap) { ForEach(sessions) { session in SessionRow(session: session, selected: store.selectedSession == session.id, store: store) { store.toggleSession(session.id) } } }
+                    VStack(spacing: WorkspaceStyle.rowGap) { ForEach(sessions) { session in SessionRow(session: session, selected: store.selectedSession == session.id, store: store) { store.toggleSession(session.id) }.transition(.card) } }
                 }
             }
         }
-        let emptyHistory = history && shownMissions.isEmpty && loose.isEmpty
-        let emptyWorkspace = !history && jobs.isEmpty && scopedMissions.isEmpty && !store.state.claude.contains { (store.project.isEmpty || $0.projectPath == store.project) && matches($0.title) }
         if emptyHistory || emptyWorkspace {
             EmptyState(title: store.search.isEmpty ? (emptyHistory ? "No completed work yet" : "Ready when you are") : "No matching work",
                        symbol: store.search.isEmpty ? "square.stack.3d.up" : "magnifyingglass",
                        detail: store.search.isEmpty && !emptyHistory ? "Start with New Job, or /crew:run in Claude." : nil) {
                 if store.search.isEmpty && !emptyHistory { Button("New Job", systemImage: "plus") { store.showingDispatch = true }.glassPillButton().disabled(!store.connected) }
-            }
+            }.transition(.card)
         }
+        }.animation(Motion.reduced(Motion.reflow, reduceMotion), value: layout)
     }
     private var activity: some View {
         // The page heading already names this list.
@@ -401,9 +416,9 @@ struct MissionPanel: View {
                                 Text(mission.stops[index]).font(Typeface.bodyStrong).foregroundStyle(.secondary).padding(.leading, WorkspaceStyle.rowTitleInset)
                                     .frame(maxWidth: .infinity, alignment: .leading).padding(.top, Space.m)
                                 if let lead {
-                                    SessionRow(session: lead, selected: store.selectedSession == lead.id, store: store) { store.toggleSession(lead.id) }
+                                    SessionRow(session: lead, selected: store.selectedSession == lead.id, store: store) { store.toggleSession(lead.id) }.transition(.card)
                                 }
-                                ForEach(mine) { job in JobRow(job: job, selected: store.selectedJob == job.id, showsKind: false, store: store) { store.toggleJob(job.id) } }
+                                ForEach(mine) { job in JobRow(job: job, selected: store.selectedJob == job.id, showsKind: false, store: store) { store.toggleJob(job.id) }.transition(.card) }
                             }
                         }
                     }
@@ -491,14 +506,21 @@ struct NeedsYouView: View {
     /// Request cards fill the page in columns of this width.
     private static let requestWidth: ClosedRange<CGFloat> = 420...620
     @Bindable var store: CrewStore
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private func matches(_ text: String) -> Bool { store.search.isEmpty || text.localizedCaseInsensitiveContains(store.search) }
     private var jobs: [Job] { store.state.waitingJobs.filter { matches("\($0.title) \($0.projectPath) \($0.agent) \($0.waiting?.reason ?? "")") } }
     private var sessions: [ClaudeSession] { store.state.waitingSessions.filter { matches("\($0.title) \($0.projectPath) Claude \($0.waitingFor ?? "")") } }
     var body: some View {
+        let jobs = jobs, sessions = sessions
+        // Requests come and go as agents ask and get answered; the cards around them close up or make room.
+        Group { content(jobs: jobs, sessions: sessions) }
+            .animation(Motion.reduced(Motion.reflow, reduceMotion), value: jobs.map(\.id) + ["sessions"] + sessions.map(\.id))
+    }
+    @ViewBuilder private func content(jobs: [Job], sessions: [ClaudeSession]) -> some View {
         if store.state.pendingCount == 0 {
-            EmptyState(title: "All caught up", symbol: "checkmark.circle")
+            EmptyState(title: "All caught up", symbol: "checkmark.circle").transition(.card)
         } else if jobs.isEmpty && sessions.isEmpty {
-            EmptyState(title: "No matching requests", symbol: "magnifyingglass")
+            EmptyState(title: "No matching requests", symbol: "magnifyingglass").transition(.card)
         }
         LazyVGrid(columns: [GridItem(.adaptive(minimum: Self.requestWidth.lowerBound, maximum: Self.requestWidth.upperBound), spacing: WorkspaceStyle.cardGap)], alignment: .leading, spacing: WorkspaceStyle.cardGap) {
             ForEach(jobs) { job in
@@ -522,6 +544,7 @@ struct NeedsYouView: View {
                     AnswerView(store: store, job: job)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading).card()
+                .transition(.card)
             }
         }
         ForEach(sessions) { session in
@@ -529,7 +552,7 @@ struct NeedsYouView: View {
                 Text(session.waitingFor ?? "Claude needs your input.").textSelection(.enabled)
                 Text(session.projectPath).font(Typeface.caption).foregroundStyle(.secondary)
                 Text("Answer in Claude.").font(Typeface.callout).foregroundStyle(.secondary)
-            }
+            }.transition(.card)
         }
     }
 }

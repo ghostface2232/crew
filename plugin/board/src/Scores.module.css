@@ -81,7 +81,7 @@
   width: 100%;
   height: 52px;
   padding-top: 8px;
-  border-radius: 12px 12px 0 0;
+  border-radius: 16px 16px 0 0;
   background: linear-gradient(to bottom, color-mix(in srgb, var(--medal) 26%, var(--surface)), color-mix(in srgb, var(--medal) 6%, var(--surface)));
   box-shadow: inset 0 1px color-mix(in srgb, white 60%, transparent);
   transform-origin: bottom;

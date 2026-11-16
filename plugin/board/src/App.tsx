@@ -199,6 +199,10 @@ export function App() {
           <div className="brand">
             <img className="brand-mark" src={appIcon} alt="" />
             <span className="brand-name">Crew</span>
+            <p className="connection" role="status" data-state={state.connection}>
+              <i aria-hidden="true" />
+              <span>{live ? 'Live' : state.connection === 'lost' ? 'Reconnecting…' : 'Connecting…'}</span>
+            </p>
           </div>
           <button className="search-trigger" onClick={openPalette} aria-keyshortcuts="Meta+K /">
             <Icon icon={Search} />
@@ -249,10 +253,6 @@ export function App() {
               <span>Search work, projects…</span>
               <kbd>⌘K</kbd>
             </button>
-            <p className="connection" role="status" data-state={state.connection}>
-              <i aria-hidden="true" />
-              <span>{live ? 'Live' : state.connection === 'lost' ? 'Reconnecting…' : 'Connecting…'}</span>
-            </p>
             <button className="new-job prominent" disabled={!live} title="New job (N)" aria-keyshortcuts="N" onClick={(event) => newJob(event.currentTarget)}>
               <Icon icon={Plus} />
               <span className="new-job-label">New Job</span>

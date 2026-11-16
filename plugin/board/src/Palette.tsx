@@ -186,7 +186,7 @@ export function Palette({ state, names, projects, origin, close, actions }: {
     element.animate(
       [
         { left: `${from.left}px`, top: `${from.top}px`, width: `${from.width}px`, height: `${from.height}px`, borderRadius: '999px', opacity: origin ? 1 : 0 },
-        { left: `${left}px`, top: `${top}px`, width: `${width}px`, height: `${height}px`, borderRadius: '20px', opacity: 1 },
+        { left: `${left}px`, top: `${top}px`, width: `${width}px`, height: `${height}px`, borderRadius: '26px', opacity: 1 },
       ],
       { duration: 520, easing: EASE_OUT },
     );

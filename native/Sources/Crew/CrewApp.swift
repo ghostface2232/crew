@@ -349,87 +349,125 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
                 }
                 let idle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: ~0)!)
                 if NSApp.isActive && idle < 120 { lastUsed = now }
-                if now.timeIntervalSince(lastUsed) >= 120 { await updater.download() }
+                // One that failed waits for the next check, rather than downloading again every few seconds.
+                if now.timeIntervalSince(lastUsed) >= 120 && updater.error == nil { await updater.download() }
                 try? await Task.sleep(for: .seconds(15))
             }
         }
     }
-    private struct DaemonHealth: Decodable, Sendable { var pid: Int; var active: Int?; var root: String? }
-    private func daemonHealth() async -> DaemonHealth? { try? await store.api.request("/api/health", timeout: 2) }
-    /// The daemon this app started runs its bundled Node and bridge from inside the bundle the update replaces.
-    private func ownsDaemon(_ health: DaemonHealth) -> Bool {
-        guard let root = health.root, let resources = Bundle.main.resourceURL else { return false }
+    private struct DaemonHealth: Decodable, Sendable { var pid: Int32; var active: Int? }
+    private struct DaemonRecord: Decodable { var pid: Int32; var root: String? }
+    private static func alive(_ pid: Int32) -> Bool { pid > 0 && (kill(pid, 0) == 0 || errno == EPERM) }
+    /// The daemon running from this bundle's bridge, found by the record it keeps in the Crew home and its process, since
+    /// a health request can time out on a busy daemon. `active` is nil when its health did not answer.
+    private func ownDaemon() async -> (pid: Int32, active: Int?)? {
+        let file = CrewHome.directory().appendingPathComponent("daemon.json")
+        guard let data = try? Data(contentsOf: file), let record = try? JSONDecoder().decode(DaemonRecord.self, from: data),
+              Self.alive(record.pid), let root = record.root, let resources = Bundle.main.resourceURL else { return nil }
         let bundled = resources.appending(path: "bridge/plugin").resolvingSymlinksInPath().standardizedFileURL.path
-        return URL(fileURLWithPath: root).resolvingSymlinksInPath().standardizedFileURL.path == bundled
+        guard URL(fileURLWithPath: root).resolvingSymlinksInPath().standardizedFileURL.path == bundled else { return nil }
+        let health: DaemonHealth? = try? await store.api.request("/api/health", timeout: 2)
+        return (record.pid, health?.pid == record.pid ? (health?.active ?? 0) : nil)
     }
+    /// Counts each install the user starts, so a cancelled one that is still sleeping does not carry on beside a new one.
+    private var installAttempt = 0
+    /// The swap helper waiting for this app to quit, and the bundle it would move in; a quit that is cancelled undoes it.
+    private var handOver: (helper: Int32, staged: URL)?
     /// Installs the staged update without losing work, as the Windows app does. The daemon this app started runs from
     /// the bundle being replaced, so it has to stop first, but it is only ever asked to stop while idle: it refuses while
     /// a job runs or a change is being saved, and otherwise saves jobs and missions before it exits. Until then the
     /// install waits, and the user can call it off. Jobs, missions and settings live in the Crew home, outside the bundle.
     func installUpdate() {
         guard updater.phase == .ready else { return }
-        guard leaveSettings(then: { [weak self] in self?.dismissSettings(); self?.installUpdate() }) else { return }
-        Task { await performUpdate() }
+        installAttempt += 1
+        let attempt = installAttempt
+        Task { await performUpdate(attempt) }
     }
-    private func performUpdate() async {
-        var health = await daemonHealth()
-        if let running = health, ownsDaemon(running), let active = running.active, active > 0 {
+    private func performUpdate(_ attempt: Int) async {
+        let first = await ownDaemon()
+        if let active = first?.active, active > 0 {
             let alert = NSAlert()
             alert.messageText = "\(active) job\(active == 1 ? " is" : "s are") still running."
             alert.informativeText = "Crew will install the update as soon as they finish. Nothing is stopped, and jobs, missions and settings are kept."
             alert.addButton(withTitle: "Update When Finished")
             alert.addButton(withTitle: "Cancel")
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            guard alert.runModal() == .alertFirstButtonReturn, attempt == installAttempt else { return }
         }
-        guard updater.installing(waiting: health.flatMap { ownsDaemon($0) ? $0.active : nil } ?? 0) else { return }
+        guard updater.installing(waiting: first?.active ?? 0) else { return }
+        // Read afresh each time: the user can cancel while the install waits.
+        let current = { attempt == self.installAttempt && !self.quitting && self.updater.phase == .installing }
+        // Once the store is paused, anything that calls the install off must start it again; it starts the daemon too.
+        var paused = false
+        let abandon = { if paused && !self.quitting { self.store.start() } }
         var refusals = 0
-        while let running = health, ownsDaemon(running) {
-            guard updater.phase == .installing, !quitting else { return }
-            let active = running.active ?? 0
-            if active == 0 {
+        while true {
+            guard current() else { return abandon() }
+            guard let daemon = await ownDaemon() else { break }
+            if daemon.active == 0 {
+                // From here the install can no longer be called off. Settings with unsaved edits would hold up the quit
+                // after the daemon has stopped, so they are settled first; saving them means trying the update again.
+                updater.waitFor(0)
+                guard leaveSettings(then: { [weak self] in self?.dismissSettings() }) else {
+                    updater.failed()
+                    return abandon()
+                }
+                dismissSettings()
                 // The store's reconnect loop would start the daemon again as soon as it stopped.
                 store.stop()
+                paused = true
                 do {
                     let _: EmptyReply = try await store.api.post("/api/shutdown", ["ifIdle": true], timeout: 10)
+                    // It saves jobs and missions, then exits; the process going is what counts, not a quiet health check.
                     var waited = 0.0
-                    while await daemonHealth()?.pid == running.pid {
-                        guard waited < 15 else { throw CrewFailure("The Crew daemon (process \(running.pid)) did not stop.") }
+                    while Self.alive(daemon.pid) {
+                        guard waited < 30 else { throw CrewFailure("The Crew daemon (process \(daemon.pid)) did not stop.") }
                         try? await Task.sleep(for: .milliseconds(200))
                         waited += 0.2
                     }
-                    break
+                    // Checked again before going on, in case another daemon from this bundle has started meanwhile.
+                    continue
                 } catch {
+                    if !Self.alive(daemon.pid) { continue }
+                    // Refused because work started meanwhile; the board keeps following it while the install waits.
                     store.start()
-                    // Refused because work started meanwhile; a daemon that keeps refusing while idle is reported instead.
+                    paused = false
                     refusals += 1
                     if refusals >= 3 {
                         updater.failed("Could not stop the Crew daemon for the update: \(error.localizedDescription)")
                         return
                     }
                 }
-            } else { refusals = 0 }
-            updater.installing(waiting: active)
+            } else if daemon.active != nil { refusals = 0 }
+            // A daemon whose health did not answer is waited for, never taken as gone.
+            if let active = daemon.active { updater.waitFor(active) }
             try? await Task.sleep(for: .seconds(5))
-            health = await daemonHealth()
         }
-        guard updater.phase == .installing, !quitting, let archive = updater.archive, let version = updater.latest else {
-            store.start()
-            return
-        }
+        guard current(), let archive = updater.archive, let version = updater.latest else { return abandon() }
+        store.stop()
+        paused = true
         let installed = Bundle.main.bundleURL
         let pid = ProcessInfo.processInfo.processIdentifier
         do {
-            try await Task.detached { try AppUpdater.handOver(archive: archive, version: version, installed: installed, processID: pid) }.value
+            handOver = try await Task.detached { try AppUpdater.handOver(archive: archive, version: version, installed: installed, processID: pid) }.value
         } catch {
-            // The archive stays staged, so the update can be tried again; the store starts the daemon again.
+            // The archive stays staged, so the update can be tried again.
             updater.failed(error.localizedDescription)
-            store.start()
-            return
+            return abandon()
         }
         NSApp.terminate(nil)
     }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard leaveSettings(then: { [weak self] in self?.dismissSettings(); NSApp.terminate(nil) }) else { return .terminateCancel }
+        guard leaveSettings(then: { [weak self] in self?.dismissSettings(); NSApp.terminate(nil) }) else {
+            // An update waiting for this quit is called off: its helper must not swap the bundle under a running app.
+            if let pending = handOver {
+                handOver = nil
+                kill(pending.helper, SIGTERM)
+                try? FileManager.default.removeItem(at: pending.staged)
+                updater.failed("Crew did not quit, so the update was not installed.")
+                store.start()
+            }
+            return .terminateCancel
+        }
         quitting = true
         let announced = store.connected && store.notificationsAllowed
         store.stop()

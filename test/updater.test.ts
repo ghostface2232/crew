@@ -146,10 +146,19 @@ test('an install waits, can be called off, and an unsupported copy does nothing'
   assert.equal(instance.installing(2), true);
   assert.equal(instance.status.waiting, 2);
   assert.equal(instance.installer, path.join(dir, 'Crew-Setup-0.3.0.exe'));
-  // Updating the count is no second install.
+  // A second install does not start over the first; the count is updated on its own.
   assert.equal(instance.installing(1), false);
+  assert.equal(instance.status.waiting, 2);
+  instance.waitFor(1);
   assert.equal(instance.status.waiting, 1);
+  // Once the daemon is being stopped, nothing is left to call off.
+  instance.waitFor(0);
+  assert.equal(instance.status.waiting, undefined);
+  assert.equal(instance.status.state, 'installing');
   instance.failed();
+  // An install that was called off is not revived by a late count.
+  instance.waitFor(3);
+  assert.equal(instance.status.state, 'ready');
   assert.equal(instance.status.state, 'ready');
   assert.equal(instance.status.error, undefined);
   assert.equal(instance.status.waiting, undefined);
@@ -163,4 +172,29 @@ test('an install waits, can be called off, and an unsupported copy does nothing'
   await unsupported.check();
   assert.equal(unsupported.status.state, 'unsupported');
   assert.ok(fs.existsSync(path.join(dir, 'Crew-Setup-0.3.0.exe')));
+});
+
+test('a check that ends during an install leaves it alone, and a release without an installer keeps the staged one', async () => {
+  const dir = path.join(tempDir(), 'updates');
+  served = payload;
+  feedStatus = 200;
+  feed = release('0.3.0', `${base}/download/Crew-Setup-0.3.0.exe`, sha(payload));
+  const { instance } = updater(dir);
+  await instance.check();
+  await instance.download();
+  assert.equal(instance.status.state, 'ready');
+
+  // The latest release no longer offers a Windows installer: the staged one stays ready.
+  feed = { ...release('0.3.0', `${base}/download/Crew-Setup-0.3.0.exe`, sha(payload)), assets: [] };
+  await instance.check();
+  assert.equal(instance.status.state, 'ready');
+  assert.ok(fs.existsSync(instance.installer!));
+
+  // A check still in flight when the install starts, even one that finds the app up to date, changes nothing.
+  feed = release('0.2.0', `${base}/download/Crew-Setup-0.2.0.exe`, sha(payload));
+  const checking = instance.check();
+  assert.equal(instance.installing(), true);
+  await checking;
+  assert.equal(instance.status.state, 'installing');
+  assert.ok(fs.existsSync(instance.installer!));
 });

@@ -51,7 +51,7 @@ The development bundle is `native/build/Crew.app`; the release copy is `release/
 
 The build copies the current Node executable and its LICENSE. It rejects Node binaries linked against non-system libraries. `CREW_NODE_LICENSE` can specify the matching license path when the Node distribution uses a different directory layout. `CREW_BUILD_CONFIGURATION=debug` selects a debug build.
 
-Bundles are locally ad-hoc signed and verified. Public Developer ID signing, notarization, automatic updates, and login launch are not configured. This is a local app distribution, not an App Store build.
+Bundles are locally ad-hoc signed and verified. Public Developer ID signing, notarization, and login launch are not configured; the app updates itself (see Updates below). This is a local app distribution, not an App Store build.
 
 ## Updates
 
@@ -59,7 +59,7 @@ The app updates itself from GitHub Releases (`native/Sources/Crew/Updater.swift`
 
 When an archive is ready, **Restart to Update** appears above Settings in the sidebar, in Settings → About Crew (the app row at the top of the Settings sidebar), and in the menu bar menu. Nothing installs until the user picks it.
 
-- The daemon runs the bundled Node and bridge from inside the bundle being replaced, so it has to stop first. The app asks it to stop only while idle (`/api/shutdown` with `ifIdle`); it is never killed. While jobs run, the install waits and can be cancelled. The store's reconnect loop is paused for the moment the daemon stops, so it does not start it again.
+- The daemon runs the bundled Node and bridge from inside the bundle being replaced, so it has to stop first. The app asks it to stop only while idle (`/api/shutdown` with `ifIdle`); it is never killed. Whether it is running is read from its `daemon.json` and its process, never from a health request that may time out. While jobs run, the install waits and can be cancelled in Settings until the daemon is asked to stop. Settings with unsaved changes are settled before that, and a quit cancelled after the hand-over stops the helper and restores the update. The store's reconnect loop is paused for the moment the daemon stops, so it does not start it again.
 - The archive is unpacked and must be this app (same bundle identifier) at the release's version and pass `codesign --verify --deep --strict`. It is staged beside the installed copy. A detached shell helper waits for the app to quit, moves the old bundle aside, moves the new one in, puts the old one back if that fails, and opens the result.
 - The folder holding Crew must be writable; otherwise About Crew says to move the app. Jobs, missions and settings live in `~/.crew`, outside the bundle.
 

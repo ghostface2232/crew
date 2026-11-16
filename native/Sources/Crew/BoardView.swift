@@ -605,9 +605,7 @@ struct ProjectSidebar: View {
                 if updater.phase == .ready || updater.phase == .installing {
                     Button(action: updater.onInstall) {
                         HStack(spacing: Space.s) {
-                            Label(updater.phase == .ready ? "Restart to Update"
-                                : updater.waiting > 0 ? "Waiting for \(updater.waiting) job\(updater.waiting == 1 ? "" : "s")…" : "Updating…",
-                                  systemImage: "arrow.down.circle.fill")
+                            Label(updateTitle, systemImage: "arrow.down.circle.fill")
                             Spacer(minLength: 0)
                             Text(updater.latest ?? "").font(.caption).monospacedDigit().opacity(0.7)
                         }
@@ -631,6 +629,11 @@ struct ProjectSidebar: View {
             .padding(.horizontal, Space.ml).padding(.bottom, Space.ml)
         }
         .navigationSplitViewColumnWidth(min: WorkspaceStyle.sidebarWidth.min, ideal: WorkspaceStyle.sidebarWidth.ideal, max: WorkspaceStyle.sidebarWidth.max)
+    }
+    private var updateTitle: String {
+        if updater.phase == .ready { return "Restart to Update" }
+        let jobs = updater.waiting
+        return jobs > 0 ? "Waiting for \(jobs) job\(jobs == 1 ? "" : "s")…" : "Updating…"
     }
 }
 

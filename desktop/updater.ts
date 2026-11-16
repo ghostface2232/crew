@@ -117,8 +117,11 @@ export class Updater {
       return;
     }
     for (const name of names) {
-      // An installer that is still running holds its file; the next launch removes it.
-      fs.rmSync(path.join(this.dir, name), { force: true, recursive: true, maxRetries: 0 });
+      try {
+        fs.rmSync(path.join(this.dir, name), { force: true, recursive: true, maxRetries: 0 });
+      } catch {
+        // An installer that is still running holds its file; a later launch removes it.
+      }
     }
   }
 
@@ -137,17 +140,25 @@ export class Updater {
         const release = response.status === 404 ? null : response.ok ? parseRelease(await response.json()) : undefined;
         if (release === undefined) throw new Error(`GitHub answered ${response.status}.`);
         const checkedAt = Date.now();
-        if (!release || !isNewer(release.version, this.status.current)) {
+        // An install that started while this check ran keeps its installer.
+        if (this.status.state === 'installing') return;
+        if (release && !isNewer(release.version, this.status.current)) {
+          // As new as the latest release: anything staged is out of date.
           this.release = null;
           this.clean();
           this.set({ state: 'idle', checkedAt });
-        } else if (before.state === 'ready' && before.latest === release.version) {
-          this.set({ ...before, checkedAt, page: release.page ?? before.page });
+        } else if (before.state === 'ready' && (!release || before.latest === release.version)) {
+          // No release, or one without a usable installer, leaves the staged one ready.
+          this.set({ ...before, checkedAt, page: release?.page ?? before.page });
+        } else if (!release) {
+          this.release = null;
+          this.set({ state: 'idle', checkedAt });
         } else {
           this.release = release;
           this.set({ state: 'available', latest: release.version, checkedAt, ...(release.page ? { page: release.page } : {}) });
         }
       } catch (error) {
+        if (this.status.state === 'installing') return;
         // A failed check leaves a staged installer ready.
         if (before.state === 'ready') this.set({ ...before });
         else this.set({ state: 'idle', checkedAt: before.checkedAt, error: `Could not check for updates: ${(error as Error).message}` });
@@ -200,14 +211,23 @@ export class Updater {
 
   /**
    * Starts installing the staged update, so nothing replaces it while the app hands over; `waiting` counts the jobs
-   * it waits for first. False when nothing is staged or an install was already under way.
+   * it waits for first. False unless an update is ready.
    */
   installing(waiting = 0): boolean {
     const { state, latest, page, checkedAt } = this.status;
-    if (state !== 'ready' && state !== 'installing') return false;
-    const fresh = state === 'ready';
+    if (state !== 'ready') return false;
     this.set({ state: 'installing', latest, checkedAt, ...(page ? { page } : {}), ...(waiting ? { waiting } : {}) });
-    return fresh;
+    return true;
+  }
+
+  /**
+   * Updates how many jobs a waiting install waits for; 0 once the daemon is being stopped, when the install can no
+   * longer be called off. An install that was called off stays off.
+   */
+  waitFor(waiting: number) {
+    if (this.status.state !== 'installing' || this.status.waiting === (waiting || undefined)) return;
+    const { waiting: _, ...rest } = this.status;
+    this.set({ ...rest, ...(waiting ? { waiting } : {}) });
   }
 
   /** Puts a staged installer back: the user cancelled, or the install could not start (`message`). */

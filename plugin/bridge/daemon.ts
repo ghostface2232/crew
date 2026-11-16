@@ -44,7 +44,8 @@ const server = http.createServer((req, res) => {
   // Open and worker routes are left out, so an unauthenticated stalled body cannot hold off a replacement;
   // a request without the secret is rejected before route() first awaits, so it is counted only briefly.
   // Lead delivery commits synchronously after checking stopping; its long polls must not pin an idle daemon.
-  const pathname = req.url?.split('?')[0] ?? '/';
+  // Parsed as route() parses it, so a path with dot segments is counted as the route it reaches.
+  const pathname = URL.canParse(req.url ?? '/', 'http://127.0.0.1') ? new URL(req.url ?? '/', 'http://127.0.0.1').pathname : '/';
   const mutating = req.method === 'POST' && pathname !== '/api/shutdown' && !pathname.startsWith('/api/lead/') && !isOpen('POST', pathname) && !WORKER_ROUTE.test(pathname);
   if (mutating) mutatingPosts++;
   route(req, res).finally(() => { if (mutating) mutatingPosts--; }).then(

@@ -15,7 +15,7 @@ import Testing
     }
 
     @Test func takesOnlyAPublishedReleaseWithThisMacsArchiveAndADigest() throws {
-        let found = try #require(Releases.parse(release("0.3.0")))
+        let found = try #require(Releases.parse(try release("0.3.0")))
         #expect(found.version == "0.3.0")
         #expect(found.sha256 == String(repeating: "a", count: 64))
         #expect(found.url.lastPathComponent == "Crew-macOS-\(Releases.arch)-0.3.0.zip")

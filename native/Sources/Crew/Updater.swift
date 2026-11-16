@@ -137,18 +137,25 @@ enum Releases {
             // A repository with no release yet answers 404: there is simply nothing newer.
             guard status == 404 || (200..<300).contains(status) else { throw CrewFailure("GitHub answered \(status).") }
             let found = status == 404 ? nil : Releases.parse(data)
+            // An install that started while this check ran keeps its archive.
+            guard phase != .installing else { return }
             checkedAt = Date()
             error = nil
-            if let found, Releases.isNewer(found.version, than: current) {
-                if wasReady && found.version == latest { page = found.page ?? page; return }
+            if let found, !Releases.isNewer(found.version, than: current) {
+                // As new as the latest release: anything staged is out of date.
+                release = nil; latest = nil; page = nil; phase = .idle
+                clean()
+            } else if wasReady && (found == nil || found?.version == latest) {
+                // No release, or one without this Mac's archive (it is built and uploaded apart), leaves the staged one ready.
+                page = found?.page ?? page
+            } else if let found {
                 release = found; latest = found.version; page = found.page; phase = .available
             } else {
                 release = nil; latest = nil; page = nil; phase = .idle
-                clean()
             }
         } catch {
-            // A failed check leaves a staged archive ready.
-            if !wasReady { phase = .idle; self.error = "Could not check for updates: \(error.localizedDescription)" }
+            // A failed check leaves a staged archive ready, and an install under way alone.
+            if !wasReady && phase != .installing { phase = .idle; self.error = "Could not check for updates: \(error.localizedDescription)" }
         }
     }
 
@@ -187,13 +194,17 @@ enum Releases {
         await download()
     }
 
-    /// Starts installing the staged update, or updates how many jobs it waits for. False when nothing is staged or an
-    /// install was already under way.
-    @discardableResult func installing(waiting: Int = 0) -> Bool {
-        guard phase == .ready || phase == .installing else { return false }
-        let fresh = phase == .ready
+    /// Starts installing the staged update; `waiting` counts the jobs it waits for first. False unless an update is ready.
+    func installing(waiting: Int = 0) -> Bool {
+        guard phase == .ready else { return false }
         phase = .installing; self.waiting = waiting; error = nil
-        return fresh
+        return true
+    }
+
+    /// Updates how many jobs a waiting install waits for; 0 once the daemon is being stopped, when the install can no
+    /// longer be called off. An install that was called off stays off.
+    func waitFor(_ count: Int) {
+        if phase == .installing { waiting = count }
     }
 
     /// Puts the staged archive back: the user cancelled, or the install could not go ahead (`message`).
@@ -241,8 +252,9 @@ enum Releases {
     }
 
     /// Unpacks the staged archive and checks that it is this app at the release's version, signed intact, then starts a
-    /// helper that swaps it in for `installed` once this process exits and opens the new copy. The caller must then quit.
-    nonisolated static func handOver(archive: URL, version: String, installed: URL, processID: Int32) throws {
+    /// helper that swaps it in for `installed` once this process exits and opens the new copy. The caller must then quit;
+    /// it gets the helper's process and the staged bundle, to undo the hand-over if the quit is cancelled.
+    nonisolated static func handOver(archive: URL, version: String, installed: URL, processID: Int32) throws -> (helper: Int32, staged: URL) {
         let parent = installed.deletingLastPathComponent()
         guard FileManager.default.isWritableFile(atPath: parent.path), FileManager.default.isWritableFile(atPath: installed.path) else {
             throw CrewFailure("Crew can’t replace itself in \(parent.path). Move Crew to a folder you can write to, such as Applications, and try again.")
@@ -257,8 +269,9 @@ enum Releases {
               run("/usr/bin/codesign", ["--verify", "--deep", "--strict", app.path]) else {
             throw CrewFailure("The downloaded update is not a valid Crew \(version).")
         }
-        // Staged beside the installed copy so the final move is a same-volume rename.
-        let staged = parent.appending(path: ".Crew-update-\(version).app", directoryHint: .isDirectory)
+        // Staged beside the installed copy so the final move is a same-volume rename; named apart from an earlier
+        // attempt's, whose helper may still be waiting to clean up.
+        let staged = parent.appending(path: ".Crew-update-\(version)-\(UUID().uuidString.prefix(8)).app", directoryHint: .isDirectory)
         try? FileManager.default.removeItem(at: staged)
         try FileManager.default.moveItem(at: app, to: staged)
         let helper = work.appending(path: "swap.sh")
@@ -273,6 +286,7 @@ enum Releases {
             try swapScript.write(to: helper, atomically: true, encoding: .utf8)
             try process.run()
             handedOff = true
+            return (process.processIdentifier, staged)
         } catch {
             try? FileManager.default.removeItem(at: staged)
             throw CrewFailure("Could not start the update: \(error.localizedDescription)")
@@ -300,7 +314,7 @@ enum Releases {
     /// $1 the app's process, $2 the installed bundle, $3 the staged bundle, $4 the work folder (removed).
     /// The old copy is kept until the new one is in place, and put back if the move fails. If the app has not quit within
     /// a minute (its quit was cancelled), nothing is swapped: a running copy is never moved out from under itself.
-    static let swapScript = """
+    nonisolated static let swapScript = """
     #!/bin/sh
     pid="$1"; target="$2"; staged="$3"; work="$4"
     i=0

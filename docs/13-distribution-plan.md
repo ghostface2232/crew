@@ -13,7 +13,7 @@ GitHub Releases is the single channel. Pushing a version tag runs GitHub Actions
 | Platform | Artifact | Signing | Updates |
 | --- | --- | --- | --- |
 | Windows | `Crew-Setup-x.y.z.exe`, an NSIS installer built by electron-builder: per-user, no administrator rights, Start menu shortcut, uninstaller | Unsigned at first. SmartScreen warns on first run; the release notes explain "More info → Run anyway". A code signing certificate (for example Azure Trusted Signing, if available in the publisher's country) removes the warning later | The app's own updater, from the GitHub Releases API: it downloads while the user is away and installs when they choose ([12-windows-electron.md](12-windows-electron.md#updates)) |
-| macOS | The native app, ad-hoc signed, as a zip or dmg | Without an Apple Developer Program membership the app cannot be notarized, so Gatekeeper blocks the first launch. The notes explain System Settings → Privacy & Security → Open Anyway. Building from source (`npm run package:desktop`, Xcode 26) avoids the block | Manual download until the app is signed and notarized |
+| macOS | The native app, ad-hoc signed: a dmg to install from, and a zip that the app's updater downloads | Without an Apple Developer Program membership the app cannot be notarized, so Gatekeeper blocks the first launch. The notes explain System Settings → Privacy & Security → Open Anyway. Building from source (`npm run package:desktop`, Xcode 26) avoids the block | Manual download until the app is signed and notarized |
 
 The Start menu shortcut also gives the Windows app the identity its own notifications need. Today notifications stay with the daemon's PowerShell toasts for that reason ([12-windows-electron.md](12-windows-electron.md)).
 

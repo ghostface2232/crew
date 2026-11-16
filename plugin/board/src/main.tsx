@@ -57,6 +57,33 @@ document.addEventListener(
 // Moving onto the page's bar also leaves the page, so that bar stays marked until the pointer is seen elsewhere.
 document.documentElement.addEventListener('pointerleave', () => overBar !== document.documentElement && markBar(null));
 
+// Where the page scrolls in its own box rather than the document (the Windows app), keys that scroll the document
+// reach it only once something inside it has focus; until then they are passed to it here.
+const SCROLL_KEYS: Record<string, (page: HTMLElement) => number> = {
+  PageDown: (page) => page.clientHeight * 0.875,
+  PageUp: (page) => -page.clientHeight * 0.875,
+  ArrowDown: () => 40,
+  ArrowUp: () => -40,
+  Home: (page) => -page.scrollHeight,
+  End: (page) => page.scrollHeight,
+  ' ': (page) => page.clientHeight * 0.875,
+};
+document.addEventListener('keydown', (event) => {
+  const step = SCROLL_KEYS[event.key];
+  const page = document.querySelector<HTMLElement>('main.page');
+  const root = document.documentElement;
+  if (!step || !page || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
+  if (root.scrollHeight > root.clientHeight || document.querySelector('dialog:modal')) return;
+  const target = event.target instanceof HTMLElement ? event.target : null;
+  // Space presses buttons, and editors and lists keep their own keys.
+  if (target && target !== document.body && (event.key === ' ' || target.closest('input, textarea, select, [contenteditable], [role="listbox"], [role="menu"]'))) return;
+  // Inside the page, or in another box that scrolls, the browser already scrolls the right thing.
+  const scrolls = (node: HTMLElement) => node.scrollHeight > node.clientHeight && !['visible', 'hidden'].includes(getComputedStyle(node).overflowY);
+  for (let node = target; node && node !== document.body; node = node.parentElement) if (node === page || scrolls(node)) return;
+  event.preventDefault();
+  page.scrollBy({ top: (event.shiftKey && event.key === ' ' ? -1 : 1) * step(page) });
+});
+
 async function start() {
   try {
     await initializeSession();

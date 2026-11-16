@@ -50,7 +50,10 @@ const FRAME_CSS = `
 :root .workspace { height: 100vh; }
 :root .topbar { position: static; flex: none; }
 :root .page { flex: 1; min-height: 0; overflow-y: auto; max-width: none; margin: 0; }
-@media (min-width: 761px) { :root .page { padding-inline: max(var(--page-margin), calc((100% - 1400px) / 2)); } }`;
+@media (min-width: 761px) { :root .page { padding-inline: max(var(--page-margin), calc((100% - 1400px) / 2)); } }
+/* Sticky offsets in board.css count the top bar the page used to scroll under; the page now starts below it. */
+:root .event-day-name { top: 0; }
+:root .dash-side { top: 12px; }`;
 /** Windows 11 22H2 (build 22621) and later draw a backdrop material behind a transparent window; older systems keep the canvas. */
 const BACKDROP = process.platform === 'win32' && Number(os.release().split('.')[2]) >= 22621 ? 'mica' : null;
 /** The main window's colors: clear over the backdrop where there is one, the board's otherwise. */

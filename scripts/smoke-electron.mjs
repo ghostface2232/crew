@@ -52,6 +52,18 @@ try {
   fs.mkdirSync('test-results', { recursive: true });
   await page.screenshot({ path: 'test-results/desktop-smoke.png' });
 
+  // Only the page below the top bar scrolls, its bar at the window's edge; keys scroll it after a sidebar click too.
+  expect(await page.evaluate(() => {
+    const root = document.documentElement;
+    const box = document.querySelector('main.page').getBoundingClientRect();
+    return { rootScrolls: root.scrollHeight > root.clientHeight, top: box.top, right: box.right === innerWidth };
+  })).toEqual({ rootScrolls: false, top: 60, right: true });
+  await page.getByRole('button', { name: 'Overview', exact: true }).first().click();
+  await page.keyboard.press('PageDown');
+  await expect.poll(() => page.evaluate(() => document.querySelector('main.page').scrollTop)).toBeGreaterThan(0);
+  await page.keyboard.press('Home');
+  await expect.poll(() => page.evaluate(() => document.querySelector('main.page').scrollTop)).toBe(0);
+
   // Closing hides to the tray; a second launch exits and shows the first window.
   await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
   expect(await visible(application)).toBe(false);
@@ -177,6 +189,7 @@ try {
     checks: [
       'cookie sign-in without a URL secret',
       'renderer isolation',
+      'page-only scrolling, keyboard scrolling after a sidebar click',
       'close hides to tray',
       'single instance',
       'cancelled quit preserves unsaved settings',

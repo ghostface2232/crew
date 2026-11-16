@@ -99,6 +99,16 @@ export function tierModel(agent: WorkerAgent, tier: Tier, cache?: string): strin
   return agent === 'codex' ? codexModel(family, cache) : family;
 }
 
+/**
+ * The model a lead-named model stands for. An ID is kept as named; a family name or label without a version
+ * ("Astra", "Astra (standard)"), as a user or a preset's wording puts it, becomes that family's model for the agent.
+ */
+export function modelId(agent: WorkerAgent, wanted: string, cache?: string): string {
+  if (/\d/.test(wanted)) return wanted;
+  const tier = tierOf(agent, wanted);
+  return (tier && tierModel(agent, tier, cache)) || wanted;
+}
+
 /** The tier whose family a model name belongs to, for holding a named model under a preset's cap; undefined when none matches. */
 export function tierOf(agent: WorkerAgent, model: string): Tier | undefined {
   const name = model.toLowerCase();

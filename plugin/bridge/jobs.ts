@@ -18,7 +18,7 @@ import type { Worktree } from './git.ts';
 import { sharedInstructions } from './instructions.ts';
 import { buildPrompt } from './prompts.ts';
 import { findSkills } from './skills.ts';
-import { defaultTier, tierEffort, tierModel, tierOf, TIERS } from './tiers.ts';
+import { defaultTier, modelId, tierEffort, tierModel, tierOf, TIERS } from './tiers.ts';
 import type { Tier } from './tiers.ts';
 
 export type { WorkerAgent };
@@ -411,7 +411,7 @@ function pickModel(agent: WorkerAgent, spec: JobSpec, role: { model?: string; ef
   const cap = preset ? config.presets[preset].maxTier : undefined;
   const wanted = spec.tier ?? (configured.model ? undefined : defaultTier(spec));
   const tier = wanted && cap && TIERS.indexOf(wanted) > TIERS.indexOf(cap) ? cap : wanted;
-  let model = spec.model ?? (tier ? tierModel(agent, tier) : undefined) ?? configured.model;
+  let model = (spec.model && modelId(agent, spec.model)) ?? (tier ? tierModel(agent, tier) : undefined) ?? configured.model;
   // The cap holds for a model named outright too; effort stays the lead's to choose.
   const named = model ? tierOf(agent, model) : undefined;
   const capped = Boolean(cap && named && TIERS.indexOf(named) > TIERS.indexOf(cap));

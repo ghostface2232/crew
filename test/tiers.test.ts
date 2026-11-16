@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { ANTIGRAVITY_MODELS, codexModel, codexModels, defaultTier, pickModel, tierEffort, tierModel, tierOf } from '../plugin/bridge/tiers.ts';
+import { ANTIGRAVITY_MODELS, codexModel, codexModels, defaultTier, modelId, pickModel, tierEffort, tierModel, tierOf } from '../plugin/bridge/tiers.ts';
 
 function cache(t: { after: (fn: () => void) => void }, models: unknown): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-tiers-'));
@@ -38,6 +38,17 @@ test('Antigravity tiers name a family that the session list resolves', () => {
   assert.equal(pickModel(options, 'gemini-4-argon'), 'gemini-4-argon');
   assert.equal(pickModel(options, 'helium'), undefined);
   assert.equal(pickModel(undefined, 'hydrogen'), undefined);
+});
+
+test('a family name or label the lead passes becomes the exact model ID', (t) => {
+  const file = cache(t, [{ slug: 'gpt-6-astra' }, { slug: 'gpt-6.1-sol' }]);
+  assert.equal(modelId('codex', 'Astra', file), 'gpt-6-astra');
+  assert.equal(modelId('codex', 'Astra (standard)', file), 'gpt-6-astra');
+  assert.equal(modelId('codex', 'sol', file), 'gpt-6.1-sol');
+  // An ID stays as named, even one the cache does not list.
+  assert.equal(modelId('codex', 'gpt-5.6-sol', file), 'gpt-5.6-sol');
+  assert.equal(modelId('codex', 'custom', file), 'custom');
+  assert.equal(modelId('antigravity', 'Argon (frontier)'), 'argon');
 });
 
 test('a named model is placed in the tier of its family', () => {

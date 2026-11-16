@@ -583,6 +583,7 @@ private enum Tile: Identifiable {
 struct ProjectSidebar: View {
     @Bindable var store: CrewStore
     var openSettings: () -> Void
+    @Environment(AppUpdater.self) private var updater
     var body: some View {
         let projects = store.projects
         List(selection: Binding<String?>(
@@ -599,16 +600,41 @@ struct ProjectSidebar: View {
         }
         .listStyle(.sidebar)
         .safeAreaInset(edge: .bottom) {
-            Button(action: openSettings) {
-                Label("Settings", systemImage: "gearshape").font(Typeface.bodyStrong)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, Space.ml).padding(.vertical, Space.m).contentShape(Rectangle())
+            VStack(spacing: Space.xs) {
+                // A downloaded update, ready to install with one click.
+                if updater.phase == .ready || updater.phase == .installing {
+                    Button(action: updater.onInstall) {
+                        HStack(spacing: Space.s) {
+                            Label(updateTitle, systemImage: "arrow.down.circle.fill")
+                            Spacer(minLength: 0)
+                            Text(updater.latest ?? "").font(.caption).monospacedDigit().opacity(0.7)
+                        }
+                        .font(Typeface.bodyStrong)
+                        .padding(.horizontal, Space.ml).padding(.vertical, Space.m)
+                        .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).foregroundStyle(.tint)
+                    .disabled(updater.phase == .installing)
+                    .help("Restart Crew to install version \(updater.latest ?? "")")
+                }
+                Button(action: openSettings) {
+                    Label("Settings", systemImage: "gearshape").font(Typeface.bodyStrong)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, Space.ml).padding(.vertical, Space.m).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).foregroundStyle(.secondary)
+                .disabled(store.state.roles.isEmpty).help("Settings (⌘,)")
             }
-            .buttonStyle(.plain).foregroundStyle(.secondary)
-            .disabled(store.state.roles.isEmpty).help("Settings (⌘,)")
             .padding(.horizontal, Space.ml).padding(.bottom, Space.ml)
         }
         .navigationSplitViewColumnWidth(min: WorkspaceStyle.sidebarWidth.min, ideal: WorkspaceStyle.sidebarWidth.ideal, max: WorkspaceStyle.sidebarWidth.max)
+    }
+    private var updateTitle: String {
+        // Kept short enough to fit on one line at the narrowest sidebar width; the tooltip says what happens.
+        if updater.phase == .ready { return "Update" }
+        guard let jobs = updater.waiting else { return "Updating…" }
+        return jobs > 0 ? "\(jobs) job\(jobs == 1 ? "" : "s") left…" : "Waiting…"
     }
 }
 

@@ -15,7 +15,9 @@ probe.listen(0, '127.0.0.1');
 await once(probe, 'listening');
 const port = probe.address().port;
 await new Promise((resolve) => probe.close(resolve));
-const env = { ...process.env, PATH: '/usr/bin:/bin:/usr/sbin:/sbin', CREW_HOME: home, CREW_PORT: String(port), CREW_TEST_MODE: '1' };
+const env = { ...process.env, PATH: '/usr/bin:/bin:/usr/sbin:/sbin', CREW_HOME: home, CREW_PORT: String(port), CREW_TEST_MODE: '1',
+  // A closed local port, so the updater never reaches GitHub during the test.
+  CREW_UPDATE_FEED: 'http://127.0.0.1:9/latest' };
 delete env.CREW_ATTACH_ONLY;
 const base = `http://127.0.0.1:${port}`;
 const health = async () => (await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(1000) })).json();

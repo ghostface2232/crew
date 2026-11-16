@@ -134,6 +134,8 @@ Groundwork done 2026-11-15: worker roles are a registry the user assigns in the 
 
 **L2. Own main screen.** Partially implemented 2026-11-12: React board, role-based direct jobs and Electron shell; see [07-desktop-and-react.md](07-desktop-and-react.md). Mission start with a lead, lead selection and merge execution remain open. Original plan: After B1 and B2 the board is close to a control screen. Add mission start, the command bar for direct dispatch (the daemon already accepts `POST /api/jobs`), lead selection, and merge execution, then wrap it in a thin native window. Deferred discussion on 2026-11-12: evaluate Electron as a thin client of the existing daemon, with one app instance, window-state restoration, a tray, and actionable approval notifications. Closing the board must not stop jobs; keep the web board available. The earlier Tauri preference (02 section 5) is not a final choice. Measure resource costs and consider packaging and updates before selecting the shell; avoid a heavy wrapper (05 section 6).
 
+**L2a. Distribution.** Planned 2026-11-16: GitHub Releases with a Windows installer and the macOS app, where the app installs and updates the Claude Code plugin itself on its own runtime and shows a setup checklist; see [13-distribution-plan.md](13-distribution-plan.md).
+
 **L3. Usage-based routing.** With AgentGauge G3 (threshold hooks), handoff starts before the lead's limit runs out.
 
 **L4. More entry points.** Start missions from GitHub or Linear issues; a read-only mobile view.

@@ -1,13 +1,15 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import type { LucideIcon } from 'lucide-react';
-import { ChevronLeft, ChevronRight, FileText, Folder, Gauge, Hammer, Info, ShieldCheck, SlidersHorizontal, Type } from 'lucide-react';
-import type { Preset, PresetName, Snapshot } from './types.ts';
+import { ChevronLeft, ChevronRight, CircleArrowDown, FileText, Folder, Gauge, Hammer, Info, ShieldCheck, SlidersHorizontal, Type } from 'lucide-react';
+import type { AppUpdate, Preset, PresetName, Snapshot } from './types.ts';
 import type { AgentSettings, Holder, JobKind, Role, RoleAssignment, RoleInfo, RoleSettings, WorkerAgent } from '../../bridge/config.ts';
 import { request } from './api.ts';
 import { board } from './store.ts';
 import { agentSettings, HOLDERS, knownProjects, NAMES, projectNames, resolveDraft, rolesOf, sortHolders } from './model.ts';
 import { AgentMark, CloseButton, Dialog, Icon, useFade } from './ui.tsx';
 import { Scores } from './Scores.tsx';
+import { desktop } from './desktop.ts';
+import appIcon from './icons/CrewAppIcon.svg';
 import styles from './Settings.module.css';
 
 /** The app's one-line summary of a preset. */
@@ -27,8 +29,8 @@ function presetDescription(preset: Preset) {
   ].join('; ');
 }
 
-/** One page of settings, listed in the sidebar: the roles by kind of work, what every agent shares, then each project's own instructions. */
-type Fixed = 'build' | 'review' | 'edit' | 'presets' | 'models' | 'instructions';
+/** One page of settings, listed in the sidebar: the roles by kind of work, what every agent shares, each project's own instructions, then the desktop app. */
+type Fixed = 'build' | 'review' | 'edit' | 'presets' | 'models' | 'instructions' | 'about';
 type Pane = Fixed | `project:${string}`;
 const PANES: Record<Fixed, { title: string; icon: LucideIcon; tint: string; kind?: JobKind }> = {
   build: { title: 'Build', icon: Hammer, tint: 'var(--accent)', kind: 'delegate' },
@@ -37,7 +39,27 @@ const PANES: Record<Fixed, { title: string; icon: LucideIcon; tint: string; kind
   presets: { title: 'Presets', icon: SlidersHorizontal, tint: 'var(--gray)' },
   models: { title: 'Model Scores', icon: Gauge, tint: 'var(--purple)' },
   instructions: { title: 'Instructions', icon: FileText, tint: 'var(--indigo)' },
+  about: { title: 'About Crew', icon: CircleArrowDown, tint: 'var(--gray)' },
 };
+
+/** Where the desktop app's update stands, in one line. */
+function updateSummary(update: AppUpdate) {
+  const checked = update.checkedAt
+    ? `Last checked at ${new Date(update.checkedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+    : 'Not checked yet';
+  switch (update.state) {
+    case 'unsupported': return 'Updates come with the installed app';
+    case 'idle': return update.checkedAt && !update.error ? 'Crew is up to date' : checked;
+    case 'checking': return 'Checking for updates…';
+    case 'available': return `Version ${update.latest} is available`;
+    case 'downloading': return `Downloading version ${update.latest}… ${Math.round((update.progress ?? 0) * 100)}%`;
+    case 'ready': return `Version ${update.latest} is ready to install`;
+    case 'installing': return update.waiting
+      ? `Version ${update.latest} will install when ${update.waiting} running job${update.waiting === 1 ? '' : 's'} finish${update.waiting === 1 ? 'es' : ''}`
+      : update.waiting === 0 ? `Version ${update.latest} will install once the Crew daemon answers`
+      : `Restarting to install version ${update.latest}…`;
+  }
+}
 
 /** Fixing review findings sits with the reviews it answers, though it runs as a build job. */
 const paneKind = (role: RoleInfo): JobKind => (role.role === 'fix' ? 'review' : role.kind);
@@ -70,7 +92,7 @@ function sameRoles(a: RoleSettings, b: RoleSettings) {
   return canonical(a) === canonical(b);
 }
 
-export function Settings({ state, close }: { state: Snapshot; close: () => void }) {
+export function Settings({ state, update, close }: { state: Snapshot; update: AppUpdate | null; close: () => void }) {
   const [pane, setPane] = useState<Pane>('build');
   // On a phone the sidebar is a list of its own, and a page replaces it; wider, both show.
   const [view, setView] = useState<'list' | 'page'>('list');
@@ -272,7 +294,8 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
     }
   };
   // A daemon without presets or notes has no page for them.
-  const current: Pane = (pane === 'presets' && !state.presets) || (pane === 'models' && !state.modelScores) ? 'build' : pane;
+  const current: Pane =
+    (pane === 'presets' && !state.presets) || (pane === 'models' && !state.modelScores) || (pane === 'about' && !update) ? 'build' : pane;
   const project = current.startsWith('project:') ? current.slice('project:'.length) : null;
   const fixed = project === null ? PANES[current as Fixed] : undefined;
   const kind = fixed?.kind;
@@ -283,7 +306,7 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
   const paneSaving = kind ? savingRoles : current === 'presets' ? savingPreset : saving;
   const paneDirty = kind ? rolesDirty : current === 'presets' ? preset !== savedPreset : text !== saved;
   const paneStatus = kind ? roleStatus : current === 'presets' ? presetStatus : load === 'loading' ? 'Loading…' : status;
-  const readOnly = current === 'models';
+  const readOnly = current === 'models' || current === 'about';
   const canSave = !readOnly && state.connection === 'live' && !paneSaving && (pageScope === null || (load === 'ready' && loadedScope === pageScope));
   const saveCurrent = async () => {
     if (!canSave) return;
@@ -455,6 +478,12 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
               <div className={styles.section}>{dirs.map((dir) => item(`project:${dir}`))}</div>
             </>
           )}
+          {update && (
+            <>
+              <p className={styles.sectionLabel}>App</p>
+              <div className={styles.section}>{item('about')}</div>
+            </>
+          )}
         </nav>
         <div className={styles.detail}>
           <div className={styles.scroll} ref={scroller} onScroll={(event) => setScrolled(event.currentTarget.scrollTop > 0)}>
@@ -497,6 +526,61 @@ export function Settings({ state, close }: { state: Snapshot; close: () => void 
                       <div className={styles.row}><span>A mission's preset</span><span className={styles.value}>Replaces this one for its new jobs</span></div>
                     </div>
                     <p className={styles.footnote}>The lead gives a mission the preset you name for a command; you can also change it from the mission.</p>
+                  </section>
+                </>
+              )}
+              {current === 'about' && update && (
+                <>
+                  <section className={styles.about}>
+                    <img className={styles.aboutIcon} src={appIcon} alt="" />
+                    <div>
+                      <p className={styles.aboutName}>Crew</p>
+                      <p className={styles.footnote}>Version {update.current}</p>
+                    </div>
+                  </section>
+                  <section className={styles.group}>
+                    <div className={styles.rows}>
+                      <div className={styles.row}>
+                        <span className={styles.updateLine} role="status">{updateSummary(update)}</span>
+                        {update.state === 'installing' && update.waiting !== undefined ? (
+                          <button type="button" onClick={() => void desktop?.update.cancel()}>Cancel Update</button>
+                        ) : update.state === 'ready' || update.state === 'installing' ? (
+                          <button type="button" className="prominent" disabled={update.state === 'installing'} onClick={() => void desktop?.update.install()}>
+                            Restart to Update
+                          </button>
+                        ) : update.state !== 'unsupported' && (
+                          <button
+                            type="button"
+                            disabled={update.state === 'checking' || update.state === 'downloading'}
+                            onClick={() => void desktop?.update.check()}
+                          >
+                            {update.state === 'available' ? 'Download Now' : 'Check for Updates'}
+                          </button>
+                        )}
+                      </div>
+                      {update.state === 'downloading' && (
+                        <div className={styles.row}>
+                          <progress className={styles.progress} value={update.progress ?? 0} max={1} aria-label="Download progress" />
+                        </div>
+                      )}
+                      {update.page && update.latest && (
+                        <div className={styles.row}>
+                          <span>Release notes</span>
+                          <a href={update.page} target="_blank" rel="noreferrer">What’s new in {update.latest}</a>
+                        </div>
+                      )}
+                    </div>
+                    {update.error && (
+                      <p className={`${styles.footnote} ${styles.note}`}>
+                        <Icon icon={Info} />
+                        {update.error}
+                      </p>
+                    )}
+                    <p className={styles.footnote}>
+                      {update.state === 'unsupported'
+                        ? 'This copy of Crew was not installed with the Crew installer, so it cannot update itself. Install Crew from its GitHub releases to get updates.'
+                        : 'Crew checks for a new version every few hours and downloads it while you are away from the app. Nothing is installed until you choose Restart to Update. If jobs are running, the update waits for them to finish; jobs, missions and settings are kept.'}
+                    </p>
                   </section>
                 </>
               )}

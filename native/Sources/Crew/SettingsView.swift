@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// One page of the settings window, listed in the sidebar: the roles by kind of work, what every agent shares,
-/// then each project's own instructions.
+/// One page of the settings window, listed in the sidebar: the app itself, the roles by kind of work, what every agent
+/// shares, then each project's own instructions.
 enum SettingsPane: Hashable, Identifiable {
-    case build, review, edit, presets, models, instructions
+    case about, build, review, edit, presets, models, instructions
     case project(String)
     var id: Self { self }
     static let roles: [SettingsPane] = [.build, .review, .edit]
@@ -14,6 +14,7 @@ enum SettingsPane: Hashable, Identifiable {
     var scope: String? { switch self { case .instructions: ""; case .project(let path): path; default: nil } }
     var systemImage: String {
         switch self {
+        case .about: "arrow.down.circle.fill"
         case .build: "hammer.fill"
         case .review: "checkmark.shield.fill"
         case .edit: "textformat"
@@ -29,7 +30,7 @@ enum SettingsPane: Hashable, Identifiable {
         case .project: .teal
         case .review: .green
         case .edit: .orange
-        case .presets: .gray
+        case .presets, .about: .gray
         case .models: .purple
         case .instructions: .indigo
         }
@@ -44,6 +45,7 @@ struct CrewSettingsView: View {
     private static let editorHeight: CGFloat = 260
     @Bindable var model: SettingsModel
     var store: CrewStore
+    @Environment(AppUpdater.self) private var updater
     @State private var selection: SettingsPane? = .build
     /// Moving to another set of instructions loads it in place of the one being edited, so unsaved edits are asked about first.
     private var pages: Binding<SettingsPane?> {
@@ -60,7 +62,7 @@ struct CrewSettingsView: View {
     var body: some View {
         NavigationSplitView {
             List(selection: pages) {
-                SettingsAppRow().selectionDisabled()
+                SettingsAppRow(ready: updater.phase == .ready).tag(SettingsPane.about)
                 Section("Roles") { ForEach(SettingsPane.roles) { paneRow($0) } }
                 Section("Shared") { ForEach(SettingsPane.shared.filter(available)) { paneRow($0) } }
                 if !store.projects.isEmpty {
@@ -78,7 +80,7 @@ struct CrewSettingsView: View {
             Form { content(pane) }
                 .formStyle(.grouped)
                 .scrollEdgeEffectStyle(.soft, for: .top)
-                .safeAreaBar(edge: .bottom) { if pane != .models { saveBar(pane) } }
+                .safeAreaBar(edge: .bottom) { if pane != .models && pane != .about { saveBar(pane) } }
                 .navigationTitle(title(pane))
                 // NSHostingController does not carry navigationTitle into the window, so the toolbar would be blank.
                 .background(WindowTitleSetter(title: title(pane)))
@@ -96,6 +98,7 @@ struct CrewSettingsView: View {
     }
     private func title(_ pane: SettingsPane) -> String {
         switch pane {
+        case .about: "About Crew"
         case .presets: "Presets"
         case .models: "Model Scores"
         case .instructions: "Instructions"
@@ -116,6 +119,8 @@ struct CrewSettingsView: View {
             Section {} footer: {
                 Text("The lead picks one of a role's holders for each job. When none is named, Antigravity takes wording and Codex other work, passing over one that is disabled or cannot do the role. Claude means the lead does the work itself or in a subagent. Each agent's model and effort apply when it runs the role.").settingsFootnote()
             }
+        } else if pane == .about {
+            about
         } else if pane == .presets {
             presets
         } else if pane == .models {
@@ -176,6 +181,50 @@ struct CrewSettingsView: View {
             LabeledContent("A mission's preset", value: "Replaces this one for its new jobs")
         } footer: {
             Text("The lead gives a mission the preset you name for a command; you can also change it from the mission.").settingsFootnote()
+        }
+    }
+    @ViewBuilder private var about: some View {
+        Section {
+            HStack(spacing: Space.l) {
+                Image(nsImage: NSApp.applicationIconImage).resizable().interpolation(.high).scaledToFit()
+                    .frame(width: 56, height: 56).accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Crew").font(.title3.weight(.semibold))
+                    Text("Version \(updater.current)").foregroundStyle(.secondary)
+                }
+            }.padding(.vertical, Space.xs)
+        }
+        Section {
+            LabeledContent {
+                switch updater.phase {
+                case .unsupported: EmptyView()
+                case .installing where updater.waiting != nil:
+                    Button("Cancel Update") { updater.failed() }
+                case .ready, .installing:
+                    Button("Restart to Update") { updater.onInstall() }
+                        .buttonStyle(.borderedProminent).disabled(updater.phase == .installing)
+                case .available:
+                    Button("Download Now") { Task { await updater.checkNow() } }
+                case .idle, .checking, .downloading:
+                    Button("Check for Updates") { Task { await updater.checkNow() } }
+                        .disabled(updater.phase != .idle)
+                }
+            } label: {
+                Text(updater.summary)
+            }
+            if updater.phase == .downloading {
+                ProgressView(value: updater.progress).accessibilityLabel("Download progress")
+            }
+            if let page = updater.page, let latest = updater.latest {
+                LabeledContent("Release notes") { Link("What’s new in \(latest)", destination: page) }
+            }
+        } footer: {
+            VStack(alignment: .leading, spacing: Space.s) {
+                if let error = updater.error { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.secondary) }
+                Text(updater.phase == .unsupported
+                    ? "This copy of Crew is not running from an app bundle, so it cannot update itself."
+                    : "Crew checks for a new version every few hours and downloads it while you are away from the app. Nothing is installed until you choose Restart to Update. If jobs are running, the update waits for them to finish; jobs, missions and settings are kept.")
+            }.settingsFootnote()
         }
     }
     @ViewBuilder private var modelScores: some View {
@@ -288,7 +337,9 @@ private struct SettingsPaneIcon: View {
 }
 
 /// The app's icon and name at the top of the sidebar, where System Settings shows the account.
+/// The app's own row, which opens About Crew; a dot marks an update ready to install.
 private struct SettingsAppRow: View {
+    let ready: Bool
     private let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
     var body: some View {
         HStack(spacing: Space.ml) {
@@ -297,6 +348,10 @@ private struct SettingsAppRow: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text("Crew").font(.body.weight(.semibold))
                 if let version { Text("v\(version)").font(.subheadline).foregroundStyle(.secondary) }
+            }
+            if ready {
+                Spacer(minLength: 0)
+                Circle().fill(.tint).frame(width: 8, height: 8).accessibilityLabel("Update ready")
             }
         }.padding(.vertical, Space.xs)
     }

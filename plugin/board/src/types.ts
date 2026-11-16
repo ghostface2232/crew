@@ -37,3 +37,41 @@ export interface Snapshot extends BoardState {
   revision: number;
   clockSkew: number;
 }
+
+/** Where the desktop app's updater stands, as its window sees it. */
+export interface AppUpdate {
+  /** The running app's version. */
+  current: string;
+  /**
+   * `unsupported` outside an installed copy. `idle` is up to date or not yet checked; `available` waits for the user to
+   * be away before downloading; `ready` holds a verified installer that runs when the user chooses.
+   */
+  state: 'unsupported' | 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'installing';
+  /** The release on offer, from `available` on. */
+  latest?: string;
+  /** Its release page. */
+  page?: string;
+  /** Download progress from 0 to 1. */
+  progress?: number;
+  /** When the last check finished, in epoch milliseconds. */
+  checkedAt?: number;
+  /** Why the last check, download or install failed. */
+  error?: string;
+  /**
+   * While installing: the running jobs the install waits for, 0 while it waits on a daemon that has not answered.
+   * The install can be called off while this is set; it is absent once the daemon is being stopped.
+   */
+  waiting?: number;
+}
+/** What the desktop app's preload script gives the board; absent in a browser. */
+export interface DesktopBridge {
+  update: {
+    state(): Promise<AppUpdate>;
+    /** Checks now and, when a release is on offer, downloads it at once. */
+    check(): Promise<void>;
+    install(): Promise<void>;
+    /** Stops an install that is still waiting for jobs. */
+    cancel(): Promise<void>;
+    subscribe(listener: (update: AppUpdate) => void): () => void;
+  };
+}

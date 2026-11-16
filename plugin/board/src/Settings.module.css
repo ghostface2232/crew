@@ -107,3 +107,10 @@
   .status { flex-basis: 100%; gap: 6px 12px; }
   .status:empty { display: none; }
 }
+
+/* The desktop app's About page: its mark and version, above where its update stands. */
+.about { display: flex; align-items: center; gap: 14px; padding: 4px 4px 8px; }
+.aboutIcon { width: 56px; height: 56px; border-radius: 22px; corner-shape: var(--smooth); }
+.aboutName { font: 600 17px/1.3 var(--text-face); }
+.row > span.updateLine { flex: 1; max-width: none; min-width: 0; overflow-wrap: anywhere; }
+.progress { width: 100%; accent-color: var(--accent); }

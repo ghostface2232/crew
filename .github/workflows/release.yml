@@ -25,7 +25,9 @@ jobs:
 
   macos:
     needs: check
-    runs-on: macos-26
+    # The app icon is an Xcode 27 Icon Composer document, and hosted runners have only Xcode 26,
+    # whose actool cannot compile it. This runs on the maintainer's Mac with Xcode 27.
+    runs-on: [self-hosted, macOS, ARM64]
     steps:
       - uses: actions/checkout@v5
       # The official Node.js tarball is standalone and ships its LICENSE one folder above bin/node,

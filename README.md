@@ -54,7 +54,7 @@ When a worker asks for approval or has a question, an input dialog pops up in th
 npm run desktop
 ```
 
-On macOS, this builds the native SwiftUI app; on Windows, it builds an Electron app around the web board. `npm run package:desktop` writes `release/Crew.app` on macOS (Xcode 26+ and a standalone Node.js distribution required) or `release/Crew-win32-x64/Crew.exe` on Windows. Both apps run the existing TypeScript daemon without a separate Node install. Closing the window hides it to the tray; quitting the app leaves jobs running. The app restores its window and opens approval notifications at the relevant job. The web board stays available.
+On macOS, this builds the native SwiftUI app; on Windows, it builds an Electron app around the web board. `npm run package:desktop` writes `release/Crew.app` on macOS (Xcode 26+ and a standalone Node.js distribution required) or `release/Crew-win32-x64/Crew.exe` on Windows. Both apps run the existing TypeScript daemon without a separate Node install. Closing the window hides it to the tray; quitting the app leaves jobs running. Both restore their window; the macOS app also opens approval notifications at the relevant job. The web board stays available.
 
 The board can send jobs directly for any role except debate, using the configured roles. Full missions still begin in the Claude lead session. See the [native macOS](docs/08-native-macos.md) and [Windows](docs/12-windows-electron.md) notes for development, tests, resource measurements, and distribution limits.
 

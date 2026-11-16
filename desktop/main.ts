@@ -422,7 +422,8 @@ async function installUpdate() {
     });
     if (response !== 0 || attempt !== installAttempt) return;
   }
-  if (!updater.installing(daemon?.active ?? 0)) return;
+  // A second click while the daemon was asked supersedes this one; only the latest attempt takes the install.
+  if (attempt !== installAttempt || !updater.installing(daemon?.active ?? 0)) return;
   // Read afresh each time: the user can cancel while the install waits.
   const current = () => attempt === installAttempt && !stopping && updater.status.state === 'installing';
   // Once the daemon has stopped, anything that calls the install off must start it again.

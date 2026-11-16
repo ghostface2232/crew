@@ -393,7 +393,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             alert.addButton(withTitle: "Cancel")
             guard alert.runModal() == .alertFirstButtonReturn, attempt == installAttempt else { return }
         }
-        guard updater.installing(waiting: first?.active ?? 0) else { return }
+        // A second click while the daemon was asked supersedes this one; only the latest attempt takes the install.
+        guard attempt == installAttempt, updater.installing(waiting: first?.active ?? 0) else { return }
         // Read afresh each time: the user can cancel while the install waits.
         let current = { attempt == self.installAttempt && !self.quitting && self.updater.phase == .installing }
         // Once the store is paused, anything that calls the install off must start it again; it starts the daemon too.

@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { ANTIGRAVITY_MODELS, codexModel, codexModels, defaultTier, modelId, pickModel, tierEffort, tierModel, tierOf } from '../plugin/bridge/tiers.ts';
+import { ANTIGRAVITY_MODELS, codexModel, codexModels, defaultTier, familyTier, modelId, pickModel, tierEffort, tierModel, tierOf } from '../plugin/bridge/tiers.ts';
 
 function cache(t: { after: (fn: () => void) => void }, models: unknown): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-tiers-'));
@@ -40,15 +40,20 @@ test('Antigravity tiers name a family that the session list resolves', () => {
   assert.equal(pickModel(undefined, 'hydrogen'), undefined);
 });
 
-test('a family name or label the lead passes becomes the exact model ID', (t) => {
-  const file = cache(t, [{ slug: 'gpt-6-astra' }, { slug: 'gpt-6.1-sol' }]);
-  assert.equal(modelId('codex', 'Astra', file), 'gpt-6-astra');
-  assert.equal(modelId('codex', 'Astra (standard)', file), 'gpt-6-astra');
-  assert.equal(modelId('codex', 'sol', file), 'gpt-6.1-sol');
-  // An ID stays as named, even one the cache does not list.
+test('a family name the lead passes as a model stands for its tier, and a display name for its ID', (t) => {
+  assert.equal(familyTier('codex', 'Astra'), 'frontier');
+  assert.equal(familyTier('codex', 'astra (frontier)'), 'frontier');
+  assert.equal(familyTier('codex', 'Luna (isolated)'), 'fast');
+  assert.equal(familyTier('antigravity', 'Hydrogen'), 'standard');
+  assert.equal(familyTier('antigravity', 'Argon (frontier)'), 'frontier');
+  // IDs, other names, and labels naming two families are not family names.
+  assert.equal(familyTier('codex', 'gpt-6-astra'), undefined);
+  assert.equal(familyTier('codex', 'console'), undefined);
+  assert.equal(familyTier('codex', 'Sol or Astra'), undefined);
+  const file = cache(t, [{ slug: 'gpt-6-astra', display_name: 'GPT-6-Astra' }, { slug: 'gpt-6.1-terra', display_name: 'GPT-6.1 Terra' }]);
+  assert.equal(modelId('codex', 'GPT-6-Astra', file), 'gpt-6-astra');
+  assert.equal(modelId('codex', 'gpt-6.1 terra', file), 'gpt-6.1-terra');
   assert.equal(modelId('codex', 'gpt-5.6-sol', file), 'gpt-5.6-sol');
-  assert.equal(modelId('codex', 'custom', file), 'custom');
-  assert.equal(modelId('antigravity', 'Argon (frontier)'), 'argon');
 });
 
 test('a named model is placed in the tier of its family', () => {

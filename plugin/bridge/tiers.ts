@@ -100,13 +100,21 @@ export function tierModel(agent: WorkerAgent, tier: Tier, cache?: string): strin
 }
 
 /**
- * The model a lead-named model stands for. An ID is kept as named; a family name or label without a version
- * ("Astra", "Astra (standard)"), as a user or a preset's wording puts it, becomes that family's model for the agent.
+ * The tier a family name stands for when the lead passes one as a model ("Astra", "Astra (frontier)"), as a user
+ * or a preset's wording puts it. Only a label without a version that names exactly one family counts.
  */
+export function familyTier(agent: WorkerAgent, label: string): Tier | undefined {
+  if (/\d/.test(label)) return undefined;
+  const words = label.toLowerCase().split(/[^a-z]+/);
+  const families = [...new Set(Object.values(TIER_FAMILIES[agent]))].filter((family) => words.includes(family));
+  return families.length === 1 ? [...TIERS].reverse().find((tier) => TIER_FAMILIES[agent][tier] === families[0]) : undefined;
+}
+
+/** The Codex model ID for a model the account lists under that ID or its display name ("GPT-6-Astra"); otherwise the name as given. */
 export function modelId(agent: WorkerAgent, wanted: string, cache?: string): string {
-  if (/\d/.test(wanted)) return wanted;
-  const tier = tierOf(agent, wanted);
-  return (tier && tierModel(agent, tier, cache)) || wanted;
+  if (agent !== 'codex') return wanted;
+  const name = wanted.toLowerCase();
+  return codexModels(cache).find((m) => m.id.toLowerCase() === name || m.name.toLowerCase() === name)?.id ?? wanted;
 }
 
 /** The tier whose family a model name belongs to, for holding a named model under a preset's cap; undefined when none matches. */

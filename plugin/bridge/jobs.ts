@@ -18,7 +18,7 @@ import type { Worktree } from './git.ts';
 import { sharedInstructions } from './instructions.ts';
 import { buildPrompt } from './prompts.ts';
 import { findSkills } from './skills.ts';
-import { defaultTier, modelId, tierEffort, tierModel, tierOf, TIERS } from './tiers.ts';
+import { defaultTier, familyTier, modelId, tierEffort, tierModel, tierOf, TIERS } from './tiers.ts';
 import type { Tier } from './tiers.ts';
 
 export type { WorkerAgent };
@@ -409,9 +409,12 @@ export function resolveRole(spec: JobSpec): Role {
 function pickModel(agent: WorkerAgent, spec: JobSpec, role: { model?: string; effort?: string }, config: Config, preset: PresetName | null): { model?: string; effort?: string; tier?: Tier; agentDefault?: boolean } {
   const configured = { model: role.model ?? config[agent].model, effort: role.effort ?? (agent === 'codex' ? config.codex.effort : undefined) };
   const cap = preset ? config.presets[preset].maxTier : undefined;
-  const wanted = spec.tier ?? (configured.model ? undefined : defaultTier(spec));
+  // A family name passed as the model is that family's tier, so it resolves, caps and sets effort like one.
+  const family = spec.model ? familyTier(agent, spec.model) : undefined;
+  const exact = spec.model && !family ? modelId(agent, spec.model) : undefined;
+  const wanted = family ?? spec.tier ?? (configured.model ? undefined : defaultTier(spec));
   const tier = wanted && cap && TIERS.indexOf(wanted) > TIERS.indexOf(cap) ? cap : wanted;
-  let model = (spec.model && modelId(agent, spec.model)) ?? (tier ? tierModel(agent, tier) : undefined) ?? configured.model;
+  let model = exact ?? (tier ? tierModel(agent, tier) : undefined) ?? configured.model;
   // The cap holds for a model named outright too; effort stays the lead's to choose.
   const named = model ? tierOf(agent, model) : undefined;
   const capped = Boolean(cap && named && TIERS.indexOf(named) > TIERS.indexOf(cap));
@@ -419,8 +422,8 @@ function pickModel(agent: WorkerAgent, spec: JobSpec, role: { model?: string; ef
   // With no model of the capped tier to name, the configured fallback could be the very model the cap refused.
   const agentDefault = capped && !model ? true : undefined;
   // A role's or preset's effort is the user's choice and holds over the tier's; the agent-wide setting does not.
-  const effort = spec.effort ?? role.effort ?? (spec.tier || !configured.effort ? (agent === 'codex' ? tierEffort(tier ?? defaultTier(spec)) : undefined) : configured.effort);
-  const shown = capped ? cap : !spec.model ? tier : undefined;
+  const effort = spec.effort ?? role.effort ?? (spec.tier || family || !configured.effort ? (agent === 'codex' ? tierEffort(tier ?? defaultTier(spec)) : undefined) : configured.effort);
+  const shown = capped ? cap : !exact ? tier : undefined;
   return { ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(shown ? { tier: shown } : {}), ...(agentDefault ? { agentDefault } : {}) };
 }
 
@@ -1426,7 +1429,7 @@ export class Jobs {
         const stop = new AbortController();
         this.checks.set(job.id, stop);
         try {
-          check = await runCheck(job.check, job.worktree.path, tmp, [tokenFile(this.home)], { network: Boolean(job.runsApp), signal: stop.signal });
+          check = await runCheck(job.check, job.worktree.path, tmp, [tokenFile(this.home)], { network: Boolean(job.runsApp), signal: stop.signal, codex: this.readConfig().codex.bin });
         } finally {
           this.checks.delete(job.id);
           clearInterval(alive);

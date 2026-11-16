@@ -119,8 +119,9 @@ struct BoardView: View {
             ForEach(tiles + [left, right].compactMap { $0 }) { placed(card($0), $0) }
         }
     }
+    /// Matched within the page only: the same mission on another page must not fly across when the page changes.
     private func placed<Card: View>(_ card: Card, _ tile: Tile) -> some View {
-        card.matchedGeometryEffect(id: tile.id, in: cards).transition(.card)
+        card.matchedGeometryEffect(id: "\(store.selection ?? "overview")/\(tile.id)", in: cards).transition(.card)
     }
     private var title: String {
         if !store.project.isEmpty { return projectName(store.project, among: store.projects) }
@@ -202,10 +203,16 @@ struct BoardView: View {
         let emptyWorkspace = !history && jobs.isEmpty && scopedMissions.isEmpty && !store.state.claude.contains { (store.project.isEmpty || $0.projectPath == store.project) && matches($0.title) }
         // What is shown where. Work arriving or leaving changes it, and only then do the cards animate, so a status
         // or timer updating in place does not set the page moving.
-        let missionsByID = Dictionary(shownMissions.map { ($0.id, $0) }) { first, _ in first }
+        // A mission's rows as its panel places them: each job and the lead's session under their step, and its notes
+        // and outcome.
+        let missionRows = (shownMissions + recent).flatMap { mission in
+            let lead = mission.state == "active" ? store.state.claude.first { $0.id == mission.owner } : nil
+            return ["\(mission.id):\(mission.notes?.count ?? 0):\(mission.outcome.isEmpty)"]
+                + missionJobs(mission).map { "\(mission.id)/\($0.id)@\(mission.jobStep($0))" }
+                + (lead.map { ["\(mission.id)/\($0.id)@\(mission.step)"] } ?? [])
+        }
         let layout = tiles.map(\.id) + loose.map(\.id) + ["finished"] + recentJobs.map(\.id) + ["sessions"] + sessions.map(\.id)
-            + jobs.map { job in "\(job.id):\(job.mission.flatMap { missionsByID[$0]?.jobStep(job) } ?? -1)" }
-            + [emptyHistory || emptyWorkspace ? "empty" : ""]
+            + missionRows + [emptyHistory || emptyWorkspace ? "empty" : ""]
         Group {
         masonry(tiles, left: recentJobs.isEmpty ? nil : .finished, right: sessions.isEmpty ? nil : .sessions) { tile in
             switch tile {
@@ -241,6 +248,8 @@ struct BoardView: View {
             if events.isEmpty { Text("No activity yet.").foregroundStyle(.secondary) }
             EventList(events: events) { store.openJob($0) }
         }
+        // On the panel rather than the list, so the panel grows with the rows instead of snapping to its new height.
+        .animation(Motion.reduced(Motion.reflow, reduceMotion), value: store.events.last?.id)
     }
 }
 

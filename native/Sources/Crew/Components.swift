@@ -320,6 +320,8 @@ struct EventList: View {
                         Text(event.detail).font(Typeface.callout).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                     }
                 }
+                // Eases in only where the caller animates the list's changes.
+                .transition(.card)
             }
         }
     }

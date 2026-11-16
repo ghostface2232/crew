@@ -10,10 +10,10 @@ The macOS `.zip` below is what the app's updater downloads; install from the `.d
 - **macOS:** Open the disk image, drag Crew to Applications, and open Crew from Applications. Opening it straight from the disk image or Downloads runs a temporary copy that Crew cannot work from.
 - **Windows:** Run the installer. It installs for the current user, needs no administrator rights, and starts Crew when it finishes.
 
-The apps are not signed by a recognized publisher yet, so the first launch takes one extra step:
+The apps are not yet signed by a recognized publisher, so the first launch may take one extra step:
 
 - **macOS:** Gatekeeper blocks the first launch. Open System Settings → Privacy & Security, then click **Open Anyway** next to the message about Crew.
-- **Windows:** SmartScreen shows "Windows protected your PC". Click **More info**, then **Run anyway**.
+- **Windows:** If SmartScreen shows "Windows protected your PC", click **More info**, then **Run anyway**.
 
 After that, both apps update themselves from this page: a newer release downloads while you are away and installs only when you choose **Restart to Update**.
 

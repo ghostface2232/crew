@@ -171,8 +171,8 @@ enum Releases {
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             clean()
-            try await Self.fetch(release.url, to: partial, session: session) { value in
-                Task { @MainActor [weak self] in
+            try await Self.fetch(release.url, to: partial, session: session) { [weak self] value in
+                Task { @MainActor in
                     // Progress shows in whole percents, not on every chunk.
                     if let self, self.phase == .downloading, value - self.progress >= 0.01 { self.progress = value }
                 }

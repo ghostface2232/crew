@@ -459,6 +459,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             try? await Task.sleep(for: .seconds(5))
         }
         guard current(), let archive = updater.archive, let version = updater.latest else { return abandon() }
+        // The hand-over below awaits and then quits without checking again, so it can no longer be called off. With no
+        // daemon of this bundle to stop, the loop above never said so.
+        updater.stoppingDaemon()
         store.stop()
         paused = true
         let installed = Bundle.main.bundleURL

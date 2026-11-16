@@ -71,15 +71,18 @@ export async function register(): Promise<Registration> {
     if (!res.ok) return { ok: false, detail: `Could not ${step[0]} the plugin: ${lastLine(res.out)}` };
   }
   linkCommand();
-  if (PACKAGED) fs.writeFileSync(RECORD, `${JSON.stringify({ root: MARKETPLACE, build: installed().build }, null, 2)}\n`);
+  if (PACKAGED) fs.writeFileSync(RECORD, `${JSON.stringify({ root: MARKETPLACE, version: VERSION, build: installed().build }, null, 2)}\n`);
   return { ok: true, detail: step ? 'Installed. Open a new Claude Code session, or run /reload-plugins, to load it.' : 'Up to date.' };
 }
 
-/** Whether this built copy has been registered since it was installed or last updated. */
+/**
+ * Whether this built copy has been registered since it was installed or last updated. The version counts as well as
+ * the code: a release that changes only the version still has Claude Code update the plugin's.
+ */
 export function registered(): boolean {
   try {
     const record = JSON.parse(fs.readFileSync(RECORD, 'utf8'));
-    return record.root === MARKETPLACE && record.build === installed().build;
+    return record.root === MARKETPLACE && record.version === VERSION && record.build === installed().build;
   } catch {
     return false;
   }

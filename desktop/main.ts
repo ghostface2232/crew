@@ -53,6 +53,10 @@ let watchTimer: ReturnType<typeof setTimeout> | undefined;
 /** Set once the user chooses to install; the installer starts after the windows have closed. */
 let installRequested = false;
 let handedOver = false;
+/** The install's hand-over steps, kept beside the app's data for diagnosing an update that did not go through. */
+const updateLog = (step: string) => {
+  try { fs.appendFileSync(path.join(app.getPath('userData'), 'update.log'), `${new Date().toISOString()} ${step}\n`); } catch {}
+};
 /** The board's top bar height (`.topbar` in board.css), so the window buttons line up with it. */
 const TOP_BAR_HEIGHT = 60;
 /** The board's --canvas and --label colors (board.css), behind and on the window buttons. */
@@ -260,10 +264,12 @@ else {
   app.on('second-instance', () => show());
   app.on('activate', () => show());
   app.on('before-quit', () => {
+    if (installRequested) updateLog('before-quit');
     quitting = true;
     saveWindow();
   });
   app.on('will-quit', (event) => {
+    if (installRequested) updateLog(`will-quit${handedOver ? ' (after hand-over)' : ''}`);
     stopping = true;
     clearTimeout(timer);
     pollAbort?.abort();
@@ -272,7 +278,12 @@ else {
     if (installRequested && !handedOver) {
       event.preventDefault();
       handedOver = true;
-      void handOver().finally(() => app.quit());
+      updateLog('windows closed; handing over');
+      // The windows are closed and before-quit has run, so the app exits outright rather than going through quit again.
+      void handOver().finally(() => {
+        updateLog('exiting');
+        app.exit(0);
+      });
     }
   });
   app.on('window-all-closed', () => {
@@ -490,6 +501,7 @@ async function installUpdate() {
   }
   if (!current()) return abandon();
   installRequested = quitting = true;
+  updateLog(`daemon stopped; quitting to install ${updater.status.latest}`);
   app.quit();
 }
 /**
@@ -498,12 +510,18 @@ async function installUpdate() {
  */
 async function handOver() {
   const installer = updater.installer;
+  updateLog(`installer ${installer ?? 'missing'}`);
   if (!installer) return;
   try {
     // Paths travel in the environment, never in the script text.
     const supervise = "$p = Start-Process -FilePath $env:CREW_INSTALLER -ArgumentList '/S','--force-run' -PassThru; $p.WaitForExit(); " +
       'if ($p.ExitCode -ne 0 -and (Test-Path -LiteralPath $env:CREW_APP)) { Start-Process -FilePath $env:CREW_APP }';
-    const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', supervise], {
+    // The supervisor must outlive the app, so it is detached: a child that is not is killed with the app (libuv's job).
+    // But a detached PowerShell has no console and exits without running its script, so a detached cmd starts it in a
+    // console of its own, which -WindowStyle Hidden then hides. The script is encoded so cmd does not parse it.
+    const encoded = Buffer.from(supervise, 'utf16le').toString('base64');
+    const powershell = ['powershell.exe', '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', encoded];
+    const child = spawn('cmd.exe', ['/d', '/c', 'start', '""', '/min', ...powershell], {
       detached: true, stdio: 'ignore', windowsHide: true,
       // Not the install folder, which the installer replaces.
       cwd: os.tmpdir(),
@@ -514,7 +532,9 @@ async function handOver() {
       child.once('error', reject);
     });
     child.unref();
+    updateLog(`supervisor started (process ${child.pid})`);
   } catch (error) {
+    updateLog(`supervisor failed: ${(error as Error).message}`);
     // The staged installer stays, so the reopened app offers it again; the reopened app starts its daemon again.
     updater.failed((error as Error).message);
     dialog.showErrorBox('Crew could not update', `${(error as Error).message}\n\nCrew will reopen; try the update again from Settings.`);

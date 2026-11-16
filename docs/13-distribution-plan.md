@@ -1,6 +1,6 @@
 # 13. Distribution plan
 
-Recorded 2026-11-16. Steps 3 and 4 of the order of work are implemented; the others are not. This records the agreed direction for releasing Crew to other users.
+Recorded 2026-11-16. Steps 1 to 4 of the order of work are implemented; signing (step 5) is not. This records the agreed direction for releasing Crew to other users.
 
 ## Goal
 
@@ -53,8 +53,8 @@ The user's path is: download the installer, run the app, sign in to whatever the
 
 ## Order of work
 
-1. Bundle the built plugin and a runtime in both apps; point the bundled plugin's MCP server, hooks and `crew` shim at that runtime.
-2. First-launch install and update of the marketplace and plugin, with the checklist screen.
+1. Bundle the built plugin and a runtime in both apps; point the bundled plugin's MCP server, hooks and `crew` shim at that runtime. Done: `scripts/bundle-plugin.mjs` lays the plugin out as a marketplace inside each app and rewrites its `node …/bridge/*.ts` commands to the compiled scripts on the app's Node (`Contents/Resources/runtime/node` on macOS; on Windows a `runtime/node.exe` beside the plugin, since a hook cannot set `ELECTRON_RUN_AS_NODE` to run `Crew.exe` as Node). Claude Code loads a local marketplace's plugin in place, so an app update replaces the plugin's files with the app's.
+2. First-launch install and update of the marketplace and plugin, with the checklist screen. Done: `plugin/bridge/setup.ts`. A packaged daemon registers its marketplace, installs or updates `crew@crew`, and writes the `crew` command whenever its build differs from the one recorded in `~/.crew/setup.json`. A marketplace named `crew` that points at a source checkout is left alone. `GET /api/setup` returns the checklist (`crew doctor` prints the same checks) and `POST /api/setup/repair` registers again; the overview in both apps shows it until every item passes.
 3. Windows installer and auto-update with electron-builder. Done: an NSIS installer and the app's own updater.
 4. GitHub Actions release workflow for both platforms, and release notes. Done: `.github/workflows/release.yml` runs on a pushed `v<version>` tag, checks the tag against both version fields, builds the macOS (arm64) app on a self-hosted Mac runner with Xcode 27 (hosted runners have only Xcode 26, which cannot compile the app's Icon Composer icon) and the Windows app on a hosted runner, and publishes them with `.github/release-notes.md` above GitHub's generated change list.
 5. Signing: a Windows certificate, and an Apple Developer Program membership for macOS, when the audience calls for them.

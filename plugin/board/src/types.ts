@@ -75,3 +75,12 @@ export interface DesktopBridge {
     subscribe(listener: (update: AppUpdate) => void): () => void;
   };
 }
+
+/** What Crew needs and whether each is in place (`GET /api/setup`). Only the plugin and `crew` command can be repaired here. */
+export interface SetupState {
+  items: { id: string; label: string; ok: boolean; detail: string; repairable?: boolean }[];
+  /** A desktop app's built copy, which registers its own plugin. */
+  packaged: boolean;
+  registering: boolean;
+  registration?: { ok: boolean; detail: string };
+}

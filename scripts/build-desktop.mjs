@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { bundlePlugin } from './bundle-plugin.mjs';
 
 if (process.platform !== 'darwin') throw new Error('The native Crew app builds on macOS with Xcode 26 or newer.');
 const run = (bin, args, options = {}) => execFileSync(bin, args, { stdio: 'inherit', ...options });
@@ -29,11 +29,7 @@ fs.copyFileSync(path.join(binPath, 'Crew'), path.join(contents, 'MacOS/Crew'));
 fs.chmodSync(path.join(contents, 'MacOS/Crew'), 0o755);
 fs.cpSync(path.join(build, 'bridge'), path.join(resources, 'bridge'), { recursive: true });
 fs.writeFileSync(path.join(resources, 'bridge/package.json'), '{"type":"module"}\n');
-for (const folder of ['roles', '.claude-plugin', 'board/dist']) {
-  fs.cpSync(`plugin/${folder}`, path.join(resources, 'bridge/plugin', folder), { recursive: true });
-}
-const { installed } = await import(pathToFileURL(path.resolve('plugin/bridge/config.ts')).href);
-fs.writeFileSync(path.join(resources, 'bridge/plugin/.claude-plugin/build'), `${installed().build}\n`);
+await bundlePlugin(path.join(resources, 'bridge'), '../../runtime/node');
 
 // A standalone Node distribution keeps Finder launches independent of shell setup and Homebrew.
 const node = fs.realpathSync(process.execPath);

@@ -1,12 +1,10 @@
 #!/usr/bin/env node
-import { execFile, execFileSync, spawn } from 'node:child_process';
-import fs from 'node:fs';
-import os from 'node:os';
+import { execFileSync, spawn } from 'node:child_process';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { api, ensureDaemon, health, stopDaemon } from './client.ts';
 import { boardUrl, readToken } from './auth.ts';
-import { agentCommand, agentEnv, BASE_URL, HOME, installed, loadConfig, PLUGIN_ROOT, VERSION } from './config.ts';
+import { BASE_URL, HOME, installed, VERSION } from './config.ts';
+import { checks as setupChecks, COMMAND, PACKAGED, register, run } from './setup.ts';
 import { describe, summarize } from './render.ts';
 import type { JobView } from './render.ts';
 
@@ -23,16 +21,6 @@ Usage:
   crew install           Register the plugin with Claude Code and put crew on PATH
   crew daemon <start|stop|restart|logs>
 `;
-
-function run(bin: string, args: string[]): Promise<{ ok: boolean; out: string }> {
-  const env = agentEnv();
-  const command = agentCommand(bin, args, env);
-  return new Promise((resolve) => {
-    execFile(command.bin, command.args, { env, shell: command.shell, timeout: 20_000, windowsHide: true }, (err, stdout, stderr) => {
-      resolve({ ok: !err, out: (stdout || stderr || err?.message || '').trim() });
-    });
-  });
-}
 
 async function status(): Promise<void> {
   await ensureDaemon();
@@ -52,23 +40,14 @@ async function status(): Promise<void> {
 }
 
 async function doctor(): Promise<void> {
-  const config = loadConfig();
   const checks: [label: string, ok: boolean, detail: string][] = [];
-  const [major, minor] = process.versions.node.split('.').map(Number);
-  checks.push(['Node.js 22.18+ (runs the bridge\'s TypeScript directly)', major > 22 || (major === 22 && minor >= 18), process.versions.node]);
-
-  const git = await run('git', ['--version']);
-  checks.push(['git', git.ok, git.out]);
-  const codex = await run(config.codex.bin, ['--version']);
-  checks.push(['Codex CLI', codex.ok, codex.ok ? codex.out : 'not found — install Codex and run `codex login`']);
-  if (codex.ok) {
-    const login = await run(config.codex.bin, ['login', 'status']);
-    checks.push(['Codex login', login.ok, login.out.split('\n')[0]]);
+  if (!PACKAGED) {
+    const [major, minor] = process.versions.node.split('.').map(Number);
+    checks.push(['Node.js 22.18+ (runs the bridge\'s TypeScript directly)', major > 22 || (major === 22 && minor >= 18), process.versions.node]);
+    const git = await run('git', ['--version']);
+    checks.push(['git', git.ok, git.out]);
   }
-  const agy = await run(config.antigravity.bin, ['--version']);
-  checks.push(['Antigravity CLI', agy.ok, agy.ok ? agy.out : 'not found — install it, then run `agy` once to log in']);
-  const claude = await run('claude', ['plugin', 'list']);
-  checks.push(['Claude Code plugin', claude.ok && /crew@/.test(claude.out), claude.ok ? (/crew@/.test(claude.out) ? 'installed' : 'not installed — run `crew install`') : 'claude CLI not found']);
+  for (const item of await setupChecks()) checks.push([item.label, item.ok, item.ok || !item.repairable ? item.detail : `${item.detail} Run \`crew install\`.`]);
 
   try {
     await ensureDaemon();
@@ -85,29 +64,10 @@ async function doctor(): Promise<void> {
 }
 
 async function install(): Promise<void> {
-  const marketplace = path.resolve(PLUGIN_ROOT, '..');
-  const steps: [string, string[]][] = [
-    ['marketplace', ['plugin', 'marketplace', 'add', marketplace]],
-    ['plugin', ['plugin', 'install', 'crew@crew']],
-  ];
-  for (const [label, args] of steps) {
-    const res = await run('claude', args);
-    console.log(`${res.ok || /already/i.test(res.out) ? '✓' : '✗'} ${label}: ${res.out.split('\n').pop()}`);
-  }
-  const link = path.join(os.homedir(), '.local', 'bin', 'crew');
-  const cli = path.join(PLUGIN_ROOT, 'bridge', 'cli.ts');
-  fs.mkdirSync(path.dirname(link), { recursive: true });
-  fs.rmSync(link, { force: true });
-  if (process.platform === 'win32') {
-    // A symlink needs Developer Mode or an elevated shell. cmd.exe reads a .cmd file in the console code page,
-    // so the shims leave the path, which may not be ASCII, to a UTF-8 module beside them.
-    fs.writeFileSync(`${link}.mjs`, `import ${JSON.stringify(pathToFileURL(cli).href)};\n`);
-    fs.writeFileSync(`${link}.cmd`, '@node "%~dp0crew.mjs" %*\r\n');
-    // For Git Bash, which Claude Code's shell is on Windows.
-    fs.writeFileSync(link, '#!/bin/sh\nexec node "$(dirname "$0")/crew.mjs" "$@"\n');
-  } else fs.symlinkSync(cli, link);
-  console.log(`✓ crew command: ${link}`);
-  console.log('\nRestart Claude Code sessions (or run /reload-plugins) to load the plugin, then try /crew:run.');
+  const result = await register();
+  console.log(`${result.ok ? '✓' : '✗'} ${result.detail}`);
+  if (!result.ok) process.exitCode = 1;
+  else console.log(`✓ crew command: ${COMMAND}\n\nRestart Claude Code sessions (or run /reload-plugins) to load the plugin, then try /crew:run.`);
 }
 
 const [command, arg] = process.argv.slice(2);

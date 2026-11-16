@@ -6,7 +6,8 @@ import {
 } from 'lucide-react';
 import type { ProviderUsage } from '../../bridge/usage.ts';
 import type { Holder } from '../../bridge/config.ts';
-import type { BoardJob, CrewEvent, Mission, Snapshot, WorkerAgent } from './types.ts';
+import type { BoardJob, CrewEvent, Mission, SetupState, Snapshot, WorkerAgent } from './types.ts';
+import { request } from './api.ts';
 import {
   dailyCounts, elapsed, endedPerHour, holdersOf, jobLabel, NAMES, projectOf, relativeDuration, rolesOf, runningPerHour,
   usageWindowName, unsettled,
@@ -417,6 +418,51 @@ export function Activity({ state, openJob }: Pick<Scope, 'state' | 'openJob'>) {
   );
 }
 
+/** What Crew still needs, from the same checks as `crew doctor`; hidden once everything is in place. */
+function Setup() {
+  const [setup, setSetup] = useState<SetupState | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    let live = true;
+    const load = () => request<SetupState>('/api/setup').then((next) => live && setSetup(next), () => {});
+    load();
+    const timer = setInterval(load, 60_000);
+    return () => { live = false; clearInterval(timer); };
+  }, []);
+  const act = async (route: string, body?: unknown) => {
+    setBusy(true);
+    setError('');
+    try { setSetup(await request<SetupState>(route, body)); }
+    catch (err) { setError((err as Error).message); }
+    finally { setBusy(false); }
+  };
+  if (!setup || setup.items.every((item) => item.ok)) return null;
+  const repairable = setup.items.some((item) => !item.ok && item.repairable);
+  return (
+    <Panel
+      label="Set up Crew"
+      action={
+        <span className="setup-actions">
+          <button className="link" disabled={busy} onClick={() => act('/api/setup?refresh')}>Check again</button>
+          {repairable && <button className="prominent small" disabled={busy || setup.registering} onClick={() => act('/api/setup/repair', {})}>{busy ? 'Installing…' : 'Install'}</button>}
+        </span>
+      }
+    >
+      <ul className="setup-list">
+        {setup.items.map((item) => (
+          <li key={item.id} data-ok={item.ok || undefined}>
+            <Icon icon={item.ok ? CircleCheck : CircleAlert} size={14} />
+            <span>{item.label}</span>
+            <span className="secondary caption selectable">{item.detail}</span>
+          </li>
+        ))}
+      </ul>
+      {(error || (setup.registration && !setup.registration.ok)) && <p className="secondary caption" role="status">{error || setup.registration?.detail}</p>}
+    </Panel>
+  );
+}
+
 /** The overview or a project: what is going on now, with the agents and the crew's rhythm beside it. */
 export function Workspace({ state, project, names, selected, openJob, openSession, newJob, openPage }: Scope & {
   newJob: (origin?: Element | null) => void;
@@ -457,6 +503,7 @@ export function Workspace({ state, project, names, selected, openJob, openSessio
       <Kpis state={state} project={project} />
       <div className="dash">
         <div className="dash-main">
+          {!project && <Setup />}
           {active.map(panel)}
           {loose.length > 0 && (
             <Panel label="Other jobs" style={{ '--i': active.length } as CSSProperties} action={<Icon icon={SquareStack} />}>

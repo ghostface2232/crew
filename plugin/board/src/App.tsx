@@ -226,9 +226,9 @@ export function App() {
               >
                 <Icon icon={CircleArrowDown} />
                 <span>
-                  {update.state === 'ready' ? 'Restart to Update'
-                    : update.waiting ? `Waiting for ${update.waiting} job${update.waiting === 1 ? '' : 's'}…`
-                    : update.waiting === 0 ? 'Waiting for the daemon…' : 'Updating…'}
+                  {update.state === 'ready' ? 'Update'
+                    : update.waiting ? `${update.waiting} job${update.waiting === 1 ? '' : 's'} left…`
+                    : update.waiting === 0 ? 'Waiting…' : 'Updating…'}
                 </span>
                 <span className="sidebar-update-version">{update.latest}</span>
               </button>

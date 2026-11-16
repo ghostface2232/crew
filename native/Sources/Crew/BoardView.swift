@@ -631,9 +631,10 @@ struct ProjectSidebar: View {
         .navigationSplitViewColumnWidth(min: WorkspaceStyle.sidebarWidth.min, ideal: WorkspaceStyle.sidebarWidth.ideal, max: WorkspaceStyle.sidebarWidth.max)
     }
     private var updateTitle: String {
-        if updater.phase == .ready { return "Restart to Update" }
+        // Kept short enough to fit on one line at the narrowest sidebar width; the tooltip says what happens.
+        if updater.phase == .ready { return "Update" }
         guard let jobs = updater.waiting else { return "Updating…" }
-        return jobs > 0 ? "Waiting for \(jobs) job\(jobs == 1 ? "" : "s")…" : "Waiting for the daemon…"
+        return jobs > 0 ? "\(jobs) job\(jobs == 1 ? "" : "s") left…" : "Waiting…"
     }
 }
 

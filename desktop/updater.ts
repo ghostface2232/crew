@@ -149,7 +149,8 @@ export class Updater {
           this.set({ state: 'idle', checkedAt });
         } else if (before.state === 'ready' && (!release || before.latest === release.version)) {
           // No release, or one without a usable installer, leaves the staged one ready.
-          this.set({ ...before, checkedAt, page: release?.page ?? before.page });
+          const { error: _, ...kept } = before;
+          this.set({ ...kept, checkedAt, page: release?.page ?? before.page });
         } else if (!release) {
           this.release = null;
           this.set({ state: 'idle', checkedAt });
@@ -216,18 +217,21 @@ export class Updater {
   installing(waiting = 0): boolean {
     const { state, latest, page, checkedAt } = this.status;
     if (state !== 'ready') return false;
-    this.set({ state: 'installing', latest, checkedAt, ...(page ? { page } : {}), ...(waiting ? { waiting } : {}) });
+    this.set({ state: 'installing', latest, checkedAt, ...(page ? { page } : {}), waiting });
     return true;
   }
 
-  /**
-   * Updates how many jobs a waiting install waits for; 0 once the daemon is being stopped, when the install can no
-   * longer be called off. An install that was called off stays off.
-   */
+  /** Sets how many jobs an install waits for, which it can be called off during. An install called off stays off. */
   waitFor(waiting: number) {
-    if (this.status.state !== 'installing' || this.status.waiting === (waiting || undefined)) return;
+    if (this.status.state !== 'installing' || this.status.waiting === waiting) return;
+    this.set({ ...this.status, waiting });
+  }
+
+  /** The daemon is being asked to stop: from here the install can no longer be called off. */
+  stoppingDaemon() {
+    if (this.status.state !== 'installing' || this.status.waiting === undefined) return;
     const { waiting: _, ...rest } = this.status;
-    this.set({ ...rest, ...(waiting ? { waiting } : {}) });
+    this.set(rest);
   }
 
   /** Puts a staged installer back: the user cancelled, or the install could not start (`message`). */

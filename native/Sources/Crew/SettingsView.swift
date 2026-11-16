@@ -198,7 +198,7 @@ struct CrewSettingsView: View {
             LabeledContent {
                 switch updater.phase {
                 case .unsupported: EmptyView()
-                case .installing where updater.waiting > 0:
+                case .installing where updater.waiting != nil:
                     Button("Cancel Update") { updater.failed() }
                 case .ready, .installing:
                     Button("Restart to Update") { updater.onInstall() }

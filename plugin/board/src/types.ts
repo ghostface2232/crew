@@ -57,7 +57,10 @@ export interface AppUpdate {
   checkedAt?: number;
   /** Why the last check, download or install failed. */
   error?: string;
-  /** While installing: the running jobs the install waits for. */
+  /**
+   * While installing: the running jobs the install waits for, 0 while it waits on a daemon that has not answered.
+   * The install can be called off while this is set; it is absent once the daemon is being stopped.
+   */
   waiting?: number;
 }
 /** What the desktop app's preload script gives the board; absent in a browser. */

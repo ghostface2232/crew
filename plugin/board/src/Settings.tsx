@@ -56,6 +56,7 @@ function updateSummary(update: AppUpdate) {
     case 'ready': return `Version ${update.latest} is ready to install`;
     case 'installing': return update.waiting
       ? `Version ${update.latest} will install when ${update.waiting} running job${update.waiting === 1 ? '' : 's'} finish${update.waiting === 1 ? 'es' : ''}`
+      : update.waiting === 0 ? `Version ${update.latest} will install once the Crew daemon answers`
       : `Restarting to install version ${update.latest}…`;
   }
 }
@@ -541,7 +542,7 @@ export function Settings({ state, update, close }: { state: Snapshot; update: Ap
                     <div className={styles.rows}>
                       <div className={styles.row}>
                         <span className={styles.updateLine} role="status">{updateSummary(update)}</span>
-                        {update.state === 'installing' && update.waiting ? (
+                        {update.state === 'installing' && update.waiting !== undefined ? (
                           <button type="button" onClick={() => void desktop?.update.cancel()}>Cancel Update</button>
                         ) : update.state === 'ready' || update.state === 'installing' ? (
                           <button type="button" className="prominent" disabled={update.state === 'installing'} onClick={() => void desktop?.update.install()}>

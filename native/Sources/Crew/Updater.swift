@@ -68,8 +68,9 @@ enum Releases {
     private(set) var progress = 0.0
     private(set) var checkedAt: Date?
     private(set) var error: String?
-    /// While installing: the running jobs the install waits for.
-    private(set) var waiting = 0
+    /// While installing: the running jobs the install waits for, 0 while it waits on a daemon that has not answered.
+    /// The install can be called off while this is set; it is nil once the daemon is being stopped.
+    private(set) var waiting: Int?
     let current: String
     /// Set by the app delegate, which runs the install.
     @ObservationIgnored var onInstall: () -> Void = {}
@@ -201,16 +202,20 @@ enum Releases {
         return true
     }
 
-    /// Updates how many jobs a waiting install waits for; 0 once the daemon is being stopped, when the install can no
-    /// longer be called off. An install that was called off stays off.
+    /// Sets how many jobs an install waits for, which it can be called off during. An install called off stays off.
     func waitFor(_ count: Int) {
         if phase == .installing { waiting = count }
+    }
+
+    /// The daemon is being asked to stop: from here the install can no longer be called off.
+    func stoppingDaemon() {
+        if phase == .installing { waiting = nil }
     }
 
     /// Puts the staged archive back: the user cancelled, or the install could not go ahead (`message`).
     func failed(_ message: String? = nil) {
         guard phase == .installing else { return }
-        phase = .ready; waiting = 0; error = message
+        phase = .ready; waiting = nil; error = message
     }
 
     /// Removes everything staged.
@@ -254,7 +259,7 @@ enum Releases {
     /// Unpacks the staged archive and checks that it is this app at the release's version, signed intact, then starts a
     /// helper that swaps it in for `installed` once this process exits and opens the new copy. The caller must then quit;
     /// it gets the helper's process and the staged bundle, to undo the hand-over if the quit is cancelled.
-    nonisolated static func handOver(archive: URL, version: String, installed: URL, processID: Int32) throws -> (helper: Int32, staged: URL) {
+    nonisolated static func handOver(archive: URL, version: String, installed: URL, processID: Int32) throws -> (helper: Int32, staged: URL, work: URL) {
         let parent = installed.deletingLastPathComponent()
         guard FileManager.default.isWritableFile(atPath: parent.path), FileManager.default.isWritableFile(atPath: installed.path) else {
             throw CrewFailure("Crew can’t replace itself in \(parent.path). Move Crew to a folder you can write to, such as Applications, and try again.")
@@ -286,7 +291,7 @@ enum Releases {
             try swapScript.write(to: helper, atomically: true, encoding: .utf8)
             try process.run()
             handedOff = true
-            return (process.processIdentifier, staged)
+            return (process.processIdentifier, staged, work)
         } catch {
             try? FileManager.default.removeItem(at: staged)
             throw CrewFailure("Could not start the update: \(error.localizedDescription)")
@@ -356,9 +361,13 @@ extension AppUpdater {
         case .downloading: "Downloading version \(latest ?? "")… \(Int((progress * 100).rounded()))%"
         case .ready: "Version \(latest ?? "") is ready to install"
         case .installing:
-            waiting > 0
-                ? "Version \(latest ?? "") will install when \(waiting) running job\(waiting == 1 ? " finishes" : "s finish")"
-                : "Restarting to install version \(latest ?? "")…"
+            if let waiting, waiting > 0 {
+                "Version \(latest ?? "") will install when \(waiting) running job\(waiting == 1 ? " finishes" : "s finish")"
+            } else if waiting == 0 {
+                "Version \(latest ?? "") will install once the Crew daemon answers"
+            } else {
+                "Restarting to install version \(latest ?? "")…"
+            }
         }
     }
 }

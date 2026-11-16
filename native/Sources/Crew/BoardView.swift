@@ -632,8 +632,8 @@ struct ProjectSidebar: View {
     }
     private var updateTitle: String {
         if updater.phase == .ready { return "Restart to Update" }
-        let jobs = updater.waiting
-        return jobs > 0 ? "Waiting for \(jobs) job\(jobs == 1 ? "" : "s")…" : "Updating…"
+        guard let jobs = updater.waiting else { return "Updating…" }
+        return jobs > 0 ? "Waiting for \(jobs) job\(jobs == 1 ? "" : "s")…" : "Waiting for the daemon…"
     }
 }
 

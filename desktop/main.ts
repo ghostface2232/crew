@@ -221,8 +221,8 @@ function trayMenu(waiting = pending) {
       { label: 'Open in browser', click: () => void openInBrowser() },
       { label: 'Reload board', click: () => void loadBoard().catch(console.error) },
       ...(updater.status.state === 'ready' ? [{ label: `Restart to update to ${updater.status.latest}`, click: () => void installUpdate() }] : []),
-      ...(updater.status.state === 'installing' && updater.status.waiting
-        ? [{ label: `Cancel the update waiting for ${updater.status.waiting} job${updater.status.waiting === 1 ? '' : 's'}`, click: () => updater.failed() }]
+      ...(updater.status.state === 'installing' && updater.status.waiting !== undefined
+        ? [{ label: 'Cancel the waiting update', click: () => updater.failed() }]
         : []),
       { type: 'separator' },
       { label: 'Quit Crew — jobs keep running', click: () => app.quit() },
@@ -346,8 +346,8 @@ function watchUpdates() {
   });
   ipcMain.handle('update:cancel', (event) => {
     fromBoard(event);
-    // Only an install still waiting for jobs can be called off; past that, the daemon is already stopping.
-    if (updater.status.state === 'installing' && updater.status.waiting) updater.failed();
+    // Only an install still waiting can be called off; past that, the daemon is already stopping.
+    if (updater.status.state === 'installing' && updater.status.waiting !== undefined) updater.failed();
   });
   void updater.load().catch(console.error).then(() => {
     const check = () => {
@@ -395,6 +395,11 @@ async function ownDaemon(): Promise<{ pid: number; active: number | null } | nul
   const running = await health();
   return { pid: record.pid as number, active: running && running.pid === record.pid ? running.active : null };
 }
+/** Starts the daemon again once a process that agreed to stop has gone, unless the app is quitting. */
+async function restartWhenGone(pid: number) {
+  while (alive(pid) && !stopping) await sleep(2000);
+  if (!stopping) void ensureDaemon().catch(console.error);
+}
 /** Counts each install the user starts, so a cancelled one that is still sleeping does not carry on beside a new one. */
 let installAttempt = 0;
 /**
@@ -426,18 +431,23 @@ async function installUpdate() {
     if (stopped && !stopping) void ensureDaemon().catch(console.error);
   };
   let refusals = 0;
+  let unanswered = 0;
   for (;;) {
     if (!current()) return abandon();
     daemon = await ownDaemon();
+    // The user may have called it off while that was asked.
+    if (!current()) return abandon();
     if (!daemon) break;
     if (daemon.active === 0) {
       // From here the install can no longer be called off.
-      updater.waitFor(0);
+      updater.stoppingDaemon();
+      let accepted = false;
       try {
         await api('POST', '/api/shutdown', { ifIdle: true });
+        accepted = true;
         // It saves jobs and missions, then exits; the process going is what counts, not a quiet health check.
         for (let waited = 0; alive(daemon.pid); waited += 200) {
-          if (waited >= 30_000) throw new Error(`The Crew daemon (process ${daemon.pid}) did not stop.`);
+          if (waited >= 120_000) throw new Error(`The Crew daemon (process ${daemon.pid}) did not stop.`);
           await sleep(200);
         }
         stopped = true;
@@ -448,15 +458,30 @@ async function installUpdate() {
           stopped = true;
           continue;
         }
-        // Refused because work started meanwhile; a daemon that keeps refusing while idle is reported instead.
-        if (++refusals >= 3) {
-          updater.failed(`Could not stop the Crew daemon for the update: ${(error as Error).message}`);
+        const message = `Could not stop the Crew daemon for the update: ${(error as Error).message}`;
+        if (accepted) {
+          // It agreed to stop and will go; once it has, the app that stays gets it back.
+          updater.failed(message);
+          void restartWhenGone(daemon.pid);
           return;
         }
+        // Refused because work started meanwhile; a daemon that keeps refusing while idle is reported instead.
+        if (++refusals >= 3) {
+          updater.failed(message);
+          return;
+        }
+        updater.waitFor(0);
       }
     } else if (daemon.active !== null) refusals = 0;
-    // A daemon whose health did not answer is waited for, never taken as gone.
-    if (daemon.active !== null) updater.waitFor(daemon.active);
+    // A daemon whose health does not answer is waited for, never taken as gone, but not for ever.
+    if (daemon.active === null && ++unanswered >= 24) {
+      updater.failed('The Crew daemon is not answering, so the update was not installed. Try again later.');
+      return abandon();
+    }
+    if (daemon.active !== null) {
+      unanswered = 0;
+      updater.waitFor(daemon.active);
+    }
     await sleep(5000);
   }
   if (!current()) return abandon();

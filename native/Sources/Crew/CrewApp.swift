@@ -372,7 +372,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
     /// Counts each install the user starts, so a cancelled one that is still sleeping does not carry on beside a new one.
     private var installAttempt = 0
     /// The swap helper waiting for this app to quit, and the bundle it would move in; a quit that is cancelled undoes it.
-    private var handOver: (helper: Int32, staged: URL)?
+    private var handOver: (helper: Int32, staged: URL, work: URL)?
     /// Installs the staged update without losing work, as the Windows app does. The daemon this app started runs from
     /// the bundle being replaced, so it has to stop first, but it is only ever asked to stop while idle: it refuses while
     /// a job runs or a change is being saved, and otherwise saves jobs and missions before it exits. Until then the
@@ -400,13 +400,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         var paused = false
         let abandon = { if paused && !self.quitting { self.store.start() } }
         var refusals = 0
+        var unanswered = 0
         while true {
             guard current() else { return abandon() }
-            guard let daemon = await ownDaemon() else { break }
+            let found = await ownDaemon()
+            // The user may have called it off while that was asked.
+            guard current() else { return abandon() }
+            guard let daemon = found else { break }
             if daemon.active == 0 {
                 // From here the install can no longer be called off. Settings with unsaved edits would hold up the quit
                 // after the daemon has stopped, so they are settled first; saving them means trying the update again.
-                updater.waitFor(0)
+                updater.stoppingDaemon()
                 guard leaveSettings(then: { [weak self] in self?.dismissSettings() }) else {
                     updater.failed()
                     return abandon()
@@ -428,7 +432,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
                     continue
                 } catch {
                     if !Self.alive(daemon.pid) { continue }
-                    // Refused because work started meanwhile; the board keeps following it while the install waits.
+                    // Refused because work started meanwhile, or slow to go after agreeing: the store follows the board
+                    // again either way, and its reconnect loop starts the daemon once one that agreed has gone.
                     store.start()
                     paused = false
                     refusals += 1
@@ -436,10 +441,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
                         updater.failed("Could not stop the Crew daemon for the update: \(error.localizedDescription)")
                         return
                     }
+                    updater.waitFor(0)
                 }
             } else if daemon.active != nil { refusals = 0 }
-            // A daemon whose health did not answer is waited for, never taken as gone.
-            if let active = daemon.active { updater.waitFor(active) }
+            // A daemon whose health does not answer is waited for, never taken as gone, but not for ever.
+            if let active = daemon.active {
+                unanswered = 0
+                updater.waitFor(active)
+            } else {
+                unanswered += 1
+                if unanswered >= 24 {
+                    updater.failed("The Crew daemon is not answering, so the update was not installed. Try again later.")
+                    return abandon()
+                }
+            }
             try? await Task.sleep(for: .seconds(5))
         }
         guard current(), let archive = updater.archive, let version = updater.latest else { return abandon() }
@@ -463,7 +478,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
                 handOver = nil
                 kill(pending.helper, SIGTERM)
                 try? FileManager.default.removeItem(at: pending.staged)
-                updater.failed("Crew did not quit, so the update was not installed.")
+                try? FileManager.default.removeItem(at: pending.work)
+                updater.failed("The update was not installed because Crew did not quit. Try again.")
                 store.start()
             }
             return .terminateCancel

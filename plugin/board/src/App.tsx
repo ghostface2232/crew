@@ -225,7 +225,11 @@ export function App() {
                 onClick={() => void desktop?.update.install()}
               >
                 <Icon icon={CircleArrowDown} />
-                <span>{update.state === 'ready' ? 'Restart to Update' : update.waiting ? `Waiting for ${update.waiting} job${update.waiting === 1 ? '' : 's'}…` : 'Updating…'}</span>
+                <span>
+                  {update.state === 'ready' ? 'Restart to Update'
+                    : update.waiting ? `Waiting for ${update.waiting} job${update.waiting === 1 ? '' : 's'}…`
+                    : update.waiting === 0 ? 'Waiting for the daemon…' : 'Updating…'}
+                </span>
                 <span className="sidebar-update-version">{update.latest}</span>
               </button>
             )}

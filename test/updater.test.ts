@@ -151,10 +151,15 @@ test('an install waits, can be called off, and an unsupported copy does nothing'
   assert.equal(instance.status.waiting, 2);
   instance.waitFor(1);
   assert.equal(instance.status.waiting, 1);
-  // Once the daemon is being stopped, nothing is left to call off.
+  // Waiting on a daemon that has not answered can still be called off; once it is being stopped, it cannot.
   instance.waitFor(0);
+  assert.equal(instance.status.waiting, 0);
+  instance.stoppingDaemon();
   assert.equal(instance.status.waiting, undefined);
   assert.equal(instance.status.state, 'installing');
+  // A daemon that refused to stop puts the install back to waiting.
+  instance.waitFor(0);
+  assert.equal(instance.status.waiting, 0);
   instance.failed();
   // An install that was called off is not revived by a late count.
   instance.waitFor(3);

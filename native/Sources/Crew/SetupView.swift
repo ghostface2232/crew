@@ -41,14 +41,13 @@ struct SetupCard: View {
                         ErrorLabel(message: message).font(Typeface.caption)
                     }
                     // The card's actions end it at the trailing edge, as a section's do.
-                    HStack(spacing: Space.m) {
-                        Spacer(minLength: 0)
+                    ActionRow {
                         Button("Check Again") { act { try await api.request("/api/setup?refresh") } }.pillButton().disabled(busy)
                         if setup.items.contains(where: { !$0.ok && $0.repairable == true }) {
                             Button(busy ? "Installing…" : "Install") { act { try await api.post("/api/setup/repair", [String: String](), timeout: 180) } }
                                 .pillButton().morphs(on: busy).disabled(busy || setup.registering)
                         }
-                    }
+                    }.frame(maxWidth: .infinity, alignment: .trailing)
                 }
             }
         }

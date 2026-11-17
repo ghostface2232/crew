@@ -70,6 +70,41 @@ extension View {
     }
 }
 
+/// A row of actions at the trailing edge. Pills never shrink, so when they do not fit across, the ones that do not
+/// fit move onto further lines, still at the trailing edge, rather than running past the edges of what holds them.
+struct ActionRow: Layout {
+    var spacing = Space.m
+    private struct Line { var items: [Int] = []; var width: CGFloat = 0; var height: CGFloat = 0 }
+    private func lines(_ width: CGFloat, _ sizes: [CGSize]) -> [Line] {
+        var lines: [Line] = []
+        var line = Line()
+        for (index, size) in sizes.enumerated() {
+            if !line.items.isEmpty && line.width + spacing + size.width > width { lines.append(line); line = Line() }
+            line.width += (line.items.isEmpty ? 0 : spacing) + size.width
+            line.height = max(line.height, size.height)
+            line.items.append(index)
+        }
+        return lines + [line]
+    }
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let lines = lines(proposal.width ?? .infinity, subviews.map { $0.sizeThatFits(.unspecified) })
+        return CGSize(width: lines.map(\.width).max() ?? 0,
+                      height: lines.map(\.height).reduce(0, +) + spacing * CGFloat(max(0, lines.count - 1)))
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        var y = bounds.minY
+        for line in lines(bounds.width, sizes) {
+            var x = bounds.maxX - line.width
+            for index in line.items {
+                subviews[index].place(at: CGPoint(x: x, y: y + line.height / 2), anchor: .leading, proposal: ProposedViewSize(sizes[index]))
+                x += sizes[index].width + spacing
+            }
+            y += line.height + spacing
+        }
+    }
+}
+
 /// A light, centered empty state; quieter than ContentUnavailableView's bold title.
 struct EmptyState<Actions: View>: View {
     var title: String
@@ -201,22 +236,20 @@ struct AnswerView: View {
                 if waiting.type == "question" {
                     composer
                     // Quick replies sit apart from the composer so they don't read as part of sending.
-                    GlassEffectContainer(spacing: Space.xs) { HStack(spacing: Space.m) {
-                        Spacer(minLength: 0)
+                    GlassEffectContainer(spacing: Space.xs) { ActionRow {
                         decision("No", symbol: "xmark", value: "deny", prominent: false)
                         decision("Yes", symbol: "checkmark", value: "approve", prominent: false)
-                    } }
+                    }.frame(maxWidth: .infinity, alignment: .trailing) }
                 } else {
                     // At the trailing edge with the completing action last, as everywhere a choice ends something.
-                    GlassEffectContainer(spacing: Space.xs) { HStack(spacing: Space.m) {
-                        Spacer(minLength: 0)
+                    GlassEffectContainer(spacing: Space.xs) { ActionRow {
                         decision("Deny", symbol: "xmark", value: "deny", prominent: false)
                         if let grant = waiting.grant {
                             decision("Allow for This Job", symbol: "checkmark.circle", value: "allow_for_job", prominent: false)
                                 .help("Also allow this job's later requests for \(grant), without asking")
                         }
                         decision("Approve", symbol: "checkmark", value: "approve", prominent: true)
-                    } }
+                    }.frame(maxWidth: .infinity, alignment: .trailing) }
                 }
                 ActionMessage(state: store.actions[job.requestKey])
             }

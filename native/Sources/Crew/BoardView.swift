@@ -439,16 +439,23 @@ struct MissionPanel: View {
                     // quiet, can still be marked done.
                     let offered = (mission.state == "active" && finished) || mission.state == "abandoned"
                     if !mission.outcome.isEmpty || offered || mission.state == "active" {
-                        HStack(alignment: .center, spacing: Space.m) {
-                            if !mission.outcome.isEmpty {
-                                Text(mission.outcome).font(Typeface.callout).textSelection(.enabled).padding(.leading, WorkspaceStyle.rowTitleInset)
+                        // A narrow card first drops the preset's words and the finished note, then moves the
+                        // controls under the outcome, where ActionRow wraps them rather than let them run past the card's edges.
+                        ViewThatFits(in: .horizontal) {
+                            HStack(alignment: .center, spacing: Space.m) {
+                                outcome
+                                Spacer(minLength: 0)
+                                controls(offered: offered, compact: false)
                             }
-                            Spacer(minLength: 0)
-                            if offered && mission.state == "active" {
-                                Text("Looks finished").font(Typeface.caption).foregroundStyle(.secondary)
+                            HStack(alignment: .center, spacing: Space.m) {
+                                outcome
+                                Spacer(minLength: 0)
+                                controls(offered: offered, compact: true)
                             }
-                            if mission.state == "active" { presetMenu }
-                            if offered { actions }
+                            VStack(alignment: .leading, spacing: Space.m) {
+                                outcome
+                                ActionRow { controls(offered: offered, compact: true) }.frame(maxWidth: .infinity, alignment: .trailing)
+                            }
                         }
                     }
                 }
@@ -470,8 +477,21 @@ struct MissionPanel: View {
     private var finished: Bool {
         mission.looksFinished(jobs: store.state.jobs, now: store.now, lead: store.state.claude.first { $0.id == mission.owner })
     }
+    @ViewBuilder private var outcome: some View {
+        if !mission.outcome.isEmpty {
+            Text(mission.outcome).font(Typeface.callout).textSelection(.enabled).padding(.leading, WorkspaceStyle.rowTitleInset)
+        }
+    }
+    /// The preset, then stop and done once offered. `compact` keeps only the preset's symbol and drops the finished note.
+    @ViewBuilder private func controls(offered: Bool, compact: Bool) -> some View {
+        if offered && mission.state == "active" && !compact {
+            Text("Looks finished").font(Typeface.caption).foregroundStyle(.secondary)
+        }
+        if mission.state == "active" { presetMenu(compact: compact) }
+        if offered { actions }
+    }
     /// Which preset the mission's new jobs take; jobs already running keep theirs.
-    private var presetMenu: some View {
+    private func presetMenu(compact: Bool) -> some View {
         Menu {
             Picker("Preset", selection: Binding(get: { mission.preset }, set: { preset in
                 Task { await store.setPreset(preset, for: mission) }
@@ -482,12 +502,15 @@ struct MissionPanel: View {
                 }
             }.pickerStyle(.inline)
         } label: {
-            Label("\(mission.preset?.rawValue.capitalized ?? "Global") preset", systemImage: "slider.horizontal.3")
+            // Set here, inside the pill's own label style, so the compact pill shows the symbol alone.
+            Label("\(presetName) preset", systemImage: "slider.horizontal.3").labelStyle(PresetLabelStyle(compact: compact))
         }
         .menuStyle(.button).menuIndicator(.hidden).pillButton().morphs(on: mission.preset).fixedSize()
         .disabled(!store.connected || store.actions[mission.actionKey]?.locked == true)
-        .help("The preset this mission's new jobs take")
+        .help(compact ? "\(presetName) preset: the preset this mission's new jobs take" : "The preset this mission's new jobs take")
+        .accessibilityLabel("\(presetName) preset")
     }
+    private var presetName: String { mission.preset?.rawValue.capitalized ?? "Global" }
     @ViewBuilder private var actions: some View {
         let locked = !store.connected || store.actions[mission.actionKey]?.locked == true
         // In the warning color: it drops the mission without completing it. An abandoned one is already dropped.
@@ -725,5 +748,18 @@ private struct PanelResizeHandle: View {
                 store.panelWidth = WorkspaceStyle.panelWidth(width + change, page: page)
                 store.persistPanelWidth()
             }
+    }
+}
+
+/// A mission's preset pill. Compact, it shows only the symbol, yet the hidden words still set its height, so it stays
+/// as tall as the pills beside it.
+private struct PresetLabelStyle: LabelStyle {
+    let compact: Bool
+    func makeBody(configuration: Configuration) -> some View {
+        if compact {
+            HStack(spacing: 0) { configuration.icon; configuration.title.hidden().frame(width: 0) }
+        } else {
+            PillLabelStyle().makeBody(configuration: configuration)
+        }
     }
 }

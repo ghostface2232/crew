@@ -811,7 +811,7 @@ dialog.detail-panel { container: panel / inline-size; }
 }
 
 /* KPIs: one card, four cells split by hairlines, each with its last day by the hour. */
-.kpis { display: grid; border-radius: var(--card-radius); background: var(--surface); box-shadow: inset 0 0 0 1px var(--hairline), var(--shadow-card); overflow: hidden; animation: rise 560ms var(--ease-out) both; }
+.kpis { display: grid; border-radius: var(--card-radius); background: var(--surface); box-shadow: var(--outline-ring), var(--shadow-card); overflow: hidden; animation: rise 560ms var(--ease-out) both; }
 .kpi-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .kpi { display: grid; gap: 12px; align-content: start; min-width: 0; padding: 20px 22px 18px; }
 .kpi + .kpi { box-shadow: inset 1px 0 0 var(--hairline); }
@@ -1135,7 +1135,7 @@ th[aria-sort] .sort { color: var(--label); }
 
 /* Needs You */
 .needs-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 400px), 1fr)); gap: var(--card-gap); }
-.need { display: grid; gap: 16px; align-content: start; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--orange) 20%, var(--hairline)), var(--shadow-card); }
+.need { display: grid; gap: 16px; align-content: start; box-shadow: var(--outline-ring), var(--shadow-card); }
 .need-head { display: grid; gap: 10px; }
 .need-bar { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .need-who { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; color: var(--secondary); font-size: 11.5px; font-weight: 500; }
@@ -1333,7 +1333,7 @@ dialog.palette-layer::backdrop { background: var(--scrim-light); animation: fade
 /* The agent rows carry their own padding for the hover fill, so the label sits closer above them. */
 .agents.panel { gap: 6px; }
 
-.setup-actions { display: flex; align-items: center; gap: 8px; }
+.setup-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
 .setup-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .setup-list li { display: grid; grid-template-columns: auto minmax(0, max-content) minmax(0, 1fr); align-items: baseline; gap: 8px; }
 .setup-list li svg { align-self: center; color: var(--red); }

@@ -66,7 +66,7 @@ Recommended order is A, then B, then C. Without A, both Cursor support and role 
 
 Injection keeps the decision recorded in [04-implementation.md](04-implementation.md) section 3: Crew does not write into each service's own `AGENTS.md`, `CLAUDE.md`, or rules folder. Touches [prompts.ts](../plugin/bridge/prompts.ts) and [hooks.json](../plugin/hooks/hooks.json).
 
-**A3. Model and effort.** Codex already accepts `model` and `effort`; Antigravity accepts `model` only. Per-role `model` and `effort` arrived with the A1 role table. Presets (economy, balanced, best) and the model of the lead's subagents were implemented 2026-11-13; see [09-usage-presets-rounds.md](09-usage-presets-rounds.md) section 8.
+**A3. Model and effort.** Codex accepts `model` and `effort`. Antigravity accepted `model` only until 2026-11-18, when its session's `thought_level` was found and wired to `effort` ([05-related-work.md](05-related-work.md) section 11). Per-role `model` and `effort` arrived with the A1 role table. Presets (economy, balanced, best) and the model of the lead's subagents were implemented 2026-11-13; see [09-usage-presets-rounds.md](09-usage-presets-rounds.md) section 8.
 
 ### B. Board to control screen
 

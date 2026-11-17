@@ -312,7 +312,8 @@ struct RoleSetting: Codable, Sendable, Equatable {
         if values.contains(.model) || values.contains(.effort) {
             // Legacy entries without an agent used the role's default worker, or Codex for a following child.
             let owner = try values.decodeIfPresent(String.self, forKey: .agent) ?? (decoder.codingPath.last?.stringValue == "polish" ? "antigravity" : "codex")
-            self[owner] = try RoleAgentSettings(model: values.decodeIfPresent(String.self, forKey: .model), effort: values.decodeIfPresent(String.self, forKey: .effort))
+            // A legacy effort was Codex's alone, as the daemon reads it.
+            self[owner] = try RoleAgentSettings(model: values.decodeIfPresent(String.self, forKey: .model), effort: owner == "codex" ? values.decodeIfPresent(String.self, forKey: .effort) : nil)
         }
         self = normalized
     }

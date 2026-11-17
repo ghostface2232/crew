@@ -268,9 +268,9 @@ Checked against code.claude.com docs and Codex CLI 0.167.0 (app-server schema ge
 - Wake the lead through a Channel for jobs started from the board, which arm no hook. Blocked until Channels leave research preview and work in Claude Desktop.
 - Phone notifications through Remote Control and the lead's push notifications, which may cover much of roadmap item L4 without a separate mobile view.
 
-## 11. Orca, rechecked (2026-11-17)
+## 11. Orca, rechecked (2026-11-17) and run (2026-11-18)
 
-Checked against `stablyai/orca` at `e39fb3a` (v1.4.261, released 2026-11-16) by reading a shallow clone and its documentation site without running it. Metrics are from `gh api`: 126.9k★, MIT, 8,517 open issues, about 34,800 files. Facts about Antigravity marked "live" come from an ACP handshake with `agy` 1.5.9 on this machine (`initialize` and one empty session, closed again, no prompt sent). Everything else about Antigravity is Orca's reading of it and was not reproduced.
+Checked against `stablyai/orca` at `e39fb3a` (v1.4.261, released 2026-11-16), first by reading a shallow clone and its documentation site. On 2026-11-18 the notarized release was installed and driven through its CLI against a headless runtime (`orca serve`), and `agy` was given real prompts through a small ACP client; what that showed is marked "run" below and replaces the earlier guesses. Metrics are from `gh api`: 126.9k★, MIT, 8,517 open issues, about 34,800 files. Facts about Antigravity marked "live" come from ACP sessions with `agy` 1.5.9 on this machine. Anything else about Antigravity is Orca's reading of it.
 
 ### What changed since the first look
 
@@ -288,17 +288,51 @@ Orca is a workbench the user sits in: terminals, editor, browser, mobile app, re
 
 Live on `agy` 1.5.9:
 
-- `session/new` returns three config options: `model` (families such as `gemini-4-argon` and `gemini-4-hydrogen`), `thought_level` (`low`, `medium`, `high` for the default model), and `mode`. `models.availableModels` lists one entry per family and level, such as `gemini-4-hydrogen-xhigh`. The statement that Antigravity has no effort setting ([04-implementation.md](04-implementation.md) section 2.1, [06-roadmap.md](06-roadmap.md) A3) is out of date.
-- `agentCapabilities._meta.antigravity.systemPrompt.append` is `true`. Orca passes instructions as `_meta: { antigravity: { systemPrompt: { append } } }` on the session request, only when this is advertised, and notes that it lasts for one activation of the session, so it is sent again on resume. Whether the text takes effect was not checked, since that needs a prompt.
+- `session/new` returns three config options: `model` (families such as `gemini-4-argon` and `gemini-4-hydrogen`), `thought_level`, and `mode`. The levels belong to the model: Argon offers `low`, `medium`, `high`; Hydrogen adds `xhigh`; a model without levels has no `thought_level` option at all, and setting one is refused with `-32602`. So the option has to be read again after the model is set.
+- `agentCapabilities._meta.antigravity.systemPrompt.append` is `true`, and the addition takes effect: a session created with `_meta: { antigravity: { systemPrompt: { append } } }` followed a rule given only there, and a control session without it did not. Orca notes that the addition lasts for one activation and sends it again on resume. Here it was still in force after `session/resume` in a new server process with no addition sent, so the resend is a precaution for other versions.
+- A question is the agent's `ask_question` tool. To a client that declares no elicitation, it does not arrive as a request at all: the question is printed as text and the turn ends with `end_turn`, so a Crew job finished with a question for a report. To a client that declares `elicitation: { form: {} }` it arrives as `elicitation/create` with `mode: "form"`, the message "The agent has a question.", and a schema with one property per question (`q1`, the question as `title`, choices under `oneOf` as `{ const, title }`) plus `q1_other` for a written answer. `{ action: "accept", content: { q1: "2" } }` picked a choice, `content: { q1_other: "…" }` gave free text, and `decline` or `cancel` reached the agent as "User Skipped". The `interaction_` permission request Orca handles for servers without forms was not seen on this version.
+- A command asks permission with `kind: "execute"`, the command in `rawInput.CommandLine`, and two options (`allow_once`, `reject_once`). After a rejection the turn ended with no text.
+- A bogus `GEMINI_API_KEY` in the environment changed nothing: the prompt was answered as usual. Orca's note that an inherited key switches `agy` to key authentication was not reproduced.
+- `agy acp` ends the commands it started when it gets SIGTERM: a `sleep` it was running was gone with it. Crew needs no process-tree cleanup for it on macOS.
 - `sessionCapabilities` has `resume`, `load`, `close`, `list`, and `additionalDirectories`. `authMethods` includes `gemini-api-key`.
 
-From Orca's source (`src/main/acp/acp-dialects/antigravity-dialect.ts`, `src/main/antigravity/antigravity-acp-launch-spec.ts`), not reproduced:
+From Orca's source (`src/main/acp/acp-dialects/antigravity-dialect.ts`), not reproduced:
 
-- A question from the agent arrives as `session/request_permission` whose `toolCallId` starts with `interaction_` and whose options are the answer choices. A client that declares `elicitation: { form: {} }` gets a form instead, with a write-in field per question.
-- An inherited `GEMINI_API_KEY` or `GOOGLE_API_KEY` switches `agy` to key authentication, which its models reject with 401.
 - Command input arrives as `CommandLine`, `command_line`, or `commandLine` depending on the server, and the working directory under five names.
 - A failed prompt reads `Cloud Code Assist API error (<status>): <JSON>`; the useful text is `error.message` inside the JSON.
 - `session/load` replays the whole conversation, so `session/resume` is preferred. Crew already prefers it.
+
+### Orca in use
+
+Run on 2026-11-18 with Codex 0.167 workers in a scratch repository, through the CLI only.
+
+What it puts in other tools' settings on first start, without asking:
+
+- `~/.claude/settings.json`: hooks for 16 events and a status line, each running a script under `~/.orca/agent-hooks/`. They run in every Claude Code session on the machine and exit early outside Orca. Also `~/.claude/keybindings.json`.
+- `~/.codex/hooks.json` with 9 hooks, and matching blocks in `~/.codex/config.toml` that mark its own hooks as trusted.
+- `~/.gemini/config/hooks.json` for Antigravity.
+
+Crew writes into none of these ([04-implementation.md](04-implementation.md) section 3); this is the cost of reading agent state from outside the protocol.
+
+What worked as documented:
+
+- A worker started from one command, got a preamble naming its task and the three commands it may send (`ask`, an escalation, `worker_done`), and its report arrived about 18 s later with `outcome: succeeded` and the files it changed.
+- `worker_done --outcome failed` came back as a failed Task, distinct from success.
+- A worker that ended its turn without `worker_done` raised an escalation ("Worker stopped without reporting") within about 2 s of the turn's end, with its last output attached. While a worker waited for an answer to `ask`, no escalation was raised.
+- A Task with an unmet dependency could not be started. Stopping a worker ended its whole process tree, including a command in another process group.
+
+What did not hold up:
+
+- Callers are not authenticated. A process outside Orca that set `ORCA_TERMINAL_HANDLE` was accepted as the coordinator, and one that passed a worker's handle sent a `worker_done` that completed the worker's Task.
+- `task-update --status completed` turned a Task its worker had reported failed into a completed one, with no evidence asked. The rule against it is a sentence in the guide.
+- A decision gate only blocks the start. Its resolution text did not reach the worker, and the refusal while it was blocked named the wrong remedy.
+- The mailbox is read once: mail taken by a stray `check` is gone, and a coordinator Orca does not recognize as an agent is never woken.
+- Workers are started with full access (`--dangerously-bypass-approvals-and-sandbox`, `--dangerously-skip-permissions`) by default, so the approval rules below never came into play.
+- An Antigravity worker sitting on a first-run prompt was reported "gone" while its process was alive.
+
+Not reached: Antigravity in chat mode (a GUI setting), `stop_unknown`, and the retry breaker.
+
+Two points are principles more than features. Orca separates "stopped" from "could not prove it stopped" and states that silence or a timeout never proves a process exited; its daemon notes (`src/main/daemon/AGENTS.md`) record 23 defects from treating "cannot tell" as "dead". Crew applies the same rule to a stalled job (`probe` answers working, ended, or unknown) and when it replaces a daemon ([client.ts](../plugin/bridge/client.ts)). And every state change in Orca goes through one compare-and-set transition, which is what made its refusals consistent in use.
 
 ### Candidates against Crew's code
 
@@ -306,19 +340,17 @@ Checked against `plugin/bridge/` and `plugin/roles/` on 2026-11-17. Status is ra
 
 | # | Candidate | Status | Evidence and remaining work |
 | --- | --- | --- | --- |
-| 1 | Effort for Antigravity (R11) | None | [antigravity.ts](../plugin/bridge/adapters/antigravity.ts) sets only `model` with `session/set_config_option`. The same call with `configId: 'thought_level'` would set effort. Open: the levels differ by family (Hydrogen lists `xhigh`), so the option has to be read again after the model is set. |
-| 2 | Role instructions as a system prompt append | None | The role is prefixed to the first prompt because "ACP has no separate instruction channel" (`start` in the adapter). The advertised append is such a channel. Open: confirm it takes effect and resend it on `session/resume`. |
-| 3 | Questions from Antigravity | None, not reproduced | `onRequest` treats every `session/request_permission` as an approval and looks only for `allow_once` or `reject_once` options, so a question would be answered `cancelled` and the worker told that an action outside its role was refused. Workers are pointed at `crew.ask_lead` ([prompts.ts](../plugin/bridge/prompts.ts)), which limits the effect to a misleading note. Reproduce with a real question before changing anything. |
-| 4 | API key in the worker's environment | None, not reproduced | `agentEnv` in [config.ts](../plugin/bridge/config.ts) passes the environment through. Removing the key would break a user who chose key authentication, so the smaller step is a line in `crew doctor` when either variable is set. |
-| 5 | Command field names | Partial | `decide` recognizes `command` and `CommandLine` when it checks that an MCP-style title does not disguise a command. `command_line` and `commandLine` are not covered. Low risk, since that check also requires `kind: other`. |
+| 1 | Effort for Antigravity (R11) | Implemented 2026-11-18 | A job's effort is set as `thought_level` after the model, at the level the model offers or the nearest lower one; the job shows the level the session reports. Roles and presets may set it, and both settings screens offer it. Checked live: a Hydrogen job asked for `low` ran at `low`. |
+| 2 | Role instructions as a system prompt append | Implemented 2026-11-18 | Where the server advertises it, the role goes in `_meta.antigravity.systemPrompt.append` on `session/new` and again on restore, and the first prompt is the task alone. Otherwise it is prefixed as before. Checked live: a job's report followed the role's shape with the role sent only this way. |
+| 3 | Questions from Antigravity | Implemented 2026-11-18, differently | The failure was not the one guessed from Orca's source. Without forms a question ended the turn, and the job finished with the question as its report. Crew now declares form elicitation and puts the question before the user as a waiting question, as it does a Codex worker's. Workers are still pointed at `crew.ask_lead` for what the lead can answer. Checked live: a job waited, took "Beta", and acted on it. |
+| 4 | API key in the worker's environment | Dropped | Not reproduced on `agy` 1.5.9 with a bogus `GEMINI_API_KEY`, so no warning was added. |
+| 5 | Command field names | Implemented 2026-11-18 | `decide` treats `command`, `CommandLine`, `command_line`, and `commandLine` as a command when it checks that an MCP-style title does not disguise one. Only `CommandLine` was seen live. |
 | 6 | Outcome declared by the worker | Partial | Orca's worker ends with exactly one `worker_done` that must carry `--outcome succeeded` or `failed`, with the instruction never to hide failure in prose. Crew's report is prose in a fixed shape ([engineer.md](../plugin/roles/engineer.md)), and receipts record the checks the bridge ran. A declared outcome would let the board and `describe` tell "done" from "ended without doing it" without reading the report. |
 | 7 | Lead may decline a worker's request with a reason | None | Orca's coordinator can always deny a worker's permission prompt and say what to do instead; allowing needs a setting the user turns on, and the user's own answer wins if it comes first. In Crew the lead passes on only what the user decided ([mcp.ts](../plugin/bridge/mcp.ts)). A decline grants nothing, so this fits R15 without widening what the lead may approve. |
 | 8 | Line-anchored review notes sent as one batch | None | Orca lets the user comment on lines of a diff and sends all comments in one prompt, because notes sent one at a time make the agent go back and forth. Crew's drawer shows the diff stat and a free-text follow-up. This continues section 9's conclusion that review is the bottleneck. |
 | 9 | Guides loaded from the running binary | Optional | Orca's installed skill files are short stubs; the guide comes from `orca skills get <name>`, so it always matches the binary, and rarely needed parts are separate references. Crew's MCP instructions already come from the server. `/crew:run` is a static file that can lag the daemon until the plugin is re-registered. |
 | 10 | Base drift warning in the worker's prompt | N/A | Orca refuses a dispatch more than 20 commits behind its base and lists the missing commit subjects below that. Crew creates each worktree from `HEAD` at dispatch and has its own sync. |
 | 11 | Retry breaker | N/A | Three failed starts in one retry chain fail the Task and may not be routed around. Crew never retries by itself (section 8, row 19). |
-
-Two points are principles more than features. Orca separates "stopped" from "could not prove it stopped" (`stop_unknown`) and states that silence or a timeout never proves a process exited; its daemon notes (`src/main/daemon/AGENTS.md`) record 23 defects from treating "cannot tell" as "dead". Crew applies the same rule when it replaces a daemon ([client.ts](../plugin/bridge/client.ts)). Whether a cancelled job can end in an unconfirmed state was not traced here.
 
 ### What we will not copy
 
@@ -329,6 +361,6 @@ Two points are principles more than features. Orca separates "stopped" from "cou
 
 ### Limits of this recheck
 
-- Orca was read, not run. Its behavior is taken from source comments and documentation.
-- The Antigravity handshake used one account and one version. Config options and models vary by account and version.
-- Candidates 3 and 4 rest on Orca's source alone.
+- Orca was driven through its CLI with Codex workers in terminal mode. Its chat view, and Antigravity inside Orca, were not used.
+- The Antigravity sessions used one account and one version (1.5.9). Config options, models, and the question form vary by account and version; the adapter reads them from each session and falls back when they are missing.
+- The process cleanup and API key checks were each run once, on macOS.

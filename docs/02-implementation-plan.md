@@ -228,3 +228,5 @@ Items based only on secondary sources (recheck against primary sources before im
 - 2026-11-12: The user chose React and Electron for the control board and desktop app. This supersedes the earlier Tauri preference for the implemented client; daemon/worker ownership stays unchanged. See [07-desktop-and-react.md](07-desktop-and-react.md) for the measured tradeoffs.
 
 - 2026-11-17: Rechecked Orca against its source at v1.4.261. It now has a chat view over `codex app-server` and ACP, a structured orchestration layer, and Antigravity usage tracking, so two of the three reasons in section 8.2 are out of date. The decision is unchanged: Orca is a workbench the user works inside, and it has no fixed roles or review stages. Details and what Crew can take from it are in [05-related-work.md](05-related-work.md) section 11.
+
+- 2026-11-18: Installed and ran Orca, and gave `agy` real prompts. Orca writes hooks into Claude Code's, Codex's, and Antigravity's own settings on first start, accepts any local process as a coordinator or worker, and starts workers with full access; these confirm the decision. What Crew took from it is listed in the same section.

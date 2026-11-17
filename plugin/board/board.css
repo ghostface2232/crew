@@ -982,7 +982,7 @@ dialog.detail-panel { container: panel / inline-size; }
 .mission { display: grid; transition: box-shadow 200ms ease-out; }
 .mission > .action-message { margin-block-start: 14px; }
 .mission:not([data-expanded]) { cursor: pointer; }
-@media (hover: hover) { .mission:not([data-expanded]):hover { box-shadow: 0 6px 20px -12px color-mix(in srgb, var(--lift), black 10%); } }
+@media (hover: hover) { .mission:not([data-expanded]):hover { box-shadow: var(--outline-ring), 0 6px 20px -12px color-mix(in srgb, var(--lift), black 10%); } }
 .mission-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .mission[data-expanded] .mission-head { cursor: pointer; }
 .mission[data-state="active"] { --tone: var(--accent); }

@@ -158,7 +158,7 @@ struct CrewSettingsView: View {
         } header: {
             HStack(spacing: Space.ml) {
                 AgentMark(agent: model.assignment(for: role.role)?.holders.first ?? "codex", size: MarkSize.card)
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: Space.xxs) {
                     Text(role.label).font(.headline).foregroundStyle(.primary)
                     Text(role.summary).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
@@ -212,7 +212,9 @@ struct CrewSettingsView: View {
                             .buttonStyle(.borderedProminent).disabled(updater.phase == .installing)
                     case .available:
                         Button("Download Now") { Task { await updater.checkNow() } }
-                    case .idle, .checking, .downloading:
+                    // The progress bar below says what a download is doing; a disabled button beside it adds nothing.
+                    case .downloading: EmptyView()
+                    case .idle, .checking:
                         Button("Check for Updates") { Task { await updater.checkNow() } }
                             .disabled(updater.phase != .idle)
                     }

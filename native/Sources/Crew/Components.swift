@@ -63,10 +63,17 @@ extension View {
             .overlay(RoundedRectangle(cornerRadius: WorkspaceStyle.fieldRadius).strokeBorder(WorkspaceStyle.hairline))
     }
     /// A typed-in text field on `fieldSurface`, at a pill's height so it lines up with the pills beside it.
-    func surfaceTextField() -> some View {
-        textFieldStyle(.plain).font(Typeface.body)
+    func surfaceTextField() -> some View { modifier(SurfaceTextField()) }
+}
+
+/// A plain text field draws no focus ring, so the focused one takes an accent outline in its place.
+private struct SurfaceTextField: ViewModifier {
+    @FocusState private var focused: Bool
+    func body(content: Content) -> some View {
+        content.textFieldStyle(.plain).font(Typeface.body).focused($focused)
             .padding(.horizontal, Space.ml).padding(.vertical, Pill.insets.top)
             .fieldSurface()
+            .overlay { if focused { RoundedRectangle(cornerRadius: WorkspaceStyle.fieldRadius).strokeBorder(Palette.accent, lineWidth: 2) } }
     }
 }
 
@@ -94,7 +101,8 @@ struct ActionRow: Layout {
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
         var y = bounds.minY
-        for line in lines(bounds.width, sizes) {
+        // Split by the width the row was measured at, not its rounded bounds, so the lines match the measured height.
+        for line in lines(proposal.width ?? .infinity, sizes) {
             var x = bounds.maxX - line.width
             for index in line.items {
                 subviews[index].place(at: CGPoint(x: x, y: y + line.height / 2), anchor: .leading, proposal: ProposedViewSize(sizes[index]))

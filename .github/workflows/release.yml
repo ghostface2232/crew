@@ -18,6 +18,7 @@ jobs:
       - name: Check versions match the tag
         run: |
           want="${GITHUB_REF_NAME#v}"
+          [[ "$want" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Release tag must be a stable version (v1.2.3), got $GITHUB_REF_NAME"; exit 1; }
           for file in package.json plugin/.claude-plugin/plugin.json; do
             have=$(jq -r .version "$file")
             [ "$have" = "$want" ] || { echo "::error file=$file::version $have does not match tag $GITHUB_REF_NAME"; exit 1; }

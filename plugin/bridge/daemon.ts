@@ -19,7 +19,7 @@ import type { Mission } from './missions.ts';
 import { addEvidence, loadNotes, notesFile, renderNotes, scoreAll, setSummary } from './notes.ts';
 import type { NotesFile } from './notes.ts';
 import { runbook } from './runbook.ts';
-import { checks as setupChecks, PACKAGED, register, registered } from './setup.ts';
+import { checks as setupChecks, PACKAGED, prunePlugins, register, registered, registrationMoved } from './setup.ts';
 import type { Registration, SetupItem } from './setup.ts';
 import { toastCommand } from './toast.ts';
 import { ANTIGRAVITY_MODELS, codexModels } from './tiers.ts';
@@ -775,8 +775,19 @@ async function setupState(refresh: boolean): Promise<{ items: SetupItem[]; packa
   const items = await setupChecked;
   return { items, packaged: PACKAGED, registering: registering !== null, registration };
 }
-// An app's copy registers itself on first launch and after each update, so its plugin matches its daemon.
+// An app's copy registers itself on first launch and after each update, so its plugin matches its daemon. Copies that
+// sessions were still running at the last registration are removed once they have closed, and a registration that
+// another Claude Code process has undone is made again, checked after startup so the daemon does not wait on it.
 if (PACKAGED && !registered()) void registerPlugin();
+else if (PACKAGED && process.platform === 'win32') {
+  prunePlugins();
+  void registrationMoved().then(
+    (moved) => {
+      if (moved) void registerPlugin();
+    },
+    () => {},
+  );
+}
 
 // Keeps idle SSE connections from being dropped by intermediaries and detects dead ones.
 setInterval(() => {

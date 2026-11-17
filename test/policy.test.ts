@@ -65,6 +65,10 @@ test('a daemon is replaced when its code differs from what is installed, unless 
   // Another install with different code: only a newer version takes over.
   assert.equal(shouldReplace({ ...daemon, root: '/other' }, disk, '/plugin'), false);
   assert.equal(shouldReplace({ ...daemon, root: '/other' }, { version: '0.2.0', build: 'new' }, '/plugin'), true);
+  // A release that changes only the version: the newer install takes over, the older one never does.
+  assert.equal(shouldReplace({ ...daemon, build: 'new', root: '/other' }, { version: '0.2.0', build: 'new' }, '/plugin'), true);
+  assert.equal(shouldReplace({ ...daemon, version: '0.2.0', build: 'new', root: '/other' }, disk, '/plugin'), false);
+  assert.equal(shouldReplace({ ...daemon, build: 'new', root: '/other', active: 1 }, { version: '0.2.0', build: 'new' }, '/plugin'), false);
 });
 
 test('versions compare numerically', () => {

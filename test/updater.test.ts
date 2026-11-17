@@ -5,7 +5,8 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { after, before, test } from 'node:test';
+import { after, test } from 'node:test';
+import { setImmediate } from 'node:timers/promises';
 import { installerName, parseRelease, Updater } from '../desktop/updater.ts';
 import type { AppUpdate } from '../plugin/board/src/types.ts';
 
@@ -40,7 +41,8 @@ let feed: unknown = null;
 let feedStatus = 200;
 const payload = Buffer.from('installer bytes '.repeat(4096));
 let served = payload;
-before(async () => {
+async function startServer() {
+  if (server) return;
   server = http.createServer((req, res) => {
     if (req.url === '/latest') {
       res.writeHead(feedStatus, { 'content-type': 'application/json' }).end(JSON.stringify(feed));
@@ -52,8 +54,8 @@ before(async () => {
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-});
-after(() => server.close());
+}
+after(() => server?.close());
 
 function updater(dir: string, current = '0.2.0') {
   const seen: AppUpdate['state'][] = [];
@@ -62,7 +64,95 @@ function updater(dir: string, current = '0.2.0') {
 }
 const tempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'crew-updater-'));
 
+test('a check during load cannot remove the installer being restored', async () => {
+  const dir = tempDir();
+  try {
+    const bytes = Buffer.alloc(4 * 1024 * 1024, 1);
+    const file = path.join(dir, installerName('0.3.0'));
+    fs.writeFileSync(file, bytes);
+    fs.writeFileSync(path.join(dir, 'staged.json'), JSON.stringify({ version: '0.3.0', sha256: sha(bytes) }));
+    const feed = 'data:application/json,' + encodeURIComponent(JSON.stringify(release('0.2.3', 'https://example.com/installer.exe', sha(bytes))));
+    const instance = new Updater({ dir, current: '0.2.3', feed, supported: true });
+    await Promise.all([instance.load(), instance.check()]);
+    assert.equal(instance.status.state, 'ready');
+    assert.ok(fs.existsSync(instance.installer!));
+    await instance.check();
+    assert.equal(instance.status.state, 'idle');
+    assert.equal(fs.existsSync(file), false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('downloads allow ongoing data and time out on missing headers or stalled bodies', async (t) => {
+  for (const scenario of ['slow', 'headers', 'body']) {
+    await t.test(scenario, { timeout: 5_000 }, async (t) => {
+      const dir = tempDir();
+      try {
+        const chunk = Buffer.from('installer chunk');
+        const bytes = Buffer.concat(Array.from({ length: 11 }, () => chunk));
+        const url = 'https://example.com/installer.exe';
+        const feed = 'data:application/json,' + encodeURIComponent(JSON.stringify(release('0.3.0', url, sha(bytes))));
+        const instance = new Updater({ dir, current: '0.2.3', feed, supported: true });
+        await instance.check();
+        let signal: AbortSignal | undefined;
+        let stream: ReadableStreamDefaultController<Uint8Array> | undefined;
+        // Control arrival times without waiting minutes or depending on network speed.
+        t.mock.method(globalThis, 'fetch', async (_input: unknown, options: RequestInit) => {
+          signal = options.signal!;
+          if (scenario === 'headers') {
+            return new Promise<Response>((_resolve, reject) => signal!.addEventListener('abort', () => reject(signal!.reason), { once: true }));
+          }
+          return new Response(new ReadableStream<Uint8Array>({
+            start(controller) {
+              stream = controller;
+              signal!.addEventListener('abort', () => controller.error(signal!.reason), { once: true });
+            },
+          }), { headers: { 'content-length': String(bytes.length) } });
+        });
+        t.mock.timers.enable({ apis: ['setTimeout'] });
+        // AbortSignal.timeout uses intrinsic timers, so route it through the test clock too.
+        t.mock.method(AbortSignal, 'timeout', (delay: number) => {
+          const controller = new AbortController();
+          setTimeout(() => controller.abort(), delay);
+          return controller.signal;
+        });
+        const downloading = instance.download();
+        await setImmediate();
+        if (scenario !== 'headers') {
+          for (let i = 0; i < 11; i++) {
+            t.mock.timers.tick(59_000);
+            assert.equal(signal!.aborted, false);
+            stream!.enqueue(chunk);
+            await setImmediate();
+          }
+        }
+        if (scenario === 'slow') stream!.close();
+        else {
+          t.mock.timers.tick(60_000);
+          assert.equal(signal!.aborted, true);
+        }
+        await downloading;
+        if (scenario === 'slow') {
+          assert.equal(instance.status.state, 'ready');
+          assert.deepEqual(fs.readFileSync(instance.installer!), bytes);
+          t.mock.timers.tick(60_000);
+          assert.equal(signal!.aborted, false);
+        } else {
+          assert.equal(signal!.aborted, true);
+          assert.equal(instance.status.state, 'available');
+          assert.match(instance.status.error!, /Could not download/);
+          assert.deepEqual(fs.readdirSync(dir), []);
+        }
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
 test('a newer release waits to download, then stays staged across launches', async () => {
+  await startServer();
   const dir = path.join(tempDir(), 'updates');
   served = payload;
   feedStatus = 200;
@@ -94,6 +184,7 @@ test('a newer release waits to download, then stays staged across launches', asy
 });
 
 test('a download that does not match the digest is discarded', async () => {
+  await startServer();
   const dir = path.join(tempDir(), 'updates');
   served = Buffer.from('tampered');
   feedStatus = 200;
@@ -118,6 +209,7 @@ test('a staged installer that changed on disk is not offered', async () => {
 });
 
 test('no newer release, no release at all, and a failed check', async () => {
+  await startServer();
   const dir = path.join(tempDir(), 'updates');
   feedStatus = 200;
   feed = release('0.2.0', `${base}/download/Crew-Setup-0.2.0.exe`, sha(payload));
@@ -136,6 +228,7 @@ test('no newer release, no release at all, and a failed check', async () => {
 });
 
 test('an install waits, can be called off, and an unsupported copy does nothing', async () => {
+  await startServer();
   const dir = path.join(tempDir(), 'updates');
   served = payload;
   feedStatus = 200;
@@ -180,6 +273,7 @@ test('an install waits, can be called off, and an unsupported copy does nothing'
 });
 
 test('a check that ends during an install leaves it alone, and a release without an installer keeps the staged one', async () => {
+  await startServer();
   const dir = path.join(tempDir(), 'updates');
   served = payload;
   feedStatus = 200;

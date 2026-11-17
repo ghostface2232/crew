@@ -93,19 +93,21 @@ export class Updater {
   /** Picks up an installer an earlier launch staged; one no newer than this app, or no longer intact, is removed. */
   async load(): Promise<void> {
     if (this.status.state === 'unsupported') return;
-    let staged: Staged | null = null;
-    try {
-      staged = JSON.parse(fs.readFileSync(this.manifest, 'utf8'));
-    } catch {
-      /* Nothing staged. */
-    }
-    const file = staged && VERSION.test(staged.version) ? path.join(this.dir, installerName(staged.version)) : null;
-    if (staged && file && isNewer(staged.version, this.status.current) && await hashFile(file).then((sha) => sha === staged.sha256, () => false)) {
-      this.release = { version: staged.version, sha256: staged.sha256, url: '', size: 0, ...(staged.page ? { page: staged.page } : {}) };
-      this.set({ state: 'ready', latest: staged.version, ...(staged.page ? { page: staged.page } : {}) });
-      return;
-    }
-    this.clean();
+    return this.exclusive(async () => {
+      let staged: Staged | null = null;
+      try {
+        staged = JSON.parse(fs.readFileSync(this.manifest, 'utf8'));
+      } catch {
+        /* Nothing staged. */
+      }
+      const file = staged && VERSION.test(staged.version) ? path.join(this.dir, installerName(staged.version)) : null;
+      if (staged && file && isNewer(staged.version, this.status.current) && await hashFile(file).then((sha) => sha === staged.sha256, () => false)) {
+        this.release = { version: staged.version, sha256: staged.sha256, url: '', size: 0, ...(staged.page ? { page: staged.page } : {}) };
+        this.set({ state: 'ready', latest: staged.version, ...(staged.page ? { page: staged.page } : {}) });
+        return;
+      }
+      this.clean();
+    });
   }
 
   /** Removes everything staged. */
@@ -177,11 +179,18 @@ export class Updater {
       const partial = `${file}.partial`;
       const page = release.page ? { page: release.page } : {};
       this.set({ state: 'downloading', latest: release.version, progress: 0, checkedAt: this.status.checkedAt, ...page });
+      const controller = new AbortController();
+      let timeout = setTimeout(() => controller.abort(), 60_000);
+      const resetTimeout = () => {
+        clearTimeout(timeout);
+        timeout = setTimeout(() => controller.abort(), 60_000);
+      };
       try {
         fs.mkdirSync(this.dir, { recursive: true });
         this.clean();
-        // Ten minutes for the whole download: fetch's own timeout stops at the response headers.
-        const response = await fetch(release.url, { signal: AbortSignal.timeout(600_000), headers: { 'user-agent': 'Crew-Desktop' } });
+        // Bound the wait for headers and each gap in the body, regardless of the total download time.
+        const response = await fetch(release.url, { signal: controller.signal, headers: { 'user-agent': 'Crew-Desktop' } });
+        resetTimeout();
         if (!response.ok || !response.body) throw new Error(`the download answered ${response.status}`);
         const total = Number(response.headers.get('content-length')) || release.size;
         const hash = createHash('sha256');
@@ -189,6 +198,7 @@ export class Updater {
         let shown = 0;
         const body = Readable.fromWeb(response.body as import('node:stream/web').ReadableStream);
         body.on('data', (chunk: Buffer) => {
+          resetTimeout();
           hash.update(chunk);
           received += chunk.length;
           // Progress goes out in whole percents, not on every chunk.
@@ -206,6 +216,8 @@ export class Updater {
       } catch (error) {
         fs.rmSync(partial, { force: true });
         this.set({ state: 'available', latest: release.version, checkedAt: this.status.checkedAt, ...page, error: `Could not download ${release.version}: ${(error as Error).message}` });
+      } finally {
+        clearTimeout(timeout);
       }
     });
   }
@@ -241,7 +253,7 @@ export class Updater {
     this.set({ state: 'ready', latest, checkedAt, ...(page ? { page } : {}), ...(message ? { error: message } : {}) });
   }
 
-  /** Checks and downloads never overlap; a second request while one runs joins it. */
+  /** Loads, checks, and downloads never overlap; a second request while one runs joins it. */
   private exclusive(task: () => Promise<void>): Promise<void> {
     this.busy ??= task().finally(() => {
       this.busy = null;

@@ -4,6 +4,7 @@ struct BoardView: View {
     @Bindable var store: CrewStore
     var openSettings: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorSchemeContrast) private var contrast
     @FocusState private var searchFocused: Bool
     @State private var wide = false
     /// The page column's width, the panel floating over its trailing part; it bounds how wide the panel may be dragged.
@@ -82,7 +83,7 @@ struct BoardView: View {
                 }
                     .frame(width: WorkspaceStyle.panelWidth(store.panelWidth, page: pageWidth)).background(WorkspaceStyle.surface, in: shape)
                     .clipShape(shape)
-                    .overlay(shape.strokeBorder(WorkspaceStyle.hairline))
+                    .overlay { if contrast == .increased { shape.strokeBorder(Palette.contrastStroke) } }
                     .overlay(alignment: .leading) { PanelResizeHandle(store: store, page: pageWidth) }
                     .shadow(color: Palette.panelShadow, radius: WorkspaceStyle.panelShadowRadius, x: WorkspaceStyle.panelShadowOffset.width, y: WorkspaceStyle.panelShadowOffset.height)
                     .padding(.trailing, WorkspaceStyle.windowInset).padding(.bottom, WorkspaceStyle.windowInset)
@@ -130,7 +131,7 @@ struct BoardView: View {
     }
     private func matches(_ text: String) -> Bool { store.search.isEmpty || text.localizedCaseInsensitiveContains(store.search) }
     private var connectionBanner: some View {
-        HStack(alignment: .top) {
+        HStack(alignment: .firstTextBaseline, spacing: Space.l) {
             Label(store.connectionMessage, systemImage: "wifi.exclamationmark").font(Typeface.callout).textSelection(.enabled)
             Spacer()
             Button("Retry") { store.start() }.pillButton()
@@ -143,7 +144,7 @@ struct BoardView: View {
                 Text("\(store.state.pendingCount) \(store.state.pendingCount == 1 ? "request needs" : "requests need") your attention").font(Typeface.bodyStrong)
                 Spacer()
                 Text("Review").font(Typeface.callout)
-                Image(systemName: "chevron.right").font(Typeface.captionStrong)
+                Image(systemName: "chevron.right").font(Typeface.micro)
             }.padding(WorkspaceStyle.bannerPadding).contentShape(Rectangle())
         }.buttonStyle(.plain).glassEffect(.regular, in: .rect(cornerRadius: WorkspaceStyle.cardRadius))
     }
@@ -172,7 +173,7 @@ struct BoardView: View {
         VStack(alignment: .leading, spacing: Space.xxl) {
             WorkspaceHeading(title: title, subtitle: store.project.isEmpty ? nil : store.project)
             if overview && pending > 0 {
-                Button("Review requests", systemImage: "arrow.up.right") { store.selection = "needs"; store.search = "" }
+                Button("Review Requests", systemImage: "arrow.up.right") { store.selection = "needs"; store.search = "" }
                     .glassPillButton(prominent: false)
             }
         }
@@ -438,16 +439,23 @@ struct MissionPanel: View {
                     // quiet, can still be marked done.
                     let offered = (mission.state == "active" && finished) || mission.state == "abandoned"
                     if !mission.outcome.isEmpty || offered || mission.state == "active" {
-                        HStack(alignment: .center, spacing: Space.m) {
-                            if !mission.outcome.isEmpty {
-                                Text(mission.outcome).font(Typeface.callout).textSelection(.enabled).padding(.leading, WorkspaceStyle.rowTitleInset)
+                        // A narrow card first drops the preset's words and the finished note, then moves the
+                        // controls under the outcome, where ActionRow wraps them rather than let them run past the card's edges.
+                        ViewThatFits(in: .horizontal) {
+                            HStack(alignment: .center, spacing: Space.m) {
+                                outcome
+                                Spacer(minLength: 0)
+                                controls(offered: offered, compact: false)
                             }
-                            Spacer(minLength: 0)
-                            if offered && mission.state == "active" {
-                                Text("Looks finished").font(Typeface.caption).foregroundStyle(.secondary)
+                            HStack(alignment: .center, spacing: Space.m) {
+                                outcome
+                                Spacer(minLength: 0)
+                                controls(offered: offered, compact: true)
                             }
-                            if mission.state == "active" { presetMenu }
-                            if offered { actions }
+                            VStack(alignment: .leading, spacing: Space.m) {
+                                outcome
+                                ActionRow { controls(offered: offered, compact: true) }.frame(maxWidth: .infinity, alignment: .trailing)
+                            }
                         }
                     }
                 }
@@ -469,8 +477,21 @@ struct MissionPanel: View {
     private var finished: Bool {
         mission.looksFinished(jobs: store.state.jobs, now: store.now, lead: store.state.claude.first { $0.id == mission.owner })
     }
+    @ViewBuilder private var outcome: some View {
+        if !mission.outcome.isEmpty {
+            Text(mission.outcome).font(Typeface.callout).textSelection(.enabled).padding(.leading, WorkspaceStyle.rowTitleInset)
+        }
+    }
+    /// The preset, then stop and done once offered. `compact` keeps only the preset's symbol and drops the finished note.
+    @ViewBuilder private func controls(offered: Bool, compact: Bool) -> some View {
+        if offered && mission.state == "active" && !compact {
+            Text("Looks finished").font(Typeface.caption).foregroundStyle(.secondary)
+        }
+        if mission.state == "active" { presetMenu(compact: compact) }
+        if offered { actions }
+    }
     /// Which preset the mission's new jobs take; jobs already running keep theirs.
-    private var presetMenu: some View {
+    private func presetMenu(compact: Bool) -> some View {
         Menu {
             Picker("Preset", selection: Binding(get: { mission.preset }, set: { preset in
                 Task { await store.setPreset(preset, for: mission) }
@@ -481,21 +502,24 @@ struct MissionPanel: View {
                 }
             }.pickerStyle(.inline)
         } label: {
-            Label("\(mission.preset?.rawValue.capitalized ?? "Global") preset", systemImage: "slider.horizontal.3")
+            // Set here, inside the pill's own label style, so the compact pill shows the symbol alone.
+            Label("\(presetName) preset", systemImage: "slider.horizontal.3").labelStyle(PresetLabelStyle(compact: compact))
         }
         .menuStyle(.button).menuIndicator(.hidden).pillButton().morphs(on: mission.preset).fixedSize()
         .disabled(!store.connected || store.actions[mission.actionKey]?.locked == true)
-        .help("The preset this mission's new jobs take")
+        .help(compact ? "\(presetName) preset: the preset this mission's new jobs take" : "The preset this mission's new jobs take")
+        .accessibilityLabel("\(presetName) preset")
     }
+    private var presetName: String { mission.preset?.rawValue.capitalized ?? "Global" }
     @ViewBuilder private var actions: some View {
         let locked = !store.connected || store.actions[mission.actionKey]?.locked == true
         // In the warning color: it drops the mission without completing it. An abandoned one is already dropped.
         if mission.state == "active" {
-            Button("Stop tracking", systemImage: "xmark.circle") { Task { await store.dismiss(mission) } }
+            Button("Stop Tracking", systemImage: "xmark.circle") { Task { await store.dismiss(mission) } }
                 .pillButton(.warning)
                 .help("Stops tracking without marking done. Its jobs keep running.").disabled(locked)
         }
-        Button("Mark done", systemImage: "checkmark.circle") { Task { await store.markDone(mission) } }
+        Button("Mark Done", systemImage: "checkmark.circle") { Task { await store.markDone(mission) } }
             .pillButton(.prominent).disabled(locked)
     }
     /// Animated from here rather than inside the card, so the cards below move with it instead of jumping.
@@ -536,19 +560,8 @@ struct NeedsYouView: View {
             ForEach(jobs) { job in
                 VStack(alignment: .leading, spacing: Space.xl) {
                     VStack(alignment: .leading, spacing: Space.ml) {
-                        HStack(spacing: Space.ml) {
-                            StatusLabel(state: "waiting", title: job.waiting?.type == "approval" ? "Approval" : "Question")
-                            HStack(spacing: Space.s) {
-                                AgentMark(agent: job.agent, size: MarkSize.inline)
-                                Text("\(agentName(job.agent)) · \(projectName(job.projectPath, among: store.projects))").lineLimit(1)
-                            }.font(Typeface.chip).foregroundStyle(.secondary).help(job.projectPath)
-                            Spacer(minLength: WorkspaceStyle.rowSpacer)
-                            // How long the request has waited, as the web board's request cards show.
-                            if let since = job.waiting?.since {
-                                ElapsedText(store: store, start: since, end: nil).font(Typeface.chip).monospacedDigit().foregroundStyle(.secondary)
-                            }
-                            Button("Details", systemImage: "arrow.up.right") { store.openJob(job.id) }.pillButton()
-                        }
+                        requestHeader(job.waiting?.type == "approval" ? "Approval" : "Question", agent: job.agent, who: agentName(job.agent),
+                                      project: job.projectPath, since: job.waiting?.since) { store.openJob(job.id) }
                         Text(job.title).font(Typeface.callout).foregroundStyle(.secondary).lineLimit(2).help(job.title)
                     }
                     AnswerView(store: store, job: job)
@@ -556,13 +569,33 @@ struct NeedsYouView: View {
                 .frame(maxWidth: .infinity, alignment: .leading).card()
                 .transition(.card)
             }
+            // As on the web board: a Claude session is answered in Claude itself, so its tile says so instead of offering a composer.
+            ForEach(sessions) { session in
+                VStack(alignment: .leading, spacing: Space.xl) {
+                    requestHeader("Claude", agent: "claude", who: session.title, project: session.projectPath) { store.openSession(session.id) }
+                    Text(session.waitingFor ?? "Claude needs your input.").font(Typeface.headline).lineSpacing(4).textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
+                    Label("Answer in Claude.", systemImage: "bubble.left.and.bubble.right").font(Typeface.callout).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading).card()
+                .transition(.card)
+            }
         }
-        ForEach(sessions) { session in
-            ContentPanel(title: session.title, symbol: "bubble.left.and.bubble.right") {
-                Text(session.waitingFor ?? "Claude needs your input.").textSelection(.enabled)
-                Text(session.projectPath).font(Typeface.caption).foregroundStyle(.secondary)
-                Text("Answer in Claude.").font(Typeface.callout).foregroundStyle(.secondary)
-            }.transition(.card)
+    }
+    /// A request tile's first line: what kind of request it is, who asks and from where, how long it has waited, and Details.
+    private func requestHeader(_ kind: String, agent: String, who: String, project: String, since: Double? = nil, details: @escaping () -> Void) -> some View {
+        HStack(spacing: Space.ml) {
+            StatusLabel(state: "waiting", title: kind)
+            HStack(spacing: Space.s) {
+                AgentMark(agent: agent, size: MarkSize.inline)
+                Text("\(who) · \(projectName(project, among: store.projects))").lineLimit(1)
+            }.font(Typeface.chip).foregroundStyle(.secondary).help(project)
+            Spacer(minLength: WorkspaceStyle.rowSpacer)
+            // How long the request has waited, as the web board's request cards show.
+            if let since {
+                ElapsedText(store: store, start: since, end: nil).font(Typeface.chip).monospacedDigit().foregroundStyle(.secondary)
+            }
+            Button("Details", systemImage: "arrow.up.right", action: details).pillButton()
         }
     }
 }
@@ -608,11 +641,11 @@ struct ProjectSidebar: View {
                         HStack(spacing: Space.s) {
                             Label(updateTitle, systemImage: "arrow.down.circle.fill")
                             Spacer(minLength: 0)
-                            Text(updater.latest ?? "").font(.caption).monospacedDigit().opacity(0.7)
+                            Text(updater.latest ?? "").font(Typeface.caption).monospacedDigit().foregroundStyle(.tint.secondary)
                         }
                         .font(Typeface.bodyStrong)
                         .padding(.horizontal, Space.ml).padding(.vertical, Space.m)
-                        .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius))
+                        .background(Palette.chip(Palette.accent), in: RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius))
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain).foregroundStyle(.tint)
@@ -715,5 +748,18 @@ private struct PanelResizeHandle: View {
                 store.panelWidth = WorkspaceStyle.panelWidth(width + change, page: page)
                 store.persistPanelWidth()
             }
+    }
+}
+
+/// A mission's preset pill. Compact, it shows only the symbol, yet the hidden words still set its height, so it stays
+/// as tall as the pills beside it.
+private struct PresetLabelStyle: LabelStyle {
+    let compact: Bool
+    func makeBody(configuration: Configuration) -> some View {
+        if compact {
+            HStack(spacing: 0) { configuration.icon; configuration.title.hidden().frame(width: 0) }
+        } else {
+            PillLabelStyle().makeBody(configuration: configuration)
+        }
     }
 }

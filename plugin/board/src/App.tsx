@@ -306,7 +306,7 @@ export function App() {
                   onClick={() => select('needs')}
                 >
                   <span className="attention-count"><RollingNumber value={pending} /></span>
-                  <span>Needs you</span>
+                  <span>Needs You</span>
                   <Icon icon={ArrowRight} />
                 </button>
               )}

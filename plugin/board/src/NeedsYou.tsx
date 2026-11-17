@@ -59,7 +59,7 @@ export function Answer({ job }: { job: BoardJob }) {
         <div className="answer-actions" data-approval>
           <ActionStatus actionKey={key} />
           {button('Deny', 'deny', false)}
-          {waiting.grant && button('Allow for this job', 'allow_for_job', false, `Also allow this job's later requests for ${waiting.grant}, without asking`)}
+          {waiting.grant && button('Allow for This Job', 'allow_for_job', false, `Also allow this job's later requests for ${waiting.grant}, without asking`)}
           {button('Approve', 'approve', true)}
         </div>
       )}

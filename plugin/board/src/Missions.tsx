@@ -231,7 +231,7 @@ export function MissionPanel({
     expandedMissions.set(mission.id, value);
     setExpandedState(value);
   };
-  // Keyed by state as in the app: once a mission is abandoned, Mark done takes a fresh lock.
+  // Keyed by state as in the app: once a mission is abandoned, Mark Done takes a fresh lock.
   const key = `mission:${mission.id}:${mission.state}`;
   const action = useAction(key);
   const presetKey = `mission-preset:${mission.id}`;
@@ -291,12 +291,12 @@ export function MissionPanel({
             <Menu label="Mission options" icon={Ellipsis}>
               <button role="menuitem" disabled={locked} onClick={markDone}>
                 <Icon icon={CircleCheck} />
-                Mark done
+                Mark Done
               </button>
               {active && (
                 <button role="menuitem" disabled={locked} title="Stops tracking without marking done. Its jobs keep running." onClick={stopTracking}>
                   <Icon icon={CircleX} />
-                  Stop tracking
+                  Stop Tracking
                 </button>
               )}
             </Menu>
@@ -339,10 +339,10 @@ export function MissionPanel({
             <div className="mission-foot-actions">
               {finished && <span className="caption secondary">Looks finished</span>}
               {finished && active && (
-                <button className="pill-warning small" disabled={locked} onClick={stopTracking}>Stop tracking</button>
+                <button className="pill-warning small" disabled={locked} onClick={stopTracking}>Stop Tracking</button>
               )}
               {(finished || mission.state === 'abandoned') && (
-                <button className="prominent small" disabled={locked} onClick={markDone}>Mark done</button>
+                <button className="prominent small" disabled={locked} onClick={markDone}>Mark Done</button>
               )}
               {active && presets && (
                 <Menu label="Mission preset" icon={Gauge} text={`${presetName} preset`}>

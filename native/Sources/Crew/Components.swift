@@ -34,15 +34,82 @@ struct StatusLabel: View {
         default: return .secondary
         }
     }
+    var body: some View {
+        Label(title ?? state.capitalized, systemImage: symbol).chip(color)
+    }
+}
+
+/// A chip's face: chip type inked in its color, on that color's tint, outlined under Increase Contrast.
+private struct ChipStyle: ViewModifier {
+    let color: Color
     @Environment(\.colorScheme) private var scheme
     @Environment(\.colorSchemeContrast) private var contrast
-    var body: some View {
+    func body(content: Content) -> some View {
         let text = color.ink(scheme)
-        Label(title ?? state.capitalized, systemImage: symbol)
+        content
             .font(Typeface.chip).foregroundStyle(text).lineLimit(1).fixedSize()
             .padding(Chip.insets)
             .background(Palette.chip(color), in: Capsule())
             .overlay { if contrast == .increased { Capsule().strokeBorder(text.opacity(0.5)) } }
+    }
+}
+
+extension View {
+    /// A status chip's face in `color`, as `StatusLabel` draws it.
+    func chip(_ color: Color) -> some View { modifier(ChipStyle(color: color)) }
+    /// A text field's or editor's surface: the card's surface in a hairline outline.
+    func fieldSurface() -> some View {
+        background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: WorkspaceStyle.fieldRadius))
+            .overlay(RoundedRectangle(cornerRadius: WorkspaceStyle.fieldRadius).strokeBorder(WorkspaceStyle.hairline))
+    }
+    /// A typed-in text field on `fieldSurface`, at a pill's height so it lines up with the pills beside it.
+    func surfaceTextField() -> some View { modifier(SurfaceTextField()) }
+}
+
+/// A plain text field draws no focus ring, so the focused one takes an accent outline in its place.
+private struct SurfaceTextField: ViewModifier {
+    @FocusState private var focused: Bool
+    func body(content: Content) -> some View {
+        content.textFieldStyle(.plain).font(Typeface.body).focused($focused)
+            .padding(.horizontal, Space.ml).padding(.vertical, Pill.insets.top)
+            .fieldSurface()
+            .overlay { if focused { RoundedRectangle(cornerRadius: WorkspaceStyle.fieldRadius).strokeBorder(Palette.accent, lineWidth: 2) } }
+    }
+}
+
+/// A row of actions at the trailing edge. Pills never shrink, so when they do not fit across, the ones that do not
+/// fit move onto further lines, still at the trailing edge, rather than running past the edges of what holds them.
+struct ActionRow: Layout {
+    var spacing = Space.m
+    private struct Line { var items: [Int] = []; var width: CGFloat = 0; var height: CGFloat = 0 }
+    private func lines(_ width: CGFloat, _ sizes: [CGSize]) -> [Line] {
+        var lines: [Line] = []
+        var line = Line()
+        for (index, size) in sizes.enumerated() {
+            if !line.items.isEmpty && line.width + spacing + size.width > width { lines.append(line); line = Line() }
+            line.width += (line.items.isEmpty ? 0 : spacing) + size.width
+            line.height = max(line.height, size.height)
+            line.items.append(index)
+        }
+        return lines + [line]
+    }
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let lines = lines(proposal.width ?? .infinity, subviews.map { $0.sizeThatFits(.unspecified) })
+        return CGSize(width: lines.map(\.width).max() ?? 0,
+                      height: lines.map(\.height).reduce(0, +) + spacing * CGFloat(max(0, lines.count - 1)))
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        var y = bounds.minY
+        // Split by the width the row was measured at, not its rounded bounds, so the lines match the measured height.
+        for line in lines(proposal.width ?? .infinity, sizes) {
+            var x = bounds.maxX - line.width
+            for index in line.items {
+                subviews[index].place(at: CGPoint(x: x, y: y + line.height / 2), anchor: .leading, proposal: ProposedViewSize(sizes[index]))
+                x += sizes[index].width + spacing
+            }
+            y += line.height + spacing
+        }
     }
 }
 
@@ -87,11 +154,19 @@ struct ContentPanel<Content: View>: View {
     }
 }
 
-struct ActionMessage: View {
-    var state: ActionState?
+/// An error in words, the same wherever one shows; the caller sets its type.
+struct ErrorLabel: View {
+    let message: String
     @Environment(\.colorScheme) private var scheme
     var body: some View {
-        if let error = state?.error { Label(error, systemImage: "exclamationmark.circle").foregroundStyle(Palette.danger.ink(scheme)).font(Typeface.callout).textSelection(.enabled) }
+        Label(message, systemImage: "exclamationmark.circle").foregroundStyle(Palette.danger.ink(scheme)).textSelection(.enabled)
+    }
+}
+
+struct ActionMessage: View {
+    var state: ActionState?
+    var body: some View {
+        if let error = state?.error { ErrorLabel(message: error).font(Typeface.callout) }
         else if state?.pending == true { ProgressView().controlSize(.small).accessibilityLabel("Sending") }
         else if state?.accepted == true { Label("Sent", systemImage: "checkmark").foregroundStyle(.secondary).font(Typeface.callout) }
     }
@@ -112,7 +187,7 @@ struct CopyButton: View {
         .pillButton().morphs(on: copied)
         .help(help ?? title)
         // The title names only what is copied; VoiceOver hears the action too.
-        .accessibilityLabel(copied ? "Copied" : "Copy \(title.prefix(1).lowercased() + title.dropFirst())")
+        .accessibilityLabel(copied ? "Copied" : "Copy \(title.lowercased())")
         .task(id: copied) {
             if copied {
                 try? await Task.sleep(for: .seconds(2))
@@ -125,17 +200,30 @@ struct CopyButton: View {
 struct MessageEditor: View {
     var title: String
     @Binding var text: String
+    var prompt: String? = nil
     var disabled = false
     var body: some View {
-        TextEditor(text: $text)
-            .font(Typeface.body)
-            .scrollContentBackground(.hidden)
-            .padding(Space.ml)
-            .frame(minHeight: WorkspaceStyle.editorHeight.lowerBound, maxHeight: WorkspaceStyle.editorHeight.upperBound)
-            .background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: WorkspaceStyle.fieldRadius))
-            .overlay(RoundedRectangle(cornerRadius: WorkspaceStyle.fieldRadius).strokeBorder(WorkspaceStyle.hairline))
-            .accessibilityLabel(title)
-            .disabled(disabled)
+        ZStack(alignment: .topLeading) {
+            TextEditor(text: $text)
+                .font(Typeface.body).lineSpacing(2)
+                .scrollContentBackground(.hidden)
+                .accessibilityLabel(title)
+            if let prompt, text.isEmpty { FieldPrompt(text: prompt) }
+        }
+        .padding(Space.ml)
+        .frame(minHeight: WorkspaceStyle.editorHeight.lowerBound, maxHeight: WorkspaceStyle.editorHeight.upperBound)
+        .fieldSurface()
+        .disabled(disabled)
+    }
+}
+
+/// A text editor's placeholder, laid over it.
+private struct FieldPrompt: View {
+    let text: String
+    var body: some View {
+        Text(text).font(Typeface.body).foregroundStyle(.tertiary)
+            // The text view's own line fragment padding, so the placeholder sits where typing starts.
+            .padding(.leading, 5).allowsHitTesting(false).accessibilityHidden(true)
     }
 }
 
@@ -156,22 +244,20 @@ struct AnswerView: View {
                 if waiting.type == "question" {
                     composer
                     // Quick replies sit apart from the composer so they don't read as part of sending.
-                    GlassEffectContainer(spacing: Space.xs) { HStack(spacing: Space.m) {
-                        Spacer(minLength: 0)
+                    GlassEffectContainer(spacing: Space.xs) { ActionRow {
                         decision("No", symbol: "xmark", value: "deny", prominent: false)
                         decision("Yes", symbol: "checkmark", value: "approve", prominent: false)
-                    } }
+                    }.frame(maxWidth: .infinity, alignment: .trailing) }
                 } else {
                     // At the trailing edge with the completing action last, as everywhere a choice ends something.
-                    GlassEffectContainer(spacing: Space.xs) { HStack(spacing: Space.m) {
-                        Spacer(minLength: 0)
+                    GlassEffectContainer(spacing: Space.xs) { ActionRow {
                         decision("Deny", symbol: "xmark", value: "deny", prominent: false)
                         if let grant = waiting.grant {
-                            decision("Allow for this job", symbol: "checkmark.circle", value: "allow_for_job", prominent: false)
+                            decision("Allow for This Job", symbol: "checkmark.circle", value: "allow_for_job", prominent: false)
                                 .help("Also allow this job's later requests for \(grant), without asking")
                         }
                         decision("Approve", symbol: "checkmark", value: "approve", prominent: true)
-                    } }
+                    }.frame(maxWidth: .infinity, alignment: .trailing) }
                 }
                 ActionMessage(state: store.actions[job.requestKey])
             }
@@ -184,23 +270,18 @@ struct AnswerView: View {
                 .scrollContentBackground(.hidden)
                 .frame(minHeight: WorkspaceStyle.answerHeight.lowerBound, maxHeight: WorkspaceStyle.answerHeight.upperBound)
                 .accessibilityLabel("Your answer")
-            if draft.wrappedValue.isEmpty {
-                Text("Write an answer…").font(Typeface.body).foregroundStyle(.tertiary)
-                    // The text view's own line fragment padding, so the placeholder sits where typing starts.
-                    .padding(.leading, 5).allowsHitTesting(false).accessibilityHidden(true)
-            }
+            if draft.wrappedValue.isEmpty { FieldPrompt(text: "Write an answer…") }
         }
         // The trailing room keeps text clear of the send button laid over the corner: its diameter and inset.
         .padding(.leading, Space.ml).padding(.top, Space.ml).padding(.trailing, IconButton.diameter + Space.m * 2).padding(.bottom, Space.m)
         .overlay(alignment: .bottomTrailing) {
-            Button("Send answer", systemImage: "arrow.up") {
+            Button("Send Answer", systemImage: "arrow.up") {
                 Task { await store.answer(job, message: draft.wrappedValue) }
             }
             .iconButton(prominent: true)
-            .disabled(!canSend).help("Send answer").padding(Space.m)
+            .disabled(!canSend).help("Send Answer").padding(Space.m)
         }
-        .background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: WorkspaceStyle.fieldRadius))
-        .overlay(RoundedRectangle(cornerRadius: WorkspaceStyle.fieldRadius).strokeBorder(WorkspaceStyle.hairline))
+        .fieldSurface()
         .disabled(locked)
     }
     @ViewBuilder private func decision(_ title: String, symbol: String, value: String, prominent: Bool) -> some View {
@@ -303,18 +384,21 @@ struct EventList: View {
     var body: some View {
         LazyVStack(alignment: .leading, spacing: Space.xl) {
             ForEach(events.reversed()) { event in
-                HStack(alignment: .top, spacing: Space.l) {
+                HStack(alignment: .firstTextBaseline, spacing: Space.l) {
                     Image(systemName: event.kind == "error" ? "exclamationmark.circle" : event.kind == "done" ? "checkmark.circle" : "circle.fill")
-                        .font(Typeface.caption).foregroundStyle(event.kind == "error" ? Palette.danger : .secondary).frame(width: Symbol.controlFrame).padding(.top, Space.xs)
+                        .font(Typeface.caption).foregroundStyle(event.kind == "error" ? Palette.danger : .secondary).frame(width: Symbol.controlFrame)
                     VStack(alignment: .leading, spacing: Space.xs) {
-                        HStack {
+                        HStack(alignment: .firstTextBaseline) {
                             Text(agentName(event.agent)).font(Typeface.calloutStrong)
                             if let date = ISO8601DateFormatter.crew.date(from: event.ts) {
                                 Text(date, style: .time).font(Typeface.caption).monospacedDigit().foregroundStyle(.secondary)
                             }
                             Spacer()
+                        }
+                        // Laid over the line rather than in it, so a row with a job is as tall as one without.
+                        .overlay(alignment: .trailing) {
                             if let id = event.job_id, let openJob {
-                                Button("Show job", systemImage: "arrow.up.right") { openJob(id) }.iconButton().help("Show job")
+                                Button("Show Job", systemImage: "arrow.up.right") { openJob(id) }.iconButton().help("Show Job")
                             }
                         }
                         Text(event.detail).font(Typeface.callout).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)

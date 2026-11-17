@@ -93,10 +93,18 @@ const FRAME_CSS = `
 const BACKDROP = process.platform === 'win32' && Number(os.release().split('.')[2]) >= 22621 ? 'mica' : null;
 /** The main window's colors: clear over the backdrop where there is one, the board's otherwise. */
 const frame = () => (BACKDROP ? { ...theme(), color: '#00000000' } : theme());
-/** Lets the backdrop show through the page and top bar; cards, panels and dialogs keep their own surfaces. */
+/**
+ * Lets the backdrop show through the page and top bar; cards, panels and dialogs keep their own surfaces.
+ * A backdrop-filter paints its blurred copy over the page, and over a clear page that copy is clear too, so the sharp
+ * text beneath shows through it. While a sheet is open the page takes its canvas again, so the sheet's backdrop blurs
+ * it as it does in a browser. Blurring the page with a filter instead would make it the containing block of the
+ * fixed detail panel and dock, and move them.
+ */
 const BACKDROP_CSS = `
 :root body { background: transparent; }
-:root .topbar { background: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; }`;
+:root .topbar { background: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; }
+:root:has(dialog.sheet:modal) body { background: var(--canvas); }
+@media (prefers-reduced-motion: no-preference) { :root body { transition: background-color 300ms ease-out; } }`;
 
 /**
  * The bounds this launch restored, and what the window reported for them. Scaled displays round them on the way

@@ -81,14 +81,13 @@ struct JobDetailView: View {
                     VStack(alignment: .leading, spacing: Space.xs) {
                         Text(file).font(Typeface.code).textSelection(.enabled)
                         if result.outOfScope.contains(file) {
-                            Label(result.files.contains(file) ? "Outside the allowed targets" : "Outside the workspace", systemImage: "exclamationmark.triangle")
-                                .font(Typeface.caption).foregroundStyle(Palette.danger.ink(scheme))
+                            ErrorLabel(message: result.files.contains(file) ? "Outside the allowed targets" : "Outside the workspace").font(Typeface.caption)
                         }
                     }
                 }
                 // A section's own action ends it at the trailing edge; an item's sits on the item's header row.
                 if let tree = job.worktree, !result.files.isEmpty {
-                    HStack { Spacer(minLength: 0); CopyButton(title: "Diff command", text: "git diff \(tree.base.prefix(8))..\(tree.branch)", help: "Copy the command that shows this job's changes") }
+                    HStack { Spacer(minLength: 0); CopyButton(title: "Diff Command", text: "git diff \(tree.base.prefix(8))..\(tree.branch)", help: "Copy the command that shows this job's changes") }
                 }
             }
         }
@@ -160,10 +159,10 @@ struct JobDetailView: View {
         } else if job.sessionId != nil && job.state != "waiting" {
             detailSection(job.isActive ? "Steer" : job.debate != nil ? "Reply" : "Follow up", symbol: "bubble.left") {
                 let key = "followup:\(job.id)"
-                MessageEditor(title: "Message to \(agentName(job.agent))", text: Binding(get: { store.drafts[key] ?? "" }, set: { store.drafts[key] = $0 }))
+                MessageEditor(title: "Message to \(agentName(job.agent))", text: Binding(get: { store.drafts[key] ?? "" }, set: { store.drafts[key] = $0 }), prompt: "Write a message…")
                 HStack {
                     Spacer(minLength: 0)
-                    Button("Send message", systemImage: "arrow.up") { Task { await store.followUp(job) } }
+                    Button("Send Message", systemImage: "arrow.up") { Task { await store.followUp(job) } }
                         .glassPillButton()
                         .disabled(!store.connected || store.actions[key]?.locked == true || (store.drafts[key] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
@@ -179,7 +178,7 @@ struct JobDetailView: View {
         }
         DetailFooter(id: job.id) {
             if let session = job.sessionId, let worker = store.state.agents[job.agent] {
-                CopyButton(title: "Resume command", text: "\(worker.resume) \(session)", help: "Copy the command that resumes this job's session")
+                CopyButton(title: "Resume Command", text: "\(worker.resume) \(session)", help: "Copy the command that resumes this job's session")
             }
             if job.isActive {
                 Button("Cancel Job", systemImage: "stop.circle", role: .destructive) { Task { await store.cancel(job) } }.pillButton()
@@ -350,7 +349,7 @@ struct SessionDetailView: View {
             }
         }
         DetailFooter(id: session.id) {
-            CopyButton(title: "Resume command", text: "claude --resume \(session.id)", help: "Copy the command that resumes this session")
+            CopyButton(title: "Resume Command", text: "claude --resume \(session.id)", help: "Copy the command that resumes this session")
         }
     }
 }
@@ -833,7 +832,7 @@ private struct EvidenceTile: View {
         VStack(alignment: .leading, spacing: Space.s) {
             Button { NSWorkspace.shared.open(URL(fileURLWithPath: item.path)) } label: {
                 ZStack {
-                    RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius, style: .continuous).fill(.quaternary.opacity(0.5))
+                    RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius, style: .continuous).fill(WorkspaceStyle.rowFill)
                     if let thumbnail {
                         Image(nsImage: thumbnail).resizable().scaledToFit().padding(1)
                     } else {
@@ -841,7 +840,7 @@ private struct EvidenceTile: View {
                     }
                 }
                 .aspectRatio(4 / 3, contentMode: .fit)
-                .overlay(RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius, style: .continuous).strokeBorder(.separator))
+                .overlay(RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius, style: .continuous).strokeBorder(WorkspaceStyle.hairline))
                 .clipShape(RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius, style: .continuous))
             }
             .buttonStyle(.plain)

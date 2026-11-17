@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import type { LucideIcon } from 'lucide-react';
-import { ChevronLeft, ChevronRight, CircleArrowDown, FileText, Folder, Gauge, Hammer, Info, ShieldCheck, SlidersHorizontal, Type } from 'lucide-react';
+import { ChevronLeft, ChevronRight, FileText, Folder, Gauge, Hammer, Info, ShieldCheck, SlidersHorizontal, Type } from 'lucide-react';
 import type { AppUpdate, Preset, PresetName, Snapshot } from './types.ts';
 import type { AgentSettings, Holder, JobKind, Role, RoleAssignment, RoleInfo, RoleSettings, WorkerAgent } from '../../bridge/config.ts';
 import { request } from './api.ts';
@@ -39,7 +39,7 @@ const PANES: Record<Fixed, { title: string; icon: LucideIcon; tint: string; kind
   presets: { title: 'Presets', icon: SlidersHorizontal, tint: 'var(--gray)' },
   models: { title: 'Model Scores', icon: Gauge, tint: 'var(--purple)' },
   instructions: { title: 'Instructions', icon: FileText, tint: 'var(--indigo)' },
-  about: { title: 'About Crew', icon: CircleArrowDown, tint: 'var(--gray)' },
+  about: { title: 'About Crew', icon: Info, tint: 'var(--gray)' },
 };
 
 /** Where the desktop app's update stands, in one line. */
@@ -542,15 +542,16 @@ export function Settings({ state, update, close }: { state: Snapshot; update: Ap
                       <div className={styles.row}>
                         <span className={styles.updateLine} role="status">{updateSummary(update)}</span>
                         {update.state === 'installing' && update.waiting !== undefined ? (
-                          <button type="button" onClick={() => void desktop?.update.cancel()}>Cancel Update</button>
+                          <button type="button" className="small" onClick={() => void desktop?.update.cancel()}>Cancel Update</button>
                         ) : update.state === 'ready' || update.state === 'installing' ? (
-                          <button type="button" className="prominent" disabled={update.state === 'installing'} onClick={() => void desktop?.update.install()}>
+                          <button type="button" className="prominent small" disabled={update.state === 'installing'} onClick={() => void desktop?.update.install()}>
                             Restart to Update
                           </button>
-                        ) : update.state !== 'unsupported' && (
+                        ) : update.state !== 'unsupported' && update.state !== 'downloading' && (
                           <button
                             type="button"
-                            disabled={update.state === 'checking' || update.state === 'downloading'}
+                            className="small"
+                            disabled={update.state === 'checking'}
                             onClick={() => void desktop?.update.check()}
                           >
                             {update.state === 'available' ? 'Download Now' : 'Check for Updates'}
@@ -630,7 +631,7 @@ export function Settings({ state, update, close }: { state: Snapshot; update: Ap
             </div>
             <div className={styles.actions}>
               {pageScope !== null && load === 'failed' && (
-                <button type="button" onClick={() => setRetry((value) => value + 1)}>Retry Loading</button>
+                <button type="button" className="large" onClick={() => setRetry((value) => value + 1)}>Retry Loading</button>
               )}
               <button type="button" className="large prominent" disabled={!canSave} onClick={() => void saveCurrent()}>
                 {paneSaving ? 'Saving…' : kind ? 'Save Roles' : current === 'presets' ? 'Save Preset' : 'Save Instructions'}

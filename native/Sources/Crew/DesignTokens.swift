@@ -134,8 +134,6 @@ enum WorkspaceStyle {
     static let sheetWidth: CGFloat = 560
     static let settingsSize = CGSize(width: 720, height: 620)
     static let settingsMinSize = CGSize(width: 640, height: 570)
-    /// A Settings picker's width, so pickers in a column line up.
-    static let pickerWidth: CGFloat = 180
 
     // MARK: Radii
     static let cardRadius: CGFloat = 20
@@ -173,7 +171,6 @@ extension Color {
 enum Typeface {
     static let pageTitle = Font.system(size: 38, weight: .semibold, design: .rounded)
     static let pageTitleCapHeight = NSFont.systemFont(ofSize: 38, weight: .semibold).capHeight
-    static let windowTitle = Font.system(size: 30, weight: .semibold, design: .rounded)
     static let title = Font.system(size: 19, weight: .semibold, design: .rounded)
     static let cardTitle = Font.system(size: 17, weight: .semibold, design: .rounded)
     static let emptyTitle = Font.system(size: 18, weight: .regular, design: .rounded)
@@ -216,7 +213,7 @@ enum Symbol {
     static let control = Font.system(size: 11, weight: .semibold)
     /// A debate point's stance, leading its line.
     static let stance = Font.system(size: 14, weight: .medium)
-    /// A thumbnail placeholder or a settings section's icon.
+    /// A thumbnail placeholder.
     static let large = Font.system(size: 17, weight: .medium)
     /// An empty state's illustration.
     static let empty = Font.system(size: 30, weight: .light)
@@ -224,6 +221,8 @@ enum Symbol {
     static let chevronNudge: CGFloat = 0.5
     /// A small dot before words, such as Unsaved changes.
     static let dot = Font.system(size: 6)
+    /// A dot drawn as a shape that marks a row on its own, such as an update ready to install.
+    static let indicator: CGFloat = 8
     /// The frame a control glyph sits in, so icon buttons match whatever their symbol.
     static let controlFrame: CGFloat = 16
 }

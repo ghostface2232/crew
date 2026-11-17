@@ -26,29 +26,29 @@ struct SetupCard: View {
     var body: some View {
         Group {
             if let setup, !setup.items.allSatisfy(\.ok) {
-                VStack(alignment: .leading, spacing: Space.m) {
-                    HStack {
-                        Text("Set up Crew").font(Typeface.bodyStrong)
-                        Spacer()
-                        Button("Check again") { act { try await api.request("/api/setup?refresh") } }.pillButton().disabled(busy)
-                        if setup.items.contains(where: { !$0.ok && $0.repairable == true }) {
-                            Button(busy ? "Installing…" : "Install") { act { try await api.post("/api/setup/repair", [String: String](), timeout: 180) } }
-                                .pillButton().disabled(busy || setup.registering)
-                        }
-                    }
-                    ForEach(setup.items) { item in
-                        HStack(alignment: .firstTextBaseline, spacing: Space.s) {
-                            Image(systemName: item.ok ? "checkmark.circle" : "exclamationmark.circle")
-                                .foregroundStyle(item.ok ? .secondary : Palette.warning)
-                            Text(item.label).font(Typeface.callout)
-                            Text(item.detail).font(Typeface.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                ContentPanel(title: "Set up Crew", symbol: "wrench.and.screwdriver") {
+                    VStack(alignment: .leading, spacing: Space.m) {
+                        ForEach(setup.items) { item in
+                            HStack(alignment: .firstTextBaseline, spacing: Space.s) {
+                                Image(systemName: item.ok ? "checkmark.circle" : "exclamationmark.circle")
+                                    .font(Typeface.callout).foregroundStyle(item.ok ? .secondary : Palette.warning).frame(width: Symbol.controlFrame)
+                                Text(item.label).font(Typeface.callout)
+                                Text(item.detail).font(Typeface.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                            }
                         }
                     }
                     if let message = error ?? setup.registration.flatMap({ $0.ok ? nil : $0.detail }) {
-                        Text(message).font(Typeface.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                        ErrorLabel(message: message).font(Typeface.caption)
                     }
+                    // The card's actions end it at the trailing edge, as a section's do.
+                    ActionRow {
+                        Button("Check Again") { act { try await api.request("/api/setup?refresh") } }.pillButton().disabled(busy)
+                        if setup.items.contains(where: { !$0.ok && $0.repairable == true }) {
+                            Button(busy ? "Installing…" : "Install") { act { try await api.post("/api/setup/repair", [String: String](), timeout: 180) } }
+                                .pillButton().morphs(on: busy).disabled(busy || setup.registering)
+                        }
+                    }.frame(maxWidth: .infinity, alignment: .trailing)
                 }
-                .card()
             }
         }
         .task {

@@ -444,7 +444,7 @@ function Setup() {
       label="Set up Crew"
       action={
         <span className="setup-actions">
-          <button className="link" disabled={busy} onClick={() => act('/api/setup?refresh')}>Check again</button>
+          <button className="small" disabled={busy} onClick={() => act('/api/setup?refresh')}>Check Again</button>
           {repairable && <button className="prominent small" disabled={busy || setup.registering} onClick={() => act('/api/setup/repair', {})}>{busy ? 'Installing…' : 'Install'}</button>}
         </span>
       }

@@ -232,8 +232,8 @@ export function Dispatch({
         </div>
         {error && <p className={`error ${styles.error}`} role="alert"><Icon icon={CircleAlert} />{error}</p>}
         <footer className={styles.footer}>
-          <button type="button" onClick={closeDraft}>Cancel</button>
-          <button type="button" className="prominent" disabled={!canSend} onClick={() => void send()}>
+          <button type="button" className="large" onClick={closeDraft}>Cancel</button>
+          <button type="button" className="large prominent" disabled={!canSend} onClick={() => void send()}>
             <Icon icon={ArrowUp} />
             {sending ? 'Sending…' : intent === 'information' ? 'Save Information'
               : intent === 'question' ? 'Ask Question' : 'Send Job'}

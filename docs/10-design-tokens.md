@@ -1,16 +1,16 @@
 # 10. Design tokens (native macOS app)
 
-Written 2026-11-14, updated 2026-11-15. Every size, gap, color and type style in the native app comes from `native/Sources/Crew/DesignTokens.swift`. Views name a token instead of writing a number, so a change made there reaches every screen. This page lists each token and where it is used. The web board has its own CSS and is not covered here.
+Written 2026-11-14, updated 2026-11-17. Every size, gap, color and type style in the native app comes from `native/Sources/Crew/DesignTokens.swift`. Views name a token instead of writing a number, so a change made there reaches every screen. This page lists each token and where it is used. The web board has its own CSS and is not covered here.
 
 When no token fits, add one here and in the file; do not write the number in the view.
 
 Some numbers stay outside the token file.
-- **Geometry a single view owns** is a named constant next to its code, listed under Composite views below. Examples are `MissionTrack.marker` and `EvidenceTile.minWidth`, the heading and request-card widths in `BoardView`, and the Settings tab and scope picker widths.
+- **Geometry a single view owns** is a named constant next to its code, listed under Composite views below. Examples are `MissionTrack.marker` and `EvidenceTile.minWidth`, the heading and request-card widths in `BoardView`, and the Settings sidebar width and app icon sizes.
 - **Bare numbers** are left only where a name would add nothing:
   - motion (durations, delays, and the small offsets of a transition)
   - 1-point hairlines
   - opacity steps inside a view's own gradient or mask
-  - three values tied to AppKit, each with a comment: the placeholder's 5-point inset (the text view's line fragment padding), the answer field's trailing room (`IconButton.diameter` plus its inset), and the Settings window's clearance under its transparent title bar
+  - two values tied to AppKit, each with a comment: an editor placeholder's 5-point inset (the text view's line fragment padding) and the answer field's trailing room (`IconButton.diameter` plus its inset)
 
 ## Spacing — `Space`
 
@@ -26,8 +26,8 @@ One scale for gaps (`spacing:`) and padding. Values between two steps are rounde
 | `l` | 12 | Controls in a group; a row's horizontal padding; gray insets |
 | `xl` | 16 | Blocks inside a card; the gap between cards; banner padding |
 | `xxl` | 20 | Card padding |
-| `x3l` | 24 | Detail panel and sheet padding |
-| `x4l` | 28 | Sections of the detail panel; Settings side padding |
+| `x3l` | 24 | Detail panel and sheet padding; the Settings save bar's side padding |
+| `x4l` | 28 | Sections of the detail panel |
 | `x5l` | 32 | The page heading's columns |
 | `x6l` | 40 | The page margin |
 
@@ -51,7 +51,7 @@ These aliases name a role for a scale step. Use the alias when the role fits, so
 | `rowGap` | 4 | Between rows of one kind: a mission's jobs and the list cards (Recently finished, Other jobs, Claude sessions) |
 | `insetPadding` | 12 | The gray inset (`inset()`) holding a detail section's contents, or an agent card's sessions or jobs. The agent card leaves the inset out when there are none |
 | `iconColumn` | 20 | The column a row's icon or mark sits in, so titles line up |
-| `titleInset` | 6 | Titles outside a card (page heading, Agents, Settings) sit this far in from the cards' edge, since a rounded corner pulls the card's edge in visually |
+| `titleInset` | 6 | Titles outside a card (page heading, Agents) sit this far in from the cards' edge, since a rounded corner pulls the card's edge in visually |
 | `rowTitleInset` | 4 | The same correction inside a card, for text beside its gray rows and insets: mission stop names, notes and outcomes, list card titles, detail section titles |
 | `factLabelWidth` | 72 | A fact's label column in the detail panel; `factColumnGap` (16) and `factRowGap` (8) space its grid |
 | `elapsedColumn` | 28 | The elapsed time at a row's end, so short and long times line up |
@@ -73,7 +73,6 @@ These aliases name a role for a scale step. Use the alias when the role fits, so
 | `sidebarWidth` | 180 / 210 / 300 | The project sidebar's minimum, ideal and maximum width |
 | `sheetWidth` | 560 | The New Job sheet |
 | `settingsSize` | 720 × 620 | The Settings window, which shrinks no smaller than `settingsMinSize` (640 × 570) |
-| `pickerWidth` | 180 | Settings pickers in a column |
 
 ## Radii
 
@@ -81,7 +80,7 @@ These aliases name a role for a scale step. Use the alias when the role fits, so
 | --- | --- | --- |
 | `cardRadius` | 20 | Cards and banners |
 | `panelRadius` | 18 | The floating detail panel: concentric with the window corner across `windowInset`, and equal to the toolbar capsules |
-| `fieldRadius` | 14 | Text fields and editors |
+| `fieldRadius` | 14 | Text fields and editors (`fieldSurface()`) |
 | `rowRadius` | 12 | Rows, gray insets and thumbnails inside a card |
 | capsule | — | Chips and pill buttons |
 | circle | — | Icon buttons and step markers |
@@ -94,8 +93,8 @@ Surfaces change between light and dark appearance. Status colors are system colo
 | --- | --- |
 | `canvas` | The page background. In dark mode, cards are about 9% lighter than the canvas. |
 | `surface` | Cards and the detail panel |
-| `rowFill` | Rows and gray insets on a surface |
-| `hairline` | Card and field outlines |
+| `rowFill` | Rows, gray insets and evidence thumbnails on a surface |
+| `hairline` | Field and thumbnail outlines; cards and the detail panel have none (`Palette.contrastStroke` outlines them under Increase Contrast) |
 | `Palette.accent` | Running work and the current step |
 | `Palette.success` | Done |
 | `Palette.warning` | Waiting, stalled, unsaved, usage at 70% or more or a window reported tight |
@@ -116,21 +115,20 @@ Titles use SF Pro Rounded and headlines SF Pro Display. Body text uses SF Pro Te
 | --- | --- | --- | --- |
 | `pageTitle` | 38 semibold | Rounded | The page heading |
 | `number` | 40 regular | Rounded | Summary counts |
-| `windowTitle` | 30 semibold | Rounded | The Settings window heading |
 | `section` | 21 semibold | Display | Page section titles, such as Agents |
 | `title` | 19 semibold | Rounded | Card, mission and detail titles |
 | `emptyTitle` | 18 regular | Rounded | Empty states |
-| `cardTitle` | 17 semibold | Rounded | Agent names, Settings cards |
+| `cardTitle` | 17 semibold | Rounded | Agent names; a podium's score in Model Scores |
 | `headline` | 16 medium | Display | The request in an approval or question; a debate round's title |
 | `subheadline` | 14 semibold | Text | Detail section titles |
-| `bodyStrong` | 14 medium | Text | Row titles, report headings, a mission stop's name above its jobs, a detail item's title |
-| `body` | 14 regular | Text | What the user types: message and answer editors |
+| `bodyStrong` | 14 medium | Text | Row titles, report headings, a mission stop's name above its jobs, a detail item's title, a model's name in Model Scores |
+| `body` | 14 regular | Text | What the user types: message and answer editors, the New Job sheet's fields |
 | `calloutStrong` | 13 medium | Text | Pill buttons, agent names in events |
 | `callout` | 13 regular | Text | Text in the detail panel: facts, reports, debate messages and points, notes |
 | `captionStrong` | 12 semibold | Text | The current mission step's name on the track; other step names use `caption` |
 | `chip` | 12 medium | Text | Status chips, step numbers |
-| `caption` | 12 regular | Text | Meta lines, usage, times; `captionSize` exposes its size for layout |
-| `micro` | 11 semibold | Text | Row chevrons |
+| `caption` | 12 regular | Text | Meta lines, usage, times, a model's counts and summary; `captionSize` exposes its size for layout |
+| `micro` | 11 semibold | Text | Chevrons that go somewhere: rows and the attention banner |
 | `code` | 13 regular | Mono | Diff stats, file paths, code blocks |
 | `codeSmall` | 12 regular | Mono | Ids |
 
@@ -144,10 +142,11 @@ A symbol inside a label takes the label's font. These tokens are for symbols tha
 | --- | --- | --- |
 | `badge` | 9 bold | Inside a small filled shape, such as a passed step |
 | `control` | 11 semibold | The glyph of an icon button or the send button |
-| `large` | 17 medium | Thumbnail placeholders, Settings section icons |
+| `large` | 17 medium | Thumbnail placeholders |
 | `empty` | 30 light | Empty state illustrations |
 | `stance` | 14 medium | A debate point's stance mark |
 | `dot` | 6 regular | A small dot before words, such as Unsaved changes |
+| `indicator` | 8 pt | A dot drawn as a shape that marks a row on its own, such as the Settings sidebar's update-ready dot. It turns white on a selected row's accent |
 | `controlFrame` | 16 pt | The frame a control glyph sits in; also the event list's status column |
 | `chevronNudge` | 0.5 pt | A sideways chevron shifts this far toward its point, where its frame leaves it looking off center |
 
@@ -157,8 +156,8 @@ A symbol inside a label takes the label's font. These tokens are for symbols tha
 | --- | --- | --- |
 | `inline` | 13 | Beside caption text, such as the Needs You chip line |
 | `row` | 16 | A job or session row's leading mark: the agent that ran it, so the row's detail line leaves the agent's name out |
-| `list` | 20 | The compact agent list |
-| `card` | 22 | Agent cards and Settings role cards |
+| `list` | 20 | The compact agent list; a model's row in Model Scores |
+| `card` | 22 | Agent cards, Settings role headers and the podium's second and third places |
 
 ## Composite views
 
@@ -218,12 +217,16 @@ A pill or glass pill whose words follow state, such as Copied, Saving… or Keep
 
 | Kind | How | Use |
 | --- | --- | --- |
-| Primary | `.glassPillButton()`, or `.glassPillButton(prominent: false)` for clear glass: Liquid Glass at the pill's size and face | Send message, New Job, Save, Send Job; Review requests in clear glass |
-| Pill | `.pillButton()`; `.pillButton(.prominent)` for the action a group leads with, `.pillButton(.warning)` for one that drops work without completing it | Mark done, Stop tracking, Details, Retry, Copy, Undo/Keep, Cancel Job, approval decisions |
-| Icon | `.iconButton()`: `IconButtonStyle`, a `Pill.fill` circle of `IconButton.diameter` (28 points), a little larger than a chip, with its symbol in `Symbol.control`; `.iconButton(prominent: true)` fills it with the accent | Close, Show job, expand a mission; Send answer (prominent) |
-| Chip | `StatusLabel`: `Typeface.chip` in a `Palette.chip` capsule with `Chip.insets` (5 × 8) | Status of jobs, sessions, missions and agents |
+| Primary | `.glassPillButton()`, or `.glassPillButton(prominent: false)` for clear glass: Liquid Glass at the pill's size and face. Glass pills side by side share a `GlassEffectContainer` | Send Message, New Job, Save, Send Job, approval decisions; Review Requests in clear glass |
+| Pill | `.pillButton()`; `.pillButton(.prominent)` for the action a group leads with, `.pillButton(.warning)` for one that drops work without completing it | Mark Done, Stop Tracking, a mission's preset menu, Details, Retry, Copy, Undo/Keep, Check Again, Install, Cancel Job |
+| Icon | `.iconButton()`: `IconButtonStyle`, a `Pill.fill` circle of `IconButton.diameter` (28 points), a little larger than a chip, with its symbol in `Symbol.control`; `.iconButton(prominent: true)` fills it with the accent | Close, Show Job, expand a mission; Send Answer (prominent) |
+| Chip | `.chip(color)`: `Typeface.chip` inked in its color, in a `Palette.chip` capsule with `Chip.insets` (5 × 8), outlined under Increase Contrast. `StatusLabel` draws status with it | Status of jobs, sessions, missions and agents; a model's verdict word |
+| Field | `.fieldSurface()`: the `surface` fill in a `hairline` outline at `fieldRadius`. `MessageEditor` pads it by `Space.ml` and can show a tertiary `prompt` where typing starts; `.surfaceTextField()` gives a text field the same surface at a pill's height (`Space.ml` across, `Pill.insets` top and bottom) | Message and answer editors, the New Job sheet's fields |
+| Error | `ErrorLabel`: an `exclamationmark.circle` label in `Palette.danger` through `Color.ink(_:)`, selectable; the caller sets its type. `ActionMessage` shows a failed action with it | Failed actions, the New Job sheet, setup, update errors, out-of-scope files |
 | Reveal | `RevealToggle`: `captionStrong` secondary words with a `Symbol.badge` chevron that turns over, no fill; the words and the room around them take the click. VoiceOver reads its `subject` and whether it is expanded | Show all / Show less, an earlier debate round, a full reply, the end of a check's output, the original task |
 | Stance mark | `StanceMark`: a `Symbol.stance` symbol in its status color, not a chip, which would read as a button: a green check for agree, a red cross for disagree, an accent branch for an alternative. It sits beside the worker's name, one per stance the reply takes, counted when taken more than once; a folded round's title carries the same marks beside it, and a point's line ends with its own only when the reply mixes stances | Points of a debate reply |
+
+Button and menu labels use title case, as macOS buttons do: Send Message, Mark Done, Allow for This Job. A reveal's words (Show all, Show less) stay in sentence case, since they read as a link rather than a button.
 
 Pill buttons use `PillButtonStyle`, not the system bordered style. The system's regular bordered button is 24 points tall with 5 points above and below its label, which looks pressed flat. A pill instead has `Pill.insets` (7 × 14), so it is about 30 points tall, with its label in `calloutStrong`.
 
@@ -234,10 +237,10 @@ Pill buttons use `PillButtonStyle`, not the system bordered style. The system's 
 | warning | `Palette.warning` | `Palette.chip(warning)` |
 | destructive role | `Palette.danger` | `Palette.chip(danger)` |
 
-When a pill's label starts with a symbol, the symbol's side has `Pill.symbolTrim` (3 points) less inset. A symbol's round shape sits inside its frame, so an even inset would look wider on that side. Text-only pills stay symmetric. The symbol and the title are `Pill.symbolGap` (6 points) apart. Glass pills use the same insets and label style. A tinted label goes through `Color.ink(_:)`, as on chips. Needs You's decisions are glass pills. A pressed pill dims, and a disabled one fades to 45%. Under Increase Contrast, a pill gets an outline. A group's actions sit at its trailing edge, and the completing action comes last. A copy button names only what it copies, such as Resume command or Diff command. The copy symbol says the rest, its help gives the whole action, and VoiceOver hears Copy resume command.
+When a pill's label starts with a symbol, the symbol's side has `Pill.symbolTrim` (3 points) less inset. A symbol's round shape sits inside its frame, so an even inset would look wider on that side. Text-only pills stay symmetric. The symbol and the title are `Pill.symbolGap` (6 points) apart. Glass pills use the same insets and label style. A tinted label goes through `Color.ink(_:)`, as on chips. Needs You's decisions are glass pills. A pressed pill dims, and a disabled one fades to 45%. Under Increase Contrast, a pill gets an outline. A group's actions sit at its trailing edge, and the completing action comes last. A copy button names only what it copies, such as Resume Command or Diff Command. The copy symbol says the rest, its help gives the whole action, and VoiceOver hears Copy resume command.
 
 Placement follows two rules.
-- **Actions sit at the trailing edge.** An item's action sits on the item's header row, as Undo does on a round. A section's action sits on its own last row, as Copy diff command does, or shares that row with a closing line, as Mark done shares it with a mission's outcome, centered on that line. The panel's footer (`DetailFooter`) is one row: the job's or session's id at the leading edge and the actions at the trailing edge, with Cancel Job last. The id gives way first and shortens in the middle. When even 80 points of it would leave the actions too little room, it moves below them.
+- **Actions sit at the trailing edge.** An item's action sits on the item's header row, as Undo does on a round. A section's or card's action sits on its own last row, as Copy Diff Command and the setup card's Check Again do, or shares that row with a closing line, as Mark Done shares it with a mission's outcome, centered on that line. The panel's footer (`DetailFooter`) is one row: the job's or session's id at the leading edge and the actions at the trailing edge, with Cancel Job last. The id gives way first and shortens in the middle. When even 80 points of it would leave the actions too little room, it moves below them. Pills never shrink, so a row of them in a card goes in `ActionRow`: when they do not fit across, the ones that do not fit move onto further lines, still at the trailing edge, with the completing action last. A mission's row first drops its preset's words and the finished note, then moves its controls under the outcome. On the board, action rows wrap the same way with `flex-wrap`.
 - **Reveals sit at the leading edge.** A reveal goes directly under what it reveals. Pills run actions and are never used to reveal content.
 
-Send and completing actions sit at the trailing edge too, such as Send message and Approve after Deny. A mission's Stop tracking and Mark done appear only once an active mission looks finished. An abandoned mission shows Mark done alone, which reopens it explicitly: the mission's controls lock per state through `Mission.actionKey`, so Stop tracking never leaves Mark done locked.
+Send and completing actions sit at the trailing edge too, such as Send Message and Approve after Deny. A mission's Stop Tracking and Mark Done appear only once an active mission looks finished. An abandoned mission shows Mark Done alone, which reopens it explicitly: the mission's controls lock per state through `Mission.actionKey`, so Stop Tracking never leaves Mark Done locked.

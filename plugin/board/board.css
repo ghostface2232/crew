@@ -56,8 +56,10 @@
   --heat-3: color-mix(in srgb, var(--accent) 72%, transparent);
   --heat-4: var(--accent);
   --shadow-card: 0 0 0 transparent;
+  /* Cards and panels have no outline; with more contrast this ring draws one. */
+  --outline-ring: 0 0 0 transparent;
   /* Palette.panelShadow, cast down and away from the edge the panel floats beside. */
-  --shadow-pop: 0 0 0 1px var(--hairline), -8px 8px 26px rgb(0 0 0 / 0.14);
+  --shadow-pop: var(--outline-ring), -8px 8px 26px rgb(0 0 0 / 0.14);
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
   /* Space and WorkspaceStyle layout */
@@ -68,6 +70,8 @@
   --section-gap: 28px;
   --card-radius: 26px;
   --row-radius: 16px;
+  /* One step in from --row-radius: blocks inside a row or inset, and one-line insets. */
+  --inset-radius: 10px;
   --field-radius: 18px;
   --panel-radius: 24px;
   --window-inset: 8px;
@@ -110,11 +114,11 @@
     --tone-ink: white;
     --track: rgb(255 255 255 / 0.22);
     --heat-0: rgb(255 255 255 / 0.06);
-    --shadow-pop: 0 0 0 1px var(--hairline-strong), -8px 8px 26px rgb(0 0 0 / 0.4);
+    --shadow-pop: var(--outline-ring), -8px 8px 26px rgb(0 0 0 / 0.4);
   }
 }
 @media (prefers-contrast: more) {
-  :root { --hairline: color-mix(in srgb, var(--label) 25%, transparent); }
+  :root { --hairline: color-mix(in srgb, var(--label) 25%, transparent); --outline-ring: 0 0 0 1px var(--hairline); }
 }
 
 * { box-sizing: border-box; }
@@ -245,7 +249,8 @@ button.large { min-height: 38px; padding: 0 18px; }
 button.small { min-height: 24px; padding: 0 9px; font-size: 11.5px; }
 button.small svg { width: 13px; height: 13px; }
 button.borderless, button.link { background: none; color: var(--secondary); padding: 0 6px; min-height: 22px; font-size: 12px; }
-button.link svg { transition: translate 220ms var(--ease-out); }
+/* Their glyphs keep the size they are drawn at, beside text smaller than a button's. */
+button.link svg { width: 12px; height: 12px; transition: translate 220ms var(--ease-out); }
 button.icon { flex: none; width: 30px; padding: 0; background: var(--fill); color: var(--label); }
 button.icon.small { width: 24px; min-height: 24px; }
 button.destructive { color: var(--red); }
@@ -271,11 +276,13 @@ input, select, textarea {
   min-height: 30px;
   padding: 5px 10px;
   border: 1px solid var(--hairline-strong);
-  border-radius: 12px;
+  border-radius: var(--field-radius);
   background: var(--surface);
   color: var(--label);
   transition: border-color 160ms ease-out, box-shadow 160ms ease-out;
 }
+/* A checkbox dims on its own. */
+input:disabled:not([type="checkbox"]), select:disabled, textarea:disabled { opacity: 0.5; cursor: default; }
 select { padding-inline-end: 24px; }
 textarea { resize: none; field-sizing: content; min-height: 80px; max-height: 180px; padding: 10px 12px; border-radius: var(--field-radius); line-height: 1.45; }
 input:focus-visible, select:focus-visible, textarea:focus-visible {
@@ -312,7 +319,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   padding: var(--card-padding);
   border-radius: var(--card-radius);
   background: var(--surface);
-  box-shadow: inset 0 0 0 1px var(--hairline), var(--shadow-card);
+  box-shadow: var(--outline-ring), var(--shadow-card);
 }
 .panel { display: grid; gap: 16px; align-content: start; }
 .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 22px; }
@@ -474,7 +481,7 @@ html[data-resizing] dialog.detail-panel { transition: none; }
 .detail-section > h3 svg { width: 14px; height: 14px; color: var(--secondary); }
 .detail-section pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
 .section-toggle { min-height: 0; padding: 0; gap: 7px; background: none !important; font-size: 13px; font-weight: 600; }
-.task { margin: 0; padding: 12px 14px; border-radius: 16px; background: var(--surface-2); font-family: var(--text-face); line-height: 1.5; cursor: auto; }
+.task { margin: 0; padding: 12px 14px; border-radius: var(--row-radius); background: var(--surface-2); font-family: var(--text-face); line-height: 1.5; cursor: auto; }
 .task[data-folded] {
   max-height: calc(3 * 1.5em + 24px);
   overflow: hidden;
@@ -498,26 +505,29 @@ html[data-resizing] dialog.detail-panel { transition: none; }
 .evidence figcaption { overflow-wrap: anywhere; }
 .report { display: grid; gap: 10px; font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; }
 .report-heading { font-weight: 600; }
-.report-code { margin: 0; padding: 10px 12px; border-radius: 13px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--hairline); font-size: 12px; white-space: pre-wrap; }
+.report-code { margin: 0; padding: 10px 12px; border-radius: var(--row-radius); background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--hairline); font-size: 12px; white-space: pre-wrap; }
 .report code { font-size: 0.92em; padding: 1px 4px; border-radius: 6px; background: var(--fill); }
 .report-code code { padding: 0; background: none; }
 .report a { color: var(--accent); }
 .file { display: grid; gap: 3px; }
 .file code { font-size: 12px; overflow-wrap: anywhere; }
-.round { display: grid; gap: 8px; padding: 12px 14px; border-radius: 16px; background: var(--surface-2); }
+.file .caption { display: inline-flex; align-items: center; gap: 4px; }
+.round { display: grid; gap: 8px; padding: 12px 14px; border-radius: var(--row-radius); background: var(--surface-2); }
 .round-head { display: flex; align-items: center; gap: 8px; }
 .round-head b { font-size: 12px; font-weight: 600; }
 .round-head span { color: var(--secondary); font-size: 11px; display: inline-flex; gap: 4px; align-items: center; }
 .round-head button { margin-inline-start: auto; }
-.receipt { display: grid; gap: 6px; padding: 12px 14px; border-radius: 16px; background: var(--surface-2); }
+.receipt { display: grid; gap: 6px; padding: 12px 14px; border-radius: var(--row-radius); background: var(--surface-2); }
 .receipt-status { display: inline-flex; align-items: center; gap: 6px; color: color-mix(in srgb, var(--tone), var(--tone-ink) var(--tone-darken)); font-size: 12px; font-weight: 600; }
 .receipt code { font-size: 12px; overflow-wrap: anywhere; }
 .receipt .stale { display: flex; align-items: center; gap: 5px; color: var(--orange); }
-.receipt .output { padding: 8px 10px; border-radius: 10px; background: var(--fill); font-size: 11.5px; }
+.receipt .output { padding: 8px 10px; border-radius: var(--inset-radius); background: var(--fill); font-size: 11.5px; }
 .approval { display: flex; gap: 10px; }
 .approval > svg { flex: none; width: 15px; height: 15px; margin-top: 2px; color: var(--secondary); }
 .approval > div { display: grid; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
 .answer-card { background: color-mix(in srgb, var(--orange) 7%, var(--surface)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--orange) 22%, transparent); }
+/* An inset in the panel, not a card of its own: a card's corner would be rounder than the panel's. */
+.detail-scroll .answer-card { padding: 14px; border-radius: var(--row-radius); }
 .session-mission { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12.5px; }
 .detail-foot { display: grid; gap: 10px; padding-top: var(--panel-padding); border-top: 1px solid var(--hairline); font-size: 12px; }
 .detail-foot > div { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
@@ -604,7 +614,7 @@ dialog.detail-panel { container: panel / inline-size; }
 }
 .brand { display: flex; align-items: center; gap: 10px; padding: 2px 0; }
 /* Square art; the corners are drawn here, so they take the smoothing like every other box. */
-.brand-mark { flex: none; width: 30px; height: 30px; border-radius: 12px; }
+.brand-mark { flex: none; width: 30px; height: 30px; border-radius: 12px; box-shadow: 0 0 0 1px var(--hairline); }
 .brand-name { font: 600 17px/1 var(--display); letter-spacing: -0.01em; }
 .brand .connection { margin-inline-start: auto; padding-inline: 0; }
 .search-trigger {
@@ -708,7 +718,7 @@ dialog.detail-panel { container: panel / inline-size; }
 .peek-stats > span { display: inline-flex; align-items: center; gap: 5px; color: var(--secondary); }
 .peek-stats > span[data-state] svg { color: var(--tone); }
 .peek-line { color: var(--secondary); font-size: 12px; }
-.peek-mission { padding: 7px 10px; border-radius: 12px; background: var(--surface-2); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.peek-mission { padding: 7px 10px; border-radius: var(--inset-radius); background: var(--surface-2); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .workspace { min-width: 0; display: flex; flex-direction: column; }
 .topbar {
@@ -801,7 +811,7 @@ dialog.detail-panel { container: panel / inline-size; }
 }
 
 /* KPIs: one card, four cells split by hairlines, each with its last day by the hour. */
-.kpis { display: grid; border-radius: var(--card-radius); background: var(--surface); box-shadow: inset 0 0 0 1px var(--hairline), var(--shadow-card); overflow: hidden; animation: rise 560ms var(--ease-out) both; }
+.kpis { display: grid; border-radius: var(--card-radius); background: var(--surface); box-shadow: var(--outline-ring), var(--shadow-card); overflow: hidden; animation: rise 560ms var(--ease-out) both; }
 .kpi-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .kpi { display: grid; gap: 12px; align-content: start; min-width: 0; padding: 20px 22px 18px; }
 .kpi + .kpi { box-shadow: inset 1px 0 0 var(--hairline); }
@@ -886,7 +896,7 @@ dialog.detail-panel { container: panel / inline-size; }
 .agent-card-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--secondary); font-variant-numeric: tabular-nums; }
 /* An unmeasured agent with nothing to say leaves the row empty; without this it still takes the card's gap. */
 .agent-card-row:empty { display: none; }
-.agent-activity { padding: 4px 9px; border-radius: 10px; background: var(--fill); }
+.agent-activity { padding: 4px 9px; border-radius: var(--inset-radius); background: var(--fill); }
 .usage { display: grid; gap: 9px; font-size: 11px; color: var(--secondary); }
 .usage-window { display: grid; gap: 5px; --tone: var(--label); }
 .usage-window[data-level="mid"] { --tone: var(--orange); }
@@ -972,7 +982,7 @@ dialog.detail-panel { container: panel / inline-size; }
 .mission { display: grid; transition: box-shadow 200ms ease-out; }
 .mission > .action-message { margin-block-start: 14px; }
 .mission:not([data-expanded]) { cursor: pointer; }
-@media (hover: hover) { .mission:not([data-expanded]):hover { box-shadow: inset 0 0 0 1px var(--hairline-strong), 0 6px 20px -12px color-mix(in srgb, var(--lift), black 10%); } }
+@media (hover: hover) { .mission:not([data-expanded]):hover { box-shadow: var(--outline-ring), 0 6px 20px -12px color-mix(in srgb, var(--lift), black 10%); } }
 .mission-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .mission[data-expanded] .mission-head { cursor: pointer; }
 .mission[data-state="active"] { --tone: var(--accent); }
@@ -1012,7 +1022,7 @@ dialog.detail-panel { container: panel / inline-size; }
 .mission-foot { margin-top: 4px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; padding-top: var(--card-padding); border-top: 1px solid var(--hairline); }
 .mission-outcome { flex: 1 1 240px; color: var(--secondary); }
 .mission-foot-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; margin-inline-start: auto; }
-.menu-pill { gap: 6px; min-height: 26px; padding: 0 9px 0 10px; font-size: 12px; color: var(--secondary); }
+.menu-pill { gap: 6px; min-height: 24px; padding: 0 9px 0 10px; font-size: 11.5px; color: var(--secondary); }
 .menu-pill svg { width: 13px; height: 13px; }
 .menu-pill-chevron { transition: rotate 260ms var(--ease-out); }
 .menu-pill[aria-expanded="true"] .menu-pill-chevron { rotate: 180deg; }
@@ -1080,6 +1090,8 @@ dialog.detail-panel { container: panel / inline-size; }
 .job-row[aria-current="true"] { background: color-mix(in srgb, var(--accent) 10%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 26%, transparent); }
 @media (hover: hover) {
   .job-row:not(:disabled):hover { background: var(--fill-strong); }
+  .job-row[data-waiting]:not(:disabled):hover { background: color-mix(in srgb, var(--orange) 12%, transparent); }
+  .job-row[aria-current="true"]:not(:disabled):hover { background: color-mix(in srgb, var(--accent) 14%, transparent); }
   .job-row:hover .row-chevron { translate: 2px 0; color: var(--secondary); }
 }
 /* WorkspaceStyle.iconColumn: the mark sits in a column so titles line up. */
@@ -1105,13 +1117,15 @@ dialog.detail-panel { container: panel / inline-size; }
 .jobs-table th.num, .jobs-table td.num { text-align: end; }
 .sort { min-height: 22px; padding: 0 4px; margin-inline: -4px; gap: 3px; background: none !important; color: var(--tertiary); font: 500 10.5px/1.2 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
 th[aria-sort] .sort { color: var(--label); }
+.sort svg { width: 12px; height: 12px; }
 .jobs-table td { padding: 10px 8px; border-top: 1px solid var(--hairline); vertical-align: middle; transition: background-color 140ms ease-out; }
 .jobs-table tbody tr { cursor: pointer; animation: fade 420ms ease-out both; animation-delay: calc(var(--i, 0) * 20ms); }
 @media (hover: hover) { .jobs-table tbody tr:hover td { background: var(--surface-2); } }
 .jobs-table tr[aria-current="true"] td { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+@media (hover: hover) { .jobs-table tbody tr[aria-current="true"]:hover td { background: color-mix(in srgb, var(--accent) 12%, transparent); } }
 .cell-title { display: grid; justify-items: start; gap: 2px; min-height: 0; padding: 0; background: none !important; text-align: start; font-weight: 400; }
 .cell-title b { font-weight: 500; overflow-wrap: anywhere; }
-.cell-title span { color: var(--tertiary); font-size: 11px; }
+.cell-title span { color: var(--tertiary); font-size: 11.5px; }
 .cell-agent { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
 .cell-muted { color: var(--secondary); white-space: nowrap; font-variant-numeric: tabular-nums; }
 /* A long path takes the room left over and fades, instead of widening the table past its card. */
@@ -1121,7 +1135,7 @@ th[aria-sort] .sort { color: var(--label); }
 
 /* Needs You */
 .needs-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 400px), 1fr)); gap: var(--card-gap); }
-.need { display: grid; gap: 16px; align-content: start; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--orange) 20%, var(--hairline)), var(--shadow-card); }
+.need { display: grid; gap: 16px; align-content: start; box-shadow: var(--outline-ring), var(--shadow-card); }
 .need-head { display: grid; gap: 10px; }
 .need-bar { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .need-who { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; color: var(--secondary); font-size: 11.5px; font-weight: 500; }
@@ -1260,7 +1274,8 @@ dialog.palette-layer::backdrop { background: var(--scrim-light); animation: fade
   .sidebar[data-open] { translate: 0 0; visibility: visible; transition: translate 420ms var(--ease-out); }
   .sidebar > .nav:first-of-type { display: none; }
   .topbar { gap: 8px; min-height: 54px; padding: 8px 16px; }
-  .topbar-sidebar { display: inline-flex; }
+  /* As tall as the search and New Job controls beside it. */
+  button.topbar-sidebar { display: inline-flex; width: 34px; min-height: 34px; }
   .new-job { width: 34px; padding: 0; }
   .new-job-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .page { padding: 0 16px 104px; }
@@ -1318,7 +1333,7 @@ dialog.palette-layer::backdrop { background: var(--scrim-light); animation: fade
 /* The agent rows carry their own padding for the hover fill, so the label sits closer above them. */
 .agents.panel { gap: 6px; }
 
-.setup-actions { display: flex; align-items: center; gap: 8px; }
+.setup-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
 .setup-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .setup-list li { display: grid; grid-template-columns: auto minmax(0, max-content) minmax(0, 1fr); align-items: baseline; gap: 8px; }
 .setup-list li svg { align-self: center; color: var(--red); }

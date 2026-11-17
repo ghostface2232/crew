@@ -86,7 +86,7 @@ export function NeedsYou({
   return (
     <>
       {pending === 0 ? (
-        <EmptyState title="All caught up" icon={CircleCheck} />
+        <EmptyState title="All caught up" icon={CircleCheck} plain />
       ) : (
         !jobs.length && !sessions.length && <EmptyState title="No matching requests" icon={Search} />
       )}

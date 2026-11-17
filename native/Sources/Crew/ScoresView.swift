@@ -20,7 +20,12 @@ extension ModelScore {
     /// Build and fix counts apart, since only builds rank a model; an older daemon gives one total.
     var countsText: String {
         guard let builds = buildSamples, let fixes = fixSamples else { return "\(statusText) · \(samples) \(samples == 1 ? "review" : "reviews")" }
-        return "\(statusText) · \(builds) \(builds == 1 ? "build" : "builds") · \(fixes) \(fixes == 1 ? "fix" : "fixes")"
+        let reviews = reviewSamples.flatMap { $0 > 0 ? " · \($0) \($0 == 1 ? "review" : "reviews")" : nil } ?? ""
+        return "\(statusText) · \(builds) \(builds == 1 ? "build" : "builds") · \(fixes) \(fixes == 1 ? "fix" : "fixes")\(reviews)"
+    }
+    /// The items beside correctness, which the ring shows; one with nothing behind it is left out. Mirrors itemBars in Scores.tsx.
+    var itemBars: [(label: String, value: Double)] {
+        [("Brief", items?.brief), ("Report", items?.report), ("Findings", items?.findings)].compactMap { label, value in value.map { (label, $0) } }
     }
     /// Mirrors adoptionText in Scores.tsx.
     var adoptionText: String? {
@@ -29,6 +34,12 @@ extension ModelScore {
             + ["\(a.rounds) \(a.rounds == 1 ? "follow-up" : "follow-ups")"]).joined(separator: " · ")
     }
     var statusText: String { status == "settled" ? "Settled" : status == "on trial" ? "On trial" : "Too few reviews" }
+    /// What a row says beyond its name and score: its counts, its bars, and the summary.
+    var spoken: String {
+        let bars: [(label: String, value: Double?)] = [("Build", build), ("Fix", fix)] + itemBars.map { ($0.label, $0.value) }
+        let values = bars.map { "\($0.label.lowercased()) \($0.value.map { Self.shown($0) } ?? "none")" }
+        return ([countsText, adoptionText ?? ""] + values + [summary]).filter { !$0.isEmpty }.joined(separator: ". ")
+    }
 }
 
 private let medals: [Color] = [Color(red: 1, green: 0.8, blue: 0), Color(red: 0.78, green: 0.78, blue: 0.8), Color(red: 0.83, green: 0.6, blue: 0.42)]
@@ -132,7 +143,7 @@ private struct ScoreBar: View {
     let value: Double?
     var body: some View {
         HStack(spacing: Space.s) {
-            Text(label).frame(width: 30, alignment: .leading)
+            Text(label).frame(minWidth: 30, alignment: .leading)
             Capsule().fill(.quaternary).frame(width: 64, height: 4)
                 .overlay(alignment: .leading) { Capsule().fill(.primary.opacity(0.7)).frame(width: 64 * (value ?? 0) / 10, height: 4) }
             Text(ModelScore.shown(value)).foregroundStyle(value == nil ? .tertiary : .primary).frame(width: 24, alignment: .leading)
@@ -163,6 +174,11 @@ struct ModelScoreRow: View {
                     ScoreBar(label: "Build", value: score.build)
                     ScoreBar(label: "Fix", value: score.fix)
                 }.padding(.top, Space.xxs)
+                if !score.itemBars.isEmpty {
+                    HStack(spacing: Space.xl) {
+                        ForEach(score.itemBars, id: \.label) { ScoreBar(label: $0.label, value: $0.value) }
+                    }
+                }
                 if !score.summary.isEmpty {
                     Text(score.summary).font(Typeface.caption).foregroundStyle(.secondary).lineLimit(2).fixedSize(horizontal: false, vertical: true).help(score.summary).padding(.top, Space.xs)
                 }
@@ -174,6 +190,6 @@ struct ModelScoreRow: View {
         .padding(.vertical, Space.s)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(rank.map { "Rank \($0): " } ?? "")\(score.model), \(agentName(score.agent)), \(score.shown) out of 10\(score.band.map { ", \($0.word)" } ?? "")")
-        .accessibilityValue([score.countsText, score.adoptionText ?? "", "build \(score.build.map { ModelScore.shown($0) } ?? "none")", "fix \(score.fix.map { ModelScore.shown($0) } ?? "none")", score.summary].filter { !$0.isEmpty }.joined(separator: ". "))
+        .accessibilityValue(score.spoken)
     }
 }

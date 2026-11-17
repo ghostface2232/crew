@@ -14,6 +14,7 @@ import type { Evidence } from './evidence.ts';
 import { describe, needsLead, summarize } from './render.ts';
 import type { JobView } from './render.ts';
 import { TIERS } from './tiers.ts';
+import { RATING_ITEMS } from './notes.ts';
 
 /**
  * Stdio MCP server the lead Claude session talks to. It holds no state: every
@@ -62,6 +63,8 @@ function currentPolicy(name: PresetName | null, whose: string): string {
   return presetPolicy(name, name ? presets?.[name] : undefined, whose);
 }
 
+/** Left out when the user turned peer ratings off: the daemon would not keep one. */
+const RATING_LINE = started?.peerRatings === false ? '' : ' On a job\'s line you may add \`rating\`, each item from 1 to 5, for what you saw of its work: correctness (a builder only), brief (how it followed your brief) and report (how well its report matched the work) for a builder or fixer, findings (how useful they were) for a review. The line\'s text is the fact a rating rests on, so leave out an item the text does not bear out; never rate your own work.';
 const PRESET_LINE = `\n- Presets set the cost of a command. The global one is ${started?.preset ? `"${started.preset}"` : 'not set'}. When the user names a preset for a command (${PRESET_NAMES.join(', ')}), pass it as \`preset\` when you start its mission; never pick one yourself. \`mission\` and \`route\` responses state the preset in effect and what it asks of your subagents; the latest one you were told holds. A setting the user gave a role wins over any preset.`;
 
 /** One line per role: who holds it now, as of this session's start. */
@@ -89,7 +92,7 @@ How jobs work:
 - When to review while you run the Crew pipeline (/crew:run), without being asked: one review (your crew:self-reviewer subagent or \`review\`, not both) when a substantial piece of implementation reaches a stopping point; before you push or open a pull request, a review of whatever is going out that no review has covered since it last changed substantially (both in parallel for security, concurrency, or data loss; fixes for a review's findings count as covered); none for small fixes and wording. Reviewers that run in parallel are static unless exactly one of them is told it may run the app. The user's own request for a review, or for none, comes first. Outside the pipeline, review only when the user asks: do not hold back a commit or a push for one.
 - When you take a user's command through several steps, call \`mission\` with title and planned stages first, with stage as you move on, and with done as soon as the work finishes. Pass stages again with what remains to add or drop future steps. The board then shows the command as one unit with its jobs under it. Skip it for a single delegated job. When the user asks for more work after you finished a mission, start a new mission for it before you begin, including work you do yourself; a question or a reply needs none. A job started without one gets a follow-up mission named after the finished one.
 - Fixing a review's findings: triage stays yours. Decide which findings to accept and which to decline with a reason; the user's intent and this conversation decide that. A change a worker built goes back to that worker with \`reply\`, since its context is intact. The fix role is for your own code or a result merged from several jobs: when a worker holds it, \`delegate\` with role fix and give it the accepted findings with their reasons, your decisions, a map of the files involved, and a done_when; a brief of file names alone invites fixes that only hide symptoms. The review-round limit is the same whoever fixes.
-- Model notes: after each review and its fix, record what happened with \`note\`, one line per model judged: the builder's line (role build) with the findings you accepted and those you declined (several reviews of one piece of work make one line, each finding counted once; a merged result gets one line per job, with how you took a delegated job's work as adoption), and the fixer's line (role fix) with how the fix went. Facts from the review only, never impressions; findings from your own crew:self-reviewer count too. \`route\` shows the role holders' notes: let them inform your choice of tier and holder within the roles and presets the user set, which stay theirs. When a note says its summary is due, rewrite it with \`note_summary\` from the evidence.
+- Model notes: after each review and its fix, record what happened with \`note\`, one line per model judged: the builder's line (role build) with the findings you accepted and those you declined (several reviews of one piece of work make one line, each finding counted once; a merged result gets one line per job, with how you took a delegated job's work as adoption), and the fixer's line (role fix) with how the fix went. A review a job ran gets a line as well (role review, with the review's job_id, the work it covered as of_job or of_model, and its findings as you accepted and declined them), so reviewers are scored on their findings.${RATING_LINE} Facts from the review only, never impressions; findings from your own crew:self-reviewer count too. \`route\` shows the role holders' notes: let them inform your choice of tier and holder within the roles and presets the user set, which stay theirs. When a note says its summary is due, rewrite it with \`note_summary\` from the evidence.
 - Usage is measured by AgentGauge. In the pipeline, call \`route\` once at each stage boundary before you hand out work (not on every turn) with the role you are about to hand out, and follow its assignee and reason; when it says degraded, say in your report what was skipped. Outside the pipeline, follow the roles unless a job fails on a limit.${PRESET_LINE}
 
 The user can watch every agent live on the status board at ${BASE_URL}.`;
@@ -241,31 +244,38 @@ const TOOLS = [
   {
     name: 'note',
     title: 'Note a review result',
-    description: 'Record one line of evidence in a model\'s notes after a review and its fix: who built or fixed, who reviewed, the findings you accepted, and how the fix went. The notes score each model out of 10 from the rate of accepted findings per change size (build) and from how its fixes went (fix, shown apart), and \`route\` shows them. Give job_id or model. To rewrite a model\'s summary, use note_summary.',
+    description: 'Record one line of evidence in a model\'s notes after a review and its fix: who built, fixed or reviewed, the findings you accepted, and how the fix went. The notes score each model out of 10 from the rate of accepted findings per change size (build), from how its fixes went (fix, shown apart), and from how many of its review findings you accepted (review), with the peer ratings laid over them, and \`route\` shows them. Give job_id or model. To rewrite a model\'s summary, use note_summary.',
     inputSchema: {
       type: 'object',
       properties: {
-        job_id: { type: 'string', description: 'The job whose work was reviewed or that did the fix; its model, agent, tier and effort are read from it.' },
+        job_id: { type: 'string', description: 'The job whose work was reviewed or that did the fix, or for role review the review job itself; its model, agent, tier and effort are read from it.' },
         model: { type: 'string', description: 'Without job_id: the exact model of work done in this session or your subagent (yours, e.g. your own model id).' },
-        role: { type: 'string', enum: ['build', 'fix'], description: 'build (default; fix for a fix-role job): the model built the change under review. fix: the model fixed the accepted findings.' },
-        reviewer: { type: 'string', enum: [...Object.keys(WORKERS), LEAD], description: 'Who reviewed the work (for a fix, who checked it): the cross-reviewer\'s agent, or claude for your crew:self-reviewer.' },
+        role: { type: 'string', enum: ['build', 'fix', 'review'], description: 'build (default; fix for a fix-role job, review for a review job): the model built the change under review. fix: the model fixed the accepted findings. review: the model reviewed the change.' },
+        reviewer: { type: 'string', enum: [...Object.keys(WORKERS), LEAD], description: 'Required for build and fix: who reviewed the work (for a fix, who checked it): the cross-reviewer\'s agent, or claude for your crew:self-reviewer. A review job\'s line takes it from the job.' },
+        of_job: { type: 'string', description: 'For review: the job that built the work the review covered. Its reviewer\'s rating of that work, and that job\'s rating of the review, are then counted.' },
+        of_model: { type: 'string', description: 'For review, without of_job: the exact model that built the work, for work done in this session or your subagent.' },
         size: { type: 'string', enum: ['small', 'medium', 'large', 'xlarge'], description: 'Size of the change: small (a few lines or one function), medium (a feature in a few files), large (many files or a new subsystem), xlarge (several subsystems at once, roughly 1,500 changed lines or more).' },
         tier: { type: 'string', enum: [...TIERS], description: 'Without job_id: how demanding the work was, as you would have given it a tier. Shown with the notes, not scored.' },
         findings: {
           type: 'object',
           properties: { high: { type: 'integer', minimum: 0 }, medium: { type: 'integer', minimum: 0 }, low: { type: 'integer', minimum: 0 } },
-          description: 'For build: the findings you accepted, by severity (high: wrong behavior, data loss, security; medium: a real bug in an edge case; low: minor). When several reviews covered the work, one line with every accepted finding counted once, naming as reviewer one from another agent if any ran. For fix: the findings the check of the fix raised; they lower the fix line.',
+          description: 'For build: the findings you accepted, by severity (high: wrong behavior, data loss, security; medium: a real bug in an edge case; low: minor). When several reviews covered the work, one line with every accepted finding counted once, naming as reviewer one from another agent if any ran. For fix: the findings the check of the fix raised; they lower the fix line. For review: the findings of this review that you accepted.',
         },
         declined: {
           type: 'object',
           properties: { high: { type: 'integer', minimum: 0 }, medium: { type: 'integer', minimum: 0 }, low: { type: 'integer', minimum: 0 } },
-          description: 'For build: the findings you declined, by the severity the reviewer gave. Not scored; kept so your triage can be checked.',
+          description: 'The findings you declined, by the severity the reviewer gave. For build: not scored; kept so your triage can be checked. For review: this review\'s, weighed against the ones you accepted.',
         },
         adoption: { type: 'string', enum: ['as-is', 'after-reply', 'partly', 'rejected'], description: 'For a delegated job\'s build line: how you took its work. as-is (merged as delivered), after-reply (merged after you sent it back), partly (merged in part), rejected. Its follow-up rounds are read from the job. Noting the job again replaces its line, so give adoption again. Shown with the notes, not scored.' },
         outcome: { type: 'string', enum: ['root-cause', 'patch', 'another-review'], description: 'Required for fix: root-cause (fixed the cause), patch (handled the case without the cause), another-review (the fix needed another round).' },
+        rating: {
+          type: 'object',
+          properties: Object.fromEntries(RATING_ITEMS.map((item) => [item, { type: 'integer', minimum: 1, maximum: 5 }])),
+          description: 'With job_id only: your rating of the job\'s work as you saw it, 1 to 5 per item, resting on text. For build: correctness, brief (how it followed your brief), report (how well its report matched the work). For fix: brief and report. For review: findings (how useful they were). Noting the job again without one keeps the rating it had. Not kept when the user turned peer ratings off.',
+        },
         text: { type: 'string', description: 'One line of facts from the review, e.g. "Markdown parser, no findings, one follow-up on underscore boundaries". No impressions.' },
       },
-      required: ['reviewer', 'size', 'text'],
+      required: ['size', 'text'],
     },
   },
   {
@@ -813,10 +823,10 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
     case 'note_summary': {
       const body = name === 'note_summary'
         ? { model: args.model, summary: args.summary }
-        : { job: args.job_id, model: args.model, role: args.role, reviewer: args.reviewer, size: args.size, tier: args.tier, findings: args.findings, declined: args.declined, adoption: args.adoption, outcome: args.outcome, text: args.text };
+        : { job: args.job_id, model: args.model, role: args.role, reviewer: args.reviewer, size: args.size, tier: args.tier, findings: args.findings, declined: args.declined, adoption: args.adoption, outcome: args.outcome, of_job: args.of_job, of_model: args.of_model, rating: args.rating, text: args.text };
       const score = await api('POST', '/api/notes', body);
       const shown = score.score === null ? '—' : score.score.toFixed(1);
-      return `Noted. ${score.model} (${score.agent}): ${shown}/10, ${score.status}, ${score.buildSamples} build(s), ${score.fixSamples} fix(es).${score.consolidate ? ' Its summary is due: rewrite it from the evidence with note_summary.' : ''}`;
+      return `Noted. ${score.model} (${score.agent}): ${shown}/10, ${score.status}, ${score.buildSamples} build(s), ${score.fixSamples} fix(es)${score.reviewSamples ? `, ${score.reviewSamples} review(s)` : ''}.${score.ratingDropped ? ' The rating was not kept: the user turned peer ratings off.' : ''}${score.consolidate ? ' Its summary is due: rewrite it from the evidence with note_summary.' : ''}`;
     }
     case 'status': {
       if (args.job_id) {

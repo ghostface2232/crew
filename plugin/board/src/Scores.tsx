@@ -35,7 +35,11 @@ function Ring({ score, size = 52 }: { score: ModelScore; size?: number }) {
   );
 }
 
-/** A build or fix score as a short bar out of 10. */
+/** The items beside correctness, which the ring shows; an older daemon sends none, and an item with nothing behind it is left out. */
+const ITEMS = [['brief', 'Brief'], ['report', 'Report'], ['findings', 'Findings']] as const;
+const itemBars = (score: ModelScore) => ITEMS.filter(([item]) => score.items?.[item] != null);
+
+/** A build or fix score, or an item, as a short bar out of 10. */
 function Bar({ label, value }: { label: string; value: number | null }) {
   return (
     <span className={styles.bar} data-empty={value === null || undefined}>
@@ -89,11 +93,12 @@ function Row({ score, rank, index }: { score: ModelScore; rank?: number; index: 
           <span className={styles.rowName}>{score.model}<span className={styles.hidden}>, {NAMES[score.agent]}</span></span>
           {word && <span className={styles.word} style={{ '--tone': word.tone } as CSSProperties}>{word.word}</span>}
         </div>
-        <span className={styles.meta}>{statusText(score)} · {counted(score.buildSamples, 'build', 'builds')} · {counted(score.fixSamples, 'fix', 'fixes')}</span>
+        <span className={styles.meta}>{statusText(score)} · {counted(score.buildSamples, 'build', 'builds')} · {counted(score.fixSamples, 'fix', 'fixes')}{score.reviewSamples ? ` · ${counted(score.reviewSamples, 'review', 'reviews')}` : ''}</span>
         {adoptionText(score) && <span className={styles.meta}>{adoptionText(score)}</span>}
         <div className={styles.bars}>
           <Bar label="Build" value={score.build} />
           <Bar label="Fix" value={score.fix} />
+          {itemBars(score).map(([item, label]) => <Bar key={item} label={label} value={score.items[item]} />)}
         </div>
         {score.summary && <p className={styles.summary} title={score.summary}>{score.summary}</p>}
       </div>
@@ -104,11 +109,13 @@ function Row({ score, rank, index }: { score: ModelScore; rank?: number; index: 
 
 /**
  * Models with enough reviews, ranked, the best three on a podium; then the ones too early to rank, so a few clean
- * reviews never put a model ahead of one with a record.
+ * reviews never put a model ahead of one with a record. A model that only reviewed has no build to rank by, so it
+ * stands apart, by how its findings held up.
  */
 export function Scores({ scores }: { scores: ModelScore[] }) {
   const ranked = scores.filter((score) => score.score !== null && score.status !== 'too few samples');
-  const early = scores.filter((score) => !ranked.includes(score));
+  const reviewers = scores.filter((score) => score.score === null && score.items?.findings != null).sort((a, b) => b.items.findings! - a.items.findings!);
+  const early = scores.filter((score) => !ranked.includes(score) && !reviewers.includes(score));
   return (
     <>
       {ranked.length >= 2 && <Podium top={ranked.slice(0, 3)} />}
@@ -123,6 +130,14 @@ export function Scores({ scores }: { scores: ModelScore[] }) {
           <h3 className={styles.earlyTitle} id="scores-early">Too early to rank</h3>
           <div className={styles.standings}>
             {early.map((score, index) => <Row key={score.model} score={score} index={ranked.length + index} />)}
+          </div>
+        </section>
+      )}
+      {reviewers.length > 0 && (
+        <section className={styles.early} aria-labelledby="scores-reviewers">
+          <h3 className={styles.earlyTitle} id="scores-reviewers">Reviewers</h3>
+          <div className={styles.standings}>
+            {reviewers.map((score, index) => <Row key={score.model} score={score} index={ranked.length + early.length + index} />)}
           </div>
         </section>
       )}

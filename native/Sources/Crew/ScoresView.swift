@@ -168,7 +168,7 @@ struct ModelScoreRow: View {
                     ScoreBar(label: "Fix", value: score.fix)
                 }.padding(.top, 2)
                 if !score.summary.isEmpty {
-                    Text(score.summary).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true).padding(.top, Space.xs)
+                    Text(score.summary).font(.subheadline).foregroundStyle(.secondary).lineLimit(2).fixedSize(horizontal: false, vertical: true).help(score.summary).padding(.top, Space.xs)
                 }
             }
             // The text takes every point the ring leaves, so a line wraps only when the row is really that narrow.

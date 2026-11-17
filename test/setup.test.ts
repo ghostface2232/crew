@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -34,11 +36,13 @@ test('copyPlugin leaves a complete copy as it is', () => {
   assert.deepEqual(fs.readdirSync(dest), ['plugin']);
 });
 
-test('prunePlugins keeps the registered copy and copies still running', (t) => {
+test('prunePlugins keeps the registered copy and copies still running, whole', async (t) => {
   const dir = path.join(home, 'prune');
   const copy = (name: string) => {
-    fs.mkdirSync(path.join(dir, name, 'runtime'), { recursive: true });
-    fs.writeFileSync(path.join(dir, name, 'runtime', 'node.exe'), '');
+    for (const file of ['runtime/node.exe', 'runtime/LICENSE', 'plugin/bridge/mcp.js']) {
+      fs.mkdirSync(path.dirname(path.join(dir, name, file)), { recursive: true });
+      fs.writeFileSync(path.join(dir, name, file), '');
+    }
     return path.join(dir, name);
   };
   const current = copy('2.0.0-new');
@@ -46,10 +50,24 @@ test('prunePlugins keeps the registered copy and copies still running', (t) => {
   const running = copy('1.5.0-open');
   copy(`1.6.0-new.partial-${process.pid}`);
   copy('1.6.0-new.partial-999999999');
-  // Windows refuses to delete a running executable; a read-only folder refuses the same way here.
-  fs.chmodSync(path.join(running, 'runtime'), 0o555);
-  t.after(() => fs.chmodSync(path.join(running, 'runtime'), 0o755));
+  const node = path.join(running, 'runtime', 'node.exe');
+  if (process.platform === 'win32') {
+    // Windows refuses to delete a running executable, which is how a copy still in use is told apart.
+    fs.copyFileSync(process.execPath, node);
+    const child = spawn(node, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+    t.after(async () => {
+      child.kill();
+      await once(child, 'exit');
+    });
+    await once(child, 'spawn');
+  } else {
+    // Elsewhere a running executable can be deleted; a read-only folder refuses the same way.
+    fs.chmodSync(path.dirname(node), 0o555);
+    t.after(() => fs.chmodSync(path.dirname(node), 0o755));
+  }
+  const files = (root: string) => (fs.readdirSync(root, { recursive: true }) as string[]).sort();
+  const before = files(running);
   prunePlugins(dir, [current]);
   assert.deepEqual(fs.readdirSync(dir).sort(), ['1.5.0-open', `1.6.0-new.partial-${process.pid}`, '2.0.0-new']);
-  assert.ok(fs.existsSync(path.join(running, 'runtime', 'node.exe')));
+  assert.deepEqual(files(running), before);
 });

@@ -78,12 +78,13 @@ export function isNewer(candidate: string, current: string): boolean {
  * Never while jobs run: a restart would fail them.
  */
 export function shouldReplace(running: Health, disk: { version: string; build: string }, root: string): boolean {
-  if (running.build === disk.build) return false;
-  // Another install owns the daemon. Only a newer version takes over; otherwise two installs
-  // with different code would take turns replacing each other's daemon.
+  if (running.active !== 0) return false;
+  // Another install owns the daemon. Only a newer version takes over, even with the same build: a release may change
+  // only the version, and an older copy's daemon would otherwise keep the newer install from registering. The older
+  // install never takes over from the newer, so two installs do not take turns replacing each other's daemon.
   const foreign = running.root !== undefined && running.root !== root;
-  if (foreign && !isNewer(disk.version, running.version)) return false;
-  return running.active === 0;
+  if (foreign) return isNewer(disk.version, running.version);
+  return running.build !== disk.build;
 }
 
 /**

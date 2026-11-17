@@ -17,8 +17,9 @@ const MARKETPLACE = path.resolve(PLUGIN_ROOT, '..');
 export const PACKAGED = fs.existsSync(path.join(PLUGIN_ROOT, '.claude-plugin', 'build'));
 const RECORD = path.join(HOME, 'setup.json');
 /**
- * On Windows the installer stops every process under the install folder and moves its files away, which would take
- * down the MCP server of every open Claude Code session and any daemon one started. So an app's copy registers a copy
+ * On Windows the installer replaces the install folder's files and is meant to stop the processes running from it
+ * (in testing it stopped none), which would stop, or leave running on missing files, the MCP server of every open
+ * Claude Code session and any daemon one started. So an app's copy registers a copy
  * of its plugin and runtime in the Crew home instead, one per build: open sessions keep running theirs through an
  * update, and the updated app registers the next.
  */
@@ -76,7 +77,8 @@ export function copyPlugin(from: string, dest: string): void {
 
 /**
  * Removes the plugin copies in `dir` other than `keep`, except those still running. Windows refuses to delete a
- * running executable, so a copy whose runtime cannot be deleted is left to the session using it and tried again later.
+ * running executable, so a copy whose `node.exe` cannot be deleted is left whole to the session using it and tried
+ * again later.
  */
 export function prunePlugins(dir = COPIES, keep = [registeredRoot(), MARKETPLACE]): void {
   let names: string[];
@@ -91,7 +93,7 @@ export function prunePlugins(dir = COPIES, keep = [registeredRoot(), MARKETPLACE
     const pid = Number(/\.partial-(\d+)$/.exec(name)?.[1]);
     if (pid && alive(pid)) continue;
     try {
-      fs.rmSync(path.join(copy, 'runtime'), { recursive: true, force: true });
+      fs.rmSync(path.join(copy, 'runtime', 'node.exe'), { force: true });
       fs.rmSync(copy, { recursive: true, force: true });
     } catch {
       /* In use. */
@@ -116,7 +118,6 @@ export async function register(): Promise<Registration> {
   const marketplaces = await claudeJSON<Marketplace[]>(['plugin', 'marketplace', 'list']);
   if (!marketplaces) return { ok: false, detail: 'Claude Code was not found. Install it, then try again.' };
   const current = marketplaces.find((entry) => entry.name === 'crew');
-  const fromSource = (folder: string) => fs.existsSync(folder) && !fs.existsSync(path.join(folder, 'plugin', '.claude-plugin', 'build'));
   const root = registeredRoot();
   if (PACKAGED && current?.path && !samePath(current.path, root) && fromSource(current.path)) {
     return { ok: true, detail: `Registered from a source checkout (${current.path}); the app leaves it as it is.` };
@@ -140,6 +141,22 @@ export async function register(): Promise<Registration> {
   if (PACKAGED) fs.writeFileSync(RECORD, `${JSON.stringify({ root, version: VERSION, build: installed().build }, null, 2)}\n`);
   if (COPIED) prunePlugins();
   return { ok: true, detail: step ? 'Installed. Open a new Claude Code session, or run /reload-plugins, to load it.' : 'Up to date.' };
+}
+
+/** A marketplace folder holding a source checkout rather than a built copy: a developer's install. */
+const fromSource = (folder: string) => fs.existsSync(folder) && !fs.existsSync(path.join(folder, 'plugin', '.claude-plugin', 'build'));
+
+/**
+ * Whether Claude Code no longer reads the plugin from the copy this app registered, although the record says it does.
+ * This was seen right after a registration, likely another Claude Code process starting meanwhile and writing back the
+ * marketplace it had loaded.
+ */
+export async function registrationMoved(): Promise<boolean> {
+  if (!COPIED) return false;
+  const plugin = (await claudeJSON<InstalledPlugin[]>(['plugin', 'list']))?.find((entry) => entry.id === 'crew@crew');
+  // A plugin the user removed stays removed.
+  if (!plugin?.readFromFolder) return false;
+  return !samePath(plugin.readFromFolder, path.join(registeredRoot(), 'plugin')) && !fromSource(path.resolve(plugin.readFromFolder, '..'));
 }
 
 /**

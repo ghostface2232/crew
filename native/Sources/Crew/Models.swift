@@ -105,7 +105,7 @@ struct Evidence: Codable, Sendable, Equatable {
 struct Worktree: Codable, Sendable, Equatable { var path: String; var branch: String; var base: String }
 struct Waiting: Codable, Sendable, Equatable {
     var type: String; var reason: String; var id: String; var since: Double
-    /// What "Allow for this job" covers; present only on plugin tool approvals that name their target.
+    /// What "Allow for This Job" covers; present only on plugin tool approvals that name their target.
     var grant: String?
 }
 struct JobResult: Codable, Sendable, Equatable { var files: [String]; var stat: String; var commit: String?; var outOfScope: [String] }
@@ -171,8 +171,8 @@ struct Mission: Codable, Sendable, Identifiable, Equatable {
             return name + (round > 1 ? " \(round)" : "")
         } ?? Self.steps
     }
-    /// Locks the mission's own controls per state: Stop tracking and Mark done exclude each other while it runs,
-    /// and once it is abandoned, Mark done takes a fresh lock.
+    /// Locks the mission's own controls per state: Stop Tracking and Mark Done exclude each other while it runs,
+    /// and once it is abandoned, Mark Done takes a fresh lock.
     var actionKey: String { "mission:\(id):\(state)" }
     func passed(_ index: Int) -> Bool { state == "done" || index < step }
     func jobStep(_ job: Job) -> Int {

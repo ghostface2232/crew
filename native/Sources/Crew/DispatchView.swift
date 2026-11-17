@@ -27,7 +27,6 @@ struct DispatchView: View {
     private static let fieldHeight: CGFloat = 22
     @Bindable var store: CrewStore
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.colorScheme) private var scheme
     @State private var directory: String
     @State private var intent = "command"
     @State private var destination = "project"
@@ -70,7 +69,7 @@ struct DispatchView: View {
                 field("Project") {
                     HStack(spacing: Space.m) {
                         TextField("Project directory", text: $directory, prompt: Text("/path/to/repository"))
-                            .textFieldStyle(.roundedBorder).labelsHidden().accessibilityLabel("Project directory")
+                            .surfaceTextField().labelsHidden().accessibilityLabel("Project directory")
                         Button("Choose…", systemImage: "folder") { chooseFolder() }.pillButton().accessibilityLabel("Choose project directory")
                     }
                 }
@@ -86,7 +85,7 @@ struct DispatchView: View {
                     }
                     if role == "polish" {
                         field("Allowed files or directories") {
-                            TextField("One path per line", text: $targets, axis: .vertical).textFieldStyle(.roundedBorder).lineLimit(3...6)
+                            TextField("One path per line", text: $targets, axis: .vertical).lineLimit(3...6).surfaceTextField()
                         }
                     }
                 }
@@ -110,7 +109,7 @@ struct DispatchView: View {
                         .font(Typeface.caption).foregroundStyle(.secondary)
                 }
             }
-            if !error.isEmpty { Label(error, systemImage: "exclamationmark.circle").foregroundStyle(Palette.danger.ink(scheme)).textSelection(.enabled) }
+            if !error.isEmpty { ErrorLabel(message: error) }
             HStack(spacing: Space.m) {
                 Spacer()
                 Button("Cancel") { if dirty { confirmingDiscard = true } else { dismiss() } }.pillButton().keyboardShortcut(.cancelAction).disabled(sending)

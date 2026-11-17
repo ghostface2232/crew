@@ -102,14 +102,15 @@
 .standings { border-radius: var(--row-radius); background: var(--surface); box-shadow: 0 0 0 1px var(--hairline); overflow: hidden; }
 .row {
   display: flex;
-  align-items: center;
+  /* A summary can make the row tall; the rank, mark and ring stay with its first lines. */
+  align-items: flex-start;
   gap: 12px;
-  padding: 14px 16px 14px 12px;
+  padding: 14px;
   animation: score-rise 420ms var(--ease-out) both;
   animation-delay: calc(var(--i) * 50ms + 120ms);
 }
 .row + .row { box-shadow: inset 0 1px var(--hairline); }
-.rank { flex: none; width: 20px; color: var(--secondary); font: 600 15px/1 var(--rounded); font-variant-numeric: tabular-nums; text-align: center; }
+.rank { flex: none; width: 20px; color: var(--secondary); font: 600 15px/34px var(--rounded); font-variant-numeric: tabular-nums; text-align: center; }
 .rowAvatar { display: grid; flex: none; place-items: center; width: 34px; height: 34px; border-radius: 50%; corner-shape: round; background: var(--fill); color: var(--label); }
 .rowText { position: relative; display: grid; gap: 3px; flex: 1; min-width: 0; }
 .rowHead { display: flex; align-items: center; gap: 8px; min-width: 0; }

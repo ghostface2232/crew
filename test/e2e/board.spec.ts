@@ -60,7 +60,7 @@ test('a quiet ended workload looks finished and the authenticated user can mark 
   const card = page.locator('[data-key="mission-1"]');
   await expect(card.getByText('Looks finished', { exact: true })).toBeVisible();
   await card.getByRole('button', { name: 'Mission options' }).click();
-  await page.getByRole('menuitem', { name: 'Mark done' }).click();
+  await page.getByRole('menuitem', { name: 'Mark Done' }).click();
   await expect(card.locator('.mission-head .chip')).toHaveText('Done');
   await expect(card.locator('.mission-progress')).toHaveText('100%');
   await expect(card.getByText('Looks finished', { exact: true })).toHaveCount(0);
@@ -72,18 +72,18 @@ test('a quiet ended workload looks finished and the authenticated user can mark 
   expect(calls).toEqual([{ route: '/api/missions/mission-1', body: { done: true, outcome: 'Marked done on the board.' } }]);
 });
 
-test('a mission dropped with Stop tracking can still be marked done, reopening it explicitly', async ({ page, request }) => {
+test('a mission dropped with Stop Tracking can still be marked done, reopening it explicitly', async ({ page, request }) => {
   await page.goto('about:blank');
   await request.post('/__reset', { data: { auth: true } });
   await page.goto(`/#token=${TEST_TOKEN}`);
   await expect(page.getByText('Live', { exact: true })).toBeVisible();
   const card = page.locator('[data-key="mission-1"]');
   await card.getByRole('button', { name: 'Mission options' }).click();
-  await page.getByRole('menuitem', { name: 'Stop tracking' }).click();
+  await page.getByRole('menuitem', { name: 'Stop Tracking' }).click();
   await expect(card.locator('.mission-head .chip')).toHaveText('Abandoned');
   await card.getByRole('button', { name: 'Mission options' }).click();
-  await expect(page.getByRole('menuitem', { name: 'Stop tracking' })).toHaveCount(0);
-  await page.getByRole('menuitem', { name: 'Mark done' }).click();
+  await expect(page.getByRole('menuitem', { name: 'Stop Tracking' })).toHaveCount(0);
+  await page.getByRole('menuitem', { name: 'Mark Done' }).click();
   await expect(card.locator('.mission-head .chip')).toHaveText('Done');
   const calls = await (await request.get('/__requests')).json();
   expect(calls).toEqual([
@@ -241,7 +241,7 @@ test('detail panel cancels, follows up, and escapes task text', async ({ page, r
   // Return adds a newline; only the button sends.
   await message.press('Enter');
   expect((await (await request.get('/__requests')).json()).some((call: { route: string }) => call.route.endsWith('/reply'))).toBe(false);
-  await drawer.getByRole('button', { name: 'Send message' }).click();
+  await drawer.getByRole('button', { name: 'Send Message' }).click();
   await expect(message).toHaveValue('');
   await drawer.getByRole('button', { name: 'Cancel Job' }).click();
   await expect(drawer.getByText('Cancelled', { exact: true }).first()).toBeVisible();
@@ -1177,7 +1177,7 @@ test('a session row opens its own panel and closes it again, as job rows do', as
   await row.click();
   const panel = page.getByRole('dialog');
   await expect(panel.getByText('Claude · Lead', { exact: true })).toBeVisible();
-  await expect(panel.getByRole('button', { name: 'Resume command' })).toBeVisible();
+  await expect(panel.getByRole('button', { name: 'Resume Command' })).toBeVisible();
   // The page beside the panel stays usable: the same row closes it.
   await row.click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
@@ -1205,7 +1205,7 @@ test('a closed mission opens from a click anywhere on it and closes from its tit
   await expect(card.locator('.track')).toBeHidden();
 });
 
-test('a finished-looking mission offers Mark done beside its outcome, and a dropped one marks its stopping step', async ({ page, request }) => {
+test('a finished-looking mission offers Mark Done beside its outcome, and a dropped one marks its stopping step', async ({ page, request }) => {
   const data = fixture();
   data.missions[0].stages = ['implement', 'cross-review', 'final'];
   data.missions[0].stage = 'cross-review';
@@ -1214,7 +1214,7 @@ test('a finished-looking mission offers Mark done beside its outcome, and a drop
   data.claude.forEach((session) => { session.state = 'idle'; });
   await request.post('/__push', { data: { type: 'state', data } });
   const card = page.locator('[data-key="mission-1"]');
-  await card.locator('.mission-foot').getByRole('button', { name: 'Mark done' }).click();
+  await card.locator('.mission-foot').getByRole('button', { name: 'Mark Done' }).click();
   await expect(card.locator('.mission-head .chip')).toHaveText('Done');
   data.missions[0] = { ...data.missions[0], state: 'abandoned', endedAt: NOW };
   await request.post('/__push', { data: { type: 'state', data } });

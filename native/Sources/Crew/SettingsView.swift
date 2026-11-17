@@ -14,7 +14,7 @@ enum SettingsPane: Hashable, Identifiable {
     var scope: String? { switch self { case .instructions: ""; case .project(let path): path; default: nil } }
     var systemImage: String {
         switch self {
-        case .about: "arrow.down.circle.fill"
+        case .about: "info.circle.fill"
         case .build: "hammer.fill"
         case .review: "checkmark.shield.fill"
         case .edit: "textformat"
@@ -43,6 +43,7 @@ struct CrewSettingsView: View {
     /// Fixed, as in System Settings; the window pins it (CrewApp.openSettings).
     static let sidebarWidth: CGFloat = 180
     private static let editorHeight: CGFloat = 260
+    private static let aboutIconSize: CGFloat = 56
     @Bindable var model: SettingsModel
     var store: CrewStore
     @Environment(AppUpdater.self) private var updater
@@ -187,30 +188,35 @@ struct CrewSettingsView: View {
         Section {
             HStack(spacing: Space.l) {
                 Image(nsImage: NSApp.applicationIconImage).resizable().interpolation(.high).scaledToFit()
-                    .frame(width: 56, height: 56).accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 2) {
+                    .frame(width: Self.aboutIconSize, height: Self.aboutIconSize).accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: Space.xxs) {
                     Text("Crew").font(.title3.weight(.semibold))
                     Text("Version \(updater.current)").foregroundStyle(.secondary)
                 }
             }.padding(.vertical, Space.xs)
         }
         Section {
-            LabeledContent {
-                switch updater.phase {
-                case .unsupported: EmptyView()
-                case .installing where updater.waiting != nil:
-                    Button("Cancel Update") { updater.failed() }
-                case .ready, .installing:
-                    Button("Restart to Update") { updater.onInstall() }
-                        .buttonStyle(.borderedProminent).disabled(updater.phase == .installing)
-                case .available:
-                    Button("Download Now") { Task { await updater.checkNow() } }
-                case .idle, .checking, .downloading:
-                    Button("Check for Updates") { Task { await updater.checkNow() } }
-                        .disabled(updater.phase != .idle)
-                }
-            } label: {
+            // Centered rather than a LabeledContent: a form row pins its label's baseline at the height of a text row,
+            // so a button taller than the text would run into the row's top padding and leave more room below it.
+            // The small button is kept out of the row's height, so this row is as tall as the text rows around it.
+            HStack {
                 Text(updater.summary)
+                Spacer()
+                Group {
+                    switch updater.phase {
+                    case .unsupported: EmptyView()
+                    case .installing where updater.waiting != nil:
+                        Button("Cancel Update") { updater.failed() }
+                    case .ready, .installing:
+                        Button("Restart to Update") { updater.onInstall() }
+                            .buttonStyle(.borderedProminent).disabled(updater.phase == .installing)
+                    case .available:
+                        Button("Download Now") { Task { await updater.checkNow() } }
+                    case .idle, .checking, .downloading:
+                        Button("Check for Updates") { Task { await updater.checkNow() } }
+                            .disabled(updater.phase != .idle)
+                    }
+                }.controlSize(.small).frame(height: 0)
             }
             if updater.phase == .downloading {
                 ProgressView(value: updater.progress).accessibilityLabel("Download progress")
@@ -220,7 +226,7 @@ struct CrewSettingsView: View {
             }
         } footer: {
             VStack(alignment: .leading, spacing: Space.s) {
-                if let error = updater.error { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.secondary) }
+                if let error = updater.error { ErrorLabel(message: error) }
                 Text(updater.phase == .unsupported
                     ? "This copy of Crew is not running from an app bundle, so it cannot update itself."
                     : "Crew checks for a new version every few hours and downloads it while you are away from the app. Nothing is installed until you choose Restart to Update. If jobs are running, the update waits for them to finish; jobs, missions and settings are kept.")
@@ -340,18 +346,22 @@ private struct SettingsPaneIcon: View {
 /// The app's own row, which opens About Crew; a dot marks an update ready to install.
 private struct SettingsAppRow: View {
     let ready: Bool
+    private static let iconSize: CGFloat = 36
+    /// White on the accent of a selected row, where the accent dot would vanish.
+    @Environment(\.backgroundProminence) private var prominence
     private let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
     var body: some View {
         HStack(spacing: Space.ml) {
             Image(nsImage: NSApp.applicationIconImage).resizable().interpolation(.high).scaledToFit()
-                .frame(width: 36, height: 36).accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 1) {
+                .frame(width: Self.iconSize, height: Self.iconSize).accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: Space.xxs) {
                 Text("Crew").font(.body.weight(.semibold))
                 if let version { Text("v\(version)").font(.subheadline).foregroundStyle(.secondary) }
             }
             if ready {
                 Spacer(minLength: 0)
-                Circle().fill(.tint).frame(width: 8, height: 8).accessibilityLabel("Update ready")
+                Circle().fill(prominence == .increased ? AnyShapeStyle(.white) : AnyShapeStyle(.tint))
+                    .frame(width: Symbol.indicator, height: Symbol.indicator).accessibilityLabel("Update ready")
             }
         }.padding(.vertical, Space.xs)
     }

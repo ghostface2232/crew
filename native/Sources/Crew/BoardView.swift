@@ -130,7 +130,7 @@ struct BoardView: View {
     }
     private func matches(_ text: String) -> Bool { store.search.isEmpty || text.localizedCaseInsensitiveContains(store.search) }
     private var connectionBanner: some View {
-        HStack(alignment: .top) {
+        HStack(alignment: .firstTextBaseline, spacing: Space.l) {
             Label(store.connectionMessage, systemImage: "wifi.exclamationmark").font(Typeface.callout).textSelection(.enabled)
             Spacer()
             Button("Retry") { store.start() }.pillButton()
@@ -143,7 +143,7 @@ struct BoardView: View {
                 Text("\(store.state.pendingCount) \(store.state.pendingCount == 1 ? "request needs" : "requests need") your attention").font(Typeface.bodyStrong)
                 Spacer()
                 Text("Review").font(Typeface.callout)
-                Image(systemName: "chevron.right").font(Typeface.captionStrong)
+                Image(systemName: "chevron.right").font(Typeface.micro)
             }.padding(WorkspaceStyle.bannerPadding).contentShape(Rectangle())
         }.buttonStyle(.plain).glassEffect(.regular, in: .rect(cornerRadius: WorkspaceStyle.cardRadius))
     }
@@ -172,7 +172,7 @@ struct BoardView: View {
         VStack(alignment: .leading, spacing: Space.xxl) {
             WorkspaceHeading(title: title, subtitle: store.project.isEmpty ? nil : store.project)
             if overview && pending > 0 {
-                Button("Review requests", systemImage: "arrow.up.right") { store.selection = "needs"; store.search = "" }
+                Button("Review Requests", systemImage: "arrow.up.right") { store.selection = "needs"; store.search = "" }
                     .glassPillButton(prominent: false)
             }
         }
@@ -491,11 +491,11 @@ struct MissionPanel: View {
         let locked = !store.connected || store.actions[mission.actionKey]?.locked == true
         // In the warning color: it drops the mission without completing it. An abandoned one is already dropped.
         if mission.state == "active" {
-            Button("Stop tracking", systemImage: "xmark.circle") { Task { await store.dismiss(mission) } }
+            Button("Stop Tracking", systemImage: "xmark.circle") { Task { await store.dismiss(mission) } }
                 .pillButton(.warning)
                 .help("Stops tracking without marking done. Its jobs keep running.").disabled(locked)
         }
-        Button("Mark done", systemImage: "checkmark.circle") { Task { await store.markDone(mission) } }
+        Button("Mark Done", systemImage: "checkmark.circle") { Task { await store.markDone(mission) } }
             .pillButton(.prominent).disabled(locked)
     }
     /// Animated from here rather than inside the card, so the cards below move with it instead of jumping.
@@ -536,19 +536,8 @@ struct NeedsYouView: View {
             ForEach(jobs) { job in
                 VStack(alignment: .leading, spacing: Space.xl) {
                     VStack(alignment: .leading, spacing: Space.ml) {
-                        HStack(spacing: Space.ml) {
-                            StatusLabel(state: "waiting", title: job.waiting?.type == "approval" ? "Approval" : "Question")
-                            HStack(spacing: Space.s) {
-                                AgentMark(agent: job.agent, size: MarkSize.inline)
-                                Text("\(agentName(job.agent)) · \(projectName(job.projectPath, among: store.projects))").lineLimit(1)
-                            }.font(Typeface.chip).foregroundStyle(.secondary).help(job.projectPath)
-                            Spacer(minLength: WorkspaceStyle.rowSpacer)
-                            // How long the request has waited, as the web board's request cards show.
-                            if let since = job.waiting?.since {
-                                ElapsedText(store: store, start: since, end: nil).font(Typeface.chip).monospacedDigit().foregroundStyle(.secondary)
-                            }
-                            Button("Details", systemImage: "arrow.up.right") { store.openJob(job.id) }.pillButton()
-                        }
+                        requestHeader(job.waiting?.type == "approval" ? "Approval" : "Question", agent: job.agent, who: agentName(job.agent),
+                                      project: job.projectPath, since: job.waiting?.since) { store.openJob(job.id) }
                         Text(job.title).font(Typeface.callout).foregroundStyle(.secondary).lineLimit(2).help(job.title)
                     }
                     AnswerView(store: store, job: job)
@@ -556,13 +545,33 @@ struct NeedsYouView: View {
                 .frame(maxWidth: .infinity, alignment: .leading).card()
                 .transition(.card)
             }
+            // As on the web board: a Claude session is answered in Claude itself, so its tile says so instead of offering a composer.
+            ForEach(sessions) { session in
+                VStack(alignment: .leading, spacing: Space.xl) {
+                    requestHeader("Claude", agent: "claude", who: session.title, project: session.projectPath) { store.openSession(session.id) }
+                    Text(session.waitingFor ?? "Claude needs your input.").font(Typeface.headline).lineSpacing(4).textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
+                    Label("Answer in Claude.", systemImage: "bubble.left.and.bubble.right").font(Typeface.callout).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading).card()
+                .transition(.card)
+            }
         }
-        ForEach(sessions) { session in
-            ContentPanel(title: session.title, symbol: "bubble.left.and.bubble.right") {
-                Text(session.waitingFor ?? "Claude needs your input.").textSelection(.enabled)
-                Text(session.projectPath).font(Typeface.caption).foregroundStyle(.secondary)
-                Text("Answer in Claude.").font(Typeface.callout).foregroundStyle(.secondary)
-            }.transition(.card)
+    }
+    /// A request tile's first line: what kind of request it is, who asks and from where, how long it has waited, and Details.
+    private func requestHeader(_ kind: String, agent: String, who: String, project: String, since: Double? = nil, details: @escaping () -> Void) -> some View {
+        HStack(spacing: Space.ml) {
+            StatusLabel(state: "waiting", title: kind)
+            HStack(spacing: Space.s) {
+                AgentMark(agent: agent, size: MarkSize.inline)
+                Text("\(who) · \(projectName(project, among: store.projects))").lineLimit(1)
+            }.font(Typeface.chip).foregroundStyle(.secondary).help(project)
+            Spacer(minLength: WorkspaceStyle.rowSpacer)
+            // How long the request has waited, as the web board's request cards show.
+            if let since {
+                ElapsedText(store: store, start: since, end: nil).font(Typeface.chip).monospacedDigit().foregroundStyle(.secondary)
+            }
+            Button("Details", systemImage: "arrow.up.right", action: details).pillButton()
         }
     }
 }
@@ -608,11 +617,11 @@ struct ProjectSidebar: View {
                         HStack(spacing: Space.s) {
                             Label(updateTitle, systemImage: "arrow.down.circle.fill")
                             Spacer(minLength: 0)
-                            Text(updater.latest ?? "").font(.caption).monospacedDigit().opacity(0.7)
+                            Text(updater.latest ?? "").font(Typeface.caption).monospacedDigit().foregroundStyle(.tint.secondary)
                         }
                         .font(Typeface.bodyStrong)
                         .padding(.horizontal, Space.ml).padding(.vertical, Space.m)
-                        .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius))
+                        .background(Palette.chip(Palette.accent), in: RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius))
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain).foregroundStyle(.tint)

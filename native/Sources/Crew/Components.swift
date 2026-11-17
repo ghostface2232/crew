@@ -34,15 +34,39 @@ struct StatusLabel: View {
         default: return .secondary
         }
     }
+    var body: some View {
+        Label(title ?? state.capitalized, systemImage: symbol).chip(color)
+    }
+}
+
+/// A chip's face: chip type inked in its color, on that color's tint, outlined under Increase Contrast.
+private struct ChipStyle: ViewModifier {
+    let color: Color
     @Environment(\.colorScheme) private var scheme
     @Environment(\.colorSchemeContrast) private var contrast
-    var body: some View {
+    func body(content: Content) -> some View {
         let text = color.ink(scheme)
-        Label(title ?? state.capitalized, systemImage: symbol)
+        content
             .font(Typeface.chip).foregroundStyle(text).lineLimit(1).fixedSize()
             .padding(Chip.insets)
             .background(Palette.chip(color), in: Capsule())
             .overlay { if contrast == .increased { Capsule().strokeBorder(text.opacity(0.5)) } }
+    }
+}
+
+extension View {
+    /// A status chip's face in `color`, as `StatusLabel` draws it.
+    func chip(_ color: Color) -> some View { modifier(ChipStyle(color: color)) }
+    /// A text field's or editor's surface: the card's surface in a hairline outline.
+    func fieldSurface() -> some View {
+        background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: WorkspaceStyle.fieldRadius))
+            .overlay(RoundedRectangle(cornerRadius: WorkspaceStyle.fieldRadius).strokeBorder(WorkspaceStyle.hairline))
+    }
+    /// A typed-in text field on `fieldSurface`, at a pill's height so it lines up with the pills beside it.
+    func surfaceTextField() -> some View {
+        textFieldStyle(.plain).font(Typeface.body)
+            .padding(.horizontal, Space.ml).padding(.vertical, Pill.insets.top)
+            .fieldSurface()
     }
 }
 
@@ -87,11 +111,19 @@ struct ContentPanel<Content: View>: View {
     }
 }
 
-struct ActionMessage: View {
-    var state: ActionState?
+/// An error in words, the same wherever one shows; the caller sets its type.
+struct ErrorLabel: View {
+    let message: String
     @Environment(\.colorScheme) private var scheme
     var body: some View {
-        if let error = state?.error { Label(error, systemImage: "exclamationmark.circle").foregroundStyle(Palette.danger.ink(scheme)).font(Typeface.callout).textSelection(.enabled) }
+        Label(message, systemImage: "exclamationmark.circle").foregroundStyle(Palette.danger.ink(scheme)).textSelection(.enabled)
+    }
+}
+
+struct ActionMessage: View {
+    var state: ActionState?
+    var body: some View {
+        if let error = state?.error { ErrorLabel(message: error).font(Typeface.callout) }
         else if state?.pending == true { ProgressView().controlSize(.small).accessibilityLabel("Sending") }
         else if state?.accepted == true { Label("Sent", systemImage: "checkmark").foregroundStyle(.secondary).font(Typeface.callout) }
     }
@@ -112,7 +144,7 @@ struct CopyButton: View {
         .pillButton().morphs(on: copied)
         .help(help ?? title)
         // The title names only what is copied; VoiceOver hears the action too.
-        .accessibilityLabel(copied ? "Copied" : "Copy \(title.prefix(1).lowercased() + title.dropFirst())")
+        .accessibilityLabel(copied ? "Copied" : "Copy \(title.lowercased())")
         .task(id: copied) {
             if copied {
                 try? await Task.sleep(for: .seconds(2))
@@ -125,17 +157,30 @@ struct CopyButton: View {
 struct MessageEditor: View {
     var title: String
     @Binding var text: String
+    var prompt: String? = nil
     var disabled = false
     var body: some View {
-        TextEditor(text: $text)
-            .font(Typeface.body)
-            .scrollContentBackground(.hidden)
-            .padding(Space.ml)
-            .frame(minHeight: WorkspaceStyle.editorHeight.lowerBound, maxHeight: WorkspaceStyle.editorHeight.upperBound)
-            .background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: WorkspaceStyle.fieldRadius))
-            .overlay(RoundedRectangle(cornerRadius: WorkspaceStyle.fieldRadius).strokeBorder(WorkspaceStyle.hairline))
-            .accessibilityLabel(title)
-            .disabled(disabled)
+        ZStack(alignment: .topLeading) {
+            TextEditor(text: $text)
+                .font(Typeface.body).lineSpacing(2)
+                .scrollContentBackground(.hidden)
+                .accessibilityLabel(title)
+            if let prompt, text.isEmpty { FieldPrompt(text: prompt) }
+        }
+        .padding(Space.ml)
+        .frame(minHeight: WorkspaceStyle.editorHeight.lowerBound, maxHeight: WorkspaceStyle.editorHeight.upperBound)
+        .fieldSurface()
+        .disabled(disabled)
+    }
+}
+
+/// A text editor's placeholder, laid over it.
+private struct FieldPrompt: View {
+    let text: String
+    var body: some View {
+        Text(text).font(Typeface.body).foregroundStyle(.tertiary)
+            // The text view's own line fragment padding, so the placeholder sits where typing starts.
+            .padding(.leading, 5).allowsHitTesting(false).accessibilityHidden(true)
     }
 }
 
@@ -167,7 +212,7 @@ struct AnswerView: View {
                         Spacer(minLength: 0)
                         decision("Deny", symbol: "xmark", value: "deny", prominent: false)
                         if let grant = waiting.grant {
-                            decision("Allow for this job", symbol: "checkmark.circle", value: "allow_for_job", prominent: false)
+                            decision("Allow for This Job", symbol: "checkmark.circle", value: "allow_for_job", prominent: false)
                                 .help("Also allow this job's later requests for \(grant), without asking")
                         }
                         decision("Approve", symbol: "checkmark", value: "approve", prominent: true)
@@ -184,23 +229,18 @@ struct AnswerView: View {
                 .scrollContentBackground(.hidden)
                 .frame(minHeight: WorkspaceStyle.answerHeight.lowerBound, maxHeight: WorkspaceStyle.answerHeight.upperBound)
                 .accessibilityLabel("Your answer")
-            if draft.wrappedValue.isEmpty {
-                Text("Write an answer…").font(Typeface.body).foregroundStyle(.tertiary)
-                    // The text view's own line fragment padding, so the placeholder sits where typing starts.
-                    .padding(.leading, 5).allowsHitTesting(false).accessibilityHidden(true)
-            }
+            if draft.wrappedValue.isEmpty { FieldPrompt(text: "Write an answer…") }
         }
         // The trailing room keeps text clear of the send button laid over the corner: its diameter and inset.
         .padding(.leading, Space.ml).padding(.top, Space.ml).padding(.trailing, IconButton.diameter + Space.m * 2).padding(.bottom, Space.m)
         .overlay(alignment: .bottomTrailing) {
-            Button("Send answer", systemImage: "arrow.up") {
+            Button("Send Answer", systemImage: "arrow.up") {
                 Task { await store.answer(job, message: draft.wrappedValue) }
             }
             .iconButton(prominent: true)
-            .disabled(!canSend).help("Send answer").padding(Space.m)
+            .disabled(!canSend).help("Send Answer").padding(Space.m)
         }
-        .background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: WorkspaceStyle.fieldRadius))
-        .overlay(RoundedRectangle(cornerRadius: WorkspaceStyle.fieldRadius).strokeBorder(WorkspaceStyle.hairline))
+        .fieldSurface()
         .disabled(locked)
     }
     @ViewBuilder private func decision(_ title: String, symbol: String, value: String, prominent: Bool) -> some View {
@@ -303,18 +343,21 @@ struct EventList: View {
     var body: some View {
         LazyVStack(alignment: .leading, spacing: Space.xl) {
             ForEach(events.reversed()) { event in
-                HStack(alignment: .top, spacing: Space.l) {
+                HStack(alignment: .firstTextBaseline, spacing: Space.l) {
                     Image(systemName: event.kind == "error" ? "exclamationmark.circle" : event.kind == "done" ? "checkmark.circle" : "circle.fill")
-                        .font(Typeface.caption).foregroundStyle(event.kind == "error" ? Palette.danger : .secondary).frame(width: Symbol.controlFrame).padding(.top, Space.xs)
+                        .font(Typeface.caption).foregroundStyle(event.kind == "error" ? Palette.danger : .secondary).frame(width: Symbol.controlFrame)
                     VStack(alignment: .leading, spacing: Space.xs) {
-                        HStack {
+                        HStack(alignment: .firstTextBaseline) {
                             Text(agentName(event.agent)).font(Typeface.calloutStrong)
                             if let date = ISO8601DateFormatter.crew.date(from: event.ts) {
                                 Text(date, style: .time).font(Typeface.caption).monospacedDigit().foregroundStyle(.secondary)
                             }
                             Spacer()
+                        }
+                        // Laid over the line rather than in it, so a row with a job is as tall as one without.
+                        .overlay(alignment: .trailing) {
                             if let id = event.job_id, let openJob {
-                                Button("Show job", systemImage: "arrow.up.right") { openJob(id) }.iconButton().help("Show job")
+                                Button("Show Job", systemImage: "arrow.up.right") { openJob(id) }.iconButton().help("Show Job")
                             }
                         }
                         Text(event.detail).font(Typeface.callout).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)

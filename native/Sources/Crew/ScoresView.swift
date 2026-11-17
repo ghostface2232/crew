@@ -43,10 +43,10 @@ struct ModelPodium: View {
     @Environment(\.colorScheme) private var scheme
     private static let heights: [CGFloat] = [92, 68, 52]
     var body: some View {
-        HStack(alignment: .bottom, spacing: 6) {
+        HStack(alignment: .bottom, spacing: Space.s) {
             ForEach([1, 0, 2].filter { $0 < top.count }, id: \.self) { index in place(index) }
         }
-        .padding(.horizontal, top.count == 2 ? 80 : 12)
+        .padding(.horizontal, top.count == 2 ? 80 : Space.l)
         .padding(.top, Space.xxl)
         .frame(maxWidth: .infinity)
         // A grouped Form insets the row within its card and ignores listRowInsets and listRowBackground, so nothing
@@ -63,33 +63,33 @@ struct ModelPodium: View {
         let medal = medals[index]
         let order = Double(2 - index)
         return VStack(spacing: Space.ml) {
-            VStack(spacing: 6) {
+            VStack(spacing: Space.s) {
                 if index == 0 {
                     Image(systemName: "trophy.fill").font(.system(size: 16)).foregroundStyle(medal.gradient)
                 }
                 ZStack(alignment: .bottomTrailing) {
                     Circle().fill(.quaternary).frame(width: index == 0 ? 60 : 50, height: index == 0 ? 60 : 50)
-                        .overlay { AgentMark(agent: score.agent, size: index == 0 ? 28 : 22) }
+                        .overlay { AgentMark(agent: score.agent, size: index == 0 ? 28 : MarkSize.card) }
                         .overlay { Circle().strokeBorder(medal.opacity(0.85), lineWidth: 2.5).padding(-4) }
                     Text("\(index + 1)").font(.system(size: 11, weight: .bold, design: .rounded)).foregroundStyle(.black.opacity(0.72))
                         .frame(width: 20, height: 20).background(medal, in: Circle()).offset(x: 4, y: 4)
                 }
-                .padding(4)
-                Text(score.model).font(.body.weight(.medium)).lineLimit(1).truncationMode(.tail).padding(.top, 2)
-                HStack(alignment: .firstTextBaseline, spacing: 2) {
-                    Text(score.shown).font(.system(size: 17, weight: .semibold, design: .rounded)).monospacedDigit()
+                .padding(Space.xs)
+                Text(score.model).font(Typeface.bodyStrong).lineLimit(1).truncationMode(.tail).padding(.top, Space.xxs)
+                HStack(alignment: .firstTextBaseline, spacing: Space.xxs) {
+                    Text(score.shown).font(Typeface.cardTitle).monospacedDigit()
                         .contentTransition(.numericText(value: score.score ?? 0))
                     Text("/10").font(.system(size: 11, weight: .medium, design: .rounded)).foregroundStyle(.secondary)
                 }
                 // The glass carries the tone; the number stays in the label color, since a toned number on toned
                 // glass falls under 2:1 (blue measured 1.8:1 in dark).
                 .foregroundStyle(.primary)
-                .padding(.horizontal, 10).padding(.vertical, 4)
+                .padding(.horizontal, Space.ml).padding(.vertical, Space.xs)
                 .glassEffect(.regular.tint(score.tone.opacity(0.3)), in: .capsule)
             }
             .opacity(shown ? 1 : 0).offset(y: shown ? 0 : 10).blur(radius: shown ? 0 : 4)
             .animation(reduceMotion ? nil : .spring(duration: 0.55, bounce: 0.15).delay(0.26 + order * 0.09), value: shown)
-            UnevenRoundedRectangle(topLeadingRadius: 12, topTrailingRadius: 12, style: .continuous)
+            UnevenRoundedRectangle(topLeadingRadius: WorkspaceStyle.rowRadius, topTrailingRadius: WorkspaceStyle.rowRadius, style: .continuous)
                 .fill(LinearGradient(colors: [medal.opacity(0.32), medal.opacity(0)], startPoint: .top, endPoint: .bottom))
                 .overlay(alignment: .top) {
                     Text("\(index + 1)").font(.system(size: 30, weight: .semibold, design: .rounded))
@@ -131,13 +131,13 @@ private struct ScoreBar: View {
     let label: String
     let value: Double?
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Space.s) {
             Text(label).frame(width: 30, alignment: .leading)
             Capsule().fill(.quaternary).frame(width: 64, height: 4)
                 .overlay(alignment: .leading) { Capsule().fill(.primary.opacity(0.7)).frame(width: 64 * (value ?? 0) / 10, height: 4) }
             Text(ModelScore.shown(value)).foregroundStyle(value == nil ? .tertiary : .primary).frame(width: 24, alignment: .leading)
         }
-        .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+        .font(Typeface.caption).foregroundStyle(.secondary).monospacedDigit()
     }
 }
 
@@ -146,29 +146,25 @@ struct ModelScoreRow: View {
     let rank: Int?
     let score: ModelScore
     var settled = false
-    @Environment(\.colorScheme) private var scheme
     var body: some View {
         HStack(alignment: .center, spacing: Space.l) {
             Text(rank.map(String.init) ?? "").font(.system(size: 15, weight: .semibold, design: .rounded)).monospacedDigit().foregroundStyle(.secondary).frame(width: 18)
-            Circle().fill(.quaternary).frame(width: 34, height: 34).overlay { AgentMark(agent: score.agent, size: 18) }
-            VStack(alignment: .leading, spacing: 3) {
+            Circle().fill(.quaternary).frame(width: 34, height: 34).overlay { AgentMark(agent: score.agent, size: MarkSize.list) }
+            VStack(alignment: .leading, spacing: Space.xxs) {
                 HStack(spacing: Space.s) {
-                    Text(score.model).font(.body.weight(.medium)).lineLimit(1).textSelection(.enabled)
-                    if let band = score.band {
-                        Text(band.word).font(.caption.weight(.semibold)).foregroundStyle(band.tone.ink(scheme))
-                            .padding(.horizontal, 7).padding(.vertical, 1).background(Palette.chip(band.tone), in: Capsule())
-                    }
+                    Text(score.model).font(Typeface.bodyStrong).lineLimit(1).textSelection(.enabled)
+                    if let band = score.band { Text(band.word).chip(band.tone) }
                 }
-                Text(score.countsText).font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
+                Text(score.countsText).font(Typeface.caption).foregroundStyle(.secondary).monospacedDigit()
                 if let adoption = score.adoptionText {
-                    Text(adoption).font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
+                    Text(adoption).font(Typeface.caption).foregroundStyle(.secondary).monospacedDigit()
                 }
                 HStack(spacing: Space.xl) {
                     ScoreBar(label: "Build", value: score.build)
                     ScoreBar(label: "Fix", value: score.fix)
-                }.padding(.top, 2)
+                }.padding(.top, Space.xxs)
                 if !score.summary.isEmpty {
-                    Text(score.summary).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true).padding(.top, Space.xs)
+                    Text(score.summary).font(Typeface.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true).padding(.top, Space.xs)
                 }
             }
             // The text takes every point the ring leaves, so a line wraps only when the row is really that narrow.

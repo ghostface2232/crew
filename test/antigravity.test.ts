@@ -146,6 +146,8 @@ test('a question form waits for the user and takes a choice, their own words, or
     const request = await h.waiting(job);
     assert.equal(request.type, 'question');
     assert.equal(request.reason, 'Which color should the banner be?\n1. Red\n2. Blue');
+    await assert.rejects(h.jobs.reply(job.id, { decision: 'decline', message: 'Outside the task', request_id: request.id }), /Only an approval can be declined/);
+    assert.equal(job.waiting, request);
     await h.jobs.reply(job.id, { ...reply, request_id: request.id });
     await h.ended(job);
     assert.equal(job.state, 'done');
@@ -182,4 +184,39 @@ test('a command under any of agy\'s field names is not taken for a Crew tool cal
     assert.notEqual(decide('review', '/work', { kind: 'other', title: 'mcp_crew_ask_lead', rawInput: { [field]: 'rm -rf .' } }), 'allow');
   }
   assert.equal(decide('review', '/work', { kind: 'other', title: 'mcp_crew_ask_lead', rawInput: { question: 'why' } }), 'allow');
+});
+
+test('a lead decline rejects the request once, and its reason is the next prompt after the turn ends', { timeout: 5000 }, async (t) => {
+  // As agy 1.5.9 does: a prompt while a permission is open is refused, and a rejection ends the turn with no text.
+  const h = harness(t, `
+    const send = (message) => console.log(JSON.stringify({ jsonrpc: '2.0', ...message }));
+    let promptId, open = false, prompts = 0;
+    require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
+      const { method, id, params, result } = JSON.parse(line);
+      if (method === 'initialize') send({ id, result: { agentCapabilities: {} } });
+      else if (method === 'session/new') send({ id, result: { sessionId: 's1' } });
+      else if (method === 'session/prompt') {
+        if (open) return send({ id, error: { code: -32603, message: 'the running prompt is waiting for a permission or question answer' } });
+        if (++prompts === 1) {
+          promptId = id; open = true;
+          send({ id: 'p', method: 'session/request_permission', params: { sessionId: 's1', toolCall: { kind: 'execute', title: 'Deploy', rawInput: { CommandLine: 'make deploy' } }, options: [{ kind: 'allow_once', optionId: 'yes' }, { kind: 'reject_once', optionId: 'no' }] } });
+        } else {
+          send({ method: 'session/update', params: { sessionId: 's1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: params.prompt[0].text } } } });
+          send({ id, result: { stopReason: 'end_turn' } });
+        }
+      } else if (id === 'p') { open = false; send({ id: promptId, result: { stopReason: result.outcome.optionId === 'no' ? 'end_turn' : 'refusal' } }); }
+    });
+  `);
+  const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' });
+  const request = await h.waiting(job);
+  await assert.rejects(h.jobs.reply(job.id, { decision: 'decline', request_id: request.id }), /message with the reason/);
+  await h.jobs.reply(job.id, { decision: 'decline', message: 'Deploying is outside the task. Report the build result instead.', request_id: request.id });
+  await h.ended(job);
+  const note = `The lead declined an action: ${request.reason}\nReason: Deploying is outside the task. Report the build result instead.\nDo it another way within the task, or report what could not be done.`;
+  assert.equal(job.state, 'done');
+  // The worker's report is its answer to the reason, not the empty end of the refused turn.
+  assert.equal(job.report, note);
+  assert.equal(job.turns, 1);
+  assert.equal(job.declinedTurn, job.turns);
+  assert.deepEqual(job.notes, [note]);
 });

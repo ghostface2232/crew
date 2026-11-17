@@ -37,6 +37,8 @@ struct Job: Codable, Sendable, Identifiable, Equatable {
     var effort: String?
     var resolvedModel: String?
     var resolvedEffort: String?
+    var outcome: String?
+    var outcomeContradiction: String?
     var refusals: [Refusal]?
     var retrying: [String]?
     var runsApp: Bool?

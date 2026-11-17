@@ -270,6 +270,7 @@ export interface Job {
   waiting: { type: 'approval' | 'question'; reason: string; id: string; since: number; grant?: string } | null;
   /** The worker's final message for the latest turn. */
   report: string;
+  outcome?: 'done' | 'partial' | 'blocked';
   questions?: LeadQuestion[];
   /** Legacy event sequence of the latest lead question. Delivery uses news snapshots. */
   questionSeq?: number;
@@ -318,13 +319,20 @@ export interface Adapter {
   /** Sends a follow-up message, steering the active turn or starting a new one. */
   reply(ctl: JobCtl, message: string): Promise<void>;
   /** Resolves the pending approval or question. forJob also allows later requests with the same grant in this job. */
-  answer(ctl: JobCtl, approve: boolean, message?: string, opts?: { forJob?: boolean }): Promise<void>;
+  answer(ctl: JobCtl, approve: boolean, message?: string, opts?: { forJob?: boolean; by?: 'lead' }): Promise<void>;
   cancel(ctl: JobCtl): Promise<void>;
   /** Releases a finished session before removing its workspace. */
   release?(ctl: JobCtl): Promise<void>;
   /** Asks the agent about a job that has been silent past the stall limit. Without it, a stall is reported unconfirmed. */
   probe?(ctl: JobCtl): Promise<Probe>;
   shutdown(): void;
+}
+
+export function noteLeadDecline(ctl: JobCtl, request: string, reason: string): string {
+  const note = `The lead declined an action: ${request}\nReason: ${reason}\nDo it another way within the task, or report what could not be done.`;
+  ctl.note(note, { declined: true });
+  ctl.progress(note);
+  return note;
 }
 
 /** working: the agent confirms the turn is in progress. ended: it is certainly over, but no end was received. unknown: neither. */
@@ -376,6 +384,17 @@ export function followUps(job: Pick<Job, 'turns' | 'approvals'>): number {
 
 export function jobRole(job: Pick<Job, 'role' | 'kind' | 'debate' | 'runsApp'>): Role {
   return job.role ?? (job.debate ? 'debate' : job.kind === 'review' && job.runsApp ? 'verify' : job.kind);
+}
+
+export function expectsOutcome(job: Pick<Job, 'kind' | 'role' | 'ask' | 'debate'>): boolean {
+  return !job.ask && !job.debate && job.role !== 'debate' && (job.kind === 'delegate' || job.kind === 'polish');
+}
+
+export function parseOutcome(report: string): Job['outcome'] {
+  const heading = /^ {0,3}##[ \t]+Outcome(?:[ \t]+#+)?[ \t]*\r?$/im.exec(report);
+  if (!heading) return;
+  const line = report.slice(heading.index + heading[0].length).trimStart();
+  return /^(?:\*\*)?(done|partial|blocked)\b/i.exec(line)?.[1].toLowerCase() as Job['outcome'];
 }
 
 /**
@@ -733,7 +752,7 @@ export class Jobs {
     }
   }
 
-  async reply(id: string, input: { message?: string; decision?: 'approve' | 'deny' | 'allow_for_job'; request_id?: string; approved_by_user?: string; lead_session?: string; sync?: boolean | string; attachments?: string[] }): Promise<Job> {
+  async reply(id: string, input: { message?: string; decision?: 'approve' | 'deny' | 'allow_for_job' | 'decline'; request_id?: string; approved_by_user?: string; lead_session?: string; sync?: boolean | string; attachments?: string[] }): Promise<Job> {
     if (this.collecting) throw new Error('Crew gc is running. Try again when it finishes.');
     const job = this.get(id);
     if (job.cleanupPending) throw new Error(`Job ${id} has incomplete cleanup. Run crew gc to resolve it before continuing.`);
@@ -748,18 +767,23 @@ export class Jobs {
     if (input.request_id !== undefined && input.request_id !== job.waiting?.id) {
       throw new Error('That request is no longer pending. Check the current job before answering.');
     }
-    if (input.decision !== undefined && !['approve', 'deny', 'allow_for_job'].includes(input.decision)) {
-      throw new Error('Pass decision "approve", "deny", or "allow_for_job".');
+    if (input.decision !== undefined && !['approve', 'deny', 'allow_for_job', 'decline'].includes(input.decision)) {
+      throw new Error('Pass decision "approve", "deny", "allow_for_job", or "decline".');
     }
     if (job.waiting) {
       if (input.approved_by_user !== undefined) throw new Error(`Job ${id} is waiting on the user (${job.waiting.reason}). approved_by_user is for an action the automatic reviewer refused in a finished turn; call wait so the user is asked.`);
       if (!input.request_id) throw new Error('Pass the request_id shown in the current job status.');
+      const decline = input.decision === 'decline';
+      if (decline) {
+        if (job.waiting.type !== 'approval') throw new Error('Only an approval can be declined by the lead. Pass a message to answer the question.');
+        if (typeof input.message !== 'string' || !input.message.trim()) throw new Error('Pass a message with the reason for declining and what to do instead.');
+      }
       // A message alone must never count as approval: the lead may only be asking the worker why.
       if (job.waiting.type === 'approval' && !input.decision) throw new Error(`Job ${id} is waiting for approval (${job.waiting.reason}). Pass decision "approve" or "deny".`);
       if (!input.decision && !input.message?.trim()) throw new Error(`Job ${id} asked a question (${job.waiting.reason}). Pass a message with the answer, or a decision.`);
       if (input.decision === 'allow_for_job' && !job.waiting.grant) throw new Error(`Job ${id}'s request cannot be allowed for the whole job. Pass decision "approve" or "deny".`);
-      const forJob = input.decision === 'allow_for_job' ? { forJob: true } : undefined;
-      await this.sendWith(job, attachments, (note) => adapter.answer(ctl, input.decision !== 'deny', note ? `${input.message ?? ''}${note}` : input.message, forJob));
+      const opts = input.decision === 'allow_for_job' ? { forJob: true } : decline ? { by: 'lead' as const } : undefined;
+      await this.sendWith(job, attachments, (note) => adapter.answer(ctl, !decline && input.decision !== 'deny', note ? `${input.message ?? ''}${note}` : input.message, opts));
       return job;
     }
     if (input.decision !== undefined) throw new Error(`Job ${id} is not waiting for a decision.`);
@@ -836,6 +860,7 @@ export class Jobs {
     job.phase = 'starting';
     job.endedAt = null;
     job.error = null;
+    delete job.outcome;
     // A retry that follows a retry goes to the user; every other turn is the automatic reviewer's.
     job.asksUser = retry !== null && job.retrying !== undefined;
     job.retrying = retry?.actions;
@@ -1453,6 +1478,7 @@ export class Jobs {
     if (isTerminal(job)) return;
     exchanged(job, 'worker', report);
     job.report = report;
+    if (expectsOutcome(job)) job.outcome = parseOutcome(report);
     job.result = result;
     job.state = 'done';
     job.waiting = null;

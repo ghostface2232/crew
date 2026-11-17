@@ -4,7 +4,7 @@ import path from 'node:path';
 import { tokenFile } from '../auth.ts';
 import { agentCommand, agentEnv, HOME, VERSION } from '../config.ts';
 import type { Config } from '../config.ts';
-import { isTerminal } from '../jobs.ts';
+import { isTerminal, noteLeadDecline } from '../jobs.ts';
 import type { Adapter, JobCtl, JobKind } from '../jobs.ts';
 import { isInside } from '../git.ts';
 import { RPC_TIMEOUT_MS, RpcError, RpcPeer } from '../rpc.ts';
@@ -20,6 +20,8 @@ interface Run {
   earlier: string;
   /** Approvals and questions waiting on the user, in arrival order. The first is the one shown. */
   pending: { type: 'approval' | 'question'; reason: string; resolve: (answer: Answer | null) => void }[];
+  /** The lead's reasons for declining requests in this turn, sent as the next prompt once it ends. */
+  declined: string[];
 }
 
 /** The user's answer to a request; null when it can no longer be answered. */
@@ -73,7 +75,7 @@ export class AntigravityAdapter implements Adapter {
       plugins: [],
     });
     const sessionId: string = res.sessionId;
-    const run: Run = { ctl, prompting: null, cancelling: false, message: '', earlier: '', pending: [] };
+    const run: Run = { ctl, prompting: null, cancelling: false, message: '', earlier: '', pending: [], declined: [] };
     this.runs.set(sessionId, run);
     this.loaded.add(sessionId);
     ctl.session(sessionId);
@@ -117,17 +119,23 @@ export class AntigravityAdapter implements Adapter {
     if (isTerminal(ctl.job)) return;
     let run = this.runs.get(sessionId);
     if (!run) {
-      run = { ctl, prompting: null, cancelling: false, message: '', earlier: '', pending: [] };
+      run = { ctl, prompting: null, cancelling: false, message: '', earlier: '', pending: [], declined: [] };
       this.runs.set(sessionId, run);
     }
     if (run.prompting) throw new Error('Antigravity is still working on the previous message. Wait for it to finish, or cancel first.');
     this.prompt(peer, run, message);
   }
 
-  async answer(ctl: JobCtl, approve: boolean, message?: string): Promise<void> {
+  async answer(ctl: JobCtl, approve: boolean, message?: string, opts?: { by?: 'lead' }): Promise<void> {
     const run = this.runs.get(ctl.job.sessionId ?? '');
     const request = run?.pending.shift();
     if (!run || !request) throw new Error('The request this job was waiting on is no longer pending.');
+    if (request.type === 'approval' && !approve) {
+      // A permission answer carries no text, and agy 1.5.9 refuses a prompt while one is open and ends the turn
+      // on a rejection. So the reason waits for the turn to end and is then sent as the next prompt.
+      if (opts?.by === 'lead') run.declined.push(noteLeadDecline(ctl, request.reason, message!.trim()));
+      else ctl.note(`The user declined an action: ${request.reason}\nDo it another way within the job permissions, or report what could not be verified.`, { declined: true });
+    }
     request.resolve({ approve, message });
     const next = run.pending[0];
     if (next) ctl.waiting(next.type, next.reason);
@@ -175,6 +183,8 @@ export class AntigravityAdapter implements Adapter {
         (res) => {
           if (this.runs.get(ctl.job.sessionId!) !== run) return;
           if (res.stopReason === 'cancelled' || run.cancelling) ctl.cancelled();
+          // The lead said what to do instead, so the job goes on with that rather than ending on the refusal.
+          else if (res.stopReason === 'end_turn' && run.declined.length) return;
           else if (res.stopReason === 'end_turn') ctl.done(plainLinks(run.message.trim() || run.earlier));
           else ctl.fail(`Antigravity stopped early: ${res.stopReason}`);
         },
@@ -188,6 +198,8 @@ export class AntigravityAdapter implements Adapter {
         run.prompting = null;
         // The turn is over, so nothing it asked for can still be granted.
         drop(run);
+        const reasons = run.declined.splice(0);
+        if (reasons.length && this.peer === peer && this.runs.get(ctl.job.sessionId!) === run && !isTerminal(ctl.job)) this.prompt(peer, run, reasons.join('\n\n'));
       });
   }
 
@@ -317,7 +329,6 @@ export class AntigravityAdapter implements Adapter {
       const answer = await this.ask(run, 'approval', reason);
       if (answer === null) return cancelled;
       allow = answer.approve;
-      if (!allow) run.ctl.note(`The user declined an action: ${describeRequest(toolCall, run.ctl.job.cwd)}\nDo it another way within the job permissions, or report what could not be verified.`, { declined: true });
     }
     if (run && typeof verdict === 'object') {
       const what = `${verdict.refuse}: ${describeRequest(toolCall, run.ctl.job.cwd)}`;

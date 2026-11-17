@@ -26,6 +26,7 @@ const ask = (id, threadId, command) => send({
 });
 let childStarted = false;
 let interrupted = false;
+let firstDecision, steer;
 readline.createInterface({ input: process.stdin }).on('line', (line) => {
   const msg = JSON.parse(line);
   if (msg.method === 'turn/start') {
@@ -49,13 +50,16 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
   }
   if (msg.method && msg.id != null) send({ id: msg.id, result: {} });
   if (interrupted) return;
+  if (msg.method === 'turn/steer') steer = msg.params;
   if (msg.id === 'a') {
+    firstDecision = msg.result.decision;
     notify('serverRequest/resolved', { threadId: 'child', requestId: 'a' });
     notify('item/started', { threadId: 'parent', item: { type: 'commandExecution', command: 'echo progress' } });
     notify('turn/completed', { threadId: 'child', turn: { id: 'child-turn', status: 'completed' } });
   }
   if (msg.id === 'b') {
-    notify('item/completed', { threadId: 'parent', item: { type: 'agentMessage', text: msg.result.decision } });
+    const text = steer ? JSON.stringify({ firstDecision, secondDecision: msg.result.decision, steer }) : msg.result.decision;
+    notify('item/completed', { threadId: 'parent', item: { type: 'agentMessage', text } });
     notify('turn/completed', { threadId: 'parent', turn: { id: 'parent-turn', status: 'completed' } });
   }
 });
@@ -105,6 +109,35 @@ test('routes a child approval and preserves overlapping approvals and the full c
   assert.ok((await waiting()).reason.includes(command));
   await jobs.cancel(job.id);
   assert.equal(job.state, 'cancelled');
+});
+
+test('a lead decline refuses the Codex request once, steers the worker, and shows the next approval', { timeout: 5000 }, async (t) => {
+  const { adapter, home, jobs } = harness(stub);
+  t.after(() => { adapter.shutdown(); jobs.flush(); fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }); });
+  const job = await jobs.create({ kind: 'delegate', cwd: home, isolation: 'in_place', task: 'test' });
+  while (!job.waiting) await jobs.wait(job.id, job.seq, 1000);
+  const first = job.waiting;
+  assert.match(describe(job), /Never approve on your own[^]*decision "decline"[^]*call wait/);
+  for (const message of [undefined, ' \n ']) {
+    await assert.rejects(jobs.reply(job.id, { decision: 'decline', message, request_id: first.id }), /message with the reason/);
+    assert.equal(job.waiting, first);
+  }
+  const message = 'Outside the task. Read the file instead.';
+  await jobs.reply(job.id, { decision: 'decline', message, request_id: first.id });
+  await until(jobs, job, 'waiting');
+  const second = job.waiting!;
+  assert.notEqual(second.id, first.id);
+  assert.match(second.reason, /echo second/);
+  await jobs.reply(job.id, { decision: 'approve', request_id: second.id });
+  await until(jobs, job, 'done');
+  const note = `The lead declined an action: ${first.reason}\nReason: ${message}\nDo it another way within the task, or report what could not be done.`;
+  const report = JSON.parse(job.report);
+  assert.deepEqual([report.firstDecision, report.secondDecision], ['decline', 'accept']);
+  assert.deepEqual([report.steer.threadId, report.steer.expectedTurnId, report.steer.input[0].text], ['child', 'child-turn', note]);
+  assert.equal(job.declinedTurn, job.turns);
+  assert.deepEqual(job.notes, [note]);
+  assert.ok(describe(job).includes(`note: ${note}`));
+  assert.ok(jobs.eventsFor(job.id, 0).some((e) => e.kind === 'progress' && e.detail === note));
 });
 
 test('a hung initialize fails the job and the next job can start a fresh server', { timeout: 5000 }, async (t) => {

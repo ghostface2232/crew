@@ -7,9 +7,9 @@ import { test } from 'node:test';
 import { canonicalPath, resolveConfig } from '../plugin/bridge/config.ts';
 import type { Config } from '../plugin/bridge/config.ts';
 import { leadContext } from '../plugin/bridge/instructions.ts';
-import { followUps, jobRole, Jobs, outOfScope } from '../plugin/bridge/jobs.ts';
+import { followUps, jobRole, Jobs, outOfScope, parseOutcome } from '../plugin/bridge/jobs.ts';
 import type { Adapter, CrewEvent, Job, JobCtl, JobSpec, Probe, ReviewTarget } from '../plugin/bridge/jobs.ts';
-import { describe, needsLead } from '../plugin/bridge/render.ts';
+import { describe, needsLead, outcomeContradiction } from '../plugin/bridge/render.ts';
 import { tierModel } from '../plugin/bridge/tiers.ts';
 import { checkLine, runCheck, windowsSandboxArgs } from '../plugin/bridge/check.ts';
 
@@ -76,6 +76,83 @@ async function settled(jobs: Jobs, job: Job): Promise<Job> {
   while (job.state === 'running') await jobs.wait(job.id, job.seq, 2000);
   return job;
 }
+
+test('parses the first word under the Outcome heading', () => {
+  assert.equal(parseOutcome('## Outcome\n\npartial — tests not run\n\n## Result\nEdited a file.'), 'partial');
+  assert.equal(parseOutcome('## OUTCOME ##\r\n  **DONE**\r\n'), 'done');
+  assert.equal(parseOutcome('## Outcome\n blocked\n'), 'blocked');
+  assert.equal(parseOutcome('## Result\ndone'), undefined);
+  assert.equal(parseOutcome('## Outcome\nsucceeded\ndone'), undefined);
+  assert.equal(parseOutcome('## Outcome\n\n## Result\ndone'), undefined);
+  assert.equal(parseOutcome('### Outcome\ndone'), undefined);
+});
+
+test('records and renders the worker outcome beside the bridge observations', async (t) => {
+  for (const [report, outcome, line, observation] of [
+    ['## Outcome\nblocked\n\n## Open points\nMissing access.', 'blocked', 'blocked — see Open points in the report'],
+    ['## Outcome\npartial — tests not run', 'partial', 'partial — see Open points in the report'],
+    ['## Result\nFinished', undefined, 'not declared — read the report before treating this as finished'],
+    ['## Outcome\ndone', 'done', 'done'],
+    ['## Outcome\ndone', 'done', 'done as declared, but the bridge check failed', 'check'],
+    ['## Outcome\ndone', 'done', 'done as declared, but no files changed after an action was refused or declined', 'declined'],
+    ['## Outcome\ndone', 'done', 'done as declared, but an action was refused or declined this turn', 'refused'],
+  ] as const) {
+    const { jobs, home } = harness((ctl) => {
+      if (observation === 'check') {
+        ctl.job.receipts = [{ turn: ctl.job.turns, head: null, at: Date.now(), check: { command: 'exit 1', exit: 1, timedOut: false, output: '', ms: 0, sandboxed: true } }];
+      } else if (observation === 'declined') {
+        ctl.note('The user declined an action.', { declined: true });
+      } else if (observation === 'refused') {
+        ctl.touched(path.join(ctl.job.cwd, 'app.js'));
+        ctl.refused('run a command', 'outside the task');
+      }
+      ctl.done(report);
+    });
+    t.after(() => { jobs.flush(); fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }); });
+    const job = await settled(jobs, await jobs.create({ kind: 'delegate', task: 'edit', cwd: home, isolation: 'in_place' }));
+    assert.equal(job.state, 'done');
+    assert.equal(job.outcome, outcome);
+    assert.equal(describe(job).split('\n').find((text) => text.startsWith('outcome: ')), `outcome: ${line}`);
+    assert.equal(outcomeContradiction(job), observation ? line.slice('done as declared, but '.length) : undefined);
+    if (observation === 'declined') assert.match(describe(job), /changes: none — an action was refused or declined/);
+  }
+});
+
+test('a saved outcome clears at the start of the next turn and is set from its report', async (t) => {
+  const { jobs, home, adapter } = harness((ctl) => ctl.done('## Outcome\nblocked'));
+  let restored: Jobs | undefined;
+  t.after(() => { jobs.flush(); restored?.flush(); fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }); });
+  const job = await settled(jobs, await jobs.create({ kind: 'delegate', task: 'edit', cwd: home, isolation: 'in_place' }));
+  jobs.flush();
+  restored = new Jobs(home, () => config, { codex: adapter, antigravity: adapter }, { onEvent: () => {}, onJob: () => {}, onAttention: () => {} });
+  const saved = restored.get(job.id);
+  assert.equal(saved.outcome, 'blocked');
+  adapter.reply = async (ctl) => {
+    assert.equal(ctl.job.outcome, undefined);
+    assert.doesNotMatch(describe(ctl.job), /^outcome:/m);
+    ctl.done('## Outcome\npartial');
+  };
+  await restored.reply(job.id, { message: 'try again' });
+  await settled(restored, saved);
+  assert.equal(saved.outcome, 'partial');
+});
+
+test('reviews, debates and questions do not record an outcome', async (t) => {
+  const cwd = tempRepo();
+  const { jobs, home } = harness((ctl) => ctl.done('## Outcome\ndone'));
+  t.after(() => { jobs.flush(); fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }); fs.rmSync(cwd, { recursive: true, force: true, maxRetries: 5 }); });
+  const specs: JobSpec[] = [
+    { cwd, kind: 'review', review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } },
+    { cwd, kind: 'delegate', task: 'What changed?', ask: true },
+    { cwd, kind: 'delegate', task: 'Argue the plan.', debate: { rounds: 2 } },
+  ];
+  for (const spec of specs) {
+    const job = await settled(jobs, await jobs.create(spec));
+    assert.equal(job.state, 'done');
+    assert.equal(job.outcome, undefined);
+    assert.doesNotMatch(describe(job), /^outcome:/m);
+  }
+});
 
 for (const operation of ['reply', 'sync', 'round'] as const) test(`incomplete cleanup prevents ${operation} from resuming work`, async (t) => {
   const repo = tempRepo();
@@ -1109,7 +1186,7 @@ test('the bridge runs the lead\'s check after each turn and marks it stale when 
   assert.match(describe(job), /no longer current: round 1 undone since/);
 
   // The next turn is checked again, and a failure shows the end of its output.
-  adapter.reply = async (ctl) => ctl.done('nothing changed');
+  adapter.reply = async (ctl) => ctl.done('## Outcome\ndone\n\n## Result\nNothing changed.');
   await jobs.reply(job.id, { message: 'check again' });
   await settled(jobs, job);
   const second = job.receipts?.at(-1);
@@ -1117,6 +1194,7 @@ test('the bridge runs the lead\'s check after each turn and marks it stale when 
   assert.equal(second?.stale, undefined);
   assert.equal(second?.check?.exit, 1);
   assert.match(describe(job), /failed \(exit 1\)/);
+  assert.match(describe(job), /^outcome: done as declared, but the bridge check failed$/m);
 
   // A check that rewrites tracked files passed on a tree the commit does not hold.
   job.check = 'echo "export const x = 9;" > app.js';

@@ -1,12 +1,12 @@
 import { unread } from './delivery.ts';
 import { checkLine } from './check.ts';
 import { WORKERS } from './config.ts';
-import { jobRole, openRefusals } from './jobs.ts';
+import { expectsOutcome, jobRole, openRefusals } from './jobs.ts';
 import type { Job } from './jobs.ts';
 
 /** Text renderings of a job, shared by the MCP tools, the wake hook, and the CLI. */
 
-export type JobView = Omit<Job, 'prompt' | 'instructions'>;
+export type JobView = Omit<Job, 'prompt' | 'instructions'> & { outcomeContradiction?: string };
 
 /** Command that reopens the worker's session in its own CLI, for the user to take over by hand. */
 export function resumeCommand(job: JobView): string {
@@ -21,6 +21,27 @@ export function duration(ms: number): string {
 /** Finished, waiting on the user, or asking a lead question not yet delivered. */
 export const needsLead = (job: JobView) => job.state !== 'running' || unread(job).some((news) =>
   (news.kind === 'question' && job.questions?.some((q) => q.id === news.question && q.answer === undefined)) || (news.kind === 'stalled' && job.stalled));
+
+function refusedThisTurn(job: JobView): boolean {
+  return job.declinedTurn === job.turns || Boolean(job.refusals?.some((r) => r.turn === job.turns));
+}
+
+function noChangesAfterRefusal(job: JobView): boolean {
+  return job.state === 'done' && job.result?.files.length === 0 && refusedThisTurn(job);
+}
+
+export function outcomeContradiction(job: JobView): string | undefined {
+  if (job.state !== 'done' || job.outcome !== 'done' || !expectsOutcome(job)) return;
+  const observations: string[] = [];
+  const receipt = job.receipts?.at(-1);
+  const check = receipt?.check;
+  if (receipt?.turn === job.turns && check && !check.skipped && check.exit !== 0) {
+    observations.push(check.timedOut ? 'the bridge check timed out' : check.exit === null ? 'the bridge check could not run' : 'the bridge check failed');
+  }
+  if (noChangesAfterRefusal(job)) observations.push('no files changed after an action was refused or declined');
+  else if (refusedThisTurn(job)) observations.push('an action was refused or declined this turn');
+  return observations.join(' and ') || undefined;
+}
 
 /** `waitingHint` replaces the default advice on how to settle a waiting job. */
 export function describe(job: JobView, waitingHint?: string): string {
@@ -49,9 +70,14 @@ export function describe(job: JobView, waitingHint?: string): string {
       : 'Still working. You are woken when it ends or needs you; end your turn rather than waiting on it.');
   }
   if (job.state === 'waiting') {
-    lines.push(`NEEDS A DECISION:\n${job.waiting!.reason}`);
-    lines.push(waitingHint ?? `This is the user's call, not yours. Call wait with job id "${job.id}" so they are asked in the app; use reply only to pass on a decision they already gave you (decision "approve" or "deny"${job.waiting!.grant ? `, or "allow_for_job" if they allowed ${job.waiting!.grant} for the rest of this job` : ''}${job.waiting!.type === 'question' ? ', or a message with the answer' : ''}).`);
-    lines.push(`When forwarding the answer, pass request_id: "${job.waiting!.id}".`);
+    const waiting = job.waiting!;
+    lines.push(`NEEDS A DECISION:\n${waiting.reason}`);
+    const ask = `wait with job id "${job.id}" so the user is asked in the app`;
+    if (waiting.type === 'approval') {
+      lines.push('Approval is the user\'s call. Never approve on your own. If the request is clearly outside the task or role, use reply with decision "decline" and a message saying why and what to do instead.');
+      lines.push(waitingHint ?? `Otherwise, call ${ask}, or relay their decision with reply ("approve" or "deny"${waiting.grant ? `, or "allow_for_job" if they allowed ${waiting.grant} for the rest of this job` : ''}).`);
+    } else lines.push(waitingHint ?? `Call ${ask}, or use reply with the answer they gave you.`);
+    lines.push(`When settling the request, pass request_id: "${waiting.id}".`);
   }
   const receipt = job.receipts?.at(-1);
   if (receipt) {
@@ -90,9 +116,14 @@ export function describe(job: JobView, waitingHint?: string): string {
       ? 'Cleanup: Windows still holds the empty worktree folder; it is removed automatically.'
       : `Cleanup incomplete: ${job.cleanupPending.join('; ') || 'Git registration unconfirmed'}; run crew gc.`);
   }
+  if (job.state === 'done' && expectsOutcome(job)) {
+    const contradiction = outcomeContradiction(job);
+    lines.push(!job.outcome ? 'outcome: not declared — read the report before treating this as finished'
+      : contradiction ? `outcome: done as declared, but ${contradiction}`
+        : `outcome: ${job.outcome}${job.outcome === 'done' ? '' : ' — see Open points in the report'}`);
+  }
   if (job.result) {
-    const blocked = job.state === 'done' && !job.result.files.length && (job.declinedTurn === job.turns || job.refusals?.some((r) => r.turn === job.turns));
-    lines.push(`changes: ${blocked ? 'none — an action was refused or declined; see refusals/notes below' : job.result.stat || 'none'}${job.result.commit ? ` · commit ${job.result.commit}` : ''}`);
+    lines.push(`changes: ${noChangesAfterRefusal(job) ? 'none — an action was refused or declined; see refusals/notes below' : job.result.stat || 'none'}${job.result.commit ? ` · commit ${job.result.commit}` : ''}`);
     for (const file of job.result.files.slice(0, 40)) lines.push(`  ${file}`);
     if (job.result.files.length > 40) lines.push(`  … and ${job.result.files.length - 40} more`);
     if (job.result.outOfScope.length) lines.push(`OUT OF SCOPE — changed but not in the allowed targets: ${job.result.outOfScope.join(', ')}`);

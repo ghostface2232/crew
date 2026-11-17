@@ -499,8 +499,8 @@ export function Settings({ state, update, close }: { state: Snapshot; update: Ap
               {kind && info.filter((role) => paneKind(role) === kind).map(roleGroup)}
               {kind && (
                 <p className={styles.footnote}>
-                  When the lead names no holder for a job, Antigravity takes wording and Codex the rest, among the holders that can.
-                  Claude means the lead does the work itself.
+                  The lead picks the holder; by default, Antigravity takes wording and Codex the rest, among holders that can.
+                  Claude means the lead does it itself.
                 </p>
               )}
               {current === 'presets' && (
@@ -577,8 +577,8 @@ export function Settings({ state, update, close }: { state: Snapshot; update: Ap
                     )}
                     <p className={styles.footnote}>
                       {update.state === 'unsupported'
-                        ? 'This copy cannot update itself. Install Crew from its GitHub releases to get updates.'
-                        : 'Updates download in the background and install when you choose Restart to Update, after running jobs finish.'}
+                        ? 'This copy cannot update itself. Install Crew from GitHub releases for updates.'
+                        : 'Updates download in the background and install only on Restart to Update, after running jobs finish.'}
                     </p>
                   </section>
                 </>
@@ -587,8 +587,8 @@ export function Settings({ state, update, close }: { state: Snapshot; update: Ap
                 <section className={styles.group}>
                   <Scores scores={state.modelScores!} />
                   <p className={styles.footnote}>
-                    Scored from the review findings each model's builds drew for their size. Fixes are scored apart, and a model is
-                    ranked after three build reviews; one by its own agent counts half.
+                    Scored from review findings per build size, with fixes scored apart. A model is ranked after three build
+                    reviews; a review by its own agent counts half.
                   </p>
                 </section>
               )}

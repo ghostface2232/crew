@@ -117,7 +117,7 @@ struct CrewSettingsView: View {
         if let group = pane.group {
             ForEach(model.roleInfo.filter { $0.group == group }) { roleSection($0) }
             Section {} footer: {
-                Text("When the lead names no holder for a job, Antigravity takes wording and Codex the rest, among the holders that can. Claude means the lead does the work itself.").settingsFootnote()
+                Text("The lead picks the holder; by default, Antigravity takes wording and Codex the rest, among holders that can. Claude means the lead does it itself.").settingsFootnote()
             }
         } else if pane == .about {
             about
@@ -223,7 +223,7 @@ struct CrewSettingsView: View {
                 if let error = updater.error { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.secondary) }
                 Text(updater.phase == .unsupported
                     ? "This copy of Crew is not running from an app bundle, so it cannot update itself."
-                    : "Updates download in the background and install when you choose Restart to Update, after running jobs finish.")
+                    : "Updates download in the background and install only on Restart to Update, after running jobs finish.")
             }.settingsFootnote()
         }
     }
@@ -249,7 +249,7 @@ struct CrewSettingsView: View {
             }
         }
         Section {} footer: {
-            Text("Scored from the review findings each model's builds drew for their size. Fixes are scored apart, and a model is ranked after three build reviews; one by its own agent counts half.")
+            Text("Scored from review findings per build size, with fixes scored apart. A model is ranked after three build reviews; a review by its own agent counts half.")
                 .settingsFootnote()
         }
     }

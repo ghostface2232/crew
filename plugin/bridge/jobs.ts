@@ -328,6 +328,7 @@ export interface Adapter {
   shutdown(): void;
 }
 
+/** Keeps the lead's reason visible because approval responses cannot carry it. */
 export function noteLeadDecline(ctl: JobCtl, request: string, reason: string): string {
   const note = `The lead declined an action: ${request}\nReason: ${reason}\nDo it another way within the task, or report what could not be done.`;
   ctl.note(note, { declined: true });
@@ -386,15 +387,30 @@ export function jobRole(job: Pick<Job, 'role' | 'kind' | 'debate' | 'runsApp'>):
   return job.role ?? (job.debate ? 'debate' : job.kind === 'review' && job.runsApp ? 'verify' : job.kind);
 }
 
+/** Only roles tasked with completing work are asked to declare whether they finished it. */
 export function expectsOutcome(job: Pick<Job, 'kind' | 'role' | 'ask' | 'debate'>): boolean {
   return !job.ask && !job.debate && job.role !== 'debate' && (job.kind === 'delegate' || job.kind === 'polish');
 }
 
+/** Reads the worker's own declaration so examples in its report cannot count as outcomes. */
 export function parseOutcome(report: string): Job['outcome'] {
-  const heading = /^ {0,3}##[ \t]+Outcome(?:[ \t]+#+)?[ \t]*\r?$/im.exec(report);
-  if (!heading) return;
-  const line = report.slice(heading.index + heading[0].length).trimStart();
-  return /^(?:\*\*)?(done|partial|blocked)\b/i.exec(line)?.[1].toLowerCase() as Job['outcome'];
+  const lines = report.split(/\r?\n/);
+  let fence: string | undefined;
+  for (const [i, line] of lines.entries()) {
+    const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (fence) {
+      if (marker?.[1].startsWith(fence) && !marker[2].trim()) fence = undefined;
+      continue;
+    }
+    if (marker && (marker[1][0] === '~' || !marker[2].includes('`'))) {
+      fence = marker[1];
+      continue;
+    }
+    const heading = /^ {0,3}##[ \t]+Outcome(?::[ \t]*(.*?))?(?:[ \t]+#+)?[ \t]*$/i.exec(line);
+    if (!heading) continue;
+    const declared = heading[1] ?? lines.slice(i + 1).find((text) => text.trim()) ?? '';
+    return /^(?:-[ \t]+)?(\*\*|\*|_|`)?(done|partial|blocked)\1(?=$|[^\w`*_-])/i.exec(declared.trimStart())?.[2].toLowerCase() as Job['outcome'];
+  }
 }
 
 /**
@@ -779,9 +795,9 @@ export class Jobs {
         if (typeof input.message !== 'string' || !input.message.trim()) throw new Error('Pass a message with the reason for declining and what to do instead.');
       }
       // A message alone must never count as approval: the lead may only be asking the worker why.
-      if (job.waiting.type === 'approval' && !input.decision) throw new Error(`Job ${id} is waiting for approval (${job.waiting.reason}). Pass decision "approve" or "deny".`);
+      if (job.waiting.type === 'approval' && !input.decision) throw new Error(`Job ${id} is waiting for approval (${job.waiting.reason}). Pass decision "approve" or "deny" for the user, or use "decline" with a message if the request is outside the task or role.`);
       if (!input.decision && !input.message?.trim()) throw new Error(`Job ${id} asked a question (${job.waiting.reason}). Pass a message with the answer, or a decision.`);
-      if (input.decision === 'allow_for_job' && !job.waiting.grant) throw new Error(`Job ${id}'s request cannot be allowed for the whole job. Pass decision "approve" or "deny".`);
+      if (input.decision === 'allow_for_job' && !job.waiting.grant) throw new Error(`Job ${id}'s request cannot be allowed for the whole job. Pass decision "approve" or "deny" for the user, or use "decline" with a message if the request is outside the task or role.`);
       const opts = input.decision === 'allow_for_job' ? { forJob: true } : decline ? { by: 'lead' as const } : undefined;
       await this.sendWith(job, attachments, (note) => adapter.answer(ctl, !decline && input.decision !== 'deny', note ? `${input.message ?? ''}${note}` : input.message, opts));
       return job;

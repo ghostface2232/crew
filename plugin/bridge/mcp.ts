@@ -122,7 +122,7 @@ const agentProp = {
 const modelProps = {
   tier: { type: 'string', enum: [...TIERS], description: 'How demanding the job is; Crew picks the model from it. standard (the default): most work, including most UI changes. frontier: only especially hard or complex work, or a UI rebuilt from scratch or a very large UI change. light: simple, well-specified tasks. fast: plain searches and lookups. For Codex these are Sol, Astra, Terra and Luna; for Antigravity, Argon for frontier (literary or very complex documents) and Hydrogen otherwise. Newer models of each family are picked up automatically.' },
   model: { type: 'string', description: 'Exact model ID for this job, as the notes list it, overriding tier. Rarely needed; prefer tier. When the user names a family such as Astra, pass its tier; a family name passed here is taken as that tier.' },
-  effort: { type: 'string', description: 'Reasoning effort: medium for most work, high when the task calls for it. Defaults to medium, or high at the frontier tier. Ignored by agents without an effort setting.' },
+  effort: { type: 'string', description: 'Codex defaults to medium effort, or high at the frontier tier. Antigravity sets its thinking level only when an effort is named, using the nearest lower offered level if needed and keeping the session default if no level fits.' },
 };
 
 const TOOLS = [

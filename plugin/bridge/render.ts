@@ -30,6 +30,7 @@ function noChangesAfterRefusal(job: JobView): boolean {
   return job.state === 'done' && job.result?.files.length === 0 && refusedThisTurn(job);
 }
 
+/** Keeps a declared success from obscuring a failed check or a refusal that left no changes. */
 export function outcomeContradiction(job: JobView): string | undefined {
   if (job.state !== 'done' || job.outcome !== 'done' || !expectsOutcome(job)) return;
   const observations: string[] = [];
@@ -39,7 +40,6 @@ export function outcomeContradiction(job: JobView): string | undefined {
     observations.push(check.timedOut ? 'the bridge check timed out' : check.exit === null ? 'the bridge check could not run' : 'the bridge check failed');
   }
   if (noChangesAfterRefusal(job)) observations.push('no files changed after an action was refused or declined');
-  else if (refusedThisTurn(job)) observations.push('an action was refused or declined this turn');
   return observations.join(' and ') || undefined;
 }
 

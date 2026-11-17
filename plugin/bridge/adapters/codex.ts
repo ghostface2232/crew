@@ -160,12 +160,16 @@ export class CodexAdapter implements Adapter {
       if (opts?.by === 'lead') {
         const note = noteLeadDecline(ctl, request.reason, message!.trim());
         const requestedTurn = request.turnId ?? run.busyChildren.get(request.threadId);
+        // The parent can act on the reason when the sub-agent's turn is unknown.
         const turnId = requestedTurn ?? run.turnId;
-        // Approval responses carry no text. Queue the reason while the turn is still waiting, then release the refusal.
-        if (this.peer && turnId) {
-          this.peer.request('turn/steer', { threadId: requestedTurn ? request.threadId : threadId, input: [textInput(note)], expectedTurnId: turnId }, RPC_TIMEOUT_MS)
-            .catch((err) => ctl.note(`Could not send the lead's reason to Codex: ${err.message}`));
-        } else ctl.note('Could not send the lead\'s reason to Codex: no confirmed turn to steer.');
+        const peer = this.peer;
+        const undelivered = (detail: string) => ctl.note(`The lead's reason did not reach the worker (${detail}). Send it with reply as a message once the turn ends.`);
+        if (peer && turnId) {
+          // Approval responses carry no text. Write the steer first, release the refusal without waiting, and
+          // retry after the refusal if Codex rejected the steer while the approval was open.
+          const steer = () => peer.request('turn/steer', { threadId: requestedTurn ? request.threadId : threadId, input: [textInput(note)], expectedTurnId: turnId }, RPC_TIMEOUT_MS);
+          void steer().catch(steer).catch((err) => undelivered(err.message));
+        } else undelivered(peer ? 'no confirmed turn to steer' : 'the Codex connection is closed');
       } else ctl.note(`The user declined an action: ${request.reason}\nDo it another way within the job permissions, or report what could not be verified.`, { declined: true });
     }
     this.settleRequest(run, 0, { approve, message, forJob: opts?.forJob });

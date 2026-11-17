@@ -16,21 +16,28 @@ import { decide } from '../plugin/bridge/adapters/antigravity.ts';
 import { tierModel } from '../plugin/bridge/tiers.ts';
 
 const command = 'echo first\necho ' + 'a'.repeat(160) + '\necho last';
-const stub = `
+function approvalStub({ steerFailures = 0, childTurn = true, lateTurn = false } = {}): string {
+  return `
 const readline = require('node:readline');
 const send = (msg) => console.log(JSON.stringify({ jsonrpc: '2.0', ...msg }));
 const notify = (method, params) => send({ method, params });
 const ask = (id, threadId, command) => send({
   id, method: 'item/commandExecution/requestApproval',
-  params: { threadId, turnId: threadId + '-turn', cwd: '/tmp', command },
+  params: { threadId, turnId: threadId !== 'child' || ${childTurn} ? threadId + '-turn' : undefined, cwd: '/tmp', command },
 });
+const steerFailures = ${steerFailures};
+const finishStart = (id) => send({ id, result: { turn: { id: 'parent-turn' } } });
+const rejectSteer = (id) => send({ id, error: { code: -32602, message: 'steer refused' } });
 let childStarted = false;
 let interrupted = false;
-let firstDecision, steer;
+let firstDecision, startId, firstSteerId;
+let order = [], steers = [];
 readline.createInterface({ input: process.stdin }).on('line', (line) => {
   const msg = JSON.parse(line);
   if (msg.method === 'turn/start') {
-    send({ id: msg.id, result: { turn: { id: 'parent-turn' } } });
+    if (${lateTurn}) startId = msg.id;
+    else finishStart(msg.id);
+    order = []; steers = [];
     if (!childStarted) {
       notify('thread/started', { thread: { id: 'child', parentThreadId: 'parent' } });
       childStarted = true;
@@ -48,22 +55,41 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
     notify('turn/completed', { threadId: 'parent', turn: { id: 'parent-turn', status: 'interrupted' } });
     return;
   }
+  if (msg.method === 'turn/steer') {
+    order.push('steer');
+    steers.push(msg.params);
+    if (steers.length === 1 && steerFailures) {
+      // Make the first error depend on receiving the refusal. The client must send it without waiting for a steer.
+      firstSteerId = msg.id;
+      return;
+    }
+    if (steers.length <= steerFailures) rejectSteer(msg.id);
+    else send({ id: msg.id, result: {} });
+    if (steers.length > 1) notify('item/started', { threadId: 'parent', item: { type: 'commandExecution', command: 'echo steer retried' } });
+    return;
+  }
   if (msg.method && msg.id != null) send({ id: msg.id, result: {} });
   if (interrupted) return;
-  if (msg.method === 'turn/steer') steer = msg.params;
   if (msg.id === 'a') {
     firstDecision = msg.result.decision;
+    order.push(firstDecision);
+    if (startId !== undefined) finishStart(startId);
+    if (firstSteerId !== undefined) rejectSteer(firstSteerId);
     notify('serverRequest/resolved', { threadId: 'child', requestId: 'a' });
     notify('item/started', { threadId: 'parent', item: { type: 'commandExecution', command: 'echo progress' } });
     notify('turn/completed', { threadId: 'child', turn: { id: 'child-turn', status: 'completed' } });
   }
   if (msg.id === 'b') {
-    const text = steer ? JSON.stringify({ firstDecision, secondDecision: msg.result.decision, steer }) : msg.result.decision;
+    const text = firstDecision === 'decline' && msg.result.decision === 'accept'
+      ? JSON.stringify({ firstDecision, secondDecision: msg.result.decision, steers, order }) : msg.result.decision;
     notify('item/completed', { threadId: 'parent', item: { type: 'agentMessage', text } });
     notify('turn/completed', { threadId: 'parent', turn: { id: 'parent-turn', status: 'completed' } });
   }
 });
 `;
+}
+
+const stub = approvalStub();
 
 function harness(source: string, agent: WorkerAgent = 'codex', roles: Parameters<typeof resolveConfig>[0]['roles'] = {}) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-codex-test-'));
@@ -104,6 +130,7 @@ test('routes a child approval and preserves overlapping approvals and the full c
   while (!job.endedAt) await jobs.wait(job.id, job.seq, 1000);
   assert.equal(job.report, 'decline');
   assert.equal(job.declinedTurn, job.turns);
+  assert.ok(job.notes.some((note) => note.startsWith(`The user declined an action: ${second.reason}\n`)));
   assert.match(describe(job), /changes: none — .*refused or declined/);
   await jobs.reply(job.id, { message: 'send the same child another task' });
   assert.ok((await waiting()).reason.includes(command));
@@ -133,12 +160,42 @@ test('a lead decline refuses the Codex request once, steers the worker, and show
   const note = `The lead declined an action: ${first.reason}\nReason: ${message}\nDo it another way within the task, or report what could not be done.`;
   const report = JSON.parse(job.report);
   assert.deepEqual([report.firstDecision, report.secondDecision], ['decline', 'accept']);
-  assert.deepEqual([report.steer.threadId, report.steer.expectedTurnId, report.steer.input[0].text], ['child', 'child-turn', note]);
+  assert.deepEqual(report.order, ['steer', 'decline']);
+  const [steer] = report.steers;
+  assert.deepEqual([steer.threadId, steer.expectedTurnId, steer.input[0].text], ['child', 'child-turn', note]);
   assert.equal(job.declinedTurn, job.turns);
   assert.deepEqual(job.notes, [note]);
   assert.ok(describe(job).includes(`note: ${note}`));
   assert.ok(jobs.eventsFor(job.id, 0).some((e) => e.kind === 'progress' && e.detail === note));
 });
+
+for (const [steerFailures, lateTurn] of [[0, false], [1, false], [2, false], [0, true]] as const) {
+  test(`Codex lead decline with an unknown child turn (steer failures: ${steerFailures}, awaiting parent: ${lateTurn})`, { timeout: 5000 }, async (t) => {
+    const h = harness(approvalStub({ steerFailures, childTurn: false, lateTurn }));
+    cleanup(t, h);
+    const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' });
+    await until(h.jobs, job, 'waiting');
+    const first = job.waiting!;
+    await h.jobs.reply(job.id, { decision: 'decline', message: 'This is outside the task.', request_id: first.id });
+    await until(h.jobs, job, 'waiting');
+    if (steerFailures) {
+      const retried = () => h.jobs.eventsFor(job.id, 0).some((e) => e.detail === '$ echo steer retried');
+      const deadline = Date.now() + 2000;
+      while (!retried() && Date.now() < deadline) await h.jobs.wait(job.id, job.seq, deadline - Date.now());
+      assert.ok(retried(), 'the refusal was released and the steer retried');
+    }
+    await h.jobs.reply(job.id, { decision: 'approve', request_id: job.waiting!.id });
+    await until(h.jobs, job, 'done');
+    const report = JSON.parse(job.report);
+    assert.deepEqual(report.order, lateTurn ? ['decline'] : steerFailures ? ['steer', 'decline', 'steer'] : ['steer', 'decline']);
+    for (const steer of report.steers) {
+      assert.deepEqual([steer.threadId, steer.expectedTurnId, steer.input[0].text], ['parent', 'parent-turn', job.notes[0]]);
+    }
+    if (steerFailures === 2 || lateTurn) {
+      assert.match(describe(job), /note: The lead's reason did not reach the worker[^\n]*reply[^\n]*message[^\n]*turn ends/);
+    } else assert.equal(job.notes.length, 1);
+  });
+}
 
 test('a hung initialize fails the job and the next job can start a fresh server', { timeout: 5000 }, async (t) => {
   const { adapter, bin, home, jobs } = harness('process.stdin.resume();');
@@ -846,14 +903,18 @@ for (const agent of ['codex', 'antigravity'] as const) {
   });
 }
 
-test('Antigravity records model changes reported during a turn', { timeout: 5000 }, async (t) => {
+for (const [update, model, effort] of [
+  [{ configOptions: [{ category: 'model', currentValue: 'updated-model' }] }, 'updated-model', undefined],
+  [{ configOptions: [{ category: 'thought_level', currentValue: 'medium' }] }, 'initial-model', 'medium'],
+  [{ models: { currentModelId: 'updated-model' } }, 'updated-model', 'high'],
+] as const) test('Antigravity records config changes reported during a turn: ' + JSON.stringify(update), { timeout: 5000 }, async (t) => {
   const h = harness(`
     const send = (msg) => console.log(JSON.stringify({ jsonrpc: '2.0', ...msg }));
     require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
       const msg = JSON.parse(line);
-      if (msg.method === 'session/new') return send({ id: msg.id, result: { sessionId: 's', models: { currentModelId: 'initial-model' } } });
+      if (msg.method === 'session/new') return send({ id: msg.id, result: { sessionId: 's', models: { currentModelId: 'initial-model' }, configOptions: [{ category: 'thought_level', currentValue: 'high' }] } });
       if (msg.method === 'session/prompt') {
-        send({ method: 'session/update', params: { sessionId: 's', update: { sessionUpdate: 'config_option_update', configOptions: [{ category: 'model', currentValue: 'updated-model' }] } } });
+        send({ method: 'session/update', params: { sessionId: 's', update: { sessionUpdate: 'config_option_update', ...${JSON.stringify(update)} } } });
         return send({ id: msg.id, result: { stopReason: 'end_turn' } });
       }
       if (msg.id != null) send({ id: msg.id, result: {} });
@@ -862,7 +923,8 @@ test('Antigravity records model changes reported during a turn', { timeout: 5000
   cleanup(t, h);
   const job = await h.jobs.create({ kind: 'polish', cwd: h.home, isolation: 'in_place', targets: ['README.md'] });
   await until(h.jobs, job, 'done');
-  assert.equal(job.resolvedModel, 'updated-model');
+  assert.equal(job.resolvedModel, model);
+  assert.equal(job.resolvedEffort, effort);
 });
 
 test('Antigravity reports no changes when approval was declined or could not be granted once', { timeout: 5000 }, async (t) => {
@@ -872,10 +934,11 @@ test('Antigravity reports no changes when approval was declined or could not be 
     cleanup(t, h);
     const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'check' });
     await until(h.jobs, job, 'waiting');
-    await h.jobs.reply(job.id, { decision: approve ? 'approve' : 'deny', request_id: job.waiting!.id });
+    const request = job.waiting!;
+    await h.jobs.reply(job.id, { decision: approve ? 'approve' : 'deny', request_id: request.id });
     await until(h.jobs, job, 'done');
     assert.match(describe(job), /changes: none — .*refused or declined/);
-    assert.ok(job.notes.some((note) => note.includes(approve ? 'not carried out' : 'declined')));
+    assert.ok(job.notes.some((note) => approve ? note.includes('not carried out') : note.startsWith(`The user declined an action: ${request.reason}\n`)));
   }
 });
 

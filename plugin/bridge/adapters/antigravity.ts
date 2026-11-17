@@ -183,10 +183,13 @@ export class AntigravityAdapter implements Adapter {
         (res) => {
           if (this.runs.get(ctl.job.sessionId!) !== run) return;
           if (res.stopReason === 'cancelled' || run.cancelling) ctl.cancelled();
-          // The lead said what to do instead, so the job goes on with that rather than ending on the refusal.
-          else if (res.stopReason === 'end_turn' && run.declined.length) return;
-          else if (res.stopReason === 'end_turn') ctl.done(plainLinks(run.message.trim() || run.earlier));
-          else ctl.fail(`Antigravity stopped early: ${res.stopReason}`);
+          else if (res.stopReason === 'end_turn') {
+            const report = run.message.trim() || run.earlier;
+            // agy can end a rejected turn without a report, so send the lead's reason in the next prompt.
+            if (!report && run.declined.length) return;
+            run.declined.length = 0;
+            ctl.done(plainLinks(report));
+          } else ctl.fail(`Antigravity stopped early: ${res.stopReason}`);
         },
         (err) => {
           if (this.peer === peer && this.runs.get(ctl.job.sessionId!) !== run) return;
@@ -199,7 +202,10 @@ export class AntigravityAdapter implements Adapter {
         // The turn is over, so nothing it asked for can still be granted.
         drop(run);
         const reasons = run.declined.splice(0);
-        if (reasons.length && this.peer === peer && this.runs.get(ctl.job.sessionId!) === run && !isTerminal(ctl.job)) this.prompt(peer, run, reasons.join('\n\n'));
+        if (reasons.length && this.peer === peer && this.runs.get(ctl.job.sessionId!) === run && !isTerminal(ctl.job)) {
+          ctl.resumed();
+          this.prompt(peer, run, reasons.join('\n\n'));
+        }
       });
   }
 
@@ -258,7 +264,8 @@ export class AntigravityAdapter implements Adapter {
     switch (update.sessionUpdate) {
       case 'config_option_update': {
         const model = sessionModel(update);
-        if (model) ctl.model(model, sessionEffort(update) ?? ctl.job.resolvedEffort);
+        const hasConfig = Array.isArray(update.configOptions);
+        if (model || hasConfig) ctl.model(model ?? ctl.job.resolvedModel, hasConfig ? sessionEffort(update) : ctl.job.resolvedEffort);
         break;
       }
       case 'agent_message_chunk':
@@ -305,12 +312,21 @@ export class AntigravityAdapter implements Adapter {
     if (!run || run.cancelling || !run.prompting || isTerminal(run.ctl.job)) return { action: 'cancel' };
     const questions = formQuestions(p.requestedSchema);
     if (p.mode !== 'form' || !questions.length) return { action: 'decline' };
-    const answer = await this.ask(run, 'question', questions.map(questionText).join('\n\n'));
+    const unsupported = questions.filter((q) => !q.choices.length && !q.other);
+    if (unsupported.length) {
+      run.ctl.note(`Crew could not show the Antigravity form because it has no supported answer field for ${unsupported.map((q) => q.title).join(' / ')}.`);
+      return { action: 'decline' };
+    }
+    const reason = (questions.length > 1 ? 'Your answer applies to every question.\n' : '') + questions.map(questionText).join('\n\n');
+    const answer = await this.ask(run, 'question', reason);
     if (!answer) return { action: 'cancel' };
-    const text = answer.message?.trim() || (answer.approve ? 'Yes' : '');
-    if (!text) return { action: 'decline' };
+    const message = answer.message?.trim();
+    if (!message && !answer.approve && !questions.every((q) => q.choices.some((c) => /^no$/i.test(c.title.trim())))) return { action: 'decline' };
+    const text = message || (answer.approve ? 'Yes' : 'No');
     const content = formAnswer(questions, text);
-    return content ? { action: 'accept', content } : { action: 'decline' };
+    if (content) return { action: 'accept', content };
+    run.ctl.note(`Antigravity's form could not use the answer to ${questions.map((q) => q.title).join(' / ')}\nAnswer: ${text}`);
+    return { action: 'decline' };
   }
 
   private async onRequest(method: string, p: any): Promise<unknown> {
@@ -381,7 +397,11 @@ export function formQuestions(schema: any): FormQuestion[] {
     const many = field?.type === 'array';
     const listed: any[] = (many ? field.items?.anyOf ?? field.items?.oneOf : field?.oneOf ?? field?.anyOf) ?? [];
     const choices = listed.filter((c) => c && c.const !== undefined).map((c) => ({ value: String(c.const), title: String(c.title ?? c.const) }));
-    const other = `${key}_other` in properties ? `${key}_other` : !choices.length && field?.type === 'string' ? key : undefined;
+    if (!choices.length && field?.type === 'string' && Array.isArray(field.enum)) {
+      for (const value of field.enum) if (typeof value === 'string') choices.push({ value, title: value });
+    }
+    const otherKey = `${key}_other`;
+    const other = properties[otherKey]?.type === 'string' ? otherKey : !choices.length && field?.type === 'string' ? key : undefined;
     return { key, title: String(field?.title ?? field?.description ?? key), choices, many, ...(other ? { other } : {}) };
   });
 }
@@ -391,17 +411,18 @@ function questionText(question: FormQuestion): string {
   return [question.title, ...choices].join('\n');
 }
 
-/**
- * The form content for one written answer, given to every question as a Codex worker's is. An answer that names a
- * choice, by its text or its number, picks it; anything else goes in as the user's own words. Undefined when a
- * question can take neither.
- */
+/** Applies one reply to the whole form because Crew collects one answer per request. */
 export function formAnswer(questions: FormQuestion[], text: string): Record<string, string | string[]> | undefined {
   const content: Record<string, string | string[]> = {};
-  const said = text.trim().toLowerCase();
+  const said = text.toLowerCase();
   for (const question of questions) {
-    const picked = question.choices.find((choice) => choice.title.trim().toLowerCase() === said) ?? (/^\d+$/.test(said) ? question.choices[Number(said) - 1] : undefined);
-    if (picked) content[question.key] = question.many ? [picked.value] : picked.value;
+    const parts = question.many ? said.split(',') : [said];
+    const picked = parts.map((part) => {
+      const name = part.trim();
+      const choice = question.choices.find((c) => c.title.trim().toLowerCase() === name) ?? (/^\d+$/.test(name) ? question.choices[Number(name) - 1] : undefined);
+      return choice?.value;
+    });
+    if (picked.every((value) => value !== undefined)) content[question.key] = question.many ? picked : picked[0];
     else if (question.other) content[question.other] = text.trim();
     else return undefined;
   }

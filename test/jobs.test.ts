@@ -81,10 +81,26 @@ test('parses the first word under the Outcome heading', () => {
   assert.equal(parseOutcome('## Outcome\n\npartial — tests not run\n\n## Result\nEdited a file.'), 'partial');
   assert.equal(parseOutcome('## OUTCOME ##\r\n  **DONE**\r\n'), 'done');
   assert.equal(parseOutcome('## Outcome\n blocked\n'), 'blocked');
+  for (const declaration of ['`done`', '*done*', '_done_', '- done']) {
+    assert.equal(parseOutcome(`## Outcome\n${declaration}\n`), 'done', declaration);
+  }
+  assert.equal(parseOutcome('## Outcome: done'), 'done');
+  assert.equal(parseOutcome('## Outcome: `partial` ##\r\n'), 'partial');
   assert.equal(parseOutcome('## Result\ndone'), undefined);
   assert.equal(parseOutcome('## Outcome\nsucceeded\ndone'), undefined);
   assert.equal(parseOutcome('## Outcome\n\n## Result\ndone'), undefined);
   assert.equal(parseOutcome('### Outcome\ndone'), undefined);
+  assert.equal(parseOutcome('## Outcome: unknown\n\ndone'), undefined);
+  assert.equal(parseOutcome('## Outcome\n*done'), undefined);
+});
+
+test('ignores Outcome headings inside backtick and tilde fences', () => {
+  for (const fence of ['`', '~']) {
+    const example = `  ${fence.repeat(4)}markdown\r\n## Outcome\r\ndone\r\n${fence.repeat(3)}\r\n## Outcome: done\r\n ${fence.repeat(5)}\r\n`;
+    assert.equal(parseOutcome(example), undefined);
+    assert.equal(parseOutcome(`${example}\n## Outcome\nblocked`), 'blocked');
+    assert.equal(parseOutcome(`${fence.repeat(3)}\n## Outcome: done`), undefined);
+  }
 });
 
 test('records and renders the worker outcome beside the bridge observations', async (t) => {
@@ -95,7 +111,7 @@ test('records and renders the worker outcome beside the bridge observations', as
     ['## Outcome\ndone', 'done', 'done'],
     ['## Outcome\ndone', 'done', 'done as declared, but the bridge check failed', 'check'],
     ['## Outcome\ndone', 'done', 'done as declared, but no files changed after an action was refused or declined', 'declined'],
-    ['## Outcome\ndone', 'done', 'done as declared, but an action was refused or declined this turn', 'refused'],
+    ['## Outcome\ndone', 'done', 'done', 'refused'],
   ] as const) {
     const { jobs, home } = harness((ctl) => {
       if (observation === 'check') {
@@ -105,6 +121,7 @@ test('records and renders the worker outcome beside the bridge observations', as
       } else if (observation === 'refused') {
         ctl.touched(path.join(ctl.job.cwd, 'app.js'));
         ctl.refused('run a command', 'outside the task');
+        ctl.job.receipts = [{ turn: ctl.job.turns, head: null, at: Date.now(), check: { command: 'exit 0', exit: 0, timedOut: false, output: '', ms: 0, sandboxed: true } }];
       }
       ctl.done(report);
     });
@@ -113,7 +130,7 @@ test('records and renders the worker outcome beside the bridge observations', as
     assert.equal(job.state, 'done');
     assert.equal(job.outcome, outcome);
     assert.equal(describe(job).split('\n').find((text) => text.startsWith('outcome: ')), `outcome: ${line}`);
-    assert.equal(outcomeContradiction(job), observation ? line.slice('done as declared, but '.length) : undefined);
+    assert.equal(outcomeContradiction(job), line.startsWith('done as declared, but ') ? line.slice('done as declared, but '.length) : undefined);
     if (observation === 'declined') assert.match(describe(job), /changes: none — an action was refused or declined/);
   }
 });
@@ -281,7 +298,8 @@ test('a waiting job resumes on a decision and reports the limit kind on failure'
   const plain = harness((ctl) => ctl.waiting('approval', 'run: npm install'));
   const unscoped = await plain.jobs.create({ kind: 'review', cwd: repo, review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } });
   await plain.jobs.wait(unscoped.id, 0, 2000);
-  await assert.rejects(plain.jobs.reply(unscoped.id, { decision: 'allow_for_job', request_id: unscoped.waiting!.id }), /cannot be allowed for the whole job/);
+  await assert.rejects(plain.jobs.reply(unscoped.id, { request_id: unscoped.waiting!.id }), /waiting for approval[^]*"decline" with a message/);
+  await assert.rejects(plain.jobs.reply(unscoped.id, { decision: 'allow_for_job', request_id: unscoped.waiting!.id }), /cannot be allowed for the whole job[^]*"decline" with a message/);
   assert.deepEqual(plain.calls, []);
   const scoped = harness((ctl) => ctl.waiting('approval', 'Use the tool cua_repl.click', 'Computer Use using "App"'));
   const tool = await scoped.jobs.create({ kind: 'review', cwd: repo, review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } });

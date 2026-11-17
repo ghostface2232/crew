@@ -141,15 +141,14 @@ export function pickModel(options: { value?: unknown; name?: unknown }[] | undef
   return values.find((v) => v.toLowerCase().includes(needle) && !v.toLowerCase().includes('orchestrator'));
 }
 
-/**
- * The offered effort a requested one stands for: itself when offered, else the nearest lower one, else the lowest offered.
- * A model with fewer levels then runs as close to the request as it can, never above it.
- */
+/** Picks the requested or nearest lower offered effort, leaving the session's level in place when neither is offered. */
 export function pickEffort(options: { value?: unknown }[] | undefined, wanted: string): string | undefined {
   const values = (options ?? []).map((o) => o.value).filter((v): v is string => typeof v === 'string');
-  if (values.includes(wanted)) return wanted;
-  const rank = EFFORT_ORDER.indexOf(wanted.toLowerCase());
-  if (rank < 0) return undefined;
-  const known = values.filter((v) => EFFORT_ORDER.includes(v)).sort((a, b) => EFFORT_ORDER.indexOf(a) - EFFORT_ORDER.indexOf(b));
-  return known.filter((v) => EFFORT_ORDER.indexOf(v) < rank).pop() ?? known[0];
+  const name = wanted.toLowerCase();
+  const exact = values.find((v) => v.toLowerCase() === name);
+  if (exact !== undefined) return exact;
+  for (let rank = EFFORT_ORDER.indexOf(name) - 1; rank >= 0; rank--) {
+    const lower = values.find((v) => v.toLowerCase() === EFFORT_ORDER[rank]);
+    if (lower !== undefined) return lower;
+  }
 }

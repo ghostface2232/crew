@@ -499,9 +499,8 @@ export function Settings({ state, update, close }: { state: Snapshot; update: Ap
               {kind && info.filter((role) => paneKind(role) === kind).map(roleGroup)}
               {kind && (
                 <p className={styles.footnote}>
-                  The lead picks one of a role's holders for each job. When none is named, Antigravity takes wording and Codex other
-                  work, passing over one that is disabled or cannot do the role. Claude means the lead does the work itself or in a
-                  subagent. Each agent's model and effort apply when it runs the role.
+                  The lead picks the holder; by default, Antigravity takes wording and Codex the rest, among holders that can.
+                  Claude means the lead does it itself.
                 </p>
               )}
               {current === 'presets' && (
@@ -579,8 +578,8 @@ export function Settings({ state, update, close }: { state: Snapshot; update: Ap
                     )}
                     <p className={styles.footnote}>
                       {update.state === 'unsupported'
-                        ? 'This copy of Crew was not installed with the Crew installer, so it cannot update itself. Install Crew from its GitHub releases to get updates.'
-                        : 'Crew checks for a new version every few hours and downloads it while you are away from the app. Nothing is installed until you choose Restart to Update. If jobs are running, the update waits for them to finish; jobs, missions and settings are kept.'}
+                        ? 'This copy cannot update itself. Install Crew from GitHub releases for updates.'
+                        : 'Updates download in the background and install only on Restart to Update, after running jobs finish.'}
                     </p>
                   </section>
                 </>
@@ -589,11 +588,8 @@ export function Settings({ state, update, close }: { state: Snapshot; update: Ap
                 <section className={styles.group}>
                   <Scores scores={state.modelScores!} />
                   <p className={styles.footnote}>
-                    After each review and its fix, the lead notes the findings it accepted and how the fix went. A model's score out of 10
-                    follows how many findings its builds drew for their size, across every job; how it fixes is scored apart and does not
-                    change its rank. A review by the model's own agent counts half. Scores reflect the work each model was given, so a model
-                    on harder work may score lower. A model starts where the others stand, and is ranked once it has three build reviews.
-                    The lead reads these notes when it picks a tier or holder; your roles and presets still decide.
+                    Scored from review findings per build size, with fixes scored apart. A model is ranked after three build
+                    reviews; a review by its own agent counts half.
                   </p>
                 </section>
               )}

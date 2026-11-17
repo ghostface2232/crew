@@ -95,7 +95,7 @@ function Row({ score, rank, index }: { score: ModelScore; rank?: number; index: 
           <Bar label="Build" value={score.build} />
           <Bar label="Fix" value={score.fix} />
         </div>
-        {score.summary && <p className={styles.summary}>{score.summary}</p>}
+        {score.summary && <p className={styles.summary} title={score.summary}>{score.summary}</p>}
       </div>
       <Ring score={score} />
     </article>

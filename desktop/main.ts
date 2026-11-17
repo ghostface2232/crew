@@ -83,6 +83,8 @@ const FRAME_CSS = `
 :root .workspace { height: 100vh; }
 :root .topbar { position: static; flex: none; }
 :root .page { flex: 1; min-height: 0; overflow-y: auto; max-width: none; margin: 0; }
+/* As a fixed-height flex scroller the page would shrink its sections to fit, crushing any that clip their overflow (the KPI card). */
+:root .page > * { flex-shrink: 0; }
 @media (min-width: 761px) { :root .page { padding-inline: max(var(--page-margin), calc((100% - 1400px) / 2)); } }
 /* Sticky offsets in board.css count the top bar the page used to scroll under; the page now starts below it. */
 :root .event-day-name { top: 0; }

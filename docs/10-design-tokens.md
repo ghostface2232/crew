@@ -94,7 +94,7 @@ Surfaces change between light and dark appearance. Status colors are system colo
 | `canvas` | The page background. In dark mode, cards are about 9% lighter than the canvas. |
 | `surface` | Cards and the detail panel |
 | `rowFill` | Rows, gray insets and evidence thumbnails on a surface |
-| `hairline` | Card, field and thumbnail outlines |
+| `hairline` | Field and thumbnail outlines; cards and the detail panel have none (`Palette.contrastStroke` outlines them under Increase Contrast) |
 | `Palette.accent` | Running work and the current step |
 | `Palette.success` | Done |
 | `Palette.warning` | Waiting, stalled, unsaved, usage at 70% or more or a window reported tight |

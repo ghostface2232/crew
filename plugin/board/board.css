@@ -56,8 +56,10 @@
   --heat-3: color-mix(in srgb, var(--accent) 72%, transparent);
   --heat-4: var(--accent);
   --shadow-card: 0 0 0 transparent;
+  /* Cards and panels have no outline; with more contrast this ring draws one. */
+  --outline-ring: 0 0 0 transparent;
   /* Palette.panelShadow, cast down and away from the edge the panel floats beside. */
-  --shadow-pop: 0 0 0 1px var(--hairline), -8px 8px 26px rgb(0 0 0 / 0.14);
+  --shadow-pop: var(--outline-ring), -8px 8px 26px rgb(0 0 0 / 0.14);
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
   /* Space and WorkspaceStyle layout */
@@ -112,11 +114,11 @@
     --tone-ink: white;
     --track: rgb(255 255 255 / 0.22);
     --heat-0: rgb(255 255 255 / 0.06);
-    --shadow-pop: 0 0 0 1px var(--hairline-strong), -8px 8px 26px rgb(0 0 0 / 0.4);
+    --shadow-pop: var(--outline-ring), -8px 8px 26px rgb(0 0 0 / 0.4);
   }
 }
 @media (prefers-contrast: more) {
-  :root { --hairline: color-mix(in srgb, var(--label) 25%, transparent); }
+  :root { --hairline: color-mix(in srgb, var(--label) 25%, transparent); --outline-ring: 0 0 0 1px var(--hairline); }
 }
 
 * { box-sizing: border-box; }
@@ -317,7 +319,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   padding: var(--card-padding);
   border-radius: var(--card-radius);
   background: var(--surface);
-  box-shadow: inset 0 0 0 1px var(--hairline), var(--shadow-card);
+  box-shadow: var(--outline-ring), var(--shadow-card);
 }
 .panel { display: grid; gap: 16px; align-content: start; }
 .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 22px; }
@@ -980,7 +982,7 @@ dialog.detail-panel { container: panel / inline-size; }
 .mission { display: grid; transition: box-shadow 200ms ease-out; }
 .mission > .action-message { margin-block-start: 14px; }
 .mission:not([data-expanded]) { cursor: pointer; }
-@media (hover: hover) { .mission:not([data-expanded]):hover { box-shadow: inset 0 0 0 1px var(--hairline-strong), 0 6px 20px -12px color-mix(in srgb, var(--lift), black 10%); } }
+@media (hover: hover) { .mission:not([data-expanded]):hover { box-shadow: 0 6px 20px -12px color-mix(in srgb, var(--lift), black 10%); } }
 .mission-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .mission[data-expanded] .mission-head { cursor: pointer; }
 .mission[data-state="active"] { --tone: var(--accent); }

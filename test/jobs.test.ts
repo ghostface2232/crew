@@ -694,11 +694,10 @@ test('a job carries its mission and starting notes, and is kept with a mission t
   // Ended long ago, so only the history limit and the mission decide.
   for (const job of [first, dropped, odd]) { acknowledge(jobs, job); job.endedAt = 1; }
 
-  // Push both past the history limit with newer finished jobs.
+  // Push both past the history limit with newer finished jobs, copied from one with no mission rather than run one by one.
   for (let i = 0; i < 201; i++) {
-    const job = await settled(jobs, await jobs.create({ kind: 'review', cwd: repo, review }));
-    acknowledge(jobs, job);
-    job.endedAt = 1;
+    const id = `history-${i}`;
+    jobs.jobs.set(id, { ...odd, id, createdAt: odd.createdAt + i + 1 });
   }
   jobs.flush();
   const reloaded = make();

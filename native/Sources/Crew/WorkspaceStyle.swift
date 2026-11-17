@@ -155,7 +155,7 @@ struct MissionTrack: View {
     }
 }
 
-/// The shared card surface: one padding, radius and outline for every card.
+/// The shared card surface: one padding and radius for every card, outlined only under Increase Contrast.
 struct CardSurface: ViewModifier {
     var padding = WorkspaceStyle.cardPadding
     var fill = WorkspaceStyle.surface
@@ -164,7 +164,7 @@ struct CardSurface: ViewModifier {
         let shape = RoundedRectangle(cornerRadius: WorkspaceStyle.cardRadius)
         content.padding(padding)
             .background(fill, in: shape)
-            .overlay(shape.strokeBorder(contrast == .increased ? Palette.contrastStroke : WorkspaceStyle.hairline))
+            .overlay { if contrast == .increased { shape.strokeBorder(Palette.contrastStroke) } }
     }
 }
 extension View {

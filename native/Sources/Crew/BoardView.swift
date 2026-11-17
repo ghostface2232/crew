@@ -4,6 +4,7 @@ struct BoardView: View {
     @Bindable var store: CrewStore
     var openSettings: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorSchemeContrast) private var contrast
     @FocusState private var searchFocused: Bool
     @State private var wide = false
     /// The page column's width, the panel floating over its trailing part; it bounds how wide the panel may be dragged.
@@ -82,7 +83,7 @@ struct BoardView: View {
                 }
                     .frame(width: WorkspaceStyle.panelWidth(store.panelWidth, page: pageWidth)).background(WorkspaceStyle.surface, in: shape)
                     .clipShape(shape)
-                    .overlay(shape.strokeBorder(WorkspaceStyle.hairline))
+                    .overlay { if contrast == .increased { shape.strokeBorder(Palette.contrastStroke) } }
                     .overlay(alignment: .leading) { PanelResizeHandle(store: store, page: pageWidth) }
                     .shadow(color: Palette.panelShadow, radius: WorkspaceStyle.panelShadowRadius, x: WorkspaceStyle.panelShadowOffset.width, y: WorkspaceStyle.panelShadowOffset.height)
                     .padding(.trailing, WorkspaceStyle.windowInset).padding(.bottom, WorkspaceStyle.windowInset)

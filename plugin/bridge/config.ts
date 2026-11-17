@@ -105,7 +105,7 @@ export function runsCommands(agent: WorkerAgent, spec: { kind: JobKind; ask?: bo
   return (spec.kind === 'delegate' && !spec.ask) || WORKERS[agent].reviewerRunsGit;
 }
 
-/** A worker's model and effort for one role, over the agent's own settings. Antigravity takes no effort. */
+/** A worker's model and effort for one role, over the agent's own settings. */
 export interface AgentSettings {
   model?: string;
   effort?: string;
@@ -146,7 +146,7 @@ export type PresetName = 'economy' | 'balanced' | 'best';
 /** Model and effort a preset gives each agent, and the model the lead should give its subagents. */
 export interface Preset {
   codex?: { model?: string; effort?: string };
-  antigravity?: { model?: string };
+  antigravity?: { model?: string; effort?: string };
   /** Passed by the lead as the model of the subagents it starts; "inherit" leaves them on the lead's model. */
   subagentModel?: string;
   /** The largest model the lead may give its subagents when a task needs more than subagentModel. */
@@ -302,7 +302,7 @@ function roleEntry(role: Role, entry: Record<string, unknown>, inherited: RoleAs
   for (const agent of Object.keys(WORKERS) as WorkerAgent[]) {
     const settings = entry[agent];
     if (settings === undefined) continue;
-    const allowed = agent === 'codex' ? ['model', 'effort'] : ['model'];
+    const allowed = ['model', 'effort'];
     if (!isObject(settings)) throw new Error(`roles.${role}.${agent} must be an object such as {"model": "..."}.`);
     for (const [key, value] of Object.entries(settings)) {
       if (!allowed.includes(key)) throw new Error(`roles.${role}.${agent}.${key} is not a setting; use ${allowed.join(' or ')}.`);
@@ -365,7 +365,7 @@ function resolvePresets(user: UserConfig): Pick<Config, 'preset' | 'presets'> {
         if (!TIERS.includes(value as Tier)) throw new Error(`presets.${name}.maxTier must be one of: ${TIERS.join(', ')}.`);
         merged.maxTier = value as Tier;
       } else if (key === 'codex' || key === 'antigravity') {
-        const allowed = key === 'codex' ? ['model', 'effort'] : ['model'];
+        const allowed = ['model', 'effort'];
         if (!isObject(value)) throw new Error(`presets.${name}.${key} must be an object.`);
         for (const [setting, text] of Object.entries(value)) {
           if (!allowed.includes(setting)) throw new Error(`presets.${name}.${key}.${setting} is not a setting; use ${allowed.join(' or ')}.`);

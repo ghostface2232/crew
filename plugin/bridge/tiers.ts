@@ -63,7 +63,7 @@ export function codexModel(family: string, cache = codexCache()): string | undef
   return matches[0];
 }
 
-/** A model the settings offer for an agent, with the efforts it accepts (Antigravity takes none). */
+/** A model the settings offer for an agent, with the efforts it accepts. */
 export interface ModelChoice {
   id: string;
   name: string;
@@ -89,9 +89,18 @@ export function codexModels(cache = codexCache()): ModelChoice[] {
     }));
 }
 
+/** Efforts in rising order, for picking the nearest one a model offers. */
+const EFFORT_ORDER = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+
+/**
+ * Thinking levels each Antigravity family offered on agy 1.5.9. They only fill the settings' choices:
+ * a job takes its levels from its own session, which lists what this account and version really offer.
+ */
+const ANTIGRAVITY_EFFORTS: Record<string, string[]> = { hydrogen: ['low', 'medium', 'high', 'xhigh'], argon: ['low', 'medium', 'high'] };
+
 /** Antigravity's models are matched by family against the session's own list, so its choices are the families. */
 export const ANTIGRAVITY_MODELS: ModelChoice[] = [...new Set(Object.values(TIER_FAMILIES.antigravity))]
-  .map((family) => ({ id: family, name: family[0].toUpperCase() + family.slice(1) }));
+  .map((family) => ({ id: family, name: family[0].toUpperCase() + family.slice(1), efforts: ANTIGRAVITY_EFFORTS[family] }));
 
 /** The model a tier gives an agent's job. For Antigravity it is the family, matched against the session's own list. */
 export function tierModel(agent: WorkerAgent, tier: Tier, cache?: string): string | undefined {
@@ -130,4 +139,17 @@ export function pickModel(options: { value?: unknown; name?: unknown }[] | undef
   const needle = wanted.toLowerCase();
   // An orchestrator wraps a family; it is not the family itself.
   return values.find((v) => v.toLowerCase().includes(needle) && !v.toLowerCase().includes('orchestrator'));
+}
+
+/**
+ * The offered effort a requested one stands for: itself when offered, else the nearest lower one, else the lowest offered.
+ * A model with fewer levels then runs as close to the request as it can, never above it.
+ */
+export function pickEffort(options: { value?: unknown }[] | undefined, wanted: string): string | undefined {
+  const values = (options ?? []).map((o) => o.value).filter((v): v is string => typeof v === 'string');
+  if (values.includes(wanted)) return wanted;
+  const rank = EFFORT_ORDER.indexOf(wanted.toLowerCase());
+  if (rank < 0) return undefined;
+  const known = values.filter((v) => EFFORT_ORDER.includes(v)).sort((a, b) => EFFORT_ORDER.indexOf(a) - EFFORT_ORDER.indexOf(b));
+  return known.filter((v) => EFFORT_ORDER.indexOf(v) < rank).pop() ?? known[0];
 }

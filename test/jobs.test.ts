@@ -1439,7 +1439,7 @@ for (const agent of ['codex', 'antigravity'] as const) {
     assert.equal(job.ask, true);
     assert.equal(job.agent, agent);
     assert.equal(job.model, 'question-model');
-    // Antigravity takes no effort, so a role written before agents gives it none.
+    // A role written before agents set effort for Codex only.
     assert.equal(job.effort, agent === 'codex' ? 'high' : undefined);
     assert.equal(job.nativeReview, null);
     assert.equal(job.report, 'The answer.');

@@ -277,8 +277,8 @@ struct RoleAssignment: Codable, Sendable, Equatable {
 struct RoleAgentSettings: Codable, Sendable, Equatable {
     var model: String?
     var effort: String?
-    func normalized(effort allowed: Bool = true) -> Self? {
-        let clean = Self(model: model?.isEmpty == true ? nil : model, effort: allowed && effort?.isEmpty != true ? effort : nil)
+    func normalized() -> Self? {
+        let clean = Self(model: model?.isEmpty == true ? nil : model, effort: effort?.isEmpty == true ? nil : effort)
         return clean == Self() ? nil : clean
     }
 }
@@ -298,7 +298,7 @@ struct RoleSetting: Codable, Sendable, Equatable {
     }
     var normalized: Self {
         Self(agents: agents.map { agents in RoleAssignment.holderOrder.filter { agents.contains($0) } },
-             codex: codex?.normalized(), antigravity: antigravity?.normalized(effort: false))
+             codex: codex?.normalized(), antigravity: antigravity?.normalized())
     }
     private enum CodingKeys: String, CodingKey { case agents, codex, antigravity, agent, also, model, effort }
     init(from decoder: Decoder) throws {

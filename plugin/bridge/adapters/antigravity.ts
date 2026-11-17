@@ -8,7 +8,7 @@ import { isTerminal } from '../jobs.ts';
 import type { Adapter, JobCtl, JobKind } from '../jobs.ts';
 import { isInside } from '../git.ts';
 import { RPC_TIMEOUT_MS, RpcError, RpcPeer } from '../rpc.ts';
-import { pickModel } from '../tiers.ts';
+import { pickEffort, pickModel } from '../tiers.ts';
 
 interface Run {
   ctl: JobCtl;
@@ -18,9 +18,18 @@ interface Run {
   message: string;
   /** Last non-empty text before that, in case the turn ends right after a tool call. */
   earlier: string;
-  /** Permission requests waiting on the user, in arrival order. The first is the one shown. */
-  pending: { reason: string; resolve: (approve: boolean | null) => void }[];
+  /** Approvals and questions waiting on the user, in arrival order. The first is the one shown. */
+  pending: { type: 'approval' | 'question'; reason: string; resolve: (answer: Answer | null) => void }[];
 }
+
+/** The user's answer to a request; null when it can no longer be answered. */
+interface Answer {
+  approve: boolean;
+  message?: string;
+}
+
+/** Names agy has used for a command in a tool call's input, by server version. */
+const COMMAND_FIELDS = ['command', 'CommandLine', 'command_line', 'commandLine'];
 
 /** ACP tool kinds that cannot change anything. */
 const PASSIVE_KINDS = ['read', 'search', 'think'];
@@ -40,6 +49,8 @@ export class AntigravityAdapter implements Adapter {
   private loaded = new Set<string>();
   private restoreMethod: 'session/resume' | 'session/load' | null = null;
   private canClose = false;
+  /** The server takes instructions as an addition to its system prompt. */
+  private appendsPrompt = false;
   private lastUsed = Date.now();
   private config: Config;
 
@@ -54,7 +65,7 @@ export class AntigravityAdapter implements Adapter {
   async start(ctl: JobCtl): Promise<void> {
     const peer = await this.ensure();
     if (isTerminal(ctl.job)) return;
-    const res = await peer.request('session/new', { cwd: ctl.job.cwd, mcpServers: [crewServer(ctl)] }, RPC_TIMEOUT_MS);
+    const res = await peer.request('session/new', { cwd: ctl.job.cwd, mcpServers: [crewServer(ctl)], ...this.instructions(ctl) }, RPC_TIMEOUT_MS);
     if (isTerminal(ctl.job)) return;
     ctl.capabilities({
       filesystem: ctl.job.sandbox === 'read-only' ? 'read-only; Crew refuses every edit' : 'edits inside the workspace only; Crew refuses the rest',
@@ -74,11 +85,24 @@ export class AntigravityAdapter implements Adapter {
     // A family the session does not list is left to the agent's default; a model named outright is still sent, so a typo shows.
     const listed = wanted ? pickModel(res.configOptions?.find((o: any) => o.category === 'model' || o.id === 'model')?.options, wanted) : undefined;
     const model = listed ?? (ctl.job.tier ? undefined : wanted);
-    const selected = model ? await peer.request('session/set_config_option', { sessionId, configId: 'model', value: model }, RPC_TIMEOUT_MS) : res;
-    ctl.model(sessionModel(selected) ?? model);
+    let selected = model ? await peer.request('session/set_config_option', { sessionId, configId: 'model', value: model }, RPC_TIMEOUT_MS) : res;
+    // The levels differ by model, so they are read from the session after the model is set.
+    const level = ctl.job.effort ? pickEffort(configOption(selected, 'thought_level')?.options, ctl.job.effort) : undefined;
+    if (level && level !== configOption(selected, 'thought_level')?.currentValue) {
+      selected = await peer.request('session/set_config_option', { sessionId, configId: 'thought_level', value: level }, RPC_TIMEOUT_MS);
+    }
+    ctl.model(sessionModel(selected) ?? model, sessionEffort(selected));
 
-    // ACP has no separate instruction channel, so the role travels with the first prompt.
-    if (!isTerminal(ctl.job)) this.prompt(peer, run, `${ctl.job.instructions}\n\n${ctl.job.prompt}`);
+    // Without a system prompt addition, the role travels with the first prompt.
+    if (!isTerminal(ctl.job)) this.prompt(peer, run, this.appendsPrompt ? ctl.job.prompt : `${ctl.job.instructions}\n\n${ctl.job.prompt}`);
+  }
+
+  /**
+   * The role as an addition to the system prompt, where the server takes one: there it holds for every turn and is
+   * not mixed into the task. agy 1.5.9 kept it across a resume in a new process; it is sent again on restore for servers that do not.
+   */
+  private instructions(ctl: JobCtl): { _meta?: unknown } {
+    return this.appendsPrompt ? { _meta: { antigravity: { systemPrompt: { append: ctl.job.instructions } } } } : {};
   }
 
   async reply(ctl: JobCtl, message: string): Promise<void> {
@@ -86,8 +110,8 @@ export class AntigravityAdapter implements Adapter {
     const sessionId = ctl.job.sessionId!;
     if (!this.loaded.has(sessionId)) {
       if (!this.restoreMethod) throw new Error('This Antigravity server cannot restore sessions. Continue it from the Antigravity CLI.');
-      const res = await peer.request(this.restoreMethod, { sessionId, cwd: ctl.job.cwd, mcpServers: [crewServer(ctl)] }, RPC_TIMEOUT_MS);
-      ctl.model(sessionModel(res) ?? ctl.job.resolvedModel ?? ctl.job.model ?? this.config.antigravity.model);
+      const res = await peer.request(this.restoreMethod, { sessionId, cwd: ctl.job.cwd, mcpServers: [crewServer(ctl)], ...this.instructions(ctl) }, RPC_TIMEOUT_MS);
+      ctl.model(sessionModel(res) ?? ctl.job.resolvedModel ?? ctl.job.model ?? this.config.antigravity.model, sessionEffort(res) ?? ctl.job.resolvedEffort);
       this.loaded.add(sessionId);
     }
     if (isTerminal(ctl.job)) return;
@@ -100,13 +124,13 @@ export class AntigravityAdapter implements Adapter {
     this.prompt(peer, run, message);
   }
 
-  async answer(ctl: JobCtl, approve: boolean): Promise<void> {
+  async answer(ctl: JobCtl, approve: boolean, message?: string): Promise<void> {
     const run = this.runs.get(ctl.job.sessionId ?? '');
     const request = run?.pending.shift();
     if (!run || !request) throw new Error('The request this job was waiting on is no longer pending.');
-    request.resolve(approve);
+    request.resolve({ approve, message });
     const next = run.pending[0];
-    if (next) ctl.waiting('approval', next.reason);
+    if (next) ctl.waiting(next.type, next.reason);
     else ctl.resumed();
   }
 
@@ -194,9 +218,11 @@ export class AntigravityAdapter implements Adapter {
     }, shell);
     this.peer = peer;
     // No fs or terminal capabilities: the agent uses its own tools, gated by request_permission.
+    // Declaring forms makes a question arrive as a request that waits for its answer. Without it, agy 1.5.9
+    // printed the question and ended the turn, so the job finished with a question for a report.
     const { agentCapabilities } = await peer.initialize({
       protocolVersion: 1,
-      clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
+      clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false, elicitation: { form: {} } },
       clientInfo: { name: 'crew', title: 'Crew', version: VERSION },
     });
     const resume = agentCapabilities?.sessionCapabilities?.resume;
@@ -204,6 +230,7 @@ export class AntigravityAdapter implements Adapter {
       : agentCapabilities?.loadSession === true ? 'session/load' : null;
     const close = agentCapabilities?.sessionCapabilities?.close;
     this.canClose = Boolean(close && typeof close === 'object');
+    this.appendsPrompt = agentCapabilities?._meta?.antigravity?.systemPrompt?.append === true;
     return peer;
   }
 
@@ -219,7 +246,7 @@ export class AntigravityAdapter implements Adapter {
     switch (update.sessionUpdate) {
       case 'config_option_update': {
         const model = sessionModel(update);
-        if (model) ctl.model(model);
+        if (model) ctl.model(model, sessionEffort(update) ?? ctl.job.resolvedEffort);
         break;
       }
       case 'agent_message_chunk':
@@ -252,7 +279,30 @@ export class AntigravityAdapter implements Adapter {
     }
   }
 
+  /** Puts a request before the user and resolves with their answer, or null once the turn can no longer use one. */
+  private ask(run: Run, type: 'approval' | 'question', reason: string): Promise<Answer | null> {
+    return new Promise((resolve) => {
+      run.pending.push({ type, reason, resolve });
+      if (run.pending.length === 1) run.ctl.waiting(type, reason);
+    });
+  }
+
+  /** A question the agent asks through a form. The user answers it, as they do a Codex worker's. */
+  private async onQuestion(p: any): Promise<unknown> {
+    const run = this.runs.get(p.sessionId);
+    if (!run || run.cancelling || !run.prompting || isTerminal(run.ctl.job)) return { action: 'cancel' };
+    const questions = formQuestions(p.requestedSchema);
+    if (p.mode !== 'form' || !questions.length) return { action: 'decline' };
+    const answer = await this.ask(run, 'question', questions.map(questionText).join('\n\n'));
+    if (!answer) return { action: 'cancel' };
+    const text = answer.message?.trim() || (answer.approve ? 'Yes' : '');
+    if (!text) return { action: 'decline' };
+    const content = formAnswer(questions, text);
+    return content ? { action: 'accept', content } : { action: 'decline' };
+  }
+
   private async onRequest(method: string, p: any): Promise<unknown> {
+    if (method === 'elicitation/create') return this.onQuestion(p ?? {});
     if (method !== 'session/request_permission') throw new RpcError(-32601, `${method} is not supported by Crew`);
     const cancelled = { outcome: { outcome: 'cancelled' } };
     const run = this.runs.get(p.sessionId);
@@ -264,13 +314,10 @@ export class AntigravityAdapter implements Adapter {
     let allow = verdict === 'allow';
     if (run && verdict === 'ask') {
       const reason = describeRequest(toolCall, run.ctl.job.cwd);
-      const answer = await new Promise<boolean | null>((resolve) => {
-        run.pending.push({ reason, resolve });
-        if (run.pending.length === 1) run.ctl.waiting('approval', reason);
-      });
+      const answer = await this.ask(run, 'approval', reason);
       if (answer === null) return cancelled;
-      allow = answer;
-      if (!answer) run.ctl.note(`The user declined an action: ${describeRequest(toolCall, run.ctl.job.cwd)}\nDo it another way within the job permissions, or report what could not be verified.`, { declined: true });
+      allow = answer.approve;
+      if (!allow) run.ctl.note(`The user declined an action: ${describeRequest(toolCall, run.ctl.job.cwd)}\nDo it another way within the job permissions, or report what could not be verified.`, { declined: true });
     }
     if (run && typeof verdict === 'object') {
       const what = `${verdict.refuse}: ${describeRequest(toolCall, run.ctl.job.cwd)}`;
@@ -287,10 +334,67 @@ export class AntigravityAdapter implements Adapter {
   }
 }
 
+function configOption(response: any, id: string): { currentValue?: unknown; options?: { value?: unknown }[] } | undefined {
+  return response?.configOptions?.find((o: any) => o.category === id || o.id === id);
+}
+
 function sessionModel(response: any): string | undefined {
-  const option = response.configOptions?.find((o: any) => o.category === 'model' || o.id === 'model');
-  const model = option?.currentValue ?? response.models?.currentModelId;
+  const model = configOption(response, 'model')?.currentValue ?? response.models?.currentModelId;
   return typeof model === 'string' && model ? model : undefined;
+}
+
+/** The thinking level the session runs at; undefined for a model that offers none. */
+function sessionEffort(response: any): string | undefined {
+  const level = configOption(response, 'thought_level')?.currentValue;
+  return typeof level === 'string' && level ? level : undefined;
+}
+
+interface FormQuestion {
+  key: string;
+  title: string;
+  choices: { value: string; title: string }[];
+  /** The answer is a list of choices. */
+  many: boolean;
+  /** The field that takes an answer in the user's own words, when the form has one. */
+  other?: string;
+}
+
+/**
+ * The questions in a form's schema. agy sends each as a property with the question as its title and the choices
+ * under oneOf (anyOf inside items when several may be picked), plus a "<key>_other" field for a written answer.
+ */
+export function formQuestions(schema: any): FormQuestion[] {
+  const properties: Record<string, any> = schema?.properties && typeof schema.properties === 'object' ? schema.properties : {};
+  const written = (key: string) => key.endsWith('_other') && key.slice(0, -'_other'.length) in properties;
+  return Object.entries(properties).filter(([key]) => !written(key)).map(([key, field]) => {
+    const many = field?.type === 'array';
+    const listed: any[] = (many ? field.items?.anyOf ?? field.items?.oneOf : field?.oneOf ?? field?.anyOf) ?? [];
+    const choices = listed.filter((c) => c && c.const !== undefined).map((c) => ({ value: String(c.const), title: String(c.title ?? c.const) }));
+    const other = `${key}_other` in properties ? `${key}_other` : !choices.length && field?.type === 'string' ? key : undefined;
+    return { key, title: String(field?.title ?? field?.description ?? key), choices, many, ...(other ? { other } : {}) };
+  });
+}
+
+function questionText(question: FormQuestion): string {
+  const choices = question.choices.map((choice, i) => `${i + 1}. ${choice.title}`);
+  return [question.title, ...choices].join('\n');
+}
+
+/**
+ * The form content for one written answer, given to every question as a Codex worker's is. An answer that names a
+ * choice, by its text or its number, picks it; anything else goes in as the user's own words. Undefined when a
+ * question can take neither.
+ */
+export function formAnswer(questions: FormQuestion[], text: string): Record<string, string | string[]> | undefined {
+  const content: Record<string, string | string[]> = {};
+  const said = text.trim().toLowerCase();
+  for (const question of questions) {
+    const picked = question.choices.find((choice) => choice.title.trim().toLowerCase() === said) ?? (/^\d+$/.test(said) ? question.choices[Number(said) - 1] : undefined);
+    if (picked) content[question.key] = question.many ? [picked.value] : picked.value;
+    else if (question.other) content[question.other] = text.trim();
+    else return undefined;
+  }
+  return content;
 }
 
 function crewServer(ctl: JobCtl) {
@@ -322,7 +426,7 @@ export function decide(role: JobKind, cwd: string, toolCall: { kind?: string; ti
   if ((toolCall.locations ?? []).some((l) => l.path && path.resolve(l.path) === secret)) return { refuse: 'the Crew token file' };
   // A qualified title can identify an MCP call, but must never disguise a command.
   const input = toolCall.rawInput;
-  const command = typeof input === 'string' || (input !== null && typeof input === 'object' && ('command' in input || 'CommandLine' in input));
+  const command = typeof input === 'string' || (input !== null && typeof input === 'object' && COMMAND_FIELDS.some((field) => field in input));
   if (!toolCall._meta?.mcpServerName && !toolCall._meta?.mcpToolName && kind === 'other' && !command
     && /^(?:Run )?mcp_crew_(?:ask_lead|lead_answers|siblings|search|recent_changes)$/.test(toolCall.title ?? '')) return 'allow';
   if (PASSIVE_KINDS.includes(kind)) return 'allow';

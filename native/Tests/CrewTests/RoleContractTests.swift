@@ -36,7 +36,7 @@ import Testing
         #expect(current.availableRoles.first { $0.role == "delegate" }?.unable == nil)
         let codex = try #require(current.agents["codex"])
         #expect(codex.models?.first == ModelChoice(id: "build-model", name: "Build model", efforts: ["low", "high"]))
-        #expect(current.agents["antigravity"]?.models == [ModelChoice(id: "hydrogen", name: "Hydrogen"), ModelChoice(id: "argon", name: "Argon")])
+        #expect(current.agents["antigravity"]?.models == [ModelChoice(id: "hydrogen", name: "Hydrogen", efforts: ["low", "medium", "high", "xhigh"]), ModelChoice(id: "argon", name: "Argon", efforts: ["low", "medium", "high"])])
         #expect(try JSONDecoder().decode(Worker.self, from: JSONEncoder().encode(codex)) == codex)
         let empty = try JSONDecoder().decode(Worker.self, from: Data(#"{"name":"Codex","resume":"codex resume","enabled":true,"models":[]}"#.utf8))
         #expect(empty.models == [])

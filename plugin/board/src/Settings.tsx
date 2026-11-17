@@ -445,13 +445,10 @@ export function Settings({ state, update, close }: { state: Snapshot; update: Ap
                 <span>{NAMES[agent]} model</span>
                 {field(agent, 'model')}
               </label>
-              {/* Antigravity has no effort setting. */}
-              {agent === 'codex' && (
-                <label className={styles.row}>
-                  <span>{NAMES[agent]} reasoning effort</span>
-                  {field(agent, 'effort')}
-                </label>
-              )}
+              <label className={styles.row}>
+                <span>{NAMES[agent]} reasoning effort</span>
+                {field(agent, 'effort')}
+              </label>
             </Fragment>
           ))}
         </div>

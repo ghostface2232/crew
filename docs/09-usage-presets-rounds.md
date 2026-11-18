@@ -18,6 +18,7 @@ Server-sent events added to the stream:
 | --- | --- | --- |
 | `usage` | `Usage` | AgentGauge's cache changes, a limit is reported, or a status changes with time |
 | `preset` | `{ preset, presets }` | `config.json` changes |
+| `peerRatings` | `boolean` | `config.json` changes, or the switch is saved; a `modelScores` event follows, since the scores change with it |
 
 Jobs gain `rounds?: Round[]` and `ask?: boolean` (`jobs.ts`); missions gain `notes?: MissionNote[]` (`missions.ts`). Both arrive through the existing `job` and `mission` events.
 
@@ -31,6 +32,8 @@ Added 2026-11-15 for roles and mission presets (sections 8 and 15): state gains 
 | `GET /api/route?kind=<role>\|lead&mission=<id>` | | `RouteDecision`, plus `preset` and `policy`: the preset the next job of that mission (or the global preset, if no mission is given) would run under, and what it sets. `mission` is optional; an unknown id is refused |
 | `POST /api/gc` | `{ "apply": false, "branches": false }` (both optional) | `{ text }`; user secret required; dry run unless `apply`, branches deleted only with both flags |
 | `POST /api/preset` | `{ "preset": "economy" \| "balanced" \| "best" \| null }` | `{ preset, presets }`; writes `preset` in `~/.crew/config.json` |
+| `POST /api/peer-ratings` | `{ "enabled": true \| false }` | `{ peerRatings }`; writes `peerRatings: false` in `~/.crew/config.json`, or removes the key to turn them on |
+| `POST /api/jobs/:id/rating` | `{ "correctness"?, "report"?, "findings"?, "fact", "token" }` | `{ kept }`; the worker's own token, and only from a job that was asked to rate (section 17) |
 | `POST /api/missions/:id` | `{ "note": "text" }` | The mission, with the note appended. Refused for a mission that is not active |
 | `POST /api/missions/:id` | `{ "preset": "economy" \| "balanced" \| "best" \| null }` | The mission. A name sets its preset, `null` clears it, and leaving it out changes nothing. Refused for a mission that is not active. Applies to the mission's next jobs |
 | `POST /api/missions` | adds `"preset"` | A new mission may start with a preset |
@@ -329,3 +332,45 @@ Revised 2026-11-16 after a review of the first method, which averaged a clamped 
 - Not modelled: time (model ids are exact versions, and the notes are too sparse to discard old lines), measured diff size, and independent checking of the lead's triage. The lead records the findings it declined with those it accepted, so its triage can be checked by reading the notes.
 
 The lead also keeps a short prose summary per model, rewritten from the evidence with the `note_summary` tool once ten lines have come in since the last one. Revised 2026-11-16: the summary had shared the `note` tool, so `note` could mark no field required, and leads often left out `size`, `reviewer`, or `text`; the two tools are now apart, `note` requires those three, and a refused line names every missing or invalid field at once with the values allowed. `route` adds the summaries and latest two lines of the role's holders' three most recently noted models to its answer, before the lead hands the work out. Noting the same job and role again replaces its line, so a retried call never counts a job twice (several reviews of one piece of work are one line, each accepted finding counted once); a review or debate job cannot be noted, since it built nothing. A notes file that cannot be read is set aside as `model-notes.json.unreadable-<time>`, and incomplete entries are skipped. A model id belongs to one agent. The notes are advice for picking a tier and a holder: role assignments and presets stay the user's, and nothing switches by itself.
+
+## 17. Peer ratings
+
+Added 2026-11-18. The scores of section 16 came from one measure, the accepted finding load per change size. That says nothing of whether a model followed its brief or reported honestly, it never scored a reviewer, and the lead wrote every line itself, its own model's included. The user proposed having the models of a mission score each other near its end. Ratings between language models run generous and unsteady, so they are laid over the evidence rather than replacing it, each one rests on a fact, and they are given in turns the raters already have.
+
+**Who rates whom.** Only a pair where one saw the other's work, and never oneself. Each item is a whole number from 1 to 5.
+
+| Rater | Rated | When | Items |
+| --- | --- | --- | --- |
+| Reviewer | The work it reviewed | Before its report, with `crew.rate` | `correctness`, `report` |
+| Lead | A job's builder or fixer | On that job's `note` line, as `rating` | `correctness` (a builder only), `brief`, `report` |
+| Lead | A review job | On the review's `note` line, as `rating` | `findings` |
+| Engineer | The review of its work | In the turn the findings come back, with `crew.rate` | `findings`, at half weight |
+
+`brief` is how the work followed its brief, `report` how well its report matched the work, `findings` how useful a review's findings were. A worker's rating needs `fact`, one line from the work; the lead's rests on the line's `text`. The lead cannot rate work without a job, so its own work is rated by its reviewer only.
+
+**No extra turn.** A job created while `peerRatings` is on is marked `rates`, gets a `# Rating` section in its instructions (`prompts.ts`), and finds a `rate` tool on its worker server, with the items of its kind. A debate, a question and a wording job see nobody's work and are not asked; neither is a fix, which starts from a review of someone else's work, nor release preparation. Both adapters let the `rate` call through as they do the worker's other Crew tools. The rating is a tool call inside a turn the worker has anyway, so a mission of any size costs a few lines of output more, and a pair with no such turn has no rating.
+
+**Review lines.** `note` takes a third role, `review`, for a review a job ran: `job_id` is the review job, `of_job` or `of_model` the work it covered, `findings` and `declined` that review's own findings as the lead triaged them. A review job noted without a role is a review line, and it can no longer be refused as "building nothing". The line is what gives a worker's rating its target: a reviewer's rating goes to the work its line names in `of` (the model the job's build line is under now, or `of_model` for work with no job), an engineer's to the reviews whose `of_job` is its job. An engineer cannot say which review it means, so each model that reviewed its job gets the rating once, however many reviews it ran. Until the lead notes the review, such a rating is kept and counts for nothing.
+
+**Storage.** `~/.crew/model-notes.json` is version 2: `ratings` holds the workers' ratings (`by`, `byModel`, `byJob`, `items`, `fact`), one per job, replaced when the job rates again. The lead's ratings are a `rating` field on its evidence lines; noting a job again with a rating replaces it, and without one keeps it. A version 1 file is read as it is; the first save copies it to `model-notes.json.v1`, since an older daemon sets a version 2 file aside as unreadable. Lines written before review lines name the reviewer's agent, not its model, so reviewers start with no history.
+
+**Items.** Each model gets four items out of 10 (`ModelScore.items`), and `score` is `correctness`:
+
+| Item | Observed evidence | Ratings from |
+| --- | --- | --- |
+| `correctness` | The build score of section 16; empty without a build, whatever the ratings | Reviewers, the lead |
+| `brief` | Adoption of delegated work: as is 1, after a reply 0.7, in part 0.4, rejected 0, drawn toward 0.7 with the weight of three | The lead |
+| `report` | None yet; a reference of 0.7 stands in for it | Reviewers, the lead |
+| `findings` | Accepted finding load over the load the reviewer raised, on its review lines, drawn toward 0.6 with the weight of 0.5 (one high and one medium) | The lead, engineers |
+
+- Ratings move an item only from three on; one or two are an anecdote. The count is of ratings, not raters, so the lead's ratings of three jobs of a model are enough.
+- Ratings move an item from where its evidence put it. A model's mean rating, 3 being neutral, becomes a shift from −1 (all ones) to 1 (all fives): neutral leaves the item where it was, all fives would take it to 10 and all ones to 0. Half of the item moves with the ratings and half stays (first built as 70 to 30; the user chose equal shares the same day). So good ratings never lower a score, and a model with ratings stays comparable with one without. The first version mapped a rating straight onto 0 to 10, where a neutral 3 was 5.0 against clean work near 8.6, and three fives lowered a clean model; the self-review caught it.
+- A rating is read against its rater: the rater's mean for that item over the other models, drawn toward 3 by one rating, is taken off, so a rater that gives everyone five moves nobody much. This only brings a rating toward neutral, never past it, and leaves out the rated model's own ratings: one more five never lowers the model it goes to, and a five given elsewhere never turns a three into a mark against. Raters are keyed by model, and the lead is one rater. A rating that reached several models, as a builder's does when two models reviewed its job, is one rating in that mean and is left out for each of them, so the order the models were noted in changes nothing. The second review round found both of those inversions in a plain mean over all of a rater's ratings.
+- A model's mean rating is drawn toward 3 with the weight of two ratings. A rating by the rated model's own agent counts half, as a self-review does.
+- A `correctness` rating of work with an accepted high finding counts as 3 at most, and enters its rater's mean as that: a high on the job's build line or on any review line of the job, or, for work with no job, on the rating reviewer's own line. Work with no job has no id to join its lines by, so a high noted only on its build line, or by another review of it, does not cap the rating.
+- `correctness` belongs to building: a fix line takes no such rating, and a reviewer's `correctness` rating of a fix-role job is left out (the review line records `of.fix`).
+- The status still follows the build reviews, and the ranking and podium follow `score`, with the finding rate breaking ties. With no ratings, too few, or with them off, `score` equals the build score, so nothing moved for the notes that existed. A model with review lines only has no score and is listed apart under "Reviewers", by `findings`. `ModelScore.ratings` counts only ratings of items that had enough to move.
+
+**Turning them off.** `peerRatings` in `~/.crew/config.json` is on unless it is `false`; the Model Scores page of the board and the app has a switch that saves at once. Off, new jobs are not asked to rate, the lead's instructions leave ratings out from its next session on, a `rating` sent with a `note` line is not kept (the answer says so), and every score, the `note` answer's included, is computed without ratings. Ratings already given stay in the file and count again when the switch goes back on.
+
+**Not modelled.** A worker's declared outcome against how the lead took the work, as observed evidence for `report`; a worker's rating of the lead's brief; a share of the weight that grows with the number of ratings.

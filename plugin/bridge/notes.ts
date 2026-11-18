@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { LEAD } from './config.ts';
 import type { Holder } from './config.ts';
 import { TIERS } from './tiers.ts';
 import type { Tier } from './tiers.ts';
@@ -18,17 +19,49 @@ const REFERENCE = { build: 0.36, fix: 0.7 };
 const PRIOR_WEIGHT = 3;
 // A review by the builder's own agent counts half.
 const SELF_REVIEW = 0.5;
+// A lead's adoption of a delegated job as how well the work followed its brief.
+const BRIEF = { 'as-is': 1, 'after-reply': 0.7, partly: 0.4, rejected: 0 };
+// Where an item starts with nothing observed: brief as merged after one reply, findings as a little over half
+// accepted, and report, which has ratings only, where a build starts.
+const ITEM_REFERENCE = { brief: 0.7, findings: 0.6, report: 0.7 };
+// The start for a reviewer's findings weighs as much as one high and one medium finding.
+const FINDINGS_PRIOR = 0.5;
+// Peer ratings run from 1 to 5, and move an item from where its evidence put it: neutral leaves it there, all fives
+// would take it to the top and all ones to zero. Half of the item moves with them and half stays: the user's choice.
+const NEUTRAL = 3;
+const PEER_SHARE = 0.5;
+// Fewer ratings than this do not move an item: one or two are an anecdote.
+export const MIN_RATINGS = 3;
+// A rater's mean over the other models is taken off its ratings, drawn toward neutral by one rating; a model's mean
+// rating is drawn toward neutral by two, so one rating decides nothing.
+const RATER_PRIOR = 1;
+const RATING_PRIOR = 2;
+// A builder rating the review of its own work has a stake in it.
+const BUILDER_RATING = 0.5;
+// Work with an accepted high finding is not rated above neutral for correctness, whatever its rater said.
+const HIGH_FINDING_CAP = 3;
 // Ten new evidence lines call for a new prose summary.
 export const CONSOLIDATE_AFTER = 10;
 
-export type NoteRole = 'build' | 'fix';
+export type NoteRole = 'build' | 'fix' | 'review';
 export type FixOutcome = 'root-cause' | 'patch' | 'another-review';
 export type ChangeSize = 'small' | 'medium' | 'large' | 'xlarge';
 export type Adoption = 'as-is' | 'after-reply' | 'partly' | 'rejected';
-export const NOTE_ROLES = ['build', 'fix'] as const;
+export const NOTE_ROLES = ['build', 'fix', 'review'] as const;
 export const FIX_OUTCOMES = ['root-cause', 'patch', 'another-review'] as const;
 export const CHANGE_SIZES = ['small', 'medium', 'large', 'xlarge'] as const;
 export const ADOPTIONS = ['as-is', 'after-reply', 'partly', 'rejected'] as const;
+/** What a peer rates, each from 1 to 5: the work's correctness, how it followed its brief, how honest its report was, and how useful a review's findings were. */
+export const RATING_ITEMS = ['correctness', 'brief', 'report', 'findings'] as const;
+export type RatingItem = (typeof RATING_ITEMS)[number];
+export type RatingItems = Partial<Record<RatingItem, number>>;
+/**
+ * The items each kind of line or job may rate: the lead rates a builder or fixer and a review; a reviewer the work it
+ * read; a builder the review it got back. A fix has no correctness: that item is the build score's, and how a fix went
+ * is its outcome.
+ */
+export const LEAD_ITEMS: Record<NoteRole, readonly RatingItem[]> = { build: ['correctness', 'brief', 'report'], fix: ['brief', 'report'], review: ['findings'] };
+export const WORKER_ITEMS = { review: ['correctness', 'report'], delegate: ['findings'] } as const satisfies Record<string, readonly RatingItem[]>;
 export interface Findings { high: number; medium: number; low: number }
 export interface Evidence {
   id: string;
@@ -48,10 +81,19 @@ export interface Evidence {
   /** How the lead took a delegated job's work, and the follow-up turns it took; shown, not scored. */
   adoption?: Adoption;
   rounds?: number;
+  /** For a review line: the work it reviewed, by its job when a worker built it; `fix` when that job was a fix. */
+  of?: { job?: string; model: string; fix?: true };
+  /** The lead's rating of this line's work, resting on `text`. Only a job's work is rated, never the lead's own. */
+  rating?: RatingItems;
   text: string;
 }
+/**
+ * A worker's rating of work it saw in its job, given in the turn it saw it. It names no target: a reviewer's goes to
+ * the work its review line names, a builder's to the reviews of its job, so it counts once the lead notes the review.
+ */
+export interface Rating { id: string; at: number; by: Holder; byModel?: string; byJob: string; items: RatingItems; fact: string }
 export interface ModelNote { model: string; agent: Holder; summary: string; summaryAt: number | null; evidence: Evidence[] }
-export interface NotesFile { version: 1; models: Record<string, ModelNote> }
+export interface NotesFile { version: 2; models: Record<string, ModelNote>; ratings: Rating[] }
 export type NoteStatus = 'too few samples' | 'on trial' | 'settled';
 export interface ModelScore {
   model: string;
@@ -62,6 +104,11 @@ export interface ModelScore {
   samples: number;
   buildSamples: number;
   fixSamples: number;
+  reviewSamples: number;
+  /** Each item out of 10, from the observed evidence and the peer ratings together; null with neither. `score` is correctness. */
+  items: Record<RatingItem, number | null>;
+  /** Peer ratings that moved an item: those of items with enough of them. */
+  ratings: number;
   status: NoteStatus;
   summary: string;
   lastAt: number | null;
@@ -75,15 +122,20 @@ export function loadNotes(home: string): NotesFile {
   const file = notesFile(home);
   try {
     const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
-    if (!saved || saved.version !== 1 || !saved.models || typeof saved.models !== 'object' || Array.isArray(saved.models)) throw new Error('Expected version 1 and a models object.');
-    return { version: 1, models: wellFormed(saved.models) };
+    // Version 1 had no ratings and no review lines; its lines are read as they are.
+    if (!saved || ![1, 2].includes(saved.version) || !saved.models || typeof saved.models !== 'object' || Array.isArray(saved.models)) throw new Error('Expected version 1 or 2 and a models object.');
+    return { version: 2, models: wellFormed(saved.models), ratings: wellRated(saved.ratings) };
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { version: 1, models: {} };
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { version: 2, models: {}, ratings: [] };
     throw new Error(`Could not load ${file}: ${(err as Error).message}`);
   }
 }
 
 const HOLDERS = ['codex', 'antigravity', 'claude'];
+const rated = (items: any, allowed: readonly string[]) => items && typeof items === 'object' && !Array.isArray(items) && Object.keys(items).length > 0
+  && Object.entries(items).every(([item, value]) => allowed.includes(item) && Number.isInteger(value) && (value as number) >= 1 && (value as number) <= 5);
+const wellRated = (ratings: unknown): Rating[] => (Array.isArray(ratings) ? ratings : []).filter((r: any) => r && typeof r.id === 'string' && Number.isFinite(r.at) && HOLDERS.includes(r.by)
+  && (r.byModel === undefined || typeof r.byModel === 'string') && typeof r.byJob === 'string' && r.byJob && rated(r.items, RATING_ITEMS) && typeof r.fact === 'string' && r.fact.trim() !== '');
 const counts = (f: any) => f && typeof f === 'object' && ['high', 'medium', 'low'].every((key) => Number.isInteger(f[key]) && f[key] >= 0);
 
 /**
@@ -96,7 +148,9 @@ function wellFormed(models: Record<string, any>): Record<string, ModelNote> {
     if (!note || !HOLDERS.includes(note.agent) || !Array.isArray(note.evidence)) continue;
     const evidence = note.evidence.filter((e: any) => e && typeof e.id === 'string' && Number.isFinite(e.at) && e.model === model && e.agent === note.agent && HOLDERS.includes(e.reviewer)
       && CHANGE_SIZES.includes(e.size) && NOTE_ROLES.includes(e.role) && (e.tier === undefined || TIERS.includes(e.tier))
-      && (e.role === 'build' || FIX_OUTCOMES.includes(e.outcome)) && typeof e.text === 'string'
+      && (e.role !== 'fix' || FIX_OUTCOMES.includes(e.outcome)) && typeof e.text === 'string'
+      && (e.role === 'review' ? Boolean(e.of) && typeof e.of.model === 'string' && e.of.model !== '' && (e.of.job === undefined || typeof e.of.job === 'string') && (e.of.fix === undefined || e.of.fix === true) : e.of === undefined)
+      && (e.rating === undefined || (typeof e.job === 'string' && e.job !== '' && rated(e.rating, LEAD_ITEMS[e.role as NoteRole])))
       && counts(e.findings) && (e.declined === undefined || counts(e.declined))
       && (e.adoption === undefined || (e.role === 'build' && typeof e.job === 'string' && e.job && ADOPTIONS.includes(e.adoption)))
       && (e.rounds === undefined || (e.adoption !== undefined && Number.isInteger(e.rounds) && e.rounds >= 0)));
@@ -116,15 +170,21 @@ function wellFormed(models: Record<string, any>): Record<string, ModelNote> {
 }
 
 const lines = (models: Record<string, any>) => Object.values(models).reduce((sum, note) => sum + 1 + (Array.isArray(note?.evidence) ? note.evidence.length : 0), 0);
+const given = (ratings: unknown) => (Array.isArray(ratings) ? ratings.length : 0);
 
 /** Loading skips what it cannot read, so a save would erase it; keep the file as it was first. */
 function keepDropped(target: string): void {
-  let models: Record<string, any>;
+  let saved: { version?: unknown; ratings?: unknown };
+  let dropped: boolean;
   try {
-    models = JSON.parse(fs.readFileSync(target, 'utf8')).models;
+    saved = JSON.parse(fs.readFileSync(target, 'utf8'));
+    const { models } = saved as { models: Record<string, any> };
+    dropped = lines(wellFormed(models)) < lines(models) || wellRated(saved.ratings).length < given(saved.ratings);
   } catch { return; /* Nothing to keep: no file yet, or one loadNotes already refuses. */ }
   // A failed copy must stop the save, or the lines are lost with no copy.
-  if (lines(wellFormed(models)) < lines(models)) fs.copyFileSync(target, `${target}.dropped-${Date.now()}`);
+  if (dropped) fs.copyFileSync(target, `${target}.dropped-${Date.now()}`);
+  // An older daemon cannot read what this one writes, so the file it could read is kept once.
+  if (saved.version === 1 && !fs.existsSync(`${target}.v1`)) fs.copyFileSync(target, `${target}.v1`);
 }
 
 function save(home: string, file: NotesFile): void {
@@ -142,7 +202,7 @@ function cleanText(value: string, name: string, limit: number, oneLine = false):
   return text;
 }
 
-export function addEvidence(home: string, input: Omit<Evidence, 'id' | 'at'> & { at?: number }): { evidence: Evidence; score: ModelScore } {
+export function addEvidence(home: string, input: Omit<Evidence, 'id' | 'at'> & { at?: number }, options: { ratings?: boolean } = {}): { evidence: Evidence; score: ModelScore } {
   // Every problem goes in one error with the values allowed, so a caller can correct the whole call in one retry.
   const problems: string[] = [];
   const check = (ok: boolean, problem: string) => { if (!ok) problems.push(problem); };
@@ -154,7 +214,14 @@ export function addEvidence(home: string, input: Omit<Evidence, 'id' | 'at'> & {
   check(NOTE_ROLES.includes(input.role), `role (${oneOf(NOTE_ROLES)})`);
   check(input.tier === undefined || TIERS.includes(input.tier), `tier (${oneOf(TIERS)})`);
   if (input.role === 'fix') check(FIX_OUTCOMES.includes(input.outcome!), `outcome (required for fix: ${oneOf(FIX_OUTCOMES)})`);
-  if (input.role === 'build') check(input.outcome === undefined, 'outcome (only for fix; leave it out for build)');
+  if (input.role !== 'fix') check(input.outcome === undefined, `outcome (only for fix; leave it out for ${input.role})`);
+  if (input.role === 'review') check(nonEmpty(input.of?.model), 'of (the work the review covered: of_job, or of_model for work done in your session)');
+  else check(input.of === undefined, 'of (only for a review line)');
+  if (input.rating !== undefined) {
+    const allowed = LEAD_ITEMS[input.role] ?? [];
+    check(Boolean(input.job), 'rating (only for a job\'s work, with job_id; your own work is rated by its reviewer)');
+    check(rated(input.rating, allowed), `rating (${allowed.join(', ')} for ${input.role}, each a whole number from 1 to 5)`);
+  }
   check(input.adoption === undefined || (input.role === 'build' && Boolean(input.job) && ADOPTIONS.includes(input.adoption)), `adoption (only for a delegated job's build line: ${oneOf(ADOPTIONS)})`);
   check(input.rounds === undefined || (input.adoption !== undefined && Number.isInteger(input.rounds) && input.rounds >= 0), 'rounds (a non-negative integer, given with adoption)');
   const counted = (given: Partial<Findings> | undefined, name: string): Findings => {
@@ -182,9 +249,13 @@ export function addEvidence(home: string, input: Omit<Evidence, 'id' | 'at'> & {
   const ids = new Set(Object.values(file.models).flatMap((m) => m.evidence.map((e) => e.id)));
   do { id = `ev-${randomBytes(3).toString('hex')}`; } while (ids.has(id));
   const evidence: Evidence = { ...input, model, findings, ...(declined ? { declined } : {}), text, id, at };
+  if (input.of) evidence.of = { ...(input.of.job ? { job: input.of.job } : {}), model: input.of.model.trim(), ...(input.of.fix ? { fix: true } : {}) };
   // Noting a job again (a retried call, a resumed session, a model the session reported later) replaces its line
   // rather than counting the job twice; the line moves to the model named now, and a model it leaves empty goes.
   if (input.job) for (const other of Object.values(file.models)) {
+    // The lead's rating of the job stays with it when a later note of the same line brings none.
+    const earlier = other.evidence.find((e) => e.job === input.job && e.role === input.role)?.rating;
+    if (earlier && !evidence.rating) evidence.rating = earlier;
     const before = other.evidence.length;
     other.evidence = other.evidence.filter((e) => !(e.job === input.job && e.role === input.role));
     if (before && !other.evidence.length && other !== existing) delete file.models[other.model];
@@ -192,17 +263,37 @@ export function addEvidence(home: string, input: Omit<Evidence, 'id' | 'at'> & {
   note.evidence.push(evidence);
   Object.defineProperty(file.models, model, { value: note, enumerable: true, configurable: true, writable: true });
   save(home, file);
-  return { evidence, score: scoreAll(file).find((s) => s.model === model)! };
+  return { evidence, score: scoreAll(file, options).find((s) => s.model === model)! };
 }
 
-export function setSummary(home: string, model: string, summary: string, at = Date.now()): ModelScore {
+/** Keeps a worker's rating of what it saw in its job. Rating again replaces the job's earlier one. */
+export function addRating(home: string, input: Omit<Rating, 'id' | 'at'> & { at?: number }, allowed: readonly RatingItem[] = RATING_ITEMS): Rating {
+  const problems: string[] = [];
+  if (!HOLDERS.includes(input.by)) problems.push(`by (one of ${HOLDERS.join(', ')})`);
+  if (typeof input.byJob !== 'string' || !input.byJob) problems.push('byJob (the job that rates)');
+  if (!rated(input.items, allowed)) problems.push(`at least one of ${allowed.join(', ')}, each a whole number from 1 to 5`);
+  if (typeof input.fact !== 'string' || !input.fact.trim()) problems.push('fact (one line from the work that the numbers rest on)');
+  const at = input.at ?? Date.now();
+  if (!Number.isFinite(at)) problems.push('at (a finite timestamp)');
+  if (problems.length) throw new Error(`Missing or invalid: ${problems.join('; ')}.`);
+  const file = loadNotes(home);
+  let id: string;
+  const ids = new Set(file.ratings.map((r) => r.id));
+  do { id = `rt-${randomBytes(3).toString('hex')}`; } while (ids.has(id));
+  const rating: Rating = { id, at, by: input.by, ...(input.byModel ? { byModel: input.byModel } : {}), byJob: input.byJob, items: { ...input.items }, fact: cleanText(input.fact, 'fact', 300, true) };
+  file.ratings = [...file.ratings.filter((r) => r.byJob !== input.byJob), rating];
+  save(home, file);
+  return rating;
+}
+
+export function setSummary(home: string, model: string, summary: string, at = Date.now(), options: { ratings?: boolean } = {}): ModelScore {
   const file = loadNotes(home);
   if (!Object.hasOwn(file.models, model)) throw new Error(`Unknown model ${model}.`);
   if (!Number.isFinite(at)) throw new Error('at must be a finite timestamp.');
   file.models[model].summary = cleanText(summary, 'summary', 1200);
   file.models[model].summaryAt = at;
   save(home, file);
-  return scoreAll(file).find((s) => s.model === model)!;
+  return scoreAll(file, options).find((s) => s.model === model)!;
 }
 
 const load = (f: Findings) => LOAD.high * f.high + LOAD.medium * f.medium + LOAD.low * f.low;
@@ -220,15 +311,105 @@ function sums(lines: Evidence[], scope: Scope): { num: number; den: number } {
 }
 const shrink = (s: { num: number; den: number }, prior: number) => (s.num + PRIOR_WEIGHT * prior) / (s.den + PRIOR_WEIGHT);
 
+/** One rating of one item, with whom it is about. `source` is the rating it came from, which may reach several models. */
+interface Vote { model: string; item: RatingItem; value: number; rater: string; weight: number; source: string }
+/**
+ * Every rating as votes on the models they are about. The lead's ride on its lines. A worker's names no target, so the
+ * review lines give it one: a reviewer's rating is of the work its line names, a builder's of the reviews of its job.
+ * A builder cannot say which review it means, so each model that reviewed its job gets the rating, once.
+ */
+function votes(file: NotesFile): Vote[] {
+  const all = Object.values(file.models).flatMap((m) => m.evidence);
+  const agentOf = (model: string) => (Object.hasOwn(file.models, model) ? file.models[model].agent : undefined);
+  const reviews = all.filter((e) => e.role === 'review');
+  // A job's work belongs to the model its build line is under now, which a later note may have moved.
+  const builders = new Map(all.filter((e) => e.role === 'build' && e.job).map((e) => [e.job!, e.model]));
+  // Flawed work: an accepted high finding on its build line, or on a review of it.
+  const flawed = new Set([...all.filter((e) => e.role === 'build' && e.job && e.findings.high > 0).map((e) => e.job!),
+    ...reviews.filter((e) => e.of!.job && e.findings.high > 0).map((e) => e.of!.job!)]);
+  const out: Vote[] = [];
+  const seen = new Set<string>();
+  const cast = (model: string, items: RatingItems, by: Holder, rater: string, source: string, weight: number, capped: boolean) => {
+    for (const item of RATING_ITEMS) {
+      const key = `${source}\0${model}\0${item}`;
+      if (items[item] === undefined || seen.has(key)) continue;
+      seen.add(key);
+      // The cap is the rating's value from here on, so capped work does not make its rater look generous either.
+      const value = item === 'correctness' && capped ? Math.min(items[item], HIGH_FINDING_CAP) : items[item];
+      out.push({ model, item, value, rater, source, weight: weight * (agentOf(model) === by ? SELF_REVIEW : 1) });
+    }
+  };
+  for (const e of all) if (e.rating) cast(e.model, e.rating, LEAD, LEAD, e.id, 1, Boolean(e.job && flawed.has(e.job)));
+  for (const r of file.ratings) {
+    const rater = r.byModel ?? r.by;
+    const { findings, correctness, ...rest } = r.items;
+    for (const line of reviews) {
+      const job = line.of!.job;
+      if (line.job === r.byJob) {
+        // Correctness is the build score's item: a review of a fix says nothing about how its model builds.
+        const work = correctness === undefined || line.of!.fix ? rest : { ...rest, correctness };
+        cast((job && builders.get(job)) ?? line.of!.model, work, r.by, rater, r.id, 1, line.findings.high > 0 || Boolean(job && flawed.has(job)));
+      }
+      if (findings !== undefined && job === r.byJob) cast(line.model, { findings }, r.by, rater, r.id, BUILDER_RATING, false);
+    }
+  }
+  return out;
+}
+
+/**
+ * How far each model's ratings sit from neutral per item, from −1 (all ones) to 1 (all fives), with how many ratings
+ * that rests on. A rating is read against how its rater rates other models on the item: that mean, drawn toward
+ * neutral, is taken off, so a rater that gives everyone five moves nobody much. It only ever brings a rating toward
+ * neutral, never past it, and a model's own ratings are left out of it, so a further good rating never lowers the
+ * model it is given to, and a rating elsewhere never turns a neutral one into a mark against.
+ */
+function peers(all: Vote[]): Map<string, { shift: number; count: number }> {
+  // Per rater and item, each rating with every model it reached: it is one rating of its rater's however many it
+  // reached, and it is a rating of each of them, so none of them reads it as a rating of another model.
+  const raters = new Map<string, Map<string, Map<string, number>>>();
+  for (const v of all) {
+    const sources = raters.get(`${v.rater}\0${v.item}`) ?? new Map<string, Map<string, number>>();
+    sources.set(v.source, (sources.get(v.source) ?? new Map<string, number>()).set(v.model, v.value));
+    raters.set(`${v.rater}\0${v.item}`, sources);
+  }
+  const lean = (v: Vote) => {
+    let sum = 0, n = 0;
+    for (const targets of raters.get(`${v.rater}\0${v.item}`)!.values()) {
+      if (targets.has(v.model)) continue;
+      sum += [...targets.values()].reduce((a, b) => a + b, 0) / targets.size;
+      n += 1;
+    }
+    return (sum + RATER_PRIOR * NEUTRAL) / (n + RATER_PRIOR) - NEUTRAL;
+  };
+  const sums = new Map<string, { num: number; den: number; count: number }>();
+  for (const v of all) {
+    const off = v.value - NEUTRAL;
+    const value = NEUTRAL + (off > 0 ? Math.max(0, off - Math.max(0, lean(v))) : Math.min(0, off - Math.min(0, lean(v))));
+    const key = `${v.model}\0${v.item}`;
+    const s = sums.get(key) ?? { num: 0, den: 0, count: 0 };
+    sums.set(key, { num: s.num + v.weight * value, den: s.den + v.weight, count: s.count + 1 });
+  }
+  return new Map([...sums].map(([key, s]) => [key, { shift: ((s.num + RATING_PRIOR * NEUTRAL) / (s.den + RATING_PRIOR) - NEUTRAL) / 2, count: s.count }]));
+}
+/** Where ratings alone would put a value: all fives at the top, all ones at zero, neutral where it was. */
+const moved = (base: number, shift: number) => (shift >= 0 ? base + shift * (1 - base) : base * (1 + shift));
+
 /**
  * Scores each model per role. Build: the rate of accepted finding load per exposure unit, drawn toward a start, shown
  * as 10·exp(−rate), so more findings always cost more and nothing is clamped. Fix: mean quality, drawn the same way.
  * The start is the mean of the other models' own estimates (each counted once, so a busy model cannot set everyone's
  * start) and the reference, which counts as one more model. Reviewers are not calibrated: the data cannot tell a harsh
- * reviewer from one that was given worse work. `score` is the build score; fix is shown beside it, never pooled.
+ * reviewer from one that was given worse work. Fix is shown beside build, never pooled.
+ *
+ * The four items lay the peer ratings over that evidence. Correctness is the build score, brief the lead's adoption of
+ * delegated work, findings the share of a reviewer's finding load the lead accepted; report has ratings only, around a
+ * reference. Ratings count only from MIN_RATINGS on, and then move half of the item (PEER_SHARE) from where the
+ * evidence put it, so neutral ratings change nothing and good ones never lower it. `score` is correctness, which
+ * ratings cannot give a model with no build: with `ratings` off, or too few given, it is the build score.
  */
-export function scoreAll(file: NotesFile): ModelScore[] {
+export function scoreAll(file: NotesFile, options: { ratings?: boolean } = {}): ModelScore[] {
   const models = Object.values(file.models);
+  const peer = peers(options.ratings === false ? [] : votes(file));
   const roleLines = (m: ModelNote, scope: Scope) => m.evidence.filter((e) => e.role === scope);
   const own = new Map<Scope, Map<string, { num: number; den: number }>>();
   for (const scope of ['build', 'fix'] as const) {
@@ -244,11 +425,25 @@ export function scoreAll(file: NotesFile): ModelScore[] {
   }
   const tenth = (n: number) => Math.round(n * 10) / 10;
   const rates = new Map<string, number | null>(models.map((m) => [m.model, estimate(m.model, 'build')]));
+  const enough = (model: string, name: RatingItem) => { const given = peer.get(`${model}\0${name}`); return given && given.count >= MIN_RATINGS ? given : undefined; };
+  /** An item from 0 to 1: its evidence, moved by its ratings once there are enough; without evidence, its reference moved by them. */
+  const item = (model: string, name: RatingItem, observed: number | null): number | null => {
+    const shift = enough(model, name)?.shift;
+    if (shift === undefined) return observed;
+    if (observed !== null) return observed + PEER_SHARE * (moved(observed, shift) - observed);
+    return name === 'correctness' ? null : moved(ITEM_REFERENCE[name], shift);
+  };
+  const correctness = new Map<string, number | null>(models.map((m) => {
+    const rate = rates.get(m.model)!;
+    return [m.model, item(m.model, 'correctness', rate === null ? null : Math.exp(-rate))];
+  }));
   const group = (s: ModelScore) => (s.score !== null ? (s.status === 'too few samples' ? 1 : 0) : s.samples ? 2 : 3);
-  const byRate = (a: ModelScore, b: ModelScore) => (rates.get(a.model) ?? 0) - (rates.get(b.model) ?? 0);
+  // The rate breaks a tie the score cannot: past a few hundred findings every score is zero.
+  const byScore = (a: ModelScore, b: ModelScore) => (correctness.get(b.model) ?? 0) - (correctness.get(a.model) ?? 0) || (rates.get(a.model) ?? 0) - (rates.get(b.model) ?? 0);
   return models.map((m): ModelScore => {
     const build = roleLines(m, 'build');
     const fix = roleLines(m, 'fix');
+    const review = m.evidence.filter((e) => e.role === 'review');
     const rate = rates.get(m.model)!;
     const quality = estimate(m.model, 'fix');
     // Status counts build reviews, a self-review as half, since only build sets the score.
@@ -257,9 +452,20 @@ export function scoreAll(file: NotesFile): ModelScore[] {
     const buildScore = rate === null ? null : tenth(10 * Math.exp(-rate));
     const adopted = build.filter((e) => e.adoption);
     const taken = (a: Adoption) => adopted.filter((e) => e.adoption === a).length;
+    const accepted = review.reduce((sum, e) => sum + load(e.findings), 0);
+    const raised = accepted + review.reduce((sum, e) => sum + (e.declined ? load(e.declined) : 0), 0);
+    const outOfTen = (value: number | null) => (value === null ? null : tenth(10 * value));
+    const items = {
+      correctness: outOfTen(correctness.get(m.model)!),
+      brief: outOfTen(item(m.model, 'brief', adopted.length ? shrink({ num: adopted.reduce((sum, e) => sum + BRIEF[e.adoption!], 0), den: adopted.length }, ITEM_REFERENCE.brief) : null)),
+      report: outOfTen(item(m.model, 'report', null)),
+      // A review that raised nothing says nothing about its findings.
+      findings: outOfTen(item(m.model, 'findings', raised ? (accepted + FINDINGS_PRIOR * ITEM_REFERENCE.findings) / (raised + FINDINGS_PRIOR) : null)),
+    };
     return {
-      model: m.model, agent: m.agent, score: buildScore, build: buildScore, fix: quality === null ? null : tenth(10 * quality),
-      samples, buildSamples: build.length, fixSamples: fix.length,
+      model: m.model, agent: m.agent, score: items.correctness, build: buildScore, fix: quality === null ? null : tenth(10 * quality),
+      samples, buildSamples: build.length, fixSamples: fix.length, reviewSamples: review.length, items,
+      ratings: RATING_ITEMS.reduce((sum, name) => sum + (enough(m.model, name)?.count ?? 0), 0),
       status: reviews < 3 ? 'too few samples' : reviews < 8 ? 'on trial' : 'settled', summary: m.summary,
       lastAt: samples ? m.evidence.reduce((latest, e) => Math.max(latest, e.at), -Infinity) : null,
       consolidate: m.evidence.filter((e) => m.summaryAt === null || e.at > m.summaryAt).length >= CONSOLIDATE_AFTER,
@@ -268,16 +474,19 @@ export function scoreAll(file: NotesFile): ModelScore[] {
         rounds: adopted.reduce((sum, e) => sum + (e.rounds ?? 0), 0),
       } : null,
     };
-  // Models with too few reviews come after every ranked one, whatever their score; then models with fixes only, and
-  // last models with no lines. Within a group the unrounded rate decides, so a tie on the shown score is not left to the name.
-  }).sort((a, b) => group(a) - group(b) || byRate(a, b) || a.model.localeCompare(b.model));
+  // Models with too few reviews come after every ranked one, whatever their score; then models with no build, and
+  // last models with no lines. Within a group the unrounded score decides, so a tie on the shown score is not left to the name.
+  }).sort((a, b) => group(a) - group(b) || byScore(a, b) || a.model.localeCompare(b.model));
 }
 
 export function renderNotes(scores: ModelScore[], file: NotesFile, options: { models?: string[]; agents?: Holder[]; evidence?: number } = {}): string {
   const number = (n: number | null) => n === null ? '—' : n.toFixed(1);
+  const stars = (items: RatingItems) => RATING_ITEMS.filter((name) => items[name] !== undefined).map((name) => `${name} ${items[name]}`).join(' ');
   return scores.filter((s) => (!options.models || options.models.includes(s.model)) && (!options.agents || options.agents.includes(s.agent))).map((s) => {
-    const lines = [`### ${s.model} (${s.agent}) — ${number(s.score)}/10, ${s.status}, ${s.buildSamples} build(s), ${s.fixSamples} fix(es)`];
+    const lines = [`### ${s.model} (${s.agent}) — ${number(s.score)}/10, ${s.status}, ${s.buildSamples} build(s), ${s.fixSamples} fix(es)${s.reviewSamples ? `, ${s.reviewSamples} review(s)` : ''}`];
     if (s.build !== null || s.fix !== null) lines.push(`build ${number(s.build)} · fix ${number(s.fix)}`);
+    const others = (['brief', 'report', 'findings'] as const).filter((name) => s.items[name] !== null);
+    if (others.length) lines.push(`${others.map((name) => `${name} ${number(s.items[name])}`).join(' · ')}${s.ratings ? ` (${s.ratings} peer rating(s) counted)` : ''}`);
     // Scores are finding rates on the work each model was given; the tiers say what that work was.
     const tiers = new Map<string, number>();
     for (const e of file.models[s.model].evidence) if (e.role === 'build' && e.tier) tiers.set(e.tier, (tiers.get(e.tier) ?? 0) + 1);
@@ -292,7 +501,9 @@ export function renderNotes(scores: ModelScore[], file: NotesFile, options: { mo
       const day = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
       const declined = e.declined && load(e.declined) ? `, declined ${(['high', 'medium', 'low'] as const).filter((k) => e.declined![k]).map((k) => `${e.declined![k]} ${k}`).join(' ')}` : '';
       const adoption = e.adoption ? `, ${e.adoption}${e.rounds ? ` after ${e.rounds} round(s)` : ''}` : '';
-      lines.push(`- ${day} ${e.job || '—'} (${e.reviewer} reviewed, ${e.role}, ${e.tier ? `${e.tier}/` : ''}${e.size}${declined}${adoption}): ${e.text}`);
+      const about = e.role === 'review' ? `reviewed ${e.of!.job ?? e.of!.model}` : `${e.reviewer} reviewed`;
+      const rating = e.rating ? `, rated ${stars(e.rating)}` : '';
+      lines.push(`- ${day} ${e.job || '—'} (${about}, ${e.role}, ${e.tier ? `${e.tier}/` : ''}${e.size}${declined}${adoption}${rating}): ${e.text}`);
     }
     if (s.consolidate) lines.push('Summary is due: rewrite it from the evidence.');
     return lines.join('\n\n');

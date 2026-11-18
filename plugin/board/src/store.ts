@@ -89,6 +89,9 @@ export class BoardStore {
       case 'modelScores':
         this.update({ modelScores: value as BoardState['modelScores'] });
         break;
+      case 'peerRatings':
+        this.update({ peerRatings: value as boolean });
+        break;
       case 'limits':
         this.update({ limits: { ...current.limits, ...(value as BoardState['limits']) } });
         break;
@@ -129,7 +132,7 @@ export class BoardStore {
         this.receive('state', state);
         const source = create('/api/stream');
         stream = source;
-        for (const type of ['state', 'job', 'mission', 'claude', 'roles', 'roleSettings', 'limits', 'usage', 'preset', 'modelScores', 'event']) {
+        for (const type of ['state', 'job', 'mission', 'claude', 'roles', 'roleSettings', 'limits', 'usage', 'preset', 'modelScores', 'peerRatings', 'event']) {
           source.addEventListener(type, (event) => {
             if (current !== generation || source !== stream) return;
             try {

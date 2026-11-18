@@ -429,6 +429,11 @@ struct ModelScore: Codable, Sendable, Equatable, Identifiable {
     /// Absent from a daemon that predates split counts.
     var buildSamples: Int?
     var fixSamples: Int?
+    /// Absent from a daemon that predates peer ratings, as `items` is.
+    var reviewSamples: Int?
+    /// Each item out of 10 from the evidence and the peer ratings together; `score` is correctness.
+    var items: Items?
+    struct Items: Codable, Sendable, Equatable { var correctness: Double?; var brief: Double?; var report: Double?; var findings: Double? }
     /// How the lead took the model's delegated work; absent from an older daemon, null when none says.
     var adoption: Adoption?
     struct Adoption: Codable, Sendable, Equatable { var judged: Int; var asIs: Int; var afterReply: Int; var partly: Int; var rejected: Int; var rounds: Int }
@@ -452,6 +457,8 @@ struct BoardState: Codable, Sendable, Equatable {
     var usage: Usage?
     var preset: PresetName?
     var presets: [String: Preset]?
+    /// Whether the lead and the workers rate each other's work; absent from a daemon that predates peer ratings.
+    var peerRatings: Bool?
     /// Absent from a daemon that predates model notes.
     var modelScores: [ModelScore]?
     var availableRoles: [RoleInfo] { roleInfo ?? RoleInfo.legacy }
@@ -484,6 +491,7 @@ struct BoardState: Codable, Sendable, Equatable {
             let change = try decoder.decode(PresetState.self, from: event.data)
             preset = change.preset; presets = change.presets
         case "modelScores": modelScores = try decoder.decode([ModelScore].self, from: event.data)
+        case "peerRatings": peerRatings = try decoder.decode(Bool.self, from: event.data)
         case "roles": roles = try decoder.decode([String: RoleAssignment].self, from: event.data)
         case "roleSettings": roleSettings = try decoder.decode([String: RoleSetting].self, from: event.data)
         default: break

@@ -1057,7 +1057,8 @@ test.describe('authenticated daemon', () => {
     await expect(page.locator('button[data-job]')).toHaveCount(0);
     const before = await (await request.get('/__traffic')).json();
     expect(before.length).toBeGreaterThan(0);
-    expect(before.length).toBeLessThanOrEqual(2);
+    // The state fetch and the Overview's setup check, each sent twice by a development build.
+    expect(before.length).toBeLessThanOrEqual(4);
     await page.waitForTimeout(2000);
     expect(await (await request.get('/__traffic')).json()).toEqual(before);
   });
@@ -1115,6 +1116,8 @@ test.describe('authenticated daemon', () => {
       status: streamRequested ? 401 : 200,
       json: streamRequested ? { error: 'unauthorized' } : fixture(),
     }));
+    // Answered here so that the stream is the only request the daemon can reject.
+    await page.route('**/api/setup', (route) => route.fulfill({ json: { items: [] } }));
     await page.goto('/');
     await expect(page.getByRole('heading', { name: 'The board is not signed in' })).toBeVisible();
     expect(await (await request.get('/__traffic')).json()).toEqual([{ route: '/api/stream', method: 'GET' }]);

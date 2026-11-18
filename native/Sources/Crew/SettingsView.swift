@@ -237,7 +237,9 @@ struct CrewSettingsView: View {
         let scores = store.state.modelScores ?? []
         // Only models with enough reviews are ranked, so a few clean reviews never put one ahead of a model with a record.
         let ranked = scores.filter { $0.score != nil && $0.status != "too few samples" }
-        let early = scores.filter { score in !ranked.contains { $0.id == score.id } }
+        // A model that only reviewed has no build to rank by, so it stands apart, by how its findings held up.
+        let reviewers = scores.filter { $0.score == nil && $0.items?.findings != nil }.sorted { ($0.items?.findings ?? 0) > ($1.items?.findings ?? 0) }
+        let early = scores.filter { score in !ranked.contains { $0.id == score.id } && !reviewers.contains { $0.id == score.id } }
         if ranked.count >= 2 {
             Section { ModelPodium(top: Array(ranked.prefix(3))) }
         }
@@ -254,9 +256,24 @@ struct CrewSettingsView: View {
                 ForEach(early) { ModelScoreRow(rank: nil, score: $0) }
             }
         }
+        if !reviewers.isEmpty {
+            Section("Reviewers") {
+                ForEach(reviewers) { ModelScoreRow(rank: nil, score: $0) }
+            }
+        }
         Section {} footer: {
             Text("Scored from review findings per build size, with fixes scored apart. A model is ranked after three build reviews; a review by its own agent counts half.")
                 .settingsFootnote()
+        }
+        if let peerRatings = store.state.peerRatings {
+            Section {
+                Toggle("Peer ratings", isOn: Binding(get: { peerRatings }, set: { enabled in Task { await store.setPeerRatings(enabled) } }))
+            } footer: {
+                VStack(alignment: .leading, spacing: Space.s) {
+                    if let error = store.actions[CrewStore.peerRatingsKey]?.error { ErrorLabel(message: error) }
+                    Text("The lead and the workers rate each other's work as they see it, in turns they already have, and the ratings move half of a score from where the review findings put it. Off, nobody is asked to rate and the scores come from the review findings alone; ratings already given are kept.")
+                }.settingsFootnote()
+            }
         }
     }
     @ViewBuilder private func instructions(_ pane: SettingsPane) -> some View {

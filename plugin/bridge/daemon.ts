@@ -16,7 +16,7 @@ import { projectRoot } from './git.ts';
 import { followUps, isTerminal, Jobs } from './jobs.ts';
 import { missionPreset, Missions, STAGES } from './missions.ts';
 import type { Mission } from './missions.ts';
-import { addEvidence, loadNotes, notesFile, renderNotes, scoreAll, setSummary } from './notes.ts';
+import { addEvidence, addRating, loadNotes, notesFile, renderNotes, scoreAll, setSummary, WORKER_ITEMS } from './notes.ts';
 import type { NotesFile } from './notes.ts';
 import { outcomeContradiction } from './render.ts';
 import { runbook } from './runbook.ts';
@@ -24,7 +24,7 @@ import { checks as setupChecks, PACKAGED, prunePlugins, register, registered, re
 import type { Registration, SetupItem } from './setup.ts';
 import { toastCommand } from './toast.ts';
 import { ANTIGRAVITY_MODELS, codexModels } from './tiers.ts';
-import { appendInstructions, instructionsFile, readInstructions, savePreset, saveRoles, writeInstructions } from './settings.ts';
+import { appendInstructions, instructionsFile, readInstructions, savePeerRatings, savePreset, saveRoles, writeInstructions } from './settings.ts';
 import { agentGaugeDir, fromCodexLimits, route as routeWork, UsageMonitor } from './usage.ts';
 import type { RouteKind } from './usage.ts';
 import type { EventKind, Job } from './jobs.ts';
@@ -40,7 +40,7 @@ fs.mkdirSync(HOME, { recursive: true });
 const log = (...args: unknown[]) => console.log(new Date().toISOString(), ...args);
 let mutatingPosts = 0;
 /** Routes a worker's own MCP server calls; they are checked against the job's token, not the user's secret. */
-const WORKER_ROUTE = /^\/api\/jobs\/[\w-]+\/(?:questions|siblings|browser)$/;
+const WORKER_ROUTE = /^\/api\/jobs\/[\w-]+\/(?:questions|siblings|browser|rating)$/;
 
 const server = http.createServer((req, res) => {
   // Reserve before reading the body: idle replacement must not interrupt an unrecorded worktree.
@@ -196,6 +196,9 @@ fs.watchFile(path.join(HOME, 'config.json'), { interval: 2000 }, () => {
   broadcast('roles', live.roles);
   broadcast('roleSettings', live.roleSettings);
   broadcast('preset', { preset: live.preset, presets: live.presets });
+  // Turning peer ratings off or on changes what the scores are made of.
+  broadcast('peerRatings', live.peerRatings);
+  broadcast('modelScores', modelScores());
   usage.setModels(usageModels(live));
 });
 
@@ -226,6 +229,7 @@ function state() {
     usage: usage.current(),
     preset: live.preset,
     presets: live.presets,
+    peerRatings: live.peerRatings,
     modelScores: modelScores(),
     events: jobs.recent.slice(-200),
   };
@@ -248,7 +252,7 @@ function readNotes(): NotesFile {
 
 function modelScores() {
   try {
-    return scoreAll(readNotes());
+    return scoreAll(readNotes(), { ratings: liveConfig().peerRatings });
   } catch {
     return [];
   }
@@ -425,7 +429,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       const agents = url.searchParams.get('agents')?.split(',').filter(Boolean);
       const evidence = Number(url.searchParams.get('evidence') ?? 5);
       const file = readNotes();
-      const scores = scoreAll(file);
+      const scores = scoreAll(file, { ratings: liveConfig().peerRatings });
       const models = scores.filter((s) => !agents || agents.includes(s.agent)).sort((a, b) => (b.lastAt ?? 0) - (a.lastAt ?? 0)).slice(0, NOTES_SHOWN).map((s) => s.model);
       return { scores, text: renderNotes(scores, file, { models, evidence: Number.isInteger(evidence) && evidence >= 0 ? evidence : 5 }) };
     }
@@ -457,6 +461,21 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     const body = await readJson(req);
     if (!jobs.workerAuthorized(browserRoute[1], body?.token)) throw new HttpError(403, 'forbidden worker token');
     return jobs.browser(browserRoute[1]);
+  }
+  const ratingRoute = /^\/api\/jobs\/([\w-]+)\/rating$/.exec(pathname);
+  if (ratingRoute && method === 'POST') {
+    const body = await readJson(req);
+    const id = ratingRoute[1];
+    if (!jobs.workerAuthorized(id, body?.token)) throw new HttpError(403, 'forbidden worker token');
+    const job = jobs.get(id);
+    // Only a job that was asked to rate saw another's work: a reviewer the change, an engineer the review it got back.
+    if (!job.rates || job.kind === 'polish') throw new HttpError(400, 'This job was not asked to rate. Carry on without rating.');
+    readNotes();
+    // Everything sent but the token and the fact is an item, so one this job may not rate is refused, not ignored.
+    const { token: _token, fact: _fact, ...sent } = body;
+    const rating = addRating(HOME, { by: job.agent, byModel: job.resolvedModel ?? (job.agent === 'codex' ? job.model : undefined), byJob: job.id, items: sent, fact: body.fact }, WORKER_ITEMS[job.kind]);
+    broadcast('modelScores', modelScores());
+    return { kept: rating.items };
   }
   const siblingsRoute = /^\/api\/jobs\/([\w-]+)\/siblings$/.exec(pathname);
   if (siblingsRoute && method === 'GET') {
@@ -686,12 +705,24 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       if (body.summary !== undefined) {
         if (typeof body.model !== 'string' || !body.model) throw new HttpError(400, 'A summary needs the model it is about.');
         if (typeof body.summary !== 'string') throw new HttpError(400, 'summary must be text.');
-        score = setSummary(HOME, body.model, body.summary);
+        score = setSummary(HOME, body.model, body.summary, undefined, { ratings: liveConfig().peerRatings });
       } else {
         // A job's own record says which model did the work; the lead names it only for work done in its session.
         const job = typeof body.job === 'string' && body.job ? jobs.get(body.job) : undefined;
-        // A reviewer's or debater's job built nothing: the line belongs to the job whose work was reviewed.
-        if (job && (job.kind === 'review' || job.role === 'debate')) throw new HttpError(400, `Job ${job.id} is a ${job.role ?? job.kind}, which builds nothing to judge. Note the job whose work it reviewed, and name its agent as the reviewer.`);
+        const role = body.role ?? (job?.kind === 'review' && job.role !== 'debate' ? 'review' : job?.role === 'fix' ? 'fix' : 'build');
+        // A debater built and reviewed nothing. A reviewer's job is judged as a review, never as the work it read.
+        if (job?.role === 'debate') throw new HttpError(400, `Job ${job.id} is a debate, which builds nothing to judge.`);
+        if (job && (job.kind === 'review') !== (role === 'review')) {
+          throw new HttpError(400, job.kind === 'review'
+            ? `Job ${job.id} is a review, which builds nothing: note it with role review, or note the job whose work it reviewed and name its agent as the reviewer.`
+            : `Job ${job.id} is not a review. Give the review's own job_id with role review, and this job as of_job.`);
+        }
+        // The work a review covered: a worker's job names its own model, as a noted job does.
+        const built = typeof body.of_job === 'string' && body.of_job ? jobs.get(body.of_job) : undefined;
+        if (built && (built.kind === 'review' || built.role === 'debate')) throw new HttpError(400, `Job ${built.id} is a ${built.role ?? built.kind}, which built nothing a review could cover.`);
+        const builtModel = built ? built.resolvedModel ?? (built.agent === 'codex' ? built.model : undefined) : body.of_model;
+        if (built && !builtModel) throw new HttpError(400, `Job ${built.id} has no recorded model, so a review of it cannot be noted.`);
+        const peerRatings = liveConfig().peerRatings;
         // Antigravity's configured model is a family name; only the model the session reported names one model.
         const model = job ? job.resolvedModel ?? (job.agent === 'codex' ? job.model : undefined) : body.model;
         if (job && !model) throw new HttpError(400, `Job ${job.id} has no recorded model, so it cannot be noted.`);
@@ -703,19 +734,30 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
           // A job's tier is its own record's. It is kept to show what work a model was given, not scored.
           ...((job ? job.tier : body.tier) ? { tier: job ? job.tier : body.tier } : {}),
           size: body.size,
-          role: body.role ?? (job?.role === 'fix' ? 'fix' : 'build'),
+          role,
           ...(job ? { job: job.id } : {}),
-          reviewer: body.reviewer,
+          // A review line is about the reviewer itself; its job says who that was.
+          reviewer: role === 'review' && job ? job.agent : body.reviewer,
+          ...(role === 'review' || body.of_job !== undefined || body.of_model !== undefined ? { of: { ...(built ? { job: built.id } : {}), model: builtModel, ...(built?.role === 'fix' ? { fix: true as const } : {}) } } : {}),
+          // Off, a rating is not kept: the lead is told so, and the line stands without it.
+          ...(body.rating !== undefined && peerRatings ? { rating: body.rating } : {}),
           findings: body.findings ?? {},
           ...(body.declined !== undefined ? { declined: body.declined } : {}),
           ...(body.outcome !== undefined ? { outcome: body.outcome } : {}),
           // The follow-up turns come from the job's own record, so the lead names only how it took the work.
           ...(body.adoption !== undefined ? { adoption: body.adoption, ...(job ? { rounds: followUps(job) } : {}) } : {}),
           text: body.text,
-        }).score;
+        }, { ratings: peerRatings }).score;
+        if (body.rating !== undefined && !peerRatings) score = { ...score, ratingDropped: true };
       }
       broadcast('modelScores', modelScores());
       return score;
+    }
+    if (pathname === '/api/peer-ratings') {
+      const saved = savePeerRatings(HOME, (await readJson(req)).enabled);
+      broadcast('peerRatings', saved.peerRatings);
+      broadcast('modelScores', modelScores());
+      return saved;
     }
     if (pathname === '/api/preset') {
       const saved = savePreset(HOME, (await readJson(req)).preset);

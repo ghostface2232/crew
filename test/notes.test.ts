@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
-import { addEvidence, loadNotes, notesFile, renderNotes, scoreAll, setSummary } from '../plugin/bridge/notes.ts';
+import { addEvidence, addRating, loadNotes, notesFile, renderNotes, scoreAll, setSummary, WORKER_ITEMS } from '../plugin/bridge/notes.ts';
 import type { Evidence, NotesFile } from '../plugin/bridge/notes.ts';
 
 const input: Omit<Evidence, 'id' | 'at'> = {
@@ -17,13 +17,13 @@ function home(t: TestContext): string {
   return path.join(dir, 'home');
 }
 function fixture(lines: Partial<Evidence>[]): NotesFile {
-  return { version: 1, models: { 'model-a': { model: 'model-a', agent: 'codex', summary: '', summaryAt: null,
+  return { version: 2, ratings: [], models: { 'model-a': { model: 'model-a', agent: 'codex', summary: '', summaryAt: null,
     evidence: lines.map((e, i) => ({ ...input, id: `ev-${i}`, at: i, ...e })) } } };
 }
 
 test('round trip creates home and atomically replaces the file', (t) => {
   const dir = home(t);
-  assert.deepEqual(loadNotes(dir), { version: 1, models: {} });
+  assert.deepEqual(loadNotes(dir), { version: 2, models: {}, ratings: [] });
   const { evidence, score } = addEvidence(dir, { ...input, at: 42, text: '  First\nsecond  ', findings: {} as Evidence['findings'] });
   assert.match(evidence.id, /^ev-[0-9a-f]{6}$/);
   assert.equal(evidence.at, 42);
@@ -287,4 +287,210 @@ test('loading drops an adoption the writer would refuse', (t) => {
   const bad: Partial<Evidence>[] = [{ adoption: 'as-is' }, { job: '', adoption: 'as-is' }, { job: 'cx-2', adoption: 'merged' as Evidence['adoption'] }, { job: 'cx-3', rounds: 1 }, { job: 'cx-4', adoption: 'partly', rounds: 1 }];
   fs.writeFileSync(notesFile(dir), JSON.stringify(fixture(bad)));
   assert.deepEqual(loadNotes(dir).models['model-a'].evidence.map((e) => e.job), ['cx-4']);
+});
+
+const high = { high: 1, medium: 0, low: 0 };
+const review = { role: 'review', of: { model: 'model-b' } } as const;
+
+test('a review line scores its reviewer on the share of its finding load the lead accepted', () => {
+  // One accepted high against the start of 0.6 with the weight of 0.5: (0.35 + 0.3) / (0.35 + 0.5).
+  const kept = scoreAll(fixture([{ ...review, findings: high }]))[0];
+  assert.deepEqual([kept.items.findings, kept.score, kept.reviewSamples, kept.buildSamples], [7.6, null, 1, 0]);
+  // A declined high of the same weight halves what was raised: (0.35 + 0.3) / (0.7 + 0.5).
+  assert.equal(scoreAll(fixture([{ ...review, findings: high, declined: high }]))[0].items.findings, 5.4);
+  // A review that raised nothing says nothing about its findings.
+  assert.equal(scoreAll(fixture([{ ...review }]))[0].items.findings, null);
+});
+
+test('brief follows how the lead took delegated work, and report has ratings only', () => {
+  const taken = (adoption: Evidence['adoption']) => scoreAll(fixture([{ job: 'cx-1', adoption }]))[0].items;
+  assert.ok(taken('as-is').brief! > taken('after-reply').brief! && taken('after-reply').brief! > taken('partly').brief! && taken('partly').brief! > taken('rejected').brief!);
+  assert.deepEqual([scoreAll(fixture([{}]))[0].items.brief, taken('as-is').report], [null, null]);
+});
+
+test('peer ratings count from three on, move half of an item from where the evidence put it, and can be left out', () => {
+  const rated = (n: number, rating: Evidence['rating']) => fixture(Array.from({ length: 4 }, (_, i) => ({ job: `cx-${i}`, ...(i < n ? { rating } : {}) })));
+  const base = scoreAll(rated(0, {}))[0];
+  assert.equal(base.score, base.build);
+  // One or two ratings are an anecdote: they move nothing, and are not counted as having moved anything.
+  assert.deepEqual([scoreAll(rated(2, { correctness: 1 }))[0].score, scoreAll(rated(2, { correctness: 1 }))[0].ratings], [base.score, 0]);
+  const low = scoreAll(rated(3, { correctness: 1 }))[0];
+  assert.deepEqual([low.score! < base.score!, low.build, low.ratings], [true, base.build, 3]);
+  // Half of the item stays with the evidence, whatever the ratings say.
+  assert.ok(low.score! > base.score! * 0.5);
+  // Neutral ratings leave a score where it was, and the best there are never lower it.
+  assert.equal(scoreAll(rated(3, { correctness: 3 }))[0].score, base.score);
+  assert.ok(scoreAll(rated(4, { correctness: 5 }))[0].score! > base.score!);
+  assert.equal(scoreAll(rated(3, { correctness: 1 }), { ratings: false })[0].score, base.score);
+  // An item with no evidence is its reference of 7.0, moved by its ratings.
+  assert.ok(scoreAll(rated(3, { report: 5 }))[0].items.report! > 7 && scoreAll(rated(3, { report: 1 }))[0].items.report! < 7);
+  assert.equal(scoreAll(rated(3, { report: 3 }))[0].items.report, 7);
+});
+
+test('a rating is read against its rater per item, counts half from the model\'s own agent, and never lifts flawed work', () => {
+  // Rated five by a rater whose every rating of the item is five, model-a gains less than when the same rater marks another down.
+  const file = (other: Evidence['rating']) => {
+    const f = fixture(Array.from({ length: 3 }, (_, i) => ({ job: `cx-a${i}`, rating: { report: 5 } })));
+    f.models['model-b'] = { model: 'model-b', agent: 'codex', summary: '', summaryAt: null,
+      evidence: Array.from({ length: 3 }, (_, i) => ({ ...input, model: 'model-b', id: `ev-b${i}`, at: i, job: `cx-b${i}`, rating: other })) };
+    return scoreAll(f).find((s) => s.model === 'model-a')!.items.report!;
+  };
+  assert.ok(file({ report: 5 }) < file({ report: 1 }));
+  // What the rater gives another item says nothing of how it rates this one.
+  assert.equal(file({ brief: 1 }), file({ brief: 5 }));
+  // Reading against the rater only brings a rating toward neutral: threes stay neutral whatever the rater gives
+  // elsewhere, and one more five never lowers the model it goes to.
+  const two = (mine: number[], other: number) => {
+    const f = fixture(mine.map((correctness, i) => ({ job: `cx-a${i}`, rating: { correctness } })));
+    f.models['model-b'] = { model: 'model-b', agent: 'codex', summary: '', summaryAt: null,
+      evidence: Array.from({ length: 3 }, (_, i) => ({ ...input, model: 'model-b', id: `ev-b${i}`, at: i, job: `cx-b${i}`, rating: { correctness: other } })) };
+    const s = scoreAll(f).find((score) => score.model === 'model-a')!;
+    return s.score! - s.build!;
+  };
+  assert.deepEqual([two([3, 3, 3], 5), two([3, 3, 3], 1)], [0, 0]);
+  assert.ok(two([5, 5, 5, 3, 3], 5) <= two([5, 5, 5, 5, 3], 5) && two([5, 5, 5, 5, 3], 5) <= two([5, 5, 5, 5, 5], 5));
+  assert.ok(two([5, 5, 5], 5) >= 0 && two([1, 1, 1], 1) <= 0);
+  // The lead rating a model of its own agent counts half: the same ratings take off less.
+  const lost = (agent: 'codex' | 'claude') => {
+    const f = fixture(Array.from({ length: 3 }, (_, i) => ({ job: `cx-${i}`, agent, reviewer: 'antigravity' as const, rating: { correctness: 1 } })));
+    f.models['model-a'].agent = agent;
+    const s = scoreAll(f)[0];
+    return (s.build! - s.score!) / s.build!;
+  };
+  assert.ok(lost('claude') > 0 && lost('claude') < lost('codex'));
+  // Three fives on work with an accepted high finding count as three threes.
+  const flawed = (correctness: number) => scoreAll(fixture(Array.from({ length: 3 }, (_, i) => ({ job: `cx-${i}`, findings: high, rating: { correctness } }))))[0].score;
+  assert.equal(flawed(5), flawed(3));
+});
+
+/** Three jobs model-a built, each reviewed by model-r, with what the reviewers and the builders rated. */
+function reviewed(t: TestContext, options: { correctness?: number; findings?: number; accepted?: Evidence['findings']; own?: boolean } = {}) {
+  const dir = home(t);
+  for (const i of [1, 2, 3]) {
+    // Work of the lead's own has no job; a worker's is under the model its build line names, whatever the review line says.
+    addEvidence(dir, { ...input, ...(options.own ? {} : { job: `cx-${i}` }) });
+    addEvidence(dir, { ...input, model: 'model-r', agent: 'antigravity', role: 'review', job: `rv-${i}`, findings: options.accepted ?? { high: 0, medium: 1, low: 0 },
+      of: options.own ? { model: 'model-a' } : { job: `cx-${i}`, model: 'stale-model' } });
+    if (options.correctness) addRating(dir, { by: 'antigravity', byModel: 'model-r', byJob: `rv-${i}`, items: { correctness: options.correctness }, fact: 'Checked the main path.' }, WORKER_ITEMS.review);
+    if (options.findings) addRating(dir, { by: 'codex', byModel: 'model-a', byJob: `cx-${i}`, items: { findings: options.findings }, fact: 'The finding was real.' }, WORKER_ITEMS.delegate);
+  }
+  const scores = scoreAll(loadNotes(dir));
+  return { dir, a: scores.find((s) => s.model === 'model-a')!, r: scores.find((s) => s.model === 'model-r')! };
+}
+
+test('a reviewer\'s rating reaches the model that built the work, and a builder\'s the model that reviewed it', (t) => {
+  const none = reviewed(t);
+  const both = reviewed(t, { correctness: 1, findings: 5 });
+  // The reviewers' ones lower the builder's score and leave its build; the builders' fives lift the reviewer's findings.
+  assert.deepEqual([both.a.score! < none.a.score!, both.a.build, both.a.ratings, both.a.items.findings], [true, none.a.build, 3, null]);
+  assert.deepEqual([both.r.items.findings! > none.r.items.findings!, both.r.ratings, both.r.score], [true, 3, null]);
+  assert.equal(scoreAll(loadNotes(both.dir)).some((s) => s.model === 'stale-model'), false);
+  // A builder has a stake in the review of its own work: its ratings move the item less than the lead's same ones.
+  for (const i of [1, 2, 3]) addEvidence(none.dir, { ...input, model: 'model-r', agent: 'antigravity', role: 'review', job: `rv-${i}`, findings: { high: 0, medium: 1, low: 0 }, of: { job: `cx-${i}`, model: 'model-a' }, rating: { findings: 5 } });
+  const lead = scoreAll(loadNotes(none.dir)).find((s) => s.model === 'model-r')!.items.findings!;
+  assert.ok(lead > both.r.items.findings!);
+});
+
+test('one rating counts once however many reviews of the job there were, and a rating waits for its review line', (t) => {
+  const dir = home(t);
+  addEvidence(dir, { ...input, job: 'cx-1' });
+  addRating(dir, { by: 'codex', byModel: 'model-a', byJob: 'cx-1', items: { findings: 1 }, fact: 'Noise.' }, WORKER_ITEMS.delegate);
+  const findings = () => scoreAll(loadNotes(dir)).find((s) => s.model === 'model-r')!;
+  for (const i of [1, 2, 3]) addEvidence(dir, { ...input, model: 'model-r', role: 'review', job: `rv-${i}`, findings: high, of: { job: 'cx-1', model: 'model-a' } });
+  const before = findings();
+  assert.equal(before.ratings, 0);
+  // Three ratings by three jobs do count, and until their review lines exist a reviewer's own ratings reach nobody.
+  for (const i of [1, 2, 3]) addRating(dir, { by: 'codex', byModel: 'model-r', byJob: `rv-x${i}`, items: { correctness: 1 }, fact: 'x' }, WORKER_ITEMS.review);
+  assert.deepEqual(scoreAll(loadNotes(dir)).map((s) => s.ratings), [0, 0]);
+  assert.equal(findings().items.findings, before.items.findings);
+});
+
+test('a rating that reaches two reviewers of a job moves both alike, whichever was noted first', (t) => {
+  const findings = (order: string[]) => {
+    const dir = home(t);
+    for (const i of [1, 2, 3]) {
+      addEvidence(dir, { ...input, job: `cx-${i}` });
+      for (const model of order) addEvidence(dir, { ...input, model, agent: 'antigravity', role: 'review', job: `${model}-${i}`, findings: { high: 0, medium: 1, low: 0 }, of: { job: `cx-${i}`, model: 'model-a' } });
+      addRating(dir, { by: 'codex', byModel: 'model-a', byJob: `cx-${i}`, items: { findings: 5 }, fact: 'The findings were real.' }, WORKER_ITEMS.delegate);
+    }
+    const scores = scoreAll(loadNotes(dir));
+    return ['model-r', 'model-s'].map((model) => scores.find((s) => s.model === model)!.items.findings);
+  };
+  const [r, s] = findings(['model-r', 'model-s']);
+  assert.equal(r, s);
+  assert.deepEqual(findings(['model-s', 'model-r']), [r, s]);
+});
+
+test('the cap on flawed work holds for a reviewer\'s rating and for work without a job, and a fix is not rated for correctness', (t) => {
+  const flawed = (correctness: number, own: boolean) => reviewed(t, { correctness, accepted: high, own }).a.score;
+  assert.equal(flawed(5, false), flawed(3, false));
+  assert.equal(flawed(5, true), flawed(3, true));
+  assert.ok(reviewed(t, { correctness: 5 }).a.score! > reviewed(t, { correctness: 3 }).a.score!);
+  const dir = home(t);
+  assert.throws(() => addEvidence(dir, { ...input, job: 'cx-9', role: 'fix', outcome: 'patch', rating: { correctness: 5 } }), /brief, report for fix/);
+  // A reviewer's correctness rating of a fix job says nothing of how its model builds: the score stays empty.
+  for (const i of [1, 2, 3]) {
+    addEvidence(dir, { ...input, job: `fx-${i}`, role: 'fix', outcome: 'patch' });
+    addEvidence(dir, { ...input, model: 'model-r', role: 'review', job: `rv-${i}`, of: { job: `fx-${i}`, model: 'model-a', fix: true } });
+    addRating(dir, { by: 'codex', byModel: 'model-r', byJob: `rv-${i}`, items: { correctness: 5, report: 5 }, fact: 'x' }, WORKER_ITEMS.review);
+  }
+  const fixer = scoreAll(loadNotes(dir)).find((s) => s.model === 'model-a')!;
+  assert.deepEqual([fixer.score, fixer.build, fixer.ratings, fixer.items.report! > 7], [null, null, 3, true]);
+});
+
+test('ratings are validated, replaced per job, kept through a later note of the line, and never dropped without a copy', (t) => {
+  const dir = home(t);
+  addRating(dir, { by: 'codex', byModel: 'model-r', byJob: 'rv-1', items: { correctness: 2 }, fact: 'Lost writes under load.' }, WORKER_ITEMS.review);
+  addRating(dir, { by: 'codex', byJob: 'cx-1', items: { findings: 4 }, fact: 'The race was real.' }, WORKER_ITEMS.delegate);
+  addRating(dir, { by: 'codex', byJob: 'rv-1', items: { correctness: 4 }, fact: 'Second look.' }, WORKER_ITEMS.review);
+  assert.deepEqual(loadNotes(dir).ratings.map((r) => [r.byJob, r.items]), [['cx-1', { findings: 4 }], ['rv-1', { correctness: 4 }]]);
+  assert.throws(() => addRating(dir, { by: 'codex', byJob: 'rv-1', items: { findings: 4 }, fact: 'x' }, WORKER_ITEMS.review), /correctness, report/);
+  assert.throws(() => addRating(dir, { by: 'codex', byJob: 'rv-1', items: { correctness: 4, brief: 9 } as never, fact: 'x' }, WORKER_ITEMS.review), /correctness, report/);
+  assert.throws(() => addRating(dir, { by: 'codex', byJob: 'rv-1', items: { correctness: 6 }, fact: 'x' }, WORKER_ITEMS.review), /1 to 5/);
+  assert.throws(() => addRating(dir, { by: 'codex', byJob: 'rv-1', items: { correctness: 4 }, fact: ' ' }, WORKER_ITEMS.review), /fact/);
+  assert.equal(loadNotes(dir).ratings.length, 2);
+  // The lead's rating of a job stays when the line is noted again without one, and a new one replaces it.
+  addEvidence(dir, { ...input, job: 'cx-1', rating: { correctness: 4, brief: 5 } });
+  assert.deepEqual(addEvidence(dir, { ...input, job: 'cx-1', text: 'Corrected.' }).evidence.rating, { correctness: 4, brief: 5 });
+  assert.deepEqual(addEvidence(dir, { ...input, job: 'cx-1', rating: { brief: 2 } }).evidence.rating, { brief: 2 });
+  // A rating a hand edit left without its fact is skipped on load, and the file is copied before a save erases it.
+  const saved = JSON.parse(fs.readFileSync(notesFile(dir), 'utf8'));
+  saved.ratings[0].fact = ' ';
+  fs.writeFileSync(notesFile(dir), JSON.stringify(saved));
+  assert.equal(loadNotes(dir).ratings.length, 1);
+  addEvidence(dir, input);
+  assert.equal(fs.readdirSync(dir).filter((name) => name.includes('.dropped-')).length, 1);
+});
+
+test('scores that are all zero still rank by their finding rate', () => {
+  const file = fixture(Array(3).fill({ findings: { high: 10000, medium: 0, low: 0 } }));
+  file.models['model-b'] = { model: 'model-b', agent: 'codex', summary: '', summaryAt: null,
+    evidence: Array.from({ length: 3 }, (_, i) => ({ ...input, model: 'model-b', id: `ev-b${i}`, at: i, findings: { high: 9000, medium: 0, low: 0 } })) };
+  assert.deepEqual(scoreAll(file).map((s) => [s.model, s.score]), [['model-b', 0], ['model-a', 0]]);
+});
+
+test('the lead rates only a job\'s work, with the items of the line\'s role, and a review line names what it covered', (t) => {
+  const dir = home(t);
+  assert.throws(() => addEvidence(dir, { ...input, rating: { correctness: 4 } }), /only for a job's work/);
+  assert.throws(() => addEvidence(dir, { ...input, job: 'cx-1', rating: { findings: 4 } }), /correctness, brief, report for build/);
+  assert.throws(() => addEvidence(dir, { ...input, job: 'rv-1', role: 'review' }), /of \(the work the review covered/);
+  assert.throws(() => addEvidence(dir, { ...input, of: { model: 'model-b' } }), /only for a review line/);
+  const { evidence } = addEvidence(dir, { ...input, job: 'rv-1', role: 'review', of: { model: 'model-b' }, rating: { findings: 5 }, declined: high });
+  assert.deepEqual([evidence.of, evidence.rating], [{ model: 'model-b' }, { findings: 5 }]);
+  const text = renderNotes(scoreAll(loadNotes(dir)), loadNotes(dir));
+  assert.match(text, /0 build\(s\), 0 fix\(es\), 1 review\(s\)/);
+  assert.match(text, /rv-1 \(reviewed model-b, review, medium, declined 1 high, rated findings 5\)/);
+});
+
+test('a version 1 file is read as it is, and kept once when the first save rewrites it', (t) => {
+  const dir = home(t);
+  fs.mkdirSync(dir);
+  const old = JSON.stringify({ version: 1, models: fixture([{}, { role: 'fix', outcome: 'patch' }]).models });
+  fs.writeFileSync(notesFile(dir), old);
+  assert.deepEqual([loadNotes(dir).models['model-a'].evidence.length, loadNotes(dir).ratings], [2, []]);
+  addEvidence(dir, input);
+  addEvidence(dir, input);
+  assert.equal(JSON.parse(fs.readFileSync(notesFile(dir), 'utf8')).version, 2);
+  assert.equal(fs.readFileSync(`${notesFile(dir)}.v1`, 'utf8'), old);
+  assert.equal(fs.readdirSync(dir).filter((name) => name.includes('dropped')).length, 0);
 });

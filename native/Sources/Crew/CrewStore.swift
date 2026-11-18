@@ -252,6 +252,15 @@ final class CrewStore {
             upsert(&state.missions, updated)
         }
     }
+    static let peerRatingsKey = "peer-ratings"
+    func setPeerRatings(_ enabled: Bool) async {
+        struct Change: Encodable, Sendable { var enabled: Bool }
+        struct Saved: Decodable, Sendable { var peerRatings: Bool }
+        await run(Self.peerRatingsKey) {
+            let saved: Saved = try await api.post("/api/peer-ratings", Change(enabled: enabled))
+            state.peerRatings = saved.peerRatings
+        }
+    }
     func setRound(_ job: Job, turn: Int, undo: Bool) async {
         guard job.roundUnavailableReason == nil else { return }
         struct Change: Encodable, Sendable { var undo: Bool?; var keep: Bool? }

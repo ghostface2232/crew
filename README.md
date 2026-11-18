@@ -70,7 +70,7 @@ The board can send jobs directly for any role except debate, using the configure
 - When a background job finishes or needs a decision, the lead session wakes up automatically.
 - Agents share the machine without colliding: each starts an isolated instance of any service it runs, only one reviewer of a change launches the app, and a worker that does gets network access and its own snapshot of the change, and performance-measuring jobs run alone ([docs/04-implementation.md](docs/04-implementation.md) section 5.4).
 - Instructions for every agent go in `~/.crew/instructions.md` (all projects) and `.crew/instructions.md` at the repository root (that project). Workers get them with each job and Claude sessions at start; no service's own instruction files are touched.
-- Configuration lives in `~/.crew/config.json` (stall timeout, notifications, Codex approval policy, whether Antigravity is enabled, and which agent holds each role).
+- Configuration lives in `~/.crew/config.json` (stall timeout, notifications, Codex approval policy, whether Antigravity is enabled, which agent holds each role, and whether agents rate each other's work for the model scores).
 
 Using Antigravity carries a Terms of Service risk; read [docs/04-implementation.md](docs/04-implementation.md) section 6 before enabling it.
 

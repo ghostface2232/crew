@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { canonicalPath, effectiveRole, PRESETS, resolveConfig } from '../plugin/bridge/config.ts';
-import { appendInstructions, instructionsFile, readInstructions, savePreset, saveRoles, writeInstructions } from '../plugin/bridge/settings.ts';
+import { appendInstructions, instructionsFile, readInstructions, savePeerRatings, savePreset, saveRoles, writeInstructions } from '../plugin/bridge/settings.ts';
 
 const tempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'crew-settings-'));
 
@@ -253,4 +253,17 @@ test('a role written before agents becomes a list of holders, the model going to
   const added = resolveConfig({ roles: { delegate: { agent: 'antigravity', model: 'gemini-y' }, refactor: { also: ['codex'], effort: 'low' }, review: { also: ['claude'] } } });
   assert.deepEqual(added.roles.refactor, { agents: ['codex', 'antigravity'], antigravity: { model: 'gemini-y' }, codex: { effort: 'low' } });
   assert.deepEqual(added.roles.review, { agents: ['codex', 'claude'] });
+});
+
+test('peer ratings are on unless the file says false, and turning them back on removes the key', () => {
+  const home = tempDir();
+  const file = path.join(home, 'config.json');
+  assert.equal(resolveConfig({}).peerRatings, true);
+  assert.throws(() => resolveConfig({ peerRatings: 'false' as never }), /peerRatings must be true or false/);
+  fs.writeFileSync(file, JSON.stringify({ notify: false }));
+  assert.deepEqual(savePeerRatings(home, false), { peerRatings: false });
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { notify: false, peerRatings: false });
+  assert.throws(() => savePeerRatings(home, 'off'), /true or false/);
+  assert.deepEqual(savePeerRatings(home, true), { peerRatings: true });
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { notify: false });
 });

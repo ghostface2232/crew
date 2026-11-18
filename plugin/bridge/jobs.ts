@@ -199,6 +199,8 @@ export interface Job {
   ask?: boolean;
   /** A debate: how many rounds it may run. The current round is the job's turn. */
   debate?: { rounds: number };
+  /** Asked to rate the work it sees (a reviewer the change, an engineer the review it gets back); set when peer ratings were on as it started. */
+  rates?: true;
   /** The messages of the job in order: the lead's task and follow-ups, and the worker's report for each turn. */
   exchange?: ExchangeEntry[];
   /** The user's Codex plugins that are on for this job, by name; absent when it runs with none. */
@@ -592,6 +594,9 @@ export class Jobs {
     }
     const config = this.readConfig();
     const preset = spec.preset === undefined ? config.preset : spec.preset;
+    // A reviewer sees the change and an engineer the review of its own. A debate, a question and an edit see nobody's
+    // work; a fix starts from a review of someone else's, and release preparation is not sent findings.
+    const rates = config.peerRatings && !spec.debate && !spec.ask && spec.kind !== 'polish' && roleName !== 'fix' && roleName !== 'release';
     const holders = config.roles[roleName].agents;
     // Named no holder, the job goes to the role's first worker.
     const picked = spec.agent ?? defaultHolder(roleName, config.roles[roleName], disabledAgents(config));
@@ -711,6 +716,7 @@ export class Jobs {
         runsApp: Boolean(spec.runsApp) || undefined,
         ask: Boolean(spec.ask) || undefined,
         debate: spec.debate ? { rounds: spec.debate.rounds } : undefined,
+        rates: rates || undefined,
         plugins: plugins.length ? plugins : undefined,
         requestedPlugins,
         cwd,
@@ -719,7 +725,7 @@ export class Jobs {
         scratch,
         evidenceDir,
         evidence: attached.length ? attached : undefined,
-        ...buildPrompt(spec, worktree, diffFile, shared.text, scratch, runsCommands(agent, spec), skills, evidenceDir),
+        ...buildPrompt(spec, worktree, diffFile, shared.text, scratch, runsCommands(agent, spec), skills, evidenceDir, rates),
         shared: shared.sources,
         // Only Codex has a built-in review mode; other agents get the prompted review.
         nativeReview: spec.kind === 'review' && agent === 'codex' && spec.review?.mode === 'standard' ? spec.review.target : null,
@@ -1348,7 +1354,7 @@ export class Jobs {
       mcp: {
         command: process.execPath,
         args: [path.join(import.meta.dirname, `worker-mcp${path.extname(import.meta.filename)}`)],
-        env: { CREW_JOB_ID: job.id, CREW_JOB_TOKEN: token, CREW_PORT: String(PORT), CREW_JOB_CWD: job.cwd },
+        env: { CREW_JOB_ID: job.id, CREW_JOB_TOKEN: token, CREW_PORT: String(PORT), CREW_JOB_CWD: job.cwd, ...(job.rates ? { CREW_JOB_RATES: job.kind } : {}) },
       },
       activity: () => {
         if (!live()) return;

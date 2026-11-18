@@ -51,7 +51,7 @@ The development bundle is `native/build/Crew.app`; the release copy is `release/
 
 The build copies the current Node executable and its LICENSE. It rejects Node binaries linked against non-system libraries. `CREW_NODE_LICENSE` can specify the matching license path when the Node distribution uses a different directory layout. `CREW_BUILD_CONFIGURATION=debug` selects a debug build.
 
-Bundles are locally ad-hoc signed and verified. Public Developer ID signing, notarization, and login launch are not configured; the app updates itself (see Updates below). This is a local app distribution, not an App Store build.
+Local builds are ad-hoc signed and verified. Releases are signed with a self-signed certificate kept in the repository secrets `MACOS_SIGNING_P12` and `MACOS_SIGNING_P12_PASSWORD`, so the app's designated requirement stays the same across versions and macOS keeps folder access granted to an earlier version. The release workflow loads it into a temporary keychain and passes it to the build as `CREW_SIGN_IDENTITY` and `CREW_SIGN_KEYCHAIN`. Public Developer ID signing, notarization, and login launch are not configured; the app updates itself (see Updates below). This is a local app distribution, not an App Store build.
 
 ## Updates
 
@@ -63,7 +63,7 @@ When an archive is ready, **Restart to Update** appears above Settings in the si
 - The archive is unpacked and must be this app (same bundle identifier) at the release's version and pass `codesign --verify --deep --strict`. It is staged beside the installed copy. A detached shell helper waits for the app to quit, moves the old bundle aside, moves the new one in, puts the old one back if that fails, and opens the result.
 - The folder holding Crew must be writable; otherwise About Crew says to move the app. Jobs, missions and settings live in `~/.crew`, outside the bundle.
 
-Without an Apple Developer ID the archive is ad-hoc signed and not notarized, so its first launch from a download needs System Settings → Privacy & Security → Open Anyway ([13-distribution-plan.md](13-distribution-plan.md)). An update replaces the bundle in place; whether Gatekeeper asks again for an ad-hoc signed update has not been verified.
+Without an Apple Developer ID the archive is not signed by a recognized publisher or notarized, so its first launch from a download needs System Settings → Privacy & Security → Open Anyway ([13-distribution-plan.md](13-distribution-plan.md)). An update replaces the bundle in place; whether Gatekeeper asks again for an update has not been verified.
 
 ## Verification
 

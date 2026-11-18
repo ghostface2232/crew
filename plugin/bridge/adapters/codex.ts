@@ -103,6 +103,8 @@ export class CodexAdapter implements Adapter {
   private lastTidy = 0;
   /** Threads a reply is resuming, which `tidy` must leave alone until they are loaded. */
   private resuming = new Set<string>();
+  /** Jobs whose thread Codex is still starting or resuming, which can take minutes; `probe` vouches for them. */
+  private opening = new Set<string>();
   private config: Config;
 
   constructor(config: Config) {
@@ -114,12 +116,10 @@ export class CodexAdapter implements Adapter {
   }
 
   async start(ctl: JobCtl): Promise<void> {
-    const peer = await this.ensure();
-    if (isTerminal(ctl.job)) return;
-    const params = await this.threadParams(ctl, peer);
-    ctl.capabilities(capabilitiesOf(ctl.job, params));
-    const res = await peer.request('thread/start', params, THREAD_TIMEOUT_MS);
-    if (isTerminal(ctl.job)) return;
+    this.opening.add(ctl.job.id);
+    const opened = await this.open(ctl).finally(() => this.opening.delete(ctl.job.id));
+    if (!opened || isTerminal(ctl.job)) return;
+    const { peer, params, res } = opened;
     const threadId: string = res.thread.id;
     const run = this.openRun(ctl, threadId, params.config.features.plugins);
     this.loaded.add(threadId);
@@ -138,6 +138,15 @@ export class CodexAdapter implements Adapter {
     }
   }
 
+  /** Launches the server if needed and starts the job's thread. */
+  private async open(ctl: JobCtl) {
+    const peer = await this.ensure();
+    if (isTerminal(ctl.job)) return null;
+    const params = await this.threadParams(ctl, peer);
+    ctl.capabilities(capabilitiesOf(ctl.job, params));
+    return { peer, params, res: await peer.request('thread/start', params, THREAD_TIMEOUT_MS) };
+  }
+
   async reply(ctl: JobCtl, message: string): Promise<void> {
     const peer = await this.ensure();
     const threadId = ctl.job.sessionId!;
@@ -146,7 +155,10 @@ export class CodexAdapter implements Adapter {
       const params = await this.threadParams(ctl, peer);
       ctl.capabilities(capabilitiesOf(ctl.job, params));
       const resume = () => peer.request('thread/resume', { threadId, ...params, excludeTurns: true }, THREAD_TIMEOUT_MS);
+      // A resume can outlast a cancel and the next reply; only the turn that asked for it may go on to send its message.
+      const turn = ctl.job.turns;
       this.resuming.add(threadId);
+      this.opening.add(ctl.job.id);
       // `tidy` archives a worker's thread after a week; a reply to that job brings it back.
       const res = await resume().catch(async (err) => {
         if (!/^session \S+ is archived\b/.test(String(err?.message))) throw err;
@@ -154,10 +166,14 @@ export class CodexAdapter implements Adapter {
           throw new Error(`${err.message} Unarchiving it failed: ${failed?.message ?? failed}`, { cause: failed });
         });
         return resume();
-      }).finally(() => this.resuming.delete(threadId));
+      }).finally(() => {
+        this.resuming.delete(threadId);
+        this.opening.delete(ctl.job.id);
+      });
+      this.loaded.add(threadId);
+      if (ctl.job.turns !== turn) return;
       pluginsEnabled = params.config.features.plugins;
       ctl.model(res.model ?? res.thread?.model ?? ctl.job.model ?? this.config.codex.model, ctl.job.effort ?? this.config.codex.effort ?? res.reasoningEffort ?? undefined);
-      this.loaded.add(threadId);
     }
     if (isTerminal(ctl.job)) return;
     const run = this.runs.get(threadId) ?? this.openRun(ctl, threadId);
@@ -252,6 +268,8 @@ export class CodexAdapter implements Adapter {
     const threadId = ctl.job.sessionId;
     const run = threadId ? this.runs.get(threadId) : undefined;
     const peer = this.peer;
+    // Starting and resuming a thread have their own, longer timeout.
+    if (this.opening.has(ctl.job.id)) return { verdict: 'working', detail: 'Codex has yet to open the thread' };
     if (!threadId || !run) return { verdict: 'ended', detail: 'Codex holds no session for this job, so its end will never arrive. Reply to resume it, or cancel it.' };
     if (!peer?.alive) return { verdict: 'ended', detail: 'codex app-server is no longer running. Reply to resume the job, or cancel it.' };
     // Starting and interrupting a turn have their own timeouts.

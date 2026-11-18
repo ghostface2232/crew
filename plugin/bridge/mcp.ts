@@ -765,7 +765,8 @@ async function withNotes(text: string, agents: Holder[], evidence: number, once 
   if (!agents.length) return text;
   try {
     const notes: { text: string } = await api('GET', `/api/notes?agents=${agents.map(encodeURIComponent).join(',')}&evidence=${evidence}`);
-    if (!notes.text) return text;
+    // Two jobs started at once both ask; only the first to hear back shows the notes.
+    if (!notes.text || (once && agents.every((agent) => noted.has(agent)))) return text;
     for (const agent of agents) noted.add(agent);
     return `${text}\n\nModel notes (advice; the roles and presets stay the user's):\n${notes.text}`;
   } catch {

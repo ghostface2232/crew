@@ -687,7 +687,7 @@ export class Jobs {
       if (scratch) fs.mkdirSync(scratch, { recursive: true });
       const evidenceDir = this.evidenceDir(id);
       // `work` holds what the worker keeps across turns that is not evidence: scratch is emptied after every turn.
-      fs.mkdirSync(path.join(evidenceDir, 'work'), { recursive: true });
+      fs.mkdirSync(scratch ? path.join(evidenceDir, 'work') : evidenceDir, { recursive: true });
       const attached = attachEvidence(evidenceDir, attachments, 1);
       if (attached.length) spec.task = `${spec.task ?? ''}${attachmentsNote(attached)}`;
 

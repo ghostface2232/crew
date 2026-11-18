@@ -72,6 +72,8 @@ test('screenshots the worker saves are recorded with the turn they came from, an
   fs.writeFileSync(path.join(job.evidenceDir!, 'narrow.png'), 'one');
   fs.writeFileSync(path.join(job.evidenceDir!, 'notes.txt'), 'ignored');
   fs.symlinkSync('/etc/hosts', path.join(job.evidenceDir!, 'linked.png'));
+  // Working files are kept beside the evidence without being listed as evidence.
+  fs.writeFileSync(path.join(job.evidenceDir!, 'work', 'capture.png'), 'kept');
   h.workers.get(job.id)!.done('first');
   await h.settle(job);
   assert.deepEqual(job.evidence?.map(({ file, turn, from }) => ({ file, turn, from })), [{ file: 'narrow.png', turn: 1, from: 'worker' }]);

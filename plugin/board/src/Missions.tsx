@@ -203,7 +203,9 @@ export function MissionTrack({ mission }: { mission: Mission }) {
 /** Open or closed per mission, kept across pages and layout changes, as the app keeps it. */
 const expandedMissions = new Map<string, boolean>();
 /** A mission with more jobs than this lets each stage fold; the user's choice per stage is kept as a mission's is. */
-const FOLD_STAGES_AFTER = 8;
+const FOLD_STAGES_AFTER = 1;
+/** A stage with this many jobs or fewer stays open by default, as reopening each one would cost more than it saves. */
+const STAGE_OPENS_UP_TO = 3;
 const openStages = new Map<string, boolean>();
 const PRESETS: [PresetName | null, string][] = [[null, 'Global'], ['economy', 'Economy'], ['balanced', 'Balanced'], ['best', 'Best']];
 
@@ -332,9 +334,9 @@ export function MissionPanel({
             const stageLead = active && stopIndex === at ? lead : undefined;
             if (!mine.length && !stageLead) return null;
             const stageKey = `${mission.id}:${stopIndex}`;
-            // Until the user picks, a stage the mission has moved past folds away once nothing in it is live or chosen.
+            // Until the user picks, a busy stage the mission has moved past folds away once nothing in it is live or chosen.
             const open = !foldsStages || (openStages.get(stageKey) ?? (
-              stopIndex >= at || Boolean(stageLead) || mine.some((job) => job.endedAt == null || job.waiting || selected === job.id)
+              mine.length <= STAGE_OPENS_UP_TO || stopIndex >= at || Boolean(stageLead) || mine.some((job) => job.endedAt == null || job.waiting || selected === job.id)
             ));
             return (
               <div className="rows" key={stopIndex}>

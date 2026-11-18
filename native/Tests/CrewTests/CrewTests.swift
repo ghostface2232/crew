@@ -323,6 +323,31 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
         let decodedJob = try JSONDecoder().decode(Job.self, from: JSONEncoder().encode(job))
         #expect(decodedJob.missionStep == 1)
     }
+    @MainActor @Test func busyPassedStagesFoldOnceNothingInThemIsLiveOrSelectedUntilTheUserPicks() throws {
+        let defaults = UserDefaults(suiteName: "crew-tests-\(UUID())")!
+        let store = CrewStore(api: CrewAPI(port: 0), defaults: defaults)
+        var mission = try fixture().missions[0]
+        mission.stages = ["implement", "cross-review"]; mission.stage = "cross-review"
+        var job = try fixture().jobs[0]
+        job.state = "done"; job.endedAt = 1_000; job.waiting = nil
+        let busy = (0...CrewStore.stageOpensUpTo).map { at in var ended = job; ended.id = "\(job.id)-\(at)"; return ended }
+        // A passed stage with few jobs stays open; one with more folds.
+        #expect(store.isStageOpen(mission, 0, jobs: Array(busy.dropLast()), hasLead: false))
+        #expect(!store.isStageOpen(mission, 0, jobs: busy, hasLead: false))
+        #expect(store.isStageOpen(mission, 1, jobs: busy, hasLead: false))
+        #expect(store.isStageOpen(mission, 0, jobs: busy, hasLead: true))
+        store.selectedJob = busy[0].id
+        #expect(store.isStageOpen(mission, 0, jobs: busy, hasLead: false))
+        store.selectedJob = nil
+        var live = busy
+        live[0].endedAt = nil
+        #expect(store.isStageOpen(mission, 0, jobs: live, hasLead: false))
+        // The user's choice holds either way.
+        store.stageExpanded["\(mission.id):0"] = true
+        #expect(store.isStageOpen(mission, 0, jobs: busy, hasLead: false))
+        store.stageExpanded["\(mission.id):1"] = false
+        #expect(!store.isStageOpen(mission, 1, jobs: [job], hasLead: false))
+    }
     @Test func verificationAndDebateFieldsDecodeAndOlderJobsShowNone() throws {
         let plain = try fixture().jobs[0]
         #expect(!plain.hasVerification && plain.latestReceipt == nil && !plain.debateConcluded)

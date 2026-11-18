@@ -87,7 +87,10 @@ const licenses = ['react', 'react-dom', 'scheduler', 'lucide-react'].map(
 licenses.push(`Inter\n${fs.readFileSync('plugin/board/inter-LICENSE.txt', 'utf8')}`);
 licenses.push(`Node.js ${process.version}\nSee runtime/LICENSE for Node.js and its bundled dependencies.`);
 fs.writeFileSync(path.join(resources, 'THIRD-PARTY-NOTICES.txt'), licenses.join('\n\n'));
-run('codesign', ['--force', '--sign', '-', path.join(resources, 'runtime/node')]);
-run('codesign', ['--force', '--sign', '-', app]);
+// A release signs with one lasting certificate, so macOS keeps the folder access people grant across updates; an ad-hoc
+// signature is tied to each build's hash. Local builds stay ad hoc.
+const sign = ['--force', '--sign', process.env.CREW_SIGN_IDENTITY || '-', ...(process.env.CREW_SIGN_KEYCHAIN ? ['--keychain', process.env.CREW_SIGN_KEYCHAIN] : [])];
+run('codesign', [...sign, path.join(resources, 'runtime/node')]);
+run('codesign', [...sign, app]);
 run('codesign', ['--verify', '--deep', '--strict', app]);
 console.log(app);

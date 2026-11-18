@@ -64,6 +64,10 @@ const LIMIT_ERRORS = ['usageLimitExceeded', 'rateLimitExceeded', 'sessionBudgetE
 const IDLE_SHUTDOWN_MS = 10 * 60_000;
 const PROBE_TIMEOUT_MS = 15_000;
 const PROBE_CONFIRM_MS = 3_000;
+const STALE_THREAD_MS = 7 * 24 * 60 * 60_000;
+const TIDY_EVERY_MS = 24 * 60 * 60_000;
+/** A job's worktree, with or without the repository folder inside its slot. */
+const WORKER_CWD = /[\\/]worktrees[\\/][^\\/]+-[0-9a-f]{8}[\\/](cx|ag)-[0-9a-f]{6}([\\/][^\\/]+)?$/;
 /**
  * The user's own Codex setup brings skills, plugins, and app connectors (design, music, mail) into every thread.
  * Few Crew jobs use them, and they cost each turn thousands of input tokens. A job that names plugins gets
@@ -90,6 +94,9 @@ export class CodexAdapter implements Adapter {
   /** Threads the current server process has in memory. */
   private loaded = new Set<string>();
   private lastUsed = Date.now();
+  private lastTidy = 0;
+  /** Threads a reply is resuming, which `tidy` must leave alone until they are loaded. */
+  private resuming = new Set<string>();
   private config: Config;
 
   constructor(config: Config) {
@@ -132,7 +139,14 @@ export class CodexAdapter implements Adapter {
     if (!this.loaded.has(threadId)) {
       const params = await this.threadParams(ctl, peer);
       ctl.capabilities(capabilitiesOf(ctl.job, params));
-      const res = await peer.request('thread/resume', { threadId, ...params, excludeTurns: true }, RPC_TIMEOUT_MS);
+      const resume = () => peer.request('thread/resume', { threadId, ...params, excludeTurns: true }, RPC_TIMEOUT_MS);
+      this.resuming.add(threadId);
+      // `tidy` archives a worker's thread after a week; a reply to that job brings it back.
+      const res = await resume().catch(async (err) => {
+        if (!/^session \S+ is archived\b/.test(String(err?.message))) throw err;
+        await peer.request('thread/unarchive', { threadId }, RPC_TIMEOUT_MS).catch(() => { throw err; });
+        return resume();
+      }).finally(() => this.resuming.delete(threadId));
       pluginsEnabled = params.config.features.plugins;
       ctl.model(res.model ?? res.thread?.model ?? ctl.job.model ?? this.config.codex.model, ctl.job.effort ?? this.config.codex.effort ?? res.reasoningEffort ?? undefined);
       this.loaded.add(threadId);
@@ -447,7 +461,41 @@ export class CodexAdapter implements Adapter {
     await peer.initialize({ clientInfo: { name: 'crew', title: 'Crew', version: VERSION }, capabilities: null });
     peer.notify('initialized');
     peer.request('account/rateLimits/read', undefined, RPC_TIMEOUT_MS).then((res) => this.setLimits(res.rateLimits), () => {});
+    void this.tidy(peer);
     return peer;
+  }
+
+  /**
+   * Archives the threads of workers that have been quiet for a week. Codex's apps list threads by working
+   * directory, so every worktree shows as a project of its own and the list fills with finished jobs.
+   * An archived thread stays readable in Codex, and `reply` unarchives it. Best effort, at most once a day.
+   */
+  private async tidy(peer: RpcPeer, now = Date.now()): Promise<void> {
+    const last = this.lastTidy;
+    if (now - last < TIDY_EVERY_MS) return;
+    this.lastTidy = now;
+    const cutoff = (now - STALE_THREAD_MS) / 1000;
+    try {
+      const stale: string[] = [];
+      let cursor: string | null = null;
+      // Oldest first, so the listing can stop at the first thread that is still recent.
+      list: do {
+        const page: any = await peer.request('thread/list', { archived: false, cursor, limit: 100, sortKey: 'updated_at', sortDirection: 'asc', useStateDbOnly: true }, RPC_TIMEOUT_MS);
+        for (const thread of (page?.data ?? []) as any[]) {
+          if (typeof thread?.updatedAt !== 'number' || thread.updatedAt > cutoff) break list;
+          if (thread.originator === 'crew' && typeof thread.cwd === 'string' && WORKER_CWD.test(thread.cwd)) stale.push(thread.id);
+        }
+        cursor = typeof page?.nextCursor === 'string' ? page.nextCursor : null;
+      } while (cursor);
+      for (const threadId of stale) {
+        if (this.peer !== peer) break;
+        // Codex refuses a thread another client has open; it is tried again on a later day.
+        if (!this.runs.has(threadId) && !this.loaded.has(threadId) && !this.resuming.has(threadId)) await peer.request('thread/archive', { threadId }, RPC_TIMEOUT_MS).catch(() => {});
+      }
+    } catch {
+      // A listing that failed is tried again at the next start instead of a day later.
+      this.lastTidy = last;
+    }
   }
 
   private setLimits(snapshot: any): void {

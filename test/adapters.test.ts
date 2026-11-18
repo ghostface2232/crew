@@ -818,6 +818,75 @@ test('RpcPeer hides the Windows taskkill console', async (t) => {
 });
 
 
+test('Codex archives worker threads quiet for a week, and a reply brings an archived one back', { timeout: 5000 }, async (t) => {
+  const h = harness(`
+    const fs = require('node:fs');
+    const send = (msg) => console.log(JSON.stringify({ jsonrpc: '2.0', ...msg }));
+    const now = Date.now() / 1000, old = now - 8 * 86400, recent = now - 6 * 86400;
+    const tree = '/home/.crew/worktrees/repo-0123abcd/';
+    const thread = (id, cwd, updatedAt, originator = 'crew') => ({ id, cwd, updatedAt, originator });
+    // Each server start is a new process, so the starts are counted in a file.
+    fs.appendFileSync(__dirname + '/starts', '.');
+    const start = fs.readFileSync(__dirname + '/starts', 'utf8').length;
+    let resumes = 0, held = null;
+    require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
+      const msg = JSON.parse(line);
+      if (/^thread\\/(list|archive|unarchive|resume)$/.test(msg.method)) fs.appendFileSync(__dirname + '/seen.jsonl', line + '\\n');
+      // The third start lists the thread being resumed as stale, and answers the resume only after the listing.
+      if (msg.method === 'thread/list' && start === 3) {
+        send({ id: msg.id, result: { data: [thread('s', tree + 'cx-777777/repo', old)], nextCursor: null } });
+        return setTimeout(() => send({ id: held, result: { thread: { id: 's' } } }), 100);
+      }
+      if (msg.method === 'thread/list') return send({ id: msg.id, result: msg.params.cursor ? {
+        data: [thread('later', tree + 'cx-333333/repo', old), thread('recent', tree + 'cx-444444/repo', recent), thread('unreached', tree + 'cx-555555/repo', old)], nextCursor: 'more',
+      } : {
+        data: [thread('nested', tree + 'cx-111111/repo', old), thread('in-place', '/home/repo', old), thread('theirs', tree + 'cx-222222/repo', old, 'Codex Desktop'),
+          thread('slot', tree + 'ag-111111', old), thread('deeper', tree + 'cx-111111/repo/sub', old), thread('open', tree + 'cx-666666/repo', old)], nextCursor: 'next',
+      } });
+      if (msg.method === 'thread/archive' && msg.params.threadId === 'open') return send({ id: msg.id, error: { code: -32600, message: 'thread open already has an active writer' } });
+      if (msg.method === 'thread/resume' && start === 2 && ++resumes === 1) return send({ id: msg.id, error: { code: -32600, message: 'session s is archived. Run codex unarchive s to unarchive it first.' } });
+      if (msg.method === 'thread/resume' && start === 3) return void (held = msg.id);
+      if (msg.method === 'thread/resume' && start === 4) return send({ id: msg.id, error: { code: -32600, message: 'failed to set working directory /tmp/archived/project' } });
+      if (msg.method === 'thread/start' || msg.method === 'thread/resume') return send({ id: msg.id, result: { thread: { id: 's' } } });
+      if (msg.method === 'turn/start') {
+        send({ id: msg.id, result: { turn: { id: 't' } } });
+        return send({ method: 'turn/completed', params: { threadId: 's', turn: { id: 't', status: 'completed' } } });
+      }
+      if (msg.id != null) send({ id: msg.id, result: {} });
+    });
+  `);
+  cleanup(t, h);
+  const job = await h.jobs.create({ kind: 'delegate', ask: true, cwd: h.home, task: 'test' });
+  await until(h.jobs, job, 'done');
+  const seen = () => fs.readFileSync(path.join(h.home, 'seen.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+  const archived = () => seen().filter((msg) => msg.method === 'thread/archive').map((msg) => msg.params.threadId);
+  while (archived().length < 4) await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.deepEqual(archived(), ['nested', 'slot', 'open', 'later']);
+  assert.deepEqual(seen().filter((msg) => msg.method === 'thread/list').map((msg) => msg.params.cursor), [null, 'next']);
+
+  h.adapter.shutdown();
+  await h.jobs.reply(job.id, { message: 'again' });
+  await until(h.jobs, job, 'done');
+  assert.deepEqual(seen().filter((msg) => /resume|unarchive/.test(msg.method)).map((msg) => msg.method), ['thread/resume', 'thread/unarchive', 'thread/resume']);
+  // Once a day, not on every server start.
+  assert.equal(seen().filter((msg) => msg.method === 'thread/list').length, 2);
+
+  // A thread a reply is resuming is not archived, though the listing calls it stale.
+  h.adapter.shutdown();
+  (h.adapter as any).lastTidy = 0;
+  await h.jobs.reply(job.id, { message: 'once more' });
+  await until(h.jobs, job, 'done');
+  assert.equal(seen().filter((msg) => msg.method === 'thread/list').length, 3);
+  assert.deepEqual(archived(), ['nested', 'slot', 'open', 'later']);
+
+  // Only Codex's own "is archived" refusal is answered by unarchiving.
+  h.adapter.shutdown();
+  await h.jobs.reply(job.id, { message: 'and again' });
+  await until(h.jobs, job, 'failed');
+  assert.match(job.error!.message, /failed to set working directory/);
+  assert.equal(seen().filter((msg) => msg.method === 'thread/unarchive').length, 1);
+});
+
 for (const agent of ['codex', 'antigravity'] as const) {
   test(`${agent} records the reported model on new and restored sessions`, { timeout: 5000 }, async (t) => {
     const h = harness(`

@@ -257,7 +257,7 @@ test('a command under any of agy\'s field names is not taken for a Crew tool cal
   assert.equal(decide('review', '/work', { kind: 'other', title: 'mcp_crew_ask_lead', rawInput: { question: 'why' } }), 'allow');
 });
 
-for (const report of ['empty', 'message', 'earlier'] as const) test(`a lead decline handles the Antigravity report (${report})`, { timeout: 5000 }, async (t) => {
+for (const report of ['empty', 'narration', 'message', 'earlier'] as const) test(`a lead decline handles the Antigravity report (${report})`, { timeout: 5000 }, async (t) => {
   // agy 1.5.9 refuses a prompt while a permission is open and ends a rejected turn with no text.
   const h = harness(t, `
     const send = (message) => console.log(JSON.stringify({ jsonrpc: '2.0', ...message }));
@@ -273,6 +273,10 @@ for (const report of ['empty', 'message', 'earlier'] as const) test(`a lead decl
         if (open) return send({ id, error: { code: -32603, message: 'the running prompt is waiting for a permission or question answer' } });
         if (++prompts === 1) {
           promptId = id; open = true;
+          if (report === 'narration') {
+            text('I will deploy now.');
+            update({ sessionUpdate: 'tool_call', title: 'Deploy' });
+          }
           send({ id: 'p', method: 'session/request_permission', params: { sessionId: 's1', toolCall: { kind: 'execute', title: 'Deploy', rawInput: { CommandLine: 'make deploy' } }, options: [{ kind: 'allow_once', optionId: 'yes' }, { kind: 'reject_once', optionId: 'no' }] } });
           if (report === 'empty') {
             send({ id: 'form', method: 'elicitation/create', params: { sessionId: 's1', mode: 'form', requestedSchema: ${JSON.stringify(FORM)} } });
@@ -284,7 +288,7 @@ for (const report of ['empty', 'message', 'earlier'] as const) test(`a lead decl
         }
       } else if (id === 'p') {
         open = false;
-        if (report !== 'empty') text('The original report');
+        if (report === 'message' || report === 'earlier') text('The original report');
         if (report === 'earlier') update({ sessionUpdate: 'tool_call', title: 'Read the result' });
         send({ id: promptId, result: { stopReason: result.outcome.optionId === 'no' ? 'end_turn' : 'refusal' } });
       }
@@ -301,7 +305,7 @@ for (const report of ['empty', 'message', 'earlier'] as const) test(`a lead decl
   await h.ended(job);
   const note = `The lead declined an action: ${request.reason}\nReason: Deploying is outside the task. Report the build result instead.\nDo it another way within the task, or report what could not be done.`;
   assert.equal(job.state, 'done');
-  assert.equal(job.report, report === 'empty' ? note : 'The original report');
+  assert.equal(job.report, report === 'message' || report === 'earlier' ? 'The original report' : note);
   assert.equal(job.waiting, null);
   if (report === 'empty') {
     const events = h.jobs.eventsFor(job.id, 0);

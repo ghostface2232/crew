@@ -133,7 +133,12 @@ export class AntigravityAdapter implements Adapter {
     if (request.type === 'approval' && !approve) {
       // A permission answer carries no text, and agy 1.5.9 refuses a prompt while one is open and ends the turn
       // on a rejection. So the reason waits for the turn to end and is then sent as the next prompt.
-      if (opts?.by === 'lead') run.declined.push(noteLeadDecline(ctl, request.reason, message!.trim()));
+      if (opts?.by === 'lead') {
+        run.declined.push(noteLeadDecline(ctl, request.reason, message!.trim()));
+        // What the worker wrote so far led up to the refused action, so it is no reply to the reason.
+        run.message = '';
+        run.earlier = '';
+      }
       else ctl.note(`The user declined an action: ${request.reason}\nDo it another way within the job permissions, or report what could not be verified.`, { declined: true });
     }
     request.resolve({ approve, message });

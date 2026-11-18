@@ -19,8 +19,9 @@ const openSettings = async (page: Page, tab?: string) => {
 };
 const settingsPage = (page: Page, name: string) => page.getByRole('navigation', { name: 'Settings pages' }).getByRole('button', { name, exact: true }).click();
 const newJob = (page: Page) => page.getByRole('button', { name: 'New Job', exact: true }).click();
+// A folding stage's heading is named by its button, which adds the job count: "Review, 2 jobs".
 const stage = (card: Locator, name: string) =>
-  card.locator('.stage-groups > .rows').filter({ has: card.page().getByRole('heading', { name, exact: true }) });
+  card.locator('.stage-groups > .rows').filter({ has: card.page().getByRole('heading', { name: new RegExp(`^${name}(, \\d+ jobs?)?$`) }) });
 
 test('short mission plans render in order with matching tracks and progress', async ({ page, request }) => {
   const data = fixture();
@@ -43,7 +44,7 @@ test('short mission plans render in order with matching tracks and progress', as
   await expect(stage(card, 'Final').locator('button[data-job]')).toHaveCount(2);
 });
 
-test('a mission with many jobs folds the stages it has moved past, and each stage folds on its own', async ({ page, request }) => {
+test('a mission with more than one job folds the stages it has moved past, and each stage folds on its own', async ({ page, request }) => {
   const data = fixture();
   data.missions[0].stages = ['implement', 'cross-review'];
   data.missions[0].stage = 'cross-review';

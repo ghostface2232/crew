@@ -323,6 +323,29 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
         let decodedJob = try JSONDecoder().decode(Job.self, from: JSONEncoder().encode(job))
         #expect(decodedJob.missionStep == 1)
     }
+    @MainActor @Test func passedStagesFoldOnceNothingInThemIsLiveOrSelectedUntilTheUserPicks() throws {
+        let defaults = UserDefaults(suiteName: "crew-tests-\(UUID())")!
+        let store = CrewStore(api: CrewAPI(port: 0), defaults: defaults)
+        var mission = try fixture().missions[0]
+        mission.stages = ["implement", "cross-review"]; mission.stage = "cross-review"
+        var job = try fixture().jobs[0]
+        job.state = "done"; job.endedAt = 1_000; job.waiting = nil
+        #expect(!store.isStageOpen(mission, 0, jobs: [job], hasLead: false))
+        #expect(store.isStageOpen(mission, 1, jobs: [], hasLead: false))
+        #expect(store.isStageOpen(mission, 0, jobs: [job], hasLead: true))
+        store.selectedJob = job.id
+        #expect(store.isStageOpen(mission, 0, jobs: [job], hasLead: false))
+        store.selectedJob = nil
+        job.endedAt = nil
+        #expect(store.isStageOpen(mission, 0, jobs: [job], hasLead: false))
+        // The user's choice holds either way.
+        store.stageExpanded["\(mission.id):0"] = false
+        #expect(!store.isStageOpen(mission, 0, jobs: [job], hasLead: false))
+        // The page animates its cards on the default only, so a pick must not change it.
+        #expect(store.stageOpensByDefault(mission, 0, jobs: [job], hasLead: false))
+        store.stageExpanded["\(mission.id):1"] = false
+        #expect(!store.isStageOpen(mission, 1, jobs: [], hasLead: false))
+    }
     @Test func verificationAndDebateFieldsDecodeAndOlderJobsShowNone() throws {
         let plain = try fixture().jobs[0]
         #expect(!plain.hasVerification && plain.latestReceipt == nil && !plain.debateConcluded)

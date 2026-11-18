@@ -203,7 +203,7 @@ export function MissionTrack({ mission }: { mission: Mission }) {
 /** Open or closed per mission, kept across pages and layout changes, as the app keeps it. */
 const expandedMissions = new Map<string, boolean>();
 /** A mission with more jobs than this lets each stage fold; the user's choice per stage is kept as a mission's is. */
-const FOLD_STAGES_AFTER = 8;
+const FOLD_STAGES_AFTER = 1;
 const openStages = new Map<string, boolean>();
 const PRESETS: [PresetName | null, string][] = [[null, 'Global'], ['economy', 'Economy'], ['balanced', 'Balanced'], ['best', 'Best']];
 

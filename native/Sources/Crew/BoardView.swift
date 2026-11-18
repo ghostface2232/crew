@@ -130,6 +130,14 @@ struct BoardView: View {
         return ["needs": "Needs You", "activity": "Activity", "history": "History"][store.selection ?? ""] ?? "Overview"
     }
     private func matches(_ text: String) -> Bool { store.search.isEmpty || text.localizedCaseInsensitiveContains(store.search) }
+    /// A folding mission's stages that fold by default, so a stage folding by itself as its last job ends moves the
+    /// cards like other work leaving. The user's own picks stay out: they animate within their card, as a mission's do.
+    private func foldedStages(_ mission: Mission, jobs: [Job], lead: ClaudeSession?) -> [String] {
+        guard jobs.count > MissionPanel.foldStagesAfter else { return [] }
+        return mission.stops.indices.filter { index in
+            !store.stageOpensByDefault(mission, index, jobs: jobs.filter { mission.jobStep($0) == index }, hasLead: lead != nil && index == mission.step)
+        }.map { "\(mission.id)#\($0)" }
+    }
     private var connectionBanner: some View {
         HStack(alignment: .firstTextBaseline, spacing: Space.l) {
             Label(store.connectionMessage, systemImage: "wifi.exclamationmark").font(Typeface.callout).textSelection(.enabled)
@@ -212,6 +220,7 @@ struct BoardView: View {
             return ["\(mission.id):\(mission.notes?.count ?? 0):\(mission.outcome.isEmpty)"]
                 + missionJobs(mission).map { "\(mission.id)/\($0.id)@\(mission.jobStep($0))" }
                 + (lead.map { ["\(mission.id)/\($0.id)@\(mission.step)"] } ?? [])
+                + foldedStages(mission, jobs: missionJobs(mission), lead: lead)
         }
         let layout = tiles.map(\.id) + loose.map(\.id) + ["finished"] + recentJobs.map(\.id) + ["sessions"] + sessions.map(\.id)
             + missionRows + [emptyHistory || emptyWorkspace ? "empty" : ""]
@@ -424,12 +433,15 @@ struct MissionPanel: View {
                             let mine = jobs.filter { mission.jobStep($0) == index }
                             let lead = mission.state == "active" && index == mission.step ? store.state.claude.first { $0.id == mission.owner } : nil
                             if !mine.isEmpty || lead != nil {
-                                Text(mission.stops[index]).font(Typeface.bodyStrong).foregroundStyle(.secondary).padding(.leading, WorkspaceStyle.rowTitleInset)
+                                let open = !foldsStages || store.isStageOpen(mission, index, jobs: mine, hasLead: lead != nil)
+                                stageLabel(index, count: mine.count, open: open)
                                     .frame(maxWidth: .infinity, alignment: .leading).padding(.top, Space.m)
-                                if let lead {
-                                    SessionRow(session: lead, selected: store.selectedSession == lead.id, store: store) { store.toggleSession(lead.id) }.transition(.card)
+                                if open {
+                                    if let lead {
+                                        SessionRow(session: lead, selected: store.selectedSession == lead.id, store: store) { store.toggleSession(lead.id) }.transition(.card)
+                                    }
+                                    ForEach(mine) { job in JobRow(job: job, selected: store.selectedJob == job.id, showsKind: false, store: store) { store.toggleJob(job.id) }.transition(.card) }
                                 }
-                                ForEach(mine) { job in JobRow(job: job, selected: store.selectedJob == job.id, showsKind: false, store: store) { store.toggleJob(job.id) }.transition(.card) }
                             }
                         }
                     }
@@ -525,6 +537,34 @@ struct MissionPanel: View {
     /// Animated from here rather than inside the card, so the cards below move with it instead of jumping.
     private func toggle() {
         withAnimation(Motion.reduced(Motion.expand, reduceMotion)) { store.missionExpanded[mission.id] = !expanded }
+    }
+    /// A mission with more jobs than this lets each stage fold from its label.
+    static let foldStagesAfter = 1
+    private var foldsStages: Bool { jobs.count > Self.foldStagesAfter }
+    /// A stop's name; on a folding mission, the button that folds it, with the stage's job count.
+    @ViewBuilder private func stageLabel(_ index: Int, count: Int, open: Bool) -> some View {
+        let name = Text(mission.stops[index]).font(Typeface.bodyStrong).foregroundStyle(.secondary)
+        if foldsStages {
+            Button {
+                withAnimation(Motion.reduced(Motion.expand, reduceMotion)) { store.stageExpanded["\(mission.id):\(index)"] = !open }
+            } label: {
+                HStack(spacing: Space.s) {
+                    name
+                    Text(count, format: .number).font(Typeface.caption).monospacedDigit().foregroundStyle(.secondary)
+                    Image(systemName: "chevron.down").font(Symbol.badge).foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(open ? 0 : -90)).offset(x: open ? 0 : Symbol.chevronNudge)
+                }
+                .padding(.leading, WorkspaceStyle.rowTitleInset).padding(.vertical, Space.xs).padding(.trailing, Space.l)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(WorkspacePressStyle())
+            // The padding widens the target only; the label stays where an unfolding stage's name sits.
+            .padding(.vertical, -Space.xs)
+            .accessibilityLabel("\(mission.stops[index]), \(count) \(count == 1 ? "job" : "jobs")")
+            .accessibilityValue(open ? "Expanded" : "Collapsed")
+        } else {
+            name.padding(.leading, WorkspaceStyle.rowTitleInset)
+        }
     }
 }
 

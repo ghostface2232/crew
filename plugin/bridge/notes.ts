@@ -364,20 +364,21 @@ function votes(file: NotesFile): Vote[] {
  * model it is given to, and a rating elsewhere never turns a neutral one into a mark against.
  */
 function peers(all: Vote[]): Map<string, { shift: number; count: number }> {
-  // Per rater and item, then per model: a rating that reached several models is still one rating of its rater's.
-  const raters = new Map<string, Map<string, { sum: number; n: number }>>();
-  const counted = new Set<string>();
+  // Per rater and item, each rating with every model it reached: it is one rating of its rater's however many it
+  // reached, and it is a rating of each of them, so none of them reads it as a rating of another model.
+  const raters = new Map<string, Map<string, Map<string, number>>>();
   for (const v of all) {
-    if (counted.has(`${v.source}\0${v.item}`)) continue;
-    counted.add(`${v.source}\0${v.item}`);
-    const models = raters.get(`${v.rater}\0${v.item}`) ?? new Map<string, { sum: number; n: number }>();
-    const m = models.get(v.model) ?? { sum: 0, n: 0 };
-    models.set(v.model, { sum: m.sum + v.value, n: m.n + 1 });
-    raters.set(`${v.rater}\0${v.item}`, models);
+    const sources = raters.get(`${v.rater}\0${v.item}`) ?? new Map<string, Map<string, number>>();
+    sources.set(v.source, (sources.get(v.source) ?? new Map<string, number>()).set(v.model, v.value));
+    raters.set(`${v.rater}\0${v.item}`, sources);
   }
   const lean = (v: Vote) => {
     let sum = 0, n = 0;
-    for (const [model, m] of raters.get(`${v.rater}\0${v.item}`)!) if (model !== v.model) { sum += m.sum; n += m.n; }
+    for (const targets of raters.get(`${v.rater}\0${v.item}`)!.values()) {
+      if (targets.has(v.model)) continue;
+      sum += [...targets.values()].reduce((a, b) => a + b, 0) / targets.size;
+      n += 1;
+    }
     return (sum + RATER_PRIOR * NEUTRAL) / (n + RATER_PRIOR) - NEUTRAL;
   };
   const sums = new Map<string, { num: number; den: number; count: number }>();

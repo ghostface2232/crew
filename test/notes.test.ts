@@ -405,6 +405,22 @@ test('one rating counts once however many reviews of the job there were, and a r
   assert.equal(findings().items.findings, before.items.findings);
 });
 
+test('a rating that reaches two reviewers of a job moves both alike, whichever was noted first', (t) => {
+  const findings = (order: string[]) => {
+    const dir = home(t);
+    for (const i of [1, 2, 3]) {
+      addEvidence(dir, { ...input, job: `cx-${i}` });
+      for (const model of order) addEvidence(dir, { ...input, model, agent: 'antigravity', role: 'review', job: `${model}-${i}`, findings: { high: 0, medium: 1, low: 0 }, of: { job: `cx-${i}`, model: 'model-a' } });
+      addRating(dir, { by: 'codex', byModel: 'model-a', byJob: `cx-${i}`, items: { findings: 5 }, fact: 'The findings were real.' }, WORKER_ITEMS.delegate);
+    }
+    const scores = scoreAll(loadNotes(dir));
+    return ['model-r', 'model-s'].map((model) => scores.find((s) => s.model === model)!.items.findings);
+  };
+  const [r, s] = findings(['model-r', 'model-s']);
+  assert.equal(r, s);
+  assert.deepEqual(findings(['model-s', 'model-r']), [r, s]);
+});
+
 test('the cap on flawed work holds for a reviewer\'s rating and for work without a job, and a fix is not rated for correctness', (t) => {
   const flawed = (correctness: number, own: boolean) => reviewed(t, { correctness, accepted: high, own }).a.score;
   assert.equal(flawed(5, false), flawed(3, false));

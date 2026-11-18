@@ -760,15 +760,22 @@ function pickHolder(role: Role, wanted: unknown): { agent?: Holder; yours?: stri
  * Appends the notes of these holders' most recently noted models, so the lead sees how they did before it picks a tier or holder.
  * Notes are advice: a daemon without them, or one that fails to read them, leaves the answer as it was.
  */
-async function withNotes(text: string, agents: Holder[], evidence: number): Promise<string> {
+async function withNotes(text: string, agents: Holder[], evidence: number, once = false): Promise<string> {
+  if (once) agents = agents.filter((agent) => !noted.has(agent));
   if (!agents.length) return text;
   try {
     const notes: { text: string } = await api('GET', `/api/notes?agents=${agents.map(encodeURIComponent).join(',')}&evidence=${evidence}`);
-    return notes.text ? `${text}\n\nModel notes (advice; the roles and presets stay the user's):\n${notes.text}` : text;
+    // Two jobs started at once both ask; only the first to hear back shows the notes.
+    if (!notes.text || (once && agents.every((agent) => noted.has(agent)))) return text;
+    for (const agent of agents) noted.add(agent);
+    return `${text}\n\nModel notes (advice; the roles and presets stay the user's):\n${notes.text}`;
   } catch {
     return text;
   }
 }
+
+/** Holders whose notes this session has been shown. `route` shows them every time; a job's answer only the first time. */
+const noted = new Set<Holder>();
 
 async function callTool(name: string, args: any, ctx: CallContext): Promise<string> {
   const cwd: string = args.cwd ?? PROJECT;
@@ -783,7 +790,7 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
     case 'debate':
       return runJob({ kind: 'delegate', role: 'debate', cwd, title: args.title ?? `Debate: ${String(args.topic).split('\n')[0].slice(0, 60)}`, task: `${args.topic}\n\n# The lead's position\n${args.position}`, debate: { rounds: args.rounds ?? 3 }, agent: args.agent, tier: args.tier, model: args.model, effort: args.effort }, args.background !== false, ctx);
     case 'delegate':
-      return withNotes(await runJob({ kind: 'delegate', role: args.role ?? 'delegate', cwd, title: args.title, task: args.task, done_when: args.done_when, check: args.check, base: args.base, isolation: args.isolation, agent: args.agent, tier: args.tier, model: args.model, effort: args.effort, exclusive: Boolean(args.exclusive), runsApp: Boolean(args.runs_app), plugins: args.plugins, skills: args.skills, attachments: args.attachments }, args.background !== false, ctx), [args.agent], 2);
+      return withNotes(await runJob({ kind: 'delegate', role: args.role ?? 'delegate', cwd, title: args.title, task: args.task, done_when: args.done_when, check: args.check, base: args.base, isolation: args.isolation, agent: args.agent, tier: args.tier, model: args.model, effort: args.effort, exclusive: Boolean(args.exclusive), runsApp: Boolean(args.runs_app), plugins: args.plugins, skills: args.skills, attachments: args.attachments }, args.background !== false, ctx), [args.agent], 2, true);
     case 'review': {
       const kind = args.target ?? 'uncommitted';
       if (kind === 'branch' && !args.base) throw new Error('target "branch" needs base (the branch to compare against, e.g. main).');

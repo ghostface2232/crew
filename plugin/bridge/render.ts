@@ -130,7 +130,11 @@ export function describe(job: JobView, waitingHint?: string): string {
     lines.push(`changes: ${noChangesAfterRefusal(job) ? 'none — an action was refused or declined; see refusals/notes below' : job.result.stat || 'none'}${job.result.commit ? ` · commit ${job.result.commit}` : ''}`);
     for (const file of job.result.files.slice(0, 40)) lines.push(`  ${file}`);
     if (job.result.files.length > 40) lines.push(`  … and ${job.result.files.length - 40} more`);
-    if (job.result.outOfScope.length) lines.push(`OUT OF SCOPE — changed but not in the allowed targets: ${job.result.outOfScope.join(', ')}`);
+    if (job.result.outOfScope.length) {
+      // The lead acts on there being any; the diff has the rest of the names.
+      const more = job.result.outOfScope.length - 10;
+      lines.push(`OUT OF SCOPE — changed but not in the allowed targets: ${job.result.outOfScope.slice(0, 10).join(', ')}${more > 0 ? `, and ${more} more` : ''}`);
+    }
   }
   if (job.runsApp) lines.push(job.kind === 'review' ? 'may run the app, in a snapshot of the change' : 'may run the app');
   if (job.plugins?.length) lines.push(`plugins on: ${job.plugins.join(', ')}`);

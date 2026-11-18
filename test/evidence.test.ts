@@ -51,6 +51,9 @@ test('the lead attaches images to a task, and the worker is told where they are 
   assert.match(job.prompt, new RegExp(`# Attached by the lead\\n.*\\n- ${path.join(job.evidenceDir!, 'lead-1-design.png').replace(/[\\.]/g, '\\$&')}`));
   assert.match(job.instructions, /# Evidence\nSave screenshots and recordings/);
   assert.ok(job.instructions.includes(job.evidenceDir!));
+  // Working files have a place that outlives the turn, and it is not listed as evidence.
+  assert.ok(job.instructions.includes(`working files that a follow-up turn or the lead will need go in \`${path.join(job.evidenceDir!, 'work')}\``));
+  assert.ok(fs.statSync(path.join(job.evidenceDir!, 'work')).isDirectory());
 });
 
 test('attachments that are not images or do not exist are refused before anything is created', async (t) => {
@@ -69,6 +72,8 @@ test('screenshots the worker saves are recorded with the turn they came from, an
   fs.writeFileSync(path.join(job.evidenceDir!, 'narrow.png'), 'one');
   fs.writeFileSync(path.join(job.evidenceDir!, 'notes.txt'), 'ignored');
   fs.symlinkSync('/etc/hosts', path.join(job.evidenceDir!, 'linked.png'));
+  // Working files are kept beside the evidence without being listed as evidence.
+  fs.writeFileSync(path.join(job.evidenceDir!, 'work', 'capture.png'), 'kept');
   h.workers.get(job.id)!.done('first');
   await h.settle(job);
   assert.deepEqual(job.evidence?.map(({ file, turn, from }) => ({ file, turn, from })), [{ file: 'narrow.png', turn: 1, from: 'worker' }]);
@@ -200,7 +205,7 @@ test('attachments to a message the worker refuses are taken back', async (t) => 
   h.refuse.reply = true;
   await assert.rejects(h.jobs.reply(job.id, { message: 'look', attachments: [h.image('design.png')] }), /not confirmed/);
   assert.deepEqual(job.evidence ?? [], []);
-  assert.deepEqual(fs.readdirSync(job.evidenceDir!), []);
+  assert.deepEqual(fs.readdirSync(job.evidenceDir!), ['work']);
 });
 
 test('relative attachments and attachments to a native review are refused', async (t) => {

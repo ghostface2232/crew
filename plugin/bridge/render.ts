@@ -39,7 +39,10 @@ export function outcomeContradiction(job: JobView): string | undefined {
   if (receipt?.turn === job.turns && check && !check.skipped && check.exit !== 0) {
     observations.push(check.timedOut ? 'the bridge check timed out' : check.exit === null ? 'the bridge check could not run' : 'the bridge check failed');
   }
-  if (noChangesAfterRefusal(job)) observations.push('no files changed after an action was refused or declined');
+  // Earlier turns' changes are still in the result, so this turn's own round is what shows whether it changed anything.
+  if (job.result && refusedThisTurn(job) && !job.rounds?.some((round) => round.turn === job.turns) && (job.worktree ? true : job.result.files.length === 0)) {
+    observations.push('no files changed after an action was refused or declined');
+  }
   return observations.join(' and ') || undefined;
 }
 
@@ -118,7 +121,8 @@ export function describe(job: JobView, waitingHint?: string): string {
   }
   if (job.state === 'done' && expectsOutcome(job)) {
     const contradiction = outcomeContradiction(job);
-    lines.push(!job.outcome ? 'outcome: not declared — read the report before treating this as finished'
+    // A job started before outcomes existed was never asked for one.
+    if (job.outcome || job.outcomeAsked) lines.push(!job.outcome ? 'outcome: not declared — read the report before treating this as finished'
       : contradiction ? `outcome: done as declared, but ${contradiction}`
         : `outcome: ${job.outcome}${job.outcome === 'done' ? '' : ' — see Open points in the report'}`);
   }

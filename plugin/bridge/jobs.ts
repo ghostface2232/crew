@@ -273,6 +273,8 @@ export interface Job {
   /** The worker's final message for the latest turn. */
   report: string;
   outcome?: 'done' | 'partial' | 'blocked';
+  /** The worker was told to declare an outcome. Absent on a job from before outcomes existed. */
+  outcomeAsked?: boolean;
   questions?: LeadQuestion[];
   /** Legacy event sequence of the latest lead question. Delivery uses news snapshots. */
   questionSeq?: number;
@@ -749,6 +751,7 @@ export class Jobs {
         delivered: 0,
       };
       exchanged(job, 'lead', spec.task ?? '');
+      if (job.instructions.includes('## Outcome')) job.outcomeAsked = true;
       this.jobs.set(id, job);
       if (job.kind === 'review' && repo) await this.recordReviewed(job, repo);
       this.event(job, 'started', `${spec.kind}: ${title}`);
@@ -926,6 +929,8 @@ export class Jobs {
           }
           if (job.worktree) throw new Error(`The previous snapshot at ${job.worktree.path} could not be removed. Cancel this job with discard: true and start a new review.`);
           job.worktree = await this.snapshot(job.repo!, id, job.reviewTarget!, job.notes);
+          // A job from before worktrees moved into their slot recorded the slot as its directory.
+          job.cwd = job.worktree.path;
           // Recorded before anything else can fail, so the snapshot is never left without an owner.
           this.flush();
           await this.recordReviewed(job, job.repo!);
@@ -1760,7 +1765,8 @@ export class Jobs {
 
 /** First line of a report that says something, skipping markdown headings. */
 function headline(report: string): string {
-  const line = report.split('\n').find((l) => l.trim() && !l.startsWith('#')) ?? '';
+  // The word under "## Outcome" says nothing about the work, so the headline is the line after it.
+  const line = report.split('\n').find((l) => l.trim() && !l.startsWith('#') && !/^\s*(-\s+)?[*_`]*(done|partial|blocked)[*_`]*\.?\s*$/i.test(l)) ?? '';
   return line.trim().slice(0, 140);
 }
 

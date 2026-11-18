@@ -144,7 +144,9 @@ export class CodexAdapter implements Adapter {
       // `tidy` archives a worker's thread after a week; a reply to that job brings it back.
       const res = await resume().catch(async (err) => {
         if (!/^session \S+ is archived\b/.test(String(err?.message))) throw err;
-        await peer.request('thread/unarchive', { threadId }, RPC_TIMEOUT_MS).catch(() => { throw err; });
+        await peer.request('thread/unarchive', { threadId }, RPC_TIMEOUT_MS).catch((failed) => {
+          throw new Error(`${err.message} Unarchiving it failed: ${failed?.message ?? failed}`, { cause: failed });
+        });
         return resume();
       }).finally(() => this.resuming.delete(threadId));
       pluginsEnabled = params.config.features.plugins;

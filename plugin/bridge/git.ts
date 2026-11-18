@@ -94,6 +94,8 @@ export async function dirtyCount(root: string, linked: string[] = []): Promise<n
 export async function createWorktree(root: string, id: string, baseRef: string, home: string): Promise<Worktree> {
   const base = await git(root, ['rev-parse', '--verify', `${baseRef}^{commit}`]);
   const wtPath = worktreePath(root, id, home);
+  // The failure path below removes the worktree and branch as its own, so a slot already there must stop it first.
+  if (lstatSync(worktreeSlot(root, id, home), { throwIfNoEntry: false })) throw new Error(`A worktree for ${id} already exists.`);
   await fs.mkdir(path.dirname(wtPath), { recursive: true });
   // Flat rather than `crew/<id>`: a repository with a branch named `crew` cannot also have `crew/...`.
   const branch = `crew-${id}`;

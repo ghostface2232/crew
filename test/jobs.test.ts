@@ -132,7 +132,17 @@ test('records and renders the worker outcome beside the bridge observations', as
     assert.equal(describe(job).split('\n').find((text) => text.startsWith('outcome: ')), `outcome: ${line}`);
     assert.equal(outcomeContradiction(job), line.startsWith('done as declared, but ') ? line.slice('done as declared, but '.length) : undefined);
     if (observation === 'declined') assert.match(describe(job), /changes: none — an action was refused or declined/);
+    // A job from before outcomes existed was never asked for one, so it is not reported as undeclared.
+    if (!outcome) {
+      assert.equal(job.outcomeAsked, true);
+      delete job.outcomeAsked;
+      assert.equal(describe(job).split('\n').some((text) => text.startsWith('outcome: ')), false);
+    }
   }
+  // Earlier turns' changes stay in the result, so only this turn's own round counts against a declined request.
+  const base = { state: 'done', outcome: 'done', kind: 'delegate', turns: 2, declinedTurn: 2, worktree: { path: '/w', branch: 'b', base: 'x' }, result: { files: ['first'], stat: '1 file' } };
+  assert.equal(outcomeContradiction({ ...base, rounds: [{ turn: 1 }] } as any), 'no files changed after an action was refused or declined');
+  assert.equal(outcomeContradiction({ ...base, rounds: [{ turn: 1 }, { turn: 2 }] } as any), undefined);
 });
 
 test('a saved outcome clears at the start of the next turn and is set from its report', async (t) => {

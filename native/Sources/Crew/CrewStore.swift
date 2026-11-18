@@ -414,8 +414,7 @@ final class SettingsModel {
         storeRole(role, setting)
     }
     func setRole(_ role: String, agent: String, _ key: WritableKeyPath<RoleAgentSettings, String?>, to value: String, offered: [ModelChoice] = []) {
-        guard assignment(for: role)?.workerHolders.contains(agent) == true,
-              agent == "codex" || key == \.model else { return }
+        guard assignment(for: role)?.workerHolders.contains(agent) == true else { return }
         var setting = roleSettings[role] ?? RoleSetting()
         var fields = setting[agent] ?? RoleAgentSettings()
         fields[keyPath: key] = value.isEmpty ? nil : value

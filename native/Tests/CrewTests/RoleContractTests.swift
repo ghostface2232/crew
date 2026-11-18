@@ -170,6 +170,12 @@ import Testing
             }
         }
         #expect(!settings.dirty)
+        // Every worker takes an effort, not Codex alone.
+        let previous = settings.roleSettings["polish"]?.antigravity?.effort ?? ""
+        settings.setRole("polish", agent: "antigravity", \.effort, to: "high")
+        #expect(settings.roleSettings["polish"]?.antigravity?.effort == "high")
+        settings.setRole("polish", agent: "antigravity", \.effort, to: previous)
+        #expect(!settings.dirty)
         settings.setRole("delegate", agent: "codex", \.model, to: "changed")
         #expect(settings.dirty)
         settings.setRole("delegate", agent: "codex", \.model, to: "build-model")

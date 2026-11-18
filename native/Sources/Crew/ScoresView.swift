@@ -175,8 +175,13 @@ struct ModelScoreRow: View {
                     ScoreBar(label: "Fix", value: score.fix)
                 }.padding(.top, Space.xxs)
                 if !score.itemBars.isEmpty {
-                    HStack(spacing: Space.xl) {
-                        ForEach(score.itemBars, id: \.label) { ScoreBar(label: $0.label, value: $0.value) }
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: Space.xl) {
+                            ForEach(score.itemBars, id: \.label) { ScoreBar(label: $0.label, value: $0.value).fixedSize() }
+                        }
+                        VStack(alignment: .leading, spacing: Space.xxs) {
+                            ForEach(score.itemBars, id: \.label) { ScoreBar(label: $0.label, value: $0.value) }
+                        }
                     }
                 }
                 if !score.summary.isEmpty {

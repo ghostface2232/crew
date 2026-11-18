@@ -155,7 +155,9 @@ test('a question form waits for the user and takes a choice, their own words, or
     [{ message: '1' }, { action: 'accept', content: { q1: '1' } }],
     [{ message: 'Green, with a border' }, { action: 'accept', content: { q1_other: 'Green, with a border' } }],
     [{ decision: 'deny' }, { action: 'decline' }],
-    [{ decision: 'approve' }, { action: 'accept', content: { q1_other: 'Yes' } }],
+    // A quick approval is no answer to a form that does not offer Yes, and a deny stays a deny whatever it says.
+    [{ decision: 'approve' }, { action: 'decline' }],
+    [{ decision: 'deny', message: 'blue' }, { action: 'decline' }],
   ] as const) {
     const h = harness(t, server({ form: FORM }));
     const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' });

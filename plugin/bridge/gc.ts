@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { commonGitDir, git, isInside, prepareRemoval, realpath, removeDirectory, requireAdminDir, worktreePath } from './git.ts';
+import { commonGitDir, git, isInside, prepareRemoval, realpath, removeDirectory, requireAdminDir, worktreeSlot } from './git.ts';
 import type { Job } from './jobs.ts';
 
 const workerId = /^(cx|ag)-[0-9a-f]{6}$/;
@@ -47,7 +47,7 @@ export async function collectGarbage(home: string, jobs: Job[], busy: (job: Job)
       const listed = (await git(root, ['worktree', 'list', '--porcelain', '-z'])).split('\0');
       const registered = new Set(listed.filter((line) => line.startsWith('worktree ')).map((line) => key(line.slice(9))));
       const owned = (file: string) => jobs.some((job) => job.worktree && key(job.worktree.path) === key(file) && (!job.cleanupPending || busy(job)));
-      const dir = worktreePath(root, '', home);
+      const dir = worktreeSlot(root, '', home);
       requireCrewPath(home, dir);
       for (const id of await names(dir)) {
         if (!workerId.test(id)) continue;
@@ -55,18 +55,27 @@ export async function collectGarbage(home: string, jobs: Job[], busy: (job: Job)
         requireCrewPath(home, orphan);
         const entry = await fs.lstat(orphan);
         if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
-        if (registered.has(key(orphan)) || owned(orphan)) continue;
-        const dotGit = path.join(orphan, '.git');
-        if ((await fs.lstat(dotGit).catch((err: NodeJS.ErrnoException) => {
-          if (err.code !== 'ENOENT') throw err;
-          return null;
-        }))?.isFile()) {
+        // The worktree is the slot itself for a job from before worktrees moved into it, else the folder inside.
+        const trees = [orphan, path.join(orphan, path.basename(root))];
+        for (const tree of trees) requireCrewPath(home, tree);
+        // Anything Git or a job still has in the slot keeps all of it, wherever in the slot it now sits.
+        const slot = key(orphan);
+        const within = (file: string) => file === slot || isInside(slot, file);
+        if ([...registered].some(within) || jobs.some((job) => job.worktree && within(key(job.worktree.path)) && (!job.cleanupPending || busy(job)))) continue;
+        let live = false;
+        for (const tree of trees) {
+          const dotGit = path.join(tree, '.git');
+          if (!(await fs.lstat(dotGit).catch((err: NodeJS.ErrnoException) => {
+            if (err.code !== 'ENOENT' && err.code !== 'ENOTDIR') throw err;
+            return null;
+          }))?.isFile()) continue;
           const admin = /^gitdir: (.+)$/m.exec(await fs.readFile(dotGit, 'utf8'))?.[1].trim();
-          if (admin && (await fs.stat(path.resolve(orphan, admin)).catch((err: NodeJS.ErrnoException) => {
+          if (admin && (await fs.stat(path.resolve(tree, admin)).catch((err: NodeJS.ErrnoException) => {
             if (err.code !== 'ENOENT') throw err;
             return null;
-          }))?.isDirectory()) continue;
+          }))?.isDirectory()) live = true;
         }
+        if (live) continue;
         lines.push(`  Directory: ${orphan}`);
         if (options.apply) {
           await removeDirectory(orphan, platform);

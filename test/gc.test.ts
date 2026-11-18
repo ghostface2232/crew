@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import { resolveConfig } from '../plugin/bridge/config.ts';
 import { collectGarbage } from '../plugin/bridge/gc.ts';
-import { createWorktree, removeWorktree, worktreePath } from '../plugin/bridge/git.ts';
+import { createWorktree, removeWorktree, worktreePath, worktreeSlot } from '../plugin/bridge/git.ts';
 import { Jobs } from '../plugin/bridge/jobs.ts';
 import type { Adapter, Job } from '../plugin/bridge/jobs.ts';
 import { describe, summarize } from '../plugin/bridge/render.ts';
@@ -58,10 +58,10 @@ for (const platform of ['darwin', 'win32'] as const) test(`gc dry run lists with
     });
     syncBuiltinESMExports();
   }
-  const orphan = worktreePath(repo, 'cx-abcdef', home);
+  const orphan = worktreeSlot(repo, 'cx-abcdef', home);
   fs.mkdirSync(orphan, { recursive: true });
   fs.writeFileSync(path.join(orphan, 'file'), 'orphan');
-  const namedFile = worktreePath(repo, 'ag-ffffff', home);
+  const namedFile = worktreeSlot(repo, 'ag-ffffff', home);
   fs.writeFileSync(namedFile, 'not a directory');
   const outside = path.join(home, 'shared');
   fs.mkdirSync(outside);
@@ -118,12 +118,13 @@ test('gc preserves unowned registered worktrees and cleans missing metadata thro
   assert.doesNotMatch(result, /Cleanup failed/);
 });
 
-test('gc protects an unlisted directory whose .git file points to existing admin metadata', async (t) => {
+// A job from before worktrees moved into their slot has the slot itself as its worktree.
+for (const place of [worktreePath, worktreeSlot]) test(`gc protects an unlisted directory whose .git file points to existing admin metadata (${place.name})`, async (t) => {
   const { home, repo, git, jobs } = fixture(t);
   const wt = await createWorktree(repo, 'cx-abcdef', 'HEAD', home);
   const admin = git('-C', wt.path, 'rev-parse', '--absolute-git-dir');
-  const orphan = worktreePath(repo, 'ag-112233', home);
-  fs.mkdirSync(orphan);
+  const orphan = place(repo, 'ag-112233', home);
+  fs.mkdirSync(orphan, { recursive: true });
   fs.writeFileSync(path.join(orphan, '.git'), `gitdir: ${path.relative(orphan, admin)}\n`);
   fs.writeFileSync(path.join(orphan, 'uncommitted'), 'keep my work');
   const result = await jobs.gc({ apply: true });
@@ -192,12 +193,36 @@ for (const state of ['owned', 'active', 'discarding', 'changingRounds'] as const
   });
 }
 
+test('gc keeps a slot while Git registers a worktree anywhere inside it', async (t) => {
+  const { home, repo, git, jobs } = fixture(t);
+  const wt = await createWorktree(repo, 'cx-abcdef', 'HEAD', home);
+  const moved = path.join(path.dirname(wt.path), 'renamed');
+  git('worktree', 'move', wt.path, moved);
+  fs.writeFileSync(path.join(moved, 'uncommitted'), 'keep my work');
+  const result = await jobs.gc({ apply: true });
+  assert.equal(fs.readFileSync(path.join(moved, 'uncommitted'), 'utf8'), 'keep my work', result);
+  assert.ok(git('worktree', 'list', '--porcelain').includes(fs.realpathSync(moved)));
+});
+
+test('gc refuses a slot whose worktree folder is redirected outside Crew worktrees', async (t) => {
+  const { home, repo, jobs } = fixture(t);
+  const outside = path.join(home, 'outside');
+  fs.mkdirSync(outside);
+  fs.writeFileSync(path.join(outside, 'keep'), 'safe');
+  const tree = worktreePath(repo, 'cx-abcdef', home);
+  fs.mkdirSync(path.dirname(tree), { recursive: true });
+  fs.symlinkSync(outside, tree, 'junction');
+  assert.match(await jobs.gc({ apply: true }), /Refusing to clean a path outside/);
+  assert.ok(fs.lstatSync(tree).isSymbolicLink());
+  assert.equal(fs.readFileSync(path.join(outside, 'keep'), 'utf8'), 'safe');
+});
+
 test('gc refuses an orphan path redirected outside Crew worktrees', async (t) => {
   const { home, repo, jobs } = fixture(t);
   const outside = path.join(home, 'outside');
   fs.mkdirSync(outside);
   fs.writeFileSync(path.join(outside, 'keep'), 'safe');
-  const orphan = worktreePath(repo, 'cx-abcdef', home);
+  const orphan = worktreeSlot(repo, 'cx-abcdef', home);
   fs.mkdirSync(path.dirname(orphan), { recursive: true });
   fs.symlinkSync(outside, orphan, 'junction');
   assert.match(await jobs.gc({ apply: true }), /Refusing to clean a path outside/);

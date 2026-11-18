@@ -8,7 +8,7 @@ import { runCheck } from './check.ts';
 import type { CheckResult } from './check.ts';
 import { canonicalPath, defaultHolder, disabledAgents, effectiveRole, isRole, LEAD, MAX_DEBATE_ROUNDS, PORT, roleInfo, ROLES, runsCommands, WORKERS } from './config.ts';
 import type { Config, JobKind, PresetName, Role, WorkerAgent } from './config.ts';
-import { carryUncommitted, changesSince, commitAll, commitChanges, copyIncluded, createWorktree, currentBranch, dirtyCount, git, mergeInto, isInside, projectRoot, realpath, removeDirectory, removeEmptyLeftover, removeWorktree, repoRoot, revertCommit, revertsSince, reviewDiff, WorktreeCleanupError } from './git.ts';
+import { carryUncommitted, changesSince, commitAll, commitChanges, copyIncluded, createWorktree, currentBranch, dirtyCount, git, mergeInto, isInside, projectRoot, realpath, removeDirectory, removeEmptyLeftover, removeEmptySlot, removeWorktree, repoRoot, revertCommit, revertsSince, reviewDiff, WorktreeCleanupError } from './git.ts';
 import { collectGarbage } from './gc.ts';
 import { BrowserServers, jobWritable } from './browser.ts';
 import { tokenFile } from './auth.ts';
@@ -1110,6 +1110,7 @@ export class Jobs {
       // A directory Git still lists is for crew gc, which prunes the registration too.
       if (listed.some((line) => line.startsWith('worktree ') && realpath(line.slice(9)) === realpath(worktree.path))) return false;
       if (!await removeEmptyLeftover(worktree.path, this.home)) return false;
+      await removeEmptySlot(job.repo!, worktree.path, job.id, this.home);
     } catch {
       return false;
     } finally {

@@ -25,7 +25,7 @@
   gap: 6px;
   min-width: 0;
   max-width: 100%;
-  animation: score-rise 520ms var(--ease-out) both;
+  animation: score-rise 520ms var(--ease-out) backwards;
   animation-delay: calc(var(--order) * 90ms + 260ms);
 }
 .trophy { display: grid; place-items: center; color: #e6b800; margin-bottom: 2px; }
@@ -85,7 +85,7 @@
   background: linear-gradient(to bottom, color-mix(in srgb, var(--medal) 26%, var(--surface)), color-mix(in srgb, var(--medal) 6%, var(--surface)));
   box-shadow: inset 0 1px color-mix(in srgb, white 60%, transparent);
   transform-origin: bottom;
-  animation: score-grow 620ms var(--ease-out) both;
+  animation: score-grow 620ms var(--ease-out) backwards;
   animation-delay: calc(var(--order) * 90ms);
 }
 .place[data-place="1"] .pedestal { height: 92px; }
@@ -106,7 +106,7 @@
   align-items: flex-start;
   gap: 12px;
   padding: 14px;
-  animation: score-rise 420ms var(--ease-out) both;
+  animation: score-rise 420ms var(--ease-out) backwards;
   animation-delay: calc(var(--i) * 50ms + 120ms);
 }
 .row + .row { box-shadow: inset 0 1px var(--hairline); }
@@ -129,7 +129,7 @@
 .bar { display: inline-flex; align-items: center; gap: 6px; color: var(--secondary); font-size: 11px; font-variant-numeric: tabular-nums; }
 .barLabel { min-width: 28px; }
 .barTrack { position: relative; width: 72px; height: 4px; border-radius: 2px; background: var(--fill); overflow: hidden; }
-.barTrack i { position: absolute; inset: 0; border-radius: inherit; background: var(--label); opacity: 0.7; transform-origin: left; scale: var(--value) 1; animation: score-grow-x 700ms var(--ease-out) both; animation-delay: calc(var(--i) * 50ms + 260ms); }
+.barTrack i { position: absolute; inset: 0; border-radius: inherit; background: var(--label); opacity: 0.7; transform-origin: left; scale: var(--value) 1; animation: score-grow-x 700ms var(--ease-out) backwards; animation-delay: calc(var(--i) * 50ms + 260ms); }
 .barValue { width: 22px; color: var(--label); }
 .bar[data-empty] .barValue { color: var(--tertiary); }
 /* The summary is written for the lead's routing; the board shows its opening and keeps the rest in the tooltip. */
@@ -146,7 +146,7 @@
   stroke: var(--tone);
   stroke-linecap: round;
   stroke-dasharray: var(--value) 100;
-  animation: ring-fill 900ms var(--ease-out) both;
+  animation: ring-fill 900ms var(--ease-out) backwards;
   animation-delay: calc(var(--i, 0) * 50ms + 200ms);
 }
 @keyframes ring-fill { from { stroke-dasharray: 0 100; } }

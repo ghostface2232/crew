@@ -43,6 +43,30 @@ test('short mission plans render in order with matching tracks and progress', as
   await expect(stage(card, 'Final').locator('button[data-job]')).toHaveCount(2);
 });
 
+test('a mission with many jobs folds the stages it has moved past, and each stage folds on its own', async ({ page, request }) => {
+  const data = fixture();
+  data.missions[0].stages = ['implement', 'cross-review'];
+  data.missions[0].stage = 'cross-review';
+  data.jobs = [
+    ...Array.from({ length: 6 }, (_, at) => job({ id: `cx-build-${at}`, title: `Build part ${at}`, missionStep: 0, state: 'done', endedAt: NOW - 60_000 })),
+    ...Array.from({ length: 3 }, (_, at) => job({ id: `cx-review-${at}`, title: `Review part ${at}`, kind: 'review', missionStep: 1 })),
+  ];
+  await request.post('/__push', { data: { type: 'state', data } });
+  const card = page.locator('[data-key="mission-1"]');
+  const build = card.getByRole('button', { name: 'Build, 6 jobs' });
+  const review = card.getByRole('button', { name: 'Review, 3 jobs' });
+  await expect(build).toHaveAttribute('aria-expanded', 'false');
+  await expect(card.getByRole('button', { name: /Build part 0/ })).toBeHidden();
+  await expect(review).toHaveAttribute('aria-expanded', 'true');
+  await expect(card.getByRole('button', { name: /Review part 0/ })).toBeVisible();
+
+  await build.click();
+  await expect(build).toHaveAttribute('aria-expanded', 'true');
+  await expect(card.getByRole('button', { name: /Build part 0/ })).toBeVisible();
+  await review.click();
+  await expect(card.getByRole('button', { name: /Review part 0/ })).toBeHidden();
+});
+
 test('a quiet ended workload looks finished and the authenticated user can mark the mission done', async ({ page, request }) => {
   // From `/`, a fragment-only goto would not reload the page, so the launch token would never sign in.
   await page.goto('about:blank');
@@ -621,6 +645,34 @@ test('a mission\'s preset can be chosen from its pill menu', async ({ page, requ
   const calls = await (await request.get('/__requests')).json();
   const sent = calls.filter((call: { route: string }) => call.route.startsWith('/api/missions/')).map((call: { body: unknown }) => call.body);
   expect(sent.slice(-2)).toEqual([{ preset: 'economy' }, { preset: null }]);
+});
+
+// Waits out the entrance animations; looping ones, such as a spinner, never finish.
+const settle = (page: Page) => page.evaluate(() => Promise.all(document.getAnimations()
+  .filter((animation) => animation.effect?.getTiming().iterations !== Infinity)
+  .map((animation) => animation.finished)));
+test('entrances let go once played, so a mission\'s menu opens above the cards after it', async ({ page, request }) => {
+  const data = fixture();
+  data.missions.push({ ...data.missions[0], id: 'mission-2', title: 'Ship the next one', state: 'done', endedAt: NOW - 1000 });
+  await request.post('/__push', { data: { type: 'state', data } });
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await expect(page.locator('[data-key="mission-2"]')).toBeVisible();
+  await settle(page);
+  // An entrance that fills forwards keeps its element a stacking context in Chromium, trapping any menu inside it
+  // beneath the cards painted after it. Headless Chromium does not show that, so the cause itself is checked.
+  expect(await page.evaluate(() => document.getAnimations()
+    .filter((animation) => animation.playState === 'finished')
+    .map((animation) => `${(animation as CSSAnimation).animationName} on ${(animation.effect as KeyframeEffect).target?.className}`))).toEqual([]);
+  const mission = page.locator('[data-key="mission-1"]');
+  await mission.locator('.mission-foot .menu-pill').click();
+  const last = mission.getByRole('menuitemradio', { name: 'Best preset' });
+  await settle(page);
+  await last.scrollIntoViewIfNeeded();
+  // A click lands on the item itself, not on a later card painted over it.
+  expect(await last.evaluate((item) => {
+    const box = item.getBoundingClientRect();
+    return item.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2));
+  })).toBe(true);
 });
 
 test('New Job sends the role, so a review that runs the app goes to its holder', async ({ page, request }) => {

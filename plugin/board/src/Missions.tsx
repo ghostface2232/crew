@@ -202,6 +202,9 @@ export function MissionTrack({ mission }: { mission: Mission }) {
 
 /** Open or closed per mission, kept across pages and layout changes, as the app keeps it. */
 const expandedMissions = new Map<string, boolean>();
+/** A mission with more jobs than this lets each stage fold; the user's choice per stage is kept as a mission's is. */
+const FOLD_STAGES_AFTER = 8;
+const openStages = new Map<string, boolean>();
 const PRESETS: [PresetName | null, string][] = [[null, 'Global'], ['economy', 'Economy'], ['balanced', 'Balanced'], ['best', 'Best']];
 
 export function MissionPanel({
@@ -260,6 +263,12 @@ export function MissionPanel({
   const fadeTitle = useFade<HTMLHeadingElement>();
   const fadeMeta = useFade<HTMLParagraphElement>();
   const presetName = PRESETS.find(([preset]) => preset === (mission.preset ?? null))?.[1] ?? 'Global';
+  const foldsStages = jobs.length > FOLD_STAGES_AFTER;
+  const [, setStagesVersion] = useState(0);
+  const setOpenStage = (stageKey: string, value: boolean) => {
+    openStages.set(stageKey, value);
+    setStagesVersion((version) => version + 1);
+  };
   return (
     <section
       className="card mission"
@@ -322,13 +331,33 @@ export function MissionPanel({
             const mine = jobs.filter((job) => missionJobStep(mission, job) === stopIndex);
             const stageLead = active && stopIndex === at ? lead : undefined;
             if (!mine.length && !stageLead) return null;
+            const stageKey = `${mission.id}:${stopIndex}`;
+            // Until the user picks, a stage the mission has moved past folds away once nothing in it is live or chosen.
+            const open = !foldsStages || (openStages.get(stageKey) ?? (
+              stopIndex >= at || Boolean(stageLead) || mine.some((job) => job.endedAt == null || job.waiting || selected === job.id)
+            ));
             return (
               <div className="rows" key={stopIndex}>
-                <h3 className="stage-name">{name}</h3>
-                {stageLead && <SessionRow session={stageLead} selected={selected === `session:${stageLead.id}`} openSession={openSession} />}
-                {mine.map((job, rowIndex) => (
-                  <JobRow key={job.id} job={job} selected={selected === job.id} openJob={openJob} showsKind={false} index={rowIndex} />
-                ))}
+                <h3 className="stage-name">
+                  {foldsStages ? (
+                    <button
+                      aria-expanded={open}
+                      aria-label={`${name}, ${mine.length} ${mine.length === 1 ? 'job' : 'jobs'}`}
+                      onClick={() => setOpenStage(stageKey, !open)}
+                    >
+                      {name}
+                      <span className="digits">{mine.length}</span>
+                      <Icon icon={ChevronDown} className="disclosure" />
+                    </button>
+                  ) : name}
+                </h3>
+                {/* Always wrapped, so rows are not mounted again when the mission starts folding. */}
+                <Collapse open={open} className="rows">
+                  {stageLead && <SessionRow session={stageLead} selected={selected === `session:${stageLead.id}`} openSession={openSession} />}
+                  {mine.map((job, rowIndex) => (
+                    <JobRow key={job.id} job={job} selected={selected === job.id} openJob={openJob} showsKind={false} index={rowIndex} />
+                  ))}
+                </Collapse>
               </div>
             );
           })}

@@ -291,6 +291,9 @@ test('polish reports files changed outside the allowed targets', async () => {
   });
   const job = await settled(jobs, await jobs.create({ kind: 'polish', cwd: repo, targets: ['README.md'] }));
   assert.deepEqual(job.result?.outOfScope, ['app.js']);
+  assert.match(describe(job), /^OUT OF SCOPE — changed but not in the allowed targets: app\.js$/m);
+  job.result!.outOfScope = Array.from({ length: 12 }, (_, i) => `f${i}.js`);
+  assert.match(describe(job), /^OUT OF SCOPE — .*: f0\.js, .*f9\.js, and 2 more$/m);
 });
 
 test('a waiting job resumes on a decision and reports the limit kind on failure', async () => {

@@ -447,6 +447,14 @@ export function agentEnv(platform: NodeJS.Platform = process.platform, source: N
   return env;
 }
 
+/**
+ * What a child started with `process.execPath` needs to run a script. Under the desktop app that path is the
+ * Electron executable, which opens the app instead unless it is told to act as Node.
+ */
+export function nodeEnv(versions: NodeJS.ProcessVersions = process.versions): Record<string, string> {
+  return versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {};
+}
+
 /** Windows npm shims need cmd.exe and one quoted string to avoid Node's shell-with-args deprecation. */
 export function agentCommand(bin: string, args: string[] = [], env: NodeJS.ProcessEnv = agentEnv(), platform: NodeJS.Platform = process.platform): { bin: string; args: string[] | undefined; shell: boolean } {
   if (platform !== 'win32') return { bin, args, shell: false };

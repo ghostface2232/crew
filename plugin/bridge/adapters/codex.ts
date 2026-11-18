@@ -62,6 +62,12 @@ export interface CodexLimits {
 const CREW_TOOLS = ['ask_lead', 'lead_answers', 'siblings', 'search', 'recent_changes', 'rate'];
 const LIMIT_ERRORS = ['usageLimitExceeded', 'rateLimitExceeded', 'sessionBudgetExceeded'];
 const IDLE_SHUTDOWN_MS = 10 * 60_000;
+/**
+ * Codex applies the job's sandbox rules before it answers `thread/start` or `thread/resume`. On Windows that is an
+ * ACL pass over every writable and protected path: 6 to 29 s on a quiet machine, and over a minute when the setup
+ * runs of other jobs' commands queue ahead of it. The shared timeout failed those jobs while the thread was still starting.
+ */
+const THREAD_TIMEOUT_MS = 180_000;
 const PROBE_TIMEOUT_MS = 15_000;
 const PROBE_CONFIRM_MS = 3_000;
 const STALE_THREAD_MS = 7 * 24 * 60 * 60_000;
@@ -112,7 +118,7 @@ export class CodexAdapter implements Adapter {
     if (isTerminal(ctl.job)) return;
     const params = await this.threadParams(ctl, peer);
     ctl.capabilities(capabilitiesOf(ctl.job, params));
-    const res = await peer.request('thread/start', params, RPC_TIMEOUT_MS);
+    const res = await peer.request('thread/start', params, THREAD_TIMEOUT_MS);
     if (isTerminal(ctl.job)) return;
     const threadId: string = res.thread.id;
     const run = this.openRun(ctl, threadId, params.config.features.plugins);
@@ -139,7 +145,7 @@ export class CodexAdapter implements Adapter {
     if (!this.loaded.has(threadId)) {
       const params = await this.threadParams(ctl, peer);
       ctl.capabilities(capabilitiesOf(ctl.job, params));
-      const resume = () => peer.request('thread/resume', { threadId, ...params, excludeTurns: true }, RPC_TIMEOUT_MS);
+      const resume = () => peer.request('thread/resume', { threadId, ...params, excludeTurns: true }, THREAD_TIMEOUT_MS);
       this.resuming.add(threadId);
       // `tidy` archives a worker's thread after a week; a reply to that job brings it back.
       const res = await resume().catch(async (err) => {

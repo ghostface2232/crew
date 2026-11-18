@@ -545,6 +545,31 @@ test('Codex merges crew MCP into a read-only permissions profile', { timeout: 50
   assert.deepEqual(config.features, { apps: false, plugins: false, tool_suggest: false });
 });
 
+test('a daemon running as the desktop app starts the worker MCP server as Node', { timeout: 5000 }, async (t) => {
+  // Agents are launched without ELECTRON_RUN_AS_NODE, so the server's own env must carry it or Crew.exe opens the app.
+  Object.defineProperty(process.versions, 'electron', { value: '1', configurable: true });
+  t.after(() => { delete (process.versions as any).electron; });
+  const h = harness(`
+    const send = (msg) => console.log(JSON.stringify({ jsonrpc: '2.0', ...msg }));
+    require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
+      const msg = JSON.parse(line);
+      if (msg.method === 'thread/start') {
+        require('node:fs').writeFileSync(__dirname + '/config.json', JSON.stringify(msg.params.config));
+        return send({ id: msg.id, result: { thread: { id: 'thread' } } });
+      }
+      if (msg.method === 'turn/start') {
+        send({ id: msg.id, result: { turn: { id: 'turn' } } });
+        send({ method: 'turn/completed', params: { threadId: 'thread', turn: { id: 'turn', status: 'completed' } } });
+      } else if (msg.id != null) send({ id: msg.id, result: {} });
+    });
+  `);
+  cleanup(t, h);
+  const job = await h.jobs.create({ kind: 'delegate', ask: true, cwd: h.home, task: 'why?' });
+  await until(h.jobs, job, 'done');
+  const config = JSON.parse(fs.readFileSync(path.join(h.home, 'config.json'), 'utf8'));
+  assert.equal(config.mcp_servers.crew.env.ELECTRON_RUN_AS_NODE, '1');
+});
+
 test('Antigravity passes crew MCP on new and restored sessions and permits identified crew calls', { timeout: 5000 }, async (t) => {
   const h = harness(`
     const send = (msg) => console.log(JSON.stringify({ jsonrpc: '2.0', ...msg }));

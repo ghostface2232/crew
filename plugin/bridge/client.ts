@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { readToken, tokenFile } from './auth.ts';
-import { agentEnv, BASE_URL, HOME, installed, PLUGIN_ROOT } from './config.ts';
+import { agentEnv, BASE_URL, HOME, installed, nodeEnv, PLUGIN_ROOT } from './config.ts';
 
 export async function api<T = any>(method: 'GET' | 'POST', route: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const send = (token: string | null) => fetch(`${BASE_URL}${route}`, {
@@ -153,7 +153,7 @@ async function startDaemon(): Promise<void> {
     detached: true,
     windowsHide: true,
     stdio: ['ignore', out, out],
-    env: { ...agentEnv(), ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}) },
+    env: { ...agentEnv(), ...nodeEnv() },
   });
   let spawnError: Error | undefined;
   child.on('error', (error) => { spawnError = error; });

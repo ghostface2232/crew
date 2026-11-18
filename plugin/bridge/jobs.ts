@@ -6,7 +6,7 @@ import { addNews, Delivery, deliveryPosition, leadSession, unread } from './deli
 import type { DeliveryState, News } from './delivery.ts';
 import { runCheck } from './check.ts';
 import type { CheckResult } from './check.ts';
-import { canonicalPath, defaultHolder, disabledAgents, effectiveRole, isRole, LEAD, MAX_DEBATE_ROUNDS, PORT, roleInfo, ROLES, runsCommands, WORKERS } from './config.ts';
+import { canonicalPath, defaultHolder, disabledAgents, effectiveRole, isRole, LEAD, MAX_DEBATE_ROUNDS, nodeEnv, PORT, roleInfo, ROLES, runsCommands, WORKERS } from './config.ts';
 import type { Config, JobKind, PresetName, Role, WorkerAgent } from './config.ts';
 import { carryUncommitted, changesSince, commitAll, commitChanges, copyIncluded, createWorktree, currentBranch, dirtyCount, git, mergeInto, isInside, projectRoot, realpath, removeDirectory, removeEmptyLeftover, removeEmptySlot, removeWorktree, repoRoot, revertCommit, revertsSince, reviewDiff, WorktreeCleanupError } from './git.ts';
 import { collectGarbage } from './gc.ts';
@@ -686,7 +686,8 @@ export class Jobs {
       const scratch = agent === 'codex' ? this.scratchDir(id) : undefined;
       if (scratch) fs.mkdirSync(scratch, { recursive: true });
       const evidenceDir = this.evidenceDir(id);
-      fs.mkdirSync(evidenceDir, { recursive: true });
+      // `work` holds what the worker keeps across turns that is not evidence: scratch is emptied after every turn.
+      fs.mkdirSync(path.join(evidenceDir, 'work'), { recursive: true });
       const attached = attachEvidence(evidenceDir, attachments, 1);
       if (attached.length) spec.task = `${spec.task ?? ''}${attachmentsNote(attached)}`;
 
@@ -1360,7 +1361,8 @@ export class Jobs {
       mcp: {
         command: process.execPath,
         args: [path.join(import.meta.dirname, `worker-mcp${path.extname(import.meta.filename)}`)],
-        env: { CREW_JOB_ID: job.id, CREW_JOB_TOKEN: token, CREW_PORT: String(PORT), CREW_JOB_CWD: job.cwd, ...(job.rates ? { CREW_JOB_RATES: job.kind } : {}) },
+        // The agent starts this server, and agents are launched without the variable that makes the app's executable act as Node.
+        env: { ...nodeEnv(), CREW_JOB_ID: job.id, CREW_JOB_TOKEN: token, CREW_PORT: String(PORT), CREW_JOB_CWD: job.cwd, ...(job.rates ? { CREW_JOB_RATES: job.kind } : {}) },
       },
       activity: () => {
         if (!live()) return;

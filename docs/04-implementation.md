@@ -92,6 +92,10 @@ Each tool is a role, and `roles` in `~/.crew/config.json` names the agents that 
 
 Every Codex job—including writable and `runs_app` jobs—gets a fresh per-turn scratch directory writable in its sandbox, with `TMPDIR`, `TMP`, and `TEMP` set to it via `shell_environment_policy.set` ([09](09-usage-presets-rounds.md) section 9), while read-only and `runs_app` permission profiles keep their restrictions. Antigravity shares one server process with no per-job environment, so its environment is unchanged.
 
+Scratch is emptied after every turn. Files a worker needs in a follow-up turn, or wants the lead to have, go in `work` inside the job's evidence directory, which is kept as long as the job; only the images and videos at the top of that directory are listed as evidence.
+
+The worker's Crew MCP server is started by the agent with the daemon's own executable. Under the desktop app that is the Electron executable, and agents are launched without `ELECTRON_RUN_AS_NODE`, so the server's own environment sets it; without it the server opens the app and the handshake fails.
+
 What each agent may do in each role:
 
 | Role | Codex | Antigravity |
@@ -154,6 +158,7 @@ Not verified: whether `SubagentStart` context reaches a real subagent (the hook'
 | Event log | JSONL (`~/.crew/events.jsonl`); job state lives in `~/.crew/jobs.json` |
 | Status board form factor | Local web page served by the daemon, viewable inside Claude Desktop's browser pane. Standalone app discussed in section 7 |
 | Suspected stall timeout | 5 minutes (`stallSeconds` in `~/.crew/config.json`) |
+| Codex thread start and resume timeout | 3 minutes. Codex sets up the job's sandbox before it answers, and on Windows that ACL pass alone can take over a minute under load. Other requests time out after 30 seconds |
 | Max review rounds | Default 1, max 2, written as a rule in the `/crew:run` skill rather than enforced by the bridge |
 | Codex approval policy | `on-request` for implementation and for a review that runs the app, `never` for a static review. Who answers approval prompts is covered in section 5.1 |
 

@@ -51,6 +51,9 @@ test('the lead attaches images to a task, and the worker is told where they are 
   assert.match(job.prompt, new RegExp(`# Attached by the lead\\n.*\\n- ${path.join(job.evidenceDir!, 'lead-1-design.png').replace(/[\\.]/g, '\\$&')}`));
   assert.match(job.instructions, /# Evidence\nSave screenshots and recordings/);
   assert.ok(job.instructions.includes(job.evidenceDir!));
+  // Working files have a place that outlives the turn, and it is not listed as evidence.
+  assert.ok(job.instructions.includes(`working files that a follow-up turn or the lead will need go in \`${path.join(job.evidenceDir!, 'work')}\``));
+  assert.ok(fs.statSync(path.join(job.evidenceDir!, 'work')).isDirectory());
 });
 
 test('attachments that are not images or do not exist are refused before anything is created', async (t) => {
@@ -200,7 +203,7 @@ test('attachments to a message the worker refuses are taken back', async (t) => 
   h.refuse.reply = true;
   await assert.rejects(h.jobs.reply(job.id, { message: 'look', attachments: [h.image('design.png')] }), /not confirmed/);
   assert.deepEqual(job.evidence ?? [], []);
-  assert.deepEqual(fs.readdirSync(job.evidenceDir!), []);
+  assert.deepEqual(fs.readdirSync(job.evidenceDir!), ['work']);
 });
 
 test('relative attachments and attachments to a native review are refused', async (t) => {

@@ -298,6 +298,13 @@ test('model notes are appended to an answer, and a daemon that cannot give them 
   assert.equal(await withNotes('Started.', [], 2), 'Started.');
   reply = { text: '' };
   assert.equal(await withNotes('Started.', ['codex'], 2), 'Started.');
+  // A job's answer repeats no notes the session has already been shown; `route` asks without `once`.
+  reply = { text: 'codex-model: 7.0/10' };
+  routes.length = 0;
+  assert.equal(await withNotes('Started.', ['codex'], 2, true), 'Started.');
+  assert.match(await withNotes('Started.', ['codex', 'antigravity'], 2, true), /Model notes/);
+  assert.deepEqual(routes, ['/api/notes?agents=antigravity&evidence=2']);
+  assert.match(await withNotes('Route.', ['codex'], 2), /Model notes/);
   reply = new Error('old daemon');
   assert.equal(await withNotes('Started.', ['codex'], 2), 'Started.');
 });

@@ -8,7 +8,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { CodexAdapter } from '../plugin/bridge/adapters/codex.ts';
 import { resolveConfig } from '../plugin/bridge/config.ts';
-import { cloneRefused, commitAll, copyIncluded, createWorktree, detachLinks, dirtyCount, removeDirectory, removeEmptyLeftover, removeWorktree } from '../plugin/bridge/git.ts';
+import { cloneRefused, commitAll, copyIncluded, createWorktree, detachLinks, dirtyCount, removeDirectory, removeEmptyLeftover, removeWorktree, worktreeSlot } from '../plugin/bridge/git.ts';
 import type { Job, JobCtl } from '../plugin/bridge/jobs.ts';
 import { buildPrompt } from '../plugin/bridge/prompts.ts';
 
@@ -80,6 +80,36 @@ for (const code of ['ENOTSUP', 'EOPNOTSUPP', 'EXDEV', 'ENOSYS', 'EINVAL']) {
     assert.equal(fs.readFileSync(path.join(repo, 'node_modules', '.bin', 'tool'), 'utf8'), 'keep');
   });
 }
+
+test('a worktree sits in its slot under the repository name, and removing it leaves neither behind', async (t) => {
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-slot-')));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }));
+  const repo = path.join(home, 'repo');
+  fs.mkdirSync(repo);
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
+  git('init', '-q');
+  git('-c', 'user.name=Test', '-c', 'user.email=t@example.com', 'commit', '-qm', 'init', '--allow-empty');
+  const slot = worktreeSlot(repo, 'cx-abcdef', home);
+  const wt = await createWorktree(repo, 'cx-abcdef', 'HEAD', home);
+  assert.equal(wt.path, path.join(slot, 'repo'));
+  await removeWorktree(repo, wt, 'cx-abcdef', home);
+  assert.equal(fs.existsSync(slot), false);
+  assert.equal(git('branch', '--list', 'crew-*'), '');
+
+  // A job from before worktrees moved into their slot has the slot itself as its worktree.
+  const legacy = { path: worktreeSlot(repo, 'ag-123456', home), branch: 'crew-ag-123456', base: git('rev-parse', 'HEAD') };
+  git('worktree', 'add', '-q', '-b', legacy.branch, legacy.path, 'HEAD');
+  await removeWorktree(repo, legacy, 'ag-123456', home);
+  assert.equal(fs.existsSync(legacy.path), false);
+  assert.equal(git('branch', '--list', 'crew-*'), '');
+  await assert.rejects(removeWorktree(repo, { ...legacy, path: path.join(legacy.path, 'other') }, 'ag-123456', home), /outside the Crew worktree directory/);
+
+  // A slot that something else wrote into is kept.
+  const kept = await createWorktree(repo, 'cx-112233', 'HEAD', home);
+  fs.writeFileSync(path.join(path.dirname(kept.path), 'note'), 'keep');
+  await removeWorktree(repo, kept, 'cx-112233', home);
+  assert.equal(fs.readFileSync(path.join(worktreeSlot(repo, 'cx-112233', home), 'note'), 'utf8'), 'keep');
+});
 
 test('a linked dependency path that Git already ignores is not named in a pathspec, so the commit still works', async (t) => {
   const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-ignored-link-')));

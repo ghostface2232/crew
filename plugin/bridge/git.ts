@@ -102,10 +102,14 @@ export async function createWorktree(root: string, id: string, baseRef: string, 
   } catch (err) {
     // `worktree add` can fail after creating both, as when a post-checkout hook fails. Without the directory it failed
     // before creating anything, and a branch of that name was already there and is not ours.
-    if (!existsSync(wtPath)) throw err;
+    if (!existsSync(wtPath)) {
+      await removeEmptySlot(root, wtPath, id, home);
+      throw err;
+    }
     const left: string[] = [];
     await git(root, ['worktree', 'remove', '--force', wtPath]).catch((cleanup) => left.push(String(cleanup?.message ?? cleanup)));
     await git(root, ['branch', '-D', branch]).catch((cleanup) => left.push(String(cleanup?.message ?? cleanup)));
+    await removeEmptySlot(root, wtPath, id, home);
     if (left.length) throw new Error(`${(err as Error).message}; worktree cleanup failed: ${left.join('; ')}`, { cause: err });
     throw err;
   }
@@ -134,10 +138,25 @@ export async function carryUncommitted(root: string, wt: string): Promise<void> 
   }
 }
 
-export function worktreePath(root: string, id: string, home: string): string {
+/** A job's own directory under Crew's worktrees; with an empty id, the directory holding a repository's slots. */
+export function worktreeSlot(root: string, id: string, home: string): string {
   // The hash keeps two repositories with the same folder name apart.
   const repoKey = `${path.basename(root)}-${createHash('sha256').update(root).digest('hex').slice(0, 8)}`;
   return path.join(home, 'worktrees', repoKey, id);
+}
+
+/**
+ * The worktree sits in its slot under the repository's own folder name. Apps that list an agent's threads by
+ * working directory show that last folder, so a worker reads as `<repository> <job id>` instead of a bare id.
+ */
+export function worktreePath(root: string, id: string, home: string): string {
+  return path.join(worktreeSlot(root, id, home), path.basename(root));
+}
+
+/** Removes the slot a worktree sat in once it is empty. A slot that stays is harmless, and `crew gc` collects it. */
+export async function removeEmptySlot(root: string, wt: string, id: string, home: string): Promise<void> {
+  const slot = worktreeSlot(root, id, home);
+  if (path.resolve(wt) !== path.resolve(slot)) await removeEmptyLeftover(slot, home).catch(() => {});
 }
 
 /** Copies included files, cloning directories when supported and otherwise sharing them read-only. */
@@ -458,7 +477,8 @@ async function worktreeLeftovers(root: string, wt: Worktree, admin: string | nul
 export async function removeWorktree(root: string, wt: Worktree, id: string, home: string, platform: NodeJS.Platform = process.platform): Promise<void> {
   const worktrees = path.join(home, 'worktrees');
   if (!/^(cx|ag)-[0-9a-f]{6}$/.test(id) || wt.branch !== `crew-${id}`
-      || path.resolve(wt.path) !== path.resolve(worktreePath(root, id, home))
+      // A job created before worktrees moved into their slot has the slot itself as its worktree.
+      || ![worktreePath(root, id, home), worktreeSlot(root, id, home)].some((known) => path.resolve(wt.path) === path.resolve(known))
       || !isInside(worktrees, wt.path) || !isInside(home, worktrees)) {
     throw new Error('Refusing to remove a worktree outside the Crew worktree directory.');
   }
@@ -546,6 +566,7 @@ export async function removeWorktree(root: string, wt: Worktree, id: string, hom
       throw new WorktreeCleanupError(err, err, await worktreeLeftovers(root, wt, admin));
     }
   }
+  if (!existsSync(wt.path)) await removeEmptySlot(root, wt.path, id, home);
   try {
     if (await git(root, ['branch', '--list', '--format=%(refname:short)', wt.branch])) {
       await git(root, ['branch', '-D', wt.branch]);

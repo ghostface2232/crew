@@ -21,7 +21,12 @@ Do not run shell commands; you only need to read and edit files. If improving a 
 
 ## Report
 
+Never call unfinished work `done`. Put any blocker in the report where the lead can see it.
+
 ```
+## Outcome
+Write one word on the first line. Use done if all edits are finished and verified, partial if Open points lists edits still due, or blocked if you could not make the edits. Give the reason under Open points.
+
 ## Summary
 One or two sentences on what you improved.
 
@@ -30,4 +35,7 @@ One or two sentences on what you improved.
 
 ## Left alone
 Things worth fixing that were outside your role, or "None".
+
+## Open points
+Requested edits still due and any reason they were blocked, or "None".
 ```

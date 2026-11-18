@@ -37,6 +37,8 @@ struct Job: Codable, Sendable, Identifiable, Equatable {
     var effort: String?
     var resolvedModel: String?
     var resolvedEffort: String?
+    var outcome: String?
+    var outcomeContradiction: String?
     var refusals: [Refusal]?
     var retrying: [String]?
     var runsApp: Bool?
@@ -277,8 +279,8 @@ struct RoleAssignment: Codable, Sendable, Equatable {
 struct RoleAgentSettings: Codable, Sendable, Equatable {
     var model: String?
     var effort: String?
-    func normalized(effort allowed: Bool = true) -> Self? {
-        let clean = Self(model: model?.isEmpty == true ? nil : model, effort: allowed && effort?.isEmpty != true ? effort : nil)
+    func normalized() -> Self? {
+        let clean = Self(model: model?.isEmpty == true ? nil : model, effort: effort?.isEmpty == true ? nil : effort)
         return clean == Self() ? nil : clean
     }
 }
@@ -298,7 +300,7 @@ struct RoleSetting: Codable, Sendable, Equatable {
     }
     var normalized: Self {
         Self(agents: agents.map { agents in RoleAssignment.holderOrder.filter { agents.contains($0) } },
-             codex: codex?.normalized(), antigravity: antigravity?.normalized(effort: false))
+             codex: codex?.normalized(), antigravity: antigravity?.normalized())
     }
     private enum CodingKeys: String, CodingKey { case agents, codex, antigravity, agent, also, model, effort }
     init(from decoder: Decoder) throws {
@@ -312,7 +314,8 @@ struct RoleSetting: Codable, Sendable, Equatable {
         if values.contains(.model) || values.contains(.effort) {
             // Legacy entries without an agent used the role's default worker, or Codex for a following child.
             let owner = try values.decodeIfPresent(String.self, forKey: .agent) ?? (decoder.codingPath.last?.stringValue == "polish" ? "antigravity" : "codex")
-            self[owner] = try RoleAgentSettings(model: values.decodeIfPresent(String.self, forKey: .model), effort: values.decodeIfPresent(String.self, forKey: .effort))
+            // A legacy effort was Codex's alone, as the daemon reads it.
+            self[owner] = try RoleAgentSettings(model: values.decodeIfPresent(String.self, forKey: .model), effort: owner == "codex" ? values.decodeIfPresent(String.self, forKey: .effort) : nil)
         }
         self = normalized
     }

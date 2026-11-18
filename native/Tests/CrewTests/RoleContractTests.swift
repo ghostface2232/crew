@@ -181,8 +181,8 @@ import Testing
         settings.roleSettings["delegate"]?.agents = ["codex", "codex"]
         settings.roleSettings["verify"] = RoleSetting(codex: .init(model: "", effort: ""), antigravity: .init())
         #expect(!settings.rolesDirty)
-        let clean = SettingsModel.normalized(["delegate": RoleSetting(agents: ["claude", "antigravity", "codex", "codex"], codex: .init(model: "", effort: "high"), antigravity: .init(model: "", effort: "ignored")), "refactor": RoleSetting(codex: .init())])
-        #expect(clean == ["delegate": RoleSetting(agents: RoleAssignment.holderOrder, codex: .init(effort: "high"))])
+        let clean = SettingsModel.normalized(["delegate": RoleSetting(agents: ["claude", "antigravity", "codex", "codex"], codex: .init(model: "", effort: "high"), antigravity: .init(model: "", effort: "low")), "refactor": RoleSetting(codex: .init())])
+        #expect(clean == ["delegate": RoleSetting(agents: RoleAssignment.holderOrder, codex: .init(effort: "high"), antigravity: .init(effort: "low"))])
     }
     @Test func dispatchSelectsOnlyWorkerHoldersAndEncodesEveryPick() throws {
         let state = try fixture()

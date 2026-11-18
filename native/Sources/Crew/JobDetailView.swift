@@ -62,6 +62,10 @@ struct JobDetailView: View {
             // The model the session reported, else the configured one.
             fact("Agent", [agentName(job.agent), job.resolvedModel ?? job.model, (job.resolvedEffort ?? job.effort).map { "\($0) effort" }, job.tier.map { "\($0) tier" }].compactMap { $0 }.joined(separator: " · "))
             fact("Role", store.state.roleLabel(job.assignedRole))
+            // What the worker declared, set against what the bridge observed.
+            if job.state == "done", let outcome = job.outcome {
+                fact("Outcome", job.outcomeContradiction.map { "Done as declared, but \($0)" } ?? outcome.capitalized)
+            }
             if let preset = job.preset { fact("Preset", preset.capitalized) }
             fact("Project", job.projectPath)
             fact("Duration", elapsed((job.endedAt ?? store.now) - job.createdAt))

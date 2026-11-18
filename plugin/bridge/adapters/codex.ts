@@ -5,7 +5,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { tokenFile } from '../auth.ts';
 import { agentCommand, agentEnv, HOME, VERSION } from '../config.ts';
 import type { Config } from '../config.ts';
-import { isTerminal } from '../jobs.ts';
+import { isTerminal, noteLeadDecline } from '../jobs.ts';
 import type { Adapter, Capabilities, Job, JobCtl, Probe } from '../jobs.ts';
 import { PLUGIN_USER_APP } from '../prompts.ts';
 import { RPC_TIMEOUT_MS, RpcError, RpcPeer, RpcTimeoutError } from '../rpc.ts';
@@ -16,6 +16,7 @@ interface Grant { key: string; label: string }
 interface Pending {
   id: string | number;
   threadId: string;
+  turnId?: string;
   type: 'approval' | 'question';
   reason: string;
   grant?: Grant;
@@ -149,10 +150,28 @@ export class CodexAdapter implements Adapter {
     }
   }
 
-  async answer(ctl: JobCtl, approve: boolean, message?: string, opts?: { forJob?: boolean }): Promise<void> {
-    const run = this.runs.get(ctl.job.sessionId ?? '');
-    if (!run?.pending.length) throw new Error('The request this job was waiting on is no longer pending.');
-    if (opts?.forJob && !run.pending[0].grant) throw new Error('This request cannot be allowed for the whole job. Approve or deny it.');
+  async answer(ctl: JobCtl, approve: boolean, message?: string, opts?: { forJob?: boolean; by?: 'lead' }): Promise<void> {
+    const threadId = ctl.job.sessionId ?? '';
+    const run = this.runs.get(threadId);
+    const request = run?.pending[0];
+    if (!run || !request) throw new Error('The request this job was waiting on is no longer pending.');
+    if (opts?.forJob && !request.grant) throw new Error('This request cannot be allowed for the whole job. Approve or deny it.');
+    if (request.type === 'approval' && !approve) {
+      if (opts?.by === 'lead') {
+        const note = noteLeadDecline(ctl, request.reason, message!.trim());
+        const requestedTurn = request.turnId ?? run.busyChildren.get(request.threadId);
+        // The parent can act on the reason when the sub-agent's turn is unknown.
+        const turnId = requestedTurn ?? run.turnId;
+        const peer = this.peer;
+        const undelivered = (detail: string) => ctl.note(`The lead's reason did not reach the worker (${detail}). Send it with reply as a message once the turn ends.`);
+        if (peer && turnId) {
+          // Approval responses carry no text. Write the steer first, release the refusal without waiting, and
+          // retry after the refusal if Codex rejected the steer while the approval was open.
+          const steer = () => peer.request('turn/steer', { threadId: requestedTurn ? request.threadId : threadId, input: [textInput(note)], expectedTurnId: turnId }, RPC_TIMEOUT_MS);
+          void steer().catch(steer).catch((err) => undelivered(err.message));
+        } else undelivered(peer ? 'no confirmed turn to steer' : 'the Codex connection is closed');
+      } else ctl.note(`The user declined an action: ${request.reason}\nDo it another way within the job permissions, or report what could not be verified.`, { declined: true });
+    }
     this.settleRequest(run, 0, { approve, message, forJob: opts?.forJob });
   }
 
@@ -636,9 +655,6 @@ export class CodexAdapter implements Adapter {
 
   private settleRequest(run: Run, index: number, answer: Answer | null): void {
     const [request] = run.pending.splice(index, 1);
-    if (request.type === 'approval' && answer && !answer.cancelled && !answer.approve) {
-      run.ctl.note(`The user declined an action: ${request.reason}\nDo it another way within the job permissions, or report what could not be verified.`, { declined: true });
-    }
     request.resolve(answer);
     let head = index === 0;
     if (answer?.forJob && request.grant) {
@@ -679,7 +695,7 @@ export class CodexAdapter implements Adapter {
       }
       if (this.children.has(threadId)) reason = `Sub-agent request\n${reason}`;
       return new Promise<Answer | null>((resolve) => {
-        run.pending.push({ id, threadId, type, reason, grant, resolve });
+        run.pending.push({ id, threadId, turnId: p.turnId ?? item?.turnId, type, reason, grant, resolve });
         if (run.pending.length === 1) run.ctl.waiting(type, reason, grant?.label);
       });
     };

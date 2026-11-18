@@ -155,7 +155,7 @@ Added 2026-11-14. A job names how demanding it is, and the bridge turns that int
 
 A tier names a family, not a version. For Codex the bridge picks the newest model of the family that Codex's own model cache (`$CODEX_HOME/models_cache.json`) lists and does not hide; with no cache or no match, Codex's default applies. For Antigravity the family is matched against the model options the session lists, skipping orchestrators; an unlisted family leaves the agent's default.
 
-The order is: a model the lead names for the job, the tier it names, the model the user configured (role, preset, or `codex.model` / `antigravity.model`), and last the default tier. A configured model therefore stays in effect until the lead names a tier for a particular job. An explicit `effort` always wins; otherwise a role's or preset's effort, then a named tier's, then `codex.effort`, then the default tier's. So under `economy` a job keeps `low` unless the lead names an effort.
+The order is: a model the lead names for the job, the tier it names, the model the user configured (role, preset, or `codex.model` / `antigravity.model`), and last the default tier. A configured model therefore stays in effect until the lead names a tier for a particular job. An explicit `effort` always wins; otherwise a role's or preset's effort, then a named tier's, then `codex.effort`, then the default tier's. So under `economy` a job keeps `low` unless the lead names an effort. Antigravity takes an effort only when the lead, a role, or a preset names one; a tier gives it none, and the built-in presets set Codex's alone.
 
 ## 9. Per-turn temporary files and read-only jobs
 
@@ -303,7 +303,7 @@ Added 2026-11-15: a role may have several holders, and Claude may be one of them
 { "roles": { "review": { "agents": ["codex", "claude"], "codex": { "effort": "high" } }, "polish": { "agents": ["claude"] } } }
 ```
 
-`agents` lists the holders in fixed order: Codex, Antigravity, then Claude. `codex` and `antigravity` hold each agent's `model` (and Codex's `effort`) for the role, and each worker holder runs with those settings. `claude` means the lead does the work in its own session or a subagent; no worker runs it. A role that follows its parent takes its parent's holders until it lists its own.
+`agents` lists the holders in fixed order: Codex, Antigravity, then Claude. `codex` and `antigravity` hold each agent's `model` and `effort` for the role, and each worker holder runs with those settings. `claude` means the lead does the work in its own session or a subagent; no worker runs it. A role that follows its parent takes its parent's holders until it lists its own.
 
 The lead picks a holder for each job with `agent` on `delegate`, `review`, `polish`, and `debate`. It gives work that operates the screen or runs the app to Codex when Codex holds the role, and may run the same job with two holders at once when a second view is worth the usage. Picking `claude` starts no job: the tool says what to do instead (for a review, the `crew:self-reviewer` subagent).
 

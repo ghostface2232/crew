@@ -81,8 +81,8 @@ How jobs work:
 - delegate and polish run in their own git worktree and branch (crew-<job id>) created from HEAD, so commit anything the worker needs first. Gitignored files it needs (node_modules, .env) are copied in if the repository lists them in .worktreeinclude. The bridge commits the worker's changes on that branch; you inspect the diff and merge or reject it. Nothing reaches your branch unless you merge it.
 - Every receipt is an offer, not a read acknowledgement. Pass its id as ack with your next Crew call (or an array of ids); only that echo acknowledges the snapshots shown. Automatic offers stop after two attempts, but unacknowledged news remains in status and on the board. Long reports are paged with status and report_offset.
 - Job calls return at once with the job id while the worker runs in the background. Do your own part, then end your turn: a live, connected watcher attempts to wake you when a job ends, needs a decision, or asks you a question. After a watcher expires or fails, the next hook or status recovers pending news. Do not sit in \`wait\` on a running job, since the user cannot talk to you meanwhile. Pass background: false only when you can do nothing else until the result arrives.
-- Codex's approval requests go to its own automatic reviewer first; only what reaches you as a waiting job is for the user. If a result lists an action the reviewer REFUSED and the user's request in this conversation clearly covers it, send it back yourself with \`reply\` and approved_by_user, quoting their words; do not ask them again. If it is refused a second time, the same call has the user asked directly. If their request does not cover it, tell them and let them decide.
-- A waiting job's approval request or question is for the user to answer, not you. The app shows it to them on the board. When you are woken because a job is waiting, call \`wait\` on it so they are asked here too. Use \`reply\` with a decision only to pass on one the user gave you in the conversation.
+- Codex's approval requests go to its own automatic reviewer first. If a result lists an action the reviewer REFUSED and the user's request in this conversation clearly covers it, send it back yourself with \`reply\` and approved_by_user, quoting their words; do not ask them again. If it is refused a second time, the same call has the user asked directly. If their request does not cover it, tell them and let them decide.
+- Approval is the user's call. Never approve on your own. For a waiting approval clearly outside the task or role, use \`reply\` with decision "decline" and a message saying why and what to do instead. For other approvals and waiting questions, call \`wait\` so the user is asked, or use \`reply\` to pass on an answer they already gave you.
 - A worker may use ask_lead mid-task for a question that is yours to answer, unlike approval requests, which are the user's. Answer it with \`answer\`; you are woken again when the worker ends or needs you.
 - \`reply\` with a message continues the same worker session, e.g. to request fixes.
 - Reject worker changes that go beyond what was asked. For polish, any file listed as out of scope, or any non-text change, is grounds to reject.
@@ -125,7 +125,7 @@ const agentProp = {
 const modelProps = {
   tier: { type: 'string', enum: [...TIERS], description: 'How demanding the job is; Crew picks the model from it. standard (the default): most work, including most UI changes. frontier: only especially hard or complex work, or a UI rebuilt from scratch or a very large UI change. light: simple, well-specified tasks. fast: plain searches and lookups. For Codex these are Sol, Astra, Terra and Luna; for Antigravity, Argon for frontier (literary or very complex documents) and Hydrogen otherwise. Newer models of each family are picked up automatically.' },
   model: { type: 'string', description: 'Exact model ID for this job, as the notes list it, overriding tier. Rarely needed; prefer tier. When the user names a family such as Astra, pass its tier; a family name passed here is taken as that tier.' },
-  effort: { type: 'string', description: 'Reasoning effort: medium for most work, high when the task calls for it. Defaults to medium, or high at the frontier tier. Ignored by agents without an effort setting.' },
+  effort: { type: 'string', description: 'Codex defaults to medium effort, or high at the frontier tier. Antigravity sets its thinking level only when an effort is named, using the nearest lower offered level if needed and keeping the session default if no level fits.' },
 };
 
 const TOOLS = [
@@ -328,14 +328,14 @@ const TOOLS = [
   {
     name: 'reply',
     title: 'Reply to a worker',
-    description: 'Send a follow-up message that continues the same worker session, e.g. to request fixes after reviewing its diff. Also passes on a decision the user gave you for a waiting job (decision: approve or deny, or allow_for_job when the status offers it); to have the user asked, call wait instead. With approved_by_user it sends back an action the worker\'s automatic reviewer refused.',
+    description: 'Continue the same worker session, pass on the user\'s answer, or decline an approval clearly outside the task or role with a reason. Never approve on your own. Call wait if the user still needs to decide. With approved_by_user it sends back an action the worker\'s automatic reviewer refused.',
     inputSchema: {
       type: 'object',
       properties: {
         job_id: { type: 'string' },
-        message: { type: 'string', description: 'Follow-up instruction, or the answer to the worker\'s question.' },
-        decision: { type: 'string', enum: ['approve', 'deny', 'allow_for_job'], description: 'The user\'s decision for a job waiting on approval. allow_for_job approves this request and the job\'s later ones on the same target without asking; only for a request whose status offers it, and only when the user said so.' },
-        request_id: { type: 'string', description: 'Required when forwarding an answer. Use the request ID shown in the job status.' },
+        message: { type: 'string', description: 'Follow-up instruction, the user\'s answer, or, with decline, why you declined and what to do instead.' },
+        decision: { type: 'string', enum: ['approve', 'deny', 'allow_for_job', 'decline'], description: 'Use decline with a reason in message only for a waiting approval clearly outside the task or role. Approve, deny, and allow_for_job relay the user\'s decision. Use allow_for_job only when offered and the user allowed later requests on the same target. Otherwise call wait.' },
+        request_id: { type: 'string', description: 'Required to settle a waiting request. Use the request ID shown in the job status.' },
         sync: { type: 'boolean', description: 'For a finished delegate or polish job: first merge your current HEAD into the worker\'s branch, so the next turn sees what you committed since it started (a fix it was waiting for, an interface you changed). Commit first. If the merge conflicts, it is aborted; the message is still sent, naming the conflicting files, and the job\'s result notes the failed sync.' },
         ...attachmentsProp,
         approved_by_user: { type: 'string', description: 'For a finished job whose result lists a REFUSED action: the user\'s own words from this conversation that cover it. The worker runs the action again and the automatic reviewer judges it with that approval. Use it without asking the user when their request clearly covers the action. A second use on the same job sends each request to the user to answer.' },
@@ -716,7 +716,7 @@ function render(job: JobView): string {
   const error = failed.get(key);
   let hint: string | undefined;
   if (error !== undefined) hint = `The app could not show the prompt to the user (${error}). Ask them in the conversation, then pass their decision on with reply.`;
-  else if (dismissed.has(key)) hint = 'The user was asked in the app and dismissed the prompt without deciding. Do not decide for them: ask what they want, then pass it on with reply.';
+  else if (dismissed.has(key)) hint = 'The user dismissed the prompt in the app. Ask what they want, then pass it on with reply.';
   else if (!canElicit) hint = 'This client cannot show the prompt itself. Ask the user in the conversation, then pass their decision on with reply.';
   return describe(job, hint);
 }

@@ -83,5 +83,5 @@ test('the settings offer the models Codex lists, with the efforts each accepts, 
     { id: 'gpt-6-luna', name: 'gpt-6-luna', efforts: [] },
   ]);
   assert.deepEqual(codexModels(path.join(os.tmpdir(), 'no-such-cache.json')), []);
-  assert.deepEqual(ANTIGRAVITY_MODELS, [{ id: 'hydrogen', name: 'Hydrogen' }, { id: 'argon', name: 'Argon' }]);
+  assert.deepEqual(ANTIGRAVITY_MODELS, [{ id: 'hydrogen', name: 'Hydrogen', efforts: ['low', 'medium', 'high', 'xhigh'] }, { id: 'argon', name: 'Argon', efforts: ['low', 'medium', 'high'] }]);
 });

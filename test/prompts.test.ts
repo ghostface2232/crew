@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -21,6 +22,26 @@ const target = { type: 'uncommittedChanges' as const };
 type Role = 'delegate' | 'review' | 'polish' | 'question';
 interface Case { name: string; agent: WorkerAgent; role: Role; runsApp?: boolean; exclusive?: boolean; scratch?: boolean; native?: boolean; skills?: boolean }
 const SKILL = { name: 'better-ui', description: 'Polishes surfaces.', file: '/skills/better-ui/SKILL.md' };
+
+test('the shared effort option describes Antigravity’s named thinking levels', (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-tools-test-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const mcp = new URL('../plugin/bridge/mcp.ts', import.meta.url).href;
+  const output = execFileSync(process.execPath, ['--input-type=module', '--eval', `
+    import { registerHooks } from 'node:module';
+    // Listing the schema needs no daemon or network access.
+    registerHooks({ resolve(specifier, context, next) {
+      if (specifier === './client.ts' && context.parentURL === ${JSON.stringify(mcp)}) {
+        return { url: 'data:text/javascript,export const api = undefined, ensureDaemon = async () => {}', shortCircuit: true };
+      }
+      return next(specifier, context);
+    } });
+    await import(${JSON.stringify(mcp)});
+  `], { env: { ...process.env, CREW_HOME: home, CLAUDE_PROJECT_DIR: home }, input: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}\n', encoding: 'utf8' });
+  const { result: { tools } } = JSON.parse(output);
+  assert.match(tools.find((tool: any) => tool.name === 'delegate').inputSchema.properties.effort.description,
+    /Antigravity[^.]*thinking level[^.]*named[^.]*nearest lower[^.]*session/i);
+});
 
 /** Arguments the way Jobs.start derives them; the combinations it refuses are not listed. */
 function build(c: Case) {

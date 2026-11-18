@@ -151,9 +151,7 @@ struct CrewSettingsView: View {
             }
             ForEach(model.assignment(for: role.role)?.workerHolders ?? [], id: \.self) { agent in
                 roleField(role, agent: agent, \.model)
-                if agent == "codex" {
-                    roleField(role, agent: agent, \.effort)
-                }
+                roleField(role, agent: agent, \.effort)
             }
         } header: {
             HStack(spacing: Space.ml) {

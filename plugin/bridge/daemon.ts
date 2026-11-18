@@ -18,6 +18,7 @@ import { missionPreset, Missions, STAGES } from './missions.ts';
 import type { Mission } from './missions.ts';
 import { addEvidence, addRating, loadNotes, notesFile, renderNotes, scoreAll, setSummary, WORKER_ITEMS } from './notes.ts';
 import type { NotesFile } from './notes.ts';
+import { outcomeContradiction } from './render.ts';
 import { runbook } from './runbook.ts';
 import { checks as setupChecks, PACKAGED, prunePlugins, register, registered, registrationMoved } from './setup.ts';
 import type { Registration, SetupItem } from './setup.ts';
@@ -114,7 +115,7 @@ function notify(agent: keyof typeof AGENT_NAMES, kind: EventKind, subject: strin
 /** Jobs as sent to clients: without the full prompt text. */
 function view(job: Job) {
   const { prompt, instructions, ...rest } = job;
-  return rest;
+  return { ...rest, outcomeContradiction: outcomeContradiction(job) };
 }
 
 /** For display only: the config on disk, or the one the daemon started with while the file is invalid. */

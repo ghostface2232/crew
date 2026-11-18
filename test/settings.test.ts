@@ -141,7 +141,7 @@ test('no preset is set by default, and a setting on the role wins over the prese
   const best = resolveConfig({ preset: 'best', roles: { review: { codex: { effort: 'low' } }, delegate: { codex: { model: 'own' } } } });
   assert.deepEqual(effectiveRole(best, 'delegate'), { agent: 'codex', model: 'own', effort: 'high' });
   assert.deepEqual(effectiveRole(best, 'review'), { agent: 'codex', effort: 'low' });
-  // Antigravity has no effort setting, and the built-in presets name no models.
+  // The built-in presets set Codex's effort only, and name no models.
   assert.deepEqual(effectiveRole(best, 'polish'), { agent: 'antigravity' });
 
   // A user's preset entry adds to the built-in one of the same name.
@@ -183,7 +183,7 @@ test('a preset that is not exactly valid is refused', () => {
   assert.throws(() => resolveConfig({ presets: { best: { maxTier: 'huge' as never } } }), /presets\.best\.maxTier must be one of: fast, light, standard, frontier/);
   assert.throws(() => resolveConfig({ presets: { turbo: {} } as never }), /presets\.turbo is not a preset/);
   assert.throws(() => resolveConfig({ presets: { best: { codex: { speed: 'x' } } } as never }), /presets\.best\.codex\.speed is not a setting; use model or effort/);
-  assert.throws(() => resolveConfig({ presets: { best: { antigravity: { effort: 'high' } } } as never }), /presets\.best\.antigravity\.effort is not a setting; use model/);
+  assert.deepEqual(effectiveRole(resolveConfig({ preset: 'best', presets: { best: { antigravity: { effort: 'high' } } } }), 'polish'), { agent: 'antigravity', effort: 'high' });
   assert.throws(() => resolveConfig({ presets: { best: { codex: { model: 1 } } } as never }), /must be a string/);
   assert.throws(() => resolveConfig({ presets: { best: { lead: 'x' } } as never }), /use codex, antigravity, subagentModel, subagentMax, or maxTier/);
 });
@@ -237,7 +237,7 @@ test('a role may hold Claude and several workers, each with its own settings', (
   assert.throws(() => resolveConfig({ roles: { review: { agents: ['cursor'] } } as never }), /roles\.review\.agents must be a non-empty list of: codex, antigravity, claude/);
   assert.throws(() => resolveConfig({ roles: { review: { agents: [] } } }), /non-empty list/);
   assert.throws(() => resolveConfig({ roles: { review: { agents: ['codex', 'codex'] } } }), /names a holder twice/);
-  assert.throws(() => resolveConfig({ roles: { review: { agents: ['codex'], antigravity: { effort: 'high' } } } as never }), /antigravity\.effort is not a setting/);
+  assert.throws(() => resolveConfig({ roles: { review: { agents: ['codex'], antigravity: { speed: 'high' } } } as never }), /antigravity\.speed is not a setting; use model or effort/);
   assert.throws(() => resolveConfig({ roles: { review: { agent: 'codex', agents: ['codex'] } } as never }), /mixes agent with agents/);
   // Settings for an agent that does not hold the role are left out.
   assert.deepEqual(resolveConfig({ roles: { review: { agents: ['codex'], antigravity: { model: 'gemini-y' } } } }).roles.review, { agents: ['codex'] });

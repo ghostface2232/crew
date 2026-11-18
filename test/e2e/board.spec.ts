@@ -433,9 +433,8 @@ test('roles settings group every role, let one follow its parent, and save what 
   await page.getByRole('region', { name: 'Review that runs the app' }).getByRole('checkbox', { name: 'Same as Cross-review' }).uncheck();
   await page.getByRole('checkbox', { name: 'Cross-review: Antigravity' }).check();
   await page.getByRole('checkbox', { name: 'Cross-review: Codex' }).uncheck();
-  // Antigravity has no effort setting.
   await expect(page.getByLabel('Cross-review Antigravity model')).toBeVisible();
-  await expect(page.getByLabel('Cross-review Antigravity reasoning effort')).toHaveCount(0);
+  await expect(page.getByLabel('Cross-review Antigravity reasoning effort')).toBeVisible();
   await page.getByRole('button', { name: 'Save Roles' }).click();
   await expect(page.getByText('Unsaved changes')).toHaveCount(0);
   const calls = await (await request.get('/__requests')).json();

@@ -406,6 +406,8 @@ export function JobDrawer({ id, state, close }: { id: string; state: Snapshot; c
         // The model the session reported, else the configured one.
         ['Agent', [NAMES[job.agent], job.resolvedModel ?? job.model, job.tier && `${job.tier} tier`, (job.resolvedEffort ?? job.effort) && `${job.resolvedEffort ?? job.effort} effort`].filter(Boolean).join(' · ')],
         ['Role', job.ask && !job.debate ? 'Question' : roleLabel(state, jobRole(job))],
+        // What the worker declared, set against what the bridge observed.
+        ...(job.state === 'done' && job.outcome ? [['Outcome', job.outcomeContradiction ? `Done as declared, but ${job.outcomeContradiction}` : job.outcome[0].toUpperCase() + job.outcome.slice(1)] as [string, string]] : []),
         ...(job.preset ? [['Preset', job.preset[0].toUpperCase() + job.preset.slice(1)] as [string, string]] : []),
         ['Project', projectOf(job)],
         ['Duration', elapsed((job.endedAt ?? now) - job.createdAt)],

@@ -113,7 +113,11 @@ export class AntigravityAdapter implements Adapter {
     if (!this.loaded.has(sessionId)) {
       if (!this.restoreMethod) throw new Error('This Antigravity server cannot restore sessions. Continue it from the Antigravity CLI.');
       const res = await peer.request(this.restoreMethod, { sessionId, cwd: ctl.job.cwd, mcpServers: [crewServer(ctl)], ...this.instructions(ctl) }, RPC_TIMEOUT_MS);
-      ctl.model(sessionModel(res) ?? ctl.job.resolvedModel ?? ctl.job.model ?? this.config.antigravity.model, sessionEffort(res) ?? ctl.job.resolvedEffort);
+      // A server that restores a session at its default level would run the next turn above the job's effort.
+      const level = ctl.job.effort ? pickEffort(configOption(res, 'thought_level')?.options, ctl.job.effort) : undefined;
+      const restored = level && level !== configOption(res, 'thought_level')?.currentValue
+        ? await peer.request('session/set_config_option', { sessionId, configId: 'thought_level', value: level }, RPC_TIMEOUT_MS) : res;
+      ctl.model(sessionModel(restored) ?? sessionModel(res) ?? ctl.job.resolvedModel ?? ctl.job.model ?? this.config.antigravity.model, sessionEffort(restored) ?? ctl.job.resolvedEffort);
       this.loaded.add(sessionId);
     }
     if (isTerminal(ctl.job)) return;
@@ -326,8 +330,14 @@ export class AntigravityAdapter implements Adapter {
     const answer = await this.ask(run, 'question', reason);
     if (!answer) return { action: 'cancel' };
     const message = answer.message?.trim();
-    if (!message && !answer.approve && !questions.every((q) => q.choices.some((c) => /^no$/i.test(c.title.trim())))) return { action: 'decline' };
-    const text = message || (answer.approve ? 'Yes' : 'No');
+    // A decision without words answers only a form whose every question offers that word; a deny with words is still a deny.
+    const quick = answer.approve ? 'Yes' : 'No';
+    const offered = questions.every((q) => q.choices.some((c) => c.title.trim().toLowerCase() === quick.toLowerCase()));
+    if (!answer.approve && message || !message && !offered) {
+      if (answer.approve) run.ctl.note(`Antigravity's question needs an answer in words: ${questions.map((q) => q.title).join(' / ')}`);
+      return { action: 'decline' };
+    }
+    const text = message || quick;
     const content = formAnswer(questions, text);
     if (content) return { action: 'accept', content };
     run.ctl.note(`Antigravity's form could not use the answer to ${questions.map((q) => q.title).join(' / ')}\nAnswer: ${text}`);

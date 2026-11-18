@@ -104,6 +104,14 @@ test('a worktree sits in its slot under the repository name, and removing it lea
   assert.equal(git('branch', '--list', 'crew-*'), '');
   await assert.rejects(removeWorktree(repo, { ...legacy, path: path.join(legacy.path, 'other') }, 'ag-123456', home), /outside the Crew worktree directory/);
 
+  // A second worktree for an id that is taken leaves the first one, its files and its branch alone.
+  const first = await createWorktree(repo, 'cx-445566', 'HEAD', home);
+  fs.writeFileSync(path.join(first.path, 'untracked'), 'first job only');
+  await assert.rejects(createWorktree(repo, 'cx-445566', 'HEAD', home), /already exists/);
+  assert.equal(fs.readFileSync(path.join(first.path, 'untracked'), 'utf8'), 'first job only');
+  assert.equal(git('branch', '--list', '--format=%(refname:short)', first.branch), first.branch);
+  await removeWorktree(repo, first, 'cx-445566', home);
+
   // A slot that something else wrote into is kept.
   const kept = await createWorktree(repo, 'cx-112233', 'HEAD', home);
   fs.writeFileSync(path.join(path.dirname(kept.path), 'note'), 'keep');

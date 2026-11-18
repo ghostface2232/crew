@@ -470,6 +470,8 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     const job = jobs.get(id);
     // Only a job that was asked to rate saw another's work: a reviewer the change, an engineer the review it got back.
     if (!job.rates || job.kind === 'polish') throw new HttpError(400, 'This job was not asked to rate. Carry on without rating.');
+    if (!liveConfig().peerRatings) throw new HttpError(400, 'Ratings were turned off after this job started. Carry on without rating.');
+    if (job.kind === 'review' && body?.correctness === undefined) throw new HttpError(400, 'A review rates correctness. Pass correctness from 1 to 5.');
     readNotes();
     // Everything sent but the token and the fact is an item, so one this job may not rate is refused, not ignored.
     const { token: _token, fact: _fact, ...sent } = body;

@@ -54,6 +54,35 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: { path: { type: 'string', description: 'File or directory, relative to the working tree. Defaults to all of it.' } } },
   },
 ];
+/** Offered only to a job that was asked to rate; a reviewer rates the work it read, an engineer the review it got back. */
+const RATE = process.env.CREW_JOB_RATES === 'review'
+  ? {
+      name: 'rate',
+      description: 'Rate the work under review, once, before your report. Calling it again replaces your rating.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          correctness: { type: 'integer', minimum: 1, maximum: 5, description: '1: wrong in its main path. 3: works, with real bugs in edge cases. 5: you checked and found nothing.' },
+          report: { type: 'integer', minimum: 1, maximum: 5, description: 'Only if you were told what the author claimed: how well the claims matched what you found.' },
+          fact: { type: 'string', maxLength: 300, description: 'One line from this review that the numbers rest on.' },
+        },
+        required: ['correctness', 'fact'],
+      },
+    }
+  : process.env.CREW_JOB_RATES === 'delegate'
+    ? {
+        name: 'rate',
+        description: 'Rate the review findings the lead sent back to you, once, in the turn they arrive. Calling it again replaces your rating.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            findings: { type: 'integer', minimum: 1, maximum: 5, description: '1: wrong, or noise. 3: real but minor. 5: caught what would have shipped broken.' },
+            fact: { type: 'string', maxLength: 300, description: 'One line naming a finding the number rests on.' },
+          },
+          required: ['findings', 'fact'],
+        },
+      }
+    : undefined;
 const PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 
 const run = promisify(execFile);
@@ -110,6 +139,8 @@ async function callTool(name: string, args: any): Promise<unknown> {
       return api('POST', `${route}/browser`, { token });
     case 'siblings':
       return api('GET', `${route}/siblings?${auth}`);
+    case 'rate':
+      return api('POST', `${route}/rating`, { correctness: args.correctness, report: args.report, findings: args.findings, fact: args.fact, token });
     case 'search': {
       if (typeof args.pattern !== 'string' || !args.pattern) throw new Error('pattern must be a non-empty string.');
       const { cwd, target } = within(args.path);
@@ -144,7 +175,7 @@ async function handle(msg: any): Promise<void> {
     case 'ping':
       return reply({});
     case 'tools/list':
-      return reply({ tools: TOOLS });
+      return reply({ tools: RATE ? [...TOOLS, RATE] : TOOLS });
     case 'tools/call':
       try {
         const result = await callTool(params?.name, params?.arguments ?? {});

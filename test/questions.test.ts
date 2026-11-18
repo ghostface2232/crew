@@ -259,7 +259,7 @@ test('worker stdio and all question routes use a private token, with answers wak
   const worker = stdio(t, 'worker-mcp.ts', { ...h.env, ...server.env });
   assert.equal((await worker.request('initialize', { protocolVersion: '2025-11-25' })).serverInfo.name, 'crew-worker');
   const tools = (await worker.request('tools/list')).tools;
-  assert.deepEqual(tools.map((tool: any) => tool.name), ['ask_lead', 'lead_answers', 'browser', 'siblings', 'search', 'recent_changes']);
+  assert.deepEqual(tools.map((tool: any) => tool.name), ['ask_lead', 'lead_answers', 'browser', 'siblings', 'search', 'recent_changes', 'rate']);
   // Starting a browser outside the sandbox takes the worker's own token.
   assert.equal((await h.api('POST', `${route}/browser`, { token: 'wrong' })).status, 403);
   assert.deepEqual(await worker.request('ping'), {});
@@ -681,9 +681,12 @@ test('model notes take a job\'s own model, refuse a model it did not run, and re
   assert.deepEqual([noted.body.model, noted.body.agent, noted.body.samples], [model, 'codex', 1]);
   assert.match((await h.api('POST', '/api/notes', { job: job.id, model: 'other-model', reviewer: 'claude', size: 'small', text: 'x' })).body.error, /ran on .*, not other-model/);
   assert.match((await h.api('POST', '/api/notes', { job: 'cx-none', reviewer: 'claude', size: 'small', text: 'x' })).body.error, /No job with id/);
-  // A review built nothing, so it cannot be noted as a build; a summary must be text.
+  // A review built nothing, so it cannot be noted as a build, nor a build as a review; a summary must be text.
   const review = (await h.api('POST', '/api/jobs', { kind: 'review', cwd: h.home, project: h.home, review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } })).body;
-  assert.match((await h.api('POST', '/api/notes', { job: review.id, reviewer: 'claude', size: 'small', text: 'x' })).body.error, /builds nothing to judge/);
+  assert.match((await h.api('POST', '/api/notes', { job: review.id, role: 'build', reviewer: 'claude', size: 'small', text: 'x' })).body.error, /builds nothing/);
+  assert.match((await h.api('POST', '/api/notes', { job: job.id, role: 'review', of_model: 'm', size: 'small', text: 'x' })).body.error, /is not a review/);
+  assert.match((await h.api('POST', '/api/notes', { job: review.id, size: 'small', text: 'x' })).body.error, /of \(the work the review covered/);
+  assert.match((await h.api('POST', '/api/notes', { job: review.id, of_job: review.id, size: 'small', text: 'x' })).body.error, /built nothing a review could cover/);
   assert.match((await h.api('POST', '/api/notes', { model: model, summary: null })).body.error, /summary must be text/);
   // Noting the job again corrects its line, and its tier stays the job's own whatever the call says.
   assert.equal((await h.api('POST', '/api/notes', { job: job.id, reviewer: 'claude', size: 'small', tier: 'frontier', text: 'one edge case' })).body.samples, 1);
@@ -706,4 +709,50 @@ test('model notes take a job\'s own model, refuse a model it did not run, and re
   assert.deepEqual((await h.api('GET', '/api/state')).body.modelScores, []);
   assert.ok(fs.readdirSync(h.home).some((name) => name.startsWith('model-notes.json.unreadable-')));
   assert.equal((await h.api('POST', '/api/notes', { model: 'claude-test', reviewer: 'codex', size: 'small', text: 'after' })).status, 200);
+});
+
+test('peer ratings: a worker rates through its own tool, the review line gives the rating its target, and the switch stops it', { timeout: 20000 }, async (t) => {
+  const h = await daemon(t);
+  const { job, server } = await h.create();
+  assert.equal(server.env.CREW_JOB_RATES, 'delegate');
+  const route = `/api/jobs/${job.id}/rating`;
+  assert.equal((await h.api('POST', route, { findings: 4, fact: 'x', token: 'wrong' })).status, 403);
+  // An engineer rates the review it got back, never its own work.
+  const worker = stdio(t, 'worker-mcp.ts', { ...h.env, ...server.env });
+  await worker.request('initialize', { protocolVersion: '2025-11-25' });
+  assert.deepEqual(JSON.parse(textOf(await worker.call('rate', { findings: 4, fact: 'The race was real.' }))), { kept: { findings: 4 } });
+  assert.match((await worker.call('rate', { correctness: 5, fact: 'x' })).content[0].text, /at least one of findings/);
+  // An item the job may not rate refuses the whole rating, rather than being dropped from it.
+  for (const brief of [99, null]) assert.match((await h.api('POST', route, { findings: 4, brief, fact: 'x', token: server.env.CREW_JOB_TOKEN })).body.error, /at least one of findings/);
+  const review = (await h.api('POST', '/api/jobs', { kind: 'review', cwd: h.home, project: h.home, review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } })).body;
+  // The builder's line carries the lead's rating of it; the review's line names the work, and so the builder's rating of the review.
+  const built = await h.api('POST', '/api/notes', { job: job.id, reviewer: 'codex', size: 'small', text: 'One race, fixed after a reply.', rating: { correctness: 4, brief: 5 } });
+  assert.equal(built.status, 200, JSON.stringify(built.body));
+  const reviewed = (await h.api('POST', '/api/notes', { job: review.id, of_job: job.id, size: 'small', findings: { high: 1 }, text: 'Found the race.', rating: { findings: 5 } })).body;
+  assert.deepEqual([reviewed.reviewSamples, reviewed.items.findings !== null], [1, true]);
+  const saved = JSON.parse(fs.readFileSync(path.join(h.home, 'model-notes.json'), 'utf8'));
+  assert.deepEqual([saved.version, saved.ratings.map((r: any) => [r.byJob, r.items])], [2, [[job.id, { findings: 4 }]]]);
+  assert.deepEqual(saved.models[reviewed.model].evidence.find((e: any) => e.role === 'review').of, { job: job.id, model: reviewed.model });
+  // Off: the scores are the evidence alone, a rating on a line is not kept, and a new job is not asked to rate.
+  assert.equal((await h.api('GET', '/api/state')).body.peerRatings, true);
+  assert.match((await h.api('POST', '/api/peer-ratings', { enabled: 'no' })).body.error, /true or false/);
+  assert.deepEqual((await h.api('POST', '/api/peer-ratings', { enabled: false })).body, { peerRatings: false });
+  const off = (await h.api('GET', '/api/state')).body;
+  assert.deepEqual([off.peerRatings, off.modelScores[0].ratings], [false, 0]);
+  const dropped = (await h.api('POST', '/api/notes', { job: job.id, reviewer: 'codex', size: 'small', text: 'One race.', rating: { correctness: 1 } })).body;
+  assert.equal(dropped.ratingDropped, true);
+  // The rating sent while off is not kept; the one the line already had stays.
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(h.home, 'model-notes.json'), 'utf8')).models[dropped.model].evidence.find((e: any) => e.role === 'build').rating, { correctness: 4, brief: 5 });
+  const later = await h.create();
+  assert.equal(later.server.env.CREW_JOB_RATES, undefined);
+  assert.match((await h.api('POST', `/api/jobs/${later.job.id}/rating`, { findings: 4, fact: 'x', token: later.server.env.CREW_JOB_TOKEN })).body.error, /not asked to rate/);
+  // On again is the default, so the key leaves the file.
+  assert.deepEqual((await h.api('POST', '/api/peer-ratings', { enabled: true })).body, { peerRatings: true });
+  const config = JSON.parse(fs.readFileSync(path.join(h.home, 'config.json'), 'utf8'));
+  assert.equal('peerRatings' in config, false);
+  // A fix starts from a review of someone else's work, so it is not asked to rate one.
+  fs.writeFileSync(path.join(h.home, 'config.json'), JSON.stringify({ ...config, roles: { fix: { agents: ['codex'] } } }));
+  const fix = (await h.api('POST', '/api/jobs', { kind: 'delegate', role: 'fix', cwd: h.home, project: h.home, task: 'fix', isolation: 'in_place', lead: 'test-lead' })).body;
+  await h.started(fix.id);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(h.home, `${fix.id}.json`), 'utf8')).env.CREW_JOB_RATES, undefined);
 });

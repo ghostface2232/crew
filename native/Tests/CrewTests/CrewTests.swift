@@ -592,6 +592,13 @@ private final class MockProtocol: URLProtocol, @unchecked Sendable {
         let scores = [ModelScore(model: "gpt-x", agent: "codex", score: 8.4, build: 8.6, fix: nil, samples: 12, status: "settled", summary: "Solid.")]
         try store.receive(event("modelScores", scores))
         #expect(store.state.modelScores == scores)
+        // Items and the peer ratings switch come from a daemon that has them; an older one sends neither.
+        #expect(scores[0].itemBars.isEmpty && store.state.peerRatings == nil)
+        let rated = try JSONDecoder().decode([ModelScore].self, from: Data(#"[{"model":"gpt-x","agent":"codex","score":8.1,"build":8.6,"fix":null,"samples":3,"buildSamples":1,"fixSamples":0,"reviewSamples":2,"items":{"correctness":8.1,"brief":7.5,"report":null,"findings":6.4},"status":"settled","summary":""}]"#.utf8))
+        #expect(rated[0].itemBars.map(\.label) == ["Brief", "Findings"])
+        #expect(rated[0].countsText.hasSuffix("0 fixes · 2 reviews"))
+        try store.receive(event("peerRatings", false))
+        #expect(store.state.peerRatings == false)
         #expect(RoleInfo(role: "fix", kind: "delegate", label: "Fix", summary: "").group == "Review")
         #expect(RoleInfo(role: "release", kind: "delegate", label: "Release", summary: "").group == "Build")
     }

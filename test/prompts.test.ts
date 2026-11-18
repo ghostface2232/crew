@@ -119,3 +119,12 @@ test('the lead picks skills by name from the installed ones', (t) => {
   assert.equal(describe('# Title\n---\ndescription: body\n---\n'), '');
 });
 
+
+test('a job asked to rate is told what it rates: a reviewer the work, an engineer the review it gets back', () => {
+  const rating = (spec: JobSpec, rates?: boolean) => /# Rating\n(.*)/.exec(buildPrompt(spec, null, null, '', undefined, true, [], undefined, rates).instructions)?.[1];
+  const review: JobSpec = { kind: 'review', cwd: CWD, review: { target, mode: 'adversarial' } };
+  const delegate: JobSpec = { kind: 'delegate', cwd: CWD, task: 'Add a flag.' };
+  assert.match(rating(review, true)!, /^Before your report, call crew\.rate once for the work under review: correctness/);
+  assert.match(rating(delegate, true)!, /^If the lead sends review findings back to you, call crew\.rate once in that turn: findings/);
+  assert.deepEqual([rating(review), rating(delegate, false)], [undefined, undefined]);
+});

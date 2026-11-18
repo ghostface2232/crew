@@ -383,7 +383,7 @@ test('Codex accepts only crew MCP approvals, including correlated legacy input r
   const h = harness(`
     const send = (msg) => console.log(JSON.stringify({ jsonrpc: '2.0', ...msg }));
     const requests = [
-      ...['ask_lead', 'lead_answers', 'siblings'].map((tool_name) => ({ serverName: 'crew', tool_name, expected: 'accept' })),
+      ...['ask_lead', 'lead_answers', 'siblings', 'rate'].map((tool_name) => ({ serverName: 'crew', tool_name, expected: 'accept' })),
       { serverName: 'other', tool_name: 'ask_lead', expected: 'decline' },
       { serverName: 'crew', tool_name: 'delete', expected: 'decline' },
       { serverName: 'crew', tool_name: 'ask_lead', approvalKind: 'browser_auth', expected: 'decline' },
@@ -423,7 +423,7 @@ test('Codex accepts only crew MCP approvals, including correlated legacy input r
     await h.jobs.wait(job.id, job.seq, 1000);
     assert.equal(job.waiting, null);
   }
-  assert.deepEqual(JSON.parse(job.report), Array(7).fill(true));
+  assert.deepEqual(JSON.parse(job.report), Array(8).fill(true));
 });
 
 test('Codex merges crew MCP into a read-only permissions profile', { timeout: 5000 }, async (t) => {
@@ -764,7 +764,7 @@ for (const agent of ['codex', 'antigravity'] as const) {
 }
 
 test('Antigravity permits only exactly identified Crew calls without metadata in polish', { timeout: 5000 }, async (t) => {
-  const names = ['recent_changes', 'search', 'siblings', 'lead_answers', 'ask_lead'];
+  const names = ['recent_changes', 'search', 'siblings', 'lead_answers', 'ask_lead', 'rate'];
   const titles = names.flatMap((name) => [`mcp_crew_${name}`, `Run mcp_crew_${name}`]);
   const rejected = ['Run mcp_other_recent_changes', 'Run mcp_crew_delete', 'Run mcp_crew_search_extra', 'please Run mcp_crew_search', 'Run mcp_crew_search && rm -rf .', 'recent_changes'];
   const h = harness(permissionStub([...titles, ...rejected].map((title) => ({ kind: 'other', title, rawInput: { query: 'hello' } }))), 'antigravity');

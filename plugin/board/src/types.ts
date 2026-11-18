@@ -28,6 +28,8 @@ export interface BoardState {
   /** The preset in effect, or null when none is set. */
   preset?: PresetName | null;
   presets?: Record<PresetName, Preset>;
+  /** Whether the lead and the workers rate each other's work; absent from a daemon that predates peer ratings. */
+  peerRatings?: boolean;
   /** Each model's score from its review notes; absent from a daemon that predates model notes. */
   modelScores?: ModelScore[];
 }

@@ -315,7 +315,7 @@ const ROLE_NAMES: Record<JobKind, string> = { delegate: 'engineer', review: 'rev
  * - A read-only job changes nothing whatever its role: a question is answered by the engineer, with a reviewer's limits.
  */
 export function decide(role: JobKind, cwd: string, toolCall: { kind?: string; title?: string; locations?: { path?: string }[]; rawInput?: unknown; _meta?: { mcpServerName?: string; mcpToolName?: string } }, readOnly = false): 'allow' | 'ask' | { refuse: string } {
-  if (toolCall._meta?.mcpServerName === 'crew' && ['ask_lead', 'lead_answers', 'siblings', 'search', 'recent_changes'].includes(toolCall._meta.mcpToolName ?? '')) return 'allow';
+  if (toolCall._meta?.mcpServerName === 'crew' && ['ask_lead', 'lead_answers', 'siblings', 'search', 'recent_changes', 'rate'].includes(toolCall._meta.mcpToolName ?? '')) return 'allow';
   const kind = toolCall.kind ?? 'other';
   // The daemon's secret is not a worker's to read, whatever the role. Commands are the user's to approve as before.
   const secret = tokenFile(HOME);
@@ -324,7 +324,7 @@ export function decide(role: JobKind, cwd: string, toolCall: { kind?: string; ti
   const input = toolCall.rawInput;
   const command = typeof input === 'string' || (input !== null && typeof input === 'object' && ('command' in input || 'CommandLine' in input));
   if (!toolCall._meta?.mcpServerName && !toolCall._meta?.mcpToolName && kind === 'other' && !command
-    && /^(?:Run )?mcp_crew_(?:ask_lead|lead_answers|siblings|search|recent_changes)$/.test(toolCall.title ?? '')) return 'allow';
+    && /^(?:Run )?mcp_crew_(?:ask_lead|lead_answers|siblings|search|recent_changes|rate)$/.test(toolCall.title ?? '')) return 'allow';
   if (PASSIVE_KINDS.includes(kind)) return 'allow';
   if (kind === 'switch_mode') return { refuse: kind };
   if (readOnly && role !== 'review') return { refuse: kind === 'edit' ? 'edit in a read-only job' : kind };

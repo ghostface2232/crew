@@ -188,6 +188,11 @@ export interface Config {
   roles: Record<Role, RoleAssignment>;
   /** The roles as the user wrote them: a role without `agent` inherits from its parent. Settings edit this, not `roles`. */
   roleSettings: RoleSettings;
+  /**
+   * Whether the lead and the workers rate each other's work as they see it, as one input to the model scores. Off, no
+   * worker is asked to rate and the scores come from the review evidence alone; ratings already given are kept.
+   */
+  peerRatings: boolean;
   /** The preset in effect; none by default, so an unconfigured install runs each agent's own settings. */
   preset: PresetName | null;
   /** What each preset sets. The built-in ones set effort only; a user's entry replaces fields of the same name. */
@@ -221,6 +226,7 @@ const defaults: Config = {
   antigravity: { bin: 'agy', enabled: true },
   roles: resolveRoles({}),
   roleSettings: {},
+  peerRatings: true,
   preset: null,
   presets: PRESETS,
 };
@@ -335,6 +341,8 @@ export function resolveConfig(user: UserConfig): Config {
     const names: unknown = user.codex?.[key] === undefined ? defaults.codex[key] : user.codex[key];
     if (!Array.isArray(names) || names.some((name) => typeof name !== 'string')) throw new Error(`codex.${key} must be a list of plugin names such as ["computer-use"].`);
   }
+  // Any other value would read as on, and "false" in quotes is the likely one.
+  if (user.peerRatings !== undefined && typeof user.peerRatings !== 'boolean') throw new Error('peerRatings must be true or false.');
   return {
     ...defaults,
     ...user,

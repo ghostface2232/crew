@@ -81,10 +81,13 @@ Then fix once, at the cause:
 
 One review round is the default. Run a second only if the fixes were substantial; never more than two, because review loops burn both agents' usage limits.
 
-Then record what the review showed with `note`, one call per model judged. Every call needs `reviewer`, the change's `size`, and `text`, one line of facts:
+Then record what the review showed with `note`, one call per model judged. Every call needs the change's `size` and `text`, one line of facts, and a builder's or fixer's line needs `reviewer`:
 
 - The builder's line (`role: "build"`): `job_id` of the job that built the work (never the review's), or `model` with your own model id for work done here or in a subagent. A result merged from several jobs gets one line per job, each with the findings in its part; a finding that spans the pieces goes on your own line. For a delegated job, also give `adoption`: how you took its work (`as-is`, `after-reply`, `partly`, `rejected`); issues you found in its diff count as findings, with `reviewer: "claude"` if no other review covered it. Give the findings you accepted by severity and the ones you `declined`. When several reviews covered the work, note it once with every accepted finding counted once, naming as `reviewer` one from another agent if any ran.
 - The fixer's line (`role: "fix"`): `outcome` is `root-cause`, `patch`, or `another-review` when the fix needed another round, and `findings` are what the check of the fix raised.
+- The reviewer's line (`role: "review"`), one per review a job ran: `job_id` of the review job, the work it covered as `of_job` (the job that built it) or `of_model` (your own model id, for work done here), and its own findings as you triaged them, accepted in `findings` and the rest in `declined`. It scores the reviewer on how its findings held up, and gives the reviewer's rating of the work, and the builder's rating of the review, their target.
+
+Unless the user turned peer ratings off, add `rating` to a job's line for what you saw of its work, each item from 1 to 5: `correctness` (a builder only), `brief` (how it followed your brief) and `report` (how well its report matched the work) for a builder or fixer, `findings` (how useful they were) for a review. The line's `text` is the fact the numbers rest on, so leave out an item it does not bear out. Never rate your own work: its reviewer does. Workers rate in turns they already have, so do not ask one for a rating.
 
 Facts only, never impressions. When a response says a model's summary is due, rewrite it with `note_summary` (`model` and `summary`) from its evidence lines. The notes inform which tier and holder you pick; the roles and presets stay the user's.
 

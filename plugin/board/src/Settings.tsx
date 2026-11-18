@@ -225,6 +225,16 @@ export function Settings({ state, update, close }: { state: Snapshot; update: Ap
       if (key === 'model' && settings.effort && accepts?.length && !accepts.includes(settings.effort)) delete settings.effort;
       return { ...own, [agent]: settings };
     });
+  // A switch, not a draft: it saves as it is flipped, and the daemon's answer is what the board then shows.
+  const [ratingsStatus, setRatingsStatus] = useState('');
+  const setPeerRatings = async (enabled: boolean) => {
+    setRatingsStatus('');
+    try {
+      board.receive('peerRatings', (await request<{ peerRatings: boolean }>('/api/peer-ratings', { enabled })).peerRatings);
+    } catch (error) {
+      setRatingsStatus((error as Error).message);
+    }
+  };
   const savePreset = async () => {
     if (presetLock.current) return;
     presetLock.current = true;
@@ -590,6 +600,19 @@ export function Settings({ state, update, close }: { state: Snapshot; update: Ap
                   <p className={styles.footnote}>
                     Scored from review findings per build size, with fixes scored apart. A model is ranked after three build
                     reviews; a review by its own agent counts half.
+                  </p>
+                </section>
+              )}
+              {current === 'models' && state.peerRatings !== undefined && (
+                <section className={styles.group}>
+                  <div className={styles.rows}>
+                    <label className={styles.row}>
+                      <span>Peer ratings</span>
+                      <input type="checkbox" className={styles.switch} checked={state.peerRatings} onChange={(event) => void setPeerRatings(event.target.checked)} />
+                    </label>
+                  </div>
+                  <p className={styles.footnote} role={ratingsStatus ? 'alert' : undefined}>
+                    {ratingsStatus || 'The lead and the workers rate each other\'s work as they see it, in turns they already have, and the ratings move half of a score from where the review findings put it. Off, nobody is asked to rate and the scores come from the review findings alone; ratings already given are kept.'}
                   </p>
                 </section>
               )}

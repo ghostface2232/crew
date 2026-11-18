@@ -59,6 +59,24 @@ function blankless(entry: object): Record<string, unknown> {
     .filter(([, value]) => value !== '' && !(value && typeof value === 'object' && !Array.isArray(value) && !Object.keys(value).length)));
 }
 
+/** Turns peer ratings on or off in config.json, keeping every other setting. On is the default, so it is left unwritten. */
+export function savePeerRatings(home: string, enabled: unknown): Pick<Config, 'peerRatings'> {
+  if (typeof enabled !== 'boolean') throw new Error('enabled must be true or false.');
+  const file = path.join(home, 'config.json');
+  let current: Record<string, unknown> = {};
+  try {
+    current = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error(`${file} is not valid JSON, so it was left untouched: ${(err as Error).message}`);
+  }
+  if (!current || typeof current !== 'object' || Array.isArray(current)) throw new Error(`${file} does not hold a settings object, so it was left untouched.`);
+  const { peerRatings: _old, ...rest } = current;
+  const next = enabled ? rest : { ...rest, peerRatings: false };
+  const resolved = resolveConfig(next as never);
+  writeAtomic(file, `${JSON.stringify(next, null, 2)}\n`);
+  return { peerRatings: resolved.peerRatings };
+}
+
 /** Sets or clears the preset in config.json, keeping every other setting. Refused without writing if it is not a preset. */
 export function savePreset(home: string, preset: unknown): Pick<Config, 'preset' | 'presets'> {
   const file = path.join(home, 'config.json');

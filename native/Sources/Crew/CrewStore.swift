@@ -82,9 +82,12 @@ final class CrewStore {
     func isStageOpen(_ mission: Mission, _ index: Int, jobs: [Job], hasLead: Bool) -> Bool {
         stageExpanded["\(mission.id):\(index)"] ?? stageOpensByDefault(mission, index, jobs: jobs, hasLead: hasLead)
     }
-    /// A stage the mission has moved past folds once nothing in it is live or selected. `jobs` are the stage's own.
+    /// A stage with this many jobs or fewer stays open by default, as reopening each one would cost more than it saves.
+    static let stageOpensUpTo = 3
+    /// A busy stage the mission has moved past folds once nothing in it is live or selected. `jobs` are the stage's own.
     func stageOpensByDefault(_ mission: Mission, _ index: Int, jobs: [Job], hasLead: Bool) -> Bool {
-        index >= mission.step || hasLead || jobs.contains { $0.isActive || $0.waiting != nil || selectedJob == $0.id }
+        jobs.count <= Self.stageOpensUpTo || index >= mission.step || hasLead
+            || jobs.contains { $0.isActive || $0.waiting != nil || selectedJob == $0.id }
     }
     var notificationsAllowed = false
     private var completionLeases = CompletionLeases()

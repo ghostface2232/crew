@@ -44,18 +44,23 @@ test('short mission plans render in order with matching tracks and progress', as
   await expect(stage(card, 'Final').locator('button[data-job]')).toHaveCount(2);
 });
 
-test('a mission with more than one job folds the stages it has moved past, and each stage folds on its own', async ({ page, request }) => {
+test('a mission with more than one job folds the busy stages it has moved past, and each stage folds on its own', async ({ page, request }) => {
   const data = fixture();
-  data.missions[0].stages = ['implement', 'cross-review'];
+  data.missions[0].stages = ['plan', 'implement', 'cross-review'];
   data.missions[0].stage = 'cross-review';
   data.jobs = [
-    ...Array.from({ length: 6 }, (_, at) => job({ id: `cx-build-${at}`, title: `Build part ${at}`, missionStep: 0, state: 'done', endedAt: NOW - 60_000 })),
-    ...Array.from({ length: 3 }, (_, at) => job({ id: `cx-review-${at}`, title: `Review part ${at}`, kind: 'review', missionStep: 1 })),
+    ...Array.from({ length: 3 }, (_, at) => job({ id: `cx-plan-${at}`, title: `Plan part ${at}`, missionStep: 0, state: 'done', endedAt: NOW - 60_000 })),
+    ...Array.from({ length: 4 }, (_, at) => job({ id: `cx-build-${at}`, title: `Build part ${at}`, missionStep: 1, state: 'done', endedAt: NOW - 60_000 })),
+    job({ id: 'cx-review-0', title: 'Review part 0', kind: 'review', missionStep: 2 }),
   ];
   await request.post('/__push', { data: { type: 'state', data } });
   const card = page.locator('[data-key="mission-1"]');
-  const build = card.getByRole('button', { name: 'Build, 6 jobs' });
-  const review = card.getByRole('button', { name: 'Review, 3 jobs' });
+  const plan = card.getByRole('button', { name: 'Plan, 3 jobs' });
+  const build = card.getByRole('button', { name: 'Build, 4 jobs' });
+  const review = card.getByRole('button', { name: 'Review, 1 job' });
+  // A passed stage of three jobs or fewer stays open; a busier one folds.
+  await expect(plan).toHaveAttribute('aria-expanded', 'true');
+  await expect(card.getByRole('button', { name: /Plan part 0/ })).toBeVisible();
   await expect(build).toHaveAttribute('aria-expanded', 'false');
   await expect(card.getByRole('button', { name: /Build part 0/ })).toBeHidden();
   await expect(review).toHaveAttribute('aria-expanded', 'true');
@@ -66,6 +71,11 @@ test('a mission with more than one job folds the stages it has moved past, and e
   await expect(card.getByRole('button', { name: /Build part 0/ })).toBeVisible();
   await review.click();
   await expect(card.getByRole('button', { name: /Review part 0/ })).toBeHidden();
+
+  // Two jobs are enough to fold.
+  data.jobs = data.jobs.slice(-2);
+  await request.post('/__push', { data: { type: 'state', data } });
+  await expect(card.getByRole('button', { name: 'Build, 1 job' })).toBeVisible();
 });
 
 test('a quiet ended workload looks finished and the authenticated user can mark the mission done', async ({ page, request }) => {

@@ -135,7 +135,9 @@ struct BoardView: View {
     private func foldedStages(_ mission: Mission, jobs: [Job], lead: ClaudeSession?) -> [String] {
         guard jobs.count > MissionPanel.foldStagesAfter else { return [] }
         return mission.stops.indices.filter { index in
-            !store.stageOpensByDefault(mission, index, jobs: jobs.filter { mission.jobStep($0) == index }, hasLead: lead != nil && index == mission.step)
+            let mine = jobs.filter { mission.jobStep($0) == index }, hasLead = lead != nil && index == mission.step
+            // A stage the panel does not draw has nothing to fold.
+            return (!mine.isEmpty || hasLead) && !store.stageOpensByDefault(mission, index, jobs: mine, hasLead: hasLead)
         }.map { "\(mission.id)#\($0)" }
     }
     private var connectionBanner: some View {
@@ -562,8 +564,9 @@ struct MissionPanel: View {
             .padding(.vertical, -Space.xs)
             .accessibilityLabel("\(mission.stops[index]), \(count) \(count == 1 ? "job" : "jobs")")
             .accessibilityValue(open ? "Expanded" : "Collapsed")
+            .accessibilityAddTraits(.isHeader)
         } else {
-            name.padding(.leading, WorkspaceStyle.rowTitleInset)
+            name.padding(.leading, WorkspaceStyle.rowTitleInset).accessibilityAddTraits(.isHeader)
         }
     }
 }

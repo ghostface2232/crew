@@ -96,6 +96,8 @@ Scratch is emptied after every turn. Files a Codex worker needs in a follow-up t
 
 The worker's Crew MCP server is started by the agent with the daemon's own executable. Under the desktop app that is the Electron executable, and agents are launched without `ELECTRON_RUN_AS_NODE`, so the server's own environment sets it; without it the server opens the app and the handshake fails.
 
+A worker whose Crew server did not start works on without `ask_lead`, `browser`, and the rest, and reports nothing: 0.3.0 ran that way on Windows unnoticed until a retrospective. Codex reports each server's start per thread (`mcpServer/startupStatus/updated`, with `name`, `status`, and `error`). When `crew` fails, the job gets a note with Codex's reason and the board a line of activity, once per run; the notification can arrive before `thread/start` is answered, so the reason is held until the thread has a run. Checked on 2026-11-20 with Codex CLI 0.167.0 and a server command that does not exist: `failed` arrived in the same second as the answer to `thread/start`, twice, with no turn started. Antigravity reports no such status, so its jobs are not covered.
+
 What each agent may do in each role:
 
 | Role | Codex | Antigravity |

@@ -1393,3 +1393,44 @@ test('the end of a turn the probe gave up on does not end a follow-up turn', { t
   assert.equal(h.run.turnId, 'follow-up');
   assert.deepEqual(h.ended, []);
 });
+
+test('a job whose Crew tools did not start says so once, whether Codex reports it before or after the thread opens', { timeout: 10_000 }, async (t) => {
+  for (const early of [true, false]) {
+    const h = harness(`
+      const send = (msg) => console.log(JSON.stringify({ jsonrpc: '2.0', ...msg }));
+      const status = (name, state, error) => send({ method: 'mcpServer/startupStatus/updated', params: { threadId: 'thread', name, status: state, error: error ?? null, failureReason: null } });
+      const failed = () => {
+        status('crew', 'starting');
+        status('other', 'failed', 'not ours');
+        status('crew', 'failed', 'MCP startup failed: No such file or directory (os error 2)');
+        status('crew', 'failed', 'MCP startup failed: No such file or directory (os error 2)');
+      };
+      require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
+        const msg = JSON.parse(line);
+        if (msg.method === 'thread/start') {
+          if (${early}) failed();
+          send({ id: msg.id, result: { thread: { id: 'thread' } } });
+          if (!${early}) failed();
+          return;
+        }
+        if (msg.method !== 'turn/start') return msg.id != null && send({ id: msg.id, result: {} });
+        send({ id: msg.id, result: { turn: { id: 'turn' } } });
+        // Codex starts the servers again for a later turn.
+        failed();
+        send({ method: 'turn/completed', params: { threadId: 'thread', turn: { id: 'turn', status: 'completed' } } });
+      });
+    `);
+    cleanup(t, h);
+    const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'build it' });
+    const ended = async () => {
+      while (!job.endedAt) await h.jobs.wait(job.id, job.seq, 1000);
+    };
+    const told = () => job.notes.filter((note) => note.startsWith("Crew's worker tools did not start"));
+    await ended();
+    assert.equal(told().length, 1, early ? 'reported before the thread opened' : 'reported after the thread opened');
+    assert.match(told()[0], /No such file or directory.*ask_lead/s);
+    await h.jobs.reply(job.id, { message: 'again' });
+    await ended();
+    assert.equal(told().length, 1);
+  }
+});

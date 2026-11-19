@@ -382,10 +382,13 @@ export class CodexAdapter implements Adapter {
       }
     }));
     const profile = job.runsApp ? 'crew_app' : 'crew_workspace';
+    // Commands get the scratch directory as their temp directory, so the system's is left out. Codex would resolve
+    // it to the server's own TEMP, the user's whole temp folder, and on Windows grant write on it by an inherited ACL
+    // over every file there: minutes on a full folder, during which thread/start does not answer.
     const app = (job.runsApp || lean.features.plugins || Object.keys(shared).length > 0) && job.sandbox === 'workspace-write'
       ? {
           default_permissions: profile,
-          permissions: { [profile]: { filesystem: { ':root': 'read', [job.cwd]: 'write', ':tmpdir': 'write', ':slash_tmp': 'write', ...(job.scratch ? { [job.scratch]: 'write' } : {}), ...evidence, ...shared, ...secret }, network: { enabled: Boolean(job.runsApp) } } },
+          permissions: { [profile]: { filesystem: { ':root': 'read', [job.cwd]: 'write', ':slash_tmp': 'write', ...(job.scratch ? { [job.scratch]: 'write' } : {}), ...evidence, ...shared, ...secret }, network: { enabled: Boolean(job.runsApp) } } },
         }
       : null;
     return {
@@ -397,7 +400,7 @@ export class CodexAdapter implements Adapter {
       config: { ...(app ?? scratch),
       ...(job.scratch ? {
         shell_environment_policy: { set: { TMPDIR: job.scratch, TMP: job.scratch, TEMP: job.scratch } },
-        ...(!app && !scratch ? { sandbox_workspace_write: { writable_roots: [job.scratch, ...Object.keys(evidence)] } } : {}),
+        ...(!app && !scratch ? { sandbox_workspace_write: { writable_roots: [job.scratch, ...Object.keys(evidence)], exclude_tmpdir_env_var: true } } : {}),
       } : {}), // Its three tools only talk to the bridge. Without this a job with approval policy "never" (a review, a question)
       // is refused the call outright, and any other job would stop to ask.
       mcp_servers: { crew: { ...ctl.mcp, default_tools_approval_mode: 'approve' } },

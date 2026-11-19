@@ -441,7 +441,10 @@ test('Codex runs an app job with network access and reports what its reviewer re
   assert.equal(seen[0].config.default_permissions, 'crew_app');
   assert.deepEqual(seen[0].config.permissions.crew_app.network, { enabled: true });
   const files = seen[0].config.permissions.crew_app.filesystem;
-  assert.deepEqual([files[':root'], files[job.cwd], files[':tmpdir'], files[':slash_tmp']], ['read', 'write', 'write', 'write']);
+  assert.deepEqual([files[':root'], files[job.cwd], files[':slash_tmp'], files[job.scratch!]], ['read', 'write', 'write', 'write']);
+  // The scratch directory is the commands' temp directory; the user's whole temp folder is not writable.
+  assert.equal(files[':tmpdir'], undefined);
+  assert.equal(seen[0].config.shell_environment_policy.set.TEMP, job.scratch);
   assert.deepEqual(Object.entries(files).filter(([, access]) => access === 'deny').map(([file]) => path.basename(file)), ['token']);
   const crew = seen[0].config.mcp_servers.crew;
   assert.equal(crew.command, process.execPath);
@@ -1187,6 +1190,7 @@ test('Codex writable and read-only thread parameters set all temp variables and 
       } else {
         assert.equal(params.sandbox, 'workspace-write');
         assert.deepEqual(params.config.sandbox_workspace_write.writable_roots, [job.scratch]);
+        assert.equal(params.config.sandbox_workspace_write.exclude_tmpdir_env_var, true);
       }
     }
   }

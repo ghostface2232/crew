@@ -76,12 +76,29 @@ function listening(port: number): Promise<boolean> {
   });
 }
 
+/** The port of a daemon that is running for this Crew home, as it recorded it. */
+async function recorded(): Promise<{ pid: number; port: number } | null> {
+  try {
+    const { pid, port } = JSON.parse(fs.readFileSync(path.join(HOME, 'daemon.json'), 'utf8'));
+    process.kill(pid, 0);
+    return await listening(port) ? { pid, port } : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Bind a port before reading or writing any state on disk. If two daemons start at once, both try the same ports
- * in the same order, so the loser finds the winner listening and exits before creating a token or deleting the
- * winner's scratch directories and review snapshots. A port the system reserves has no listener, so it is skipped.
+ * Bind a port before writing any state on disk. If two daemons start at once, both try the same ports in the same
+ * order, so the loser finds the winner listening and exits before creating a token or deleting the winner's scratch
+ * directories and review snapshots. A port the system reserves has no listener, so it is skipped. Reservations move,
+ * so a daemon on a fallback port does not hold the ports before it: a later daemon checks the record first.
  */
 async function bind(): Promise<number> {
+  const running = await recorded();
+  if (running) {
+    log(`port ${running.port} is already in use by the running daemon (process ${running.pid})`);
+    process.exit(0);
+  }
   for (const port of PORTS) {
     const err = await new Promise<NodeJS.ErrnoException | null>((resolve) => {
       server.once('error', resolve);

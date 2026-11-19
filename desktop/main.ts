@@ -27,6 +27,8 @@ let quitting = false;
 let stopping = false;
 let timer: ReturnType<typeof setTimeout> | undefined;
 let pollAbort: AbortController | null = null;
+/** The daemon address the board was last moved to. */
+let movedTo = '';
 let pending = 0;
 const stateFile = path.join(app.getPath('userData'), 'window.json');
 const asset = (name: string) => path.join(import.meta.dirname, name);
@@ -259,9 +261,13 @@ async function poll() {
     const signal = AbortSignal.any([pollAbort.signal, AbortSignal.timeout(4000)]);
     const state = await api<BoardState>('GET', '/api/state', undefined, signal);
     if (stopping) return;
-    // A daemon that restarted on another port leaves the board reconnecting to the old one.
+    // A daemon that restarted on another port leaves the board reconnecting to the old one. Moved once per port:
+    // a board that refuses to unload (unsaved settings) is not asked again every poll.
     const shown = window && !window.isDestroyed() ? window.webContents.getURL() : '';
-    if (URL.canParse(shown) && new URL(shown).origin !== baseUrl()) void loadBoard().catch(console.error);
+    if (URL.canParse(shown) && new URL(shown).origin !== baseUrl() && movedTo !== baseUrl()) {
+      movedTo = baseUrl();
+      void loadBoard().catch(console.error);
+    }
     trayMenu(
       state.jobs.filter((job) => job.state === 'waiting').length +
         state.claude.filter((claude) => claude.state === 'waiting').length,

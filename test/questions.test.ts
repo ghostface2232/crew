@@ -548,6 +548,23 @@ test('a daemon that loses the race for the port writes no token and leaves runni
   assert.equal((await h.api('GET', `/api/jobs/${job.id}`)).body.state, 'running');
 });
 
+test('a daemon whose ports are free still yields to the daemon running on another port', { timeout: 15000 }, async (t) => {
+  const h = await daemon(t);
+  const { body: job } = await h.api('POST', '/api/jobs', { kind: 'delegate', cwd: h.home, project: h.home, task: 'a question', ask: true });
+  // As when the running daemon took a fallback port and the system has since freed the ports before it.
+  const port = await freePort();
+  const later = spawn(process.execPath, [path.resolve('plugin/bridge/daemon.ts')], { env: { ...h.env, CREW_PORT: String(port) }, stdio: ['ignore', 'pipe', 'pipe'] });
+  // A daemon that does not yield keeps running; it must not outlive the test.
+  t.after(() => { if (later.exitCode === null) later.kill(); });
+  let out = '';
+  later.stdout.on('data', (chunk) => { out += chunk; });
+  assert.equal(await new Promise((resolve) => later.once('exit', resolve)), 0);
+  assert.match(out, new RegExp(`port ${h.port} is already in use by the running daemon`));
+  assert.equal(JSON.parse(fs.readFileSync(path.join(h.home, 'daemon.json'), 'utf8')).port, h.port);
+  assert.ok(fs.existsSync(job.scratch), 'the running job keeps its scratch directory');
+  assert.equal((await h.api('GET', `/api/jobs/${job.id}`)).body.state, 'running');
+});
+
 test('a client replacing an outdated daemon is refused while a job is active', { timeout: 15000 }, async (t) => {
   const h = await daemon(t);
   const { job } = await h.create();

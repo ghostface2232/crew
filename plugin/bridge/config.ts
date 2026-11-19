@@ -31,8 +31,25 @@ export function installed(): { version: string; build: string } {
 }
 
 export const HOME = process.env.CREW_HOME ?? path.join(os.homedir(), '.crew');
-export const PORT = Number(process.env.CREW_PORT ?? 47615);
-export const BASE_URL = `http://127.0.0.1:${PORT}`;
+/**
+ * Ports the daemon tries, in order; CREW_PORT pins one. Windows can reserve a port with nothing listening on it:
+ * WSL's mirrored networking reserves a block of 4096 at each start, wherever it finds room. So each fallback lies
+ * further from the others than such a block.
+ */
+export const PORTS = process.env.CREW_PORT ? [Number(process.env.CREW_PORT)] : [47615, 42615, 37615, 32615, 27615];
+
+/** The port the daemon took, as it recorded it in the Crew home; the first it tries until it has recorded one. */
+export function daemonPort(): number {
+  try {
+    const { port } = JSON.parse(fs.readFileSync(path.join(HOME, 'daemon.json'), 'utf8'));
+    if (PORTS.includes(port)) return port;
+  } catch {
+    /* No daemon has recorded a port. */
+  }
+  return PORTS[0];
+}
+
+export const baseUrl = () => `http://127.0.0.1:${daemonPort()}`;
 
 export type WorkerAgent = 'codex' | 'antigravity';
 /** How a job runs: its sandbox, workspace, and base prompt. Each role runs as one of these. */

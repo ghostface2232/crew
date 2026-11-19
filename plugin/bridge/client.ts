@@ -2,10 +2,10 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { readToken, tokenFile } from './auth.ts';
-import { agentEnv, BASE_URL, HOME, installed, nodeEnv, PLUGIN_ROOT } from './config.ts';
+import { agentEnv, baseUrl, HOME, installed, nodeEnv, PLUGIN_ROOT } from './config.ts';
 
 export async function api<T = any>(method: 'GET' | 'POST', route: string, body?: unknown, signal?: AbortSignal): Promise<T> {
-  const send = (token: string | null) => fetch(`${BASE_URL}${route}`, {
+  const send = (token: string | null) => fetch(`${baseUrl()}${route}`, {
     method,
     signal,
     headers: { ...(body === undefined ? {} : { 'content-type': 'application/json' }), ...(token ? { authorization: `Bearer ${token}` } : {}) },
@@ -35,7 +35,7 @@ export interface Health {
 
 export async function health(): Promise<Health | null> {
   try {
-    const res = await fetch(`${BASE_URL}/api/health`, { signal: AbortSignal.timeout(1000) });
+    const res = await fetch(`${baseUrl()}/api/health`, { signal: AbortSignal.timeout(1000) });
     const data: any = await res.json();
     return data.name === 'crew' ? { ...data, active: data.active ?? 0 } : null;
   } catch {
@@ -97,7 +97,7 @@ export async function stopDaemon(): Promise<void> {
   const down = async () => (await health()) === null;
   const asked = await api('POST', '/api/shutdown', {}).then(() => true, () => false);
   if (asked && await waitFor(down, 5000)) return;
-  const stuck = new Error(`The Crew daemon (process ${running.pid}) is still running at ${BASE_URL}. Stop that process yourself, then start Crew again.`);
+  const stuck = new Error(`The Crew daemon (process ${running.pid}) is still running at ${baseUrl()}. Stop that process yourself, then start Crew again.`);
   // Any local listener can report an arbitrary PID on /api/health; only signal the PID
   // that this home's daemon recorded on disk.
   let recorded: unknown;
@@ -112,7 +112,7 @@ export async function stopDaemon(): Promise<void> {
     }
   }, 1000);
   if (await down()) return;
-  if (recorded === undefined) throw new Error(`The Crew daemon's PID could not be confirmed from ${file}. Stop the process listening at ${BASE_URL} yourself, then start Crew again.`);
+  if (recorded === undefined) throw new Error(`The Crew daemon's PID could not be confirmed from ${file}. Stop the process listening at ${baseUrl()} yourself, then start Crew again.`);
   if (!Number.isInteger(recorded) || (recorded as number) <= 0 || recorded !== running.pid) throw stuck;
   try {
     process.kill(running.pid, 'SIGTERM');
@@ -143,7 +143,7 @@ async function startDaemon(): Promise<void> {
     }
     // Wait for that process to go, not for silence: another client may start the replacement in between.
     if (!(await waitFor(async () => (await health())?.pid !== running.pid, 5000))) {
-      throw new Error(`The previous Crew daemon (process ${running.pid}) did not stop at ${BASE_URL}. Try crew daemon restart again after it exits.`);
+      throw new Error(`The previous Crew daemon (process ${running.pid}) did not stop at ${baseUrl()}. Try crew daemon restart again after it exits.`);
     }
     if (await health()) return;
   }

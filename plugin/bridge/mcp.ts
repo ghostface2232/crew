@@ -1,7 +1,7 @@
 import readline from 'node:readline';
 import { clipped, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, REPORT_PAGE_BYTES, textPage, unread } from './delivery.ts';
 import { api, ensureDaemon } from './client.ts';
-import { BASE_URL, canonicalPath, DEFAULT_ROLES, defaultHolder, disabledAgents, LEAD, loadConfig, MAX_DEBATE_ROUNDS, PRESET_NAMES, ROLE_INFO, ROLES, VERSION, WORKERS } from './config.ts';
+import { baseUrl, canonicalPath, DEFAULT_ROLES, defaultHolder, disabledAgents, LEAD, loadConfig, MAX_DEBATE_ROUNDS, PRESET_NAMES, ROLE_INFO, ROLES, VERSION, WORKERS } from './config.ts';
 import { listSkills } from './skills.ts';
 import { describeUsage } from './usage.ts';
 import type { RouteDecision, Usage } from './usage.ts';
@@ -95,7 +95,7 @@ How jobs work:
 - Model notes: after each review and its fix, record what happened with \`note\`, one line per model judged: the builder's line (role build) with the findings you accepted and those you declined (several reviews of one piece of work make one line, each finding counted once; a merged result gets one line per job, with how you took a delegated job's work as adoption), and the fixer's line (role fix) with how the fix went. A review a job ran gets a line as well (role review, with the review's job_id, the work it covered as of_job or of_model, and its findings as you accepted and declined them), so reviewers are scored on their findings.${RATING_LINE} Facts from the review only, never impressions; findings from your own crew:self-reviewer count too. \`route\` shows the role holders' notes: let them inform your choice of tier and holder within the roles and presets the user set, which stay theirs. When a note says its summary is due, rewrite it with \`note_summary\` from the evidence.
 - Usage is measured by AgentGauge. In the pipeline, call \`route\` once at each stage boundary before you hand out work (not on every turn) with the role you are about to hand out, and follow its assignee and reason; when it says degraded, say in your report what was skipped. Outside the pipeline, follow the roles unless a job fails on a limit.${PRESET_LINE}
 
-The user can watch every agent live on the status board at ${BASE_URL}.`;
+The user can watch every agent live on the status board, which /crew:board opens.`;
 
 const common = {
   cwd: { type: 'string', description: 'Project directory. Defaults to this session\'s project.' },
@@ -871,7 +871,7 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       if (measured.length) lines.push('', 'Usage (AgentGauge):', ...measured);
       const windows = measured.length ? [] : (state.limits.codex?.windows ?? []);
       if (windows.length) lines.push('', `Codex usage: ${windows.map((w: any) => `${Math.round(w.usedPercent)}% of the ${w.minutes >= 1440 ? `${Math.round(w.minutes / 1440)}-day` : `${Math.round(w.minutes / 60)}-hour`} window`).join(', ')}`);
-      lines.push('', `Board: ${BASE_URL}`);
+      lines.push('', `Board: ${baseUrl()}`);
       return lines.join('\n');
     }
     case 'wait': {

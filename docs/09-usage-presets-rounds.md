@@ -151,9 +151,11 @@ Added 2026-11-14. A job names how demanding it is, and the bridge turns that int
 | `fast` | Plain searches and lookups | Luna | Hydrogen | medium |
 | `light` | Simple, well-specified tasks; default for a question | Terra | Hydrogen | medium |
 | `standard` | Most work, including most UI changes; the default | Sol | Hydrogen | medium |
-| `frontier` | Especially hard or complex work, a UI rebuilt from scratch, literary or very complex documents | Astra | Argon | high |
+| `frontier` | Especially hard or complex work, a UI rebuilt from scratch, literary or very complex documents | Astra | Neon | high |
 
 A tier names a family, not a version. For Codex the bridge picks the newest model of the family that Codex's own model cache (`$CODEX_HOME/models_cache.json`) lists and does not hide; with no cache or no match, Codex's default applies. For Antigravity the family is matched against the model options the session lists, skipping orchestrators; an unlisted family leaves the agent's default.
+
+Antigravity's families are named after elements, and the names say nothing of rank, so a new family is placed by hand. Neon replaced Argon at `frontier` on 2026-11-19 (agy 1.5.12 lists `gemini-4-neon` with `low` to `xhigh`). A family that leaves its tier still counts at that tier: a model of it named outright still runs, and a preset's cap still lowers it.
 
 The order is: a model the lead names for the job, the tier it names, the model the user configured (role, preset, or `codex.model` / `antigravity.model`), and last the default tier. A configured model therefore stays in effect until the lead names a tier for a particular job. An explicit `effort` always wins; otherwise a role's or preset's effort, then a named tier's, then `codex.effort`, then the default tier's. So under `economy` a job keeps `low` unless the lead names an effort. Antigravity takes an effort only when the lead, a role, or a preset names one; a tier gives it none, and the built-in presets set Codex's alone.
 

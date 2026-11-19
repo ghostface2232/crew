@@ -1079,7 +1079,7 @@ test('a job\'s model comes from the lead\'s model, then its tier, then the user\
   const polish = await jobs.create({ kind: 'polish', cwd: repo, targets: ['README.md'], isolation: 'in_place' });
   assert.deepEqual([polish.tier, polish.model, polish.effort], ['standard', 'hydrogen', undefined]);
   const literary = await jobs.create({ kind: 'polish', cwd: repo, targets: ['README.md'], isolation: 'in_place', tier: 'frontier' });
-  assert.equal(literary.model, 'argon');
+  assert.equal(literary.model, 'neon');
 
   // The economy preset caps the model at the standard tier, even one named outright; effort stays the lead's.
   current = resolveConfig({ preset: 'economy', roles: { polish: { agent: 'antigravity' } } });
@@ -1095,6 +1095,8 @@ test('a job\'s model comes from the lead\'s model, then its tier, then the user\
   assert.deepEqual([other.tier, other.model], [undefined, 'some-unknown-model']);
   const argon = await jobs.create({ kind: 'polish', cwd: repo, targets: ['README.md'], isolation: 'in_place', model: 'gemini-4-argon' });
   assert.deepEqual([argon.tier, argon.model], ['standard', 'hydrogen']);
+  const neon = await jobs.create({ kind: 'polish', cwd: repo, targets: ['README.md'], isolation: 'in_place', model: 'gemini-4-neon' });
+  assert.deepEqual([neon.tier, neon.model], ['standard', 'hydrogen']);
 });
 
 test('each job goes to its role\'s holder, gets the role\'s brief, and refuses a role its options contradict', async (t) => {

@@ -201,7 +201,7 @@ test('gc keeps a slot while Git registers a worktree anywhere inside it', async 
   fs.writeFileSync(path.join(moved, 'uncommitted'), 'keep my work');
   const result = await jobs.gc({ apply: true });
   assert.equal(fs.readFileSync(path.join(moved, 'uncommitted'), 'utf8'), 'keep my work', result);
-  assert.ok(git('worktree', 'list', '--porcelain').includes(fs.realpathSync(moved)));
+  assert.ok(listed(git).includes(fs.realpathSync(moved)));
 });
 
 test('gc refuses a slot whose worktree folder is redirected outside Crew worktrees', async (t) => {

@@ -123,7 +123,7 @@ const agentProp = {
   agent: { type: 'string', enum: [...Object.keys(WORKERS), LEAD], description: 'Which of the role\'s holders takes this job; the roles in your instructions list them. Without it, Antigravity for wording and Codex for other work, among the holders that can take it. claude starts no worker: you do it.' },
 };
 const modelProps = {
-  tier: { type: 'string', enum: [...TIERS], description: 'How demanding the job is; Crew picks the model from it. standard (the default): most work, including most UI changes. frontier: only especially hard or complex work, or a UI rebuilt from scratch or a very large UI change. light: simple, well-specified tasks. fast: plain searches and lookups. For Codex these are Sol, Astra, Terra and Luna; for Antigravity, Argon for frontier (literary or very complex documents) and Hydrogen otherwise. Newer models of each family are picked up automatically.' },
+  tier: { type: 'string', enum: [...TIERS], description: 'How demanding the job is; Crew picks the model from it. standard (the default): most work, including most UI changes. frontier: only especially hard or complex work, or a UI rebuilt from scratch or a very large UI change. light: simple, well-specified tasks. fast: plain searches and lookups. For Codex these are Sol, Astra, Terra and Luna; for Antigravity, Neon for frontier (literary or very complex documents) and Hydrogen otherwise. Newer models of each family are picked up automatically.' },
   model: { type: 'string', description: 'Exact model ID for this job, as the notes list it, overriding tier. Rarely needed; prefer tier. When the user names a family such as Astra, pass its tier; a family name passed here is taken as that tier.' },
   effort: { type: 'string', description: 'Codex defaults to medium effort, or high at the frontier tier. Antigravity sets its thinking level only when an effort is named, using the nearest lower offered level if needed and keeping the session default if no level fits.' },
 };
@@ -186,7 +186,7 @@ const TOOLS = [
         guidance: { type: 'string', description: 'Tone, terminology, audience, or what to leave alone.' },
         title: { type: 'string', description: 'Short label shown on the status board.' },
         ...worktreeProps,
-        tier: { ...modelProps.tier, description: 'standard (the default, Hydrogen for Antigravity) for nearly all wording work; frontier (Argon) only for literary or very complex, difficult documents.' },
+        tier: { ...modelProps.tier, description: 'standard (the default, Hydrogen for Antigravity) for nearly all wording work; frontier (Neon) only for literary or very complex, difficult documents.' },
         model: modelProps.model,
         ...agentProp,
         ...skillsProp,

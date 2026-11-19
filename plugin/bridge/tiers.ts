@@ -17,12 +17,18 @@ export type Tier = (typeof TIERS)[number];
 /**
  * Model family per tier. Families, not versions: when a newer model of a family ships, jobs use it
  * without a change here. Antigravity has two families worth using: Hydrogen for nearly everything,
- * Argon only for literary or very complex document editing.
+ * Neon only for literary or very complex document editing.
  */
 export const TIER_FAMILIES: Record<WorkerAgent, Record<Tier, string>> = {
   codex: { fast: 'luna', light: 'terra', standard: 'sol', frontier: 'astra' },
-  antigravity: { fast: 'hydrogen', light: 'hydrogen', standard: 'hydrogen', frontier: 'argon' },
+  antigravity: { fast: 'hydrogen', light: 'hydrogen', standard: 'hydrogen', frontier: 'neon' },
 };
+
+/**
+ * Families no tier picks any more, by the tier they held. A model of one named outright still runs,
+ * and a preset's cap still lowers it. Google names Antigravity's families after elements, which say nothing of rank.
+ */
+const FORMER_FAMILIES: Partial<Record<WorkerAgent, Record<string, Tier>>> = { antigravity: { argon: 'frontier' } };
 
 /** Codex effort by tier when the lead names none: medium for most work, high for the hardest. */
 export function tierEffort(tier: Tier): string {
@@ -93,10 +99,10 @@ export function codexModels(cache = codexCache()): ModelChoice[] {
 const EFFORT_ORDER = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 
 /**
- * Thinking levels each Antigravity family offered on agy 1.5.9. They only fill the settings' choices:
+ * Thinking levels each Antigravity family offered on agy 1.5.12. They only fill the settings' choices:
  * a job takes its levels from its own session, which lists what this account and version really offer.
  */
-const ANTIGRAVITY_EFFORTS: Record<string, string[]> = { hydrogen: ['low', 'medium', 'high', 'xhigh'], argon: ['low', 'medium', 'high'] };
+const ANTIGRAVITY_EFFORTS: Record<string, string[]> = { hydrogen: ['low', 'medium', 'high', 'xhigh'], neon: ['low', 'medium', 'high', 'xhigh'] };
 
 /** Antigravity's models are matched by family against the session's own list, so its choices are the families. */
 export const ANTIGRAVITY_MODELS: ModelChoice[] = [...new Set(Object.values(TIER_FAMILIES.antigravity))]
@@ -129,7 +135,8 @@ export function modelId(agent: WorkerAgent, wanted: string, cache?: string): str
 /** The tier whose family a model name belongs to, for holding a named model under a preset's cap; undefined when none matches. */
 export function tierOf(agent: WorkerAgent, model: string): Tier | undefined {
   const name = model.toLowerCase();
-  return [...TIERS].reverse().find((tier) => name.includes(TIER_FAMILIES[agent][tier]));
+  return [...TIERS].reverse().find((tier) => name.includes(TIER_FAMILIES[agent][tier]))
+    ?? Object.entries(FORMER_FAMILIES[agent] ?? {}).find(([family]) => name.includes(family))?.[1];
 }
 
 /** The session's model option that a requested model or family names: an exact value first, else the first value containing it. */

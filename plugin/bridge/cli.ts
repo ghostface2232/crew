@@ -3,7 +3,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import path from 'node:path';
 import { api, ensureDaemon, health, stopDaemon } from './client.ts';
 import { boardUrl, readToken } from './auth.ts';
-import { BASE_URL, HOME, installed, VERSION } from './config.ts';
+import { baseUrl, HOME, installed, VERSION } from './config.ts';
 import { checks as setupChecks, COMMAND, PACKAGED, register, run } from './setup.ts';
 import { describe, summarize } from './render.ts';
 import type { JobView } from './render.ts';
@@ -36,7 +36,7 @@ async function status(): Promise<void> {
     if (shown.length === 0) console.log('  idle');
     for (const job of shown) console.log(`  ${summarize(job)}`);
   }
-  console.log(`\nBoard: ${BASE_URL}`);
+  console.log(`\nBoard: ${baseUrl()}`);
 }
 
 async function doctor(): Promise<void> {
@@ -54,7 +54,7 @@ async function doctor(): Promise<void> {
     const running = await health();
     const stale = running?.build !== installed().build;
     // Not a failure: the daemon switches to the installed code once its running jobs are done.
-    const detail = `${BASE_URL} (v${running?.version}${stale ? `, older code than installed; it restarts once ${running?.active} running job(s) finish, or run \`crew daemon restart\`` : ''})`;
+    const detail = `${baseUrl()} (v${running?.version}${stale ? `, older code than installed; it restarts once ${running?.active} running job(s) finish, or run \`crew daemon restart\`` : ''})`;
     checks.push(['Crew daemon', true, detail]);
   } catch (err) {
     checks.push(['Crew daemon', false, String((err as Error).message)]);
@@ -102,14 +102,14 @@ try {
       // The address carries the secret in its fragment so the page can sign in. It is printed only when asked for,
       // for a caller that opens the page itself.
       if (process.argv.includes('--url')) {
-        console.log(boardUrl(BASE_URL, readToken(HOME)));
+        console.log(boardUrl(baseUrl(), readToken(HOME)));
         break;
       }
       if (process.platform === 'win32') {
         // start, not explorer, keeps the fragment that signs the page in. The address holds no cmd.exe syntax.
-        spawn('cmd.exe', ['/d', '/s', '/c', `start "" "${boardUrl(BASE_URL, readToken(HOME))}"`], { stdio: 'ignore', detached: true, windowsHide: true, windowsVerbatimArguments: true }).unref();
-      } else spawn('open', [boardUrl(BASE_URL, readToken(HOME))], { stdio: 'ignore', detached: true }).unref();
-      console.log(BASE_URL);
+        spawn('cmd.exe', ['/d', '/s', '/c', `start "" "${boardUrl(baseUrl(), readToken(HOME))}"`], { stdio: 'ignore', detached: true, windowsHide: true, windowsVerbatimArguments: true }).unref();
+      } else spawn('open', [boardUrl(baseUrl(), readToken(HOME))], { stdio: 'ignore', detached: true }).unref();
+      console.log(baseUrl());
       break;
     case 'doctor':
       await doctor();
@@ -131,7 +131,7 @@ try {
       else {
         // Verify that the daemon accepts the token on disk before reporting it as running.
         await api('GET', '/api/usage');
-        console.log(`running at ${BASE_URL}`);
+        console.log(`running at ${baseUrl()}`);
       }
       break;
     default:

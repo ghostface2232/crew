@@ -5,7 +5,7 @@ description: Open the Crew status board, which shows live what Claude, Codex, an
 
 # Open the status board
 
-The board is served by the Crew daemon at http://127.0.0.1:47615.
+The board is served by the Crew daemon at http://127.0.0.1:47615, or on a fallback port when the system has reserved that one.
 
 1. Call the `crew` MCP `status` tool once. This starts the daemon if needed and tells you what is running.
 2. Show the board. It signs in with a secret carried in the address, so take the address from `crew board --url`, which prints it without opening anything; do not repeat that address to the user or write it anywhere.

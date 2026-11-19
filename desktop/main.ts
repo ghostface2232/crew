@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { readToken, SESSION_COOKIE } from '../plugin/bridge/auth.ts';
 import { api, ensureDaemon, health } from '../plugin/bridge/client.ts';
-import { BASE_URL, HOME, PLUGIN_ROOT } from '../plugin/bridge/config.ts';
+import { baseUrl, HOME, PLUGIN_ROOT } from '../plugin/bridge/config.ts';
 import type { BoardState } from '../plugin/board/src/types.ts';
 import { Updater } from './updater.ts';
 import { isBoardNavigation, linkTarget, windowBounds } from './window-state.ts';
@@ -27,6 +27,8 @@ let quitting = false;
 let stopping = false;
 let timer: ReturnType<typeof setTimeout> | undefined;
 let pollAbort: AbortController | null = null;
+/** The daemon address the board was last moved to. */
+let movedTo = '';
 let pending = 0;
 const stateFile = path.join(app.getPath('userData'), 'window.json');
 const asset = (name: string) => path.join(import.meta.dirname, name);
@@ -136,11 +138,11 @@ async function loadBoard() {
   const token = readToken(HOME);
   if (token) {
     await window.webContents.session.cookies.set({
-      url: BASE_URL, name: SESSION_COOKIE, value: token, httpOnly: true, sameSite: 'strict',
+      url: baseUrl(), name: SESSION_COOKIE, value: token, httpOnly: true, sameSite: 'strict',
       expirationDate: Date.now() / 1000 + 31_536_000,
     });
   }
-  await window.loadURL(BASE_URL);
+  await window.loadURL(baseUrl());
 }
 function createWindow() {
   let saved = {};
@@ -174,7 +176,7 @@ function createWindow() {
   });
   // Report links open in the user's browser. Evidence needs the board's sign-in, so it opens in a window of its own.
   window.webContents.setWindowOpenHandler(({ url }) => {
-    const target = linkTarget(url, BASE_URL);
+    const target = linkTarget(url, baseUrl());
     if (target === 'external') void shell.openExternal(url);
     if (target !== 'evidence') return { action: 'deny' };
     return {
@@ -193,10 +195,10 @@ function createWindow() {
     child.webContents.on('will-redirect', (event) => event.preventDefault());
   });
   window.webContents.on('will-navigate', (event, url) => {
-    if (!isBoardNavigation(url, BASE_URL)) event.preventDefault();
+    if (!isBoardNavigation(url, baseUrl())) event.preventDefault();
   });
   window.webContents.on('will-redirect', (event, url) => {
-    if (!isBoardNavigation(url, BASE_URL)) event.preventDefault();
+    if (!isBoardNavigation(url, baseUrl())) event.preventDefault();
   });
   // The board's settings editor guards unsaved edits with beforeunload; Electron leaves the prompt to us.
   window.webContents.on('will-prevent-unload', (event) => {
@@ -250,7 +252,7 @@ function trayMenu(waiting = pending) {
 /** The browser signs in through the launch fragment, as /crew:board opens it. */
 async function openInBrowser() {
   const token = readToken(HOME);
-  await shell.openExternal(token ? `${BASE_URL}/#token=${token}` : BASE_URL);
+  await shell.openExternal(token ? `${baseUrl()}/#token=${token}` : baseUrl());
 }
 /** Keeps the tray's waiting count current; the board itself follows the daemon's live stream. */
 async function poll() {
@@ -259,6 +261,13 @@ async function poll() {
     const signal = AbortSignal.any([pollAbort.signal, AbortSignal.timeout(4000)]);
     const state = await api<BoardState>('GET', '/api/state', undefined, signal);
     if (stopping) return;
+    // A daemon that restarted on another port leaves the board reconnecting to the old one. Moved once per port:
+    // a board that refuses to unload (unsaved settings) is not asked again every poll.
+    const shown = window && !window.isDestroyed() ? window.webContents.getURL() : '';
+    if (URL.canParse(shown) && new URL(shown).origin !== baseUrl() && movedTo !== baseUrl()) {
+      movedTo = baseUrl();
+      void loadBoard().catch(console.error);
+    }
     trayMenu(
       state.jobs.filter((job) => job.state === 'waiting').length +
         state.claude.filter((claude) => claude.state === 'waiting').length,
@@ -309,7 +318,7 @@ async function startDesktop() {
   await app.whenReady();
   Menu.setApplicationMenu(Menu.buildFromTemplate([{ role: 'editMenu' }, { role: 'viewMenu' }, { role: 'windowMenu' }]));
   // The board's copy buttons are the only permission it needs; notifications come from the daemon.
-  const allowed = (permission: string, origin: string) => permission === 'clipboard-sanitized-write' && origin === BASE_URL;
+  const allowed = (permission: string, origin: string) => permission === 'clipboard-sanitized-write' && origin === baseUrl();
   session.defaultSession.setPermissionRequestHandler((_contents, permission, callback, details) =>
     callback(allowed(permission, URL.canParse(details.requestingUrl) ? new URL(details.requestingUrl).origin : '')));
   session.defaultSession.setPermissionCheckHandler((_contents, permission, origin) => allowed(permission, origin));
@@ -349,7 +358,7 @@ async function startDesktop() {
 /** Only the main window's board page may reach the updater. */
 function fromBoard(event: IpcMainInvokeEvent) {
   const url = event.senderFrame?.url;
-  if (event.sender !== window?.webContents || !url || !URL.canParse(url) || new URL(url).origin !== BASE_URL) {
+  if (event.sender !== window?.webContents || !url || !URL.canParse(url) || new URL(url).origin !== baseUrl()) {
     throw new Error('The updater answers only the Crew board.');
   }
 }

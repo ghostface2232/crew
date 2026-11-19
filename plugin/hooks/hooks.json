@@ -6,7 +6,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "curl -s -m 2 -o /dev/null -X POST -H 'content-type: application/json' --data-binary @- http://127.0.0.1:47615/api/hooks/claude || true",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/bridge/report.ts"
+            ],
             "timeout": 5
           },
           {
@@ -48,9 +51,12 @@
       {
         "hooks": [
           {
-            "type": "http",
-            "url": "http://127.0.0.1:47615/api/hooks/claude",
-            "timeout": 2
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/bridge/report.ts"
+            ],
+            "timeout": 5
           },
           {
             "type": "command",
@@ -68,9 +74,12 @@
       {
         "hooks": [
           {
-            "type": "http",
-            "url": "http://127.0.0.1:47615/api/hooks/claude",
-            "timeout": 2
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/bridge/report.ts"
+            ],
+            "timeout": 5
           }
         ]
       }
@@ -79,9 +88,12 @@
       {
         "hooks": [
           {
-            "type": "http",
-            "url": "http://127.0.0.1:47615/api/hooks/claude",
-            "timeout": 2
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/bridge/report.ts"
+            ],
+            "timeout": 5
           }
         ]
       },
@@ -105,9 +117,12 @@
       {
         "hooks": [
           {
-            "type": "http",
-            "url": "http://127.0.0.1:47615/api/hooks/claude",
-            "timeout": 2
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/bridge/report.ts"
+            ],
+            "timeout": 5
           }
         ]
       },
@@ -131,9 +146,12 @@
       {
         "hooks": [
           {
-            "type": "http",
-            "url": "http://127.0.0.1:47615/api/hooks/claude",
-            "timeout": 2
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/bridge/report.ts"
+            ],
+            "timeout": 5
           },
           {
             "type": "command",
@@ -150,9 +168,12 @@
       {
         "hooks": [
           {
-            "type": "http",
-            "url": "http://127.0.0.1:47615/api/hooks/claude",
-            "timeout": 2
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/bridge/report.ts"
+            ],
+            "timeout": 5
           }
         ]
       }
@@ -161,9 +182,12 @@
       {
         "hooks": [
           {
-            "type": "http",
-            "url": "http://127.0.0.1:47615/api/hooks/claude",
-            "timeout": 2
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/bridge/report.ts"
+            ],
+            "timeout": 5
           }
         ]
       }
@@ -172,9 +196,12 @@
       {
         "hooks": [
           {
-            "type": "http",
-            "url": "http://127.0.0.1:47615/api/hooks/claude",
-            "timeout": 2
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/bridge/report.ts"
+            ],
+            "timeout": 5
           }
         ]
       }
@@ -183,9 +210,12 @@
       {
         "hooks": [
           {
-            "type": "http",
-            "url": "http://127.0.0.1:47615/api/hooks/claude",
-            "timeout": 2
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/bridge/report.ts"
+            ],
+            "timeout": 5
           },
           {
             "type": "command",
@@ -213,9 +243,12 @@
       {
         "hooks": [
           {
-            "type": "http",
-            "url": "http://127.0.0.1:47615/api/hooks/claude",
-            "timeout": 2
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/bridge/report.ts"
+            ],
+            "timeout": 5
           }
         ]
       }
@@ -224,9 +257,12 @@
       {
         "hooks": [
           {
-            "type": "http",
-            "url": "http://127.0.0.1:47615/api/hooks/claude",
-            "timeout": 2
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/bridge/report.ts"
+            ],
+            "timeout": 5
           }
         ]
       }

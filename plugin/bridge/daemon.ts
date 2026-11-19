@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { boardAsset, BOARD_CSP } from './assets.ts';
@@ -9,7 +10,7 @@ import { AntigravityAdapter } from './adapters/antigravity.ts';
 import { CodexAdapter } from './adapters/codex.ts';
 import { ClaudeSessions } from './claude.ts';
 import type { ClaudeSession } from './claude.ts';
-import { canonicalPath, HOME, installed, isRole, loadConfig, PLUGIN_ROOT, PORT, ROLE_INFO, ROLES, VERSION, WORKERS } from './config.ts';
+import { canonicalPath, HOME, installed, isRole, loadConfig, PLUGIN_ROOT, PORTS, ROLE_INFO, ROLES, VERSION, WORKERS } from './config.ts';
 import type { Config } from './config.ts';
 import { evidenceType, openEvidence } from './evidence.ts';
 import { projectRoot } from './git.ts';
@@ -65,17 +66,68 @@ const server = http.createServer((req, res) => {
   );
 });
 
+/** Whether something accepts connections on the port, as opposed to the system holding it with nothing behind it. */
+function listening(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = net.connect(port, '127.0.0.1');
+    socket.setTimeout(1000, () => { socket.destroy(); resolve(true); });
+    socket.once('connect', () => { socket.destroy(); resolve(true); });
+    socket.once('error', () => resolve(false));
+  });
+}
+
+/** The port of a daemon that is running for this Crew home, as it recorded it. */
+async function recorded(): Promise<{ pid: number; port: number } | null> {
+  try {
+    const { pid, port } = JSON.parse(fs.readFileSync(path.join(HOME, 'daemon.json'), 'utf8'));
+    process.kill(pid, 0);
+    return await listening(port) ? { pid, port } : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Bind the port before reading or writing any state on disk. If two daemons start at once,
- * the loser exits before creating a token or deleting the winner's scratch directories and
- * review snapshots. Initialization below is synchronous, so no request is handled until setup finishes.
+ * Bind a port before writing any state on disk. If two daemons start at once, both try the same ports in the same
+ * order, so the loser finds the winner listening and exits before creating a token or deleting the winner's scratch
+ * directories and review snapshots. A port the system reserves has no listener, so it is skipped. Reservations move,
+ * so a daemon on a fallback port does not hold the ports before it: a later daemon checks the record first.
  */
-server.on('error', (err: NodeJS.ErrnoException) => {
-  // Another daemon won the race for the port; the client will find it via /api/health.
-  log(err.code === 'EADDRINUSE' ? `port ${PORT} is already in use` : `server error: ${err.message}`);
-  process.exit(err.code === 'EADDRINUSE' ? 0 : 1);
+async function bind(): Promise<number> {
+  const running = await recorded();
+  if (running) {
+    log(`port ${running.port} is already in use by the running daemon (process ${running.pid})`);
+    process.exit(0);
+  }
+  for (const port of PORTS) {
+    const err = await new Promise<NodeJS.ErrnoException | null>((resolve) => {
+      server.once('error', resolve);
+      server.listen(port, '127.0.0.1', () => {
+        server.off('error', resolve);
+        resolve(null);
+      });
+    });
+    if (!err) return port;
+    if (err.code !== 'EADDRINUSE' && err.code !== 'EACCES') {
+      log(`server error: ${err.message}`);
+      process.exit(1);
+    }
+    // Another daemon won the race for the port; the client will find it via /api/health.
+    if (await listening(port)) {
+      log(`port ${port} is already in use`);
+      process.exit(0);
+    }
+    log(`port ${port} is reserved by the system with nothing listening on it`);
+  }
+  log(`no port Crew can use is free: ${PORTS.join(', ')}`);
+  process.exit(1);
+}
+const PORT = await bind();
+server.on('error', (err) => {
+  log(`server error: ${err.message}`);
+  process.exit(1);
 });
-await new Promise<void>((resolve) => server.listen(PORT, '127.0.0.1', resolve));
+// Initialization below is synchronous, so no request is handled until setup finishes.
 
 const config = loadConfig();
 /** Fingerprint of the code this process loaded; clients compare it with what is on disk now. */

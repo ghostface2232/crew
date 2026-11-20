@@ -29,12 +29,13 @@
     },
     {
       "blend-mode" : "overlay",
+      "blur-material" : null,
       "hidden" : false,
       "layers" : [
         {
-          "image-name" : "crew2.svg",
-          "name" : "crew2",
-          "opacity" : 0.55
+          "image-name" : "Group 215.svg",
+          "name" : "Group 215",
+          "opacity" : 0.5
         }
       ],
       "lighting" : "individual",
@@ -42,7 +43,7 @@
         "kind" : "neutral",
         "opacity" : 0.5
       },
-      "specular" : "outside",
+      "specular" : true,
       "translucency" : {
         "enabled" : true,
         "value" : 0.4

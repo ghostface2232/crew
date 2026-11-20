@@ -5,6 +5,7 @@ import type { Config, Preset, PresetName, RoleInfo, RoleSettings, Worker, Worker
 import type { ModelChoice } from '../../bridge/tiers.ts';
 import type { Usage } from '../../bridge/usage.ts';
 import type { ModelScore } from '../../bridge/notes.ts';
+import type { PullWatch } from '../../bridge/pulls.ts';
 
 /** `outcomeContradiction` is what the daemon observed against a declared "done"; an older daemon sends none. */
 export type BoardJob = Omit<Job, 'prompt' | 'instructions' | 'evidence'> & Partial<Pick<Job, 'prompt' | 'instructions'>> & {
@@ -16,10 +17,12 @@ export type { CrewEvent, ClaudeSession, Mission, WorkerAgent, Usage, Preset, Pre
 export type Roles = Config['roles'];
 /** An older daemon sends no models; the settings then take a typed model and effort. */
 export type Agents = Record<WorkerAgent, Worker & { enabled: boolean; models?: ModelChoice[] }>;
+export type BoardPull = Omit<PullWatch, 'news' | 'newsSeq' | 'reviews'>;
 export interface BoardState {
   now: number;
   jobs: BoardJob[];
   missions: Mission[];
+  pulls?: BoardPull[];
   claude: ClaudeSession[];
   agents: Agents;
   roles: Roles;

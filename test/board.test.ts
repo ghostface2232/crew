@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Actions, answerKey, onUnauthorized, stream, ticketFromFragment, UnauthorizedError } from '../plugin/board/src/api.ts';
 import { BoardStore, mergeEvents } from '../plugin/board/src/store.ts';
-import { elapsed, evidenceSide, evidenceTurn, orderEvidence, jobLabel, projectNames, unsettled, missionProgress, missionStops, missionStep, missionStopPosition, missionJobStep, missionLooksFinished, relativeDuration, usageWindowName, STOP_OF_STAGE } from '../plugin/board/src/model.ts';
+import { elapsed, evidenceSide, evidenceTurn, orderEvidence, jobLabel, leadMission, projectNames, unsettled, missionProgress, missionStops, missionStep, missionStopPosition, missionJobStep, missionLooksFinished, relativeDuration, usageWindowName, STOP_OF_STAGE } from '../plugin/board/src/model.ts';
 import type { BoardJob, BoardState, ClaudeSession, CrewEvent, Mission } from '../plugin/board/src/types.ts';
 
 function deferred() {
@@ -216,7 +216,21 @@ test('repeated stops use the saved occurrence for progress and retain jobs on th
   assert.equal(missionProgress(mission, []), 4.5 / 8);
 });
 
-test('looks finished requires an active mission quiet for 20 minutes with no running or waiting jobs', () => {
+test('a lead row follows its focused active mission, falling back to its newest active mission', () => {
+  const older = { id: 'older', state: 'active', owner: 'lead', createdAt: 1000, updatedAt: 9999 } as Mission;
+  const newer = { ...older, id: 'newer', createdAt: 2000, updatedAt: 2000 };
+  const closed = { ...older, id: 'closed', state: 'done', createdAt: 3000 } as const;
+  const foreign = { ...older, id: 'foreign', owner: 'other', createdAt: 4000 };
+  const all = [older, newer, closed, foreign];
+  const session = { id: 'lead' };
+  assert.equal(leadMission({ ...session, mission: older.id }, all), older);
+  for (const mission of [undefined, 'missing', closed.id, foreign.id])
+    assert.equal(leadMission({ ...session, mission }, all), newer);
+  assert.equal(leadMission(session, [older]), older);
+  assert.equal(leadMission(session, [closed, foreign]), undefined);
+});
+
+test('looks finished requires a quiet owner and no open jobs or tasks for 20 minutes', () => {
   const mission = { id: 'm', state: 'active', updatedAt: 1000 } as Mission;
   const now = 1000 + 20 * 60_000;
   assert.equal(missionLooksFinished(mission, [], now - 1), false);
@@ -232,6 +246,8 @@ test('looks finished requires an active mission quiet for 20 minutes with no run
   }
   for (const state of ['done', 'abandoned'] as const)
     assert.equal(missionLooksFinished({ ...mission, state }, [], now), false);
+  for (const state of ['todo', 'doing', 'done', 'dropped'] as const)
+    assert.equal(missionLooksFinished({ ...mission, tasks: [{ id: 'task', title: 'Test', state }] }, [], now), state === 'done' || state === 'dropped');
 });
 
 test('usage labels and relative durations remain compact', () => {

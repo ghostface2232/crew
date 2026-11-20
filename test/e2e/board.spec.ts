@@ -1,5 +1,6 @@
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import { resolveConfig } from '../../plugin/bridge/config.ts';
+import type { BoardPull, Mission } from '../../plugin/board/src/types.ts';
 import { fixture, job, NOW, TEST_CREDENTIAL, TEST_TICKET } from './fixtures.ts';
 
 test.beforeEach(async ({ page, request }) => {
@@ -22,6 +23,48 @@ const newJob = (page: Page) => page.getByRole('button', { name: 'New Job', exact
 // A folding stage's heading is named by its button, which adds the job count: "Review, 2 jobs".
 const stage = (card: Locator, name: string) =>
   card.locator('.stage-groups > .rows').filter({ has: card.page().getByRole('heading', { name: new RegExp(`^${name}(, \\d+ jobs?)?$`) }) });
+
+test('a shared lead appears on one mission and linked pulls show when their status is stale', async ({ page, request }, testInfo) => {
+  const data = fixture();
+  const focused = data.missions[0];
+  const taskStates: NonNullable<Mission['tasks']>[number]['state'][] = ['done', 'done', 'doing', 'todo', 'todo', 'dropped'];
+  data.missions.push({
+    ...focused, id: 'mission-follow-up', title: 'Verify the desktop release', stage: 'final',
+    createdAt: NOW - 180_000, notes: undefined,
+    tasks: taskStates.map((state, index) => ({ id: `task-${index}`, title: `Task ${index}`, state })),
+  });
+  data.claude[0].mission = focused.id;
+  const pull: BoardPull = {
+    id: 'pr-42', url: 'https://github.com/example/crew/pull/42', repo: 'example/crew', number: 42,
+    title: 'Verify the desktop release', mission: 'mission-follow-up', state: 'open', head: 'abc',
+    checks: 'failing', review: 'changes_requested', conflict: true,
+    told: { head: 'abc', checks: ['build'] }, failingHeads: 1,
+    createdAt: NOW - 180_000, checkedAt: NOW - 60_000, changedAt: NOW - 60_000,
+  };
+  data.pulls = [pull];
+  await request.post('/__push', { data: { type: 'state', data } });
+  await page.getByRole('navigation', { name: 'Projects' }).getByRole('button', { name: 'Crew', exact: true }).click();
+  const focusedCard = page.locator('[data-key="mission-1"]');
+  const newerCard = page.locator('[data-key="mission-follow-up"]');
+  const lead = '[data-session="lead-1"]';
+  await expect(focusedCard.locator(lead)).toBeVisible();
+  await expect(newerCard.locator(lead)).toHaveCount(0);
+  await expect(newerCard.locator('.mission-meta').first()).toContainText('2/5 tasks');
+  await expect(newerCard.locator('.mission-pull')).toHaveText('#42 · checks failing · changes requested · conflict');
+  await expect(newerCard.getByRole('link', { name: 'Pull request example/crew #42' })).toHaveAttribute('href', pull.url);
+  await page.screenshot({ path: testInfo.outputPath('lead-mission-placement.png'), animations: 'disabled' });
+
+  const push = (next: BoardPull) => request.post('/__push', { data: { type: 'pull', data: next } });
+  await push({ ...pull, checkedAt: NOW - 16 * 60_000 });
+  await push({ ...pull, id: 'pr-43', number: 43, url: 'https://github.com/example/crew/pull/43', review: '', conflict: false });
+  await expect(newerCard.locator('.mission-pull')).toHaveText([
+    '#42 · checks failing · changes requested · conflict · checked 16m ago',
+    '#43 · checks failing',
+  ]);
+  await expect(newerCard.locator('.mission-pull').first()).toHaveAttribute('data-stale', 'true');
+  await expect(newerCard.locator('.mission-pull').last()).not.toHaveAttribute('data-stale');
+  await newerCard.screenshot({ path: testInfo.outputPath('mission-tasks-and-pulls.png'), animations: 'disabled' });
+});
 
 test('short mission plans render in order with matching tracks and progress', async ({ page, request }) => {
   const data = fixture();

@@ -1,4 +1,4 @@
-import type { BoardJob, BoardState, ClaudeSession, CrewEvent, Mission, Snapshot } from './types.ts';
+import type { BoardJob, BoardPull, BoardState, ClaudeSession, CrewEvent, Mission, Snapshot } from './types.ts';
 import { onUnauthorized, stream } from './api.ts';
 
 const replace = <T extends { id: string }>(items: T[], next: T) =>
@@ -49,6 +49,7 @@ export class BoardStore {
           preset: state.preset,
           presets: state.presets,
           missions: state.missions ?? [],
+          pulls: state.pulls,
           agents: state.agents ?? {},
           roles: state.roles ?? {},
           roleSettings: state.roleSettings,
@@ -64,6 +65,9 @@ export class BoardStore {
         break;
       case 'mission':
         this.update({ missions: replace(current.missions, value as Mission) });
+        break;
+      case 'pull':
+        this.update({ pulls: replace(current.pulls ?? [], value as BoardPull) });
         break;
       case 'claude': {
         const { session, removed } = value as { session: ClaudeSession; removed: boolean };

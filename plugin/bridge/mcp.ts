@@ -88,7 +88,7 @@ How jobs work:
 - Leave \`tier\` and \`effort\` out for ordinary work, so the model and effort the user set for the role or preset apply. Name one only when a job clearly needs another, since it overrides them.
 - If a job fails on a usage limit, do that piece yourself and say what was skipped. If Crew cannot start a job at all, retry once, then tell the user the error and do that piece yourself.
 - /crew:run says when its pipeline reviews. Outside it, review only when the user asks: do not hold back a commit or a push for one. After a review and its fix, record what it showed with \`note\`: facts only, never impressions.
-- When you take a user's command through several steps, report it with \`mission\`: title and stages first, done as soon as the work finishes. Skip it for a single delegated job. Work the user asks for after done gets a new mission before you begin.
+- When you take a user's command through several steps, report it with \`mission\`: title and stages first, done as soon as the work finishes. Skip it for a single delegated job. Work the user asks for after done gets a new mission before you begin; a command given while another is under way gets its own beside it. \`tasks\` keep the work's split for a resumed session; \`pr\` links a pull request.
 - When a worker reports a workaround for this machine or project, add it to the project's .crew/instructions.md, which every later job is given.
 - \`route\` says who should take a kind of work now, from each agent's remaining usage. /crew:run calls it at each stage; outside it, follow the roles unless a job fails on a limit.
 ${PRESET_LINE}

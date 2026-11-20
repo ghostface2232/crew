@@ -57,9 +57,13 @@ let daemonPid;
 try {
   application = await launch();
   const page = await application.firstWindow();
-  // The board signs in with the cookie the shell sets, so the stream connects without a launch fragment.
+  // The shell signs the board's requests itself, so the stream connects with nothing in the address, and the
+  // page is left holding nothing: no cookie, and a reload stays signed in.
   await expect(page.getByText('Live', { exact: true })).toBeVisible({ timeout: 20_000 });
   expect(page.url()).toBe(`${base}/`);
+  expect(await application.evaluate(({ session }) => session.defaultSession.cookies.get({}))).toEqual([]);
+  await page.reload();
+  await expect(page.getByText('Live', { exact: true })).toBeVisible({ timeout: 20_000 });
   daemonPid = (await getHealth()).pid;
   expect(await page.evaluate(() => ({ require: typeof window.require, process: typeof window.process }))).toEqual({
     require: 'undefined',
@@ -170,7 +174,7 @@ try {
   await page.waitForTimeout(500);
   expect(await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.getURL())).toBe(`${base}/`);
 
-  // Copy buttons can write the clipboard; evidence opens in a signed-in window; web links go to the browser.
+  // Copy buttons can write the clipboard; evidence opens in a window of its own; web links go to the browser.
   expect(await page.evaluate(() => navigator.clipboard.writeText('crew').then(() => 'ok', (error) => String(error)))).toBe('ok');
   await application.evaluate(({ shell }) => {
     globalThis.crewOpened = [];
@@ -234,7 +238,7 @@ try {
     result: 'passed',
     platform: process.platform,
     checks: [
-      'cookie sign-in without a URL secret',
+      'sign-in by the shell, with no cookie and no secret in the address',
       'renderer isolation',
       'page-only scrolling, keyboard scrolling after a sidebar click',
       'close hides to tray',

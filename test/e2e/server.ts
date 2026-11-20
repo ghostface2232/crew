@@ -1,14 +1,17 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fixture, job, TEST_TOKEN } from './fixtures.ts';
+import { fixture, job, TEST_CREDENTIAL, TEST_TICKET } from './fixtures.ts';
 import { boardAsset, BOARD_CSP } from '../../plugin/bridge/assets.ts';
 import { resolveConfig } from '../../plugin/bridge/config.ts';
 
 let state = fixture();
 let instructions = 'Prefer minimal changes.\n';
 let requests: { route: string; body: unknown }[] = [];
+// Off, the server answers a page that sends nothing, as the daemon answers the desktop app's signed requests.
 let requireSession = false;
+// Whether the credential still holds; off stands for one that lapsed or a secret that was replaced.
+let credentialHolds = true;
 let traffic: { route: string; method: string }[] = [];
 const streams = new Set<http.ServerResponse>();
 const send = (type: string, data: unknown) => {
@@ -32,11 +35,17 @@ const server = http.createServer(async (req, res) => {
     requests = [];
     traffic = [];
     requireSession = body.auth === true;
+    credentialHolds = true;
     send('state', state);
     return json({});
   }
   if (url.pathname === '/__requests') return json(requests);
   if (url.pathname === '/__traffic') return json(traffic);
+  if (url.pathname === '/__auth') {
+    if (body.required !== undefined) requireSession = body.required;
+    if (body.holds !== undefined) credentialHolds = body.holds;
+    return json({});
+  }
   if (url.pathname === '/__push') {
     if (body.type === 'job')
       state.jobs = state.jobs.map((job) => (job.id === body.data.id ? { ...job, ...body.data } : job));
@@ -52,12 +61,10 @@ const server = http.createServer(async (req, res) => {
   }
   if (url.pathname.startsWith('/api/')) traffic.push({ route: url.pathname, method: req.method! });
   if (url.pathname === '/api/session' && req.method === 'POST') {
-    if (body.token !== TEST_TOKEN) return json({ error: 'unauthorized' }, 401);
-    res.setHeader('set-cookie', `crew_session=${TEST_TOKEN}; HttpOnly; SameSite=Strict; Path=/`);
-    return json({});
+    if (body.ticket !== TEST_TICKET) return json({ error: 'unauthorized' }, 401);
+    return json({ credential: TEST_CREDENTIAL });
   }
-  if (requireSession && url.pathname.startsWith('/api/') &&
-      !req.headers.cookie?.split(';').some((cookie) => cookie.trim() === `crew_session=${TEST_TOKEN}`)) {
+  if (requireSession && url.pathname.startsWith('/api/') && !(credentialHolds && req.headers.authorization === `Bearer ${TEST_CREDENTIAL}`)) {
     return json({ error: 'unauthorized' }, 401);
   }
   if (url.pathname === '/api/stream') {

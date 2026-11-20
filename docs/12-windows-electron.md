@@ -7,14 +7,14 @@ Implemented 2026-11-16. macOS keeps the [native SwiftUI app](08-native-macos.md)
 ```text
 Electron main (desktop/main.ts) ── ensureDaemon ── independent daemon ── agent CLIs / worktrees
   window, tray, single instance          │
-                                         │ HTTP + SSE, signed in by cookie
+                                         │ HTTP + SSE, signed by the main process
   sandboxed renderer ─── React board (plugin/board) served by the daemon
 ```
 
 - The main process imports the bridge's own `client.ts`, so startup reuses `ensureDaemon`, including version negotiation and active-job protection. The daemon starts using the app's Electron executable in Node mode (`ELECTRON_RUN_AS_NODE`), so no separate Node install is needed.
-- Before loading the board, the main process sets the daemon's `crew_session` cookie from `~/.crew/token`. The secret never appears in a URL or browser history. The tray's Open in browser command uses the usual `#token=` launch fragment.
+- The main process signs the board window's requests to the daemon: it makes a board credential from `~/.crew/token` and adds it as a header (`signBoard` in `desktop/main.ts`), so the page holds nothing and neither a cookie nor an address carries the secret. The tray's Open in browser command opens the board with a one-time ticket in the launch fragment (09 section 12).
 - The renderer runs with `nodeIntegration: false`, `contextIsolation: true`, and `sandbox: true`. Its preload script (`desktop/preload.cts`) exposes only the updater, as `window.crewDesktop`, and the main process answers it only from the main window's board page. Navigation outside the board and webviews are denied. The only granted permission is clipboard write access for the board's origin, used by its copy buttons.
-- Links in reports open in the default browser. Evidence images require the board's sign-in, so they open in a separate sandboxed app window that cannot navigate. All other new-window requests are denied.
+- Links in reports open in the default browser. Evidence images are the daemon's to serve, so they open in a separate sandboxed app window that cannot navigate, by an address that carries the file's seal. All other new-window requests are denied.
 
 ## Window
 
@@ -68,7 +68,7 @@ npm run test:desktop
 
 The smoke test (`scripts/smoke-electron.mjs`) runs the app against an isolated daemon in a temporary home directory on a free port, without starting any workers. It verifies:
 
-- cookie sign-in without a URL secret, and renderer isolation
+- sign-in by the main process with no cookie and no secret in the address, across a reload, and renderer isolation
 - hiding to the tray on close, single-instance focus, and daemon survival across quit and reopen
 - cancelling quit to preserve unsaved settings
 - blocked external navigation, browser-opened report links, and separate evidence windows

@@ -2,7 +2,9 @@ import { resolveConfig, ROLE_INFO } from '../../plugin/bridge/config.ts';
 import type { BoardJob, BoardState } from '../../plugin/board/src/types.ts';
 
 export const NOW = 1_795_000_000_000;
-export const TEST_TOKEN = '0123456789abcdef'.repeat(4);
+/** The ticket a launch address carries, and what the fixture server gives a page for it. */
+export const TEST_TICKET = '0123456789abcdef'.repeat(4);
+export const TEST_CREDENTIAL = `board.1.${'fedcba9876543210'.repeat(4)}`;
 export function job(overrides: Partial<BoardJob> = {}): BoardJob {
   return {
     id: 'cx-build',

@@ -2,7 +2,7 @@
 import { execFileSync, spawn } from 'node:child_process';
 import path from 'node:path';
 import { api, ensureDaemon, health, stopDaemon } from './client.ts';
-import { boardUrl, readToken } from './auth.ts';
+import { boardUrl } from './auth.ts';
 import { baseUrl, HOME, installed, VERSION } from './config.ts';
 import { checks as setupChecks, COMMAND, PACKAGED, register, run } from './setup.ts';
 import { describe, summarize } from './render.ts';
@@ -97,20 +97,25 @@ try {
       console.log(result.text);
       break;
     }
-    case 'board':
+    case 'board': {
       await ensureDaemon();
-      // The address carries the secret in its fragment so the page can sign in. It is printed only when asked for,
-      // for a caller that opens the page itself.
+      // The address carries a ticket in its fragment, which signs one page in once within a minute and is worth
+      // nothing after. It is printed only when asked for, for a caller that opens the page itself.
+      const { ticket } = await api<{ ticket: string }>('POST', '/api/session/ticket').catch((err) => {
+        throw new Error(`The daemon gave no sign-in ticket (${err.message}). If it is older than this command, it is replaced once its running jobs end; \`crew daemon restart\` replaces it now and ends them.`);
+      });
+      const address = boardUrl(baseUrl(), ticket);
       if (process.argv.includes('--url')) {
-        console.log(boardUrl(baseUrl(), readToken(HOME)));
+        console.log(address);
         break;
       }
       if (process.platform === 'win32') {
         // start, not explorer, keeps the fragment that signs the page in. The address holds no cmd.exe syntax.
-        spawn('cmd.exe', ['/d', '/s', '/c', `start "" "${boardUrl(baseUrl(), readToken(HOME))}"`], { stdio: 'ignore', detached: true, windowsHide: true, windowsVerbatimArguments: true }).unref();
-      } else spawn('open', [boardUrl(baseUrl(), readToken(HOME))], { stdio: 'ignore', detached: true }).unref();
+        spawn('cmd.exe', ['/d', '/s', '/c', `start "" "${address}"`], { stdio: 'ignore', detached: true, windowsHide: true, windowsVerbatimArguments: true }).unref();
+      } else spawn('open', [address], { stdio: 'ignore', detached: true }).unref();
       console.log(baseUrl());
       break;
+    }
     case 'doctor':
       await doctor();
       break;

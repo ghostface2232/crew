@@ -52,7 +52,7 @@ When something hangs, `crew doctor` checks prerequisites, `crew daemon logs` sho
 
 `crew gc` previews orphan worktrees, Git metadata, and unused worker branches, showing whether each branch is merged into `HEAD`. Use `crew gc --apply` to remove orphan directories and prune metadata; add `--branches` to delete only branches merged into `HEAD`. Unmerged branches are kept with a `git branch -D <name>` command for manual removal. Active and owned worktrees are protected. Windows cleanup failures name leftovers in job status and notes.
 
-The status board runs at http://127.0.0.1:47615, or on a fallback port in `~/.crew/daemon.json` when the system reserves that one. Open it with `crew board` or from the app to sign in; the daemon answers only requests carrying the secret in `~/.crew/token` ([docs/09-usage-presets-rounds.md](docs/09-usage-presets-rounds.md) section 12).
+The status board runs at http://127.0.0.1:47615, or on a fallback port in `~/.crew/daemon.json` when the system reserves that one. Open it with `crew board` or from the app to sign in; a browser tab stays signed in until it is closed or reloaded. The daemon answers only requests carrying the secret in `~/.crew/token` ([docs/09-usage-presets-rounds.md](docs/09-usage-presets-rounds.md) section 12).
 
 Each `/crew:run` command appears as a single unit with its jobs grouped under it, and a top line lists anything waiting on you. Click a job to read its report, changed files, and activity, or to send a follow-up.
 

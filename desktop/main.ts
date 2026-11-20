@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { readToken, SESSION_COOKIE } from '../plugin/bridge/auth.ts';
+import { boardCredential, boardUrl, readToken, SESSION_COOKIE } from '../plugin/bridge/auth.ts';
 import { api, ensureDaemon, health } from '../plugin/bridge/client.ts';
 import { baseUrl, HOME, PLUGIN_ROOT } from '../plugin/bridge/config.ts';
 import type { BoardState } from '../plugin/board/src/types.ts';
@@ -132,16 +132,26 @@ function show() {
   window.show();
   window.focus();
 }
-/** Signs the board in with the daemon's secret as its HttpOnly cookie, so the secret never enters a URL or history. */
+/** What the board's requests are signed with: a board credential, made again when the secret changes or it nears its end. */
+let signed: { token: string; credential: string; expires: number } | null = null;
+/**
+ * Signs the board's requests from here, so its page holds nothing and neither a cookie nor an address carries the
+ * secret. Only the board window's requests to the daemon are signed; a window opened for evidence loads an address
+ * that carries that file's seal.
+ */
+function signBoard(board: BrowserWindow) {
+  // Read once: the session outlives the window, whose contents cannot be asked for their id once it is destroyed.
+  const { id } = board.webContents;
+  board.webContents.session.webRequest.onBeforeSendHeaders((details, respond) => {
+    const token = details.webContentsId === id && URL.parse(details.url)?.origin === baseUrl() ? readToken(HOME) : null;
+    if (token && (signed?.token !== token || signed.expires - Date.now() < 3_600_000)) signed = { token, ...boardCredential(token) };
+    respond({ requestHeaders: token ? { ...details.requestHeaders, Authorization: `Bearer ${signed!.credential}` } : details.requestHeaders });
+  });
+}
 async function loadBoard() {
   if (!window || window.isDestroyed()) return;
-  const token = readToken(HOME);
-  if (token) {
-    await window.webContents.session.cookies.set({
-      url: baseUrl(), name: SESSION_COOKIE, value: token, httpOnly: true, sameSite: 'strict',
-      expirationDate: Date.now() / 1000 + 31_536_000,
-    });
-  }
+  // An earlier version signed in with a cookie holding the secret itself.
+  await window.webContents.session.cookies.remove(baseUrl(), SESSION_COOKIE);
   await window.loadURL(baseUrl());
 }
 function createWindow() {
@@ -170,11 +180,13 @@ function createWindow() {
   const settled = window.getNormalBounds();
   restored = { bounds: { ...settled, ...bounds }, settled };
   if (bounds.maximized) window.maximize();
+  signBoard(window);
   window.once('ready-to-show', () => show());
   window.webContents.on('dom-ready', () => {
     void window?.webContents.insertCSS(BACKDROP ? FRAME_CSS + BACKDROP_CSS : FRAME_CSS).catch(console.error);
   });
-  // Report links open in the user's browser. Evidence needs the board's sign-in, so it opens in a window of its own.
+  // Report links open in the user's browser. Evidence is the daemon's to serve, so it opens in a window of its
+  // own, by an address that carries the file's seal.
   window.webContents.setWindowOpenHandler(({ url }) => {
     const target = linkTarget(url, baseUrl());
     if (target === 'external') void shell.openExternal(url);
@@ -249,10 +261,10 @@ function trayMenu(waiting = pending) {
   );
   window?.setOverlayIcon(pending ? nativeImage.createFromPath(asset('badge.png')) : null, pending ? `${pending} waiting` : '');
 }
-/** The browser signs in through the launch fragment, as /crew:board opens it. */
+/** The browser signs in with a ticket in the launch fragment, as /crew:board opens it. Without one it shows how to sign in. */
 async function openInBrowser() {
-  const token = readToken(HOME);
-  await shell.openExternal(token ? `${baseUrl()}/#token=${token}` : baseUrl());
+  const ticket = await api<{ ticket: string }>('POST', '/api/session/ticket').then((issued) => issued.ticket, () => null);
+  await shell.openExternal(boardUrl(baseUrl(), ticket));
 }
 /** Keeps the tray's waiting count current; the board itself follows the daemon's live stream. */
 async function poll() {

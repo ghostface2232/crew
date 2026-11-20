@@ -224,19 +224,24 @@ private final class AuthenticationProtocol: URLProtocol, @unchecked Sendable {
         } catch { #expect(error is URLError) }
         #expect(calls.withLock { $0 } == 2)
     }
-    @Test func webBoardURLReadsCurrentTokenOrUsesPlainAddress() throws {
+    @Test func webBoardURLCarriesATicketOrIsThePlainAddress() async throws {
         let home = try home()
         defer { try? FileManager.default.removeItem(at: home) }
-        let api = api(home: home) { _ in (200, Data()) }
-        #expect(api.webBoardURL == api.baseURL)
         try write(firstToken, home: home)
-        #expect(api.webBoardURL.absoluteString == "http://127.0.0.1:0/#token=\(firstToken)")
-        try write(nextToken, home: home)
-        #expect(api.webBoardURL.fragment == "token=\(nextToken)")
-        try write("invalid-token", home: home)
-        #expect(api.webBoardURL == api.baseURL)
-        try FileManager.default.removeItem(at: api.tokenFile)
-        #expect(api.webBoardURL == api.baseURL)
+        let token = firstToken
+        let ticket = String(repeating: "c3", count: 32)
+        let refused = Mutex(false)
+        let api = api(home: home) { request in
+            #expect(request.url?.path == "/api/session/ticket")
+            #expect(request.httpMethod == "POST")
+            #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer \(token)")
+            return refused.withLock { $0 } ? (404, Data(#"{"error":"not found"}"#.utf8)) : (200, Data(#"{"ticket":"\#(ticket)"}"#.utf8))
+        }
+        // The secret itself never enters the address.
+        #expect(await api.webBoardURL().absoluteString == "http://127.0.0.1:0/#ticket=\(ticket)")
+        // A daemon from before tickets has no such route: the page then shows how to sign in.
+        refused.withLock { $0 = true }
+        #expect(await api.webBoardURL() == api.baseURL)
     }
     @Test func crewHomeControlsTokenLocationAndDefaultsToUserHome() throws {
         let home = try home()

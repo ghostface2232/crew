@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { Actions, answerKey, tokenFromFragment } from '../plugin/board/src/api.ts';
+import { Actions, answerKey, onUnauthorized, stream, ticketFromFragment, UnauthorizedError } from '../plugin/board/src/api.ts';
 import { BoardStore, mergeEvents } from '../plugin/board/src/store.ts';
 import { elapsed, evidenceSide, evidenceTurn, orderEvidence, jobLabel, projectNames, unsettled, missionProgress, missionStops, missionStep, missionStopPosition, missionJobStep, missionLooksFinished, relativeDuration, usageWindowName, STOP_OF_STAGE } from '../plugin/board/src/model.ts';
 import type { BoardJob, BoardState, ClaudeSession, CrewEvent, Mission } from '../plugin/board/src/types.ts';
@@ -104,23 +104,49 @@ test('events deduplicate overlap between a detail fetch and the stream and stay 
   );
 });
 
-test('stream lifecycle closes connections on unmount and exposes disconnection', async (t) => {
-  t.mock.method(globalThis, 'fetch', async () => Response.json({ now: Date.now(), events: [] }));
+test('stream lifecycle closes connections on unmount and exposes disconnection', async () => {
   const store = new BoardStore();
-  let closed = false;
-  const stream = {
-    addEventListener() {},
-    onerror: null as null | (() => void),
-    close() {
-      closed = true;
-    },
-  };
-  const cleanup = store.connect(() => stream as unknown as EventSource);
+  let fail!: (error: Error) => void;
+  let signal!: AbortSignal;
+  const cleanup = store.connect((_route, _receive, given) => {
+    signal = given;
+    return new Promise((_resolve, reject) => { fail = reject; });
+  });
   await new Promise((resolve) => setImmediate(resolve));
-  stream.onerror!();
+  fail(new Error('connection reset'));
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(store.getSnapshot().connection, 'lost');
   cleanup();
-  assert.equal(closed, true);
+  assert.equal(signal.aborted, true);
+});
+
+test('the stream is read whole across chunks that end inside a character or an event', async (t) => {
+  const bytes = Buffer.from(`event: state\ndata: {"title":"한글"}\n\n: keep-alive\n\nevent: job\ndata: {"id":"cx-1"}\n\nevent: job\ndata: {"id":"unfinished`);
+  // One byte at a time cuts every character and every event somewhere.
+  const body = new ReadableStream({ start(controller) { for (const byte of bytes) controller.enqueue(Uint8Array.of(byte)); controller.close(); } });
+  const sent: RequestInit[] = [];
+  t.mock.method(globalThis, 'fetch', async (_route: string, init: RequestInit) => { sent.push(init); return new Response(body); });
+  const events: [string, unknown][] = [];
+  await stream('/api/stream', (type, data) => events.push([type, JSON.parse(data)]), new AbortController().signal);
+  assert.deepEqual(events, [['state', { title: '한글' }], ['job', { id: 'cx-1' }]]);
+  // A page that holds no credential sends none: the desktop app signs its requests itself.
+  assert.deepEqual(sent[0].headers, {});
+});
+
+test('a refused stream signs the board out instead of retrying as an outage', async (t) => {
+  let calls = 0;
+  t.mock.method(globalThis, 'fetch', async () => { calls++; return Response.json({ error: 'unauthorized' }, { status: 401 }); });
+  let told = 0;
+  const unsubscribe = onUnauthorized(() => told++);
+  await assert.rejects(stream('/api/stream', () => {}, new AbortController().signal), UnauthorizedError);
+  unsubscribe();
+  assert.equal(told, 1);
+  const store = new BoardStore();
+  const cleanup = store.connect();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(store.getSnapshot().connection, 'unauthorized');
+  cleanup();
+  assert.equal(calls, 2);
 });
 
 test('mission progress uses all seven stages and only its unfinished jobs', () => {
@@ -240,29 +266,31 @@ test('usage and preset events replace immutable snapshots and older state clears
   assert.equal(store.getSnapshot().presets, undefined);
 });
 
-test('transport subscribes to usage and preset events', async (t) => {
-  t.mock.method(globalThis, 'fetch', async () => Response.json({ now: Date.now(), events: [] }));
-  const listeners = new Map<string, (event: { data: string }) => void>();
+test('transport passes usage and preset events to the store', async () => {
+  let receive!: (type: string, data: string) => void;
   const store = new BoardStore();
-  const cleanup = store.connect(() => ({
-    addEventListener: (type: string, listener: (event: { data: string }) => void) => listeners.set(type, listener),
-    close() {},
-  }) as unknown as EventSource);
+  const cleanup = store.connect((_route, given) => {
+    receive = given;
+    return new Promise(() => {});
+  });
   await new Promise((resolve) => setImmediate(resolve));
-  listeners.get('usage')!({ data: JSON.stringify({ source: 'none', providers: [] }) });
-  listeners.get('preset')!({ data: JSON.stringify({ preset: null, presets: {} }) });
+  receive('usage', JSON.stringify({ source: 'none', providers: [] }));
+  receive('preset', JSON.stringify({ preset: null, presets: {} }));
   assert.equal(store.getSnapshot().usage?.source, 'none');
   assert.equal(store.getSnapshot().preset, null);
   cleanup();
+  // An event from a connection that was closed is not applied.
+  receive('preset', JSON.stringify({ preset: 'best', presets: {} }));
+  assert.equal(store.getSnapshot().preset, null);
 });
 
-test('launch fragments accept only a complete 64-digit hexadecimal token', () => {
-  const token = '0123456789abcdef'.repeat(4);
-  assert.equal(tokenFromFragment(`#token=${token}`), token);
-  assert.equal(tokenFromFragment(`#view=board&token=${token.toUpperCase()}&other=value`), token.toUpperCase());
-  for (const fragment of ['', '#cx-build', '#token=', `#token=${token.slice(1)}`, `#token=${token}0`,
-    `#token=${'g'.repeat(64)}`, `#other=token=${token}`, `#token=${token}%0A`]) {
-    assert.equal(tokenFromFragment(fragment), null);
+test('launch fragments accept only a complete 64-digit hexadecimal ticket', () => {
+  const ticket = '0123456789abcdef'.repeat(4);
+  assert.equal(ticketFromFragment(`#ticket=${ticket}`), ticket);
+  assert.equal(ticketFromFragment(`#view=board&ticket=${ticket.toUpperCase()}&other=value`), ticket.toUpperCase());
+  for (const fragment of ['', '#cx-build', '#ticket=', `#ticket=${ticket.slice(1)}`, `#ticket=${ticket}0`,
+    `#ticket=${'g'.repeat(64)}`, `#other=ticket=${ticket}`, `#ticket=${ticket}%0A`, `#token=${ticket}`]) {
+    assert.equal(ticketFromFragment(fragment), null);
   }
 });
 

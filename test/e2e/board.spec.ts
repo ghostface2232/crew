@@ -1,6 +1,6 @@
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import { resolveConfig } from '../../plugin/bridge/config.ts';
-import { fixture, job, NOW, TEST_TOKEN } from './fixtures.ts';
+import { fixture, job, NOW, TEST_CREDENTIAL, TEST_TICKET } from './fixtures.ts';
 
 test.beforeEach(async ({ page, request }) => {
   await request.post('/__reset');
@@ -79,10 +79,10 @@ test('a mission with more than one job folds the busy stages it has moved past, 
 });
 
 test('a quiet ended workload looks finished and the authenticated user can mark the mission done', async ({ page, request }) => {
-  // From `/`, a fragment-only goto would not reload the page, so the launch token would never sign in.
+  // From `/`, a fragment-only goto would not reload the page, so the launch ticket would never sign in.
   await page.goto('about:blank');
   await request.post('/__reset', { data: { auth: true } });
-  await page.goto(`/#token=${TEST_TOKEN}`);
+  await page.goto(`/#ticket=${TEST_TICKET}`);
   await expect(page.getByText('Live', { exact: true })).toBeVisible();
   const data = fixture();
   data.missions[0].stages = ['implement', 'cross-review'];
@@ -110,7 +110,7 @@ test('a quiet ended workload looks finished and the authenticated user can mark 
 test('a mission dropped with Stop Tracking can still be marked done, reopening it explicitly', async ({ page, request }) => {
   await page.goto('about:blank');
   await request.post('/__reset', { data: { auth: true } });
-  await page.goto(`/#token=${TEST_TOKEN}`);
+  await page.goto(`/#ticket=${TEST_TICKET}`);
   await expect(page.getByText('Live', { exact: true })).toBeVisible();
   const card = page.locator('[data-key="mission-1"]');
   await card.getByRole('button', { name: 'Mission options' }).click();
@@ -288,7 +288,7 @@ test('detail panel cancels, follows up, and escapes task text', async ({ page, r
 test('the detail panel shows the worker\'s evidence and the lead\'s attachments', async ({ page, request }) => {
   const data = fixture();
   data.jobs[0].evidence = [
-    { file: 'narrow.png', path: '/x/narrow.png', turn: 1, from: 'worker', bytes: 10, modified: 1 },
+    { file: 'narrow.png', path: '/x/narrow.png', turn: 1, from: 'worker', bytes: 10, modified: 1, sig: 'ab'.repeat(32) },
     { file: 'lead-1-design.png', path: '/x/lead-1-design.png', turn: 1, from: 'lead', bytes: 10, modified: 1 },
   ];
   await request.post('/__push', { data: { type: 'state', data } });
@@ -297,6 +297,8 @@ test('the detail panel shows the worker\'s evidence and the lead\'s attachments'
   const shot = section.getByRole('img', { name: 'narrow.png' });
   await expect(shot).toBeVisible();
   expect(await shot.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true);
+  // An image cannot send the credential, so its address carries the seal the daemon gave for the file.
+  await expect(shot).toHaveAttribute('src', `/api/jobs/${data.jobs[0].id}/evidence/narrow.png?v=1&sig=${'ab'.repeat(32)}`);
   await expect(section.getByText('Turn 1 · narrow.png')).toBeVisible();
   await expect(section.getByText('Attached by the lead · lead-1-design.png')).toBeVisible();
 });
@@ -1135,10 +1137,10 @@ test.describe('authenticated daemon', () => {
     });
   });
 
-  test('a launch token signs in before other requests, clears the fragment, and uses only the cookie', async ({ page, context, request, browserName }) => {
+  test('a launch ticket signs in before other requests, clears the fragment, and leaves nothing in the browser', async ({ page, context, request }) => {
     const errors: string[] = [];
     page.on('pageerror', (error) => errors.push(error.message));
-    await page.goto(`/?view=board#token=${TEST_TOKEN}`);
+    await page.goto(`/?view=board#ticket=${TEST_TICKET}`);
     await expect(page.getByText('Live', { exact: true })).toBeVisible();
     await expect(page).toHaveURL(/\/\?view=board$/);
     await expect(page.locator('button[data-job="cx-build"]')).toBeVisible();
@@ -1146,20 +1148,20 @@ test.describe('authenticated daemon', () => {
     expect(traffic[0]).toEqual({ route: '/api/session', method: 'POST' });
     expect(traffic.filter((call: { route: string }) => call.route === '/api/session')).toHaveLength(1);
     expect(traffic.some((call: { route: string }) => call.route === '/api/stream')).toBe(true);
-    expect(traffic.every((call: { route: string }) => !call.route.includes(TEST_TOKEN))).toBe(true);
-    // WebKit on Windows reports every cookie's SameSite as None; the server still sends Strict.
-    expect((await context.cookies()).find((cookie) => cookie.name === 'crew_session')).toMatchObject({
-      httpOnly: true, ...(browserName === 'webkit' && process.platform === 'win32' ? {} : { sameSite: 'Strict' }),
-    });
+    expect(traffic.every((call: { route: string }) => !call.route.includes(TEST_TICKET) && !call.route.includes(TEST_CREDENTIAL))).toBe(true);
+    // Whatever a browser keeps is on disk: the credential is in neither a cookie nor web storage.
+    expect(await context.cookies()).toEqual([]);
     expect(await page.evaluate(() => ({ local: { ...localStorage }, session: { ...sessionStorage } })))
       .toEqual({ local: {}, session: {} });
     expect(await page.evaluate(() => Reflect.get(window, '__secretStorageWrite'))).toBe(false);
     expect(errors).toEqual([]);
+    // So a reload signs the page out, and the screen says how to come back.
     await page.reload();
-    await expect(page.getByText('Live', { exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'The board is not signed in' })).toBeVisible();
+    await expect(page.getByText('a reload signs it out')).toBeVisible();
   });
 
-  test('without a token, explains sign-in and stops retrying until asked', async ({ page, request }) => {
+  test('without a ticket, explains sign-in and stops retrying until asked', async ({ page, request }) => {
     await page.goto('/');
     await expect(page.getByRole('heading', { name: 'The board is not signed in' })).toBeVisible();
     await expect(page.getByText('crew board', { exact: true })).toBeVisible();
@@ -1168,35 +1170,35 @@ test.describe('authenticated daemon', () => {
     await expect(page.locator('button[data-job]')).toHaveCount(0);
     const before = await (await request.get('/__traffic')).json();
     expect(before.length).toBeGreaterThan(0);
-    // The state fetch and the Overview's setup check, each sent twice by a development build.
+    // The stream and the Overview's setup check, each sent twice by a development build.
     expect(before.length).toBeLessThanOrEqual(4);
     await page.waitForTimeout(2000);
     expect(await (await request.get('/__traffic')).json()).toEqual(before);
   });
 
-  test('a wrong token shows the same screen and removes the fragment', async ({ page, request }) => {
-    await page.goto(`/#token=${'f'.repeat(64)}`);
+  test('a wrong ticket shows the same screen and removes the fragment', async ({ page, request }) => {
+    await page.goto(`/#ticket=${'f'.repeat(64)}`);
     await expect(page.getByRole('heading', { name: 'The board is not signed in' })).toBeVisible();
     await expect(page).toHaveURL(/\/$/);
     expect(await (await request.get('/__traffic')).json()).toEqual([{ route: '/api/session', method: 'POST' }]);
   });
 
-  test('Retry loads the board after the cookie is set', async ({ page, context }) => {
+  test('Retry loads the board once its requests are signed again, as the desktop app signs them', async ({ page, request }) => {
     await page.goto('/');
     await expect(page.getByRole('heading', { name: 'The board is not signed in' })).toBeVisible();
     await page.getByRole('button', { name: 'Retry', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'The board is not signed in' })).toBeVisible();
-    expect((await context.request.post('/api/session', { data: { token: TEST_TOKEN } })).status()).toBe(200);
+    await request.post('/__auth', { data: { required: false } });
     await page.getByRole('button', { name: 'Retry', exact: true }).click();
     await expect(page.getByText('Live', { exact: true })).toBeVisible();
     await expect(page.locator('button[data-job="cx-build"]')).toBeVisible();
   });
 
-  test('an action returning 401 replaces the board and closes its stream', async ({ page, context, request }) => {
-    await page.goto(`/#token=${TEST_TOKEN}`);
+  test('an action returning 401 replaces the board and closes its stream', async ({ page, request }) => {
+    await page.goto(`/#ticket=${TEST_TICKET}`);
     await expect(page.getByText('Live', { exact: true })).toBeVisible();
     await needsYou(page);
-    await context.clearCookies();
+    await request.post('/__auth', { data: { holds: false } });
     await page.getByRole('button', { name: 'Yes', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'The board is not signed in' })).toBeVisible();
     await request.post('/__push', { data: { type: 'state', data: fixture() } });
@@ -1206,41 +1208,25 @@ test.describe('authenticated daemon', () => {
     expect(await (await request.get('/__traffic')).json()).toEqual(before);
   });
 
-  test('a failed stream probes state and stops on 401', async ({ page, context, request }) => {
-    await page.goto(`/#token=${TEST_TOKEN}`);
+  test('a stream that ends is opened again, and a refusal then stops it', async ({ page, request }) => {
+    await page.goto(`/#ticket=${TEST_TICKET}`);
     await expect(page.getByText('Live', { exact: true })).toBeVisible();
-    await context.clearCookies();
+    await request.post('/__auth', { data: { holds: false } });
     await request.post('/__push', { data: { type: 'disconnect' } });
     await expect(page.getByRole('heading', { name: 'The board is not signed in' })).toBeVisible();
     const before = await (await request.get('/__traffic')).json();
-    expect(before.at(-1)).toEqual({ route: '/api/state', method: 'GET' });
+    expect(before.at(-1)).toEqual({ route: '/api/stream', method: 'GET' });
     await page.waitForTimeout(2000);
     expect(await (await request.get('/__traffic')).json()).toEqual(before);
-  });
-
-  test('a stream rejected with 401 is detected even after a successful state fetch', async ({ page, request }) => {
-    let streamRequested = false;
-    page.on('request', (call) => {
-      if (new URL(call.url()).pathname === '/api/stream') streamRequested = true;
-    });
-    await page.route('**/api/state', (route) => route.fulfill({
-      status: streamRequested ? 401 : 200,
-      json: streamRequested ? { error: 'unauthorized' } : fixture(),
-    }));
-    // Answered here so that the stream is the only request the daemon can reject.
-    await page.route('**/api/setup', (route) => route.fulfill({ json: { items: [] } }));
-    await page.goto('/');
-    await expect(page.getByRole('heading', { name: 'The board is not signed in' })).toBeVisible();
-    expect(await (await request.get('/__traffic')).json()).toEqual([{ route: '/api/stream', method: 'GET' }]);
   });
 });
 
 test('an unreachable stream stays a connection failure and can recover', async ({ page, request }) => {
-  await page.route('**/api/state', (route) => route.abort());
+  await page.route('**/api/stream', (route) => route.abort());
   await request.post('/__push', { data: { type: 'disconnect' } });
   await expect(page.getByText('Lost the connection to Crew. Reconnecting…')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'The board is not signed in' })).toHaveCount(0);
-  await page.unroute('**/api/state');
+  await page.unroute('**/api/stream');
   await expect(page.getByText('Live', { exact: true })).toBeVisible();
 });
 

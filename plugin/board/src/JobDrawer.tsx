@@ -71,8 +71,9 @@ function RoundRow({ job, round }: { job: BoardJob; round: NonNullable<BoardJob['
 
 type EvidenceItem = NonNullable<BoardJob['evidence']>[number];
 const isVideo = (file: string) => /\.(webm|mp4)$/i.test(file);
-// The version keeps a cached copy from standing in for a file rewritten under the same name.
-const evidenceSrc = (job: BoardJob, item: EvidenceItem) => `/api/jobs/${encodeURIComponent(job.id)}/evidence/${encodeURIComponent(item.file)}?v=${item.modified}`;
+// The version keeps a cached copy from standing in for a file rewritten under the same name. The seal stands in
+// for the credential, which an image, a video or a new tab cannot send.
+const evidenceSrc = (job: BoardJob, item: EvidenceItem) => `/api/jobs/${encodeURIComponent(job.id)}/evidence/${encodeURIComponent(item.file)}?v=${item.modified}${item.sig ? `&sig=${item.sig}` : ''}`;
 
 /** What the worker saw, newest turn first, and what the lead attached. */
 function EvidenceSection({ job }: { job: BoardJob }) {

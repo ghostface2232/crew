@@ -1,5 +1,5 @@
 import type { BoardJob, BoardState, ClaudeSession, CrewEvent, Mission, Snapshot } from './types.ts';
-import { onUnauthorized, request } from './api.ts';
+import { onUnauthorized, stream } from './api.ts';
 
 const replace = <T extends { id: string }>(items: T[], next: T) =>
   items.some((item) => item.id === next.id)
@@ -103,16 +103,13 @@ export class BoardStore {
   private reconnect?: () => void;
   retry = () => this.reconnect?.();
   signOut = () => this.update({ connection: 'unauthorized' });
-  connect(create = (url: string) => new EventSource(url)) {
+  connect(read = stream) {
     let generation = 0;
-    let stream: EventSource | undefined;
     let controller: AbortController | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const stop = () => {
       generation++;
       controller?.abort();
-      stream?.close();
-      stream = undefined;
       clearTimeout(timer);
     };
     const unsubscribe = onUnauthorized(() => {
@@ -122,39 +119,22 @@ export class BoardStore {
     const open = async () => {
       const current = ++generation;
       controller = new AbortController();
-      const signal = controller.signal;
-      const reconnectLater = () => {
-        if (current === generation) timer = setTimeout(() => void open(), 3000);
-      };
       try {
-        const state = await request<BoardState>('/api/state', undefined, signal);
-        if (current !== generation) return;
-        this.receive('state', state);
-        const source = create('/api/stream');
-        stream = source;
-        for (const type of ['state', 'job', 'mission', 'claude', 'roles', 'roleSettings', 'limits', 'usage', 'preset', 'modelScores', 'peerRatings', 'event']) {
-          source.addEventListener(type, (event) => {
-            if (current !== generation || source !== stream) return;
-            try {
-              this.receive(type, JSON.parse((event as MessageEvent).data));
-            } catch {
-              this.update({ connection: 'lost' });
-            }
-          });
-        }
-        source.onerror = () => {
-          if (current !== generation || source !== stream) return;
-          // Stop native retries while a fetch distinguishes an expired session from an outage.
-          source.close();
-          stream = undefined;
-          this.update({ connection: 'lost' });
-          void request('/api/state', undefined, signal).catch(() => {}).finally(reconnectLater);
-        };
+        // The stream opens with the whole state, so each connection replaces what the one before it left.
+        await read('/api/stream', (type, data) => {
+          if (current !== generation) return;
+          try {
+            this.receive(type, JSON.parse(data));
+          } catch {
+            this.update({ connection: 'lost' });
+          }
+        }, controller.signal);
       } catch {
-        if (current !== generation) return;
-        this.update({ connection: 'lost' });
-        reconnectLater();
+        // An outage. A refused credential has already signed the board out and stopped this connection.
       }
+      if (current !== generation) return;
+      this.update({ connection: 'lost' });
+      timer = setTimeout(() => void open(), 3000);
     };
     this.reconnect = () => {
       stop();

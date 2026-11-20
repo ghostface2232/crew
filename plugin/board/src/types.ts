@@ -7,7 +7,11 @@ import type { Usage } from '../../bridge/usage.ts';
 import type { ModelScore } from '../../bridge/notes.ts';
 
 /** `outcomeContradiction` is what the daemon observed against a declared "done"; an older daemon sends none. */
-export type BoardJob = Omit<Job, 'prompt' | 'instructions'> & Partial<Pick<Job, 'prompt' | 'instructions'>> & { outcomeContradiction?: string };
+export type BoardJob = Omit<Job, 'prompt' | 'instructions' | 'evidence'> & Partial<Pick<Job, 'prompt' | 'instructions'>> & {
+  outcomeContradiction?: string;
+  /** Each file with the seal its address needs; see evidenceSeal in the bridge. */
+  evidence?: (NonNullable<Job['evidence']>[number] & { sig?: string })[];
+};
 export type { CrewEvent, ClaudeSession, Mission, WorkerAgent, Usage, Preset, PresetName, ModelScore };
 export type Roles = Config['roles'];
 /** An older daemon sends no models; the settings then take a typed model and effort. */

@@ -33,7 +33,7 @@ struct CrewApp: App {
                 Button("Activity") { delegate.show(); delegate.store.selection = "activity" }.keyboardShortcut("3")
                 Button("History") { delegate.show(); delegate.store.selection = "history" }.keyboardShortcut("4")
                 Divider()
-                Button("Open Web Board") { NSWorkspace.shared.open(delegate.store.api.webBoardURL) }
+                Button("Open Web Board") { Task { NSWorkspace.shared.open(await delegate.store.api.webBoardURL()) } }
             }
         }
         // The menu bar reads live state in its own views so the App body is not re-evaluated on every update.
@@ -65,7 +65,7 @@ private struct MenuBarMenu: View {
         }
         Divider()
         SettingsCommand(store: store, open: openSettings)
-        Button("Open Web Board") { NSWorkspace.shared.open(store.api.webBoardURL) }
+        Button("Open Web Board") { Task { NSWorkspace.shared.open(await store.api.webBoardURL()) } }
         if updater.phase == .ready {
             Button("Restart to Update to \(updater.latest ?? "")") { updater.onInstall() }
         }

@@ -4,7 +4,7 @@ A Claude Code plugin that divides roles across Claude, Codex, and Antigravity so
 
 ## Getting started
 
-Install the desktop app from [Releases](https://github.com/ghostface2232/crew/releases/latest) and open it. On first launch it installs the Crew plugin for Claude Code and the `crew` command, both running on the app's own Node, and its overview lists anything else Crew needs. Open a new Claude Code session afterwards. The app updates the plugin along with itself, but leaves a plugin installed from a source checkout alone.
+Install the desktop app from [Releases](https://github.com/ghostface2232/crew/releases/latest) (macOS 26 or later on Apple silicon, or Windows 10 or later on x64) and open it. You need Claude Code, and the Codex and Antigravity CLIs signed in (`codex login`; run `agy` once); every job spends the usage of the plan its agent is signed in to. On first launch it installs the Crew plugin for Claude Code and the `crew` command, both running on the app's own Node, and its overview lists anything else Crew needs. Open a new Claude Code session afterwards. The app updates the plugin along with itself, but leaves a plugin installed from a source checkout alone.
 
 ### From source
 
@@ -28,7 +28,7 @@ Inside a Claude Code session:
 
 | Input | What happens |
 | --- | --- |
-| `/crew:run <task>` | Runs planning, parallel implementation, self-review, cross-review, fixes, wording polish, and final verification in order |
+| `/crew:run <task>` | Runs planning, parallel implementation, a review (your own or Codex's; both where security, concurrency, or data loss is involved), fixes, wording polish, and final verification in order |
 | `/crew:debate <decision>` | Debates a hard or important decision with Codex over a few read-only rounds that end with a conclusion |
 | `/crew:review [target]` | Runs a self-review and a Codex cross-review of a change in parallel, then fixes what holds up |
 | `/crew:board` | Opens the status board (inside the browser pane in Claude Desktop) |
@@ -43,6 +43,8 @@ crew status
 ```bash
 crew board
 ```
+
+When something hangs, `crew doctor` checks what Crew needs, `crew daemon logs` shows the daemon's log, and `crew daemon restart` restarts it; `crew show <job>` and `crew cancel <job>` read and stop one job.
 
 `crew gc` previews orphan worktrees, Git metadata, and unused worker branches, including whether each branch is merged into `HEAD`. Use `crew gc --apply` to remove orphan directories and prune metadata; add `--branches` to delete only branches merged into `HEAD`. Unmerged branches are kept, with a `git branch -D <name>` command shown for manual removal. Active and owned worktrees are protected. Windows cleanup failures name their leftovers in job status and notes.
 
@@ -72,7 +74,7 @@ The board can send jobs directly for any role except debate, using the configure
 - Instructions for every agent go in `~/.crew/instructions.md` (all projects) and `.crew/instructions.md` at the repository root (that project). Workers get them with each job and Claude sessions at start; no service's own instruction files are touched.
 - Configuration lives in `~/.crew/config.json` (stall timeout, notifications, Codex approval policy, whether Antigravity is enabled, which agent holds each role, and whether agents rate each other's work for the model scores).
 
-Using Antigravity carries a Terms of Service risk; read [docs/04-implementation.md](docs/04-implementation.md) section 6 before enabling it.
+Antigravity is enabled by default, and using it carries a Terms of Service risk: read [docs/04-implementation.md](docs/04-implementation.md) section 6, and set `antigravity.enabled` to `false` in `~/.crew/config.json` to turn it off.
 
 ## Directory layout
 
@@ -89,7 +91,7 @@ Using Antigravity carries a Terms of Service risk; read [docs/04-implementation.
 
 | Document | Contents |
 | --- | --- |
-| [docs/01-requirements.md](docs/01-requirements.md) | Goal, current requirements (R1–R14), defaults and priorities, acceptance criteria |
+| [docs/01-requirements.md](docs/01-requirements.md) | Goal, current requirements (R1–R16), defaults and priorities, acceptance criteria |
 | [docs/02-implementation-plan.md](docs/02-implementation-plan.md) | Architecture decisions, connection methods, roles and workflow, status display, rejected alternatives, risks, build phases |
 | [docs/03-agentgauge-integration.md](docs/03-agentgauge-integration.md) | Current state of AgentGauge, integration gaps, phased integration plan, MCP tool spec, routing policy |
 | [docs/04-implementation.md](docs/04-implementation.md) | Implemented architecture, changes from the plan and why, desktop app visibility findings, verification log |
@@ -98,12 +100,14 @@ Using Antigravity carries a Terms of Service risk; read [docs/04-implementation.
 | [docs/07-desktop-and-react.md](docs/07-desktop-and-react.md) | React migration and historical Electron implementation |
 | [docs/08-native-macos.md](docs/08-native-macos.md) | Native macOS app, Liquid Glass, Swift 6, packaging and verification |
 | [docs/09-usage-presets-rounds.md](docs/09-usage-presets-rounds.md) | AgentGauge usage and routing, presets, rounds, intents, and the API they share |
+| [docs/10-design-tokens.md](docs/10-design-tokens.md) | Design tokens of the macOS app: color, type, spacing, radius, motion |
+| [docs/11-mcp-compatibility.md](docs/11-mcp-compatibility.md) | MCP protocol revisions and what each host supports |
 | [docs/12-windows-electron.md](docs/12-windows-electron.md) | Windows Electron app, frameless window, notifications, packaging and verification |
 | [docs/13-distribution-plan.md](docs/13-distribution-plan.md) | Release plan: GitHub Releases, Windows installer, the app installing the plugin, first-run checklist (release workflow and installer implemented) |
 
 ## Current status
 
-The bridge (Phase 1) and status board (Phase 2) are implemented, roles can be reassigned in `~/.crew/config.json`, and shared instructions reach every agent ([docs/04-implementation.md](docs/04-implementation.md) sections 2.1 and 2.2). AgentGauge usage and routing are implemented by reading its files (phase G1, [docs/09-usage-presets-rounds.md](docs/09-usage-presets-rounds.md)); the phases that need changes in AgentGauge itself are not. What comes next is in [docs/06-roadmap.md](docs/06-roadmap.md).
+Released as 0.3.x with desktop apps for macOS and Windows. Usage-based routing works when AgentGauge is installed. Planned work is in [docs/06-roadmap.md](docs/06-roadmap.md); the surveys behind it are in [research/](research/).
 
 ## Updating the documentation
 

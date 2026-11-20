@@ -176,6 +176,21 @@ test('tasks and a pull request reach the mission, and come back in its reply', a
   assert.match(linked, /Pull requests:\n- pr-abc123 o\/r#7 open · checks pending · checked just now\npolicy\nLinked o\/r#7 · open · checks pending\. Crew reads it while this session is open[^]*never merge, close or deploy/);
 });
 
+test('a call that ends a mission applies its tasks and pull request first, and ends nothing when one is refused', async (t) => {
+  const { missions, calls, server } = missionServer(t);
+  const { reportMission } = server();
+  await reportMission({ title: 'Ship it', stages: ['final'], tasks: [{ id: 'api', title: 'Add the route' }] });
+  const route = `/api/missions/${missions.list()[0].id}`;
+  await assert.rejects(reportMission({ abandoned: true, pr: '7' }), /abandoned mission's pull request is not watched/);
+  await assert.rejects(reportMission({ done: true, pr: '7', tasks: [{ id: 'api', after: ['api'] }] }), /circle/);
+  assert.equal(missions.list()[0].state, 'active');
+  const before = calls.length;
+  const done = await reportMission({ done: true, outcome: 'Shipped', pr: '7', tasks: [{ id: 'api', state: 'done', result: 'npm test passed' }] });
+  assert.deepEqual(calls.slice(before).filter((call) => call.method === 'POST').map((call) => [call.route, Object.keys(call.body)[0]]), [[route, 'tasks'], [`${route}/pulls`, 'pr'], [route, 'done']]);
+  assert.equal(missions.list()[0].state, 'done');
+  assert.match(done, /- \[done\] api: Add the route — npm test passed[^]*Linked o\/r#7 · open · checks pending\./);
+});
+
 test('work started after a done mission opens a follow-up mission named after it', async (t) => {
   const { missions, calls, server } = missionServer(t);
   const { reportMission, runJob, context } = server();

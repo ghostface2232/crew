@@ -649,6 +649,7 @@ async function updateMission(args: any, ctx?: CallContext): Promise<string> {
   const now = await standing();
   if (ctx) ctx.pullIds = sessionPulls(now.pulls).map((pull) => pull.id);
   if (args.done && args.abandoned) throw new Error('Pass done or abandoned, not both.');
+  if (args.abandoned && args.pr !== undefined) throw new Error('An abandoned mission\'s pull request is not watched. Leave pr out, or pass done if the work is finished.');
   const restarted = fresh;
   fresh = false;
   const ending = Boolean(args.done || args.abandoned);
@@ -718,12 +719,15 @@ async function updateMission(args: any, ctx?: CallContext): Promise<string> {
   }
   track(current);
   if (ending) {
+    // An ended mission takes no later call, so the tasks and the pull request this one carries go in first. If either is refused, the mission stays open.
+    if (args.tasks !== undefined) await api('POST', `/api/missions/${current.id}`, { tasks: args.tasks, lead: SESSION });
+    const linked = await link(current);
     const ended: Mission = await api('POST', `/api/missions/${current.id}`, { done: Boolean(args.done), abandoned: Boolean(args.abandoned), outcome: args.outcome, record: args.record, by: 'lead' });
     missionId = null;
     costMission = null;
     lastDone = args.done ? ended : null;
     const others = now.open.filter((m) => m.id !== ended.id);
-    return `${describeMission(ended, now)}${others.length ? `\nStill open in this session: ${listed(others)}.${others.length === 1 ? ' Calls that name no mission now go to it; work that follows up the one just finished gets a mission of its own first.' : ''}` : ''}`;
+    return `${describeMission(ended, now)}${linked}${others.length ? `\nStill open in this session: ${listed(others)}.${others.length === 1 ? ' Calls that name no mission now go to it; work that follows up the one just finished gets a mission of its own first.' : ''}` : ''}`;
   }
   const mission: Mission = changing ? await api('POST', `/api/missions/${current.id}`, { stage: args.stage, stages: args.stages, preset: args.preset, tasks: args.tasks, lead: SESSION }) : current;
   const linked = await link(mission);

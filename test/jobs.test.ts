@@ -1126,6 +1126,8 @@ test('each job goes to its role\'s holder, gets the role\'s brief, and refuses a
   // A role alone is enough: the board sends no kind.
   const fromBoard = await jobs.create({ role: 'refactor', cwd: repo, task: 'x', isolation: 'in_place' } as JobSpec);
   assert.deepEqual([fromBoard.kind, fromBoard.agent], ['delegate', 'antigravity']);
+  // Each job still collects its changes after its turn; one that saved after the home was removed failed the file on Windows.
+  for (const job of jobs.list()) await settled(jobs, job);
 
   await assert.rejects(jobs.create({ kind: 'review', role: 'refactor', cwd: repo, review }), /refactor role runs as a delegate job, not review/);
   await assert.rejects(jobs.create({ kind: 'review', role: 'review', cwd: repo, review, runsApp: true }), /is the verify role/);

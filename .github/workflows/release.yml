@@ -101,10 +101,13 @@ jobs:
       - run: npx playwright install chromium
       - run: npm run package:desktop
       # Starts the packaged app against its own daemon, so an installer that cannot start is never published.
+      # It ran once on Windows without ending, so it is bounded, and Playwright logs each call to show where one stops.
       - name: Smoke test the packaged app
         run: node scripts/desktop.mjs smoke
+        timeout-minutes: 10
         env:
           CREW_APP_PATH: release/win-unpacked/Crew.exe
+          DEBUG: pw:api
       - uses: actions/upload-artifact@v7
         with:
           name: windows

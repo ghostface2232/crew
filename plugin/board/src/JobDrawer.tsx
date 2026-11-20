@@ -1,7 +1,7 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import {
-  BadgeCheck, BadgeHelp, Check, CircleCheck, CircleDashed, CircleDot, CircleMinus, CircleStop, CircleX, Clock, FileText, Flag, FlagTriangleRight, GitBranch, GitFork,
+  BadgeCheck, BadgeHelp, Check, CircleCheck, CircleDashed, CircleDot, CircleMinus, CircleStop, CircleX, Clock, FileText, Film, Flag, FlagTriangleRight, GitBranch, GitFork,
   History, Images, MessageSquare, NotebookText, RotateCcw, ShieldAlert, ShieldCheck, TextAlignStart, TriangleAlert, Undo2, Users, X, Zap,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -10,7 +10,7 @@ import { ChevronDown } from 'lucide-react';
 import type { BoardJob, CrewEvent, Snapshot } from './types.ts';
 import { actions, drafts, request } from './api.ts';
 import { board, mergeEvents } from './store.ts';
-import { elapsed, jobLabel, jobRole, NAMES, projectOf, roleLabel } from './model.ts';
+import { elapsed, evidenceCompanions, evidenceTurn, jobLabel, jobRole, MAX_COMPARED, NAMES, orderEvidence, projectOf, roleLabel } from './model.ts';
 import { ActionStatus, CloseButton, CopyButton, CopyMenu, Dialog, Icon, Chip, useAction, useDraft, useNow } from './ui.tsx';
 import { ReportText as RenderReport } from './Report.ts';
 import { debatePoints, stanceCounts } from './debate.ts';
@@ -69,33 +69,107 @@ function RoundRow({ job, round }: { job: BoardJob; round: NonNullable<BoardJob['
   );
 }
 
+type EvidenceItem = NonNullable<BoardJob['evidence']>[number];
+const isVideo = (file: string) => /\.(webm|mp4)$/i.test(file);
+// The version keeps a cached copy from standing in for a file rewritten under the same name.
+const evidenceSrc = (job: BoardJob, item: EvidenceItem) => `/api/jobs/${encodeURIComponent(job.id)}/evidence/${encodeURIComponent(item.file)}?v=${item.modified}`;
+
 /** What the worker saw, newest turn first, and what the lead attached. */
 function EvidenceSection({ job }: { job: BoardJob }) {
   const items = (job.evidence ?? []).toSorted((a, b) => b.turn - a.turn);
+  const [picked, setPicked] = useState<string[]>([]);
   if (!items.length) return null;
+  // A capture the worker has since deleted leaves the comparison.
+  const compared = picked.filter((file) => items.some((item) => item.file === file));
   return (
     <Section title="Evidence" icon={Images}>
       <div className="evidence">
         {items.map((item) => {
-          // The version keeps a cached copy from standing in for a file rewritten under the same name.
-          const src = `/api/jobs/${encodeURIComponent(job.id)}/evidence/${encodeURIComponent(item.file)}?v=${item.modified}`;
+          const src = evidenceSrc(job, item);
           return (
             <figure key={item.file}>
-              {item.file.match(/\.(webm|mp4)$/i) ? (
+              {isVideo(item.file) ? (
                 <video src={src} controls preload="metadata" />
               ) : (
-                <a href={src} target="_blank" rel="noreferrer">
+                <a
+                  href={src}
+                  target="_blank"
+                  rel="noreferrer"
+                  title="Compare"
+                  onClick={(event) => {
+                    // A plain press compares; a modified one still opens the file by itself.
+                    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                    event.preventDefault();
+                    setPicked(evidenceCompanions(items, item.file));
+                  }}
+                >
                   <img src={src} alt={item.file} loading="lazy" />
                 </a>
               )}
               <figcaption className="caption secondary selectable">
-                {item.from === 'lead' ? 'Attached by the lead' : `Turn ${item.turn}`} · {item.file}
+                {evidenceTurn(item, job.turns)} · {item.file}
               </figcaption>
             </figure>
           );
         })}
       </div>
+      {compared.length > 0 && <EvidenceCompare job={job} items={items} shown={compared} onShown={setPicked} />}
     </Section>
+  );
+}
+
+/**
+ * Captures side by side. A result alone says little: it is judged against what was there before, or what it was
+ * meant to match. Each says which turn it is from, since one from an earlier turn may not show the final state.
+ */
+function EvidenceCompare({ job, items, shown, onShown }: { job: BoardJob; items: EvidenceItem[]; shown: string[]; onShown: (files: string[]) => void }) {
+  const close = () => onShown([]);
+  const caption = (item: EvidenceItem) => evidenceTurn(item, job.turns);
+  return (
+    <Dialog labelId="evidence-compare-title" className="evidence-compare" onClose={close}>
+      <div className="sheet-body">
+        <div className="sheet-head">
+          <h2 className="title" id="evidence-compare-title">Evidence</h2>
+          <CloseButton label="Close" onClose={close} />
+        </div>
+        <div className="compare" data-panes={shown.length}>
+          {orderEvidence(items.filter((item) => shown.includes(item.file))).map((item) => {
+            const src = evidenceSrc(job, item);
+            return (
+              <figure key={item.file}>
+                {isVideo(item.file) ? <video src={src} controls preload="metadata" /> : <img src={src} alt={item.file} />}
+                <figcaption className="caption selectable">
+                  <b>{caption(item)}</b>
+                  <a className="secondary" href={src} target="_blank" rel="noreferrer">{item.file}</a>
+                </figcaption>
+              </figure>
+            );
+          })}
+        </div>
+        {items.length > 1 && (
+          <div className="compare-picker" role="group" aria-label={`Captures to compare, up to ${MAX_COMPARED}`}>
+            {orderEvidence(items).map((item) => {
+              const on = shown.includes(item.file);
+              return (
+                <button
+                  key={item.file}
+                  type="button"
+                  aria-pressed={on}
+                  // The last one stays, and a fourth has no room.
+                  disabled={on ? shown.length === 1 : shown.length >= MAX_COMPARED}
+                  title={item.file}
+                  onClick={() => onShown(on ? shown.filter((file) => file !== item.file) : [...shown, item.file])}
+                >
+                  {isVideo(item.file) ? <span className="compare-video"><Icon icon={Film} /></span> : <img src={evidenceSrc(job, item)} alt="" loading="lazy" />}
+                  <span className="caption">{caption(item)}</span>
+                  <span className="caption secondary">{item.file}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </Dialog>
   );
 }
 

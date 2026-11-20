@@ -263,6 +263,36 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
         mission.state = "abandoned"; mission.stage = "unknown"
         #expect(missionProgress(mission, jobs: []) == 0.5 / 7)
     }
+    @Test func evidenceSaysWhichTurnItIsFromOnceAJobHasSeveral() {
+        var capture = Evidence(file: "a.png", path: "/x/a.png", turn: 1, from: "worker", bytes: 1, modified: 1)
+        #expect(capture.turnLabel(of: 1) == "Turn 1")
+        #expect(capture.turnLabel(of: 3) == "Turn 1 of 3")
+        capture.from = "lead"
+        #expect(capture.turnLabel(of: 3) == "Attached by the lead")
+    }
+    @Test func aCaptureOpensBesideItsOtherSideAndTheReferenceAsOnTheBoard() {
+        let item = { (file: String, turn: Int, from: String) in Evidence(file: file, path: "/x/\(file)", turn: turn, from: from, bytes: 1, modified: 1) }
+        #expect(item("fox-before.png", 1, "worker").side?.view == "fox")
+        #expect(item("After_Fox Idle.PNG", 1, "worker").side.map { "\($0.view)|\($0.after)" } == "fox idle|true")
+        // A leading word wins over a trailing one.
+        #expect(item("after-x-before.png", 1, "worker").side.map { "\($0.view)|\($0.after)" } == "x-before|true")
+        #expect(item("before.png", 1, "worker").side == nil)
+        #expect(item("aftermath.png", 1, "worker").side == nil)
+        let items = [
+            item("fox-after.png", 3, "worker"), item("fox-before.png", 1, "worker"), item("rock-after.png", 3, "worker"), item("rock-before.png", 2, "worker"),
+            item("notes.png", 3, "worker"), item("lead-1-concept.png", 1, "lead"), item("lead-2-concept.png", 2, "lead"),
+        ]
+        #expect(Evidence.companions(of: "fox-after.png", in: items) == ["lead-2-concept.png", "fox-before.png", "fox-after.png"])
+        #expect(Evidence.companions(of: "rock-before.png", in: items) == ["lead-2-concept.png", "rock-before.png", "rock-after.png"])
+        #expect(Evidence.companions(of: "notes.png", in: items) == ["lead-2-concept.png", "notes.png"])
+        #expect(Evidence.companions(of: "lead-1-concept.png", in: items) == ["lead-1-concept.png", "fox-before.png", "fox-after.png"])
+        #expect(Evidence.companions(of: "only.png", in: [item("only.png", 1, "worker")]) == ["only.png"])
+        // No more captures than fit at once: all of them open, whichever was pressed.
+        #expect(Evidence.companions(of: "rock-after.png", in: Array(items[..<4])) == ["fox-before.png", "rock-before.png", "fox-after.png", "rock-after.png"])
+        #expect(Evidence.companions(of: "gone.png", in: items) == [])
+        #expect(Evidence.ordered(items).map(\.file)
+            == ["lead-1-concept.png", "lead-2-concept.png", "fox-before.png", "rock-before.png", "notes.png", "fox-after.png", "rock-after.png"])
+    }
     @Test func shortPlansSetStopOrderPassedStepsJobAttachmentAndProgress() throws {
         var mission = try fixture().missions[0]
         var job = try fixture().jobs[0]
@@ -288,6 +318,11 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
         #expect(missionProgress(mission, jobs: []) == 0.5)
         mission.stages = ["cross-review", "implement", "self-review"]; mission.stage = "cross-review"
         #expect(mission.stops == ["Review", "Build", "Review 2"])
+        // A named stop goes by its name and is left out of the numbering; unnamed ones arrive as null.
+        mission.labels = ["Sample check", nil, nil]
+        #expect(mission.stops == ["Sample check", "Build", "Review"])
+        #expect(try JSONDecoder().decode(Mission.self, from: JSONEncoder().encode(mission)).labels == mission.labels)
+        mission.labels = nil
         job.kind = "review"
         #expect(mission.jobStep(job) == 0)
         mission.stage = "self-review"

@@ -26,6 +26,8 @@ export interface Mission {
   stages?: Stage[];
   /** Current occurrence in the plan; stage mirrors this entry for older clients. */
   stageIndex?: number;
+  /** The lead's own names for stops, one entry per stage; absent when no stop has one. */
+  labels?: (string | null)[];
   state: MissionState;
   outcome: string;
   /** What the lead recorded when it finished: decisions taken, approaches that failed, prerequisites. For the runbook. */
@@ -70,6 +72,8 @@ function isMission(m: any): m is Mission {
     && (m.stages === undefined || isPlan(m.stages))
     && (m.stageIndex === undefined || (m.stages && Number.isInteger(m.stageIndex) && m.stageIndex >= 0
       && m.stageIndex < m.stages.length && m.stages[m.stageIndex] === m.stage))
+    && (m.labels === undefined || (m.stages && Array.isArray(m.labels) && m.labels.length === m.stages.length
+      && m.labels.every((label: unknown) => label === null || (typeof label === 'string' && label.length > 0 && label.length <= MAX_LABEL))))
     && (m.preset === undefined || isPresetName(m.preset))
     && (m.notes === undefined || (Array.isArray(m.notes) && m.notes.every((n: any) => n && typeof n.text === 'string' && Number.isFinite(n.at))))
     && STAGES.includes(m.stage) && ['active', 'done', 'abandoned'].includes(m.state)
@@ -78,21 +82,65 @@ function isMission(m: any): m is Mission {
 
 /** Every stop is drawn on the board and in the app. */
 export const MAX_PLAN = 30;
+/** A label sits on a stop of the track, where a long one would push its neighbors apart. */
+export const MAX_LABEL = 24;
 
-function isPlan(stages: unknown, allowEmpty = false): stages is Stage[] {
-  return Array.isArray(stages) && (allowEmpty || stages.length > 0) && stages.length <= MAX_PLAN
-    && stages.every((stage) => STAGES.includes(stage));
+/** One stop of a plan. Its label names what this occurrence is for, which the stage alone cannot: a sample, then the rest. */
+interface Step {
+  stage: Stage;
+  label: string | null;
 }
 
-function planOf(stages: unknown, allowEmpty = false): Stage[] | undefined {
+function isPlan(stages: unknown): stages is Stage[] {
+  return Array.isArray(stages) && stages.length > 0 && stages.length <= MAX_PLAN && stages.every((stage) => STAGES.includes(stage));
+}
+
+/** `implement`, or `implement: Sample` to name the stop. Null when it is neither. */
+function stepOf(entry: unknown): Step | null {
+  if (typeof entry !== 'string') return null;
+  const colon = entry.indexOf(':');
+  const stage = (colon < 0 ? entry : entry.slice(0, colon)).trim();
+  if (!STAGES.includes(stage as Stage)) return null;
+  const label = colon < 0 ? '' : entry.slice(colon + 1).replace(/\s+/g, ' ').trim().slice(0, MAX_LABEL).trim();
+  return { stage: stage as Stage, label: label || null };
+}
+
+const STAGE_FORM = `${STAGES.join(', ')}, each optionally followed by a colon and a name for that stop ("implement: Sample")`;
+
+function planOf(stages: unknown, allowEmpty = false): Step[] | undefined {
   if (stages === undefined) return undefined;
-  if (!isPlan(stages, allowEmpty)) throw new Error(`stages must be ${allowEmpty ? 'an' : 'a nonempty'} array of at most ${MAX_PLAN} using: ${STAGES.join(', ')}.`);
-  return [...stages];
+  const steps = Array.isArray(stages) ? stages.map(stepOf) : [];
+  if (!Array.isArray(stages) || (!allowEmpty && !stages.length) || stages.length > MAX_PLAN || steps.includes(null)) {
+    throw new Error(`stages must be ${allowEmpty ? 'an' : 'a nonempty'} array of at most ${MAX_PLAN} using: ${STAGE_FORM}.`);
+  }
+  return steps as Step[];
 }
 
-function stageOf(stage: string): Stage {
-  if (!STAGES.includes(stage as Stage)) throw new Error(`Invalid mission stage "${stage}"; use one of: ${STAGES.join(', ')}.`);
-  return stage as Stage;
+function stageOf(stage: unknown): Step {
+  const step = stepOf(stage);
+  if (!step) throw new Error(`Invalid mission stage "${String(stage)}"; use one of: ${STAGE_FORM}.`);
+  return step;
+}
+
+const sameLabel = (a: string | null, b: string | null) => a?.toLowerCase() === b?.toLowerCase();
+
+/** A mission's plan as steps; undefined for one on the original full track. */
+function stepsOf(mission: Pick<Mission, 'stages' | 'labels'>): Step[] | undefined {
+  return mission.stages?.map((stage, at) => ({ stage, label: mission.labels?.[at] ?? null }));
+}
+
+function setSteps(mission: Mission, steps: Step[], index: number): void {
+  mission.stages = steps.map((step) => step.stage);
+  mission.stageIndex = index;
+  mission.stage = steps[index].stage;
+  if (steps.some((step) => step.label)) mission.labels = steps.map((step) => step.label);
+  else delete mission.labels;
+}
+
+/** The plan as the lead writes it, for showing it back: `implement: Sample → self-review`. */
+export function planText(mission: Pick<Mission, 'stages' | 'labels'>, mark?: (at: number) => string): string {
+  return (stepsOf(mission) ?? STAGES.map((stage) => ({ stage, label: null })))
+    .map((step, at) => `${step.stage}${step.label ? `: ${step.label}` : ''}${mark?.(at) ?? ''}`).join(' → ');
 }
 
 /** Omitted leaves the preset as it is, null clears it so the global one applies, and a name sets it. */
@@ -142,15 +190,14 @@ export class Missions {
   start(input: { title: string; project: string; root: string; owner?: string; stage?: string; stages?: unknown; preset?: unknown }): Mission {
     const title = titleOf(input.title);
     const preset = presetOf(input.preset);
-    const stages = planOf(input.stages);
-    const first = stages?.[0] ?? 'plan';
-    const stage = input.stage === undefined ? first : stageOf(input.stage);
-    let stageIndex = stages?.indexOf(stage) ?? 0;
-    if (stages && stageIndex < 0) {
-      stages.splice(1, 0, stage);
+    const steps = planOf(input.stages);
+    const first = input.stage === undefined ? steps?.[0] ?? { stage: 'plan' as const, label: null } : stageOf(input.stage);
+    let stageIndex = steps ? this.find(steps, first, 0) : 0;
+    if (steps && stageIndex < 0) {
+      steps.splice(1, 0, first);
       stageIndex = 1;
     }
-    if (stages && stages.length > MAX_PLAN) throw new Error(`A mission plan has at most ${MAX_PLAN} steps.`);
+    if (steps && steps.length > MAX_PLAN) throw new Error(`A mission plan has at most ${MAX_PLAN} steps.`);
     let id: string;
     do {
       id = `m-${randomBytes(3).toString('hex')}`;
@@ -162,8 +209,7 @@ export class Missions {
       project: canonicalPath(input.project),
       root: canonicalPath(input.root),
       ...(input.owner ? { owner: input.owner } : {}),
-      stage,
-      ...(stages ? { stages, stageIndex } : {}),
+      stage: first.stage,
       ...(preset ? { preset } : {}),
       state: 'active',
       outcome: '',
@@ -171,6 +217,7 @@ export class Missions {
       updatedAt: now,
       endedAt: null,
     };
+    if (steps) setSteps(mission, steps, stageIndex);
     this.missions.set(id, mission);
     this.changed(mission);
     return mission;
@@ -183,34 +230,39 @@ export class Missions {
     const preset = presetOf(input.preset);
     const remaining = planOf(input.stages, true);
     const stage = input.stage === undefined ? undefined : stageOf(input.stage);
-    let stages = mission.stages?.slice();
-    let index = mission.stageIndex ?? Math.max(0, (stages ?? STAGES).indexOf(mission.stage));
+    let steps = stepsOf(mission);
+    let index = mission.stageIndex ?? Math.max(0, (mission.stages ?? STAGES).indexOf(mission.stage));
     if (remaining) {
       // Revisions replace only the future: passed steps and jobs' recorded indices stay stable.
-      stages = [...(stages ?? STAGES).slice(0, index + 1), ...remaining];
+      steps = [...(steps ?? STAGES.map((name) => ({ stage: name, label: null }))).slice(0, index + 1), ...remaining];
     }
-    if (stages) {
-      // Reporting the current step again (as a resumed lead does) is not a new round.
-      if (stage !== undefined && stage !== stages[index]) {
-        const next = stages.indexOf(stage, index + 1);
+    if (steps) {
+      // Reporting the current step again (as a resumed lead does) is not a new round. A different name is another
+      // step, which is how the lead moves between two steps of one stage.
+      const current = steps[index];
+      if (stage !== undefined && (stage.stage !== current.stage || (stage.label !== null && !sameLabel(stage.label, current.label)))) {
+        const next = this.find(steps, stage, index + 1);
         // Steps jumped over were not done, so they leave the plan instead of showing as passed.
-        if (next > index + 1) stages.splice(index + 1, next - index - 1);
+        if (next > index + 1) steps.splice(index + 1, next - index - 1);
         else if (next < 0) {
-          if (stages.length >= MAX_PLAN) throw new Error(`A mission plan has at most ${MAX_PLAN} steps; drop some with stages first.`);
-          stages.splice(index + 1, 0, stage);
+          if (steps.length >= MAX_PLAN) throw new Error(`A mission plan has at most ${MAX_PLAN} steps; drop some with stages first.`);
+          steps.splice(index + 1, 0, stage);
         }
         index += 1;
       }
-      if (stages.length > MAX_PLAN) throw new Error(`A mission plan has at most ${MAX_PLAN} steps.`);
-      mission.stages = stages;
-      mission.stageIndex = index;
-      mission.stage = stages[index];
-    } else if (stage !== undefined) mission.stage = stage;
+      if (steps.length > MAX_PLAN) throw new Error(`A mission plan has at most ${MAX_PLAN} steps.`);
+      setSteps(mission, steps, index);
+    } else if (stage !== undefined) mission.stage = stage.stage;
     mission.title = title;
     setPreset(mission, preset);
     mission.updatedAt = Date.now();
     this.changed(mission);
     return mission;
+  }
+
+  /** The first step from `from` on that `wanted` means: its stage, and its name when it gives one. */
+  private find(steps: Step[], wanted: Step, from: number): number {
+    return steps.findIndex((step, at) => at >= from && step.stage === wanted.stage && (wanted.label === null || sameLabel(step.label, wanted.label)));
   }
 
   finish(id: string, input: { outcome?: string; abandoned?: boolean; record?: string; reopen?: boolean; byLead?: boolean } = {}): Mission {

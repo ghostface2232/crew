@@ -103,6 +103,53 @@ struct Evidence: Codable, Sendable, Equatable {
     var bytes: Int
     var modified: Double
     var isVideo: Bool { ["webm", "mp4"].contains((file as NSString).pathExtension.lowercased()) }
+    /// Which turn it is from, against how many the job has had: one from an earlier turn may not show the final state.
+    func turnLabel(of turns: Int) -> String {
+        from == "lead" ? "Attached by the lead" : turns > 1 ? "Turn \(turn) of \(turns)" : "Turn \(turn)"
+    }
+    /// At most this many captures at once: three in a row, or four in a grid of two by two.
+    static let maxCompared = 4
+    /// The view a capture shows and which side of a change, from a name such as `hero-before.png` or `after_hero.png`.
+    var side: (view: String, after: Bool)? {
+        let stem = ((file as NSString).deletingPathExtension).lowercased()
+        let separators = CharacterSet(charactersIn: "-_. ")
+        let words = [("before", false), ("after", true)]
+        // A leading word wins over a trailing one, as on the board.
+        for (word, after) in words where stem.hasPrefix(word) {
+            let rest = stem.dropFirst(word.count)
+            let view = rest.trimmingCharacters(in: separators)
+            if let next = rest.unicodeScalars.first, separators.contains(next), !view.isEmpty { return (view, after) }
+        }
+        for (word, after) in words where stem.hasSuffix(word) {
+            let rest = stem.dropLast(word.count)
+            let view = rest.trimmingCharacters(in: separators)
+            if let previous = rest.unicodeScalars.last, separators.contains(previous), !view.isEmpty { return (view, after) }
+        }
+        return nil
+    }
+    /// Left to right: what the lead attached, then the worker's by turn, with a before ahead of its after.
+    static func ordered(_ items: [Evidence]) -> [Evidence] {
+        items.sorted { a, b in
+            let keys = [(a.from == "lead" ? 0 : 1, b.from == "lead" ? 0 : 1), (a.turn, b.turn), (a.side?.after == true ? 1 : 0, b.side?.after == true ? 1 : 0)]
+            for (left, right) in keys where left != right { return left < right }
+            return a.file < b.file
+        }
+    }
+    /// What opens beside a capture, as the web board's `evidenceCompanions` has it: the other side of its before and
+    /// after, and the reference the lead attached. A reference opens beside the worker's latest capture instead.
+    /// A job with no more captures than fit at once opens them all.
+    static func companions(of file: String, in items: [Evidence]) -> [String] {
+        guard let opened = items.first(where: { $0.file == file }) else { return [] }
+        if items.count <= maxCompared { return ordered(items).map(\.file) }
+        // The last of the highest turn, as the board's reduce keeps it.
+        let latest = { (found: [Evidence]) in found.reduce(Evidence?.none) { best, item in best.map { item.turn >= $0.turn ? item : $0 } ?? item } }
+        let mine = items.filter { $0.from != "lead" }
+        let last = mine.filter { $0.turn == latest(mine)?.turn }
+        let result = opened.from == "lead" ? last.first { $0.side?.after == true } ?? last.first : opened
+        let other = result?.side.flatMap { side in latest(mine.filter { $0.side?.view == side.view && $0.side?.after != side.after }) }
+        let reference = opened.from == "lead" ? opened : latest(items.filter { $0.from == "lead" })
+        return ordered([reference, other, result].compactMap { $0 }).map(\.file)
+    }
 }
 struct Worktree: Codable, Sendable, Equatable { var path: String; var branch: String; var base: String }
 struct Waiting: Codable, Sendable, Equatable {
@@ -160,14 +207,18 @@ struct Mission: Codable, Sendable, Identifiable, Equatable {
     var notes: [MissionNote]?
     var stages: [String]?
     var stageIndex: Int?
+    /// The lead's own names for stops, one entry per stage; missing when no stop has one.
+    var labels: [String?]?
     var preset: PresetName?
     private static let stopOfStage = ["plan": 0, "implement": 1, "self-review": 2, "cross-review": 2, "fix": 3, "polish": 4, "final": 5]
     var step: Int { stages.map { stageIndex ?? $0.firstIndex(of: stage) ?? 0 } ?? Self.stopOfStage[stage] ?? 0 }
     static let steps = ["Plan", "Build", "Review", "Fix", "Polish", "Final"]
     var stops: [String] {
         var rounds: [String: Int] = [:]
-        return stages?.map {
-            let name = Self.steps[Self.stopOfStage[$0] ?? 0]
+        return stages?.enumerated().map { index, stage in
+            // A stop the lead named goes by that name and takes no number: the numbers tell apart stops that share one.
+            if let labels, labels.indices.contains(index), let label = labels[index], !label.isEmpty { return label }
+            let name = Self.steps[Self.stopOfStage[stage] ?? 0]
             let round = (rounds[name] ?? 0) + 1
             rounds[name] = round
             return name + (round > 1 ? " \(round)" : "")

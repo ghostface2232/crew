@@ -1,6 +1,7 @@
 import { checkLine } from './check.ts';
 import { WORKERS } from './config.ts';
 import type { Job } from './jobs.ts';
+import { planText } from './missions.ts';
 import type { Mission } from './missions.ts';
 
 /**
@@ -16,7 +17,7 @@ export function runbook(mission: Mission, jobs: Job[]): string {
     `Mission ${mission.id} · ${mission.state}${mission.outcome ? ` — ${mission.outcome}` : ''} · ${date(mission.createdAt)}${mission.endedAt ? ` to ${date(mission.endedAt)}` : ''}`,
     `Project: ${mission.root}`,
   ];
-  if (mission.stages?.length) out.push(`Stages: ${mission.stages.join(' → ')}`);
+  if (mission.stages?.length) out.push(`Stages: ${planText(mission)}`);
   if (mission.record) out.push('', '## Decisions and dead ends', '', mission.record);
   if (mission.notes?.length) out.push('', '## Notes pinned by the user', '', ...mission.notes.map((note) => `- ${note.text.replace(/\n/g, '\n  ')}`));
 

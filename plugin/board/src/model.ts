@@ -61,8 +61,11 @@ const MISSION_STAGES = ['plan', 'implement', 'self-review', 'cross-review', 'fix
 export function missionStops(mission?: Mission) {
   const rounds = new Map<number, number>();
   return mission?.stages
-    ? mission.stages.map((stage) => {
+    ? mission.stages.map((stage, index) => {
       const stop = STOP_OF_STAGE[stage];
+      // A stop the lead named goes by that name and takes no number: the numbers tell apart stops that share one.
+      const label = mission.labels?.[index];
+      if (label) return { name: label, stop };
       const round = (rounds.get(stop) ?? 0) + 1;
       rounds.set(stop, round);
       return { name: `${STOPS[stop]}${round > 1 ? ` ${round}` : ''}`, stop };
@@ -107,6 +110,47 @@ export function missionProgress(mission: Mission, jobs: BoardJob[]) {
   // Missions without a plan retain the original seven-stage progress formula.
   const index = mission.stages ? missionStep(mission) : Math.max(0, stages.indexOf(mission.stage));
   return Math.max(0, (index + share) / stages.length);
+}
+type EvidenceItem = NonNullable<BoardJob['evidence']>[number];
+/** At most this many captures at once: three in a row, or four in a grid of two by two. */
+export const MAX_COMPARED = 4;
+/** The view a capture shows and which side of a change, from a name such as `hero-before.png` or `after_hero.png`. */
+export function evidenceSide(file: string): { view: string; side: 'before' | 'after' } | null {
+  const match = /^(?:(before|after)[-_. ]+(.+)|(.+)[-_. ]+(before|after))$/i.exec(file.replace(/\.[^.]+$/, ''));
+  if (!match) return null;
+  return { view: (match[2] ?? match[3]).toLowerCase(), side: (match[1] ?? match[4]).toLowerCase() as 'before' | 'after' };
+}
+/** Left to right: what the lead attached, then the worker's by turn, with a before ahead of its after. */
+export function orderEvidence<T extends Pick<EvidenceItem, 'file' | 'turn' | 'from'>>(items: T[]): T[] {
+  const rank = (item: T) => (evidenceSide(item.file)?.side === 'after' ? 1 : 0);
+  return items.toSorted((a, b) => Number(a.from !== 'lead') - Number(b.from !== 'lead') || a.turn - b.turn || rank(a) - rank(b) || a.file.localeCompare(b.file));
+}
+/**
+ * What opens beside a capture: the other side of its before and after, and the reference the lead attached.
+ * A reference opens beside the worker's latest capture instead. A job with no more captures than fit at once
+ * opens them all. Returns file names, the opened one among them.
+ */
+export function evidenceCompanions(items: Pick<EvidenceItem, 'file' | 'turn' | 'from'>[], file: string): string[] {
+  const opened = items.find((item) => item.file === file);
+  if (!opened) return [];
+  if (items.length <= MAX_COMPARED) return orderEvidence(items).map((item) => item.file);
+  type Item = (typeof items)[number];
+  const latest = (found: Item[]) => found.reduce<Item | undefined>((best, item) => (!best || item.turn >= best.turn ? item : best), undefined);
+  const mine = items.filter((item) => item.from !== 'lead');
+  const last = mine.filter((item) => item.turn === latest(mine)?.turn);
+  const result = opened.from === 'lead' ? last.find((item) => evidenceSide(item.file)?.side === 'after') ?? last[0] : opened;
+  const side = result && evidenceSide(result.file);
+  const other = side && latest(mine.filter((item) => {
+    const its = evidenceSide(item.file);
+    return its?.view === side.view && its.side !== side.side;
+  }));
+  const reference = opened.from === 'lead' ? opened : latest(items.filter((item) => item.from === 'lead'));
+  return orderEvidence([reference, other, result].filter((item): item is Item => Boolean(item))).map((item) => item.file);
+}
+/** Which turn a capture is from, against how many the job has had: one from an earlier turn may not show the final state. */
+export function evidenceTurn(item: Pick<EvidenceItem, 'turn' | 'from'>, turns: number) {
+  if (item.from === 'lead') return 'Attached by the lead';
+  return turns > 1 ? `Turn ${item.turn} of ${turns}` : `Turn ${item.turn}`;
 }
 export function usageWindowName(kind: string) {
   return (

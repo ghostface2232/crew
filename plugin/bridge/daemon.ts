@@ -15,7 +15,7 @@ import type { Config } from './config.ts';
 import { evidenceType, openEvidence } from './evidence.ts';
 import { projectRoot } from './git.ts';
 import { followUps, isTerminal, Jobs } from './jobs.ts';
-import { missionPreset, Missions, STAGES } from './missions.ts';
+import { missionPreset, Missions } from './missions.ts';
 import type { Mission } from './missions.ts';
 import { addEvidence, addRating, loadNotes, notesFile, renderNotes, scoreAll, setSummary, WORKER_ITEMS } from './notes.ts';
 import type { NotesFile } from './notes.ts';
@@ -611,10 +611,8 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     if (value !== undefined && typeof value !== 'string') throw new HttpError(400, `${name} must be a string`);
     return value;
   };
-  const stage = (value: unknown): string | undefined => {
-    if (value !== undefined && !(STAGES as readonly unknown[]).includes(value)) throw new HttpError(400, `stage must be one of: ${STAGES.join(', ')}`);
-    return value as string | undefined;
-  };
+  // Missions checks the stage itself, since it may carry a name for its stop.
+  const stage = (value: unknown): string | undefined => text(value, 'stage');
 
   const runbookRoute = /^\/api\/missions\/([\w-]+)\/runbook$/.exec(pathname);
   if (runbookRoute && method === 'GET') {

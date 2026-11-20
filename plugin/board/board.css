@@ -500,9 +500,28 @@ html[data-resizing] dialog.detail-panel { transition: none; }
 .evidence { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 12px; }
 .evidence figure { display: grid; gap: 6px; min-width: 0; margin: 0; }
 .evidence a { display: block; border-radius: var(--row-radius); overflow: hidden; }
-.evidence img, .evidence video { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: contain; background: var(--fill); border: 1px solid var(--hairline); border-radius: var(--row-radius); transition: scale 300ms var(--ease-out); }
+.evidence img, .evidence video { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: contain; background: var(--fill); border-radius: var(--row-radius); transition: scale 300ms var(--ease-out); }
 @media (hover: hover) { .evidence a:hover img { scale: 1.03; } }
 .evidence figcaption { overflow-wrap: anywhere; }
+/* Captures side by side, in a sheet wide enough for three. */
+dialog.sheet.evidence-compare { width: min(1320px, calc(100vw - 32px)); }
+/* Up to three in a row; four in a grid of two by two, each half as tall. */
+.compare { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 12px; --pane-height: min(62vh, 720px); }
+.compare[data-panes="4"] { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); --pane-height: min(30vh, 350px); }
+.compare figure { display: grid; align-content: start; gap: 8px; min-width: 0; margin: 0; }
+/* One height for every pane, so the same view lines up across them. */
+.compare img, .compare video { display: block; width: 100%; height: var(--pane-height); object-fit: contain; background: var(--fill); border-radius: var(--row-radius); }
+.compare figcaption { display: flex; flex-wrap: wrap; gap: 2px 8px; overflow-wrap: anywhere; }
+.compare figcaption a { min-width: 0; }
+.compare-picker { display: flex; gap: 8px; padding: 2px; overflow-x: auto; }
+.compare-picker button { flex: none; display: grid; justify-items: start; gap: 2px; width: 112px; min-height: 0; padding: 6px; border-radius: var(--row-radius); background: none; text-align: left; font-weight: 400; }
+.compare-picker button[aria-pressed="true"] { background: var(--fill); box-shadow: inset 0 0 0 1.5px var(--accent); }
+.compare-picker img, .compare-video { display: grid; place-items: center; width: 100%; aspect-ratio: 4 / 3; margin-bottom: 4px; object-fit: contain; background: var(--fill); border-radius: calc(var(--row-radius) - 2px); color: var(--secondary); }
+.compare-picker .caption { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 760px) {
+  .compare, .compare[data-panes="4"] { grid-auto-flow: row; grid-template-columns: minmax(0, 1fr); }
+  .compare img, .compare video { height: auto; max-height: 46vh; }
+}
 .report { display: grid; gap: 10px; font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; }
 .report-heading { font-weight: 600; }
 .report-code { margin: 0; padding: 10px 12px; border-radius: var(--row-radius); background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--hairline); font-size: 12px; white-space: pre-wrap; }

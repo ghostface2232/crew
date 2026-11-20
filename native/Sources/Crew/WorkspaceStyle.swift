@@ -118,6 +118,8 @@ struct MissionTrack: View {
                     Text(title).font(emphasized ? Typeface.captionStrong : Typeface.caption)
                         .foregroundStyle(index == mission.step && mission.state == "active" ? .primary : .secondary)
                         .lineLimit(1).frame(maxWidth: count > 1 ? max(0, span - Space.xs) : nil)
+                        // A name the lead gave can be longer than its column.
+                        .help(title)
                         .position(x: center(index), y: Self.marker + Space.m + Self.labelHeight / 2)
                 }
             }

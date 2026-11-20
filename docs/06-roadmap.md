@@ -122,6 +122,35 @@ Order: D1's evidence lines first, so data builds up, then the D1 summaries in `r
 
 **D3. Peer ratings.** Implemented 2026-11-18 as described in [09](09-usage-presets-rounds.md) section 17. D1 kept impressions out of the notes; a rating is admitted only with the fact it rests on, counts for half of an item beside the evidence, and can be turned off.
 
+### E. From the game retrospective
+
+Recorded 2026-11-20 from a retrospective of one game project on Windows: 58 jobs, about 110 hours and 1.5 billion tokens, mostly art (modeling, terrain, shading, VFX). Each item was taken only in the form that holds for any project. What belongs to that project (Blender's path, WebGL and GPU flags, Vite's config loader, HMR) goes in its own `.crew/instructions.md`.
+
+Implemented 2026-11-20:
+
+- **Sample before the set.** Work judged by eye or taste, in many like items, is built as one approved sample first, then the rest, with the full regression check once at the end. A rule for the lead (`/crew:run` and the MCP server instructions), using repeated `implement` steps with names of their own; no fixed template per kind of work, which would encode one project's pipeline.
+- **Briefs.** The few points that decide acceptance, the user's own words and the reference where taste decides, and how much verification is wanted. From the second correction on, the lead restates the whole brief instead of appending; a worker treats a restated task as replacing earlier messages and asks when messages conflict.
+- **Judging.** Evidence beside the reference, not the worker's account. Workers list what still differs instead of rating themselves, and do not add detail the task did not ask for.
+- **Evidence.** The few captures that decide, of the final state, with stale ones replaced.
+- **Environment.** A worker says at once when a tool the task needs will not run, and reports workarounds with the exact command; the lead adds them to `.crew/instructions.md`, so the next worker is given them.
+- **Worker tools.** A job whose Crew tools did not start says so ([04](04-implementation.md) section 2.1).
+- **Named stops (E3).** A stage in a mission's plan may carry a name, so a sample, the rest, and a fix for one item read as themselves on the board and in the app ([04](04-implementation.md) section 5.3).
+- **Evidence side by side (E4).** On the board and in the app, a capture opens beside its before and the lead's reference, each with the turn it is from ([04](04-implementation.md) section 5.2). The app shows images itself instead of opening Preview.
+- **Crew cannot start a job.** The lead retries once, then does the piece itself.
+
+Already fixed before the retrospective was read: worker tools under the desktop app and the three-minute thread start (0.3.1), the `work` folder that outlives a turn (0.3.1), the daemon's port fallback, and the system temp folder left out of writable paths, which was what timed out `thread/start` twelve times.
+
+Open, each needing a decision first:
+
+- **E1. A browser with a GPU on Windows.** `crew.browser` runs only on macOS. On Windows a worker starts Chromium itself, inside Codex's sandbox. The retrospective reports the GPU process dying there, rendering falling back to software at full CPU, and a headless shell showing an error window on the user's screen; the cause was not looked into. Running the job's browser server from the daemon, as on macOS, would give it the GPU and one place to stop it; but Windows has no `sandbox-exec` to hold that browser to the job's file limits, so it would read whatever the user can. Needs that trade settled and a Windows machine to verify on.
+- **E2. A budget per job.** Tokens and time are shown when a job ends, not while it runs. A limit per job (a default in the settings, or `delegate` arguments) that wakes the lead once when passed. Open: the defaults, and whether a wake is worth the lead's own tokens.
+
+Not taken:
+
+- **Retrying `thread/start`.** The twelve timeouts had one cause, removed since; a retry would have waited three more minutes and failed the same way. The lead's rule (retry once, then do it yourself) covers what is left.
+- **Blocking software rendering and `--disable-gpu`.** Right for a WebGL game, wrong for most web UI, where software rendering is cheaper and enough. A project that needs the GPU says so in its instructions.
+- **Linking each capture to a model file's hash and a camera.** Specific to 3D assets. The general form exists: evidence records the turn it was written in, and each turn is a commit on the job's branch.
+
 ## 5. Long-term plan
 
 **L1. The lead as an adapter.** Only three parts are tied to Claude Code: the MCP server, the hooks, and the skills. Jobs, events, and the board belong to the daemon. Defining the lead as the role that plans and decides merges lets Codex or a headless Claude take it. This also resolves the "Codex as temporary lead when Claude is nearly exhausted" case in 03 section 8.2.
@@ -183,3 +212,4 @@ Requirements R4 and R6 (computer use, side chat, visibility in the desktop app) 
 - 2026-11-16: The user asked for a detailed, parallel review of the scoring and for a better method, fundamental if need be. A self-review and a cross-review reproduced that reviewer calibration mistook the work a reviewer was given for harshness, that tier acted as a fixed bonus per Codex model, that the per-line clamp hid how bad a bad job was, and that fixes lifted the overall score. The build score became a finding rate over change size with no calibration and no tier, fix became a separate score that does not rank, the start counts each other model once, and the lead records declined findings. See [09](09-usage-presets-rounds.md) section 16.
 - 2026-11-16: Replaying the Crew history (35 reviews, 112 findings, 89% accepted) through the new method showed scores holding steady as reviews accumulate. Two things charged the lead for its roles: its largest integrations (up to 5,800 lines) counted as ordinary large changes, and findings in a merged result fell on the lead's line. A size xlarge (exposure 4) and one line per merged job fix these without a bonus. The lead also records how it took each delegated job (adoption), shown per model and not scored.
 - 2026-11-18: The user found that a curve over review counts and change sizes does not reflect how a model really did, and proposed that the models of a mission score each other near its end. Built as peer ratings laid over the evidence ([09](09-usage-presets-rounds.md) section 17): each rating rests on a fact and is given in a turn the rater already has, reviewers get a score of their own from how their findings held up, and four items (correctness, brief, report, findings) replace the single number beside build and fix. The user asked for a switch, since rating adds usage; it is `peerRatings`, on by default. They also set the shares of evidence and ratings in an item to half each, from the 70 to 30 first proposed.
+- 2026-11-20: The user brought a retrospective of a game project run with Crew and asked which of its points to take, generalizing or declining those that fit only that project. Rules for the lead and the worker, and the check on a worker's Crew tools, were built; four larger items were left open and three declined. The user then asked for two of the four, named stops and evidence side by side, since the board is a web page whatever shell shows it. See section 4 E.

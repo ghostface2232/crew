@@ -7,7 +7,7 @@ import { describeUsage } from './usage.ts';
 import type { RouteDecision, Usage } from './usage.ts';
 import type { Holder, Preset, PresetName, Role, RoleAssignment, WorkerAgent } from './config.ts';
 import type { CrewEvent, JobSpec } from './jobs.ts';
-import { followUpTitle, normalizeTitle, STAGES } from './missions.ts';
+import { followUpTitle, MAX_LABEL, normalizeTitle, planText, STAGES } from './missions.ts';
 import type { Mission } from './missions.ts';
 import { imageContent, isImage } from './evidence.ts';
 import type { Evidence } from './evidence.ts';
@@ -63,37 +63,34 @@ function currentPolicy(name: PresetName | null, whose: string): string {
   return presetPolicy(name, name ? presets?.[name] : undefined, whose);
 }
 
-/** Left out when the user turned peer ratings off: the daemon would not keep one. */
-const RATING_LINE = started?.peerRatings === false ? '' : ' On a job\'s line you may add \`rating\`, each item from 1 to 5, for what you saw of its work: correctness (a builder only), brief (how it followed your brief) and report (how well its report matched the work) for a builder or fixer, findings (how useful they were) for a review. The line\'s text is the fact a rating rests on, so leave out an item the text does not bear out; never rate your own work.';
-const PRESET_LINE = `\n- Presets set the cost of a command. The global one is ${started?.preset ? `"${started.preset}"` : 'not set'}. When the user names a preset for a command (${PRESET_NAMES.join(', ')}), pass it as \`preset\` when you start its mission; never pick one yourself. \`mission\` and \`route\` responses state the preset in effect and what it asks of your subagents; the latest one you were told holds. A setting the user gave a role wins over any preset.`;
+const PRESET_LINE = `- Presets set the cost of a command. The global one is ${started?.preset ? `"${started.preset}"` : 'not set'}. When the user names one for a command (${PRESET_NAMES.join(', ')}), pass it as \`preset\` when you start its mission; never pick one yourself. \`mission\` and \`route\` state the preset in effect and what it asks of your subagents; the latest one you were told holds. A setting the user gave a role wins over any preset.`;
 
-/** One line per role: who holds it now, as of this session's start. */
-const ROLE_LINES = ROLE_INFO.map((info) => `- ${info.label} (\`${info.role}\`) — ${holder(info.role)}. ${info.summary}`).join('\n');
+/** One line per role: who holds it now, as of this session's start. The tool descriptions say what each role does. */
+const ROLE_LINES = ROLE_INFO.map((info) => `- ${info.label} (\`${info.role}\`): ${holder(info.role)}`).join('\n');
 
+/**
+ * What a lead needs in every session, whether or not it runs the pipeline. Claude Code cuts a server's
+ * instructions at 4,096 characters (seen 2026-11-20), so this holds only what no tool description, job
+ * result or skill says at the moment it is needed; test/mcp.test.ts holds it under that length.
+ */
 const INSTRUCTIONS = `Crew connects this session to other coding agents that run in the background. You are the lead: you plan, do the main implementation, review, and decide what is merged.
 
-Roles (assigned by the user in the settings or ~/.crew/config.json; each job goes to the agent holding its role, and you do not reassign them). As of this session's start:
+Roles are the user's to assign (settings or ~/.crew/config.json); a job goes to an agent holding its role. As of this session's start:
 ${ROLE_LINES}
-\`delegate\` takes role delegate, refactor, release, or fix; \`review\` is the review role, or verify with runs_app; \`debate\` and \`polish\` are their own roles. Each job's result names the agent that took it.
-A role may have several holders: pick one for each job with \`agent\` (\`route\` says who has room); without it, wording goes to Antigravity and other work to Codex, among the role's holders that can take it. Give work that operates the screen (computer use) or must run the app to Codex when it holds the role. When a second view is worth the usage, run the job with two holders at once. Picking yourself (\`claude\`) starts no worker: do the work in this session, or in a subagent (\`crew:self-reviewer\` for a review).
+\`delegate\` takes role delegate, refactor, release, or fix; \`review\` is the review role, or verify with runs_app. Where a role has several holders, pick one with \`agent\`. Picking yourself (\`claude\`) starts no worker: do the work in this session or in a subagent.
 
 How jobs work:
-- delegate and polish run in their own git worktree and branch (crew-<job id>) created from HEAD, so commit anything the worker needs first. Gitignored files it needs (node_modules, .env) are copied in if the repository lists them in .worktreeinclude. The bridge commits the worker's changes on that branch; you inspect the diff and merge or reject it. Nothing reaches your branch unless you merge it.
-- Every receipt is an offer, not a read acknowledgement. Pass its id as ack with your next Crew call (or an array of ids); only that echo acknowledges the snapshots shown. Automatic offers stop after two attempts, but unacknowledged news remains in status and on the board. Long reports are paged with status and report_offset.
-- Job calls return at once with the job id while the worker runs in the background. Do your own part, then end your turn: a live, connected watcher attempts to wake you when a job ends, needs a decision, or asks you a question. After a watcher expires or fails, the next hook or status recovers pending news. Do not sit in \`wait\` on a running job, since the user cannot talk to you meanwhile. Pass background: false only when you can do nothing else until the result arrives.
-- Codex's approval requests go to its own automatic reviewer first. If a result lists an action the reviewer REFUSED and the user's request in this conversation clearly covers it, send it back yourself with \`reply\` and approved_by_user, quoting their words; do not ask them again. If it is refused a second time, the same call has the user asked directly. If their request does not cover it, tell them and let them decide.
-- Approval is the user's call. Never approve on your own. For a waiting approval clearly outside the task or role, use \`reply\` with decision "decline" and a message saying why and what to do instead. For other approvals and waiting questions, call \`wait\` so the user is asked, or use \`reply\` to pass on an answer they already gave you.
-- A worker may use ask_lead mid-task for a question that is yours to answer, unlike approval requests, which are the user's. Answer it with \`answer\`; you are woken again when the worker ends or needs you.
-- \`reply\` with a message continues the same worker session, e.g. to request fixes.
-- Reject worker changes that go beyond what was asked. For polish, any file listed as out of scope, or any non-text change, is grounds to reject.
-- If a worker fails on a usage limit, do that piece yourself and say that the cross-check was skipped.
-- This machine is shared. Workers are told to start their own isolated instance of anything they run (free port, own data directory, headless browser) and to measure nothing unless the job runs alone. A job that has to start the app takes runs_app: its sandbox then has network access, and a review runs in a snapshot of the change. Without it a worker's review is static. Work whose result only shows while it runs (how it looks, interaction and timing, traffic between processes, startup and builds, concurrency and recovery), or whose checks need a server, browser, or app, always takes runs_app, and so does one reviewer of it: reading code and mocked tests do not show these. Pure logic that tests can check in the sandbox does not need it. Only one reviewer of a change runs the app: if the cross-review does, tell your self-review subagent to stay static, and the other way round. A delegate job that measures performance takes exclusive: it is refused while other jobs are active, so wait for them first.
-- Workers save screenshots and recordings in the job's evidence directory, which is kept with the job: results list them and show the latest turn's images, and the board shows them all. To show a worker an image (a design, a screenshot of the problem), pass its path in attachments with delegate, review, reply, or answer.
-- When to review while you run the Crew pipeline (/crew:run), without being asked: one review (your crew:self-reviewer subagent or \`review\`, not both) when a substantial piece of implementation reaches a stopping point; before you push or open a pull request, a review of whatever is going out that no review has covered since it last changed substantially (both in parallel for security, concurrency, or data loss; fixes for a review's findings count as covered); none for small fixes and wording. Reviewers that run in parallel are static unless exactly one of them is told it may run the app. The user's own request for a review, or for none, comes first. Outside the pipeline, review only when the user asks: do not hold back a commit or a push for one.
-- When you take a user's command through several steps, call \`mission\` with title and planned stages first, with stage as you move on, and with done as soon as the work finishes. Pass stages again with what remains to add or drop future steps. The board then shows the command as one unit with its jobs under it. Skip it for a single delegated job. When the user asks for more work after you finished a mission, start a new mission for it before you begin, including work you do yourself; a question or a reply needs none. A job started without one gets a follow-up mission named after the finished one.
-- Fixing a review's findings: triage stays yours. Decide which findings to accept and which to decline with a reason; the user's intent and this conversation decide that. A change a worker built goes back to that worker with \`reply\`, since its context is intact. The fix role is for your own code or a result merged from several jobs: when a worker holds it, \`delegate\` with role fix and give it the accepted findings with their reasons, your decisions, a map of the files involved, and a done_when; a brief of file names alone invites fixes that only hide symptoms. The review-round limit is the same whoever fixes.
-- Model notes: after each review and its fix, record what happened with \`note\`, one line per model judged: the builder's line (role build) with the findings you accepted and those you declined (several reviews of one piece of work make one line, each finding counted once; a merged result gets one line per job, with how you took a delegated job's work as adoption), and the fixer's line (role fix) with how the fix went. A review a job ran gets a line as well (role review, with the review's job_id, the work it covered as of_job or of_model, and its findings as you accepted and declined them), so reviewers are scored on their findings.${RATING_LINE} Facts from the review only, never impressions; findings from your own crew:self-reviewer count too. \`route\` shows the role holders' notes: let them inform your choice of tier and holder within the roles and presets the user set, which stay theirs. When a note says its summary is due, rewrite it with \`note_summary\` from the evidence.
-- Usage is measured by AgentGauge. In the pipeline, call \`route\` once at each stage boundary before you hand out work (not on every turn) with the role you are about to hand out, and follow its assignee and reason; when it says degraded, say in your report what was skipped. Outside the pipeline, follow the roles unless a job fails on a limit.${PRESET_LINE}
+- A delegate or polish job runs in its own git worktree and branch (crew-<job id>) created from HEAD, so commit what the worker needs first; gitignored files it needs are copied in only if .worktreeinclude lists them. Read its diff, then merge it or reject it, and reject what goes beyond the task. Nothing reaches your branch unless you merge it.
+- Job calls return at once. Do your own part, then end your turn: you are woken when a job ends, needs a decision, or asks you a question. Do not sit in \`wait\` on a running job, since the user cannot talk to you meanwhile.
+- A result that carries a receipt is acknowledged only by passing its id as \`ack\` with your next Crew call.
+- Approval is the user's call; never approve on your own. Decline a request clearly outside the task or role with \`reply\`. For any other, call \`wait\` so the user is asked, or pass on an answer they already gave. When a result lists an action Codex's automatic reviewer REFUSED and the user's request in this conversation clearly covers it, send it back with \`reply\` and approved_by_user, quoting their words; if it does not, tell them and let them decide. A question a worker asks you (ask_lead) is yours to answer, with \`answer\`.
+- Leave \`tier\` and \`effort\` out for ordinary work, so the model and effort the user set for the role or preset apply. Name one only when a job clearly needs another, since it overrides them.
+- If a job fails on a usage limit, do that piece yourself and say what was skipped. If Crew cannot start a job at all, retry once, then tell the user the error and do that piece yourself.
+- /crew:run says when its pipeline reviews. Outside it, review only when the user asks: do not hold back a commit or a push for one. After a review and its fix, record what it showed with \`note\`: facts only, never impressions.
+- When you take a user's command through several steps, report it with \`mission\`: title and stages first, done as soon as the work finishes. Skip it for a single delegated job. Work the user asks for after done gets a new mission before you begin.
+- When a worker reports a workaround for this machine or project, add it to the project's .crew/instructions.md, which every later job is given.
+- \`route\` says who should take a kind of work now, from each agent's remaining usage. /crew:run calls it at each stage; outside it, follow the roles unless a job fails on a limit.
+${PRESET_LINE}
 
 The user can watch every agent live on the status board, which /crew:board opens.`;
 
@@ -123,9 +120,9 @@ const agentProp = {
   agent: { type: 'string', enum: [...Object.keys(WORKERS), LEAD], description: 'Which of the role\'s holders takes this job; the roles in your instructions list them. Without it, Antigravity for wording and Codex for other work, among the holders that can take it. claude starts no worker: you do it.' },
 };
 const modelProps = {
-  tier: { type: 'string', enum: [...TIERS], description: 'How demanding the job is; Crew picks the model from it. standard (the default): most work, including most UI changes. frontier: only especially hard or complex work, or a UI rebuilt from scratch or a very large UI change. light: simple, well-specified tasks. fast: plain searches and lookups. For Codex these are Sol, Astra, Terra and Luna; for Antigravity, Neon for frontier (literary or very complex documents) and Hydrogen otherwise. Newer models of each family are picked up automatically.' },
+  tier: { type: 'string', enum: [...TIERS], description: 'How demanding the job is; Crew picks the model from it. Leave it out for ordinary work: the model the user set for the role or preset then applies, or standard without one. A tier named here overrides that model. standard: most work, including most UI changes. frontier: only especially hard or complex work, or a UI rebuilt from scratch or a very large UI change. light: simple, well-specified tasks. fast: plain searches and lookups. For Codex these are Sol, Astra, Terra and Luna; for Antigravity, Neon for frontier (literary or very complex documents) and Hydrogen otherwise. Newer models of each family are picked up automatically.' },
   model: { type: 'string', description: 'Exact model ID for this job, as the notes list it, overriding tier. Rarely needed; prefer tier. When the user names a family such as Astra, pass its tier; a family name passed here is taken as that tier.' },
-  effort: { type: 'string', description: 'Codex defaults to medium effort, or high at the frontier tier. Antigravity sets its thinking level only when an effort is named, using the nearest lower offered level if needed and keeping the session default if no level fits.' },
+  effort: { type: 'string', description: 'Leave it out to keep the effort the user set for the role or preset; an effort named here overrides it. With none set, Codex runs at medium, or high at the frontier tier. Antigravity sets its thinking level only when an effort is named, using the nearest lower offered level if needed and keeping the session default if no level fits.' },
 };
 
 const TOOLS = [
@@ -137,7 +134,7 @@ const TOOLS = [
       type: 'object',
       properties: {
         role: { type: 'string', enum: ['delegate', 'refactor', 'release', 'fix'], description: 'delegate (default): implementation. refactor: restructure code without changing behavior, with the checks run before and after. release: prepare a release (version, changelog, build, checks, and written steps to publish); it publishes, pushes, and deploys nothing. fix: fix the review findings you accepted in your own code or a merged result; give the findings with their reasons and your decisions. A worker\'s own change goes back to it with reply instead.' },
-        task: { type: 'string', description: 'What to build, with the context the engineer needs: relevant files, constraints, interfaces to match. It has not seen this conversation. If the result must match something (a design, screenshots, another implementation), name it by file path and commit; the engineer can open images by path.' },
+        task: { type: 'string', description: 'What to build, with the context the engineer needs: relevant files, constraints, interfaces to match. It has not seen this conversation. If the result must match something (a design, screenshots, another implementation), name it by file path and commit, and pass images in attachments.' },
         title: { type: 'string', description: 'Short label shown on the status board.' },
         done_when: { type: 'string', description: 'Concrete completion criteria the engineer can check, e.g. tests that must pass, or what must be true on screen and at which widths.' },
         check: { type: 'string', description: 'A shell command (e.g. "npm test") the bridge itself runs in the worktree after every turn, so the result shows an observed exit status instead of the worker\'s word. Runs with the worker\'s file limits, up to 10 minutes. Needs a worktree.' },
@@ -164,7 +161,7 @@ const TOOLS = [
         base: { type: 'string', description: 'For target "branch": the branch or commit to compare against, e.g. main, or the commit before your first one when you work on main itself.' },
         commit: { type: 'string', description: 'Commit SHA for target "commit".' },
         focus: { type: 'string', description: 'What to scrutinize: the design decisions, assumptions or risks you are least sure about.' },
-        mode: { type: 'string', enum: ['adversarial', 'standard'], description: 'adversarial (default): challenges design and assumptions. standard: Codex\'s built-in code review; other agents run the adversarial review instead.' },
+        mode: { type: 'string', enum: ['adversarial', 'standard'], description: 'adversarial (default): challenges design and assumptions. standard: Codex\'s built-in code review, which is given no focus or done_when; other agents run the adversarial review instead.' },
         done_when: { type: 'string', description: 'Acceptance criteria to verify in adversarial mode.' },
         ...runsAppProp('judge the change. It then goes to the verify role and runs in a snapshot worktree holding the change; your own self-review must stay static'),
         ...attachmentsProp,
@@ -221,8 +218,8 @@ const TOOLS = [
       type: 'object',
       properties: {
         title: { type: 'string', description: 'The user\'s command in a few words. Pass it once, to start the mission; later calls pass stage or stages without it. Passing the same title again resumes the mission and ignores stages. A different title starts a new mission and closes this session\'s open one as abandoned.' },
-        stages: { type: 'array', items: { type: 'string', enum: [...STAGES] }, description: 'Ordered stages, with repeats allowed. With title: a nonempty whole plan. Later: replace only the remainder to add, drop or reorder steps ([] drops all future steps); passed and current steps stay.' },
-        stage: { type: 'string', enum: [...STAGES], description: 'Advance to the next occurrence of this stage, or insert it after the current step. Reporting the current step again changes nothing.' },
+        stages: { type: 'array', items: { type: 'string' }, description: `Ordered stages, with repeats allowed, each one of: ${STAGES.join(', ')}. To say what a step is for, add a colon and a short name (at most ${MAX_LABEL} characters), which the board shows in place of the stage's: "implement: Sample", "implement: The rest". With title: a nonempty whole plan. Later: replace only the remainder to add, drop or reorder steps ([] drops all future steps); passed and current steps stay.` },
+        stage: { type: 'string', description: `One of: ${STAGES.join(', ')}. Advance to the next occurrence of this stage, or insert it after the current step. Reporting the current step again changes nothing, so to move between two steps of one stage, add the next one's name ("implement: The rest"); a name the plan does not have is inserted as a new step.` },
         done: { type: 'boolean', description: 'The command is finished.' },
         abandoned: { type: 'boolean', description: 'The command was dropped before it finished.' },
         outcome: { type: 'string', description: 'With done or abandoned: one line on how it ended.' },
@@ -259,7 +256,7 @@ const TOOLS = [
         findings: {
           type: 'object',
           properties: { high: { type: 'integer', minimum: 0 }, medium: { type: 'integer', minimum: 0 }, low: { type: 'integer', minimum: 0 } },
-          description: 'For build: the findings you accepted, by severity (high: wrong behavior, data loss, security; medium: a real bug in an edge case; low: minor). When several reviews covered the work, one line with every accepted finding counted once, naming as reviewer one from another agent if any ran. For fix: the findings the check of the fix raised; they lower the fix line. For review: the findings of this review that you accepted.',
+          description: 'For build: the findings you accepted, by severity (high: wrong behavior, data loss, security; medium: a real bug in an edge case; low: minor; these are the blocker, major and minor of a review report). When several reviews covered the work, one line with every accepted finding counted once, naming as reviewer one from another agent if any ran. For fix: the findings the check of the fix raised; they lower the fix line. For review: the findings of this review that you accepted.',
         },
         declined: {
           type: 'object',
@@ -305,7 +302,7 @@ const TOOLS = [
   {
     name: 'wait',
     title: 'Wait for workers',
-    description: 'Collect results of jobs that ended, or have the user asked about a waiting job. Blocks until one of the given jobs finishes, fails, or asks a lead question; for a job still running, end your turn instead, since you are woken when it ends. If a job needs an approval or a user answer meanwhile, the user is asked and the wait continues. With no ids, waits on every active job of this project.',
+    description: 'Collect results of jobs that ended, or have the user asked about a waiting job. Blocks until one of the given jobs finishes, fails, or asks a lead question; for a job still running, end your turn instead, since you are woken when it ends. If a job needs an approval or a user answer meanwhile, the user is asked and the wait continues. With no ids, waits on every active job this session started in this project.',
     annotations: { readOnlyHint: true },
     inputSchema: {
       type: 'object',
@@ -333,7 +330,7 @@ const TOOLS = [
       type: 'object',
       properties: {
         job_id: { type: 'string' },
-        message: { type: 'string', description: 'Follow-up instruction, the user\'s answer, or, with decline, why you declined and what to do instead.' },
+        message: { type: 'string', description: 'Follow-up instruction, the user\'s answer, or, with decline, why you declined and what to do instead. From the second correction on, restate the whole brief as it now stands and say it replaces your earlier messages, naming what is approved and must stay.' },
         decision: { type: 'string', enum: ['approve', 'deny', 'allow_for_job', 'decline'], description: 'Use decline with a reason in message only for a waiting approval clearly outside the task or role. Approve, deny, and allow_for_job relay the user\'s decision. Use allow_for_job only when offered and the user allowed later requests on the same target. Otherwise call wait.' },
         request_id: { type: 'string', description: 'Required to settle a waiting request. Use the request ID shown in the job status.' },
         sync: { type: 'boolean', description: 'For a finished delegate or polish job: first merge your current HEAD into the worker\'s branch, so the next turn sees what you committed since it started (a fix it was waiting for, an interface you changed). Commit first. If the merge conflicts, it is aborted; the message is still sent, naming the conflicting files, and the job\'s result notes the failed sync.' },
@@ -347,7 +344,7 @@ const TOOLS = [
   {
     name: 'cancel',
     title: 'Cancel a job',
-    description: 'Stop a running job. With discard: true, also remove a finished job\'s worktree and branch (after merging or rejecting its changes).',
+    description: 'Stop a running job. With discard: true, also remove a finished job\'s worktree and branch, after merging or rejecting its changes: work on the branch that was not merged is lost.',
     inputSchema: {
       type: 'object',
       properties: { job_id: { type: 'string' }, discard: { type: 'boolean' } },
@@ -590,7 +587,7 @@ function describeMission(mission: Mission): string {
   const stages = mission.stages ?? STAGES;
   const index = mission.stageIndex ?? stages.indexOf(mission.stage);
   const state = mission.state === 'active' ? `${mission.stage} (step ${index + 1} of ${stages.length})` : mission.state;
-  const plan = stages.map((stage, at) => `${stage}${at === index && mission.state === 'active' ? ' (current)' : ''}`).join(' → ');
+  const plan = planText(mission, (at) => (at === index && mission.state === 'active' ? ' (current)' : ''));
   const policy = mission.preset ? currentPolicy(mission.preset, ' for this mission') : currentPolicy(globalPreset(), ' (the global preset; the mission sets none)');
   return `Mission ${mission.id} · ${state} — ${mission.title}\nPlan: ${plan}\n${policy}`;
 }

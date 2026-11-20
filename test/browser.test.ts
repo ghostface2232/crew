@@ -22,6 +22,22 @@ const skip = (() => {
   }
 })();
 
+test('the browser profile protects .git in each writable directory and its resolved path', (t) => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-profile-')));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const job = path.join(dir, 'job');
+  const alias = path.join(dir, 'alias');
+  const scratch = path.join(dir, 'scratch');
+  fs.mkdirSync(job);
+  fs.mkdirSync(scratch);
+  fs.symlinkSync(job, alias, 'junction');
+  const profile = browserProfile([alias, scratch], []);
+  for (const root of [alias, job, scratch]) {
+    const git = JSON.stringify(path.join(root, '.git'));
+    assert.ok(profile.includes(`(deny file-write* (literal ${git}) (subpath ${git}))`));
+  }
+});
+
 test('the browser profile denies the token and writes outside the job, and allows the rest', { skip }, (t) => {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-profile-')));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -32,6 +48,8 @@ test('the browser profile denies the token and writes outside the job, and allow
   const secret = path.join(dir, 'token');
   fs.writeFileSync(secret, 'secret');
   const profile = browserProfile([job], [secret]);
+  // Refusing to start another app was checked by hand (`open` fails with -54); a test that tried would start one when it regressed.
+  for (const operation of ['lsopen', 'appleevent-send', 'job-creation']) assert.ok(profile.includes(`(deny ${operation})`), operation);
   const run = (...args: string[]) => {
     try {
       return execFileSync('/usr/bin/sandbox-exec', ['-p', profile, ...args], { encoding: 'utf8', stdio: 'pipe' });
@@ -41,6 +59,10 @@ test('the browser profile denies the token and writes outside the job, and allow
   };
   assert.match(run('/bin/cat', secret), /failed: .*Operation not permitted/);
   assert.match(run('/usr/bin/touch', path.join(outside, 'x')), /failed: .*Operation not permitted/);
+  const git = path.join(job, '.git');
+  assert.match(run('/usr/bin/touch', git), /failed: .*Operation not permitted/);
+  fs.mkdirSync(git);
+  assert.match(run('/usr/bin/touch', path.join(git, 'config')), /failed: .*Operation not permitted/);
   assert.equal(run('/usr/bin/touch', path.join(job, 'x')), '');
   assert.equal(fs.existsSync(path.join(job, 'x')), true);
 });

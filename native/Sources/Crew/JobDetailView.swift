@@ -9,6 +9,8 @@ struct JobDetailView: View {
     @State private var error = ""
     @State private var retry = 0
     @State private var scrolled = false
+    /// Files of the evidence shown side by side; empty while the sheet is closed.
+    @State private var compared: [String] = []
     private var job: Job? {
         guard var current = store.state.jobs.first(where: { $0.id == id }) else { return detail }
         current.prompt = detail?.prompt ?? current.prompt
@@ -102,8 +104,13 @@ struct JobDetailView: View {
             detailSection("Evidence", symbol: "photo.on.rectangle") {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: EvidenceTile.minWidth), spacing: Space.l, alignment: .top)], alignment: .leading, spacing: Space.l) {
                     // Newest turn first, as on the web board.
-                    ForEach(evidence.sorted { $0.turn > $1.turn }, id: \.file) { item in EvidenceTile(item: item) }
+                    ForEach(evidence.sorted { $0.turn > $1.turn }, id: \.file) { item in
+                        EvidenceTile(item: item, turns: job.turns) { compared = Evidence.companions(of: item.file, in: evidence) }
+                    }
                 }
+            }
+            .sheet(isPresented: Binding(get: { !compared.isEmpty }, set: { if !$0 { compared = [] } })) {
+                EvidenceCompareView(items: evidence, turns: job.turns, shown: $compared)
             }
         }
         if let rounds = job.rounds, !rounds.isEmpty {
@@ -831,42 +838,196 @@ private struct EvidenceTile: View {
     /// Narrow enough for three across the detail panel.
     static let minWidth: CGFloat = 132
     let item: Evidence
+    /// How many turns the job has had.
+    let turns: Int
+    /// Shows an image inside the app, beside what it is judged against.
+    let compare: () -> Void
     @State private var thumbnail: NSImage?
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s) {
-            Button { NSWorkspace.shared.open(URL(fileURLWithPath: item.path)) } label: {
+            // A recording plays in the system's player: the app decodes images only, and WebM not at all.
+            Button { if item.isVideo { NSWorkspace.shared.open(item.url) } else { compare() } } label: {
                 ZStack {
                     RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius, style: .continuous).fill(WorkspaceStyle.rowFill)
                     if let thumbnail {
-                        Image(nsImage: thumbnail).resizable().scaledToFit().padding(1)
+                        Image(nsImage: thumbnail).resizable().scaledToFit()
                     } else {
                         Image(systemName: item.isVideo ? "play.rectangle" : "photo").font(Symbol.large).foregroundStyle(.secondary)
                     }
                 }
                 .aspectRatio(4 / 3, contentMode: .fit)
-                .overlay(RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius, style: .continuous).strokeBorder(WorkspaceStyle.hairline))
                 .clipShape(RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius, style: .continuous))
             }
             .buttonStyle(.plain)
-            .help(item.path)
-            Text("\(item.from == "lead" ? "Attached by the lead" : "Turn \(item.turn)") · \(item.file)")
+            .help(item.isVideo ? item.path : "Compare")
+            .evidenceFileMenu(item)
+            Text("\(item.turnLabel(of: turns)) · \(item.file)")
                 .font(Typeface.caption).foregroundStyle(.secondary).textSelection(.enabled)
         }
         // Decoded once per version, off the main thread and at tile size, not on every refresh of a live job.
         .task(id: "\(item.path)|\(item.modified)") {
             guard !item.isVideo else { return }
             let path = item.path
-            thumbnail = await Task.detached { Self.thumbnail(path) }.value
+            thumbnail = await Task.detached { evidenceImage(path, maxPixel: 600) }.value
         }
     }
-    private nonisolated static func thumbnail(_ path: String) -> NSImage? {
-        guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil),
-              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
-                  kCGImageSourceCreateThumbnailFromImageAlways: true,
-                  kCGImageSourceThumbnailMaxPixelSize: 600,
-                  kCGImageSourceCreateThumbnailWithTransform: true,
-              ] as CFDictionary)
-        else { return nil }
-        return NSImage(cgImage: image, size: .zero)
+}
+
+/// An image decoded no larger than it is shown, so a screenshot of any size costs a tile's or a pane's memory.
+private nonisolated func evidenceImage(_ path: String, maxPixel: Int) -> NSImage? {
+    guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil),
+          let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+              kCGImageSourceCreateThumbnailFromImageAlways: true,
+              kCGImageSourceThumbnailMaxPixelSize: maxPixel,
+              kCGImageSourceCreateThumbnailWithTransform: true,
+          ] as CFDictionary)
+    else { return nil }
+    return NSImage(cgImage: image, size: .zero)
+}
+
+private extension Evidence {
+    var url: URL { URL(fileURLWithPath: path) }
+}
+
+private extension View {
+    /// The ways out of the app for a file it shows itself.
+    func evidenceFileMenu(_ item: Evidence) -> some View {
+        contextMenu {
+            Button("Open in Default App", systemImage: "arrow.up.forward.app") { NSWorkspace.shared.open(item.url) }
+            Button("Show in Finder", systemImage: "folder") { NSWorkspace.shared.activateFileViewerSelecting([item.url]) }
+        }
+    }
+}
+
+/// Captures side by side, inside the app. A result alone says little: it is judged against what was there before, or
+/// what it was meant to match. Each says which turn it is from, since one from an earlier turn may not show the final state.
+private struct EvidenceCompareView: View {
+    /// Wide enough for three panes, and no wider than the screen it opens on.
+    private static var size: CGSize {
+        let screen = NSScreen.main?.visibleFrame.size ?? CGSize(width: 1280, height: 800)
+        return CGSize(width: min(1120, screen.width - Space.x6l * 2), height: min(760, screen.height - Space.x6l * 2))
+    }
+    let items: [Evidence]
+    let turns: Int
+    @Binding var shown: [String]
+    private var panes: [Evidence] { Evidence.ordered(items.filter { shown.contains($0.file) }) }
+    /// Up to three in a row; four in a grid of two by two.
+    private var rows: [[Evidence]] { panes.count == 4 ? [Array(panes[..<2]), Array(panes[2...])] : [panes] }
+    var body: some View {
+        VStack(alignment: .leading, spacing: Space.xl) {
+            HStack {
+                Label("Evidence", systemImage: "photo.on.rectangle").font(Typeface.title)
+                    .labelStyle(.titleAndIcon).symbolRenderingMode(.hierarchical)
+                Spacer()
+                Button("Close", systemImage: "xmark") { shown = [] }
+                    .iconButton().help("Close (Esc)").keyboardShortcut(.cancelAction)
+            }
+            VStack(spacing: Space.l) {
+                ForEach(rows, id: \.first?.file) { row in
+                    HStack(alignment: .top, spacing: Space.l) {
+                        ForEach(row, id: \.file) { item in EvidencePane(item: item, turns: turns) }
+                    }
+                }
+            }
+            if items.count > 1 { picker }
+        }
+        .padding(WorkspaceStyle.panelPadding)
+        .frame(width: Self.size.width, height: Self.size.height)
+        // A capture the worker has since deleted leaves the comparison, and the last one closes it.
+        .onChange(of: panes.isEmpty) { _, empty in if empty { shown = [] } }
+    }
+    private var picker: some View {
+        let open = panes.map(\.file)
+        return ScrollView(.horizontal) {
+            HStack(alignment: .top, spacing: Space.m) {
+                ForEach(Evidence.ordered(items), id: \.file) { item in
+                    let on = shown.contains(item.file)
+                    // Counted from what is on screen: a capture the worker has since deleted is still named in `shown`.
+                    Button { shown = on ? open.filter { $0 != item.file } : open + [item.file] } label: {
+                        EvidenceChoice(item: item, turns: turns, on: on)
+                    }
+                    .buttonStyle(.plain)
+                    // The last one stays, and a fourth has no room.
+                    .disabled(on ? open.count == 1 : open.count >= Evidence.maxCompared)
+                    .help(item.file)
+                    .accessibilityLabel("\(item.turnLabel(of: turns)), \(item.file)")
+                    .accessibilityAddTraits(on ? .isSelected : [])
+                }
+            }.padding(1)
+        }
+        .scrollIndicators(.never)
+        .accessibilityLabel("Captures to compare, up to \(Evidence.maxCompared)")
+    }
+}
+
+private struct EvidencePane: View {
+    let item: Evidence
+    let turns: Int
+    @State private var image: NSImage?
+    @State private var loaded = false
+    var body: some View {
+        VStack(alignment: .leading, spacing: Space.m) {
+            ZStack {
+                RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius, style: .continuous).fill(WorkspaceStyle.rowFill)
+                if item.isVideo {
+                    Button("Play in Default App", systemImage: "play.rectangle") { NSWorkspace.shared.open(item.url) }.pillButton()
+                } else if let image {
+                    Image(nsImage: image).resizable().scaledToFit().accessibilityLabel(item.file)
+                } else if loaded {
+                    Image(systemName: "photo").font(Symbol.large).foregroundStyle(.secondary).accessibilityLabel("\(item.file) could not be shown")
+                } else {
+                    ProgressView().controlSize(.small)
+                }
+            }
+            // One height for every pane, so the same view lines up across them.
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipShape(RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius, style: .continuous))
+            .evidenceFileMenu(item)
+            HStack(alignment: .firstTextBaseline, spacing: Space.m) {
+                Text(item.turnLabel(of: turns)).font(Typeface.captionStrong).fixedSize()
+                Text(item.file).font(Typeface.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+            }
+        }
+        .task(id: "\(item.path)|\(item.modified)") {
+            guard !item.isVideo else { return }
+            let path = item.path
+            image = await Task.detached { evidenceImage(path, maxPixel: 2400) }.value
+            loaded = true
+        }
+    }
+}
+
+/// One capture in the row that picks what is compared.
+private struct EvidenceChoice: View {
+    private static let width: CGFloat = 112
+    let item: Evidence
+    let turns: Int
+    let on: Bool
+    @State private var thumbnail: NSImage?
+    var body: some View {
+        VStack(alignment: .leading, spacing: Space.xs) {
+            ZStack {
+                RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius - Space.xs, style: .continuous).fill(WorkspaceStyle.rowFill)
+                if let thumbnail {
+                    Image(nsImage: thumbnail).resizable().scaledToFit()
+                } else {
+                    Image(systemName: item.isVideo ? "play.rectangle" : "photo").foregroundStyle(.secondary)
+                }
+            }
+            .aspectRatio(4 / 3, contentMode: .fit)
+            .clipShape(RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius - Space.xs, style: .continuous))
+            Text(item.turnLabel(of: turns)).font(Typeface.caption).lineLimit(1)
+            Text(item.file).font(Typeface.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+        }
+        .padding(Space.s)
+        .frame(width: Self.width, alignment: .leading)
+        .background(on ? WorkspaceStyle.rowFill : .clear, in: RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius, style: .continuous))
+        .overlay { if on { RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius, style: .continuous).strokeBorder(Palette.accent, lineWidth: 1.5) } }
+        .contentShape(RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius, style: .continuous))
+        .task(id: "\(item.path)|\(item.modified)") {
+            guard !item.isVideo else { return }
+            let path = item.path
+            thumbnail = await Task.detached { evidenceImage(path, maxPixel: 300) }.value
+        }
     }
 }

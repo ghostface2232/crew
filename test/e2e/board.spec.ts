@@ -301,6 +301,49 @@ test('the detail panel shows the worker\'s evidence and the lead\'s attachments'
   await expect(section.getByText('Attached by the lead · lead-1-design.png')).toBeVisible();
 });
 
+test('a capture opens side by side with its other side and the reference, and the picker swaps what is shown', async ({ page, request }) => {
+  const data = fixture();
+  const shot = (file: string, turn: number, from: 'worker' | 'lead' = 'worker') => ({ file, path: `/x/${file}`, turn, from, bytes: 10, modified: 1 });
+  data.jobs[0].turns = 3;
+  data.jobs[0].evidence = [shot('hero-before.png', 1), shot('hero-after.png', 3), shot('footer.png', 2), shot('nav.png', 2), shot('lead-1-design.png', 1, 'lead')];
+  await request.post('/__push', { data: { type: 'state', data } });
+  await page.locator(`button[data-job="${data.jobs[0].id}"]`).click();
+  const section = page.getByRole('dialog').getByRole('region', { name: 'Evidence' });
+  await expect(section.getByText('Turn 1 of 3 · hero-before.png')).toBeVisible();
+  await section.getByRole('img', { name: 'hero-after.png' }).click();
+  const sheet = page.getByRole('dialog', { name: 'Evidence' });
+  const panes = sheet.locator('.compare figure');
+  await expect(panes).toHaveCount(3);
+  await expect(panes.locator('b')).toHaveText(['Attached by the lead', 'Turn 1 of 3', 'Turn 3 of 3']);
+  await expect(panes.getByRole('link')).toHaveText(['lead-1-design.png', 'hero-before.png', 'hero-after.png']);
+  // Side by side, at one height.
+  const rects = () => panes.locator('img').evaluateAll((images) => images.map((image) => image.getBoundingClientRect()));
+  let boxes = await rects();
+  expect(new Set(boxes.map((box) => Math.round(box.top))).size).toBe(1);
+  expect(new Set(boxes.map((box) => Math.round(box.height))).size).toBe(1);
+  expect(boxes[0].right).toBeLessThanOrEqual(boxes[1].left);
+  const picker = sheet.getByRole('group', { name: /Captures to compare/ });
+  const nav = picker.getByRole('button', { name: /nav\.png/ });
+  // A fourth makes a grid of two by two, and a fifth waits until one leaves.
+  await picker.getByRole('button', { name: /footer\.png/ }).click();
+  await expect(panes.getByRole('link')).toHaveText(['lead-1-design.png', 'hero-before.png', 'footer.png', 'hero-after.png']);
+  boxes = await rects();
+  expect(Math.round(boxes[0].top)).toBe(Math.round(boxes[1].top));
+  expect(Math.round(boxes[2].top)).toBe(Math.round(boxes[3].top));
+  expect(boxes[0].bottom).toBeLessThanOrEqual(boxes[2].top);
+  expect(Math.round(boxes[0].left)).toBe(Math.round(boxes[2].left));
+  expect(new Set(boxes.map((box) => Math.round(box.height))).size).toBe(1);
+  await expect(nav).toBeDisabled();
+  await picker.getByRole('button', { name: /hero-before\.png/ }).click();
+  await expect(panes).toHaveCount(3);
+  await nav.click();
+  await expect(panes.getByRole('link')).toHaveText(['lead-1-design.png', 'footer.png', 'nav.png', 'hero-after.png']);
+  await sheet.getByRole('button', { name: 'Close' }).click();
+  await expect(sheet).toHaveCount(0);
+  // The panel behind stays open.
+  await expect(section).toBeVisible();
+});
+
 test('the detail panel shows what verified the result and nothing for jobs without receipts', async ({ page, request }) => {
   const data = fixture();
   const check = { command: 'npm test', exit: 0, timedOut: false, output: 'ok 12 tests', ms: 4200, sandboxed: true };

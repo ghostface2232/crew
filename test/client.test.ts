@@ -48,6 +48,29 @@ test('replacement leaves a daemon another client started in the meantime', async
   assert.equal(spawn.mock.callCount(), 0);
 });
 
+test('a hook report retries with the newly created token and exits successfully on failure', (t) => {
+  const reportHome = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-report-'));
+  t.after(() => fs.rmSync(reportHome, { recursive: true, force: true }));
+  const input = { hook_event_name: 'UserPromptSubmit', session_id: 's', prompt: '한글' };
+  const result = childProcess.spawnSync(process.execPath, ['--input-type=module', '-e', `
+    import fs from 'node:fs';
+    import path from 'node:path';
+    globalThis.fetch = async (url, options) => {
+      const file = path.join(process.env.CREW_HOME, 'token');
+      console.log(JSON.stringify([new URL(url).pathname, options.headers.authorization ?? null, JSON.parse(options.body)]));
+      if (!fs.existsSync(file)) fs.writeFileSync(file, 'a'.repeat(64));
+      return Response.json({ error: 'unauthorized' }, { status: 401 });
+    };
+    await import(${JSON.stringify(new URL('../plugin/bridge/report.ts', import.meta.url).href)});
+  `], { env: { ...process.env, CREW_HOME: reportHome }, input: JSON.stringify(input), encoding: 'utf8', timeout: 5000 });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(result.stdout.trim().split('\n').map((line) => JSON.parse(line)), [
+    ['/api/hooks/claude', null, input],
+    ['/api/hooks/claude', `Bearer ${'a'.repeat(64)}`, input],
+  ]);
+});
+
 test('stop retries a missing PID file before signalling the confirmed process', async (t) => {
   fastWaits(t);
   let alive = true;

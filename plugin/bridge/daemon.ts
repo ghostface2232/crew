@@ -4,6 +4,7 @@ import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 import { boardAsset, BOARD_CSP } from './assets.ts';
 import { ensureToken, sameToken, SESSION_COOKIE } from './auth.ts';
 import { AntigravityAdapter } from './adapters/antigravity.ts';
@@ -15,7 +16,7 @@ import type { Config } from './config.ts';
 import { evidenceType, openEvidence } from './evidence.ts';
 import { projectRoot } from './git.ts';
 import { followUps, isTerminal, Jobs } from './jobs.ts';
-import { missionPreset, Missions, STAGES } from './missions.ts';
+import { missionPreset, Missions } from './missions.ts';
 import type { Mission } from './missions.ts';
 import { addEvidence, addRating, loadNotes, notesFile, renderNotes, scoreAll, setSummary, WORKER_ITEMS } from './notes.ts';
 import type { NotesFile } from './notes.ts';
@@ -356,6 +357,8 @@ function readJson(req: http.IncomingMessage): Promise<any> {
     let body = '';
     let bytes = 0;
     let overflow = false;
+    // One decoder for the whole body: a character split across two chunks would otherwise be lost.
+    const decoder = new StringDecoder('utf8');
     req.on('data', (chunk) => {
       if (overflow) return;
       bytes += Buffer.byteLength(chunk);
@@ -365,11 +368,12 @@ function readJson(req: http.IncomingMessage): Promise<any> {
         reject(new HttpError(413, 'body too large'));
         return;
       }
-      body += chunk;
+      body += decoder.write(chunk);
     });
     req.on('end', () => {
       if (overflow) return;
       try {
+        body += decoder.end();
         resolve(body ? JSON.parse(body) : {});
       } catch {
         reject(new HttpError(400, 'invalid JSON'));
@@ -411,7 +415,7 @@ function signedIn(req: http.IncomingMessage): boolean {
 function isOpen(method: string, pathname: string): boolean {
   if (method === 'GET') return pathname === '/api/health' || !pathname.startsWith('/api/');
   if (method !== 'POST') return false;
-  return pathname === '/api/hooks/claude' || pathname === '/api/session';
+  return pathname === '/api/session';
 }
 
 async function route(req: http.IncomingMessage, res: http.ServerResponse): Promise<unknown> {
@@ -611,10 +615,8 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     if (value !== undefined && typeof value !== 'string') throw new HttpError(400, `${name} must be a string`);
     return value;
   };
-  const stage = (value: unknown): string | undefined => {
-    if (value !== undefined && !(STAGES as readonly unknown[]).includes(value)) throw new HttpError(400, `stage must be one of: ${STAGES.join(', ')}`);
-    return value as string | undefined;
-  };
+  // Missions checks the stage itself, since it may carry a name for its stop.
+  const stage = (value: unknown): string | undefined => text(value, 'stage');
 
   const runbookRoute = /^\/api\/missions\/([\w-]+)\/runbook$/.exec(pathname);
   if (runbookRoute && method === 'GET') {

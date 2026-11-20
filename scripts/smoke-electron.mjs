@@ -196,12 +196,14 @@ try {
       return original.call(this, text);
     };
   });
-  const hook = (hook_event_name, extra = {}) =>
-    fetch(`${base}/api/hooks/claude`, {
+  const hook = async (hook_event_name, extra = {}) => {
+    const response = await fetch(`${base}/api/hooks/claude`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...auth() },
       body: JSON.stringify({ session_id: 'tray-test', cwd: home, hook_event_name, ...extra }),
     });
+    expect(response.status, hook_event_name).toBe(200);
+  };
   await hook('Notification', { notification_type: 'permission_prompt', message: 'Allow this command?' });
   await expect.poll(tooltip, { timeout: 10_000 }).toBe('Crew · 1 need your input');
   await hook('SessionEnd');

@@ -313,7 +313,10 @@ test('notification routes require authentication; hook ingestion cannot ACK; shu
   // Only the lead's own done marks a mission done by the lead; the board's does not.
   assert.equal((await route({ method: 'POST', url: '/api/missions/m-1', auth: true, body: { done: true, by: 'lead' } }, {})).input.byLead, true);
   assert.equal((await route({ method: 'POST', url: '/api/missions/m-1', auth: true, body: { done: true } }, {})).input.byLead, false);
-  await route({ method: 'POST', url: '/api/hooks/claude', body: { session_id: 'lead', ack: receipt } }, {});
+  // A hook's report is taken as the user's own words, so it needs the secret like the rest.
+  await assert.rejects(route({ method: 'POST', url: '/api/hooks/claude', body: { session_id: 'lead', ack: receipt } }, {}), /unauthorized/);
+  assert.equal(ingested, 0);
+  await route({ method: 'POST', url: '/api/hooks/claude', auth: true, body: { session_id: 'lead', ack: receipt } }, {});
   assert.equal(ingested, 1);
   assert.equal(job.ackedSeq, 0);
   await assert.rejects(route({ method: 'POST', url: '/api/lead/ack', auth: true, body: { session: 'other', ack: receipt } }, {}), /session/);

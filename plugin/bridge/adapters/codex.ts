@@ -51,6 +51,8 @@ interface Run {
   lost: string | null;
   /** Keys of plugin tool approvals the user allowed for this job. */
   grants: Set<string>;
+  /** The lead has been told that this thread's Crew tools did not start. */
+  toolsDown: boolean;
 }
 
 export interface CodexLimits {
@@ -105,6 +107,8 @@ export class CodexAdapter implements Adapter {
   private resuming = new Set<string>();
   /** Jobs whose thread Codex is still starting or resuming, which can take minutes; `probe` vouches for them. */
   private opening = new Set<string>();
+  /** Threads whose Crew tools Codex could not start, and why. Codex may say so before the thread has a run to tell. */
+  private toolFailures = new Map<string, string>();
   private config: Config;
 
   constructor(config: Config) {
@@ -388,7 +392,7 @@ export class CodexAdapter implements Adapter {
     const app = (job.runsApp || lean.features.plugins || Object.keys(shared).length > 0) && job.sandbox === 'workspace-write'
       ? {
           default_permissions: profile,
-          permissions: { [profile]: { filesystem: { ':root': 'read', [job.cwd]: 'write', ':slash_tmp': 'write', ...(job.scratch ? { [job.scratch]: 'write' } : {}), ...evidence, ...shared, ...secret }, network: { enabled: Boolean(job.runsApp) } } },
+          permissions: { [profile]: { filesystem: { ':root': 'read', [job.cwd]: 'write', [path.join(job.cwd, '.git')]: 'read', ':slash_tmp': 'write', ...(job.scratch ? { [job.scratch]: 'write' } : {}), ...evidence, ...shared, ...secret }, network: { enabled: Boolean(job.runsApp) } } },
         }
       : null;
     return {
@@ -415,9 +419,24 @@ export class CodexAdapter implements Adapter {
   }
 
   private openRun(ctl: JobCtl, threadId: string, pluginsEnabled = false): Run {
-    const run: Run = { ctl, pluginsEnabled, turnId: null, awaitingTurn: false, interrupt: null, message: '', pending: [], crewCalls: new Set(), items: new Map(), busyChildren: new Map(), held: null, lost: null, grants: new Set() };
+    const run: Run = { ctl, pluginsEnabled, turnId: null, awaitingTurn: false, interrupt: null, message: '', pending: [], crewCalls: new Set(), items: new Map(), busyChildren: new Map(), held: null, lost: null, grants: new Set(), toolsDown: false };
     this.runs.set(threadId, run);
+    this.noteToolFailure(threadId);
     return run;
+  }
+
+  /**
+   * A worker whose Crew server failed to start works on without `ask_lead` and the rest, and says nothing: it
+   * cannot tell a tool that is missing from one it was never given. Only Codex's startup status shows it.
+   */
+  private noteToolFailure(threadId: string): void {
+    const run = this.runs.get(threadId);
+    const error = this.toolFailures.get(threadId);
+    if (!run || error === undefined || run.toolsDown) return;
+    run.toolsDown = true;
+    const note = `Crew's worker tools did not start for this job (${error}). The worker cannot ask you questions (ask_lead), see other jobs, or start the bridge's browser, so do not wait for its questions, and read its report for what it could not check. If the next job says the same, restart Crew.`;
+    run.ctl.note(note);
+    run.ctl.progress(note);
   }
 
   private startTurn(peer: RpcPeer, run: Run, text: string): Promise<void> {
@@ -477,6 +496,7 @@ export class CodexAdapter implements Adapter {
         if (this.peer === peer) this.peer = null;
         this.loaded.clear();
         this.children.clear();
+        this.toolFailures.clear();
         for (const run of this.runs.values()) {
           run.turnId = null;
           run.interrupt?.resolve();
@@ -550,6 +570,15 @@ export class CodexAdapter implements Adapter {
     }
     const threadId: string | undefined = p?.threadId;
     if (!threadId) return;
+    if (method === 'mcpServer/startupStatus/updated') {
+      if (p.name !== 'crew') return;
+      if (p.status === 'failed') {
+        this.toolFailures.set(threadId, detail((typeof p.error === 'string' && p.error.trim()) || 'no reason given', 300));
+        this.noteToolFailure(threadId);
+      } else if (p.status === 'ready') this.toolFailures.delete(threadId);
+      return;
+    }
+    if (method === 'thread/closed') this.toolFailures.delete(threadId);
     const owner = this.runs.get(threadId) ?? this.children.get(threadId);
     if (method === 'turn/started' || method === 'thread/closed') {
       for (const key of owner?.items.keys() ?? []) if (key.startsWith(`${threadId}\0`)) owner?.items.delete(key);

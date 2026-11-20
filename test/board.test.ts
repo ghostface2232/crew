@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Actions, answerKey, tokenFromFragment } from '../plugin/board/src/api.ts';
 import { BoardStore, mergeEvents } from '../plugin/board/src/store.ts';
-import { elapsed, jobLabel, projectNames, unsettled, missionProgress, missionStops, missionStep, missionStopPosition, missionJobStep, missionLooksFinished, relativeDuration, usageWindowName, STOP_OF_STAGE } from '../plugin/board/src/model.ts';
+import { elapsed, evidenceCompanions, evidenceSide, evidenceTurn, orderEvidence, jobLabel, projectNames, unsettled, missionProgress, missionStops, missionStep, missionStopPosition, missionJobStep, missionLooksFinished, relativeDuration, usageWindowName, STOP_OF_STAGE } from '../plugin/board/src/model.ts';
 import type { BoardJob, BoardState, ClaudeSession, CrewEvent, Mission } from '../plugin/board/src/types.ts';
 
 function deferred() {
@@ -162,7 +162,11 @@ test('short plans drive stops, passed positions, job attachment and progress in 
   assert.equal(missionProgress(mission, []), 0.5);
   mission.stage = 'cross-review'; mission.stages = ['cross-review', 'implement', 'self-review'];
   assert.deepEqual(missionStops(mission).map((stop) => stop.name), ['Review', 'Build', 'Review 2']);
+  // A named stop goes by its name and is left out of the numbering, but keeps its kind for attaching jobs.
+  mission.labels = ['Sample check', null, null];
+  assert.deepEqual(missionStops(mission).map((stop) => stop.name), ['Sample check', 'Build', 'Review']);
   assert.equal(missionJobStep(mission, { kind: 'review' }), 0);
+  delete mission.labels;
   mission.stage = 'self-review';
   assert.equal(missionJobStep(mission, { kind: 'review' }), 2);
   assert.equal(missionProgress(mission, []), 2.5 / 3);
@@ -267,4 +271,38 @@ test('an ended job counts until its worktree is gone and the lead has read its r
   assert.equal(unsettled({ worktree: tree, seq: 3, delivered: 3 } as BoardJob), true);
   assert.equal(unsettled({ worktree: null, seq: 4, delivered: 3 } as BoardJob), true);
   assert.equal(unsettled({ worktree: null, seq: 4, delivered: 4 } as BoardJob), false);
+});
+
+test('a capture opens beside its other side and the lead\'s reference, ordered reference, before, after', () => {
+  assert.deepEqual(evidenceSide('fox-before.png'), { view: 'fox', side: 'before' });
+  assert.deepEqual(evidenceSide('After_Fox Idle.PNG'), { view: 'fox idle', side: 'after' });
+  assert.equal(evidenceSide('before.png'), null);
+  assert.equal(evidenceSide('aftermath.png'), null);
+  // The separators around a view are not part of it, and a name that is only separators is no view; the app reads both so.
+  assert.deepEqual(['hero--after.png', 'hero - after.png', 'before - hero.png'].map((file) => evidenceSide(file)?.view), ['hero', 'hero', 'hero']);
+  assert.equal(evidenceSide('before--.png'), null);
+  const item = (file: string, turn: number, from: 'worker' | 'lead' = 'worker') => ({ file, turn, from });
+  const items = [
+    item('fox-after.png', 3), item('fox-before.png', 1), item('rock-after.png', 3), item('rock-before.png', 2),
+    item('notes.png', 3), item('lead-1-concept.png', 1, 'lead'), item('lead-2-concept.png', 2, 'lead'),
+  ];
+  assert.deepEqual(evidenceCompanions(items, 'fox-after.png'), ['lead-2-concept.png', 'fox-before.png', 'fox-after.png']);
+  assert.deepEqual(evidenceCompanions(items, 'rock-before.png'), ['lead-2-concept.png', 'rock-before.png', 'rock-after.png']);
+  // A capture with no other side still opens beside the reference.
+  assert.deepEqual(evidenceCompanions(items, 'notes.png'), ['lead-2-concept.png', 'notes.png']);
+  // A reference opens beside the latest turn's result and what that was before.
+  assert.deepEqual(evidenceCompanions(items, 'lead-1-concept.png'), ['lead-1-concept.png', 'fox-before.png', 'fox-after.png']);
+  assert.deepEqual(evidenceCompanions([item('only.png', 1)], 'only.png'), ['only.png']);
+  // No more captures than fit at once: all of them open, whichever was pressed.
+  assert.deepEqual(evidenceCompanions(items.slice(0, 4), 'rock-after.png'), ['fox-before.png', 'rock-before.png', 'fox-after.png', 'rock-after.png']);
+  assert.deepEqual(evidenceCompanions([item('lead-1-a.png', 1, 'lead')], 'lead-1-a.png'), ['lead-1-a.png']);
+  assert.deepEqual(evidenceCompanions(items, 'gone.png'), []);
+  assert.deepEqual(orderEvidence(items).map((found) => found.file),
+    ['lead-1-concept.png', 'lead-2-concept.png', 'fox-before.png', 'rock-before.png', 'notes.png', 'fox-after.png', 'rock-after.png']);
+  // Names that tie are ordered by code unit, as the app orders them, not by locale.
+  assert.deepEqual(orderEvidence(['fox.png', 'hero_a.png', 'hero-a.png', 'Rock.png'].map((file) => item(file, 1))).map((found) => found.file), ['Rock.png', 'fox.png', 'hero-a.png', 'hero_a.png']);
+  // Only a job with several turns needs to say which of them a capture is from.
+  assert.equal(evidenceTurn(item('a.png', 1), 1), 'Turn 1');
+  assert.equal(evidenceTurn(item('a.png', 1), 3), 'Turn 1 of 3');
+  assert.equal(evidenceTurn(item('a.png', 1, 'lead'), 3), 'Attached by the lead');
 });

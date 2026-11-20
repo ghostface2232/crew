@@ -3,10 +3,10 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import { stripTypeScriptTypes } from 'node:module';
 import { test } from 'node:test';
-import { followUpTitle, STAGES, normalizeTitle } from '../plugin/bridge/missions.ts';
+import { followUpTitle, planText, STAGES, normalizeTitle } from '../plugin/bridge/missions.ts';
 import type { Mission } from '../plugin/bridge/missions.ts';
 import { TIERS } from '../plugin/bridge/tiers.ts';
-import { defaultHolder, disabledAgents } from '../plugin/bridge/config.ts';
+import { defaultHolder, disabledAgents, LEAD, PRESET_NAMES, ROLE_INFO, WORKERS } from '../plugin/bridge/config.ts';
 import { addNews, clipped, Delivery, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, REPORT_PAGE_BYTES, textPage, unread } from '../plugin/bridge/delivery.ts';
 import type { Job } from '../plugin/bridge/jobs.ts';
 
@@ -17,7 +17,7 @@ test('mission forwards plans on start, revision, repeated titles and reattachmen
   let saved: Mission[] = [];
   const calls: { method: string; route: string; body: any }[] = [];
   const run = vm.runInNewContext(`${stripTypeScriptTypes(handler)}; reportMission`, {
-    STAGES, normalizeTitle, SESSION: 'lead', PROJECT: '/project', missionId: null, closedElsewhere: null, costMission: null, fresh: false,
+    STAGES, planText, normalizeTitle, SESSION: 'lead', PROJECT: '/project', missionId: null, closedElsewhere: null, costMission: null, fresh: false,
     SUPERSEDED: 'Superseded by a new mission.', currentPolicy: () => 'policy', globalPreset: () => null,
     ownMission: async () => current,
     api: async (method: string, route: string, body: any) => {
@@ -56,9 +56,11 @@ test('mission forwards plans on start, revision, repeated titles and reattachmen
   saved = [];
   await run({ title: 'Cheap', stages, preset: 'economy' });
   assert.equal(calls.at(-1)?.body.preset, 'economy');
-  const describe = vm.runInNewContext(`${stripTypeScriptTypes(handler.slice(0, handler.indexOf('async function reportMission')))}; describeMission`, { STAGES, currentPolicy: () => 'policy', globalPreset: () => null });
+  const describe = vm.runInNewContext(`${stripTypeScriptTypes(handler.slice(0, handler.indexOf('async function reportMission')))}; describeMission`, { STAGES, planText, currentPolicy: () => 'policy', globalPreset: () => null });
   assert.match(describe({ id: 'm', title: 'Review', state: 'active', stage: 'self-review', stageIndex: 2,
     stages: ['self-review', 'fix', 'self-review'] }), /Plan: self-review → fix → self-review \(current\)/);
+  assert.match(describe({ id: 'm', title: 'Art', state: 'active', stage: 'implement', stageIndex: 1,
+    stages: ['implement', 'implement', 'final'], labels: ['Sample', 'The rest', null] }), /Plan: implement: Sample → implement: The rest \(current\) → final/);
 });
 
 test('only a restarted server takes a closed mission of this session for one it lost track of', async () => {
@@ -68,7 +70,7 @@ test('only a restarted server takes a closed mission of this session for one it 
   const start = (fresh: boolean) => {
     const calls: string[] = [];
     const context = {
-      STAGES, normalizeTitle, SESSION: 'lead', PROJECT: '/project', missionId: null, closedElsewhere: null, costMission: null, fresh,
+      STAGES, planText, normalizeTitle, SESSION: 'lead', PROJECT: '/project', missionId: null, closedElsewhere: null, costMission: null, fresh,
       SUPERSEDED: 'Superseded by a new mission.', currentPolicy: () => 'policy', globalPreset: () => null, ownMission: async () => null,
       api: async (method: string, route: string, body: any) => {
         calls.push(`${method} ${route}`);
@@ -235,7 +237,7 @@ test('work started after a done mission opens a follow-up mission named after it
   const jobs = source.slice(source.indexOf('/** The follow-up mission being opened'), source.indexOf('async function followOne'));
   const calls: { route: string; body: any }[] = [];
   const context: Record<string, unknown> = {
-    STAGES, normalizeTitle, followUpTitle, SESSION: 'lead', PROJECT: '/project', missionId: 'm1', closedElsewhere: null, costMission: 'm1', fresh: false, lastDone: null,
+    STAGES, planText, normalizeTitle, followUpTitle, SESSION: 'lead', PROJECT: '/project', missionId: 'm1', closedElsewhere: null, costMission: 'm1', fresh: false, lastDone: null,
     SUPERSEDED: 'Superseded by a new mission.', currentPolicy: () => 'policy', globalPreset: () => null,
     ownMission: async () => (context.missionId ? { id: context.missionId, title: '역할 정리', state: 'active', stage: 'final' } : null),
     reattach: async () => {}, withMission: (call: () => unknown) => call(), describeJob: (job: Job) => `job ${job.id}`,
@@ -307,4 +309,18 @@ test('model notes are appended to an answer, and a daemon that cannot give them 
   assert.match(await withNotes('Route.', ['codex'], 2), /Model notes/);
   reply = new Error('old daemon');
   assert.equal(await withNotes('Started.', ['codex'], 2), 'Started.');
+});
+
+test('the session instructions fit what Claude Code keeps of them', () => {
+  const source = fs.readFileSync(new URL('../plugin/bridge/mcp.ts', import.meta.url), 'utf8');
+  const text = source.slice(source.indexOf('const holderName ='), source.indexOf('\nconst common = {'));
+  // The longest they get: every role held by every agent, and a preset set.
+  const everyone = Object.fromEntries(ROLE_INFO.map((info) => [info.role, { agents: [...Object.keys(WORKERS), LEAD] }]));
+  const instructions: string = vm.runInNewContext(`${stripTypeScriptTypes(text)}; INSTRUCTIONS`, {
+    LEAD, WORKERS, ROLE_INFO, PRESET_NAMES, roles: everyone, started: { preset: 'balanced' }, loadConfig: () => ({}),
+  });
+  // Claude Code cuts a server's instructions at 4,096 characters; what follows never reaches the lead.
+  assert.ok(instructions.length <= 4096, `${instructions.length} characters`);
+  for (const role of ROLE_INFO) assert.ok(instructions.includes(`\`${role.role}\``), role.role);
+  assert.match(instructions, /The global one is "balanced"/);
 });

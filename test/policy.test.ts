@@ -5,6 +5,42 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { decide } from '../plugin/bridge/adapters/antigravity.ts';
 import { isNewer, shouldReplace } from '../plugin/bridge/client.ts';
+import { isInside } from '../plugin/bridge/git.ts';
+
+test("an edit cannot reach the tree's .git through a symlink followed by ..", (t) => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-policy-'));
+  t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(cwd, 'docs'));
+  fs.mkdirSync(path.join(cwd, 'target'));
+  fs.symlinkSync(path.join(cwd, 'target'), path.join(cwd, 'docs', 'alias'), 'junction');
+  fs.writeFileSync(path.join(cwd, '.git'), 'gitdir: /elsewhere\n');
+  const file = `docs${path.sep}alias${path.sep}..${path.sep}.git`;
+  // A name that does not exist yet does not hide what follows it: an editor that creates missing directories gets there.
+  for (const location of [file, cwd + path.sep + file, `missing${path.sep}..${path.sep}${file}`]) {
+    assert.deepEqual(decide('polish', cwd, { kind: 'edit', locations: [{ path: location }] }), { refuse: 'edit inside .git' });
+  }
+});
+
+test('containment resolves a symlink before following .. outside the tree', (t) => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-policy-'));
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const cwd = path.join(base, 'workspace');
+  fs.mkdirSync(cwd);
+  fs.mkdirSync(path.join(base, 'outside'));
+  fs.symlinkSync(path.join(base, 'outside'), path.join(cwd, 'alias'), 'junction');
+  const file = `alias${path.sep}..${path.sep}new.md`;
+  assert.equal(isInside(cwd, file), false);
+  assert.equal(isInside(cwd, cwd + path.sep + file), false);
+});
+
+test('containment accounts for a symlink to a file that has not been created', (t) => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-policy-'));
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const cwd = path.join(base, 'workspace');
+  fs.mkdirSync(cwd);
+  fs.symlinkSync(path.join(base, 'new.md'), path.join(cwd, 'alias'), 'file');
+  assert.equal(isInside(cwd, 'alias'), false);
+});
 
 test('each role may read anywhere; only editors and engineers edit, inside the workspace; only an engineer may ask for more', () => {
   const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-policy-')));
@@ -24,6 +60,13 @@ test('each role may read anywhere; only editors and engineers edit, inside the w
   assert.deepEqual(edit(path.join(cwd, 'link', 'README.md')), refused('edit outside the workspace'));
   assert.deepEqual(edit(path.join(cwd, 'a.md'), path.join(outside, 'b.md')), refused('edit outside the workspace'));
   assert.deepEqual(edit(), refused('edit without a path'));
+  // The bridge runs git in this tree itself, so a worker must not repoint or reconfigure the repository.
+  fs.writeFileSync(path.join(cwd, '.git'), 'gitdir: /elsewhere\n');
+  for (const inGit of ['.git', '.GIT', path.join('.git', 'config'), path.join('docs', '..', '.git')]) {
+    assert.deepEqual(edit(path.join(cwd, inGit)), refused('edit inside .git'), inGit);
+  }
+  assert.equal(edit(path.join(cwd, '.gitignore')), 'allow');
+  assert.equal(edit(path.join(cwd, 'vendor', '.git', 'config')), 'allow');
 
   const inside = { kind: 'edit', locations: [{ path: path.join(cwd, 'README.md') }] };
   for (const role of ['delegate', 'review', 'polish'] as const) {

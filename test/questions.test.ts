@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -303,7 +303,7 @@ test('lead wait delivers a running question once, ignores further progress, and 
   const { job, server } = await h.create();
   const lead = stdio(t, 'mcp.ts', h.env);
   const init = await lead.request('initialize', { protocolVersion: '2025-11-25', capabilities: {} });
-  assert.match(init.instructions, /ask_lead mid-task/);
+  assert.match(init.instructions, /\(ask_lead\) is yours to answer/);
   assert.ok((await lead.request('tools/list')).tools.some((tool: any) => tool.name === 'answer'));
   const route = `/api/jobs/${job.id}`;
   const waiting = lead.call('wait', { job_ids: [job.id], timeout_seconds: 5 });
@@ -405,9 +405,11 @@ test('the daemon answers only requests that carry its secret, as a header or as 
   if (process.platform !== 'win32') assert.equal(fs.statSync(path.join(h.home, 'token')).mode & 0o777, 0o600);
   assert.match(h.secret, /^[0-9a-f]{64}$/);
 
-  // Open without it: finding the daemon, the page itself, Claude's hooks.
+  // Open without it: finding the daemon and the page itself.
   assert.equal((await h.api('GET', '/api/health', undefined, none)).status, 200);
-  assert.equal((await h.api('POST', '/api/hooks/claude', { hook_event_name: 'Stop', session_id: 's' }, none)).status, 200);
+  // Claude's hooks are not: what a prompt hook reports is later shown as the user's own words.
+  assert.equal((await h.api('POST', '/api/hooks/claude', { hook_event_name: 'Stop', session_id: 's' }, none)).status, 401);
+  assert.equal((await h.api('POST', '/api/hooks/claude', { hook_event_name: 'Stop', session_id: 's' })).status, 200);
   // Everything else is refused, read or write, and refused work leaves nothing behind.
   for (const [method, route, body] of [['GET', '/api/state'], ['GET', '/api/usage'], ['GET', '/api/instructions'], ['POST', '/api/jobs', { kind: 'delegate', cwd: h.home, task: 'x', isolation: 'in_place' }], ['POST', '/api/preset', { preset: 'best' }], ['POST', '/api/shutdown', {}]] as const) {
     assert.deepEqual(await h.api(method, route, body, none), { status: 401, body: { error: 'unauthorized' } }, `${method} ${route}`);
@@ -772,4 +774,18 @@ test('peer ratings: a worker rates through its own tool, the review line gives t
   const fix = (await h.api('POST', '/api/jobs', { kind: 'delegate', role: 'fix', cwd: h.home, project: h.home, task: 'fix', isolation: 'in_place', lead: 'test-lead' })).body;
   await h.started(fix.id);
   assert.equal(JSON.parse(fs.readFileSync(path.join(h.home, `${fix.id}.json`), 'utf8')).env.CREW_JOB_RATES, undefined);
+});
+
+test('a hook report reaches the daemon with the secret the hook reads from the token file', { timeout: 15000 }, async (t) => {
+  const h = await daemon(t);
+  const report = (env: NodeJS.ProcessEnv, session: string) => spawnSync(process.execPath, [path.resolve('plugin/bridge/report.ts')], {
+    env, input: JSON.stringify({ hook_event_name: 'UserPromptSubmit', session_id: session, cwd: h.home, prompt: '한글 프롬프트' }),
+  });
+  assert.equal(report(h.env, 'typed').status, 0);
+  // Without the token file the report is refused, and the hook still does not fail Claude's turn.
+  const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-no-token-'));
+  t.after(() => fs.rmSync(elsewhere, { recursive: true, force: true }));
+  assert.equal(report({ ...h.env, CREW_HOME: elsewhere }, 'forged').status, 0);
+  const sessions = (await h.api('GET', '/api/state')).body.claude.map((session: { id: string }) => session.id);
+  assert.deepEqual([sessions.includes('typed'), sessions.includes('forged')], [true, false]);
 });

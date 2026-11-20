@@ -192,7 +192,8 @@ export function MissionTrack({ mission }: { mission: Mission }) {
             <span className="track-node">
               <b>{pos === 'past' ? <Icon icon={Check} /> : index + 1}</b>
             </span>
-            <span className="track-name">{name}</span>
+            {/* A name the lead gave can be longer than its column. */}
+            <span className="track-name" title={name}>{name}</span>
           </li>
         );
       })}

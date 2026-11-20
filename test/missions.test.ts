@@ -5,7 +5,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import { canonicalPath } from '../plugin/bridge/config.ts';
-import { missionPreset, Missions, STAGES, STALE_MS } from '../plugin/bridge/missions.ts';
+import { MAX_LABEL, missionPreset, Missions, planText, STAGES, STALE_MS } from '../plugin/bridge/missions.ts';
 import type { Mission } from '../plugin/bridge/missions.ts';
 
 const tempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'crew-missions-'));
@@ -99,6 +99,43 @@ test('legacy missions keep no plan when loaded or advanced and may adopt a remai
   assert.deepEqual(loaded.get(legacy.id).stages, ['plan', 'implement', 'self-review', 'cross-review', 'fix', 'final']);
   assert.equal(loaded.get(legacy.id).stageIndex, 3);
   loaded.flush();
+});
+
+test('a step can carry its own name, which tells two steps of one stage apart', (t) => {
+  const { home, missions } = harness(t);
+  const mission = missions.start({ ...input, stages: ['plan', 'implement: Sample', '  implement :  The   rest ', 'self-review', 'final'] });
+  assert.deepEqual(mission.stages, ['plan', 'implement', 'implement', 'self-review', 'final']);
+  assert.deepEqual(mission.labels, [null, 'Sample', 'The rest', null, null]);
+  assert.equal(planText(mission, (at) => (at === 0 ? ' (current)' : '')), 'plan (current) → implement: Sample → implement: The rest → self-review → final');
+  missions.update(mission.id, { stage: 'implement' });
+  assert.equal(mission.stageIndex, 1);
+  // The stage alone is the current step again; the next step's name moves on.
+  missions.update(mission.id, { stage: 'implement' });
+  missions.update(mission.id, { stage: 'implement: sample' });
+  assert.equal(mission.stageIndex, 1);
+  missions.update(mission.id, { stage: 'implement: The rest' });
+  assert.equal(mission.stageIndex, 2);
+  // A name the plan does not have is a new step, and a revision keeps the names of what has passed.
+  missions.update(mission.id, { stage: 'implement: Boss' });
+  assert.deepEqual(mission.labels, [null, 'Sample', 'The rest', 'Boss', null, null]);
+  assert.equal(mission.stageIndex, 3);
+  missions.update(mission.id, { stages: ['fix: Fox only', 'final'] });
+  assert.deepEqual(mission.stages, ['plan', 'implement', 'implement', 'implement', 'fix', 'final']);
+  assert.deepEqual(mission.labels, [null, 'Sample', 'The rest', 'Boss', 'Fox only', null]);
+  missions.flush();
+  assert.deepEqual(new Missions(home, () => {}).get(mission.id), mission);
+  // A plan left without names stores none, as one that never had any.
+  const plain = missions.start({ ...input, title: 'Plain', stages: ['implement: Sample', 'final'], stage: 'final' });
+  assert.deepEqual(plain.labels, ['Sample', null]);
+  const none = missions.start({ ...input, title: 'None', stages: ['implement:', 'final'] });
+  assert.equal(none.labels, undefined);
+  assert.equal('x'.repeat(40).length > MAX_LABEL, true);
+  assert.equal(missions.start({ ...input, title: 'Long', stages: [`implement: ${'x'.repeat(40)}`] }).labels?.[0]?.length, MAX_LABEL);
+  // A cut that would split a character leaves it out whole: half of one is not valid JSON to the app.
+  const cut = missions.start({ ...input, title: 'Emoji', stages: [`implement: ${'x'.repeat(MAX_LABEL - 1)}🎨 more`] }).labels?.[0];
+  assert.deepEqual([cut, cut?.isWellFormed()], ['x'.repeat(MAX_LABEL - 1), true]);
+  for (const stages of [['sample'], ['Sample: implement'], [': implement']]) assert.throws(() => missions.start({ ...input, stages }), /stages/);
+  assert.throws(() => missions.update(mission.id, { stage: 'sample' }), /Invalid mission stage/);
 });
 
 function harness(t: TestContext) {
@@ -377,6 +414,10 @@ test('a stored record that is not a mission is refused, since records are render
   }
   fs.writeFileSync(file, JSON.stringify({ missions: [good] }));
   assert.equal(new Missions(home, () => {}).list().length, 1);
+  // A daemon from before names changed this plan and left the names behind: the missions load, without the names.
+  fs.writeFileSync(file, JSON.stringify({ missions: [good, { ...good, id: 'm-000002', stage: 'implement', stages: ['plan', 'implement', 'final'], stageIndex: 1, labels: [null, 'Sample'] }] }));
+  const kept = new Missions(home, () => {}).list();
+  assert.deepEqual([kept.length, kept.find((m) => m.id === 'm-000002')?.labels], [2, undefined]);
 });
 
 test('a mission remembers the session that opened it, and only as a string', (t) => {

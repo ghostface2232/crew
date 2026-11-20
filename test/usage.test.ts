@@ -332,17 +332,21 @@ test('a holder that cannot do the work is never suggested, nor an exhausted one 
 test('the lead hands implementation to the first worker holding it, never to itself', () => {
   const roles = resolveConfig({ roles: { delegate: { agent: 'claude', also: ['codex'] } } }).roles;
   assert.match(route('lead', usageOf({ claude: 'tight' }), roles).reason, /hand more implementation to Codex/);
-  assert.equal(route('lead', usageOf({ claude: 'exhausted' }), roles).assignee, 'codex');
+  assert.equal(route('lead', usageOf({ claude: 'exhausted' }), roles).assignee, 'claude');
   const alone = resolveConfig({ roles: { delegate: { agent: 'claude' } } }).roles;
   assert.match(route('lead', usageOf({ claude: 'tight' }), alone).reason, /give more implementation to subagents/);
 });
 
-test('a short lead hands off implementation, and an exhausted one hands the session to Codex if it can', () => {
+test('a short lead hands off implementation, and an exhausted one keeps the session', () => {
   assert.match(route('lead', usageOf({ claude: 'tight' }), DEFAULT_ROLES).reason, /hand more implementation to Codex/);
-  const handoff = route('lead', usageOf({ claude: 'exhausted' }), DEFAULT_ROLES);
-  assert.deepEqual([handoff.assignee, handoff.degraded], ['codex', true]);
-  // The session is handed only to an engineer measured to have room.
-  for (const codex of ['exhausted', 'tight', 'stale', 'unknown'] as const) assert.equal(route('lead', usageOf({ claude: 'exhausted', codex }), DEFAULT_ROLES).assignee, 'claude');
+  const exhausted = route('lead', usageOf({ claude: 'exhausted' }), DEFAULT_ROLES);
+  assert.deepEqual([exhausted.assignee, exhausted.degraded], ['claude', true]);
+  assert.match(exhausted.reason, /Finish the step you are on/);
+  for (const codex of ['exhausted', 'tight', 'stale', 'unknown'] as const) {
+    const decision = route('lead', usageOf({ claude: 'exhausted', codex }), DEFAULT_ROLES);
+    assert.equal(decision.assignee, 'claude');
+    assert.match(decision.reason, /No other agent can lead/);
+  }
   // Antigravity as engineer is the user's choice, but it is never given the lead.
   const roles = { ...DEFAULT_ROLES, delegate: { agents: ['antigravity' as const] } };
   assert.equal(route('lead', usageOf({ claude: 'exhausted' }), roles).assignee, 'claude');

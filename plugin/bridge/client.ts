@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { readToken, tokenFile } from './auth.ts';
 import { agentEnv, baseUrl, HOME, installed, nodeEnv, PLUGIN_ROOT } from './config.ts';
 
@@ -14,7 +15,7 @@ export async function api<T = any>(method: 'GET' | 'POST', route: string, body?:
   let res = await send(readToken(HOME));
   // The daemon makes the token file on its first start, which may be a moment after this process first looked.
   if (res.status === 401) {
-    await new Promise((r) => setTimeout(r, 200));
+    await delay(200, undefined, { signal });
     res = await send(readToken(HOME));
   }
   const data: any = await res.json();

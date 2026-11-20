@@ -534,6 +534,11 @@ test('a lead whose latest mission ended done is reminded to open one for more wo
   missions.finish(newer.id, { byLead: true });
   assert.equal(missions.followUpHint('lead'), '');
   missions.finish(older.id, { abandoned: true });
+  // The reminder follows the mission that ended last, and here that is the dropped one. Both can end within one
+  // millisecond, so the order is pinned.
+  older.endedAt = newer.endedAt! + 1;
+  assert.equal(missions.followUpHint('lead'), '');
+  older.endedAt = newer.endedAt! - 1;
   assert.match(missions.followUpHint('lead'), /"Newer" is done/);
 });
 

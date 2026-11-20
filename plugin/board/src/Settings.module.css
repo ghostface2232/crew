@@ -23,9 +23,9 @@
 
 /* Page */
 .detail { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-/* A scrollbar sits inside the border, so this keeps its top clear of the dialog's rounded corner. */
-.scroll { scrollbar-gutter: stable; flex: 1; min-height: 0; overflow: auto; border-block-start: var(--panel-radius) solid transparent; }
-/* The title stays while the page scrolls under it, blurred, then fading out below it, rather than cut off at an edge. */
+/* Reaches the dialog's top edge, so the page scrolls under the whole title bar. */
+.scroll { scrollbar-gutter: stable; flex: 1; min-height: 0; overflow: auto; }
+/* The title stays while the page scrolls under it, blurred and set off by a rule below. */
 .pageHead {
   position: sticky;
   top: 0;
@@ -33,22 +33,19 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: max(0px, calc(20px - var(--panel-radius))) calc(26px - var(--scrollbar-w, 0px)) 30px 26px;
-  /* Overlaps the content only by what is clear of the fade, so nothing sits faded before it is scrolled. */
-  margin-bottom: -6px;
-  transition: background-color 150ms ease-out, backdrop-filter 150ms ease-out;
-  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent);
-  mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent);
+  padding: var(--panel-radius) calc(26px - var(--scrollbar-w, 0px)) 14px 26px;
+  transition: background-color 150ms ease-out, backdrop-filter 150ms ease-out, box-shadow 150ms ease-out;
 }
 /* At rest the title sits on the page itself; the blur appears only once something scrolls under it. */
 .pageHead[data-scrolled] {
   background: color-mix(in srgb, var(--canvas) 70%, transparent);
   -webkit-backdrop-filter: blur(16px) saturate(1.6);
   backdrop-filter: blur(16px) saturate(1.6);
+  box-shadow: 0 1px 0 var(--hairline);
 }
 .pageTitle { flex: 1; min-width: 0; font: 600 20px/1.2 var(--rounded); overflow-wrap: anywhere; }
 .back { display: none; }
-.body { display: grid; gap: 24px; padding: 0 calc(26px - var(--scrollbar-w, 0px)) 24px 26px; }
+.body { display: grid; gap: 24px; padding: 10px calc(26px - var(--scrollbar-w, 0px)) 24px 26px; }
 
 /* Grouped rows, each a label with its control at the trailing edge. */
 .group { display: grid; gap: 8px; min-width: 0; }
@@ -98,13 +95,13 @@
   .tile svg { width: 15px; height: 15px; }
   .chevron { display: block; color: var(--tertiary); }
   /* The buttons keep their width and the title takes the rest, so a long one is cut instead of covering them. */
-  .pageHead { display: grid; grid-template-columns: minmax(max-content, 1fr) minmax(0, auto) minmax(max-content, 1fr); padding: 12px 12px 26px; margin-bottom: -2px; }
+  .pageHead { display: grid; grid-template-columns: minmax(max-content, 1fr) minmax(0, auto) minmax(max-content, 1fr); padding: 12px 12px 12px; }
   .back { display: inline-flex; justify-self: start; gap: 2px; padding-inline: 4px; }
   .listClose { display: contents; }
   .pageClose { justify-self: end; }
   .back svg { width: 18px; height: 18px; }
   .pageTitle { font: 600 16px/1.2 var(--text-face); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .body { padding: 0 16px 20px; }
+  .body { padding: 10px 16px 20px; }
   .row { flex-wrap: wrap; gap: 4px 16px; }
   .row > span:first-child { max-width: none; }
   .row select, .row input { flex: 1 1 160px; }

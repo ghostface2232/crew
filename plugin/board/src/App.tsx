@@ -67,6 +67,14 @@ export function App() {
   const narrow = useNarrow();
   // Narrow windows keep the sidebar folded away until its button brings it out over the page.
   const [drawer, setDrawer] = useState(false);
+  // The topbar gets its bottom rule once the page has scrolled under it.
+  const [scrolled, setScrolled] = useState(false);
+  useEffect(() => {
+    const listener = () => setScrolled(window.scrollY > 0);
+    listener();
+    window.addEventListener('scroll', listener, { passive: true });
+    return () => window.removeEventListener('scroll', listener);
+  }, []);
   const toggle = useRef<HTMLButtonElement>(null);
   const sidebar = useRef<HTMLElement>(null);
   const searchButton = useRef<HTMLButtonElement>(null);
@@ -172,7 +180,7 @@ export function App() {
   if (state.connection === 'unauthorized') {
     return (
       <main className="sign-in" aria-labelledby="sign-in-title">
-        <span className="sign-in-mark"><Icon icon={LockKeyhole} size={22} /></span>
+        <span className="sign-in-mark"><Icon icon={LockKeyhole} size={36} /></span>
         <h1 className="title" id="sign-in-title">The board is not signed in</h1>
         <p className="secondary">
           A browser tab stays signed in only while it is open, so a reload signs it out.
@@ -243,7 +251,7 @@ export function App() {
         {drawer && <div className="sidebar-scrim" aria-hidden="true" onClick={fold} />}
         {/* While the drawer is out over it, the page is out of reach, so Tab stays in the drawer. */}
         <div className="workspace" inert={drawer}>
-          <header className="topbar">
+          <header className="topbar" data-scrolled={scrolled || undefined}>
             <button
               className="icon topbar-sidebar"
               ref={toggle}

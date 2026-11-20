@@ -117,13 +117,15 @@ export const MAX_COMPARED = 4;
 /** The view a capture shows and which side of a change, from a name such as `hero-before.png` or `after_hero.png`. */
 export function evidenceSide(file: string): { view: string; side: 'before' | 'after' } | null {
   const match = /^(?:(before|after)[-_. ]+(.+)|(.+)[-_. ]+(before|after))$/i.exec(file.replace(/\.[^.]+$/, ''));
-  if (!match) return null;
-  return { view: (match[2] ?? match[3]).toLowerCase(), side: (match[1] ?? match[4]).toLowerCase() as 'before' | 'after' };
+  // The separators around the view are not part of it, as in the app: `hero--after` pairs with `hero-before`.
+  const view = (match?.[2] ?? match?.[3] ?? '').replace(/^[-_. ]+|[-_. ]+$/g, '').toLowerCase();
+  if (!match || !view) return null;
+  return { view, side: (match[1] ?? match[4]).toLowerCase() as 'before' | 'after' };
 }
 /** Left to right: what the lead attached, then the worker's by turn, with a before ahead of its after. */
 export function orderEvidence<T extends Pick<EvidenceItem, 'file' | 'turn' | 'from'>>(items: T[]): T[] {
   const rank = (item: T) => (evidenceSide(item.file)?.side === 'after' ? 1 : 0);
-  return items.toSorted((a, b) => Number(a.from !== 'lead') - Number(b.from !== 'lead') || a.turn - b.turn || rank(a) - rank(b) || a.file.localeCompare(b.file));
+  return items.toSorted((a, b) => Number(a.from !== 'lead') - Number(b.from !== 'lead') || a.turn - b.turn || rank(a) - rank(b) || (a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
 }
 /**
  * What opens beside a capture: the other side of its before and after, and the reference the lead attached.

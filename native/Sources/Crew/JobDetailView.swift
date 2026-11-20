@@ -937,16 +937,18 @@ private struct EvidenceCompareView: View {
         .onChange(of: panes.isEmpty) { _, empty in if empty { shown = [] } }
     }
     private var picker: some View {
-        ScrollView(.horizontal) {
+        let open = panes.map(\.file)
+        return ScrollView(.horizontal) {
             HStack(alignment: .top, spacing: Space.m) {
                 ForEach(Evidence.ordered(items), id: \.file) { item in
                     let on = shown.contains(item.file)
-                    Button { shown = on ? shown.filter { $0 != item.file } : shown + [item.file] } label: {
+                    // Counted from what is on screen: a capture the worker has since deleted is still named in `shown`.
+                    Button { shown = on ? open.filter { $0 != item.file } : open + [item.file] } label: {
                         EvidenceChoice(item: item, turns: turns, on: on)
                     }
                     .buttonStyle(.plain)
                     // The last one stays, and a fourth has no room.
-                    .disabled(on ? shown.count == 1 : shown.count >= Evidence.maxCompared)
+                    .disabled(on ? open.count == 1 : open.count >= Evidence.maxCompared)
                     .help(item.file)
                     .accessibilityLabel("\(item.turnLabel(of: turns)), \(item.file)")
                     .accessibilityAddTraits(on ? .isSelected : [])

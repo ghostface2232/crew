@@ -278,6 +278,9 @@ test('a capture opens beside its other side and the lead\'s reference, ordered r
   assert.deepEqual(evidenceSide('After_Fox Idle.PNG'), { view: 'fox idle', side: 'after' });
   assert.equal(evidenceSide('before.png'), null);
   assert.equal(evidenceSide('aftermath.png'), null);
+  // The separators around a view are not part of it, and a name that is only separators is no view; the app reads both so.
+  assert.deepEqual(['hero--after.png', 'hero - after.png', 'before - hero.png'].map((file) => evidenceSide(file)?.view), ['hero', 'hero', 'hero']);
+  assert.equal(evidenceSide('before--.png'), null);
   const item = (file: string, turn: number, from: 'worker' | 'lead' = 'worker') => ({ file, turn, from });
   const items = [
     item('fox-after.png', 3), item('fox-before.png', 1), item('rock-after.png', 3), item('rock-before.png', 2),
@@ -296,6 +299,8 @@ test('a capture opens beside its other side and the lead\'s reference, ordered r
   assert.deepEqual(evidenceCompanions(items, 'gone.png'), []);
   assert.deepEqual(orderEvidence(items).map((found) => found.file),
     ['lead-1-concept.png', 'lead-2-concept.png', 'fox-before.png', 'rock-before.png', 'notes.png', 'fox-after.png', 'rock-after.png']);
+  // Names that tie are ordered by code unit, as the app orders them, not by locale.
+  assert.deepEqual(orderEvidence(['fox.png', 'hero_a.png', 'hero-a.png', 'Rock.png'].map((file) => item(file, 1))).map((found) => found.file), ['Rock.png', 'fox.png', 'hero-a.png', 'hero_a.png']);
   // Only a job with several turns needs to say which of them a capture is from.
   assert.equal(evidenceTurn(item('a.png', 1), 1), 'Turn 1');
   assert.equal(evidenceTurn(item('a.png', 1), 3), 'Turn 1 of 3');

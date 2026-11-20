@@ -131,6 +131,9 @@ test('a step can carry its own name, which tells two steps of one stage apart', 
   assert.equal(none.labels, undefined);
   assert.equal('x'.repeat(40).length > MAX_LABEL, true);
   assert.equal(missions.start({ ...input, title: 'Long', stages: [`implement: ${'x'.repeat(40)}`] }).labels?.[0]?.length, MAX_LABEL);
+  // A cut that would split a character leaves it out whole: half of one is not valid JSON to the app.
+  const cut = missions.start({ ...input, title: 'Emoji', stages: [`implement: ${'x'.repeat(MAX_LABEL - 1)}🎨 more`] }).labels?.[0];
+  assert.deepEqual([cut, cut?.isWellFormed()], ['x'.repeat(MAX_LABEL - 1), true]);
   for (const stages of [['sample'], ['Sample: implement'], [': implement']]) assert.throws(() => missions.start({ ...input, stages }), /stages/);
   assert.throws(() => missions.update(mission.id, { stage: 'sample' }), /Invalid mission stage/);
 });
@@ -411,6 +414,10 @@ test('a stored record that is not a mission is refused, since records are render
   }
   fs.writeFileSync(file, JSON.stringify({ missions: [good] }));
   assert.equal(new Missions(home, () => {}).list().length, 1);
+  // A daemon from before names changed this plan and left the names behind: the missions load, without the names.
+  fs.writeFileSync(file, JSON.stringify({ missions: [good, { ...good, id: 'm-000002', stage: 'implement', stages: ['plan', 'implement', 'final'], stageIndex: 1, labels: [null, 'Sample'] }] }));
+  const kept = new Missions(home, () => {}).list();
+  assert.deepEqual([kept.length, kept.find((m) => m.id === 'm-000002')?.labels], [2, undefined]);
 });
 
 test('a mission remembers the session that opened it, and only as a string', (t) => {

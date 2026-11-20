@@ -51,9 +51,12 @@ const KEEP_MISSIONS = 100;
 /** Finished missions kept for each project whatever the overall limit, since the board shows that many per project. */
 export const KEEP_PER_PROJECT = 2;
 
+/** Cuts to a length without leaving half of a surrogate pair, which the app's JSON decoder refuses with the whole state. */
+const clip = (text: string, length: number) => text.slice(0, length).replace(/[\ud800-\udbff]$/, '');
+
 /** First line of a title, as stored. Lets a caller tell whether a title names a mission that already exists. */
 export function normalizeTitle(text: unknown): string {
-  return typeof text === 'string' ? text.split(/\r\n|\r|\n/)[0].trim().slice(0, 120).trim() : '';
+  return typeof text === 'string' ? clip(text.split(/\r\n|\r|\n/)[0].trim(), 120).trim() : '';
 }
 
 /** A follow-up's title in the language of the mission it follows: Korean for a Korean title, English otherwise. */
@@ -101,7 +104,7 @@ function stepOf(entry: unknown): Step | null {
   const colon = entry.indexOf(':');
   const stage = (colon < 0 ? entry : entry.slice(0, colon)).trim();
   if (!STAGES.includes(stage as Stage)) return null;
-  const label = colon < 0 ? '' : entry.slice(colon + 1).replace(/\s+/g, ' ').trim().slice(0, MAX_LABEL).trim();
+  const label = colon < 0 ? '' : clip(entry.slice(colon + 1).replace(/\s+/g, ' ').trim(), MAX_LABEL).trim();
   return { stage: stage as Stage, label: label || null };
 }
 
@@ -378,6 +381,8 @@ export class Missions {
     if (!saved || !Array.isArray(saved.missions)) {
       throw new Error(`${file} does not hold a missions array, so it was left untouched.`);
     }
+    // A daemon from before names changes a plan without them, leaving names that fit no stop: the plan is kept, they are not.
+    for (const m of saved.missions as any[]) if (Array.isArray(m?.labels) && m.labels.length !== m.stages?.length) delete m.labels;
     if (!saved.missions.every(isMission)) throw new Error(`${file} holds a record that is not a mission, so it was left untouched.`);
     for (const mission of saved.missions) {
       // Saved before keys were canonical; a Windows mission may hold git's `C:/x` spelling.

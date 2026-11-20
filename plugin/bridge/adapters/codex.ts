@@ -573,7 +573,7 @@ export class CodexAdapter implements Adapter {
     if (method === 'mcpServer/startupStatus/updated') {
       if (p.name !== 'crew') return;
       if (p.status === 'failed') {
-        this.toolFailures.set(threadId, detail(p.error?.trim() || 'no reason given', 300));
+        this.toolFailures.set(threadId, detail((typeof p.error === 'string' && p.error.trim()) || 'no reason given', 300));
         this.noteToolFailure(threadId);
       } else if (p.status === 'ready') this.toolFailures.delete(threadId);
       return;

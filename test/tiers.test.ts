@@ -74,6 +74,8 @@ test('effort is medium by default and high at the frontier; a question defaults 
   assert.deepEqual(['fast', 'light', 'standard', 'frontier'].map((tier) => tierEffort(tier as never)), ['medium', 'medium', 'medium', 'high']);
   assert.equal(defaultTier({}), 'standard');
   assert.equal(defaultTier({ ask: true }), 'light');
+  // A debate is marked a question to keep it read-only, and tests a hard decision.
+  assert.equal(defaultTier({ ask: true, debate: { rounds: 3 } }), 'standard');
 });
 
 test('the settings offer the models Codex lists, with the efforts each accepts, and Antigravity\'s families', () => {

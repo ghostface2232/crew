@@ -256,7 +256,7 @@ const TOOLS = [
         findings: {
           type: 'object',
           properties: { high: { type: 'integer', minimum: 0 }, medium: { type: 'integer', minimum: 0 }, low: { type: 'integer', minimum: 0 } },
-          description: 'For build: the findings you accepted, by severity (high: wrong behavior, data loss, security; medium: a real bug in an edge case; low: minor). When several reviews covered the work, one line with every accepted finding counted once, naming as reviewer one from another agent if any ran. For fix: the findings the check of the fix raised; they lower the fix line. For review: the findings of this review that you accepted.',
+          description: 'For build: the findings you accepted, by severity (high: wrong behavior, data loss, security; medium: a real bug in an edge case; low: minor; these are the blocker, major and minor of a review report). When several reviews covered the work, one line with every accepted finding counted once, naming as reviewer one from another agent if any ran. For fix: the findings the check of the fix raised; they lower the fix line. For review: the findings of this review that you accepted.',
         },
         declined: {
           type: 'object',
@@ -817,7 +817,7 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       if (decision.fallback.length) lines.push(`If that fails: ${decision.fallback.map((a) => (a === 'claude' ? 'you' : WORKERS[a].name)).join(', then ')}.`);
       // A daemon that predates holders lists none.
       // Without agent a job goes to the role's first worker, which route may have just skipped.
-      if (decision.assignee !== 'claude' && decision.assignee !== decision.holders?.find((h) => h.agent !== 'claude')?.agent) lines.push(`Pass agent: ${decision.assignee}.`);
+      if (args.kind !== 'lead' && decision.assignee !== 'claude' && decision.assignee !== decision.holders?.find((h) => h.agent !== 'claude')?.agent) lines.push(`Pass agent: ${decision.assignee}.`);
       if ((decision.holders?.length ?? 0) > 1) lines.push(`Holders you may pick with agent: ${decision.holders!.map((h) => `${h.agent} (${h.status})`).join(', ')}.`);
       // A daemon that predates mission presets sends none; the session's instructions then still hold.
       if (decision.preset !== undefined) lines.push(presetPolicy(decision.preset, decision.policy ?? undefined, ' for the next job'));

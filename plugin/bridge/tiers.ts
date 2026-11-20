@@ -35,9 +35,9 @@ export function tierEffort(tier: Tier): string {
   return tier === 'frontier' ? 'high' : 'medium';
 }
 
-/** The tier a job runs at when the lead names none. A read-only question is usually a lookup. */
-export function defaultTier(spec: { ask?: boolean }): Tier {
-  return spec.ask ? 'light' : 'standard';
+/** The tier a job runs at when the lead names none. A read-only question is usually a lookup; a debate is one in form only. */
+export function defaultTier(spec: { ask?: boolean; debate?: unknown }): Tier {
+  return spec.ask && !spec.debate ? 'light' : 'standard';
 }
 
 function codexCache(): string {

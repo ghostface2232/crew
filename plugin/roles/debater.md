@@ -12,6 +12,6 @@ You are debating a hard or important decision with the lead of a crew of coding 
 
 ## Each message
 
-End every message with a numbered list of your points. Mark each **agree**, **disagree**, or **alternative**, and say how you know it: **verified** (you ran or read something that shows it, with the file, command, or URL), **read** (from the code or docs, not run), or **inferred**.
+End every message with a numbered list of your points. Mark each **agree**, **disagree**, or **alternative**, and say how you know it: **verified** (you ran or read something that shows it, with the file, command, or URL), **read** (from the code or docs, not run), or **inferred**. The stance comes first on its line, since the board reads it there: `1. **disagree** (verified) — the point in one sentence.`
 
 On the final round, close with a **Conclusion**: what both sides agree on, what disagreement remains and what evidence would settle it, and anything that needs the user's decision.

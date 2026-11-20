@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import { followUpTitle, planText, STAGES, normalizeTitle } from '../plugin/bridge/missions.ts';
 import type { Mission } from '../plugin/bridge/missions.ts';
 import { TIERS } from '../plugin/bridge/tiers.ts';
-import { defaultHolder, disabledAgents } from '../plugin/bridge/config.ts';
+import { defaultHolder, disabledAgents, LEAD, PRESET_NAMES, ROLE_INFO, WORKERS } from '../plugin/bridge/config.ts';
 import { addNews, clipped, Delivery, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, REPORT_PAGE_BYTES, textPage, unread } from '../plugin/bridge/delivery.ts';
 import type { Job } from '../plugin/bridge/jobs.ts';
 
@@ -309,4 +309,18 @@ test('model notes are appended to an answer, and a daemon that cannot give them 
   assert.match(await withNotes('Route.', ['codex'], 2), /Model notes/);
   reply = new Error('old daemon');
   assert.equal(await withNotes('Started.', ['codex'], 2), 'Started.');
+});
+
+test('the session instructions fit what Claude Code keeps of them', () => {
+  const source = fs.readFileSync(new URL('../plugin/bridge/mcp.ts', import.meta.url), 'utf8');
+  const text = source.slice(source.indexOf('const holderName ='), source.indexOf('\nconst common = {'));
+  // The longest they get: every role held by every agent, and a preset set.
+  const everyone = Object.fromEntries(ROLE_INFO.map((info) => [info.role, { agents: [...Object.keys(WORKERS), LEAD] }]));
+  const instructions: string = vm.runInNewContext(`${stripTypeScriptTypes(text)}; INSTRUCTIONS`, {
+    LEAD, WORKERS, ROLE_INFO, PRESET_NAMES, roles: everyone, started: { preset: 'balanced' }, loadConfig: () => ({}),
+  });
+  // Claude Code cuts a server's instructions at 4,096 characters; what follows never reaches the lead.
+  assert.ok(instructions.length <= 4096, `${instructions.length} characters`);
+  for (const role of ROLE_INFO) assert.ok(instructions.includes(`\`${role.role}\``), role.role);
+  assert.match(instructions, /The global one is "balanced"/);
 });

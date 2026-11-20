@@ -175,6 +175,7 @@ export function App() {
         <span className="sign-in-mark"><Icon icon={LockKeyhole} size={22} /></span>
         <h1 className="title" id="sign-in-title">The board is not signed in</h1>
         <p className="secondary">
+          A browser tab stays signed in only while it is open, so a reload signs it out.
           Run <code>crew board</code> in a terminal, or choose <strong>Open Web Board</strong> in the Crew app.
         </p>
         <button className="prominent" onClick={board.retry}>

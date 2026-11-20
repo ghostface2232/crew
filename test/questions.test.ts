@@ -235,7 +235,12 @@ async function daemon(t: TestContext) {
     });
     request.on('error', reject);
   });
-  return { home, env, api, create, started, hostStatus, port, secret };
+  // What a board page holds once it has traded in a ticket.
+  const board = async (): Promise<Record<string, string>> => {
+    const { ticket } = (await api('POST', '/api/session/ticket', {})).body;
+    return { authorization: `Bearer ${(await api('POST', '/api/session', { ticket }, { authorization: '' })).body.credential}` };
+  };
+  return { home, env, api, create, started, hostStatus, port, secret, board };
 }
 
 const textOf = (result: any): string => {
@@ -398,7 +403,7 @@ test('wake reports a running question and never wakes again for progress on the 
   assert.ok(newUpdate.stderr.includes(second.id));
 });
 
-test('the daemon answers only requests that carry its secret, as a header or as the board cookie', { timeout: 15000 }, async (t) => {
+test('the daemon answers only requests that carry its secret, or what a board bought with a ticket', { timeout: 15000 }, async (t) => {
   const h = await daemon(t);
   const none = { authorization: '' };
   // Windows has no POSIX file modes.
@@ -425,14 +430,112 @@ test('the daemon answers only requests that carry its secret, as a header or as 
   assert.equal((await h.api('POST', `/api/jobs/${job.id}/questions/${question.id}`, { answer: 'forged' }, none)).status, 401);
   assert.equal((await h.api('POST', `/api/jobs/${job.id}/questions/${question.id}`, { answer: 'real' })).status, 200);
 
-  // The board signs in with the token once and holds a cookie after that.
-  assert.equal((await h.api('POST', '/api/session', { token: 'wrong' }, none)).status, 401);
-  const signIn = await fetch(`http://127.0.0.1:${h.port}/api/session`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: h.secret }) });
-  assert.equal(signIn.status, 200);
-  const cookie = signIn.headers.get('set-cookie')!;
-  assert.match(cookie, /^crew_session=[0-9a-f]{64}; Path=\/; HttpOnly; SameSite=Strict; Max-Age=\d+$/);
-  assert.equal((await h.api('GET', '/api/state', undefined, { authorization: '', cookie: cookie.split(';')[0] })).status, 200);
-  assert.equal((await h.api('GET', '/api/state', undefined, { authorization: '', cookie: 'crew_session=wrong' })).status, 401);
+  // The cookie that once carried the secret is no longer read, and a browser that still sends it is told to drop it.
+  const stale = await fetch(`http://127.0.0.1:${h.port}/api/state`, { headers: { cookie: `crew_session=${h.secret}` } });
+  assert.equal(stale.status, 401);
+  assert.equal(stale.headers.get('set-cookie'), 'crew_session=; Path=/; Max-Age=0');
+  // Nor does the secret itself sign a page in: that would put it in an address.
+  assert.equal((await h.api('POST', '/api/session', { token: h.secret }, none)).status, 401);
+});
+
+test('a board signs in once with a ticket and may do only what its pages do', { timeout: 15000 }, async (t) => {
+  const h = await daemon(t);
+  const none = { authorization: '' };
+  // Only the user's own program gets a ticket.
+  assert.equal((await h.api('POST', '/api/session/ticket', {}, none)).status, 401);
+  const issued = await fetch(`http://127.0.0.1:${h.port}/api/session/ticket`, { method: 'POST', headers: { authorization: `Bearer ${h.secret}` } });
+  assert.equal(issued.headers.get('cache-control'), 'no-store');
+  const { ticket } = await issued.json() as { ticket: string };
+  assert.match(ticket, /^[0-9a-f]{64}$/);
+  // Two pages sending one ticket at the same moment: one is signed in.
+  const both = await Promise.all([0, 1].map(() => h.api('POST', '/api/session', { ticket }, none)));
+  assert.deepEqual(both.map((reply) => reply.status).sort(), [200, 401]);
+  const { credential, expires } = both.find((reply) => reply.status === 200)!.body;
+  assert.equal((await h.api('POST', '/api/session', { ticket }, none)).status, 401);
+  for (const bad of [undefined, '', 'wrong', ['x'], {}]) assert.equal((await h.api('POST', '/api/session', { ticket: bad }, none)).status, 401);
+  // It is not the secret, it holds for a week, and a changed one is refused.
+  assert.equal(credential.includes(h.secret), false);
+  assert.ok(Math.abs(expires - (Date.now() + 7 * 24 * 60 * 60 * 1000)) < 60_000);
+  const board = { authorization: `Bearer ${credential}` };
+  assert.equal((await h.api('GET', '/api/state', undefined, board)).status, 200);
+  const later = credential.replace(/^board\.\d+/, `board.${expires + 1}`);
+  assert.equal((await h.api('GET', '/api/state', undefined, { authorization: `Bearer ${later}` })).status, 401);
+
+  // What the board's pages send goes through.
+  const { job } = await h.create();
+  assert.equal((await h.api('POST', '/api/preset', { preset: 'best' }, board)).status, 200);
+  assert.equal((await h.api('POST', `/api/jobs/${job.id}/reply`, { message: 'carry on' }, board)).status, 200);
+  // What only the lead, the CLI or the app sends does not, and leaves nothing behind.
+  const refused = { status: 403, body: { error: 'The board may not do this.' } };
+  for (const [route, body] of [
+    ['/api/session/ticket', {}], ['/api/hooks/claude', { hook_event_name: 'UserPromptSubmit', session_id: 's', prompt: 'forged' }],
+    ['/api/lead/context', { session: 'test-lead' }], [`/api/jobs/${job.id}/discard`, {}], ['/api/gc', { apply: true }],
+    ['/api/desktop/heartbeat', {}], ['/api/missions', { title: 'x', project: h.home }], ['/api/notes', {}], ['/api/shutdown', {}],
+  ] as const) assert.deepEqual(await h.api('POST', route, body, board), refused, route);
+  assert.deepEqual(await h.api('POST', `/api/jobs/${job.id}/questions/q1`, { answer: 'as the lead' }, board), refused);
+  // Nor the parts of its own requests that speak for the user or the lead, or have the daemon read a file.
+  const image = path.join(h.home, 'shot.png');
+  fs.writeFileSync(image, 'png');
+  for (const [route, body] of [
+    [`/api/jobs/${job.id}/reply`, { message: 'x', approved_by_user: 'do it' }], [`/api/jobs/${job.id}/reply`, { message: 'x', lead_session: 'test-lead' }],
+    [`/api/jobs/${job.id}/reply`, { message: 'x', attachments: [image] }], ['/api/missions/m-000000', { done: true, by: 'lead' }], ['/api/jobs', { kind: 'delegate', cwd: h.home, task: 'x', isolation: 'in_place', lead: 'test-lead' }],
+    ['/api/jobs', { kind: 'delegate', cwd: h.home, task: 'x', isolation: 'in_place', check: 'true' }],
+  ] as const) assert.deepEqual(await h.api('POST', route, body, board), { status: 403, body: { error: 'The board may not send this.' } }, JSON.stringify(body));
+  assert.equal((await h.api('GET', '/api/state')).body.jobs.length, 1);
+
+  // An image element cannot send the credential, so each recorded file's address carries a seal for that file alone.
+  const attached = (await h.api('POST', `/api/jobs/${job.id}/reply`, { message: 'see this', attachments: [image] })).body;
+  const [item] = attached.evidence;
+  assert.match(item.sig, /^[0-9a-f]{64}$/);
+  assert.equal((await h.api('GET', `/api/jobs/${job.id}`)).body.evidence[0].sig, item.sig);
+  const file = `http://127.0.0.1:${h.port}/api/jobs/${job.id}/evidence/${encodeURIComponent(item.file)}`;
+  const sealed = await fetch(`${file}?v=${item.modified}&sig=${item.sig}`);
+  assert.equal(sealed.status, 200);
+  assert.equal(await sealed.text(), 'png');
+  assert.equal((await fetch(file, { headers: board })).status, 200);
+  for (const sig of ['', 'wrong', item.sig.replace(/.$/, (last: string) => (last === '0' ? '1' : '0'))]) assert.equal((await fetch(`${file}?sig=${sig}`)).status, 401);
+  assert.equal((await fetch(`http://127.0.0.1:${h.port}/api/jobs/${job.id}/evidence/%?sig=${item.sig}`)).status, 401);
+  // Another job, another file, or a job that does not exist: the seal opens nothing, and says nothing about what exists.
+  assert.equal((await fetch(`http://127.0.0.1:${h.port}/api/jobs/cx-000000/evidence/${encodeURIComponent(item.file)}?sig=${item.sig}`)).status, 401);
+  assert.equal((await fetch(`http://127.0.0.1:${h.port}/api/jobs/${job.id}/evidence/other.png?sig=${item.sig}`)).status, 401);
+});
+
+test('a secret made before tickets is replaced once, and a restart keeps the new one', { timeout: 30000 }, async (t) => {
+  const h = await daemon(t);
+  const { credential } = (await h.api('POST', '/api/session', { ticket: (await h.api('POST', '/api/session/ticket', {})).body.ticket }, { authorization: '' })).body;
+  const secret = () => fs.readFileSync(path.join(h.home, 'token'), 'utf8').trim();
+  const state = (authorization: string) => fetch(`http://127.0.0.1:${h.port}/api/state`, { headers: { authorization } }).then((res) => res.status);
+  let running: ChildProcess | undefined;
+  const restart = async () => {
+    const stopped = await fetch(`http://127.0.0.1:${h.port}/api/shutdown`, { method: 'POST', headers: { authorization: `Bearer ${secret()}` } });
+    assert.equal(stopped.status, 200);
+    while (fs.existsSync(path.join(h.home, 'daemon.json'))) await new Promise((resolve) => setTimeout(resolve, 10));
+    const child = running = spawn(process.execPath, [path.resolve('plugin/bridge/daemon.ts')], { env: h.env, stdio: ['ignore', 'pipe', 'pipe'] });
+    await new Promise<void>((resolve, reject) => {
+      child.stdout!.on('data', (chunk) => { if (String(chunk).includes('listening on')) resolve(); });
+      child.once('exit', (code) => reject(new Error(`daemon exited ${code}`)));
+    });
+    return secret();
+  };
+  try {
+    // The same secret after a restart: an open board is still signed in.
+    assert.equal(await restart(), h.secret);
+    assert.equal(await state(`Bearer ${credential}`), 200);
+    // As an earlier version left it: a secret with nothing beside it saying it was made after tickets.
+    fs.rmSync(path.join(h.home, 'token.version'));
+    const replaced = await restart();
+    assert.match(replaced, /^[0-9a-f]{64}$/);
+    assert.notEqual(replaced, h.secret);
+    assert.equal(fs.readFileSync(path.join(h.home, 'token.version'), 'utf8'), '2\n');
+    // The old secret, and everything sealed with it, stops working.
+    assert.equal(await state(`Bearer ${h.secret}`), 401);
+    assert.equal(await state(`Bearer ${credential}`), 401);
+    assert.equal(await state(`Bearer ${replaced}`), 200);
+    assert.equal(await restart(), replaced);
+  } finally {
+    // Before the harness removes the home it saves into.
+    if (running) await stop(running);
+  }
 });
 
 test('mission routes revise only the future, capture job rounds and let the user mark another session mission done', { timeout: 15000 }, async (t) => {
@@ -487,7 +590,7 @@ test('mission routes revise only the future, capture job rounds and let the user
   }
   const body = { done: true, outcome: 'Marked done on the board.' };
   assert.equal((await h.api('POST', route, body, { authorization: '' })).status, 401);
-  const closed = await h.api('POST', route, body, { authorization: '', cookie: `crew_session=${h.secret}` });
+  const closed = await h.api('POST', route, body, await h.board());
   assert.equal(closed.status, 200);
   assert.equal(closed.body.state, 'done');
   assert.equal(closed.body.outcome, body.outcome);

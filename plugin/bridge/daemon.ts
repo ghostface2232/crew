@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
@@ -6,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { boardAsset, BOARD_CSP } from './assets.ts';
-import { ensureToken, sameToken, SESSION_COOKIE } from './auth.ts';
+import { boardCredential, boardExpiry, ensureToken, evidenceSeal, sameToken, SESSION_COOKIE } from './auth.ts';
 import { AntigravityAdapter } from './adapters/antigravity.ts';
 import { CodexAdapter } from './adapters/codex.ts';
 import { ClaudeSessions } from './claude.ts';
@@ -45,6 +46,8 @@ let mutatingPosts = 0;
 const WORKER_ROUTE = /^\/api\/jobs\/[\w-]+\/(?:questions|siblings|browser|rating)$/;
 
 const server = http.createServer((req, res) => {
+  // A browser that signed in while a cookie carried the secret still sends it to every port on this host. It is no longer read.
+  if (req.headers.cookie?.includes(`${SESSION_COOKIE}=`)) res.setHeader('set-cookie', `${SESSION_COOKIE}=; Path=/; Max-Age=0`);
   // Reserve before reading the body: idle replacement must not interrupt an unrecorded worktree.
   // Open and worker routes are left out, so an unauthenticated stalled body cannot hold off a replacement;
   // a request without the secret is rejected before route() first awaits, so it is counted only briefly.
@@ -128,6 +131,8 @@ server.on('error', (err) => {
   log(`server error: ${err.message}`);
   process.exit(1);
 });
+// Only the daemon that holds the port makes the secret, or replaces one made before tickets; see ensureToken.
+const TOKEN = ensureToken(HOME);
 // Initialization below is synchronous, so no request is handled until setup finishes.
 
 const config = loadConfig();
@@ -165,10 +170,15 @@ function notify(agent: keyof typeof AGENT_NAMES, kind: EventKind, subject: strin
   execFile('osascript', ['-e', script], () => {});
 }
 
+/** A job's evidence with the seal that lets a board page load each file; see evidenceSeal. */
+function sealed(job: Job) {
+  return job.evidence ? { evidence: job.evidence.map((item) => ({ ...item, sig: evidenceSeal(TOKEN, job.id, item.file, item.modified) })) } : {};
+}
+
 /** Jobs as sent to clients: without the full prompt text. */
 function view(job: Job) {
   const { prompt, instructions, ...rest } = job;
-  return { ...rest, outcomeContradiction: outcomeContradiction(job) };
+  return { ...rest, ...sealed(job), outcomeContradiction: outcomeContradiction(job) };
 }
 
 /** For display only: the config on disk, or the one the daemon started with while the file is invalid. */
@@ -353,6 +363,7 @@ class HttpError extends Error {
 }
 
 function readJson(req: http.IncomingMessage): Promise<any> {
+  if (bodies.has(req)) return Promise.resolve(bodies.get(req));
   return new Promise((resolve, reject) => {
     let body = '';
     let bytes = 0;
@@ -395,20 +406,18 @@ function guard(req: http.IncomingMessage): void {
   if (origin && !hosts.some((h) => origin === `http://${h}`)) throw new HttpError(403, 'forbidden origin');
 }
 
-const TOKEN = ensureToken(HOME);
-
 /**
- * Host and Origin keep web pages out; they do not tell the user's own programs from any other local
- * process. The secret does: a header from programs that read the token file, a cookie from the board.
+ * Host and Origin keep web pages out; they do not tell the user's own programs from any other local process. The
+ * secret does. A program that can read the token file sends the secret itself. A board page cannot be handed it,
+ * since whatever a browser keeps is on disk where a worker can read it, so it sends a credential that it holds in
+ * memory, bought with a ticket. The answer says when a board's credential lapses; the user's own program has no such limit.
  */
-function signedIn(req: http.IncomingMessage): boolean {
+function signedIn(req: http.IncomingMessage): { board?: number } | null {
   const header = req.headers.authorization;
-  if (header?.startsWith('Bearer ') && sameToken(header.slice(7), TOKEN)) return true;
-  for (const part of (req.headers.cookie ?? '').split(';')) {
-    const [name, ...value] = part.trim().split('=');
-    if (name === SESSION_COOKIE && sameToken(value.join('='), TOKEN)) return true;
-  }
-  return false;
+  const given = header?.startsWith('Bearer ') ? header.slice(7) : '';
+  if (sameToken(given, TOKEN)) return {};
+  const board = boardExpiry(given, TOKEN);
+  return board ? { board } : null;
 }
 
 /** What answers without the secret; docs/09-usage-presets-rounds.md section 12 says why for each. */
@@ -418,20 +427,76 @@ function isOpen(method: string, pathname: string): boolean {
   return pathname === '/api/session';
 }
 
+/** Sign-in tickets not yet used, each with when it lapses. They live in memory, so a restart drops them. */
+const tickets = new Map<string, number>();
+const TICKET_MS = 60_000;
+
+/**
+ * What a board credential may change: the requests the board's pages send. Any other change needs the secret, so a
+ * route added for the lead or the CLI is not the board's until it is listed here.
+ */
+const BOARD_POSTS = [
+  /^\/api\/jobs$/,
+  /^\/api\/jobs\/[\w-]+\/(?:reply|cancel|rounds\/\d+)$/,
+  /^\/api\/missions\/[\w-]+$/,
+  /^\/api\/(?:instructions|setup\/repair|peer-ratings|preset|roles)$/,
+];
+/**
+ * Parts of those requests that only the lead sends: they speak for the user or the lead, or have the daemon read a
+ * file or run a command. Unlike the routes, a field is the board's unless it is listed here.
+ */
+const LEAD_FIELDS = ['approved_by_user', 'lead_session', 'lead', 'by', 'check', 'attachments'];
+/** A body read to check it before its route runs, kept for the route to read again. */
+const bodies = new WeakMap<http.IncomingMessage, unknown>();
+
+const EVIDENCE_ROUTE = /^\/api\/jobs\/([\w-]+)\/evidence\/([^/]+)$/;
+/** Whether the request is for one recorded file and carries that file's seal; see evidenceSeal. */
+function sealedEvidence(method: string, url: URL): boolean {
+  const match = EVIDENCE_ROUTE.exec(url.pathname);
+  if (method !== 'GET' || !match) return false;
+  let file: string;
+  try {
+    file = decodeURIComponent(match[2]);
+  } catch {
+    // A name that does not decode is refused like any other, not answered with an error that says the job exists.
+    return false;
+  }
+  const item = jobs.list().find((job) => job.id === match[1])?.evidence?.find((entry) => entry.file === file);
+  return Boolean(item) && sameToken(url.searchParams.get('sig'), evidenceSeal(TOKEN, match[1], item!.file, item!.modified));
+}
+
 async function route(req: http.IncomingMessage, res: http.ServerResponse): Promise<unknown> {
   guard(req);
   const url = new URL(req.url ?? '/', `http://127.0.0.1:${PORT}`);
   const { pathname } = url;
   const method = req.method ?? 'GET';
-  if (!isOpen(method, pathname) && !WORKER_ROUTE.test(pathname) && !signedIn(req)) throw new HttpError(401, 'unauthorized');
+  const open = isOpen(method, pathname) || WORKER_ROUTE.test(pathname);
+  const who = open ? null : signedIn(req);
+  if (!open && !who && !sealedEvidence(method, url)) throw new HttpError(401, 'unauthorized');
   // Reject mutations once shutdown is scheduled so new work is not dropped mid-flight.
   if (stopping && method === 'POST') throw new HttpError(503, 'The Crew daemon is shutting down. Try again in a moment.');
+  if (who?.board && method === 'POST') {
+    if (!BOARD_POSTS.some((allowed) => allowed.test(pathname))) throw new HttpError(403, 'The board may not do this.');
+    const body = await readJson(req);
+    if (LEAD_FIELDS.some((field) => body?.[field] !== undefined)) throw new HttpError(403, 'The board may not send this.');
+    bodies.set(req, body);
+  }
 
+  if (method === 'POST' && pathname === '/api/session/ticket') {
+    for (const [ticket, lapses] of tickets) if (lapses <= Date.now()) tickets.delete(ticket);
+    const ticket = randomBytes(32).toString('hex');
+    tickets.set(ticket, Date.now() + TICKET_MS);
+    res.setHeader('cache-control', 'no-store');
+    return { ticket };
+  }
   if (method === 'POST' && pathname === '/api/session') {
-    if (!sameToken((await readJson(req)).token, TOKEN)) throw new HttpError(401, 'unauthorized');
-    // HttpOnly keeps it from page scripts, SameSite from other sites; it lasts as long as the token file does.
-    res.setHeader('set-cookie', `${SESSION_COOKIE}=${TOKEN}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000`);
-    return {};
+    const { ticket } = await readJson(req);
+    // Looked up and removed in one step, so of two pages sending the same ticket only one is signed in.
+    const lapses = typeof ticket === 'string' ? tickets.get(ticket) : undefined;
+    tickets.delete(ticket);
+    if (!lapses || lapses <= Date.now()) throw new HttpError(401, 'unauthorized');
+    res.setHeader('cache-control', 'no-store');
+    return boardCredential(TOKEN);
   }
 
   if (method === 'GET') {
@@ -493,7 +558,15 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
       res.write(`event: state\ndata: ${JSON.stringify(state())}\n\n`);
       streams.add(res);
-      req.on('close', () => streams.delete(res));
+      // A stream outlives the check made when it opened, so a board's is ended when its credential lapses.
+      const lapse = who?.board ? setTimeout(() => {
+        streams.delete(res);
+        res.end();
+      }, who.board - Date.now()).unref() : undefined;
+      req.on('close', () => {
+        streams.delete(res);
+        clearTimeout(lapse);
+      });
       return undefined;
     }
   }
@@ -542,7 +615,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     return jobs.siblings(id);
   }
 
-  const evidenceRoute = /^\/api\/jobs\/([\w-]+)\/evidence\/([^/]+)$/.exec(pathname);
+  const evidenceRoute = EVIDENCE_ROUTE.exec(pathname);
   if (evidenceRoute && method === 'GET') {
     // Only files the job recorded are served, never a path taken from the request.
     const item = jobs.get(evidenceRoute[1]).evidence?.find((entry) => entry.file === decodeURIComponent(evidenceRoute[2]));
@@ -593,7 +666,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
   const jobRoute = /^\/api\/jobs\/([\w-]+)(?:\/(\w+))?$/.exec(pathname);
   if (jobRoute) {
     const [, id, action] = jobRoute;
-    if (method === 'GET' && !action) return jobs.get(id);
+    if (method === 'GET' && !action) return { ...jobs.get(id), ...sealed(jobs.get(id)) };
     if (method === 'GET' && action === 'events') return jobs.eventsFor(id, 0);
     if (method === 'GET' && action === 'wait') {
       const after = Number(url.searchParams.get('after') ?? 0);

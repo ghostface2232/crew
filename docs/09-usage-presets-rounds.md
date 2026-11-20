@@ -221,27 +221,36 @@ Antigravity CLI 1.5.5 passed the same check with a polish job via ACP `mcpServer
 
 The daemon listens on a local port, which every process on the machine can reach. Checking `Host` and `Origin` keeps web pages out, but not a local process, such as a worker whose sandbox has the network open for `runs_app`. So every request carries a secret.
 
-The secret is `~/.crew/token`: 64 hex characters, created on first start by the daemon that holds the port, readable by the user alone, and kept across restarts.
+The secret is `~/.crew/token`: 64 hex characters, created on first start by the daemon that holds the port, readable by the user alone, and kept across restarts. `~/.crew/token.version` beside it records that the secret was made after boards began signing in with tickets; a secret without it is replaced once, at the next start.
 
 | Client | How it presents the secret |
 | --- | --- |
 | The lead's MCP server, the CLI, and every hook (wake, context, and the report of session activity) | `Authorization: Bearer <token>`, read from the file |
 | The native app | The same header, on requests and on the event stream |
-| The web board | A cookie. The board is opened at `http://127.0.0.1:47615/#token=<token>`; the page posts the token to `POST /api/session`, which answers with an `HttpOnly`, `SameSite=Strict` cookie named `crew_session`, and removes the fragment from the address |
+| The web board in a browser | A board credential, held in the page's memory and sent as `Authorization: Bearer`. `crew board` and the app's Open Web Board ask the daemon for a ticket and open `http://127.0.0.1:47615/#ticket=<ticket>`; the page removes the fragment and posts the ticket to `POST /api/session`, which answers with the credential |
+| The web board in the Windows app | The same credential, made by the app's main process from the file and added to the board window's requests. The page holds nothing |
 | A worker's MCP server | Its own per-job token, on the worker routes only (section 11) |
 
 | Open without the secret | Why |
 | --- | --- |
 | `GET /`, the board's assets, fonts, icons | The page has to load before it can sign in; it holds no data |
 | `GET /api/health` | Clients use it to find the daemon and compare versions; it names no job |
-| `POST /api/session` | It is how the secret is presented |
+| `POST /api/session` | It takes a ticket, which only a holder of the secret can get |
+| `GET /api/jobs/:id/evidence/:file` with that file's seal | An image or video element cannot send a header |
 | The worker routes | They take the job token instead |
 
 Everything else answers `401` with `{ "error": "unauthorized" }` when the secret is missing or wrong. A board that gets `401` says how to open it signed in: `crew board`, or Open Web Board in the app.
 
+**The board never holds the secret.** Every worker profile can read the whole disk except the token file, and whatever a browser keeps is on that disk: Firefox stores cookie values in plaintext, Chromium stores web storage in plaintext and can keep a visited address with its fragment in its history, and an address printed by `crew board --url` lands in the transcript of the session that ran it. So nothing reusable is given to a browser to keep:
+
+- **A ticket** signs one page in. `POST /api/session/ticket` takes the secret and answers with 64 random hex characters that the daemon holds in memory for a minute and gives up at the first use. A ticket found later in a history file or a transcript is worth nothing.
+- **A board credential** is what the page gets for it: `board.<expiry>.<HMAC of it under the secret>`, valid for seven days. It is sealed rather than recorded, so an open board reconnects by itself after the daemon restarts, and it stops working when it lapses or the secret is replaced; a stream opened with it is ended at that moment. The page keeps it in a variable, so closing or reloading the tab signs it out. Nothing that survives a reload stays off the disk.
+- **It is not the secret.** It may read, and it may send the ten requests the board's pages send (`BOARD_POSTS` in `daemon.ts`). Any other change answers `403`: getting a ticket, the hook and lead routes, answering a worker's question as the lead, discarding a job, `gc`, the desktop heartbeat, starting a mission, notes, shutdown. Within its own requests it may not send `approved_by_user`, `lead_session`, `lead`, `by`, `check` or `attachments`, which speak for the user or the lead, or have the daemon read a file or run a command (`LEAD_FIELDS`). A route added later is not the board's until it is listed; a field is, unless it is listed.
+- **An evidence file's address carries a seal**, `sig`: an HMAC under the secret over the job, the file and its recorded modification time, which the daemon adds to each evidence item it sends. It opens that file as last recorded and nothing else, has no time limit, and stops working when the file is recorded again or the secret is replaced. A worker can read `~/.crew/evidence` directly, so a seal left in a history file opens nothing new.
+
 Workers are kept from the file. A Codex job that is read-only or has the network open runs under a permissions profile that denies it; a Codex job with neither can read it but has no network to use it with. Antigravity's read of the file is refused by the bridge's policy, and its commands need the user's approval.
 
-Checked on 2026-11-13. A headless browser against a real daemon: with no token and with a wrong one the board showed the sign-in screen after a single API request; with the right one it loaded, the fragment was gone from the address, the cookie was `HttpOnly` and `SameSite=Strict`, and web storage was empty. A real Codex job with the network open (Codex CLI 0.167.0) was refused the token file by its permissions profile, while a local server in its worktree, writing there, and a question to the lead all worked. Not exercised: the native app against a live daemon beyond the packaged smoke test.
+Checked on 2026-11-13, when the board signed in with a cookie. A real Codex job with the network open (Codex CLI 0.167.0) was refused the token file by its permissions profile, while a local server in its worktree, writing there, and a question to the lead all worked. Not exercised: the native app against a live daemon beyond the packaged smoke test.
 
 Sessions that were already open when the daemon gained authentication hold an MCP server started from the old code, which sends no secret. Their Crew tools answer with an error until the session is restarted.
 
@@ -250,7 +259,15 @@ Revised 2026-11-20, after a review of the trust boundary:
 - **`POST /api/hooks/claude` needs the secret.** It was open because Claude Code's HTTP hooks cannot read a file. Every hook is now a command hook (`report.ts`) that can, and the route does more than record activity: what a prompt hook reports is kept as the user's own words and shown to Codex's automatic reviewer when the lead sends back a refused action (04 section 5.1). A process without the secret, such as a worker with the network open, could have written those words. A hook from a plugin copy older than this change sends no secret and is refused; its session then does not appear on the board until the plugin is updated.
 - **A worker cannot rewrite the repository pointer of its tree.** The bridge runs git in a worker's tree after each turn, outside any sandbox, so a `.git` a worker repointed or reconfigured would have the bridge run the worker's commands (a clean filter, a textconv driver). Antigravity's edits inside `.git` are refused, Codex's permissions profile makes it read-only, and a `check` already ran with it read-only.
 - **The bridge's own sandbox denies starting other programs.** The profile for a job's browser server and for `check` allows by default and limits files; it now also denies LaunchServices, Apple Events and launchd jobs, through which a process inside it could have had something run outside every limit. Checked on macOS 27.2: `open` fails with -54 under the profile, and the job's Playwright server still starts and drives a page.
-- **Open: the board's cookie.** A cookie is sent to every port on its host, so a local server the user opens in the same browser, such as one a `runs_app` worker started, receives `crew_session`, whose value is the secret itself. The native app is not affected. Closing it means header authentication from the page, which costs staying signed in across a reload unless the secret is kept in web storage; undecided.
+
+Revised again on 2026-11-20, after a debate with Codex and Antigravity:
+
+- **The board's cookie is gone.** It held the secret itself and was sent to every port on its host, so a server a `runs_app` worker started received it when the user opened that server at `127.0.0.1`; and the secret could be read from disk with no such step (above). The cookie is no longer set or read, a browser that still sends it is told to drop it, and the secret is replaced once because an earlier one cannot be called back.
+- **Rejected: keeping the secret, or anything reusable, in web storage.** It is scoped to the port, which a cookie is not, but it is plaintext in the browser's profile, so a worker would need no step from the user at all.
+- **What it costs.** In a plain browser a reload, a bookmark or a week signs the board out, and it is opened again from `crew board` or the app. The native app and the Windows app are unchanged.
+- **What it does not close.** A ticket is live from when it is issued until the page trades it in. `crew board --url` prints one into the transcript of the session that ran it, so for those seconds a worker that has the network open and reads that transcript can trade it in first; the lead's page then shows the sign-in screen, which is the only sign. `crew board` itself passes the ticket to the browser without printing it. A daemon or launcher from before this change, started beside the new one, reads the new secret and puts it in a cookie or an address again; a daemon is replaced only by a newer version, so the release that carries this change must raise the version. A launcher that meets an older daemon gets no ticket and opens the board signed out rather than fall back to the secret.
+
+Checked on 2026-11-20: a real daemon gave one credential for two simultaneous uses of a ticket, refused a spent or wrong ticket, the cookie, and a credential with a changed expiry, and answered `403` to each route and field above; a sealed address served its file without a header and no other; a secret without its version file was replaced at the next start and the earlier secret and credential were then refused. Chromium against the fixture server: the fragment left the address, no cookie was set and web storage stayed empty, and a reload showed the sign-in screen. The Windows app's shell on macOS (Electron 45.3.3): the board loaded with no cookie and stayed signed in across a reload. Not exercised: a real browser's profile and a real transcript, the Windows app on Windows, and an older install beside the new one.
 
 ## 13. What a job's tokens are made of
 

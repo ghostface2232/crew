@@ -95,11 +95,14 @@ final class CrewAPI: Sendable {
     func post<T: Decodable & Sendable, B: Encodable & Sendable>(_ path: String, _ body: B, timeout: TimeInterval? = nil) async throws -> T {
         try await request(path, body: JSONEncoder().encode(body), timeout: timeout)
     }
-    var webBoardURL: URL {
-        guard let token = readToken() else { return baseURL }
+    /// The board's address with a sign-in ticket in its fragment. A ticket signs one page in once, within a minute,
+    /// so the address is worth nothing in a browser's history. Without one, the page says how to sign in.
+    func webBoardURL() async -> URL {
+        struct Issued: Decodable, Sendable { var ticket: String }
+        guard let issued: Issued = try? await post("/api/session/ticket", EmptyReply(), timeout: 5) else { return baseURL }
         var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)!
         components.path = "/"
-        components.fragment = "token=\(token)"
+        components.fragment = "ticket=\(issued.ticket)"
         return components.url!
     }
     private func readToken() -> String? {

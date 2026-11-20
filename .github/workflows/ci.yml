@@ -1,0 +1,26 @@
+# Type checks and unit tests. Runs on every pull request, and the release workflow calls it, so a tag is not built
+# until both pass. A push to main is not checked again: its pull request was, and a release checks the tagged commit.
+name: CI
+
+on:
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      # Tests that need macOS or Windows skip themselves here; the release runs the suite on both before it builds.
+      - run: npm test

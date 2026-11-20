@@ -501,8 +501,9 @@ extension View {
     func fadeTruncated() -> some View { modifier(FadeTruncation()) }
 }
 
-/// Keeps the scroll view it sits in on thin overlay scroll bars, which show only while scrolling. With a mouse
+/// Keeps the scroll views of its window on thin overlay scroll bars, which show only while scrolling. With a mouse
 /// attached, macOS otherwise switches every scroll view to wide legacy bars that always take a strip of the page.
+/// Lists, forms and text editors build their scroll views beside the view that asks, so the whole window is covered.
 struct OverlayScrollers: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView { Probe() }
     func updateNSView(_ view: NSView, context: Context) {}
@@ -510,14 +511,21 @@ struct OverlayScrollers: NSViewRepresentable {
         nonisolated(unsafe) private var observer: NSObjectProtocol?
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            apply()
+            // The scroll views beside this one are built in the same pass.
+            DispatchQueue.main.async { [weak self] in self?.apply() }
             guard observer == nil else { return }
             // The scroll view takes the new system style on this notice too; applied after it, so ours wins.
             observer = NotificationCenter.default.addObserver(forName: NSScroller.preferredScrollerStyleDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
                 DispatchQueue.main.async { self?.apply() }
             }
         }
-        private func apply() { enclosingScrollView?.scrollerStyle = .overlay }
+        private func apply() {
+            func walk(_ view: NSView) {
+                if let scroll = view as? NSScrollView, scroll.scrollerStyle != .overlay { scroll.scrollerStyle = .overlay }
+                view.subviews.forEach(walk)
+            }
+            if let root = window?.contentView?.superview { walk(root) }
+        }
         deinit { if let observer { NotificationCenter.default.removeObserver(observer) } }
     }
 }

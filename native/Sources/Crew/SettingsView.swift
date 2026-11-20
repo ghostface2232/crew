@@ -71,6 +71,7 @@ struct CrewSettingsView: View {
                 }
             }
             .listStyle(.sidebar)
+            .background(OverlayScrollers())
             // A split view hosted in an NSWindow ignores the column width alone; the sidebar's own frame holds it.
             .frame(width: Self.sidebarWidth)
             .navigationSplitViewColumnWidth(Self.sidebarWidth)
@@ -80,6 +81,7 @@ struct CrewSettingsView: View {
             let pane = selection.flatMap { available($0) ? $0 : nil } ?? .build
             Form { content(pane) }
                 .formStyle(.grouped)
+                .background(OverlayScrollers())
                 .scrollEdgeEffectStyle(.soft, for: .top)
                 .safeAreaBar(edge: .bottom) { if pane != .models && pane != .about { saveBar(pane) } }
                 .navigationTitle(title(pane))
@@ -280,6 +282,7 @@ struct CrewSettingsView: View {
         Section {
             TextEditor(text: $model.text).font(Typeface.code)
                 .scrollContentBackground(.hidden)
+                .background(OverlayScrollers())
                 .frame(minHeight: Self.editorHeight)
                 .accessibilityLabel("Shared instructions").disabled(!model.loaded || model.scope != pane.scope)
         } header: {

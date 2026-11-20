@@ -676,6 +676,7 @@ struct ProjectSidebar: View {
             }
         }
         .listStyle(.sidebar)
+        .background(OverlayScrollers())
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: Space.xs) {
                 // A downloaded update, ready to install with one click.

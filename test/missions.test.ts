@@ -5,8 +5,9 @@ import path from 'node:path';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import { canonicalPath } from '../plugin/bridge/config.ts';
-import { MAX_LABEL, missionPreset, Missions, planText, STAGES, STALE_MS } from '../plugin/bridge/missions.ts';
+import { MAX_LABEL, missionDetail, missionPreset, Missions, planText, STAGES, STALE_HELD_MS, STALE_MS, waitsFor } from '../plugin/bridge/missions.ts';
 import type { Mission } from '../plugin/bridge/missions.ts';
+import type { PullWatch } from '../plugin/bridge/pulls.ts';
 
 const tempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'crew-missions-'));
 // Canonical already, so stored keys equal these on every platform.
@@ -533,5 +534,137 @@ test('a lead whose latest mission ended done is reminded to open one for more wo
   missions.finish(newer.id, { byLead: true });
   assert.equal(missions.followUpHint('lead'), '');
   missions.finish(older.id, { abandoned: true });
+  // The reminder follows the mission that ended last, and here that is the dropped one. Both can end within one
+  // millisecond, so the order is pinned.
+  older.endedAt = newer.endedAt! + 1;
+  assert.equal(missions.followUpHint('lead'), '');
+  older.endedAt = newer.endedAt! - 1;
   assert.match(missions.followUpHint('lead'), /"Newer" is done/);
+});
+
+test('tasks are laid over the mission by id, and a list that does not hold together changes nothing', (t) => {
+  const { home, missions } = harness(t);
+  const mission = missions.start({ ...input, tasks: [{ id: 'api', title: 'Add the route' }, { id: 'ui', title: 'Show it\nsecond line', after: ['api'] }] });
+  assert.deepEqual(mission.tasks, [{ id: 'api', title: 'Add the route', state: 'todo' }, { id: 'ui', title: 'Show it', state: 'todo', after: ['api'] }]);
+  // An update names only what changed; the rest of the task, and the other tasks, stay.
+  missions.update(mission.id, { tasks: [{ id: 'api', state: 'done', result: 'npm test passed' }, { id: 'docs', title: 'Write it up', after: ['ui', 'ui'] }] });
+  assert.deepEqual(mission.tasks, [
+    { id: 'api', title: 'Add the route', state: 'done', result: 'npm test passed' },
+    { id: 'ui', title: 'Show it', state: 'todo', after: ['api'] },
+    { id: 'docs', title: 'Write it up', state: 'todo', after: ['ui'] },
+  ]);
+  const before = structuredClone(mission.tasks);
+  for (const [tasks, reason] of [
+    [[{ id: 'api', after: ['docs'] }], /circle: api → docs → ui → api/],
+    [[{ id: 'ui', after: ['ui'] }], /circle/],
+    [[{ id: 'ui', after: ['nope'] }], /waits for "nope", which is not a task/],
+    [[{ id: 'new' }], /needs a title/],
+    [[{ id: 'bad id', title: 'x' }], /task id is/],
+    [[{ id: 'api', state: 'finished' }], /use one of: todo, doing, done, dropped/],
+    [[{ id: 'docs', state: 'done' }, { id: 'ui', after: 'api' }], /after is a list/],
+    ['api', /tasks is a list/],
+  ] as const) {
+    assert.throws(() => missions.update(mission.id, { tasks }), reason);
+    assert.deepEqual(mission.tasks, before, 'a refused list leaves every task as it was');
+  }
+  // Clearing after and result, and a plan with nothing but a stage change keeps the tasks.
+  missions.update(mission.id, { tasks: [{ id: 'docs', after: [], result: '' }] });
+  assert.deepEqual(mission.tasks!.at(-1), { id: 'docs', title: 'Write it up', state: 'todo' });
+  missions.update(mission.id, { stage: 'implement' });
+  assert.equal(mission.tasks!.length, 3);
+  assert.throws(() => missions.update(mission.id, { tasks: Array.from({ length: 40 }, (_, i) => ({ id: `t${i}`, title: 'more' })) }), /at most 40 tasks/);
+  missions.flush();
+  assert.deepEqual(new Missions(home, () => {}).get(mission.id).tasks, mission.tasks);
+});
+
+test('the detail shows each task with what it waits for and the jobs done for it, read from the jobs', (t) => {
+  const { missions } = harness(t);
+  const mission = missions.start({ ...input, tasks: [
+    { id: 'a', title: 'First', state: 'done', result: 'checked by hand' }, { id: 'b', title: 'Second', state: 'doing' },
+    { id: 'c', title: 'Third', after: ['a', 'b'] }, { id: 'd', title: 'Fourth', after: ['a'] }, { id: 'e', title: 'Fifth' },
+    { id: 'x', title: 'Dropped', state: 'dropped' }, { id: 'y', title: 'Blocked', after: ['x'] },
+  ] });
+  assert.deepEqual(waitsFor(mission.tasks!, mission.tasks![2]).map((task) => task.id), ['b']);
+  const job = (id: string, state: string, createdAt: number, exit?: number | null): any => ({ id, mission: mission.id, taskId: 'b', state, createdAt,
+    ...(exit === undefined ? {} : { receipts: [{ turn: 1, head: null, at: 0, check: { command: 'npm test', exit, timedOut: false, output: '', ms: 1, sandboxed: true } }] }) });
+  const text = missionDetail(mission, [job('cx-1', 'done', 1, 0), job('cx-2', 'failed', 2, 1), job('cx-3', 'running', 3), { ...job('cx-9', 'running', 4), mission: 'other' }], []);
+  assert.match(text, /^Tasks \(1 of 6 done\):/);
+  assert.match(text, /- \[done\] a: First — checked by hand$/m);
+  // The older success is left out: the job that ended last failed, and one is still running.
+  assert.match(text, /- \[doing\] b: Second · cx-3 running$/m);
+  assert.match(text, /- \[todo\] c: Third · waits for b$/m);
+  assert.match(text, /- \[todo\] d: Fourth · ready$/m);
+  assert.match(text, /- \[todo\] y: Blocked · waits for x \(dropped: take it out of after\)$/m);
+  assert.match(text, /^d, e wait for nothing: those that touch different files can go at the same time\.$/m);
+  assert.match(missionDetail(mission, [job('cx-1', 'done', 1, 0), job('cx-2', 'failed', 2, 1)], []), /b: Second · cx-2 failed, check failed with exit 1$/m);
+  assert.match(missionDetail(mission, [job('cx-1', 'done', 1, null)], []), /cx-1 done, check stopped$/m);
+  const pull = { id: 'pr-abc123', repo: 'o/r', number: 7, mission: mission.id, state: 'open', checks: 'failing', review: 'changes_requested', conflict: true, held: true,
+    told: { head: 'h', checks: ['CI / test'] }, checkedAt: 1_000 } as PullWatch;
+  assert.match(missionDetail(mission, [], [pull, { ...pull, id: 'pr-other', mission: 'other' }], 1_000 + 5 * 60_000),
+    /Pull requests:\n- pr-abc123 o\/r#7 open · checks failing \(CI \/ test\) · changes requested · conflicts with its base · check failures held back[^\n]* · checked 5m ago$/);
+  assert.match(missionDetail(mission, [], [{ ...pull, state: 'merged', ended: true }]), /- pr-abc123 o\/r#7 merged · no longer watched$/);
+  assert.equal(missionDetail(missions.start({ ...input, title: 'Bare' }), [], []), '');
+});
+
+test('a session that starts again is shown its open missions with their tasks, and no one else\'s', (t) => {
+  const { missions } = harness(t);
+  assert.equal(missions.resumeText('lead', [], []), '');
+  const first = missions.start({ ...input, title: 'First', owner: 'lead', stages: ['plan', 'implement'], tasks: [{ id: 'a', title: 'Alpha' }] });
+  missions.start({ ...input, title: 'Theirs', owner: 'other' });
+  const one = missions.resumeText('lead', [], []);
+  assert.match(one, /^Crew: this session has a mission open, as recorded\./);
+  assert.match(one, new RegExp(`Mission ${first.id} · plan \\(step 1 of 2\\) — First\\nPlan: plan \\(current\\) → implement\\nTasks \\(0 of 1 done\\):\\n- \\[todo\\] a: Alpha · ready`));
+  assert.doesNotMatch(one, /Theirs|name the mission/);
+  const second = missions.start({ ...input, title: 'Second', owner: 'lead' });
+  second.createdAt = first.createdAt + 1;
+  const two = missions.resumeText('lead', [], []);
+  assert.match(two, /has 2 missions open[^]*name the mission each call is for/);
+  assert.ok(two.indexOf('First') < two.indexOf('Second'), 'oldest first, as the work began');
+  // A finished mission is not listed, but its pull request is still this session's to hear about.
+  missions.finish(first.id, { byLead: true });
+  missions.finish(second.id, { byLead: true });
+  const pull = { id: 'pr-abc123', repo: 'o/r', number: 7, mission: first.id, state: 'open' } as PullWatch;
+  assert.equal(missions.resumeText('lead', [], [{ ...pull, ended: true }]), '');
+  assert.match(missions.resumeText('lead', [], [pull]), new RegExp(`^Crew still watches o/r#7 \\(pr-abc123, mission ${first.id}, done\\)`));
+  // Bounded, however much a session left open.
+  for (let i = 0; i < 12; i++) missions.start({ ...input, title: `Long ${i}`, owner: 'lead', tasks: Array.from({ length: 30 }, (_, n) => ({ id: `t${n}`, title: 'x'.repeat(100) })) });
+  assert.ok(missions.resumeText('lead', [], []).length < 6200);
+  assert.match(missions.resumeText('lead', [], []), /… \(cut; call mission with an id for the rest\)$/);
+});
+
+test('a mission with an open task or a watched pull request is waited for longer before it is swept', (t) => {
+  const { missions } = harness(t);
+  let now = 1_000;
+  t.mock.method(Date, 'now', () => now);
+  const plain = missions.start(input);
+  const tasked = missions.start({ ...input, title: 'Tasked', tasks: [{ id: 'a', title: 'Alpha' }] });
+  const finished = missions.start({ ...input, title: 'All done', tasks: [{ id: 'a', title: 'Alpha', state: 'done' }, { id: 'b', title: 'Beta', state: 'dropped' }] });
+  const watched = missions.start({ ...input, title: 'Watched' });
+  const held = (id: string) => id === watched.id;
+  now = 1_000 + STALE_MS;
+  assert.deepEqual(missions.sweep(now, () => false, held), [plain, finished]);
+  assert.equal(plain.outcome, 'No update for 12 hours.');
+  now = 1_000 + STALE_HELD_MS;
+  assert.deepEqual(missions.sweep(now, () => false, held), [tasked, watched]);
+  assert.equal(tasked.outcome, 'No update for 72 hours.');
+});
+
+test('the same title from the same session is one card, and the reminder follows the mission that ended last', (t) => {
+  const { missions } = harness(t);
+  const first = missions.start({ ...input, title: 'Same', owner: 'lead' });
+  assert.equal(missions.start({ ...input, title: 'Same', owner: 'lead' }), first, 'a retry or a batch opens no second card');
+  assert.notEqual(missions.start({ ...input, title: 'Same', owner: 'other' }), first);
+  assert.notEqual(missions.start({ ...input, title: 'Same' }), missions.start({ ...input, title: 'Same' }), 'sessions that name no owner cannot be told apart');
+  assert.notEqual(missions.start({ ...input, title: 'Same', owner: 'lead', project: canonicalPath('/elsewhere') }), first);
+  // Opened later but ended first: the hint is about the one that ended last.
+  const { missions: own } = harness(t);
+  const long = own.start({ ...input, title: 'Long one', owner: 'lead' });
+  const short = own.start({ ...input, title: 'Short one', owner: 'lead' });
+  short.createdAt = long.createdAt + 1;
+  own.finish(short.id, { byLead: true });
+  short.endedAt = long.createdAt + 2;
+  assert.equal(own.followUpHint('lead'), '', 'the long one is still open');
+  own.finish(long.id, { byLead: true });
+  long.endedAt = long.createdAt + 3;
+  assert.match(own.followUpHint('lead', long.createdAt + 4), /"Long one" is done/);
 });

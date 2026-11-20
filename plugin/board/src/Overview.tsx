@@ -487,7 +487,9 @@ export function Workspace({ state, project, names, selected, openJob, openSessio
       mission={mission}
       jobs={byMission.get(mission.id) ?? []}
       allJobs={state.jobs}
-      lead={state.claude.find((session) => session.id === mission.owner)}
+      owner={state.claude.find((session) => session.id === mission.owner)}
+      allMissions={state.missions}
+      pulls={state.pulls?.filter((pull) => pull.mission === mission.id)}
       projectName={project ? undefined : names.get(projectOf(mission))}
       selected={selected}
       openJob={openJob}
@@ -593,7 +595,9 @@ export function History({ state, project, names, selected, openJob, openSession 
           mission={mission}
           jobs={state.jobs.filter((job) => job.mission === mission.id)}
           allJobs={state.jobs}
-          lead={state.claude.find((session) => session.id === mission.owner)}
+          owner={state.claude.find((session) => session.id === mission.owner)}
+          allMissions={state.missions}
+          pulls={state.pulls?.filter((pull) => pull.mission === mission.id)}
           projectName={project ? undefined : names.get(projectOf(mission))}
           selected={selected}
           openJob={openJob}

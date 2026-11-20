@@ -195,6 +195,7 @@ struct Mission: Codable, Sendable, Identifiable, Equatable {
     /// The lead's own names for stops, one entry per stage; missing when no stop has one.
     var labels: [String?]?
     var preset: PresetName?
+    var tasks: [MissionTask]?
     private static let stopOfStage = ["plan": 0, "implement": 1, "self-review": 2, "cross-review": 2, "fix": 3, "polish": 4, "final": 5]
     var step: Int { stages.map { stageIndex ?? $0.firstIndex(of: stage) ?? 0 } ?? Self.stopOfStage[stage] ?? 0 }
     static let steps = ["Plan", "Build", "Review", "Fix", "Polish", "Final"]
@@ -225,10 +226,38 @@ struct Mission: Codable, Sendable, Identifiable, Equatable {
     func looksFinished(jobs: [Job], now: Double, lead: ClaudeSession? = nil) -> Bool {
         state == "active" && now - updatedAt >= 20 * 60_000
             && (lead == nil || lead?.state == "idle" || lead?.state == "error")
+            && tasks?.contains { $0.state == "todo" || $0.state == "doing" } != true
             && !jobs.contains { $0.mission == id && ($0.state == "running" || $0.state == "waiting") }
     }
 }
 struct MissionNote: Codable, Sendable, Equatable { var text: String; var at: Double }
+struct MissionTask: Codable, Sendable, Equatable {
+    var id: String
+    var title: String
+    var after: [String]?
+    var state: String
+    var result: String?
+}
+
+/// A watched pull request as the board shows it; the daemon sends more, which the app does not read.
+struct MissionPull: Codable, Sendable, Identifiable, Equatable {
+    var id: String
+    var url: URL
+    var repo: String
+    var number: Int
+    var mission: String
+    var state: String
+    var ended: Bool?
+    var checks: String
+    var review: String
+    var conflict: Bool
+    var checkedAt: Double
+    var error: String?
+
+    func isStale(now: Double) -> Bool {
+        state == "open" && (ended != nil || error != nil || now - checkedAt > 15 * 60_000)
+    }
+}
 
 func missionProgress(_ mission: Mission, jobs: [Job]) -> Double {
     if mission.state == "done" { return 1 }
@@ -243,6 +272,7 @@ func missionProgress(_ mission: Mission, jobs: [Job]) -> Double {
 
 struct ClaudeSession: Codable, Sendable, Identifiable, Equatable {
     var id: String
+    var mission: String?
     var cwd: String
     var root: String?
     var title: String
@@ -258,6 +288,10 @@ struct ClaudeSession: Codable, Sendable, Identifiable, Equatable {
     var agents: [SubAgent]?
     var workflows: [WorkflowRun]?
     var projectPath: String { root ?? cwd }
+    func leadMission(in missions: [Mission]) -> Mission? {
+        let active = missions.filter { $0.owner == id && $0.state == "active" }
+        return active.first { $0.id == mission } ?? active.max { $0.createdAt < $1.createdAt }
+    }
     /// "2 sub-agents · review 12 running", or nil with none running.
     var agentSummary: String? {
         let agents = self.agents ?? []
@@ -482,6 +516,7 @@ struct BoardState: Codable, Sendable, Equatable {
     var now: Double = 0
     var jobs: [Job] = []
     var missions: [Mission] = []
+    var pulls: [MissionPull]?
     var claude: [ClaudeSession] = []
     var agents: [String: Worker] = [:]
     var roles: [String: RoleAssignment] = [:]
@@ -509,6 +544,12 @@ struct BoardState: Codable, Sendable, Equatable {
     var waitingSessions: [ClaudeSession] { claude.filter { $0.state == "waiting" } }
     var pendingCount: Int { waitingJobs.count + waitingSessions.count }
 
+    func leadRow(for mission: Mission) -> ClaudeSession? {
+        guard mission.state == "active", let owner = claude.first(where: { $0.id == mission.owner }),
+              owner.leadMission(in: missions)?.id == mission.id else { return nil }
+        return owner
+    }
+
     @discardableResult mutating func receive(_ event: ServerEvent) throws -> String? {
         let decoder = JSONDecoder()
         switch event.name {
@@ -518,6 +559,10 @@ struct BoardState: Codable, Sendable, Equatable {
             upsert(&jobs, job)
             return job.id
         case "mission": upsert(&missions, try decoder.decode(Mission.self, from: event.data))
+        case "pull":
+            var items = pulls ?? []
+            upsert(&items, try decoder.decode(MissionPull.self, from: event.data))
+            pulls = items
         case "claude":
             let change = try decoder.decode(SessionChange.self, from: event.data)
             if change.removed == true { claude.removeAll { $0.id == change.session.id } }

@@ -10,7 +10,8 @@ import type { TestContext } from 'node:test';
 import { Jobs } from '../plugin/bridge/jobs.ts';
 import type { Adapter, Job, JobCtl } from '../plugin/bridge/jobs.ts';
 import { resolveConfig } from '../plugin/bridge/config.ts';
-import { addNews, Delivery, HOOK_SECONDS, jsonBytes, LEAD_BYTES, OFFER_MS, textPage, unread, WATCH_MS, WATCH_REPLACE_MS } from '../plugin/bridge/delivery.ts';
+import { addNews, Delivery, HOOK_SECONDS, jsonBytes, LEAD_BYTES, OFFER_MS, PRESENT_MS, textPage, unread, WATCH_MS, WATCH_REPLACE_MS } from '../plugin/bridge/delivery.ts';
+import { Pulls } from '../plugin/bridge/pulls.ts';
 import { ClaudeSessions } from '../plugin/bridge/claude.ts';
 import { leadHook } from '../plugin/bridge/wake.ts';
 import type { api } from '../plugin/bridge/client.ts';
@@ -293,6 +294,7 @@ test('notification routes require authentication; hook ingestion cannot ACK; shu
   const handler = source.slice(source.indexOf('function isOpen('), source.indexOf('\nlet stopping = false;'));
   let reads = 0;
   let ingested = 0;
+  const appeared: string[] = [];
   const context = vm.createContext({
     URL, PORT: 0, stopping: false, guard: () => {}, signedIn: (req: any) => req.auth,
     WORKER_ROUTE: /^\/api\/jobs\/[\w-]+\/(?:questions|siblings|browser)$/,
@@ -300,7 +302,8 @@ test('notification routes require authentication; hook ingestion cannot ACK; shu
     readJson: async (req: any) => { reads++; if (req.stopDuringBody) context.stopping = true; return req.body; },
     jobs: h.jobs, view: (job: unknown) => job, broadcast: () => {},
     claude: { sessions: new Map(), ingest: () => { ingested++; } }, locate: () => {},
-    missions: { followUpHint: (session: string) => `hint for ${session}`, finish: (id: string, input: unknown) => ({ id, input }) },
+    missions: { followUpHint: (session: string) => `hint for ${session}`, resumeText: (session: string) => `plan of ${session}`, finish: (id: string, input: unknown) => ({ id, input }) },
+    pulls: { list: () => [], tick: async (session: string) => { appeared.push(session); } },
   });
   const route = vm.runInContext(`${stripTypeScriptTypes(handler)}; route`, context);
   for (const action of ['context', 'watch', 'heartbeat', 'release', 'offer', 'ack']) {
@@ -309,7 +312,18 @@ test('notification routes require authentication; hook ingestion cannot ACK; shu
   assert.equal(reads, 0, 'authentication happens before reading a notification body');
   // Only a user's prompt carries the follow-up reminder, after any news.
   assert.match((await route({ method: 'POST', url: '/api/lead/context', auth: true, body: { session: 'lead', event: 'UserPromptSubmit' } }, {})).text, new RegExp(`${job.id}[^]*\\nhint for lead$`));
-  assert.doesNotMatch((await route({ method: 'POST', url: '/api/lead/context', auth: true, body: { session: 'lead', event: 'SessionStart' } }, {})).text, /hint/);
+  // A session that starts, resumes or is compacted is shown its open missions again; a prompt is not.
+  const started = (await route({ method: 'POST', url: '/api/lead/context', auth: true, body: { session: 'lead', event: 'SessionStart' } }, {})).text;
+  assert.match(started, new RegExp(`${job.id}[^]*\\nplan of lead$`));
+  assert.doesNotMatch(started, /hint/);
+  assert.doesNotMatch((await route({ method: 'POST', url: '/api/lead/context', auth: true, body: { session: 'lead', event: 'UserPromptSubmit' } }, {})).text, /plan of/);
+  // Its pull requests are read when it appears, not again with each of its calls.
+  assert.deepEqual(appeared, ['lead']);
+  await route({ method: 'POST', url: '/api/hooks/claude', auth: true, body: { session_id: 'lead', hook_event_name: 'SessionEnd' } }, {});
+  assert.equal(h.delivery.present('lead'), false);
+  await route({ method: 'POST', url: '/api/lead/context', auth: true, body: { session: 'lead' } }, {});
+  assert.deepEqual(appeared, ['lead', 'lead']);
+  ingested = 0;
   // Only the lead's own done marks a mission done by the lead; the board's does not.
   assert.equal((await route({ method: 'POST', url: '/api/missions/m-1', auth: true, body: { done: true, by: 'lead' } }, {})).input.byLead, true);
   assert.equal((await route({ method: 'POST', url: '/api/missions/m-1', auth: true, body: { done: true } }, {})).input.byLead, false);
@@ -370,7 +384,7 @@ test('a watcher whose long poll was cut off is replaced at once, as after its se
   const context = vm.createContext({
     URL, AbortController, PORT: 0, stopping: false, guard: () => {}, signedIn: () => true, WORKER_ROUTE: /^$/,
     HttpError: class extends Error { status: number; constructor(status: number, message: string) { super(message); this.status = status; } },
-    readJson: async (req: any) => req.body, jobs: h.jobs, view: (job: unknown) => job, broadcast: () => {},
+    readJson: async (req: any) => req.body, jobs: h.jobs, view: (job: unknown) => job, broadcast: () => {}, pulls: { tick: async () => {} },
   });
   const route = vm.runInContext(`${stripTypeScriptTypes(handler)}; route`, context);
   const lead = (action: string, body: object, res: object = {}) => route({ method: 'POST', url: `/api/lead/${action}`, body: { session: 'lead', ...body } }, res);
@@ -408,4 +422,101 @@ test('the wake hook takes over only the jobs a call named, never those a listing
   await leadHook({ session_id: 'lead', tool_name: 'mcp__plugin_crew_crew__wait', tool_input: { job_ids: ['cx-333333', 'not an id'] }, tool_response: list }, 'watch', request);
   await leadHook({ session_id: 'lead', tool_name: 'mcp__plugin_crew_crew__reply', tool_input: { job_id: 'cx-444444' }, tool_response: list }, 'watch', request);
   assert.deepEqual(adopted, [['cx-333333'], ['cx-444444']]);
+});
+
+test('a watched pull request\'s news is offered, acknowledged and saved beside the jobs\', and names its mission', async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-delivery-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const adapter: Adapter = { start: async () => {}, reply: async () => {}, answer: async () => {}, cancel: async () => {}, shutdown: () => {} };
+  const config = resolveConfig({ notify: false });
+  let now = 1_000_000;
+  let view = { url: 'https://github.com/o/r/pull/7', number: 7, title: 'T', state: 'OPEN', headRefOid: 'a'.repeat(40), mergeable: 'MERGEABLE', reviewDecision: '',
+    author: { login: 'me' }, statusCheckRollup: [] as object[], reviews: [] };
+  const start = () => {
+    const pulls: Pulls = new Pulls({
+      gh: async () => JSON.stringify(view), mission: () => ({ state: 'done', owner: 'lead', root: home }), present: (session) => jobs.delivery.present(session, now),
+      save: () => jobs.flush(), changed: () => jobs.delivery.changed(), now: () => now,
+    });
+    const jobs: Jobs = new Jobs(home, () => config, { codex: adapter, antigravity: adapter }, { onJob: () => {}, onEvent: () => {}, onAttention: () => {}, pulls });
+    return { pulls, jobs };
+  };
+  const { pulls, jobs } = start();
+  const { watch } = await pulls.link('m-1', '7');
+  const job = await jobs.create({ kind: 'delegate', cwd: home, task: 'test', ask: true, lead: 'lead', mission: 'm-2' });
+  jobs.ask(job.id, 'Which one?');
+  // Nothing is read for a session that is not open; once its hooks call, it is, for a while.
+  view = { ...view, statusCheckRollup: [{ __typename: 'CheckRun', name: 'test', workflowName: 'CI', status: 'COMPLETED', conclusion: 'FAILURE' }] };
+  now += 600_000;
+  await pulls.tick();
+  assert.equal(unread(watch).length, 0);
+  assert.equal(jobs.delivery.touch('lead', now), true);
+  assert.equal(jobs.delivery.touch('lead', now + 1), false, 'only its appearing is news');
+  await pulls.tick('lead');
+  assert.equal(unread(watch).length, 1);
+  assert.equal(jobs.delivery.present('lead', now + PRESENT_MS + 1), false);
+  const offer = jobs.delivery.offer('lead')!;
+  assert.match(offer.text, new RegExp(`\\[${job.id}\\] news 1 · RUNNING · turn 1 · mission m-2 · question`));
+  assert.match(offer.text, new RegExp(`\\[${watch.id}\\] news 1 · PR o/r#7 · mission m-1 · checks: o/r#7 at aaaaaaa failed checks: CI / test\\.`));
+  assert.match(jobs.delivery.context('lead'), new RegExp(`${watch.id}#1`));
+  // The receipt, the job's news and the watch's are one snapshot: a restart before the ACK offers both again.
+  const again = start();
+  assert.deepEqual(again.pulls.list().map((kept) => [kept.id, unread(kept).length]), [[watch.id, 1]]);
+  assert.deepEqual(again.jobs.delivery.ack('lead', offer.receipt), []);
+  assert.equal(unread(again.pulls.list()[0]).length, 0);
+  assert.equal(again.jobs.get(job.id).ackedSeq, 1);
+  assert.equal(start().pulls.list()[0].news![0].acked, true, 'the ACK reached the snapshot');
+  // Another session can neither be offered a watch's news nor take it over as it would a job.
+  assert.equal(again.jobs.delivery.offer('other'), null);
+  assert.deepEqual(again.jobs.delivery.adopt('other', [watch.id]), []);
+});
+
+test('a mixed receipt survives restart after its watch news is acknowledged and more news arrives', async (t) => {
+  const h = harness(t);
+  const pulls = new Pulls({
+    gh: async () => JSON.stringify({ url: 'https://github.com/o/r/pull/7', number: 7, title: 'T', state: 'OPEN',
+      headRefOid: 'abc', mergeable: 'MERGEABLE', reviewDecision: '' }),
+    mission: () => ({ state: 'active', owner: 'lead', root: '/project' }),
+    present: () => true, save: () => {}, changed: () => {},
+  });
+  const { watch } = await pulls.link('m-1', '7');
+  const job = await h.create();
+  const delivery = new Delivery(() => [job], () => {}, () => pulls.list());
+  addNews(job, 'done', 'job finished');
+  addNews(watch, 'checks', 'first failure');
+  const mixed = delivery.offer('lead')!;
+  assert.equal(delivery.state.receipts[mixed.receipt].items.length, 2);
+  for (let i = 0; i <= 20; i++) {
+    if (i) addNews(watch, 'checks', `later failure ${i}`);
+    const watchOnly = delivery.offer('lead', { ids: [watch.id] })!;
+    assert.deepEqual(delivery.ack('lead', watchOnly.receipt), []);
+  }
+
+  pulls.restore(JSON.parse(JSON.stringify(pulls.saved(new Set([watch.id, job.id])))));
+  const restored = new Delivery(() => [job], () => {}, () => pulls.list());
+  restored.restore(JSON.parse(JSON.stringify(delivery.state)));
+  assert.deepEqual(restored.ack('lead', mixed.receipt), []);
+  assert.equal(unread(job).length, 0);
+});
+
+test('job creation validates a task against its mission before detaching ended missions', async () => {
+  const source = fs.readFileSync(new URL('../plugin/bridge/daemon.ts', import.meta.url), 'utf8');
+  const route = source.slice(source.indexOf("    if (pathname === '/api/jobs')"), source.indexOf("    if (pathname.startsWith('/api/lead/'))"));
+  const mission = { id: 'm-1', state: 'done', tasks: [{ id: 'build' }] };
+  const create = vm.runInNewContext(stripTypeScriptTypes(`(async (req: any) => { const pathname = '/api/jobs'; ${route} })`), {
+    HttpError: class extends Error { status: number; constructor(status: number, message: string) { super(message); this.status = status; } },
+    readJson: async (req: unknown) => req, missions: { list: () => [mission] },
+    missionPreset: () => 'economy', liveConfig: () => ({}),
+    jobs: { create: async (spec: unknown) => spec }, view: (job: unknown) => job,
+  });
+  await assert.rejects(create({ taskId: 'build' }), { status: 400, message: /task_id.*mission/ });
+  await assert.rejects(create({ mission: mission.id, taskId: 'missing' }), { status: 400, message: /has no task "missing"/ });
+  const ended = await create({ mission: mission.id, taskId: 'build', notes: ['prior note'] });
+  assert.equal(ended.mission, undefined);
+  assert.equal(ended.taskId, undefined);
+  assert.equal(ended.preset, 'economy');
+  assert.match(ended.notes.join('\n'), /prior note\n.*shown on its own\.\n.*task "build" was dropped/);
+  mission.state = 'active';
+  const active = await create({ mission: mission.id, taskId: 'build' });
+  assert.equal(active.mission, mission.id);
+  assert.equal(active.taskId, 'build');
 });

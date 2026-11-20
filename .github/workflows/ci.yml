@@ -1,0 +1,41 @@
+# Type checks and unit tests on the two platforms Crew ships for. Runs on every pull request, and the release
+# workflow calls it, so a tag is not built until both pass. A push to main is not checked again: its pull request
+# was, and a release checks the tagged commit.
+name: CI
+
+on:
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    strategy:
+      # One platform's failure should not hide the other's.
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # The types do not depend on the platform, so one of the two checks them.
+      - if: runner.os == 'Windows'
+        run: npm run typecheck
+      # Only macOS tests the browser a job is given, which is Playwright's Chromium.
+      - if: runner.os == 'macOS'
+        run: npx playwright install chromium
+      # The Windows runner's own TEMP is a short path (RUNNER~1) that Git reports in its long form, so the tests'
+      # path comparisons fail in it. Only Windows reads these two.
+      - run: npm test
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}

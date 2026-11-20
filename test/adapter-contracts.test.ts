@@ -267,7 +267,8 @@ for (const type of ['approval', 'question'] as const) test(`Codex cancellation c
   const requestId = job.waiting!.id;
   assert.equal(job.waiting!.type, type);
   await h.jobs.cancel(job.id);
-  await until(() => h.wire().some((msg) => msg.id === 'barrier'));
+  // The barrier's error reply can be written before the late request's answer, which awaits its decision first.
+  await until(() => h.wire().some((msg) => msg.id === 'barrier') && h.wire().filter((msg) => String(msg.id).startsWith('pending-')).length >= 3);
   assert.equal(job.state, 'cancelled');
   assert.equal(job.waiting, null);
   await assert.rejects(h.jobs.reply(job.id, { decision: 'approve', request_id: requestId }), /no longer pending/);

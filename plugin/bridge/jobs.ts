@@ -4,6 +4,7 @@ import path from 'node:path';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { addNews, Delivery, deliveryPosition, leadSession, unread } from './delivery.ts';
 import type { DeliveryState, News } from './delivery.ts';
+import type { Pulls } from './pulls.ts';
 import { runCheck } from './check.ts';
 import type { CheckResult } from './check.ts';
 import { canonicalPath, defaultHolder, disabledAgents, effectiveRole, isRole, LEAD, MAX_DEBATE_ROUNDS, daemonPort, nodeEnv, roleInfo, ROLES, runsCommands, WORKERS } from './config.ts';
@@ -76,6 +77,8 @@ export interface JobSpec {
   mission?: string;
   /** Plan occurrence captured by the daemon when this job was requested. */
   missionStep?: number;
+  /** The mission's task this job is done for, as the lead named it. */
+  taskId?: string;
   /** delegate: the job measures performance and must run alone. It starts only when no other job is running, and none starts until it ends. */
   exclusive?: boolean;
   /**
@@ -191,6 +194,8 @@ export interface Job {
   /** Mission this job is one strand of; absent for a job started on its own. */
   mission?: string;
   missionStep?: number;
+  /** The mission's task it is done for. The task shows this job's state; nothing of the job is copied into it. */
+  taskId?: string;
   /** Runs alone on the machine, for measurement. */
   exclusive?: boolean;
   /** May start the app: network access in the sandbox, and for a review a snapshot worktree. */
@@ -349,6 +354,8 @@ export interface JobsHooks {
   onAttention(job: Job, kind: EventKind, detail: string): void;
   /** Whether a mission is still being kept; its jobs are then kept with it, beyond the history limit. */
   keepsMission?(id: string): boolean;
+  /** The watched pull requests. They are saved in the jobs' snapshot, so their news commits with the receipts that cover it. */
+  pulls?: Pulls;
   /** The user's recent prompts in a lead session, oldest first, as its hooks reported them. */
   userPrompts?(session: string): { text: string; at: number }[];
 }
@@ -483,7 +490,7 @@ export function isTerminal(job: Job): boolean {
 export class Jobs {
   readonly jobs = new Map<string, Job>();
   readonly recent: CrewEvent[] = [];
-  readonly delivery = new Delivery(() => this.list(), () => { this.flush(); });
+  readonly delivery = new Delivery(() => this.list(), () => { this.flush(); }, () => this.hooks.pulls?.list() ?? []);
   private seq = 0;
   private workerTokens = new Map<string, string>();
   private waiters = new Map<string, Set<() => void>>();
@@ -715,6 +722,7 @@ export class Jobs {
         root: canonicalPath(root),
         mission: spec.mission,
         missionStep: spec.missionStep,
+        taskId: spec.mission ? spec.taskId : undefined,
         exclusive: Boolean(spec.exclusive) || undefined,
         runsApp: Boolean(spec.runsApp) || undefined,
         ask: Boolean(spec.ask) || undefined,
@@ -1687,7 +1695,7 @@ export class Jobs {
       || Date.now() - (job.endedAt ?? 0) < RECENT_MS || (unread(job).length > 0 && Date.now() - (job.endedAt ?? 0) < UNREAD_KEEP_MS) || (job.mission !== undefined && this.hooks.keepsMission?.(job.mission)) || history++ < KEEP_JOBS,
     );
     const file = path.join(this.home, 'jobs.json');
-    fs.writeFileSync(`${file}.tmp`, JSON.stringify({ seq: this.seq, jobs: keep, delivery: this.delivery.state }));
+    fs.writeFileSync(`${file}.tmp`, JSON.stringify({ seq: this.seq, jobs: keep, delivery: this.delivery.state, pulls: this.hooks.pulls?.saved(named) }));
     fs.renameSync(`${file}.tmp`, file);
     const kept = new Set(keep.map((job) => job.id));
     for (const id of this.jobs.keys()) {
@@ -1707,7 +1715,7 @@ export class Jobs {
   }
 
   private load(): void {
-    let saved: { seq: number; jobs: Job[]; delivery?: DeliveryState };
+    let saved: { seq: number; jobs: Job[]; delivery?: DeliveryState; pulls?: unknown };
     try {
       saved = JSON.parse(fs.readFileSync(path.join(this.home, 'jobs.json'), 'utf8'));
     } catch {
@@ -1715,6 +1723,7 @@ export class Jobs {
     }
     this.seq = saved.seq;
     this.delivery.restore(saved.delivery);
+    this.hooks.pulls?.restore(saved.pulls);
     for (const job of saved.jobs) {
       const legacy = job.news === undefined;
       job.news ??= [];

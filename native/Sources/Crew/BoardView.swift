@@ -218,7 +218,7 @@ struct BoardView: View {
         // A mission's rows as its panel places them: each job and the lead's session under their step, and its notes
         // and outcome.
         let missionRows = (shownMissions + recent).flatMap { mission in
-            let lead = mission.state == "active" ? store.state.claude.first { $0.id == mission.owner } : nil
+            let lead = store.state.leadRow(for: mission)
             return ["\(mission.id):\(mission.notes?.count ?? 0):\(mission.outcome.isEmpty)"]
                 + missionJobs(mission).map { "\(mission.id)/\($0.id)@\(mission.jobStep($0))" }
                 + (lead.map { ["\(mission.id)/\($0.id)@\(mission.step)"] } ?? [])
@@ -389,41 +389,50 @@ struct MissionPanel: View {
     private var expanded: Bool { store.isExpanded(mission) }
     private var meta: String {
         let tokens = jobs.reduce(0) { $0 + ($1.tokens ?? 0) }
+        let tasks = (mission.tasks ?? []).filter { $0.state != "dropped" }
         return [
             tokens > 0 ? "\(tokens.formatted()) tokens" : nil,
             store.project.isEmpty ? projectName(mission.root, among: store.projects) : nil,
             "\(jobs.count) \(jobs.count == 1 ? "job" : "jobs")",
+            tasks.isEmpty ? nil : "\(tasks.filter { $0.state == "done" }.count)/\(tasks.count) tasks",
             // An active mission shows its preset on its menu; an ended one names it here unless it was the global one.
             mission.state == "active" ? nil : mission.preset.map { "\($0.rawValue.capitalized) preset" },
         ].compactMap { $0 }.joined(separator: " · ")
     }
     var body: some View {
+        let leadRow = store.state.leadRow(for: mission)
         VStack(alignment: .leading, spacing: Space.xl) {
-            // Progress, status and the controls sit on the middle of the title and its meta line together.
-            HStack(alignment: .center, spacing: Space.m) {
-                VStack(alignment: .leading, spacing: Space.xs) {
-                    // One line each, so cards side by side keep the same height whatever their titles.
-                    Text(mission.title).font(Typeface.title).fadeTruncated().help(mission.title)
-                    HStack(spacing: 0) {
-                        ElapsedText(store: store, start: mission.createdAt, end: mission.endedAt)
-                        Text(" · " + meta)
-                    }.font(Typeface.caption).monospacedDigit().foregroundStyle(.secondary).fadeTruncated().help(mission.root)
+            VStack(alignment: .leading, spacing: Space.xs) {
+                // Progress, status and the controls sit on the middle of the title and its meta line together.
+                HStack(alignment: .center, spacing: Space.m) {
+                    VStack(alignment: .leading, spacing: Space.xs) {
+                        // One line each, so cards side by side keep the same height whatever their titles.
+                        Text(mission.title).font(Typeface.title).fadeTruncated().help(mission.title)
+                        HStack(spacing: 0) {
+                            ElapsedText(store: store, start: mission.createdAt, end: mission.endedAt)
+                            Text(" · " + meta)
+                        }.font(Typeface.caption).monospacedDigit().foregroundStyle(.secondary).fadeTruncated().help(mission.root)
+                    }
+                    Spacer(minLength: WorkspaceStyle.rowSpacer)
+                    Text(missionProgress(mission, jobs: jobs), format: .percent.precision(.fractionLength(0)))
+                        .font(Typeface.caption).monospacedDigit().foregroundStyle(.secondary).help("Mission progress")
+                    StatusLabel(state: mission.state == "active" ? "running" : mission.state, title: mission.state.capitalized)
+                    if mission.state == "active" { missionMenu }
+                    // A filled circle, so the control shows its hit area.
+                    Button { toggle() } label: {
+                        Image(systemName: "chevron.down").font(Symbol.control)
+                            .rotationEffect(.degrees(expanded ? 0 : -90)).frame(width: Symbol.controlFrame, height: Symbol.controlFrame)
+                            // Pointing right, the chevron's weight sits left of its frame; a point over centers it optically.
+                            .offset(x: expanded ? 0 : Symbol.chevronNudge)
+                    }.iconButton().accessibilityLabel(expanded ? "Collapse mission" : "Expand mission").help(expanded ? "Collapse" : "Expand")
                 }
-                Spacer(minLength: WorkspaceStyle.rowSpacer)
-                Text(missionProgress(mission, jobs: jobs), format: .percent.precision(.fractionLength(0)))
-                    .font(Typeface.caption).monospacedDigit().foregroundStyle(.secondary).help("Mission progress")
-                StatusLabel(state: mission.state == "active" ? "running" : mission.state, title: mission.state.capitalized)
-                // A filled circle, so the control shows its hit area.
-                Button { toggle() } label: {
-                    Image(systemName: "chevron.down").font(Symbol.control)
-                        .rotationEffect(.degrees(expanded ? 0 : -90)).frame(width: Symbol.controlFrame, height: Symbol.controlFrame)
-                        // Pointing right, the chevron's weight sits left of its frame; a point over centers it optically.
-                        .offset(x: expanded ? 0 : Symbol.chevronNudge)
-                }.iconButton().accessibilityLabel(expanded ? "Collapse mission" : "Expand mission").help(expanded ? "Collapse" : "Expand")
+                // The title row opens and closes the card; its button keeps its own click.
+                .contentShape(Rectangle())
+                .onTapGesture(perform: toggle)
+                ForEach((store.state.pulls ?? []).filter { $0.mission == mission.id }) { pull in
+                    MissionPullLine(pull: pull, now: store.now)
+                }
             }
-            // The title row opens and closes the card; its button keeps its own click.
-            .contentShape(Rectangle())
-            .onTapGesture(perform: toggle)
             if expanded {
                 VStack(alignment: .leading, spacing: Space.xl) {
                     ForEach(Array((mission.notes ?? []).enumerated()), id: \.offset) { _, note in
@@ -433,7 +442,7 @@ struct MissionPanel: View {
                     VStack(spacing: WorkspaceStyle.rowGap) {
                         ForEach(mission.stops.indices, id: \.self) { index in
                             let mine = jobs.filter { mission.jobStep($0) == index }
-                            let lead = mission.state == "active" && index == mission.step ? store.state.claude.first { $0.id == mission.owner } : nil
+                            let lead = index == mission.step ? leadRow : nil
                             if !mine.isEmpty || lead != nil {
                                 let open = !foldsStages || store.isStageOpen(mission, index, jobs: mine, hasLead: lead != nil)
                                 stageLabel(index, count: mine.count, open: open)
@@ -491,6 +500,18 @@ struct MissionPanel: View {
     private var finished: Bool {
         mission.looksFinished(jobs: store.state.jobs, now: store.now, lead: store.state.claude.first { $0.id == mission.owner })
     }
+    private var locked: Bool { !store.connected || store.actions[mission.actionKey]?.locked == true }
+    private var missionMenu: some View {
+        Menu {
+            Button("Mark Done", systemImage: "checkmark.circle") { Task { await store.markDone(mission) } }
+            Button("Stop Tracking", systemImage: "xmark.circle") { Task { await store.dismiss(mission) } }
+        } label: {
+            Image(systemName: "ellipsis").font(Symbol.control)
+                .frame(width: Symbol.controlFrame, height: Symbol.controlFrame)
+        }
+        .menuStyle(.button).menuIndicator(.hidden).iconButton().fixedSize()
+        .disabled(locked).accessibilityLabel("Mission options").help("Mission options")
+    }
     @ViewBuilder private var outcome: some View {
         if !mission.outcome.isEmpty {
             Text(mission.outcome).font(Typeface.callout).textSelection(.enabled).padding(.leading, WorkspaceStyle.rowTitleInset)
@@ -526,7 +547,6 @@ struct MissionPanel: View {
     }
     private var presetName: String { mission.preset?.rawValue.capitalized ?? "Global" }
     @ViewBuilder private var actions: some View {
-        let locked = !store.connected || store.actions[mission.actionKey]?.locked == true
         // In the warning color: it drops the mission without completing it. An abandoned one is already dropped.
         if mission.state == "active" {
             Button("Stop Tracking", systemImage: "xmark.circle") { Task { await store.dismiss(mission) } }
@@ -568,6 +588,34 @@ struct MissionPanel: View {
         } else {
             name.padding(.leading, WorkspaceStyle.rowTitleInset).accessibilityAddTraits(.isHeader)
         }
+    }
+}
+
+private struct MissionPullLine: View {
+    let pull: MissionPull
+    let now: Double
+
+    var body: some View {
+        let stale = pull.isStale(now: now)
+        HStack(spacing: 0) {
+            Link(destination: pull.url) {
+                Text("#\(pull.number)").underline()
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Pull request \(pull.repo) #\(pull.number)")
+            if pull.state == "open" {
+                let checks = pull.checks == "none" ? Text("") :
+                    Text(" · \(Text("checks \(pull.checks)").foregroundStyle(pull.checks == "failing" && !stale ? Palette.danger : .secondary))")
+                let review = pull.review == "changes_requested" ? " · changes requested" : pull.review == "approved" ? " · approved" : ""
+                let conflict = pull.conflict ? Text(" · \(Text("conflict").foregroundStyle(stale ? .secondary : Palette.danger))") : Text("")
+                let checked = !stale ? "" : pull.error != nil ? " · could not be read" : " · checked \(elapsed(now - pull.checkedAt)) ago"
+                Text("\(checks)\(review)\(conflict)\(checked)")
+            } else {
+                Text(" · \(pull.state)")
+            }
+        }
+        .font(Typeface.caption).monospacedDigit().foregroundStyle(.secondary)
+        .opacity(stale ? 0.7 : 1)
     }
 }
 

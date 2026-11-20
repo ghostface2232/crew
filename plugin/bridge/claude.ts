@@ -23,6 +23,8 @@ export interface ClaudeSession {
   agents: SubAgent[];
   /** Workflow runs with agents running now, or with one that stopped in the last few minutes. */
   workflows: WorkflowRun[];
+  /** The open mission this session last acted on as its lead. With several open, the board shows the session on that card alone. Memory only. */
+  mission?: string;
 }
 
 export interface SubAgent {
@@ -239,6 +241,15 @@ export class ClaudeSessions {
         return;
     }
     if (s.state !== 'waiting') delete s.waitingId;
+    this.hooks.onSession(s);
+  }
+
+  /** Records the open mission a lead session just acted on, or that it has none any more. */
+  focus(id: string, mission: string | undefined): void {
+    const s = this.sessions.get(id);
+    if (!s || s.mission === mission) return;
+    if (mission) s.mission = mission;
+    else delete s.mission;
     this.hooks.onSession(s);
   }
 

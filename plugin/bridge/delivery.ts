@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Job, JobState } from './jobs.ts';
+import type { PullWatch } from './pulls.ts';
 
 /**
  * Bounds on what one lead tool response carries, far under the host's limit for a tool result, so a result
@@ -17,15 +18,20 @@ export const WATCH_REPLACE_MS = 15_000;
 /** A watcher that has not beaten for this long died without releasing its lease, so another may take over. */
 export const WATCH_SILENT_MS = 25_000;
 export const HOOK_SECONDS = 86_400;
+/** A lead session whose hooks called within this long is open: long enough to bridge one watcher handing over to the next. */
+export const PRESENT_MS = 10 * 60_000;
 const KEEP_RECEIPTS = 500;
 
 /** Immutable notification content; progress and later turns cannot change what a receipt covers. */
 export interface News {
   seq: number;
+  /** The job event the news came with; 0 for a pull request, which has no events. */
   eventSeq: number;
-  kind: 'done' | 'failed' | 'question' | 'waiting' | 'stalled';
-  state: JobState;
-  turn: number;
+  /** The last four are a watched pull request's. */
+  kind: 'done' | 'failed' | 'question' | 'waiting' | 'stalled' | 'checks' | 'passed' | 'review' | 'conflict';
+  /** The job's state and turn when it happened; a pull request has neither. */
+  state?: JobState;
+  turn?: number;
   reason: string;
   question?: string;
   request?: string;
@@ -33,6 +39,11 @@ export interface News {
   offers: number;
 }
 
+/** Whatever has news for a lead session: a job, or a watched pull request. */
+export type Subject = Job | PullWatch;
+const isJob = (subject: Subject): subject is Job => 'seq' in subject;
+
+/** `jobId` names the subject, a job or a watch: the field keeps its name so stored receipts stay readable. */
 interface Item { jobId: string; newsSeq: number }
 interface Receipt { session: string; items: Item[]; text: string; acknowledged?: boolean; at?: number }
 interface Lease { generation: string; expiresAt: number }
@@ -69,17 +80,18 @@ export function unread(job: Pick<Job, 'news'>): News[] {
 }
 
 /** Old board/native clients compare event seq to delivered. Keep that projection, never use it as an ACK. */
-export function deliveryPosition(job: Job): void {
+export function deliveryPosition(job: Subject): void {
+  if (!isJob(job)) return;
   const pending = unread(job);
   job.ackedSeq = pending.length ? Math.min(...pending.map((item) => item.seq)) - 1 : job.newsSeq ?? 0;
   job.delivered = pending.length ? Math.min(...pending.map((item) => item.eventSeq)) - 1 : job.seq;
 }
 
-export function addNews(job: Job, kind: News['kind'], reason: string, refs: { question?: string; request?: string } = {}): void {
+export function addNews(job: Subject, kind: News['kind'], reason: string, refs: { question?: string; request?: string } = {}, bytes = 600): void {
   job.newsSeq = (job.newsSeq ?? 0) + 1;
   // A job no lead session owns (one started from the board) has no one to deliver to; the board shows it already.
-  (job.news ??= []).push({ seq: job.newsSeq, eventSeq: job.seq, kind, state: job.state, turn: job.turns,
-    reason: clipped(reason, 600), ...refs, acked: !job.lead, offers: 0 });
+  (job.news ??= []).push({ seq: job.newsSeq, eventSeq: isJob(job) ? job.seq : 0, kind, ...(isJob(job) ? { state: job.state, turn: job.turns } : {}),
+    reason: clipped(reason, bytes), ...refs, acked: !job.lead, offers: 0 });
   deliveryPosition(job);
 }
 
@@ -93,12 +105,37 @@ export class Delivery {
   state: DeliveryState = { receipts: Object.create(null), offering: Object.create(null) };
   private watching = new Map<string, Watch>();
   private waiters = new Set<() => void>();
+  /** When each lead session's hooks last called. */
+  private seen = new Map<string, number>();
   private jobs: () => Job[];
   private save: () => void;
+  private others: () => Subject[];
 
-  constructor(jobs: () => Job[], save: () => void) {
+  /** `others` are the subjects beside jobs; they are saved by the same `save`, so their news and receipts commit together too. */
+  constructor(jobs: () => Job[], save: () => void, others: () => Subject[] = () => []) {
     this.jobs = jobs;
     this.save = save;
+    this.others = others;
+  }
+
+  private subjects(): Subject[] {
+    return [...this.jobs(), ...this.others()];
+  }
+
+  /** Records that a lead session's hook called. True when the session was not open before, so what waited for it can start. */
+  touch(session: string, now = Date.now()): boolean {
+    const appeared = !this.present(session, now);
+    this.seen.set(session, now);
+    return appeared;
+  }
+
+  forget(session: string): void {
+    this.seen.delete(session);
+  }
+
+  /** Whether a lead session is open in Claude Code now, as far as its hooks show: it takes no usage to ask. */
+  present(session: string, now = Date.now()): boolean {
+    return now - (this.seen.get(session) ?? -Infinity) < PRESENT_MS;
   }
 
   restore(state?: DeliveryState): void {
@@ -126,9 +163,9 @@ export class Delivery {
     });
   }
 
-  pending(session: string, ids?: string[]): { job: Job; news: News }[] {
+  pending(session: string, ids?: string[]): { job: Subject; news: News }[] {
     leadSession(session);
-    return this.jobs().filter((job) => job.lead === session && (!ids || ids.includes(job.id)))
+    return this.subjects().filter((job) => job.lead === session && (!ids || ids.includes(job.id)))
       .flatMap((job) => unread(job).map((news) => ({ job, news })));
   }
 
@@ -194,7 +231,9 @@ export class Delivery {
     const selected: typeof candidates = [];
     for (const item of candidates) {
       const { job, news } = item;
-      const line = `\n[${job.id}] news ${news.seq} · ${news.state.toUpperCase()} · turn ${news.turn} · ${news.kind}${news.question ? ` · ASKS YOU [${news.question}]` : ''}${news.request ? ` · request ${news.request}` : ''}: ${news.reason}`;
+      // With several missions open, the lead must name the one its next call is for.
+      const what = isJob(job) ? `${news.state?.toUpperCase()} · turn ${news.turn}${job.mission ? ` · mission ${job.mission}` : ''}` : `PR ${job.repo}#${job.number} · mission ${job.mission}`;
+      const line = `\n[${job.id}] news ${news.seq} · ${what} · ${news.kind}${news.question ? ` · ASKS YOU [${news.question}]` : ''}${news.request ? ` · request ${news.request}` : ''}: ${news.reason}`;
       if (selected.length === OFFER_ITEMS || jsonBytes(text + line + suffix) > bytes) break;
       selected.push(item);
       text += line;
@@ -241,7 +280,7 @@ export class Delivery {
     const ids = typeof value === 'string' ? [value] : value;
     if (!Array.isArray(ids) || !ids.length || ids.length > 100 || ids.some((id) => typeof id !== 'string')) throw new Error('ack must be a receipt id or an array of receipt ids.');
     // One pruned or mistyped id must not block the valid ones beside it; the unknown ones are reported back.
-    const jobs = new Map(this.jobs().map((job) => [job.id, job]));
+    const jobs = new Map(this.subjects().map((job) => [job.id, job]));
     // A receipt applies whole or not at all. Previously ACKed receipts survive history pruning.
     const fits = (receipt: Receipt | undefined) => receipt?.session === session && (receipt.acknowledged || receipt.items.every((item) => {
       const job = jobs.get(item.jobId);
@@ -251,11 +290,11 @@ export class Delivery {
     const ignored = unique.filter((id) => !fits(this.state.receipts[id]));
     const receipts = unique.filter((id) => !ignored.includes(id)).map((id) => this.state.receipts[id]);
     if (!receipts.length) throw new Error('Unknown receipt, another session\'s, or for news this session no longer owns.');
-    const changed = new Map<Job, { ackedSeq?: number; delivered: number; acked: boolean[] }>();
+    const changed = new Map<Subject, { ackedSeq?: number; delivered?: number; acked: boolean[] }>();
     for (const receipt of receipts.filter((r) => !r.acknowledged)) {
       for (const item of receipt.items) {
         const job = jobs.get(item.jobId)!;
-        changed.set(job, { ackedSeq: job.ackedSeq, delivered: job.delivered, acked: job.news!.map((news) => news.acked) });
+        changed.set(job, { ...(isJob(job) ? { ackedSeq: job.ackedSeq, delivered: job.delivered } : {}), acked: job.news!.map((news) => news.acked) });
       }
     }
     const acknowledgements = receipts.map((r) => r.acknowledged);
@@ -271,8 +310,10 @@ export class Delivery {
       this.save();
     } catch (error) {
       for (const [job, before] of changed) {
-        job.ackedSeq = before.ackedSeq;
-        job.delivered = before.delivered;
+        if (isJob(job)) {
+          job.ackedSeq = before.ackedSeq;
+          job.delivered = before.delivered!;
+        }
         job.news!.forEach((news, i) => { news.acked = before.acked[i]; });
       }
       receipts.forEach((receipt, i) => { receipt.acknowledged = acknowledgements[i]; });

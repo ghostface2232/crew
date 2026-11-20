@@ -2,10 +2,10 @@ import { useState, useSyncExternalStore } from 'react';
 import type { CSSProperties } from 'react';
 import { board } from './store.ts';
 import { Check, ChevronDown, ChevronRight, CircleCheck, CircleX, Ellipsis, Gauge } from 'lucide-react';
-import type { BoardJob, ClaudeSession, Mission, PresetName } from './types.ts';
+import type { BoardJob, BoardPull, ClaudeSession, Mission, PresetName } from './types.ts';
 import { actions, request } from './api.ts';
 import {
-  agentSummary, elapsed, jobLabel, jobRole, missionJobStep, missionLooksFinished, missionProgress, missionStep, missionStopPosition,
+  agentSummary, elapsed, jobLabel, jobRole, leadMission, missionJobStep, missionLooksFinished, missionProgress, missionStep, missionStopPosition,
   missionStops, NAMES, roleLabel,
 } from './model.ts';
 import { ActionStatus, AgentMark, Chip, Collapse, Icon, Menu, useAction, useFade, useNow } from './ui.tsx';
@@ -210,11 +210,31 @@ const STAGE_OPENS_UP_TO = 3;
 const openStages = new Map<string, boolean>();
 const PRESETS: [PresetName | null, string][] = [[null, 'Global'], ['economy', 'Economy'], ['balanced', 'Balanced'], ['best', 'Best']];
 
+function MissionPull({ pull, now }: { pull: BoardPull; now: number }) {
+  const stale = pull.state === 'open' && (pull.ended != null || pull.error != null || now - pull.checkedAt > 15 * 60_000);
+  return (
+    <p className="mission-meta mission-pull" data-stale={stale || undefined}>
+      <a href={pull.url} target="_blank" rel="noreferrer" aria-label={`Pull request ${pull.repo} #${pull.number}`}>#{pull.number}</a>
+      {pull.state !== 'open' ? ` · ${pull.state}` : (
+        <>
+          {pull.checks !== 'none' && <> · <span data-attention={pull.checks === 'failing' || undefined}>checks {pull.checks}</span></>}
+          {pull.review === 'changes_requested' && ' · changes requested'}
+          {pull.review === 'approved' && ' · approved'}
+          {pull.conflict && <> · <span data-attention>conflict</span></>}
+          {stale && (pull.error ? ' · could not be read' : ` · checked ${elapsed(now - pull.checkedAt)} ago`)}
+        </>
+      )}
+    </p>
+  );
+}
+
 export function MissionPanel({
   mission,
   jobs,
   allJobs,
-  lead,
+  owner,
+  allMissions,
+  pulls,
   projectName,
   selected,
   openJob,
@@ -224,7 +244,9 @@ export function MissionPanel({
   mission: Mission;
   jobs: BoardJob[];
   allJobs: BoardJob[];
-  lead?: ClaudeSession;
+  owner?: ClaudeSession;
+  allMissions: Mission[];
+  pulls?: BoardPull[];
   projectName?: string;
   selected: string;
   openJob: (id: string) => void;
@@ -246,11 +268,14 @@ export function MissionPanel({
   const at = missionStep(mission);
   const tokens = jobs.reduce((sum, job) => sum + (job.tokens ?? 0), 0);
   const active = mission.state === 'active';
+  const lead = owner && leadMission(owner, allMissions)?.id === mission.id ? owner : undefined;
+  const tasks = mission.tasks?.filter((task) => task.state !== 'dropped') ?? [];
   const meta = [
     elapsed((mission.endedAt ?? now) - mission.createdAt),
     tokens > 0 ? `${tokens.toLocaleString()} tokens` : null,
     projectName,
     `${jobs.length} ${jobs.length === 1 ? 'job' : 'jobs'}`,
+    tasks.length ? `${tasks.filter((task) => task.state === 'done').length}/${tasks.length} tasks` : null,
     // An active mission shows its preset in its menu instead.
     mission.preset && !active ? `${capitalized(mission.preset)} preset` : null,
   ].filter(Boolean).join(' · ');
@@ -262,7 +287,7 @@ export function MissionPanel({
   const stopTracking = () => update({ abandoned: true, outcome: 'Dismissed on the board.' }, 'Dismissed');
   // A daemon without the role registry ignores a mission's preset.
   const presets = Boolean(board.getSnapshot().roleInfo);
-  const finished = missionLooksFinished(mission, allJobs, now, lead);
+  const finished = missionLooksFinished(mission, allJobs, now, owner);
   const fadeTitle = useFade<HTMLHeadingElement>();
   const fadeMeta = useFade<HTMLParagraphElement>();
   const presetName = PRESETS.find(([preset]) => preset === (mission.preset ?? null))?.[1] ?? 'Global';
@@ -281,7 +306,7 @@ export function MissionPanel({
       style={{ '--i': index } as CSSProperties}
       // A closed card opens from a click anywhere on it, as the app's does.
       onClick={(event) => {
-        if (!expanded && !(event.target as Element).closest('button, [role="menu"]')) setExpanded(true);
+        if (!expanded && !(event.target as Element).closest('a, button, [role="menu"]')) setExpanded(true);
       }}
     >
       <div
@@ -324,6 +349,11 @@ export function MissionPanel({
           </button>
         </span>
       </div>
+      {!!pulls?.length && (
+        <div className="mission-pulls">
+          {pulls.map((pull) => <MissionPull key={pull.id} pull={pull} now={now} />)}
+        </div>
+      )}
       <Collapse open={expanded} className="mission-body">
         {mission.notes?.map((note, noteIndex) => (
           <p className="mission-note selectable" key={`${note.at}:${noteIndex}`}>{note.text}</p>

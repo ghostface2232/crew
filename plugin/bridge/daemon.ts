@@ -12,13 +12,15 @@ import { AntigravityAdapter } from './adapters/antigravity.ts';
 import { CodexAdapter } from './adapters/codex.ts';
 import { ClaudeSessions } from './claude.ts';
 import type { ClaudeSession } from './claude.ts';
-import { canonicalPath, HOME, installed, isRole, loadConfig, PLUGIN_ROOT, PORTS, ROLE_INFO, ROLES, VERSION, WORKERS } from './config.ts';
+import { agentCommand, agentEnv, canonicalPath, HOME, installed, isRole, loadConfig, PLUGIN_ROOT, PORTS, ROLE_INFO, ROLES, VERSION, WORKERS } from './config.ts';
 import type { Config } from './config.ts';
 import { evidenceType, openEvidence } from './evidence.ts';
 import { projectRoot } from './git.ts';
 import { followUps, isTerminal, Jobs } from './jobs.ts';
 import { missionPreset, Missions } from './missions.ts';
 import type { Mission } from './missions.ts';
+import { Pulls } from './pulls.ts';
+import type { PullWatch } from './pulls.ts';
 import { addEvidence, addRating, loadNotes, notesFile, renderNotes, scoreAll, setSummary, WORKER_ITEMS } from './notes.ts';
 import type { NotesFile } from './notes.ts';
 import { outcomeContradiction } from './render.ts';
@@ -201,9 +203,15 @@ const antigravity = new AntigravityAdapter(config);
  * that fails, missions are kept in a scratch folder for this run so the original is never overwritten.
  */
 function loadMissions(): Missions {
-  const onChange = (mission: Mission) => broadcast('mission', mission);
+  const onChange = (mission: Mission) => {
+    broadcast('mission', mission);
+    // The board shows a lead on the mission it last acted on, so one that has ended lets go of it.
+    if (mission.state !== 'active') for (const session of claude.sessions.values()) if (session.mission === mission.id) claude.focus(session.id, undefined);
+  };
+  // A finished mission is kept while one of its pull requests is still watched, so its news still has a mission to name.
+  const pinned = (id: string) => pulls.list().some((pull) => pull.mission === id && !pull.ended);
   try {
-    return new Missions(HOME, onChange);
+    return new Missions(HOME, onChange, pinned);
   } catch (err) {
     const file = path.join(HOME, 'missions.json');
     const cause = (err as Error).message;
@@ -211,15 +219,50 @@ function loadMissions(): Missions {
       const aside = `${file}.unreadable-${Date.now()}`;
       fs.renameSync(file, aside);
       log(`missions.json could not be used and was set aside as ${aside}; starting with no missions. Cause: ${cause}`);
-      return new Missions(HOME, onChange);
+      return new Missions(HOME, onChange, pinned);
     } catch (again) {
       const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-missions-'));
       log(`missions.json could not be used or set aside (${(again as Error).message}); missions for this run are kept in ${scratch} and the file is left as it is. Cause: ${cause}`);
-      return new Missions(scratch, onChange);
+      return new Missions(scratch, onChange, pinned);
     }
   }
 }
 const missions = loadMissions();
+
+/** Runs the GitHub CLI as the user has it set up and signed in; Crew holds no GitHub credentials of its own. */
+function gh(args: string[], cwd?: string): Promise<string> {
+  const env = { ...agentEnv(), GH_PROMPT_DISABLED: '1', NO_COLOR: '1' };
+  const command = agentCommand('gh', args, env);
+  return new Promise((resolve, reject) => {
+    execFile(command.bin, command.args ?? [], { cwd, env, shell: command.shell, timeout: 30_000, maxBuffer: 8 * 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
+      if (!err) resolve(stdout);
+      else reject(new Error((err as NodeJS.ErrnoException).code === 'ENOENT' ? 'the GitHub CLI (gh) was not found; install it and sign in with `gh auth login`' : (stderr || err.message).trim()));
+    });
+  });
+}
+
+/** A watch without the ledger and the memory behind it, as the board and the lead's state read it. */
+function pullView(watch: PullWatch) {
+  const { news, newsSeq, reviews, ...rest } = watch;
+  return rest;
+}
+
+/**
+ * The pull requests linked to missions. Each is read with `gh` only while it is open, its mission has not been
+ * dropped, and the lead session its news goes to is open in Claude Code: a closed session costs no polling, and
+ * opening it again reads its pull requests at once.
+ */
+const pulls: Pulls = new Pulls({
+  gh,
+  mission: (id) => missions.list().find((mission) => mission.id === id),
+  present: (session) => jobs.delivery.present(session),
+  save: () => jobs.flush(),
+  changed: (watch) => {
+    broadcast('pull', pullView(watch));
+    jobs.delivery.changed();
+  },
+  polled: (watch) => broadcast('pull', pullView(watch)),
+});
 
 const usage = new UsageMonitor(agentGaugeDir(), (latest) => broadcast('usage', latest));
 const usageModels = (live: Config) => ({ antigravity: live.roles.polish.antigravity?.model ?? live.antigravity.model });
@@ -250,6 +293,7 @@ const jobs = new Jobs(HOME, loadConfig, { codex, antigravity }, {
   onAttention: (job, kind, detail) => notify(job.agent, kind, job.title, detail),
   // A mission on the board lists its jobs; they stay as long as it does.
   keepsMission: (id) => missions.saved().some((mission) => mission.id === id),
+  pulls,
   userPrompts: (session) => claude.recentPrompts(session),
 });
 
@@ -280,6 +324,7 @@ function state() {
     stallSeconds: config.stallSeconds,
     jobs: jobs.list().map(view),
     missions: missions.list(),
+    pulls: pulls.list().map(pullView),
     claude: [...claude.sessions.values()],
     limits: { codex: codex.limits },
     agents: {
@@ -705,7 +750,20 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     if (body.done && body.abandoned) throw new HttpError(400, 'pass done or abandoned, not both');
     if (body.done || body.abandoned) return missions.finish(id, { outcome: text(body.outcome, 'outcome'), record: text(body.record, 'record'), abandoned: Boolean(body.abandoned), reopen: body.reopen === true, byLead: body.by === 'lead' });
     if (body.note !== undefined) return missions.note(id, text(body.note, 'note') ?? '');
-    return missions.update(id, { stage: stage(body.stage), stages: body.stages, title: text(body.title, 'title'), preset: body.preset });
+    const updated = missions.update(id, { stage: stage(body.stage), stages: body.stages, title: text(body.title, 'title'), preset: body.preset, tasks: body.tasks });
+    if (typeof body.lead === 'string') claude.focus(body.lead, updated.id);
+    return updated;
+  }
+
+  // Lead only: the board sends no such request, so it is not among BOARD_POSTS.
+  const pullRoute = /^\/api\/missions\/([\w-]+)\/pulls$/.exec(pathname);
+  if (pullRoute && method === 'POST') {
+    const body = await readJson(req);
+    if (typeof body.pr !== 'string' && typeof body.pr !== 'number') throw new HttpError(400, 'pr must be a pull request number or its URL');
+    const mission = missions.list().find((m) => m.id === pullRoute[1]);
+    if (!mission) throw new HttpError(404, `No mission with id "${pullRoute[1]}".`);
+    const linked = await pulls.link(mission.id, String(body.pr)).catch((err: Error) => { throw new HttpError(400, err.message); });
+    return { ...linked, watch: pullView(linked.watch) };
   }
 
   if (method === 'POST') {
@@ -739,7 +797,10 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       const body = await readJson(req);
       if (typeof body.project !== 'string' || !body.project) throw new HttpError(400, 'project must be the lead session\'s project directory');
       const first = stage(body.stage);
-      return missions.start({ title: text(body.title, 'title') ?? '', project: body.project, root: (await projectRoot(body.project).catch(() => null)) ?? body.project, owner: text(body.owner, 'owner'), stage: first, stages: body.stages, preset: body.preset });
+      const owner = text(body.owner, 'owner');
+      const opened = missions.start({ title: text(body.title, 'title') ?? '', project: body.project, root: (await projectRoot(body.project).catch(() => null)) ?? body.project, owner, stage: first, stages: body.stages, preset: body.preset, tasks: body.tasks });
+      if (owner) claude.focus(owner, opened.id);
+      return opened;
     }
     if (pathname === '/api/jobs') {
       const spec = await readJson(req);
@@ -748,14 +809,24 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       // The mission's preset is a cost the user chose; running on the global one instead would quietly change it.
       if (spec.mission == null) delete spec.mission;
       if (spec.mission !== undefined && !mission) throw new HttpError(400, `No mission with id "${spec.mission}" is known any more, so its preset cannot be applied. Start the job without it, or open a new mission.`);
+      if (spec.taskId !== undefined) {
+        if (typeof spec.taskId !== 'string' || !mission) throw new HttpError(400, 'task_id must be the id of a task of the job\'s mission');
+        if (!mission.tasks?.some((task) => task.id === spec.taskId)) throw new HttpError(400, `Mission ${mission.id} has no task "${spec.taskId}"${mission.tasks?.length ? `; its tasks are ${mission.tasks.map((task) => task.id).join(', ')}` : ''}. Add it with mission (tasks) first, or leave task_id out.`);
+      }
       spec.preset = missionPreset(mission, liveConfig().preset);
       // A job outlives its mission's tracking: it still runs under the mission's preset, on its own, and says why.
       if (mission && mission.state !== 'active') {
         spec.notes = [...(spec.notes ?? []), `Mission ${spec.mission} is ${mission.state}, so this job is shown on its own.`];
         delete spec.mission;
+        if (spec.taskId !== undefined) {
+          spec.notes.push(`The link to task "${spec.taskId}" was dropped.`);
+          delete spec.taskId;
+        }
       }
       if (mission?.state === 'active' && mission.stages) spec.missionStep = mission.stageIndex ?? mission.stages.indexOf(mission.stage);
-      return view(await jobs.create(spec));
+      const created = await jobs.create(spec);
+      if (created.lead && created.mission) claude.focus(created.lead, created.mission);
+      return view(created);
     }
     if (pathname.startsWith('/api/lead/')) {
       const body = await readJson(req);
@@ -763,6 +834,8 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       const session = body.session;
       if (typeof session !== 'string' || !session.trim() || session.length > 200) throw new HttpError(400, 'A lead session id is required.');
       const delivery = jobs.delivery;
+      // A session that was not open a moment ago is back: read its pull requests now rather than at their next turn.
+      if (delivery.touch(session)) void pulls.tick(session);
       switch (pathname.slice('/api/lead/'.length)) {
         case 'ack': {
           const ignored = delivery.ack(session, body.ack);
@@ -775,7 +848,10 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
           return { adopted };
         }
         // The reminder speaks of "this message", so only a prompt from the user carries it, not a session start or compaction.
-        case 'context': return { text: [delivery.context(session), body.event === 'UserPromptSubmit' ? missions.followUpHint(session) : ''].filter(Boolean).join('\n') };
+        // A session start (also a resume, a clear, a compaction) is when the context may have lost the plan, so the
+        // open missions are shown again there and not with every prompt.
+        case 'context': return { text: [delivery.context(session), body.event === 'UserPromptSubmit' ? missions.followUpHint(session) : '',
+          body.event === 'SessionStart' ? missions.resumeText(session, jobs.list(), pulls.list()) : ''].filter(Boolean).join('\n') };
         case 'watch': return { watch: delivery.watch(session, body.deadline) };
         case 'heartbeat': return { watch: delivery.heartbeat(session, body.generation) };
         case 'release':
@@ -807,6 +883,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     }
     if (pathname === '/api/hooks/claude') {
       const payload = await readJson(req);
+      if (payload?.hook_event_name === 'SessionEnd' && typeof payload.session_id === 'string') jobs.delivery.forget(payload.session_id);
       claude.ingest(payload);
       locate(claude.sessions.get(payload?.session_id));
       return {};
@@ -968,8 +1045,11 @@ setInterval(() => {
 
 // A mission whose lead session is gone would stay open forever; one with a job still running is not stale.
 setInterval(() => {
-  missions.sweep(Date.now(), (id) => jobs.list().some((job) => job.mission === id && !isTerminal(job)));
+  missions.sweep(Date.now(), (id) => jobs.list().some((job) => job.mission === id && !isTerminal(job)), (id) => pulls.list().some((pull) => pull.mission === id && !pull.ended));
 }, 10 * 60_000).unref();
+
+// Each watch decides whether it is due; a tick with nothing due runs no command.
+setInterval(() => void pulls.tick(), 30_000).unref();
 
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);

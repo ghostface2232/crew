@@ -270,7 +270,7 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
         capture.from = "lead"
         #expect(capture.turnLabel(of: 3) == "Attached by the lead")
     }
-    @Test func aCaptureOpensBesideItsOtherSideAndTheReferenceAsOnTheBoard() {
+    @Test func capturesReadTheirSideAndOrderAsOnTheBoard() {
         let item = { (file: String, turn: Int, from: String) in Evidence(file: file, path: "/x/\(file)", turn: turn, from: from, bytes: 1, modified: 1) }
         #expect(item("fox-before.png", 1, "worker").side?.view == "fox")
         #expect(item("After_Fox Idle.PNG", 1, "worker").side.map { "\($0.view)|\($0.after)" } == "fox idle|true")
@@ -282,14 +282,6 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
             item("fox-after.png", 3, "worker"), item("fox-before.png", 1, "worker"), item("rock-after.png", 3, "worker"), item("rock-before.png", 2, "worker"),
             item("notes.png", 3, "worker"), item("lead-1-concept.png", 1, "lead"), item("lead-2-concept.png", 2, "lead"),
         ]
-        #expect(Evidence.companions(of: "fox-after.png", in: items) == ["lead-2-concept.png", "fox-before.png", "fox-after.png"])
-        #expect(Evidence.companions(of: "rock-before.png", in: items) == ["lead-2-concept.png", "rock-before.png", "rock-after.png"])
-        #expect(Evidence.companions(of: "notes.png", in: items) == ["lead-2-concept.png", "notes.png"])
-        #expect(Evidence.companions(of: "lead-1-concept.png", in: items) == ["lead-1-concept.png", "fox-before.png", "fox-after.png"])
-        #expect(Evidence.companions(of: "only.png", in: [item("only.png", 1, "worker")]) == ["only.png"])
-        // No more captures than fit at once: all of them open, whichever was pressed.
-        #expect(Evidence.companions(of: "rock-after.png", in: Array(items[..<4])) == ["fox-before.png", "rock-before.png", "fox-after.png", "rock-after.png"])
-        #expect(Evidence.companions(of: "gone.png", in: items) == [])
         #expect(Evidence.ordered(items).map(\.file)
             == ["lead-1-concept.png", "lead-2-concept.png", "fox-before.png", "rock-before.png", "notes.png", "fox-after.png", "rock-after.png"])
     }

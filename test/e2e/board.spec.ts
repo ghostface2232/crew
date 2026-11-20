@@ -301,7 +301,7 @@ test('the detail panel shows the worker\'s evidence and the lead\'s attachments'
   await expect(section.getByText('Attached by the lead · lead-1-design.png')).toBeVisible();
 });
 
-test('a capture opens side by side with its other side and the reference, and the picker swaps what is shown', async ({ page, request }) => {
+test('a capture opens by itself, and the picker adds others beside it', async ({ page, request }) => {
   const data = fixture();
   const shot = (file: string, turn: number, from: 'worker' | 'lead' = 'worker') => ({ file, path: `/x/${file}`, turn, from, bytes: 10, modified: 1 });
   data.jobs[0].turns = 3;
@@ -313,17 +313,22 @@ test('a capture opens side by side with its other side and the reference, and th
   await section.getByRole('img', { name: 'hero-after.png' }).click();
   const sheet = page.getByRole('dialog', { name: 'Evidence' });
   const panes = sheet.locator('.compare figure');
-  await expect(panes).toHaveCount(3);
+  // Only the one pressed, which cannot be taken away.
+  await expect(panes.getByRole('link')).toHaveText(['hero-after.png']);
+  await expect(panes.locator('b')).toHaveText(['Turn 3 of 3']);
+  const picker = sheet.getByRole('group', { name: /Captures to compare/ });
+  await expect(picker.getByRole('button', { name: /hero-after\.png/ })).toBeDisabled();
+  const nav = picker.getByRole('button', { name: /nav\.png/ });
+  // Added ones go side by side at one height, in the order reference, before, after.
+  await picker.getByRole('button', { name: /lead-1-design\.png/ }).click();
+  await picker.getByRole('button', { name: /hero-before\.png/ }).click();
   await expect(panes.locator('b')).toHaveText(['Attached by the lead', 'Turn 1 of 3', 'Turn 3 of 3']);
   await expect(panes.getByRole('link')).toHaveText(['lead-1-design.png', 'hero-before.png', 'hero-after.png']);
-  // Side by side, at one height.
   const rects = () => panes.locator('img').evaluateAll((images) => images.map((image) => image.getBoundingClientRect()));
   let boxes = await rects();
   expect(new Set(boxes.map((box) => Math.round(box.top))).size).toBe(1);
   expect(new Set(boxes.map((box) => Math.round(box.height))).size).toBe(1);
   expect(boxes[0].right).toBeLessThanOrEqual(boxes[1].left);
-  const picker = sheet.getByRole('group', { name: /Captures to compare/ });
-  const nav = picker.getByRole('button', { name: /nav\.png/ });
   // A fourth makes a grid of two by two, and a fifth waits until one leaves.
   await picker.getByRole('button', { name: /footer\.png/ }).click();
   await expect(panes.getByRole('link')).toHaveText(['lead-1-design.png', 'hero-before.png', 'footer.png', 'hero-after.png']);

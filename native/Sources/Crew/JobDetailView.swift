@@ -9,7 +9,7 @@ struct JobDetailView: View {
     @State private var error = ""
     @State private var retry = 0
     @State private var scrolled = false
-    /// Files of the evidence shown side by side; empty while the sheet is closed.
+    /// Files of the evidence the sheet shows, starting with the one pressed; empty while it is closed.
     @State private var compared: [String] = []
     private var job: Job? {
         guard var current = store.state.jobs.first(where: { $0.id == id }) else { return detail }
@@ -105,7 +105,7 @@ struct JobDetailView: View {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: EvidenceTile.minWidth), spacing: Space.l, alignment: .top)], alignment: .leading, spacing: Space.l) {
                     // Newest turn first, as on the web board.
                     ForEach(evidence.sorted { $0.turn > $1.turn }, id: \.file) { item in
-                        EvidenceTile(item: item, turns: job.turns) { compared = Evidence.companions(of: item.file, in: evidence) }
+                        EvidenceTile(item: item, turns: job.turns) { compared = [item.file] }
                     }
                 }
             }
@@ -840,7 +840,7 @@ private struct EvidenceTile: View {
     let item: Evidence
     /// How many turns the job has had.
     let turns: Int
-    /// Shows an image inside the app, beside what it is judged against.
+    /// Shows an image inside the app, where others can be added beside it.
     let compare: () -> Void
     @State private var thumbnail: NSImage?
     var body: some View {
@@ -899,8 +899,9 @@ private extension View {
     }
 }
 
-/// Captures side by side, inside the app. A result alone says little: it is judged against what was there before, or
-/// what it was meant to match. Each says which turn it is from, since one from an earlier turn may not show the final state.
+/// A capture inside the app, and the others added beside it from the strip below. A result alone says little: it is
+/// judged against what was there before, or what it was meant to match. Each says which turn it is from, since one
+/// from an earlier turn may not show the final state.
 private struct EvidenceCompareView: View {
     /// Wide enough for three panes, and no wider than the screen it opens on.
     private static var size: CGSize {

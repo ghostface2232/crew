@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Actions, answerKey, tokenFromFragment } from '../plugin/board/src/api.ts';
 import { BoardStore, mergeEvents } from '../plugin/board/src/store.ts';
-import { elapsed, evidenceCompanions, evidenceSide, evidenceTurn, orderEvidence, jobLabel, projectNames, unsettled, missionProgress, missionStops, missionStep, missionStopPosition, missionJobStep, missionLooksFinished, relativeDuration, usageWindowName, STOP_OF_STAGE } from '../plugin/board/src/model.ts';
+import { elapsed, evidenceSide, evidenceTurn, orderEvidence, jobLabel, projectNames, unsettled, missionProgress, missionStops, missionStep, missionStopPosition, missionJobStep, missionLooksFinished, relativeDuration, usageWindowName, STOP_OF_STAGE } from '../plugin/board/src/model.ts';
 import type { BoardJob, BoardState, ClaudeSession, CrewEvent, Mission } from '../plugin/board/src/types.ts';
 
 function deferred() {
@@ -273,7 +273,7 @@ test('an ended job counts until its worktree is gone and the lead has read its r
   assert.equal(unsettled({ worktree: null, seq: 4, delivered: 4 } as BoardJob), false);
 });
 
-test('a capture opens beside its other side and the lead\'s reference, ordered reference, before, after', () => {
+test('captures read their side from their name and order as reference, before, after', () => {
   assert.deepEqual(evidenceSide('fox-before.png'), { view: 'fox', side: 'before' });
   assert.deepEqual(evidenceSide('After_Fox Idle.PNG'), { view: 'fox idle', side: 'after' });
   assert.equal(evidenceSide('before.png'), null);
@@ -286,17 +286,6 @@ test('a capture opens beside its other side and the lead\'s reference, ordered r
     item('fox-after.png', 3), item('fox-before.png', 1), item('rock-after.png', 3), item('rock-before.png', 2),
     item('notes.png', 3), item('lead-1-concept.png', 1, 'lead'), item('lead-2-concept.png', 2, 'lead'),
   ];
-  assert.deepEqual(evidenceCompanions(items, 'fox-after.png'), ['lead-2-concept.png', 'fox-before.png', 'fox-after.png']);
-  assert.deepEqual(evidenceCompanions(items, 'rock-before.png'), ['lead-2-concept.png', 'rock-before.png', 'rock-after.png']);
-  // A capture with no other side still opens beside the reference.
-  assert.deepEqual(evidenceCompanions(items, 'notes.png'), ['lead-2-concept.png', 'notes.png']);
-  // A reference opens beside the latest turn's result and what that was before.
-  assert.deepEqual(evidenceCompanions(items, 'lead-1-concept.png'), ['lead-1-concept.png', 'fox-before.png', 'fox-after.png']);
-  assert.deepEqual(evidenceCompanions([item('only.png', 1)], 'only.png'), ['only.png']);
-  // No more captures than fit at once: all of them open, whichever was pressed.
-  assert.deepEqual(evidenceCompanions(items.slice(0, 4), 'rock-after.png'), ['fox-before.png', 'rock-before.png', 'fox-after.png', 'rock-after.png']);
-  assert.deepEqual(evidenceCompanions([item('lead-1-a.png', 1, 'lead')], 'lead-1-a.png'), ['lead-1-a.png']);
-  assert.deepEqual(evidenceCompanions(items, 'gone.png'), []);
   assert.deepEqual(orderEvidence(items).map((found) => found.file),
     ['lead-1-concept.png', 'lead-2-concept.png', 'fox-before.png', 'rock-before.png', 'notes.png', 'fox-after.png', 'rock-after.png']);
   // Names that tie are ordered by code unit, as the app orders them, not by locale.

@@ -192,7 +192,7 @@ test('link primes without news and relinking only lifts a hold', async () => {
   const { watch, summary, resumed } = await h.pulls.link('one', '#12');
   assert.deepEqual(h.calls, [{ args: ['pr', 'view', '12', '--json', PULL_FIELDS], cwd: '/project' }]);
   assert.match(watch.id, /^pr-[0-9a-f]{6}$/);
-  assert.match(summary, /^octo\/crew#12.*open.*failing.*CI \/ build.*review_required.*conflicts with its base$/);
+  assert.match(summary, /^octo\/crew#12 · open · checks failing \(CI \/ build\) · review required · conflicts with its base$/);
   assert.equal(resumed, false);
   assert.equal(watch.news, undefined);
   assert.equal(watch.failingHeads, 1);

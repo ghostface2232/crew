@@ -370,7 +370,7 @@ export class Pulls {
 
     const { state, failed } = checksOf(view);
     const summary = [`${repo}#${view.number}`, view.state.toLowerCase(),
-      failed.length ? `${state} (${failed.map(oneLine).join(', ')})` : state, oneLine(view.reviewDecision.toLowerCase()),
+      failed.length ? `checks ${state} (${failed.map(oneLine).join(', ')})` : `checks ${state}`, oneLine(view.reviewDecision.toLowerCase().replace(/_/g, ' ')),
       view.mergeable === 'CONFLICTING' || (view.mergeable === 'UNKNOWN' && watch.conflict) ? 'conflicts with its base' : '',
     ].filter(Boolean).join(' · ');
     return { watch, resumed, summary };

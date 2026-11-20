@@ -7,8 +7,9 @@ import { describeUsage } from './usage.ts';
 import type { RouteDecision, Usage } from './usage.ts';
 import type { Holder, Preset, PresetName, Role, RoleAssignment, WorkerAgent } from './config.ts';
 import type { CrewEvent, JobSpec } from './jobs.ts';
-import { followUpTitle, MAX_LABEL, normalizeTitle, planText, STAGES } from './missions.ts';
+import { followUpTitle, MAX_LABEL, missionDetail, missionHead, NAME_THE_MISSION, normalizeTitle, STAGES, TASK_STATES } from './missions.ts';
 import type { Mission } from './missions.ts';
+import type { PullWatch } from './pulls.ts';
 import { imageContent, isImage } from './evidence.ts';
 import type { Evidence } from './evidence.ts';
 import { describe, needsLead, summarize } from './render.ts';
@@ -96,6 +97,8 @@ The user can watch every agent live on the status board, which /crew:board opens
 
 const common = {
   cwd: { type: 'string', description: 'Project directory. Defaults to this session\'s project.' },
+  mission: { type: 'string', description: 'The id of the mission this job is for. Needed only while this session has more than one mission open; otherwise the job goes to its one open mission.' },
+  task_id: { type: 'string', description: 'The id of the mission task this job is done for, as you named it in the mission\'s tasks. The task then shows this job\'s state and check.' },
   background: { type: 'boolean', description: 'Default true: return at once with the job id; you are woken when the job ends or needs you. Pass false to block until then.' },
 };
 const worktreeProps = {
@@ -213,13 +216,30 @@ const TOOLS = [
   {
     name: 'mission',
     title: 'Report the mission',
-    description: 'Report one user command and its jobs. Start with title and stages in the intended order, pass stages again with what remains to add or drop future steps at any time, report stage as you move on, and call done as soon as the work is finished at any stage. It starts no work.',
+    description: 'Report one user command and its jobs. Start with title and stages in the intended order, pass stages again with what remains to add or drop future steps at any time, report stage as you move on, and call done as soon as the work is finished at any stage. tasks keeps the split of the work, and what was verified, where a resumed or compacted session reads it again. pr links a pull request so you hear of its failed checks, reviews and conflicts. With no argument it shows what this session has open. It starts no work.',
     inputSchema: {
       type: 'object',
       properties: {
-        title: { type: 'string', description: 'The user\'s command in a few words. Pass it once, to start the mission; later calls pass stage or stages without it. Passing the same title again resumes the mission and ignores stages. A different title starts a new mission and closes this session\'s open one as abandoned.' },
+        title: { type: 'string', description: 'The user\'s command in a few words. Pass it once, to start the mission; later calls pass stage or stages without it. Passing the same title again resumes the mission and ignores stages. A different title starts another mission beside the open one, which stays open until you finish it: the user may give a new command while an earlier one is still under way.' },
+        id: { type: 'string', description: 'The mission this call is for, as its replies name it (m-…). Needed only while this session has more than one mission open; a call that would change one without it is refused, and changes nothing.' },
         stages: { type: 'array', items: { type: 'string' }, description: `Ordered stages, with repeats allowed, each one of: ${STAGES.join(', ')}. To say what a step is for, add a colon and a short name (at most ${MAX_LABEL} characters), which the board shows in place of the stage's: "implement: Sample", "implement: The rest". With title: a nonempty whole plan. Later: replace only the remainder to add, drop or reorder steps ([] drops all future steps); passed and current steps stay.` },
         stage: { type: 'string', description: `One of: ${STAGES.join(', ')}. Advance to the next occurrence of this stage, or insert it after the current step. Reporting the current step again changes nothing, so to move between two steps of one stage, add the next one's name ("implement: The rest"); a name the plan does not have is inserted as a new step.` },
+        tasks: {
+          type: 'array',
+          description: 'The pieces you split the work into, added or updated by id; tasks you leave out stay as they are. How you split and order them is yours to decide. Give after for a task that must wait for others; tasks that wait for nothing and touch different files can go at the same time. Set state as you go, and result when a task is done: one line on how it was verified. Start a job for a task with its task_id rather than copying the job\'s state here.',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string', description: 'Your short name for the task, e.g. "api" or "t2".' },
+              title: { type: 'string', description: 'What the task is, in a few words. Needed for a new id.' },
+              after: { type: 'array', items: { type: 'string' }, description: 'Ids of the tasks this one waits for. [] clears it. A dropped task never counts as done, so take it out of after.' },
+              state: { type: 'string', enum: [...TASK_STATES], description: 'todo (the default), doing, done, or dropped.' },
+              result: { type: 'string', description: 'One line: how it was verified, or why it was dropped.' },
+            },
+            required: ['id'],
+          },
+        },
+        pr: { type: 'string', description: 'A pull request of this work, as its number or URL. Crew then reads it with the GitHub CLI while this session is open and wakes you only when something new needs you: a failed check, review feedback, a merge conflict, or checks passing after a failure it told you of. You judge the cause and hand the fix to an agent with delegate or reply; Crew never merges, closes or deploys. Passing a linked one again resumes check news that was held back after three failing heads.' },
         done: { type: 'boolean', description: 'The command is finished.' },
         abandoned: { type: 'boolean', description: 'The command was dropped before it finished.' },
         outcome: { type: 'string', description: 'With done or abandoned: one line on how it ended.' },
@@ -235,7 +255,10 @@ const TOOLS = [
     annotations: { readOnlyHint: true },
     inputSchema: {
       type: 'object',
-      properties: { kind: { type: 'string', enum: ['lead', ...ROLES], description: 'The role you are about to hand out (verify for a review with runs_app, refactor, release or fix for those delegate roles). lead asks whether you yourself should carry on.' } },
+      properties: {
+        kind: { type: 'string', enum: ['lead', ...ROLES], description: 'The role you are about to hand out (verify for a review with runs_app, refactor, release or fix for those delegate roles). lead asks whether you yourself should carry on.' },
+        mission: { type: 'string', description: 'The id of the mission the work is for, whose preset then applies. Needed only while this session has more than one mission open.' },
+      },
     },
   },
   {
@@ -510,16 +533,19 @@ function showEvidence(ctx: CallContext, job: JobView): void {
 }
 
 
-/** The mission this session opened and is carrying out. Only this session's own mission is ever advanced or closed from here. */
 /** The Claude session this server belongs to; it outlives a restart of the server. Unset in clients that do not pass it on. */
 const SESSION = process.env.CLAUDE_CODE_SESSION_ID || undefined;
-/** How a mission replaced by this session's next one ends; such a mission carries no work on. */
+/** How a mission ended when this session's next one replaced it, before a session could hold several. Such a mission carries no work on. */
 const SUPERSEDED = 'Superseded by a new mission.';
+/**
+ * The mission this session last reported on. A session may have several open, so this decides nothing about where
+ * a call goes: it only lets the lead be told, once, that the mission was closed from outside.
+ */
 let missionId: string | null = null;
 /**
- * The mission whose preset this session's jobs run under. It outlives tracking: when the user closes the mission
- * on the board, the remaining work keeps the preset they chose for it. Cleared only when this session finishes
- * the mission or opens another.
+ * The mission whose preset this session's jobs run under while it has none open. It outlives tracking: when the
+ * user closes the mission on the board, the remaining work keeps the preset they chose for it. Cleared when this
+ * session finishes the mission; never moved to another open mission by guessing.
  */
 let costMission: string | null = null;
 /** The mission this session last finished as done, until work after it opens a follow-up mission or the lead opens one. */
@@ -531,48 +557,8 @@ let closedElsewhere: Mission | null = null;
  * track of in a restart; afterwards a closed one is one this server saw end.
  */
 let fresh = true;
-
-/**
- * After a restart the server no longer knows its mission. A lead that goes straight on with its work, without
- * reporting the mission again, still means this session's one open mission, and its jobs keep that mission's preset.
- */
-async function reattach(): Promise<void> {
-  if (!fresh || costMission || !SESSION) return;
-  fresh = false;
-  const open = ((await api('GET', '/api/state')).missions as Mission[] ?? []).filter((m) => m.owner === SESSION && m.project === PROJECT && m.state === 'active');
-  if (open.length === 1 && !costMission) {
-    missionId = open[0].id;
-    costMission = open[0].id;
-  }
-}
-
-/** The daemon no longer knows the mission whose preset this session's jobs ran under: say so once, then go on without it. */
-async function withMission<T>(call: () => Promise<T>): Promise<T> {
-  try {
-    return await call();
-  } catch (err) {
-    if (!costMission || !/is known any more/.test((err as Error).message)) throw err;
-    const lost = costMission;
-    costMission = null;
-    if (missionId === lost) missionId = null;
-    throw new Error(`Mission ${lost} is no longer known to Crew, so its preset cannot be applied. Try again to run under the global preset, or start a new mission with the preset the user named.`);
-  }
-}
-
-/** This session's mission if it is still open. A mission closed from outside is forgotten and remembered as such. */
-async function ownMission(): Promise<Mission | null> {
-  const id = missionId;
-  if (!id) return null;
-  const all: Mission[] = (await api('GET', '/api/state')).missions ?? [];
-  const mine = all.find((m) => m.id === id);
-  if (mine?.state === 'active') return mine;
-  // Unless a newer mission was opened while the answer was on its way.
-  if (missionId === id) {
-    missionId = null;
-    closedElsewhere = mine ?? null;
-  }
-  return null;
-}
+/** The missions this server opened, for a client that passes no session id: the daemon cannot then say whose a mission is. */
+const openedHere = new Set<string>();
 
 /** The global preset as the config on disk has it; null when it cannot be read, as jobs would then fail anyway. */
 function globalPreset(): PresetName | null {
@@ -583,13 +569,67 @@ function globalPreset(): PresetName | null {
   }
 }
 
-function describeMission(mission: Mission): string {
-  const stages = mission.stages ?? STAGES;
-  const index = mission.stageIndex ?? stages.indexOf(mission.stage);
-  const state = mission.state === 'active' ? `${mission.stage} (step ${index + 1} of ${stages.length})` : mission.state;
-  const plan = planText(mission, (at) => (at === index && mission.state === 'active' ? ' (current)' : ''));
+/** This session's missions in this project, the open ones oldest first, with the jobs and pull requests their tasks are shown with. */
+interface Standing { all: Mission[]; open: Mission[]; jobs: JobView[]; pulls: PullWatch[] }
+
+/** Read from the daemon for each call and never remembered, so a restart of this server loses nothing. */
+async function standing(): Promise<Standing> {
+  const state = await api('GET', '/api/state');
+  const all = ((state.missions ?? []) as Mission[]).filter((m) => m.project === PROJECT && (SESSION ? m.owner === SESSION : openedHere.has(m.id)));
+  return { all, open: all.filter((m) => m.state === 'active').sort((a, b) => a.createdAt - b.createdAt), jobs: state.jobs ?? [], pulls: state.pulls ?? [] };
+}
+
+const listed = (missions: Mission[]) => missions.map((m) => `${m.id} "${m.title}" (${m.stage})`).join(', ');
+
+/**
+ * With several missions open, a call that names none is refused: a guess could advance, close or bill the wrong
+ * one, and none of that can be undone.
+ */
+function unnamed(open: Mission[], arg: 'id' | 'mission'): Error {
+  return new Error(`This session has ${open.length} missions open: ${listed(open)}. Pass ${arg} to say which one this call is for. Nothing was changed or started.`);
+}
+
+/** The mission a call names, which must be one this session opened in this project. */
+function named(now: Standing, id: unknown, arg: 'id' | 'mission'): Mission {
+  const mission = now.all.find((m) => m.id === id);
+  if (!mission) throw new Error(`${arg} ${JSON.stringify(id)} is not a mission this session opened in this project.${now.open.length ? ` Open: ${listed(now.open)}.` : ''}`);
+  return mission;
+}
+
+function track(mission: Mission): void {
+  missionId = mission.id;
+  costMission = mission.id;
+}
+
+/** The daemon no longer knows the mission a job or route call went to: say so once, then go on without it. */
+async function withMission<T>(id: string | undefined, call: () => Promise<T>): Promise<T> {
+  try {
+    return await call();
+  } catch (err) {
+    if (!id || !/is known any more/.test((err as Error).message)) throw err;
+    if (costMission === id) costMission = null;
+    if (missionId === id) missionId = null;
+    throw new Error(`Mission ${id} is no longer known to Crew, so its preset cannot be applied. Try again to run under the global preset, or start a new mission with the preset the user named.`);
+  }
+}
+
+/**
+ * The mission a new job or a route question belongs to: the one it names, else this session's only open one, else
+ * the one whose preset still holds. After a restart this server remembers none of it; the daemon's list is enough.
+ */
+async function jobMission(wanted: unknown): Promise<string | undefined> {
+  if (SESSION) fresh = false;
+  if (wanted === undefined && !SESSION && !openedHere.size) return costMission ?? undefined;
+  const now = await standing();
+  if (wanted !== undefined) return named(now, wanted, 'mission').id;
+  if (now.open.length > 1) throw unnamed(now.open, 'mission');
+  if (now.open.length === 1) track(now.open[0]);
+  return costMission ?? undefined;
+}
+
+function describeMission(mission: Mission, now?: Pick<Standing, 'jobs' | 'pulls'>): string {
   const policy = mission.preset ? currentPolicy(mission.preset, ' for this mission') : currentPolicy(globalPreset(), ' (the global preset; the mission sets none)');
-  return `Mission ${mission.id} · ${state} — ${mission.title}\nPlan: ${plan}\n${policy}`;
+  return [missionHead(mission), now ? missionDetail(mission, now.jobs, now.pulls) : '', policy].filter(Boolean).join('\n');
 }
 
 async function reportMission(args: any): Promise<string> {
@@ -597,61 +637,83 @@ async function reportMission(args: any): Promise<string> {
   const restarted = fresh;
   fresh = false;
   const ending = Boolean(args.done || args.abandoned);
-  const current = await ownMission();
+  const now = await standing();
+  const changing = Boolean(args.stage) || args.stages !== undefined || args.preset !== undefined || args.tasks !== undefined;
+  // Links a pull request and says what stands on it now; what is already there is not sent again as news.
+  const link = async (mission: Mission): Promise<string> => {
+    if (args.pr === undefined) return '';
+    const linked: { watch: PullWatch; resumed: boolean; summary: string } = await api('POST', `/api/missions/${mission.id}/pulls`, { pr: args.pr });
+    now.pulls = [...now.pulls.filter((pull) => pull.id !== linked.watch.id), linked.watch];
+    return `\n${linked.resumed ? 'Check failures of this pull request are sent again. ' : ''}Linked ${linked.summary}. Crew reads it while this session is open and wakes you only for a newly failed check, new review feedback, a conflict, or checks passing after a failure it told you of. Judge the cause yourself and hand the fix to an agent; never merge, close or deploy on such news.`;
+  };
 
-  if (args.title && !ending) {
+  if (args.title && !ending && args.id === undefined) {
     const title = normalizeTitle(args.title);
     if (!title) throw new Error('A mission needs a title: the command it carries out.');
     // The same title again is the same command: report the step, do not open a second card for it.
     // A resumed lead may resend its whole starting call; its plan is not a revision, so stages are ignored here.
-    if (current && current.title === title) {
-      return describeMission(args.stage || args.preset !== undefined ? await api('POST', `/api/missions/${current.id}`, { stage: args.stage, preset: args.preset }) : current);
-    }
-    // After this server restarts it no longer knows its mission. An open one this session opened under the same title is
-    // that mission. The title alone proves nothing: another session in the project may be carrying out a command of the same name.
-    const all: Mission[] = current || !SESSION ? [] : ((await api('GET', '/api/state')).missions ?? []);
-    const mine = all.filter((m) => m.owner === SESSION && m.project === PROJECT && m.title === title);
-    const lost = mine.find((m) => m.state === 'active');
-    if (lost) {
-      missionId = lost.id;
-      costMission = lost.id;
-      return describeMission(args.stage || args.preset !== undefined ? await api('POST', `/api/missions/${lost.id}`, { stage: args.stage, preset: args.preset }) : lost);
+    const same = now.open.find((m) => m.title === title);
+    if (same) {
+      track(same);
+      const mission = args.stage || args.preset !== undefined || args.tasks !== undefined ? await api('POST', `/api/missions/${same.id}`, { stage: args.stage, preset: args.preset, tasks: args.tasks, lead: SESSION }) : same;
+      const linked = await link(mission);
+      return describeMission(mission, now) + linked;
     }
     // Closed while this server was down, as on the board: the work goes on under the preset the user chose for it.
-    const closed = restarted && !costMission && mine.filter((m) => m.state === 'abandoned' && m.outcome !== SUPERSEDED).sort((a, b) => b.createdAt - a.createdAt)[0];
+    const closed = restarted && !costMission && !now.open.length && now.all.filter((m) => m.title === title && m.state === 'abandoned' && m.outcome !== SUPERSEDED).sort((a, b) => b.createdAt - a.createdAt)[0];
     if (closed) {
       costMission = closed.id;
       return `Mission ${closed.id} was closed outside this session (${closed.outcome || closed.state}). Carry on with the work and do not open a new mission for it.\n${describeMission(closed)}`;
     }
-    // Opened before the previous one is closed, so a refused title leaves the previous mission as it was.
-    const opened: Mission = await api('POST', '/api/missions', { title: args.title, project: PROJECT, stage: args.stage, stages: args.stages, owner: SESSION, preset: args.preset ?? undefined });
-    missionId = opened.id;
-    costMission = opened.id;
+    // A mission already open stays open: the user often gives a second command while the first is still under way.
+    const opened: Mission = await api('POST', '/api/missions', { title: args.title, project: PROJECT, stage: args.stage, stages: args.stages, owner: SESSION, preset: args.preset ?? undefined, tasks: args.tasks });
+    openedHere.add(opened.id);
+    track(opened);
     closedElsewhere = null;
     lastDone = null;
-    if (current) await api('POST', `/api/missions/${current.id}`, { abandoned: true, outcome: SUPERSEDED }).catch(() => {});
-    return `${describeMission(opened)}\nJobs you start now are shown under it. Report each step with stage (no title needed), and finish with done.`;
+    const linked = await link(opened);
+    const others = now.open.filter((m) => m.id !== opened.id);
+    return `${describeMission(opened, now)}${linked}\nJobs you start now are shown under it. Report each step with stage (no title needed), and finish with done.${others.length
+      ? `\nStill open in this session: ${listed(others)}. ${NAME_THE_MISSION} Finish each by its id when its work ends: done, or abandoned if this command replaces it.` : ''}`;
   }
 
+  let current: Mission | null;
+  if (args.id !== undefined) {
+    current = named(now, args.id, 'id');
+    if (current.state !== 'active') throw new Error(`Mission ${current.id} is already ${current.state}${current.outcome ? ` (${current.outcome})` : ''}. ${now.open.length ? `Open: ${listed(now.open)}.` : 'Start a new one by passing title.'}`);
+  } else if (now.open.length > 1) {
+    if (ending || changing || args.pr !== undefined) throw unnamed(now.open, 'id');
+    return `This session has ${now.open.length} missions open. ${NAME_THE_MISSION}\n\n${now.open.map((m) => describeMission(m, now)).join('\n\n')}`;
+  } else current = now.open[0] ?? null;
+
   if (!current) {
+    // The one this session last reported on is no longer open, and the lead did not close it.
+    const gone = missionId ? now.all.find((m) => m.id === missionId && m.state !== 'active') : undefined;
+    if (missionId) {
+      missionId = null;
+      closedElsewhere = gone ?? null;
+    }
     if (closedElsewhere) {
-      const gone = closedElsewhere;
+      const closed = closedElsewhere;
       closedElsewhere = null;
       // Reopening it would bring back a card the user closed. The work goes on; only the reporting stops.
-      return `Mission ${gone.id} was closed outside this session (${gone.outcome || gone.state}). Carry on with the work and do not open a new mission for it.\n${describeMission(gone)}`;
+      return `Mission ${closed.id} was closed outside this session (${closed.outcome || closed.state}). Carry on with the work and do not open a new mission for it.\n${describeMission(closed)}`;
     }
     if (args.preset !== undefined && costMission) throw new Error('This session\'s mission was closed outside it, so its preset can no longer change. Carry on under it, or start a new mission with the preset the user named.');
     throw new Error('This session has no open mission. Start one by passing title; if the work is already under way without one, carry on without reporting.');
   }
+  track(current);
   if (ending) {
     const ended: Mission = await api('POST', `/api/missions/${current.id}`, { done: Boolean(args.done), abandoned: Boolean(args.abandoned), outcome: args.outcome, record: args.record, by: 'lead' });
     missionId = null;
     costMission = null;
     lastDone = args.done ? ended : null;
-    return describeMission(ended);
+    const others = now.open.filter((m) => m.id !== ended.id);
+    return `${describeMission(ended, now)}${others.length ? `\nStill open in this session: ${listed(others)}.${others.length === 1 ? ' Calls that name no mission now go to it; work that follows up the one just finished gets a mission of its own first.' : ''}` : ''}`;
   }
-  if (!args.stage && args.stages === undefined && args.preset === undefined) return describeMission(current);
-  return describeMission(await api('POST', `/api/missions/${current.id}`, { stage: args.stage, stages: args.stages, preset: args.preset }));
+  const mission: Mission = changing ? await api('POST', `/api/missions/${current.id}`, { stage: args.stage, stages: args.stages, preset: args.preset, tasks: args.tasks, lead: SESSION }) : current;
+  const linked = await link(mission);
+  return describeMission(mission, now) + linked;
 }
 
 function describeJob(job: JobView, ctx: CallContext): string {
@@ -673,8 +735,8 @@ async function followUp(): Promise<string> {
   if (costMission || !lastDone || !SESSION) return '';
   const after = lastDone;
   opening = api('POST', '/api/missions', { title: followUpTitle(after.title), project: PROJECT, owner: SESSION, stages: ['implement', 'final'] }).then((opened: Mission) => {
-    missionId = opened.id;
-    costMission = opened.id;
+    openedHere.add(opened.id);
+    track(opened);
     lastDone = null;
     return `Opened mission ${opened.id} "${opened.title}" for this work, since "${after.title}" was done. Report its stage and done as usual, and pass stages to change its plan.\n`;
   });
@@ -685,12 +747,15 @@ async function followUp(): Promise<string> {
   }
 }
 
-async function runJob(spec: JobSpec, background: boolean, ctx: CallContext): Promise<string> {
-  await reattach();
-  const opened = await followUp();
+/** `wanted`: the mission the call named for this job, if any. */
+async function runJob(spec: JobSpec, background: boolean, ctx: CallContext, wanted?: unknown): Promise<string> {
+  // Settled before anything is started and fixed for the whole request, whatever other calls do meanwhile.
+  let mission = await jobMission(wanted);
+  const opened = mission ? '' : await followUp();
+  mission ??= costMission ?? undefined;
   try {
     // The id is sent as it is known: the daemon applies the mission's preset, and lets the job stand on its own if the mission has ended.
-    const job: JobView = await withMission(() => api('POST', '/api/jobs', { ...spec, lead: SESSION, project: PROJECT, mission: costMission ?? undefined }));
+    const job: JobView = await withMission(mission, () => api('POST', '/api/jobs', { ...spec, lead: SESSION, project: PROJECT, mission }));
     return opened + await (background ? describeJob(job, ctx) : followOne(job.id, ctx));
   } catch (err) {
     // The mission is open either way, so the lead hears of it even when the job fails.
@@ -785,9 +850,9 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
   }
   switch (name) {
     case 'debate':
-      return runJob({ kind: 'delegate', role: 'debate', cwd, title: args.title ?? `Debate: ${String(args.topic).split('\n')[0].slice(0, 60)}`, task: `${args.topic}\n\n# The lead's position\n${args.position}`, debate: { rounds: args.rounds ?? 3 }, agent: args.agent, tier: args.tier, model: args.model, effort: args.effort }, args.background !== false, ctx);
+      return runJob({ kind: 'delegate', role: 'debate', cwd, title: args.title ?? `Debate: ${String(args.topic).split('\n')[0].slice(0, 60)}`, task: `${args.topic}\n\n# The lead's position\n${args.position}`, debate: { rounds: args.rounds ?? 3 }, agent: args.agent, tier: args.tier, model: args.model, effort: args.effort, taskId: args.task_id }, args.background !== false, ctx, args.mission);
     case 'delegate':
-      return withNotes(await runJob({ kind: 'delegate', role: args.role ?? 'delegate', cwd, title: args.title, task: args.task, done_when: args.done_when, check: args.check, base: args.base, isolation: args.isolation, agent: args.agent, tier: args.tier, model: args.model, effort: args.effort, exclusive: Boolean(args.exclusive), runsApp: Boolean(args.runs_app), plugins: args.plugins, skills: args.skills, attachments: args.attachments }, args.background !== false, ctx), [args.agent], 2, true);
+      return withNotes(await runJob({ kind: 'delegate', role: args.role ?? 'delegate', cwd, title: args.title, task: args.task, done_when: args.done_when, check: args.check, base: args.base, isolation: args.isolation, agent: args.agent, tier: args.tier, model: args.model, effort: args.effort, exclusive: Boolean(args.exclusive), runsApp: Boolean(args.runs_app), plugins: args.plugins, skills: args.skills, attachments: args.attachments, taskId: args.task_id }, args.background !== false, ctx, args.mission), [args.agent], 2, true);
     case 'review': {
       const kind = args.target ?? 'uncommitted';
       if (kind === 'branch' && !args.base) throw new Error('target "branch" needs base (the branch to compare against, e.g. main).');
@@ -795,11 +860,11 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       const target = kind === 'branch' ? { type: 'baseBranch' as const, branch: args.base } : kind === 'commit' ? { type: 'commit' as const, sha: args.commit } : { type: 'uncommittedChanges' as const };
       // The focus can be long; the board title only needs to say what is under review.
       const title = `Review of ${kind === 'branch' ? `the branch against ${args.base}` : kind === 'commit' ? `commit ${args.commit.slice(0, 8)}` : 'uncommitted changes'}`;
-      return runJob({ kind: 'review', role: args.runs_app ? 'verify' : 'review', cwd, title, task: args.focus, done_when: args.done_when, review: { target, mode: args.mode ?? 'adversarial' }, agent: args.agent, tier: args.tier, model: args.model, effort: args.effort, runsApp: Boolean(args.runs_app), plugins: args.plugins, skills: args.skills, attachments: args.attachments }, args.background !== false, ctx);
+      return runJob({ kind: 'review', role: args.runs_app ? 'verify' : 'review', cwd, title, task: args.focus, done_when: args.done_when, review: { target, mode: args.mode ?? 'adversarial' }, agent: args.agent, tier: args.tier, model: args.model, effort: args.effort, runsApp: Boolean(args.runs_app), plugins: args.plugins, skills: args.skills, attachments: args.attachments, taskId: args.task_id }, args.background !== false, ctx, args.mission);
     }
     case 'polish':
       if (args.exclusive) throw new Error('polish cannot run alone: an editor measures nothing. Drop exclusive.');
-      return runJob({ kind: 'polish', role: 'polish', cwd, title: args.title ?? `Polish ${args.targets.join(', ')}`, task: args.guidance, targets: args.targets, base: args.base, isolation: args.isolation, agent: args.agent, tier: args.tier, model: args.model, skills: args.skills }, args.background !== false, ctx);
+      return runJob({ kind: 'polish', role: 'polish', cwd, title: args.title ?? `Polish ${args.targets.join(', ')}`, task: args.guidance, targets: args.targets, base: args.base, isolation: args.isolation, agent: args.agent, tier: args.tier, model: args.model, skills: args.skills, taskId: args.task_id }, args.background !== false, ctx, args.mission);
     case 'mission':
       return reportMission(args);
     case 'route': {
@@ -807,9 +872,9 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
         const measured = describeUsage(await api('GET', '/api/usage'));
         return measured.length ? measured.join('\n') : 'AgentGauge has no usage data on this machine, so the roles are followed as assigned.';
       }
-      await reattach();
-      const query = `kind=${encodeURIComponent(args.kind)}${costMission ? `&mission=${encodeURIComponent(costMission)}` : ''}`;
-      const decision: RouteDecision & { preset?: PresetName | null; policy?: Preset | null } = await withMission(() => api('GET', `/api/route?${query}`));
+      const mission = await jobMission(args.mission);
+      const query = `kind=${encodeURIComponent(args.kind)}${mission ? `&mission=${encodeURIComponent(mission)}` : ''}`;
+      const decision: RouteDecision & { preset?: PresetName | null; policy?: Preset | null } = await withMission(mission, () => api('GET', `/api/route?${query}`));
       const who = decision.assignee === 'claude' ? 'you (the lead)' : WORKERS[decision.assignee].name;
       const lines = [`${args.kind} → ${who}`, decision.reason];
       if (decision.degraded) lines.push('Degraded: the usual cross-check is missing. Say so in your report.');

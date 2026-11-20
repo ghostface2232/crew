@@ -23,6 +23,10 @@ export function browserProfile(writable: string[], unreadable: string[]): string
   };
   const quote = (value: string) => JSON.stringify(value);
   const roots = [...new Set(writable.flatMap((dir) => [dir, real(dir)]))];
+  const git = [...new Set(roots.flatMap((dir) => {
+    const file = path.join(dir, '.git');
+    return [file, real(file)];
+  }))];
   return [
     '(version 1)',
     '(allow default)',
@@ -32,6 +36,8 @@ export function browserProfile(writable: string[], unreadable: string[]): string
     '(deny appleevent-send)',
     '(deny job-creation)',
     ...unreadable.flatMap((file) => [...new Set([file, real(file)])]).map((file) => `(deny file-read* file-write* (literal ${quote(file)}))`),
+    // The bridge runs Git outside the sandbox, where a modified pointer or config could run commands.
+    ...git.map((file) => `(deny file-write* (literal ${quote(file)}) (subpath ${quote(file)}))`),
     '(deny file-write*',
     '  (require-not',
     '    (require-any',

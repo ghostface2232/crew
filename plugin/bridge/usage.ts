@@ -398,9 +398,8 @@ export function route(kind: RouteKind, usage: Usage, roles: Config['roles'], dis
     // The engineer is the first worker holding implementation: Claude may hold it too, and cannot hand work to itself.
     const engineer = workersFor('delegate', roles.delegate, disabled)[0];
     if (status(LEAD) === 'exhausted') {
-      // Handing the session over is not undone lightly: only to an engineer measured to have room.
-      const takeover = engineer === 'codex' && status('codex') === 'ok';
-      return { kind, assignee: takeover ? 'codex' : LEAD, reason: `${why(LEAD)} ${takeover ? 'Finish the step you are on, tell the user that Claude is out of usage and when it resets, and say what is left.' : 'No other agent can lead; stop and tell the user.'}`, fallback: [], degraded: true, deferUntil: resets(LEAD) };
+      const codexHasRoom = engineer === 'codex' && status('codex') === 'ok';
+      return { kind, assignee: LEAD, reason: `${why(LEAD)} ${codexHasRoom ? 'Finish the step you are on, tell the user that Claude is out of usage and when it resets, and say what is left.' : 'No other agent can lead; stop and tell the user.'}`, fallback: [], degraded: true, deferUntil: resets(LEAD) };
     }
     if (status(LEAD) === 'tight') {
       if (!engineer) return plain(LEAD, `${why(LEAD)} Keep to planning and merge decisions, and give more implementation to subagents.`);

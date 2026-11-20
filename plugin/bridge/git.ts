@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { constants, existsSync, lstatSync, realpathSync } from 'node:fs';
+import { constants, existsSync, lstatSync, readlinkSync, realpathSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -232,7 +232,7 @@ async function cloneDirectory(source: string, dest: string): Promise<void> {
 
 /** True when `file` is `root` or inside it, after resolving symlinks. */
 export function isInside(root: string, file: string): boolean {
-  const rel = path.relative(realpath(root), realpath(path.resolve(root, file)));
+  const rel = path.relative(realpath(root), realpath(file, root));
   return rel === '' || (rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
 }
 
@@ -242,20 +242,46 @@ export function isInside(root: string, file: string): boolean {
  * would have its own commands run there (a clean filter, a textconv driver).
  */
 export function isGitPath(root: string, file: string): boolean {
-  const first = path.relative(realpath(root), realpath(path.resolve(root, file))).split(path.sep)[0];
+  const first = path.relative(realpath(root), realpath(file, root)).split(path.sep)[0];
   // Compared without case: on the usual macOS and Windows volumes `.GIT` is the same entry.
   return first.toLowerCase() === '.git';
 }
 
-/** Resolves symlinks for the part of the path that exists; the rest may be a file not created yet. */
-export function realpath(target: string): string {
-  let existing = path.resolve(target);
-  const rest: string[] = [];
-  while (!existsSync(existing) && path.dirname(existing) !== existing) {
-    rest.unshift(path.basename(existing));
-    existing = path.dirname(existing);
+/**
+ * Resolves a path in the order the filesystem does: a symlink before a `..` that follows it. The part that does not
+ * exist yet may be a file or directories still to be created, so there a `..` only takes back the name before it.
+ */
+export function realpath(target: string, base = process.cwd()): string {
+  const { root } = path.parse(target);
+  if (!root && base !== process.cwd()) return realpath(base + path.sep + target);
+  const parts = target.slice(root.length).split(path.sep === '\\' ? /[\\/]/ : '/');
+  let current = realpathSync.native(root ? path.resolve(base, root) : base);
+  // Names below the last directory that exists.
+  const missing: string[] = [];
+  for (const [i, part] of parts.entries()) {
+    if (part === '' || part === '.') continue;
+    if (part === '..') {
+      if (!missing.pop()) current = path.dirname(current);
+      continue;
+    }
+    if (missing.length) {
+      missing.push(part);
+      continue;
+    }
+    const next = current.endsWith(path.sep) ? current + part : current + path.sep + part;
+    try {
+      current = realpathSync.native(next);
+    } catch (err) {
+      const { code } = err as NodeJS.ErrnoException;
+      if (code !== 'ENOENT' && code !== 'ENOTDIR') throw err;
+      // A dangling link can still redirect a write that creates its target.
+      if (code === 'ENOENT' && lstatSync(next, { throwIfNoEntry: false })?.isSymbolicLink()) {
+        return realpath([readlinkSync(next), ...parts.slice(i + 1)].join(path.sep), current);
+      }
+      missing.push(part);
+    }
   }
-  return path.join(realpathSync(existing), ...rest);
+  return missing.length ? path.join(current, ...missing) : current;
 }
 
 /**
@@ -456,7 +482,7 @@ async function worktreeAdmin(root: string, wt: string, known?: string): Promise<
       if (err.code !== 'ENOENT') throw err;
       return '';
     });
-    if (target && realpath(path.resolve(admin, target.trim())) === realpath(path.join(wt, '.git'))) return admin;
+    if (target && realpath(target.trim(), admin) === realpath(path.join(wt, '.git'))) return admin;
   }
   if (known) {
     requireAdminDir(common, known);

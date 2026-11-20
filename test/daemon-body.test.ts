@@ -84,3 +84,13 @@ test('a character split across two chunks of a body is read whole', async () => 
   req.emit('end');
   assert.deepEqual(await result, { task: '한글 지시문' });
 });
+
+test('an incomplete UTF-8 sequence after valid JSON makes the body malformed', async () => {
+  const h = reader();
+  const req = new EventEmitter();
+  const rejected = assert.rejects(h.readJson(req), { status: 400, message: 'invalid JSON' });
+  req.emit('data', Buffer.from('{}'));
+  req.emit('data', Buffer.from([0xe2]));
+  req.emit('end');
+  await rejected;
+});

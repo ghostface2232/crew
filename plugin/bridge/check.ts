@@ -27,11 +27,7 @@ const KEEP_OUTPUT = 4000;
 function checkProfile(cwd: string, tmp: string, unreadable: string[], network: boolean): string {
   const quote = (value: string) => JSON.stringify(value);
   const both = (dir: string) => [...new Set([dir, real(dir)])];
-  // The bridge runs git in this worktree right after the check; a rewritten .git pointer or config would run
-  // the check's own commands outside the sandbox (core.fsmonitor, hooks).
-  const git = both(path.join(cwd, '.git')).map((file) => `(literal ${quote(file)}) (subpath ${quote(file)})`).join(' ');
-  const profile = `${browserProfile([cwd, tmp], unreadable)}
-(deny file-write* ${git})`;
+  const profile = browserProfile([cwd, tmp], unreadable);
   if (network) return profile;
   // Local servers stay reachable for test suites; other local sockets (an SSH agent, Docker) do not.
   return `${profile}

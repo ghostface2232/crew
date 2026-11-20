@@ -817,7 +817,7 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       if (decision.fallback.length) lines.push(`If that fails: ${decision.fallback.map((a) => (a === 'claude' ? 'you' : WORKERS[a].name)).join(', then ')}.`);
       // A daemon that predates holders lists none.
       // Without agent a job goes to the role's first worker, which route may have just skipped.
-      if (args.kind !== 'lead' && decision.assignee !== 'claude' && decision.assignee !== decision.holders?.find((h) => h.agent !== 'claude')?.agent) lines.push(`Pass agent: ${decision.assignee}.`);
+      if (decision.assignee !== 'claude' && decision.assignee !== decision.holders?.find((h) => h.agent !== 'claude')?.agent) lines.push(`Pass agent: ${decision.assignee}.`);
       if ((decision.holders?.length ?? 0) > 1) lines.push(`Holders you may pick with agent: ${decision.holders!.map((h) => `${h.agent} (${h.status})`).join(', ')}.`);
       // A daemon that predates mission presets sends none; the session's instructions then still hold.
       if (decision.preset !== undefined) lines.push(presetPolicy(decision.preset, decision.policy ?? undefined, ' for the next job'));

@@ -373,6 +373,7 @@ function readJson(req: http.IncomingMessage): Promise<any> {
     req.on('end', () => {
       if (overflow) return;
       try {
+        body += decoder.end();
         resolve(body ? JSON.parse(body) : {});
       } catch {
         reject(new HttpError(400, 'invalid JSON'));

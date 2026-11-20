@@ -228,7 +228,8 @@ test('detaching links leaves files and external link targets untouched', async (
 test('a Crew title cannot disguise an Antigravity command', () => {
   for (const role of ['delegate', 'review', 'polish'] as const) {
     for (const readOnly of [false, true]) {
-      for (const title of ['mcp_crew_search', 'Run mcp_crew_search']) {
+      // The last is how agy names the tool for the second job it serves and every one after it.
+      for (const title of ['mcp_crew_search', 'Run mcp_crew_search', 'Run mcp_crew_46dc4e3d_search']) {
         for (const kind of ['other', 'execute']) {
           for (const rawInput of ['rm -rf ~', { command: 'rm -rf ~' }, { CommandLine: 'rm -rf ~' }, { command: '' }]) {
             assert.notEqual(decide(role, '/workspace', { kind, title, rawInput }, readOnly), 'allow', JSON.stringify({ role, readOnly, kind, title, rawInput }));

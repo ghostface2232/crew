@@ -471,11 +471,12 @@ export function decide(role: JobKind, cwd: string, toolCall: { kind?: string; ti
   // The daemon's secret is not a worker's to read, whatever the role. Commands are the user's to approve as before.
   const secret = tokenFile(HOME);
   if ((toolCall.locations ?? []).some((l) => l.path && path.resolve(l.path) === secret)) return { refuse: 'the Crew token file' };
-  // A qualified title can identify an MCP call, but must never disguise a command.
+  // A qualified title can identify an MCP call, but must never disguise a command. One agy process serves every job, and
+  // each job's server is another one named crew to it: from the second on it tells them apart by eight hex digits in the name.
   const input = toolCall.rawInput;
   const command = typeof input === 'string' || (input !== null && typeof input === 'object' && COMMAND_FIELDS.some((field) => field in input));
   if (!toolCall._meta?.mcpServerName && !toolCall._meta?.mcpToolName && kind === 'other' && !command
-    && /^(?:Run )?mcp_crew_(?:ask_lead|lead_answers|siblings|search|recent_changes|rate)$/.test(toolCall.title ?? '')) return 'allow';
+    && /^(?:Run )?mcp_crew_(?:[0-9a-f]{8}_)?(?:ask_lead|lead_answers|siblings|search|recent_changes|rate)$/.test(toolCall.title ?? '')) return 'allow';
   if (PASSIVE_KINDS.includes(kind)) return 'allow';
   if (kind === 'switch_mode') return { refuse: kind };
   if (readOnly && role !== 'review') return { refuse: kind === 'edit' ? 'edit in a read-only job' : kind };

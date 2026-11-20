@@ -129,6 +129,10 @@ export class Delivery {
     return appeared;
   }
 
+  forget(session: string): void {
+    this.seen.delete(session);
+  }
+
   /** Whether a lead session is open in Claude Code now, as far as its hooks show: it takes no usage to ask. */
   present(session: string, now = Date.now()): boolean {
     return now - (this.seen.get(session) ?? -Infinity) < PRESENT_MS;

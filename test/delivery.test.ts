@@ -319,6 +319,11 @@ test('notification routes require authentication; hook ingestion cannot ACK; shu
   assert.doesNotMatch((await route({ method: 'POST', url: '/api/lead/context', auth: true, body: { session: 'lead', event: 'UserPromptSubmit' } }, {})).text, /plan of/);
   // Its pull requests are read when it appears, not again with each of its calls.
   assert.deepEqual(appeared, ['lead']);
+  await route({ method: 'POST', url: '/api/hooks/claude', auth: true, body: { session_id: 'lead', hook_event_name: 'SessionEnd' } }, {});
+  assert.equal(h.delivery.present('lead'), false);
+  await route({ method: 'POST', url: '/api/lead/context', auth: true, body: { session: 'lead' } }, {});
+  assert.deepEqual(appeared, ['lead', 'lead']);
+  ingested = 0;
   // Only the lead's own done marks a mission done by the lead; the board's does not.
   assert.equal((await route({ method: 'POST', url: '/api/missions/m-1', auth: true, body: { done: true, by: 'lead' } }, {})).input.byLead, true);
   assert.equal((await route({ method: 'POST', url: '/api/missions/m-1', auth: true, body: { done: true } }, {})).input.byLead, false);
@@ -463,4 +468,55 @@ test('a watched pull request\'s news is offered, acknowledged and saved beside t
   // Another session can neither be offered a watch's news nor take it over as it would a job.
   assert.equal(again.jobs.delivery.offer('other'), null);
   assert.deepEqual(again.jobs.delivery.adopt('other', [watch.id]), []);
+});
+
+test('a mixed receipt survives restart after its watch news is acknowledged and more news arrives', async (t) => {
+  const h = harness(t);
+  const pulls = new Pulls({
+    gh: async () => JSON.stringify({ url: 'https://github.com/o/r/pull/7', number: 7, title: 'T', state: 'OPEN',
+      headRefOid: 'abc', mergeable: 'MERGEABLE', reviewDecision: '' }),
+    mission: () => ({ state: 'active', owner: 'lead', root: '/project' }),
+    present: () => true, save: () => {}, changed: () => {},
+  });
+  const { watch } = await pulls.link('m-1', '7');
+  const job = await h.create();
+  const delivery = new Delivery(() => [job], () => {}, () => pulls.list());
+  addNews(job, 'done', 'job finished');
+  addNews(watch, 'checks', 'first failure');
+  const mixed = delivery.offer('lead')!;
+  assert.equal(delivery.state.receipts[mixed.receipt].items.length, 2);
+  for (let i = 0; i <= 20; i++) {
+    if (i) addNews(watch, 'checks', `later failure ${i}`);
+    const watchOnly = delivery.offer('lead', { ids: [watch.id] })!;
+    assert.deepEqual(delivery.ack('lead', watchOnly.receipt), []);
+  }
+
+  pulls.restore(JSON.parse(JSON.stringify(pulls.saved(new Set([watch.id, job.id])))));
+  const restored = new Delivery(() => [job], () => {}, () => pulls.list());
+  restored.restore(JSON.parse(JSON.stringify(delivery.state)));
+  assert.deepEqual(restored.ack('lead', mixed.receipt), []);
+  assert.equal(unread(job).length, 0);
+});
+
+test('job creation validates a task against its mission before detaching ended missions', async () => {
+  const source = fs.readFileSync(new URL('../plugin/bridge/daemon.ts', import.meta.url), 'utf8');
+  const route = source.slice(source.indexOf("    if (pathname === '/api/jobs')"), source.indexOf("    if (pathname.startsWith('/api/lead/'))"));
+  const mission = { id: 'm-1', state: 'done', tasks: [{ id: 'build' }] };
+  const create = vm.runInNewContext(stripTypeScriptTypes(`(async (req: any) => { const pathname = '/api/jobs'; ${route} })`), {
+    HttpError: class extends Error { status: number; constructor(status: number, message: string) { super(message); this.status = status; } },
+    readJson: async (req: unknown) => req, missions: { list: () => [mission] },
+    missionPreset: () => 'economy', liveConfig: () => ({}),
+    jobs: { create: async (spec: unknown) => spec }, view: (job: unknown) => job,
+  });
+  await assert.rejects(create({ taskId: 'build' }), { status: 400, message: /task_id.*mission/ });
+  await assert.rejects(create({ mission: mission.id, taskId: 'missing' }), { status: 400, message: /has no task "missing"/ });
+  const ended = await create({ mission: mission.id, taskId: 'build', notes: ['prior note'] });
+  assert.equal(ended.mission, undefined);
+  assert.equal(ended.taskId, undefined);
+  assert.equal(ended.preset, 'economy');
+  assert.match(ended.notes.join('\n'), /prior note\n.*shown on its own\.\n.*task "build" was dropped/);
+  mission.state = 'active';
+  const active = await create({ mission: mission.id, taskId: 'build' });
+  assert.equal(active.mission, mission.id);
+  assert.equal(active.taskId, 'build');
 });

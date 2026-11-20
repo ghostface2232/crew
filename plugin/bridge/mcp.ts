@@ -520,6 +520,7 @@ interface CallContext {
   /** Evidence images to show with the text result. */
   images: Evidence[];
   jobs: JobView[];
+  pullIds?: string[];
   /** False for a listing: it shows jobs without acting on them, so it offers their news but takes none over. */
   adopt?: boolean;
 }
@@ -579,6 +580,10 @@ async function standing(): Promise<Standing> {
   return { all, open: all.filter((m) => m.state === 'active').sort((a, b) => a.createdAt - b.createdAt), jobs: state.jobs ?? [], pulls: state.pulls ?? [] };
 }
 
+function sessionPulls(pulls: PullWatch[]): PullWatch[] {
+  return SESSION ? pulls.filter((pull) => pull.lead === SESSION) : [];
+}
+
 const listed = (missions: Mission[]) => missions.map((m) => `${m.id} "${m.title}" (${m.stage})`).join(', ');
 
 /**
@@ -632,12 +637,21 @@ function describeMission(mission: Mission, now?: Pick<Standing, 'jobs' | 'pulls'
   return [missionHead(mission), now ? missionDetail(mission, now.jobs, now.pulls) : '', policy].filter(Boolean).join('\n');
 }
 
-async function reportMission(args: any): Promise<string> {
+let missionReports = Promise.resolve();
+
+function reportMission(args: any, ctx?: CallContext): Promise<string> {
+  const report = missionReports.then(() => updateMission(args, ctx));
+  missionReports = report.then(() => {}, () => {});
+  return report;
+}
+
+async function updateMission(args: any, ctx?: CallContext): Promise<string> {
+  const now = await standing();
+  if (ctx) ctx.pullIds = sessionPulls(now.pulls).map((pull) => pull.id);
   if (args.done && args.abandoned) throw new Error('Pass done or abandoned, not both.');
   const restarted = fresh;
   fresh = false;
   const ending = Boolean(args.done || args.abandoned);
-  const now = await standing();
   const changing = Boolean(args.stage) || args.stages !== undefined || args.preset !== undefined || args.tasks !== undefined;
   // Links a pull request and says what stands on it now; what is already there is not sent again as news.
   const link = async (mission: Mission): Promise<string> => {
@@ -751,6 +765,7 @@ async function followUp(): Promise<string> {
 async function runJob(spec: JobSpec, background: boolean, ctx: CallContext, wanted?: unknown): Promise<string> {
   // Settled before anything is started and fixed for the whole request, whatever other calls do meanwhile.
   let mission = await jobMission(wanted);
+  if (!mission && spec.taskId !== undefined) throw new Error('task_id must be the id of a task of the job\'s mission');
   const opened = mission ? '' : await followUp();
   mission ??= costMission ?? undefined;
   try {
@@ -866,7 +881,7 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       if (args.exclusive) throw new Error('polish cannot run alone: an editor measures nothing. Drop exclusive.');
       return runJob({ kind: 'polish', role: 'polish', cwd, title: args.title ?? `Polish ${args.targets.join(', ')}`, task: args.guidance, targets: args.targets, base: args.base, isolation: args.isolation, agent: args.agent, tier: args.tier, model: args.model, skills: args.skills, taskId: args.task_id }, args.background !== false, ctx, args.mission);
     case 'mission':
-      return reportMission(args);
+      return reportMission(args, ctx);
     case 'route': {
       if (!args.kind) {
         const measured = describeUsage(await api('GET', '/api/usage'));
@@ -926,6 +941,12 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       const elsewhere = state.jobs.filter((j: JobView) => j.project !== PROJECT && !j.endedAt).length;
       if (elsewhere) lines.push(`(${elsewhere} active job(s) belong to other projects; they are on the board.)`);
       if (recent.length) lines.push('', 'Recent:', ...recent.map(summarize));
+      const pulls = sessionPulls(state.pulls ?? []);
+      ctx.pullIds = pulls.map((pull) => pull.id);
+      if (pulls.length) {
+        lines.push('', 'Watched pull requests:', ...pulls.slice(0, 8).map((pull) => `[${pull.id}] ${pull.repo}#${pull.number} · ${pull.state}`));
+        if (pulls.length > 8) lines.push(`(${pulls.length - 8} more.)`);
+      }
       // A daemon that predates the role table reports none.
       if (state.roles) lines.push('', `Roles: ${(Object.keys(state.roles) as Role[]).map((role) => `${role} → ${holder(role, state.roles)}`).join(', ')}`);
       // A daemon that predates AgentGauge support reports no usage; Codex's own figures are then all there is.
@@ -1037,8 +1058,16 @@ async function handle(msg: any): Promise<void> {
             ackNote = clipped(`\n\nack not applied: ${String((err as Error).message ?? err).split('\n')[0].replace(/\.$/, '')}. The news stays unacknowledged; read it with status.`, 600);
           });
         }
-        let text = clipped(await callTool(params.name, args, ctx), LEAD_TEXT_BYTES) + ackNote;
-        if (SESSION && ctx.jobs.length) {
+        let text: string;
+        let isError: true | undefined;
+        try {
+          text = clipped(await callTool(params.name, args, ctx), LEAD_TEXT_BYTES) + ackNote;
+        } catch (err) {
+          if (!ctx.pullIds?.length) throw err;
+          isError = true;
+          text = clipped(String((err as Error).message ?? err), 7000);
+        }
+        if (SESSION && (ctx.jobs.length || ctx.pullIds?.length)) {
           // The call has already taken effect; failing it now over a missing offer would invite a duplicate retry.
           // The news stays in the ledger for the watcher, the Stop hook, or the next call.
           const ids = [...new Set(ctx.jobs.map((job) => job.id))];
@@ -1046,13 +1075,13 @@ async function handle(msg: any): Promise<void> {
           // news. A job cut off by the bound stays with its owner.
           const shown = ctx.adopt === false ? [] : ids.filter((jobId) => text.includes(`[${jobId}]`)).slice(0, 50);
           const offer = await (shown.length ? api('POST', '/api/lead/adopt', { session: SESSION, job_ids: shown }) : Promise.resolve())
-            .then(() => api('POST', '/api/lead/offer', { session: SESSION, job_ids: ids, bytes: 4000 }))
+            .then(() => api('POST', '/api/lead/offer', { session: SESSION, job_ids: [...ids, ...(ctx.pullIds ?? [])], bytes: 4000 }))
             .then(({ offer }) => offer, () => null);
           if (offer) text += `\n\n${offer.text}`;
         }
         // The limit is on text, which is what grew without bound; evidence images keep their own path as before.
         if (jsonBytes(text) > LEAD_BYTES) throw new Error('Crew response exceeds its size limit. Read one job at a time.');
-        reply({ content: [{ type: 'text', text }, ...imageContent(ctx.images)] });
+        reply({ content: [{ type: 'text', text }, ...imageContent(ctx.images)], isError });
       } catch (err) {
         reply({ content: [{ type: 'text', text: clipped(String((err as Error).message ?? err), 7000) }], isError: true });
       } finally {

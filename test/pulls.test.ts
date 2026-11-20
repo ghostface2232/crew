@@ -132,9 +132,19 @@ test('reviews record every id and send only new feedback from other reviewers', 
   assert.equal(watch.review, 'changes_requested');
   assert.deepEqual(watch.reviews, ['own', 'approved', 'change']);
   assert.deepEqual(observe(watch, reviewed), []);
-  const reviews = Array.from({ length: 201 }, (_, i) => ({ id: String(i), state: 'APPROVED' }));
-  assert.deepEqual(observe(watch, view({ reviews })), []);
-  assert.deepEqual(watch.reviews, reviews.slice(1).map(({ id }) => id));
+  const reviews = Array.from({ length: 201 }, (_, i) => ({
+    id: String(i), state: i === 0 ? 'COMMENTED' : 'APPROVED', author: { login: 'reviewer' },
+  }));
+  const latest = view({ reviews });
+  assert.deepEqual(observe(watch, latest).map(({ kind }) => kind), ['review']);
+  assert.deepEqual(observe(watch, latest), []);
+  assert.deepEqual(watch.reviews, reviews.map(({ id }) => id));
+  for (const empty of [[], undefined, null]) observe(watch, view({ reviews: empty }));
+  const restored = harness().pulls;
+  restored.restore([watch]);
+  assert.deepEqual(observe(restored.list()[0], latest), []);
+  observe(watch, view({ reviews: reviews.slice(-1) }));
+  assert.deepEqual(watch.reviews, ['200']);
 });
 
 test('a conflict only returns after a mergeable observation; a merged PR only updates its title and state', async () => {
@@ -356,4 +366,32 @@ test('a failed link save leaves no new watch and preserves an existing hold', as
   assert.equal(watch.held, true);
   assert.equal(watch.failingHeads, 4);
   assert.deepEqual(h.changes, [watch.id]);
+});
+
+test('check keys stay on one line and at most 100 characters', async () => {
+  const { watch } = await harness().pulls.link('one', URL);
+  observe(watch, view({ statusCheckRollup: [
+    { ...run('build\r\nstep'), workflowName: 'CI\nworkflow' },
+    { __typename: 'StatusContext', context: `ci\n${'s'.repeat(150)}`, state: 'ERROR' },
+  ] }));
+  assert.deepEqual(watch.told.checks, ['CI workflow / build step', `ci ${'s'.repeat(97)}`]);
+});
+
+test('an in-flight observation cannot update a watch whose mission has ended tracking', async () => {
+  for (const state of ['abandoned', 'missing']) {
+    const h = harness();
+    const { watch } = await h.pulls.link('one', URL);
+    const { promise, resolve } = Promise.withResolvers<string>();
+    h.deps.gh = () => promise;
+    h.advance(300_000);
+    const running = h.pulls.tick();
+    if (state === 'abandoned') h.missions.get('one')!.state = 'abandoned';
+    else h.missions.delete('one');
+    resolve(JSON.stringify(view({ title: 'Ignored', statusCheckRollup: [run('build')] })));
+    await running;
+    assert.equal(watch.ended, true);
+    assert.equal(watch.title, 'Update Crew');
+    assert.equal(watch.news, undefined);
+    assert.deepEqual(h.changes, [watch.id, watch.id]);
+  }
 });

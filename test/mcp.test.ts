@@ -11,6 +11,7 @@ import { TIERS } from '../plugin/bridge/tiers.ts';
 import { canonicalPath, defaultHolder, disabledAgents, LEAD, PRESET_NAMES, ROLE_INFO, WORKERS } from '../plugin/bridge/config.ts';
 import { addNews, clipped, Delivery, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, REPORT_PAGE_BYTES, textPage, unread } from '../plugin/bridge/delivery.ts';
 import type { Job } from '../plugin/bridge/jobs.ts';
+import type { PullWatch } from '../plugin/bridge/pulls.ts';
 
 /**
  * The mission half of mcp.ts run against the real mission store, standing in for the daemon. Each call starts a
@@ -46,9 +47,9 @@ function missionServer(t: TestContext) {
     if (body.done || body.abandoned) return missions.finish(id, { outcome: body.outcome, record: body.record, abandoned: Boolean(body.abandoned), byLead: body.by === 'lead' });
     return missions.update(id, body);
   };
-  const server = (session: string | undefined = 'lead', fresh = false) => {
+  const server = (session: string | null = 'lead', fresh = false) => {
     const context: Record<string, any> = {
-      missionHead, missionDetail, NAME_THE_MISSION, normalizeTitle, followUpTitle, SESSION: session, PROJECT: canonicalPath('/project'), missionId: null, closedElsewhere: null,
+      missionHead, missionDetail, NAME_THE_MISSION, normalizeTitle, followUpTitle, SESSION: session ?? undefined, PROJECT: canonicalPath('/project'), missionId: null, closedElsewhere: null,
       costMission: null, lastDone: null, fresh, openedHere: new Set<string>(), SUPERSEDED: 'Superseded by a new mission.', currentPolicy: () => 'policy', globalPreset: () => null,
       describeJob: (job: Job) => `job ${job.id}`, api,
     };
@@ -395,4 +396,71 @@ test('the session instructions fit what Claude Code keeps of them', () => {
   assert.ok(instructions.length <= 4096, `${instructions.length} characters`);
   for (const role of ROLE_INFO) assert.ok(instructions.includes(`\`${role.role}\``), role.role);
   assert.match(instructions, /The global one is "balanced"/);
+});
+
+test('concurrent mission reports without a session id resume the same title', async (t) => {
+  const { missions, server } = missionServer(t);
+  const { reportMission } = server(null);
+  await Promise.all([
+    reportMission({ title: 'Same command', stages: ['plan', 'implement', 'final'] }),
+    reportMission({ title: 'Same command', stage: 'implement' }),
+  ]);
+  assert.equal(missions.list().length, 1);
+  assert.equal(missions.list()[0].stage, 'implement');
+});
+
+test('a task job without a mission cannot open a follow-up', async (t) => {
+  const { missions, calls, server } = missionServer(t);
+  const { reportMission, runJob } = server();
+  await reportMission({ title: 'Finished command' });
+  await reportMission({ done: true });
+  const before = calls.length;
+  await assert.rejects(runJob({ kind: 'delegate', task: 'x', taskId: 'ui' }, true, { jobs: [] }), /task_id.*mission/);
+  assert.equal(missions.list().length, 1);
+  assert.ok(calls.slice(before).every(({ method }) => method === 'GET'));
+});
+
+test('status and mission explicitly read this session\'s watch news without any jobs', async () => {
+  const source = fs.readFileSync(new URL('../plugin/bridge/mcp.ts', import.meta.url), 'utf8');
+  const tool = source.slice(source.indexOf('async function callTool('), source.indexOf('// --- MCP stdio transport'));
+  const handler = source.slice(source.indexOf('async function handle('), source.indexOf('readline.createInterface'));
+  const standing = source.slice(source.indexOf('/** This session\'s missions in this project, the open ones oldest first'), source.indexOf('function describeJob'));
+  const watches = ['lead', 'other'].map((lead, index) => ({ id: `pr-${index}`, lead, repo: 'o/r', number: index + 7, mission: 'm-1', state: 'open' } as PullWatch));
+  for (const watch of watches) {
+    addNews(watch, 'checks', 'test failed');
+    watch.news![0].offers = 2;
+  }
+  const delivery = new Delivery(() => [], () => {}, () => watches);
+  const replies: any[] = [];
+  const missions: object[] = [];
+  const handle = vm.runInNewContext(`${stripTypeScriptTypes(standing + tool + handler)}; handle`, {
+    AbortController, inFlight: new Map(), ensureDaemon: async () => {}, SESSION: 'lead', PROJECT: '/project',
+    fresh: false, missionId: null, costMission: null, closedElsewhere: null,
+    missionHead: () => 'Current mission', missionDetail: () => '', currentPolicy: () => '', globalPreset: () => null,
+    clipped, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, send: (msg: unknown) => replies.push(msg),
+    imageContent: () => [], baseUrl: () => 'board', summarize: () => '',
+    api: async (_method: string, route: string, body: any) => {
+      if (route === '/api/state') return { jobs: [], pulls: watches.map(({ news, ...pull }) => pull), missions, limits: {} };
+      assert.equal(route, '/api/lead/offer');
+      assert.deepEqual(Array.from(body.job_ids), ['pr-0']);
+      assert.equal(body.bytes, 4000);
+      return { offer: delivery.offer(body.session, { ids: body.job_ids, bytes: body.bytes }) };
+    },
+  });
+  const call = async (name: string, args = {}) => {
+    await handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } });
+    return replies.at(-1).result;
+  };
+  const status = await call('status');
+  assert.match(status.content[0].text, /Watched pull requests:\n\[pr-0\] o\/r#7 · open/);
+  assert.match(status.content[0].text, /\[pr-0\] news 1/);
+  assert.doesNotMatch(status.content[0].text, /pr-1|o\/r#8/);
+  const mission = await call('mission');
+  assert.equal(mission.isError, true);
+  assert.match(mission.content[0].text, /no open mission[^]*\[pr-0\] news 1/);
+  missions.push({ id: 'm-1', state: 'active', project: '/project', owner: 'lead' });
+  const current = await call('mission', { id: 'm-1' });
+  assert.equal(current.isError, undefined);
+  assert.match(current.content[0].text, /Current mission[^]*\[pr-0\] news 1/);
+  assert.equal(unread(watches[0])[0].offers, 2);
 });

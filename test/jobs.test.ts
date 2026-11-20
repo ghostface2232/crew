@@ -14,7 +14,10 @@ import { tierModel } from '../plugin/bridge/tiers.ts';
 import { checkLine, runCheck, windowsSandboxArgs } from '../plugin/bridge/check.ts';
 
 /** Where the bridge can hold a check to the worker's limits: macOS's sandbox-exec, or Codex's sandbox on Windows. */
-const SANDBOXED = process.platform === 'darwin' || process.platform === 'win32';
+const checkProbe = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-check-probe-')));
+const SANDBOXED = await runCheck('true', checkProbe, checkProbe, [])
+  .then((result) => !result.skipped)
+  .finally(() => fs.rmSync(checkProbe, { recursive: true, force: true }));
 
 const config = resolveConfig({ notify: false, codex: { bin: 'codex', approvalPolicy: 'never', approvalsReviewer: 'auto_review' } });
 
@@ -1196,7 +1199,7 @@ test('a debate runs read-only for its rounds, keeps the conversation, and ends w
   await assert.rejects(jobs.reply(job.id, { message: 'one more' }), /has had its 2 round\(s\)/);
 });
 
-test('the bridge runs the lead\'s check after each turn and marks it stale when the branch moves', async () => {
+test('the bridge runs the lead\'s check after each turn and marks it stale when the branch moves', { skip: !SANDBOXED }, async () => {
   const repo = tempRepo();
   const { jobs, adapter } = harness((ctl) => {
     fs.writeFileSync(path.join(ctl.job.cwd, 'app.js'), 'export const x = 2;\n');

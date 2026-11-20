@@ -808,19 +808,21 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       // The mission's preset is a cost the user chose; running on the global one instead would quietly change it.
       if (spec.mission == null) delete spec.mission;
       if (spec.mission !== undefined && !mission) throw new HttpError(400, `No mission with id "${spec.mission}" is known any more, so its preset cannot be applied. Start the job without it, or open a new mission.`);
+      if (spec.taskId !== undefined) {
+        if (typeof spec.taskId !== 'string' || !mission) throw new HttpError(400, 'task_id must be the id of a task of the job\'s mission');
+        if (!mission.tasks?.some((task) => task.id === spec.taskId)) throw new HttpError(400, `Mission ${mission.id} has no task "${spec.taskId}"${mission.tasks?.length ? `; its tasks are ${mission.tasks.map((task) => task.id).join(', ')}` : ''}. Add it with mission (tasks) first, or leave task_id out.`);
+      }
       spec.preset = missionPreset(mission, liveConfig().preset);
       // A job outlives its mission's tracking: it still runs under the mission's preset, on its own, and says why.
       if (mission && mission.state !== 'active') {
         spec.notes = [...(spec.notes ?? []), `Mission ${spec.mission} is ${mission.state}, so this job is shown on its own.`];
         delete spec.mission;
+        if (spec.taskId !== undefined) {
+          spec.notes.push(`The link to task "${spec.taskId}" was dropped.`);
+          delete spec.taskId;
+        }
       }
       if (mission?.state === 'active' && mission.stages) spec.missionStep = mission.stageIndex ?? mission.stages.indexOf(mission.stage);
-      if (spec.taskId !== undefined) {
-        // Refused rather than stored: a task id nothing answers to would show nowhere.
-        if (typeof spec.taskId !== 'string') throw new HttpError(400, 'task_id must be the id of a task of the job\'s mission');
-        if (!spec.mission) delete spec.taskId;
-        else if (!mission!.tasks?.some((task) => task.id === spec.taskId)) throw new HttpError(400, `Mission ${mission!.id} has no task "${spec.taskId}"${mission!.tasks?.length ? `; its tasks are ${mission!.tasks.map((task) => task.id).join(', ')}` : ''}. Add it with mission (tasks) first, or leave task_id out.`);
-      }
       const created = await jobs.create(spec);
       if (created.lead && created.mission) claude.focus(created.lead, created.mission);
       return view(created);
@@ -880,6 +882,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     }
     if (pathname === '/api/hooks/claude') {
       const payload = await readJson(req);
+      if (payload?.hook_event_name === 'SessionEnd' && typeof payload.session_id === 'string') jobs.delivery.forget(payload.session_id);
       claude.ingest(payload);
       locate(claude.sessions.get(payload?.session_id));
       return {};

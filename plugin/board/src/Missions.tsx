@@ -6,7 +6,7 @@ import type { BoardJob, BoardPull, ClaudeSession, Mission, PresetName } from './
 import { actions, request } from './api.ts';
 import {
   agentSummary, elapsed, jobLabel, jobRole, leadMission, missionJobStep, missionLooksFinished, missionProgress, missionStep, missionStopPosition,
-  missionStops, NAMES, relativeDuration, roleLabel,
+  missionStops, NAMES, roleLabel,
 } from './model.ts';
 import { ActionStatus, AgentMark, Chip, Collapse, Icon, Menu, useAction, useFade, useNow } from './ui.tsx';
 
@@ -221,7 +221,7 @@ function MissionPull({ pull, now }: { pull: BoardPull; now: number }) {
           {pull.review === 'changes_requested' && ' · changes requested'}
           {pull.review === 'approved' && ' · approved'}
           {pull.conflict && <> · <span data-attention>conflict</span></>}
-          {stale && ` · checked ${relativeDuration(now - pull.checkedAt)} ago`}
+          {stale && (pull.error ? ' · could not be read' : ` · checked ${elapsed(now - pull.checkedAt)} ago`)}
         </>
       )}
     </p>
@@ -275,7 +275,7 @@ export function MissionPanel({
     tokens > 0 ? `${tokens.toLocaleString()} tokens` : null,
     projectName,
     `${jobs.length} ${jobs.length === 1 ? 'job' : 'jobs'}`,
-    mission.tasks?.length ? `${tasks.filter((task) => task.state === 'done').length}/${tasks.length} tasks` : null,
+    tasks.length ? `${tasks.filter((task) => task.state === 'done').length}/${tasks.length} tasks` : null,
     // An active mission shows its preset in its menu instead.
     mission.preset && !active ? `${capitalized(mission.preset)} preset` : null,
   ].filter(Boolean).join(' · ');

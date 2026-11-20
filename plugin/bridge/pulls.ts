@@ -97,6 +97,8 @@ export interface PullDeps {
   save(): void;
   /** A watch gained news, or changed in what is shown of it. */
   changed(watch: PullWatch): void;
+  /** A watch was read again and only the time of the reading moved; the board alone shows that. */
+  polled?(watch: PullWatch): void;
   now?(): number;
 }
 
@@ -418,6 +420,7 @@ export class Pulls {
           watch.error = failure;
           watch.checkedAt = now;
           if (previous !== watch.error) this.changed(watch, now);
+          else this.deps.polled?.(watch);
           continue;
         }
         const before = visible(watch);
@@ -427,6 +430,7 @@ export class Pulls {
         watch.checkedAt = now;
         delete watch.error;
         if (news.length || reviews !== watch.reviews || visible(watch).some((value, i) => value !== before[i])) this.changed(watch, now);
+        else this.deps.polled?.(watch);
       }
     } finally {
       this.ticking = false;

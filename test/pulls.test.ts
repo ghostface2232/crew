@@ -31,6 +31,7 @@ function harness() {
   const responses = new Map<string, PullView | string | Error>([[URL, view()], [SECOND_URL, view({ url: SECOND_URL, number: 13 })]]);
   const calls: { args: string[]; cwd?: string }[] = [];
   const changes: string[] = [];
+  const polled: string[] = [];
   const deps: PullDeps = {
     gh: async (args, cwd) => {
       calls.push({ args, cwd });
@@ -43,10 +44,11 @@ function harness() {
     present: () => present,
     save: () => { saves++; },
     changed: (watch) => { changes.push(watch.id); },
+    polled: (watch) => { polled.push(watch.id); },
   };
   const pulls = new Pulls(deps);
   return {
-    pulls, deps, responses, calls, changes, missions,
+    pulls, deps, responses, calls, changes, polled, missions,
     advance: (ms: number) => { now += ms; },
     setPresent: (value: boolean) => { present = value; },
     saves: () => saves,
@@ -282,6 +284,8 @@ test('poll errors and invalid JSON send no news, notify only on change and leave
   h.advance(300_000);
   await h.pulls.tick();
   assert.deepEqual(h.changes, [one.id, two.id]);
+  // The board still hears of a reading that changed nothing, so it does not take a watched pull request for a stale one.
+  assert.deepEqual(h.polled, [one.id, two.id]);
   assert.equal(one.checkedAt, 610_000);
   for (const output of ['unexpected output', JSON.stringify(view({ reviews: [null!] }))]) {
     h.responses.set(URL, output);

@@ -394,7 +394,7 @@ struct MissionPanel: View {
             tokens > 0 ? "\(tokens.formatted()) tokens" : nil,
             store.project.isEmpty ? projectName(mission.root, among: store.projects) : nil,
             "\(jobs.count) \(jobs.count == 1 ? "job" : "jobs")",
-            mission.tasks?.isEmpty == false ? "\(tasks.filter { $0.state == "done" }.count)/\(tasks.count) tasks" : nil,
+            tasks.isEmpty ? nil : "\(tasks.filter { $0.state == "done" }.count)/\(tasks.count) tasks",
             // An active mission shows its preset on its menu; an ended one names it here unless it was the global one.
             mission.state == "active" ? nil : mission.preset.map { "\($0.rawValue.capitalized) preset" },
         ].compactMap { $0 }.joined(separator: " · ")
@@ -608,7 +608,7 @@ private struct MissionPullLine: View {
                     Text(" · \(Text("checks \(pull.checks)").foregroundStyle(pull.checks == "failing" && !stale ? Palette.danger : .secondary))")
                 let review = pull.review == "changes_requested" ? " · changes requested" : pull.review == "approved" ? " · approved" : ""
                 let conflict = pull.conflict ? Text(" · \(Text("conflict").foregroundStyle(stale ? .secondary : Palette.danger))") : Text("")
-                let checked = stale ? " · checked \(elapsed(now - pull.checkedAt)) ago" : ""
+                let checked = !stale ? "" : pull.error != nil ? " · could not be read" : " · checked \(elapsed(now - pull.checkedAt)) ago"
                 Text("\(checks)\(review)\(conflict)\(checked)")
             } else {
                 Text(" · \(pull.state)")

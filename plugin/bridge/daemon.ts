@@ -261,6 +261,7 @@ const pulls: Pulls = new Pulls({
     broadcast('pull', pullView(watch));
     jobs.delivery.changed();
   },
+  polled: (watch) => broadcast('pull', pullView(watch)),
 });
 
 const usage = new UsageMonitor(agentGaugeDir(), (latest) => broadcast('usage', latest));

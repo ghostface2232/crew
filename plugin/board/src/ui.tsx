@@ -462,10 +462,10 @@ export function Menu({ label, icon, text, children }: { label: string; icon: Luc
     </div>
   );
 }
-/** A light, centered empty state. `plain` shows the icon without its tile, for an icon that is its own shape. */
-export function EmptyState({ title, icon, detail, plain, children }: { title: string; icon: LucideIcon; detail?: string; plain?: boolean; children?: ReactNode }) {
+/** A light, centered empty state. */
+export function EmptyState({ title, icon, detail, children }: { title: string; icon: LucideIcon; detail?: string; children?: ReactNode }) {
   return (
-    <div className={plain ? 'empty-state plain' : 'empty-state'}>
+    <div className="empty-state">
       <Icon icon={icon} />
       <b>{title}</b>
       {detail && <p>{detail}</p>}

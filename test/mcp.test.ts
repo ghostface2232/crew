@@ -189,6 +189,10 @@ test('a call that ends a mission applies its tasks and pull request first, and e
   assert.deepEqual(calls.slice(before).filter((call) => call.method === 'POST').map((call) => [call.route, Object.keys(call.body)[0]]), [[route, 'tasks'], [`${route}/pulls`, 'pr'], [route, 'done']]);
   assert.equal(missions.list()[0].state, 'done');
   assert.match(done, /- \[done\] api: Add the route — npm test passed[^]*Linked o\/r#7 · open · checks pending\./);
+  // A done mission takes a pull request and nothing else: linking again is how held check news resumes.
+  assert.match(await reportMission({ id: missions.list()[0].id, pr: '7' }), /^Mission \S+ · done[^]*Pull requests:\n- pr-abc123 o\/r#7[^]*Linked o\/r#7/);
+  assert.deepEqual([calls.at(-1)?.route, missions.list()[0].state], [`${route}/pulls`, 'done']);
+  await assert.rejects(reportMission({ id: missions.list()[0].id, pr: '7', stage: 'final' }), /is already done/);
 });
 
 test('work started after a done mission opens a follow-up mission named after it', async (t) => {

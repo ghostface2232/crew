@@ -695,6 +695,11 @@ async function updateMission(args: any, ctx?: CallContext): Promise<string> {
   let current: Mission | null;
   if (args.id !== undefined) {
     current = named(now, args.id, 'id');
+    // A done mission's pull request is still watched, and check news held back after three failing heads resumes only by linking it again.
+    if (current.state === 'done' && args.pr !== undefined && !ending && !changing) {
+      const linked = await link(current);
+      return describeMission(current, now) + linked;
+    }
     if (current.state !== 'active') throw new Error(`Mission ${current.id} is already ${current.state}${current.outcome ? ` (${current.outcome})` : ''}. ${now.open.length ? `Open: ${listed(now.open)}.` : 'Start a new one by passing title.'}`);
   } else if (now.open.length > 1) {
     if (ending || changing || args.pr !== undefined) throw unnamed(now.open, 'id');

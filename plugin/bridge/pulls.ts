@@ -193,7 +193,7 @@ export function observe(watch: PullWatch, view: PullView): { kind: News['kind'];
         guidance = 'Checks failed again on a new head after a push. Compare the cause with the earlier failure before handing out another fix so the same fix is not tried twice.';
       } else {
         watch.held = true;
-        guidance = 'Checks have now failed on three heads in a row. Stop handing out fixes and bring this to the user. Crew will not send further check failures for this PR until a head passes or it is linked to the mission again (pass pr to mission again once the user has decided).';
+        guidance = `Checks have now failed on three heads in a row. Stop handing out fixes and bring this to the user. Crew will not send further check failures for this PR until a head passes or it is linked to the mission again (pass pr to mission again, with id "${watch.mission}", once the user has decided).`;
       }
       send('checks', withDetails(`${pr} at ${short} failed checks: `, fresh, 8, `. ${guidance}`,
         (key, chars, bytes) => fit(key, chars, bytes)));

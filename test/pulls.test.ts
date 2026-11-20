@@ -87,7 +87,7 @@ test('the third failing head holds further failures until a head passes', async 
   assert.equal(first[0].kind, 'checks');
   assert.match(first[0].reason, /gh pr checks.*gh run view --log-failed.*reply.*delegate with role fix/);
   assert.match(failing('22222222')[0].reason, /new head after a push.*earlier failure.*same fix/);
-  assert.match(failing('33333333')[0].reason, /three heads in a row.*user.*pass pr to mission again/);
+  assert.match(failing('33333333')[0].reason, /three heads in a row.*user.*pass pr to mission again, with id "one"/);
   assert.equal(watch.held, true);
   assert.deepEqual(failing('44444444'), []);
   assert.equal(watch.failingHeads, 4);

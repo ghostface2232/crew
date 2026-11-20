@@ -60,7 +60,7 @@ Board Settings edits roles, the preset, and shared instructions, and shows each 
 
 A mission can use its own preset when you name one in the command ("economy" for a simple task, "best" for a deep one) or pick one from the mission's menu.
 
-A command you give while another is still under way opens beside it, and both stay open until each is finished. A mission keeps the tasks the lead split the work into, so a session that is resumed or compacted carries on from that record. When the lead links a pull request to a mission, Crew reads it with your GitHub CLI (`gh`) while the session is open and wakes the lead only for a newly failed check, review feedback, or a merge conflict; the lead decides the fix and hands it to an agent, and merging stays yours.
+A command you give while another is still under way opens beside it, and both stay open until each finishes. A mission stores the tasks the lead split the work into, so a resumed or compacted session carries on from that record. When the lead links a pull request to a mission, Crew reads it with your GitHub CLI (`gh`) while the session is open and wakes the lead only for a newly failed check, review feedback, or a merge conflict. The lead decides the fix and hands it to an agent, while merging stays yours.
 
 If [AgentGauge](https://github.com/ghostface2232/AgentGauge) is installed, each agent's card shows remaining usage and `/crew:run` routes work accordingly. When an agent runs low, the lead takes over or defers the work and says so.
 

@@ -14,7 +14,7 @@ const TOOLS = [
       type: 'object',
       properties: {
         question: { type: 'string', maxLength: 4000 },
-        blocks: { type: 'string' },
+        blocks: { type: 'string', description: 'What part of the task waits on this answer.' },
         attachments: { type: 'array', items: { type: 'string' }, maxItems: 10, description: 'Names of screenshots or recordings in your evidence directory to show the lead with the question.' },
       },
       required: ['question'],
@@ -151,10 +151,10 @@ async function callTool(name: string, args: any): Promise<unknown> {
     }
     case 'recent_changes': {
       const { cwd, target } = within(args.path);
-      const log = await git(cwd, ['log', '-n', '5', '--date=short', '--format=%h %ad %s', '--stat', '--', target]);
+      const log = await git(cwd, ['log', '-n', '5', '--date=short', '--format=%h %ad %s', '--stat', '--no-textconv', '--', target]);
       if (!log.trim()) return { commits: 'No commit touches that path.' };
       const latest = (await git(cwd, ['log', '-n', '1', '--format=%H', '--', target])).trim();
-      return { commits: clip(log), latest_diff: clip(await git(cwd, ['show', '--format=', latest, '--', target])) };
+      return { commits: clip(log), latest_diff: clip(await git(cwd, ['show', '--format=', '--no-textconv', '--no-ext-diff', latest, '--', target])) };
     }
     default:
       throw new Error(`Unknown tool: ${name}`);

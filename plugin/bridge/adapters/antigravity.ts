@@ -6,7 +6,7 @@ import { agentCommand, agentEnv, HOME, VERSION } from '../config.ts';
 import type { Config } from '../config.ts';
 import { isTerminal, noteLeadDecline } from '../jobs.ts';
 import type { Adapter, JobCtl, JobKind } from '../jobs.ts';
-import { isInside } from '../git.ts';
+import { isGitPath, isInside } from '../git.ts';
 import { RPC_TIMEOUT_MS, RpcError, RpcPeer } from '../rpc.ts';
 import { pickEffort, pickModel } from '../tiers.ts';
 
@@ -488,7 +488,8 @@ export function decide(role: JobKind, cwd: string, toolCall: { kind?: string; ti
   const paths = (toolCall.locations ?? []).map((l) => l.path).filter((f): f is string => Boolean(f));
   // An edit that does not say where it writes cannot be shown to stay inside.
   if (paths.length === 0) return { refuse: 'edit without a path' };
-  return paths.every((f) => isInside(cwd, f)) ? 'allow' : { refuse: 'edit outside the workspace' };
+  if (!paths.every((f) => isInside(cwd, f))) return { refuse: 'edit outside the workspace' };
+  return paths.some((f) => isGitPath(cwd, f)) ? { refuse: 'edit inside .git' } : 'allow';
 }
 
 /** What the user is asked to approve: the whole request, never a shortened form. */

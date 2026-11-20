@@ -26,6 +26,11 @@ export function browserProfile(writable: string[], unreadable: string[]): string
   return [
     '(version 1)',
     '(allow default)',
+    // The file limits below mean nothing to a process that has LaunchServices, another app, or launchd run something
+    // for it. The worker's own sandbox denies by default and so refuses all three.
+    '(deny lsopen)',
+    '(deny appleevent-send)',
+    '(deny job-creation)',
     ...unreadable.flatMap((file) => [...new Set([file, real(file)])]).map((file) => `(deny file-read* file-write* (literal ${quote(file)}))`),
     '(deny file-write*',
     '  (require-not',

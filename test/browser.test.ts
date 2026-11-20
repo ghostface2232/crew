@@ -32,6 +32,8 @@ test('the browser profile denies the token and writes outside the job, and allow
   const secret = path.join(dir, 'token');
   fs.writeFileSync(secret, 'secret');
   const profile = browserProfile([job], [secret]);
+  // Refusing to start another app was checked by hand (`open` fails with -54); a test that tried would start one when it regressed.
+  for (const operation of ['lsopen', 'appleevent-send', 'job-creation']) assert.ok(profile.includes(`(deny ${operation})`), operation);
   const run = (...args: string[]) => {
     try {
       return execFileSync('/usr/bin/sandbox-exec', ['-p', profile, ...args], { encoding: 'utf8', stdio: 'pipe' });

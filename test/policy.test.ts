@@ -24,6 +24,13 @@ test('each role may read anywhere; only editors and engineers edit, inside the w
   assert.deepEqual(edit(path.join(cwd, 'link', 'README.md')), refused('edit outside the workspace'));
   assert.deepEqual(edit(path.join(cwd, 'a.md'), path.join(outside, 'b.md')), refused('edit outside the workspace'));
   assert.deepEqual(edit(), refused('edit without a path'));
+  // The bridge runs git in this tree itself, so a worker must not repoint or reconfigure the repository.
+  fs.writeFileSync(path.join(cwd, '.git'), 'gitdir: /elsewhere\n');
+  for (const inGit of ['.git', '.GIT', path.join('.git', 'config'), path.join('docs', '..', '.git')]) {
+    assert.deepEqual(edit(path.join(cwd, inGit)), refused('edit inside .git'), inGit);
+  }
+  assert.equal(edit(path.join(cwd, '.gitignore')), 'allow');
+  assert.equal(edit(path.join(cwd, 'vendor', '.git', 'config')), 'allow');
 
   const inside = { kind: 'edit', locations: [{ path: path.join(cwd, 'README.md') }] };
   for (const role of ['delegate', 'review', 'polish'] as const) {

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
+import { StringDecoder } from 'node:string_decoder';
 import { stripTypeScriptTypes } from 'node:module';
 import { test } from 'node:test';
 import vm from 'node:vm';
@@ -10,7 +11,7 @@ function reader() {
   const start = source.indexOf('function readJson(');
   let parses = 0;
   const context = vm.createContext({
-    Buffer, URL, PORT: 0, stopping: false, guard: () => {}, signedIn: () => false,
+    Buffer, StringDecoder, URL, PORT: 0, stopping: false, guard: () => {}, signedIn: () => false, sameToken: () => false, TOKEN: '',
     WORKER_ROUTE: /^\/api\/jobs\/[\w-]+\/(?:questions|siblings|browser)$/,
     claude: { ingest: () => {}, sessions: new Map() }, locate: () => {},
     JSON: { parse: (body: string) => { parses++; return JSON.parse(body); } },
@@ -60,13 +61,26 @@ test('JSON exactly at the body limit is accepted', async () => {
   assert.equal((await result as string).length, 4 * 1024 * 1024 - 2);
 });
 
-test('unauthenticated Claude hooks reject an oversized upload before it ends', async () => {
+test('a route open without the secret rejects an oversized upload before it ends', async () => {
   const h = reader();
-  const req = Object.assign(new EventEmitter(), { method: 'POST', url: '/api/hooks/claude' });
+  const req = Object.assign(new EventEmitter(), { method: 'POST', url: '/api/session' });
   const rejected = assert.rejects(h.route(req, {}), { status: 413, message: 'body too large' });
   req.emit('data', Buffer.alloc(4 * 1024 * 1024));
   req.emit('data', Buffer.from('x'));
   await rejected;
   req.emit('end');
   assert.equal(h.parses(), 0);
+});
+
+test('a character split across two chunks of a body is read whole', async () => {
+  const h = reader();
+  const req = new EventEmitter();
+  const result = h.readJson(req);
+  const body = Buffer.from(JSON.stringify({ task: '한글 지시문' }));
+  // Cut inside the three bytes of the first Hangul syllable.
+  const cut = body.indexOf(Buffer.from('한')) + 1;
+  req.emit('data', body.subarray(0, cut));
+  req.emit('data', body.subarray(cut));
+  req.emit('end');
+  assert.deepEqual(await result, { task: '한글 지시문' });
 });

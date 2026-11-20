@@ -4,6 +4,7 @@ import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 import { boardAsset, BOARD_CSP } from './assets.ts';
 import { ensureToken, sameToken, SESSION_COOKIE } from './auth.ts';
 import { AntigravityAdapter } from './adapters/antigravity.ts';
@@ -356,6 +357,8 @@ function readJson(req: http.IncomingMessage): Promise<any> {
     let body = '';
     let bytes = 0;
     let overflow = false;
+    // One decoder for the whole body: a character split across two chunks would otherwise be lost.
+    const decoder = new StringDecoder('utf8');
     req.on('data', (chunk) => {
       if (overflow) return;
       bytes += Buffer.byteLength(chunk);
@@ -365,7 +368,7 @@ function readJson(req: http.IncomingMessage): Promise<any> {
         reject(new HttpError(413, 'body too large'));
         return;
       }
-      body += chunk;
+      body += decoder.write(chunk);
     });
     req.on('end', () => {
       if (overflow) return;
@@ -411,7 +414,7 @@ function signedIn(req: http.IncomingMessage): boolean {
 function isOpen(method: string, pathname: string): boolean {
   if (method === 'GET') return pathname === '/api/health' || !pathname.startsWith('/api/');
   if (method !== 'POST') return false;
-  return pathname === '/api/hooks/claude' || pathname === '/api/session';
+  return pathname === '/api/session';
 }
 
 async function route(req: http.IncomingMessage, res: http.ServerResponse): Promise<unknown> {

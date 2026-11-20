@@ -729,6 +729,8 @@ test('Codex plugin jobs deny the daemon token even without app or linked depende
   assert.equal(params.sandbox, null);
   assert.equal(params.config.default_permissions, 'crew_workspace');
   assert.equal(params.config.permissions.crew_workspace.filesystem[tokenFile(HOME)], 'deny');
+  // The tree is writable, its repository pointer is not: the bridge runs git there after the turn.
+  assert.deepEqual([params.config.permissions.crew_workspace.filesystem['/workspace'], params.config.permissions.crew_workspace.filesystem[path.join('/workspace', '.git')]], ['write', 'read']);
   assert.deepEqual(params.config.permissions.crew_workspace.network, { enabled: false });
 });
 

@@ -392,7 +392,7 @@ export class CodexAdapter implements Adapter {
     const app = (job.runsApp || lean.features.plugins || Object.keys(shared).length > 0) && job.sandbox === 'workspace-write'
       ? {
           default_permissions: profile,
-          permissions: { [profile]: { filesystem: { ':root': 'read', [job.cwd]: 'write', ':slash_tmp': 'write', ...(job.scratch ? { [job.scratch]: 'write' } : {}), ...evidence, ...shared, ...secret }, network: { enabled: Boolean(job.runsApp) } } },
+          permissions: { [profile]: { filesystem: { ':root': 'read', [job.cwd]: 'write', [path.join(job.cwd, '.git')]: 'read', ':slash_tmp': 'write', ...(job.scratch ? { [job.scratch]: 'write' } : {}), ...evidence, ...shared, ...secret }, network: { enabled: Boolean(job.runsApp) } } },
         }
       : null;
     return {

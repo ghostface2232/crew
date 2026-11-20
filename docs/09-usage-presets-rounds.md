@@ -221,7 +221,7 @@ The secret is `~/.crew/token`: 64 hex characters, created on first start by the 
 
 | Client | How it presents the secret |
 | --- | --- |
-| The lead's MCP server, the CLI, the wake and context hooks | `Authorization: Bearer <token>`, read from the file |
+| The lead's MCP server, the CLI, and every hook (wake, context, and the report of session activity) | `Authorization: Bearer <token>`, read from the file |
 | The native app | The same header, on requests and on the event stream |
 | The web board | A cookie. The board is opened at `http://127.0.0.1:47615/#token=<token>`; the page posts the token to `POST /api/session`, which answers with an `HttpOnly`, `SameSite=Strict` cookie named `crew_session`, and removes the fragment from the address |
 | A worker's MCP server | Its own per-job token, on the worker routes only (section 11) |
@@ -230,7 +230,6 @@ The secret is `~/.crew/token`: 64 hex characters, created on first start by the 
 | --- | --- |
 | `GET /`, the board's assets, fonts, icons | The page has to load before it can sign in; it holds no data |
 | `GET /api/health` | Clients use it to find the daemon and compare versions; it names no job |
-| `POST /api/hooks/claude` | Claude Code's HTTP hooks cannot read a file; the route only records session activity |
 | `POST /api/session` | It is how the secret is presented |
 | The worker routes | They take the job token instead |
 
@@ -241,6 +240,13 @@ Workers are kept from the file. A Codex job that is read-only or has the network
 Checked on 2026-11-13. A headless browser against a real daemon: with no token and with a wrong one the board showed the sign-in screen after a single API request; with the right one it loaded, the fragment was gone from the address, the cookie was `HttpOnly` and `SameSite=Strict`, and web storage was empty. A real Codex job with the network open (Codex CLI 0.167.0) was refused the token file by its permissions profile, while a local server in its worktree, writing there, and a question to the lead all worked. Not exercised: the native app against a live daemon beyond the packaged smoke test.
 
 Sessions that were already open when the daemon gained authentication hold an MCP server started from the old code, which sends no secret. Their Crew tools answer with an error until the session is restarted.
+
+Revised 2026-11-20, after a review of the trust boundary:
+
+- **`POST /api/hooks/claude` needs the secret.** It was open because Claude Code's HTTP hooks cannot read a file. Every hook is now a command hook (`report.ts`) that can, and the route does more than record activity: what a prompt hook reports is kept as the user's own words and shown to Codex's automatic reviewer when the lead sends back a refused action (04 section 5.1). A process without the secret, such as a worker with the network open, could have written those words. A hook from a plugin copy older than this change sends no secret and is refused; its session then does not appear on the board until the plugin is updated.
+- **A worker cannot rewrite the repository pointer of its tree.** The bridge runs git in a worker's tree after each turn, outside any sandbox, so a `.git` a worker repointed or reconfigured would have the bridge run the worker's commands (a clean filter, a textconv driver). Antigravity's edits inside `.git` are refused, Codex's permissions profile makes it read-only, and a `check` already ran with it read-only.
+- **The bridge's own sandbox denies starting other programs.** The profile for a job's browser server and for `check` allows by default and limits files; it now also denies LaunchServices, Apple Events and launchd jobs, through which a process inside it could have had something run outside every limit. Checked on macOS 27.2: `open` fails with -54 under the profile, and the job's Playwright server still starts and drives a page.
+- **Open: the board's cookie.** A cookie is sent to every port on its host, so a local server the user opens in the same browser, such as one a `runs_app` worker started, receives `crew_session`, whose value is the secret itself. The native app is not affected. Closing it means header authentication from the page, which costs staying signed in across a reload unless the secret is kept in web storage; undecided.
 
 ## 13. What a job's tokens are made of
 

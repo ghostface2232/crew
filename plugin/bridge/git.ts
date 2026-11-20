@@ -236,6 +236,17 @@ export function isInside(root: string, file: string): boolean {
   return rel === '' || (rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
 }
 
+/**
+ * True when `file` is the tree's own `.git` (a directory, or a worktree's pointer file) or inside it. The bridge runs
+ * git in a worker's tree itself, outside any sandbox, so a worker that could repoint or reconfigure the repository
+ * would have its own commands run there (a clean filter, a textconv driver).
+ */
+export function isGitPath(root: string, file: string): boolean {
+  const first = path.relative(realpath(root), realpath(path.resolve(root, file))).split(path.sep)[0];
+  // Compared without case: on the usual macOS and Windows volumes `.GIT` is the same entry.
+  return first.toLowerCase() === '.git';
+}
+
 /** Resolves symlinks for the part of the path that exists; the rest may be a file not created yet. */
 export function realpath(target: string): string {
   let existing = path.resolve(target);

@@ -33,4 +33,9 @@ jobs:
       # Only macOS tests the browser a job is given, which is Playwright's Chromium.
       - if: runner.os == 'macOS'
         run: npx playwright install chromium
+      # The Windows runner's own TEMP is a short path (RUNNER~1) that Git reports in its long form, so the tests'
+      # path comparisons fail in it. Only Windows reads these two.
       - run: npm test
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}

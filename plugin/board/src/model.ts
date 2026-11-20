@@ -127,28 +127,6 @@ export function orderEvidence<T extends Pick<EvidenceItem, 'file' | 'turn' | 'fr
   const rank = (item: T) => (evidenceSide(item.file)?.side === 'after' ? 1 : 0);
   return items.toSorted((a, b) => Number(a.from !== 'lead') - Number(b.from !== 'lead') || a.turn - b.turn || rank(a) - rank(b) || (a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
 }
-/**
- * What opens beside a capture: the other side of its before and after, and the reference the lead attached.
- * A reference opens beside the worker's latest capture instead. A job with no more captures than fit at once
- * opens them all. Returns file names, the opened one among them.
- */
-export function evidenceCompanions(items: Pick<EvidenceItem, 'file' | 'turn' | 'from'>[], file: string): string[] {
-  const opened = items.find((item) => item.file === file);
-  if (!opened) return [];
-  if (items.length <= MAX_COMPARED) return orderEvidence(items).map((item) => item.file);
-  type Item = (typeof items)[number];
-  const latest = (found: Item[]) => found.reduce<Item | undefined>((best, item) => (!best || item.turn >= best.turn ? item : best), undefined);
-  const mine = items.filter((item) => item.from !== 'lead');
-  const last = mine.filter((item) => item.turn === latest(mine)?.turn);
-  const result = opened.from === 'lead' ? last.find((item) => evidenceSide(item.file)?.side === 'after') ?? last[0] : opened;
-  const side = result && evidenceSide(result.file);
-  const other = side && latest(mine.filter((item) => {
-    const its = evidenceSide(item.file);
-    return its?.view === side.view && its.side !== side.side;
-  }));
-  const reference = opened.from === 'lead' ? opened : latest(items.filter((item) => item.from === 'lead'));
-  return orderEvidence([reference, other, result].filter((item): item is Item => Boolean(item))).map((item) => item.file);
-}
 /** Which turn a capture is from, against how many the job has had: one from an earlier turn may not show the final state. */
 export function evidenceTurn(item: Pick<EvidenceItem, 'turn' | 'from'>, turns: number) {
   if (item.from === 'lead') return 'Attached by the lead';

@@ -135,21 +135,6 @@ struct Evidence: Codable, Sendable, Equatable {
             return a.file < b.file
         }
     }
-    /// What opens beside a capture, as the web board's `evidenceCompanions` has it: the other side of its before and
-    /// after, and the reference the lead attached. A reference opens beside the worker's latest capture instead.
-    /// A job with no more captures than fit at once opens them all.
-    static func companions(of file: String, in items: [Evidence]) -> [String] {
-        guard let opened = items.first(where: { $0.file == file }) else { return [] }
-        if items.count <= maxCompared { return ordered(items).map(\.file) }
-        // The last of the highest turn, as the board's reduce keeps it.
-        let latest = { (found: [Evidence]) in found.reduce(Evidence?.none) { best, item in best.map { item.turn >= $0.turn ? item : $0 } ?? item } }
-        let mine = items.filter { $0.from != "lead" }
-        let last = mine.filter { $0.turn == latest(mine)?.turn }
-        let result = opened.from == "lead" ? last.first { $0.side?.after == true } ?? last.first : opened
-        let other = result?.side.flatMap { side in latest(mine.filter { $0.side?.view == side.view && $0.side?.after != side.after }) }
-        let reference = opened.from == "lead" ? opened : latest(items.filter { $0.from == "lead" })
-        return ordered([reference, other, result].compactMap { $0 }).map(\.file)
-    }
 }
 struct Worktree: Codable, Sendable, Equatable { var path: String; var branch: String; var base: String }
 struct Waiting: Codable, Sendable, Equatable {

@@ -10,7 +10,7 @@ import { ChevronDown } from 'lucide-react';
 import type { BoardJob, CrewEvent, Snapshot } from './types.ts';
 import { actions, drafts, request } from './api.ts';
 import { board, mergeEvents } from './store.ts';
-import { elapsed, evidenceCompanions, evidenceTurn, jobLabel, jobRole, MAX_COMPARED, NAMES, orderEvidence, projectOf, roleLabel } from './model.ts';
+import { elapsed, evidenceTurn, jobLabel, jobRole, MAX_COMPARED, NAMES, orderEvidence, projectOf, roleLabel } from './model.ts';
 import { ActionStatus, CloseButton, CopyButton, CopyMenu, Dialog, Icon, Chip, useAction, useDraft, useNow } from './ui.tsx';
 import { ReportText as RenderReport } from './Report.ts';
 import { debatePoints, stanceCounts } from './debate.ts';
@@ -95,12 +95,12 @@ function EvidenceSection({ job }: { job: BoardJob }) {
                   href={src}
                   target="_blank"
                   rel="noreferrer"
-                  title="Compare"
+                  title="Open"
                   onClick={(event) => {
-                    // A plain press compares; a modified one still opens the file by itself.
+                    // A plain press opens it here, where others can be added beside it; a modified one opens the file.
                     if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
                     event.preventDefault();
-                    setPicked(evidenceCompanions(items, item.file));
+                    setPicked([item.file]);
                   }}
                 >
                   <img src={src} alt={item.file} loading="lazy" />
@@ -119,8 +119,9 @@ function EvidenceSection({ job }: { job: BoardJob }) {
 }
 
 /**
- * Captures side by side. A result alone says little: it is judged against what was there before, or what it was
- * meant to match. Each says which turn it is from, since one from an earlier turn may not show the final state.
+ * A capture, and the others added beside it from the strip below. A result alone says little: it is judged against
+ * what was there before, or what it was meant to match. Each says which turn it is from, since one from an earlier
+ * turn may not show the final state.
  */
 function EvidenceCompare({ job, items, shown, onShown }: { job: BoardJob; items: EvidenceItem[]; shown: string[]; onShown: (files: string[]) => void }) {
   const close = () => onShown([]);

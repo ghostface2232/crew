@@ -29,14 +29,14 @@ fs.writeFileSync(
   ),
 );
 
-// Icons are rendered from the board's app mark; an .ico holds PNG images, which Windows reads since Vista.
-// The app mark is square art; its corners are cut here as the sidebar's .brand-mark cuts them (12px of 30px, smoothed).
-const appIcon = `<div style="width:100%;height:100%;overflow:hidden;border-radius:40%;corner-shape:superellipse(1.35)">${fs.readFileSync('plugin/board/src/icons/CrewAppIcon.svg', 'utf8')}</div>`;
+// Icons are scaled from the Icon Composer export, which carries the lighting and shadow effects the layered
+// icon has on macOS and already has transparent rounded corners. An .ico holds PNG images, which Windows reads since Vista.
+const appIcon = `<img src="data:image/png;base64,${fs.readFileSync('assets/crew-iOS-Default-1024@2x.png').toString('base64')}">`;
 const badge = '<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><circle cx="8" cy="8" r="7" fill="#e5484d"/></svg>';
 const browser = await chromium.launch();
 const render = async (svg, size) => {
   const page = await browser.newPage({ viewport: { width: size, height: size }, deviceScaleFactor: 1 });
-  await page.setContent(`<style>html,body{margin:0;background:transparent}svg{display:block;width:100%;height:100%}</style>${svg}`);
+  await page.setContent(`<style>html,body{margin:0;background:transparent}svg,img{display:block;width:100%;height:100%}</style>${svg}`);
   const png = await page.screenshot({ omitBackground: true });
   await page.close();
   return png;

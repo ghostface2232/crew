@@ -9,13 +9,8 @@ argument-hint: <decision to debate>
 Topic: $ARGUMENTS
 
 1. Understand the decision first: read the code and docs it touches, and form your own position. If the topic is unclear, ask the user one question before starting.
-2. Call the `crew` MCP `debate` tool with:
-   - `topic`: the decision and everything the engineer needs without this conversation: the problem, constraints, files, and docs.
-   - `position`: your current position and why.
-   - `rounds`: 3 unless the user asks otherwise (at most 6).
-   - Effort `high` unless a preset is in effect, whose effort then holds; `tier` `frontier` only when the decision is especially hard.
-   Then end your turn; you are woken when it answers.
-3. For each answer, take every point seriously: concede what holds up, push back with evidence where you disagree, and answer with `reply` (a message) for the next round. The last round ends with its conclusion.
-4. Tell the user what was agreed, what disagreement remains and what would settle it, and anything that needs their decision. If a mission is open, pass the decision as its `record` when you finish it.
+2. Call `debate` with `topic`, `position`, effort `high` unless a preset is in effect, and `tier` `frontier` only when the decision is especially hard; then end your turn.
+3. For each round, concede what holds up, push back with evidence where you disagree, and continue with `reply`.
+4. Tell the user what was agreed, what disagreement remains and what would settle it, and anything that needs their decision; pass the decision as `record` when closing an open mission.
 
-A debate changes nothing. Implement the outcome only if the user asked for that.
+Implement the outcome only if the user asked for that.

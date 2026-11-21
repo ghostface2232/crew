@@ -610,14 +610,15 @@ private struct MissionPullChip: View {
         let word = unread ? "Could not be read" : statuses.first?.word
         let more = unread ? 0 : statuses.dropFirst().filter(\.needsLead).count
         let checked = elapsed(now - pull.checkedAt)
-        let summary = (statuses.map(\.word) + (stale ? [unread ? "Could not be read" : "Checked \(checked) ago"] : [])).joined(separator: " · ")
+        let details = ([pull.title] + statuses.map(\.word) + (unread ? ["Could not be read"] : []) + (stale ? ["Checked \(checked) ago"] : []))
+            .filter { !$0.isEmpty }.joined(separator: " · ")
         Link(destination: pull.url) {
             HStack(spacing: Space.xs) {
-                Image(systemName: pull.state == "merged" ? "arrow.triangle.merge" : "arrow.triangle.pull")
+                Image(systemName: pull.state == "merged" ? "arrow.triangle.merge" : pull.state == "closed" ? "xmark.circle" : "arrow.triangle.pull")
                 Text("#\(pull.number)")
                 if let word { Text(word) }
                 if more > 0 { Text("+\(more)").fontWeight(.regular) }
-                if stale && !unread {
+                if stale {
                     Image(systemName: "clock")
                     Text(checked)
                 }
@@ -628,8 +629,8 @@ private struct MissionPullChip: View {
                   in: RoundedRectangle(cornerRadius: Chip.squareRadius, style: .continuous))
         }
         .buttonStyle(.plain)
-        .help([pull.title, summary].filter { !$0.isEmpty }.joined(separator: " · "))
-        .accessibilityLabel("Pull request \(pull.repo) #\(pull.number)\(summary.isEmpty ? "" : ": \(summary)")")
+        .help(details)
+        .accessibilityLabel("Pull request \(pull.repo) #\(pull.number)\(details.isEmpty ? "" : ": \(details)")")
     }
 }
 

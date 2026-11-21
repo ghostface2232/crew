@@ -218,9 +218,11 @@ function MissionPull({ pull, now }: { pull: BoardPull; now: number }) {
   const unread = stale && pull.error != null;
   const word = unread ? 'Could not be read' : statuses[0]?.word;
   const more = unread ? 0 : statuses.slice(1).filter((status) => status.needsLead).length;
-  const summary = [
+  const details = [
+    pull.title,
     ...statuses.map((status) => status.word),
-    stale ? (unread ? 'Could not be read' : `Checked ${elapsed(now - pull.checkedAt)} ago`) : null,
+    unread ? 'Could not be read' : null,
+    stale ? `Checked ${elapsed(now - pull.checkedAt)} ago` : null,
   ].filter(Boolean).join(' · ');
   const glyph = pull.state === 'merged' ? GitMerge : pull.state === 'closed' ? GitPullRequestClosed : GitPullRequest;
   return (
@@ -232,14 +234,14 @@ function MissionPull({ pull, now }: { pull: BoardPull; now: number }) {
       href={pull.url}
       target="_blank"
       rel="noreferrer"
-      title={[pull.title, summary].filter(Boolean).join(' · ')}
-      aria-label={`Pull request ${pull.repo} #${pull.number}${summary ? `: ${summary}` : ''}`}
+      title={details}
+      aria-label={`Pull request ${pull.repo} #${pull.number}${details ? `: ${details}` : ''}`}
     >
       <Icon icon={glyph} />
       <span className="digits">#{pull.number}</span>
       {word && <span>{word}</span>}
       {more > 0 && <span className="pull-more digits">+{more}</span>}
-      {stale && !unread && (
+      {stale && (
         <>
           <Icon icon={Clock} />
           <span className="digits">{elapsed(now - pull.checkedAt)}</span>

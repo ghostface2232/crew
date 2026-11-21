@@ -51,7 +51,7 @@ test('a shared lead appears on one mission and linked pulls show when their stat
   await expect(newerCard.locator(lead)).toHaveCount(0);
   await expect(newerCard.locator('.mission-meta').first()).toContainText('2/5 tasks');
   // The most urgent status names the chip, and the others the lead must act on are counted.
-  const chip = newerCard.getByRole('link', { name: 'Pull request example/crew #42: Conflict · Checks failing · Changes requested' });
+  const chip = newerCard.getByRole('link', { name: 'Pull request example/crew #42: Verify the desktop release · Conflict · Checks failing · Changes requested' });
   await expect(chip).toHaveAttribute('href', pull.url);
   await expect(chip).toHaveText('#42Conflict+2');
   await expect(chip).toHaveAttribute('data-state', 'failed');
@@ -73,7 +73,7 @@ test('a shared lead appears on one mission and linked pulls show when their stat
   await expect(chips.nth(3)).toHaveAttribute('data-state', 'done');
   await newerCard.screenshot({ path: testInfo.outputPath('mission-tasks-and-pulls.png'), animations: 'disabled' });
   await push({ ...pull, error: 'gh: not found' });
-  await expect(chips.first()).toHaveText('#42Could not be read');
+  await expect(chips.first()).toHaveText('#42Could not be read1m');
 });
 
 test('short mission plans render in order with matching tracks and progress', async ({ page, request }) => {

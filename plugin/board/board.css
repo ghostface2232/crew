@@ -1014,7 +1014,7 @@ dialog.detail-panel { container: panel / inline-size; }
 /* Pull requests share one line of chips, which wraps only when there are many. */
 .mission-pulls { display: flex; flex-wrap: wrap; gap: 6px; margin-block-start: 10px; min-width: 0; }
 /* A smoothed rounded square, so a pull request does not read as one more status pill beside the mission's. */
-.pull-chip { gap: 5px; border-radius: 6px; corner-shape: var(--smooth); text-decoration: none; }
+.pull-chip { border-radius: 6px; corner-shape: var(--smooth); text-decoration: none; }
 /* Its symbol names a pull request, not a running state, so it does not spin. */
 .chip.pull-chip svg { animation: none; }
 .pull-more { font-weight: 400; }

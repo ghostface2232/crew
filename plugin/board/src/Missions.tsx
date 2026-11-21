@@ -8,7 +8,7 @@ import {
   agentSummary, elapsed, jobLabel, jobRole, leadMission, missionJobStep, missionLooksFinished, missionProgress, missionStep, missionStopPosition,
   missionStops, NAMES, pullIsStale, pullStatuses, roleLabel,
 } from './model.ts';
-import { ActionStatus, AgentMark, Chip, Collapse, Icon, Menu, useAction, useFade, useNow } from './ui.tsx';
+import { ActionStatus, AgentMark, Chip, Collapse, Icon, Menu, StatusIcon, useAction, useFade, useNow } from './ui.tsx';
 
 const capitalized = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 export const jobStatusState = (job: BoardJob) => (job.stalled ? 'stalled' : job.state);
@@ -51,7 +51,7 @@ export function JobRow({ job, selected, openJob, showsKind = true, index = 0 }: 
         <b>{job.title}</b>
         {detail && <span data-error={job.error ? '' : undefined} key={detail} className="swap">{detail}</span>}
       </span>
-      <Chip state={jobStatusState(job)}>{jobLabel(job)}</Chip>
+      <StatusIcon state={jobStatusState(job)} label={jobLabel(job)} />
       <span className="job-row-time">{elapsed((job.endedAt ?? now) - job.createdAt)}</span>
       <Icon icon={ChevronRight} className="row-chevron" />
     </button>
@@ -152,7 +152,7 @@ export function SessionRow({ session, selected, openSession }: { session: Claude
         <b>{session.title}</b>
         {detail && <span key={detail} className="swap">{detail}</span>}
       </span>
-      <Chip state={session.stalled ? 'stalled' : session.state}>{session.stalled ? 'May be stuck' : capitalized(session.state)}</Chip>
+      <StatusIcon state={session.stalled ? 'stalled' : session.state} label={session.stalled ? 'May be stuck' : capitalized(session.state)} />
       {/* An idle session stops its clock at its last activity. */}
       <span className="job-row-time">{elapsed((session.state === 'idle' ? session.activeAt : now) - session.startedAt)}</span>
       <Icon icon={ChevronRight} className="row-chevron" />
@@ -342,9 +342,12 @@ export function MissionPanel({
           <h2 className="title selectable fade-line" ref={fadeTitle} title={mission.title}>{mission.title}</h2>
           <p className="mission-meta fade-line" ref={fadeMeta} title={mission.root}>{meta}</p>
         </div>
-        <span className="mission-progress digits" title="Mission progress" style={{ '--progress': progress } as CSSProperties}>
-          {Math.round(progress * 100)}%
-        </span>
+        {/* An ended mission's status chip already says how it ended. */}
+        {active && (
+          <span className="mission-progress digits" title="Mission progress" style={{ '--progress': progress } as CSSProperties}>
+            {Math.round(progress * 100)}%
+          </span>
+        )}
         <Chip state={active ? 'running' : mission.state}>{capitalized(mission.state)}</Chip>
         <span className="mission-controls">
           {(active || mission.state === 'abandoned') && (
@@ -372,11 +375,6 @@ export function MissionPanel({
           </button>
         </span>
       </div>
-      {!!pulls?.length && (
-        <div className="mission-pulls">
-          {pulls.map((pull) => <MissionPull key={pull.id} pull={pull} now={now} />)}
-        </div>
-      )}
       <Collapse open={expanded} className="mission-body">
         {mission.notes?.map((note, noteIndex) => (
           <p className="mission-note selectable" key={`${note.at}:${noteIndex}`}>{note.text}</p>
@@ -455,6 +453,11 @@ export function MissionPanel({
       </Collapse>
       {!expanded && finished && <span className="caption secondary mission-hint reveal">Looks finished</span>}
       <ActionStatus actionKey={key} />
+      {!!pulls?.length && (
+        <div className="mission-pulls">
+          {pulls.map((pull) => <MissionPull key={pull.id} pull={pull} now={now} />)}
+        </div>
+      )}
     </section>
   );
 }

@@ -38,6 +38,8 @@
   --purple: #af52de;
   --indigo: #5856d6;
   --teal: #30b0c7;
+  /* GitHub's own merged purple, so a merged PR reads as it does there. */
+  --merged: #8250df;
   /* Text on an orange badge: white reaches only about 2:1 there. */
   --on-orange: rgb(0 0 0 / 0.82);
   /* Backdrops behind sheets and the palette, and the faint drop under raised controls. */
@@ -106,6 +108,7 @@
     --purple: #bf5af2;
     --indigo: #5e5ce6;
     --teal: #40c8e0;
+    --merged: #a371f7;
     /* A dark canvas swallows light-mode scrims and drops, so both deepen. */
     --scrim: rgb(0 0 0 / 0.5);
     --scrim-light: rgb(0 0 0 / 0.36);
@@ -190,6 +193,7 @@ kbd {
 [data-state="waiting"], [data-state="stalled"] { --tone: var(--orange); }
 [data-state="failed"], [data-state="error"] { --tone: var(--red); }
 [data-state="done"] { --tone: var(--green); }
+[data-state="merged"] { --tone: var(--merged); }
 [data-state="idle"], [data-state="cancelled"], [data-state="abandoned"], [data-state=""] { --tone: var(--secondary); }
 
 /* StatusLabel: the symbol, then the word, on a tint of the state's color. */
@@ -210,7 +214,10 @@ kbd {
   transition: background-color 300ms var(--ease-out), color 300ms var(--ease-out);
 }
 .chip svg { width: 12px; height: 12px; }
-.chip[data-state="running"] svg, .chip[data-state="working"] svg { animation: spin 4s linear infinite; }
+.chip[data-state="running"] svg, .chip[data-state="working"] svg,
+.status-icon[data-state="running"] svg, .status-icon[data-state="working"] svg { animation: spin 4s linear infinite; }
+.status-icon { display: inline-flex; flex: none; color: color-mix(in srgb, var(--tone, var(--secondary)), var(--tone-ink) var(--tone-darken)); }
+.status-icon svg { width: 16px; height: 16px; }
 @media (prefers-contrast: more) { .chip { box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 50%, transparent); } }
 
 /* The service marks are template images: one shape, drawn in the text color. */
@@ -1011,8 +1018,18 @@ dialog.detail-panel { container: panel / inline-size; }
 .mission[data-state="abandoned"] { --tone: var(--secondary); }
 .mission-heading { flex: 1; min-width: 0; display: grid; gap: 2px; }
 .mission-meta { color: var(--secondary); font-size: 11.5px; font-variant-numeric: tabular-nums; }
-/* Pull requests share one line of chips, which wraps only when there are many. */
-.mission-pulls { display: flex; flex-wrap: wrap; gap: 6px; margin-block-start: 10px; min-width: 0; }
+/* Pull requests sit in a band across the card's foot, apart from its title, whether the card is open or closed. */
+.mission-pulls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  margin: var(--card-padding) calc(-1 * var(--card-padding)) calc(-1 * var(--card-padding));
+  padding: 10px var(--card-padding);
+  border-top: 1px solid var(--hairline);
+  border-radius: 0 0 var(--card-radius) var(--card-radius);
+  background: var(--surface-2);
+}
 /* A smoothed rounded square, so a pull request does not read as one more status pill beside the mission's. */
 .pull-chip { border-radius: 6px; corner-shape: var(--smooth); text-decoration: none; }
 /* Its symbol names a pull request, not a running state, so it does not spin. */
@@ -1041,7 +1058,7 @@ dialog.detail-panel { container: panel / inline-size; }
   .mission-controls { margin-inline-start: auto; }
   .job-row { flex-wrap: wrap; row-gap: 6px; }
   .job-row > .job-row-text { flex-basis: calc(100% - 40px); }
-  .job-row > .chip { margin-inline-start: 38px; }
+  .job-row > .status-icon { margin-inline-start: 38px; }
   .job-row-time { margin-inline-start: auto; }
 }
 .disclosure { transition: rotate 320ms var(--ease-out), translate 320ms var(--ease-out); translate: 0 0.5px; }

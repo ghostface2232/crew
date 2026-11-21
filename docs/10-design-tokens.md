@@ -99,6 +99,7 @@ Surfaces change between light and dark appearance. Status colors are system colo
 | `Palette.success` | Done |
 | `Palette.warning` | Waiting, stalled, unsaved, usage at 70% or more or a window reported tight |
 | `Palette.danger` | Failed, errors, refusals, usage at 90% or more or at its limit |
+| `Palette.merged` | A merged PR, in GitHub's own purple (`#8250df`, `#a371f7` in dark mode) |
 | `Palette.attention(color)` | A row or card that needs attention, tinted 7% with its status color |
 | `Palette.chip(color)` | A chip's background, 12% of its status color |
 | `Palette.selection` | The row whose details are open |
@@ -221,7 +222,7 @@ A pill or glass pill whose words follow state, such as Copied, Saving… or Keep
 | Primary | `.glassPillButton()`, or `.glassPillButton(prominent: false)` for clear glass: Liquid Glass at the pill's size and face. Glass pills side by side share a `GlassEffectContainer` | Send Message, New Job, Save Roles / Save Preset / Save Instructions, Send Job, approval decisions; Review Requests in clear glass |
 | Pill | `.pillButton()`; `.pillButton(.prominent)` for the action a group leads with, `.pillButton(.warning)` for one that drops work without completing it | Mark Done, Stop Tracking, a mission's preset menu, Details, Retry, Copy, Undo/Keep, Check Again, Install, Cancel Job |
 | Icon | `.iconButton()`: `IconButtonStyle`, a `Pill.fill` circle of `IconButton.diameter` (28 points), a little larger than a chip, with its symbol in `Symbol.control`; `.iconButton(prominent: true)` fills it with the accent | Close, Show Job, expand a mission; Send Answer (prominent) |
-| Chip | `.chip(color)`: `Typeface.chip` inked in its color, in a `Palette.chip` capsule with `Chip.insets` (5 × 8), outlined under Increase Contrast. `StatusLabel` draws status with it | Status of jobs, sessions, missions and agents; a model's verdict word |
+| Chip | `.chip(color)`: `Typeface.chip` inked in its color, in a `Palette.chip` capsule with `Chip.insets` (5 × 8), outlined under Increase Contrast. `StatusLabel` draws status with it; `.chip(color, in:)` gives it another shape, such as a PR's rounded square | Status of missions and agents; a model's verdict word. Job and session rows show `StatusIcon`, the status symbol alone, so a row does not repeat its mission's chip |
 | Field | `.fieldSurface()`: the `surface` fill in a `hairline` outline at `fieldRadius`. `MessageEditor` pads it by `Space.ml` and can show a tertiary `prompt` where typing starts; `.surfaceTextField()` gives a text field the same surface at a pill's height (`Space.ml` across, `Pill.insets` top and bottom) | Message and answer editors, the New Job sheet's fields |
 | Error | `ErrorLabel`: an `exclamationmark.circle` label in `Palette.danger` through `Color.ink(_:)`, selectable; the caller sets its type. `ActionMessage` shows a failed action with it | Failed actions, the New Job sheet, setup, update errors, out-of-scope files |
 | Reveal | `RevealToggle`: `captionStrong` secondary words with a `Symbol.badge` chevron that turns over, no fill; the words and the room around them take the click. VoiceOver reads its `subject` and whether it is expanded | Show all / Show less, an earlier debate round, a full reply, the end of a check's output, the original task |

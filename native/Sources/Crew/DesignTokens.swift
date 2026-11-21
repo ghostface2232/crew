@@ -150,6 +150,9 @@ enum Palette {
     static let success = Color.green
     static let warning = Color.orange
     static let danger = Color.red
+    /// GitHub's own merged purple, so a merged PR reads as it does there.
+    static let merged = WorkspaceStyle.dynamic(light: NSColor(srgbRed: 0x82 / 255, green: 0x50 / 255, blue: 0xdf / 255, alpha: 1),
+                                               dark: NSColor(srgbRed: 0xa3 / 255, green: 0x71 / 255, blue: 0xf7 / 255, alpha: 1))
     /// A row or card that needs attention, tinted with its status color.
     static func attention(_ color: Color) -> Color { color.opacity(0.07) }
     /// A chip's background.

@@ -240,7 +240,7 @@ test('a pull request lists its statuses most urgent first, and only ended reads 
   assert.deepEqual(words({ checks: 'passing', review: 'review_required' }), ['Checks passed']);
   assert.deepEqual(pullStatuses({ ...pull, review: 'changes_requested' }), [{ word: 'Changes requested', tone: 'waiting', needsLead: true }]);
   // An ended pull request is its end state alone.
-  assert.deepEqual(pullStatuses({ ...pull, state: 'merged', checks: 'failing', conflict: true }), [{ word: 'Merged', tone: 'done' }]);
+  assert.deepEqual(pullStatuses({ ...pull, state: 'merged', checks: 'failing', conflict: true }), [{ word: 'Merged', tone: 'merged' }]);
   assert.deepEqual(pullStatuses({ ...pull, state: 'closed' }), [{ word: 'Closed', tone: '' }]);
 
   const quiet = 1000 + 15 * 60_000;

@@ -30,12 +30,25 @@ struct StatusLabel: View {
         case "waiting", "stalled": return Palette.warning
         case "failed", "error": return Palette.danger
         case "done": return Palette.success
+        case "merged": return Palette.merged
         case "running", "working", "active": return Palette.accent
         default: return .secondary
         }
     }
     var body: some View {
         Label(title ?? state.capitalized, systemImage: symbol).chip(color)
+    }
+}
+
+/// A row's status as its symbol alone, so it does not repeat the status chip of the card around it; the word is its name.
+struct StatusIcon: View {
+    let state: String
+    let title: String
+    @Environment(\.colorScheme) private var scheme
+    var body: some View {
+        let label = StatusLabel(state: state)
+        Image(systemName: label.symbol).font(Typeface.body).foregroundStyle(label.color.ink(scheme))
+            .help(title).accessibilityLabel(title)
     }
 }
 
@@ -330,7 +343,7 @@ struct JobRow: View {
                     }
                 }
                 Spacer(minLength: WorkspaceStyle.rowSpacer)
-                StatusLabel(state: job.stalled ? "stalled" : job.state, title: job.status)
+                StatusIcon(state: job.stalled ? "stalled" : job.state, title: job.status)
                 ElapsedText(store: store, start: job.createdAt, end: job.endedAt).monospacedDigit().font(Typeface.caption).foregroundStyle(.secondary)
                     .frame(minWidth: WorkspaceStyle.elapsedColumn, alignment: .trailing)
                 Image(systemName: "chevron.right").font(Typeface.micro).foregroundStyle(.tertiary)
@@ -368,7 +381,7 @@ struct SessionRow: View {
                     }
                 }
                 Spacer(minLength: WorkspaceStyle.rowSpacer)
-                StatusLabel(state: session.stalled ? "stalled" : session.state, title: session.stalled ? "May be stuck" : session.state.capitalized)
+                StatusIcon(state: session.stalled ? "stalled" : session.state, title: session.stalled ? "May be stuck" : session.state.capitalized)
                 // An idle session stops its clock at its last activity.
                 ElapsedText(store: store, start: session.startedAt, end: session.state == "idle" ? session.activeAt : nil)
                     .monospacedDigit().font(Typeface.caption).foregroundStyle(.secondary).frame(minWidth: WorkspaceStyle.elapsedColumn, alignment: .trailing)

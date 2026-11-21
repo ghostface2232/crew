@@ -164,6 +164,14 @@ export function Chip({ state, children }: { state: string; children?: ReactNode 
     </span>
   );
 }
+/** A row's status as its symbol alone, so it does not repeat the status chip of the card around it; the word is its name. */
+export function StatusIcon({ state, label }: { state: string; label: string }) {
+  return (
+    <span className="status-icon" data-state={state} role="img" aria-label={label} title={label}>
+      <Icon icon={statusIcon(state)} />
+    </span>
+  );
+}
 export function useAction(key: string) {
   return useSyncExternalStore(actions.subscribe, () => actions.get(key));
 }

@@ -70,7 +70,7 @@ test('a shared lead appears on one mission and linked pulls show when their stat
   await expect(chips.first()).toHaveAttribute('title', 'Verify the desktop release · Conflict · Checks failing · Changes requested · Checked 16m ago');
   await expect(chips.nth(1)).not.toHaveAttribute('data-stale');
   await expect(chips.nth(2)).toHaveAttribute('data-state', 'running');
-  await expect(chips.nth(3)).toHaveAttribute('data-state', 'done');
+  await expect(chips.nth(3)).toHaveAttribute('data-state', 'merged');
   await newerCard.screenshot({ path: testInfo.outputPath('mission-tasks-and-pulls.png'), animations: 'disabled' });
   await push({ ...pull, error: 'gh: not found' });
   await expect(chips.first()).toHaveText('#42Could not be read1m');
@@ -150,7 +150,8 @@ test('a quiet ended workload looks finished and the authenticated user can mark 
   await card.getByRole('button', { name: 'Mission options' }).click();
   await page.getByRole('menuitem', { name: 'Mark Done' }).click();
   await expect(card.locator('.mission-head .chip')).toHaveText('Done');
-  await expect(card.locator('.mission-progress')).toHaveText('100%');
+  // Its status chip says how it ended, so the progress ring goes.
+  await expect(card.locator('.mission-progress')).toHaveCount(0);
   await expect(card.getByText('Looks finished', { exact: true })).toHaveCount(0);
   await expect(card.getByRole('button', { name: 'Mission options' })).toHaveCount(0);
   // An ended mission starts collapsed, as in the app.

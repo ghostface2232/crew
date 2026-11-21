@@ -401,100 +401,109 @@ struct MissionPanel: View {
     }
     var body: some View {
         let leadRow = store.state.leadRow(for: mission)
-        VStack(alignment: .leading, spacing: Space.xl) {
-            VStack(alignment: .leading, spacing: Space.xs) {
-                // Progress, status and the controls sit on the middle of the title and its meta line together.
-                HStack(alignment: .center, spacing: Space.m) {
-                    VStack(alignment: .leading, spacing: Space.xs) {
-                        // One line each, so cards side by side keep the same height whatever their titles.
-                        Text(mission.title).font(Typeface.title).fadeTruncated().help(mission.title)
-                        HStack(spacing: 0) {
-                            ElapsedText(store: store, start: mission.createdAt, end: mission.endedAt)
-                            Text(" · " + meta)
-                        }.font(Typeface.caption).monospacedDigit().foregroundStyle(.secondary).fadeTruncated().help(mission.root)
+        let pulls = (store.state.pulls ?? []).filter { $0.mission == mission.id }
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: Space.xl) {
+                VStack(alignment: .leading, spacing: Space.xs) {
+                    // Progress, status and the controls sit on the middle of the title and its meta line together.
+                    HStack(alignment: .center, spacing: Space.m) {
+                        VStack(alignment: .leading, spacing: Space.xs) {
+                            // One line each, so cards side by side keep the same height whatever their titles.
+                            Text(mission.title).font(Typeface.title).fadeTruncated().help(mission.title)
+                            HStack(spacing: 0) {
+                                ElapsedText(store: store, start: mission.createdAt, end: mission.endedAt)
+                                Text(" · " + meta)
+                            }.font(Typeface.caption).monospacedDigit().foregroundStyle(.secondary).fadeTruncated().help(mission.root)
+                        }
+                        Spacer(minLength: WorkspaceStyle.rowSpacer)
+                        // An ended mission's status chip already says how it ended.
+                        if mission.state == "active" {
+                            Text(missionProgress(mission, jobs: jobs), format: .percent.precision(.fractionLength(0)))
+                                .font(Typeface.caption).monospacedDigit().foregroundStyle(.secondary).help("Mission progress")
+                        }
+                        StatusLabel(state: mission.state == "active" ? "running" : mission.state, title: mission.state.capitalized)
+                        if mission.state == "active" { missionMenu }
+                        // A filled circle, so the control shows its hit area.
+                        Button { toggle() } label: {
+                            Image(systemName: "chevron.down").font(Symbol.control)
+                                .rotationEffect(.degrees(expanded ? 0 : -90)).frame(width: Symbol.controlFrame, height: Symbol.controlFrame)
+                                // Pointing right, the chevron's weight sits left of its frame; a point over centers it optically.
+                                .offset(x: expanded ? 0 : Symbol.chevronNudge)
+                        }.iconButton().accessibilityLabel(expanded ? "Collapse mission" : "Expand mission").help(expanded ? "Collapse" : "Expand")
                     }
-                    Spacer(minLength: WorkspaceStyle.rowSpacer)
-                    Text(missionProgress(mission, jobs: jobs), format: .percent.precision(.fractionLength(0)))
-                        .font(Typeface.caption).monospacedDigit().foregroundStyle(.secondary).help("Mission progress")
-                    StatusLabel(state: mission.state == "active" ? "running" : mission.state, title: mission.state.capitalized)
-                    if mission.state == "active" { missionMenu }
-                    // A filled circle, so the control shows its hit area.
-                    Button { toggle() } label: {
-                        Image(systemName: "chevron.down").font(Symbol.control)
-                            .rotationEffect(.degrees(expanded ? 0 : -90)).frame(width: Symbol.controlFrame, height: Symbol.controlFrame)
-                            // Pointing right, the chevron's weight sits left of its frame; a point over centers it optically.
-                            .offset(x: expanded ? 0 : Symbol.chevronNudge)
-                    }.iconButton().accessibilityLabel(expanded ? "Collapse mission" : "Expand mission").help(expanded ? "Collapse" : "Expand")
+                    // The title row opens and closes the card; its button keeps its own click.
+                    .contentShape(Rectangle())
+                    .onTapGesture(perform: toggle)
                 }
-                // The title row opens and closes the card; its button keeps its own click.
-                .contentShape(Rectangle())
-                .onTapGesture(perform: toggle)
-                let pulls = (store.state.pulls ?? []).filter { $0.mission == mission.id }
-                if !pulls.isEmpty {
-                    // One shared line of chips, which wraps only when there are many.
-                    ActionRow(spacing: Space.s, leading: true) {
-                        ForEach(pulls) { MissionPullChip(pull: $0, now: store.now) }
-                    }
-                    .padding(.top, Space.s)
-                }
-            }
-            if expanded {
-                VStack(alignment: .leading, spacing: Space.xl) {
-                    ForEach(Array((mission.notes ?? []).enumerated()), id: \.offset) { _, note in
-                        Text(note.text).font(Typeface.callout).textSelection(.enabled).padding(.leading, WorkspaceStyle.rowTitleInset)
-                    }
-                    MissionTrack(mission: mission).padding(.vertical, Space.xs)
-                    VStack(spacing: WorkspaceStyle.rowGap) {
-                        ForEach(mission.stops.indices, id: \.self) { index in
-                            let mine = jobs.filter { mission.jobStep($0) == index }
-                            let lead = index == mission.step ? leadRow : nil
-                            if !mine.isEmpty || lead != nil {
-                                let open = !foldsStages || store.isStageOpen(mission, index, jobs: mine, hasLead: lead != nil)
-                                stageLabel(index, count: mine.count, open: open)
-                                    .frame(maxWidth: .infinity, alignment: .leading).padding(.top, Space.m)
-                                if open {
-                                    if let lead {
-                                        SessionRow(session: lead, selected: store.selectedSession == lead.id, store: store) { store.toggleSession(lead.id) }.transition(.card)
+                if expanded {
+                    VStack(alignment: .leading, spacing: Space.xl) {
+                        ForEach(Array((mission.notes ?? []).enumerated()), id: \.offset) { _, note in
+                            Text(note.text).font(Typeface.callout).textSelection(.enabled).padding(.leading, WorkspaceStyle.rowTitleInset)
+                        }
+                        MissionTrack(mission: mission).padding(.vertical, Space.xs)
+                        VStack(spacing: WorkspaceStyle.rowGap) {
+                            ForEach(mission.stops.indices, id: \.self) { index in
+                                let mine = jobs.filter { mission.jobStep($0) == index }
+                                let lead = index == mission.step ? leadRow : nil
+                                if !mine.isEmpty || lead != nil {
+                                    let open = !foldsStages || store.isStageOpen(mission, index, jobs: mine, hasLead: lead != nil)
+                                    stageLabel(index, count: mine.count, open: open)
+                                        .frame(maxWidth: .infinity, alignment: .leading).padding(.top, Space.m)
+                                    if open {
+                                        if let lead {
+                                            SessionRow(session: lead, selected: store.selectedSession == lead.id, store: store) { store.toggleSession(lead.id) }.transition(.card)
+                                        }
+                                        ForEach(mine) { job in JobRow(job: job, selected: store.selectedJob == job.id, showsKind: false, store: store) { store.toggleJob(job.id) }.transition(.card) }
                                     }
-                                    ForEach(mine) { job in JobRow(job: job, selected: store.selectedJob == job.id, showsKind: false, store: store) { store.toggleJob(job.id) }.transition(.card) }
+                                }
+                            }
+                        }
+                        // The outcome and the mission's own controls share its last row: the outcome leads, the
+                        // controls end it at the trailing edge, centered on one line. An active mission always offers its
+                        // preset; done and stop are offered once it looks finished, and an abandoned one, superseded or gone
+                        // quiet, can still be marked done.
+                        let offered = (mission.state == "active" && finished) || mission.state == "abandoned"
+                        if !mission.outcome.isEmpty || offered || mission.state == "active" {
+                            // A narrow card first drops the preset's words and the finished note, then moves the
+                            // controls under the outcome, where ActionRow wraps them rather than let them run past the card's edges.
+                            ViewThatFits(in: .horizontal) {
+                                HStack(alignment: .center, spacing: Space.m) {
+                                    outcome
+                                    Spacer(minLength: 0)
+                                    controls(offered: offered, compact: false)
+                                }
+                                HStack(alignment: .center, spacing: Space.m) {
+                                    outcome
+                                    Spacer(minLength: 0)
+                                    controls(offered: offered, compact: true)
+                                }
+                                VStack(alignment: .leading, spacing: Space.m) {
+                                    outcome
+                                    ActionRow { controls(offered: offered, compact: true) }.frame(maxWidth: .infinity, alignment: .trailing)
                                 }
                             }
                         }
                     }
-                    // The outcome and the mission's own controls share its last row: the outcome leads, the
-                    // controls end it at the trailing edge, centered on one line. An active mission always offers its
-                    // preset; done and stop are offered once it looks finished, and an abandoned one, superseded or gone
-                    // quiet, can still be marked done.
-                    let offered = (mission.state == "active" && finished) || mission.state == "abandoned"
-                    if !mission.outcome.isEmpty || offered || mission.state == "active" {
-                        // A narrow card first drops the preset's words and the finished note, then moves the
-                        // controls under the outcome, where ActionRow wraps them rather than let them run past the card's edges.
-                        ViewThatFits(in: .horizontal) {
-                            HStack(alignment: .center, spacing: Space.m) {
-                                outcome
-                                Spacer(minLength: 0)
-                                controls(offered: offered, compact: false)
-                            }
-                            HStack(alignment: .center, spacing: Space.m) {
-                                outcome
-                                Spacer(minLength: 0)
-                                controls(offered: offered, compact: true)
-                            }
-                            VStack(alignment: .leading, spacing: Space.m) {
-                                outcome
-                                ActionRow { controls(offered: offered, compact: true) }.frame(maxWidth: .infinity, alignment: .trailing)
-                            }
-                        }
-                    }
+                    .transition(reduceMotion ? .opacity : .asymmetric(
+                        // In after the card has started to open; out quickly, before the card closes over it.
+                        insertion: .modifier(active: Reveal(shown: false), identity: Reveal(shown: true)).animation(Motion.enter),
+                        removal: .modifier(active: Reveal(shown: false), identity: Reveal(shown: true)).animation(Motion.leave)))
                 }
-                .transition(reduceMotion ? .opacity : .asymmetric(
-                    // In after the card has started to open; out quickly, before the card closes over it.
-                    insertion: .modifier(active: Reveal(shown: false), identity: Reveal(shown: true)).animation(Motion.enter),
-                    removal: .modifier(active: Reveal(shown: false), identity: Reveal(shown: true)).animation(Motion.leave)))
+                ActionMessage(state: store.actions[mission.actionKey])
             }
-            ActionMessage(state: store.actions[mission.actionKey])
+            .padding(WorkspaceStyle.cardPadding)
+            if !pulls.isEmpty {
+                // Pull requests sit in a band across the card's foot, apart from its title, whether the card is open or closed.
+                ActionRow(spacing: Space.s, leading: true) {
+                    ForEach(pulls) { MissionPullChip(pull: $0, now: store.now) }
+                }
+                .padding(.horizontal, WorkspaceStyle.cardPadding).padding(.vertical, Space.ml)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(WorkspaceStyle.rowFill)
+                .overlay(alignment: .top) { Rectangle().fill(WorkspaceStyle.hairline).frame(height: 1) }
+            }
         }
-        .card()
+        .card(padding: 0)
         // Closing, the contents fade while the card shrinks; they must not spill over the card below.
         .clipShape(RoundedRectangle(cornerRadius: WorkspaceStyle.cardRadius))
         // Closed, the whole card opens it. Open, only the title row closes it, so text inside stays selectable

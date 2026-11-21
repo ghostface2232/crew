@@ -149,7 +149,7 @@ No input. Returns the list of windows per service and account. Values below illu
 
 ### 7.2 `route`
 
-Proposed input: `task_kind` (`lead`, `implement`, `review`, `copy_polish`). Implemented in `mcp.ts` (`GET /api/route`) taking `kind` (`lead` or any of the eight `ROLES` in `config.ts`: `delegate`, `refactor`, `release`, `debate`, `review`, `verify`, `fix`, `polish`) plus optional `mission`, and returning camelCase `RouteDecision` (`kind`, `assignee`, `reason`, `fallback`, `degraded`, `deferUntil`, `holders`, plus `preset` and `policy`):
+Proposed input: `task_kind` (`lead`, `implement`, `review`, `copy_polish`). The MCP `route` tool in `mcp.ts` returns text lines. The HTTP endpoint `GET /api/route` in `daemon.ts` takes `kind` (`lead` or any of the eight `ROLES` in `config.ts`: `delegate`, `refactor`, `release`, `debate`, `review`, `verify`, `fix`, `polish`) plus optional `mission` and returns a camelCase `RouteDecision` (`kind`, `assignee`, `reason`, `fallback`, `degraded`, `deferUntil`, `holders`, plus `preset` and `policy`):
 
 ```json
 {

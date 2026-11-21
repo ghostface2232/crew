@@ -14,7 +14,7 @@ Version evidence: `claude --version` printed `2.1.323 (Claude Code)`; `codex --v
 
 ## 2. Probe method and evidence
 
-A temporary Python stdio server logged each incoming newline-delimited JSON-RPC message, echoed the requested `protocolVersion` on `initialize`, returned `capabilities: {"tools":{}}` with `serverInfo: {"name":"compat-probe","version":"1"}`, returned `{"tools":[]}` on `tools/list`, ignored notifications, and returned `-32601` for unsupported requests (matching Crew's behavior):
+The probe used a temporary Python stdio server that imitated Crew's replies. Crew and its daemon were never started. The stand-in logged each incoming newline-delimited JSON-RPC message, echoed the requested `protocolVersion` on `initialize`, returned `capabilities: {"tools":{}}` with `serverInfo: {"name":"compat-probe","version":"1"}`, returned `{"tools":[]}` on `tools/list`, ignored notifications, and returned `-32601` for unsupported requests (matching Crew's behavior):
 
 ```json
 {"jsonrpc":"2.0","id":"server-discover-probe-1","error":{"code":-32601,"message":"Method not found: server/discover"}}
@@ -62,7 +62,7 @@ Both Codex runs sent these incoming MCP messages:
 
 Neither Codex capture sent `server/discover`. No Tasks capability or extension appeared in any captured host capabilities, though this alone does not prove the binaries lack optional Tasks support.
 
-After MCP listing, Claude exited with `Not logged in · Please run /login`, Codex CLI hit network/DNS errors on model requests and was terminated after 25 seconds, and `codex app-server` returned `thread/start` and MCP listing before termination (Codex also warned it could not create PATH helper aliases in the temporary home). All probe processes and temporary files were removed afterwards.
+No credentials were copied into the temporary homes, so after MCP listing Claude exited with `Not logged in · Please run /login`, Codex CLI hit network/DNS errors on model requests and was terminated after 25 seconds, and `codex app-server` returned `thread/start` and MCP listing before termination (Codex also warned it could not create PATH helper aliases in the temporary home). All probe processes and temporary files were removed afterwards.
 
 ## 3. Crew today and impact
 
@@ -70,7 +70,7 @@ Both [lead MCP transport](../plugin/bridge/mcp.ts) (`PROTOCOL_VERSIONS`, `handle
 
 The lead transport also checks `params?.capabilities?.elicitation` and can send `elicitation/create` as a server-initiated request (`request` in `mcp.ts`), which remains a legacy-protocol path.
 
-No startup incompatibility was observed: Claude falls back after `-32601` on `server/discover`, and Codex requests `2025-06-18` directly. Live Crew tool execution, elicitation, cancellation, and a `2026-07-28` discovery/MRTR exchange remain **unverified** by this probe. A future discovery-only client could fail on `-32601`, so Claude's fallback should not be assumed permanent.
+The first run returned an empty discovery result. The evidence here comes from the repeat run with an explicit error. No startup incompatibility was observed: Claude falls back after `-32601` on `server/discover`, and Codex requests `2025-06-18` directly. Live Crew tool execution, elicitation, cancellation, and a `2026-07-28` discovery/MRTR exchange remain **unverified** by this probe. A future discovery-only client could fail on `-32601`, so Claude's fallback should not be assumed permanent.
 
 ## 4. Recommendation
 

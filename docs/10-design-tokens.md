@@ -199,7 +199,7 @@ These views keep their own geometry next to their code, built from the tokens ab
 
 ## Motion — `Motion`
 
-Every animation takes one of these values, through `Motion.reduced`, so Reduce Motion turns it off.
+Shared transitions use `Motion.reduced` to respect Reduce Motion. `WorkflowStrip` applies its pulse directly and checks `reduceMotion` before animating.
 
 | Token | Animation | Use |
 | --- | --- | --- |

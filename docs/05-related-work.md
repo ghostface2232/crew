@@ -4,7 +4,7 @@ Surveyed 2026-11-12. Star counts, last push dates, and licenses were checked via
 
 ## 1. Summary
 
-- **Worktrees plus a dashboard is already commodity infrastructure.** Plenty of human-driven GUIs and TUIs do this, and several have already shut down or stalled (Conductor is shutting down its cloud on Nov 20 after joining Meta; Vibe Kanban is community-maintained after the company wound down). What sets Crew apart is that a lead agent delegates over MCP and reviews/merges diffs, workers run through structured protocols with no blind auto-approval (Codex defaults to its automatic reviewer with user escalation, and Antigravity routes commands to the user), and Codex performs adversarial cross-review.
+- **Worktrees plus a dashboard is already commodity infrastructure.** Plenty of human-driven GUIs and TUIs do this, and several have already shut down or stalled (Conductor is shutting down its cloud on Nov 20 after joining Meta; Vibe Kanban is community-maintained after the company wound down). What sets Crew apart is that a lead agent delegates over MCP and reviews/merges diffs, workers run through structured protocols with no blind auto-approval (Codex defaults to its automatic reviewer with user escalation, and Antigravity routes delegate commands to the user and refuses commands in other roles), and Codex performs adversarial cross-review.
 - **The closest point of comparison is `openai/codex-plugin-cc`** (35k★, Apache-2.0). It lacks worktree isolation, user approval routing, and a polish role—and its top open issues are almost all process lifecycle bugs. Crew needs to guard against the same class of bugs.
 - **Evidence for cross-model code review is weaker than commonly assumed.** For code, existing research suggests a fresh reviewer with a clean context matters more than switching model vendors—whereas for documentation and prose, cross-model review showed a large gain (section 4).
 - **The industry broadly warns against parallel writes and over-orchestration.** Both Anthropic and Cognition favor read-heavy fan-out while treating parallel writes as high-risk. Crew's "delegate only separable slices + single lead merges" design matches that consensus.
@@ -66,7 +66,7 @@ CrewAI, Mastra, and Microsoft Agent Framework were skipped as too far removed fr
 ## 3. What Crew already does well
 
 - Dedicated worktree and branch per job; the bridge commits and only the lead merges.
-- No blind auto-approval (unlike `codex-plugin-cc`, OpenHands, or Claude Squad): Codex defaults to `auto_review` (`config.ts`) and escalates refusals or `user`-mode turns to the user; Antigravity allows workspace reads/edits and routes commands and questions to the user (`adapters/antigravity.ts`).
+- No blind auto-approval (unlike `codex-plugin-cc`, OpenHands, or Claude Squad): Codex defaults to `auto_review` (`config.ts`) and escalates refusals or `user`-mode turns to the user; Antigravity allows reads and role-scoped workspace edits and forwards questions to the user. It routes commands to the user only for delegate jobs and refuses them in other roles (`adapters/antigravity.ts`).
 - Uses structured protocols (`codex app-server`, `agy acp`) rather than terminal screen-scraping.
 - Configurable roles (eight roles around implementation, adversarial review, and wording polish in `config.ts`) with out-of-scope edits flagged (`outOfScope` in `jobs.ts`) or refused (`antigravity.ts`).
 - Background execution plus `wait` and `wake.ts` avoids long synchronous tool-call timeouts.
@@ -174,12 +174,12 @@ Initial audit findings (reproduced with a fake `codex app-server`, temporary rep
 
 ### B. Improvement candidates from the code audit
 
-- **B-1 Forwarding denial reasons (Refuted)**: Neither Codex approval responses nor ACP permission responses carry a reason field. Instead, `reply` with `decision: "decline"` sends a `turn/steer` (Codex) or a next-turn prompt (Antigravity) after the turn ends.
+- **B-1 Forwarding denial reasons (Refuted)**: Neither Codex approval responses nor ACP permission responses carry a reason field. Instead, `reply` with `decision: "decline"` steers the waiting Codex turn immediately via `turn/steer`. Antigravity waits for the turn to end before sending a new prompt.
 - **B-2 Claude lane card reordering (Reproduced, fixed)**: Replaced the 3-lane `activeAt`-sorted layout with mission/session panels (`Overview.tsx`, `BoardView.swift`) that keep card order stable across activity updates.
 
 ### C. Follow-up verification and fixes
 
-Follow-up checks used temporary Git repositories, JSON-RPC stubs, the installed Codex protocol schema, and an Antigravity `1.5.5` handshake (later rechecked on `1.5.9` in section 11). All A-1 through A-6, B-1, and B-2 fixes above are verified by tests (`test/adapters.test.ts`, `test/adapter-contracts.test.ts`, `test/jobs.test.ts`) except live Codex child-thread and overlapping-approval traffic, which was simulated against stubs. Repository-wide worktree creation mutexes and abrupt `SIGKILL` daemon termination remain unverified.
+Follow-up checks used temporary Git repositories, JSON-RPC stubs, the installed Codex protocol schema, and an Antigravity `1.5.5` handshake (later rechecked on `1.5.9` in section 11). The tests (`test/adapters.test.ts`, `test/adapter-contracts.test.ts`, `test/jobs.test.ts`) cover A-1, A-1b, A-2, A-4, and A-6. Codex child-thread and overlapping-approval traffic was simulated against stubs. Live parent turns ending while child turns are still active require separate evidence. Repository-wide worktree creation mutexes and abrupt `SIGKILL` daemon termination also remain unverified.
 
 ## 9. Usability and UX takeaways
 

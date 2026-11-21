@@ -34,7 +34,7 @@ The board is organized around missions, needs-you requests, activity, and histor
 | Needs you | Dedicated `Needs You` view and attention banner (`NeedsYou.tsx`, `BoardView.swift`) answering approvals and questions in place; merge execution stays with the lead. | Done (merge execution open) |
 | Strand drawer | Clicking a job opens `JobDrawer.tsx` / `JobDetailView.swift` with report, changed/out-of-scope files, check receipts, events, and follow-up input. | Done |
 | Command bar | `Dispatch.tsx` / `DispatchView.swift` (`New Job`) sends a command, question, or information note without a lead (`POST /api/jobs`); inline `@codex` syntax and lead mission start remain open. | Partial |
-| Usage gauges | Per-agent usage windows and status in `Overview.tsx` and `BoardView.swift`; the New Job sheet disables unavailable agents rather than auto-suggesting an alternative when tight. | Done |
+| Usage gauges | Per-agent usage windows and status in `Overview.tsx` and `BoardView.swift`; New Job disables only agents whose configuration has `enabled: false`. The command bar does not suggest an alternative when an agent is tight. | Partial |
 | Progress roll-up | Mission progress rolls up from stages and jobs (`Missions.tsx`, `BoardView.swift`). | Done |
 | Intent | `New Job` distinguishes information (global/project instructions or mission note), read-only question (`ask: true`), and command. | Done |
 | Scoped follow-up | `JobDrawer` / `JobDetailView` send follow-ups via `POST /api/jobs/:id/reply`, steering active Codex turns; Antigravity still requires waiting for the turn to end (`antigravity.ts`). | Partial |
@@ -62,6 +62,7 @@ Recommended order is A, then B, then C. Without A, both Cursor support and role 
 | --- | --- |
 | Codex | `developerInstructions`, where the role text already goes |
 | Antigravity | `_meta.antigravity.systemPrompt.append` (or prompt prefix fallback) |
+| Cursor (planned) | Prompt prefix |
 | Claude (lead) | `SessionStart` and `SubagentStart` hook context (`context.ts`) |
 
 **A3. Model and effort. *(Done)*** Implemented in `config.ts`, `tiers.ts`, `codex.ts`, and `antigravity.ts` ([09-usage-presets-rounds.md](09-usage-presets-rounds.md) section 8). Codex accepts `model` and `effort`; Antigravity maps `effort` to `thought_level` (`tiers.ts`). Role settings override presets (`economy`, `balanced`, `best`), and presets guide lead subagent models.
@@ -88,7 +89,7 @@ Recommended order is A, then B, then C. Without A, both Cursor support and role 
 
 **D2. Fix role. *(Done)*** Implemented as `fix` in `config.ts` (defaulting to Claude), `plugin/roles/fix.md`, `delegate` (`role: "fix"`) in `mcp.ts`, and `route` in `usage.ts`. A worker's own change still goes back via `reply`; `fix` handles the lead's code or merged results in a fresh worktree, keeping build and fix evidence separate in `notes.ts`.
 
-**D3. Peer ratings. *(Done)*** Implemented in `notes.ts`, `worker-mcp.ts` (`rate`), `daemon.ts` (`/api/jobs/:id/rating`, `/api/peer-ratings`), and `config.ts` (`peerRatings`, on by default) ([09](09-usage-presets-rounds.md) section 17). Ratings require a `fact` and count for half (`PEER_SHARE = 0.5`) beside evidence once at least `MIN_RATINGS = 3` exist.
+**D3. Peer ratings. *(Done)*** Implemented in `notes.ts`, `worker-mcp.ts` (`rate`), `daemon.ts` (`/api/jobs/:id/rating`, `/api/peer-ratings`), and `config.ts` (`peerRatings`, on by default) ([09](09-usage-presets-rounds.md) section 17). The switch is available because rating adds usage. Ratings require a `fact` and count for half (`PEER_SHARE = 0.5`) beside evidence once at least `MIN_RATINGS = 3` exist.
 
 ### E. From the game retrospective
 
@@ -106,10 +107,10 @@ From a game project retrospective (58 jobs, ~110 hours, 1.5B tokens). Project-sp
 
 **Open**, each needing a decision first:
 
-- **E1. A browser with a GPU on Windows. *(Open)*** `crew.browser` (`browser.ts`) runs only on macOS (`process.platform !== 'darwin'` throws). On Windows a worker starts Chromium inside Codex's sandbox, where GPU crashes/software fallback were reported; running it from the daemon would give GPU access but Windows has no `sandbox-exec` to enforce the job's file limits. Needs that tradeoff settled and a Windows machine to verify.
+- **E1. A browser with a GPU on Windows. *(Open)*** `crew.browser` (`browser.ts`) runs only on macOS (`process.platform !== 'darwin'` throws). On Windows a worker starts Chromium inside Codex's sandbox, where GPU crashes, software fallback, and a headless shell showing an error window on the user's screen were reported. The cause was not investigated. Running Chromium from the daemon would give it GPU access, but Windows has no `sandbox-exec` to enforce the job's file limits. Needs that tradeoff settled and a Windows machine to verify.
 - **E2. A budget per job. *(Open)*** Tokens and elapsed time show when a job ends (`render.ts`, board, native app), with no live budget cap that wakes the lead mid-run. Open: defaults and whether waking the lead is worth its tokens.
 
-**Not taken:** retrying `thread/start` (root cause fixed in `codex.ts` with `THREAD_TIMEOUT_MS = 180_000` and excluding system temp from ACLs), blocking software rendering globally (projects needing GPU set it in `.crew/instructions.md`), and asset-hash/camera metadata on captures (turns already commit on the job branch).
+**Not taken:** retrying `thread/start`, blocking software rendering globally (projects needing GPU set it in `.crew/instructions.md`), and asset-hash/camera metadata on captures (turns already commit on the job branch). `thread/start` timed out because Codex granted an ACL to the system temp folder, which is now excluded from writable paths. `THREAD_TIMEOUT_MS = 180_000` separately allows for slow ACL passes. A retry would have waited three more minutes and failed the same way.
 
 ## 5. Long-term plan
 
@@ -142,7 +143,8 @@ Requirements R4 and R6 (computer use, side chat, visibility in the desktop app) 
 - Midmap was read from its Microsoft Store listing only (released 2026-11-04, Windows x64); its layout and site were not seen.
 - Conductor's status is inconsistent between sources (planned cloud shutdown in 05 vs. a release on 2026-11-12); does not affect UX references.
 - Antigravity's native `AGENTS.md` support is unverified; A2 does not depend on it.
-- Direct dispatch shape *(settled in `Dispatch.tsx` / `DispatchView.swift`)*: `POST /api/jobs` creates a single job with no mission or lead.
+- Direct dispatch shape *(settled in `Dispatch.tsx` / `DispatchView.swift`)*: the board’s New Job creates a job without a mission or lead. The lead’s tools use the same `POST /api/jobs` endpoint and pass lead and mission information.
+- PR watches: the user has yet to decide whether Crew should poll slowly while the owning session is closed (Codex's preference). The current implementation skips polling while the session is closed.
 
 ## 7. Sources
 
@@ -159,8 +161,8 @@ Requirements R4 and R6 (computer use, side chat, visibility in the desktop app) 
 
 Summary of design turns recorded across the roadmap:
 
-- **Board and desktop shells**: Built the React + Vite board (L5) and direct dispatch (`POST /api/jobs`) while keeping the independent daemon; replaced Electron with a native SwiftUI/AppKit macOS app (`native/`, Swift 6, macOS 26+) and kept Electron for Windows (`desktop/`) ([07](07-desktop-and-react.md), [08](08-native-macos.md)).
-- **Roles, presets, and AgentGauge G1**: Expanded roles into an 8-role registry with inheritance (keeping `release` scoped to preparation, never push/publish), added global/mission presets, and built AgentGauge G1 inside the daemon ([09](09-usage-presets-rounds.md) sections 3, 6–8, 15).
-- **Model notes, fix role, and peer ratings (D1–D3)**: Replaced calibrated/clamped scoring (which rewarded tier and let fixes lift build scores) with uncalibrated finding load over change size (`xlarge` exposure 4 for large integrations), a separate `fix` score, `adoption` tracking, and fact-backed `peerRatings` weighted at 50% alongside evidence ([09](09-usage-presets-rounds.md) sections 16–17).
-- **Game retrospective (E)**: Adopted lead/worker prompt rules, tool-failure reporting, named stage labels (E3), and side-by-side evidence comparison opening one capture first (E4), leaving E1/E2 open ([04](04-implementation.md)).
-- **Release gate, PR watching, and concurrent missions**: Gated releases on passing typechecks and tests, added mission PR watching (no polling while the lead session is closed), and required explicit mission IDs when multiple missions are open instead of an implicit current mission or workflow engine ([04](04-implementation.md) section 5.5, [13](13-distribution-plan.md)).
+- 2026-11-12–13: **Board and desktop shells**: Built the React + Vite board (L5) and direct dispatch (`POST /api/jobs`) while keeping the independent daemon; replaced Electron with a native SwiftUI/AppKit macOS app (`native/`, Swift 6, macOS 26+) and kept Electron for Windows (`desktop/`) ([07](07-desktop-and-react.md), [08](08-native-macos.md)).
+- 2026-11-13 and 2026-11-15: **Roles, presets, and AgentGauge G1**: Expanded roles into an 8-role registry with inheritance (keeping `release` scoped to preparation because push, publish, and deploy need their own permission, network, and approval design), added global/mission presets, and built AgentGauge G1 inside the daemon ([09](09-usage-presets-rounds.md) sections 3, 6–8, 15).
+- 2026-11-15, 2026-11-16, and 2026-11-18: **Model notes, fix role, and peer ratings (D1–D3)**: Replaced calibrated/clamped scoring (which rewarded tier and let fixes lift build scores) with uncalibrated finding load over change size (`xlarge` exposure 4 for large integrations), a separate `fix` score, `adoption` tracking, and fact-backed `peerRatings` weighted at 50% alongside evidence ([09](09-usage-presets-rounds.md) sections 16–17).
+- 2026-11-20: **Game retrospective (E)**: Adopted lead/worker prompt rules, tool-failure reporting, named stage labels (E3), and side-by-side evidence comparison opening one capture first (E4), leaving E1/E2 open ([04](04-implementation.md)).
+- 2026-11-20: **Release gate, PR watching, and concurrent missions**: Gated releases on passing typechecks and tests, added mission PR watching (no polling while the lead session is closed), and required explicit mission IDs when multiple missions are open instead of an implicit current mission or workflow engine ([04](04-implementation.md) section 5.5, [13](13-distribution-plan.md)).

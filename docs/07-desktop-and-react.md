@@ -1,6 +1,6 @@
 # 07. React board and Electron desktop
 
-The Electron shell originally built for all platforms was replaced on macOS by the [native macOS app](08-native-macos.md) and now serves Windows and other non-macOS systems ([12-windows-electron.md](12-windows-electron.md)). The React web board remains supported on all platforms.
+Windows uses the [Electron shell](12-windows-electron.md), and macOS uses the [native macOS app](08-native-macos.md). The React web board remains supported on all platforms.
 
 Originally implemented in Crew 0.2.0 (2026-11-12) for the L5 UI foundation and L2 role-based dispatch. AgentGauge usage routing (`plugin/bridge/usage.ts`), New Job intents (`Command`, `Question`, `Information`), and per-round undo (`plugin/board/src/JobDrawer.tsx`) have since shipped; Claude remains the pipeline lead, while Cursor, alternate leads, and automatic merges remain separate work.
 
@@ -12,10 +12,10 @@ Claude plugin / CLI ──┐
 Electron main ────────┘             │
   window, tray, signing, updater    │ HTTP + SSE
   update preload IPC only           ▼
-                     React board in Electron (non-macOS) or web browser
+                     React board in Electron (Windows) or web browser
 ```
 
-React owns the entire board (`plugin/board/src`), replacing the original imperative `board.js` renderer with no shared DOM ownership. On macOS, the desktop shell is SwiftUI (`native/Sources/Crew`); on non-macOS systems, `desktop/main.ts` hosts the daemon-served React board.
+React owns the entire board (`plugin/board/src`), replacing the original imperative `board.js` renderer with no shared DOM ownership. On macOS, the desktop shell is SwiftUI (`native/Sources/Crew`); on Windows, `desktop/main.ts` hosts the daemon-served React board.
 
 | File | Responsibility |
 | --- | --- |
@@ -25,7 +25,7 @@ React owns the entire board (`plugin/board/src`), replacing the original imperat
 | `plugin/board/src/ui.tsx` | Native `<dialog>` lifecycle, stable composers, Lucide status icons, agent marks, and clock updates |
 | `Missions.tsx`, `NeedsYou.tsx`, `Overview.tsx`, `Palette.tsx`, `Shell.tsx`, `Scores.tsx` | Mission tracks, needs-you cards, workspace/activity/history views, command palette, sidebar navigation, and model scores |
 | `JobDrawer.tsx`, `Settings.tsx`, `Dispatch.tsx` | Job/session details (verification, evidence, rounds, debate), scoped settings/presets/about, and direct dispatch |
-| `desktop/main.ts`, `desktop/preload.cts` | Non-macOS Electron shell: single instance, tray, restored bounds, Mica backdrop, request signing, daemon startup, and updater IPC |
+| `desktop/main.ts`, `desktop/preload.cts` | Windows Electron shell: single instance, tray, restored bounds, Mica backdrop, request signing, daemon startup, and updater IPC |
 | `plugin/bridge/assets.ts` | Built-asset allowlist, MIME types, and renderer CSP |
 
 Bridge types are imported type-only; Node modules never enter the renderer. Shared CSS tokens (`plugin/board/board.css`) preserve the workspace surfaces, typography, and state colors, while `Dispatch.tsx`, `Settings.tsx`, and `Scores.tsx` use CSS Modules. Lucide SVGs use `currentColor` and `strokeWidth={1.75}`; agent marks (`AgentMark`) render the SVGs in `plugin/board/src/icons/` as CSS mask templates.
@@ -51,11 +51,11 @@ Versions below match `package.json` (pinned in `package-lock.json`).
 | React / React DOM 19.3 | Stable component identity and declarative updates replace manual HTML patching and input restoration |
 | Vite 8.3 | TypeScript/JSX development and production bundling, hashed assets, and unused-code elimination |
 | Lucide React 1.72 | One outline SVG vocabulary, explicit sizing and stroke width, only imported icons in the build |
-| Electron 45.3 | Desktop shell for Windows and non-macOS systems with tray, window lifecycle, and Mica support |
+| Electron 45.3 | Desktop shell for Windows with tray, window lifecycle, and Mica support |
 | Electron Builder 26.18 | Per-user NSIS Windows installer and unpacked bundle (`asar: false`), replacing the earlier `electron-packager` setup |
 | Playwright 1.65 | Real browser regressions, visual baselines, and automation of the Electron executable |
 
-No state manager, router, UI component framework, motion runtime, or Storybook was added. React state and `useSyncExternalStore` cover the state model; native `<dialog>` and `<select>` cover focus and keyboard behavior. Playwright exercises the real screens and component states. Replacing `electron-packager` with `electron-builder` (`asar: false`) removed the earlier `@electron/asar` dependency overrides.
+No state manager, router, UI component framework, motion runtime, or Storybook was added. React state and `useSyncExternalStore` cover the state model; native `<dialog>` and `<select>` cover focus and keyboard behavior. Playwright exercises the real screens and component states. The move to the native macOS app removed the earlier `@electron/asar` dependency overrides (`73bde30`).
 
 Primary references consulted:
 
@@ -102,11 +102,11 @@ npm run test:e2e
 npm run test:desktop
 ```
 
-`npm run test:desktop` runs `scripts/smoke-desktop.mjs` on macOS or `scripts/smoke-electron.mjs` elsewhere (`CREW_APP_PATH` points either script at a packaged binary).
+`npm run test:desktop` runs `scripts/smoke-desktop.mjs` on macOS or `scripts/smoke-electron.mjs` on Windows (`CREW_APP_PATH` points either script at a packaged binary).
 
-Browser checks (`playwright.config.ts`) run in Chromium (`chromium`) and a `development` build that keeps React's StrictMode checks; Firefox and WebKit are omitted because neither launches on macOS 27. Each project gets its own fixture server (`test/e2e/server.ts`) on a free port without starting workers. Screenshot baselines are Chromium's on macOS; inspect changes before running `npm run test:e2e -- --update-snapshots`. Desktop smoke tests use a fresh temporary home and free port, never the user's real jobs.
+Browser checks (`playwright.config.ts`) run in Chromium (`chromium`) and a `development` build that keeps React's StrictMode checks; Firefox and WebKit are omitted because neither launches on macOS 27. Each project gets its own fixture server (`test/e2e/server.ts`) on a free port without starting workers. Screenshot baselines are Chromium's on macOS. Screenshot comparisons are skipped on other platforms. Inspect changes before running `npm run test:e2e -- --update-snapshots`. Desktop smoke tests use a fresh temporary home and free port, never the user's real jobs.
 
-At the initial 2026-11-12 React/Electron migration baseline, 81 unit tests, typecheck, 14 browser tests, and a macOS arm64 Electron smoke run passed (reporting ~524 MiB sum of Electron working sets under Playwright, ~255 MiB app bundle, and ~262 kB / 82 kB gzip JS renderer bundle). See [08-native-macos.md](08-native-macos.md) and [12-windows-electron.md](12-windows-electron.md) for current platform verification.
+At the initial 2026-11-12 React/Electron migration baseline, 81 unit tests, typecheck, 14 browser tests, and a macOS arm64 Electron smoke run passed (reporting ~524 MiB sum of Electron working sets under Playwright, ~255 MiB app bundle, and ~262 kB / 82 kB gzip JS renderer bundle). The working-set sum counts shared pages twice, excludes the daemon and workers, and cannot serve as a physical-memory budget. See [08-native-macos.md](08-native-macos.md) and [12-windows-electron.md](12-windows-electron.md) for current platform verification.
 
 ## UI review
 
@@ -114,14 +114,14 @@ Scope: the board, requests, details, settings, and dispatch flow (excluding OS n
 
 | Severity | Location | Before | After | Why |
 | --- | --- | --- | --- | --- |
-| Medium | `plugin/board/board.css`, `src/ui.tsx`, `src/Missions.tsx` | Mixed mask glyphs, CSS chevrons, and SVG controls | Lucide marks, controls, and completed-stage checks share physical stroke widths | Keeps small icons legible and consistent |
+| Medium | `plugin/board/board.css`, `src/ui.tsx`, `src/Missions.tsx` | Mixed mask glyphs, CSS chevrons, and SVG controls | Lucide icons use a `strokeWidth` of 1.75 in SVG units | Keeps small icons legible and consistent |
 | High | `src/Settings.tsx`, `src/api.ts` | Migration could drop shared locks and late-response protection | Request identities and scoped save generations preserve those guarantees | Prevents duplicate decisions and overwritten drafts |
 | Medium | `plugin/board/board.css` | Retired dock stacking rules hid subsequent React request cards | Removed renderer-specific stacking and kept all requests in flow | Every waiting job remains reachable |
 
 ## Review fixes (2026-11-13)
 
 - Keeping `All projects` visible in the project sidebar ensures users can always clear a persisted project filter and dispatch to another directory.
-- Claude waiting episodes carry a unique `waitingId` across duplicate hooks for the same wait, while a new wait gets a new ID even if its message repeats, enabling accurate notification deduplication.
+- Claude waiting episodes carry a unique `waitingId` across duplicate hooks for the same wait, while a new wait gets a new ID even if its message repeats, enabling accurate notification deduplication. For daemons without `waitingId`, notifications fall back to the message key.
 
 ## Revision: native macOS replacement (2026-11-13)
 

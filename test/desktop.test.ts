@@ -48,8 +48,10 @@ test('serves only built assets with explicit types and a renderer security polic
     fs.mkdirSync(path.join(root, 'board/dist/assets'), { recursive: true });
     fs.writeFileSync(path.join(root, 'board/dist/index.html'), '<html></html>');
     fs.writeFileSync(path.join(root, 'board/dist/assets/index-ab12.js'), '');
+    fs.writeFileSync(path.join(root, 'board/dist/assets/CrewAppIcon-ab12.png'), '');
     assert.equal(boardAsset(root, '/')?.immutable, false);
     assert.equal(boardAsset(root, '/assets/index-ab12.js')?.type, 'text/javascript; charset=utf-8');
+    assert.equal(boardAsset(root, '/assets/CrewAppIcon-ab12.png')?.type, 'image/png');
     for (const url of [
       '/src/main.tsx',
       '/assets/../../bridge/config.ts',

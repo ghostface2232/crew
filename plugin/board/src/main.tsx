@@ -85,7 +85,8 @@ document.addEventListener('keydown', (event) => {
 });
 
 // Tooltips in the board's own style in place of the system's. While the pointer rests on an element, its title moves to
-// data-title so the system's never shows; it comes back when the pointer leaves, so assistive technology still reads it.
+// data-title so the system's never shows, and stays its description for assistive technology; it comes back when the
+// pointer leaves.
 const tip = document.createElement('div');
 tip.className = 'tooltip';
 tip.popover = 'manual';
@@ -99,7 +100,9 @@ let tipWarm = 0;
 const stash = (owner: HTMLElement) => {
   if (!owner.title) return;
   owner.dataset.title = owner.title;
+  owner.setAttribute('aria-description', owner.title);
   owner.removeAttribute('title');
+  if (tip.matches(':popover-open')) tip.textContent = owner.dataset.title;
 };
 const retitled = new MutationObserver(() => tipOwner && stash(tipOwner));
 const hideTip = () => {
@@ -117,6 +120,7 @@ const releaseTip = () => {
   if (!owner) return;
   if (!owner.hasAttribute('title')) owner.setAttribute('title', owner.dataset.title ?? '');
   delete owner.dataset.title;
+  owner.removeAttribute('aria-description');
 };
 const showTip = () => {
   const owner = tipOwner;

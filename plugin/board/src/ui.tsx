@@ -24,6 +24,8 @@ export function Collapse({ open, className, children }: { open: boolean; classNa
   );
 }
 
+/** Open modal sheets, topmost last; only the topmost takes Escape. */
+const modals: HTMLDialogElement[] = [];
 /** How long a side panel takes to leave, shorter than it takes to arrive. */
 export const PANEL_EXIT_MS = 300;
 /** True while a side panel is still on screen only to play its exit; the Dialog inside reads it. */
@@ -291,16 +293,34 @@ export function Dialog({
     const dialog = ref.current!;
     const previous = document.activeElement as HTMLElement | null;
     unmounting.current = false;
-    if (modal) dialog.showModal();
-    else dialog.show();
+    if (modal) {
+      dialog.showModal();
+      modals.push(dialog);
+    } else dialog.show();
     if (origin) growFrom(dialog, origin);
     if (!modal) dialog.querySelector<HTMLElement>('[data-autofocus]')?.focus({ preventScroll: true });
     return () => {
       unmounting.current = true;
+      if (modals.includes(dialog)) modals.splice(modals.indexOf(dialog), 1);
       dialog.close();
       if (modal || dialog.contains(document.activeElement) || document.activeElement === document.body) previous?.focus({ preventScroll: true });
     };
   }, []);
+  useEffect(() => {
+    if (!modal) return;
+    const dialog = ref.current!;
+    // Escape is handled here rather than left to the browser, which closes a dialog anyway on a repeated Escape and would
+    // then show it again above whatever its parent opened in answer, such as `ask`'s question. It listens on the document,
+    // so an Escape still arrives when focus has fallen out of the dialog; only the topmost sheet takes it, and a held key
+    // acts once.
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || modals.at(-1) !== dialog) return;
+      event.preventDefault();
+      if (!event.repeat) close.current();
+    };
+    document.addEventListener('keydown', escape);
+    return () => document.removeEventListener('keydown', escape);
+  }, [modal]);
   useEffect(() => {
     if (modal) return;
     const dialog = ref.current!;
@@ -328,13 +348,6 @@ export function Dialog({
       style={style}
       aria-label={label}
       aria-labelledby={labelId}
-      onKeyDown={(event) => {
-        // Escape is handled here rather than left to the browser, which closes a dialog anyway on a repeated Escape and would
-        // then show it again above whatever its parent opened in answer, such as `ask`'s question.
-        if (!modal || event.key !== 'Escape' || event.defaultPrevented) return;
-        event.preventDefault();
-        onClose();
-      }}
       onCancel={(event) => {
         event.preventDefault();
         onClose();
@@ -497,9 +510,24 @@ export function Select<T extends string>({
   const list = useRef<HTMLUListElement>(null);
   const id = useId();
   const chosen = options.findIndex(([option]) => option === value);
+  const typed = useRef({ text: '', at: 0 });
   const show = () => {
     setActive(Math.max(0, chosen));
     setOpen(true);
+    // Safari and Firefox on macOS do not focus a clicked button, and the list's keys go to the button.
+    button.current?.focus();
+  };
+  /** The next option whose text starts with what was typed in the last moment, as the system's list finds one. */
+  const typeahead = (key: string, from: number) => {
+    const now = Date.now();
+    typed.current = { text: (now - typed.current.at < 700 ? typed.current.text : '') + key.toLowerCase(), at: now };
+    const { text } = typed.current;
+    const start = text.length === 1 ? from + 1 : from;
+    for (let step = 0; step < options.length; step++) {
+      const index = (start + step) % options.length;
+      if (options[index][1].toLowerCase().startsWith(text)) return index;
+    }
+    return -1;
   };
   const choose = (index: number) => {
     setOpen(false);
@@ -529,7 +557,9 @@ export function Select<T extends string>({
     // A press elsewhere, a resize or leaving the window closes it, as it does the system's.
     const away = (event: Event) => {
       const target = event.target as Node;
-      if (!popup.contains(target) && !button.current?.contains(target)) setOpen(false);
+      // A press on the button, or on a label around it whose click reaches the button, is left to the button's own toggle.
+      const labelled = [...(button.current?.labels ?? [])].some((label) => label.contains(target));
+      if (!popup.contains(target) && !button.current?.contains(target) && !labelled) setOpen(false);
     };
     const scrolled = (event: Event) => !popup.contains(event.target as Node) && place();
     const leave = () => setOpen(false);
@@ -558,20 +588,32 @@ export function Select<T extends string>({
         aria-label={label}
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-controls={id}
+        aria-controls={open ? id : undefined}
         aria-activedescendant={open ? `${id}-${active}` : undefined}
         onClick={() => (open ? setOpen(false) : show())}
         onBlur={() => setOpen(false)}
         onKeyDown={(event) => {
           const move = { ArrowDown: 1, ArrowUp: -1 }[event.key];
+          const letter = event.key.length === 1 && event.key !== ' ' && !event.ctrlKey && !event.metaKey && !event.altKey;
           if (!open) {
             if (move) {
               event.preventDefault();
               show();
+            } else if (letter) {
+              const found = typeahead(event.key, chosen);
+              if (found >= 0) choose(found);
             }
             return;
           }
-          if (move) setActive((active + move + options.length) % options.length);
+          if (event.key === 'Tab') {
+            // Tab takes the highlighted option and moves on, as the system's list does.
+            choose(active);
+            return;
+          }
+          if (letter) {
+            const found = typeahead(event.key, active);
+            if (found >= 0) setActive(found);
+          } else if (move) setActive((active + move + options.length) % options.length);
           else if (event.key === 'Home') setActive(0);
           else if (event.key === 'End') setActive(options.length - 1);
           else if (event.key === 'Enter' || event.key === ' ') choose(active);
@@ -583,7 +625,8 @@ export function Select<T extends string>({
           event.preventDefault();
         }}
       >
-        <span>{options[chosen]?.[1] ?? value}</span>
+        {/* A value no option holds shows the first option, as the system's select does. */}
+        <span>{(options[chosen] ?? options[0])?.[1]}</span>
         <Icon icon={ChevronsUpDown} size={13} />
       </button>
       {open && (
@@ -626,14 +669,23 @@ export function ask(title: string, action: string, detail?: string) {
 /** Where `ask` shows its question; mounted once. */
 export function AskHost() {
   const [question, setQuestion] = useState<Question | null>(null);
+  // The open question, so one that is replaced or left by an unmount is still answered, as no.
+  const open = useRef<Question>(null);
   useEffect(() => {
-    asker = setQuestion;
+    asker = (next) => {
+      open.current?.answer(false);
+      open.current = next;
+      setQuestion(next);
+    };
     return () => {
       asker = null;
+      open.current?.answer(false);
+      open.current = null;
     };
   }, []);
   if (!question) return null;
   const answer = (yes: boolean) => {
+    open.current = null;
     setQuestion(null);
     question.answer(yes);
   };

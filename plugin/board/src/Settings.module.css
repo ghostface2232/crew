@@ -119,3 +119,8 @@
 .progress::-webkit-progress-bar { background: transparent; }
 .progress::-webkit-progress-value { border-radius: 999px; background: var(--accent); }
 .progress::-moz-progress-bar { border-radius: 999px; background: var(--accent); }
+@media (forced-colors: active) {
+  .progress { forced-color-adjust: none; border: 1px solid CanvasText; background: Canvas; }
+  .progress::-webkit-progress-value { background: Highlight; }
+  .progress::-moz-progress-bar { background: Highlight; }
+}

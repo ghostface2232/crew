@@ -315,6 +315,29 @@ test('the scope cannot change during a save and failed loads cannot be saved', a
   await expect(page.getByRole('button', { name: 'Retry Loading' })).toBeVisible();
 });
 
+test('a question over a sheet stays on top through repeated Escape, and nothing saves behind it', async ({ page, request }) => {
+  await openSettings(page, 'Instructions');
+  const field = page.getByRole('textbox', { name: 'Shared instructions' });
+  await expect(field).toBeEnabled();
+  await field.fill('Draft');
+  const ask = page.getByRole('dialog', { name: 'Close without saving your changes?' });
+  for (let round = 0; round < 3; round++) {
+    await page.keyboard.press('Escape');
+    await expect(ask).toBeVisible();
+    // Saving is the sheet's shortcut, not the question's.
+    await page.keyboard.press('ControlOrMeta+s');
+    await page.keyboard.press('Escape');
+    await expect(ask).toHaveCount(0);
+    await expect(field).toHaveValue('Draft');
+  }
+  await page.keyboard.press('Escape');
+  // Topmost and reachable: a click on its button lands.
+  await ask.getByRole('button', { name: 'Close' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  const calls = await (await request.get('/__requests')).json();
+  expect(calls.filter((call: { route: string }) => call.route === '/api/instructions')).toHaveLength(0);
+});
+
 test('settings can retry failed saves and confirm unsaved close', async ({ page }) => {
   // Open from the keyboard: Safari does not focus a clicked button, so there would be no focus to return to.
   await page.getByRole('button', { name: 'Settings', exact: true }).focus();

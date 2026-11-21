@@ -342,6 +342,8 @@ export function Settings({ state, update, close }: { state: Snapshot; update: Ap
     const shortcut = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's' && !event.altKey) {
         event.preventDefault();
+        // Not while a question is open over Settings, such as whether to close without saving.
+        if (event.target instanceof Element && event.target.closest('dialog.ask')) return;
         void saveCurrent();
       }
     };

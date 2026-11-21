@@ -297,22 +297,23 @@ const command = (CommandLine: string, Cwd?: string, kind = 'execute') => ({
   kind, rawInput: { CommandLine, ...(Cwd === undefined ? {} : { Cwd }) },
 });
 
-test('a command grant covers queued and later requests for the same program, directory, and kind', { timeout: 5000 }, async (t) => {
+test('a command grant covers queued and later requests for the same program, subcommand, and directory', { timeout: 5000 }, async (t) => {
   const h = harness(t, commandServer([
-    [command('npm test', '/work'), command('node test.js', '/work'), command('npm run lint', '/work')],
+    [command('npm test', '/work'), command('node test.js', '/work'), command('npm test --watch', '/work')],
     [
-      command('npm run build', '/work'), command('npm test', '/else'), command('npm test', '/work', 'other'),
+      command('npm test --watch', '/work'), command('npm run lint', '/work'), command('npm test', '/else'),
+      command('npm test', '/work', 'other'),
       { ...command('npm test', '/work'), locations: [{ path: tokenFile(HOME) }] },
       command('npm test && npm run lint', '/work'),
     ],
   ]));
   const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' });
   const request = await h.waiting(job);
-  assert.equal(request.grant, 'running "npm" in /work');
+  assert.equal(request.grant, 'running "npm test" in /work');
   while (!h.jobs.eventsFor(job.id, 0).some((e) => e.detail.includes('Batch 1 sent'))) await h.jobs.wait(job.id, job.seq, 1000);
   await h.jobs.reply(job.id, { decision: 'allow_for_job', request_id: request.id });
   const denyRemaining = async () => {
-    for (const label of ['running "node" in /work', 'running "npm" in /else', 'running "npm" in /work', undefined]) {
+    for (const label of ['running "node test.js" in /work', 'running "npm run" in /work', 'running "npm test" in /else', undefined, undefined]) {
       const next = await h.waiting(job);
       assert.equal(next.grant, label);
       await h.jobs.reply(job.id, { decision: 'deny', request_id: next.id });
@@ -323,10 +324,10 @@ test('a command grant covers queued and later requests for the same program, dir
   const expected = {
     'command-1-0': 'allow_once', 'command-1-1': 'reject_once', 'command-1-2': 'allow_once',
     'command-2-0': 'allow_once', 'command-2-1': 'reject_once', 'command-2-2': 'reject_once',
-    'command-2-3': 'reject_once', 'command-2-4': 'reject_once',
+    'command-2-3': 'reject_once', 'command-2-4': 'reject_once', 'command-2-5': 'reject_once',
   };
   assert.deepEqual(JSON.parse(job.report!), expected);
-  assert.equal(h.jobs.eventsFor(job.id, 0).filter((e) => e.detail === 'allowed for this job: running "npm" in /work').length, 2);
+  assert.equal(h.jobs.eventsFor(job.id, 0).filter((e) => e.detail === 'allowed for this job: running "npm test" in /work').length, 2);
 
   await h.jobs.reply(job.id, { message: 'Run again' });
   await denyRemaining();
@@ -334,6 +335,26 @@ test('a command grant covers queued and later requests for the same program, dir
 
   const another = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test again' });
   assert.equal((await h.waiting(another)).grant, request.grant);
+});
+
+test('a git status grant does not cover an invocation that starts with an option', { timeout: 5000 }, async (t) => {
+  const h = harness(t, commandServer([
+    [command('git status')],
+    [command('git status -s'), command('git -c alias.x=y x')],
+  ]));
+  const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' });
+  const request = await h.waiting(job);
+  await h.jobs.reply(job.id, { decision: 'allow_for_job', request_id: request.id });
+  while (!job.waiting && !job.endedAt) await h.jobs.wait(job.id, job.seq, 1000);
+  assert.ok(job.waiting, 'git -c should still ask for approval');
+  assert.match(job.waiting.reason, /git -c alias\.x=y x/);
+  assert.equal(job.waiting.grant, undefined);
+  await h.jobs.reply(job.id, { decision: 'deny', request_id: job.waiting.id });
+  await h.ended(job);
+  assert.equal(request.grant, 'running "git status" in the job workspace');
+  assert.deepEqual(JSON.parse(job.report!), {
+    'command-1-0': 'allow_once', 'command-2-0': 'allow_once', 'command-2-1': 'reject_once',
+  });
 });
 
 test('only simple commands offer a job grant', { timeout: 5000 }, async (t) => {
@@ -344,7 +365,7 @@ test('only simple commands offer a job grant', { timeout: 5000 }, async (t) => {
     '/usr/bin/sudo npm test', 'env npm test', 'xargs npm', 'bash -lc "npm test"', 'eval npm test', 'exec npm test',
     'PATH=/tmp/bin npm test', 'NODE_OPTIONS=--require=x npm test', 'nohup npm test', 'timeout 60 npm test',
   ];
-  const h = harness(t, commandServer([...commands.map((line) => [command(line)]), [command('./node_modules/.bin/tsc --noEmit')]]));
+  const h = harness(t, commandServer([...commands.map((line) => [command(line)]), [command('./node_modules/.bin/tsc build')]]));
   const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' });
   for (const [i, line] of commands.entries()) {
     const request = await h.waiting(job);
@@ -358,10 +379,46 @@ test('only simple commands offer a job grant', { timeout: 5000 }, async (t) => {
     await h.jobs.reply(job.id, { decision: 'approve', request_id: request.id });
   }
   const request = await h.waiting(job);
-  assert.equal(request.grant, 'running "./node_modules/.bin/tsc" in the job workspace');
+  assert.equal(request.grant, 'running "./node_modules/.bin/tsc build" in the job workspace');
   await h.jobs.reply(job.id, { decision: 'approve', request_id: request.id });
   await h.ended(job);
   assert.equal(Object.values(JSON.parse(job.report!)).length, commands.length + 1);
+});
+
+test('dispatchers, ambiguous arguments and input, and non-execute tools offer no grant', { timeout: 5000 }, async (t) => {
+  const calls = [
+    ...[
+      'zsh -c "echo hi"', 'dash -c "echo hi"', 'git -c alias.x=y x', 'find . -name x -print',
+      'perl -e 1', 'osascript -e 1', 'ssh host echo hi', 'busybox echo hi', 'arch -arm64 echo hi',
+      'flock lockfile echo hi', 'cmd /c echo hi', 'powershell -EncodedCommand ZQBjAGgAbwAgAGgAaQA=', 'pwsh -Command echo',
+      'CMD.EXE /c echo hi', 'pwsh.exe -Command echo',
+      'sh script.sh', 'bash script.sh', 'zsh script.sh', 'dash script.sh', 'ksh script.sh', 'fish script.fish',
+      'csh script.csh', 'tcsh script.csh', 'script transcript', 'find src -print', 'OSASCRIPT.EXE script.scpt',
+      'CMD.EXE help', 'pwsh.exe script.ps1', 'POWERSHELL.EXE script.ps1', '/usr/bin/SSH.EXE host echo hi',
+      'npm', 'npm .', 'npm /x', 'npm --version', 'git --exec-path', 'npm "test"', 'npm test/path',
+    ].map((line) => command(line)),
+    command('npm test', undefined, 'other'),
+    { ...command('npm test'), _meta: { mcpServerName: 'example', mcpToolName: 'execute' } },
+    { kind: 'execute', rawInput: { CommandLine: 'npm test', directory: '/elsewhere' } },
+    { kind: 'execute', rawInput: { CommandLine: 'npm test', unknownFlag: true } },
+    { kind: 'execute', rawInput: { CommandLine: 'npm test', unknownNumber: 1 } },
+    { kind: 'execute', rawInput: { CommandLine: 'npm test', command: 'npm test' } },
+    { kind: 'execute', rawInput: { CommandLine: 'npm test', Cwd: '/work', cwd: '/elsewhere' } },
+  ];
+  const h = harness(t, commandServer([...calls.map((call) => [call]), [command('NPM.EXE test')]]));
+  const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' });
+  const unexpectedGrants = [];
+  for (const call of calls) {
+    const request = await h.waiting(job);
+    if (request.grant !== undefined) unexpectedGrants.push({ ...call, grant: request.grant });
+    await h.jobs.reply(job.id, { decision: 'approve', request_id: request.id });
+  }
+  const request = await h.waiting(job);
+  await h.jobs.reply(job.id, { decision: 'approve', request_id: request.id });
+  await h.ended(job);
+  assert.deepEqual(unexpectedGrants, []);
+  assert.equal(request.grant, 'running "NPM.EXE test" in the job workspace');
+  assert.deepEqual(Object.values(JSON.parse(job.report!)), Array(calls.length + 1).fill('allow_once'));
 });
 
 test('a read-only Antigravity job refuses commands without offering a grant', { timeout: 5000 }, async (t) => {

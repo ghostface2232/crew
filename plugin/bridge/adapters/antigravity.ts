@@ -478,10 +478,9 @@ function drop(run: Run): void {
 
 const ROLE_NAMES: Record<JobKind, string> = { delegate: 'engineer', review: 'reviewer', polish: 'editor' };
 
-/** A grant names one literal program, without shell syntax that could dispatch another command. */
+/** A grant names a literal program and its first argument. */
 function commandGrant(toolCall: { kind?: string; rawInput?: unknown; _meta?: { mcpServerName?: string; mcpToolName?: string } }): Grant | undefined {
-  const kind = toolCall.kind ?? 'other';
-  if ((kind !== 'execute' && kind !== 'other') || toolCall._meta?.mcpServerName || toolCall._meta?.mcpToolName) return;
+  if (toolCall.kind !== 'execute' || toolCall._meta?.mcpServerName || toolCall._meta?.mcpToolName) return;
   const input = toolCall.rawInput;
   let command: unknown = input;
   let cwd: string | undefined;
@@ -490,6 +489,7 @@ function commandGrant(toolCall: { kind?: string; rawInput?: unknown; _meta?: { m
     const commands = COMMAND_FIELDS.filter((field) => field in fields);
     const directories = CWD_FIELDS.filter((field) => field in fields);
     if (commands.length !== 1 || directories.length > 1) return;
+    if (Object.keys(fields).length !== commands.length + directories.length) return;
     command = fields[commands[0]];
     if (directories.length) {
       const directory = fields[directories[0]];
@@ -499,14 +499,18 @@ function commandGrant(toolCall: { kind?: string; rawInput?: unknown; _meta?: { m
   }
   if (typeof command !== 'string' || /[;&|`<>\r\n\0()]/.test(command)) return;
   // A leading assignment (PATH=…, NODE_OPTIONS=…) can change what the named program runs, so it gets no grant.
-  const match = /^[ \t]*([A-Za-z0-9_./+-]+)(?=[ \t]|$)/.exec(command);
-  if (!match || match[1].includes('=')) return;
-  const program = match[1];
-  const name = path.posix.basename(program);
+  const match = /^[ \t]*([A-Za-z0-9_./+-]+)[ \t]+([A-Za-z0-9][A-Za-z0-9_.:+-]*)(?=[ \t]|$)/.exec(command);
+  if (!match) return;
+  const [, program, subcommand] = match;
+  const name = path.posix.basename(program).toLowerCase().replace(/\.exe$/, '');
   // Programs whose job is to run another command: a grant for them would cover whatever they are given.
-  if (['sudo', 'doas', 'su', 'env', 'xargs', 'eval', 'exec', 'command', 'builtin', 'time', 'source', '.', 'nohup', 'nice', 'timeout', 'gtimeout', 'caffeinate', 'watch', 'stdbuf', 'unbuffer'].includes(name)) return;
-  if (['sh', 'bash'].includes(name) && /[ \t]-[a-z]*c|['"\\$*?[\]{}]/i.test(command.slice(match[0].length))) return;
-  return { key: JSON.stringify([kind, program, cwd]), label: `running ${JSON.stringify(program)} in ${cwd ?? 'the job workspace'}` };
+  if ([
+    'sudo', 'doas', 'su', 'env', 'xargs', 'eval', 'exec', 'command', 'builtin', 'time', 'source', '.', 'nohup',
+    'nice', 'timeout', 'gtimeout', 'caffeinate', 'watch', 'stdbuf', 'unbuffer',
+    'sh', 'bash', 'zsh', 'dash', 'ksh', 'fish', 'csh', 'tcsh', 'busybox', 'cmd', 'powershell', 'pwsh',
+    'ssh', 'arch', 'flock', 'script', 'find', 'osascript',
+  ].includes(name)) return;
+  return { key: JSON.stringify([program, subcommand, cwd]), label: `running "${program} ${subcommand}" in ${cwd ?? 'the job workspace'}` };
 }
 
 /**

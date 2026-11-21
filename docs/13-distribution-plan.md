@@ -1,6 +1,6 @@
 # 13. Distribution plan
 
-Recorded 2026-11-16. Steps 1 to 4 of the order of work are implemented; signing (step 5) is not. This records the agreed direction for releasing Crew to other users.
+Recorded 2026-11-16. Steps 1 to 4 of the order of work have shipped; recognized-publisher signing (step 5) has not. This records the direction and current state for releasing Crew to users.
 
 ## Goal
 
@@ -8,56 +8,48 @@ A user downloads one app from GitHub Releases, runs it, and Crew is ready: the C
 
 ## Channel
 
-GitHub Releases is the single channel. Pushing a version tag runs GitHub Actions on Windows and macOS runners, which build the apps and attach them to the release. The plugin already installs from this repository, so users look in one place.
+GitHub Releases is the single channel. Pushing a `v<version>` tag triggers `.github/workflows/release.yml`, which builds the Windows and macOS apps and attaches them to the release.
 
 | Platform | Artifact | Signing | Updates |
 | --- | --- | --- | --- |
-| Windows | `Crew-Setup-x.y.z.exe`, an NSIS installer built by electron-builder: per-user, no administrator rights, Start menu shortcut, uninstaller | Unsigned at first. SmartScreen warns on first run; the release notes explain "More info → Run anyway". A code signing certificate (for example Azure Trusted Signing, if available in the publisher's country) removes the warning later | The app's own updater, from the GitHub Releases API: it downloads while the user is away and installs when they choose ([12-windows-electron.md](12-windows-electron.md#updates)) |
-| macOS | The native app, ad-hoc signed: a dmg to install from, and a zip that the app's updater downloads | Without an Apple Developer Program membership the app cannot be notarized, so Gatekeeper blocks the first launch. The notes explain System Settings → Privacy & Security → Open Anyway. Building from source (`npm run package:desktop`, Xcode 26) avoids the block | Manual download until the app is signed and notarized |
+| Windows | `Crew-Setup-<version>.exe`, a per-user NSIS installer built by `electron-builder` (no admin rights, Start menu shortcut, uninstaller) | Unsigned. SmartScreen warns on first run; `.github/release-notes.md` explains "More info → Run anyway". A code signing certificate (for example Azure Trusted Signing) is planned | Self-updates from GitHub Releases: downloads while away, verifies SHA-256, and installs on **Restart to Update** ([12-windows-electron.md](12-windows-electron.md#updates)) |
+| macOS | `Crew-macOS-arm64-<version>.dmg` (to install from) and `Crew-macOS-arm64-<version>.zip` (for the updater) | Signed with a self-signed certificate (`MACOS_SIGNING_P12`) so macOS keeps granted folder access across updates, but without an Apple Developer ID or notarization. Gatekeeper blocks first launch; release notes explain System Settings → Privacy & Security → Open Anyway. Building from source (`npm run package:desktop`, Xcode 27+) avoids the block | Self-updates from GitHub Releases: downloads `.zip` while away, verifies SHA-256, and swaps the bundle on **Restart to Update** ([08-native-macos.md](08-native-macos.md#updates)) |
 
-The Start menu shortcut also gives the Windows app the identity its own notifications need. Today notifications stay with the daemon's PowerShell toasts for that reason ([12-windows-electron.md](12-windows-electron.md)).
-
-Joining the Apple Developer Program is the step that makes macOS "download and run". Developer ID signing and notarization then go into the same workflow.
+The Start menu shortcut gives the Windows app an AppUserModelID (`dev.crew.desktop`), while notifications stay with the daemon's PowerShell toasts ([12-windows-electron.md](12-windows-electron.md#notifications)). Joining the Apple Developer Program and acquiring a Windows signing certificate remain the steps to remove first-run OS warnings.
 
 ## The app installs the plugin
 
-Today `crew install` does three things: `claude plugin marketplace add <folder>`, `claude plugin install crew@crew`, and a `crew` shim in `~/.local/bin`. The app takes this over, with two changes.
+`crew install` registers the marketplace, installs `crew@crew`, and writes a `crew` shim in `~/.local/bin`. Packaged apps automate this via `plugin/bridge/setup.ts`:
 
-1. **The app carries a built plugin and registers its own copy.** Registering the GitHub repository instead would miss the built board (`plugin/board/dist` is not committed). It would also let the plugin and the app run different code. With the bundled copy, the app's daemon and the plugin's daemon are the same build, and the existing version negotiation keeps a single daemon. The folder sits at a stable install path: `%LOCALAPPDATA%\Programs\Crew` on Windows, `/Applications/Crew.app` on macOS.
-2. **The plugin runs on the app's runtime, not the user's Node.** The plugin's MCP server and hooks call `node …/bridge/*.ts`, which needs Node 22.18 or later on the PATH. The bundled plugin instead points at a runtime inside the app. The macOS app already ships standalone Node. On Windows, either ship `node.exe` or add a small launcher that runs `Crew.exe` in Node mode. The `crew` shim uses the same runtime.
+1. **Each app carries a built plugin.** Registering the GitHub repository would miss the built board (`plugin/board/dist` is not committed) and let plugin and app code drift. On macOS, the packaged daemon registers the copy inside `Crew.app` (`/Applications/Crew.app/Contents/Resources/bridge`). On Windows, `setup.ts` copies the plugin and `runtime/node.exe` to `~/.crew/plugins/<version>-<build>` and registers that copy so installer updates do not replace files beneath running Claude Code sessions.
+2. **The plugin runs on the app's runtime.** macOS bundles standalone Node (`Contents/Resources/runtime/node`, `scripts/build-desktop.mjs`); Windows bundles `runtime/node.exe` (`scripts/build-electron.mjs`) because a hook command cannot set `ELECTRON_RUN_AS_NODE`. `linkCommand` in `setup.ts` points `~/.local/bin/crew` (and `.cmd`/`.mjs` shims on Windows) at that runtime.
 
-On first launch, and on the first launch after an update (when the bundled version changes), the app registers or updates the marketplace and the plugin. It runs `claude plugin marketplace update` and `claude plugin update crew@crew` when they are already installed, and rewrites the `crew` shim.
+On startup, a packaged daemon checks `~/.crew/setup.json` (`registered()`). Whenever its `root`, `version`, or `build` differs, it runs `claude plugin marketplace add <root>`, runs `claude plugin install crew@crew` or `claude plugin update crew@crew` if needed, and rewrites the `crew` shim (leaving a source-checkout `crew` marketplace alone). On Windows, startup also checks `registrationMoved()` and re-registers if Claude Code rewrote the marketplace path.
 
 ## First-run checklist
 
-The app shows a setup checklist built from the same checks as `crew doctor`. Once every item passes, the app opens straight to the board.
+Both apps show a **Set up Crew** card at the top of the unfiltered Overview page (`SetupView.swift`, `Overview.tsx`), backed by `GET /api/setup` and `POST /api/setup/repair` (matching `crew doctor`). It hides automatically once every item passes.
 
 | Item | What the app does |
 | --- | --- |
-| Crew plugin and `crew` command | Installs or repairs automatically, with a Repair button |
-| Claude Code (`claude` on the PATH) | Detects it; if missing, links to the installer. It does not install it |
-| Codex CLI and login | Shows status; installing and signing in are left to the user |
-| Antigravity CLI and login | Shows status; installing and signing in are left to the user |
+| Crew plugin and `crew` command | Registers and writes shims automatically; exposes an **Install** repair button when missing |
+| Claude Code (`claude` on `PATH`) | Checks `claude --version`; if missing, tells the user to install from `claude.com/code` |
+| Codex CLI and sign-in | Checks `codex --version` and `codex login status`; installing and signing in are left to the user |
+| Antigravity CLI | Checks `agy --version` when `antigravity.enabled` is true; installing and running `agy` to sign in are left to the user |
 
-Signing in to the user's accounts is never automated.
-
-The user's path is: download the installer, run the app, sign in to whatever the checklist shows as missing, open a new Claude Code session, and use `/crew:run`.
+Signing in to user accounts is never automated.
 
 ## Release housekeeping
 
-- To release, set both version fields below, commit to `main`, then push the tag: `git tag v<version> && git push origin v<version>`.
-- A release is published only when every check before it passes: the tag matching both version fields; type checks and unit tests on hosted macOS and Windows runners (`.github/workflows/ci.yml`, the same workflow that runs on every pull request; Linux is not a target and is not tested); Swift tests on the Mac runner, which need its Xcode; and a Windows smoke test that starts the packaged app. A failed job stops later ones, so nothing is uploaded. To rehearse all of it without publishing, run the Release workflow by hand on a branch from the Actions tab.
-
-- Keep `package.json` and `plugin/.claude-plugin/plugin.json` at the release tag's version, since daemons compare versions to decide which replaces which.
-- Release notes cover changes, installation, and the SmartScreen and Gatekeeper steps.
-- README: the plugin comes with the app; installing from source stays documented for development.
+- Set `package.json` and `plugin/.claude-plugin/plugin.json` to the release version (daemons compare versions to decide which replaces which), commit to `main`, and push a stable semver tag: `git tag v<version> && git push origin v<version>`.
+- `.github/workflows/release.yml` publishes only when all checks pass: tag matching both version files; `.github/workflows/ci.yml` (`npm run typecheck` and `npm test` on `macos-latest` and `windows-latest`; Linux is not a target); `npm run test:native` on the self-hosted ARM64 Mac runner (Xcode 27); and `node scripts/desktop.mjs smoke` on the packaged Windows app (`release/win-unpacked/Crew.exe`). Run `Release` via `workflow_dispatch` on any branch to rehearse without publishing.
+- `.github/release-notes.md` documents download links, install paths, and Gatekeeper/SmartScreen steps above GitHub's generated changelog.
+- README documents both the packaged app install and source checkout development.
 
 ## Order of work
 
-1. Bundle the built plugin and a runtime in both apps; point the bundled plugin's MCP server, hooks and `crew` shim at that runtime. Done: `scripts/bundle-plugin.mjs` lays the plugin out as a marketplace inside each app and rewrites its `node …/bridge/*.ts` commands to the compiled scripts on the app's Node (`Contents/Resources/runtime/node` on macOS; on Windows a `runtime/node.exe` beside the plugin, since a hook cannot set `ELECTRON_RUN_AS_NODE` to run `Crew.exe` as Node). Claude Code loads a local marketplace's plugin in place, so an app update replaces the plugin's files with the app's. On Windows the app registers a per-build copy in `~/.crew/plugins` instead, so an update does not stop open sessions' MCP servers or replace their files ([12](12-windows-electron.md#updates)).
-2. First-launch install and update of the marketplace and plugin, with the checklist screen. Done: `plugin/bridge/setup.ts`. A packaged daemon registers its marketplace, installs or updates `crew@crew`, and writes the `crew` command whenever its build differs from the one recorded in `~/.crew/setup.json`. A marketplace named `crew` that points at a source checkout is left alone. `GET /api/setup` returns the checklist (`crew doctor` prints the same checks) and `POST /api/setup/repair` registers again; the overview in both apps shows it until every item passes.
-3. Windows installer and auto-update with electron-builder. Done: an NSIS installer and the app's own updater.
-4. GitHub Actions release workflow for both platforms, and release notes. Done: `.github/workflows/release.yml` runs on a pushed `v<version>` tag, checks the tag against both version fields, builds the macOS (arm64) app on a self-hosted Mac runner with Xcode 27 (hosted runners have only Xcode 26, which cannot compile the app's Icon Composer icon) and the Windows app on a hosted runner, and publishes them with `.github/release-notes.md` above GitHub's generated change list. Since 2026-11-20 it first calls `.github/workflows/ci.yml` (type checks and unit tests on hosted macOS and Windows runners), runs the Swift tests on the Mac, and smoke-tests the packaged Windows app; pull requests run the same `ci.yml`, while pushes to `main` are not checked again.
-5. Signing: a Windows certificate, and an Apple Developer Program membership for macOS, when the audience calls for them.
-
-Review the design (step 1 especially: the runtime launcher and how Claude Code caches installed plugins) before building it.
+1. **Bundle plugin and runtime.** *Shipped:* `scripts/bundle-plugin.mjs` lays out the marketplace in each app and rewrites `node …/bridge/*.ts` commands to compiled `.js` on the bundled Node (`Contents/Resources/runtime/node` on macOS; `runtime/node.exe` on Windows, registered via per-build copies in `~/.crew/plugins` in `plugin/bridge/setup.ts`).
+2. **First-launch registration and checklist.** *Shipped:* `plugin/bridge/setup.ts`, `~/.crew/setup.json`, `GET /api/setup`, `POST /api/setup/repair`, `crew doctor`, and the Overview checklist card in both apps.
+3. **Installers and auto-update.** *Shipped:* `electron-builder` NSIS installer + `desktop/updater.ts` on Windows; `.dmg`/`.zip` packaging + `native/Sources/Crew/Updater.swift` on macOS.
+4. **GitHub Actions release workflow.** *Shipped:* `.github/workflows/release.yml` calls `.github/workflows/ci.yml`, builds macOS (self-hosted ARM64 Mac with Xcode 27 for `assets/crew.icon`) and Windows (hosted runner with smoke test), and publishes with `.github/release-notes.md`. Pull requests also run `.github/workflows/ci.yml`; pushes to `main` are not re-checked.
+5. **Signing.** *Remaining:* Windows code signing certificate and Apple Developer Program membership (Developer ID + notarization) when public distribution calls for them.

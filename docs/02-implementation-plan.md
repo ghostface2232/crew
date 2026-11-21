@@ -5,8 +5,8 @@ Written 2026-11-11. Requirement IDs (R1–R8) follow [01-requirements.md](01-req
 ## 1. Summary of decisions
 
 1. The cockpit is Claude Code Desktop. The lead session runs as an interactive Desktop session.
-2. Codex and Antigravity run in the background through their official runtimes: `codex app-server` for Codex, and `agy acp` or `agy -p` for Antigravity.
-3. Calls and events for both workers flow through a single Crew bridge (a local MCP server). This matches Anthropic's guidance for parallel work in Claude Code, where native workers are Claude sessions and external tools attach as MCP servers.
+2. Codex and Antigravity run in the background through their official runtimes: `codex app-server` for Codex, and `agy acp` or `agy -p` for Antigravity. *(Built: `agy acp` only; `agy -p` was dropped because wrapping it inside third-party agents is unsupported on consumer plans.)*
+3. Calls and events for both workers flow through a single Crew bridge (a local MCP server). This matches Anthropic's guidance for parallel work in Claude Code, where native workers are Claude sessions and external tools attach as MCP servers. *(Built: a long-lived HTTP/SSE daemon in `plugin/bridge/daemon.ts` owns workers, jobs, and the board; `plugin/bridge/mcp.ts` is a stateless stdio MCP server forwarding to it.)*
 4. Session status is shown on a lightweight status board fed by the bridge. Usage measurement and routing decisions belong to AgentGauge ([03-agentgauge-integration.md](03-agentgauge-integration.md)).
 5. We do not build a custom wrapper around the entire frontend (section 8).
 
@@ -25,17 +25,19 @@ Crew Bridge ───── events ────▶ Status Board (three lanes)
   └─ agy acp / agy -p ── Antigravity: UX copy, comment & doc cleanup
 ```
 
+*(Built: `mcp.ts` forwards to `daemon.ts` over HTTP/SSE; `usage.ts` reads AgentGauge files inside the daemon; workers use `codex app-server` and `agy acp` only; the status board is a React app in `plugin/board/src/` paired with `native/` on macOS and `desktop/` on Windows.)*
+
 ## 3. How each component connects
 
 ### 3.1 Claude (lead)
 
 - Runs directly as a local session in Claude Code Desktop. Subagents, inter-session messaging, Remote Control, computer use, the browser pane, Claude in Chrome, side chat (`/btw`), MCP, and compaction all work natively in this session.
 - Self-review is delegated to a dedicated review subagent that does not share the working conversation context. Rereading one's own diff inside the same context does not count as review.
-- Background sessions are launched with `claude --bg` and inspected via `claude agents --json`. Files under `$HOME/.claude/jobs/` are documented as an unstable internal interface and are not read directly.
+- Background sessions are launched with `claude --bg` and inspected via `claude agents --json`. Files under `$HOME/.claude/jobs/` are documented as an unstable internal interface and are not read directly. *(Built instead: plugin hooks in `plugin/hooks/hooks.json` push session events via `report.ts`, `context.ts`, and `wake.ts` to `/api/hooks/claude` in `daemon.ts`, which also covers Desktop sessions.)*
 
 ### 3.2 Codex (supporting engineer, reviewer)
 
-- Phase 0 uses OpenAI's official plugin, `openai/codex-plugin-cc`.
+- Phase 0 uses OpenAI's official plugin, `openai/codex-plugin-cc`. *(Built: Phase 0 was skipped; `plugin/bridge/adapters/codex.ts` drives `codex app-server` directly.)*
 
   | Command | Purpose |
   | --- | --- |
@@ -56,6 +58,8 @@ Crew Bridge ───── events ────▶ Status Board (three lanes)
 - Role restrictions are enforced through a custom agent passed to `--agent` and through `--mode`. Authentication reuses the cached credentials from a prior interactive `agy` login.
 - MCP servers are registered in `.agents/mcp_config.json` or `$HOME/.gemini/config/mcp_config.json`.
 
+*(Built: `plugin/bridge/adapters/antigravity.ts` uses `agy acp` only—dropping `agy -p`, `--agent`, and `--mode`—enforces role permissions in `decide()`, passes role instructions via `_meta.antigravity.systemPrompt.append` or prompt prefix, and attaches `crew` as a per-session `mcpServers` entry on `session/new`.)*
+
 ### 3.4 Crew bridge
 
 A single local MCP server. It starts with five tools for the lead:
@@ -71,6 +75,8 @@ A single local MCP server. It starts with five tools for the lead:
 - The bridge holds the `app-server` process and `agy` session, writes every received event to a local event log (JSONL or SQLite), and broadcasts events over WebSocket.
 - Proposed event shape: `{ts, agent, session_id, kind, detail}`, where `kind` is `started`, `progress`, `waiting`, `error`, `limit`, or `done`.
 - The bridge only executes the official `codex` and `agy` binaries. It never reads either service's authentication files or tokens.
+
+*(Built instead: `mcp.ts` exposes 13 lead tools—`delegate`, `review`, `polish`, `debate`, `mission`, `route`, `note`, `note_summary`, `status`, `wait`, `answer`, `reply`, and `cancel`—and `worker-mcp.ts` exposes worker tools `ask_lead`, `lead_answers`, `browser`, `siblings`, `search`, `recent_changes`, and `rate`. `daemon.ts` and `jobs.ts` hold the worker adapters, append `CrewEvent` records `{seq, ts, agent, session_id, job_id?, kind, detail}` with `cancelled` added to `kind` to `~/.crew/events.jsonl`, and broadcast over SSE at `GET /api/stream`.)*
 
 ## 4. Roles and workflow
 
@@ -96,6 +102,8 @@ Where role rules live:
 - `AGENTS.md`: Codex's role, prohibitions, and report format
 - Antigravity custom agent definition: allowed file types and prohibitions
 
+*(Built instead: role files stay in `plugin/roles/` and are injected per job by `prompts.ts`, while `plugin/skills/run/SKILL.md` defines the lead workflow and `~/.crew/instructions.md` plus `.crew/instructions.md` hold shared user/project rules without editing `CLAUDE.md` or `AGENTS.md`. `config.ts` expands the three base roles into eight configurable roles, with `fix` defaulting to Claude.)*
+
 ## 5. Status display and stall detection (R5)
 
 Data sources:
@@ -113,11 +121,15 @@ Stall and limit detection rules:
 - If no event arrives for a set duration (initially 5 minutes, configurable), the bridge marks the job as suspected stalled and sends a notification.
 - Measured quota numbers come from AgentGauge (document 03).
 
+*(Built: Claude session tracking uses all hooks in `plugin/hooks/hooks.json` routed to `claude.ts` rather than `claude agents --json`. `jobs.ts` marks silent running jobs `stalled` after `stallSeconds` (300 s default) and calls `adapter.probe` in `codex.ts` before waking the lead.)*
+
 Status board:
 
 - Three lanes showing the current stage, last event, wait reason, and elapsed time. Controls are limited to cancel and resume.
 - First choice is a Tauri v2 + React tray app (the same stack as Noten), though starting with a local web page is fine.
 - It is not merged into the AgentGauge popover (document 03 section 10).
+
+*(Built instead: `plugin/board/src/` is a React + Vite web board organized by Overview/missions, Needs You, Activity, and History, paired with a native SwiftUI/AppKit macOS app in `native/` and an Electron shell in `desktop/` for Windows and other systems.)*
 
 ## 6. Desktop app visibility (R6)
 
@@ -162,7 +174,7 @@ Rechecked 2026-11-17: the first and third reasons no longer describe Orca. See [
 
 | Risk | Mitigation |
 | --- | --- |
-| Protocol churn (`app-server` experimental, ACP version changes) | Isolate per-service adapters inside the bridge; rely only on the official plugin in Phase 0 |
+| Protocol churn (`app-server` experimental, ACP version changes) | Isolate per-service adapters inside the bridge (`plugin/bridge/adapters/`; Phase 0 was skipped) |
 | Billing policy changes | Keep the lead as an interactive session; build no path that depends on `claude -p` or the Agent SDK |
 | Account enforcement | Execute only official binaries and never touch auth tokens |
 | Quota burn from review loops | Keep the automatic review gate off and cap the number of review rounds |
@@ -179,14 +191,18 @@ Rechecked 2026-11-17: the first and third reasons no longer describe Orca. See [
 | Phase 2 | Status board; notifications for suspected stalls and `limit` events | Force-stopping a worker triggers a notification within the configured timeout |
 | Phase 3 | AgentGauge integration (G1–G3 in doc 03). G1 requires no changes to AgentGauge and can run in parallel with Phase 1 | The lead delegates according to `route`, and a pre-exhaustion lead handoff is reproduced once |
 
+*(Status: Phase 0 was skipped; Phases 1, 2, and Phase 3 G1 are implemented in `plugin/bridge/`, `plugin/board/`, `native/`, and `desktop/`, while AgentGauge G2/G3 remain open.)*
+
 ## 11. Open items
 
-- Target machine: whether to run on the MacBook or the Windows desktop. AgentGauge supports both, so either works.
-- Status board form factor: Tauri tray app vs. local web page.
-- Bridge implementation language and event store (JSONL vs. SQLite).
-- Exact numbers for the stall timeout and maximum review rounds.
-- Whether `agy acp` sessions appear in the Antigravity desktop app (needs check).
-- Progress on the Codex desktop app visibility issues (needs check).
+Settled in the current code:
+- **Platforms and board shell**: both macOS (`native/` SwiftUI/AppKit) and Windows (`desktop/` Electron) are supported alongside the React + Vite web board (`plugin/board/src/`).
+- **Bridge runtime and store**: TypeScript on Node 22.18+ (`package.json`), persisting JSON snapshots (`jobs.json`, `missions.json`) and `events.jsonl`.
+- **Timeouts and round caps**: `stallSeconds: 300` (`config.ts`), `MAX_DEBATE_ROUNDS = 6` (`config.ts`), and a 2-round review cap in `plugin/skills/run/SKILL.md`.
+
+Still open to verify externally:
+- Whether `agy acp` sessions appear in the Antigravity desktop app.
+- Progress on the Codex desktop app visibility issues.
 
 ## 12. Verification sources (2026-11-11)
 
@@ -217,16 +233,9 @@ Items based only on secondary sources (recheck against primary sources before im
 
 ## 13. Revision log
 
-- 2026-11-11: Changed the following during implementation. Reasons and details are in [04-implementation.md](04-implementation.md) section 3.
-  - Dropped `agy -p` from the Antigravity connection. Because the official FAQ states that wrapping `agy -p` inside third-party coding agents is not supported on consumer plans, only ACP (`agy acp`) is used.
-  - Skipped Phase 0 (completing a run with the official plugin first) and went straight to Phase 1.
-  - Kept role files inside the plugin and injected them per job instead of placing `CLAUDE.md`, `AGENTS.md`, and custom agent files in each project.
-  - Replaced WebSocket with SSE for event delivery, and replaced `claude agents --json` polling with hooks for Claude status.
-  - Added `wait` and `reply` to the bridge tools.
-- 2026-11-11: Proposed and then withdrew merging the status board into the AgentGauge popover. It conflicted with the recorded direction of the AgentGauge repo (depth over breadth, and no scanning of local agent processes). Reverted to keeping the status board on the bridge side.
+Key shifts from the original 2026-11-11 plan:
 
-- 2026-11-12: The user chose React and Electron for the control board and desktop app. This supersedes the earlier Tauri preference for the implemented client; daemon/worker ownership stays unchanged. See [07-desktop-and-react.md](07-desktop-and-react.md) for the measured tradeoffs.
-
-- 2026-11-17: Rechecked Orca against its source at v1.4.261. It now has a chat view over `codex app-server` and ACP, a structured orchestration layer, and Antigravity usage tracking, so two of the three reasons in section 8.2 are out of date. The decision is unchanged: Orca is a workbench the user works inside, and it has no fixed roles or review stages. Details and what Crew can take from it are in [05-related-work.md](05-related-work.md) section 11.
-
-- 2026-11-18: Installed and ran Orca, and gave `agy` real prompts. Orca writes hooks into Claude Code's, Codex's, and Antigravity's own settings on first start, accepts any local process as a coordinator or worker, and starts workers with full access. These findings confirm the decision. What Crew took from it is listed in the same section.
+- **Direct adapters and ACP only** ([04-implementation.md](04-implementation.md) section 3): skipped Phase 0, dropped `agy -p` (unsupported inside third-party agents on consumer plans), kept role files in `plugin/roles/` instead of writing into project files, switched from WebSocket and `claude agents --json` polling to SSE and Claude hooks, and expanded bridge tools (`wait`, `reply`, `mission`, `route`, `debate`, `answer`, `note`, `note_summary`).
+- **Status board separate from AgentGauge**: dropped merging the board into the AgentGauge popover because it conflicted with AgentGauge's scope (depth over breadth, no local process scanning).
+- **Desktop clients**: chose React + Vite for the board (`plugin/board/`), wrapped in Electron on Windows (`desktop/`) and replaced Electron with a native SwiftUI/AppKit app on macOS (`native/`); daemon ownership stayed unchanged ([07-desktop-and-react.md](07-desktop-and-react.md), [08-native-macos.md](08-native-macos.md)).
+- **Orca rechecked (`v1.4.261`)**: Orca now supports `codex app-server`, ACP, structured orchestration, and Antigravity usage tracking, so two of the earlier exclusion reasons in section 8.2 no longer apply. The decision stands because Orca is a full workbench without fixed roles or review stages, writes hooks into tool settings on first start, and starts workers with full access ([05-related-work.md](05-related-work.md) section 11).

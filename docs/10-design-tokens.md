@@ -91,7 +91,7 @@ Surfaces change between light and dark appearance. Status colors are system colo
 
 | Token | Use |
 | --- | --- |
-| `canvas` | The page background. In dark mode, cards are about 9% lighter than the canvas. |
+| `canvas` | The page background (`#0B0B0C` in dark mode, with `#1C1C1E` cards). |
 | `surface` | Cards and the detail panel |
 | `rowFill` | Rows, gray insets and evidence thumbnails on a surface |
 | `hairline` | Field and thumbnail outlines; cards and the detail panel have none (`Palette.contrastStroke` outlines them under Increase Contrast) |
@@ -205,6 +205,7 @@ Every animation takes one of these values, through `Motion.reduced`, so Reduce M
 | --- | --- | --- |
 | `content` | smooth, 0.3 s | A control or block changing its words or size: Copied, Saving…, Undo/Keep, a reveal opening |
 | `expand` | smooth, 0.38 s | A card opening or closing, with the cards around it moving along |
+| `reflow` | smooth, 0.42 s | Work arriving or leaving on its own: cards and rows come and go, and neighbors move into place |
 | `panel` | smooth, 0.26 s, no bounce | The detail panel coming in or going out |
 | `page` | ease out, 0.22 s | A page replacing another |
 | `fade` | ease out, 0.25 s | The detail header's veil |
@@ -217,7 +218,7 @@ A pill or glass pill whose words follow state, such as Copied, Saving… or Keep
 
 | Kind | How | Use |
 | --- | --- | --- |
-| Primary | `.glassPillButton()`, or `.glassPillButton(prominent: false)` for clear glass: Liquid Glass at the pill's size and face. Glass pills side by side share a `GlassEffectContainer` | Send Message, New Job, Save, Send Job, approval decisions; Review Requests in clear glass |
+| Primary | `.glassPillButton()`, or `.glassPillButton(prominent: false)` for clear glass: Liquid Glass at the pill's size and face. Glass pills side by side share a `GlassEffectContainer` | Send Message, New Job, Save Roles / Save Preset / Save Instructions, Send Job, approval decisions; Review Requests in clear glass |
 | Pill | `.pillButton()`; `.pillButton(.prominent)` for the action a group leads with, `.pillButton(.warning)` for one that drops work without completing it | Mark Done, Stop Tracking, a mission's preset menu, Details, Retry, Copy, Undo/Keep, Check Again, Install, Cancel Job |
 | Icon | `.iconButton()`: `IconButtonStyle`, a `Pill.fill` circle of `IconButton.diameter` (28 points), a little larger than a chip, with its symbol in `Symbol.control`; `.iconButton(prominent: true)` fills it with the accent | Close, Show Job, expand a mission; Send Answer (prominent) |
 | Chip | `.chip(color)`: `Typeface.chip` inked in its color, in a `Palette.chip` capsule with `Chip.insets` (5 × 8), outlined under Increase Contrast. `StatusLabel` draws status with it | Status of jobs, sessions, missions and agents; a model's verdict word |
@@ -243,4 +244,4 @@ Placement follows two rules.
 - **Actions sit at the trailing edge.** An item's action sits on the item's header row, as Undo does on a round. A section's or card's action sits on its own last row, as Copy Diff Command and the setup card's Check Again do, or shares that row with a closing line, as Mark Done shares it with a mission's outcome, centered on that line. The panel's footer (`DetailFooter`) is one row: the job's or session's id at the leading edge and the actions at the trailing edge, with Cancel Job last. The id gives way first and shortens in the middle. When even 80 points of it would leave the actions too little room, it moves below them. Pills never shrink, so a row of them in a card goes in `ActionRow`: when they do not fit across, the ones that do not fit move onto further lines, still at the trailing edge, with the completing action last. A mission's row first drops its preset's words and the finished note, then moves its controls under the outcome. On the board, action rows wrap the same way with `flex-wrap`.
 - **Reveals sit at the leading edge.** A reveal goes directly under what it reveals. Pills run actions and are never used to reveal content.
 
-Send and completing actions sit at the trailing edge too, such as Send Message and Approve after Deny. A mission's Stop Tracking and Mark Done appear only once an active mission looks finished. An abandoned mission shows Mark Done alone, which reopens it explicitly: the mission's controls lock per state through `Mission.actionKey`, so Stop Tracking never leaves Mark Done locked.
+Send and completing actions sit at the trailing edge too, such as Send Message and Approve after Deny. A mission's bottom-row Stop Tracking and Mark Done pills appear only once an active mission looks finished (the header ellipsis menu offers both at any time while active). An abandoned mission shows Mark Done alone, which reopens it explicitly: the mission's controls lock per state through `Mission.actionKey`, so Stop Tracking never leaves Mark Done locked.

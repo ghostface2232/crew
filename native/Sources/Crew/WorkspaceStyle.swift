@@ -81,8 +81,12 @@ struct MissionTrack: View {
     /// Steps not reached yet: their outline and the track leading to them share one weight and color.
     /// Stronger in dark mode, where 0.12 measured about 1.4:1 against the card.
     static let upcoming = WorkspaceStyle.dynamic(light: NSColor(calibratedWhite: 0, alpha: 0.12), dark: NSColor(calibratedWhite: 1, alpha: 0.22))
-    /// From the edge to the first and last markers' centers, so a name centered under an end marker has room.
+    /// The least room from the edge to the first and last markers' centers.
     static let inset = Space.x3l
+    /// A step name's width in `Typeface.captionStrong`, the wider of the two fonts it takes.
+    private static func labelWidth(_ title: String) -> CGFloat {
+        ceil((title as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: Typeface.captionSize, weight: .semibold)]).width)
+    }
     /// One line of a step name in `Typeface.captionStrong`.
     private static let labelHeight: CGFloat = {
         let font = NSFont.systemFont(ofSize: Typeface.captionSize, weight: .semibold)
@@ -101,9 +105,14 @@ struct MissionTrack: View {
         let count = mission.stops.count
         // Markers spread evenly between the insets; each name sits centered under its marker.
         GeometryReader { geometry in
+            let width = geometry.size.width
+            // Wide enough for the longer end name centered under its marker, so it stays inside the card. At most half
+            // an equal column, where an end name has as much room as any other and truncates like them.
+            let ends = [mission.stops.first, mission.stops.last].compactMap { $0 }.map(Self.labelWidth).max() ?? 0
+            let inset = count > 1 ? min(max(Self.inset, ceil(ends / 2)), width / CGFloat(count * 2)) : width / 2
             // Never negative, however narrow the card or long the plan.
-            let span = count > 1 ? max(0, (geometry.size.width - Self.inset * 2) / CGFloat(count - 1)) : 0
-            let center = { (index: Int) in count > 1 ? Self.inset + span * CGFloat(index) : geometry.size.width / 2 }
+            let span = count > 1 ? max(0, (width - inset * 2) / CGFloat(count - 1)) : 0
+            let center = { (index: Int) in inset + span * CGFloat(index) }
             ZStack(alignment: .topLeading) {
                 ForEach(0..<max(0, count - 1), id: \.self) { index in
                     Rectangle().fill(mission.passed(index) ? passedColor.opacity(0.6) : Self.upcoming)
@@ -117,7 +126,8 @@ struct MissionTrack: View {
                     marker(index).position(x: center(index), y: Self.marker / 2)
                     Text(title).font(emphasized ? Typeface.captionStrong : Typeface.caption)
                         .foregroundStyle(index == mission.step && mission.state == "active" ? .primary : .secondary)
-                        .lineLimit(1).frame(maxWidth: count > 1 ? max(0, span - Space.xs) : nil)
+                        .lineLimit(1)
+                        .frame(maxWidth: max(0, min(count > 1 ? span - Space.m : width, index == 0 || index == count - 1 ? inset * 2 : width)))
                         // A name the lead gave can be longer than its column.
                         .help(title)
                         .position(x: center(index), y: Self.marker + Space.m + Self.labelHeight / 2)

@@ -437,15 +437,21 @@ struct MissionPanel: View {
                     ForEach(Array((mission.notes ?? []).enumerated()), id: \.offset) { _, note in
                         Text(note.text).font(Typeface.callout).textSelection(.enabled).padding(.leading, WorkspaceStyle.rowTitleInset)
                     }
-                    MissionTrack(mission: mission).padding(.vertical, Space.xs)
-                    VStack(spacing: WorkspaceStyle.rowGap) {
-                        ForEach(mission.stops.indices, id: \.self) { index in
-                            let mine = jobs.filter { mission.jobStep($0) == index }
-                            let lead = index == mission.step ? leadRow : nil
-                            if !mine.isEmpty || lead != nil {
+                    // As far from the title above as from what follows below.
+                    MissionTrack(mission: mission).padding(.vertical, Space.l)
+                    let shown = mission.stops.indices.filter { index in
+                        jobs.contains { mission.jobStep($0) == index } || (index == mission.step && leadRow != nil)
+                    }
+                    // Left out when empty, so it adds no second gap above the outcome.
+                    if !shown.isEmpty {
+                        VStack(spacing: WorkspaceStyle.rowGap) {
+                            ForEach(shown, id: \.self) { index in
+                                let mine = jobs.filter { mission.jobStep($0) == index }
+                                let lead = index == mission.step ? leadRow : nil
                                 let open = !foldsStages || store.isStageOpen(mission, index, jobs: mine, hasLead: lead != nil)
+                                // The first stage sits as far under the track as the track sits under the title.
                                 stageLabel(index, count: mine.count, open: open)
-                                    .frame(maxWidth: .infinity, alignment: .leading).padding(.top, Space.m)
+                                    .frame(maxWidth: .infinity, alignment: .leading).padding(.top, index == shown.first ? 0 : Space.m)
                                 if open {
                                     if let lead {
                                         SessionRow(session: lead, selected: store.selectedSession == lead.id, store: store) { store.toggleSession(lead.id) }.transition(.card)

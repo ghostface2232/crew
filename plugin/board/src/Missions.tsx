@@ -186,8 +186,8 @@ export function MissionTrack({ mission }: { mission: Mission }) {
       setFit(Math.ceil((Math.max(measure.measureText(first).width, measure.measureText(last).width) + padding) / 2));
     };
     update();
-    // Measured again once the web font has replaced its fallback.
-    void document.fonts.ready.then(update);
+    // Measured again once the face the names use has loaded; the board may not have asked for it yet.
+    if (measure) void document.fonts.load(measure.font, first + last).then(update, () => {});
     return () => { current = false; };
   }, [first, last, stops.length]);
   return (

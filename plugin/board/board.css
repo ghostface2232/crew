@@ -1069,6 +1069,8 @@ dialog.detail-panel { container: panel / inline-size; }
    within half an equal column, past which an end name truncates like the others; a lone step sits in the middle. */
 .track {
   container-type: inline-size;
+  /* Keeps the markers' z-index inside the track. */
+  isolation: isolate;
   display: flex;
   justify-content: space-between;
   padding: 8px 0 0;
@@ -1081,8 +1083,11 @@ dialog.detail-panel { container: panel / inline-size; }
 .track > li { position: relative; display: flex; flex: none; flex-direction: column; align-items: center; gap: 8px; width: 0; }
 .track > li:first-child { margin-inline-start: var(--inset); }
 .track > li:last-child { margin-inline-end: var(--inset); }
-.track > li + li::before { content: ""; position: absolute; top: 12px; right: 16px; width: calc(var(--span) - 32px); height: 2px; border-radius: 2px; background: var(--track); transition: background-color 400ms ease-out; }
+/* Center to center, under the markers as in the app, so it shows however close the markers sit. */
+.track > li + li::before { content: ""; position: absolute; top: 12px; inset-inline-end: 0; width: var(--span); height: 2px; border-radius: 2px; background: var(--track); transition: background-color 400ms ease-out; }
 .track > li[data-pos="past"] + li::before, .track > li[data-pos="past"] + li[data-pos="now"]::before { background: color-mix(in srgb, var(--passed) 55%, transparent); }
+/* Above every step's line, so a marker covers the lines meeting it on the card's own color. */
+.track-node { position: relative; z-index: 1; border-radius: 50%; corner-shape: round; background: var(--surface); }
 .track-node b {
   display: grid;
   place-items: center;

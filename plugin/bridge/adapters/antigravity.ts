@@ -514,6 +514,8 @@ function commandGrant(toolCall: { kind?: string; rawInput?: unknown; _meta?: { m
   }
   if (cwd !== undefined && (!cwd.startsWith('/') || /\/\/|\/\.{1,2}(?:\/|$)/.test(cwd))) return;
   if (/[;&|`<>\r\n\0()]/.test(command)) return;
+  // Variable, tilde and brace expansion turn literal text into paths the checks below cannot see.
+  if (/[$~{}]/.test(command)) return;
   // A leading assignment (PATH=…, NODE_OPTIONS=…) can change what the named program runs, so it gets no grant.
   const match = /^[ \t]*([A-Za-z0-9_./+-]+)[ \t]+([A-Za-z0-9][A-Za-z0-9_.:+-]*)(?=[ \t]|$)/.exec(command);
   if (!match) return;

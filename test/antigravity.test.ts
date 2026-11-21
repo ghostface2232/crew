@@ -480,6 +480,13 @@ test('command grants require an unambiguous directory and arguments', { timeout:
     command('npm test ../x'),
     command('make test -C/elsewhere'),
     command("npm test '.'./x"),
+    // The shell expands these into paths the literal text does not show.
+    command('npm test "$HOME/x"'),
+    command('npm test ${HOME}'),
+    command('npm test ~/x'),
+    command('npm test --prefix=~'),
+    command('npm test x{,/elsewhere}'),
+    command('npm test x{..,y}'),
   ];
   const h = harness(t, commandServer(calls.map((call) => [call])));
   const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' });

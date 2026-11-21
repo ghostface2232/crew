@@ -71,7 +71,12 @@ try {
   });
   const prefs = await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.getLastWebPreferences());
   expect(prefs).toMatchObject({ nodeIntegration: false, contextIsolation: true, sandbox: true });
-  await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setBounds({ x: 50, y: 60, width: 1100, height: 760 }));
+  // Sized to fit the screen's work area: a hosted runner's display is smaller than a desk's, and Windows shrinks a
+  // window that would run past it, so a fixed size would not come back as set.
+  const area = await application.evaluate(({ screen }) => screen.getPrimaryDisplay().workArea);
+  const placed = { x: area.x + 50, y: area.y + 60, width: Math.min(1100, area.width - 100), height: Math.min(760, area.height - 120) };
+  console.log(`work area ${JSON.stringify(area)}, window ${JSON.stringify(placed)}`);
+  await application.evaluate(({ BrowserWindow }, bounds) => BrowserWindow.getAllWindows()[0].setBounds(bounds), placed);
   fs.mkdirSync('test-results', { recursive: true });
   await page.screenshot({ path: 'test-results/desktop-smoke.png' });
 
@@ -125,7 +130,7 @@ try {
         .map(({ element }) => element.getAttribute('aria-label') || element.textContent.trim());
     });
   expect(await covered()).toEqual([]);
-  await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setBounds({ width: 700, height: 760 }));
+  await application.evaluate(({ BrowserWindow }, height) => BrowserWindow.getAllWindows()[0].setBounds({ width: 700, height }), placed.height);
   await page.waitForTimeout(300);
   expect(await covered()).toEqual([]);
   await page.getByRole('button', { name: 'Show sidebar' }).click();
@@ -140,7 +145,7 @@ try {
   expect(await covered()).toEqual([]);
   await page.keyboard.press('Escape');
   await page.waitForTimeout(500);
-  await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setBounds({ x: 50, y: 60, width: 1100, height: 760 }));
+  await application.evaluate(({ BrowserWindow }, bounds) => BrowserWindow.getAllWindows()[0].setBounds(bounds), placed);
 
   // About Crew checks the feed and downloads the release; the sidebar then offers it above Settings.
   const version = JSON.parse(fs.readFileSync('package.json', 'utf8')).version;
@@ -229,9 +234,9 @@ try {
     return bounds;
   };
   const bounds = await relaunchBounds();
-  expect(bounds).toMatchObject({ x: 50, y: 60 });
-  expect(Math.abs(bounds.width - 1100)).toBeLessThanOrEqual(8);
-  expect(Math.abs(bounds.height - 760)).toBeLessThanOrEqual(8);
+  expect(bounds).toMatchObject({ x: placed.x, y: placed.y });
+  expect(Math.abs(bounds.width - placed.width)).toBeLessThanOrEqual(8);
+  expect(Math.abs(bounds.height - placed.height)).toBeLessThanOrEqual(8);
   expect(await relaunchBounds()).toEqual(bounds);
   expect((await getHealth()).pid).toBe(daemonPid);
   const result = {

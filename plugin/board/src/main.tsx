@@ -84,6 +84,66 @@ document.addEventListener('keydown', (event) => {
   page.scrollBy({ top: (event.shiftKey && event.key === ' ' ? -1 : 1) * step(page) });
 });
 
+// Tooltips in the board's own style in place of the system's. While the pointer rests on an element, its title moves to
+// data-title so the system's never shows; it comes back when the pointer leaves, so assistive technology still reads it.
+const tip = document.createElement('div');
+tip.className = 'tooltip';
+tip.popover = 'manual';
+tip.setAttribute('aria-hidden', 'true');
+document.body.append(tip);
+let tipOwner: HTMLElement | null = null;
+let tipTimer = 0;
+// Once one tooltip has shown, the next follows at once, as the system's do.
+let tipWarm = 0;
+// A title set while the pointer is still there, such as a toggle's after a click, moves aside too.
+const stash = (owner: HTMLElement) => {
+  if (!owner.title) return;
+  owner.dataset.title = owner.title;
+  owner.removeAttribute('title');
+};
+const retitled = new MutationObserver(() => tipOwner && stash(tipOwner));
+const hideTip = () => {
+  clearTimeout(tipTimer);
+  if (!tip.matches(':popover-open')) return;
+  tip.hidePopover();
+  tipWarm = Date.now();
+};
+/** Hides the tooltip and gives the title back once the pointer has left its element. */
+const releaseTip = () => {
+  hideTip();
+  retitled.disconnect();
+  const owner = tipOwner;
+  tipOwner = null;
+  if (!owner) return;
+  if (!owner.hasAttribute('title')) owner.setAttribute('title', owner.dataset.title ?? '');
+  delete owner.dataset.title;
+};
+const showTip = () => {
+  const owner = tipOwner;
+  if (!owner?.isConnected || !owner.dataset.title) return;
+  tip.textContent = owner.dataset.title;
+  tip.showPopover();
+  const box = owner.getBoundingClientRect();
+  const below = box.bottom + 6 + tip.offsetHeight <= innerHeight - 8;
+  tip.style.top = `${below ? box.bottom + 6 : box.top - 6 - tip.offsetHeight}px`;
+  tip.style.left = `${Math.max(8, Math.min(box.left + box.width / 2 - tip.offsetWidth / 2, innerWidth - tip.offsetWidth - 8))}px`;
+};
+document.addEventListener('pointerover', (event) => {
+  if (event.pointerType === 'touch') return;
+  const owner = event.target instanceof Element ? event.target.closest<HTMLElement>('[title], [data-title]') : null;
+  if (owner === tipOwner) return;
+  releaseTip();
+  if (!owner?.title) return;
+  tipOwner = owner;
+  stash(owner);
+  retitled.observe(owner, { attributeFilter: ['title'] });
+  tipTimer = window.setTimeout(showTip, Date.now() - tipWarm < 600 ? 0 : 600);
+});
+document.documentElement.addEventListener('pointerleave', releaseTip);
+window.addEventListener('blur', releaseTip);
+// A press, a key or a scroll puts the tooltip away until the pointer moves to something else.
+for (const type of ['pointerdown', 'keydown', 'scroll']) document.addEventListener(type, hideTip, { capture: true, passive: true });
+
 async function start() {
   try {
     await initializeSession();

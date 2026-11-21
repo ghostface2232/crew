@@ -6,10 +6,10 @@ import type { AgentSettings, Holder, JobKind, Role, RoleAssignment, RoleInfo, Ro
 import { request } from './api.ts';
 import { board } from './store.ts';
 import { agentSettings, HOLDERS, knownProjects, NAMES, projectNames, resolveDraft, rolesOf, sortHolders } from './model.ts';
-import { AgentMark, CloseButton, Dialog, Icon, useFade } from './ui.tsx';
+import { AgentMark, ask, CloseButton, Dialog, Icon, Select, useFade } from './ui.tsx';
 import { Scores } from './Scores.tsx';
 import { desktop } from './desktop.ts';
-import appIcon from './icons/CrewAppIcon.svg';
+import appIcon from './icons/CrewAppIcon.png';
 import styles from './Settings.module.css';
 
 /** The app's one-line summary of a preset. */
@@ -195,8 +195,8 @@ export function Settings({ state, update, close }: { state: Snapshot; update: Ap
       if (back.current?.offsetParent) back.current.focus();
     } else if (pushed.current) nav.current?.querySelector<HTMLButtonElement>('[aria-current="page"]')?.focus();
   }, [view, pane]);
-  const closeSettings = () => {
-    if ((!dirty && !saving && !savingRoles && !savingPreset) || confirm('Close without saving your changes?')) close();
+  const closeSettings = async () => {
+    if ((!dirty && !saving && !savingRoles && !savingPreset) || await ask('Close without saving your changes?', 'Close')) close();
   };
   /** Replaces a role's entry in the draft, dropping it when nothing is left. */
   const setEntry = (role: Role, change: (own: Partial<RoleAssignment>) => Partial<RoleAssignment>) =>
@@ -353,11 +353,11 @@ export function Settings({ state, update, close }: { state: Snapshot; update: Ap
     if (scroller.current) scroller.current.scrollTop = 0;
     setScrolled(false);
   }, [current, view]);
-  const open = (next: Pane) => {
+  const open = async (next: Pane) => {
     const nextScope = next === 'instructions' ? '' : next.startsWith('project:') ? next.slice('project:'.length) : null;
     // Another set of instructions loads in place of the one being edited, so unsaved edits are asked about first.
     if (nextScope !== null && nextScope !== scope) {
-      if (text !== saved && !confirm('Discard the unsaved changes to these instructions?')) return;
+      if (text !== saved && !(await ask('Discard the unsaved changes to these instructions?', 'Discard'))) return;
       // Discarded now, not when the next set arrives: nothing is left to ask about meanwhile.
       setText(saved);
       setScope(nextScope);
@@ -417,10 +417,7 @@ export function Settings({ state, update, close }: { state: Snapshot; update: Ap
       const options = key === 'model' ? offered.map((choice) => [choice.id, choice.name]) : efforts.map((effort) => [effort, effort]);
       if (value && !options.some(([id]) => id === value)) options.push([value, value]);
       return (
-        <select aria-label={label} value={value} onChange={(event) => change(event.target.value)}>
-          <option value="">{blank(agent, key)}</option>
-          {options.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
-        </select>
+        <Select label={label} value={value} options={[['', blank(agent, key)], ...(options as [string, string][])]} onChange={change} />
       );
     };
     const workers = (shown?.agents ?? []).filter((holder): holder is WorkerAgent => holder !== 'claude' && holder in state.agents);
@@ -437,7 +434,7 @@ export function Settings({ state, update, close }: { state: Snapshot; update: Ap
           {role.parent && (
             <label className={styles.row}>
               <span>Same as {parentLabel}</span>
-              <input type="checkbox" className={styles.switch} checked={following} onChange={(event) => follow(role, event.target.checked)} />
+              <input type="checkbox" className="switch" checked={following} onChange={(event) => follow(role, event.target.checked)} />
             </label>
           )}
           <div className={styles.row}>
@@ -530,12 +527,12 @@ export function Settings({ state, update, close }: { state: Snapshot; update: Ap
                     <div className={styles.rows}>
                       <label className={styles.row}>
                         <span>Default</span>
-                        <select aria-label="Model preset" value={preset ?? ''} onChange={(event) => setPreset((event.target.value as PresetName) || null)}>
-                          <option value="">None</option>
-                          <option value="economy">Economy</option>
-                          <option value="balanced">Balanced</option>
-                          <option value="best">Best</option>
-                        </select>
+                        <Select<PresetName | ''>
+                          label="Model preset"
+                          value={preset ?? ''}
+                          options={[['', 'None'], ['economy', 'Economy'], ['balanced', 'Balanced'], ['best', 'Best']]}
+                          onChange={(next) => setPreset(next || null)}
+                        />
                       </label>
                       {selectedPreset && presetDetails(selectedPreset).map(([label, value]) => (
                         <div className={styles.row} key={label}><span>{label}</span><span className={styles.value}>{value}</span></div>
@@ -623,7 +620,7 @@ export function Settings({ state, update, close }: { state: Snapshot; update: Ap
                   <div className={styles.rows}>
                     <label className={styles.row}>
                       <span>Peer ratings</span>
-                      <input type="checkbox" className={styles.switch} checked={state.peerRatings} onChange={(event) => void setPeerRatings(event.target.checked)} />
+                      <input type="checkbox" className="switch" checked={state.peerRatings} onChange={(event) => void setPeerRatings(event.target.checked)} />
                     </label>
                   </div>
                   <p className={styles.footnote} role={ratingsStatus ? 'alert' : undefined}>
@@ -640,7 +637,7 @@ export function Settings({ state, update, close }: { state: Snapshot; update: Ap
                   </p>
                   <section className={styles.group}>
                     <textarea
-                      className={`mono ${styles.editor}`}
+                      className={styles.editor}
                       id="instructions-text"
                       aria-label="Shared instructions"
                       aria-describedby="instructions-hint"

@@ -73,7 +73,7 @@ try {
 const licenses = ['react', 'react-dom', 'scheduler', 'lucide-react'].map(
   (name) => `${name}\n${fs.readFileSync(`node_modules/${name}/LICENSE`, 'utf8')}`,
 );
-licenses.push(`Inter\n${fs.readFileSync('plugin/board/inter-LICENSE.txt', 'utf8')}`);
+licenses.push(`Pretendard\n${fs.readFileSync('plugin/board/pretendard-LICENSE.txt', 'utf8')}`);
 if (process.platform === 'win32') licenses.push(`Node.js ${process.version}\nSee runtime/LICENSE for Node.js and its bundled dependencies.`);
 fs.writeFileSync(path.join(root, 'THIRD-PARTY-NOTICES.txt'), licenses.join('\n\n'));
 console.log(root);

@@ -404,6 +404,12 @@ test('dispatchers, ambiguous arguments and input, and non-execute tools offer no
     { kind: 'execute', rawInput: { CommandLine: 'npm test', unknownNumber: 1 } },
     { kind: 'execute', rawInput: { CommandLine: 'npm test', command: 'npm test' } },
     { kind: 'execute', rawInput: { CommandLine: 'npm test', Cwd: '/work', cwd: '/elsewhere' } },
+    { kind: 'execute', rawInput: { CommandLine: 'cd /work && npm test', Cwd: '/elsewhere' } },
+    { kind: 'execute', rawInput: { CommandLine: 'cd ~ && npm test' } },
+    { kind: 'execute', rawInput: { CommandLine: 'cd - && npm test' } },
+    { kind: 'execute', rawInput: { CommandLine: 'cd /work && cd /tmp && npm test' } },
+    { kind: 'execute', rawInput: { CommandLine: 'cd /work && npm test', WaitMsBeforeAsync: '5000' } },
+    { kind: 'execute', rawInput: { CommandLine: 'cd /work && npm test', toolSummary: 1 } },
   ];
   const h = harness(t, commandServer([...calls.map((call) => [call]), [command('NPM.EXE test')]]));
   const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' });
@@ -419,6 +425,22 @@ test('dispatchers, ambiguous arguments and input, and non-execute tools offer no
   assert.deepEqual(unexpectedGrants, []);
   assert.equal(request.grant, 'running "NPM.EXE test" in the job workspace');
   assert.deepEqual(Object.values(JSON.parse(job.report!)), Array(calls.length + 1).fill('allow_once'));
+});
+
+test('agy\'s own request shape, `cd <dir> && <command>` with its summary fields, gets a grant for that directory', { timeout: 5000 }, async (t) => {
+  // As agy 1.5 sent it in a live job on 2026-11-21.
+  const live = (line: string) => ({ kind: 'execute', rawInput: { CommandLine: `cd /work/repo && ${line}`, WaitMsBeforeAsync: 5000, toolSummary: `Run ${line}` } });
+  const h = harness(t, commandServer([[live('npm test')], [live('npm test --silent'), live('node test.js'), command('npm test', '/work/repo')]]));
+  const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' });
+  const first = await h.waiting(job);
+  assert.equal(first.grant, 'running "npm test" in /work/repo');
+  await h.jobs.reply(job.id, { decision: 'allow_for_job', request_id: first.id });
+  const node = await h.waiting(job);
+  assert.equal(node.grant, 'running "node test.js" in /work/repo');
+  await h.jobs.reply(job.id, { decision: 'deny', request_id: node.id });
+  await h.ended(job);
+  // The later `npm test --silent` and the Cwd-field form of the same directory ride the grant; `node test.js` was asked.
+  assert.deepEqual(JSON.parse(job.report!), { 'command-1-0': 'allow_once', 'command-2-0': 'allow_once', 'command-2-1': 'reject_once', 'command-2-2': 'allow_once' });
 });
 
 test('a read-only Antigravity job refuses commands without offering a grant', { timeout: 5000 }, async (t) => {

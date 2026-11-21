@@ -489,7 +489,9 @@ function commandGrant(toolCall: { kind?: string; rawInput?: unknown; _meta?: { m
     const commands = COMMAND_FIELDS.filter((field) => field in fields);
     const directories = CWD_FIELDS.filter((field) => field in fields);
     if (commands.length !== 1 || directories.length > 1) return;
-    if (Object.keys(fields).length !== commands.length + directories.length) return;
+    // Fields agy 1.5 sends beside the command that change neither what runs nor where (seen live on 2026-11-21).
+    const known = Object.keys(fields).filter((field) => !commands.includes(field) && !directories.includes(field));
+    if (!known.every((field) => (field === 'WaitMsBeforeAsync' && typeof fields[field] === 'number') || (field === 'toolSummary' && typeof fields[field] === 'string'))) return;
     command = fields[commands[0]];
     if (directories.length) {
       const directory = fields[directories[0]];
@@ -497,9 +499,17 @@ function commandGrant(toolCall: { kind?: string; rawInput?: unknown; _meta?: { m
       cwd = directory;
     }
   }
-  if (typeof command !== 'string' || /[;&|`<>\r\n\0()]/.test(command)) return;
+  if (typeof command !== 'string') return;
+  // agy runs every command as `cd <workspace> && <command>`: a literal directory there is the working directory.
+  const moved = /^[ \t]*cd[ \t]+([A-Za-z0-9_./][A-Za-z0-9_./+-]*)[ \t]*&&[ \t]*/.exec(command);
+  if (moved) {
+    if (cwd !== undefined && cwd !== moved[1]) return;
+    cwd = moved[1];
+    command = command.slice(moved[0].length);
+  }
+  if (/[;&|`<>\r\n\0()]/.test(command as string)) return;
   // A leading assignment (PATH=…, NODE_OPTIONS=…) can change what the named program runs, so it gets no grant.
-  const match = /^[ \t]*([A-Za-z0-9_./+-]+)[ \t]+([A-Za-z0-9][A-Za-z0-9_.:+-]*)(?=[ \t]|$)/.exec(command);
+  const match = /^[ \t]*([A-Za-z0-9_./+-]+)[ \t]+([A-Za-z0-9][A-Za-z0-9_.:+-]*)(?=[ \t]|$)/.exec(command as string);
   if (!match) return;
   const [, program, subcommand] = match;
   const name = path.posix.basename(program).toLowerCase().replace(/\.exe$/, '');

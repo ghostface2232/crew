@@ -20,7 +20,7 @@ struct StatusLabel: View {
         case "failed", "error": return "exclamationmark.triangle.fill"
         case "stalled": return "clock.badge.exclamationmark"
         case "done": return "checkmark.circle.fill"
-        case "running", "working", "active": return "circle.dotted.circle"
+        case "running", "working", "active": return "progress.indicator"
         case "cancelled", "abandoned": return "stop.circle"
         default: return "circle"
         }
@@ -35,9 +35,22 @@ struct StatusLabel: View {
         default: return .secondary
         }
     }
+    var spins: Bool { ["running", "working", "active"].contains(state) }
     var body: some View {
-        Label(title ?? state.capitalized, systemImage: symbol).chip(color)
+        Label { Text(title ?? state.capitalized) } icon: { StatusSymbol(name: symbol, spins: spins) }.chip(color)
     }
+}
+
+/// A status symbol. Running work's turns slowly, as on the board, unless Reduce Motion is on.
+struct StatusSymbol: View {
+    let name: String
+    let spins: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var body: some View {
+        Image(systemName: name).symbolEffect(.rotate, options: .repeat(.continuous).speed(Self.speed), isActive: spins && !reduceMotion)
+    }
+    /// Half the effect's own pace, for a calm turn rather than a busy spinner.
+    static let speed = 0.5
 }
 
 /// A job's or session's status as its symbol alone, quieter than a chip in a list of them; the word is its name.
@@ -47,7 +60,7 @@ struct StatusIcon: View {
     @Environment(\.colorScheme) private var scheme
     var body: some View {
         let label = StatusLabel(state: state)
-        Image(systemName: label.symbol).font(Typeface.body).foregroundStyle(label.color.ink(scheme))
+        StatusSymbol(name: label.symbol, spins: label.spins).font(Typeface.body).foregroundStyle(label.color.ink(scheme))
             .help(title).accessibilityLabel(title)
     }
 }

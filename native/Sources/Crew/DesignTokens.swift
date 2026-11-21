@@ -242,6 +242,8 @@ enum MarkSize {
 /// A status chip: chip type in a tinted capsule.
 enum Chip {
     static let insets = EdgeInsets(top: 5, leading: Space.m, bottom: 5, trailing: Space.m)
+    /// A pull request's chip is a rounded square, so it does not read as one more status pill beside the mission's.
+    static let squareRadius: CGFloat = 6
 }
 
 /// A pill button: a capsule a little taller than the system's regular bordered button, whose 5-point top and

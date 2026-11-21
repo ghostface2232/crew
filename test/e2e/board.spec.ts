@@ -50,20 +50,30 @@ test('a shared lead appears on one mission and linked pulls show when their stat
   await expect(focusedCard.locator(lead)).toBeVisible();
   await expect(newerCard.locator(lead)).toHaveCount(0);
   await expect(newerCard.locator('.mission-meta').first()).toContainText('2/5 tasks');
-  await expect(newerCard.locator('.mission-pull')).toHaveText('#42 · checks failing · changes requested · conflict');
-  await expect(newerCard.getByRole('link', { name: 'Pull request example/crew #42' })).toHaveAttribute('href', pull.url);
+  // The most urgent status names the chip, and the others the lead must act on are counted.
+  const chip = newerCard.getByRole('link', { name: 'Pull request example/crew #42: Conflict · Checks failing · Changes requested' });
+  await expect(chip).toHaveAttribute('href', pull.url);
+  await expect(chip).toHaveText('#42Conflict+2');
+  await expect(chip).toHaveAttribute('data-state', 'failed');
   await page.screenshot({ path: testInfo.outputPath('lead-mission-placement.png'), animations: 'disabled' });
 
   const push = (next: BoardPull) => request.post('/__push', { data: { type: 'pull', data: next } });
   await push({ ...pull, checkedAt: NOW - 16 * 60_000 });
   await push({ ...pull, id: 'pr-43', number: 43, url: 'https://github.com/example/crew/pull/43', review: '', conflict: false });
-  await expect(newerCard.locator('.mission-pull')).toHaveText([
-    '#42 · checks failing · changes requested · conflict · checked 16m ago',
-    '#43 · checks failing',
-  ]);
-  await expect(newerCard.locator('.mission-pull').first()).toHaveAttribute('data-stale', 'true');
-  await expect(newerCard.locator('.mission-pull').last()).not.toHaveAttribute('data-stale');
+  await push({ ...pull, id: 'pr-44', number: 44, url: 'https://github.com/example/crew/pull/44', checks: 'pending', review: 'approved', conflict: false });
+  await push({ ...pull, id: 'pr-45', number: 45, url: 'https://github.com/example/crew/pull/45', state: 'merged' });
+  const chips = newerCard.locator('.pull-chip');
+  await expect(chips).toHaveText(['#42Conflict+216m', '#43Checks failing', '#44Checks running', '#45Merged']);
+  // A stale chip keeps its words but not its color.
+  await expect(chips.first()).toHaveAttribute('data-stale', 'true');
+  await expect(chips.first()).toHaveAttribute('data-state', '');
+  await expect(chips.first()).toHaveAttribute('title', 'Verify the desktop release · Conflict · Checks failing · Changes requested · Checked 16m ago');
+  await expect(chips.nth(1)).not.toHaveAttribute('data-stale');
+  await expect(chips.nth(2)).toHaveAttribute('data-state', 'running');
+  await expect(chips.nth(3)).toHaveAttribute('data-state', 'done');
   await newerCard.screenshot({ path: testInfo.outputPath('mission-tasks-and-pulls.png'), animations: 'disabled' });
+  await push({ ...pull, error: 'gh: not found' });
+  await expect(chips.first()).toHaveText('#42Could not be read');
 });
 
 test('short mission plans render in order with matching tracks and progress', async ({ page, request }) => {

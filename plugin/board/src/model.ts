@@ -1,5 +1,5 @@
 import type { AgentSettings, Holder, Role, RoleAssignment, RoleInfo, RoleSettings, WorkerAgent } from '../../bridge/config.ts';
-import type { BoardJob, BoardState, ClaudeSession, Mission } from './types.ts';
+import type { BoardJob, BoardPull, BoardState, ClaudeSession, Mission } from './types.ts';
 
 export const NAMES = { claude: 'Claude', codex: 'Codex', antigravity: 'Antigravity' };
 /** Every holder, in the order a role lists them, as config.ts HOLDERS does. */
@@ -121,6 +121,27 @@ export function missionProgress(mission: Mission, jobs: BoardJob[]) {
   const index = mission.stages ? missionStep(mission) : Math.max(0, stages.indexOf(mission.stage));
   return Math.max(0, (index + share) / stages.length);
 }
+/** A pull request's status as a card shows it: a word and the state color it takes (as a chip's data-state). */
+export interface PullStatus { word: string; tone: 'failed' | 'waiting' | 'running' | 'done' | ''; needsLead?: true }
+/**
+ * Most urgent first: what the lead must fix before what it must weigh, and a conflict first of all, since resolving it
+ * moves the head and reruns the checks. Waiting and good news follow.
+ */
+export function pullStatuses(pull: BoardPull): PullStatus[] {
+  if (pull.state === 'merged') return [{ word: 'Merged', tone: 'done' }];
+  if (pull.state === 'closed') return [{ word: 'Closed', tone: '' }];
+  const statuses: (PullStatus | false)[] = [
+    pull.conflict && { word: 'Conflict', tone: 'failed', needsLead: true },
+    pull.checks === 'failing' && { word: 'Checks failing', tone: 'failed', needsLead: true },
+    pull.review === 'changes_requested' && { word: 'Changes requested', tone: 'waiting', needsLead: true },
+    pull.checks === 'pending' && { word: 'Checks running', tone: 'running' },
+    pull.review === 'approved' && { word: 'Approved', tone: 'done' },
+    pull.checks === 'passing' && { word: 'Checks passed', tone: 'done' },
+  ];
+  return statuses.filter((status): status is PullStatus => Boolean(status));
+}
+export const pullIsStale = (pull: BoardPull, now: number) =>
+  pull.state === 'open' && (pull.ended != null || pull.error != null || now - pull.checkedAt > 15 * 60_000);
 type EvidenceItem = NonNullable<BoardJob['evidence']>[number];
 /** At most this many captures at once: three in a row, or four in a grid of two by two. */
 export const MAX_COMPARED = 4;

@@ -55,6 +55,29 @@ import Testing
         }
     }
 
+    @Test func pullStatusesComeMostUrgentFirst() throws {
+        var pull = MissionPull(
+            id: "pr-1", url: try #require(URL(string: "https://github.com/example/crew/pull/42")), repo: "example/crew",
+            number: 42, title: "Update board", mission: "m", state: "open", checks: "none", review: "", conflict: false, checkedAt: 0
+        )
+        #expect(pull.statuses.isEmpty)
+        pull.checks = "failing"
+        pull.review = "changes_requested"
+        pull.conflict = true
+        #expect(pull.statuses.map(\.word) == ["Conflict", "Checks failing", "Changes requested"])
+        #expect(pull.statuses.allSatisfy { $0.needsLead })
+        pull.conflict = false
+        pull.checks = "pending"
+        pull.review = "approved"
+        #expect(pull.statuses == [PullStatus(word: "Checks running", tone: "running"), PullStatus(word: "Approved", tone: "done")])
+        pull.checks = "passing"
+        #expect(pull.statuses.map(\.word) == ["Approved", "Checks passed"])
+        pull.state = "merged"
+        #expect(pull.statuses == [PullStatus(word: "Merged", tone: "done")])
+        pull.state = "closed"
+        #expect(pull.statuses == [PullStatus(word: "Closed", tone: "")])
+    }
+
     @Test func decodesNewFieldsAndAcceptsAnOlderDaemonSnapshot() throws {
         let legacy = try fixture()
         #expect(legacy.pulls == nil)

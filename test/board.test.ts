@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Actions, answerKey, onUnauthorized, stream, ticketFromFragment, UnauthorizedError } from '../plugin/board/src/api.ts';
 import { BoardStore, mergeEvents } from '../plugin/board/src/store.ts';
-import { elapsed, evidenceSide, evidenceTurn, orderEvidence, jobLabel, leadMission, projectNames, unsettled, missionProgress, missionStops, missionStep, missionStopPosition, missionJobStep, missionLooksFinished, relativeDuration, usageWindowName, STOP_OF_STAGE } from '../plugin/board/src/model.ts';
-import type { BoardJob, BoardState, ClaudeSession, CrewEvent, Mission } from '../plugin/board/src/types.ts';
+import { elapsed, evidenceSide, evidenceTurn, orderEvidence, jobLabel, leadMission, projectNames, unsettled, missionProgress, missionStops, missionStep, missionStopPosition, missionJobStep, missionLooksFinished, pullIsStale, pullStatuses, relativeDuration, usageWindowName, STOP_OF_STAGE } from '../plugin/board/src/model.ts';
+import type { BoardJob, BoardPull, BoardState, ClaudeSession, CrewEvent, Mission } from '../plugin/board/src/types.ts';
 
 function deferred() {
   let resolve!: (value?: unknown) => void;
@@ -228,6 +228,27 @@ test('a lead row follows its focused active mission, falling back to its newest 
     assert.equal(leadMission({ ...session, mission }, all), newer);
   assert.equal(leadMission(session, [older]), older);
   assert.equal(leadMission(session, [closed, foreign]), undefined);
+});
+
+test('a pull request lists its statuses most urgent first, and only ended reads or quiet watches go stale', () => {
+  const pull = { state: 'open', checks: 'none', review: '', conflict: false, checkedAt: 1000 } as BoardPull;
+  const words = (change: Partial<BoardPull>) => pullStatuses({ ...pull, ...change }).map(({ word }) => word);
+  assert.deepEqual(words({}), []);
+  assert.deepEqual(words({ checks: 'failing', review: 'changes_requested', conflict: true }), ['Conflict', 'Checks failing', 'Changes requested']);
+  assert.deepEqual(words({ checks: 'pending', review: 'approved' }), ['Checks running', 'Approved']);
+  assert.deepEqual(words({ checks: 'passing', review: 'approved' }), ['Approved', 'Checks passed']);
+  assert.deepEqual(words({ checks: 'passing', review: 'review_required' }), ['Checks passed']);
+  assert.deepEqual(pullStatuses({ ...pull, review: 'changes_requested' }), [{ word: 'Changes requested', tone: 'waiting', needsLead: true }]);
+  // An ended pull request is its end state alone.
+  assert.deepEqual(pullStatuses({ ...pull, state: 'merged', checks: 'failing', conflict: true }), [{ word: 'Merged', tone: 'done' }]);
+  assert.deepEqual(pullStatuses({ ...pull, state: 'closed' }), [{ word: 'Closed', tone: '' }]);
+
+  const quiet = 1000 + 15 * 60_000;
+  assert.equal(pullIsStale(pull, quiet), false);
+  assert.equal(pullIsStale(pull, quiet + 1), true);
+  assert.equal(pullIsStale({ ...pull, error: 'gh failed' }, 1000), true);
+  assert.equal(pullIsStale({ ...pull, ended: true }, 1000), true);
+  assert.equal(pullIsStale({ ...pull, state: 'merged' }, quiet + 1), false);
 });
 
 test('looks finished requires a quiet owner and no open jobs or tasks for 20 minutes', () => {

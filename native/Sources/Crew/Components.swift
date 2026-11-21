@@ -40,8 +40,9 @@ struct StatusLabel: View {
 }
 
 /// A chip's face: chip type inked in its color, on that color's tint, outlined under Increase Contrast.
-private struct ChipStyle: ViewModifier {
+private struct ChipStyle<S: InsettableShape>: ViewModifier {
     let color: Color
+    let shape: S
     @Environment(\.colorScheme) private var scheme
     @Environment(\.colorSchemeContrast) private var contrast
     func body(content: Content) -> some View {
@@ -49,14 +50,16 @@ private struct ChipStyle: ViewModifier {
         content
             .font(Typeface.chip).foregroundStyle(text).lineLimit(1).fixedSize()
             .padding(Chip.insets)
-            .background(Palette.chip(color), in: Capsule())
-            .overlay { if contrast == .increased { Capsule().strokeBorder(text.opacity(0.5)) } }
+            .background(Palette.chip(color), in: shape)
+            .overlay { if contrast == .increased { shape.strokeBorder(text.opacity(0.5)) } }
     }
 }
 
 extension View {
     /// A status chip's face in `color`, as `StatusLabel` draws it.
-    func chip(_ color: Color) -> some View { modifier(ChipStyle(color: color)) }
+    func chip(_ color: Color) -> some View { chip(color, in: Capsule()) }
+    /// The same face in another shape.
+    func chip(_ color: Color, in shape: some InsettableShape) -> some View { modifier(ChipStyle(color: color, shape: shape)) }
     /// A text field's or editor's surface: the card's surface in a hairline outline.
     func fieldSurface() -> some View {
         background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: WorkspaceStyle.fieldRadius))
@@ -77,10 +80,12 @@ private struct SurfaceTextField: ViewModifier {
     }
 }
 
-/// A row of actions at the trailing edge. Pills never shrink, so when they do not fit across, the ones that do not
-/// fit move onto further lines, still at the trailing edge, rather than running past the edges of what holds them.
+/// A row of actions at the trailing edge, or of chips at the leading edge. Pills never shrink, so when they do not fit
+/// across, the ones that do not fit move onto further lines, still at that edge, rather than running past the edges of
+/// what holds them.
 struct ActionRow: Layout {
     var spacing = Space.m
+    var leading = false
     private struct Line { var items: [Int] = []; var width: CGFloat = 0; var height: CGFloat = 0 }
     private func lines(_ width: CGFloat, _ sizes: [CGSize]) -> [Line] {
         var lines: [Line] = []
@@ -103,7 +108,7 @@ struct ActionRow: Layout {
         var y = bounds.minY
         // Split by the width the row was measured at, not its rounded bounds, so the lines match the measured height.
         for line in lines(proposal.width ?? .infinity, sizes) {
-            var x = bounds.maxX - line.width
+            var x = leading ? bounds.minX : bounds.maxX - line.width
             for index in line.items {
                 subviews[index].place(at: CGPoint(x: x, y: y + line.height / 2), anchor: .leading, proposal: ProposedViewSize(sizes[index]))
                 x += sizes[index].width + spacing

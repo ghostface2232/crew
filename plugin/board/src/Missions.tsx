@@ -1,4 +1,4 @@
-import { useState, useSyncExternalStore } from 'react';
+import { useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { CSSProperties } from 'react';
 import { board } from './store.ts';
 import { Check, ChevronDown, ChevronRight, CircleCheck, CircleX, Clock, Ellipsis, Gauge, GitMerge, GitPullRequest, GitPullRequestClosed } from 'lucide-react';
@@ -160,17 +160,44 @@ export function SessionRow({ session, selected, openSession }: { session: Claude
   );
 }
 
+/** Measures step names for the track's end insets; one canvas serves every track. */
+let measure: CanvasRenderingContext2D | null | undefined;
+
 export function MissionTrack({ mission }: { mission: Mission }) {
   const stops = missionStops(mission);
   const at = missionStep(mission);
   const active = mission.state === 'active';
+  const track = useRef<HTMLOListElement>(null);
+  // The end insets' least width that keeps the longer end name inside the card, as the app's track measures it.
+  const [fit, setFit] = useState<number>();
+  const first = stops[0]?.name ?? '';
+  const last = stops.at(-1)?.name ?? '';
+  useLayoutEffect(() => {
+    const name = track.current?.querySelector('.track-name');
+    if (!name || stops.length < 2) return setFit(undefined);
+    let current = true;
+    const update = () => {
+      measure ??= document.createElement('canvas').getContext('2d');
+      if (!current || !measure) return;
+      const style = getComputedStyle(name);
+      // In the current step's heavier weight, so the insets hold still as the mission advances.
+      measure.font = `600 ${style.fontSize} ${style.fontFamily}`;
+      const padding = parseFloat(style.paddingInlineStart) + parseFloat(style.paddingInlineEnd);
+      setFit(Math.ceil((Math.max(measure.measureText(first).width, measure.measureText(last).width) + padding) / 2));
+    };
+    update();
+    // Measured again once the web font has replaced its fallback.
+    void document.fonts.ready.then(update);
+    return () => { current = false; };
+  }, [first, last, stops.length]);
   return (
     <ol
+      ref={track}
       className="track"
       // One element for assistive technology, as the app's track is.
       role="img"
       data-abandoned={mission.state === 'abandoned' || undefined}
-      style={{ '--steps': stops.length } as CSSProperties}
+      style={{ '--steps': stops.length, '--fit': fit === undefined ? undefined : `${fit}px` } as CSSProperties}
       aria-label={
         mission.state === 'done'
           ? `Done, all ${stops.length} steps passed`

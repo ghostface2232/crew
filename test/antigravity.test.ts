@@ -297,13 +297,16 @@ const command = (CommandLine: string, Cwd?: string, kind = 'execute') => ({
   kind, rawInput: { CommandLine, ...(Cwd === undefined ? {} : { Cwd }) },
 });
 
+// Job grants are offered only where commands run in a POSIX shell.
+const posixOnly = process.platform === 'win32' ? 'job grants assume a POSIX shell' : false;
+
 function commandDirectory(t: test.TestContext): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-agy-command-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   return dir;
 }
 
-test('a command grant covers queued and later requests for the same program, subcommand, and directory', { timeout: 5000 }, async (t) => {
+test('a command grant covers queued and later requests for the same program, subcommand, and directory', { timeout: 5000, skip: posixOnly }, async (t) => {
   const work = commandDirectory(t);
   const elsewhere = commandDirectory(t);
   const h = harness(t, commandServer([
@@ -345,7 +348,7 @@ test('a command grant covers queued and later requests for the same program, sub
   assert.equal((await h.waiting(another)).grant, request.grant);
 });
 
-test('a git status grant does not cover an invocation that starts with an option', { timeout: 5000 }, async (t) => {
+test('a git status grant does not cover an invocation that starts with an option', { timeout: 5000, skip: posixOnly }, async (t) => {
   const h = harness(t, commandServer([
     [command('git status')],
     [command('git status -s'), command('git -c alias.x=y x')],
@@ -365,7 +368,7 @@ test('a git status grant does not cover an invocation that starts with an option
   });
 });
 
-test('only simple commands offer a job grant', { timeout: 5000 }, async (t) => {
+test('only simple commands offer a job grant', { timeout: 5000, skip: posixOnly }, async (t) => {
   const commands = [
     'npm test && npm run build', 'npm test | tee log', 'npm test $(whoami)', 'sh -c "npm test"',
     'npm test; npm run build', 'npm test || true', 'npm test &', 'npm test `whoami`',
@@ -435,7 +438,7 @@ test('dispatchers, ambiguous arguments and input, and non-execute tools offer no
   assert.deepEqual(Object.values(JSON.parse(job.report!)), Array(calls.length + 1).fill('allow_once'));
 });
 
-test('agy\'s own request shape, `cd <dir> && <command>` with its summary fields, gets a grant for that directory', { timeout: 5000 }, async (t) => {
+test('agy\'s own request shape, `cd <dir> && <command>` with its summary fields, gets a grant for that directory', { timeout: 5000, skip: posixOnly }, async (t) => {
   // As agy 1.5 sent it in a live job on 2026-11-21.
   const work = commandDirectory(t);
   const live = (line: string) => ({ kind: 'execute', rawInput: { CommandLine: `cd ${work} && ${line}`, WaitMsBeforeAsync: 5000, toolSummary: `Run ${line}` } });
@@ -500,7 +503,7 @@ test('command grants require an unambiguous directory and arguments', { timeout:
   assert.deepEqual(unexpectedGrants, []);
 });
 
-test('a directory grant does not follow a retargeted symlink', { timeout: 5000 }, async (t) => {
+test('a directory grant does not follow a retargeted symlink', { timeout: 5000, skip: posixOnly }, async (t) => {
   const work = commandDirectory(t);
   const original = commandDirectory(t);
   const replacement = commandDirectory(t);
@@ -536,7 +539,7 @@ test('a directory grant does not follow a retargeted symlink', { timeout: 5000 }
   });
 });
 
-test('granting a queued command compares directories at the time of approval', { timeout: 5000 }, async (t) => {
+test('granting a queued command compares directories at the time of approval', { timeout: 5000, skip: posixOnly }, async (t) => {
   const work = commandDirectory(t);
   const original = commandDirectory(t);
   const replacement = commandDirectory(t);
@@ -560,6 +563,15 @@ test('granting a queued command compares directories at the time of approval', {
   assert.deepEqual(JSON.parse(job.report!), {
     'command-1-0': 'allow_once', 'command-1-1': 'reject_once', 'command-2-0': 'allow_once',
   });
+});
+
+test('on Windows no command offers a job grant', { timeout: 5000, skip: process.platform !== 'win32' }, async (t) => {
+  const h = harness(t, commandServer([[command('npm test')]]));
+  const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' });
+  const request = await h.waiting(job);
+  assert.equal(request.grant, undefined);
+  await h.jobs.reply(job.id, { decision: 'deny', request_id: request.id });
+  await h.ended(job);
 });
 
 test('a read-only Antigravity job refuses commands without offering a grant', { timeout: 5000 }, async (t) => {

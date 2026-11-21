@@ -485,6 +485,8 @@ const ROLE_NAMES: Record<JobKind, string> = { delegate: 'engineer', review: 'rev
 /** A grant names a literal program and its first argument. */
 function commandGrant(toolCall: { kind?: string; rawInput?: unknown; _meta?: { mcpServerName?: string; mcpToolName?: string } }): Grant | undefined {
   if (toolCall.kind !== 'execute' || toolCall._meta?.mcpServerName || toolCall._meta?.mcpToolName) return;
+  // The checks below model a POSIX shell; cmd and PowerShell quote, expand and chain differently.
+  if (process.platform === 'win32') return;
   const input = toolCall.rawInput;
   let rawCommand: unknown = input;
   let cwd: string | undefined;

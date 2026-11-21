@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { realpathSync, statSync } from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
 import path from 'node:path';
 import { tokenFile } from '../auth.ts';
@@ -10,7 +11,7 @@ import { isGitPath, isInside } from '../git.ts';
 import { RPC_TIMEOUT_MS, RpcError, RpcPeer } from '../rpc.ts';
 import { pickEffort, pickModel } from '../tiers.ts';
 
-type Grant = { key: string; label: string };
+type Grant = { program: string; subcommand: string; cwd?: string; label: string };
 
 interface Run {
   ctl: JobCtl;
@@ -138,7 +139,9 @@ export class AntigravityAdapter implements Adapter {
     const run = this.runs.get(ctl.job.sessionId ?? '');
     const request = run?.pending[0];
     if (!run || !request) throw new Error('The request this job was waiting on is no longer pending.');
-    if (opts?.forJob && (!request.grant || ctl.job.sandbox === 'read-only')) throw new Error('This request cannot be allowed for the whole job. Approve or deny it.');
+    const grant = opts?.forJob && ctl.job.sandbox !== 'read-only' ? request.grant : undefined;
+    const key = grant && commandGrantKey(grant);
+    if (opts?.forJob && !key) throw new Error('This request cannot be allowed for the whole job. Approve or deny it.');
     run.pending.shift();
     if (request.type === 'approval' && !approve) {
       // A permission answer carries no text, and agy 1.5.9 refuses a prompt while one is open and ends the turn
@@ -152,18 +155,18 @@ export class AntigravityAdapter implements Adapter {
       else ctl.note(`The user declined an action: ${request.reason}\nDo it another way within the job permissions, or report what could not be verified.`, { declined: true });
     }
     request.resolve({ approve, message });
-    if (approve && opts?.forJob && request.grant) {
-      run.grants.add(request.grant.key);
-      ctl.progress(`allowed for this job: ${request.grant.label}`);
+    if (approve && grant && key) {
+      run.grants.add(key);
+      ctl.progress(`allowed for this job: ${grant.label}`);
       for (let i = run.pending.length - 1; i >= 0; i--) {
         const queued = run.pending[i];
-        if (queued.grant?.key !== request.grant.key) continue;
+        if (!queued.grant || commandGrantKey(queued.grant) !== key) continue;
         run.pending.splice(i, 1);
         queued.resolve({ approve: true });
       }
     }
     const next = run.pending[0];
-    if (next) ctl.waiting(next.type, next.reason, next.grant?.label);
+    if (next) ctl.waiting(next.type, next.reason, next.grant && commandGrantKey(next.grant) ? next.grant.label : undefined);
     else ctl.resumed();
   }
 
@@ -373,12 +376,13 @@ export class AntigravityAdapter implements Adapter {
     let allow = verdict === 'allow';
     if (run && verdict === 'ask') {
       const grant = run.ctl.job.sandbox === 'read-only' ? undefined : commandGrant(toolCall);
-      if (grant && run.grants.has(grant.key)) {
+      const key = grant && commandGrantKey(grant);
+      if (grant && key && run.grants.has(key)) {
         allow = true;
         run.ctl.progress(`allowed for this job: ${grant.label}`);
       } else {
         const reason = describeRequest(toolCall, run.ctl.job.cwd);
-        const answer = await this.ask(run, 'approval', reason, grant);
+        const answer = await this.ask(run, 'approval', reason, key ? grant : undefined);
         if (answer === null) return cancelled;
         allow = answer.approve;
       }
@@ -482,7 +486,7 @@ const ROLE_NAMES: Record<JobKind, string> = { delegate: 'engineer', review: 'rev
 function commandGrant(toolCall: { kind?: string; rawInput?: unknown; _meta?: { mcpServerName?: string; mcpToolName?: string } }): Grant | undefined {
   if (toolCall.kind !== 'execute' || toolCall._meta?.mcpServerName || toolCall._meta?.mcpToolName) return;
   const input = toolCall.rawInput;
-  let command: unknown = input;
+  let rawCommand: unknown = input;
   let cwd: string | undefined;
   if (input && typeof input === 'object' && !Array.isArray(input)) {
     const fields = input as Record<string, unknown>;
@@ -492,14 +496,15 @@ function commandGrant(toolCall: { kind?: string; rawInput?: unknown; _meta?: { m
     // Fields agy 1.5 sends beside the command that change neither what runs nor where (seen live on 2026-11-21).
     const known = Object.keys(fields).filter((field) => !commands.includes(field) && !directories.includes(field));
     if (!known.every((field) => (field === 'WaitMsBeforeAsync' && typeof fields[field] === 'number') || (field === 'toolSummary' && typeof fields[field] === 'string'))) return;
-    command = fields[commands[0]];
+    rawCommand = fields[commands[0]];
     if (directories.length) {
       const directory = fields[directories[0]];
       if (typeof directory !== 'string' || !directory.trim() || /[\r\n]/.test(directory)) return;
       cwd = directory;
     }
   }
-  if (typeof command !== 'string') return;
+  if (typeof rawCommand !== 'string') return;
+  let command = rawCommand;
   // agy runs every command as `cd <workspace> && <command>`: a literal directory there is the working directory.
   const moved = /^[ \t]*cd[ \t]+([A-Za-z0-9_./][A-Za-z0-9_./+-]*)[ \t]*&&[ \t]*/.exec(command);
   if (moved) {
@@ -507,12 +512,18 @@ function commandGrant(toolCall: { kind?: string; rawInput?: unknown; _meta?: { m
     cwd = moved[1];
     command = command.slice(moved[0].length);
   }
-  if (/[;&|`<>\r\n\0()]/.test(command as string)) return;
+  if (cwd !== undefined && (!cwd.startsWith('/') || /\/\/|\/\.{1,2}(?:\/|$)/.test(cwd))) return;
+  if (/[;&|`<>\r\n\0()]/.test(command)) return;
   // A leading assignment (PATH=…, NODE_OPTIONS=…) can change what the named program runs, so it gets no grant.
-  const match = /^[ \t]*([A-Za-z0-9_./+-]+)[ \t]+([A-Za-z0-9][A-Za-z0-9_.:+-]*)(?=[ \t]|$)/.exec(command as string);
+  const match = /^[ \t]*([A-Za-z0-9_./+-]+)[ \t]+([A-Za-z0-9][A-Za-z0-9_.:+-]*)(?=[ \t]|$)/.exec(command);
   if (!match) return;
   const [, program, subcommand] = match;
+  // Quotes and escapes can split a literal path across multiple shell fragments.
+  const args = command.slice(match[0].length).replace(/['"\\]/g, '');
+  if (/(?:^|[ \t=,:@])(?:-[A-Za-z]+)?\//.test(args)) return;
+  if (/(?:^|[/ \t=,:@])(?:-[A-Za-z]+)?\.\.(?=$|[/ \t=,:@])/.test(args)) return;
   const name = path.posix.basename(program).toLowerCase().replace(/\.exe$/, '');
+  if (['cd', 'pushd', 'popd'].includes(name)) return;
   // Programs whose job is to run another command: a grant for them would cover whatever they are given.
   if ([
     'sudo', 'doas', 'su', 'env', 'xargs', 'eval', 'exec', 'command', 'builtin', 'time', 'source', '.', 'nohup',
@@ -520,7 +531,18 @@ function commandGrant(toolCall: { kind?: string; rawInput?: unknown; _meta?: { m
     'sh', 'bash', 'zsh', 'dash', 'ksh', 'fish', 'csh', 'tcsh', 'busybox', 'cmd', 'powershell', 'pwsh',
     'ssh', 'arch', 'flock', 'script', 'find', 'osascript',
   ].includes(name)) return;
-  return { key: JSON.stringify([program, subcommand, cwd]), label: `running "${program} ${subcommand}" in ${cwd ?? 'the job workspace'}` };
+  return { program, subcommand, cwd, label: `running "${program} ${subcommand}" in ${cwd ?? 'the job workspace'}` };
+}
+
+function commandGrantKey({ program, subcommand, cwd }: Grant): string | undefined {
+  if (cwd === undefined) return JSON.stringify([program, subcommand, cwd]);
+  try {
+    // Use filesystem semantics even when a symlink target contains a parent component.
+    const directory = realpathSync.native(cwd);
+    if (statSync(directory).isDirectory()) return JSON.stringify([program, subcommand, directory]);
+  } catch {
+    return undefined;
+  }
 }
 
 /**

@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { flushSync } from 'react-dom';
 import {
-  ArrowRight, Bell, CircleArrowDown, Clock, Command, FolderClosed, LayoutGrid, LockKeyhole, PanelLeft, Plus, RotateCw, Search,
+  ArrowRight, Bell, CircleArrowDown, Clock, FolderClosed, LayoutGrid, LockKeyhole, PanelLeft, Plus, RotateCw, Search,
   Settings as SettingsIcon, SquareStack, WifiOff, Zap,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { board } from './store.ts';
 import { knownProjects, projectNames, projectOf } from './model.ts';
-import { ClockProvider, CopyMenu, Icon, PANEL_EXIT_MS, PanelLeavingContext, RollingNumber, useLinger } from './ui.tsx';
-import appIcon from './icons/CrewAppIcon.svg';
+import { AskHost, ClockProvider, CopyMenu, Icon, PANEL_EXIT_MS, PanelLeavingContext, RollingNumber, useLinger } from './ui.tsx';
+import appIcon from './icons/CrewAppIcon.png';
 import { Activity, History, Workspace } from './Overview.tsx';
 import { NeedsYou } from './NeedsYou.tsx';
 import { JobDrawer, SessionDrawer } from './JobDrawer.tsx';
@@ -217,11 +217,6 @@ export function App() {
               <span>{live ? 'Live' : state.connection === 'lost' ? 'Reconnecting…' : 'Connecting…'}</span>
             </p>
           </div>
-          <button className="search-trigger" onClick={openPalette} aria-keyshortcuts="Meta+K /">
-            <Icon icon={Search} />
-            <span>Search</span>
-            <kbd><Icon icon={Command} size={11} />K</kbd>
-          </button>
           {pageNav}
           <ProjectNav projects={projects} names={names} project={project} state={state} select={select} />
           <div className="sidebar-foot">
@@ -277,6 +272,7 @@ export function App() {
               onClick={openPalette}
               title="Search (⌘K)"
               aria-label="Search"
+              aria-keyshortcuts="Meta+K /"
               data-hidden={palette ? '' : undefined}
             >
               <Icon icon={Search} />
@@ -353,6 +349,7 @@ export function App() {
           )}
         </PanelLeavingContext>
         {settings && <Settings state={state} update={update} close={() => setSettings(false)} />}
+        <AskHost />
       </div>
     </ClockProvider>
   );

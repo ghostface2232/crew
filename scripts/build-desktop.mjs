@@ -84,7 +84,7 @@ run('plutil', ['-convert', 'xml1', '-o', path.join(contents, 'Info.plist'), plis
 const licenses = ['react', 'react-dom', 'scheduler', 'lucide-react'].map(
   (name) => `${name}\n${fs.readFileSync(`node_modules/${name}/LICENSE`, 'utf8')}`,
 );
-licenses.push(`Inter\n${fs.readFileSync('plugin/board/inter-LICENSE.txt', 'utf8')}`);
+licenses.push(`Pretendard\n${fs.readFileSync('plugin/board/pretendard-LICENSE.txt', 'utf8')}`);
 licenses.push(`Node.js ${process.version}\nSee runtime/LICENSE for Node.js and its bundled dependencies.`);
 fs.writeFileSync(path.join(resources, 'THIRD-PARTY-NOTICES.txt'), licenses.join('\n\n'));
 // A release signs with one lasting certificate, so macOS keeps the folder access people grant across updates; an ad-hoc

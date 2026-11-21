@@ -20,6 +20,20 @@ const openSettings = async (page: Page, tab?: string) => {
 };
 const settingsPage = (page: Page, name: string) => page.getByRole('navigation', { name: 'Settings pages' }).getByRole('button', { name, exact: true }).click();
 const newJob = (page: Page) => page.getByRole('button', { name: 'New Job', exact: true }).click();
+/** Picks an option by its text from one of the board's own selects. */
+const pick = async (select: Locator, option: string) => {
+  await select.click();
+  await select.page().getByRole('listbox').getByRole('option', { name: option, exact: true }).click();
+};
+/** The options one of the board's selects offers, read by opening it and closing it again. */
+const optionsOf = async (select: Locator) => {
+  await select.click();
+  const list = select.page().getByRole('listbox');
+  await expect(list).toBeVisible();
+  const options = await list.getByRole('option').allTextContents();
+  await select.page().keyboard.press('Escape');
+  return options;
+};
 // A folding stage's heading is named by its button, which adds the job count: "Review, 2 jobs".
 const stage = (card: Locator, name: string) =>
   card.locator('.stage-groups > .rows').filter({ has: card.page().getByRole('heading', { name: new RegExp(`^${name}(, \\d+ jobs?)?$`) }) });
@@ -301,6 +315,29 @@ test('the scope cannot change during a save and failed loads cannot be saved', a
   await expect(page.getByRole('button', { name: 'Retry Loading' })).toBeVisible();
 });
 
+test('a question over a sheet stays on top through repeated Escape, and nothing saves behind it', async ({ page, request }) => {
+  await openSettings(page, 'Instructions');
+  const field = page.getByRole('textbox', { name: 'Shared instructions' });
+  await expect(field).toBeEnabled();
+  await field.fill('Draft');
+  const ask = page.getByRole('dialog', { name: 'Close without saving your changes?' });
+  for (let round = 0; round < 3; round++) {
+    await page.keyboard.press('Escape');
+    await expect(ask).toBeVisible();
+    // Saving is the sheet's shortcut, not the question's.
+    await page.keyboard.press('ControlOrMeta+s');
+    await page.keyboard.press('Escape');
+    await expect(ask).toHaveCount(0);
+    await expect(field).toHaveValue('Draft');
+  }
+  await page.keyboard.press('Escape');
+  // Topmost and reachable: a click on its button lands.
+  await ask.getByRole('button', { name: 'Close' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  const calls = await (await request.get('/__requests')).json();
+  expect(calls.filter((call: { route: string }) => call.route === '/api/instructions')).toHaveLength(0);
+});
+
 test('settings can retry failed saves and confirm unsaved close', async ({ page }) => {
   // Open from the keyboard: Safari does not focus a clicked button, so there would be no focus to return to.
   await page.getByRole('button', { name: 'Settings', exact: true }).focus();
@@ -313,8 +350,10 @@ test('settings can retry failed saves and confirm unsaved close', async ({ page 
   await page.getByRole('button', { name: 'Save Instructions' }).click();
   await expect(page.getByText('Save failed', { exact: true })).toBeVisible();
   await expect(field).toHaveValue('Draft');
-  page.once('dialog', (dialog) => dialog.dismiss());
   await page.keyboard.press('Escape');
+  const ask = page.getByRole('dialog', { name: 'Close without saving your changes?' });
+  await ask.getByRole('button', { name: 'Cancel' }).click();
+  await expect(ask).toHaveCount(0);
   await expect(page.getByRole('dialog')).toBeVisible();
   await page.unroute('**/api/instructions');
   await page.getByRole('button', { name: 'Save Instructions' }).click();
@@ -548,7 +587,8 @@ test('project filtering keeps global requests visible and New Job follows roles'
   await expect(page.getByRole('button', { name: /1 request needs your attention/ })).toBeVisible();
   await newJob(page);
   await expect(page.getByRole('textbox', { name: 'Project directory' })).toHaveValue('/workspace/Other');
-  await page.getByRole('combobox', { name: 'Role', exact: true }).selectOption('review');
+  await page.getByRole('combobox', { name: 'Role', exact: true }).click();
+  await page.getByRole('option', { name: 'Cross-review', exact: true }).click();
   await page.getByRole('textbox', { name: 'New job instructions' }).fill('Review the accessibility changes');
   await page.getByRole('button', { name: 'Send Job' }).click();
   await expect(page.getByRole('button', { name: 'Close details' })).toBeVisible();
@@ -601,11 +641,9 @@ test('a setting changed and changed back is no change, and closing then asks not
   await same.uncheck();
   await same.check();
   await expect(page.getByText('Unsaved changes')).toHaveCount(0);
-  let asked = false;
-  page.once('dialog', (dialog) => { asked = true; void dialog.dismiss(); });
+  // Nothing is left to ask about, so Settings closes without a question.
   await page.getByRole('button', { name: 'Close settings' }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  expect(asked).toBe(false);
 });
 
 test('on a phone, settings move between the list and a page with focus kept, and the drawer hands focus back', async ({ page }) => {
@@ -676,18 +714,18 @@ test('models and efforts are picked from what each agent offers, and a hand-writ
   await request.post('/__push', { data: { type: 'state', data } });
   await openSettings(page);
   const model = page.getByLabel('Implementation Codex model');
-  await expect(model).toHaveValue('gpt-custom');
+  await expect(model).toHaveText('gpt-custom');
   // A model that does not accept the chosen effort drops it.
-  await model.selectOption('gpt-sol');
-  await page.getByLabel('Implementation Codex reasoning effort').selectOption('high');
-  await model.selectOption('gpt-luna');
-  await expect(page.getByLabel('Implementation Codex reasoning effort')).toHaveValue('');
+  await pick(model, 'GPT Sol');
+  await pick(page.getByLabel('Implementation Codex reasoning effort'), 'high');
+  await pick(model, 'GPT Luna');
+  await expect(page.getByLabel('Implementation Codex reasoning effort')).toHaveText('Agent default');
   // The efforts follow the chosen model; a following role offers its parent's value as its blank.
   const effort = page.getByLabel('Implementation Codex reasoning effort');
-  await expect(effort.locator('option')).toHaveText(['Agent default', 'low']);
-  await effort.selectOption('low');
-  await expect(page.getByLabel('Refactoring Codex reasoning effort').locator('option').first()).toHaveText('low (same as Implementation)');
-  await page.getByLabel('Implementation Antigravity model').selectOption('argon');
+  expect(await optionsOf(effort)).toEqual(['Agent default', 'low']);
+  await pick(effort, 'low');
+  expect((await optionsOf(page.getByLabel('Refactoring Codex reasoning effort')))[0]).toBe('low (same as Implementation)');
+  await pick(page.getByLabel('Implementation Antigravity model'), 'Argon');
   // Antigravity cannot run the app, so it is not offered for that review.
   await settingsPage(page, 'Review');
   const verify = page.getByRole('region', { name: 'Review that runs the app' });
@@ -707,9 +745,9 @@ test('New Job gives wording to Antigravity and other work to Codex when a role h
   await page.request.post('/__push', { data: { type: 'state', data } });
   await newJob(page);
   const assigned = page.getByRole('combobox', { name: 'Assigned to' });
-  await expect(assigned).toHaveValue('codex');
-  await page.getByRole('combobox', { name: 'Role', exact: true }).selectOption('polish');
-  await expect(assigned).toHaveValue('antigravity');
+  await expect(assigned).toHaveText('Codex');
+  await pick(page.getByRole('combobox', { name: 'Role', exact: true }), 'Wording');
+  await expect(assigned).toHaveText('Antigravity');
 });
 
 test('New Job picks among a role\'s worker holders, and a role only Claude holds starts from Claude', async ({ page, request }) => {
@@ -719,13 +757,13 @@ test('New Job picks among a role\'s worker holders, and a role only Claude holds
   await newJob(page);
   await page.getByRole('textbox', { name: 'Project directory' }).fill('/workspace/Crew');
   const assigned = page.getByRole('combobox', { name: 'Assigned to' });
-  await expect(assigned).toHaveValue('codex');
-  await assigned.selectOption('antigravity');
+  await expect(assigned).toHaveText('Codex');
+  await pick(assigned, 'Antigravity');
   await page.getByRole('textbox', { name: 'New job instructions' }).fill('Build the piece');
-  await page.getByRole('combobox', { name: 'Role', exact: true }).selectOption('polish');
+  await pick(page.getByRole('combobox', { name: 'Role', exact: true }), 'Wording');
   await expect(page.getByText('Claude, the lead', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Send Job' })).toBeDisabled();
-  await page.getByRole('combobox', { name: 'Role', exact: true }).selectOption('delegate');
+  await pick(page.getByRole('combobox', { name: 'Role', exact: true }), 'Implementation');
   await page.getByRole('button', { name: 'Send Job' }).click();
   await expect(page.getByRole('button', { name: 'Close details' })).toBeVisible();
   const calls = await (await request.get('/__requests')).json();
@@ -739,8 +777,8 @@ test('each project has its own instructions page', async ({ page, request }) => 
   await expect(field).toBeEnabled();
   await field.fill('Use tabs here.');
   // Leaving for another set of instructions asks first; staying keeps the draft.
-  page.once('dialog', (dialog) => dialog.dismiss());
   await settingsPage(page, 'Instructions');
+  await page.getByRole('dialog', { name: 'Discard the unsaved changes to these instructions?' }).getByRole('button', { name: 'Cancel' }).click();
   await expect(field).toHaveValue('Use tabs here.');
   await page.getByRole('button', { name: 'Save Instructions' }).click();
   await expect(page.getByText('Unsaved changes')).toHaveCount(0);
@@ -797,9 +835,9 @@ test('entrances let go once played, so a mission\'s menu opens above the cards a
 test('New Job sends the role, so a review that runs the app goes to its holder', async ({ page, request }) => {
   await newJob(page);
   await page.getByRole('textbox', { name: 'Project directory' }).fill('/workspace/Crew');
-  await page.getByRole('combobox', { name: 'Role', exact: true }).selectOption('verify');
+  await pick(page.getByRole('combobox', { name: 'Role', exact: true }), 'Review that runs the app');
   await expect(page.locator('#dispatch-caption')).toHaveText('Reviews uncommitted changes by running the app in a snapshot of them.');
-  await expect(page.getByRole('combobox', { name: 'Role', exact: true }).locator('option[value="debate"]')).toHaveCount(0);
+  expect(await optionsOf(page.getByRole('combobox', { name: 'Role', exact: true }))).not.toContain('Debate');
   await page.getByRole('textbox', { name: 'New job instructions' }).fill('Check the board runs');
   await page.getByRole('button', { name: 'Send Job' }).click();
   await expect(page.getByRole('button', { name: 'Close details' })).toBeVisible();
@@ -1002,8 +1040,8 @@ test('model scores list each model with its score, counts and summary, and have 
 test('preset saves its selection, describes its models, and permits none', async ({ page, request }) => {
   await openSettings(page, 'Model Presets');
   const select = page.getByLabel('Model preset');
-  await expect(select).toHaveValue('balanced');
-  await select.selectOption('economy');
+  await expect(select).toHaveText('Balanced');
+  await pick(select, 'Economy');
   await expect(page.getByText('small · Low effort', { exact: true })).toBeVisible();
   await expect(page.getByText('flash', { exact: true })).toBeVisible();
   await expect(page.getByText('Haiku', { exact: true })).toBeVisible();
@@ -1012,7 +1050,7 @@ test('preset saves its selection, describes its models, and permits none', async
   await expect(page.getByText('Unsaved changes')).toHaveCount(0);
   let calls = await (await request.get('/__requests')).json();
   expect(calls.find((call: { route: string }) => call.route === '/api/preset').body).toEqual({ preset: 'economy' });
-  await select.selectOption('');
+  await pick(select, 'None');
   await expect(page.getByText("Uses each agent's own model and effort settings.")).toBeVisible();
   await page.getByRole('button', { name: 'Save Preset' }).click();
   await expect(page.getByText('Unsaved changes')).toHaveCount(0);
@@ -1023,20 +1061,20 @@ test('preset saves its selection, describes its models, and permits none', async
 test('preset failures keep the draft and saving preserves newer edits', async ({ page }) => {
   await openSettings(page, 'Model Presets');
   const select = page.getByLabel('Model preset');
-  await select.selectOption('best');
+  await pick(select, 'Best');
   await page.route('**/api/preset', (route) => route.fulfill({ status: 500, json: { error: 'Cannot save preset' } }));
   await page.getByRole('button', { name: 'Save Preset' }).click();
   await expect(page.getByText('Cannot save preset')).toBeVisible();
-  await expect(select).toHaveValue('best');
+  await expect(select).toHaveText('Best');
   await page.unroute('**/api/preset');
   let release!: () => void;
   const gate = new Promise<void>((resolve) => { release = resolve; });
   await page.route('**/api/preset', async (route) => { await gate; await route.continue(); });
   await page.getByRole('button', { name: 'Save Preset' }).click();
-  await select.selectOption('economy');
+  await pick(select, 'Economy');
   release();
   await expect(page.getByRole('button', { name: 'Save Preset' })).toBeEnabled();
-  await expect(select).toHaveValue('economy');
+  await expect(select).toHaveText('Economy');
   await expect(page.getByText('Unsaved changes')).toBeVisible();
 });
 
@@ -1100,7 +1138,7 @@ test('command intent retains the existing implementation request', async ({ page
 test('question intent hides command options, keeps Return as a newline, and labels the read-only job', async ({ page, request }) => {
   await newJob(page);
   await page.getByLabel('Project directory').fill('/workspace/Crew');
-  await page.getByRole('combobox', { name: 'Role', exact: true }).selectOption('polish');
+  await pick(page.getByRole('combobox', { name: 'Role', exact: true }), 'Wording');
   await expect(page.getByRole('textbox', { name: 'Allowed files or directories' })).toBeVisible();
   await page.getByRole('radio', { name: 'Question' }).click();
   await expect(page.getByRole('combobox', { name: 'Role', exact: true })).toHaveCount(0);
@@ -1124,7 +1162,10 @@ for (const target of ['mission:mission-1', 'project', 'global'])
     await newJob(page);
     await page.getByLabel('Project directory').fill('/workspace/Crew');
     await page.getByRole('radio', { name: 'Information' }).click();
-    await page.getByLabel('Information destination').selectOption(target);
+    const destinations: Record<string, string> = {
+      'mission:mission-1': fixture().missions[0].title, project: "This project's shared instructions", global: "Every project's shared instructions",
+    };
+    await pick(page.getByLabel('Information destination'), destinations[target]);
     await expect(page.getByText('Adds information only. This starts no work.')).toBeVisible();
     await page.getByRole('textbox', { name: 'New job instructions' }).fill('Keep this requirement');
     await page.getByRole('button', { name: 'Save Information' }).click();
@@ -1168,8 +1209,8 @@ test('information offers only active missions in the chosen project and retains 
   await page.getByLabel('Project directory').fill('/workspace/Crew');
   await page.getByRole('radio', { name: 'Information' }).click();
   const destination = page.getByRole('combobox', { name: 'Information destination' });
-  await expect(destination.locator('option')).toHaveCount(3);
-  await destination.selectOption('mission:mission-1');
+  expect(await optionsOf(destination)).toHaveLength(3);
+  await pick(destination, data.missions[0].title);
   const field = page.getByRole('textbox', { name: 'New job instructions' });
   await field.fill('정보를 유지해요');
   await field.press('Enter');
@@ -1396,8 +1437,8 @@ test('New Job shows who takes a question, and says when only the lead can', asyn
   await page.getByRole('radio', { name: 'Question' }).click();
   await expect(page.getByRole('dialog').getByText('Assigned to')).toBeVisible();
   // A changed intent is a draft, so leaving asks first.
-  page.once('dialog', (prompt) => void prompt.accept());
   await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Discard this job draft?' }).getByRole('button', { name: 'Discard' }).click();
   const data = fixture();
   data.roles = { ...data.roles, delegate: { agents: ['claude'] } };
   await request.post('/__push', { data: { type: 'state', data } });

@@ -6,6 +6,7 @@ const TYPES: Record<string, string> = {
   '.css': 'text/css; charset=utf-8',
   '.woff2': 'font/woff2',
   '.svg': 'image/svg+xml',
+  '.png': 'image/png',
 };
 export const BOARD_CSP =
   "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'";

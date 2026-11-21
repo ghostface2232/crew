@@ -285,8 +285,6 @@ export function MissionPanel({
   // Keyed by state as in the app: once a mission is abandoned, Mark Done takes a fresh lock.
   const key = `mission:${mission.id}:${mission.state}`;
   const action = useAction(key);
-  const presetKey = `mission-preset:${mission.id}`;
-  const presetAction = useAction(presetKey);
   const stops = missionStops(mission);
   const at = missionStep(mission);
   const tokens = jobs.reduce((sum, job) => sum + (job.tokens ?? 0), 0);
@@ -368,11 +366,10 @@ export function MissionPanel({
                       key={name}
                       role="menuitemradio"
                       aria-checked={(mission.preset ?? null) === preset}
-                      disabled={presetAction.pending || !live}
+                      disabled={locked}
                       title="Applies to the mission's next jobs. Jobs already started keep theirs."
-                      onClick={() => void actions.run(presetKey, () => request(`/api/missions/${mission.id}`, { preset }), {
-                        done: preset ? `${name} preset for new jobs` : 'Global preset for new jobs', once: false,
-                      })}
+                      // The meta line and the check show the choice, so only sending and failure are said.
+                      onClick={() => void actions.run(key, () => request(`/api/missions/${mission.id}`, { preset }), { done: '', once: false })}
                     >
                       <Icon icon={(mission.preset ?? null) === preset ? Check : Gauge} />
                       {preset ? `${name} preset` : 'Global preset'}
@@ -439,7 +436,6 @@ export function MissionPanel({
       {/* Its menu holds Mark Done, so the card only says so. */}
       {finished && <span className="caption secondary mission-hint reveal">Looks finished</span>}
       <ActionStatus actionKey={key} />
-      <ActionStatus actionKey={presetKey} />
       {!!pulls?.length && (
         <div className="mission-pulls">
           {pulls.map((pull) => <MissionPull key={pull.id} pull={pull} now={now} />)}

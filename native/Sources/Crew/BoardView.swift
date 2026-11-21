@@ -818,4 +818,3 @@ private struct PanelResizeHandle: View {
             }
     }
 }
-

@@ -40,7 +40,7 @@ struct StatusLabel: View {
     }
 }
 
-/// A row's status as its symbol alone, so it does not repeat the status chip of the card around it; the word is its name.
+/// A job's or session's status as its symbol alone, quieter than a chip in a list of them; the word is its name.
 struct StatusIcon: View {
     let state: String
     let title: String

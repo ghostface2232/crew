@@ -74,6 +74,17 @@ test('a shared lead appears on one mission and linked pulls show when their stat
   await newerCard.screenshot({ path: testInfo.outputPath('mission-tasks-and-pulls.png'), animations: 'disabled' });
   await push({ ...pull, error: 'gh: not found' });
   await expect(chips.first()).toHaveText('#42Could not be read1m');
+  // An ended mission starts closed, and its PRs still show at its foot.
+  data.missions = data.missions.map((mission) => (mission.id === 'mission-follow-up' ? { ...mission, state: 'done', endedAt: NOW } : mission));
+  data.pulls = [{ ...pull, state: 'merged' }];
+  await request.post('/__push', { data: { type: 'state', data } });
+  await expect(newerCard.getByRole('button', { name: 'Expand mission' })).toBeVisible();
+  await expect(newerCard.locator('.pull-chip')).toHaveText('#42Merged');
+});
+
+test('a row shows its status as a symbol named by its word', async ({ page }) => {
+  await expect(page.locator('button[data-job="cx-build"]').getByRole('img', { name: 'Working' })).toHaveAttribute('title', 'Working');
+  await expect(page.locator('button[data-job="cx-build"] .chip')).toHaveCount(0);
 });
 
 test('short mission plans render in order with matching tracks and progress', async ({ page, request }) => {

@@ -434,7 +434,7 @@ test('dispatchers, ambiguous arguments and input, and non-execute tools offer no
   await h.jobs.reply(job.id, { decision: 'approve', request_id: request.id });
   await h.ended(job);
   assert.deepEqual(unexpectedGrants, []);
-  assert.equal(request.grant, 'running "NPM.EXE test" in the job workspace');
+  assert.equal(request.grant, posixOnly ? undefined : 'running "NPM.EXE test" in the job workspace');
   assert.deepEqual(Object.values(JSON.parse(job.report!)), Array(calls.length + 1).fill('allow_once'));
 });
 

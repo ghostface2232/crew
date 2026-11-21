@@ -299,8 +299,7 @@ export function MissionPanel({
     projectName,
     `${jobs.length} ${jobs.length === 1 ? 'job' : 'jobs'}`,
     tasks.length ? `${tasks.filter((task) => task.state === 'done').length}/${tasks.length} tasks` : null,
-    // An active mission shows its preset in its menu instead.
-    mission.preset && !active ? `${capitalized(mission.preset)} preset` : null,
+    mission.preset ? `${capitalized(mission.preset)} preset` : null,
   ].filter(Boolean).join(' · ');
   const progress = missionProgress(mission, jobs);
   const live = useSyncExternalStore(board.subscribe, () => board.getSnapshot().connection === 'live');
@@ -313,7 +312,6 @@ export function MissionPanel({
   const finished = missionLooksFinished(mission, allJobs, now, owner);
   const fadeTitle = useFade<HTMLHeadingElement>();
   const fadeMeta = useFade<HTMLParagraphElement>();
-  const presetName = PRESETS.find(([preset]) => preset === (mission.preset ?? null))?.[1] ?? 'Global';
   const foldsStages = jobs.length > FOLD_STAGES_AFTER;
   const [, setStagesVersion] = useState(0);
   const setOpenStage = (stageKey: string, value: boolean) => {
@@ -361,6 +359,26 @@ export function MissionPanel({
                   <Icon icon={CircleX} />
                   Stop Tracking
                 </button>
+              )}
+              {active && presets && (
+                <>
+                  <hr />
+                  {PRESETS.map(([preset, name]) => (
+                    <button
+                      key={name}
+                      role="menuitemradio"
+                      aria-checked={(mission.preset ?? null) === preset}
+                      disabled={presetAction.pending || !live}
+                      title="Applies to the mission's next jobs. Jobs already started keep theirs."
+                      onClick={() => void actions.run(presetKey, () => request(`/api/missions/${mission.id}`, { preset }), {
+                        done: preset ? `${name} preset for new jobs` : 'Global preset for new jobs', once: false,
+                      })}
+                    >
+                      <Icon icon={(mission.preset ?? null) === preset ? Check : Gauge} />
+                      {preset ? `${name} preset` : 'Global preset'}
+                    </button>
+                  ))}
+                </>
               )}
             </Menu>
           )}
@@ -416,43 +434,12 @@ export function MissionPanel({
             );
           })}
         </div>
-        {(mission.outcome || finished || mission.state === 'abandoned' || (active && presets)) && (
-          <div className="mission-foot">
-            {mission.outcome ? <p className="mission-outcome selectable">{mission.outcome}</p> : <span />}
-            <div className="mission-foot-actions">
-              {finished && <span className="caption secondary">Looks finished</span>}
-              {finished && active && (
-                <button className="pill-warning small" disabled={locked} onClick={stopTracking}>Stop Tracking</button>
-              )}
-              {(finished || mission.state === 'abandoned') && (
-                <button className="prominent small" disabled={locked} onClick={markDone}>Mark Done</button>
-              )}
-              {active && presets && (
-                <Menu label="Mission preset" icon={Gauge} text={`${presetName} preset`}>
-                  {PRESETS.map(([preset, name]) => (
-                    <button
-                      key={name}
-                      role="menuitemradio"
-                      aria-checked={(mission.preset ?? null) === preset}
-                      disabled={presetAction.pending || !live}
-                      title="Applies to the mission's next jobs. Jobs already started keep theirs."
-                      onClick={() => void actions.run(presetKey, () => request(`/api/missions/${mission.id}`, { preset }), {
-                        done: preset ? `${name} preset for new jobs` : 'Global preset for new jobs', once: false,
-                      })}
-                    >
-                      <Icon icon={(mission.preset ?? null) === preset ? Check : Gauge} />
-                      {preset ? `${name} preset` : 'Global preset'}
-                    </button>
-                  ))}
-                </Menu>
-              )}
-            </div>
-          </div>
-        )}
-        <ActionStatus actionKey={presetKey} />
+        {mission.outcome && <p className="mission-outcome selectable">{mission.outcome}</p>}
       </Collapse>
-      {!expanded && finished && <span className="caption secondary mission-hint reveal">Looks finished</span>}
+      {/* Its menu holds Mark Done, so the card only says so. */}
+      {finished && <span className="caption secondary mission-hint reveal">Looks finished</span>}
       <ActionStatus actionKey={key} />
+      <ActionStatus actionKey={presetKey} />
       {!!pulls?.length && (
         <div className="mission-pulls">
           {pulls.map((pull) => <MissionPull key={pull.id} pull={pull} now={now} />)}

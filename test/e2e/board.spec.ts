@@ -743,20 +743,19 @@ test('each project has its own instructions page', async ({ page, request }) => 
   expect(calls.findLast((call: { route: string }) => call.route === '/api/instructions').body).toEqual({ project: '/workspace/Other', text: 'Use tabs here.' });
 });
 
-test('a mission\'s preset can be chosen from its pill menu', async ({ page, request }) => {
+test('a mission\'s preset can be chosen from its options menu', async ({ page, request }) => {
   const mission = page.locator('.mission[data-state="active"]').first();
-  const pill = mission.locator('.mission-foot .menu-pill');
-  await expect(pill).toHaveText('Global preset');
-  await pill.click();
-  await mission.getByRole('menuitemradio', { name: 'Economy preset' }).click();
-  await expect(pill).toHaveText('Economy preset');
-  // An active mission's meta leaves the preset to its menu.
+  const options = mission.getByRole('button', { name: 'Mission options' });
+  // The global preset goes unnamed.
   await expect(mission.locator('.mission-meta')).not.toContainText('preset');
+  await options.click();
+  await mission.getByRole('menuitemradio', { name: 'Economy preset' }).click();
+  await expect(mission.locator('.mission-meta')).toContainText('Economy preset');
   // The menu stays usable after a preset change, and the choice shows.
-  await pill.click();
+  await options.click();
   await expect(mission.getByRole('menuitemradio', { name: 'Economy preset' })).toHaveAttribute('aria-checked', 'true');
   await mission.getByRole('menuitemradio', { name: 'Global preset' }).click();
-  await expect(pill).toHaveText('Global preset');
+  await expect(mission.locator('.mission-meta')).not.toContainText('preset');
   const calls = await (await request.get('/__requests')).json();
   const sent = calls.filter((call: { route: string }) => call.route.startsWith('/api/missions/')).map((call: { body: unknown }) => call.body);
   expect(sent.slice(-2)).toEqual([{ preset: 'economy' }, { preset: null }]);
@@ -779,7 +778,7 @@ test('entrances let go once played, so a mission\'s menu opens above the cards a
     .filter((animation) => animation.playState === 'finished')
     .map((animation) => `${(animation as CSSAnimation).animationName} on ${(animation.effect as KeyframeEffect).target?.className}`))).toEqual([]);
   const mission = page.locator('[data-key="mission-1"]');
-  await mission.locator('.mission-foot .menu-pill').click();
+  await mission.getByRole('button', { name: 'Mission options' }).click();
   const last = mission.getByRole('menuitemradio', { name: 'Best preset' });
   await settle(page);
   await last.scrollIntoViewIfNeeded();
@@ -1358,7 +1357,7 @@ test('a closed mission opens from a click anywhere on it and closes from its tit
   await expect(card.locator('.track')).toBeHidden();
 });
 
-test('a finished-looking mission offers Mark Done beside its outcome, and a dropped one marks its stopping step', async ({ page, request }) => {
+test('a finished-looking mission is marked done from its menu, and a dropped one marks its stopping step', async ({ page, request }) => {
   const data = fixture();
   data.missions[0].stages = ['implement', 'cross-review', 'final'];
   data.missions[0].stage = 'cross-review';
@@ -1367,7 +1366,9 @@ test('a finished-looking mission offers Mark Done beside its outcome, and a drop
   data.claude.forEach((session) => { session.state = 'idle'; });
   await request.post('/__push', { data: { type: 'state', data } });
   const card = page.locator('[data-key="mission-1"]');
-  await card.locator('.mission-foot').getByRole('button', { name: 'Mark Done' }).click();
+  await expect(card.getByText('Looks finished', { exact: true })).toBeVisible();
+  await card.getByRole('button', { name: 'Mission options' }).click();
+  await page.getByRole('menuitem', { name: 'Mark Done' }).click();
   await expect(card.locator('.mission-head .chip')).toHaveText('Done');
   data.missions[0] = { ...data.missions[0], state: 'abandoned', endedAt: NOW };
   await request.post('/__push', { data: { type: 'state', data } });

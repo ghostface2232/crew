@@ -19,14 +19,28 @@ function ItemTitle({ text }: { text: string }) {
   return <span className={`${styles.itemTitle} fade-line`} ref={fade}>{text}</span>;
 }
 
-function presetDescription(preset: Preset) {
+const PRESET_SUMMARY: Record<PresetName, string> = {
+  economy: 'Lower cost and faster runs for straightforward tasks.',
+  balanced: 'Everyday balance of quality, speed, and cost.',
+  best: 'Maximum reasoning depth for complex work.',
+};
+
+function formatModelName(name: string) {
+  if (name === 'inherit') return 'Same as lead';
+  return /[-./]/.test(name) ? name : name.charAt(0).toUpperCase() + name.slice(1);
+}
+
+/** Structured rows for the Model Presets settings page. */
+function presetDetails(preset: Preset): [string, string][] {
   const agents: [string, { model?: string; effort?: string } | undefined][] = [['Codex', preset.codex], ['Antigravity', preset.antigravity]];
+  const cap = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
+  const subagent = formatModelName(preset.subagentModel ?? 'inherit');
   return [
-    ...agents.flatMap(([name, agent]) =>
-      agent ? [`${name}: ${[agent.model ?? 'Agent default', agent.effort && `${agent.effort} effort`].filter(Boolean).join(' · ')}`] : []),
-    `Subagents: ${preset.subagentModel ?? 'inherit'}${preset.subagentMax ? ` (up to ${preset.subagentMax})` : ''}`,
-    ...(preset.maxTier ? [`Workers up to the ${preset.maxTier} tier`] : []),
-  ].join('; ');
+    ...agents.flatMap(([name, agent]): [string, string][] =>
+      agent ? [[name, [agent.model ?? 'Default model', agent.effort && `${cap(agent.effort)} effort`].filter(Boolean).join(' · ')]] : []),
+    ['Subagents', preset.subagentMax ? `${subagent} (max ${formatModelName(preset.subagentMax)})` : subagent],
+    ...(preset.maxTier ? [['Worker cap', `Up to ${cap(preset.maxTier)} tier`] as [string, string]] : []),
+  ];
 }
 
 /** One page of settings, listed in the sidebar: the roles by kind of work, what every agent shares, each project's own instructions, then the desktop app. */
@@ -36,7 +50,7 @@ const PANES: Record<Fixed, { title: string; icon: LucideIcon; tint: string; kind
   build: { title: 'Build', icon: Hammer, tint: 'var(--accent)', kind: 'delegate' },
   review: { title: 'Review', icon: ShieldCheck, tint: 'var(--green)', kind: 'review' },
   edit: { title: 'Edit', icon: Type, tint: 'var(--orange)', kind: 'polish' },
-  presets: { title: 'Presets', icon: SlidersHorizontal, tint: 'var(--gray)' },
+  presets: { title: 'Model Presets', icon: SlidersHorizontal, tint: 'var(--gray)' },
   models: { title: 'Model Scores', icon: Gauge, tint: 'var(--purple)' },
   instructions: { title: 'Instructions', icon: FileText, tint: 'var(--indigo)' },
   about: { title: 'About Crew', icon: Info, tint: 'var(--gray)' },
@@ -515,7 +529,7 @@ export function Settings({ state, update, close }: { state: Snapshot; update: Ap
                   <section className={styles.group}>
                     <div className={styles.rows}>
                       <label className={styles.row}>
-                        <span>Global preset</span>
+                        <span>Default</span>
                         <select aria-label="Model preset" value={preset ?? ''} onChange={(event) => setPreset((event.target.value as PresetName) || null)}>
                           <option value="">None</option>
                           <option value="economy">Economy</option>
@@ -523,15 +537,19 @@ export function Settings({ state, update, close }: { state: Snapshot; update: Ap
                           <option value="best">Best</option>
                         </select>
                       </label>
+                      {selectedPreset && presetDetails(selectedPreset).map(([label, value]) => (
+                        <div className={styles.row} key={label}><span>{label}</span><span className={styles.value}>{value}</span></div>
+                      ))}
                     </div>
-                    <p className={styles.footnote}>{selectedPreset ? presetDescription(selectedPreset) : "Uses each agent's configured model and effort."}</p>
+                    <p className={styles.footnote}>{preset ? PRESET_SUMMARY[preset] : "Uses each agent's own model and effort settings."}</p>
                   </section>
                   <section className={styles.group}>
+                    <header className={styles.groupHead}><h3 className={styles.groupTitle}>Priority</h3></header>
                     <div className={styles.rows}>
-                      <div className={styles.row}><span>A role's own model or effort</span><span className={styles.value}>Wins over any preset</span></div>
-                      <div className={styles.row}><span>A mission's preset</span><span className={styles.value}>Replaces this one for its new jobs</span></div>
+                      <div className={styles.row}><span>Role settings</span><span className={styles.value}>Override any preset</span></div>
+                      <div className={styles.row}><span>Mission preset</span><span className={styles.value}>Overrides default for new jobs</span></div>
                     </div>
-                    <p className={styles.footnote}>The lead gives a mission the preset you name for a command; you can also change it from the mission.</p>
+                    <p className={styles.footnote}>Change a mission's preset from its menu, or name one in your prompt.</p>
                   </section>
                 </>
               )}

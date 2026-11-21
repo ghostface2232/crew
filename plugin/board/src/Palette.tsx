@@ -77,8 +77,8 @@ export function Palette({ state, names, projects, origin, close, actions }: {
       run: actions.newJob, preview: () => ({ eyebrow: 'Action', lines: ['Shortcut: N'], text: 'Give a command, ask a question, or add information for the crew.' }),
     });
     list.push({
-      id: 'settings', group: 'Actions', title: 'Settings', subtitle: 'Roles, presets and instructions', icon: SettingsIcon,
-      run: actions.settings, preview: () => ({ eyebrow: 'Action', lines: [], text: 'Choose who holds each role, the model preset, and the instructions every agent reads.' }),
+      id: 'settings', group: 'Actions', title: 'Settings', subtitle: 'Roles, model presets, and instructions', icon: SettingsIcon,
+      run: actions.settings, preview: () => ({ eyebrow: 'Action', lines: [], text: 'Configure roles, model presets, and shared instructions.' }),
     });
     if (notifyState !== 'unsupported') {
       const on = notifyState === 'granted' && notificationsWanted();

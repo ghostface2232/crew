@@ -235,7 +235,7 @@ const FOLD_STAGES_AFTER = 1;
 /** A stage with this many jobs or fewer stays open by default, as reopening each one would cost more than it saves. */
 const STAGE_OPENS_UP_TO = 3;
 const openStages = new Map<string, boolean>();
-const PRESETS: [PresetName | null, string][] = [[null, 'Global'], ['economy', 'Economy'], ['balanced', 'Balanced'], ['best', 'Best']];
+const PRESETS: [PresetName | null, string][] = [[null, 'Default'], ['economy', 'Economy'], ['balanced', 'Balanced'], ['best', 'Best']];
 
 /** A chip that names a pull request's most urgent status and counts the others the lead must act on; it opens the pull request. */
 function MissionPull({ pull, now }: { pull: BoardPull; now: number }) {
@@ -324,7 +324,7 @@ export function MissionPanel({
     projectName,
     `${jobs.length} ${jobs.length === 1 ? 'job' : 'jobs'}`,
     tasks.length ? `${tasks.filter((task) => task.state === 'done').length}/${tasks.length} tasks` : null,
-    mission.preset ? `${capitalized(mission.preset)} preset` : null,
+    mission.preset ? capitalized(mission.preset) : null,
   ].filter(Boolean).join(' · ');
   const live = useSyncExternalStore(board.subscribe, () => board.getSnapshot().connection === 'live');
   const locked = action.pending || action.accepted || !live;
@@ -381,18 +381,19 @@ export function MissionPanel({
               {active && presets && (
                 <>
                   <hr />
+                  <p className="menu-label" role="presentation">Model Preset</p>
                   {PRESETS.map(([preset, name]) => (
                     <button
                       key={name}
                       role="menuitemradio"
                       aria-checked={(mission.preset ?? null) === preset}
                       disabled={locked}
-                      title="Applies to the mission's next jobs. Jobs already started keep theirs."
+                      title="Applies to new jobs only. Running jobs keep theirs."
                       // The meta line and the check show the choice, so only sending and failure are said.
                       onClick={() => void actions.run(key, () => request(`/api/missions/${mission.id}`, { preset }), { done: '', once: false })}
                     >
                       <Icon icon={(mission.preset ?? null) === preset ? Check : Gauge} />
-                      {preset ? `${name} preset` : 'Global preset'}
+                      {name}
                     </button>
                   ))}
                 </>

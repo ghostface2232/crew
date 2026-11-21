@@ -483,7 +483,16 @@ struct Usage: Codable, Sendable, Equatable {
     var source: String
     var providers: [ProviderUsage]
 }
-enum PresetName: String, Codable, Sendable, CaseIterable { case economy, balanced, best }
+enum PresetName: String, Codable, Sendable, CaseIterable {
+    case economy, balanced, best
+    var summary: String {
+        switch self {
+        case .economy: "Lower cost and faster runs for straightforward tasks."
+        case .balanced: "Everyday balance of quality, speed, and cost."
+        case .best: "Maximum reasoning depth for complex work."
+        }
+    }
+}
 struct Preset: Codable, Sendable, Equatable {
     struct Agent: Codable, Sendable, Equatable { var model: String?; var effort: String? }
     var codex: Agent?
@@ -491,12 +500,26 @@ struct Preset: Codable, Sendable, Equatable {
     var subagentModel: String?
     var subagentMax: String?
     var maxTier: String?
-    var description: String {
-        let agents = [("Codex", codex), ("Antigravity", antigravity)].compactMap { name, agent in
-            agent.map { name + ": " + [$0.model ?? "Agent default", $0.effort.map { "\($0) effort" }].compactMap { $0 }.joined(separator: " · ") }
+    /// Structured rows for the Model Presets settings page.
+    var details: [(label: String, value: String)] {
+        var rows: [(String, String)] = []
+        for (name, agent) in [("Codex", codex), ("Antigravity", antigravity)] {
+            guard let agent else { continue }
+            let value = [agent.model ?? "Default model", agent.effort.map { "\($0.capitalized) effort" }].compactMap { $0 }.joined(separator: " · ")
+            rows.append((name, value))
         }
-        let subagents = "Subagents: " + (subagentModel ?? "inherit") + (subagentMax.map { " (up to \($0))" } ?? "")
-        return (agents + [subagents] + [maxTier.map { "Workers up to the \($0) tier" }].compactMap { $0 }).joined(separator: "; ")
+        let subagent = Self.formatModelName(subagentModel ?? "inherit")
+        let subagentValue = subagentMax.map { "\(subagent) (max \(Self.formatModelName($0)))" } ?? subagent
+        rows.append(("Subagents", subagentValue))
+        if let maxTier { rows.append(("Worker cap", "Up to \(maxTier.capitalized) tier")) }
+        return rows
+    }
+    var description: String {
+        details.map { "\($0.label): \($0.value)" }.joined(separator: "; ")
+    }
+    private static func formatModelName(_ name: String) -> String {
+        if name == "inherit" { return "Same as lead" }
+        return name.contains("-") || name.contains(".") || name.contains("/") ? name : name.capitalized
     }
 }
 struct PresetState: Codable, Sendable, Equatable { var preset: PresetName?; var presets: [String: Preset] }

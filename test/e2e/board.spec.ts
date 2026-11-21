@@ -565,7 +565,7 @@ test('project filtering keeps global requests visible and New Job follows roles'
 test('roles settings group every role, let one follow its parent, and save what the user wrote', async ({ page, request }) => {
   await openSettings(page);
   const nav = page.getByRole('navigation', { name: 'Settings pages' });
-  for (const name of ['Build', 'Review', 'Edit', 'Presets', 'Instructions', 'Crew', 'Other']) await expect(nav.getByRole('button', { name, exact: true })).toBeVisible();
+  for (const name of ['Build', 'Review', 'Edit', 'Model Presets', 'Instructions', 'Crew', 'Other']) await expect(nav.getByRole('button', { name, exact: true })).toBeVisible();
   const refactor = page.getByRole('region', { name: 'Refactoring' });
   await expect(refactor.getByRole('checkbox', { name: 'Same as Implementation' })).toBeChecked();
   await expect(page.getByRole('checkbox', { name: 'Refactoring: Codex' })).toBeDisabled();
@@ -751,16 +751,16 @@ test('each project has its own instructions page', async ({ page, request }) => 
 test('a mission\'s preset can be chosen from its options menu', async ({ page, request }) => {
   const mission = page.locator('.mission[data-state="active"]').first();
   const options = mission.getByRole('button', { name: 'Mission options' });
-  // The global preset goes unnamed.
-  await expect(mission.locator('.mission-meta')).not.toContainText('preset');
+  // The default preset goes unnamed.
+  await expect(mission.locator('.mission-meta')).not.toContainText('Economy');
   await options.click();
-  await mission.getByRole('menuitemradio', { name: 'Economy preset' }).click();
-  await expect(mission.locator('.mission-meta')).toContainText('Economy preset');
+  await mission.getByRole('menuitemradio', { name: 'Economy' }).click();
+  await expect(mission.locator('.mission-meta')).toContainText('Economy');
   // The menu stays usable after a preset change, and the choice shows.
   await options.click();
-  await expect(mission.getByRole('menuitemradio', { name: 'Economy preset' })).toHaveAttribute('aria-checked', 'true');
-  await mission.getByRole('menuitemradio', { name: 'Global preset' }).click();
-  await expect(mission.locator('.mission-meta')).not.toContainText('preset');
+  await expect(mission.getByRole('menuitemradio', { name: 'Economy' })).toHaveAttribute('aria-checked', 'true');
+  await mission.getByRole('menuitemradio', { name: 'Default' }).click();
+  await expect(mission.locator('.mission-meta')).not.toContainText('Economy');
   const calls = await (await request.get('/__requests')).json();
   const sent = calls.filter((call: { route: string }) => call.route.startsWith('/api/missions/')).map((call: { body: unknown }) => call.body);
   expect(sent.slice(-2)).toEqual([{ preset: 'economy' }, { preset: null }]);
@@ -784,7 +784,7 @@ test('entrances let go once played, so a mission\'s menu opens above the cards a
     .map((animation) => `${(animation as CSSAnimation).animationName} on ${(animation.effect as KeyframeEffect).target?.className}`))).toEqual([]);
   const mission = page.locator('[data-key="mission-1"]');
   await mission.getByRole('button', { name: 'Mission options' }).click();
-  const last = mission.getByRole('menuitemradio', { name: 'Best preset' });
+  const last = mission.getByRole('menuitemradio', { name: 'Best' });
   await settle(page);
   await last.scrollIntoViewIfNeeded();
   // A click lands on the item itself, not on a later card painted over it.
@@ -1000,17 +1000,20 @@ test('model scores list each model with its score, counts and summary, and have 
 });
 
 test('preset saves its selection, describes its models, and permits none', async ({ page, request }) => {
-  await openSettings(page, 'Presets');
+  await openSettings(page, 'Model Presets');
   const select = page.getByLabel('Model preset');
   await expect(select).toHaveValue('balanced');
   await select.selectOption('economy');
-  await expect(page.getByText('Codex: small · low effort; Antigravity: flash; Subagents: haiku', { exact: true })).toBeVisible();
+  await expect(page.getByText('small · Low effort', { exact: true })).toBeVisible();
+  await expect(page.getByText('flash', { exact: true })).toBeVisible();
+  await expect(page.getByText('Haiku', { exact: true })).toBeVisible();
+  await expect(page.getByText('Lower cost and faster runs for straightforward tasks.')).toBeVisible();
   await page.getByRole('button', { name: 'Save Preset' }).click();
   await expect(page.getByText('Unsaved changes')).toHaveCount(0);
   let calls = await (await request.get('/__requests')).json();
   expect(calls.find((call: { route: string }) => call.route === '/api/preset').body).toEqual({ preset: 'economy' });
   await select.selectOption('');
-  await expect(page.getByText("Uses each agent's configured model and effort.")).toBeVisible();
+  await expect(page.getByText("Uses each agent's own model and effort settings.")).toBeVisible();
   await page.getByRole('button', { name: 'Save Preset' }).click();
   await expect(page.getByText('Unsaved changes')).toHaveCount(0);
   calls = await (await request.get('/__requests')).json();
@@ -1018,7 +1021,7 @@ test('preset saves its selection, describes its models, and permits none', async
 });
 
 test('preset failures keep the draft and saving preserves newer edits', async ({ page }) => {
-  await openSettings(page, 'Presets');
+  await openSettings(page, 'Model Presets');
   const select = page.getByLabel('Model preset');
   await select.selectOption('best');
   await page.route('**/api/preset', (route) => route.fulfill({ status: 500, json: { error: 'Cannot save preset' } }));

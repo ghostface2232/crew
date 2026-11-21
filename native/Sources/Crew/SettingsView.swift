@@ -102,7 +102,7 @@ struct CrewSettingsView: View {
     private func title(_ pane: SettingsPane) -> String {
         switch pane {
         case .about: "About Crew"
-        case .presets: "Presets"
+        case .presets: "Model Presets"
         case .models: "Model Scores"
         case .instructions: "Instructions"
         case .project(let path): projectName(path, among: store.projects)
@@ -166,22 +166,30 @@ struct CrewSettingsView: View {
         }
     }
     @ViewBuilder private var presets: some View {
+        let selected = model.preset.flatMap { model.presets?[$0.rawValue] }
         Section {
-            Picker("Global preset", selection: $model.preset) {
+            Picker("Default", selection: $model.preset) {
                 Text("None").tag(nil as PresetName?)
                 ForEach(PresetName.allCases, id: \.self) { name in
                     Text(name.rawValue.capitalized).tag(Optional(name))
                 }
             }
+            if let selected {
+                ForEach(selected.details, id: \.label) { row in
+                    LabeledContent(row.label, value: row.value)
+                }
+            }
         } footer: {
-            Text(model.preset.flatMap { model.presets?[$0.rawValue]?.description } ?? "Uses each agent's configured model and effort.")
+            Text(model.preset?.summary ?? "Uses each agent's own model and effort settings.")
                 .settingsFootnote()
         }
         Section {
-            LabeledContent("A role's own model or effort", value: "Wins over any preset")
-            LabeledContent("A mission's preset", value: "Replaces this one for its new jobs")
+            LabeledContent("Role settings", value: "Override any preset")
+            LabeledContent("Mission preset", value: "Overrides default for new jobs")
+        } header: {
+            Text("Priority")
         } footer: {
-            Text("The lead gives a mission the preset you name for a command; you can also change it from the mission.").settingsFootnote()
+            Text("Change a mission's preset from its menu, or name one in your prompt.").settingsFootnote()
         }
     }
     @ViewBuilder private var about: some View {

@@ -395,7 +395,7 @@ struct MissionPanel: View {
             store.project.isEmpty ? projectName(mission.root, among: store.projects) : nil,
             "\(jobs.count) \(jobs.count == 1 ? "job" : "jobs")",
             tasks.isEmpty ? nil : "\(tasks.filter { $0.state == "done" }.count)/\(tasks.count) tasks",
-            mission.preset.map { "\($0.rawValue.capitalized) preset" },
+            mission.preset.map { $0.rawValue.capitalized },
         ].compactMap { $0 }.joined(separator: " · ")
     }
     var body: some View {
@@ -502,12 +502,12 @@ struct MissionPanel: View {
                 Button("Stop Tracking", systemImage: "xmark.circle") { Task { await store.dismiss(mission) } }
                     .help("Stops tracking without marking done. Its jobs keep running.")
                 Divider()
-                Picker("Preset for new jobs", selection: Binding(get: { mission.preset }, set: { preset in
+                Picker("Model Preset", selection: Binding(get: { mission.preset }, set: { preset in
                     Task { await store.setPreset(preset, for: mission) }
                 })) {
-                    Text("Global preset").tag(nil as PresetName?)
+                    Text("Default").tag(nil as PresetName?)
                     ForEach(PresetName.allCases, id: \.self) { preset in
-                        Text("\(preset.rawValue.capitalized) preset").tag(Optional(preset))
+                        Text(preset.rawValue.capitalized).tag(Optional(preset))
                     }
                 }.pickerStyle(.inline)
             }

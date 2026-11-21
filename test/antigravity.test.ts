@@ -4,7 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { AntigravityAdapter, decide, formAnswer, formQuestions } from '../plugin/bridge/adapters/antigravity.ts';
-import { resolveConfig } from '../plugin/bridge/config.ts';
+import { tokenFile } from '../plugin/bridge/auth.ts';
+import { HOME, resolveConfig } from '../plugin/bridge/config.ts';
 import { Jobs } from '../plugin/bridge/jobs.ts';
 import type { Job } from '../plugin/bridge/jobs.ts';
 import { pickEffort } from '../plugin/bridge/tiers.ts';
@@ -257,6 +258,117 @@ test('a command under any of agy\'s field names is not taken for a Crew tool cal
     assert.notEqual(decide('review', '/work', { kind: 'other', title: 'mcp_crew_ask_lead', rawInput: { [field]: 'rm -rf .' } }), 'allow');
   }
   assert.equal(decide('review', '/work', { kind: 'other', title: 'mcp_crew_ask_lead', rawInput: { question: 'why' } }), 'allow');
+});
+
+function commandServer(batches: unknown[][]): string {
+  return `
+    const send = (message) => console.log(JSON.stringify({ jsonrpc: '2.0', ...message }));
+    const batches = ${JSON.stringify(batches)};
+    const update = (update) => send({ method: 'session/update', params: { sessionId, update } });
+    const options = ['allow_always', 'allow_once', 'reject_once'].map((kind) => ({ kind, optionId: kind }));
+    let sessions = 0, sessionId, promptId, batch, remaining, answers;
+    const next = () => {
+      const calls = batches[batch++];
+      if (!calls) {
+        update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: JSON.stringify(answers) } });
+        return send({ id: promptId, result: { stopReason: 'end_turn' } });
+      }
+      remaining = calls.length;
+      calls.forEach((toolCall, i) => send({ id: 'command-' + batch + '-' + i, method: 'session/request_permission',
+        params: { sessionId, toolCall, options } }));
+      update({ sessionUpdate: 'tool_call', title: 'Batch ' + batch + ' sent' });
+    };
+    require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
+      const { method, id, params, result } = JSON.parse(line);
+      if (method === 'initialize') send({ id, result: { agentCapabilities: {} } });
+      else if (method === 'session/new') send({ id, result: { sessionId: 's' + ++sessions } });
+      else if (method === 'session/prompt') {
+        sessionId = params.sessionId; promptId = id; batch = 0; answers = {};
+        next();
+      } else if (typeof id === 'string' && id.startsWith('command-')) {
+        answers[id] = result.outcome.optionId;
+        if (--remaining === 0) next();
+      }
+    });
+  `;
+}
+
+const command = (CommandLine: string, Cwd?: string, kind = 'execute') => ({
+  kind, rawInput: { CommandLine, ...(Cwd === undefined ? {} : { Cwd }) },
+});
+
+test('a command grant covers queued and later requests for the same program, directory, and kind', { timeout: 5000 }, async (t) => {
+  const h = harness(t, commandServer([
+    [command('npm test', '/work'), command('node test.js', '/work'), command('npm run lint', '/work')],
+    [
+      command('npm run build', '/work'), command('npm test', '/else'), command('npm test', '/work', 'other'),
+      { ...command('npm test', '/work'), locations: [{ path: tokenFile(HOME) }] },
+      command('npm test && npm run lint', '/work'),
+    ],
+  ]));
+  const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' });
+  const request = await h.waiting(job);
+  assert.equal(request.grant, 'running "npm" in /work');
+  while (!h.jobs.eventsFor(job.id, 0).some((e) => e.detail.includes('Batch 1 sent'))) await h.jobs.wait(job.id, job.seq, 1000);
+  await h.jobs.reply(job.id, { decision: 'allow_for_job', request_id: request.id });
+  const denyRemaining = async () => {
+    for (const label of ['running "node" in /work', 'running "npm" in /else', 'running "npm" in /work', undefined]) {
+      const next = await h.waiting(job);
+      assert.equal(next.grant, label);
+      await h.jobs.reply(job.id, { decision: 'deny', request_id: next.id });
+    }
+    await h.ended(job);
+  };
+  await denyRemaining();
+  const expected = {
+    'command-1-0': 'allow_once', 'command-1-1': 'reject_once', 'command-1-2': 'allow_once',
+    'command-2-0': 'allow_once', 'command-2-1': 'reject_once', 'command-2-2': 'reject_once',
+    'command-2-3': 'reject_once', 'command-2-4': 'reject_once',
+  };
+  assert.deepEqual(JSON.parse(job.report!), expected);
+  assert.equal(h.jobs.eventsFor(job.id, 0).filter((e) => e.detail === 'allowed for this job: running "npm" in /work').length, 2);
+
+  await h.jobs.reply(job.id, { message: 'Run again' });
+  await denyRemaining();
+  assert.deepEqual(JSON.parse(job.report!), expected);
+
+  const another = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test again' });
+  assert.equal((await h.waiting(another)).grant, request.grant);
+});
+
+test('only simple commands offer a job grant', { timeout: 5000 }, async (t) => {
+  const commands = [
+    'npm test && npm run build', 'npm test | tee log', 'npm test $(whoami)', 'sh -c "npm test"',
+    'npm test; npm run build', 'npm test || true', 'npm test &', 'npm test `whoami`',
+    'npm test > log', 'npm test < input', 'npm test\nnpm run build',
+    '/usr/bin/sudo npm test', 'env npm test', 'xargs npm', 'bash -lc "npm test"', 'eval npm test', 'exec npm test',
+    'PATH=/tmp/bin npm test', 'NODE_OPTIONS=--require=x npm test', 'nohup npm test', 'timeout 60 npm test',
+  ];
+  const h = harness(t, commandServer([...commands.map((line) => [command(line)]), [command('./node_modules/.bin/tsc --noEmit')]]));
+  const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' });
+  for (const [i, line] of commands.entries()) {
+    const request = await h.waiting(job);
+    assert.ok(request.reason.includes(JSON.stringify(line)));
+    assert.equal(request.grant, undefined);
+    if (i === 0) {
+      await assert.rejects(h.adapter.answer(h.jobs['ctl'](job), true, undefined, { forJob: true }),
+        { message: 'This request cannot be allowed for the whole job. Approve or deny it.' });
+      assert.equal(job.waiting?.id, request.id);
+    }
+    await h.jobs.reply(job.id, { decision: 'approve', request_id: request.id });
+  }
+  const request = await h.waiting(job);
+  assert.equal(request.grant, 'running "./node_modules/.bin/tsc" in the job workspace');
+  await h.jobs.reply(job.id, { decision: 'approve', request_id: request.id });
+  await h.ended(job);
+  assert.equal(Object.values(JSON.parse(job.report!)).length, commands.length + 1);
+});
+
+test('a read-only Antigravity job refuses commands without offering a grant', { timeout: 5000 }, async (t) => {
+  const h = harness(t, commandServer([[command('npm test'), command('npm run lint')]]));
+  const job = await h.ended(await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test', ask: true }));
+  assert.deepEqual(JSON.parse(job.report!), { 'command-1-0': 'reject_once', 'command-1-1': 'reject_once' });
+  assert.ok(!h.jobs.eventsFor(job.id, 0).some((e) => e.kind === 'waiting' || e.detail.startsWith('allowed for this job:')));
 });
 
 for (const report of ['empty', 'narration', 'message', 'earlier'] as const) test(`a lead decline handles the Antigravity report (${report})`, { timeout: 5000 }, async (t) => {

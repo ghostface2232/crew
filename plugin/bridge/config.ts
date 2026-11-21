@@ -99,6 +99,10 @@ export const ROLE_INFO: RoleInfo[] = [
   { role: 'polish', kind: 'polish', label: 'Wording', summary: 'Improves UI strings, comments, and docs.' },
 ];
 export const roleInfo = (role: Role): RoleInfo => ROLE_INFO.find((info) => info.role === role)!;
+
+/** Where the user assigns a role's holders, for a refusal to name: the lead cannot change roles itself. */
+export const assignHint = (role: Role): string =>
+  `To use another agent, ask the user to add it under Settings, Roles, ${roleInfo(role).label} (on the board or in the app), or to \`roles.${role}.agents\` in ~/.crew/config.json.`;
 export const isRole = (value: unknown): value is Role => ROLES.includes(value as Role);
 
 export interface Worker {

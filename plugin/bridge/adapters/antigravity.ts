@@ -10,6 +10,8 @@ import { isGitPath, isInside } from '../git.ts';
 import { RPC_TIMEOUT_MS, RpcError, RpcPeer } from '../rpc.ts';
 import { pickEffort, pickModel } from '../tiers.ts';
 
+type Grant = { key: string; label: string };
+
 interface Run {
   ctl: JobCtl;
   prompting: Promise<void> | null;
@@ -19,7 +21,8 @@ interface Run {
   /** Last non-empty text before that, in case the turn ends right after a tool call. */
   earlier: string;
   /** Approvals and questions waiting on the user, in arrival order. The first is the one shown. */
-  pending: { type: 'approval' | 'question'; reason: string; resolve: (answer: Answer | null) => void }[];
+  pending: { type: 'approval' | 'question'; reason: string; grant?: Grant; resolve: (answer: Answer | null) => void }[];
+  grants: Set<string>;
   /** The lead's reasons for declining requests in this turn, sent as the next prompt once it ends. */
   declined: string[];
 }
@@ -32,6 +35,7 @@ interface Answer {
 
 /** Names agy has used for a command in a tool call's input, by server version. */
 const COMMAND_FIELDS = ['command', 'CommandLine', 'command_line', 'commandLine'];
+const CWD_FIELDS = ['cwd', 'Cwd', 'workingDirectory', 'WorkingDirectory', 'working_directory'];
 
 /** ACP tool kinds that cannot change anything. */
 const PASSIVE_KINDS = ['read', 'search', 'think'];
@@ -75,7 +79,7 @@ export class AntigravityAdapter implements Adapter {
       plugins: [],
     });
     const sessionId: string = res.sessionId;
-    const run: Run = { ctl, prompting: null, cancelling: false, message: '', earlier: '', pending: [], declined: [] };
+    const run: Run = { ctl, prompting: null, cancelling: false, message: '', earlier: '', pending: [], grants: new Set(), declined: [] };
     this.runs.set(sessionId, run);
     this.loaded.add(sessionId);
     ctl.session(sessionId);
@@ -123,17 +127,19 @@ export class AntigravityAdapter implements Adapter {
     if (isTerminal(ctl.job)) return;
     let run = this.runs.get(sessionId);
     if (!run) {
-      run = { ctl, prompting: null, cancelling: false, message: '', earlier: '', pending: [], declined: [] };
+      run = { ctl, prompting: null, cancelling: false, message: '', earlier: '', pending: [], grants: new Set(), declined: [] };
       this.runs.set(sessionId, run);
     }
     if (run.prompting) throw new Error('Antigravity is still working on the previous message. Wait for it to finish, or cancel first.');
     this.prompt(peer, run, message);
   }
 
-  async answer(ctl: JobCtl, approve: boolean, message?: string, opts?: { by?: 'lead' }): Promise<void> {
+  async answer(ctl: JobCtl, approve: boolean, message?: string, opts?: { forJob?: boolean; by?: 'lead' }): Promise<void> {
     const run = this.runs.get(ctl.job.sessionId ?? '');
-    const request = run?.pending.shift();
+    const request = run?.pending[0];
     if (!run || !request) throw new Error('The request this job was waiting on is no longer pending.');
+    if (opts?.forJob && (!request.grant || ctl.job.sandbox === 'read-only')) throw new Error('This request cannot be allowed for the whole job. Approve or deny it.');
+    run.pending.shift();
     if (request.type === 'approval' && !approve) {
       // A permission answer carries no text, and agy 1.5.9 refuses a prompt while one is open and ends the turn
       // on a rejection. So the reason waits for the turn to end and is then sent as the next prompt.
@@ -146,8 +152,18 @@ export class AntigravityAdapter implements Adapter {
       else ctl.note(`The user declined an action: ${request.reason}\nDo it another way within the job permissions, or report what could not be verified.`, { declined: true });
     }
     request.resolve({ approve, message });
+    if (approve && opts?.forJob && request.grant) {
+      run.grants.add(request.grant.key);
+      ctl.progress(`allowed for this job: ${request.grant.label}`);
+      for (let i = run.pending.length - 1; i >= 0; i--) {
+        const queued = run.pending[i];
+        if (queued.grant?.key !== request.grant.key) continue;
+        run.pending.splice(i, 1);
+        queued.resolve({ approve: true });
+      }
+    }
     const next = run.pending[0];
-    if (next) ctl.waiting(next.type, next.reason);
+    if (next) ctl.waiting(next.type, next.reason, next.grant?.label);
     else ctl.resumed();
   }
 
@@ -308,10 +324,10 @@ export class AntigravityAdapter implements Adapter {
   }
 
   /** Puts a request before the user and resolves with their answer, or null once the turn can no longer use one. */
-  private ask(run: Run, type: 'approval' | 'question', reason: string): Promise<Answer | null> {
+  private ask(run: Run, type: 'approval' | 'question', reason: string, grant?: Grant): Promise<Answer | null> {
     return new Promise((resolve) => {
-      run.pending.push({ type, reason, resolve });
-      if (run.pending.length === 1) run.ctl.waiting(type, reason);
+      run.pending.push({ type, reason, grant, resolve });
+      if (run.pending.length === 1) run.ctl.waiting(type, reason, grant?.label);
     });
   }
 
@@ -356,17 +372,23 @@ export class AntigravityAdapter implements Adapter {
 
     let allow = verdict === 'allow';
     if (run && verdict === 'ask') {
-      const reason = describeRequest(toolCall, run.ctl.job.cwd);
-      const answer = await this.ask(run, 'approval', reason);
-      if (answer === null) return cancelled;
-      allow = answer.approve;
+      const grant = run.ctl.job.sandbox === 'read-only' ? undefined : commandGrant(toolCall);
+      if (grant && run.grants.has(grant.key)) {
+        allow = true;
+        run.ctl.progress(`allowed for this job: ${grant.label}`);
+      } else {
+        const reason = describeRequest(toolCall, run.ctl.job.cwd);
+        const answer = await this.ask(run, 'approval', reason, grant);
+        if (answer === null) return cancelled;
+        allow = answer.approve;
+      }
     }
     if (run && typeof verdict === 'object') {
       const what = `${verdict.refuse}: ${describeRequest(toolCall, run.ctl.job.cwd)}`;
       run.ctl.progress(`refused (${what})`);
       run.ctl.note(`The bridge refused an action outside the ${ROLE_NAMES[run.ctl.job.kind]} role (${what}). Do it another way within the role permissions, or ask the lead to reassign the work.`, { declined: true });
     }
-    // Never "always": each action must come back here so its path is checked and the user sees every command.
+    // Never "always": each action must come back here for Crew's role policy and job grants.
     // A refusal is for this request only, so "reject always" is used just when it is the only way to say no.
     const options: any[] = p.options ?? [];
     const option = (allow ? ['allow_once'] : ['reject_once', 'reject_always']).map((kind) => options.find((o) => o.kind === kind)).find(Boolean);
@@ -455,6 +477,37 @@ function drop(run: Run): void {
 }
 
 const ROLE_NAMES: Record<JobKind, string> = { delegate: 'engineer', review: 'reviewer', polish: 'editor' };
+
+/** A grant names one literal program, without shell syntax that could dispatch another command. */
+function commandGrant(toolCall: { kind?: string; rawInput?: unknown; _meta?: { mcpServerName?: string; mcpToolName?: string } }): Grant | undefined {
+  const kind = toolCall.kind ?? 'other';
+  if ((kind !== 'execute' && kind !== 'other') || toolCall._meta?.mcpServerName || toolCall._meta?.mcpToolName) return;
+  const input = toolCall.rawInput;
+  let command: unknown = input;
+  let cwd: string | undefined;
+  if (input && typeof input === 'object' && !Array.isArray(input)) {
+    const fields = input as Record<string, unknown>;
+    const commands = COMMAND_FIELDS.filter((field) => field in fields);
+    const directories = CWD_FIELDS.filter((field) => field in fields);
+    if (commands.length !== 1 || directories.length > 1) return;
+    command = fields[commands[0]];
+    if (directories.length) {
+      const directory = fields[directories[0]];
+      if (typeof directory !== 'string' || !directory.trim() || /[\r\n]/.test(directory)) return;
+      cwd = directory;
+    }
+  }
+  if (typeof command !== 'string' || /[;&|`<>\r\n\0()]/.test(command)) return;
+  // A leading assignment (PATH=…, NODE_OPTIONS=…) can change what the named program runs, so it gets no grant.
+  const match = /^[ \t]*([A-Za-z0-9_./+-]+)(?=[ \t]|$)/.exec(command);
+  if (!match || match[1].includes('=')) return;
+  const program = match[1];
+  const name = path.posix.basename(program);
+  // Programs whose job is to run another command: a grant for them would cover whatever they are given.
+  if (['sudo', 'doas', 'su', 'env', 'xargs', 'eval', 'exec', 'command', 'builtin', 'time', 'source', '.', 'nohup', 'nice', 'timeout', 'gtimeout', 'caffeinate', 'watch', 'stdbuf', 'unbuffer'].includes(name)) return;
+  if (['sh', 'bash'].includes(name) && /[ \t]-[a-z]*c|['"\\$*?[\]{}]/i.test(command.slice(match[0].length))) return;
+  return { key: JSON.stringify([kind, program, cwd]), label: `running ${JSON.stringify(program)} in ${cwd ?? 'the job workspace'}` };
+}
 
 /**
  * Role policy for a permission request.

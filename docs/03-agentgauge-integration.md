@@ -80,33 +80,41 @@ This integration plan follows the decisions already recorded in the AgentGauge r
 
 ### G1. Read-only MCP server without modifying AgentGauge
 
-- Place a stdio MCP server on the Crew side that only reads the cache file and history database.
+*(Implemented inside the Crew daemon rather than as a separate stdio MCP server: `UsageMonitor` in `plugin/bridge/usage.ts` is started by `daemon.ts` so `mcp.ts` and the boards read one source.)*
+
+- Place a stdio MCP server on the Crew side that only reads the cache file and history database. *(Built in `usage.ts` using `fs.watchFile` on `usage-cache.json`, a 60-second clock check, `node:sqlite` in read-only mode on `usage-history.db`, and live Codex limit supplements via `fromCodexLimits`.)*
 - No token access and no network listener. Open the history database in read-only mode.
 - Provide two platform-specific cache adapters for the differing file shapes, returning `unknown` if the version field is unrecognized.
 - Recompute projected exhaustion from the `samples` table using the same rules as section 3.3.
 - Limitations: breaks if the internal cache format changes, and snapshots can be up to 30 minutes stale because polling cannot be nudged.
-- Done when: the lead session calls `get_usage` and `route` and receives values for all three services.
+- Done when: the lead session calls `get_usage` and `route` and receives values for all three services. *(Implemented via `route` and `status` in `mcp.ts` and `GET /api/usage` / `GET /api/route` in `daemon.ts`.)*
 
 ### G2. `--json` output (work in the AgentGauge repository)
+
+*(Open.)*
 
 - Implement item I from `doc/codexbar-reference.md` section 4: one-shot `--json` output using a generic schema.
 - Start on macOS, which only requires adding an executable target over `GaugeCore`. Windows requires extracting `Core` first.
 - Include per-account entries in the output to support multi-account setups.
-- Switch the G1 MCP server from reading files to reading `--json` output, insulating it from cache format changes.
-- Done when: the same MCP tools run on top of `--json` and direct cache file reads are removed.
+- Switch the G1 reader from cache files to `--json` output, insulating it from cache format changes.
+- Done when: the same tools run on top of `--json` and direct cache file reads are removed.
 
 ### G3. Freshness and events
 
+*(Open; in-memory limit reporting implemented.)*
+
 - Consumer activity signal: count MCP calls as user interaction alongside popover opens so the adaptive multiplier does not back off while agents are active. Because the consumer signals directly without process scanning, this respects the constraint in section 5.
 - Threshold hook: run a configured external command or append a line to an event file when a window crosses a threshold. This triggers the pre-exhaustion lead handoff.
-- Immediate limit reporting: when a worker or the bridge hits a quota error and calls `report_limit`, mark that service exhausted immediately without waiting for the next poll.
+- Immediate limit reporting: when a worker or the bridge hits a quota error, mark that service exhausted immediately without waiting for the next poll. *(Crew side built in `daemon.ts` via `usage.reportLimit()`, standing up to 5 hours or until a newer AgentGauge reading shows room; forwarding to AgentGauge remains open.)*
 - Done when: an automatic handoff is reproduced once when the lead's 5-hour window crosses the threshold.
 
 ## 7. Proposed MCP tool specification
 
-Limit the surface to three tools, since tool definitions consume context in every agent session.
+The initial proposal below defined three MCP tools. In the built daemon (`plugin/bridge/mcp.ts`, `plugin/bridge/daemon.ts`, `plugin/bridge/usage.ts`), only `route` is a dedicated MCP tool; usage readings appear in `status` (without `job_id`), `route` (without `kind`), and `GET /api/usage` using camelCase fields (`generatedAt`, `source`, `providers`, `capturedAt`, `usedRatio`, `resetTime`, `durationSec`, `projectedExhaustion`, `decidingKeys`), and limit reporting is internal to `daemon.ts`.
 
 ### 7.1 `get_usage`
+
+*(Proposed; served in Crew as `GET /api/usage` and in `status` / `route`.)*
 
 No input. Returns the list of windows per service and account. Values below illustrate the shape:
 
@@ -141,7 +149,7 @@ No input. Returns the list of windows per service and account. Values below illu
 
 ### 7.2 `route`
 
-Input: `task_kind` (`lead`, `implement`, `review`, `copy_polish`). Returns the assignee, rationale, fallback order, and whether quality is degraded:
+Proposed input: `task_kind` (`lead`, `implement`, `review`, `copy_polish`). The MCP `route` tool in `mcp.ts` returns text lines. The HTTP endpoint `GET /api/route` in `daemon.ts` takes `kind` (`lead` or any of the eight `ROLES` in `config.ts`: `delegate`, `refactor`, `release`, `debate`, `review`, `verify`, `fix`, `polish`) plus optional `mission` and returns a camelCase `RouteDecision` (`kind`, `assignee`, `reason`, `fallback`, `degraded`, `deferUntil`, `holders`, plus `preset` and `policy`):
 
 ```json
 {
@@ -158,13 +166,15 @@ Input: `task_kind` (`lead`, `implement`, `review`, `copy_polish`). Returns the a
 
 ### 7.3 `report_limit`
 
-Input: `tool`, `account`, `detail` (error text), `observed_at`. Called immediately by the bridge or a worker when a quota error occurs. Held in memory by the MCP server in G1, and forwarded to AgentGauge in G3.
+*(Proposed; internal in `UsageMonitor`.)*
+
+Proposed input: `tool`, `account`, `detail` (error text), `observed_at`. In `daemon.ts`, a worker job's `limit` event calls `usage.reportLimit(agent, detail)` directly in memory; forwarding to AgentGauge waits on G3.
 
 ## 8. Routing policy
 
 ### 8.1 Classification rules
 
-Superseded on 2026-11-13 by [09](09-usage-presets-rounds.md) section 3: the status now follows the remaining quota with the hysteresis in the second rule alone, whatever the samples, and the projection is only shown on the web board. The original two rules:
+Status in `plugin/bridge/usage.ts` follows remaining quota alone with hysteresis: `usedRatio >= 0.999` is `exhausted`, remaining `<= 15%` is `tight`, remaining `>= 30%` is `ok`, values in between keep their prior status, and readings older than `45` minutes (`STALE_MS`) are `stale` (see [09](09-usage-presets-rounds.md) section 3). `usage.ts` still computes `projectedExhaustion` from `usage-history.db`, and `native/Sources/Crew/Models.swift` decodes it, though neither the web board (`plugin/board/src/`) nor the native app renders it in the UI. The original two rules:
 
 - Do not judge by remaining percentage alone. Mark a window `tight` if projected exhaustion comes before `reset_time`, and `exhausted` if remaining quota hits 0 or `report_limit` arrives. Ten percent remaining with a reset in 20 minutes is comfortable; forty percent remaining with four days until reset is tight.
 - When samples are too sparse for a projection, fall back to remaining-quota thresholds with hysteresis so routing does not flap: switch away at 15% remaining and switch back at 30% remaining (initial values, tunable).
@@ -180,7 +190,7 @@ Superseded on 2026-11-13 by [09](09-usage-presets-rounds.md) section 3: the stat
 | Codex `exhausted` | Replace cross-review with Claude's dedicated review subagent and flag the result as missing cross-review (`degraded: true`) |
 | Antigravity `tight` or `exhausted` | Copy, comment, and doc cleanup is not a merge gate; defer until after `reset_time` (`defer_until`), or let Claude handle urgent wording fixes |
 | Claude `tight` | Shift more implementation slices to Codex while Claude focuses on planning and merge decisions |
-| Claude nearing exhaustion | Write a handoff note and run `/codex:transfer` to hand the session to a Codex thread, making Codex temporary lead |
+| Claude nearing exhaustion | Write a handoff note and run `/codex:transfer` to hand the session to a Codex thread, making Codex temporary lead *(Not yet built: `route` with `lead` in `usage.ts` returns `assignee: 'claude'`, `degraded: true`, advising Claude to finish the step and notify the user of reset time, or stop.)* |
 
 Routing never promotes Antigravity to implementation or code review. Its default role under R3 is wording and documentation cleanup, and only the user can assign it another.
 
@@ -192,8 +202,8 @@ An exhausted lead cannot reroute work on its own. Detecting near-exhaustion for 
 
 Two official channels update faster than AgentGauge's polling interval and can bridge polling gaps alongside `report_limit`:
 
-- Claude Code statusline: the JSON passed to a statusline script includes `used_percentage` and `resets_at` for `rate_limits.five_hour` and `rate_limits.seven_day`, updating live during a session without polling. Per-model weekly limits are not in this payload, so AgentGauge polling is still needed.
-- Codex `app-server`: provides the `account/rateLimits/read` request and `account/rateLimits/updated` notification at zero extra cost since the bridge already holds `app-server`.
+- Claude Code statusline *(not implemented in Crew)*: the JSON passed to a statusline script includes `used_percentage` and `resets_at` for `rate_limits.five_hour` and `rate_limits.seven_day`, updating live during a session without polling. Per-model weekly limits are not in this payload, so AgentGauge polling is still needed.
+- Codex `app-server` *(implemented in `adapters/codex.ts`, `daemon.ts`, and `fromCodexLimits` in `usage.ts`)*: provides the `account/rateLimits/read` request and `account/rateLimits/updated` notification at zero extra cost since the bridge already holds `app-server`.
 - Antigravity: no official usage channel was investigated; AgentGauge's provider remains the sole source.
 
 ## 10. Out of scope
@@ -204,11 +214,14 @@ Two official channels update faster than AgentGauge's polling interval and can b
 
 ## 11. Open items
 
-- Where to host the G1 MCP server (first choice: a standalone package inside the Crew repository).
+Settled in `plugin/bridge/usage.ts`:
+- G1 host: integrated into the Crew daemon (`UsageMonitor` in `usage.ts`, `daemon.ts`), not a separate MCP server.
+- Thresholds and cutoffs: `TIGHT_REMAINING = 0.15`, `OK_REMAINING = 0.3`, `STALE_MS = 45` minutes, `REPORT_MS = 5` hours.
+
+Still open (AgentGauge repository):
 - Finalizing the generic `--json` schema (section 7.1 is a proposal to be locked down in the AgentGauge repository).
 - Shape and security boundary of the threshold hook (external command, event file, or both, and who is allowed to register the command).
 - How AgentGauge receives consumer activity signals without a resident server (e.g., a file-based signal or treating `--json` invocations themselves as activity).
-- Initial threshold values (15% / 30%) and the `stale` cutoff age.
 - Schedule for extracting `Core` on Windows.
 
 ## 12. Revision log (2026-11-11)

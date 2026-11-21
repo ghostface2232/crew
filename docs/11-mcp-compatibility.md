@@ -14,17 +14,15 @@ Version evidence: `claude --version` printed `2.1.323 (Claude Code)`; `codex --v
 
 ## 2. Probe method and evidence
 
-A temporary Python stdio server logged each incoming newline-delimited JSON-RPC message before replying. It echoed the requested version on `initialize`, returned `capabilities: {"tools":{}}` and `serverInfo: {"name":"compat-probe","version":"1"}`, returned `{"tools":[]}` on `tools/list`, and ignored notifications. For unsupported requests, including `server/discover`, it returned:
+The probe used a temporary Python stdio server that imitated Crew's replies. Crew and its daemon were never started. The stand-in logged each incoming newline-delimited JSON-RPC message, echoed the requested `protocolVersion` on `initialize`, returned `capabilities: {"tools":{}}` with `serverInfo: {"name":"compat-probe","version":"1"}`, returned `{"tools":[]}` on `tools/list`, ignored notifications, and returned `-32601` for unsupported requests (matching Crew's behavior):
 
 ```json
 {"jsonrpc":"2.0","id":"server-discover-probe-1","error":{"code":-32601,"message":"Method not found: server/discover"}}
 ```
 
-This matches Crew's unsupported-method behavior. An initial exploratory run returned an empty result for discovery and also observed Claude falling back; the evidence below is from the repeat with the explicit error.
+Each host ran in a fresh temporary working directory with isolated `HOME`, `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, and host config directories, with inherited `CLAUDE*`, `CODEX*`, and `CREW*` variables removed and no real user or project config touched.
 
-Each host ran in its own temporary working directory with temporary `HOME`, `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, and host config directories. Inherited `CLAUDE*`, `CODEX*`, and `CREW*` variables were removed. No credentials or existing configs were copied. No real user or project config was edited.
-
-Claude used temporary `CLAUDE_CONFIG_DIR` and this temporary MCP JSON (`<python>`, `<server>`, and `<log>` were absolute paths):
+Claude used a temporary `CLAUDE_CONFIG_DIR` and MCP JSON (`<python>`, `<server>`, `<log>` were absolute paths):
 
 ```json
 {"mcpServers":{"probe":{"command":"<python>","args":["<server>","<log>"]}}}
@@ -44,7 +42,7 @@ Captured incoming Claude MCP messages (complete capability objects):
 {"method":"tools/list","jsonrpc":"2.0","id":1}
 ```
 
-Codex used a new temporary `CODEX_HOME` containing only this minimal `config.toml` before launch:
+Codex used a temporary `CODEX_HOME` containing only this `config.toml`:
 
 ```toml
 [mcp_servers.probe]
@@ -52,9 +50,9 @@ command = "<python>"
 args = ["<server>", "<log>"]
 ```
 
-The CLI ran `codex exec --skip-git-repo-check 'Reply OK.'`. A separate isolated home was used for `codex app-server`; its stdin received app-server `initialize` with `clientInfo: {"name":"compat-probe","version":"1"}` and `capabilities: null`, then `initialized`, then `thread/start` with the temporary cwd, `approvalPolicy: "never"`, and `sandbox: "read-only"`. This outer app-server initialization is distinct from the MCP initialization captured below.
+The CLI ran `codex exec --skip-git-repo-check 'Reply OK.'`. A separate isolated home ran `codex app-server`, sending app-server `initialize` (`clientInfo: {"name":"compat-probe","version":"1"}`, `capabilities: null`), `initialized`, and `thread/start` (`approvalPolicy: "never"`, `sandbox: "read-only"`). That outer app-server handshake is separate from the MCP messages below.
 
-Both Codex runs produced these same incoming MCP messages:
+Both Codex runs sent these incoming MCP messages:
 
 ```jsonl
 {"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{"experimental":{"codex/auth-change":{}},"elicitation":{"form":{},"url":{}}},"clientInfo":{"name":"codex-mcp-client","title":"Codex","version":"0.167.0"}}}
@@ -62,20 +60,20 @@ Both Codex runs produced these same incoming MCP messages:
 {"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"progressToken":0}}}
 ```
 
-No `server/discover` appeared in either Codex capture. No tasks capability or extension appeared in any captured host capabilities. This does not prove that the binaries lack optional Tasks support.
+Neither Codex capture sent `server/discover`. No Tasks capability or extension appeared in any captured host capabilities, though this alone does not prove the binaries lack optional Tasks support.
 
-Claude exited with `Not logged in · Please run /login` after MCP startup. Codex CLI reached MCP listing but model requests failed with network/DNS errors; it was terminated after 25 seconds. The app-server returned a successful `thread/start` and MCP listing without starting a model turn, then was terminated. Codex also warned that it could not create PATH helper aliases in a temporary home; this did not prevent MCP startup. Probe process groups were stopped and temporary scripts, configs, state, and raw logs removed after embedding the evidence here. No binary-inspection fallback was needed.
+No credentials were copied into the temporary homes, so after MCP listing Claude exited with `Not logged in · Please run /login`, Codex CLI hit network/DNS errors on model requests and was terminated after 25 seconds, and `codex app-server` returned `thread/start` and MCP listing before termination (Codex also warned it could not create PATH helper aliases in the temporary home). All probe processes and temporary files were removed afterwards.
 
 ## 3. Crew today and impact
 
-Both [lead MCP transport](../plugin/bridge/mcp.ts) (`PROTOCOL_VERSIONS`, `handle`) and [worker MCP transport](../plugin/bridge/worker-mcp.ts) advertise, through `initialize`, these accepted revisions: `2025-11-25`, `2025-06-18`, `2025-03-26`, `2024-11-05`. They echo a recognized requested version; otherwise they return `2025-06-18`. Both advertise only `capabilities: { tools: {} }`. Neither implements `server/discover`, the Tasks extension, or MRTR. Unknown requests receive `-32601`.
+Both [lead MCP transport](../plugin/bridge/mcp.ts) (`PROTOCOL_VERSIONS`, `handle`) and [worker MCP transport](../plugin/bridge/worker-mcp.ts) advertise accepted revisions `2025-11-25`, `2025-06-18`, `2025-03-26`, and `2024-11-05` in `initialize`, echoing a recognized request version or falling back to `2025-06-18`. Both advertise only `capabilities: { tools: {} }`, return `-32601` for unknown methods, and do not implement `server/discover`, the Tasks extension, or MRTR (which replaces server-initiated requests in `2026-07-28`).
 
-The lead transport additionally checks the client's elicitation capability and can send `elicitation/create` as a server-initiated request. That remains a legacy-protocol path.
+The lead transport also checks `params?.capabilities?.elicitation` and can send `elicitation/create` as a server-initiated request (`request` in `mcp.ts`), which remains a legacy-protocol path.
 
-No startup incompatibility was observed with the tested host requests: Claude's discovery receives an error but falls back to a revision Crew accepts, and Codex requests a supported revision directly. The probe reproduced Crew's version response and unsupported-discovery behavior, rather than launching Crew or its daemon. Real Crew tool execution, elicitation, cancellation, and a successful 2026-07-28 discovery/MRTR exchange are **unverified** by this probe. A future discovery-only client would receive `-32601` and could fail; today's Claude fallback must not be assumed permanent.
+The first run returned an empty discovery result. The evidence here comes from the repeat run with an explicit error. No startup incompatibility was observed: Claude falls back after `-32601` on `server/discover`, and Codex requests `2025-06-18` directly. Live Crew tool execution, elicitation, cancellation, and a `2026-07-28` discovery/MRTR exchange remain **unverified** by this probe. A future discovery-only client could fail on `-32601`, so Claude's fallback should not be assumed permanent.
 
 ## 4. Recommendation
 
-**Wait** on implementing the 2026-07-28 transport migration, Tasks, and MRTR. Claude already probes the new revision, but its verified legacy fallback and Codex's legacy request leave no demonstrated startup blocker. Do not merely add `2026-07-28` to the accepted version array: the current dispatcher and server-initiated elicitation path do not implement that protocol.
+**Wait** on migrating to the `2026-07-28` transport, Tasks, and MRTR. Do not add `2026-07-28` to `PROTOCOL_VERSIONS` alone: the current dispatcher and server-initiated elicitation path do not implement that protocol.
 
-Repeat this isolated probe after host upgrades or a reported connection failure. Implement the new discovery and request model when a supported host requires it or when a concrete Crew feature needs the Tasks extension, while retaining legacy negotiation for the tested Codex client.
+Re-run this isolated probe after host upgrades or connection failures, and migrate when a supported host requires `2026-07-28` or a Crew feature needs the Tasks extension (retaining legacy negotiation for Codex).

@@ -3,7 +3,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { bundlePlugin } from './bundle-plugin.mjs';
 
-if (process.platform !== 'darwin') throw new Error('The native Crew app builds on macOS with Xcode 26 or newer.');
+if (process.platform !== 'darwin') throw new Error('The native Crew app builds on macOS with Xcode 27 or newer.');
 const run = (bin, args, options = {}) => execFileSync(bin, args, { stdio: 'inherit', ...options });
 const build = path.resolve('native/build');
 const app = path.join(build, 'Crew.app');

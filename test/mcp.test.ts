@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import { followUpTitle, missionDetail, missionHead, Missions, NAME_THE_MISSION, normalizeTitle } from '../plugin/bridge/missions.ts';
 import { TIERS } from '../plugin/bridge/tiers.ts';
-import { canonicalPath, defaultHolder, disabledAgents, LEAD, PRESET_NAMES, ROLE_INFO, WORKERS } from '../plugin/bridge/config.ts';
+import { assignHint, canonicalPath, defaultHolder, disabledAgents, LEAD, PRESET_NAMES, ROLE_INFO, WORKERS } from '../plugin/bridge/config.ts';
 import { addNews, clipped, Delivery, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, REPORT_PAGE_BYTES, textPage, unread } from '../plugin/bridge/delivery.ts';
 import type { Job } from '../plugin/bridge/jobs.ts';
 import type { PullWatch } from '../plugin/bridge/pulls.ts';
@@ -367,12 +367,12 @@ test('a role the lead holds starts no worker, and a pick outside the holders is 
   const code = source.slice(source.indexOf('/** What the lead does with a role it holds itself'), source.indexOf('async function callTool'));
   const roles = { review: { agents: ['codex', 'claude'] }, polish: { agents: ['claude'] } };
   const pick = vm.runInNewContext(`const holderName = (a) => a === 'claude' ? 'you, Claude' : a; const holder = (r, t) => t[r].agents.join(' or '); ${stripTypeScriptTypes(code)}; pickHolder`, {
-    roles, LEAD: 'claude', loadConfig: () => ({ roles, antigravity: { enabled: true } }), defaultHolder, disabledAgents,
+    roles, LEAD: 'claude', loadConfig: () => ({ roles, antigravity: { enabled: true } }), defaultHolder, disabledAgents, assignHint,
   });
   assert.deepEqual({ ...pick('review', undefined) }, { agent: 'codex' });
   assert.match(pick('review', 'claude').yours, /no worker was started\. Run the crew:self-reviewer subagent[^]*other holders: codex/);
   assert.match(pick('polish', undefined).yours, /^polish is yours/);
-  assert.throws(() => pick('review', 'antigravity'), /antigravity does not hold review; its holders are codex or claude/);
+  assert.throws(() => pick('review', 'antigravity'), /antigravity does not hold review; its holders are codex or claude\. To use another agent, ask the user to add it under Settings, Roles, Cross-review[^]*roles\.review\.agents/);
 });
 
 test('model notes are appended to an answer, and a daemon that cannot give them leaves it as it was', async () => {
@@ -452,6 +452,7 @@ test('status and mission explicitly read this session\'s watch news without any 
   const delivery = new Delivery(() => [], () => {}, () => watches);
   const replies: any[] = [];
   const missions: object[] = [];
+  const offered: (string[] | undefined)[] = [];
   const handle = vm.runInNewContext(`${stripTypeScriptTypes(standing + tool + handler)}; handle`, {
     AbortController, inFlight: new Map(), ensureDaemon: async () => {}, SESSION: 'lead', PROJECT: '/project',
     fresh: false, missionId: null, costMission: null, closedElsewhere: null,
@@ -461,7 +462,8 @@ test('status and mission explicitly read this session\'s watch news without any 
     api: async (_method: string, route: string, body: any) => {
       if (route === '/api/state') return { jobs: [], pulls: watches.map(({ news, ...pull }) => pull), missions, limits: {} };
       assert.equal(route, '/api/lead/offer');
-      assert.deepEqual(Array.from(body.job_ids), ['pr-0']);
+      // A listing offers all of the session's news; other calls only that of what they show.
+      offered.push(body.job_ids && Array.from(body.job_ids));
       assert.equal(body.bytes, 4000);
       return { offer: delivery.offer(body.session, { ids: body.job_ids, bytes: body.bytes }) };
     },
@@ -482,4 +484,5 @@ test('status and mission explicitly read this session\'s watch news without any 
   assert.equal(current.isError, undefined);
   assert.match(current.content[0].text, /Current mission[^]*\[pr-0\] news 1/);
   assert.equal(unread(watches[0])[0].offers, 2);
+  assert.deepEqual(offered, [undefined, ['pr-0'], ['pr-0']]);
 });

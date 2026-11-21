@@ -1,7 +1,7 @@
 import readline from 'node:readline';
 import { clipped, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, REPORT_PAGE_BYTES, textPage, unread } from './delivery.ts';
 import { api, ensureDaemon } from './client.ts';
-import { baseUrl, canonicalPath, DEFAULT_ROLES, defaultHolder, disabledAgents, LEAD, loadConfig, MAX_DEBATE_ROUNDS, PRESET_NAMES, ROLE_INFO, ROLES, VERSION, WORKERS } from './config.ts';
+import { assignHint, baseUrl, canonicalPath, DEFAULT_ROLES, defaultHolder, disabledAgents, LEAD, loadConfig, MAX_DEBATE_ROUNDS, PRESET_NAMES, ROLE_INFO, ROLES, VERSION, WORKERS } from './config.ts';
 import { listSkills } from './skills.ts';
 import { describeUsage } from './usage.ts';
 import type { RouteDecision, Usage } from './usage.ts';
@@ -314,7 +314,7 @@ const TOOLS = [
   {
     name: 'status',
     title: 'Crew status',
-    description: 'Show a bounded job summary or report page, or list recent jobs with what each worker is doing now and each agent\'s usage.',
+    description: 'Show a bounded job summary or report page, or list recent jobs with what each worker is doing now and each agent\'s usage. A list also brings every news item this session has not acknowledged, under one receipt.',
     annotations: { readOnlyHint: true },
     inputSchema: { type: 'object', properties: {
       job_id: { type: 'string' },
@@ -523,6 +523,8 @@ interface CallContext {
   pullIds?: string[];
   /** False for a listing: it shows jobs without acting on them, so it offers their news but takes none over. */
   adopt?: boolean;
+  /** Offer every unacknowledged item this session owns, not only those of the jobs shown: a listing is where the lead catches up. */
+  allNews?: boolean;
 }
 
 /** The latest turn's screenshots and the open questions' attachments: what the lead needs to see now, not the whole history. */
@@ -837,7 +839,7 @@ function pickHolder(role: Role, wanted: unknown): { agent?: Holder; yours?: stri
   if (!table[role]) return { agent: wanted as Holder | undefined };
   const holders = table[role].agents;
   const agent = (wanted ?? defaultHolder(role, table[role], disabled)) as Holder;
-  if (!holders.includes(agent)) throw new Error(`${String(wanted)} does not hold ${role}; its holders are ${holder(role, table)}.`);
+  if (!holders.includes(agent)) throw new Error(`${String(wanted)} does not hold ${role}; its holders are ${holder(role, table)}. ${assignHint(role)}`);
   if (agent !== LEAD) return { agent };
   return { yours: `${role} is yours: no worker was started. ${YOURS[role]} Its other holders: ${holders.filter((h) => h !== LEAD).map(holderName).join(', ') || 'none'}.` };
 }
@@ -946,6 +948,7 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       ctx.jobs.push(...active.slice(0, 8), ...recent);
       // Another lead session in this project may own these; a glance at the list must not take its news.
       ctx.adopt = false;
+      ctx.allNews = true;
       const lines = [active.length ? 'Active:' : 'No active jobs.', ...active.slice(0, 8).map(summarize)];
       const elsewhere = state.jobs.filter((j: JobView) => j.project !== PROJECT && !j.endedAt).length;
       if (elsewhere) lines.push(`(${elsewhere} active job(s) belong to other projects; they are on the board.)`);
@@ -1076,7 +1079,7 @@ async function handle(msg: any): Promise<void> {
           isError = true;
           text = clipped(String((err as Error).message ?? err), 7000);
         }
-        if (SESSION && (ctx.jobs.length || ctx.pullIds?.length)) {
+        if (SESSION && (ctx.jobs.length || ctx.pullIds?.length || ctx.allNews)) {
           // The call has already taken effect; failing it now over a missing offer would invite a duplicate retry.
           // The news stays in the ledger for the watcher, the Stop hook, or the next call.
           const ids = [...new Set(ctx.jobs.map((job) => job.id))];
@@ -1084,7 +1087,7 @@ async function handle(msg: any): Promise<void> {
           // news. A job cut off by the bound stays with its owner.
           const shown = ctx.adopt === false ? [] : ids.filter((jobId) => text.includes(`[${jobId}]`)).slice(0, 50);
           const offer = await (shown.length ? api('POST', '/api/lead/adopt', { session: SESSION, job_ids: shown }) : Promise.resolve())
-            .then(() => api('POST', '/api/lead/offer', { session: SESSION, job_ids: [...ids, ...(ctx.pullIds ?? [])], bytes: 4000 }))
+            .then(() => api('POST', '/api/lead/offer', { session: SESSION, job_ids: ctx.allNews ? undefined : [...ids, ...(ctx.pullIds ?? [])], bytes: 4000 }))
             .then(({ offer }) => offer, () => null);
           if (offer) text += `\n\n${offer.text}`;
         }

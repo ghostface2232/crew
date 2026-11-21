@@ -1,6 +1,6 @@
 # 01. Requirements
 
-Current as of 2026-11-13. This document states what Crew is for and what it must do now. It is rewritten when the goals change; earlier versions, including the original request text, are in the git history.
+States what Crew is for and what it must do. Earlier versions are in git history.
 
 ## 1. Goal
 
@@ -10,7 +10,7 @@ The supported agents are Claude, Codex, and Antigravity. Cursor is to be added.
 
 ## 2. Requirements
 
-IDs R1 to R8 keep the meaning other documents refer to. R9 to R15 were added on 2026-11-12; R16 was added on 2026-11-13.
+IDs R1 to R16 keep the meanings other documents refer to.
 
 | ID | Requirement | Kind |
 | --- | --- | --- |
@@ -30,6 +30,13 @@ IDs R1 to R8 keep the meaning other documents refer to. R9 to R15 were added on 
 | R14 | Agents working at the same time do not collide. Each runs its own isolated instance of whatever it starts, reviews that run in parallel are independent and at most one of them runs the app, and performance is measured with nothing else running | Required |
 | R15 | Approvals need the user as little as is safe. Each agent's automatic reviewer decides first, and the user is asked only about what it will not allow | Required |
 | R16 | The Mac app uses SwiftUI and AppKit with Swift 6, supports macOS 26+, and preserves the TypeScript daemon and existing workflows. Its modern native design uses Liquid Glass, SF Symbols, and supplied service marks | Required |
+
+Current implementation notes:
+- **Roles (R3)**: `plugin/bridge/config.ts` expands the three initial roles into eight (`delegate`, `refactor`, `release`, `debate`, `review`, `verify`, `fix`, `polish`); `fix` defaults to Claude, and child roles inherit from `delegate` or `review`.
+- **Usage handoff (R8)**: `plugin/bridge/usage.ts` reads AgentGauge snapshots and routes work, but automatic pre-exhaustion handoff is not built (`route` with `lead` advises shifting implementation when `tight` and stopping to tell the user when `exhausted`).
+- **Model and effort (R11)**: `config.ts` supports service-level `model` and `effort` for Codex, and service-level `model` for Antigravity (Antigravity `effort` is set per role or preset and mapped to `thought_level`).
+- **Cursor and standalone mode (R12, R13)**: Cursor is not yet implemented (`config.ts`). Single worker jobs can be dispatched from the board and desktop apps (`POST /api/jobs`), while starting missions with another lead or executing merges from the UI remains open.
+- **Desktop apps (R16)**: `native/Sources/Crew/` implements the macOS SwiftUI/AppKit app; `desktop/main.ts` provides an Electron shell around the React board for Windows and other non-macOS systems.
 
 ## 3. Defaults and priorities
 

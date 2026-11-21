@@ -1011,10 +1011,15 @@ dialog.detail-panel { container: panel / inline-size; }
 .mission[data-state="abandoned"] { --tone: var(--secondary); }
 .mission-heading { flex: 1; min-width: 0; display: grid; gap: 2px; }
 .mission-meta { color: var(--secondary); font-size: 11.5px; font-variant-numeric: tabular-nums; }
-.mission-pulls { display: grid; gap: 2px; margin-block-start: 2px; min-width: 0; }
-.mission-pull a { color: inherit; text-decoration: underline; }
-.mission-pull:not([data-stale]) [data-attention] { color: var(--red); }
-.mission-pull[data-stale] { opacity: 0.7; }
+/* Pull requests share one line of chips, which wraps only when there are many. */
+.mission-pulls { display: flex; flex-wrap: wrap; gap: 6px; margin-block-start: 10px; min-width: 0; }
+/* A smoothed rounded square, so a pull request does not read as one more status pill beside the mission's. */
+.pull-chip { border-radius: 6px; corner-shape: var(--smooth); text-decoration: none; }
+/* Its symbol names a pull request, not a running state, so it does not spin. */
+.chip.pull-chip svg { animation: none; }
+.pull-more { font-weight: 400; }
+.pull-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (hover: hover) { .pull-chip:hover { background: color-mix(in srgb, var(--tone, var(--secondary)) 19%, transparent); } }
 /* Progress as a ring beside its number. */
 .mission-progress { display: inline-flex; align-items: center; gap: 7px; color: var(--secondary); font-size: 12px; font-weight: 500; }
 .mission-progress::before {

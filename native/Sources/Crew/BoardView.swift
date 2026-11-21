@@ -429,8 +429,13 @@ struct MissionPanel: View {
                 // The title row opens and closes the card; its button keeps its own click.
                 .contentShape(Rectangle())
                 .onTapGesture(perform: toggle)
-                ForEach((store.state.pulls ?? []).filter { $0.mission == mission.id }) { pull in
-                    MissionPullLine(pull: pull, now: store.now)
+                let pulls = (store.state.pulls ?? []).filter { $0.mission == mission.id }
+                if !pulls.isEmpty {
+                    // One shared line of chips, which wraps only when there are many.
+                    ActionRow(spacing: Space.s, leading: true) {
+                        ForEach(pulls) { MissionPullChip(pull: $0, now: store.now) }
+                    }
+                    .padding(.top, Space.s)
                 }
             }
             if expanded {
@@ -591,31 +596,41 @@ struct MissionPanel: View {
     }
 }
 
-private struct MissionPullLine: View {
+/// A chip that names a pull request's most urgent status and counts the others the lead must act on; it opens the
+/// pull request.
+private struct MissionPullChip: View {
     let pull: MissionPull
     let now: Double
 
     var body: some View {
+        let statuses = pull.statuses
         let stale = pull.isStale(now: now)
-        HStack(spacing: 0) {
-            Link(destination: pull.url) {
-                Text("#\(pull.number)").underline()
+        // A failed read leaves the last statuses in doubt, so the chip names the failure in their place.
+        let unread = stale && pull.error != nil
+        let word = unread ? "Could not be read" : statuses.first?.word
+        let more = unread ? 0 : statuses.dropFirst().filter(\.needsLead).count
+        let checked = elapsed(now - pull.checkedAt)
+        let details = ([pull.title] + statuses.map(\.word) + (unread ? ["Could not be read"] : []) + (stale ? ["Checked \(checked) ago"] : []))
+            .filter { !$0.isEmpty }.joined(separator: " · ")
+        Link(destination: pull.url) {
+            HStack(spacing: Space.xs) {
+                Image(systemName: pull.state == "merged" ? "arrow.triangle.merge" : pull.state == "closed" ? "xmark.circle" : "arrow.triangle.pull")
+                Text("#\(pull.number)")
+                if let word { Text(word) }
+                if more > 0 { Text("+\(more)").fontWeight(.regular) }
+                if stale {
+                    Image(systemName: "clock")
+                    Text(checked)
+                }
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Pull request \(pull.repo) #\(pull.number)")
-            if pull.state == "open" {
-                let checks = pull.checks == "none" ? Text("") :
-                    Text(" · \(Text("checks \(pull.checks)").foregroundStyle(pull.checks == "failing" && !stale ? Palette.danger : .secondary))")
-                let review = pull.review == "changes_requested" ? " · changes requested" : pull.review == "approved" ? " · approved" : ""
-                let conflict = pull.conflict ? Text(" · \(Text("conflict").foregroundStyle(stale ? .secondary : Palette.danger))") : Text("")
-                let checked = !stale ? "" : pull.error != nil ? " · could not be read" : " · checked \(elapsed(now - pull.checkedAt)) ago"
-                Text("\(checks)\(review)\(conflict)\(checked)")
-            } else {
-                Text(" · \(pull.state)")
-            }
+            .monospacedDigit()
+            // Stale statuses keep their words but lose their color.
+            .chip(stale ? .secondary : StatusLabel(state: statuses.first?.tone ?? "").color,
+                  in: RoundedRectangle(cornerRadius: Chip.squareRadius, style: .continuous))
         }
-        .font(Typeface.caption).monospacedDigit().foregroundStyle(.secondary)
-        .opacity(stale ? 0.7 : 1)
+        .buttonStyle(.plain)
+        .help(details)
+        .accessibilityLabel("Pull request \(pull.repo) #\(pull.number)\(details.isEmpty ? "" : ": \(details)")")
     }
 }
 

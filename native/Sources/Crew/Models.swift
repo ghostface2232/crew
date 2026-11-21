@@ -245,6 +245,7 @@ struct MissionPull: Codable, Sendable, Identifiable, Equatable {
     var url: URL
     var repo: String
     var number: Int
+    var title: String
     var mission: String
     var state: String
     var ended: Bool?
@@ -257,6 +258,28 @@ struct MissionPull: Codable, Sendable, Identifiable, Equatable {
     func isStale(now: Double) -> Bool {
         state == "open" && (ended != nil || error != nil || now - checkedAt > 15 * 60_000)
     }
+    /// Most urgent first, as the web board orders them: what the lead must fix before what it must weigh, and a
+    /// conflict first of all, since resolving it moves the head and reruns the checks. Waiting and good news follow.
+    var statuses: [PullStatus] {
+        switch state {
+        case "merged": return [PullStatus(word: "Merged", tone: "done")]
+        case "closed": return [PullStatus(word: "Closed", tone: "")]
+        default: return [
+            conflict ? PullStatus(word: "Conflict", tone: "failed", needsLead: true) : nil,
+            checks == "failing" ? PullStatus(word: "Checks failing", tone: "failed", needsLead: true) : nil,
+            review == "changes_requested" ? PullStatus(word: "Changes requested", tone: "waiting", needsLead: true) : nil,
+            checks == "pending" ? PullStatus(word: "Checks running", tone: "running") : nil,
+            review == "approved" ? PullStatus(word: "Approved", tone: "done") : nil,
+            checks == "passing" ? PullStatus(word: "Checks passed", tone: "done") : nil,
+        ].compactMap { $0 }
+        }
+    }
+}
+/// A pull request's status as a card shows it: a word, and the state whose color it takes (as StatusLabel's).
+struct PullStatus: Equatable {
+    var word: String
+    var tone: String
+    var needsLead = false
 }
 
 func missionProgress(_ mission: Mission, jobs: [Job]) -> Double {

@@ -1,12 +1,12 @@
 import { useState, useSyncExternalStore } from 'react';
 import type { CSSProperties } from 'react';
 import { board } from './store.ts';
-import { Check, ChevronDown, ChevronRight, CircleCheck, CircleX, Ellipsis, Gauge } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, CircleCheck, CircleX, Clock, Ellipsis, Gauge, GitMerge, GitPullRequest, GitPullRequestClosed } from 'lucide-react';
 import type { BoardJob, BoardPull, ClaudeSession, Mission, PresetName } from './types.ts';
 import { actions, request } from './api.ts';
 import {
   agentSummary, elapsed, jobLabel, jobRole, leadMission, missionJobStep, missionLooksFinished, missionProgress, missionStep, missionStopPosition,
-  missionStops, NAMES, roleLabel,
+  missionStops, NAMES, pullIsStale, pullStatuses, roleLabel,
 } from './model.ts';
 import { ActionStatus, AgentMark, Chip, Collapse, Icon, Menu, useAction, useFade, useNow } from './ui.tsx';
 
@@ -210,21 +210,44 @@ const STAGE_OPENS_UP_TO = 3;
 const openStages = new Map<string, boolean>();
 const PRESETS: [PresetName | null, string][] = [[null, 'Global'], ['economy', 'Economy'], ['balanced', 'Balanced'], ['best', 'Best']];
 
+/** A chip that names a pull request's most urgent status and counts the others the lead must act on; it opens the pull request. */
 function MissionPull({ pull, now }: { pull: BoardPull; now: number }) {
-  const stale = pull.state === 'open' && (pull.ended != null || pull.error != null || now - pull.checkedAt > 15 * 60_000);
+  const statuses = pullStatuses(pull);
+  const stale = pullIsStale(pull, now);
+  // A failed read leaves the last statuses in doubt, so the chip names the failure in their place.
+  const unread = stale && pull.error != null;
+  const word = unread ? 'Could not be read' : statuses[0]?.word;
+  const more = unread ? 0 : statuses.slice(1).filter((status) => status.needsLead).length;
+  const details = [
+    pull.title,
+    ...statuses.map((status) => status.word),
+    unread ? 'Could not be read' : null,
+    stale ? `Checked ${elapsed(now - pull.checkedAt)} ago` : null,
+  ].filter(Boolean).join(' · ');
+  const glyph = pull.state === 'merged' ? GitMerge : pull.state === 'closed' ? GitPullRequestClosed : GitPullRequest;
   return (
-    <p className="mission-meta mission-pull" data-stale={stale || undefined}>
-      <a href={pull.url} target="_blank" rel="noreferrer" aria-label={`Pull request ${pull.repo} #${pull.number}`}>#{pull.number}</a>
-      {pull.state !== 'open' ? ` · ${pull.state}` : (
+    <a
+      className="chip pull-chip"
+      // Stale statuses keep their words but lose their color.
+      data-state={stale ? '' : statuses[0]?.tone ?? ''}
+      data-stale={stale || undefined}
+      href={pull.url}
+      target="_blank"
+      rel="noreferrer"
+      title={details}
+      aria-label={`Pull request ${pull.repo} #${pull.number}${details ? `: ${details}` : ''}`}
+    >
+      <Icon icon={glyph} />
+      <span className="digits">#{pull.number}</span>
+      {word && <span>{word}</span>}
+      {more > 0 && <span className="pull-more digits">+{more}</span>}
+      {stale && (
         <>
-          {pull.checks !== 'none' && <> · <span data-attention={pull.checks === 'failing' || undefined}>checks {pull.checks}</span></>}
-          {pull.review === 'changes_requested' && ' · changes requested'}
-          {pull.review === 'approved' && ' · approved'}
-          {pull.conflict && <> · <span data-attention>conflict</span></>}
-          {stale && (pull.error ? ' · could not be read' : ` · checked ${elapsed(now - pull.checkedAt)} ago`)}
+          <Icon icon={Clock} />
+          <span className="digits">{elapsed(now - pull.checkedAt)}</span>
         </>
       )}
-    </p>
+    </a>
   );
 }
 

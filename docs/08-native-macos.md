@@ -51,7 +51,7 @@ npm run package:desktop
 
 The build copies the current Node executable and its `LICENSE`, using `otool -L` to reject Node binaries linked against non-system libraries. `CREW_NODE_LICENSE` overrides the license path when the Node layout differs, and `CREW_BUILD_CONFIGURATION=debug` selects a debug build.
 
-Local builds are ad-hoc signed and verified. Releases are signed with a self-signed certificate from `MACOS_SIGNING_P12` and `MACOS_SIGNING_P12_PASSWORD` to keep the app's designated requirement stable and preserve granted folder access across versions (`.github/workflows/release.yml` loads it into a temporary keychain as `CREW_SIGN_IDENTITY` and `CREW_SIGN_KEYCHAIN`). Folder access has yet to be verified across a real signed update. Apple Developer ID signing, notarization, and login launch are not configured; this is a direct release, not an App Store build.
+Local builds are ad-hoc signed and verified. Releases are signed with a self-signed certificate from `MACOS_SIGNING_P12` and `MACOS_SIGNING_P12_PASSWORD` to keep the app's designated requirement stable and preserve granted folder access across versions (`.github/workflows/release.yml` loads it into a temporary keychain as `CREW_SIGN_IDENTITY` and `CREW_SIGN_KEYCHAIN`). The 0.4.0 → 0.5.0 update kept folder access without asking again. Apple Developer ID signing, notarization, and login launch are not configured; this is a direct release, not an App Store build.
 
 ## Updates
 

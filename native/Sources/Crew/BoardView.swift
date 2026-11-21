@@ -416,8 +416,7 @@ struct MissionPanel: View {
                     Spacer(minLength: WorkspaceStyle.rowSpacer)
                     // An ended mission's status chip already says how it ended.
                     if mission.state == "active" {
-                        Text(missionProgress(mission, jobs: jobs), format: .percent.precision(.fractionLength(0)))
-                            .font(Typeface.caption).monospacedDigit().foregroundStyle(.secondary).help("Mission progress")
+                        ProgressRing(progress: missionProgress(mission, jobs: jobs)).help("Mission progress")
                     }
                     StatusLabel(state: mission.state == "active" ? "running" : mission.state, title: mission.state.capitalized)
                     if mission.state != "done" { missionMenu }
@@ -593,6 +592,24 @@ private struct MissionPullChip: View {
         .help(details)
         .accessibilityLabel("Pull request \(pull.repo) #\(pull.number)\(details.isEmpty ? "" : ": \(details)")")
     }
+}
+
+/// Progress as a ring alone, as on the board: it moves by stage, so a number would claim more precision than it has.
+private struct ProgressRing: View {
+    let progress: Double
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var body: some View {
+        ZStack {
+            Circle().strokeBorder(.quaternary, lineWidth: Self.width)
+            Circle().inset(by: Self.width / 2).trim(from: 0, to: progress)
+                .stroke(Palette.accent, lineWidth: Self.width).rotationEffect(.degrees(-90))
+        }
+        .frame(width: Self.side, height: Self.side)
+        .animation(Motion.reduced(Motion.content, reduceMotion), value: progress)
+        .accessibilityHidden(true)
+    }
+    static let side: CGFloat = 16
+    static let width: CGFloat = 3.5
 }
 
 /// How a mission's contents enter and leave: a short drift down out of a soft blur, never a plain cut.

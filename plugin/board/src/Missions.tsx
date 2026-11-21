@@ -340,9 +340,7 @@ export function MissionPanel({
         </div>
         {/* An ended mission's status chip already says how it ended. */}
         {active && (
-          <span className="mission-progress digits" title="Mission progress" style={{ '--progress': progress } as CSSProperties}>
-            {Math.round(progress * 100)}%
-          </span>
+          <span className="mission-progress" title="Mission progress" style={{ '--progress': progress } as CSSProperties} />
         )}
         <Chip state={active ? 'running' : mission.state}>{capitalized(mission.state)}</Chip>
         <span className="mission-controls">

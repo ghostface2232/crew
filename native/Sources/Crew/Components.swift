@@ -14,6 +14,8 @@ struct AgentMark: View {
 struct StatusLabel: View {
     let state: String
     var title: String? = nil
+    /// Only an active mission's chip turns; a turning symbol on every running row would be restless.
+    var spins = false
     var symbol: String {
         switch state {
         case "waiting": return "bell.badge.fill"
@@ -35,13 +37,12 @@ struct StatusLabel: View {
         default: return .secondary
         }
     }
-    var spins: Bool { ["running", "working", "active"].contains(state) }
     var body: some View {
         Label { Text(title ?? state.capitalized) } icon: { StatusSymbol(name: symbol, spins: spins) }.chip(color)
     }
 }
 
-/// A status symbol. Running work's turns slowly, as on the board, unless Reduce Motion is on.
+/// A status symbol, turning slowly when asked, as on the board, unless Reduce Motion is on.
 struct StatusSymbol: View {
     let name: String
     let spins: Bool
@@ -60,7 +61,7 @@ struct StatusIcon: View {
     @Environment(\.colorScheme) private var scheme
     var body: some View {
         let label = StatusLabel(state: state)
-        StatusSymbol(name: label.symbol, spins: label.spins).font(Typeface.body).foregroundStyle(label.color.ink(scheme))
+        Image(systemName: label.symbol).font(Typeface.body).foregroundStyle(label.color.ink(scheme))
             .help(title).accessibilityLabel(title)
     }
 }

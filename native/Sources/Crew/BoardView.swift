@@ -418,7 +418,7 @@ struct MissionPanel: View {
                     if mission.state == "active" {
                         ProgressRing(progress: missionProgress(mission, jobs: jobs)).help("Mission progress")
                     }
-                    StatusLabel(state: mission.state == "active" ? "running" : mission.state, title: mission.state.capitalized)
+                    StatusLabel(state: mission.state == "active" ? "running" : mission.state, title: mission.state.capitalized, spins: mission.state == "active")
                     if mission.state != "done" { missionMenu }
                     // A filled circle, so the control shows its hit area.
                     Button { toggle() } label: {

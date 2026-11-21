@@ -26,7 +26,7 @@ function harness(t: TestContext) {
   const config = resolveConfig({ notify: false });
   const hooks = { onJob: () => {}, onEvent: () => {}, onAttention: () => {} };
   const jobs = new Jobs(home, () => config, { codex: adapter, antigravity: adapter }, hooks);
-  t.after(() => { jobs.flush(); fs.rmSync(home, { recursive: true, force: true }); });
+  t.after(() => { jobs.flush(); fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }); });
   const create = (lead: string | undefined = 'lead') => jobs.create({ kind: 'delegate', cwd: home, task: 'test', ask: true, lead: lead === 'board' ? undefined : lead });
   return { jobs, home, create, workers, adapter, delivery: jobs.delivery,
     restore: () => new Jobs(home, () => config, { codex: adapter, antigravity: adapter }, hooks) };

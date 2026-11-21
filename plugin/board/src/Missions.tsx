@@ -5,7 +5,7 @@ import { Check, ChevronDown, ChevronRight, CircleCheck, CircleX, Clock, Ellipsis
 import type { BoardJob, BoardPull, ClaudeSession, Mission, PresetName } from './types.ts';
 import { actions, request } from './api.ts';
 import {
-  agentSummary, elapsed, jobLabel, jobRole, leadMission, missionJobStep, missionLooksFinished, missionProgress, missionStep, missionStopPosition,
+  agentSummary, elapsed, jobLabel, jobRole, leadMission, missionJobStep, missionLooksFinished, missionStep, missionStopPosition,
   missionStops, NAMES, pullIsStale, pullStatuses, roleLabel,
 } from './model.ts';
 import { ActionStatus, AgentMark, Chip, Collapse, Icon, Menu, StatusIcon, useAction, useFade, useNow } from './ui.tsx';
@@ -326,7 +326,6 @@ export function MissionPanel({
     tasks.length ? `${tasks.filter((task) => task.state === 'done').length}/${tasks.length} tasks` : null,
     mission.preset ? `${capitalized(mission.preset)} preset` : null,
   ].filter(Boolean).join(' · ');
-  const progress = missionProgress(mission, jobs);
   const live = useSyncExternalStore(board.subscribe, () => board.getSnapshot().connection === 'live');
   const locked = action.pending || action.accepted || !live;
   const update = (body: object, done: string) => void actions.run(key, () => request(`/api/missions/${mission.id}`, body), { done });
@@ -365,10 +364,6 @@ export function MissionPanel({
           <h2 className="title selectable fade-line" ref={fadeTitle} title={mission.title}>{mission.title}</h2>
           <p className="mission-meta fade-line" ref={fadeMeta} title={mission.root}>{meta}</p>
         </div>
-        {/* An ended mission's status chip already says how it ended. */}
-        {active && (
-          <span className="mission-progress" title="Mission progress" style={{ '--progress': progress } as CSSProperties} />
-        )}
         <Chip state={active ? 'running' : mission.state}>{capitalized(mission.state)}</Chip>
         <span className="mission-controls">
           {(active || mission.state === 'abandoned') && (

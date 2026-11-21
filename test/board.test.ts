@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Actions, answerKey, onUnauthorized, stream, ticketFromFragment, UnauthorizedError } from '../plugin/board/src/api.ts';
 import { BoardStore, mergeEvents } from '../plugin/board/src/store.ts';
-import { elapsed, evidenceSide, evidenceTurn, orderEvidence, jobLabel, leadMission, projectNames, unsettled, missionProgress, missionStops, missionStep, missionStopPosition, missionJobStep, missionLooksFinished, pullIsStale, pullStatuses, relativeDuration, usageWindowName, STOP_OF_STAGE } from '../plugin/board/src/model.ts';
+import { elapsed, evidenceSide, evidenceTurn, orderEvidence, jobLabel, leadMission, projectNames, unsettled, missionStops, missionStep, missionStopPosition, missionJobStep, missionLooksFinished, pullIsStale, pullStatuses, relativeDuration, usageWindowName, STOP_OF_STAGE } from '../plugin/board/src/model.ts';
 import type { BoardJob, BoardPull, BoardState, ClaudeSession, CrewEvent, Mission } from '../plugin/board/src/types.ts';
 
 function deferred() {
@@ -149,43 +149,18 @@ test('a refused stream signs the board out instead of retrying as an outage', as
   assert.equal(calls, 2);
 });
 
-test('mission progress uses all seven stages and only its unfinished jobs', () => {
-  const mission = { id: 'm', stage: 'cross-review', state: 'active' } as Mission;
-  const jobs = [
-    { mission: 'm', state: 'running', endedAt: null },
-    { mission: 'm', state: 'waiting', endedAt: null },
-    { mission: 'm', state: 'done', endedAt: 10 },
-    { mission: 'm', state: 'failed', endedAt: 11 },
-    { mission: 'm', state: 'cancelled', endedAt: 12 },
-    { mission: 'other', state: 'running', endedAt: null },
-  ] as BoardJob[];
-  assert.equal(missionProgress(mission, jobs), 0.5);
-  assert.equal(missionProgress(mission, []), 0.5);
-  assert.equal(missionProgress({ ...mission, state: 'abandoned' }, jobs), 0.5);
-  assert.equal(missionProgress({ ...mission, state: 'done' }, jobs), 1);
-  const stages = ['plan', 'implement', 'self-review', 'cross-review', 'fix', 'polish', 'final'] as const;
-  stages.forEach((stage, index) => {
-    assert.equal(missionProgress({ ...mission, stage }, jobs), (index + 0.5) / 7);
-    assert.equal(missionProgress({ ...mission, stage, state: 'abandoned' }, []), (index + 0.5) / 7);
-  });
-});
-
-test('short plans drive stops, passed positions, job attachment and progress in their own order', () => {
+test('short plans drive stops, passed positions and job attachment in their own order', () => {
   const mission = { id: 'm', stage: 'self-review', state: 'active', stages: ['implement', 'self-review', 'final'] } as Mission;
   assert.deepEqual(missionStops(mission).map((stop) => stop.name), ['Build', 'Review', 'Final']);
   assert.equal(missionStep(mission), 1);
   assert.deepEqual([0, 1, 2].map((index) => missionStopPosition(mission, index)), ['past', 'now', 'todo']);
-  assert.equal(missionProgress(mission, []), 0.5);
   assert.equal(missionJobStep(mission, { kind: 'delegate' }), 0);
   assert.equal(missionJobStep(mission, { kind: 'review' }), 1);
   assert.equal(missionJobStep(mission, { kind: 'polish' }), 1);
   mission.stage = 'final';
-  assert.equal(missionProgress(mission, []), 2.5 / 3);
   mission.state = 'done';
-  assert.equal(missionProgress(mission, []), 1);
   assert.deepEqual([0, 1, 2].map((index) => missionStopPosition(mission, index)), ['past', 'past', 'past']);
   mission.state = 'active'; mission.stages = ['final'];
-  assert.equal(missionProgress(mission, []), 0.5);
   mission.stage = 'cross-review'; mission.stages = ['cross-review', 'implement', 'self-review'];
   assert.deepEqual(missionStops(mission).map((stop) => stop.name), ['Review', 'Build', 'Review 2']);
   // A named stop goes by its name and is left out of the numbering, but keeps its kind for attaching jobs.
@@ -195,25 +170,21 @@ test('short plans drive stops, passed positions, job attachment and progress in 
   delete mission.labels;
   mission.stage = 'self-review';
   assert.equal(missionJobStep(mission, { kind: 'review' }), 2);
-  assert.equal(missionProgress(mission, []), 2.5 / 3);
   delete mission.stages;
   assert.equal(missionStops(mission).length, 6);
   assert.equal(missionStep(mission), 2);
-  assert.equal(missionProgress(mission, []), 2.5 / 7);
 });
 
-test('repeated stops use the saved occurrence for progress and retain jobs on the stop where they started', () => {
+test('repeated stops use the saved occurrence and retain jobs on the stop where they started', () => {
   const mission = { id: 'm', stage: 'fix', stageIndex: 4, state: 'active', stages: ['implement', 'self-review', 'fix', 'cross-review', 'fix', 'final'] } as Mission;
   assert.deepEqual(missionStops(mission).map((stop) => stop.name), ['Build', 'Review', 'Fix', 'Review 2', 'Fix 2', 'Final']);
   assert.equal(missionStep(mission), 4);
-  assert.equal(missionProgress(mission, []), 4.5 / 6);
   assert.equal(missionJobStep(mission, { kind: 'review', missionStep: 1 }), 1);
   assert.equal(missionJobStep(mission, { kind: 'review', missionStep: 3 }), 3);
   assert.equal(missionJobStep(mission, { kind: 'delegate', missionStep: 4 }), 4);
   mission.stages = [...mission.stages!.slice(0, 5), 'polish', 'cross-review', 'final'];
   assert.equal(missionJobStep(mission, { kind: 'review', missionStep: 1 }), 1);
   assert.equal(missionJobStep(mission, { kind: 'review', missionStep: 3 }), 3);
-  assert.equal(missionProgress(mission, []), 4.5 / 8);
 });
 
 test('a lead row follows its focused active mission, falling back to its newest active mission', () => {

@@ -282,17 +282,6 @@ struct PullStatus: Equatable {
     var needsLead = false
 }
 
-func missionProgress(_ mission: Mission, jobs: [Job]) -> Double {
-    if mission.state == "done" { return 1 }
-    let stages = mission.stages ?? ["plan", "implement", "self-review", "cross-review", "fix", "polish", "final"]
-    let stageIndex = mission.stages == nil ? stages.firstIndex(of: mission.stage) ?? 0 : mission.step
-    let weights = jobs.filter { $0.mission == mission.id && $0.endedAt == nil }.map { $0.state == "running" || $0.state == "waiting" ? 0.5 : 0 }
-    let share = weights.isEmpty ? 0.5 : weights.reduce(0, +) / Double(weights.count)
-    // Zero-based plan position plus at most half a step of running work; only done reaches 100%.
-    // Missions without a plan retain the original seven-stage progress formula.
-    return max(0, (Double(stageIndex) + share) / Double(stages.count))
-}
-
 struct ClaudeSession: Codable, Sendable, Identifiable, Equatable {
     var id: String
     var mission: String?

@@ -243,26 +243,6 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
         #expect(current.jobs[0].kindTitle == "Question")
         #expect(current.missions[0].notes?.first?.text == "Preserve compatibility.")
     }
-    @Test func progressUsesSevenStagesAndOnlyUnendedMissionJobs() throws {
-        var mission = try fixture().missions[0]
-        var job = try fixture().jobs[0]
-        for (index, stage) in ["plan", "implement", "self-review", "cross-review", "fix", "polish", "final"].enumerated() {
-            mission.stage = stage
-            let expected = (Double(index) + 0.5) / 7
-            #expect(missionProgress(mission, jobs: []) == expected)
-            for state in ["running", "waiting", "done", "failed", "cancelled"] {
-                job.state = state; job.endedAt = state == "running" || state == "waiting" ? nil : 100
-                #expect(missionProgress(mission, jobs: [job]) == expected)
-            }
-            job.mission = "another-mission"; job.endedAt = nil
-            #expect(missionProgress(mission, jobs: [job]) == expected)
-            job.mission = mission.id
-        }
-        mission.state = "done"
-        #expect(missionProgress(mission, jobs: []) == 1)
-        mission.state = "abandoned"; mission.stage = "unknown"
-        #expect(missionProgress(mission, jobs: []) == 0.5 / 7)
-    }
     @Test func evidenceSaysWhichTurnItIsFromOnceAJobHasSeveral() {
         var capture = Evidence(file: "a.png", path: "/x/a.png", turn: 1, from: "worker", bytes: 1, modified: 1)
         #expect(capture.turnLabel(of: 1) == "Turn 1")
@@ -285,7 +265,7 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
         #expect(Evidence.ordered(items).map(\.file)
             == ["lead-1-concept.png", "lead-2-concept.png", "fox-before.png", "rock-before.png", "notes.png", "fox-after.png", "rock-after.png"])
     }
-    @Test func shortPlansSetStopOrderPassedStepsJobAttachmentAndProgress() throws {
+    @Test func shortPlansSetStopOrderPassedStepsAndJobAttachment() throws {
         var mission = try fixture().missions[0]
         var job = try fixture().jobs[0]
         #expect(mission.stages == nil)
@@ -294,7 +274,6 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
         #expect(mission.stops == ["Build", "Review", "Final"])
         #expect(mission.step == 1)
         #expect(mission.stops.indices.map { mission.passed($0) } == [true, false, false])
-        #expect(missionProgress(mission, jobs: []) == 0.5)
         job.kind = "delegate"
         #expect(mission.jobStep(job) == 0)
         job.kind = "review"
@@ -302,12 +281,9 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
         job.kind = "polish"
         #expect(mission.jobStep(job) == 1)
         mission.stage = "final"
-        #expect(missionProgress(mission, jobs: []) == 2.5 / 3)
         mission.state = "done"
-        #expect(missionProgress(mission, jobs: []) == 1)
         #expect(mission.stops.indices.allSatisfy { mission.passed($0) })
         mission.state = "active"; mission.stages = ["final"]
-        #expect(missionProgress(mission, jobs: []) == 0.5)
         mission.stages = ["cross-review", "implement", "self-review"]; mission.stage = "cross-review"
         #expect(mission.stops == ["Review", "Build", "Review 2"])
         // A named stop goes by its name and is left out of the numbering; unnamed ones arrive as null.
@@ -320,12 +296,10 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
         mission.stage = "self-review"
         job.kind = "review"
         #expect(mission.jobStep(job) == 2)
-        #expect(missionProgress(mission, jobs: []) == 2.5 / 3)
         let loaded = try JSONDecoder().decode(Mission.self, from: JSONEncoder().encode(mission))
         #expect(loaded.stages == mission.stages)
         mission.stages = nil
         #expect(mission.step == 2)
-        #expect(missionProgress(mission, jobs: []) == 2.5 / 7)
     }
     @Test func repeatedStopsUseThePersistedIndexAndKeepJobsOnTheirOriginalRound() throws {
         var mission = try fixture().missions[0]
@@ -334,7 +308,6 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
         mission.stage = "fix"; mission.stageIndex = 4
         #expect(mission.step == 4)
         #expect(mission.stops == ["Build", "Review", "Fix", "Review 2", "Fix 2", "Final"])
-        #expect(missionProgress(mission, jobs: []) == 4.5 / 6)
         job.kind = "review"; job.missionStep = 1
         #expect(mission.jobStep(job) == 1)
         job.missionStep = 3
@@ -344,7 +317,6 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
         mission.stages = ["implement", "self-review", "fix", "cross-review", "fix", "polish", "cross-review", "final"]
         job.missionStep = 1
         #expect(mission.jobStep(job) == 1)
-        #expect(missionProgress(mission, jobs: []) == 4.5 / 8)
         let decoded = try JSONDecoder().decode(Mission.self, from: JSONEncoder().encode(mission))
         #expect(decoded.stageIndex == 4 && decoded.stage == "fix")
         let decodedJob = try JSONDecoder().decode(Job.self, from: JSONEncoder().encode(job))

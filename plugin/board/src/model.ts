@@ -57,7 +57,6 @@ export const STOP_OF_STAGE = {
   final: 5,
 };
 export const STOP_OF_KIND = { delegate: 1, review: 2, polish: 4 };
-const MISSION_STAGES = ['plan', 'implement', 'self-review', 'cross-review', 'fix', 'polish', 'final'];
 export function missionStops(mission?: Mission) {
   const rounds = new Map<number, number>();
   return mission?.stages
@@ -107,19 +106,6 @@ export function missionLooksFinished(mission: Mission, jobs: BoardJob[], now: nu
     && (!lead || lead.state === 'idle' || lead.state === 'error')
     && !mission.tasks?.some((task) => task.state === 'todo' || task.state === 'doing')
     && !jobs.some((job) => job.mission === mission.id && (job.state === 'running' || job.state === 'waiting'));
-}
-export function missionProgress(mission: Mission, jobs: BoardJob[]) {
-  if (mission.state === 'done') return 1;
-  const unfinished = jobs.filter((job) => job.mission === mission.id && job.endedAt == null);
-  const share = unfinished.length
-    ? unfinished.reduce((sum, job) => sum + (job.state === 'running' || job.state === 'waiting' ? 0.5 : 0), 0) /
-      unfinished.length
-    : 0.5;
-  const stages = mission.stages ?? MISSION_STAGES;
-  // Zero-based plan position plus at most half a step of running work; only done reaches 100%.
-  // Missions without a plan retain the original seven-stage progress formula.
-  const index = mission.stages ? missionStep(mission) : Math.max(0, stages.indexOf(mission.stage));
-  return Math.max(0, (index + share) / stages.length);
 }
 /** A pull request's status as a card shows it: a word and the state color it takes (as a chip's data-state). */
 export interface PullStatus { word: string; tone: 'failed' | 'waiting' | 'running' | 'done' | 'merged' | ''; needsLead?: true }

@@ -403,7 +403,7 @@ struct MissionPanel: View {
         let pulls = (store.state.pulls ?? []).filter { $0.mission == mission.id }
         VStack(alignment: .leading, spacing: Space.xl) {
             VStack(alignment: .leading, spacing: Space.xs) {
-                // Progress, status and the controls sit on the middle of the title and its meta line together.
+                // Status and the controls sit on the middle of the title and its meta line together.
                 HStack(alignment: .center, spacing: Space.m) {
                     VStack(alignment: .leading, spacing: Space.xs) {
                         // One line each, so cards side by side keep the same height whatever their titles.
@@ -414,10 +414,6 @@ struct MissionPanel: View {
                         }.font(Typeface.caption).monospacedDigit().foregroundStyle(.secondary).fadeTruncated().help(mission.root)
                     }
                     Spacer(minLength: WorkspaceStyle.rowSpacer)
-                    // An ended mission's status chip already says how it ended.
-                    if mission.state == "active" {
-                        ProgressRing(progress: missionProgress(mission, jobs: jobs)).help("Mission progress")
-                    }
                     StatusLabel(state: mission.state == "active" ? "running" : mission.state, title: mission.state.capitalized, spins: mission.state == "active")
                     if mission.state != "done" { missionMenu }
                     // A filled circle, so the control shows its hit area.
@@ -598,24 +594,6 @@ private struct MissionPullChip: View {
         .help(details)
         .accessibilityLabel("Pull request \(pull.repo) #\(pull.number)\(details.isEmpty ? "" : ": \(details)")")
     }
-}
-
-/// Progress as a ring alone, as on the board: it moves by stage, so a number would claim more precision than it has.
-private struct ProgressRing: View {
-    let progress: Double
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    var body: some View {
-        ZStack {
-            Circle().strokeBorder(.quaternary, lineWidth: Self.width)
-            Circle().inset(by: Self.width / 2).trim(from: 0, to: progress)
-                .stroke(Palette.accent, lineWidth: Self.width).rotationEffect(.degrees(-90))
-        }
-        .frame(width: Self.side, height: Self.side)
-        .animation(Motion.reduced(Motion.content, reduceMotion), value: progress)
-        .accessibilityHidden(true)
-    }
-    static let side: CGFloat = 16
-    static let width: CGFloat = 3.5
 }
 
 /// How a mission's contents enter and leave: a short drift down out of a soft blur, never a plain cut.

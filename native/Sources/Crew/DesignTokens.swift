@@ -150,6 +150,9 @@ enum Palette {
     static let success = Color.green
     static let warning = Color.orange
     static let danger = Color.red
+    /// GitHub's own merged purple, so a merged PR reads as it does there.
+    static let merged = WorkspaceStyle.dynamic(light: NSColor(srgbRed: 0x82 / 255, green: 0x50 / 255, blue: 0xdf / 255, alpha: 1),
+                                               dark: NSColor(srgbRed: 0xa3 / 255, green: 0x71 / 255, blue: 0xf7 / 255, alpha: 1))
     /// A row or card that needs attention, tinted with its status color.
     static func attention(_ color: Color) -> Color { color.opacity(0.07) }
     /// A chip's background.
@@ -257,7 +260,6 @@ enum Pill {
     static let symbolGap = Space.s
     /// The plain pill's fill, close to the system bordered button's.
     static let fill = Color.primary.opacity(0.08)
-    enum Kind { case plain, prominent, warning }
 }
 
 /// An icon button: a filled circle a little larger than a chip, where the system's regular circle read smaller
@@ -336,20 +338,18 @@ struct GlassPillButtonStyle: ButtonStyle {
     }
 }
 
-/// Draws pills with `Pill.insets`. A destructive role takes the danger color whatever the kind.
+/// Draws pills with `Pill.insets`. A destructive role takes the danger color.
 struct PillButtonStyle: ButtonStyle {
-    var kind = Pill.Kind.plain
     @Environment(\.isEnabled) private var enabled
     @Environment(\.colorScheme) private var scheme
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.pillSwap) private var swap
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     func makeBody(configuration: Configuration) -> some View {
-        let status: Color? = configuration.role == .destructive ? Palette.danger : kind == .warning ? Palette.warning : nil
+        let status: Color? = configuration.role == .destructive ? Palette.danger : nil
         // As on chips: inked toward black in light mode and white in dark, so the tinted label stays readable on its tint.
-        let tinted = status.map { $0.ink(scheme) }
-        let text: Color = kind == .prominent && status == nil ? .white : tinted ?? .primary
-        let fill: Color = status.map(Palette.chip) ?? (kind == .prominent ? Palette.accent : Pill.fill)
+        let text: Color = status.map { $0.ink(scheme) } ?? .primary
+        let fill: Color = status.map(Palette.chip) ?? Pill.fill
         PillWords(label: configuration.label)
             .font(Typeface.calloutStrong).foregroundStyle(text).lineLimit(1)
             .padding(Pill.insets).clipShape(Capsule())
@@ -430,12 +430,10 @@ extension View {
         padding(WorkspaceStyle.insetPadding).frame(maxWidth: .infinity, alignment: .leading)
             .background(WorkspaceStyle.rowFill, in: RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius))
     }
-    /// A secondary action as a pill, so pills read the same wherever they sit. `.prominent` fills it for the one
-    /// action a group leads with; `.warning` marks one that drops work without completing it.
-    func pillButton(_ kind: Pill.Kind = .plain) -> some View { buttonStyle(PillButtonStyle(kind: kind)).labelStyle(PillLabelStyle()) }
+    /// A secondary action as a pill, so pills read the same wherever they sit.
+    func pillButton() -> some View { buttonStyle(PillButtonStyle()).labelStyle(PillLabelStyle()) }
     /// A primary action in glass at the pill's size; `prominent` tints it with the accent.
     func glassPillButton(prominent: Bool = true) -> some View { buttonStyle(GlassPillButtonStyle(prominent: prominent)).labelStyle(PillLabelStyle()) }
-    func pillButton(prominent: Bool) -> some View { pillButton(prominent ? .prominent : .plain) }
     /// An icon-only circle at `IconButton.diameter`; its symbol takes `Symbol.control`.
     func iconButton(prominent: Bool = false) -> some View { labelStyle(.iconOnly).buttonStyle(IconButtonStyle(prominent: prominent)) }
 }

@@ -73,7 +73,7 @@ import Testing
         pull.checks = "passing"
         #expect(pull.statuses.map(\.word) == ["Approved", "Checks passed"])
         pull.state = "merged"
-        #expect(pull.statuses == [PullStatus(word: "Merged", tone: "done")])
+        #expect(pull.statuses == [PullStatus(word: "Merged", tone: "merged")])
         pull.state = "closed"
         #expect(pull.statuses == [PullStatus(word: "Closed", tone: "")])
     }

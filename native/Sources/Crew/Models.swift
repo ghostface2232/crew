@@ -262,7 +262,7 @@ struct MissionPull: Codable, Sendable, Identifiable, Equatable {
     /// conflict first of all, since resolving it moves the head and reruns the checks. Waiting and good news follow.
     var statuses: [PullStatus] {
         switch state {
-        case "merged": return [PullStatus(word: "Merged", tone: "done")]
+        case "merged": return [PullStatus(word: "Merged", tone: "merged")]
         case "closed": return [PullStatus(word: "Closed", tone: "")]
         default: return [
             conflict ? PullStatus(word: "Conflict", tone: "failed", needsLead: true) : nil,

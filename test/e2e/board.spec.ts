@@ -2,6 +2,9 @@ import { test, expect, type Locator, type Page } from '@playwright/test';
 import { resolveConfig } from '../../plugin/bridge/config.ts';
 import type { BoardPull, Mission } from '../../plugin/board/src/types.ts';
 import { fixture, job, NOW, TEST_CREDENTIAL, TEST_TICKET } from './fixtures.ts';
+// A mission's progress ring, in whole percent; it shows no number.
+const progressOf = (card: Locator) => expect.poll(() => card.locator('.mission-progress')
+  .evaluate((ring) => Math.round(Number((ring as HTMLElement).style.getPropertyValue('--progress')) * 100)));
 
 test.beforeEach(async ({ page, request }) => {
   await request.post('/__reset');
@@ -70,10 +73,21 @@ test('a shared lead appears on one mission and linked pulls show when their stat
   await expect(chips.first()).toHaveAttribute('title', 'Verify the desktop release · Conflict · Checks failing · Changes requested · Checked 16m ago');
   await expect(chips.nth(1)).not.toHaveAttribute('data-stale');
   await expect(chips.nth(2)).toHaveAttribute('data-state', 'running');
-  await expect(chips.nth(3)).toHaveAttribute('data-state', 'done');
+  await expect(chips.nth(3)).toHaveAttribute('data-state', 'merged');
   await newerCard.screenshot({ path: testInfo.outputPath('mission-tasks-and-pulls.png'), animations: 'disabled' });
   await push({ ...pull, error: 'gh: not found' });
   await expect(chips.first()).toHaveText('#42Could not be read1m');
+  // An ended mission starts closed, and its PRs still show at its foot.
+  data.missions = data.missions.map((mission) => (mission.id === 'mission-follow-up' ? { ...mission, state: 'done', endedAt: NOW } : mission));
+  data.pulls = [{ ...pull, state: 'merged' }];
+  await request.post('/__push', { data: { type: 'state', data } });
+  await expect(newerCard.getByRole('button', { name: 'Expand mission' })).toBeVisible();
+  await expect(newerCard.locator('.pull-chip')).toHaveText('#42Merged');
+});
+
+test('a row shows its status as a symbol named by its word', async ({ page }) => {
+  await expect(page.locator('button[data-job="cx-build"]').getByRole('img', { name: 'Working' })).toHaveAttribute('title', 'Working');
+  await expect(page.locator('button[data-job="cx-build"] .chip')).toHaveCount(0);
 });
 
 test('short mission plans render in order with matching tracks and progress', async ({ page, request }) => {
@@ -85,15 +99,15 @@ test('short mission plans render in order with matching tracks and progress', as
   await expect(card.locator('.track-name')).toHaveText(['Review', 'Fix', 'Final']);
   await expect(card.locator('.track > li[data-pos="past"]')).toHaveCount(0);
   await expect(stage(card, 'Review').locator('button[data-job]')).toHaveCount(2);
-  await expect(card.locator('.mission-progress')).toHaveText(`${Math.round((0.5 / 3) * 100)}%`);
+  await progressOf(card).toBe(Math.round((0.5 / 3) * 100));
 
   data.missions[0].stage = 'final';
   await request.post('/__push', { data: { type: 'state', data } });
-  await expect(card.locator('.mission-progress')).toHaveText(`${Math.round((2.5 / 3) * 100)}%`);
+  await progressOf(card).toBe(Math.round((2.5 / 3) * 100));
   data.missions[0].stages = ['final'];
   await request.post('/__push', { data: { type: 'state', data } });
   await expect(card.locator('.track-name')).toHaveText(['Final']);
-  await expect(card.locator('.mission-progress')).toHaveText('50%');
+  await progressOf(card).toBe(50);
   await expect(stage(card, 'Final').locator('button[data-job]')).toHaveCount(2);
 });
 
@@ -150,7 +164,8 @@ test('a quiet ended workload looks finished and the authenticated user can mark 
   await card.getByRole('button', { name: 'Mission options' }).click();
   await page.getByRole('menuitem', { name: 'Mark Done' }).click();
   await expect(card.locator('.mission-head .chip')).toHaveText('Done');
-  await expect(card.locator('.mission-progress')).toHaveText('100%');
+  // Its status chip says how it ended, so the progress ring goes.
+  await expect(card.locator('.mission-progress')).toHaveCount(0);
   await expect(card.getByText('Looks finished', { exact: true })).toHaveCount(0);
   await expect(card.getByRole('button', { name: 'Mission options' })).toHaveCount(0);
   // An ended mission starts collapsed, as in the app.
@@ -193,7 +208,7 @@ test('repeated stops keep jobs on their original round while the remaining plan 
   await expect(stage(card, 'Review').locator('button[data-job="cx-build"]')).toHaveCount(1);
   await expect(stage(card, 'Review 2').locator('button[data-job="cx-question"]')).toHaveCount(1);
   await expect(card.locator('.track > li[data-pos="now"] .track-name')).toHaveText('Fix 2');
-  await expect(card.locator('.mission-progress')).toHaveText(`${Math.round((4.5 / 7) * 100)}%`);
+  await progressOf(card).toBe(Math.round((4.5 / 7) * 100));
   data.missions[0].stages = [...data.missions[0].stages.slice(0, 5), 'final', 'cross-review'];
   await request.post('/__push', { data: { type: 'state', data } });
   await expect(card.locator('.track-name')).toHaveText(['Build', 'Review', 'Fix', 'Review 2', 'Fix 2', 'Final', 'Review 3']);
@@ -742,20 +757,19 @@ test('each project has its own instructions page', async ({ page, request }) => 
   expect(calls.findLast((call: { route: string }) => call.route === '/api/instructions').body).toEqual({ project: '/workspace/Other', text: 'Use tabs here.' });
 });
 
-test('a mission\'s preset can be chosen from its pill menu', async ({ page, request }) => {
+test('a mission\'s preset can be chosen from its options menu', async ({ page, request }) => {
   const mission = page.locator('.mission[data-state="active"]').first();
-  const pill = mission.locator('.mission-foot .menu-pill');
-  await expect(pill).toHaveText('Global preset');
-  await pill.click();
-  await mission.getByRole('menuitemradio', { name: 'Economy preset' }).click();
-  await expect(pill).toHaveText('Economy preset');
-  // An active mission's meta leaves the preset to its menu.
+  const options = mission.getByRole('button', { name: 'Mission options' });
+  // The global preset goes unnamed.
   await expect(mission.locator('.mission-meta')).not.toContainText('preset');
+  await options.click();
+  await mission.getByRole('menuitemradio', { name: 'Economy preset' }).click();
+  await expect(mission.locator('.mission-meta')).toContainText('Economy preset');
   // The menu stays usable after a preset change, and the choice shows.
-  await pill.click();
+  await options.click();
   await expect(mission.getByRole('menuitemradio', { name: 'Economy preset' })).toHaveAttribute('aria-checked', 'true');
   await mission.getByRole('menuitemradio', { name: 'Global preset' }).click();
-  await expect(pill).toHaveText('Global preset');
+  await expect(mission.locator('.mission-meta')).not.toContainText('preset');
   const calls = await (await request.get('/__requests')).json();
   const sent = calls.filter((call: { route: string }) => call.route.startsWith('/api/missions/')).map((call: { body: unknown }) => call.body);
   expect(sent.slice(-2)).toEqual([{ preset: 'economy' }, { preset: null }]);
@@ -778,7 +792,7 @@ test('entrances let go once played, so a mission\'s menu opens above the cards a
     .filter((animation) => animation.playState === 'finished')
     .map((animation) => `${(animation as CSSAnimation).animationName} on ${(animation.effect as KeyframeEffect).target?.className}`))).toEqual([]);
   const mission = page.locator('[data-key="mission-1"]');
-  await mission.locator('.mission-foot .menu-pill').click();
+  await mission.getByRole('button', { name: 'Mission options' }).click();
   const last = mission.getByRole('menuitemradio', { name: 'Best preset' });
   await settle(page);
   await last.scrollIntoViewIfNeeded();
@@ -1130,10 +1144,11 @@ for (const target of ['mission:mission-1', 'project', 'global'])
 
 test('mission progress stays visible when collapsed and notes show when expanded', async ({ page }) => {
   const card = page.locator('[data-key="mission-1"]');
-  await expect(card.locator('.mission-progress')).toHaveText(`${Math.round((1.5 / 7) * 100)}%`);
+  await progressOf(card).toBe(Math.round((1.5 / 7) * 100));
   await expect(card.getByText('Keep keyboard navigation available.')).toBeVisible();
   await card.getByRole('button', { name: 'Collapse mission' }).click();
-  await expect(card.getByText('21%', { exact: true })).toBeVisible();
+  await expect(card.locator('.mission-progress')).toBeVisible();
+  await expect(card.getByText('21%', { exact: true })).toHaveCount(0);
   // A closed body stays mounted so it can animate; it is hidden, not removed.
   await expect(card.getByText('Keep keyboard navigation available.')).toBeHidden();
 });
@@ -1357,7 +1372,7 @@ test('a closed mission opens from a click anywhere on it and closes from its tit
   await expect(card.locator('.track')).toBeHidden();
 });
 
-test('a finished-looking mission offers Mark Done beside its outcome, and a dropped one marks its stopping step', async ({ page, request }) => {
+test('a finished-looking mission is marked done from its menu, and a dropped one marks its stopping step', async ({ page, request }) => {
   const data = fixture();
   data.missions[0].stages = ['implement', 'cross-review', 'final'];
   data.missions[0].stage = 'cross-review';
@@ -1366,7 +1381,9 @@ test('a finished-looking mission offers Mark Done beside its outcome, and a drop
   data.claude.forEach((session) => { session.state = 'idle'; });
   await request.post('/__push', { data: { type: 'state', data } });
   const card = page.locator('[data-key="mission-1"]');
-  await card.locator('.mission-foot').getByRole('button', { name: 'Mark Done' }).click();
+  await expect(card.getByText('Looks finished', { exact: true })).toBeVisible();
+  await card.getByRole('button', { name: 'Mission options' }).click();
+  await page.getByRole('menuitem', { name: 'Mark Done' }).click();
   await expect(card.locator('.mission-head .chip')).toHaveText('Done');
   data.missions[0] = { ...data.missions[0], state: 'abandoned', endedAt: NOW };
   await request.post('/__push', { data: { type: 'state', data } });

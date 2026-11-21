@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import {
-  ArrowUp, BellDot, Check, ChevronDown, Circle, CircleAlert, CircleCheck, CircleDotDashed, CircleStop, ClockAlert, Copy,
+  ArrowUp, BellDot, Check, Circle, CircleAlert, CircleCheck, CircleDotDashed, CircleStop, ClockAlert, Copy,
   TriangleAlert, X,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -161,6 +161,14 @@ export function Chip({ state, children }: { state: string; children?: ReactNode 
       <Icon icon={statusIcon(state)} />
       {/* A new word swaps in over the old one rather than cutting to it. */}
       <span className="swap" key={typeof children === 'string' ? children : state}>{children ?? capitalized(state)}</span>
+    </span>
+  );
+}
+/** A job's or session's status as its symbol alone, quieter than a chip in a list of them; the word is its name. */
+export function StatusIcon({ state, label }: { state: string; label: string }) {
+  return (
+    <span className="status-icon" data-state={state} role="img" aria-label={label} title={label}>
+      <Icon icon={statusIcon(state)} />
     </span>
   );
 }
@@ -394,7 +402,7 @@ export function CopyButton({ text, short, children }: { text: string; short?: st
  * A pop-up menu: focus moves to its first item, arrows move between items, and a choice, Escape, a click
  * elsewhere or tabbing away closes it and returns focus to its button.
  */
-export function Menu({ label, icon, text, children }: { label: string; icon: LucideIcon; text?: string; children: ReactNode }) {
+export function Menu({ label, icon, children }: { label: string; icon: LucideIcon; children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
@@ -436,16 +444,14 @@ export function Menu({ label, icon, text, children }: { label: string; icon: Luc
     >
       <button
         ref={button}
-        className={text ? 'menu-pill' : 'icon'}
-        aria-label={text ? undefined : label}
+        className="icon"
+        aria-label={label}
         title={label}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
       >
         <Icon icon={icon} />
-        {text}
-        {text && <ChevronDown className="menu-pill-chevron" size={12} aria-hidden="true" />}
       </button>
       {open && (
         <div

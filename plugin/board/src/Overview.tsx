@@ -12,7 +12,7 @@ import {
   dailyCounts, elapsed, endedPerHour, holdersOf, jobLabel, NAMES, projectOf, relativeDuration, rolesOf, runningPerHour,
   usageWindowName, unsettled,
 } from './model.ts';
-import { AgentMark, Chip, EmptyState, Icon, RollingNumber, useFade, useNow } from './ui.tsx';
+import { AgentMark, Chip, EmptyState, Icon, RollingNumber, StatusIcon, useFade, useNow } from './ui.tsx';
 import { JobRow, jobKind, jobStatusState, MissionPanel, SessionRow } from './Missions.tsx';
 
 export interface Scope {
@@ -630,7 +630,7 @@ export function History({ state, project, names, selected, openJob, openSession 
                     </td>
                     <td className="narrow-hide"><span className="cell-agent"><AgentMark agent={job.agent} size={14} />{NAMES[job.agent]}</span></td>
                     {!project && <td className="narrow-hide cell-muted cell-project"><FadeText text={names.get(projectOf(job)) ?? projectOf(job)} /></td>}
-                    <td><Chip state={jobStatusState(job)}>{jobLabel(job)}</Chip></td>
+                    <td><StatusIcon state={jobStatusState(job)} label={jobLabel(job)} /></td>
                     <td className="num cell-muted">{elapsed((job.endedAt ?? 0) - job.createdAt)}</td>
                     <td className="num cell-muted narrow-hide">{new Date(job.endedAt!).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</td>
                   </tr>

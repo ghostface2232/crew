@@ -14,13 +14,15 @@ struct AgentMark: View {
 struct StatusLabel: View {
     let state: String
     var title: String? = nil
+    /// Only an active mission's chip turns; a turning symbol on every running row would be restless.
+    var spins = false
     var symbol: String {
         switch state {
         case "waiting": return "bell.badge.fill"
         case "failed", "error": return "exclamationmark.triangle.fill"
         case "stalled": return "clock.badge.exclamationmark"
         case "done": return "checkmark.circle.fill"
-        case "running", "working", "active": return "circle.dotted.circle"
+        case "running", "working", "active": return "progress.indicator"
         case "cancelled", "abandoned": return "stop.circle"
         default: return "circle"
         }
@@ -30,12 +32,37 @@ struct StatusLabel: View {
         case "waiting", "stalled": return Palette.warning
         case "failed", "error": return Palette.danger
         case "done": return Palette.success
+        case "merged": return Palette.merged
         case "running", "working", "active": return Palette.accent
         default: return .secondary
         }
     }
     var body: some View {
-        Label(title ?? state.capitalized, systemImage: symbol).chip(color)
+        Label { Text(title ?? state.capitalized) } icon: { StatusSymbol(name: symbol, spins: spins) }.chip(color)
+    }
+}
+
+/// A status symbol, turning slowly when asked, as on the board, unless Reduce Motion is on.
+struct StatusSymbol: View {
+    let name: String
+    let spins: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var body: some View {
+        Image(systemName: name).symbolEffect(.rotate, options: .repeat(.continuous).speed(Self.speed), isActive: spins && !reduceMotion)
+    }
+    /// Half the effect's own pace, for a calm turn rather than a busy spinner.
+    static let speed = 0.5
+}
+
+/// A job's or session's status as its symbol alone, quieter than a chip in a list of them; the word is its name.
+struct StatusIcon: View {
+    let state: String
+    let title: String
+    @Environment(\.colorScheme) private var scheme
+    var body: some View {
+        let label = StatusLabel(state: state)
+        Image(systemName: label.symbol).font(Typeface.body).foregroundStyle(label.color.ink(scheme))
+            .help(title).accessibilityLabel(title)
     }
 }
 
@@ -330,7 +357,7 @@ struct JobRow: View {
                     }
                 }
                 Spacer(minLength: WorkspaceStyle.rowSpacer)
-                StatusLabel(state: job.stalled ? "stalled" : job.state, title: job.status)
+                StatusIcon(state: job.stalled ? "stalled" : job.state, title: job.status)
                 ElapsedText(store: store, start: job.createdAt, end: job.endedAt).monospacedDigit().font(Typeface.caption).foregroundStyle(.secondary)
                     .frame(minWidth: WorkspaceStyle.elapsedColumn, alignment: .trailing)
                 Image(systemName: "chevron.right").font(Typeface.micro).foregroundStyle(.tertiary)
@@ -368,7 +395,7 @@ struct SessionRow: View {
                     }
                 }
                 Spacer(minLength: WorkspaceStyle.rowSpacer)
-                StatusLabel(state: session.stalled ? "stalled" : session.state, title: session.stalled ? "May be stuck" : session.state.capitalized)
+                StatusIcon(state: session.stalled ? "stalled" : session.state, title: session.stalled ? "May be stuck" : session.state.capitalized)
                 // An idle session stops its clock at its last activity.
                 ElapsedText(store: store, start: session.startedAt, end: session.state == "idle" ? session.activeAt : nil)
                     .monospacedDigit().font(Typeface.caption).foregroundStyle(.secondary).frame(minWidth: WorkspaceStyle.elapsedColumn, alignment: .trailing)

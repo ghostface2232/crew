@@ -8,7 +8,7 @@ import {
   agentSummary, elapsed, jobLabel, jobRole, leadMission, missionJobStep, missionLooksFinished, missionProgress, missionStep, missionStopPosition,
   missionStops, NAMES, pullIsStale, pullStatuses, roleLabel,
 } from './model.ts';
-import { ActionStatus, AgentMark, Chip, Collapse, Icon, Menu, useAction, useFade, useNow } from './ui.tsx';
+import { ActionStatus, AgentMark, Chip, Collapse, Icon, Menu, StatusIcon, useAction, useFade, useNow } from './ui.tsx';
 
 const capitalized = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 export const jobStatusState = (job: BoardJob) => (job.stalled ? 'stalled' : job.state);
@@ -51,7 +51,7 @@ export function JobRow({ job, selected, openJob, showsKind = true, index = 0 }: 
         <b>{job.title}</b>
         {detail && <span data-error={job.error ? '' : undefined} key={detail} className="swap">{detail}</span>}
       </span>
-      <Chip state={jobStatusState(job)}>{jobLabel(job)}</Chip>
+      <StatusIcon state={jobStatusState(job)} label={jobLabel(job)} />
       <span className="job-row-time">{elapsed((job.endedAt ?? now) - job.createdAt)}</span>
       <Icon icon={ChevronRight} className="row-chevron" />
     </button>
@@ -152,7 +152,7 @@ export function SessionRow({ session, selected, openSession }: { session: Claude
         <b>{session.title}</b>
         {detail && <span key={detail} className="swap">{detail}</span>}
       </span>
-      <Chip state={session.stalled ? 'stalled' : session.state}>{session.stalled ? 'May be stuck' : capitalized(session.state)}</Chip>
+      <StatusIcon state={session.stalled ? 'stalled' : session.state} label={session.stalled ? 'May be stuck' : capitalized(session.state)} />
       {/* An idle session stops its clock at its last activity. */}
       <span className="job-row-time">{elapsed((session.state === 'idle' ? session.activeAt : now) - session.startedAt)}</span>
       <Icon icon={ChevronRight} className="row-chevron" />
@@ -285,8 +285,6 @@ export function MissionPanel({
   // Keyed by state as in the app: once a mission is abandoned, Mark Done takes a fresh lock.
   const key = `mission:${mission.id}:${mission.state}`;
   const action = useAction(key);
-  const presetKey = `mission-preset:${mission.id}`;
-  const presetAction = useAction(presetKey);
   const stops = missionStops(mission);
   const at = missionStep(mission);
   const tokens = jobs.reduce((sum, job) => sum + (job.tokens ?? 0), 0);
@@ -299,8 +297,7 @@ export function MissionPanel({
     projectName,
     `${jobs.length} ${jobs.length === 1 ? 'job' : 'jobs'}`,
     tasks.length ? `${tasks.filter((task) => task.state === 'done').length}/${tasks.length} tasks` : null,
-    // An active mission shows its preset in its menu instead.
-    mission.preset && !active ? `${capitalized(mission.preset)} preset` : null,
+    mission.preset ? `${capitalized(mission.preset)} preset` : null,
   ].filter(Boolean).join(' · ');
   const progress = missionProgress(mission, jobs);
   const live = useSyncExternalStore(board.subscribe, () => board.getSnapshot().connection === 'live');
@@ -313,7 +310,6 @@ export function MissionPanel({
   const finished = missionLooksFinished(mission, allJobs, now, owner);
   const fadeTitle = useFade<HTMLHeadingElement>();
   const fadeMeta = useFade<HTMLParagraphElement>();
-  const presetName = PRESETS.find(([preset]) => preset === (mission.preset ?? null))?.[1] ?? 'Global';
   const foldsStages = jobs.length > FOLD_STAGES_AFTER;
   const [, setStagesVersion] = useState(0);
   const setOpenStage = (stageKey: string, value: boolean) => {
@@ -342,9 +338,10 @@ export function MissionPanel({
           <h2 className="title selectable fade-line" ref={fadeTitle} title={mission.title}>{mission.title}</h2>
           <p className="mission-meta fade-line" ref={fadeMeta} title={mission.root}>{meta}</p>
         </div>
-        <span className="mission-progress digits" title="Mission progress" style={{ '--progress': progress } as CSSProperties}>
-          {Math.round(progress * 100)}%
-        </span>
+        {/* An ended mission's status chip already says how it ended. */}
+        {active && (
+          <span className="mission-progress" title="Mission progress" style={{ '--progress': progress } as CSSProperties} />
+        )}
         <Chip state={active ? 'running' : mission.state}>{capitalized(mission.state)}</Chip>
         <span className="mission-controls">
           {(active || mission.state === 'abandoned') && (
@@ -359,6 +356,25 @@ export function MissionPanel({
                   Stop Tracking
                 </button>
               )}
+              {active && presets && (
+                <>
+                  <hr />
+                  {PRESETS.map(([preset, name]) => (
+                    <button
+                      key={name}
+                      role="menuitemradio"
+                      aria-checked={(mission.preset ?? null) === preset}
+                      disabled={locked}
+                      title="Applies to the mission's next jobs. Jobs already started keep theirs."
+                      // The meta line and the check show the choice, so only sending and failure are said.
+                      onClick={() => void actions.run(key, () => request(`/api/missions/${mission.id}`, { preset }), { done: '', once: false })}
+                    >
+                      <Icon icon={(mission.preset ?? null) === preset ? Check : Gauge} />
+                      {preset ? `${name} preset` : 'Global preset'}
+                    </button>
+                  ))}
+                </>
+              )}
             </Menu>
           )}
           <button
@@ -372,11 +388,6 @@ export function MissionPanel({
           </button>
         </span>
       </div>
-      {!!pulls?.length && (
-        <div className="mission-pulls">
-          {pulls.map((pull) => <MissionPull key={pull.id} pull={pull} now={now} />)}
-        </div>
-      )}
       <Collapse open={expanded} className="mission-body">
         {mission.notes?.map((note, noteIndex) => (
           <p className="mission-note selectable" key={`${note.at}:${noteIndex}`}>{note.text}</p>
@@ -418,43 +429,16 @@ export function MissionPanel({
             );
           })}
         </div>
-        {(mission.outcome || finished || mission.state === 'abandoned' || (active && presets)) && (
-          <div className="mission-foot">
-            {mission.outcome ? <p className="mission-outcome selectable">{mission.outcome}</p> : <span />}
-            <div className="mission-foot-actions">
-              {finished && <span className="caption secondary">Looks finished</span>}
-              {finished && active && (
-                <button className="pill-warning small" disabled={locked} onClick={stopTracking}>Stop Tracking</button>
-              )}
-              {(finished || mission.state === 'abandoned') && (
-                <button className="prominent small" disabled={locked} onClick={markDone}>Mark Done</button>
-              )}
-              {active && presets && (
-                <Menu label="Mission preset" icon={Gauge} text={`${presetName} preset`}>
-                  {PRESETS.map(([preset, name]) => (
-                    <button
-                      key={name}
-                      role="menuitemradio"
-                      aria-checked={(mission.preset ?? null) === preset}
-                      disabled={presetAction.pending || !live}
-                      title="Applies to the mission's next jobs. Jobs already started keep theirs."
-                      onClick={() => void actions.run(presetKey, () => request(`/api/missions/${mission.id}`, { preset }), {
-                        done: preset ? `${name} preset for new jobs` : 'Global preset for new jobs', once: false,
-                      })}
-                    >
-                      <Icon icon={(mission.preset ?? null) === preset ? Check : Gauge} />
-                      {preset ? `${name} preset` : 'Global preset'}
-                    </button>
-                  ))}
-                </Menu>
-              )}
-            </div>
-          </div>
-        )}
-        <ActionStatus actionKey={presetKey} />
+        {mission.outcome && <p className="mission-outcome selectable">{mission.outcome}</p>}
       </Collapse>
-      {!expanded && finished && <span className="caption secondary mission-hint reveal">Looks finished</span>}
+      {/* Its menu holds Mark Done, so the card only says so. */}
+      {finished && <span className="caption secondary mission-hint reveal">Looks finished</span>}
       <ActionStatus actionKey={key} />
+      {!!pulls?.length && (
+        <div className="mission-pulls">
+          {pulls.map((pull) => <MissionPull key={pull.id} pull={pull} now={now} />)}
+        </div>
+      )}
     </section>
   );
 }

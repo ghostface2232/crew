@@ -38,6 +38,8 @@
   --purple: #af52de;
   --indigo: #5856d6;
   --teal: #30b0c7;
+  /* GitHub's own merged purple, so a merged PR reads as it does there. */
+  --merged: #8250df;
   /* Text on an orange badge: white reaches only about 2:1 there. */
   --on-orange: rgb(0 0 0 / 0.82);
   /* Backdrops behind sheets and the palette, and the faint drop under raised controls. */
@@ -106,6 +108,7 @@
     --purple: #bf5af2;
     --indigo: #5e5ce6;
     --teal: #40c8e0;
+    --merged: #a371f7;
     /* A dark canvas swallows light-mode scrims and drops, so both deepen. */
     --scrim: rgb(0 0 0 / 0.5);
     --scrim-light: rgb(0 0 0 / 0.36);
@@ -190,6 +193,7 @@ kbd {
 [data-state="waiting"], [data-state="stalled"] { --tone: var(--orange); }
 [data-state="failed"], [data-state="error"] { --tone: var(--red); }
 [data-state="done"] { --tone: var(--green); }
+[data-state="merged"] { --tone: var(--merged); }
 [data-state="idle"], [data-state="cancelled"], [data-state="abandoned"], [data-state=""] { --tone: var(--secondary); }
 
 /* StatusLabel: the symbol, then the word, on a tint of the state's color. */
@@ -210,7 +214,10 @@ kbd {
   transition: background-color 300ms var(--ease-out), color 300ms var(--ease-out);
 }
 .chip svg { width: 12px; height: 12px; }
-.chip[data-state="running"] svg, .chip[data-state="working"] svg { animation: spin 4s linear infinite; }
+/* Only an active mission's chip turns; a turning symbol on every running row would be restless. */
+.mission-head .chip[data-state="running"] svg { animation: spin 4s linear infinite; }
+.status-icon { display: inline-flex; flex: none; color: color-mix(in srgb, var(--tone, var(--secondary)), var(--tone-ink) var(--tone-darken)); }
+.status-icon svg { width: 16px; height: 16px; }
 @media (prefers-contrast: more) { .chip { box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 50%, transparent); } }
 
 /* The service marks are template images: one shape, drawn in the text color. */
@@ -254,7 +261,6 @@ button.link svg { width: 12px; height: 12px; transition: translate 220ms var(--e
 button.icon { flex: none; width: 30px; padding: 0; background: var(--fill); color: var(--label); }
 button.icon.small { width: 24px; min-height: 24px; }
 button.destructive { color: var(--red); }
-button.pill-warning { background: color-mix(in srgb, var(--orange) 14%, transparent); color: color-mix(in srgb, var(--orange), var(--tone-ink) var(--tone-darken)); }
 button:disabled { opacity: 0.4; cursor: default; }
 button:focus-visible, summary:focus-visible, [role="tab"]:focus-visible, [role="separator"]:focus-visible {
   outline: 2px solid var(--accent);
@@ -266,7 +272,6 @@ button:focus-visible, summary:focus-visible, [role="tab"]:focus-visible, [role="
   button.glass:not(:disabled):hover { background: var(--surface-2); }
   button.borderless:not(:disabled):hover, button.link:not(:disabled):hover { background: none; color: var(--label); }
   button.link:not(:disabled):hover svg { translate: 2px 0; }
-  button.pill-warning:not(:disabled):hover { background: color-mix(in srgb, var(--orange) 22%, transparent); }
 }
 button:not(:disabled):active { scale: 0.97; }
 
@@ -1011,17 +1016,25 @@ dialog.detail-panel { container: panel / inline-size; }
 .mission[data-state="abandoned"] { --tone: var(--secondary); }
 .mission-heading { flex: 1; min-width: 0; display: grid; gap: 2px; }
 .mission-meta { color: var(--secondary); font-size: 11.5px; font-variant-numeric: tabular-nums; }
-/* Pull requests share one line of chips, which wraps only when there are many. */
-.mission-pulls { display: flex; flex-wrap: wrap; gap: 6px; margin-block-start: 10px; min-width: 0; }
+/* Pull requests sit in a band across the card's foot, below a hairline that runs to the card's edges, whether the
+   card is open or closed. */
+.mission-pulls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  /* Out to the card's edges for the hairline; the card's own padding keeps the chips as far from its bottom as its sides. */
+  margin: var(--card-padding) calc(-1 * var(--card-padding)) 0;
+  padding: 16px var(--card-padding) 0;
+  border-top: 1px solid var(--hairline);
+}
 /* A smoothed rounded square, so a pull request does not read as one more status pill beside the mission's. */
 .pull-chip { border-radius: 6px; corner-shape: var(--smooth); text-decoration: none; }
-/* Its symbol names a pull request, not a running state, so it does not spin. */
-.chip.pull-chip svg { animation: none; }
 .pull-more { font-weight: 400; }
 .pull-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 @media (hover: hover) { .pull-chip:hover { background: color-mix(in srgb, var(--tone, var(--secondary)) 19%, transparent); } }
-/* Progress as a ring beside its number. */
-.mission-progress { display: inline-flex; align-items: center; gap: 7px; color: var(--secondary); font-size: 12px; font-weight: 500; }
+/* Progress as a ring alone: it moves by stage, so a number would claim more precision than it has. */
+.mission-progress { display: inline-flex; }
 .mission-progress::before {
   content: "";
   width: 16px;
@@ -1041,7 +1054,7 @@ dialog.detail-panel { container: panel / inline-size; }
   .mission-controls { margin-inline-start: auto; }
   .job-row { flex-wrap: wrap; row-gap: 6px; }
   .job-row > .job-row-text { flex-basis: calc(100% - 40px); }
-  .job-row > .chip { margin-inline-start: 38px; }
+  .job-row > .status-icon { margin-inline-start: 38px; }
   .job-row-time { margin-inline-start: auto; }
 }
 .disclosure { transition: rotate 320ms var(--ease-out), translate 320ms var(--ease-out); translate: 0 0.5px; }
@@ -1049,13 +1062,7 @@ dialog.detail-panel { container: panel / inline-size; }
 [aria-expanded="false"] > .disclosure { rotate: -90deg; translate: 1px 0; }
 .mission-note, .mission-outcome { font-size: 12.5px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .mission-note { padding: 10px 12px; border-radius: 16px; background: var(--surface-2); color: var(--secondary); }
-.mission-foot { margin-top: 4px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; padding-top: var(--card-padding); border-top: 1px solid var(--hairline); }
-.mission-outcome { flex: 1 1 240px; color: var(--secondary); }
-.mission-foot-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; margin-inline-start: auto; }
-.menu-pill { gap: 6px; min-height: 24px; padding: 0 9px 0 10px; font-size: 11.5px; color: var(--secondary); }
-.menu-pill svg { width: 13px; height: 13px; }
-.menu-pill-chevron { transition: rotate 260ms var(--ease-out); }
-.menu-pill[aria-expanded="true"] .menu-pill-chevron { rotate: 180deg; }
+.mission-outcome { color: var(--secondary); }
 
 /* MissionTrack: numbered markers, evenly spread, joined by a line, names centered under them. */
 .track { display: grid; grid-template-columns: repeat(var(--steps), minmax(0, 1fr)); padding: 8px 0 0; --passed: var(--label); }

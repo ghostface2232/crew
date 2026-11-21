@@ -395,12 +395,12 @@ struct MissionPanel: View {
             store.project.isEmpty ? projectName(mission.root, among: store.projects) : nil,
             "\(jobs.count) \(jobs.count == 1 ? "job" : "jobs")",
             tasks.isEmpty ? nil : "\(tasks.filter { $0.state == "done" }.count)/\(tasks.count) tasks",
-            // An active mission shows its preset on its menu; an ended one names it here unless it was the global one.
-            mission.state == "active" ? nil : mission.preset.map { "\($0.rawValue.capitalized) preset" },
+            mission.preset.map { "\($0.rawValue.capitalized) preset" },
         ].compactMap { $0 }.joined(separator: " · ")
     }
     var body: some View {
         let leadRow = store.state.leadRow(for: mission)
+        let pulls = (store.state.pulls ?? []).filter { $0.mission == mission.id }
         VStack(alignment: .leading, spacing: Space.xl) {
             VStack(alignment: .leading, spacing: Space.xs) {
                 // Progress, status and the controls sit on the middle of the title and its meta line together.
@@ -414,10 +414,12 @@ struct MissionPanel: View {
                         }.font(Typeface.caption).monospacedDigit().foregroundStyle(.secondary).fadeTruncated().help(mission.root)
                     }
                     Spacer(minLength: WorkspaceStyle.rowSpacer)
-                    Text(missionProgress(mission, jobs: jobs), format: .percent.precision(.fractionLength(0)))
-                        .font(Typeface.caption).monospacedDigit().foregroundStyle(.secondary).help("Mission progress")
-                    StatusLabel(state: mission.state == "active" ? "running" : mission.state, title: mission.state.capitalized)
-                    if mission.state == "active" { missionMenu }
+                    // An ended mission's status chip already says how it ended.
+                    if mission.state == "active" {
+                        ProgressRing(progress: missionProgress(mission, jobs: jobs)).help("Mission progress")
+                    }
+                    StatusLabel(state: mission.state == "active" ? "running" : mission.state, title: mission.state.capitalized, spins: mission.state == "active")
+                    if mission.state != "done" { missionMenu }
                     // A filled circle, so the control shows its hit area.
                     Button { toggle() } label: {
                         Image(systemName: "chevron.down").font(Symbol.control)
@@ -429,14 +431,6 @@ struct MissionPanel: View {
                 // The title row opens and closes the card; its button keeps its own click.
                 .contentShape(Rectangle())
                 .onTapGesture(perform: toggle)
-                let pulls = (store.state.pulls ?? []).filter { $0.mission == mission.id }
-                if !pulls.isEmpty {
-                    // One shared line of chips, which wraps only when there are many.
-                    ActionRow(spacing: Space.s, leading: true) {
-                        ForEach(pulls) { MissionPullChip(pull: $0, now: store.now) }
-                    }
-                    .padding(.top, Space.s)
-                }
             }
             if expanded {
                 VStack(alignment: .leading, spacing: Space.xl) {
@@ -461,38 +455,29 @@ struct MissionPanel: View {
                             }
                         }
                     }
-                    // The outcome and the mission's own controls share its last row: the outcome leads, the
-                    // controls end it at the trailing edge, centered on one line. An active mission always offers its
-                    // preset; done and stop are offered once it looks finished, and an abandoned one, superseded or gone
-                    // quiet, can still be marked done.
-                    let offered = (mission.state == "active" && finished) || mission.state == "abandoned"
-                    if !mission.outcome.isEmpty || offered || mission.state == "active" {
-                        // A narrow card first drops the preset's words and the finished note, then moves the
-                        // controls under the outcome, where ActionRow wraps them rather than let them run past the card's edges.
-                        ViewThatFits(in: .horizontal) {
-                            HStack(alignment: .center, spacing: Space.m) {
-                                outcome
-                                Spacer(minLength: 0)
-                                controls(offered: offered, compact: false)
-                            }
-                            HStack(alignment: .center, spacing: Space.m) {
-                                outcome
-                                Spacer(minLength: 0)
-                                controls(offered: offered, compact: true)
-                            }
-                            VStack(alignment: .leading, spacing: Space.m) {
-                                outcome
-                                ActionRow { controls(offered: offered, compact: true) }.frame(maxWidth: .infinity, alignment: .trailing)
-                            }
-                        }
-                    }
+                    outcome
                 }
                 .transition(reduceMotion ? .opacity : .asymmetric(
                     // In after the card has started to open; out quickly, before the card closes over it.
                     insertion: .modifier(active: Reveal(shown: false), identity: Reveal(shown: true)).animation(Motion.enter),
                     removal: .modifier(active: Reveal(shown: false), identity: Reveal(shown: true)).animation(Motion.leave)))
             }
+            // Its menu holds Mark Done, so the card only says so.
+            if finished { Text("Looks finished").font(Typeface.caption).foregroundStyle(.secondary) }
             ActionMessage(state: store.actions[mission.actionKey])
+            if !pulls.isEmpty {
+                // Pull requests sit in a band across the card's foot, below a hairline that runs to the card's edges, whether
+                // the card is open or closed. The negative padding runs the hairline out over the card's side padding; the
+                // card's own bottom padding keeps the chips as far from its bottom as from its sides.
+                ActionRow(spacing: Space.s, leading: true) {
+                    ForEach(pulls) { MissionPullChip(pull: $0, now: store.now) }
+                }
+                .padding(.horizontal, WorkspaceStyle.cardPadding).padding(.top, Space.xl)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .overlay(alignment: .top) { Rectangle().fill(WorkspaceStyle.hairline).frame(height: 1) }
+                .padding(.horizontal, -WorkspaceStyle.cardPadding)
+                .padding(.top, WorkspaceStyle.cardPadding - Space.xl)
+            }
         }
         .card()
         // Closing, the contents fade while the card shrinks; they must not spill over the card below.
@@ -506,10 +491,24 @@ struct MissionPanel: View {
         mission.looksFinished(jobs: store.state.jobs, now: store.now, lead: store.state.claude.first { $0.id == mission.owner })
     }
     private var locked: Bool { !store.connected || store.actions[mission.actionKey]?.locked == true }
+    /// Every action on the mission. An abandoned one can only be marked done; an active one can also be dropped, and
+    /// sets the preset its new jobs take, while jobs already running keep theirs.
     private var missionMenu: some View {
         Menu {
             Button("Mark Done", systemImage: "checkmark.circle") { Task { await store.markDone(mission) } }
-            Button("Stop Tracking", systemImage: "xmark.circle") { Task { await store.dismiss(mission) } }
+            if mission.state == "active" {
+                Button("Stop Tracking", systemImage: "xmark.circle") { Task { await store.dismiss(mission) } }
+                    .help("Stops tracking without marking done. Its jobs keep running.")
+                Divider()
+                Picker("Preset for new jobs", selection: Binding(get: { mission.preset }, set: { preset in
+                    Task { await store.setPreset(preset, for: mission) }
+                })) {
+                    Text("Global preset").tag(nil as PresetName?)
+                    ForEach(PresetName.allCases, id: \.self) { preset in
+                        Text("\(preset.rawValue.capitalized) preset").tag(Optional(preset))
+                    }
+                }.pickerStyle(.inline)
+            }
         } label: {
             Image(systemName: "ellipsis").font(Symbol.control)
                 .frame(width: Symbol.controlFrame, height: Symbol.controlFrame)
@@ -521,45 +520,6 @@ struct MissionPanel: View {
         if !mission.outcome.isEmpty {
             Text(mission.outcome).font(Typeface.callout).textSelection(.enabled).padding(.leading, WorkspaceStyle.rowTitleInset)
         }
-    }
-    /// The preset, then stop and done once offered. `compact` keeps only the preset's symbol and drops the finished note.
-    @ViewBuilder private func controls(offered: Bool, compact: Bool) -> some View {
-        if offered && mission.state == "active" && !compact {
-            Text("Looks finished").font(Typeface.caption).foregroundStyle(.secondary)
-        }
-        if mission.state == "active" { presetMenu(compact: compact) }
-        if offered { actions }
-    }
-    /// Which preset the mission's new jobs take; jobs already running keep theirs.
-    private func presetMenu(compact: Bool) -> some View {
-        Menu {
-            Picker("Preset", selection: Binding(get: { mission.preset }, set: { preset in
-                Task { await store.setPreset(preset, for: mission) }
-            })) {
-                Text("Global").tag(nil as PresetName?)
-                ForEach(PresetName.allCases, id: \.self) { preset in
-                    Text(preset.rawValue.capitalized).tag(Optional(preset))
-                }
-            }.pickerStyle(.inline)
-        } label: {
-            // Set here, inside the pill's own label style, so the compact pill shows the symbol alone.
-            Label("\(presetName) preset", systemImage: "slider.horizontal.3").labelStyle(PresetLabelStyle(compact: compact))
-        }
-        .menuStyle(.button).menuIndicator(.hidden).pillButton().morphs(on: mission.preset).fixedSize()
-        .disabled(!store.connected || store.actions[mission.actionKey]?.locked == true)
-        .help(compact ? "\(presetName) preset: the preset this mission's new jobs take" : "The preset this mission's new jobs take")
-        .accessibilityLabel("\(presetName) preset")
-    }
-    private var presetName: String { mission.preset?.rawValue.capitalized ?? "Global" }
-    @ViewBuilder private var actions: some View {
-        // In the warning color: it drops the mission without completing it. An abandoned one is already dropped.
-        if mission.state == "active" {
-            Button("Stop Tracking", systemImage: "xmark.circle") { Task { await store.dismiss(mission) } }
-                .pillButton(.warning)
-                .help("Stops tracking without marking done. Its jobs keep running.").disabled(locked)
-        }
-        Button("Mark Done", systemImage: "checkmark.circle") { Task { await store.markDone(mission) } }
-            .pillButton(.prominent).disabled(locked)
     }
     /// Animated from here rather than inside the card, so the cards below move with it instead of jumping.
     private func toggle() {
@@ -632,6 +592,24 @@ private struct MissionPullChip: View {
         .help(details)
         .accessibilityLabel("Pull request \(pull.repo) #\(pull.number)\(details.isEmpty ? "" : ": \(details)")")
     }
+}
+
+/// Progress as a ring alone, as on the board: it moves by stage, so a number would claim more precision than it has.
+private struct ProgressRing: View {
+    let progress: Double
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var body: some View {
+        ZStack {
+            Circle().strokeBorder(.quaternary, lineWidth: Self.width)
+            Circle().inset(by: Self.width / 2).trim(from: 0, to: progress)
+                .stroke(Palette.accent, lineWidth: Self.width).rotationEffect(.degrees(-90))
+        }
+        .frame(width: Self.side, height: Self.side)
+        .animation(Motion.reduced(Motion.content, reduceMotion), value: progress)
+        .accessibilityHidden(true)
+    }
+    static let side: CGFloat = 16
+    static let width: CGFloat = 3.5
 }
 
 /// How a mission's contents enter and leave: a short drift down out of a soft blur, never a plain cut.
@@ -855,18 +833,5 @@ private struct PanelResizeHandle: View {
                 store.panelWidth = WorkspaceStyle.panelWidth(width + change, page: page)
                 store.persistPanelWidth()
             }
-    }
-}
-
-/// A mission's preset pill. Compact, it shows only the symbol, yet the hidden words still set its height, so it stays
-/// as tall as the pills beside it.
-private struct PresetLabelStyle: LabelStyle {
-    let compact: Bool
-    func makeBody(configuration: Configuration) -> some View {
-        if compact {
-            HStack(spacing: 0) { configuration.icon; configuration.title.hidden().frame(width: 0) }
-        } else {
-            PillLabelStyle().makeBody(configuration: configuration)
-        }
     }
 }

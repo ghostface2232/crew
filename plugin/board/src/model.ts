@@ -122,13 +122,13 @@ export function missionProgress(mission: Mission, jobs: BoardJob[]) {
   return Math.max(0, (index + share) / stages.length);
 }
 /** A pull request's status as a card shows it: a word and the state color it takes (as a chip's data-state). */
-export interface PullStatus { word: string; tone: 'failed' | 'waiting' | 'running' | 'done' | ''; needsLead?: true }
+export interface PullStatus { word: string; tone: 'failed' | 'waiting' | 'running' | 'done' | 'merged' | ''; needsLead?: true }
 /**
  * Most urgent first: what the lead must fix before what it must weigh, and a conflict first of all, since resolving it
  * moves the head and reruns the checks. Waiting and good news follow.
  */
 export function pullStatuses(pull: BoardPull): PullStatus[] {
-  if (pull.state === 'merged') return [{ word: 'Merged', tone: 'done' }];
+  if (pull.state === 'merged') return [{ word: 'Merged', tone: 'merged' }];
   if (pull.state === 'closed') return [{ word: 'Closed', tone: '' }];
   const statuses: (PullStatus | false)[] = [
     pull.conflict && { word: 'Conflict', tone: 'failed', needsLead: true },

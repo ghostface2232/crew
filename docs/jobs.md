@@ -10,7 +10,7 @@ Lead tools start and manage work in worker sessions. Writable jobs use isolated 
 | --- | --- |
 | `delegate` | Hand a piece of work (`role`: `delegate`, `refactor`, `release`, or `fix`) to a role holder in an isolated git worktree (`~/.crew/worktrees/<repo>-<hash>/<job id>/<repo folder>`) on branch `crew-<job id>`. Optional `check` runs a sandboxed shell command in the worktree after each turn |
 | `review` | Hand a read-only review to a cross-reviewer (`review` role). `runs_app: true` routes to `verify` in a writable snapshot. Defaults to `adversarial`. `mode: "standard"` uses Codex's built-in review |
-| `polish` | Hand UI copy, comment, and doc cleanup to the `polish` role. Edits outside `targets` are reported as out of scope |
+| `polish` | Hand UI copy, comment, and doc cleanup to the `polish` role. Edits outside `targets` are reported as out of scope. Scope checks compare literal Git paths, including non-ASCII names and embedded newlines |
 | `debate` | Run a read-only multi-round debate (`debate` role, up to 6 rounds, default 3) over a hard decision |
 | [`mission`](missions.md) | Start, advance, revise, or close a mission and manage its `tasks` and linked pull requests (`pr`) |
 | [`route`](usage-and-presets.md) | Ask who should take a role (or `lead`) based on remaining usage and role holders, plus active preset policy and recent model notes |

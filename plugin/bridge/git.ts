@@ -44,13 +44,13 @@ export async function repoRoot(cwd: string): Promise<string | null> {
 export async function projectRoot(cwd: string): Promise<string | null> {
   let list: string;
   try {
-    list = await git(cwd, ['worktree', 'list', '--porcelain']);
+    list = await git(cwd, ['worktree', 'list', '--porcelain', '-z']);
   } catch (err) {
     if (/not a git repository/i.test((err as Error).message)) return null;
     throw err;
   }
   // The main working tree is always listed first.
-  return /^worktree (.+)$/m.exec(list)?.[1] ?? null;
+  return /^worktree ([^\0]+)\0/.exec(list)?.[1] ?? null;
 }
 
 export interface Worktree {
@@ -81,9 +81,16 @@ async function besides(root: string, linked: string[]): Promise<string[]> {
 /** Number of uncommitted paths in the main tree; a worktree created from a ref will not contain them. */
 export async function dirtyCount(root: string, linked: string[] = []): Promise<number> {
   // Every untracked file by name, so a folder holding nothing but Finder's metadata is not counted either.
-  const out = await git(root, ['status', '--porcelain', '--untracked-files=all', ...await besides(root, linked)]);
-  // Finder's .DS_Store files are never something a worker needs, and they are in most trees that do not ignore them.
-  return out.split('\n').filter((line) => line && !/(^|\/)\.DS_Store"?$/.test(line.slice(3))).length;
+  const out = await git(root, ['status', '--porcelain', '-z', '--untracked-files=all', ...await besides(root, linked)]);
+  const entries = out.split('\0');
+  let count = 0;
+  for (let i = 0; entries[i]; i++) {
+    const entry = entries[i];
+    if (path.posix.basename(entry.slice(3)) !== '.DS_Store') count++;
+    // With -z, a rename or copy has a second field containing its original path.
+    if (/[RC]/.test(entry.slice(0, 2))) i++;
+  }
+  return count;
 }
 
 /**
@@ -327,7 +334,7 @@ export function realpath(target: string, base = process.cwd()): string {
  */
 export async function commitAll(wt: string, message: string, linked: string[] = []): Promise<string | null> {
   await git(wt, [...NO_HOOKS, 'add', '-A', ...await besides(wt, linked)]);
-  const staged = await git(wt, [...NO_HOOKS, 'diff', '--cached', '--name-only']);
+  const staged = await git(wt, [...NO_HOOKS, 'diff', '--cached', '--name-only', '-z']);
   if (!staged) return null;
   await git(wt, [...await commitSettings(wt), ...NO_HOOKS, 'commit', '--no-verify', '-m', message]);
   return git(wt, ['rev-parse', '--short', 'HEAD']);
@@ -400,9 +407,9 @@ export async function revertCommit(wt: string, commit: string, linked: string[] 
 }
 
 export async function changesSince(wt: string, base: string): Promise<{ files: string[]; stat: string }> {
-  const names = await git(wt, ['diff', '--name-only', base, 'HEAD']);
+  const names = await git(wt, ['diff', '--name-only', '-z', base, 'HEAD']);
   const stat = await git(wt, ['diff', '--shortstat', base, 'HEAD']);
-  return { files: names ? names.split('\n') : [], stat };
+  return { files: names.split('\0').filter(Boolean), stat };
 }
 
 /** Detach links (including Windows junctions) before Git can follow them during deletion. */

@@ -126,14 +126,23 @@ async function callTool(name: string, args: any): Promise<unknown> {
     case 'lead_answers': {
       const seconds = args.wait_seconds ?? 0;
       if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) throw new Error('wait_seconds must be a non-negative number.');
-      const { questions }: { questions: LeadQuestion[] } = await api('GET', `${route}/questions?${auth}&wait=${Math.min(seconds, 600)}`);
-      const fresh = questions.filter((q) => q.answer !== undefined && !shown.has(q.id));
-      for (const q of fresh) shown.add(q.id);
-      return {
-        answered: fresh.map(({ id, text, answer }) => ({ id, question: text, answer })),
-        open: questions.filter((q) => q.answer === undefined).map(({ id, text, blocks }) => ({ id, question: text, blocks })),
-        answered_earlier: questions.filter((q) => q.answer !== undefined).length - fresh.length,
-      };
+      const deadline = Date.now() + Math.min(seconds, 600) * 1000;
+      const known = shown.size;
+      for (;;) {
+        // Each request must receive headers before fetch's five-minute timeout.
+        const wait = Math.max(0, Math.min((deadline - Date.now()) / 1000, 120));
+        const { questions }: { questions: LeadQuestion[] } = await api('GET', `${route}/questions?${auth}&answered=${known}&wait=${wait}`);
+        const answered = questions.filter((q) => q.answer !== undefined);
+        const open = questions.filter((q) => q.answer === undefined);
+        if (open.length && answered.length === known && Date.now() < deadline) continue;
+        const fresh = answered.filter((q) => !shown.has(q.id));
+        for (const q of fresh) shown.add(q.id);
+        return {
+          answered: fresh.map(({ id, text, answer }) => ({ id, question: text, answer })),
+          open: open.map(({ id, text, blocks }) => ({ id, question: text, blocks })),
+          answered_earlier: answered.length - fresh.length,
+        };
+      }
     }
     case 'browser':
       return api('POST', `${route}/browser`, { token });

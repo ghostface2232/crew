@@ -1,13 +1,16 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
+import { once } from 'node:events';
 import fs from 'node:fs';
+import net from 'node:net';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
+import { runCheck } from '../plugin/bridge/check.ts';
 import { resolveConfig } from '../plugin/bridge/config.ts';
 import { Jobs } from '../plugin/bridge/jobs.ts';
 import type { Adapter, CrewEvent, Job, JobCtl } from '../plugin/bridge/jobs.ts';
@@ -177,7 +180,7 @@ async function freePort(): Promise<number> {
   return port;
 }
 
-async function daemon(t: TestContext) {
+async function daemon(t: TestContext, prepare?: (home: string) => void, preload?: string) {
   const port = await freePort();
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-question-http-'));
   const bin = path.join(home, 'codex');
@@ -208,7 +211,9 @@ async function daemon(t: TestContext) {
   // A job's model is read from Codex's own model cache, which a machine without Codex does not have.
   fs.writeFileSync(path.join(home, 'models_cache.json'), JSON.stringify({ models: [{ slug: 'gpt-test-sol' }] }));
   const env = { ...process.env, CREW_HOME: home, CREW_PORT: String(port), CLAUDE_PROJECT_DIR: home, CLAUDE_CODE_SESSION_ID: 'test-lead', CREW_AGENTGAUGE_DIR: path.join(home, 'gauge'), CODEX_HOME: home };
-  const child = spawn(process.execPath, [path.resolve('plugin/bridge/daemon.ts')], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+  prepare?.(home);
+  const args = preload ? ['--import', preload] : [];
+  const child = spawn(process.execPath, [...args, path.resolve('plugin/bridge/daemon.ts')], { env, stdio: ['ignore', 'pipe', 'pipe'] });
   t.after(async () => { await stop(child); fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }); });
   await new Promise<void>((resolve, reject) => {
     child.stdout.on('data', (chunk) => { if (String(chunk).includes('listening on')) resolve(); });
@@ -242,7 +247,7 @@ async function daemon(t: TestContext) {
     const { ticket } = (await api('POST', '/api/session/ticket', {})).body;
     return { authorization: `Bearer ${(await api('POST', '/api/session', { ticket }, { authorization: '' })).body.credential}` };
   };
-  return { home, env, api, create, started, hostStatus, port, secret, board };
+  return { home, env, api, create, started, hostStatus, port, secret, board, child };
 }
 
 const textOf = (result: any): string => {
@@ -290,6 +295,11 @@ test('worker stdio and all question routes use a private token, with answers wak
   assert.equal((await h.api('GET', `${route}/questions?token=${token}&wait=NaN`)).status, 400);
   assert.equal((await worker.call('lead_answers', { wait_seconds: -1 })).isError, true);
   assert.equal((await worker.call('unknown')).isError, true);
+  // A poll starting after an answer arrives must return it even if a different question stays open.
+  await worker.call('ask_lead', { question: 'One more?' });
+  const reader = stdio(t, 'worker-mcp.ts', { ...h.env, ...server.env });
+  const latest = JSON.parse(textOf(await reader.call('lead_answers', { wait_seconds: 600 })));
+  assert.deepEqual([latest.answered[0].id, latest.open[0].question], [question.id, 'One more?']);
   const sibling = await h.create();
   const siblings = JSON.parse(textOf(await worker.call('siblings')));
   assert.deepEqual(siblings.map((s: any) => s.id), [sibling.job.id]);
@@ -893,4 +903,133 @@ test('a hook report reaches the daemon with the secret the hook reads from the t
   assert.equal(report({ ...h.env, CREW_HOME: elsewhere }, 'forged').status, 0);
   const sessions = (await h.api('GET', '/api/state')).body.claude.map((session: { id: string }) => session.id);
   assert.deepEqual([sessions.includes('typed'), sessions.includes('forged')], [true, false]);
+});
+
+test('worker polls stay below the header timeout and share one 600-second deadline', async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-worker-polls-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const env = { ...process.env, CREW_HOME: home, CREW_PORT: String(await freePort()), CREW_JOB_ID: 'job', CREW_JOB_TOKEN: 'test' };
+  const script = `
+    let elapsed = 0;
+    Date.now = () => elapsed * 1000;
+    globalThis.fetch = async (url) => {
+      const wait = Number(new URL(url).searchParams.get('wait'));
+      if (wait >= 300) throw new Error('response headers timed out');
+      if (!(wait > 0) || elapsed + wait > 600) throw new Error('invalid remaining wait');
+      if (elapsed === 0) elapsed += 0.25; // Request overhead leaves a fractional final slice.
+      elapsed += wait;
+      const answer = elapsed > 300 && process.env.ANSWER === '1' ? 'yes' : undefined;
+      return Response.json({ questions: [{ id: 'q', text: 'ready?', answer }] });
+    };
+    process.on('exit', () => console.error(elapsed));
+    await import(${JSON.stringify(new URL('../plugin/bridge/worker-mcp.ts', import.meta.url).href)});
+  `;
+  for (const answer of [true, false]) {
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+      env: { ...env, ANSWER: answer ? '1' : '0' }, encoding: 'utf8', timeout: 5000,
+      input: JSON.stringify({ jsonrpc: '2.0', method: 'tools/call', id: 1, params: { name: 'lead_answers', arguments: { wait_seconds: 600 } } }) + '\n',
+    });
+    assert.ifError(result.error);
+    assert.equal(result.status, 0, result.stderr);
+    const received = JSON.parse(textOf(JSON.parse(result.stdout).result));
+    assert.deepEqual(received.answered.map((q: any) => q.answer), answer ? ['yes'] : []);
+    const elapsed = Number(result.stderr.trim());
+    assert.ok(answer ? elapsed > 300 && elapsed < 600 : elapsed === 600, `elapsed ${elapsed}`);
+  }
+});
+
+test('job detail keeps the original task and the same failed-check outcome and seals as state', async (t) => {
+  const h = await daemon(t, (home) => fs.writeFileSync(path.join(home, 'jobs.json'), JSON.stringify({ seq: 1, jobs: [{
+    id: 'cx-test', kind: 'delegate', agent: 'codex', cwd: home, state: 'done', outcome: 'done', endedAt: Date.now(), turns: 1,
+    prompt: 'original task', instructions: 'worker instructions', receipts: [{ turn: 1, check: { exit: 1 } }],
+    evidence: [{ file: 'result.png', modified: 1 }], news: [],
+  }] })));
+  const summary = (await h.api('GET', '/api/state')).body.jobs[0];
+  const { body: detail } = await h.api('GET', '/api/jobs/cx-test');
+  assert.equal(summary.outcomeContradiction, 'the bridge check failed');
+  assert.equal(summary.prompt, undefined);
+  assert.ok(summary.evidence[0].sig);
+  assert.deepEqual(detail, { ...summary, prompt: 'original task', instructions: 'worker instructions' });
+});
+
+for (const failed of ['jobs', 'missions']) {
+  test(`shutdown logs a failed ${failed} flush, saves the other store and exits with failure`, async (t) => {
+    const h = await daemon(t);
+    let logs = '';
+    h.child.stdout.on('data', (chunk) => { logs += chunk; });
+    const blockedFile = path.join(h.home, failed + '.json.tmp');
+    fs.mkdirSync(blockedFile);
+    try {
+      const exited = once(h.child, 'close', { signal: AbortSignal.timeout(4000) });
+      await h.api('POST', '/api/shutdown', {});
+      assert.equal((await exited)[0], 1);
+      assert.match(logs, new RegExp(failed + '.*(EISDIR|EPERM|EACCES)', 's'));
+      assert.ok(fs.existsSync(path.join(h.home, (failed === 'jobs' ? 'missions' : 'jobs') + '.json')));
+      assert.equal(fs.existsSync(path.join(h.home, 'daemon.json')), false);
+    } finally {
+      fs.rmdirSync(blockedFile);
+    }
+  });
+}
+
+test('shutdown signals the process group of every running check', async (t) => {
+  // In a nested sandbox the launcher cannot run. Stand in for it and record signals without starting any processes.
+  const preload = `
+    import childProcess from 'node:child_process';
+    import { EventEmitter } from 'node:events';
+    import { syncBuiltinESMExports } from 'node:module';
+    import fs from 'node:fs';
+    import path from 'node:path';
+    import { runCheck } from ${JSON.stringify(new URL('../plugin/bridge/check.ts', import.meta.url).href)};
+    const spawn = childProcess.spawn;
+    let id = 1000000000;
+    childProcess.spawn = (...args) => args[0] === '/usr/bin/sandbox-exec'
+      ? Object.assign(new EventEmitter(), { pid: ++id, stdout: new EventEmitter(), stderr: new EventEmitter() })
+      : spawn(...args);
+    syncBuiltinESMExports();
+    const kill = process.kill;
+    process.kill = (pid, signal) => {
+      if (pid >= 0) return kill(pid, signal);
+      fs.appendFileSync(path.join(process.env.CREW_HOME, 'signals'), pid + ' ' + signal + '\\n');
+      return true;
+    };
+    for (let i = 0; i < 2; i++) void runCheck('true', process.env.CREW_HOME, process.env.CREW_HOME, [], { platform: 'darwin' });
+  `;
+  const h = await daemon(t, undefined, 'data:text/javascript,' + encodeURIComponent(preload));
+  const exited = once(h.child, 'close', { signal: AbortSignal.timeout(4000) });
+  await h.api('POST', '/api/shutdown', {});
+  assert.equal((await exited)[0], 0);
+  assert.deepEqual(fs.readFileSync(path.join(h.home, 'signals'), 'utf8').trim().split('\n'), ['-1000000001 SIGKILL', '-1000000002 SIGKILL']);
+});
+
+test('daemon shutdown closes a live sandboxed check and its descendants', {
+  skip: !['darwin', 'win32'].includes(process.platform),
+  timeout: 30000,
+}, async (t) => {
+  if (process.platform === 'win32') {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-check-probe-'));
+    t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+    const probe = await runCheck('true', tmp, tmp, []);
+    if (probe.skipped) return t.skip(probe.skipped);
+    assert.equal(probe.exit, 0, probe.output);
+  }
+  const listener = net.createServer();
+  listener.listen(0, '127.0.0.1');
+  await once(listener, 'listening');
+  const port = (listener.address() as net.AddressInfo).port;
+  const connected = once(listener, 'connection', { signal: AbortSignal.timeout(20000) });
+  t.after(() => listener.close());
+  // This descendant holds its socket until it is killed, the test closes it, or its own safety timeout fires.
+  const command = `node -e "const s = require('node:net').connect(${port}, '127.0.0.1'); s.setTimeout(25000, () => s.destroy()); s.resume()"`;
+  const preload = `import { runCheck } from ${JSON.stringify(new URL('../plugin/bridge/check.ts', import.meta.url).href)};
+    void runCheck(${JSON.stringify(command)}, process.env.CREW_HOME, process.env.CREW_HOME + '/scratch-check', []);`;
+  const h = await daemon(t, (home) => fs.mkdirSync(path.join(home, 'scratch-check')), 'data:text/javascript,' + encodeURIComponent(preload));
+  const [socket] = await connected;
+  try {
+    const closed = once(socket, 'close', { signal: AbortSignal.timeout(4000) });
+    await h.api('POST', '/api/shutdown', {});
+    await closed.catch((err) => { if (err.code !== 'ECONNRESET') throw err; });
+  } finally {
+    socket.destroy();
+  }
 });

@@ -76,9 +76,9 @@ Built-in presets name no worker models because account availability differs. Cus
 
 ### Presets per mission
 
-A mission's `preset` overrides the global preset for jobs started under it. Role models and efforts still win. The lead passes `preset` to `mission` only when the user names one. Users can also change it from the mission menu on the board or in the app. Changes apply to new jobs. Each job records `Job.preset` at start and keeps its preset and model across follow-ups.
+A mission's `preset` overrides the global preset for jobs started under it. Role models and efforts still win. The lead passes `preset` to `mission` only when the user names one and never picks one itself. Users can also change it from the mission menu on the board or in the app. Changes apply to new jobs. Each job records `Job.preset` at start and keeps its preset and model across follow-ups.
 
-Stopping tracking on the board keeps the mission ID (`costMission`) and preset on new jobs until the lead finishes the mission or opens another. A job naming an unknown mission fails once with no fallback to the global preset. After an MCP server restart, the next job or `route` reads the session's open mission from the daemon. If it closed while the MCP server was down, the lead keeps the preset and leaves the card closed. Because session instructions are fixed at start, `mission` and `route` replies state the active preset and subagent cap.
+The preset belongs to the work, not the card. Stopping tracking on the board keeps the mission ID (`costMission`) and preset on new jobs until the lead finishes the mission or opens another. A job naming an unknown mission fails once with no fallback to the global preset. After an MCP server restart, the next job or `route` reads the session's open mission from the daemon. If it closed while the MCP server was down, the lead keeps the preset and leaves the card closed. Because session instructions are fixed at start, `mission` and `route` replies state the active preset and subagent cap.
 
 ### Tiers
 
@@ -91,7 +91,7 @@ A job can name its difficulty via `tier` (`delegate`, `review`, `polish`, `debat
 | `standard` | Most work, including most UI changes; the default | Sol | Hydrogen | `medium` |
 | `frontier` | Especially hard/complex work, a UI rebuilt from scratch, or literary/very complex documents | Astra | Neon | `high` |
 
-Tiers name model families. For Codex, Crew picks the newest unhidden model in that family from `$CODEX_HOME/models_cache.json` (falling back to Codex's default). For Antigravity, Crew matches the session's offered model list (skipping orchestrators) and falls back to the agent's default. Because Antigravity element names do not encode rank, families are mapped manually. `Neon` holds `frontier`. The displaced `Argon` stays recorded in `FORMER_FAMILIES` so explicit Argon models still run and preset caps still lower them.
+Tiers name model families, not versions. For Codex, Crew picks the newest unhidden model in that family from `$CODEX_HOME/models_cache.json` (falling back to Codex's default). For Antigravity, Crew matches the session's offered model list (skipping orchestrators) and falls back to the agent's default. Because Antigravity element names do not encode rank, families are mapped manually. `Neon` holds `frontier`. The displaced `Argon` stays recorded in `FORMER_FAMILIES` so explicit Argon models still run and preset caps still lower them.
 
 - **Model precedence:** explicit job `model` (a versionless family name such as `"Astra"` resolves as its tier), job `tier`, configured model (role, preset, or `codex.model`/`antigravity.model`), then default tier.
 - **Effort precedence:** job `effort`, role or preset `effort`, then (for Codex) named tier effort, `codex.effort`, or default tier effort. Under `economy`, jobs stay `low` unless the lead overrides `effort`. Antigravity accepts `effort` only from the job, role, or preset (mapped to `thought_level`).

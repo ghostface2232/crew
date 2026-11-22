@@ -93,4 +93,3 @@ Related tests include `test/policy.test.ts`, `test/browser.test.ts`, and `test/w
 - 2026-11-16: Windows bridge parity verified on Windows 11 with Codex CLI 0.166.0 and Git for Windows 2.53. Sandboxed `check` runs Git for Windows' `sh` inside `codex sandbox` under a PowerShell 5.1 kill-on-close job object with a stdin-secret status line because Codex waits on open pipes and sandboxed processes can kill their parent. `crew.browser` stayed macOS-only because Chromium starts inside Codex's Windows sandbox.
 - 2026-11-14: Added the `codex.plugins` default `["browser"]` and the plugin token-denial profile.
 - 2026-11-12–13: Added shared-machine rules, `runs_app` snapshots, and `exclusive` jobs.
-- 2026-11-11: Returned Antigravity to default mode after live testing showed `accept-edits` skipped workspace bounds. See [approval policy](approvals.md).

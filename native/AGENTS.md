@@ -6,7 +6,7 @@ The macOS app: SwiftUI and AppKit in Swift 6 language mode, macOS 26 and later, 
 
 - The app and the React board (`plugin/board/src/`) show the same state and offer the same actions. A change to what one shows or offers usually needs the same change in the other.
 - Every size, gap, color, type style, and animation comes from `Sources/Crew/DesignTokens.swift`. When no token fits, add one there and in `docs/design-tokens.md`; do not write the number in the view. The exceptions are listed in that doc.
-- No SwiftUI animation that never ends: one renders the window's whole view graph on every frame. A turning symbol is a layer animation (`Turning`) and stands still under Reduce Motion.
+- A repeating SwiftUI animation renders the window's whole view graph on every frame, so one runs only while its cause lasts (the workflow strip while its session panel is open). A turning symbol is a layer animation (`Turning`) and stands still under Reduce Motion.
 - `Sources/Crew/Models.swift` decodes the daemon's JSON. Fields an older daemon does not send are optional.
 
 ## Where things are

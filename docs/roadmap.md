@@ -35,7 +35,7 @@ The board is organized around missions, needs-you requests, activity, and histor
 | Strand drawer | Clicking a job opens `JobDrawer.tsx` / `JobDetailView.swift` with report, changed/out-of-scope files, check receipts, events, and follow-up input. | Done |
 | Command bar | `Dispatch.tsx` / `DispatchView.swift` (`New Job`) sends a command, question, or information note without a lead (`POST /api/jobs`); inline `@codex` syntax and lead mission start remain open. | Partial |
 | Usage gauges | Per-agent usage windows and status in `Overview.tsx` and `BoardView.swift`; New Job disables only agents whose configuration has `enabled: false`. The command bar does not suggest an alternative when an agent is tight. | Partial |
-| Progress roll-up | Mission progress rolls up from stages and jobs (`Missions.tsx`, `BoardView.swift`). | Done |
+| Progress roll-up | A mission's stage track shows how far it has come (`Missions.tsx`, `BoardView.swift`); the separate progress ring was removed on 2026-11-22 ([missions.md](missions.md#history)). | Done |
 | Intent | `New Job` distinguishes information (global/project instructions or mission note), read-only question (`ask: true`), and command. | Done |
 | Scoped follow-up | `JobDrawer` / `JobDetailView` send follow-ups via `POST /api/jobs/:id/reply`, steering active Codex turns; Antigravity still requires waiting for the turn to end (`antigravity.ts`). | Partial |
 | Rounds | Per-turn commits on job branches (`jobs.ts` `rounds` / `round()`), Keep/Undo buttons, and `roundsNotice` on the worker's next turn. | Done |

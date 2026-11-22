@@ -17,16 +17,6 @@ A mission groups one user command and the jobs it took, so the board can answer 
 - Active missions offer *Mark Done* and *Stop Tracking* in both UIs, in the card's ellipsis menu (and *Mark Done* on abandoned ones, sending `reopen: true` so late lead calls cannot undo *Stop Tracking*). *Stop Tracking* marks a mission `abandoned` without stopping its jobs.
 - Clients show "Looks finished" after 20 quiet minutes with no active jobs or open tasks (`todo`/`doing`) unless the owning lead session is working.
 
-### Progress roll-up
-
-Both the React board (`plugin/board/src/model.ts`) and the native macOS app (`native/Sources/Crew/Models.swift`) compute mission progress from state using the same rule:
-
-- A `done` mission is `1` (100%).
-- Otherwise progress is `(index + share) / stages.length`:
-  - For a mission with a custom `stages` plan, `stages` is that plan and `index` is `mission.stageIndex` (falling back to `stages.indexOf(mission.stage)`).
-  - For a legacy mission without `stages`, `stages` is the 7 standard stages (`plan`, `implement`, `self-review`, `cross-review`, `fix`, `polish`, `final`) and `index` is the current stage's position.
-- `share` is the mean across the mission's unfinished jobs (`endedAt == null`) of `0.5` for `running` or `waiting` jobs and `0` for other unfinished jobs, or `0.5` when there are no unfinished jobs.
-
 ## Several missions in one session
 
 - Opening a new mission keeps existing open missions active (`active`, `done`, `abandoned`). A fourth state would only record where the lead is looking, while the mission's workers can still run.
@@ -72,6 +62,7 @@ Both the React board (`plugin/board/src/model.ts`) and the native macOS app (`na
 
 ## History
 
+- 2026-11-22: The progress ring on a mission card's title row was removed from the board and the app, with its formula (`missionProgress`), because it moved by stage rather than by measured work and the stage track already shows the same progress.
 - 2026-11-20: Several open missions per session, with explicit mission IDs instead of an implicit current mission or a workflow engine; mission tasks; linked PR watches, with no polling while the lead session is away; `SessionStart` resume context.
 - 2026-11-14: Fluid mission plans with repeated and named stops; *Mark Done* and *Stop Tracking*.
-- 2026-11-12–13: Missions and the board's decision support added.
+- 2026-11-12–13: Missions added; the board's decision support is in [board.md](board.md#history).

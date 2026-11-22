@@ -41,7 +41,7 @@ Unassigned roles and roles without `agents` inherit their parent's holders with 
 
 - `agents` is stored in fixed order (`codex`, `antigravity`, `claude`). The legacy config form (`agent`, `also`, `model`, `effort`) is still converted on read.
 - The lead selects a holder with `agent` on `delegate`, `review`, `polish`, and `debate`. Picking `claude` starts no worker job and returns instructions for in-session or subagent execution (`crew:self-reviewer` for reviews).
-- When `agent` is omitted (`POST /api/jobs` or tool call), Crew picks the first enabled, able worker in preferred order (`antigravity` first for `polish`, `codex` first for all other roles). See [routing](usage-and-presets.md#routing) for the usage-aware choice. Roles held only by `claude` or an unable/disabled worker fail at start.
+- When `agent` is omitted (`POST /api/jobs` or tool call), Crew picks the first enabled, able worker in preferred order (`antigravity` first for `polish`, `codex` first for all other roles). See [routing](usage-and-presets.md#routing) for the usage-aware choice. Roles held only by `claude` or an unable/disabled worker fail at start rather than falling back.
 - Settings edits the stored `roleSettings` table. See [daemon state](daemon-api.md#state-and-events) for the fields the daemon sends.
 - `resolveRole` in `jobs.ts` settles a job's role once at creation. `POST /api/jobs` may pass `role` without `kind`. A job with `kind: "review"` and `runs_app` resolves to `verify`. Contradictory `role`/`kind`/`runs_app`/`debate` combinations fail. The board's New Job offers every role except `debate`.
 
@@ -50,7 +50,7 @@ Unassigned roles and roles without `agents` inherit their parent's holders with 
 - Per-role `codex` and `antigravity` entries (`model`, `effort`) override global agent settings, and per-job tool arguments override both. Antigravity's `effort` sets `thought_level` after selecting the model and steps down to the nearest lower supported level if needed. Omitted or unsupported levels keep the session default.
 - `polish` accepts `model` like `delegate` and `review`, and results print `model:` right after the header. `resolvedModel` and `resolvedEffort` record what the session reported (falling back to configured values or `unknown (agent default)`).
 
-`roles` is read at job start so edits apply to the next job without a restart. An invalid table fails the job and reports the reason. The lead's tool titles and server instructions name the role holders as of session start.
+`roles` is read at job start so edits apply to the next job without a restart. An invalid table fails the job with the reason instead of falling back to defaults. The lead's tool titles and server instructions name the role holders as of session start.
 
 ## Role instruction files
 
@@ -72,7 +72,7 @@ The project file is part of the repository and is trusted like its `AGENTS.md` o
 - Nothing is written to any service's own instruction files (`AGENTS.md`, `CLAUDE.md`, rules folders).
 - Missing or empty files contribute no instructions. An unreadable file fails the job or surfaces an error in the Claude hook.
 - Because Claude Code replaces hook context over 10,000 characters with a 2,000-character preview, any file that would push the hook output past 9,000 characters (`CONTEXT_LIMIT`) is shown only by its path. Workers have no such cap.
-- Each section is headed by its source so the agent can distinguish user instructions from repository instructions. The bridge and sandbox enforce role limits.
+- Each section is headed by its source so the agent can distinguish user instructions from repository instructions. Role limits are enforced by the bridge and sandbox, not by prose.
 
 ## Model notes and scores
 
@@ -93,7 +93,7 @@ Not modelled: time decay, measured diff size, and independent checks of lead tri
 
 Peer ratings layer over review evidence so brief adherence, reporting honesty, reviewer usefulness, and independent checks on the lead's own work show up in scores without letting generous LLM ratings dominate.
 
-**Who rates whom.** A rater must have seen the other participant's work. Every item takes an integer from `1` to `5`.
+**Who rates whom.** A rater must have seen the other participant's work, and never rates itself. Every item takes an integer from `1` to `5`.
 
 | Rater | Rated | When | Items |
 | --- | --- | --- | --- |

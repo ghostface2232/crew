@@ -12,7 +12,7 @@ The Claude plugin, CLI, and Windows Electron main process connect to an independ
 | --- | --- |
 | `plugin/board/src/store.ts` | One SSE subscription, immutable snapshots, reconnect replacement, and bounded history of 400 events |
 | `plugin/board/src/api.ts` | Launch-ticket sign-in, HTTP requests, SSE reader, shared drafts, and action locks keyed by job and request identity |
-| `plugin/board/src/model.ts` | Project grouping, state priority, usage and heatmap helpers, duration labels, and [mission stop and progress math](missions.md#progress-roll-up) |
+| `plugin/board/src/model.ts` | Project grouping, state priority, usage and heatmap helpers, duration labels, and [mission stops](missions.md#display) |
 | `plugin/board/src/ui.tsx` | Native `<dialog>` lifecycle, the board's select, menus, confirm sheet (`ask`), stable composers, Fluent status icons, agent marks, and clock updates |
 | `Missions.tsx`, `NeedsYou.tsx`, `Overview.tsx`, `Palette.tsx`, `Shell.tsx`, `Scores.tsx` | Mission tracks, request cards, workspace/activity/history views, command palette, sidebar navigation, and model scores |
 | `JobDrawer.tsx`, `Settings.tsx`, `Dispatch.tsx` | Job and session details (verification, evidence, rounds, debate), scoped settings/presets/about, and direct dispatch |
@@ -117,7 +117,7 @@ The Electron renderer uses `nodeIntegration: false`, `contextIsolation: true`, a
 
 ## Tests
 
-The board was checked in the browser pane and with Playwright regressions (`npm run test:e2e`). Automated handler tests covered instruction saves, concurrent edits, and request locks. The mission and workspace changes were covered by browser checks and `test/mcp.test.ts`, `test/missions.test.ts`, and `test/board.test.ts`.
+The board was checked in the browser pane and with Playwright regressions (`npm run test:e2e`). Automated handler tests covered instruction saves, concurrent edits, and request locks. Mission display is tested as described in [missions.md](missions.md#tests).
 
 ```bash
 npm test
@@ -136,8 +136,8 @@ The browser suite (`test/e2e/board.spec.ts`, `playwright.config.ts`) runs in Chr
 
 - **2026-11-13.** The native SwiftUI and AppKit app replaced Electron on macOS, using system Liquid Glass, SF Symbols, and bundled standalone Node while keeping the TypeScript daemon and React web board. The retired Electron output was `release/Crew-darwin-arm64/Crew.app`. The move removed the earlier `@electron/asar` dependency overrides (`73bde30`). See [macos-app.md](macos-app.md) and [windows-app.md](windows-app.md) for the current apps.
 - **2026-11-13.** Review fixes kept `All projects` visible and gave Claude waiting episodes a unique `waitingId`. Duplicate hooks for the same wait share the ID. A new wait gets a new ID even if the message repeats, enabling accurate notification deduplication. For daemons without `waitingId`, notifications fall back to the message key.
-- **2026-11-12–13.** Migrated the board to React/TypeScript/Vite, added desktop apps in place of the earlier web-only setup, and added board decision support. React replaced the imperative `board.js` renderer and took sole ownership of its DOM.
-- **2026-11-12.** The original Crew 0.2.0 implementation served the L5 UI foundation and L2 role-based dispatch. In the original React/Electron setup, the Electron main process owned the window, tray, signing, and updater, with preload IPC only for updates. AgentGauge usage routing (`plugin/bridge/usage.ts`), New Job intents (`Command`, `Question`, `Information`), and per-round undo (`plugin/board/src/JobDrawer.tsx`) shipped after that baseline.
+- **2026-11-12–13.** Migrated the board to React/TypeScript/Vite and added board decision support ([architecture.md](architecture.md#history) records the desktop apps). React replaced the imperative `board.js` renderer and took sole ownership of its DOM.
+- **2026-11-12.** The original Crew 0.2.0 implementation served the L5 UI foundation and L2 role-based dispatch. As it still does on Windows, the Electron main process owned the window, tray, signing, and updater, with preload IPC only for updates. AgentGauge usage routing (`plugin/bridge/usage.ts`), New Job intents (`Command`, `Question`, `Information`), and per-round undo (`plugin/board/src/JobDrawer.tsx`) shipped after that baseline.
 - **2026-11-12.** The initial React/Electron baseline passed 81 unit tests, typecheck, 14 browser tests, and a macOS arm64 Electron smoke run. The baseline reported ~524 MiB sum of Electron working sets under Playwright, ~255 MiB app bundle, and ~262 kB / 82 kB gzip JS renderer bundle. The working-set sum counts shared pages twice and excludes the daemon and workers, so it cannot serve as a physical-memory budget.
 
 The migration UI review covered the board, requests, details, settings, and dispatch flow, excluding OS notification appearance.

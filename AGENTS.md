@@ -30,7 +30,7 @@ Crew daemon (plugin/bridge/daemon.ts, http://127.0.0.1:47615)
 | --- | --- | --- |
 | `plugin/bridge/` | Daemon, lead and worker MCP servers, agent adapters, hooks, and the `crew` CLI, in TypeScript run directly by Node | [plugin/bridge/AGENTS.md](plugin/bridge/AGENTS.md) |
 | `plugin/board/` | React status board, built with Vite and served by the daemon | `plugin/board/AGENTS.md` |
-| `plugin/roles/` | Role instructions each job receives (engineer, reviewer, editor, debater, question, machine rules, and additions for refactor, release, and fix) | |
+| `plugin/roles/` | Role instructions each job receives (engineer, reviewer, editor in `polisher.md`, debater, question, machine rules, and additions for refactor, release, and fix) | |
 | `plugin/skills/`, `plugin/agents/`, `plugin/hooks/` | The `/crew:run`, `/crew:debate`, `/crew:review`, and `/crew:board` skills; the `self-reviewer` subagent; hook registrations | |
 | `native/` | macOS app (Swift 6) | `native/AGENTS.md` |
 | `desktop/` | Windows app (Electron) | `desktop/AGENTS.md` |
@@ -60,7 +60,7 @@ node plugin/bridge/cli.ts install    # register this checkout as the Crew plugin
 - Comments and docs are in English. Write what the code cannot say: intent, constraints, and non-obvious decisions.
 - The bridge has no runtime dependencies and no build step. The only runtime dependencies are the board's (React and Fluent icons), bundled by Vite.
 - When behavior changes, update the doc that owns the topic (below) in the same change.
-- Do not add a `CLAUDE.md` here: Claude Code ignores `AGENTS.md` files while one exists.
+- Do not add a `CLAUDE.md` here: by default Claude Code ignores `AGENTS.md` files while one exists (checked with Claude Code 2.1.326, 2026-11-22).
 
 ## Where each topic is documented
 

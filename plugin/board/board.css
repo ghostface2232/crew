@@ -156,6 +156,22 @@
    whole area would keep it up whenever the pointer rests on a modal. The gutter stays, so nothing shifts when it appears. */
 * { scrollbar-width: thin; scrollbar-color: transparent transparent; transition: scrollbar-color 250ms ease-out; }
 [data-scrolling], [data-scrollbar-hover] { scrollbar-color: var(--tertiary) transparent; }
+/* The stage and the detail panel let their content run out under their rounded corners, so their bars' tracks start and
+   end clear of the curves instead. Only a styled ::-webkit-scrollbar takes a track margin, and Chrome draws it only while
+   scrollbar-width and scrollbar-color are auto; browsers without it keep the thin bar above. */
+:root { --edge-bar: max(var(--scrollbar-w, 0px), 10px); }
+@supports selector(::-webkit-scrollbar) {
+  main.page, div.detail-scroll { scrollbar-width: auto; scrollbar-color: auto; }
+  /* The bar's gutter comes out of the stage's end padding, so its content sits as far from both edges. */
+  main.page { padding-inline-end: calc(max(var(--page-margin), (100% - 1400px) / 2) - var(--edge-bar)); }
+  @media (max-width: 760px) { main.page { padding-inline-end: calc(12px - var(--edge-bar)); } }
+  main.page::-webkit-scrollbar, div.detail-scroll::-webkit-scrollbar { width: var(--edge-bar); background: transparent; }
+  main.page::-webkit-scrollbar-track { margin-block: var(--stage-radius); }
+  div.detail-scroll::-webkit-scrollbar-track { margin-block: 6px var(--panel-radius); }
+  main.page::-webkit-scrollbar-thumb, div.detail-scroll::-webkit-scrollbar-thumb { border: 3px solid transparent; border-radius: 999px; background: transparent; background-clip: padding-box; }
+  main.page:is([data-scrolling], [data-scrollbar-hover])::-webkit-scrollbar-thumb,
+  div.detail-scroll:is([data-scrolling], [data-scrollbar-hover])::-webkit-scrollbar-thumb { background-color: var(--tertiary); }
+}
 html { min-width: 320px; }
 body {
   margin: 0;
@@ -599,7 +615,7 @@ html[data-resizing] dialog.detail-panel { transition: none; }
 .detail-scroll { flex: 1; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: var(--section-gap); padding: 4px var(--panel-padding) var(--panel-padding); border-radius: 0 0 var(--panel-radius) var(--panel-radius); }
 .detail-head[data-scrolled] + .detail-scroll { -webkit-mask-image: linear-gradient(transparent, #000 20px); mask-image: linear-gradient(transparent, #000 20px); }
 /* The bar's gutter is always kept and taken out of the right padding, so both edges of the content sit as far in as the header's. */
-.detail-scroll { scrollbar-gutter: stable; padding-inline-end: calc(var(--panel-padding) - var(--scrollbar-w, 0px)); }
+.detail-scroll { scrollbar-gutter: stable; padding-inline-end: calc(var(--panel-padding) - var(--edge-bar)); }
 .detail-title { display: grid; gap: 8px; }
 .detail-title p { font-size: 12px; overflow-wrap: anywhere; }
 .facts {

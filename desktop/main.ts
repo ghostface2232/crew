@@ -63,7 +63,7 @@ const updateLog = (step: string) => {
 const TOP_BAR_HEIGHT = 60;
 /** The board's --canvas and --label colors (board.css), behind and on the window buttons. */
 const theme = () =>
-  nativeTheme.shouldUseDarkColors ? { color: '#0b0b0c', symbolColor: '#e1e1e2' } : { color: '#f4f4f6', symbolColor: '#28282a' };
+  nativeTheme.shouldUseDarkColors ? { color: '#1f1f22', symbolColor: '#e1e1e2' } : { color: '#f1f2f4', symbolColor: '#28282a' };
 /**
  * Lets the top bar and the sidebar's brand move the window, and keeps the top bar's controls and the dialogs'
  * close buttons clear of the window buttons. Injected here rather than kept in board.css, since the browser board has a title bar of its own;
@@ -74,37 +74,21 @@ const FRAME_CSS = `
 .topbar :is(button, a, input, nav), .brand :is(button, a) { -webkit-app-region: no-drag; }
 :root .topbar {
   min-height: ${TOP_BAR_HEIGHT}px;
-  padding-inline-end: max(var(--page-margin), calc((100% - 1400px) / 2),
-    calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) + 12px));
+  padding-inline-end: max(var(--window-inset), calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) + 12px));
 }
-:root dialog.detail-panel { top: ${TOP_BAR_HEIGHT + 4}px; }
-:root dialog.sheet { max-height: calc(100vh - ${2 * (TOP_BAR_HEIGHT + 4)}px); }
-/* Only the page below the top bar scrolls, so nothing passes under the bar and its scrollbar starts below the window
-   buttons. The page centers its content with padding rather than a maximum width, keeping that scrollbar at the edge. */
-:root, :root body { height: 100%; overflow: hidden; }
-:root .workspace { height: 100vh; }
-:root .topbar { position: static; flex: none; }
-:root .page { flex: 1; min-height: 0; overflow-y: auto; max-width: none; margin: 0; }
-/* As a fixed-height flex scroller the page would shrink its sections to fit, crushing any that clip their overflow (the KPI card). */
-:root .page > * { flex-shrink: 0; }
-@media (min-width: 761px) { :root .page { padding-inline: max(var(--page-margin), calc((100% - 1400px) / 2)); } }
-/* Sticky offsets in board.css count the top bar the page used to scroll under; the page now starts below it. */
-:root .event-day-name { top: 0; }
-:root .dash-side { top: 12px; }`;
+@media (max-width: 760px) { :root dialog.detail-panel { top: ${TOP_BAR_HEIGHT + 4}px; } }
+:root dialog.sheet { max-height: calc(100vh - ${2 * (TOP_BAR_HEIGHT + 4)}px); }`;
 /** Windows 11 22H2 (build 22621) and later draw a backdrop material behind a transparent window; older systems keep the canvas. */
 const BACKDROP = process.platform === 'win32' && Number(os.release().split('.')[2]) >= 22621 ? 'mica' : null;
 /** The main window's colors: clear over the backdrop where there is one, the board's otherwise. */
 const frame = () => (BACKDROP ? { ...theme(), color: '#00000000' } : theme());
 /**
- * Lets the backdrop show through the page and top bar; cards, panels and dialogs keep their own surfaces.
- * A backdrop-filter paints its blurred copy over the page, and over a clear page that copy is clear too, so the sharp
- * text beneath shows through it. While a sheet is open the page takes its canvas again, so the sheet's backdrop blurs
- * it as it does in a browser. Blurring the page with a filter instead would make it the containing block of the
- * fixed detail panel and dock, and move them.
+ * Lets the backdrop show through the frame (the sidebar and top bar); the stage, cards, panels and dialogs keep their
+ * own surfaces. While a sheet is open the frame takes its canvas again, so the sheet's backdrop blurs it as it does in
+ * a browser.
  */
 const BACKDROP_CSS = `
 :root body { background: transparent; }
-:root .topbar { background: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; }
 :root:has(dialog.sheet:modal) body { background: var(--canvas); }
 @media (prefers-reduced-motion: no-preference) { :root body { transition: background-color 300ms ease-out; } }`;
 

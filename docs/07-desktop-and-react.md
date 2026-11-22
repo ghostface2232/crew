@@ -22,13 +22,13 @@ React owns the entire board (`plugin/board/src`), replacing the original imperat
 | `plugin/board/src/store.ts` | One SSE subscription, immutable snapshots, reconnect replacement, bounded event history (400 events) |
 | `plugin/board/src/api.ts` | Launch-ticket sign-in, HTTP requests, SSE reader, shared drafts, and action locks keyed by job/request identity |
 | `plugin/board/src/model.ts` | Project grouping, state priority, mission stop/progress math, usage/heatmap helpers, and duration labels |
-| `plugin/board/src/ui.tsx` | Native `<dialog>` lifecycle, stable composers, Lucide status icons, agent marks, and clock updates |
+| `plugin/board/src/ui.tsx` | Native `<dialog>` lifecycle, stable composers, Fluent status icons, agent marks, and clock updates |
 | `Missions.tsx`, `NeedsYou.tsx`, `Overview.tsx`, `Palette.tsx`, `Shell.tsx`, `Scores.tsx` | Mission tracks, needs-you cards, workspace/activity/history views, command palette, sidebar navigation, and model scores |
 | `JobDrawer.tsx`, `Settings.tsx`, `Dispatch.tsx` | Job/session details (verification, evidence, rounds, debate), scoped settings/presets/about, and direct dispatch |
 | `desktop/main.ts`, `desktop/preload.cts` | Windows Electron shell: single instance, tray, restored bounds, Mica backdrop, request signing, daemon startup, and updater IPC |
 | `plugin/bridge/assets.ts` | Built-asset allowlist, MIME types, and renderer CSP |
 
-Bridge types are imported type-only; Node modules never enter the renderer. Shared CSS tokens (`plugin/board/board.css`) preserve the workspace surfaces, typography, and state colors, while `Dispatch.tsx`, `Settings.tsx`, and `Scores.tsx` use CSS Modules. Lucide SVGs use `currentColor` and `strokeWidth={1.75}`; agent marks (`AgentMark`) render the SVGs in `plugin/board/src/icons/` as CSS mask templates.
+Bridge types are imported type-only; Node modules never enter the renderer. Shared CSS tokens (`plugin/board/board.css`) preserve the workspace surfaces, typography, and state colors, while `Dispatch.tsx`, `Settings.tsx`, and `Scores.tsx` use CSS Modules. Fluent System Icons (`@fluentui/react-icons`) are filled SVGs in `currentColor`, sized by CSS; selected sidebar items swap to the Filled style with `bundleIcon`; agent marks (`AgentMark`) render the SVGs in `plugin/board/src/icons/` as CSS mask templates.
 
 ## Behaviors
 
@@ -50,7 +50,7 @@ Versions below match `package.json` (pinned in `package-lock.json`).
 | --- | --- |
 | React / React DOM 19.3 | Stable component identity and declarative updates replace manual HTML patching and input restoration |
 | Vite 8.3 | TypeScript/JSX development and production bundling, hashed assets, and unused-code elimination |
-| Lucide React 1.72 | One outline SVG vocabulary, explicit sizing and stroke width, only imported icons in the build |
+| Fluent UI React Icons 2 | Windows' own icon vocabulary in Regular and Filled styles, only imported icons in the build; its Griffel runtime injects a few inline styles, which the board's CSP allows |
 | Electron 45.3 | Desktop shell for Windows with tray, window lifecycle, and Mica support |
 | Electron Builder 26.18 | Per-user NSIS Windows installer and unpacked bundle (`asar: false`), replacing the earlier `electron-packager` setup |
 | Playwright 1.65 | Real browser regressions, visual baselines, and automation of the Electron executable |
@@ -60,7 +60,7 @@ No state manager, router, UI component framework, motion runtime, or Storybook w
 Primary references consulted:
 
 - [Vite guide](https://vite.dev/guide/)
-- [Lucide React](https://lucide.dev/guide/react/)
+- [Fluent UI System Icons](https://github.com/microsoft/fluentui-system-icons)
 - [Electron security checklist](https://github.com/electron/electron/blob/main/docs/tutorial/security.md)
 - [Electron sandboxing](https://www.electronjs.org/docs/latest/tutorial/sandbox)
 - [Electron application distribution](https://github.com/electron/electron/blob/main/docs/tutorial/application-distribution.md)

@@ -47,18 +47,11 @@ document.addEventListener(
   'pointermove',
   (event) => {
     const target = event.target instanceof Element ? event.target : null;
-    const root = document.documentElement;
-    // Nothing over the page's own scrollbar reaches the page, so the pointer arriving at the window's edge stands in for it.
-    const atPageBar = root.scrollHeight > root.clientHeight && event.clientX >= root.clientWidth - 6;
-    markBar(target && gutter(target, event) ? target : atPageBar ? root : null);
+    markBar(target && gutter(target, event) ? target : null);
   },
   { passive: true },
 );
-// Moving onto the page's bar also leaves the page, so that bar stays marked until the pointer is seen elsewhere.
-document.documentElement.addEventListener('pointerleave', () => overBar !== document.documentElement && markBar(null));
-
-// Where the page scrolls in its own box rather than the document (the Windows app), keys that scroll the document
-// reach it only once something inside it has focus; until then they are passed to it here.
+// Forward scroll keys to the stage when focus is outside a scroll box.
 const SCROLL_KEYS: Record<string, (page: HTMLElement) => number> = {
   PageDown: (page) => page.clientHeight * 0.875,
   PageUp: (page) => -page.clientHeight * 0.875,
@@ -71,9 +64,8 @@ const SCROLL_KEYS: Record<string, (page: HTMLElement) => number> = {
 document.addEventListener('keydown', (event) => {
   const step = SCROLL_KEYS[event.key];
   const page = document.querySelector<HTMLElement>('main.page');
-  const root = document.documentElement;
   if (!step || !page || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
-  if (root.scrollHeight > root.clientHeight || document.querySelector('dialog:modal')) return;
+  if (document.querySelector('dialog:modal')) return;
   const target = event.target instanceof HTMLElement ? event.target : null;
   // Space presses buttons, and editors and lists keep their own keys.
   if (target && target !== document.body && (event.key === ' ' || target.closest('input, textarea, select, [contenteditable], [role="listbox"], [role="menu"]'))) return;

@@ -1,10 +1,11 @@
 import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import {
-  ArrowUp, BellDot, Check, ChevronsUpDown, Circle, CircleAlert, CircleCheck, CircleDotDashed, CircleStop, ClockAlert, Copy,
-  TriangleAlert, X,
-} from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
+  AlertBadge16Regular, ArrowUp16Filled, Checkmark16Regular, CheckmarkCircle16Regular, CheckmarkRegular,
+  ChevronUpDown16Regular, Circle16Regular, ClockWarning16Regular, CopyRegular, DismissRegular, ErrorCircle16Regular,
+  RecordStop16Regular, SpinnerIos16Regular, Warning16Regular,
+} from '@fluentui/react-icons';
+import type { FluentIcon } from '@fluentui/react-icons';
 import { actions, drafts } from './api.ts';
 import claudeMark from './icons/ClaudeCode.svg';
 import codexMark from './icons/Codex.svg';
@@ -128,8 +129,8 @@ export function WordReveal({ text, className }: { text: string; className?: stri
     </span>
   );
 }
-export function Icon({ icon: Glyph, size = 15, className = '' }: { icon: LucideIcon; size?: number; className?: string }) {
-  return <Glyph size={size} strokeWidth={1.75} aria-hidden="true" className={className} />;
+export function Icon({ icon: Glyph, size = 15, className = '', filled }: { icon: FluentIcon; size?: number; className?: string; filled?: boolean }) {
+  return <Glyph fontSize={size} filled={filled} aria-hidden="true" className={className} />;
 }
 const MARKS: Record<string, string> = { claude: claudeMark, codex: codexMark, antigravity: antigravityMark };
 /** The supplied service SVGs, drawn as template images in the current text color, as the app draws them. */
@@ -142,19 +143,19 @@ export function AgentMark({ agent, size = 24 }: { agent: string; size?: number }
     />
   );
 }
-const STATUS_ICONS: Record<string, LucideIcon> = {
-  waiting: BellDot,
-  failed: TriangleAlert,
-  error: TriangleAlert,
-  stalled: ClockAlert,
-  done: CircleCheck,
-  running: CircleDotDashed,
-  working: CircleDotDashed,
-  active: CircleDotDashed,
-  cancelled: CircleStop,
-  abandoned: CircleStop,
+const STATUS_ICONS: Record<string, FluentIcon> = {
+  waiting: AlertBadge16Regular,
+  failed: Warning16Regular,
+  error: Warning16Regular,
+  stalled: ClockWarning16Regular,
+  done: CheckmarkCircle16Regular,
+  running: SpinnerIos16Regular,
+  working: SpinnerIos16Regular,
+  active: SpinnerIos16Regular,
+  cancelled: RecordStop16Regular,
+  abandoned: RecordStop16Regular,
 };
-export const statusIcon = (state: string) => STATUS_ICONS[state] ?? Circle;
+export const statusIcon = (state: string) => STATUS_ICONS[state] ?? Circle16Regular;
 const capitalized = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 /** StatusLabel in the app: the state's symbol and word on a tint of its color. */
 export function Chip({ state, children }: { state: string; children?: ReactNode }) {
@@ -186,7 +187,7 @@ export function ActionStatus({ actionKey }: { actionKey: string }) {
         <i className="spinner" aria-label="Sending" />
       ) : state.text ? (
         <>
-          <Icon icon={state.tone ? CircleAlert : Check} />
+          <Icon icon={state.tone ? ErrorCircle16Regular : Checkmark16Regular} />
           {state.text}
         </>
       ) : null}
@@ -238,7 +239,7 @@ export function Composer({
           if (sent && draftRef.current.trim() === message) setDraft('');
         }}
       >
-        <Icon icon={ArrowUp} />
+        <Icon icon={ArrowUp16Filled} />
       </button>
     </div>
   );
@@ -382,7 +383,7 @@ export function Dialog({
 export function CloseButton({ label, onClose }: { label: string; onClose: () => void }) {
   return (
     <button className="icon" onClick={onClose} aria-label={label} title={label}>
-      <Icon icon={X} />
+      <Icon icon={DismissRegular} />
     </button>
   );
 }
@@ -411,7 +412,7 @@ export function CopyButton({ text, short, children }: { text: string; short?: st
           }
         }}
       >
-        <Icon icon={copied ? Check : Copy} />
+        <Icon icon={copied ? CheckmarkRegular : CopyRegular} />
         {copied ? 'Copied' : short ? <><span className="label-long">{children}</span><span className="label-short" aria-hidden="true">{short}</span></> : children}
       </button>
       {failed && <span className="action-message selectable">Could not copy. Select and copy: {text}</span>}
@@ -422,7 +423,7 @@ export function CopyButton({ text, short, children }: { text: string; short?: st
  * A pop-up menu: focus moves to its first item, arrows move between items, and a choice, Escape, a click
  * elsewhere or tabbing away closes it and returns focus to its button.
  */
-export function Menu({ label, icon, children }: { label: string; icon: LucideIcon; children: ReactNode }) {
+export function Menu({ label, icon, children }: { label: string; icon: FluentIcon; children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
@@ -627,7 +628,7 @@ export function Select<T extends string>({
       >
         {/* A value no option holds shows the first option, as the system's select does. */}
         <span>{(options[chosen] ?? options[0])?.[1]}</span>
-        <Icon icon={ChevronsUpDown} size={13} />
+        <Icon icon={ChevronUpDown16Regular} size={13} />
       </button>
       {open && (
         <ul
@@ -652,7 +653,7 @@ export function Select<T extends string>({
               onClick={() => choose(index)}
             >
               <span>{text}</span>
-              {index === chosen && <Icon icon={Check} size={13} />}
+              {index === chosen && <Icon icon={Checkmark16Regular} size={13} />}
             </li>
           ))}
         </ul>
@@ -703,7 +704,7 @@ export function AskHost() {
   );
 }
 /** A light, centered empty state. */
-export function EmptyState({ title, icon, detail, children }: { title: string; icon: LucideIcon; detail?: string; children?: ReactNode }) {
+export function EmptyState({ title, icon, detail, children }: { title: string; icon: FluentIcon; detail?: string; children?: ReactNode }) {
   return (
     <div className="empty-state">
       <Icon icon={icon} />
@@ -713,7 +714,7 @@ export function EmptyState({ title, icon, detail, children }: { title: string; i
     </div>
   );
 }
-export function ContentPanel({ title, icon, children }: { title?: string; icon?: LucideIcon; children: ReactNode }) {
+export function ContentPanel({ title, icon, children }: { title?: string; icon?: FluentIcon; children: ReactNode }) {
   return (
     <section className="card">
       {title && (
@@ -801,12 +802,12 @@ export function CopyMenu({ text, label, children }: { text: string; label: strin
               setAt(null);
             }}
           >
-            <Icon icon={Copy} />
+            <Icon icon={CopyRegular} />
             {label}
           </button>
         </div>
       )}
-      {copied && <span className="toast" role="status"><Icon icon={Check} />Copied</span>}
+      {copied && <span className="toast" role="status"><Icon icon={Checkmark16Regular} />Copied</span>}
     </div>
   );
 }

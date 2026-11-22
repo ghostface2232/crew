@@ -81,10 +81,16 @@ const plist = {
 const plistJSON = path.join(build, 'Info.json');
 fs.writeFileSync(plistJSON, JSON.stringify(plist));
 run('plutil', ['-convert', 'xml1', '-o', path.join(contents, 'Info.plist'), plistJSON]);
-const licenses = ['react', 'react-dom', 'scheduler', 'lucide-react'].map(
-  (name) => `${name}\n${fs.readFileSync(`node_modules/${name}/LICENSE`, 'utf8')}`,
-);
-licenses.push(`Pretendard\n${fs.readFileSync('plugin/board/pretendard-LICENSE.txt', 'utf8')}`);
+const licenses = [
+  ['react', 'node_modules/react/LICENSE'],
+  ['react-dom', 'node_modules/react-dom/LICENSE'],
+  ['scheduler', 'node_modules/scheduler/LICENSE'],
+  ['@fluentui/react-icons', 'plugin/board/fluentui-react-icons-LICENSE.txt'],
+  ['@griffel/react', 'node_modules/@griffel/react/LICENSE.md'],
+  ['@griffel/core', 'node_modules/@griffel/core/LICENSE.md'],
+  ['@emotion/hash', 'node_modules/@emotion/hash/LICENSE'],
+  ['Pretendard', 'plugin/board/pretendard-LICENSE.txt'],
+].map(([name, file]) => `${name}\n${fs.readFileSync(file, 'utf8')}`);
 licenses.push(`Node.js ${process.version}\nSee runtime/LICENSE for Node.js and its bundled dependencies.`);
 fs.writeFileSync(path.join(resources, 'THIRD-PARTY-NOTICES.txt'), licenses.join('\n\n'));
 // A release signs with one lasting certificate, so macOS keeps the folder access people grant across updates; an ad-hoc

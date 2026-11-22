@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { ArrowUp, CircleAlert, Send } from 'lucide-react';
+import { ArrowUp16Filled, ErrorCircleRegular, SendRegular } from '@fluentui/react-icons';
 import type { Role, WorkerAgent } from '../../bridge/config.ts';
 import type { BoardJob, Mission, Snapshot } from './types.ts';
 import { request } from './api.ts';
@@ -125,7 +125,7 @@ export function Dispatch({
     <Dialog labelId="dispatch-title" onClose={closeDraft} origin={origin}>
       <fieldset className={`sheet-body ${styles.body}`} disabled={sending}>
         <h2 className={`title ${styles.title}`} id="dispatch-title">
-          <Icon icon={Send} size={18} />
+          <Icon icon={SendRegular} size={18} />
           New Job
         </h2>
         <Segmented
@@ -229,11 +229,11 @@ export function Dispatch({
             </span>
           </label>
         </div>
-        {error && <p className={`error ${styles.error}`} role="alert"><Icon icon={CircleAlert} />{error}</p>}
+        {error && <p className={`error ${styles.error}`} role="alert"><Icon icon={ErrorCircleRegular} />{error}</p>}
         <footer className={styles.footer}>
           <button type="button" className="large" onClick={closeDraft}>Cancel</button>
           <button type="button" className="large prominent" disabled={!canSend} onClick={() => void send()}>
-            <Icon icon={ArrowUp} />
+            <Icon icon={ArrowUp16Filled} />
             {sending ? 'Sending…' : intent === 'information' ? 'Save Information'
               : intent === 'question' ? 'Ask Question' : 'Send Job'}
           </button>

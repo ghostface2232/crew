@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { flushSync } from 'react-dom';
 import {
-  ArrowRight, Bell, CircleArrowDown, Clock, FolderClosed, LayoutGrid, LockKeyhole, PanelLeft, Plus, RotateCw, Search,
-  Settings as SettingsIcon, SquareStack, WifiOff, Zap,
-} from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
+  bundleIcon, AddRegular, AlertFilled, AlertRegular, ArrowCircleDownRegular, ArrowClockwiseRegular,
+  ArrowRight16Filled, ClockFilled, ClockRegular, FlashFilled, FlashRegular, FolderFilled,
+  FolderRegular, GridFilled, GridRegular, LockClosedKeyRegular, PanelLeftRegular, SearchRegular, SettingsRegular,
+  StackFilled, StackRegular, WifiOffRegular,
+} from '@fluentui/react-icons';
+import type { FluentIcon } from '@fluentui/react-icons';
 import { board } from './store.ts';
 import { knownProjects, projectNames, projectOf } from './model.ts';
 import { AskHost, ClockProvider, CopyMenu, Icon, PANEL_EXIT_MS, PanelLeavingContext, RollingNumber, useLinger } from './ui.tsx';
@@ -20,11 +22,17 @@ import { Notifier } from './notify.ts';
 import { desktop, useAppUpdate } from './desktop.ts';
 
 export type Page = 'overview' | 'needs' | 'activity' | 'history';
-export const PAGES: [Page, string, LucideIcon][] = [
-  ['overview', 'Overview', LayoutGrid],
-  ['needs', 'Needs You', Bell],
-  ['activity', 'Activity', Zap],
-  ['history', 'History', Clock],
+const GridNavIcon = bundleIcon(GridFilled, GridRegular);
+const AlertNavIcon = bundleIcon(AlertFilled, AlertRegular);
+const FlashNavIcon = bundleIcon(FlashFilled, FlashRegular);
+const ClockNavIcon = bundleIcon(ClockFilled, ClockRegular);
+const StackNavIcon = bundleIcon(StackFilled, StackRegular);
+const FolderNavIcon = bundleIcon(FolderFilled, FolderRegular);
+export const PAGES: [Page, string, FluentIcon][] = [
+  ['overview', 'Overview', GridNavIcon],
+  ['needs', 'Needs You', AlertNavIcon],
+  ['activity', 'Activity', FlashNavIcon],
+  ['history', 'History', ClockNavIcon],
 ];
 const TITLES: Record<Page, string> = { overview: 'Overview', needs: 'Needs You', activity: 'Activity', history: 'History' };
 
@@ -67,14 +75,6 @@ export function App() {
   const narrow = useNarrow();
   // Narrow windows keep the sidebar folded away until its button brings it out over the page.
   const [drawer, setDrawer] = useState(false);
-  // The topbar gets its bottom rule once the page has scrolled under it.
-  const [scrolled, setScrolled] = useState(false);
-  useEffect(() => {
-    const listener = () => setScrolled(window.scrollY > 0);
-    listener();
-    window.addEventListener('scroll', listener, { passive: true });
-    return () => window.removeEventListener('scroll', listener);
-  }, []);
   const toggle = useRef<HTMLButtonElement>(null);
   const sidebar = useRef<HTMLElement>(null);
   const searchButton = useRef<HTMLButtonElement>(null);
@@ -180,14 +180,14 @@ export function App() {
   if (state.connection === 'unauthorized') {
     return (
       <main className="sign-in" aria-labelledby="sign-in-title">
-        <span className="sign-in-mark"><Icon icon={LockKeyhole} size={36} /></span>
+        <span className="sign-in-mark"><Icon icon={LockClosedKeyRegular} size={36} /></span>
         <h1 className="title" id="sign-in-title">The board is not signed in</h1>
         <p className="secondary">
           A browser tab stays signed in only while it is open, so a reload signs it out.
           Run <code>crew board</code> in a terminal, or choose <strong>Open Web Board</strong> in the Crew app.
         </p>
         <button className="prominent" onClick={board.retry}>
-          <Icon icon={RotateCw} />
+          <Icon icon={ArrowClockwiseRegular} />
           Retry
         </button>
       </main>
@@ -212,10 +212,6 @@ export function App() {
           <div className="brand">
             <img className="brand-mark" src={appIcon} alt="" />
             <span className="brand-name">Crew</span>
-            <p className="connection" role="status" data-state={state.connection}>
-              <i aria-hidden="true" />
-              <span>{live ? 'Live' : state.connection === 'lost' ? 'Reconnecting…' : 'Connecting…'}</span>
-            </p>
           </div>
           {pageNav}
           <ProjectNav projects={projects} names={names} project={project} state={state} select={select} />
@@ -228,7 +224,7 @@ export function App() {
                 title={`Restart Crew to install version ${update.latest}`}
                 onClick={() => void desktop?.update.install()}
               >
-                <Icon icon={CircleArrowDown} />
+                <Icon icon={ArrowCircleDownRegular} />
                 <span>
                   {update.state === 'ready' ? 'Update'
                     : update.waiting ? `${update.waiting} job${update.waiting === 1 ? '' : 's'} left…`
@@ -237,16 +233,23 @@ export function App() {
                 <span className="sidebar-update-version">{update.latest}</span>
               </button>
             )}
-            <button className="sidebar-item" id="open-settings" disabled={!Object.keys(state.roles).length} onClick={openSettings}>
-              <Icon icon={SettingsIcon} />
-              <span>Settings</span>
-            </button>
+            <div className="sidebar-foot-row">
+              <button className="sidebar-item" id="open-settings" disabled={!Object.keys(state.roles).length} onClick={openSettings}>
+                <Icon icon={SettingsRegular} />
+                <span>Settings</span>
+              </button>
+              {/* A working connection is only its green light; the word shows while connecting or lost. */}
+              <p className="connection" role="status" data-state={state.connection} title={live ? 'Live' : undefined}>
+                <i aria-hidden="true" />
+                <span>{live ? 'Live' : state.connection === 'lost' ? 'Reconnecting…' : 'Connecting…'}</span>
+              </p>
+            </div>
           </div>
         </aside>
         {drawer && <div className="sidebar-scrim" aria-hidden="true" onClick={fold} />}
         {/* While the drawer is out over it, the page is out of reach, so Tab stays in the drawer. */}
         <div className="workspace" inert={drawer}>
-          <header className="topbar" data-scrolled={scrolled || undefined}>
+          <header className="topbar">
             <button
               className="icon topbar-sidebar"
               ref={toggle}
@@ -256,7 +259,7 @@ export function App() {
               aria-controls="sidebar"
               onClick={() => setDrawer(!drawer)}
             >
-              <Icon icon={PanelLeft} />
+              <Icon icon={PanelLeftRegular} />
             </button>
             <nav className="crumbs" aria-label="Location">
               <button className="crumb" onClick={() => select('overview')} disabled={!project && page === 'overview'}>
@@ -275,19 +278,19 @@ export function App() {
               aria-keyshortcuts="Meta+K /"
               data-hidden={palette ? '' : undefined}
             >
-              <Icon icon={Search} />
+              <Icon icon={SearchRegular} />
               <span>Search work, projects…</span>
               <kbd>⌘K</kbd>
             </button>
             <button className="new-job prominent" disabled={!live} title="New job (N)" aria-keyshortcuts="N" onClick={(event) => newJob(event.currentTarget)}>
-              <Icon icon={Plus} />
+              <Icon icon={AddRegular} />
               <span className="new-job-label">New Job</span>
             </button>
           </header>
           <main className="page" key={selection}>
             {state.connection === 'lost' && (
               <div className="banner" role="alert">
-                <Icon icon={WifiOff} />
+                <Icon icon={WifiOffRegular} />
                 <span>Lost the connection to Crew. Reconnecting…</span>
                 <button onClick={board.retry}>Retry</button>
               </div>
@@ -296,7 +299,7 @@ export function App() {
               <div className="page-head-copy">
                 {project ? (
                   <CopyMenu text={project} label="Copy Path">
-                    <p className="eyebrow path" title={project}><Icon icon={FolderClosed} size={12} />{project}</p>
+                    <p className="eyebrow path" title={project}><Icon icon={FolderRegular} size={12} />{project}</p>
                   </CopyMenu>
                 ) : (
                   <p className="eyebrow">{eyebrow(page, state.now || Date.now())}</p>
@@ -312,7 +315,7 @@ export function App() {
                 >
                   <span className="attention-count"><RollingNumber value={pending} /></span>
                   <span>Needs You</span>
-                  <Icon icon={ArrowRight} />
+                  <Icon icon={ArrowRight16Filled} />
                 </button>
               )}
             </header>
@@ -386,9 +389,9 @@ function ProjectNav({ projects, names, project, state, select }: {
         label="Projects"
         heading="Projects"
         items={[
-          { id: '', label: 'All projects', icon: SquareStack },
+          { id: '', label: 'All projects', icon: StackNavIcon },
           // No tooltip: the preview beside the list shows the path, and a tooltip would cover it.
-          ...projects.map((dir) => ({ id: dir, label: names.get(dir) ?? dir, icon: FolderClosed, dot: activity(dir) })),
+          ...projects.map((dir) => ({ id: dir, label: names.get(dir) ?? dir, icon: FolderNavIcon, dot: activity(dir) })),
         ]}
         current={project}
         onSelect={(id) => {

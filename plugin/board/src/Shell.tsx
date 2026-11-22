@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import type { LucideIcon } from 'lucide-react';
-import { CircleDotDashed, BellDot, Flag } from 'lucide-react';
+import { AlertBadgeRegular, FlagRegular, SpinnerIosRegular } from '@fluentui/react-icons';
+import type { FluentIcon } from '@fluentui/react-icons';
 import type { Snapshot } from './types.ts';
 import { projectOf, relativeDuration } from './model.ts';
 import { Icon, useFade, useNow, WordReveal } from './ui.tsx';
@@ -9,7 +9,7 @@ import { Icon, useFade, useNow, WordReveal } from './ui.tsx';
 export interface NavItem {
   id: string;
   label: string;
-  icon: LucideIcon;
+  icon: FluentIcon;
   count?: number;
   title?: string;
   /** A state the item is in, drawn as a dot: working or waiting. */
@@ -71,7 +71,7 @@ export function NavList({ label, heading, items, current, onSelect, onHover, sho
             }}
             onClick={() => onSelect(item.id)}
           >
-            <Icon icon={item.icon} />
+            <Icon icon={item.icon} filled={current === item.id} />
             <NavLabel label={item.label} />
             {item.dot && <i className="nav-dot" data-state={item.dot} aria-hidden="true" />}
             {item.count ? <span className="nav-count" aria-label={`${item.count} waiting`}>{item.count}</span> : null}
@@ -107,9 +107,9 @@ export function ProjectPeek({ dir, name, top, state }: { dir: string; name: stri
         <p className="peek-name">{name}</p>
         <p className="peek-path">{dir}</p>
         <div className="peek-stats">
-          <span data-state="working"><Icon icon={CircleDotDashed} size={13} />{running}</span>
-          <span data-state="waiting"><Icon icon={BellDot} size={13} />{waiting}</span>
-          <span><Icon icon={Flag} size={13} />{missions.length}</span>
+          <span data-state="working"><Icon icon={SpinnerIosRegular} size={13} />{running}</span>
+          <span data-state="waiting"><Icon icon={AlertBadgeRegular} size={13} />{waiting}</span>
+          <span><Icon icon={FlagRegular} size={13} />{missions.length}</span>
         </div>
         <p className="peek-line"><WordReveal text={line} /></p>
         {missions.slice(0, 3).map((mission) => (

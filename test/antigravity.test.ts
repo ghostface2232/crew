@@ -302,6 +302,88 @@ test('a message sent during a turn is added to it', { timeout: 5000 }, async (t)
   assert.equal(job.tokens, 15);
 });
 
+test('every message added during a turn has its tokens counted once', { timeout: 10000 }, async (t) => {
+  const h = harness(t, `
+    const send = (message) => console.log(JSON.stringify({ jsonrpc: '2.0', ...message }));
+    const usage = (n) => ({ inputTokens: n, cachedReadTokens: 0, outputTokens: 0, totalTokens: n });
+    let open, count = 0;
+    require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
+      const { method, id } = JSON.parse(line);
+      if (method === 'initialize') send({ id, result: { agentCapabilities: {} } });
+      else if (method === 'session/new') send({ id, result: { sessionId: 's1' } });
+      else if (method === 'session/prompt') {
+        count++;
+        if (open !== undefined) send({ id: open, result: { stopReason: 'end_turn', usage: usage(count === 2 ? 10 : 20) } });
+        open = id;
+        if (count === 1) send({ method: 'session/update', params: { sessionId: 's1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'working' } } } });
+        if (count === 3) setTimeout(() => send({ id, result: { stopReason: 'end_turn', usage: usage(30) } }), 100);
+      }
+    });
+  `);
+  const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' });
+  while (job.phase !== 'writing') await h.jobs.wait(job.id, job.seq, 200);
+  const ctl = (h.jobs as any).ctl(job);
+  await Promise.all([h.adapter.reply(ctl, 'one'), h.adapter.reply(ctl, 'two')]);
+  await h.ended(job);
+  assert.equal(job.state, 'done');
+  assert.equal(job.tokens, 60);
+});
+
+test('a message sent while the session is being set up joins the first turn instead of replacing it', { timeout: 5000 }, async (t) => {
+  const h = harness(t, `
+    const send = (message) => console.log(JSON.stringify({ jsonrpc: '2.0', ...message }));
+    const fs = require('node:fs');
+    const path = require('node:path');
+    let held;
+    require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
+      const { method, id, params } = JSON.parse(line);
+      if (method === 'initialize') send({ id, result: { agentCapabilities: {} } });
+      else if (method === 'session/new') send({ id, result: { sessionId: 's1', configOptions: [{ id: 'model', category: 'model', currentValue: 'a', options: [{ value: 'a' }, { value: 'b' }] }] } });
+      else if (method === 'session/set_config_option') { held = id; fs.writeFileSync(path.join(__dirname, 'held'), ''); }
+      else if (method === 'release') send({ id: held, result: {} });
+      else if (method === 'session/prompt') {
+        fs.appendFileSync(path.join(__dirname, 'prompts'), params.prompt[0].text + '\\n');
+        send({ method: 'session/update', params: { sessionId: 's1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'report' } } } });
+        send({ id, result: { stopReason: 'end_turn' } });
+      }
+    });
+  `);
+  const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'the original task', model: 'b' });
+  while (!fs.existsSync(path.join(h.home, 'held'))) await new Promise((resolve) => setTimeout(resolve, 20));
+  await assert.rejects(h.adapter.reply((h.jobs as any).ctl(job), 'an extra message'), /still starting this turn/);
+  (h.adapter as any).peer.request('release', {}).catch(() => {});
+  await h.ended(job);
+  assert.equal(job.state, 'done');
+  assert.match(fs.readFileSync(path.join(h.home, 'prompts'), 'utf8'), /the original task/);
+});
+
+test('a mode reported while a switch back is answered is switched back too', { timeout: 5000 }, async (t) => {
+  const h = harness(t, `
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const log = (method) => fs.appendFileSync(path.join(__dirname, 'log.jsonl'), JSON.stringify({ method }) + '\\n');
+    const send = (message) => console.log(JSON.stringify({ jsonrpc: '2.0', ...message }));
+    let switches = 0;
+    require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
+      const { method, id } = JSON.parse(line);
+      if (method) log(method);
+      if (method === 'initialize') send({ id, result: { agentCapabilities: {} } });
+      else if (method === 'session/new') send({ id, result: { sessionId: 's1', modes: { currentModeId: 'auto' } } });
+      else if (method === 'session/set_mode') {
+        if (++switches === 1) send({ method: 'session/update', params: { sessionId: 's1', update: { sessionUpdate: 'current_mode_update', currentModeId: 'accept-edits' } } });
+        send({ id, result: {} });
+      } else if (method === 'session/prompt') {
+        send({ method: 'session/update', params: { sessionId: 's1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'report' } } } });
+        send({ id, result: { stopReason: 'end_turn' } });
+      }
+    });
+  `);
+  const job = await h.ended(await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' }));
+  assert.equal(job.state, 'done');
+  const order = fs.readFileSync(path.join(h.home, 'log.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line).method);
+  assert.deepEqual(order.slice(order.indexOf('session/set_mode')), ['session/set_mode', 'session/set_mode', 'session/prompt']);
+});
+
 test('a message is refused while Antigravity waits for an approval', { timeout: 5000 }, async (t) => {
   const h = harness(t, steerServer(true));
   const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' });

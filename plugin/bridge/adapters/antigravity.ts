@@ -17,8 +17,12 @@ interface Run {
   ctl: JobCtl;
   /** Set from the moment a turn is taken, through the mode check and any restore, until it ends. */
   prompting: Promise<void> | null;
+  /** The turn that holds the run now. A turn that no longer holds it changes nothing when it settles. */
+  turn?: object;
   /** The prompt has gone to agy. Updates before that are a restore replaying the session, not this turn. */
   sent: boolean;
+  /** Every request of the turn has been answered; it takes no more messages. */
+  ending: boolean;
   cancelling: boolean;
   /** Text since the last tool call. */
   message: string;
@@ -37,9 +41,12 @@ interface Run {
   switched?: string;
   /** The switch back from it; the turn's outcome waits for it. Never rejects. */
   restoring?: Promise<void>;
-  /** A message added during the turn: its prompt request carries the rest of the turn. */
-  next?: Promise<any>;
+  /** Messages added during the turn, in order. Each ends the request before it, and the last carries the turn. */
+  steers: Promise<Steered>[];
 }
+
+/** What came of a message added during a turn. `told`: its refusal already went back to whoever sent it. */
+type Steered = { res?: any; refused?: Error; told?: boolean };
 
 type ToolCall = { kind?: string; title?: string; locations?: { path?: string }[]; rawInput?: unknown; _meta?: { mcpServerName?: string; mcpToolName?: string } };
 
@@ -78,6 +85,8 @@ export class AntigravityAdapter implements Adapter {
   private loaded = new Set<string>();
   /** The mode agy last reported for each session, numbered so that a switch back cannot overwrite a newer report. */
   private modes = new Map<string, { mode: string; seq: number }>();
+  /** Closes still in flight. A restore waits for its session's, since agy may refuse to restore one it still holds. */
+  private closing = new Map<string, Promise<void>>();
   private restoreMethod: 'session/resume' | 'session/load' | null = null;
   private canClose = false;
   /** The server takes instructions as an addition to its system prompt. */
@@ -113,21 +122,29 @@ export class AntigravityAdapter implements Adapter {
     // but its default for other sessions became Auto in 1.5.7, so the mode is checked before every prompt.
     // A new session has no reports before this request; any it has now came in meanwhile.
     this.noteResponseMode(sessionId, res, undefined);
-    const wanted = ctl.job.model ?? (ctl.job.agentDefault ? undefined : this.config.antigravity.model);
-    // A tier names a family ("hydrogen"); the session lists the exact values this account has.
-    // A family the session does not list is left to the agent's default; a model named outright is still sent, so a typo shows.
-    const listed = wanted ? pickModel(res.configOptions?.find((o: any) => o.category === 'model' || o.id === 'model')?.options, wanted) : undefined;
-    const model = listed ?? (ctl.job.tier ? undefined : wanted);
-    let selected = model ? await peer.request('session/set_config_option', { sessionId, configId: 'model', value: model }, RPC_TIMEOUT_MS) : res;
-    // The levels differ by model, so they are read from the session after the model is set.
-    const level = ctl.job.effort ? pickEffort(configOption(selected, 'thought_level')?.options, ctl.job.effort) : undefined;
-    if (level && level !== configOption(selected, 'thought_level')?.currentValue) {
-      selected = await peer.request('session/set_config_option', { sessionId, configId: 'thought_level', value: level }, RPC_TIMEOUT_MS);
-    }
-    ctl.model(sessionModel(selected) ?? model, sessionEffort(selected));
-
+    if (isTerminal(ctl.job)) return;
+    // The first turn is taken as the session becomes known, so a message sent during the setup below joins it.
     // Without a system prompt addition, the role travels with the first prompt.
-    if (!isTerminal(ctl.job)) this.prompt(peer, run, this.appendsPrompt ? ctl.job.prompt : `${ctl.job.instructions}\n\n${ctl.job.prompt}`);
+    this.prompt(peer, run, this.appendsPrompt ? ctl.job.prompt : `${ctl.job.instructions}\n\n${ctl.job.prompt}`, async () => {
+      const wanted = ctl.job.model ?? (ctl.job.agentDefault ? undefined : this.config.antigravity.model);
+      // A tier names a family ("hydrogen"); the session lists the exact values this account has.
+      // A family the session does not list is left to the agent's default; a model named outright is still sent, so a typo shows.
+      const listed = wanted ? pickModel(res.configOptions?.find((o: any) => o.category === 'model' || o.id === 'model')?.options, wanted) : undefined;
+      const model = listed ?? (ctl.job.tier ? undefined : wanted);
+      let selected = model ? await this.configure(peer, sessionId, 'model', model) : res;
+      // The levels differ by model, so they are read from the session after the model is set.
+      const level = ctl.job.effort ? pickEffort(configOption(selected, 'thought_level')?.options, ctl.job.effort) : undefined;
+      if (level && level !== configOption(selected, 'thought_level')?.currentValue) selected = await this.configure(peer, sessionId, 'thought_level', level);
+      ctl.model(sessionModel(selected) ?? model, sessionEffort(selected));
+    });
+  }
+
+  /** Sets a session option. Its answer lists every option, the mode among them, so it reports the mode too. */
+  private async configure(peer: RpcPeer, sessionId: string, configId: string, value: string): Promise<any> {
+    const before = this.modes.get(sessionId)?.seq;
+    const res = await peer.request('session/set_config_option', { sessionId, configId, value }, RPC_TIMEOUT_MS);
+    this.noteResponseMode(sessionId, res, before);
+    return res;
   }
 
   /**
@@ -147,6 +164,7 @@ export class AntigravityAdapter implements Adapter {
       const stopped = await Promise.race([stopping.prompting.then(() => true), delay(6_000, false, { ref: false })]);
       if (!stopped && this.runs.get(sessionId) === stopping) throw new Error('Antigravity has not yet stopped the turn Crew ended. Send the message again in a moment.');
     }
+    await this.closing.get(sessionId);
     const restore = !this.loaded.has(sessionId);
     if (restore && !this.restoreMethod) throw new Error('This Antigravity server cannot restore sessions. Continue it from the Antigravity CLI.');
     if (isTerminal(ctl.job)) return;
@@ -163,7 +181,7 @@ export class AntigravityAdapter implements Adapter {
       // A server that restores a session at its default level would run the next turn above the job's effort.
       const level = ctl.job.effort ? pickEffort(configOption(res, 'thought_level')?.options, ctl.job.effort) : undefined;
       const restored = level && level !== configOption(res, 'thought_level')?.currentValue
-        ? await peer.request('session/set_config_option', { sessionId, configId: 'thought_level', value: level }, RPC_TIMEOUT_MS) : res;
+        ? await this.configure(peer, sessionId, 'thought_level', level) : res;
       ctl.model(sessionModel(restored) ?? sessionModel(res) ?? ctl.job.resolvedModel ?? ctl.job.model ?? this.config.antigravity.model, sessionEffort(restored) ?? ctl.job.resolvedEffort);
       this.loaded.add(sessionId);
     } : undefined);
@@ -241,40 +259,50 @@ export class AntigravityAdapter implements Adapter {
   private prompt(peer: RpcPeer, run: Run, text: string, prepare?: () => Promise<void>): void {
     const { ctl } = run;
     const sessionId = ctl.job.sessionId!;
+    const token = {};
+    // The job's turn, so that a turn that ends after the job moved on to the next leaves that one alone.
+    const turnNo = ctl.job.turns;
+    const stale = () => run.turn !== token || ctl.job.turns !== turnNo;
+    const current = () => !stale() && this.runs.get(sessionId) === run;
+    run.turn = token;
     run.message = '';
     run.earlier = '';
     run.calls.clear();
     run.violation = undefined;
     run.switched = undefined;
     run.restoring = undefined;
-    run.next = undefined;
+    run.steers = [];
     run.sent = false;
+    run.ending = false;
     ctl.phase('working');
     const turn = async (): Promise<any> => {
       await prepare?.();
       // Every prompt goes out in the asking mode, whatever agy reported since the last one.
       await this.keepAsking(peer, sessionId);
-      if (run.cancelling || isTerminal(ctl.job) || this.runs.get(sessionId) !== run) return { stopReason: 'cancelled' };
+      if (run.cancelling || isTerminal(ctl.job) || !current()) return { stopReason: 'cancelled' };
       run.sent = true;
       let res = await peer.request('session/prompt', { sessionId, prompt: [{ type: 'text', text }] });
-      this.counted(run, res?.usage);
-      // A message added meanwhile ended that request; the turn goes on under the message's own.
-      while (run.next) {
-        const next = run.next;
-        run.next = undefined;
-        const result = await next;
-        if (result?.refused) throw result.refused;
-        res = result;
-        this.counted(run, res?.usage);
+      this.counted(run, res?.usage, current);
+      for (let i = 0; i < run.steers.length; i++) {
+        const steered = await run.steers[i];
+        if (steered.refused) {
+          if (this.peer !== peer || !peer.alive) throw steered.refused;
+          // A message agy did not take leaves the turn's outcome as it was.
+          if (!steered.told && current()) ctl.note(`A message sent during the turn did not reach Antigravity: ${steered.refused.message}`);
+          continue;
+        }
+        res = steered.res;
+        this.counted(run, res?.usage, current);
       }
-      // A switch back that agy refused during the turn decides its outcome, even when the reply came first.
-      await run.restoring;
+      run.ending = true;
+      // A switch back that agy refused decides the outcome, even when the reply came first.
+      await settled(run);
       return res;
     };
     run.prompting = turn()
       .then(
         (res) => {
-          if (this.runs.get(sessionId) !== run) return;
+          if (!current()) return;
           if (run.violation) ctl.fail(run.violation);
           else if (res.stopReason === 'cancelled' || run.cancelling) ctl.cancelled();
           else if (res.stopReason === 'end_turn') {
@@ -286,12 +314,15 @@ export class AntigravityAdapter implements Adapter {
           } else ctl.fail(`Antigravity stopped early: ${res.stopReason}`);
         },
         (err) => {
-          if (this.peer === peer && this.runs.get(sessionId) !== run) return;
+          // A lost connection fails the turn even though the runs went with it.
+          if (stale() || (this.peer === peer && this.runs.get(sessionId) !== run)) return;
           const detail = `${err.message}${err instanceof RpcError && err.data ? ` ${JSON.stringify(err.data)}` : ''}`;
           ctl.fail(run.violation ?? detail, { limit: !run.violation && LIMIT_PATTERN.test(detail) });
         },
       )
       .finally(() => {
+        // A later turn holds the run now.
+        if (run.turn !== token) return;
         run.prompting = null;
         run.sent = false;
         // The turn is over, so nothing it asked for can still be granted.
@@ -311,13 +342,25 @@ export class AntigravityAdapter implements Adapter {
    */
   private close(peer: RpcPeer, sessionId: string): void {
     if (!this.canClose || this.peer !== peer || !this.loaded.delete(sessionId)) return;
-    this.modes.delete(sessionId);
-    peer.request('session/close', { sessionId }, RPC_TIMEOUT_MS).catch(() => {});
+    const closing: Promise<void> = peer.request('session/close', { sessionId }, RPC_TIMEOUT_MS).then(
+      () => { this.modes.delete(sessionId); },
+      (err) => {
+        // A session agy still holds stays loaded, in the mode it was in; one it no longer knows is closed.
+        if (err instanceof RpcError && err.code === -32002) this.modes.delete(sessionId);
+        else if (this.peer === peer) this.loaded.add(sessionId);
+      },
+    ).finally(() => {
+      if (this.closing.get(sessionId) === closing) this.closing.delete(sessionId);
+    });
+    this.closing.set(sessionId, closing);
   }
 
-  /** agy reports each prompt's tokens; a job's are the sum over its prompts. Its input excludes what was read from cache. */
-  private counted(run: Run, usage: any): void {
-    if (!usage || typeof usage.totalTokens !== 'number') return;
+  /**
+   * agy reports each prompt's tokens; a job's are the sum over its prompts. Its input excludes what was read from cache.
+   * A turn that ended without its answer cannot have the tokens added later: they would count toward the next turn.
+   */
+  private counted(run: Run, usage: any, current: () => boolean): void {
+    if (!usage || typeof usage.totalTokens !== 'number' || !current()) return;
     const { ctl } = run;
     const before = ctl.job.tokenUse ?? { input: 0, cachedInput: 0, output: 0 };
     const cached = usage.cachedReadTokens ?? 0;
@@ -334,16 +377,26 @@ export class AntigravityAdapter implements Adapter {
    * question waits.
    */
   private async steer(peer: RpcPeer, run: Run, message: string): Promise<void> {
-    if (run.pending.length) throw new Error('Antigravity is waiting for an approval or an answer, and takes no message until it has one. Answer it first, or cancel.');
-    if (!run.sent) throw new Error('Antigravity is still starting this turn. Send the message again in a moment.');
-    const next = peer.request('session/prompt', { sessionId: run.ctl.job.sessionId, prompt: [{ type: 'text', text: message }] })
-      .then((res) => res, (refused) => ({ refused }));
+    const sessionId = run.ctl.job.sessionId!;
+    const open = () => {
+      if (run.pending.length) throw new Error('Antigravity is waiting for an approval or an answer, and takes no message until it has one. Answer it first, or cancel.');
+      if (run.ending || run.cancelling || run.violation) throw new Error('Antigravity is ending this turn. Send the message again once it has ended.');
+      if (!run.sent) throw new Error('Antigravity is still starting this turn. Send the message again in a moment.');
+    };
+    open();
+    // The message goes out in the asking mode too.
+    await settled(run);
+    await this.keepAsking(peer, sessionId);
+    open();
+    const steered: Steered = {};
+    const next = peer.request('session/prompt', { sessionId, prompt: [{ type: 'text', text: message }] })
+      .then((res) => Object.assign(steered, { res }), (refused) => Object.assign(steered, { refused }));
     // Taken before the earlier request is answered, so the turn waits for this one.
-    run.next = next;
-    const early = await Promise.race([next, delay(2_000, undefined, { ref: false })]);
-    if (early?.refused) {
-      if (run.next === next) run.next = undefined;
-      throw early.refused;
+    run.steers.push(next);
+    await Promise.race([next, delay(2_000, undefined, { ref: false })]);
+    if (steered.refused) {
+      steered.told = true;
+      throw steered.refused;
     }
     run.ctl.progress('message added to the running turn');
   }
@@ -361,17 +414,22 @@ export class AntigravityAdapter implements Adapter {
     if (this.modes.get(sessionId)?.seq === before || (mode && mode !== ASKING_MODE)) this.noteMode(sessionId, mode);
   }
 
-  /** Puts a session back in the mode where agy asks before edits and commands, or throws when agy refuses. */
+  /**
+   * Puts a session back in the mode where agy asks before edits and commands, or throws when agy refuses. A report that
+   * comes in during the switch is newer than it, so the mode is checked again until it holds.
+   */
   private async keepAsking(peer: RpcPeer, sessionId: string): Promise<void> {
-    const known = this.modes.get(sessionId);
-    if (!known || known.mode === ASKING_MODE) return;
-    try {
-      await peer.request('session/set_mode', { sessionId, modeId: ASKING_MODE }, RPC_TIMEOUT_MS);
-    } catch (err) {
-      throw new Error(`Antigravity's session is in "${known.mode}" mode, where it does not ask before edits and commands, and it refused to switch to "${ASKING_MODE}": ${(err as Error).message}`);
+    for (let attempt = 0; ; attempt++) {
+      const known = this.modes.get(sessionId);
+      if (!known || known.mode === ASKING_MODE) return;
+      if (attempt === 3) throw new Error(`Antigravity kept switching its session out of "${ASKING_MODE}" mode, most recently to "${known.mode}".`);
+      try {
+        await peer.request('session/set_mode', { sessionId, modeId: ASKING_MODE }, RPC_TIMEOUT_MS);
+      } catch (err) {
+        throw new Error(`Antigravity's session is in "${known.mode}" mode, where it does not ask before edits and commands, and it refused to switch to "${ASKING_MODE}": ${(err as Error).message}`);
+      }
+      if (this.modes.get(sessionId)?.seq === known.seq) this.noteMode(sessionId, ASKING_MODE);
     }
-    // A report that came in meanwhile is newer than this switch, and is checked again before the next prompt.
-    if (this.modes.get(sessionId)?.seq === known.seq) this.noteMode(sessionId, ASKING_MODE);
   }
 
   /**
@@ -390,13 +448,11 @@ export class AntigravityAdapter implements Adapter {
     if (!peer || !prompting) return;
     peer.notify('session/cancel', { sessionId });
     if (!this.canClose) return;
-    void Promise.race([prompting.then(() => true), delay(5_000, false, { ref: false })]).then(async (stopped) => {
+    void Promise.race([prompting.then(() => true), delay(5_000, false, { ref: false })]).then((stopped) => {
       if (stopped || this.runs.get(sessionId) !== run) return;
       this.runs.delete(sessionId);
-      this.loaded.delete(sessionId);
-      this.modes.delete(sessionId);
-      await peer.request('session/close', { sessionId }, RPC_TIMEOUT_MS);
-    }).catch(() => {});
+      this.close(peer, sessionId);
+    });
   }
 
   /**
@@ -483,14 +539,26 @@ export class AntigravityAdapter implements Adapter {
 
   private onNotification(method: string, p: any): void {
     if (method !== 'session/update') return;
-    // Kept for every session, between turns and during a restore too; the next prompt undoes a switch.
-    if (p.update?.sessionUpdate === 'current_mode_update') this.noteMode(p.sessionId, p.update.currentModeId);
+    // Kept for every session, between turns and during a restore too; the next prompt undoes a switch. The mode is also
+    // one of the session's options, so an options update reports it.
+    const kind = p.update?.sessionUpdate;
+    const reported = kind === 'current_mode_update' ? p.update.currentModeId : kind === 'config_option_update' ? sessionMode(p.update) : undefined;
+    if (typeof reported === 'string') this.noteMode(p.sessionId, reported);
     const run = this.runs.get(p.sessionId);
     if (!run || !run.prompting || !run.sent || isTerminal(run.ctl.job)) return;
     const { ctl } = run;
     this.lastUsed = Date.now();
     ctl.activity();
     const update = p.update ?? {};
+    // The agent's own switch_mode is refused in onRequest; a switch that still lands is undone.
+    if (typeof reported === 'string' && reported !== ASKING_MODE && this.peer) {
+      run.switched = reported;
+      ctl.progress(`Antigravity switched to "${reported}" mode; switching back to "${ASKING_MODE}"`);
+      const earlier = run.restoring;
+      run.restoring = this.keepAsking(this.peer, p.sessionId).then(() => earlier, (err) => {
+        this.stop(run, (err as Error).message);
+      });
+    }
 
     switch (update.sessionUpdate) {
       case 'config_option_update': {
@@ -522,15 +590,6 @@ export class AntigravityAdapter implements Adapter {
         this.track(run, update);
         break;
       case 'current_mode_update':
-        // The agent's own switch_mode is refused in onRequest; a switch that still lands is undone.
-        if (update.currentModeId && update.currentModeId !== ASKING_MODE && this.peer) {
-          run.switched = update.currentModeId;
-          ctl.progress(`Antigravity switched to "${update.currentModeId}" mode; switching back to "${ASKING_MODE}"`);
-          const earlier = run.restoring;
-          run.restoring = this.keepAsking(this.peer, p.sessionId).then(() => earlier, (err) => {
-            this.stop(run, (err as Error).message);
-          });
-        }
         break;
       case 'usage_update':
         if (typeof update.used === 'number' && typeof update.size === 'number') ctl.context(update.used, update.size);
@@ -642,7 +701,16 @@ export class AntigravityAdapter implements Adapter {
 }
 
 function newRun(ctl: JobCtl): Run {
-  return { ctl, prompting: null, sent: false, cancelling: false, message: '', earlier: '', pending: [], grants: new Set(), declined: [], calls: new Map() };
+  return { ctl, prompting: null, sent: false, ending: false, cancelling: false, message: '', earlier: '', pending: [], grants: new Set(), declined: [], calls: new Map(), steers: [] };
+}
+
+/** Waits for every switch back the turn has started, including one started while it waited. */
+async function settled(run: Run): Promise<void> {
+  let restoring;
+  do {
+    restoring = run.restoring;
+    await restoring;
+  } while (run.restoring !== restoring);
 }
 
 /** The session's mode, from ACP's modes or from a config option of the mode category. */

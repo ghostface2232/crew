@@ -1449,11 +1449,14 @@ export class Jobs {
         if (used >= 0 && size > 0) job.context = { used, size };
       },
       diff: (text) => {
-        if (!live() || typeof text !== 'string') return;
+        if (!live() || this.finalizing.has(job.id) || typeof text !== 'string') return;
+        // Never between the halves of a surrogate pair, which a strict JSON decoder (the macOS app's) refuses.
+        const cut = /[\uD800-\uDBFF]/.test(text[LIVE_DIFF_CHARS - 1] ?? '') ? LIVE_DIFF_CHARS - 1 : LIVE_DIFF_CHARS;
         const diff = text.length > LIVE_DIFF_CHARS
-          ? `${text.slice(0, LIVE_DIFF_CHARS)}\n… ${(text.length - LIVE_DIFF_CHARS).toLocaleString('en-US')} more characters; the worktree has the whole change.`
+          ? `${text.slice(0, cut)}\n… ${(text.length - cut).toLocaleString('en-US')} more characters; the worktree has the whole change.`
           : text;
-        const at = Date.now();
+        // Clients refetch when this changes, so two updates in one millisecond still differ.
+        const at = Math.max(Date.now(), (job.liveDiff?.at ?? 0) + 1);
         this.liveDiffs.set(job.id, { turn: job.turns, diff, at });
         job.liveDiff = { turn: job.turns, at, chars: text.length };
         this.changed(job);
@@ -1477,6 +1480,8 @@ export class Jobs {
       },
       done: (report) => {
         if (!live() || this.finalizing.has(job.id)) return;
+        // The turn is over; collecting its result can take a while, and the result replaces what it showed.
+        this.dropLiveDiff(job);
         this.finalizing.add(job.id);
         this.finalize(job, report).catch((err) => {
           this.finalizing.delete(job.id);
@@ -1666,6 +1671,13 @@ export class Jobs {
     return path.join(this.home, 'reviews', `${id}${turn === 1 ? '' : `-${turn}`}.diff`);
   }
 
+  private dropLiveDiff(job: Job): void {
+    this.liveDiffs.delete(job.id);
+    if (!job.liveDiff) return;
+    delete job.liveDiff;
+    this.changed(job);
+  }
+
   /** The diff of a job's running turn so far, while it runs. */
   liveDiff(id: string): { turn: number; diff: string; at: number } | null {
     const job = this.get(id);
@@ -1679,11 +1691,7 @@ export class Jobs {
 
   private event(job: Job, kind: EventKind, detail: string, news?: { kind: News['kind']; reason: string; question?: string }): void {
     job.seq = this.record(job.agent, job.sessionId, kind, detail, job.id).seq;
-    // The turn's result replaces what it showed while it ran.
-    if (isTerminal(job) && job.liveDiff) {
-      this.liveDiffs.delete(job.id);
-      delete job.liveDiff;
-    }
+    if (isTerminal(job)) this.dropLiveDiff(job);
     // Each turn has its own file, so delayed cleanup cannot delete a follow-up's fresh diff.
     if (isTerminal(job) && job.kind === 'review') {
       fs.rm(this.diffFile(job.id, job.turns), { force: true }, () => {});

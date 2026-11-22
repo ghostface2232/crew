@@ -661,7 +661,8 @@ export class CodexAdapter implements Adapter {
         if (p.tokenUsage.modelContextWindow) ctl.context(p.tokenUsage.last?.totalTokens ?? 0, p.tokenUsage.modelContextWindow);
         break;
       case 'turn/diff/updated':
-        if (!run.turnId || p.turnId === run.turnId) ctl.diff(p.diff);
+        // Only the confirmed turn's: a late diff from the turn before must not show as this one's.
+        if (run.turnId && p.turnId === run.turnId) ctl.diff(p.diff);
         break;
       case 'model/rerouted':
         // The rest of the turn runs on the other model, so scores and ratings must name that one.

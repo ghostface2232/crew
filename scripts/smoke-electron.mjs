@@ -80,11 +80,12 @@ try {
   fs.mkdirSync('test-results', { recursive: true });
   await page.screenshot({ path: 'test-results/desktop-smoke.png' });
 
-  // Only the page below the top bar scrolls, its bar at the window's edge; keys scroll it after a sidebar click too.
+  // Only the stage below the top bar scrolls, inset from the window's edge by the frame; keys scroll it after a sidebar click too.
   expect(await page.evaluate(() => {
     const root = document.documentElement;
     const box = document.querySelector('main.page').getBoundingClientRect();
-    return { rootScrolls: root.scrollHeight > root.clientHeight, top: box.top, right: box.right === innerWidth };
+    const inset = parseFloat(getComputedStyle(root).getPropertyValue('--window-inset'));
+    return { rootScrolls: root.scrollHeight > root.clientHeight, top: box.top, right: box.right === innerWidth - inset };
   })).toEqual({ rootScrolls: false, top: 60, right: true });
   await page.getByRole('button', { name: 'Overview', exact: true }).first().click();
   await page.keyboard.press('PageDown');
@@ -117,8 +118,8 @@ try {
   });
   await expect(instructions).toHaveValue('Keep this unsaved draft');
   expect(await visible(application)).toBe(true);
-  page.once('dialog', (dialog) => dialog.accept());
   await page.getByRole('button', { name: 'Close settings' }).click();
+  await page.getByRole('dialog', { name: 'Close without saving your changes?' }).getByRole('button', { name: 'Close', exact: true }).click();
 
   // No control lies under the window buttons, including at a narrow width with Settings open.
   const covered = () =>
@@ -155,9 +156,8 @@ try {
   await page.getByRole('button', { name: 'Check for Updates' }).click();
   await expect(page.getByText('Version 9.9.9 is ready to install')).toBeVisible({ timeout: 15_000 });
   await expect(page.getByRole('link', { name: 'What’s new in 9.9.9' })).toBeVisible();
-  page.once('dialog', (dialog) => dialog.accept());
   await page.getByRole('button', { name: 'Close settings' }).click();
-  expect(await page.evaluate(() => [...document.querySelectorAll('.sidebar-foot > button')].map((button) => button.id)))
+  expect(await page.evaluate(() => [...document.querySelectorAll('.sidebar-foot button')].map((button) => button.id)))
     .toEqual(['install-update', 'open-settings']);
   expect(fs.readFileSync(path.join(home, 'desktop', 'updates', 'Crew-Setup-9.9.9.exe'))).toEqual(installer);
   // Only the main window reaches the updater: another window with the same preload, even on the board, is refused.
@@ -245,7 +245,7 @@ try {
     checks: [
       'sign-in by the shell, with no cookie and no secret in the address',
       'renderer isolation',
-      'page-only scrolling, keyboard scrolling after a sidebar click',
+      'stage-only scrolling, keyboard scrolling after a sidebar click',
       'close hides to tray',
       'single instance',
       'cancelled quit preserves unsaved settings',

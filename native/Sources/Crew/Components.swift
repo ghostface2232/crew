@@ -38,17 +38,20 @@ struct StatusLabel: View {
         }
     }
     var body: some View {
-        Label { Text(title ?? state.capitalized) } icon: { StatusSymbol(name: symbol, spins: spins) }.chip(color, insets: Chip.symbolInsets)
+        Label { Text(title ?? state.capitalized) } icon: { StatusSymbol(name: symbol, color: color, spins: spins) }.chip(color, insets: Chip.symbolInsets)
     }
 }
 
 /// A status symbol, turning slowly when asked, as on the board, unless Reduce Motion is on.
 struct StatusSymbol: View {
     let name: String
+    let color: Color
     let spins: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var scheme
     var body: some View {
-        Turning(isActive: spins && !reduceMotion) { Image(systemName: name) }
+        // Inked here rather than left to the chip's style, which a turning picture may not see change (see `Turning`).
+        Turning(isActive: spins && !reduceMotion) { Image(systemName: name).foregroundStyle(color.ink(scheme)) }
     }
 }
 
@@ -74,7 +77,9 @@ struct Turning<Content: View>: View {
     }
     /// Twice the display's own scale, so a turned picture stays as crisp as a glyph drawn at that angle.
     private var scale: CGFloat { environment.displayScale * 2 }
-    /// Drawn with the environment the content stands in, so its font and color are the ones it would show.
+    /// Drawn with the environment the content stands in, so its font is the one it would show. A foreground style
+    /// belongs on the content itself: a change to an inherited one alone does not update this environment, so the
+    /// picture would keep the style from the last other change, such as a chip's gray from before it turned.
     private var picture: CGImage? {
         let renderer = ImageRenderer(content: content.environment(\.self, environment))
         renderer.scale = scale

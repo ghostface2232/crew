@@ -203,7 +203,7 @@ These views keep their own geometry next to their code, built from the tokens ab
 
 Shared transitions use `Motion.reduced` to respect Reduce Motion. `WorkflowStrip` applies its pulse directly and checks `reduceMotion` before animating.
 
-A spinning status symbol (`StatusLabel(spins:)`, used for an active mission's chip and a working agent's) rotates through `Turning`, a layer animation on a picture of the symbol: clockwise, four seconds a turn, around the symbol's ink center, and stationary under Reduce Motion. A SwiftUI animation that never ends renders the window's whole view graph on every frame, which for one symbol took a quarter of a core.
+A spinning status symbol (`StatusLabel(spins:)`, used for an active mission's chip and a working agent's) rotates through `Turning`, a layer animation on a picture of the symbol: clockwise, four seconds a turn, around the symbol's ink center, and stationary under Reduce Motion. A SwiftUI animation that never ends renders the window's whole view graph on every frame, which for one symbol took a quarter of a core. The symbol carries its own color into the picture: a picture does not follow a change to a foreground style it only inherits, so a chip that turned from Ready to Working would keep Ready's gray.
 
 | Token | Animation | Use |
 | --- | --- | --- |

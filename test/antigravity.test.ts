@@ -386,7 +386,7 @@ test('a mode reported while a switch back is answered is switched back too', { t
 });
 
 /** Holds ACP requests so a test can deliver their answers across a turn boundary. */
-async function heldSession(t: test.TestContext, options: { model?: string; effort?: string; canClose?: boolean } = {}) {
+async function heldSession(t: test.TestContext, options: { model?: string; effort?: string; canClose?: boolean; holdNew?: boolean; holdResume?: boolean } = {}) {
   const h = harness(t);
   const acp = h.adapter as any;
   const calls: { method: string; params: any; resolve: (res: any) => void; reject: (err: Error) => void }[] = [];
@@ -395,8 +395,8 @@ async function heldSession(t: test.TestContext, options: { model?: string; effor
     request(method: string, params: unknown) {
       const result = Promise.withResolvers<unknown>();
       calls.push({ method, params, ...result });
-      if (method === 'session/new') result.resolve({ sessionId: 's1' });
-      if (method === 'session/resume') result.resolve({ models: { currentModelId: 'restored' }, modes: { currentModeId: 'default' } });
+      if (method === 'session/new' && !options.holdNew) result.resolve({ sessionId: 's1' });
+      if (method === 'session/resume' && !options.holdResume) result.resolve({ models: { currentModelId: 'restored' }, modes: { currentModeId: 'default' } });
       return result.promise;
     },
     notify(method: string, params: unknown) { calls.push({ method, params, resolve() {}, reject() {} }); },
@@ -422,6 +422,112 @@ async function heldSession(t: test.TestContext, options: { model?: string; effor
 
 const endTurn = { stopReason: 'end_turn' };
 const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+test('a prompt failure holds the session until an outstanding steer settles or close succeeds', async (t) => {
+  for (const canClose of [false, true]) {
+    const h = await heldSession(t, { canClose });
+    const first = await h.call('prompt');
+    const steering = h.reply('steer');
+    const outstanding = await h.call('prompt', 1);
+    first.reject(new Error('first prompt failed'));
+    await h.ended(h.job);
+    assert.equal(h.job.error?.message, 'first prompt failed');
+    if (canClose) {
+      (await h.call('close')).resolve({});
+    } else {
+      await h.reply('too soon');
+      assert.equal(h.job.state, 'failed');
+      assert.match(h.job.error!.message, /not yet stopped/);
+      assert.equal(h.sent('prompt').length, 2);
+      outstanding.resolve(endTurn);
+      await steering;
+    }
+    await h.reply('next');
+    assert.equal((await h.call('prompt', 2)).params.prompt[0].text, 'next');
+    outstanding.resolve(endTurn);
+    await steering;
+  }
+});
+
+test('cancelling a restore ignores replayed usage and tool calls', async (t) => {
+  const h = await heldSession(t, { holdResume: true });
+  (await h.call('prompt')).resolve(endTurn);
+  (await h.call('close')).resolve({});
+  await h.reply('restore');
+  const restore = await h.call('resume');
+  const cancel = h.jobs.cancel(h.job.id);
+  await h.call('cancel');
+  h.update({ sessionUpdate: 'usage_update', used: 789, size: 999 });
+  h.violation();
+  restore.resolve({});
+  await cancel;
+  assert.equal(h.sent('prompt').length, 1);
+  assert.equal(h.job.context, undefined);
+  assert.deepEqual(h.job.notes, []);
+});
+
+test('overlapping steers wait for refusal or handover before sending the next message', async (t) => {
+  const h = await heldSession(t);
+  const first = await h.call('prompt');
+  const rejected = assert.rejects(h.reply('one'), /first steer refused/);
+  const steer = await h.call('prompt', 1);
+  const accepted = h.reply('two');
+  await tick();
+  const beforeRefusal = h.sent('prompt').length;
+  steer.reject(new Error('first steer refused'));
+  await rejected;
+  const next = await h.call('prompt', 2);
+  first.resolve(endTurn);
+  next.reject(new RpcError(-32603, 'quota exhausted'));
+  await accepted;
+  await h.ended(h.job);
+  assert.equal(beforeRefusal, 2);
+  assert.deepEqual(h.job.error, { message: 'quota exhausted', limit: true });
+});
+
+test('a stopped turn refuses a queued steer before agy answers the previous one', { timeout: 5000 }, async (t) => {
+  const h = await heldSession(t);
+  const first = await h.call('prompt');
+  const sent = h.reply('one');
+  const pending = await h.call('prompt', 1);
+  const queued = assert.rejects(h.reply('two'), /ending this turn/);
+  h.violation();
+  await queued;
+  assert.equal(h.sent('prompt').length, 2);
+  first.resolve(endTurn);
+  pending.resolve(endTurn);
+  (await h.call('close')).resolve({});
+  await sent;
+});
+
+test('a cancelled job closes the session created by a late answer', async (t) => {
+  const h = await heldSession(t, { holdNew: true });
+  const creating = await h.call('new');
+  await h.jobs.cancel(h.job.id);
+  creating.resolve({ sessionId: 'late' });
+  await tick();
+  assert.deepEqual(h.sent('close').map((call) => call.params.sessionId), ['late']);
+  h.sent('close')[0].resolve({});
+  assert.equal(h.sent('prompt').length, 0);
+  assert.equal(h.job.sessionId, null);
+});
+
+test('a drained turn releases its session if the job ends during its final mode check', async (t) => {
+  const h = await heldSession(t, { canClose: false });
+  const first = await h.call('prompt');
+  h.mode('auto');
+  const mode = await h.call('set_mode');
+  first.resolve(endTurn);
+  await tick();
+  (h.jobs as any).ctl(h.job).fail('job ended externally');
+  await h.ended(h.job);
+  const follow = h.reply('continue');
+  h.mode('default');
+  mode.resolve({});
+  await follow;
+  assert.equal(h.job.state, 'running');
+  assert.equal((await h.call('prompt', 1)).params.prompt[0].text, 'continue');
+});
 
 test('an accepted steer that fails during generation fails the turn with its limit', { timeout: 5000 }, async (t) => {
   const h = await heldSession(t);

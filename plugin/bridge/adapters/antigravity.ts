@@ -20,7 +20,7 @@ class Session {
   grants = new Set<string>();
   /** The lead's latest turn, including one queued behind the previous turn's close. */
   turn?: Turn;
-  /** The turn agy still holds. Only its prompt settling or a confirmed close releases it. */
+  /** The turn agy still holds. Only its prompts settling or a confirmed close releases it. */
   owner?: Turn;
   private tail = Promise.resolve();
 
@@ -36,10 +36,10 @@ class Session {
     if (this.owner === turn) this.owner = undefined;
   }
 
-  end(turn: Turn): void {
-    turn.phase = 'ended';
+  end(turn: Turn, phase: 'stopping' | 'stopped' | 'ended' = 'ended'): void {
+    turn.phase = phase;
     if (this.turn === turn) this.turn = undefined;
-    this.release(turn);
+    turn.handover?.resolve();
   }
 }
 
@@ -56,7 +56,10 @@ class Turn {
   pending: { type: 'approval' | 'question'; reason: string; grant?: Grant; resolve: (answer: Answer | null) => void }[] = [];
   declined: string[] = [];
   calls = new Map<string, ToolCall & { asked?: boolean; checked?: boolean; mode?: string }>();
-  prompts: { released: boolean; answer: Promise<PromptAnswer> }[] = [];
+  prompts: Promise<PromptAnswer>[] = [];
+  /** Steers wait for each other without occupying the session queue needed by mode changes and close. */
+  nextSteer = Promise.resolve();
+  handover?: PromiseWithResolvers<void>;
   cancelViolation?: string;
   readonly drained = Promise.withResolvers<void>();
   abandonControl?: () => void;
@@ -154,10 +157,14 @@ export class AntigravityAdapter implements Adapter {
   async start(ctl: JobCtl): Promise<void> {
     const turn = new Turn(ctl);
     const peer = await this.ensure();
-    const res = await turn.control(peer, 'session/new', { cwd: ctl.job.cwd, mcpServers: [crewServer(ctl)], ...this.instructions(ctl) }).catch((err) => {
+    if (!turn.alive) return;
+    const res = await peer.request('session/new', { cwd: ctl.job.cwd, mcpServers: [crewServer(ctl)], ...this.instructions(ctl) }, RPC_TIMEOUT_MS).catch((err) => {
       if (turn.alive) throw err;
     });
-    if (!turn.alive) return;
+    if (!turn.alive) {
+      if (res?.sessionId) await this.close(peer, new Session(res.sessionId)).catch(() => {});
+      return;
+    }
     ctl.capabilities({
       filesystem: ctl.job.sandbox === 'read-only' ? 'read-only; Crew refuses every edit' : 'edits inside the workspace only; Crew refuses the rest',
       network: 'agent-managed',
@@ -309,23 +316,26 @@ export class AntigravityAdapter implements Adapter {
 
   private async collect(peer: RpcPeer, session: Session, turn: Turn): Promise<void> {
     let outcome: PromptAnswer = {};
-    for (const request of turn.prompts) {
-      const answer = await request.answer;
+    for (const prompt of turn.prompts) {
+      const answer = await prompt;
       if (answer.refused) continue;
       outcome = answer;
-      if (answer.error) break;
+      if (answer.error && turn.phase === 'working') this.finish(peer, session, turn, answer);
       this.counted(turn, answer.res?.usage);
     }
     turn.drained.resolve();
-    if (!turn.alive || turn.phase !== 'working') {
-      if (session.owner === turn && turn.phase === 'stopped') {
-        void session.enqueue(() => this.close(peer, session)).catch(() => {});
+    try {
+      if (!turn.alive || turn.phase !== 'working') {
+        if (session.owner === turn && turn.phase === 'stopped') {
+          void session.enqueue(() => this.close(peer, session)).catch(() => {});
+        }
+        return;
       }
+      turn.phase = 'finishing';
+      await this.enforceMode(peer, session, turn, () => this.finish(peer, session, turn, outcome));
+    } finally {
       session.release(turn);
-      return;
     }
-    turn.phase = 'finishing';
-    this.enforceMode(peer, session, turn, () => this.finish(peer, session, turn, outcome));
   }
 
   private finish(peer: RpcPeer, session: Session, turn: Turn, answer: PromptAnswer): void {
@@ -335,6 +345,7 @@ export class AntigravityAdapter implements Adapter {
     const report = turn.message.trim() || turn.earlier;
     if (answer.res?.stopReason === 'end_turn' && !report && turn.declined.length) {
       ctl.resumed();
+      session.release(turn);
       session.end(turn);
       session.turn = turn.continuation();
       void this.begin(peer, session, session.turn, turn.declined.join('\n\n'));
@@ -360,6 +371,7 @@ export class AntigravityAdapter implements Adapter {
     }
     session.loaded = false;
     session.mode = undefined;
+    session.owner = undefined;
   }
 
   /** Cancel goes straight to agy. The close is ordered with session setup, with a bounded wait for a stuck option RPC. */
@@ -384,8 +396,11 @@ export class AntigravityAdapter implements Adapter {
           result.resolve();
         } else {
           if (turn.cancelViolation) turn.ctl.fail(turn.cancelViolation);
-          turn.phase = turn.phase === 'stopping' || turn.cancelViolation ? 'stopped' : 'working';
-          if (turn.phase === 'working') this.enforceMode(peer, session, turn);
+          if (turn.phase === 'stopping' || turn.cancelViolation) session.end(turn, 'stopped');
+          else {
+            turn.phase = 'working';
+            void this.enforceMode(peer, session, turn);
+          }
           result.reject(err);
         }
       } finally {
@@ -424,12 +439,18 @@ export class AntigravityAdapter implements Adapter {
     };
     open();
     const peer = this.peer!;
-    const { next } = await session.enqueue(() => {
+    const previous = turn.nextSteer;
+    const handover = Promise.withResolvers<void>();
+    turn.nextSteer = handover.promise;
+    const { next } = await previous.then(() => {
       open();
-      return this.inAskingMode(peer, session, turn, () => {
+      return session.enqueue(() => this.inAskingMode(peer, session, turn, () => {
         open();
-        return { next: this.sendPrompt(peer, session, turn, message) };
-      });
+        return { next: this.sendPrompt(peer, session, turn, message, handover) };
+      }));
+    }).catch((err) => {
+      handover.resolve();
+      throw err;
     });
     const answer = await Promise.race([next, delay(2_000, undefined, { ref: false })]);
     if (answer?.refused) throw answer.error;
@@ -439,22 +460,27 @@ export class AntigravityAdapter implements Adapter {
     turn.ctl.progress('message added to the running turn');
   }
 
-  private sendPrompt(peer: RpcPeer, session: Session, turn: Turn, text: string): Promise<PromptAnswer> {
-    const prompts = turn.prompts;
-    const index = prompts.length;
+  private sendPrompt(peer: RpcPeer, session: Session, turn: Turn, text: string, handover?: PromiseWithResolvers<void>): Promise<PromptAnswer> {
+    turn.handover = handover;
     const answer = peer.request('session/prompt', { sessionId: session.id, prompt: [{ type: 'text', text }] }).then(
       (res) => {
-        prompts[index].released = res?.stopReason === 'end_turn';
+        // Only the preceding request's end_turn confirms the pending steer.
+        if (res?.stopReason === 'end_turn' && turn.handover !== handover) {
+          turn.handover?.resolve();
+          turn.handover = undefined;
+        }
         return { res };
       },
       (error: Error) => {
-        // A steer takes over once every earlier request has returned end_turn or refused its own message.
-        const refused = peer.alive && prompts.some((request, i) => i < index && !request.released);
-        prompts[index].released = refused;
+        const refused = !!handover && turn.handover === handover && peer.alive;
+        if (refused) {
+          handover.resolve();
+          turn.handover = undefined;
+        }
         return { error, refused };
       },
     );
-    prompts.push({ released: false, answer });
+    turn.prompts.push(answer);
     return answer;
   }
 
@@ -480,8 +506,8 @@ export class AntigravityAdapter implements Adapter {
   }
 
   /** A turn cannot finish until every reported switch ahead of it on the session queue has been undone. */
-  private enforceMode(peer: RpcPeer, session: Session, turn: Turn, work = () => {}): void {
-    void session.enqueue(async () => {
+  private enforceMode(peer: RpcPeer, session: Session, turn: Turn, work = () => {}): Promise<void> {
+    return session.enqueue(async () => {
       try {
         await this.inAskingMode(peer, session, turn, work);
       } catch (err) {
@@ -499,7 +525,7 @@ export class AntigravityAdapter implements Adapter {
     drop(turn);
     void this.interrupt(session, turn).catch(() => {});
     turn.ctl.fail(message);
-    turn.phase = 'stopping';
+    session.end(turn, 'stopping');
   }
 
   /**
@@ -588,7 +614,7 @@ export class AntigravityAdapter implements Adapter {
     const session = this.session(p.sessionId);
     if (typeof reported === 'string') session.mode = { id: reported };
     const turn = session.owner;
-    if (!turn?.alive || turn.phase === 'starting') return;
+    if (!turn?.alive || !turn.prompts.length) return;
     const { ctl } = turn;
     this.lastUsed = Date.now();
     ctl.activity();
@@ -596,7 +622,7 @@ export class AntigravityAdapter implements Adapter {
     if (typeof reported === 'string' && reported !== ASKING_MODE && this.peer) {
       const peer = this.peer;
       ctl.progress(`Antigravity switched to "${reported}" mode; switching back to "${ASKING_MODE}"`);
-      this.enforceMode(peer, session, turn);
+      void this.enforceMode(peer, session, turn);
     }
 
     switch (update.sessionUpdate) {

@@ -329,3 +329,108 @@ test('a late start acknowledgement cannot confirm a later pending turn', async (
   h.notify('turn/diff/updated', { turnId: 'two', diff: 'current' });
   assert.deepEqual(diffs, ['current']);
 });
+
+function startChild(h: ReturnType<typeof harness>) {
+  h.notify('thread/started', { thread: { id: 'child', parentThreadId: 'parent' } });
+  h.notify('turn/started', { threadId: 'child', turn: { id: 'one' } });
+}
+
+test('a newer child turn holds the parent after the older child completion arrives', () => {
+  const h = harness();
+  const reports: string[] = [];
+  Object.assign(h.ctl, { done: (text: string) => reports.push(text) });
+  startChild(h);
+  h.notify('turn/completed', { turn: { id: 'turn', status: 'completed' } });
+  h.notify('turn/started', { threadId: 'child', turn: { id: 'two' } });
+  h.notify('turn/completed', { threadId: 'child', turn: { id: 'one', status: 'completed' } });
+  assert.deepEqual(reports, []);
+  h.notify('turn/completed', { threadId: 'child', turn: { id: 'two', status: 'completed' } });
+  assert.deepEqual(reports, ['']);
+});
+
+function pendingStart(h: ReturnType<typeof harness>) {
+  const ack = Promise.withResolvers<unknown>();
+  h.internal.peer = { alive: true, request: () => ack.promise };
+  h.internal.loaded.add('parent');
+  const start = h.adapter.reply(h.ctl as any, 'continue');
+  return { ack, start };
+}
+
+test('a parent waiting for a child ignores its own late start acknowledgement and message', async () => {
+  const h = harness(false);
+  const reports: string[] = [];
+  Object.assign(h.ctl, { done: (text: string) => reports.push(text) });
+  const { ack, start } = pendingStart(h);
+  await new Promise((resolve) => setImmediate(resolve));
+  startChild(h);
+  const report = (text: string) => h.notify('item/completed', { item: { type: 'agentMessage', text } });
+  report('correct report');
+  h.notify('turn/completed', { turn: { id: 'turn', status: 'completed' } });
+  ack.resolve({ turn: { id: 'turn' } });
+  await start;
+  report('late overwrite');
+  h.notify('turn/completed', { threadId: 'child', turn: { id: 'one', status: 'completed' } });
+  assert.deepEqual(reports, ['correct report']);
+});
+
+test('interrupting the parent retires its child turns before a follow-up', async () => {
+  for (const held of [false, true]) {
+    const h = harness();
+    Object.assign(h.ctl, { cancelled() {} });
+    h.internal.peer = { request: async () => ({}) };
+    startChild(h);
+    h.notify('turn/completed', { turn: { id: 'turn', status: held ? 'completed' : 'interrupted' } });
+    if (held) await h.adapter.cancel(h.ctl as any);
+    h.notify('turn/started', { turn: { id: 'follow-up' } });
+    h.notify('item/autoApprovalReview/completed', {
+      threadId: 'child', turnId: 'one', review: { status: 'denied', rationale: 'old refusal' },
+      action: { type: 'command', command: 'example' },
+    });
+    assert.deepEqual(h.refusals, []);
+  }
+});
+
+test('confirming a turn preserves its early report and started items', async () => {
+  const h = harness(false);
+  const reports: string[] = [];
+  Object.assign(h.ctl, { done: (text: string) => reports.push(text) });
+  const { ack, start } = pendingStart(h);
+  await new Promise((resolve) => setImmediate(resolve));
+  h.notify('item/completed', { item: { type: 'agentMessage', text: 'early report' } });
+  h.notify('item/started', { item: { type: 'mcpToolCall', id: 'item', server: 'example', tool: 'read', arguments: { name: 'early input' } } });
+  h.notify('turn/started', { turn: { id: 'turn' } });
+  ack.resolve({ turn: { id: 'turn' } });
+  await start;
+  h.notify('item/autoApprovalReview/completed', {
+    targetItemId: 'item', action: { type: 'mcpToolCall', server: 'example', tool: 'read' }, review: { status: 'denied' },
+  });
+  h.notify('turn/completed', { turn: { id: 'turn', status: 'completed' } });
+  assert.deepEqual(reports, ['early report']);
+  assert.match(h.refusals[0].action, /early input/);
+  h.notify('turn/started', { turn: { id: 'new' } });
+  h.notify('turn/completed', { turn: { id: 'new', status: 'completed' } });
+  assert.deepEqual(reports, ['early report', '']);
+});
+
+test('a diff from the next turn can arrive between turns before its start notification', () => {
+  const h = harness();
+  const diffs: string[] = [];
+  Object.assign(h.ctl, { diff: (text: string) => diffs.push(text) });
+  h.notify('turn/completed', { turn: { id: 'turn', status: 'completed' } });
+  h.notify('turn/diff/updated', { diff: 'stale' });
+  h.notify('turn/diff/updated', { turnId: 'new', diff: 'early' });
+  h.notify('turn/started', { turn: { id: 'new' } });
+  assert.deepEqual(diffs, ['early']);
+});
+
+test('final cumulative thread usage can arrive after its turn completes', () => {
+  const h = harness();
+  Object.assign(h.ctl, { tokens: (total: number) => { h.job.tokens = total; } });
+  h.notify('turn/completed', { turn: { id: 'turn', status: 'completed' } });
+  h.notify('thread/tokenUsage/updated', { tokenUsage: { total: { totalTokens: 100 } } });
+  h.notify('thread/tokenUsage/updated', { tokenUsage: { total: { totalTokens: 99 } } });
+  assert.equal(h.job.tokens, 100);
+  h.notify('turn/started', { turn: { id: 'next' } });
+  h.notify('thread/tokenUsage/updated', { tokenUsage: { total: { totalTokens: 110 } } });
+  assert.equal(h.job.tokens, 110);
+});

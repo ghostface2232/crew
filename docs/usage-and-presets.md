@@ -14,7 +14,9 @@ Crew reads agent quota and uses it to advise the lead who should take a role. Pr
 | `stale` | AgentGauge's reading is older than 45 minutes |
 | `unknown` | No reading: AgentGauge is absent, signed out, or uses an unknown cache format |
 
-A provider's status equals its tightest account-wide window. Single-model windows (`group` set) report their own status without deciding the provider's. Antigravity checks both account-wide windows (when present) and the configured model's family: every word of a family name must appear in the model name (`/` separates alternatives, such as `Claude/GPT`), so non-Argon Gemini matches `Gemini` over `Gemini 4 Argon`. Without a configured model, account-wide windows decide if present. When neither a model nor account-wide windows are available, or if no family matches, the tightest family decides because jobs cannot switch models.
+A provider's status equals its tightest account-wide window. Single-model windows (`group` set) report their own status without deciding the provider's.
+
+Antigravity checks both account-wide windows (when present) and the configured model's family: every word of a family name must appear in the model name (`/` separates alternatives, such as `Claude/GPT`), so non-Argon Gemini matches `Gemini` over `Gemini 4 Argon`. Without a configured model, account-wide windows decide if present. When neither a model nor account-wide windows are available, or if no family matches, the tightest family decides because jobs cannot switch models.
 
 Status uses remaining quota. Pace projections often misjudged real usage (marking Codex `tight` with 57% of its weekly window left), so routing ignores them. Each window still carries `projectedExhaustion` in usage readings, but neither board shows it.
 
@@ -31,7 +33,7 @@ On the board, a provider that is `stale`, `unknown`, or `exhausted` by a reporte
 
 Codex's live `account/rateLimits/read` and `account/rateLimits/updated` readings display on the board and supplement AgentGauge for `route` whenever newer than AgentGauge's cache.
 
-Both AgentGauge files open read-only. Crew holds no credentials and makes no provider requests. Two cache formats are supported: macOS (version 1 in `~/Library/Application Support/AgentGauge`) and Windows (version 4 in `%APPDATA%\Gauge`). Windows PascalCase tool names and Id-less window names (`Claude`, `Weekly`) normalize to macOS spelling, and SQLite history queries ignore case (`COLLATE NOCASE`) so Codex readings match on both platforms. Signed-out tools are skipped. On unsupported platforms or unknown versions, agents report `unknown` and roles run as assigned.
+Both AgentGauge files open read-only. Crew holds no credentials and makes no provider requests. Two cache formats are supported: macOS (version 1 in `~/Library/Application Support/AgentGauge`) and Windows (version 4 in `%APPDATA%\Gauge`). Windows PascalCase tool names and ID-less window names (`Claude`, `Weekly`) normalize to macOS spelling, and SQLite history queries ignore case (`COLLATE NOCASE`) so Codex readings match on both platforms. Signed-out tools are skipped. On unsupported platforms or unknown versions, agents report `unknown` and roles run as assigned.
 
 Stale and unknown readings never move work: `route` keeps the assigned holder and notes that usage is unknown.
 
@@ -78,7 +80,7 @@ Built-in presets name no worker models because account availability differs. Cus
 
 A mission's `preset` overrides the global preset for jobs started under it. Role models and efforts still win. The lead passes `preset` to `mission` only when the user names one and never picks one itself. Users can also change it from the mission menu on the board or in the app. Changes apply to new jobs. Each job records `Job.preset` at start and keeps its preset and model across follow-ups.
 
-The preset belongs to the work, not the card. Stopping tracking on the board keeps the mission ID (`costMission`) and preset on new jobs until the lead finishes the mission or opens another. A job naming an unknown mission fails once with no fallback to the global preset. After an MCP server restart, the next job or `route` reads the session's open mission from the daemon. If it closed while the MCP server was down, the lead keeps the preset and leaves the card closed. Because session instructions are fixed at start, `mission` and `route` replies state the active preset and subagent cap.
+The preset belongs to the work, not the card. Stopping tracking on the board keeps the mission ID (`costMission`) and preset on new jobs until the lead finishes the mission or opens another. A job naming an unknown mission fails once with no fallback to the global preset. After an MCP server restart, the next job or `route` reads the session's open mission from the daemon. If the mission closed while the MCP server was down, the lead keeps the preset and leaves the card closed. Because session instructions are fixed at start, `mission` and `route` replies state the active preset and subagent cap.
 
 ### Tiers
 

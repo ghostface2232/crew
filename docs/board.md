@@ -1,6 +1,6 @@
 # Board
 
-The React web board lets users inspect work and act on it directly, as does the native macOS app (requirement R10, roadmap item B1). The web board is supported on all platforms and also runs in the Windows Electron shell. Claude remains the pipeline lead, with Cursor, alternate leads, and automatic merges remaining separate work.
+The React web board lets users inspect work and act on it directly, as does the native macOS app (requirement R10, roadmap item B1). The web board is supported on all platforms and also runs in the Windows Electron shell. Claude remains the pipeline lead; Cursor, alternate leads, and automatic merges remain separate work.
 
 **Key files:** `plugin/board/src/store.ts`, `plugin/board/src/api.ts`, `plugin/board/src/model.ts`, `plugin/board/src/ui.tsx`, `plugin/board/board.css`, and `plugin/bridge/assets.ts`. See [daemon-api.md](daemon-api.md) for HTTP and SSE, [missions.md](missions.md#display) for mission display, [approvals.md](approvals.md) for approvals and questions, and [usage-and-presets.md](usage-and-presets.md) for usage routing and presets. The current desktop apps are documented in [windows-app.md](windows-app.md) and [macos-app.md](macos-app.md).
 
@@ -25,7 +25,7 @@ Bridge types are imported type-only, keeping Node modules out of the renderer. S
 
 - The sidebar lists `Overview`, `Needs You`, `Activity`, and `History`, with an alphabetical `Projects` list. The sidebar `NavList` keeps `All projects` visible so users can always clear a persisted filter and dispatch to a different directory. It also offers per-project hover previews. The board saves the selection in `localStorage` under `crew.selection`. Selecting a project scopes Overview to it. Jobs and sessions group under the repository's main working tree even when started from a worktree or subfolder.
 - `⌘K` or `/` opens the search palette, `N` opens New Job, and `1`–`4` switch pages. The board follows system light and dark mode (`color-scheme: light dark`) and scales down to `320px`. At `<= 760px` the sidebar becomes a slide-over drawer, with a bottom dock below `760px`.
-- The workspace shows mission stages and recent completed missions as described in [missions.md](missions.md#display), along with unfinished jobs, lead session disclosures, and limits. Summary KPI counts include ended jobs only while unsettled, meaning they have an undiscarded worktree or unread result.
+- The workspace shows mission stages and recently completed missions as described in [missions.md](missions.md#display), along with unfinished jobs, lead session disclosures, and limits. Summary KPI counts include ended jobs only while unsettled, meaning they have an undiscarded worktree or unread result.
 - Status uses Fluent icons and tinted chips (`Chip`). Fluent System Icons (`@fluentui/react-icons`) are filled SVGs in `currentColor` and sized by CSS. Selected sidebar items swap to the Filled style with `bundleIcon`. The `AgentPanel` beside the workspace shows agent names and marks. `AgentMark` renders SVGs in `plugin/board/src/icons/` as CSS mask templates.
 
 ## Needs You and live answers
@@ -38,7 +38,7 @@ Bridge types are imported type-only, keeping Node modules out of the renderer. S
 ## Job details and evidence
 
 - Clicking a job row opens a non-modal side panel (`#<job id>`). It shows status and errors, inline approval or question controls while waiting, and facts about the agent, model, project, branch, tokens, and shared instructions. It also shows changed files with out-of-scope files marked, the bridge check receipt, evidence, rounds with undo and keep, automatic-review refusals, notes, the report or debate transcript, a follow-up composer, the original task, activity, Resume Command, Diff Command, and Cancel Job. Detail requests abort when the drawer closes or changes jobs.
-- Pressing a capture opens it alone. A thumbnail strip adds or removes up to four panes in a row of up to three or a 2×2 grid. Lead attachments come first, then worker captures by turn, with `<view>-before` ahead of `<view>-after`. Captions show `Turn X of Y` or `Attached by the lead`. The macOS app decodes images natively at pane size and opens recordings in the system player. macOS has no WebM decoder.
+- Pressing a capture opens it alone. A thumbnail strip adds or removes panes (up to four, arranged in a row of up to three or a 2×2 grid). Lead attachments come first, then worker captures by turn, with `<view>-before` ahead of `<view>-after`. Captions show `Turn X of Y` or `Attached by the lead`. The macOS app decodes images natively at pane size and opens recordings in the system player. macOS has no WebM decoder.
 
 ## Settings
 
@@ -59,7 +59,8 @@ Direct dispatch (`Dispatch.tsx`) sends one of three intents. Direct jobs appear 
 
 - `ClockProvider` holds a clock store that ticks once a second and skips updates while `document.hidden` is true. Components read it through `useClock(select)` and re-render only when the text they show changes. Finished work does not subscribe.
 - `BoardStore` in `store.ts` applies each stream event to its snapshot immediately. It notifies subscribers once per animation frame, or on a timer in a hidden tab. Connection changes notify subscribers immediately.
-- Four animations now rest as they do under Reduce Motion. The running mission chip's turning symbol, the current step's halo, the working project's dot, and the live connection's ripple together used a third of a core while a mission ran because the browser draws every frame of a looping animation. Three loops remain and run only while their cause lasts. `.spinner` runs while a request is in flight, `.dots` while waiting for a debate reply, and the workflow strip's pulse while its session panel is open. `@media (prefers-reduced-motion: reduce)` disables transitions and animations except the active `.spinner`.
+- Four status animations now rest as they do under Reduce Motion: the running mission chip's turning symbol, the current step's halo, the working project's dot, and the live connection's ripple. Together they used a third of a core while a mission ran because the browser draws every frame of a looping animation.
+- Three looping animations remain, running only while their cause lasts: `.spinner` while a request is in flight, `.dots` while waiting for a debate reply, and the workflow strip's pulse while its session panel is open. `@media (prefers-reduced-motion: reduce)` disables transitions and animations except the active `.spinner`.
 
 ## Dependencies and decisions
 
@@ -102,7 +103,7 @@ npm run desktop
 npm run package:desktop
 ```
 
-These commands run `scripts/desktop.mjs`, which builds and opens the native SwiftUI app on macOS and Electron on non-macOS systems. Closing the Electron desktop window hides it to the tray. Quitting leaves the daemon and jobs running, and reopening attaches to the same daemon with existing active-job protection. See the platform docs for build and launch steps, packaging, signing, and self-updating. [macOS app](macos-app.md#build-and-run), [Windows app](windows-app.md#build-and-run)
+These commands run `scripts/desktop.mjs`, which builds and opens the native SwiftUI app on macOS and Electron on non-macOS systems. Closing the Electron desktop window hides it to the tray. Quitting leaves the daemon and jobs running, and reopening attaches to the same daemon with existing active-job protection. See the platform docs for build and launch steps, packaging, signing, and self-updating: [macOS app](macos-app.md#build-and-run) and [Windows app](windows-app.md#build-and-run).
 
 ## Renderer security
 

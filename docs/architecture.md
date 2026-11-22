@@ -19,8 +19,8 @@ plugin/bridge/mcp.ts ──HTTP──▶ Crew Daemon (127.0.0.1:47615)
 
 - One long-lived daemon owns worker processes, job state, event log, and status board. The MCP server (`plugin/bridge/mcp.ts`) is a thin client, so jobs survive Claude session restarts or compaction and multiple sessions share one board.
 - The daemon starts automatically on the first MCP or CLI call and replaces itself when idle if `plugin/bridge/` file hashes differ on disk (so source edits apply without bumping versions). Replacement sends `POST /api/shutdown` with `ifIdle: true`. The daemon returns `409` while any mutating POST is in flight or a job is active (running, waiting, starting, syncing, changing rounds, or being discarded). A daemon from another folder is replaced only by a newer version.
-- `crew daemon stop` and `restart` stop the daemon unconditionally. If shutdown goes unanswered, they send `SIGTERM` to the PID in `~/.crew/daemon.json` only if it matches the listener reported by `/api/health`, retry briefly if the PID file is missing, and remove the file after a forced stop only if it still names that PID (Windows `SIGTERM` bypasses shutdown). Replacement never spawns a new daemon while the old listener is up, and `restart` verifies `~/.crew/token` is accepted before reporting "running".
-- The daemon binds its port before reading or writing any state, so a concurrent loser exits without creating a token, loading jobs, or clearing active scratch directories and review snapshots. If the system reserves a port with nothing listening (such as WSL mirrored networking's 4096-port blocks), the daemon steps down `PORTS` in `config.ts`. Clients, hooks (`bridge/report.ts`), and desktop apps read the bound port from `~/.crew/daemon.json`.
+- `crew daemon stop` and `restart` stop the daemon unconditionally. If the shutdown request goes unanswered, they send `SIGTERM` to the PID in `~/.crew/daemon.json`—only after verifying it matches `/api/health`'s listener, retrying briefly if the PID file is missing—and remove the PID file after a forced stop only if it still names that PID (on Windows, `SIGTERM` terminates immediately). Replacement never spawns a new daemon while the old listener is still up, and `restart` verifies `~/.crew/token` is accepted before reporting "running".
+- The daemon binds its port before reading or writing any state, so a competing daemon that loses the port race exits without creating a token, loading jobs, or clearing active scratch directories and review snapshots. If the system reserves a port with nothing listening (such as WSL mirrored networking's 4096-port blocks), the daemon steps down through `PORTS` in `config.ts`. Clients, hooks (`bridge/report.ts`), and desktop apps read the bound port from `~/.crew/daemon.json`.
 - Everything ships in one Claude Code plugin (`plugin/`) containing the MCP server, hooks, 4 skills, 1 subagent (`self-reviewer`), and 9 role files.
 
 ## Bridge and state
@@ -68,7 +68,7 @@ The bridge runs only the official `agy` binary via ACP (which Google documents f
 
 ## Standalone status board app
 
-Both desktop apps are now built as thin clients over the daemon's `/api/state`, `/api/stream` (SSE), and `POST` endpoints, while the [React web board](board.md) remains for browsers and Claude Desktop's browser pane.
+Both desktop apps are thin clients over the daemon's `/api/state`, `/api/stream` (SSE), and `POST` endpoints, while the [React web board](board.md) remains for browsers and Claude Desktop's browser pane.
 
 - **macOS (`native/Sources/Crew/`)** uses SwiftUI/AppKit. Crew chose it over Tauri for menu bar integration, actionable approval notifications, and OS-native presentation. See [macos-app.md](macos-app.md).
 - **Windows (`desktop/`)** uses Electron to wrap the React web board with a system tray icon and daemon-signed requests. See [windows-app.md](windows-app.md).

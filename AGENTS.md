@@ -19,7 +19,7 @@ Crew daemon (plugin/bridge/daemon.ts, http://127.0.0.1:47615)
                   └─ Windows app (desktop/, Electron around the board)
 ```
 
-- The daemon is one long-lived process per user. It owns the worker processes, job and mission state, and the board, so jobs survive the lead session restarting and several sessions share one board. The MCP server, hooks, CLI, and apps are clients; the first one to need the daemon starts it.
+- The daemon is one long-lived process per user. It owns the worker processes, job and mission state, and the board, so jobs survive a lead session restart and several sessions share one board. The MCP server, hooks, CLI, and apps are clients; the first one to need the daemon starts it.
 - Each implementation or polish job runs on branch `crew-<job id>` in a worktree under `~/.crew/worktrees/`. Nothing reaches the user's branch until the lead reads the diff and merges it.
 - Workers never see the lead's conversation. Each job gets the lead's brief, a role file from `plugin/roles/`, the machine-sharing rules, and the shared instructions in `~/.crew/instructions.md` and `.crew/instructions.md`.
 - A desktop app carries a built copy of the plugin and its own Node runtime, and registers the plugin with Claude Code on first launch.

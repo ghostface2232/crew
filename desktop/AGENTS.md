@@ -4,7 +4,7 @@ The Windows app: an Electron shell around the React board, with a tray icon, the
 
 ## Rules
 
-- The renderer stays sandboxed (`nodeIntegration: false`, `contextIsolation: true`, `sandbox: true`). The preload script (`preload.cts`) exposes only the updater, and the main process answers it only from the main window's board page.
+- The renderer stays sandboxed (`nodeIntegration: false`, `contextIsolation: true`, `sandbox: true`). The preload script (`preload.cts`) exposes only the updater, and the main process answers it only when called from the main window's board page.
 - The main process signs the board's requests to the daemon (`signBoard` in `main.ts`); the page holds no secret.
 - Board features belong in `plugin/board/`. What this folder adds to the page is limited to the frame: drag regions and room for the window buttons.
 - Notifications stay with the daemon's toasts (`plugin/bridge/toast.ts`), because an unsigned Electron build has no registered app identity.

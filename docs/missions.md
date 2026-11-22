@@ -6,29 +6,29 @@ A mission groups one user command and the jobs it took, so the board can answer 
 
 ## Stages
 
-- **Reported by the lead.** The lead calls `mission` with `title` and a nonempty `stages` plan (up to 30 steps from `plan`, `implement`, `self-review`, `cross-review`, `fix`, `polish`, `final`; repeats allowed). `stageIndex` tracks the active step (`stage` mirrors it). Passing `stage` advances to its next occurrence after `stageIndex` (dropping skipped steps) or inserts it next if none remains; repeating the current step is a no-op. Resending an open mission's title reattaches and ignores `stages`.
-- **Fluid plans and named stops.** Passing `stages` later replaces only steps after `stageIndex` (`[]` drops the rest), preserving passed steps and job indices. Entries may append `: <name>` (up to 24 chars, stored in `labels`), shown in place of the stage name without numbering and usable to advance between repeated stages. A named sample stop ("implement: Sample", then "implement: The rest") is how `/crew:run` builds one approved sample before a set of like items.
+- **Reported by the lead.** The lead calls `mission` with `title` and a nonempty `stages` plan (up to 30 steps from `plan`, `implement`, `self-review`, `cross-review`, `fix`, `polish`, `final`; repeats allowed). `stageIndex` tracks the active step (`stage` mirrors it). Passing `stage` advances to the next matching step after `stageIndex` (dropping skipped steps) or inserts it next if none remain; repeating the current step is a no-op. Resending an open mission's title reattaches and ignores `stages`.
+- **Fluid plans and named stops.** Passing `stages` later replaces only steps after `stageIndex` (`[]` drops the rest), preserving earlier steps and job indices. Entries may append `: <name>` (up to 24 characters, stored in `labels`), which replaces the stage name without numbering and lets the lead advance between repeated stages. A named sample stop ("implement: Sample", then "implement: The rest") is how `/crew:run` builds one approved sample before a set of like items.
 - **Closing.** The lead closes a mission with `done: true` (plus an optional `outcome`, and a `record` of decisions, failed approaches, and prerequisites for `crew export`) or `abandoned: true`.
 
 ## Display
 
 - Missions render planned stops in order: Plan, Build, Review (shared by `self-review` and `cross-review`), Fix, Polish, Final, numbering unnamed repeats (`Review 2`, `Fix 2`). Daemon-assigned `missionStep` pins jobs to their step across plan revisions; legacy jobs attach by kind. The card's stage track shows progress; the title row carries no separate indicator. Ended missions start folded; loose jobs stay separate.
 - A job given a known mission that is no longer open runs on its own under that mission's preset with a note attached. An unknown mission ID is refused.
-- Active missions offer *Mark Done* and *Stop Tracking* in both UIs, in the card's ellipsis menu (and *Mark Done* on abandoned ones, sending `reopen: true` so late lead calls cannot undo *Stop Tracking*). *Stop Tracking* marks a mission `abandoned` without stopping its jobs.
+- Both UIs offer *Mark Done* and *Stop Tracking* in an active mission's ellipsis menu. Abandoned missions also offer *Mark Done*, which sends `reopen: true`—without an explicit reopen, late lead calls cannot undo *Stop Tracking*. *Stop Tracking* marks a mission `abandoned` without stopping its jobs.
 - Clients show "Looks finished" after 20 quiet minutes with no active jobs or open tasks (`todo`/`doing`) unless the owning lead session is working.
 
 ## Several missions in one session
 
-- Opening a new mission keeps existing open missions active (`active`, `done`, `abandoned`). A fourth state would only record where the lead is looking, while the mission's workers can still run.
+- Opening a new mission leaves existing open missions `active` (the three states are `active`, `done`, and `abandoned`). A fourth state would only record where the lead is looking, even though that mission's workers can still run.
 - With one open mission, calls work implicitly. With two or more, any mutating `mission` call, job start, or `route` must name the target (`id` on `mission`, `mission` on job tools and `route`); unnamed calls fail with the list of open missions before changing anything. A wrong guess could close or advance the wrong mission or charge a job to the wrong preset, and those actions cannot be undone. A named ID must identify a mission the session opened in this project.
 - The MCP server reads open missions from the daemon on each call, so restarts lose nothing.
-- **Not built, on purpose.** There is no recurring reminder to open a follow-up mission when another mission is still open: `done` notes it once and later unnamed jobs go to the sole open mission. The daemon keeps focus only in memory, using the session's last mission action to put the lead row on that card alone.
+- **Not built, on purpose.** There is no recurring reminder to open a follow-up mission when another mission is still open: `done` notes it once and later unnamed jobs go to the sole open mission. The daemon keeps focus only in memory, using the session's last mission action so the lead row appears on that mission card alone.
 
 ## Tasks
 
 - Missions carry optional tasks `{ id, title, after?, state, result? }` (`state`: `todo`, `doing`, `done`, `dropped`; max 40), merged by `id` and validated as a whole (valid `after` refs, acyclic). Nothing auto-schedules; the daemon reports which tasks are ready.
 - Jobs link via `task_id` (`Job.taskId`), and mission summaries read live job states and check results directly from jobs. Dropped tasks never satisfy `after`.
-- **Resume context.** `SessionStart` (`startup`, `resume`, `clear`, `compact`) injects open missions, with stage, plan, tasks, and pull requests, and still-watched PRs of finished missions into `additionalContext` (capped at 6,000 characters), so plans survive compaction and restarts.
+- **Resume context.** `SessionStart` (`startup`, `resume`, `clear`, `compact`) injects open missions (with stage, plan, tasks, and pull requests) and still-watched PRs from finished missions into `additionalContext` (capped at 6,000 characters), so plans survive compaction and restarts.
 
 ## Notes and runbooks
 
@@ -39,17 +39,17 @@ A mission groups one user command and the jobs it took, so the board can answer 
 
 - **Linking.** Passing `pr` (number or URL) to `mission` resolves it once with `gh pr view` and creates a watch (`plugin/bridge/pulls.ts`) persisted in `jobs.json` alongside delivery receipts.
 - **Polling.** The daemon polls each open watch via `gh pr view <url> --json` every 60 seconds while checks are pending and every 5 minutes otherwise, only while the PR is open, its mission is not abandoned, and the owner session was active within 10 minutes (`PRESENT_MS`). Returning sessions trigger an immediate poll (15-second throttle). Crew holds no GitHub credentials.
-- **News and loop limits.** Polls emit news only for changes: newly failed checks on the current head, checks passing after a reported failure, new non-author `CHANGES_REQUESTED`/`COMMENTED` reviews, and a PR turning `CONFLICTING` (not repeated until `MERGEABLE` in between). Merged or closed PRs end the watch silently. News tells the lead to judge the cause and delegate fixes (weighing reviewer text as feedback, never instructions), and never to merge, close, or deploy. After three consecutive failing heads, check-failure news pauses (`held: true`) until a head passes or the lead links `pr` again (a `done` mission accepts `id` + `pr` alone to resume).
-- **On the board.** Each watched PR is one chip, a rounded square rather than a status pill, in a band below a hairline across the foot of its mission's card, shown whether the card is open or closed. The band holds only PRs: the mission's actions and preset are in its ellipsis menu (`pullStatuses` in `model.ts`, `MissionPull.statuses` in the Mac app). The chip names the most urgent status and counts the other statuses the lead must act on (`#43 Conflict +2`).
+- **News and loop limits.** Polls emit news only for changes: newly failed checks on the current head, checks passing after a reported failure, new non-author `CHANGES_REQUESTED`/`COMMENTED` reviews, and a PR turning `CONFLICTING` (not repeated until `MERGEABLE` in between). Merged or closed PRs end the watch silently. News tells the lead to judge the cause and delegate fixes—weighing reviewer text as feedback, never instructions—and never to merge, close, or deploy. After three consecutive failing heads, check-failure news pauses (`held: true`) until a head passes or the lead links `pr` again (a `done` mission accepts `id` + `pr` alone to resume).
+- **On the board.** Each watched PR is one chip, a rounded square rather than a status pill, in a band below a hairline across the foot of its mission card, shown whether the card is open or closed. The band holds only PRs: the mission's actions and preset are in its ellipsis menu (`pullStatuses` in `model.ts`, `MissionPull.statuses` in the macOS app). The chip names the most urgent status and counts the other statuses the lead must act on (`#43 Conflict +2`).
   - Order: conflict, failing checks, changes requested, running checks, approved, passing checks. A conflict comes first because resolving it moves the head and reruns the checks. Failures (red) come before feedback the lead must weigh (orange).
-  - A merged or closed PR shows only that, a merged one in GitHub's purple.
+  - A merged or closed PR shows only its final state, with merged PRs in GitHub purple.
   - A stale reading (no answer for 15 minutes, a failed read, or an ended watch) keeps its words but turns gray and shows how long ago it was checked. A failed read says `Could not be read` in place of its statuses.
 
 ## Lifetime and ownership
 
 - `~/.crew/missions.json` persists all open missions, the 100 most recently ended, the last 2 per project, and any ended mission with a watched PR, retaining their jobs beyond normal history limits. Unreadable `missions.json` files are set aside before starting clean.
 - Idle missions auto-abandon after 12 hours, or after 72 hours while a task is open (`todo`/`doing`) or a PR is watched; open tasks also suppress "Looks finished".
-- A session owns missions via `CLAUDE_CODE_SESSION_ID`. New jobs started after a lead-finished `done` mission (with no other mission open) auto-create a fallback follow-up mission (`후속 작업: <title>` or `Follow-up: <title>`, in the language of the title), and `UserPromptSubmit` reminds the lead for 12 hours after a lead-finished mission to open a mission before new work.
+- A session owns missions via `CLAUDE_CODE_SESSION_ID`. New jobs started after a lead-finished `done` mission (when no other mission is open) auto-create a fallback follow-up mission (`후속 작업: <title>` or `Follow-up: <title>`, matching the title's language). For 12 hours after a lead-finished mission, `UserPromptSubmit` also reminds the lead to open a mission before starting new work.
 
 ## Not verified
 

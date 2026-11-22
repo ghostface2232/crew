@@ -6,7 +6,7 @@ Crew brings worker approvals and user questions to the user. A worker can also a
 
 ## Approval requests and user questions
 
-Codex approval requests go first to its automatic reviewer (`codex.approvalsReviewer`, default `auto_review`). Anything it refuses twice, and every user-bound request or question reaching Crew, goes to the user. The lead's only decision on an approval is to decline a clearly out-of-scope request with a reason (`reply` with `decision: "decline"` and `message`), which grants nothing and spares the user a prompt.
+Codex approval requests go first to its automatic reviewer (`codex.approvalsReviewer`, default `auto_review`). Anything it refuses twice, along with every user-bound request or question reaching Crew, goes to the user. The lead's only decision on an approval is to decline a clearly out-of-scope request with a reason (`reply` with `decision: "decline"` and `message`), which grants nothing and spares the user a prompt.
 
 - While the lead blocks inside a job call (`wait`, or `background: false`), the MCP server sends `elicitation/create` so Claude shows its native input prompt and forwards the user's answer straight to the worker.
 - For background jobs, the wake hook wakes the lead and the prompt appears when it calls `wait`. Answering first on the board or in the desktop app, or returning early from the call, withdraws the in-app prompt immediately.
@@ -24,11 +24,15 @@ The user answers Antigravity approvals one at a time and sees the full request f
 
   Only non-MCP `execute` requests qualify. The input may hold one command field, an optional working-directory field, and the two fields agy 1.5 sends beside them (`WaitMsBeforeAsync`, `toolSummary`). agy runs each command as `cd <workspace> && <command>`, so a leading `cd` to a literal path supplies the working directory. A directory named by `cd` or a working-directory field must be absolute, with no `.` or `..` components or doubled slashes. Crew resolves it to a real directory when granting and matching, and shows the path as written. A symlink retargeted to a different directory prompts again.
 
-  Shell operators (`;`, `&`, `|`, backticks, `<`, `>`, `()`, newlines), shell expansions (`$`, `~`, `{}`), leading variable assignments (`PATH=…`), directory-changing commands (`cd`, `pushd`, `popd`), shells, and programs that run another command (`sudo`, `env`, `xargs`, `nohup`, `timeout`, `find`, `ssh`, `osascript`, and the like) never get a grant. A grant for a command that runs workspace files (`npm test`, `make build`, `node script.js`) also covers what the worker later writes into them, since workspace edits need no approval. Windows gets no command grants, since the checks model a POSIX shell. Grants live in memory for the job and its follow-up turns. When the agy server restarts after being idle, it loses the grants and the user is asked again. Crew still answers each call with `allow_once`, so role policy checks every request. Read-only jobs get none.
+  Shell operators (`;`, `&`, `|`, backticks, `<`, `>`, `()`, newlines), shell expansions (`$`, `~`, `{}`), leading variable assignments (`PATH=…`), directory-changing commands (`cd`, `pushd`, `popd`), shells, and programs that run another command (`sudo`, `env`, `xargs`, `nohup`, `timeout`, `find`, `ssh`, `osascript`, and the like) never get a grant. A grant for a command that runs workspace files (`npm test`, `make build`, `node script.js`) also covers what the worker later writes into them, since workspace edits need no approval. Windows gets no command grants, since the checks model a POSIX shell.
+
+  Grants live in memory for the job and its follow-up turns. When the agy server restarts after being idle, it loses the grants and the user is asked again. Crew still answers each call with `allow_once`, so role policy checks every request. Read-only jobs get none.
 
 ### Automatic reviewer and refusals
 
-Set `{"codex": {"approvalsReviewer": "user"}}` in `~/.crew/config.json` to send all Codex approvals straight to the user. When `auto_review` denies or times out (`item/autoApprovalReview/completed`), the bridge records action fields (program/arguments, `cwd`, and MCP input recovered from the started item by `targetItemId`), omits environment fields, and caps free-form input at 4,000 characters, reasons at 2,000, and descriptions at 8,000. Missing reasons are labeled missing. The bridge quotes generic messages as received. The lead checks whether the user's conversation request covers the refused action.
+Set `{"codex": {"approvalsReviewer": "user"}}` in `~/.crew/config.json` to send all Codex approvals straight to the user.
+
+When `auto_review` denies or times out (`item/autoApprovalReview/completed`), the bridge records action fields (program/arguments, `cwd`, and MCP input recovered from the started item by `targetItemId`), omits environment fields, and caps free-form input at 4,000 characters, reasons at 2,000, and descriptions at 8,000. Missing reasons are labeled missing, and the bridge quotes generic messages as received. The lead checks whether the user's conversation request covers the refused action.
 
 1. If it does, the lead calls `reply` with `approved_by_user` quoting the user's words. The bridge sends the user's recent recorded prompts plus the quote for one more automatic review.
 2. If refused again on that retry turn, the same call runs the next turn with `approvalsReviewer: user` so the user decides, then returns to `auto_review` on later turns. “Again” means the preceding turn was itself a retry. An unrelated later refusal starts over with `auto_review`.
@@ -58,7 +62,7 @@ A new `ask_lead` question wakes the lead while the worker keeps running. The lea
 | `POST /api/jobs/:id/browser` | `{ token }` | Worker MCP server |
 | `POST /api/jobs/:id/questions/:questionId` | `{ answer, attachments? }` | Lead |
 
-The worker MCP server also calls `POST /api/jobs/:id/rating`. See the [endpoint table](daemon-api.md#endpoints) for its request body. The job's in-memory token is passed via environment and never written to disk or sent to boards. Codex registers the server with `default_tools_approval_mode = "approve"` so `approvalPolicy: "never"` jobs can call it.
+The worker MCP server also calls `POST /api/jobs/:id/rating`. See the [endpoint table](daemon-api.md#endpoints) for its request body. The job's in-memory token is passed via an environment variable and never written to disk or sent to boards. Codex registers the server with `default_tools_approval_mode = "approve"` so `approvalPolicy: "never"` jobs can call it.
 
 ## Not verified
 

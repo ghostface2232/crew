@@ -6,9 +6,9 @@ The status board: a React 19 and TypeScript app built by Vite into `dist/` (not 
 
 - The board and the macOS app (`native/Sources/Crew/`) show the same state and offer the same actions, and their code names each other's views ("as in the app"). A change to what one shows or offers usually needs the same change in the other.
 - `src/types.ts` mirrors the daemon's JSON. Fields an older daemon does not send are optional, so a newer board keeps working against it.
-- Draw controls with the board's own components in `src/ui.tsx` (`Select`, the `ask` confirm sheet, menus) rather than the platform's, so they look the same on Windows. Tooltips need only a `title` attribute: `src/main.tsx` shows every title in the board's own style. Text uses the bundled Pretendard font, with no monospace face; icons are Fluent.
-- A looping animation runs only while its cause lasts (a request in flight, a reply awaited), because a browser draws every frame of one; a running state otherwise rests as it does under Reduce Motion.
-- The page holds no secret: the daemon signs it in with a scoped credential kept in memory ([docs/daemon-api.md](../../docs/daemon-api.md)). Do not put credentials in cookies, web storage, or addresses.
+- Draw controls using the board's own components in `src/ui.tsx` (`Select`, the `ask` confirm sheet, menus) rather than native browser controls, so they look the same on Windows. Tooltips need only a `title` attribute: `src/main.tsx` shows every title in the board's own style. Text uses the bundled Pretendard font, with no monospace face; icons are Fluent.
+- A looping animation runs only while its cause lasts (a request in flight or a reply awaited), because the browser draws every frame; otherwise, a running state stays still as it does under Reduce Motion.
+- The page holds no secret: the daemon signs it in with a scoped credential kept in memory ([docs/daemon-api.md](../../docs/daemon-api.md)). Do not put credentials in cookies, web storage, or URLs.
 
 ## Where things are
 

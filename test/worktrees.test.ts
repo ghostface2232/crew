@@ -8,7 +8,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { CodexAdapter } from '../plugin/bridge/adapters/codex.ts';
 import { resolveConfig } from '../plugin/bridge/config.ts';
-import { cloneRefused, commitAll, copyIncluded, createWorktree, detachLinks, dirtyCount, removeDirectory, removeEmptyLeftover, removeWorktree, worktreeSlot } from '../plugin/bridge/git.ts';
+import { cloneRefused, cloneTree, commitAll, copyIncluded, createWorktree, detachLinks, dirtyCount, removeDirectory, removeEmptyLeftover, removeWorktree, worktreeSlot } from '../plugin/bridge/git.ts';
 import type { Job, JobCtl } from '../plugin/bridge/jobs.ts';
 import { buildPrompt } from '../plugin/bridge/prompts.ts';
 
@@ -189,6 +189,35 @@ test('APFS includes use native clones and preserve dependency symlinks', { skip:
   assert.equal(fs.readlinkSync(path.join(wt, 'deps', '.bin', 'tool')), '../tool');
   fs.writeFileSync(path.join(wt, 'deps', 'tool'), 'private');
   assert.equal(fs.readFileSync(path.join(dir, 'deps', 'tool'), 'utf8'), 'original');
+});
+
+test('a directory is cloned whole in one call, and a refused clone leaves nothing behind', { skip: process.platform !== 'darwin' }, async (t) => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-clone-tree-')));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const source = path.join(dir, '원본 "deps"');
+  fs.mkdirSync(path.join(source, 'pkg', '.bin'), { recursive: true });
+  fs.writeFileSync(path.join(source, 'pkg', 'tool'), 'original', { mode: 0o750 });
+  fs.symlinkSync('../tool', path.join(source, 'pkg', '.bin', 'tool'));
+  fs.symlinkSync('/nonexistent', path.join(source, 'dangling'));
+  const dest = path.join(dir, 'clone');
+  if (!await cloneTree(source, dest)) {
+    // A sandboxed run may not reach the script host; the per-file copy then does the work, as the tests above check.
+    assert.ok(!process.env.CI, 'clonefile through osascript must work on a macOS runner');
+    t.skip('clonefile through osascript is not available here');
+    return;
+  }
+  assert.equal(fs.readFileSync(path.join(dest, 'pkg', 'tool'), 'utf8'), 'original');
+  assert.equal(fs.statSync(path.join(dest, 'pkg', 'tool')).mode & 0o777, 0o750);
+  assert.equal(fs.readlinkSync(path.join(dest, 'pkg', '.bin', 'tool')), '../tool');
+  assert.equal(fs.readlinkSync(path.join(dest, 'dangling')), '/nonexistent');
+  fs.writeFileSync(path.join(dest, 'pkg', 'tool'), 'private');
+  assert.equal(fs.readFileSync(path.join(source, 'pkg', 'tool'), 'utf8'), 'original');
+  // An existing destination is never cloned into or removed.
+  assert.equal(await cloneTree(source, dest), false);
+  assert.equal(fs.readFileSync(path.join(dest, 'pkg', 'tool'), 'utf8'), 'private');
+  // A failed clone leaves no destination for the slower copy to trip over.
+  assert.equal(await cloneTree(path.join(dir, 'missing'), path.join(dir, 'none')), false);
+  assert.equal(fs.existsSync(path.join(dir, 'none')), false);
 });
 
 test('nested APFS includes create missing destination parents before cloning', { skip: process.platform !== 'darwin' }, async (t) => {

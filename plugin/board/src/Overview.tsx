@@ -75,7 +75,7 @@ export function Kpis({ state, project }: { state: Snapshot; project: string }) {
     // Lead sessions count like jobs, as they already do under Needs you.
     { label: 'In progress', state: 'working', count: jobs.filter((job) => job.state === 'running').length + sessions.filter((session) => session.state === 'working').length,
       spark: runningPerHour(jobs, now), unit: 'running', foot: `${sessions.filter((session) => session.state === 'working').length} lead sessions` },
-    { label: 'Needs you', state: 'waiting', count: waiting.length, marks: [...jobs.filter((job) => job.state === 'waiting').map((job) => job.agent), ...sessions.filter((session) => session.state === 'waiting').map(() => 'claude')], foot: waiting.length ? `Oldest waiting ${elapsed(now - Math.min(...waiting))}` : 'Nothing waiting' },
+    { label: 'Needs you', state: 'waiting', count: waiting.length, foot: waiting.length ? `Oldest waiting ${elapsed(now - Math.min(...waiting))}` : 'Nothing waiting' },
     // Settled jobs stay in the list but leave the totals, which would otherwise only grow.
     { label: 'Finished', state: 'done', count: jobs.filter((job) => job.state === 'done' && unsettled(job)).length,
       spark: endedPerHour(jobs, 'done', now), unit: 'finished', foot: `${jobs.filter((job) => job.state === 'done').length} in all` },
@@ -92,13 +92,7 @@ export function Kpis({ state, project }: { state: Snapshot; project: string }) {
             <span className="label">{metric.label}</span>
             <div className="kpi-figure">
               <RollingNumber value={metric.count} className="kpi-number" />
-              {metric.spark ? <Spark values={metric.spark} label={metric.unit!} /> : (
-                // Who is waiting, one mark per request.
-                <span className="kpi-marks" aria-hidden="true">
-                  {metric.marks!.slice(0, 4).map((agent, index) => <span key={index} style={{ '--i': index } as CSSProperties}><AgentMark agent={agent} size={14} /></span>)}
-                  {metric.marks!.length > 4 && <span className="kpi-more">+{metric.marks!.length - 4}</span>}
-                </span>
-              )}
+              {metric.spark && <Spark values={metric.spark} label={metric.unit!} />}
             </div>
             <span className="kpi-foot">{metric.foot}</span>
           </li>

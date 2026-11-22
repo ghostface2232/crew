@@ -212,10 +212,6 @@ export function App() {
           <div className="brand">
             <img className="brand-mark" src={appIcon} alt="" />
             <span className="brand-name">Crew</span>
-            <p className="connection" role="status" data-state={state.connection}>
-              <i aria-hidden="true" />
-              <span>{live ? 'Live' : state.connection === 'lost' ? 'Reconnecting…' : 'Connecting…'}</span>
-            </p>
           </div>
           {pageNav}
           <ProjectNav projects={projects} names={names} project={project} state={state} select={select} />
@@ -237,10 +233,17 @@ export function App() {
                 <span className="sidebar-update-version">{update.latest}</span>
               </button>
             )}
-            <button className="sidebar-item" id="open-settings" disabled={!Object.keys(state.roles).length} onClick={openSettings}>
-              <Icon icon={SettingsRegular} />
-              <span>Settings</span>
-            </button>
+            <div className="sidebar-foot-row">
+              <button className="sidebar-item" id="open-settings" disabled={!Object.keys(state.roles).length} onClick={openSettings}>
+                <Icon icon={SettingsRegular} />
+                <span>Settings</span>
+              </button>
+              {/* A working connection is only its green light; the word shows while connecting or lost. */}
+              <p className="connection" role="status" data-state={state.connection} title={live ? 'Live' : undefined}>
+                <i aria-hidden="true" />
+                <span>{live ? 'Live' : state.connection === 'lost' ? 'Reconnecting…' : 'Connecting…'}</span>
+              </p>
+            </div>
           </div>
         </aside>
         {drawer && <div className="sidebar-scrim" aria-hidden="true" onClick={fold} />}

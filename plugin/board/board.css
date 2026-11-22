@@ -755,7 +755,6 @@ html, body { height: 100%; overflow: hidden; }
 /* The app icon's own export, rounded corners and shading included. */
 .brand-mark { flex: none; width: 26px; height: 26px; }
 .brand-name { font: 600 17px/1 var(--text-face); letter-spacing: -0.01em; }
-.brand .connection { margin-inline-start: auto; padding-inline: 0; }
 .nav { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
 .nav-heading { padding: 6px 10px 4px; }
 .nav-heading { color: var(--tertiary); font: 500 10.5px/1.2 var(--text-face); letter-spacing: 0.06em; text-transform: uppercase; }
@@ -816,6 +815,12 @@ html, body { height: 100%; overflow: hidden; }
 .nav-key { opacity: 0; transition: opacity 160ms ease-out; }
 @media (hover: hover) { .nav-item:hover .nav-key { opacity: 1; } }
 .sidebar-foot { display: grid; gap: 6px; margin-top: auto; padding-top: 13px; border-top: 1px solid var(--hairline); }
+.sidebar-foot-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.sidebar-foot-row > .sidebar-item { flex: 1; min-width: 0; }
+.sidebar-foot-row > .connection { flex: none; padding-inline: 10px; }
+/* Live, the word stays for assistive technology and the tooltip says it; the light alone is enough to see. */
+.connection[data-state="live"] { padding-inline: 12px; }
+.connection[data-state="live"] > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .sidebar-item { justify-content: flex-start; gap: 10px; width: 100%; min-height: 32px; padding: 0 10px; border-radius: 12px; corner-shape: var(--smooth); background: none; color: var(--secondary); font-weight: 450; }
 .sidebar-item svg { width: 16px; height: 16px; transition: rotate 500ms var(--ease-out); }
 @media (hover: hover) {

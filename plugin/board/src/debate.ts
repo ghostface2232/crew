@@ -6,10 +6,11 @@ export interface DebatePoint {
   title: string;
 }
 
+const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+
 export function debatePoints(text: string): DebatePoint[] {
   const pattern = /^\s*(?:[-*]\s*)?(\d+)\.\s*(?:\*\*)?\[?(agree|disagree|alternative)\b\]?(?:\*\*)?[\s:.\-—–·,]*(.*)$/i;
   const basisPattern = /^[(\[]?(?:\*\*)?(?:verified|read|inferred)(?:\*\*)?[)\]]?\s*[:\-—–·,]+\s*(.*)$/i;
-  const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
   const points: DebatePoint[] = [];
   for (const line of text.split('\n')) {
     const match = pattern.exec(line);

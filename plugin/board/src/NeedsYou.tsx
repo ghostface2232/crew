@@ -7,8 +7,8 @@ import type { CSSProperties } from 'react';
 import type { BoardJob, ClaudeSession } from './types.ts';
 import { board } from './store.ts';
 import { actions, answerKey, request } from './api.ts';
-import { elapsed, NAMES, projectOf } from './model.ts';
-import { ActionStatus, AgentMark, Chip, Composer, EmptyState, Icon, useAction, useDraft, useNow } from './ui.tsx';
+import { NAMES, projectOf } from './model.ts';
+import { ActionStatus, AgentMark, Chip, Composer, EmptyState, Icon, useAction, useDraft, Elapsed } from './ui.tsx';
 
 /** AnswerView in the app: the request leads, then the reply controls. */
 export function Answer({ job }: { job: BoardJob }) {
@@ -85,7 +85,6 @@ export function NeedsYou({
   openJob: (id: string) => void;
   openSession: (id: string) => void;
 }) {
-  const now = useNow();
   return (
     <>
       {pending === 0 ? (
@@ -106,7 +105,7 @@ export function NeedsYou({
                       {NAMES[job.agent]} · {names.get(projectOf(job)) ?? projectOf(job)}
                     </span>
                   </span>
-                  {job.waiting && <span className="need-age digits">{elapsed(now - job.waiting.since)}</span>}
+                  {job.waiting && <span className="need-age digits"><Elapsed start={job.waiting.since} /></span>}
                   <button className="caption small" data-opens-panel="" onClick={() => openJob(job.id)}>
                     <Icon icon={ArrowUpRight16Filled} size={12} />
                     Details

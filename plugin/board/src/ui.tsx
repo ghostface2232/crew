@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { createContext, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import {
   AlertBadge16Regular, ArrowUp16Filled, Checkmark16Regular, CheckmarkCircle16Regular, CheckmarkRegular,
@@ -6,6 +6,7 @@ import {
   RecordStop16Regular, SpinnerIos16Regular, Warning16Regular,
 } from '@fluentui/react-icons';
 import type { FluentIcon } from '@fluentui/react-icons';
+import { elapsed } from './model.ts';
 import { actions, drafts } from './api.ts';
 import claudeMark from './icons/ClaudeCode.svg';
 import codexMark from './icons/Codex.svg';
@@ -54,24 +55,68 @@ export function useLinger(value: string, ms: number): [string, boolean] {
   }, [value]);
   return [value || kept, leaving];
 }
-export const ClockContext = createContext(Date.now());
-export const useNow = () => useContext(ClockContext);
-export function ClockProvider({ skew, children }: { skew: number; children: ReactNode }) {
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => {
-      if (!document.hidden) setNow(Date.now());
-    }, 1000);
-    const visible = () => {
-      if (!document.hidden) setNow(Date.now());
-    };
-    document.addEventListener('visibilitychange', visible);
-    return () => {
-      clearInterval(timer);
-      document.removeEventListener('visibilitychange', visible);
+export function sameItems<T>(a: readonly T[], b: readonly T[], equal: (a: T, b: T) => boolean = Object.is) {
+  return a === b || (a.length === b.length && a.every((item, index) => equal(item, b[index])));
+}
+
+export function useStableItems<T>(items: T[], equal?: (a: T, b: T) => boolean) {
+  const stabilize = useMemo(() => {
+    let previous: T[] = [];
+    return (next: T[], compare?: (a: T, b: T) => boolean) => {
+      if (!sameItems(previous, next, compare)) previous = next;
+      return previous;
     };
   }, []);
-  return <ClockContext value={now + skew}>{children}</ClockContext>;
+  return stabilize(items, equal);
+}
+
+const idleSubscribe: (listener: () => void) => () => void = () => () => {};
+const initialTime = Date.now();
+const ClockContext = createContext({
+  getSnapshot: () => initialTime,
+  subscribe: idleSubscribe,
+});
+
+function createClock() {
+  let now = Date.now();
+  const listeners = new Set<() => void>();
+  return {
+    getSnapshot: () => now,
+    subscribe(listener: () => void) {
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    },
+    tick() {
+      if (document.hidden) return;
+      now = Date.now();
+      listeners.forEach((listener) => listener());
+    },
+  };
+}
+
+export function useClock<T>(select: (now: number) => T, live = true): T {
+  const clock = useContext(ClockContext);
+  const getSnapshot = () => select(clock.getSnapshot());
+  return useSyncExternalStore(live ? clock.subscribe : idleSubscribe, getSnapshot);
+}
+
+export function Elapsed({ start, end, prefix = '', suffix = '' }: { start: number; end?: number | null; prefix?: string; suffix?: string }) {
+  const text = useClock((now) => elapsed((end ?? now) - start), end == null);
+  return prefix + text + suffix;
+}
+
+export function ClockProvider({ skew, children }: { skew: number; children: ReactNode }) {
+  const [clock] = useState(createClock);
+  const value = useMemo(() => ({ subscribe: clock.subscribe, getSnapshot: () => clock.getSnapshot() + skew }), [clock, skew]);
+  useEffect(() => {
+    const timer = setInterval(clock.tick, 1000);
+    document.addEventListener('visibilitychange', clock.tick);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', clock.tick);
+    };
+  }, [clock]);
+  return <ClockContext value={value}>{children}</ClockContext>;
 }
 /** The motion language: things open on a long, soft ease-out and close quicker, as the reference menus do. */
 export const EASE_OUT = 'cubic-bezier(0.22, 1, 0.36, 1)';
@@ -129,9 +174,9 @@ export function WordReveal({ text, className }: { text: string; className?: stri
     </span>
   );
 }
-export function Icon({ icon: Glyph, size = 15, className = '', filled }: { icon: FluentIcon; size?: number; className?: string; filled?: boolean }) {
+export const Icon = memo(function Icon({ icon: Glyph, size = 15, className = '', filled }: { icon: FluentIcon; size?: number; className?: string; filled?: boolean }) {
   return <Glyph fontSize={size} filled={filled} aria-hidden="true" className={className} />;
-}
+});
 const MARKS: Record<string, string> = { claude: claudeMark, codex: codexMark, antigravity: antigravityMark };
 /** The supplied service SVGs, drawn as template images in the current text color, as the app draws them. */
 export function AgentMark({ agent, size = 24 }: { agent: string; size?: number }) {
@@ -815,14 +860,30 @@ export function CopyMenu({ text, label, children }: { text: string; label: strin
  * A ref for one line of text that fades at its end only when it is cut, as the app's fadeTruncated does; text
  * that fits keeps every letter.
  */
-export function useFade<T extends HTMLElement>() {
-  const observer = useRef<ResizeObserver>(null);
-  return (element: T | null) => {
-    observer.current?.disconnect();
+export function useFade<T extends HTMLElement>(text: string) {
+  const measurement = useRef<{ check: () => void; text: string | null }>(null);
+  useLayoutEffect(() => {
+    if (measurement.current?.text !== text) measurement.current?.check();
+  }, [text]);
+  return useCallback((element: T | null) => {
     if (!element) return;
-    const check = () => element.toggleAttribute('data-cut', element.scrollWidth > element.clientWidth + 1);
-    observer.current = new ResizeObserver(check);
-    observer.current.observe(element);
-    check();
-  };
+    const current = {
+      text: null as string | null,
+      check: () => {
+        current.text = element.textContent;
+        element.toggleAttribute('data-cut', element.scrollWidth > element.clientWidth + 1);
+      },
+    };
+    const observer = new ResizeObserver(current.check);
+    const fonts = document.fonts;
+    measurement.current = current;
+    observer.observe(element);
+    fonts?.addEventListener('loadingdone', current.check);
+    current.check();
+    return () => {
+      fonts?.removeEventListener('loadingdone', current.check);
+      observer.disconnect();
+      measurement.current = null;
+    };
+  }, []);
 }

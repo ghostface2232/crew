@@ -92,7 +92,7 @@ test('a reconnect replaces snapshots and events, including restarted event seque
   assert.deepEqual(store.getSnapshot().events, [{ seq: 1 }]);
   assert.equal(store.getSnapshot().jobs.length, 0);
   assert.equal(store.getSnapshot().revision, 2);
-  assert.equal(updates, 5);
+  assert.equal(updates, 2);
   unsubscribe();
 });
 
@@ -330,4 +330,67 @@ test('captures read their side from their name and order as reference, before, a
   assert.equal(evidenceTurn(item('a.png', 1), 1), 'Turn 1');
   assert.equal(evidenceTurn(item('a.png', 1), 3), 'Turn 1 of 3');
   assert.equal(evidenceTurn(item('a.png', 1, 'lead'), 3), 'Attached by the lead');
+});
+
+test('stream keeps the first event name, joins data lines and consumes blank lines without overlap', async (t) => {
+  const chunks = ['event:  first  \nevent: second\ndata:  one\ndata:\ndata:three\n', '\n\ndata: next\n\n\n\nevent: empty\n\ndata:\n\n'];
+  const body = new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(new TextEncoder().encode(chunk));
+      controller.close();
+    },
+  });
+  t.mock.method(globalThis, 'fetch', async () => new Response(body));
+  const frames: [string, string][] = [];
+  await stream('/api/stream', (type, data) => frames.push([type, data]), new AbortController().signal);
+  assert.deepEqual(frames, [['first', ' one\n\nthree'], ['message', 'next'], ['message', '']]);
+});
+
+test('store publishes the latest snapshot once per frame and flushes connection changes immediately', (t) => {
+  const frames = new Map<number, FrameRequestCallback>();
+  let frameId = 0;
+  const frame = (callback: FrameRequestCallback) => {
+    frames.set(++frameId, callback);
+    return frameId;
+  };
+  const cancel = (id: number) => frames.delete(id);
+  const restore = (key: string, value: unknown) => {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, key);
+    Object.defineProperty(globalThis, key, { configurable: true, value });
+    t.after(() => {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else Reflect.deleteProperty(globalThis, key);
+    });
+  };
+  restore('requestAnimationFrame', frame);
+  restore('cancelAnimationFrame', cancel);
+  const doc = Object.assign(new EventTarget(), { hidden: false });
+  restore('document', doc);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+
+  const store = new BoardStore();
+  const seen: number[] = [];
+  const unsubscribe = store.subscribe(() => seen.push(store.getSnapshot().events.at(-1)?.seq ?? 0));
+  store.receive('event', { seq: 1 });
+  store.receive('event', { seq: 2 });
+  assert.equal(store.getSnapshot().events.length, 2);
+  assert.deepEqual(seen, []);
+  assert.equal(frames.size, 1);
+  frames.get(frameId)!(0);
+  assert.deepEqual(seen, [2]);
+
+  store.receive('event', { seq: 3 });
+  doc.hidden = true;
+  doc.dispatchEvent(new Event('visibilitychange'));
+  assert.equal(frames.size, 0);
+  t.mock.timers.tick(0);
+  assert.deepEqual(seen, [2, 3]);
+
+  store.receive('event', { seq: 4 });
+  store.signOut();
+  assert.equal(store.getSnapshot().connection, 'unauthorized');
+  assert.deepEqual(seen, [2, 3, 4]);
+  t.mock.timers.tick(0);
+  assert.deepEqual(seen, [2, 3, 4]);
+  unsubscribe();
 });

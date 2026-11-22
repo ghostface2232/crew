@@ -6,6 +6,7 @@ import {
 import type { FluentIcon } from '@fluentui/react-icons';
 import type { AppUpdate, Preset, PresetName, Snapshot } from './types.ts';
 import type { AgentSettings, Holder, JobKind, Role, RoleAssignment, RoleInfo, RoleSettings, WorkerAgent } from '../../bridge/config.ts';
+import { formatDate, timeOfDay } from './dates.ts';
 import { request } from './api.ts';
 import { board } from './store.ts';
 import { agentSettings, HOLDERS, knownProjects, NAMES, projectNames, resolveDraft, rolesOf, sortHolders } from './model.ts';
@@ -18,7 +19,7 @@ import styles from './Settings.module.css';
 /** The app's one-line summary of a preset. */
 /** A sidebar item's name, fading at its end when it is too long for the sidebar. */
 function ItemTitle({ text }: { text: string }) {
-  const fade = useFade<HTMLSpanElement>();
+  const fade = useFade<HTMLSpanElement>(text);
   return <span className={`${styles.itemTitle} fade-line`} ref={fade}>{text}</span>;
 }
 
@@ -62,7 +63,7 @@ const PANES: Record<Fixed, { title: string; icon: FluentIcon; tint: string; kind
 /** Where the desktop app's update stands, in one line. */
 function updateSummary(update: AppUpdate) {
   const checked = update.checkedAt
-    ? `Last checked at ${new Date(update.checkedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+    ? `Last checked at ${formatDate(timeOfDay, new Date(update.checkedAt))}`
     : 'Not checked yet';
   switch (update.state) {
     case 'unsupported': return 'Updates come with the installed app';

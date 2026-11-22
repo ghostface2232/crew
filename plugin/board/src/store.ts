@@ -6,14 +6,41 @@ const replace = <T extends { id: string }>(items: T[], next: T) =>
     ? items.map((item) => (item.id === next.id ? next : item))
     : [...items, next];
 export function mergeEvents(events: CrewEvent[], incoming: CrewEvent[], limit = 400) {
+  if (
+    incoming.length === 1 && Number.isSafeInteger(limit) && limit > 0 &&
+    incoming[0].seq > (events.at(-1)?.seq ?? -Infinity) &&
+    events.every((event, index) => index === 0 || event.seq > events[index - 1].seq)
+  ) {
+    const merged = events.slice(Math.max(0, events.length + 1 - limit));
+    merged.push(incoming[0]);
+    return merged;
+  }
   return [...new Map([...events, ...incoming].map((event) => [event.seq, event])).values()]
     .sort((a, b) => a.seq - b.seq)
     .slice(-limit);
 }
 
+function notificationsChanged(type: string, value: unknown, previous: Snapshot) {
+  if (type === 'state') return true;
+  if (type === 'job') {
+    const job = value as BoardJob;
+    const old = previous.jobs.find((item) => item.id === job.id);
+    return !old || old.state !== job.state || old.turns !== job.turns || old.waiting?.id !== job.waiting?.id;
+  }
+  if (type === 'claude') {
+    const { session, removed } = value as { session: ClaudeSession; removed: boolean };
+    const old = previous.claude.find((item) => item.id === session.id);
+    if (removed) return old?.state === 'waiting';
+    return (old?.state === 'waiting') !== (session.state === 'waiting') ||
+      (session.state === 'waiting' && (old?.waitingId ?? old?.waitingFor ?? '') !== (session.waitingId ?? session.waitingFor ?? ''));
+  }
+  return false;
+}
+
 /** One transport, independent of React. Snapshots replace history after a daemon restart. */
 export class BoardStore {
   private listeners = new Set<() => void>();
+  private cancelNotification?: () => void;
   private snapshot: Snapshot = {
     now: 0,
     jobs: [],
@@ -32,11 +59,42 @@ export class BoardStore {
     this.listeners.add(listener);
     return () => {
       this.listeners.delete(listener);
+      if (!this.listeners.size) this.clearNotification();
+    };
+  };
+  private clearNotification() {
+    this.cancelNotification?.();
+    this.cancelNotification = undefined;
+  }
+  private notify = () => {
+    this.clearNotification();
+    this.listeners.forEach((listener) => listener());
+  };
+  private scheduleNotification = () => {
+    const doc = typeof document === 'undefined' ? undefined : document;
+    const reschedule = () => {
+      this.clearNotification();
+      this.scheduleNotification();
+    };
+    const cancel = doc?.hidden || typeof requestAnimationFrame !== 'function'
+      ? (() => {
+          const timer = setTimeout(this.notify, 0);
+          return () => clearTimeout(timer);
+        })()
+      : (() => {
+          const frame = requestAnimationFrame(this.notify);
+          return () => cancelAnimationFrame(frame);
+        })();
+    doc?.addEventListener('visibilitychange', reschedule);
+    this.cancelNotification = () => {
+      doc?.removeEventListener('visibilitychange', reschedule);
+      cancel();
     };
   };
   private update(patch: Partial<Snapshot>) {
     this.snapshot = { ...this.snapshot, ...patch };
-    this.listeners.forEach((listener) => listener());
+    if (patch.connection !== undefined) this.notify();
+    else if (this.listeners.size && !this.cancelNotification) this.scheduleNotification();
   }
   receive(type: string, value: unknown) {
     const current = this.snapshot;
@@ -107,7 +165,7 @@ export class BoardStore {
   private reconnect?: () => void;
   retry = () => this.reconnect?.();
   signOut = () => this.update({ connection: 'unauthorized' });
-  connect(read = stream) {
+  connect(read = stream, onNotificationState?: (state: Snapshot) => void) {
     let generation = 0;
     let controller: AbortController | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -128,7 +186,12 @@ export class BoardStore {
         await read('/api/stream', (type, data) => {
           if (current !== generation) return;
           try {
-            this.receive(type, JSON.parse(data));
+            const previous = this.snapshot;
+            const value: unknown = JSON.parse(data);
+            this.receive(type, value);
+            if (onNotificationState && this.snapshot.connection === 'live' && notificationsChanged(type, value, previous)) {
+              onNotificationState(this.snapshot);
+            }
           } catch {
             this.update({ connection: 'lost' });
           }

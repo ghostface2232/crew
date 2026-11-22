@@ -1,10 +1,10 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { memo, useLayoutEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { AlertBadgeRegular, FlagRegular, SpinnerIosRegular } from '@fluentui/react-icons';
 import type { FluentIcon } from '@fluentui/react-icons';
 import type { Snapshot } from './types.ts';
 import { projectOf, relativeDuration } from './model.ts';
-import { Icon, useFade, useNow, WordReveal } from './ui.tsx';
+import { Icon, useFade, useClock, WordReveal } from './ui.tsx';
 
 export interface NavItem {
   id: string;
@@ -19,7 +19,7 @@ export interface NavItem {
  * A list of sidebar items. A soft highlight glides to the item under the pointer while the others dim, and comes
  * to rest on nothing when the pointer leaves, as the reference menus behave.
  */
-export function NavList({ label, heading, items, current, onSelect, onHover, shortcut = false }: {
+export const NavList = memo(function NavList({ label, heading, items, current, onSelect, onHover, shortcut = false }: {
   label: string;
   heading?: string;
   items: NavItem[];
@@ -81,28 +81,29 @@ export function NavList({ label, heading, items, current, onSelect, onHover, sho
       </div>
     </nav>
   );
-}
+});
 
 /** An item's name, fading at its end instead of widening the sidebar when it is too long for it. */
 function NavLabel({ label }: { label: string }) {
-  const fade = useFade<HTMLSpanElement>();
+  const fade = useFade<HTMLSpanElement>(label);
   return <span className="nav-label fade-line" ref={fade}>{label}</span>;
 }
 
 /** A project's live state beside the sidebar, while the pointer rests on it in the list. */
 export function ProjectPeek({ dir, name, top, state }: { dir: string; name: string; top: number; state: Snapshot }) {
-  const now = useNow();
   const jobs = state.jobs.filter((job) => projectOf(job) === dir);
   const sessions = state.claude.filter((session) => projectOf(session) === dir);
   const running = jobs.filter((job) => job.state === 'running').length + sessions.filter((session) => session.state === 'working').length;
   const waiting = jobs.filter((job) => job.state === 'waiting').length + sessions.filter((session) => session.state === 'waiting').length;
   const missions = state.missions.filter((mission) => projectOf(mission) === dir && mission.state === 'active');
   const last = Math.max(0, ...jobs.map((job) => job.activeAt ?? job.createdAt), ...sessions.map((session) => session.activeAt));
+  const quiet = useClock((now) => last ? `Quiet for ${relativeDuration(now - last)}` : 'No work yet', !running && !waiting && Boolean(last));
+  const inset = useClock(() => Math.max(12, Math.min(top - 12, innerHeight - 260)));
   const line = running || waiting
     ? [running && `${running} working`, waiting && `${waiting} waiting on you`].filter(Boolean).join(', ')
-    : last ? `Quiet for ${relativeDuration(now - last)}` : 'No work yet';
+    : quiet;
   return (
-    <div className="peek" aria-hidden="true" style={{ '--top': `${Math.max(12, Math.min(top - 12, innerHeight - 260))}px` } as CSSProperties}>
+    <div className="peek" aria-hidden="true" style={{ '--top': `${inset}px` } as CSSProperties}>
       <div className="peek-inner" key={dir}>
         <p className="peek-name">{name}</p>
         <p className="peek-path">{dir}</p>

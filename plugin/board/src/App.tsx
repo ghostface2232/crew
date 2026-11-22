@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { flushSync } from 'react-dom';
 import {
   bundleIcon, AddRegular, AlertFilled, AlertRegular, ArrowCircleDownRegular, ArrowClockwiseRegular,
@@ -8,8 +8,10 @@ import {
 } from '@fluentui/react-icons';
 import type { FluentIcon } from '@fluentui/react-icons';
 import { board } from './store.ts';
+import type { Snapshot } from './types.ts';
+import { formatDate, longDay } from './dates.ts';
 import { knownProjects, projectNames, projectOf } from './model.ts';
-import { AskHost, ClockProvider, CopyMenu, Icon, PANEL_EXIT_MS, PanelLeavingContext, RollingNumber, useLinger } from './ui.tsx';
+import { AskHost, ClockProvider, CopyMenu, Icon, PANEL_EXIT_MS, PanelLeavingContext, RollingNumber, useLinger, useStableItems } from './ui.tsx';
 import appIcon from './icons/CrewAppIcon.png';
 import { Activity, History, Workspace } from './Overview.tsx';
 import { NeedsYou } from './NeedsYou.tsx';
@@ -63,13 +65,13 @@ export function App() {
   const [detail, setDetail] = useState(detailFromHash);
   const project = selection.startsWith('project:') ? selection.slice(8) : '';
   const page: Page = project ? 'overview' : (PAGES.find(([id]) => id === selection)?.[0] ?? 'overview');
-  const known = knownProjects(state);
-  const projects = project && !known.includes(project) ? [...known, project].sort() : known;
-  const names = projectNames(projects);
-  const waitingJobs = state.jobs
-    .filter((job) => job.state === 'waiting')
-    .sort((a, b) => (a.waiting?.since ?? 0) - (b.waiting?.since ?? 0));
-  const waitingSessions = state.claude.filter((session) => session.state === 'waiting');
+  const { jobs, claude, missions } = state;
+  const known = useMemo(() => knownProjects({ jobs, claude, missions }), [jobs, claude, missions]);
+  const projects = useStableItems(project && !known.includes(project) ? [...known, project].sort() : known);
+  const names = useMemo(() => projectNames(projects), [projects]);
+  const waitingJobs = useMemo(() => jobs.filter((job) => job.state === 'waiting')
+    .sort((a, b) => (a.waiting?.since ?? 0) - (b.waiting?.since ?? 0)), [jobs]);
+  const waitingSessions = useMemo(() => claude.filter((session) => session.state === 'waiting'), [claude]);
   const pending = waitingJobs.length + waitingSessions.length;
   const live = state.connection === 'live';
   const narrow = useNarrow();
@@ -83,13 +85,13 @@ export function App() {
     if (!narrow) setDrawer(false);
   }, [narrow]);
   /** Folds the drawer away and gives focus back to its button, which would otherwise fall to the page as the drawer turns inert. */
-  const fold = () => {
+  const fold = useCallback(() => {
     if (!drawer) return;
     // Committed at once, so the page behind is no longer inert and its button takes focus now, before a dialog
     // opened next records where to return focus.
     flushSync(() => setDrawer(false));
     toggle.current?.focus();
-  };
+  }, [drawer]);
   useEffect(() => {
     if (!drawer) return;
     sidebar.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
@@ -102,7 +104,7 @@ export function App() {
     window.addEventListener('keydown', escape);
     return () => window.removeEventListener('keydown', escape);
   }, [drawer]);
-  useEffect(() => board.connect(), []);
+
   useEffect(() => {
     document.title = pending ? `(${pending}) Crew` : 'Crew';
   }, [pending]);
@@ -111,7 +113,7 @@ export function App() {
     window.addEventListener('hashchange', change);
     return () => window.removeEventListener('hashchange', change);
   }, []);
-  const select = (value: string) => {
+  const select = useCallback((value: string) => {
     setSelection(value);
     fold();
     try {
@@ -119,15 +121,20 @@ export function App() {
     } catch {
       /* Embedded panes may disable storage. */
     }
-  };
-  const show = (value: string) => {
+  }, [fold]);
+  const show = useCallback((value: string) => {
     setDetail(value);
     history.replaceState(null, '', value ? `#${encodeURIComponent(value)}` : location.pathname + location.search);
-  };
+  }, []);
+  const currentDetail = useRef(detail);
+  useLayoutEffect(() => {
+    currentDetail.current = detail;
+  }, [detail]);
   /** A row opens its panel, or closes it when it is the one already open, as the app's rows do. */
-  const openJob = (id: string) => show(detail === id ? '' : id);
-  const openSession = (id: string) => show(detail === `session:${id}` ? '' : `session:${id}`);
-  const closeDetail = () => show('');
+  const openJob = useCallback((id: string) => show(currentDetail.current === id ? '' : id), [show]);
+  const showSession = useCallback((id: string) => show(`session:${id}`), [show]);
+  const openSession = useCallback((id: string) => show(currentDetail.current === `session:${id}` ? '' : `session:${id}`), [show]);
+  const closeDetail = useCallback(() => show(''), [show]);
   // A closed panel stays up while it slides out; a different one replaces it at once.
   const [panel, panelLeaving] = useLinger(detail, PANEL_EXIT_MS);
   /** After New Job, the job's own project, so the new job is in view, as the app goes there. */
@@ -135,21 +142,28 @@ export function App() {
     if (root && project !== root) select(`project:${root}`);
     show(id);
   };
-  const newJob = (origin?: Element | null) => {
+  const newJob = useCallback((origin?: Element | null) => {
     if (live) setDispatching({ origin: origin?.getBoundingClientRect() });
-  };
+  }, [live]);
   const openPalette = () => setPalette({ origin: searchButton.current?.getBoundingClientRect() });
-  const openSettings = () => {
+  const openSettings = useCallback(() => {
     // First, so the settings dialog returns focus to the drawer's button when it closes.
     fold();
     setSettings(true);
-  };
+  }, [fold]);
+  const paletteActions = useMemo(() => ({ select, openJob: show, openSession: showSession, newJob: () => newJob(), settings: openSettings }), [select, show, showSession, newJob, openSettings]);
+  const closePalette = useCallback(() => setPalette(null), []);
   // Notifications for requests that arrive while the board is in the background, as the app sends them.
   const notifier = useRef<Notifier>(null);
   notifier.current ??= new Notifier();
   notifier.current.onOpen = (id) => id && show(id);
+  // A request can appear and be answered between two paints.
+  const notificationStates = useRef<Snapshot[]>([]);
+  useEffect(() => board.connect(undefined, (snapshot) => notificationStates.current.push(snapshot)), []);
   useEffect(() => {
-    if (state.connection === 'live') notifier.current!.update(state, document.hasFocus());
+    const snapshots = notificationStates.current;
+    notificationStates.current = [];
+    for (const snapshot of snapshots) notifier.current!.update(snapshot, document.hasFocus());
   }, [state]);
   // Shortcuts that stay clear of the browser's: ⌘K or / to search, N for a new job, 1–4 for the pages.
   const keys = useRef<(event: KeyboardEvent) => void>(null);
@@ -177,6 +191,8 @@ export function App() {
     window.addEventListener('keydown', listener);
     return () => window.removeEventListener('keydown', listener);
   }, []);
+  const scope = useMemo(() => ({ state, project, names, selected: detail, openJob, openSession }), [state, project, names, detail, openJob, openSession]);
+  const pageItems = useMemo(() => PAGES.map(([id, label, icon]) => ({ id, label, icon, count: id === 'needs' ? pending : undefined })), [pending]);
   if (state.connection === 'unauthorized') {
     return (
       <main className="sign-in" aria-labelledby="sign-in-title">
@@ -194,14 +210,12 @@ export function App() {
     );
   }
   const title = project ? (names.get(project) ?? project) : TITLES[page];
-  const scope = { state, project, names, selected: detail, openJob, openSession };
-  const counts = { needs: pending };
   const pageNav = (
     <NavList
       label="Pages"
-      items={PAGES.map(([id, label, icon]) => ({ id, label, icon, count: counts[id as 'needs'] }))}
+      items={pageItems}
       current={project ? (page === 'overview' ? '' : page) : page}
-      onSelect={(id) => select(id)}
+      onSelect={select}
       shortcut
     />
   );
@@ -322,7 +336,7 @@ export function App() {
             {page === 'needs' ? (
               <NeedsYou jobs={waitingJobs} sessions={waitingSessions} pending={pending} names={names} openJob={openJob} openSession={openSession} />
             ) : page === 'activity' ? (
-              <Activity state={state} openJob={openJob} />
+              <Activity events={state.events} jobs={jobs} missions={missions} openJob={openJob} />
             ) : page === 'history' ? (
               <History {...scope} />
             ) : (
@@ -340,8 +354,8 @@ export function App() {
             names={names}
             projects={projects}
             origin={palette.origin}
-            close={() => setPalette(null)}
-            actions={{ select, openJob: show, openSession: (id) => show(`session:${id}`), newJob: () => newJob(), settings: openSettings }}
+            close={closePalette}
+            actions={paletteActions}
           />
         )}
         <PanelLeavingContext value={panelLeaving}>
@@ -359,7 +373,7 @@ export function App() {
 }
 
 function eyebrow(page: Page, now: number) {
-  const date = new Date(now).toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
+  const date = formatDate(longDay, new Date(now));
   return page === 'overview' ? date : page === 'needs' ? 'Requests from your agents' : page === 'activity' ? 'Everything the crew did' : 'Finished work';
 }
 
@@ -374,39 +388,44 @@ function ProjectNav({ projects, names, project, state, select }: {
   const [peek, setPeek] = useState<{ dir: string; top: number } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const hover = matchMedia('(hover: hover)').matches;
-  const activity = (dir: string) => {
-    const jobs = state.jobs.filter((job) => projectOf(job) === dir);
-    return jobs.some((job) => job.state === 'waiting') || state.claude.some((session) => projectOf(session) === dir && session.state === 'waiting')
-      ? 'waiting'
-      : jobs.some((job) => job.state === 'running') || state.claude.some((session) => projectOf(session) === dir && session.state === 'working')
-        ? 'working'
-        : undefined;
-  };
+  const { jobs, claude } = state;
+  const dots = useMemo(() => {
+    const dots = new Map<string, 'waiting' | 'working'>();
+    for (const item of [...jobs, ...claude]) {
+      const dir = projectOf(item);
+      if (item.state === 'waiting') dots.set(dir, 'waiting');
+      else if ((item.state === 'running' || item.state === 'working') && !dots.has(dir)) dots.set(dir, 'working');
+    }
+    return dots;
+  }, [jobs, claude]);
+  const items = useStableItems([
+    { id: '', label: 'All projects', icon: StackNavIcon, dot: undefined },
+    // No tooltip: the preview beside the list shows the path, and a tooltip would cover it.
+    ...projects.map((dir) => ({ id: dir, label: names.get(dir) ?? dir, icon: FolderNavIcon, dot: dots.get(dir) })),
+  ], (a, b) => a.id === b.id && a.label === b.label && a.dot === b.dot);
+  const selectProject = useCallback((id: string) => {
+    setPeek(null);
+    select(id ? `project:${id}` : 'overview');
+  }, [select]);
+  const hoverProject = useCallback((id: string, element: HTMLElement | null) => {
+    clearTimeout(timer.current);
+    if (!hover) return;
+    // A short rest before the first preview, none while moving between projects.
+    const open = () => setPeek(id && element ? { dir: id, top: element.getBoundingClientRect().top } : null);
+    if (!id) timer.current = setTimeout(open, 120);
+    else if (peek) open();
+    else timer.current = setTimeout(open, 260);
+  }, [hover, peek]);
   useEffect(() => () => clearTimeout(timer.current), []);
   return (
     <>
       <NavList
         label="Projects"
         heading="Projects"
-        items={[
-          { id: '', label: 'All projects', icon: StackNavIcon },
-          // No tooltip: the preview beside the list shows the path, and a tooltip would cover it.
-          ...projects.map((dir) => ({ id: dir, label: names.get(dir) ?? dir, icon: FolderNavIcon, dot: activity(dir) })),
-        ]}
+        items={items}
         current={project}
-        onSelect={(id) => {
-          setPeek(null);
-          select(id ? `project:${id}` : 'overview');
-        }}
-        onHover={(id, element) => {
-          clearTimeout(timer.current);
-          if (!hover) return;
-          // A short rest before the first preview, none while moving between projects.
-          const open = () => setPeek(id && element ? { dir: id, top: element.getBoundingClientRect().top } : null);
-          if (!id) timer.current = setTimeout(open, 120);
-          else if (peek) open();
-          else timer.current = setTimeout(open, 260);
-        }}
+        onSelect={selectProject}
+        onHover={hoverProject}
       />
       {peek && <ProjectPeek dir={peek.dir} name={names.get(peek.dir) ?? peek.dir} top={peek.top} state={state} />}
     </>

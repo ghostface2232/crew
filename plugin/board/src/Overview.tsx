@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import {
   AddRegular, ArrowRight16Filled, ArrowUpRight16Filled, ChatMultipleRegular, CheckmarkCircle16Regular,
@@ -8,12 +8,13 @@ import {
 import type { ProviderUsage } from '../../bridge/usage.ts';
 import type { Holder } from '../../bridge/config.ts';
 import type { BoardJob, CrewEvent, Mission, SetupState, Snapshot, WorkerAgent } from './types.ts';
+import { formatDate, longDay, shortDateTime, shortDay, shortMonth, timeOfDay } from './dates.ts';
 import { request } from './api.ts';
 import {
-  dailyCounts, elapsed, endedPerHour, holdersOf, jobLabel, NAMES, projectOf, relativeDuration, rolesOf, runningPerHour,
+  dailyCounts, elapsed, endedPerHour, holdersOf, jobLabel, leadMission, NAMES, projectOf, relativeDuration, rolesOf, runningPerHour,
   usageWindowName, unsettled,
 } from './model.ts';
-import { AgentMark, Chip, EmptyState, Icon, RollingNumber, StatusIcon, useFade, useNow } from './ui.tsx';
+import { AgentMark, Chip, EmptyState, Icon, RollingNumber, StatusIcon, useFade, useClock, useStableItems } from './ui.tsx';
 import { JobRow, jobKind, jobStatusState, MissionPanel, SessionRow } from './Missions.tsx';
 
 export interface Scope {
@@ -65,25 +66,45 @@ function Spark({ values, label }: { values: number[]; label: string }) {
   );
 }
 
+function kpiClock(jobs: BoardJob[]) {
+  let sparks: [number[], number[], number[]];
+  return (now: number) => {
+    const next: typeof sparks = [runningPerHour(jobs, now), endedPerHour(jobs, 'done', now), endedPerHour(jobs, 'failed', now)];
+    if (!sparks || next.some((values, index) => values.some((value, at) => value !== sparks[index][at]))) sparks = next;
+    return sparks;
+  };
+}
+
 /** The counts that matter most, each with its last day by the hour, and their shares as one bar. */
-export function Kpis({ state, project }: { state: Snapshot; project: string }) {
-  const now = useNow();
-  const jobs = state.jobs.filter((job) => inProject(project, job));
+export const Kpis = memo(function Kpis({ state, project }: { state: Snapshot; project: string }) {
+  const jobs = useMemo(() => state.jobs.filter((job) => inProject(project, job)), [state.jobs, project]);
   const sessions = state.claude.filter((session) => inProject(project, session));
-  const waiting = [...jobs.filter((job) => job.state === 'waiting').map((job) => job.waiting?.since ?? now), ...sessions.filter((session) => session.state === 'waiting').map((session) => session.activeAt)];
+  const waiting = jobs.filter((job) => job.state === 'waiting');
+  const waitingSessions = sessions.filter((session) => session.state === 'waiting');
+  const waitingCount = waiting.length + waitingSessions.length;
+  const oldest = Math.min(...waiting.map((job) => job.waiting?.since ?? Infinity), ...waitingSessions.map((session) => session.activeAt));
+  const missingSince = waiting.some((job) => job.waiting?.since == null);
+  const waitingFoot = useClock((now) =>
+    waitingCount ? `Oldest waiting ${elapsed(now - (missingSince ? Math.min(oldest, now) : oldest))}` : 'Nothing waiting',
+  Boolean(waitingCount));
+  const sparkJobs = useStableItems(jobs, (a, b) => a.state === b.state && a.createdAt === b.createdAt && a.endedAt === b.endedAt);
+  const getSparks = useMemo(() => kpiClock(sparkJobs), [sparkJobs]);
+  const [runningSpark, doneSpark, failedSpark] = useClock(getSparks, jobs.length > 0);
   const metrics = [
     // Lead sessions count like jobs, as they already do under Needs you.
     { label: 'In progress', state: 'working', count: jobs.filter((job) => job.state === 'running').length + sessions.filter((session) => session.state === 'working').length,
-      spark: runningPerHour(jobs, now), unit: 'running', foot: `${sessions.filter((session) => session.state === 'working').length} lead sessions` },
-    { label: 'Needs you', state: 'waiting', count: waiting.length, foot: waiting.length ? `Oldest waiting ${elapsed(now - Math.min(...waiting))}` : 'Nothing waiting' },
+      spark: runningSpark, unit: 'running', foot: `${sessions.filter((session) => session.state === 'working').length} lead sessions` },
+    { label: 'Needs you', state: 'waiting', count: waitingCount, foot: waitingFoot },
     // Settled jobs stay in the list but leave the totals, which would otherwise only grow.
     { label: 'Finished', state: 'done', count: jobs.filter((job) => job.state === 'done' && unsettled(job)).length,
-      spark: endedPerHour(jobs, 'done', now), unit: 'finished', foot: `${jobs.filter((job) => job.state === 'done').length} in all` },
+      spark: doneSpark, unit: 'finished', foot: `${jobs.filter((job) => job.state === 'done').length} in all` },
     { label: 'Failed', state: 'failed', count: jobs.filter((job) => job.state === 'failed' && unsettled(job)).length,
-      spark: endedPerHour(jobs, 'failed', now), unit: 'failed', foot: `${jobs.filter((job) => job.state === 'failed').length} in all` },
+      spark: failedSpark, unit: 'failed', foot: `${jobs.filter((job) => job.state === 'failed').length} in all` },
   ];
   const total = metrics.reduce((sum, metric) => sum + metric.count, 0);
-  const tokens = jobs.filter((job) => now - job.createdAt < 86_400_000).reduce((sum, job) => sum + (job.tokens ?? 0), 0);
+  const tokenJobs = useMemo(() => jobs.filter((job) => job.tokens), [jobs]);
+  const tokens = useClock((now) => tokenJobs.reduce((sum, job) =>
+    now - job.createdAt < 86_400_000 ? sum + job.tokens! : sum, 0), tokenJobs.length > 0);
   return (
     <section className="kpis" aria-label="Jobs by state">
       <ul className="kpi-row">
@@ -117,13 +138,17 @@ export function Kpis({ state, project }: { state: Snapshot; project: string }) {
       </div>
     </section>
   );
-}
+}, (a, b) => a.project === b.project && a.state.jobs === b.state.jobs && a.state.claude === b.state.claude);
 
 /** Orange from 70% used and red from 90% or at the limit, as the app colors usage. */
 const usageLevel = (ratio: number, status?: string) => (status === 'exhausted' || ratio >= 0.9 ? 'high' : ratio >= 0.7 || status === 'tight' ? 'mid' : undefined);
 
+function UsageReset({ time }: { time: number }) {
+  const text = useClock((now) => time <= now ? 'Reset due' : `Resets in ${relativeDuration(time - now)}`);
+  return <span className="usage-reset">{text}</span>;
+}
+
 function AgentUsage({ state, agent }: { state: Snapshot; agent: string }) {
-  const now = useNow();
   const usage = state.usage;
   if (usage && usage.source !== 'none') {
     const provider = usage.providers.find((item) => item.agent === agent);
@@ -150,7 +175,7 @@ function AgentUsage({ state, agent }: { state: Snapshot; agent: string }) {
                   <span>{status === 'exhausted' ? 'limit reached' : status}</span>
                 )}
                 {window.resetTime != null && (
-                  <span className="usage-reset">{window.resetTime <= now ? 'Reset due' : `Resets in ${relativeDuration(window.resetTime - now)}`}</span>
+                  <UsageReset time={window.resetTime} />
                 )}
               </p>
               <span className="usage-bar" aria-hidden="true">
@@ -200,16 +225,16 @@ function agentActivity(state: Snapshot, project: string, agent: string) {
 
 /** A table cell's text, fading at its end when the column is too narrow for it. */
 function FadeText({ text }: { text: string }) {
-  const fade = useFade<HTMLSpanElement>();
+  const fade = useFade<HTMLSpanElement>(text);
   return <span className="fade-line" ref={fade} title={text}>{text}</span>;
 }
 
 function FadeCaption({ text }: { text: string }) {
-  const fade = useFade<HTMLParagraphElement>();
+  const fade = useFade<HTMLParagraphElement>(text);
   return <p className="caption fade-line" ref={fade} title={text}>{text}</p>;
 }
 
-export function AgentPanel({ state, project }: { state: Snapshot; project: string }) {
+export const AgentPanel = memo(function AgentPanel({ state, project }: { state: Snapshot; project: string }) {
   const agents = ['claude', ...(['codex', 'antigravity'] as const).filter((agent) => state.agents[agent])];
   const measured = state.usage != null && state.usage.source !== 'none';
   return (
@@ -251,15 +276,19 @@ export function AgentPanel({ state, project }: { state: Snapshot; project: strin
       </ul>
     </Panel>
   );
-}
+}, (a, b) => a.project === b.project &&
+  a.state.jobs === b.state.jobs && a.state.claude === b.state.claude &&
+  a.state.agents === b.state.agents && a.state.usage === b.state.usage &&
+  a.state.limits === b.state.limits && a.state.roles === b.state.roles &&
+  a.state.roleSettings === b.state.roleSettings && a.state.roleInfo === b.state.roleInfo);
 
 /** Days as squares, weeks as columns; the darker, the more work started. One tooltip glides between squares. */
 /**
  * Days as squares, weeks as columns, as many recent weeks as fit the card up to `most`; the darker, the more work
  * started. Its title row carries the total, and one tooltip glides between squares.
  */
-export function Heatmap({ title, times, most, label, one }: { title: string; times: number[]; most: number; label: string; one: string }) {
-  const now = useNow();
+export const Heatmap = memo(function Heatmap({ title, times, most, label, one }: { title: string; times: number[]; most: number; label: string; one: string }) {
+  const day = useClock((now) => new Date(now).setHours(0, 0, 0, 0));
   const [weeks, setWeeks] = useState(most);
   const root = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -278,7 +307,7 @@ export function Heatmap({ title, times, most, label, one }: { title: string; tim
     return () => observer.disconnect();
   }, [most]);
   // Recounted when the local day turns, not the UTC hour, which some zones' midnight falls inside.
-  const days = useMemo(() => dailyCounts(times, now, weeks), [times, new Date(now).toDateString(), weeks]);
+  const days = useMemo(() => dailyCounts(times, day, weeks), [times, day, weeks]);
   const [at, setAt] = useState<number | null>(null);
   // A narrower card shows fewer days; a square under the pointer may be gone.
   useEffect(() => setAt(null), [weeks]);
@@ -293,7 +322,7 @@ export function Heatmap({ title, times, most, label, one }: { title: string; tim
   const months = days
     .map((day, index) => ({ index, date: new Date(day.day) }))
     .filter(({ date, index }) => index % 7 === 0 && date.getDate() <= 7)
-    .map(({ index, date }) => ({ column: index / 7, name: date.toLocaleDateString([], { month: 'short' }) }));
+    .map(({ index, date }) => ({ column: index / 7, name: formatDate(shortMonth, date) }));
   const tip = useRef<HTMLSpanElement>(null);
   // The tooltip sits outside the scrolling frame so it is never cut off, kept within the heatmap's own width.
   useLayoutEffect(() => {
@@ -334,38 +363,53 @@ export function Heatmap({ title, times, most, label, one }: { title: string; tim
       </div>
       {at !== null && days[at] && (
         <span className="heatmap-tip" ref={tip}>
-          <b>{days[at].count}</b> {days[at].count === 1 ? one : label} · {new Date(days[at].day).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}
+          <b>{days[at].count}</b> {days[at].count === 1 ? one : label} · {formatDate(shortDay, new Date(days[at].day))}
         </span>
       )}
     </div>
   );
-}
+});
 
 /** Without openJob, as in a job's own details, events carry no link to the job. */
-export function EventList({ events, openJob, limit }: { events: CrewEvent[]; openJob?: (id: string) => void; limit?: number }) {
+export const EventList = memo(function EventList({ events, openJob, limit }: { events: CrewEvent[]; openJob?: (id: string) => void; limit?: number }) {
   const shown = events.slice().reverse().slice(0, limit);
   return (
     <ol className="events">
       {shown.map((event, index) => (
-        <li className="event" key={event.seq} data-kind={event.kind} style={{ '--i': Math.min(index, 12) } as CSSProperties}>
-          <span className="event-mark"><Icon icon={event.kind === 'error' ? ErrorCircle16Regular : event.kind === 'done' ? CheckmarkCircle16Regular : CircleMultipleConcentric16Regular} /></span>
-          <div>
-            <p className="event-head">
-              <b>{NAMES[event.agent as keyof typeof NAMES] ?? event.agent}</b>
-              <time dateTime={event.ts}>{new Date(event.ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time>
-              {event.job_id && openJob && (
-                <button className="icon small" data-opens-panel="" aria-label="Show job" title="Show job" onClick={() => openJob(event.job_id!)}>
-                  <Icon icon={ArrowUpRight16Filled} />
-                </button>
-              )}
-            </p>
-            <p className="selectable">{event.detail}</p>
-          </div>
-        </li>
+        <EventRow key={event.seq} event={event} index={Math.min(index, 12)} openJob={openJob} />
       ))}
     </ol>
   );
-}
+}, (a, b) => {
+  if (a.openJob !== b.openJob || a.limit !== b.limit) return false;
+  if (a.events === b.events) return true;
+  const length = Math.min(a.events.length, a.limit ?? Infinity);
+  if (length !== Math.min(b.events.length, b.limit ?? Infinity)) return false;
+  for (let offset = 1; offset <= length; offset++) {
+    if (a.events.at(-offset) !== b.events.at(-offset)) return false;
+  }
+  return true;
+});
+
+const EventRow = memo(function EventRow({ event, index, openJob }: { event: CrewEvent; index: number; openJob?: (id: string) => void }) {
+  return (
+    <li className="event" data-kind={event.kind} style={{ '--i': index } as CSSProperties}>
+      <span className="event-mark"><Icon icon={event.kind === 'error' ? ErrorCircle16Regular : event.kind === 'done' ? CheckmarkCircle16Regular : CircleMultipleConcentric16Regular} /></span>
+      <div>
+        <p className="event-head">
+          <b>{NAMES[event.agent as keyof typeof NAMES] ?? event.agent}</b>
+          <time dateTime={event.ts}>{formatDate(timeOfDay, new Date(event.ts))}</time>
+          {event.job_id && openJob && (
+            <button className="icon small" data-opens-panel="" aria-label="Show job" title="Show job" onClick={() => openJob(event.job_id!)}>
+              <Icon icon={ArrowUpRight16Filled} />
+            </button>
+          )}
+        </p>
+        <p className="selectable">{event.detail}</p>
+      </div>
+    </li>
+  );
+});
 
 const AGENT_FILTERS: [string, string][] = [['', 'Everyone'], ['claude', 'Claude'], ['codex', 'Codex'], ['antigravity', 'Antigravity']];
 /** Pills that filter a list, with each one's count, as the reference dashboards filter. */
@@ -382,16 +426,29 @@ function Pills<T extends string>({ label, value, options, onChange }: { label: s
   );
 }
 
-export function Activity({ state, openJob }: Pick<Scope, 'state' | 'openJob'>) {
+const eventDays = new WeakMap<CrewEvent, string>();
+
+export const Activity = memo(function Activity({ events, jobs, missions, openJob }: Pick<Snapshot, 'events' | 'jobs' | 'missions'> & Pick<Scope, 'openJob'>) {
   const [agent, setAgent] = useState('');
-  const events = state.events.filter((event) => !agent || event.agent === agent);
   // Days, newest first, each under its own sticky heading.
-  const days = new Map<string, CrewEvent[]>();
-  for (const event of events) {
-    const day = new Date(event.ts).toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
-    days.set(day, [...(days.get(day) ?? []), event]);
-  }
-  const times = [...state.jobs.map((job) => job.createdAt), ...state.missions.map((mission) => mission.createdAt)];
+  const { days, counts } = useMemo(() => {
+    const days = new Map<string, CrewEvent[]>();
+    const counts = new Map<string, number>();
+    for (const event of events) {
+      counts.set(event.agent, (counts.get(event.agent) ?? 0) + 1);
+      if (agent && event.agent !== agent) continue;
+      let day = eventDays.get(event);
+      if (day === undefined) {
+        day = formatDate(longDay, new Date(event.ts));
+        eventDays.set(event, day);
+      }
+      const list = days.get(day);
+      if (list) list.push(event);
+      else days.set(day, [event]);
+    }
+    return { days, counts };
+  }, [events, agent]);
+  const times = useStableItems(useMemo(() => [...jobs.map((job) => job.createdAt), ...missions.map((mission) => mission.createdAt)], [jobs, missions]));
   return (
     <>
       <section className="card panel activity-map" aria-label="Work started" style={{ '--i': 0 } as CSSProperties}>
@@ -399,9 +456,9 @@ export function Activity({ state, openJob }: Pick<Scope, 'state' | 'openJob'>) {
       </section>
       <Panel
         label="Events"
-        action={<Pills label="Agent" value={agent} options={AGENT_FILTERS.map(([id, name]) => [id, name, state.events.filter((event) => !id || event.agent === id).length])} onChange={setAgent} />}
+        action={<Pills label="Agent" value={agent} options={AGENT_FILTERS.map(([id, name]) => [id, name, id ? counts.get(id) ?? 0 : events.length])} onChange={setAgent} />}
       >
-        {!events.length && <p className="secondary">No activity yet.</p>}
+        {!days.size && <p className="secondary">No activity yet.</p>}
         {[...days].reverse().map(([day, list]) => (
           <div className="event-day" key={day}>
             <h3 className="event-day-name">{day}</h3>
@@ -411,7 +468,7 @@ export function Activity({ state, openJob }: Pick<Scope, 'state' | 'openJob'>) {
       </Panel>
     </>
   );
-}
+});
 
 /** What Crew still needs, from the same checks as `crew doctor`; hidden once everything is in place. */
 function Setup() {
@@ -458,14 +515,50 @@ function Setup() {
   );
 }
 
+const noJobs: BoardJob[] = [];
+
+function useMissionPanels({ jobs, pulls, claude, missions }: Snapshot) {
+  const byMission = useMemo(() => {
+    const groups = new Map<string, BoardJob[]>();
+    for (const job of jobs) {
+      if (!job.mission) continue;
+      const group = groups.get(job.mission);
+      if (group) group.push(job);
+      else groups.set(job.mission, [job]);
+    }
+    return groups;
+  }, [jobs]);
+  const pullsByMission = useMemo(() => {
+    const groups = new Map<string, NonNullable<Snapshot['pulls']>>();
+    for (const pull of pulls ?? []) {
+      const group = groups.get(pull.mission);
+      if (group) group.push(pull);
+      else groups.set(pull.mission, [pull]);
+    }
+    return groups;
+  }, [pulls]);
+  const sessions = useMemo(() => new Map(claude.map((session) => [session.id, session])), [claude]);
+  return (mission: Mission, project = '') => {
+    const missionJobs = byMission.get(mission.id) ?? noJobs;
+    const owner = mission.owner ? sessions.get(mission.owner) : undefined;
+    return {
+      jobs: project ? missionJobs.filter((job) => inProject(project, job)) : missionJobs,
+      missionJobs,
+      owner,
+      lead: mission.state === 'active' && owner && leadMission(owner, missions)?.id === mission.id ? owner : undefined,
+      pulls: pullsByMission.get(mission.id),
+    };
+  };
+}
+
 /** The overview or a project: what is going on now, with the agents and the crew's rhythm beside it. */
 export function Workspace({ state, project, names, selected, openJob, openSession, newJob, openPage }: Scope & {
   newJob: (origin?: Element | null) => void;
   openPage: (selection: string) => void;
 }) {
-  const jobs = state.jobs.filter((job) => inProject(project, job));
-  const byMission = new Map<string, BoardJob[]>();
-  for (const job of jobs) if (job.mission) byMission.set(job.mission, [...(byMission.get(job.mission) ?? []), job]);
+  const jobs = useMemo(() => project ? state.jobs.filter((job) => inProject(project, job)) : state.jobs, [state.jobs, project]);
+  const times = useStableItems(useMemo(() => jobs.map((job) => job.createdAt), [jobs]));
+  const missionPanel = useMissionPanels(state);
   const missions = state.missions.filter((mission) => inProject(project, mission)).sort((a, b) => b.createdAt - a.createdAt);
   const active = missions.filter((mission) => mission.state === 'active');
   const recent = missions.filter((mission) => mission.state !== 'active').slice(0, 2);
@@ -480,11 +573,7 @@ export function Workspace({ state, project, names, selected, openJob, openSessio
     <MissionPanel
       key={mission.id}
       mission={mission}
-      jobs={byMission.get(mission.id) ?? []}
-      allJobs={state.jobs}
-      owner={state.claude.find((session) => session.id === mission.owner)}
-      allMissions={state.missions}
-      pulls={state.pulls?.filter((pull) => pull.mission === mission.id)}
+      {...missionPanel(mission, project)}
       projectName={project ? undefined : names.get(projectOf(mission))}
       selected={selected}
       openJob={openJob}
@@ -492,9 +581,10 @@ export function Workspace({ state, project, names, selected, openJob, openSessio
       index={index}
     />
   );
-  const row = (job: BoardJob, index: number) => <JobRow key={job.id} job={job} selected={selected === job.id} openJob={openJob} index={index} />;
+  const row = (job: BoardJob, index: number) => <JobRow key={job.id} job={job} selected={selected === job.id} openJob={openJob} kind={jobKind(job, state)} index={index} />;
   const empty = !jobs.length && !missions.length && !sessions.length;
-  const events = state.events.filter((event) => !project || !event.job_id || jobs.some((job) => job.id === event.job_id));
+  const jobIds = useMemo(() => new Set(jobs.map((job) => job.id)), [jobs]);
+  const events = useMemo(() => project ? state.events.filter((event) => !event.job_id || jobIds.has(event.job_id)) : state.events, [state.events, project, jobIds]);
   return (
     <>
       <Kpis state={state} project={project} />
@@ -534,7 +624,7 @@ export function Workspace({ state, project, names, selected, openJob, openSessio
         <aside className="dash-side" aria-label="Agents and activity">
           <AgentPanel state={state} project={project} />
           <section className="card panel" aria-label="Rhythm" style={{ '--i': 1 } as CSSProperties}>
-            <Heatmap title="Rhythm" times={jobs.map((job) => job.createdAt)} most={26} label="jobs" one="job" />
+            <Heatmap title="Rhythm" times={times} most={26} label="jobs" one="job" />
           </section>
           <Panel label="Live feed" action={<button className="link" onClick={() => openPage('activity')}>All <Icon icon={ArrowRight16Filled} size={12} /></button>}>
             {events.length ? <EventList events={events} openJob={openJob} limit={6} /> : <p className="secondary caption">Nothing has happened yet.</p>}
@@ -547,21 +637,27 @@ export function Workspace({ state, project, names, selected, openJob, openSessio
 
 type SortKey = 'title' | 'agent' | 'project' | 'state' | 'duration' | 'ended';
 /** Finished work: ended missions, then every ended job in a table to filter and sort. */
-export function History({ state, project, names, selected, openJob, openSession }: Scope) {
+export const History = memo(function History({ state, project, names, selected, openJob, openSession }: Scope) {
   const [filter, setFilter] = useState<'' | 'done' | 'failed' | 'cancelled'>('');
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<{ key: SortKey; up: boolean }>({ key: 'ended', up: false });
-  const ended = state.jobs.filter((job) => inProject(project, job) && job.endedAt != null);
-  const missions = state.missions.filter((mission) => inProject(project, mission) && mission.state !== 'active' && matches(search, mission.title)).sort((a, b) => b.createdAt - a.createdAt);
-  const value = (job: BoardJob): string | number =>
-    sort.key === 'title' ? job.title.toLowerCase() : sort.key === 'agent' ? NAMES[job.agent] : sort.key === 'project' ? names.get(projectOf(job)) ?? projectOf(job)
-      : sort.key === 'state' ? job.state : sort.key === 'duration' ? (job.endedAt ?? 0) - job.createdAt : job.endedAt ?? 0;
-  const rows = ended
-    .filter((job) => (!filter || job.state === filter) && matches(search, `${job.title} ${projectOf(job)} ${NAMES[job.agent]} ${jobKind(job)}`))
-    .sort((a, b) => {
-      const [x, y] = [value(a), value(b)];
-      return (x < y ? -1 : x > y ? 1 : 0) * (sort.up ? 1 : -1);
-    });
+  const { roleInfo } = state;
+  const missionPanel = useMissionPanels(state);
+  const ended = useStableItems(useMemo(() => state.jobs.filter((job) => inProject(project, job) && job.endedAt != null), [state.jobs, project]));
+  const missions = useMemo(() => state.missions
+    .filter((mission) => inProject(project, mission) && mission.state !== 'active' && matches(search, mission.title))
+    .sort((a, b) => b.createdAt - a.createdAt), [state.missions, project, search]);
+  const rows = useMemo(() => {
+    const value = (job: BoardJob): string | number =>
+      sort.key === 'title' ? job.title.toLowerCase() : sort.key === 'agent' ? NAMES[job.agent] : sort.key === 'project' ? names.get(projectOf(job)) ?? projectOf(job)
+        : sort.key === 'state' ? job.state : sort.key === 'duration' ? (job.endedAt ?? 0) - job.createdAt : job.endedAt ?? 0;
+    return ended
+      .filter((job) => (!filter || job.state === filter) && matches(search, `${job.title} ${projectOf(job)} ${NAMES[job.agent]} ${jobKind(job, { roleInfo })}`))
+      .sort((a, b) => {
+        const [x, y] = [value(a), value(b)];
+        return (x < y ? -1 : x > y ? 1 : 0) * (sort.up ? 1 : -1);
+      });
+  }, [ended, filter, names, roleInfo, search, sort]);
   const column = (key: SortKey, text: string, className?: string) => (
     <th className={className} aria-sort={sort.key === key ? (sort.up ? 'ascending' : 'descending') : undefined}>
       <button className="sort" onClick={() => setSort({ key, up: sort.key === key ? !sort.up : key === 'title' || key === 'agent' || key === 'project' })}>
@@ -588,11 +684,7 @@ export function History({ state, project, names, selected, openJob, openSession 
         <MissionPanel
           key={mission.id}
           mission={mission}
-          jobs={state.jobs.filter((job) => job.mission === mission.id)}
-          allJobs={state.jobs}
-          owner={state.claude.find((session) => session.id === mission.owner)}
-          allMissions={state.missions}
-          pulls={state.pulls?.filter((pull) => pull.mission === mission.id)}
+          {...missionPanel(mission)}
           projectName={project ? undefined : names.get(projectOf(mission))}
           selected={selected}
           openJob={openJob}
@@ -616,19 +708,7 @@ export function History({ state, project, names, selected, openJob, openSession 
               </thead>
               <tbody>
                 {rows.map((job, index) => (
-                  <tr key={job.id} data-opens-panel="" aria-current={selected === job.id || undefined} style={{ '--i': Math.min(index, 16) } as CSSProperties} onClick={() => openJob(job.id)}>
-                    <td>
-                      <button className="cell-title" data-job={job.id} data-opens-panel="" onClick={(event) => { event.stopPropagation(); openJob(job.id); }}>
-                        <b>{job.title}</b>
-                        <span>{jobKind(job)}</span>
-                      </button>
-                    </td>
-                    <td className="narrow-hide"><span className="cell-agent"><AgentMark agent={job.agent} size={14} />{NAMES[job.agent]}</span></td>
-                    {!project && <td className="narrow-hide cell-muted cell-project"><FadeText text={names.get(projectOf(job)) ?? projectOf(job)} /></td>}
-                    <td><StatusIcon state={jobStatusState(job)} label={jobLabel(job)} /></td>
-                    <td className="num cell-muted">{elapsed((job.endedAt ?? 0) - job.createdAt)}</td>
-                    <td className="num cell-muted narrow-hide">{new Date(job.endedAt!).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</td>
-                  </tr>
+                  <HistoryRow key={job.id} job={job} kind={jobKind(job, state)} projectName={project ? undefined : names.get(projectOf(job)) ?? projectOf(job)} selected={selected === job.id} index={Math.min(index, 16)} openJob={openJob} />
                 ))}
               </tbody>
             </table>
@@ -639,4 +719,33 @@ export function History({ state, project, names, selected, openJob, openSession 
       )}
     </>
   );
-}
+}, (a, b) =>
+  a.project === b.project && a.names === b.names && a.selected === b.selected &&
+  a.openJob === b.openJob && a.openSession === b.openSession &&
+  a.state.jobs === b.state.jobs && a.state.missions === b.state.missions &&
+  a.state.roleInfo === b.state.roleInfo && a.state.pulls === b.state.pulls);
+
+const HistoryRow = memo(function HistoryRow({ job, kind, projectName, selected, index, openJob }: {
+  job: BoardJob;
+  kind: string;
+  projectName?: string;
+  selected: boolean;
+  index: number;
+  openJob: Scope['openJob'];
+}) {
+  return (
+    <tr data-opens-panel="" aria-current={selected || undefined} style={{ '--i': index } as CSSProperties} onClick={() => openJob(job.id)}>
+      <td>
+        <button className="cell-title" data-job={job.id} data-opens-panel="" onClick={(event) => { event.stopPropagation(); openJob(job.id); }}>
+          <b>{job.title}</b>
+          <span>{kind}</span>
+        </button>
+      </td>
+      <td className="narrow-hide"><span className="cell-agent"><AgentMark agent={job.agent} size={14} />{NAMES[job.agent]}</span></td>
+      {projectName !== undefined && <td className="narrow-hide cell-muted cell-project"><FadeText text={projectName} /></td>}
+      <td><StatusIcon state={jobStatusState(job)} label={jobLabel(job)} /></td>
+      <td className="num cell-muted">{elapsed((job.endedAt ?? 0) - job.createdAt)}</td>
+      <td className="num cell-muted narrow-hide">{formatDate(shortDateTime, new Date(job.endedAt!))}</td>
+    </tr>
+  );
+});

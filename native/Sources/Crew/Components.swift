@@ -48,10 +48,106 @@ struct StatusSymbol: View {
     let spins: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
-        Image(systemName: name).symbolEffect(.rotate, options: .repeat(.continuous).speed(Self.speed), isActive: spins && !reduceMotion)
+        Turning(isActive: spins && !reduceMotion) { Image(systemName: name) }
     }
-    /// Half the effect's own pace, for a calm turn rather than a busy spinner.
-    static let speed = 0.5
+}
+
+/// Turns its content clockwise once every four seconds, a calm turn rather than a busy spinner, as a layer animation
+/// on a picture of the content. SwiftUI drives its own animations by rendering the window's whole view graph every
+/// frame, which for one turning symbol took a quarter of a core for as long as a mission was active; the render
+/// server turns a layer at no cost to the app.
+struct Turning<Content: View>: View {
+    let isActive: Bool
+    let content: Content
+    @Environment(\.self) private var environment
+    init(isActive: Bool, @ViewBuilder content: () -> Content) {
+        self.isActive = isActive; self.content = content()
+    }
+    var body: some View {
+        if isActive {
+            // The content itself keeps its place in the layout, unseen under its turning picture.
+            content.hidden().overlay { TurningLayer(image: picture, scale: scale).allowsHitTesting(false) }
+        } else {
+            content
+        }
+    }
+    /// Twice the display's own scale, so a turned picture stays as crisp as a glyph drawn at that angle.
+    private var scale: CGFloat { environment.displayScale * 2 }
+    /// Drawn with the environment the content stands in, so its font and color are the ones it would show.
+    private var picture: CGImage? {
+        let renderer = ImageRenderer(content: content.environment(\.self, environment))
+        renderer.scale = scale
+        return renderer.cgImage
+    }
+}
+
+private struct TurningLayer: NSViewRepresentable {
+    let image: CGImage?
+    let scale: CGFloat
+    func makeNSView(context: Context) -> Surface { Surface() }
+    func updateNSView(_ view: Surface, context: Context) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        view.turning.contents = image
+        view.turning.contentsScale = scale
+        // A symbol's weight rarely sits at the middle of its frame; turning about the frame would make it wobble.
+        if let image { view.turning.anchorPoint = Self.inkCenter(of: image) }
+        view.turning.frame = view.bounds
+        CATransaction.commit()
+    }
+    /// Where the picture's ink balances, in the layer's unit coordinates.
+    static func inkCenter(of image: CGImage) -> CGPoint {
+        let width = image.width, height = image.height
+        var alpha = [UInt8](repeating: 0, count: width * height)
+        guard width > 0, height > 0, let context = CGContext(data: &alpha, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width,
+                                                              space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.alphaOnly.rawValue) else { return CGPoint(x: 0.5, y: 0.5) }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        var total = 0.0, x = 0.0, y = 0.0
+        for row in 0..<height {
+            for column in 0..<width {
+                let weight = Double(alpha[row * width + column])
+                total += weight; x += weight * (Double(column) + 0.5); y += weight * (Double(row) + 0.5)
+            }
+        }
+        guard total > 0 else { return CGPoint(x: 0.5, y: 0.5) }
+        // Bitmap rows run from the top; the layer's unit space runs from the bottom.
+        return CGPoint(x: x / total / Double(width), y: 1 - y / total / Double(height))
+    }
+    final class Surface: NSView {
+        let turning = CALayer()
+        init() {
+            super.init(frame: .zero)
+            wantsLayer = true
+            turning.contentsGravity = .center
+            turning.minificationFilter = .trilinear
+            layer?.addSublayer(turning)
+            setAccessibilityElement(false)
+        }
+        required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+        override func layout() {
+            super.layout()
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            turning.frame = bounds
+            CATransaction.commit()
+            start()
+        }
+        // A layer's animations leave with it when its view leaves the window.
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            start()
+        }
+        private func start() {
+            guard window != nil, turning.animation(forKey: "turn") == nil else { return }
+            let turn = CABasicAnimation(keyPath: "transform.rotation.z")
+            turn.fromValue = 0
+            turn.toValue = -2 * Double.pi
+            turn.duration = 4
+            turn.repeatCount = .infinity
+            turn.isRemovedOnCompletion = false
+            turning.add(turn, forKey: "turn")
+        }
+    }
 }
 
 /// A job's or session's status as its symbol alone, quieter than a chip in a list of them; the word is its name.

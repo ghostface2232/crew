@@ -306,7 +306,9 @@ struct AgentOverview: View {
                         let idle = agent == "claude" ? idleSessions(store) : 0
                         let summary = [count > 0 ? "\(count) active" : nil, idle > 0 ? "\(idle) idle" : nil].compactMap { $0 }
                         if !summary.isEmpty { Text(summary.joined(separator: " · ")).font(Typeface.caption).foregroundStyle(.secondary) }
-                        StatusLabel(state: mark, title: waiting ? "Needs you" : stalled ? "May be stuck" : store.state.agents[agent]?.enabled == false ? "Disabled" : count > 0 ? "Working" : "Ready")
+                        StatusLabel(state: mark, title: waiting ? "Needs you" : stalled ? "May be stuck" : store.state.agents[agent]?.enabled == false ? "Disabled" : count > 0 ? "Working" : "Ready",
+                                    // Only under the word Working: a disabled agent's last job still counts as active.
+                                    spins: mark == "working" && store.state.agents[agent]?.enabled != false)
                     }
                     if let usage = store.usage, usage.source != "none" { AgentUsageView(store: store, agent: agent) }
                 }.padding(.horizontal, WorkspaceStyle.cardPadding).padding(.vertical, Space.l)
@@ -366,7 +368,7 @@ private struct AgentCard: View {
                     }
                 }
                 Spacer(minLength: Space.m)
-                StatusLabel(state: mark, title: mark == "waiting" ? "Needs you" : mark == "working" ? "Working" : mark == "stalled" ? "May be stuck" : store.state.agents[agent]?.enabled == false ? "Disabled" : "Ready")
+                StatusLabel(state: mark, title: mark == "waiting" ? "Needs you" : mark == "working" ? "Working" : mark == "stalled" ? "May be stuck" : store.state.agents[agent]?.enabled == false ? "Disabled" : "Ready", spins: mark == "working")
             }
             // The agent's work in a gray inset, apart from its name above and its account usage below; with
             // nothing open, the inset is left out rather than saying so.

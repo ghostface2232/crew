@@ -1,13 +1,13 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import {
   AddRegular, AlertOffRegular, AlertRegular, ArrowTurnDownLeftRegular, ChatMultipleRegular, ClockRegular,
   FlagRegular, FlashRegular, FolderRegular, GridRegular, SearchRegular, SettingsRegular, StackRegular, WrenchRegular,
 } from '@fluentui/react-icons';
 import type { FluentIcon } from '@fluentui/react-icons';
 import type { Snapshot } from './types.ts';
-import { elapsed, jobLabel, missionStep, missionStops, NAMES, projectOf, roleLabel, jobRole } from './model.ts';
-import { AgentMark, Chip, EASE_IN_OUT, EASE_OUT, Icon, reducedMotion, useNow, WordReveal } from './ui.tsx';
+import { jobLabel, missionStep, missionStops, NAMES, projectOf, roleLabel, jobRole } from './model.ts';
+import { AgentMark, Chip, EASE_IN_OUT, EASE_OUT, Icon, reducedMotion, Elapsed, useClock, WordReveal } from './ui.tsx';
 import { jobStatusState } from './Missions.tsx';
 import { notificationPermission, notificationsWanted, requestNotifications, setNotificationsWanted } from './notify.ts';
 
@@ -19,7 +19,7 @@ interface Entry {
   icon?: FluentIcon;
   agent?: string;
   run: () => void;
-  preview: () => { eyebrow: string; chip?: [string, string]; lines: string[]; text?: string };
+  preview: () => { eyebrow: string; chip?: [string, string]; lines: ReactNode[]; text?: string };
 }
 export interface PaletteActions {
   select: (selection: string) => void;
@@ -47,7 +47,6 @@ export function Palette({ state, names, projects, origin, close, actions }: {
   close: () => void;
   actions: PaletteActions;
 }) {
-  const now = useNow();
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
   const [pointer, setPointer] = useState(false);
@@ -56,22 +55,27 @@ export function Palette({ state, names, projects, origin, close, actions }: {
   const closing = useRef(false);
   const pressed = useRef(false);
   const unmounting = useRef(false);
-  const width = Math.min(760, innerWidth - 24);
-  const height = Math.min(500, innerHeight - 96);
+  const viewportWidth = useClock(() => innerWidth);
+  const width = Math.min(760, viewportWidth - 24);
+  const height = useClock(() => Math.min(500, innerHeight - 96));
   // Anchored to the search control's right edge, growing down and to the left from it; centered without one.
-  const left = origin ? Math.max(12, Math.min(origin.right - width, innerWidth - 12 - width)) : (innerWidth - width) / 2;
+  const left = origin ? Math.max(12, Math.min(origin.right - width, viewportWidth - 12 - width)) : (viewportWidth - width) / 2;
   // Where the page draws the title bar (the Windows app), the window buttons keep their corner, so a palette reaching
   // under them starts below them instead.
   // Not yet in TypeScript's DOM types.
   const overlay = (navigator as { windowControlsOverlay?: { visible: boolean; getTitlebarAreaRect(): DOMRect } }).windowControlsOverlay;
-  const bar = overlay?.visible ? overlay.getTitlebarAreaRect() : null;
-  const below = bar && left + width > bar.right ? bar.bottom + 8 : 0;
+  const below = useClock(() => {
+    const bar = overlay?.visible ? overlay.getTitlebarAreaRect() : null;
+    return bar && left + width > bar.right ? bar.bottom + 8 : 0;
+  }, Boolean(overlay));
   const top = Math.max(origin ? Math.max(8, origin.top) : 72, below);
   // The morph to and from the search control would pass under those buttons, so a palette moved below them fades instead.
   const anchor = below ? undefined : origin;
+  const { jobs, claude, missions, roleInfo } = state;
+  const notifyState = useClock(notificationPermission);
+  const notifyOn = useClock(() => notifyState === 'granted' && notificationsWanted(), notifyState === 'granted');
   const entries = useMemo(() => {
     const list: Entry[] = [];
-    const notifyState = notificationPermission();
     list.push({
       id: 'new-job', group: 'Actions', title: 'New Job', subtitle: 'Hand a task to an agent', icon: AddRegular,
       run: actions.newJob, preview: () => ({ eyebrow: 'Action', lines: ['Shortcut: N'], text: 'Give a command, ask a question, or add information for the crew.' }),
@@ -81,7 +85,7 @@ export function Palette({ state, names, projects, origin, close, actions }: {
       run: actions.settings, preview: () => ({ eyebrow: 'Action', lines: [], text: 'Configure roles, model presets, and shared instructions.' }),
     });
     if (notifyState !== 'unsupported') {
-      const on = notifyState === 'granted' && notificationsWanted();
+      const on = notifyOn;
       list.push({
         id: 'notify', group: 'Actions', title: on ? 'Turn off notifications' : 'Turn on notifications',
         subtitle: notifyState === 'denied' ? 'Blocked in this browser' : 'When an agent needs you and the board is in the background',
@@ -98,18 +102,18 @@ export function Palette({ state, names, projects, origin, close, actions }: {
       list.push({ id: `page:${id}`, group: 'Pages', title, subtitle, icon, run: () => actions.select(id), preview: () => ({ eyebrow: 'Page', lines: [], text: subtitle }) });
     list.push({ id: 'project:', group: 'Projects', title: 'All projects', subtitle: 'Overview', icon: StackRegular, run: () => actions.select('overview'), preview: () => ({ eyebrow: 'Projects', lines: [`${projects.length} projects`] }) });
     for (const dir of projects) {
-      const jobs = state.jobs.filter((job) => projectOf(job) === dir);
+      const projectJobs = jobs.filter((job) => projectOf(job) === dir);
       list.push({
         id: `project:${dir}`, group: 'Projects', title: names.get(dir) ?? dir, subtitle: dir, icon: FolderRegular,
         run: () => actions.select(`project:${dir}`),
         preview: () => ({
           eyebrow: 'Project',
-          lines: [dir, `${jobs.filter((job) => job.endedAt == null).length} active jobs · ${jobs.length} in all`],
-          text: `${state.missions.filter((mission) => projectOf(mission) === dir && mission.state === 'active').length} missions in progress`,
+          lines: [dir, `${projectJobs.filter((job) => job.endedAt == null).length} active jobs · ${projectJobs.length} in all`],
+          text: `${missions.filter((mission) => projectOf(mission) === dir && mission.state === 'active').length} missions in progress`,
         }),
       });
     }
-    for (const mission of [...state.missions].sort((a, b) => Number(b.state === 'active') - Number(a.state === 'active') || b.createdAt - a.createdAt)) {
+    for (const mission of [...missions].sort((a, b) => Number(b.state === 'active') - Number(a.state === 'active') || b.createdAt - a.createdAt)) {
       const stops = missionStops(mission);
       list.push({
         id: `mission:${mission.id}`, group: 'Missions', title: mission.title, subtitle: names.get(projectOf(mission)) ?? projectOf(mission), icon: FlagRegular,
@@ -122,43 +126,51 @@ export function Palette({ state, names, projects, origin, close, actions }: {
           chip: [mission.state === 'active' ? 'running' : mission.state, mission.state[0].toUpperCase() + mission.state.slice(1)],
           lines: [
             mission.state === 'done' ? `All ${stops.length} steps passed` : `Step ${missionStep(mission) + 1} of ${stops.length}: ${stops[missionStep(mission)]?.name ?? ''}`,
-            elapsed((mission.endedAt ?? now) - mission.createdAt),
+            <Elapsed start={mission.createdAt} end={mission.endedAt} />,
           ],
           text: mission.outcome || mission.notes?.at(-1)?.text,
         }),
       });
     }
-    for (const session of state.claude) {
+    for (const session of claude) {
       list.push({
         id: `session:${session.id}`, group: 'Claude sessions', title: session.title, subtitle: names.get(projectOf(session)) ?? projectOf(session), agent: 'claude',
         run: () => actions.openSession(session.id),
         preview: () => ({
           eyebrow: 'Claude · Lead',
           chip: [session.stalled ? 'stalled' : session.state, session.stalled ? 'May be stuck' : session.state[0].toUpperCase() + session.state.slice(1)],
-          lines: [`Started ${elapsed(now - session.startedAt)} ago`],
+          lines: [<Elapsed start={session.startedAt} prefix="Started " suffix=" ago" />],
           text: session.waitingFor ?? session.phase,
         }),
       });
     }
-    for (const job of [...state.jobs].sort((a, b) => Number(b.endedAt == null) - Number(a.endedAt == null) || b.createdAt - a.createdAt)) {
+    for (const job of [...jobs].sort((a, b) => Number(b.endedAt == null) - Number(a.endedAt == null) || b.createdAt - a.createdAt)) {
       list.push({
         id: `job:${job.id}`, group: 'Jobs', title: job.title, subtitle: `${NAMES[job.agent]} · ${names.get(projectOf(job)) ?? projectOf(job)}`, agent: job.agent, icon: WrenchRegular,
         run: () => actions.openJob(job.id),
         preview: () => ({
-          eyebrow: `${NAMES[job.agent]} · ${job.ask && !job.debate ? 'Question' : roleLabel(state, jobRole(job))}`,
+          eyebrow: `${NAMES[job.agent]} · ${job.ask && !job.debate ? 'Question' : roleLabel({ roleInfo }, jobRole(job))}`,
           chip: [jobStatusState(job), jobLabel(job)],
-          lines: [names.get(projectOf(job)) ?? projectOf(job), elapsed((job.endedAt ?? now) - job.createdAt)],
+          lines: [names.get(projectOf(job)) ?? projectOf(job), <Elapsed start={job.createdAt} end={job.endedAt} />],
           text: job.waiting?.reason ?? job.error?.message ?? (job.endedAt == null ? job.phase : job.result?.stat),
         }),
       });
     }
     return list;
-  }, [state, names, projects, now]);
-  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
-  const shown = words.length
-    ? entries.filter((entry) => words.every((word) => `${entry.title} ${entry.subtitle} ${entry.group}`.toLowerCase().includes(word))).slice(0, 60)
+  }, [jobs, claude, missions, roleInfo, names, projects, actions, notifyState, notifyOn]);
+  const shown = useMemo(() => {
+    const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+    if (words.length) return entries.filter((entry) =>
+      words.every((word) => `${entry.title} ${entry.subtitle} ${entry.group}`.toLowerCase().includes(word))).slice(0, 60);
     // With nothing typed: actions, pages, projects, and only the most recent work.
-    : entries.filter((entry, index, all) => !['Jobs', 'Missions', 'Claude sessions'].includes(entry.group) || all.slice(0, index).filter((other) => other.group === entry.group).length < 4);
+    const counts = new Map<string, number>();
+    return entries.filter(({ group }) => {
+      if (group !== 'Jobs' && group !== 'Missions' && group !== 'Claude sessions') return true;
+      const count = counts.get(group) ?? 0;
+      counts.set(group, count + 1);
+      return count < 4;
+    });
+  }, [entries, query]);
   const current = shown[Math.min(active, shown.length - 1)];
   const finish = (then?: () => void) => {
     if (closing.current) return;

@@ -45,11 +45,19 @@ struct PresetSelection: Encodable, Sendable {
 
 @MainActor @Observable
 final class CrewStore {
-    var state = BoardState()
+    var state = BoardState() {
+        didSet {
+            let pending = state.pendingCount
+            if pending != pendingCount { pendingCount = pending }
+        }
+    }
     // Kept apart from `state` so the frequent event and usage updates only redraw the views that show them.
     var events: [CrewEvent] = []
     var limits: [String: LimitUsage?] = [:]
     var usage: Usage?
+    /// `state.pendingCount`, kept by `state` itself and written only when it changes: the menu bar item redraws its
+    /// image whenever its label is evaluated again, which reading `state` would cause on every event.
+    private(set) var pendingCount = 0
     var signInRequired = false
     var connected = false
     var connectionMessage = "Connecting to Crew…"

@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test, type TestContext } from 'node:test';
 import { Actions, answerKey, onUnauthorized, stream, ticketFromFragment, UnauthorizedError } from '../plugin/board/src/api.ts';
 import { BoardStore, mergeEvents } from '../plugin/board/src/store.ts';
+import { formatDate, longDay, shortDateTime, shortDay, shortMonth, timeOfDay } from '../plugin/board/src/dates.ts';
+import { Notifier } from '../plugin/board/src/notify.ts';
 import { elapsed, evidenceSide, evidenceTurn, orderEvidence, jobLabel, leadMission, projectNames, unsettled, missionStops, missionStep, missionStopPosition, missionJobStep, missionLooksFinished, pullIsStale, pullStatuses, relativeDuration, usageWindowName, STOP_OF_STAGE } from '../plugin/board/src/model.ts';
 import type { BoardJob, BoardPull, BoardState, ClaudeSession, CrewEvent, Mission } from '../plugin/board/src/types.ts';
 
@@ -13,6 +15,15 @@ function deferred() {
     reject = no;
   });
   return { promise, resolve, reject };
+}
+
+function stubGlobal(t: TestContext, key: string, value: unknown) {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, key);
+  Object.defineProperty(globalThis, key, { configurable: true, value });
+  t.after(() => {
+    if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+    else Reflect.deleteProperty(globalThis, key);
+  });
 }
 
 test('all answer surfaces share a lock that survives acceptance until a new request', async () => {
@@ -92,7 +103,7 @@ test('a reconnect replaces snapshots and events, including restarted event seque
   assert.deepEqual(store.getSnapshot().events, [{ seq: 1 }]);
   assert.equal(store.getSnapshot().jobs.length, 0);
   assert.equal(store.getSnapshot().revision, 2);
-  assert.equal(updates, 5);
+  assert.equal(updates, 2);
   unsubscribe();
 });
 
@@ -102,6 +113,46 @@ test('events deduplicate overlap between a detail fetch and the stream and stay 
     mergeEvents(events, [{ seq: 2 }, { seq: 3 }] as CrewEvent[], 2).map((event) => event.seq),
     [2, 3],
   );
+});
+
+test('single-event merges agree with the general path for appends, duplicates and late arrivals', () => {
+  const events = [{ seq: 1 }, { seq: 3 }] as CrewEvent[];
+  for (const [seq, limit, expected] of [
+    [4, 3, [1, 3, 4]],
+    [4, 2, [3, 4]],
+    [3, 3, [1, 3]],
+    [2, 3, [1, 2, 3]],
+  ] as const) {
+    const event = { seq } as CrewEvent;
+    const merged = mergeEvents(events, [event], limit);
+    assert.deepEqual(merged, mergeEvents(events, [event, event], limit));
+    assert.deepEqual(merged.map((item) => item.seq), expected);
+    assert.equal(merged.find((item) => item.seq === seq), event);
+  }
+});
+
+test('board dates preserve invalid dates and follow changes to the local time zone', (t) => {
+  const original = process.env.TZ;
+  t.after(() => {
+    if (original === undefined) delete process.env.TZ;
+    else process.env.TZ = original;
+  });
+  const date = new Date('2025-01-01T01:30:00Z');
+  const invalid = new Date(NaN);
+  const formatters = [
+    [longDay, { weekday: 'long', month: 'long', day: 'numeric' }],
+    [shortDay, { weekday: 'short', month: 'short', day: 'numeric' }],
+    [shortMonth, { month: 'short' }],
+    [timeOfDay, { hour: 'numeric', minute: '2-digit' }],
+    [shortDateTime, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }],
+  ] as const;
+  for (const zone of ['UTC', 'America/Los_Angeles']) {
+    process.env.TZ = zone;
+    for (const [formatter, options] of formatters) {
+      assert.equal(formatDate(formatter, invalid), invalid.toLocaleString());
+      assert.equal(formatDate(formatter, date), date.toLocaleString([], options), zone);
+    }
+  }
 });
 
 test('stream lifecycle closes connections on unmount and exposes disconnection', async () => {
@@ -330,4 +381,111 @@ test('captures read their side from their name and order as reference, before, a
   assert.equal(evidenceTurn(item('a.png', 1), 1), 'Turn 1');
   assert.equal(evidenceTurn(item('a.png', 1), 3), 'Turn 1 of 3');
   assert.equal(evidenceTurn(item('a.png', 1, 'lead'), 3), 'Attached by the lead');
+});
+
+test('stream keeps the first event name, joins data lines and consumes blank lines without overlap', async (t) => {
+  const chunks = ['event:  first  \nevent: second\ndata:  one\ndata:\ndata:three\n', '\n\ndata: next\n\n\n\nevent: empty\n\ndata:\n\n'];
+  const body = new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(new TextEncoder().encode(chunk));
+      controller.close();
+    },
+  });
+  t.mock.method(globalThis, 'fetch', async () => new Response(body));
+  const frames: [string, string][] = [];
+  await stream('/api/stream', (type, data) => frames.push([type, data]), new AbortController().signal);
+  assert.deepEqual(frames, [['first', ' one\n\nthree'], ['message', 'next'], ['message', '']]);
+});
+
+test('stream notifications see a request and its resolution before the next frame, with focus at arrival', (t) => {
+  const store = new BoardStore();
+  const listener = t.mock.fn();
+  t.after(store.subscribe(listener));
+
+  let focused = false;
+  let frames = 0;
+  stubGlobal(t, 'document', Object.assign(new EventTarget(), { hasFocus: () => focused }));
+  stubGlobal(t, 'requestAnimationFrame', () => ++frames);
+  stubGlobal(t, 'cancelAnimationFrame', () => {});
+
+  const notify = new Notifier();
+  const update = t.mock.method(notify, 'update');
+  let receive!: (type: string, data: string) => void;
+  t.after(store.connect((_path, onEvent) => {
+    receive = onEvent;
+    return new Promise(() => {});
+  }, notify));
+
+  const job = { id: 'cx-1', state: 'running' };
+  receive('state', JSON.stringify({ now: Date.now(), jobs: [job], claude: [], events: [] }));
+  update.mock.resetCalls();
+  listener.mock.resetCalls();
+  receive('job', JSON.stringify({ ...job, state: 'waiting', waiting: { id: 'request-1' } }));
+  focused = true;
+  receive('job', JSON.stringify(job));
+  receive('event', JSON.stringify({ seq: 1 }));
+
+  assert.equal(frames, 1);
+  assert.equal(listener.mock.callCount(), 0);
+  assert.deepEqual(update.mock.calls.map(({ arguments: [state, focus] }) => [state.jobs[0].state, focus]), [
+    ['waiting', false],
+    ['running', true],
+  ]);
+});
+
+test('store publishes the latest snapshot once per frame and flushes connection changes immediately', (t) => {
+  const frames = new Map<number, FrameRequestCallback>();
+  let frameId = 0;
+  const frame = (callback: FrameRequestCallback) => {
+    frames.set(++frameId, callback);
+    return frameId;
+  };
+  const cancel = (id: number) => frames.delete(id);
+  stubGlobal(t, 'requestAnimationFrame', frame);
+  stubGlobal(t, 'cancelAnimationFrame', cancel);
+  const doc = Object.assign(new EventTarget(), { hidden: false });
+  stubGlobal(t, 'document', doc);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+
+  const store = new BoardStore();
+  const seen: number[] = [];
+  const unsubscribe = store.subscribe(() => seen.push(store.getSnapshot().events.at(-1)?.seq ?? 0));
+  store.receive('event', { seq: 1 });
+  store.receive('event', { seq: 2 });
+  assert.equal(store.getSnapshot().events.length, 2);
+  assert.deepEqual(seen, []);
+  assert.equal(frames.size, 1);
+  frames.get(frameId)!(0);
+  assert.deepEqual(seen, [2]);
+
+  store.receive('event', { seq: 3 });
+  doc.hidden = true;
+  doc.dispatchEvent(new Event('visibilitychange'));
+  assert.equal(frames.size, 0);
+  t.mock.timers.tick(0);
+  assert.deepEqual(seen, [2, 3]);
+
+  store.receive('event', { seq: 4 });
+  store.signOut();
+  assert.equal(store.getSnapshot().connection, 'unauthorized');
+  assert.deepEqual(seen, [2, 3, 4]);
+  t.mock.timers.tick(0);
+  assert.deepEqual(seen, [2, 3, 4]);
+
+  doc.hidden = false;
+  store.receive('event', { seq: 5 });
+  assert.equal(frames.size, 1);
+  unsubscribe();
+  assert.equal(frames.size, 0);
+
+  doc.hidden = true;
+  const unsubscribeHidden = store.subscribe(() => assert.fail('the timer was cancelled'));
+  store.receive('event', { seq: 6 });
+  unsubscribeHidden();
+  const unsubscribeNext = store.subscribe(() => assert.fail('a stale timer must not notify new subscribers'));
+  t.mock.timers.tick(0);
+  doc.hidden = false;
+  doc.dispatchEvent(new Event('visibilitychange'));
+  assert.equal(frames.size, 0);
+  unsubscribeNext();
 });

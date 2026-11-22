@@ -96,6 +96,38 @@ test('a shared lead appears on one mission and linked pulls show when their stat
   await expect(newerCard.locator('.pull-chip')).toHaveText('#42Merged');
 });
 
+test('the palette offers to turn notifications on when browser permission is missing', async ({ page }) => {
+  await page.evaluate(() => {
+    localStorage.setItem('crew.notify', '1');
+    Object.defineProperty(Notification, 'permission', { value: 'default' });
+  });
+  await page.getByRole('button', { name: 'Search', exact: true }).click();
+  await page.getByRole('combobox', { name: 'Search work, projects and actions' }).fill('notifications');
+  await expect(page.getByRole('option', { name: /Turn on notifications/ })).toBeVisible();
+});
+
+test('sidebar and Settings labels update their fade when selection changes', async ({ page }) => {
+  const check = async (item: Locator, other: Locator) => {
+    const label = item.locator('.fade-line');
+    // Model the wider text at the selected weight while keeping the label's box fixed.
+    await label.evaluate((element) => {
+      Object.defineProperty(element, 'scrollWidth', {
+        get: () => element.clientWidth + (element.parentElement?.hasAttribute('aria-current') ? 10 : 0),
+      });
+    });
+    await expect(label).not.toHaveAttribute('data-cut');
+    await item.click();
+    await expect(label).toHaveAttribute('data-cut', '');
+    await other.click();
+    await expect(label).not.toHaveAttribute('data-cut');
+  };
+  const pages = page.getByRole('navigation', { name: 'Pages' }).filter({ visible: true });
+  await check(pages.getByRole('button', { name: 'History' }), pages.getByRole('button', { name: 'Overview' }));
+  await openSettings(page);
+  const settings = page.getByRole('navigation', { name: 'Settings pages' });
+  await check(settings.getByRole('button', { name: 'Review', exact: true }), settings.getByRole('button', { name: 'Build', exact: true }));
+});
+
 test('a row shows its status as a symbol named by its word', async ({ page }) => {
   await expect(page.locator('button[data-job="cx-build"]').getByRole('img', { name: 'Working' })).toHaveAttribute('title', 'Working');
   await expect(page.locator('button[data-job="cx-build"] .chip')).toHaveCount(0);
@@ -808,6 +840,21 @@ test('a mission\'s preset can be chosen from its options menu', async ({ page, r
 const settle = (page: Page) => page.evaluate(() => Promise.all(document.getAnimations()
   .filter((animation) => animation.effect?.getTiming().iterations !== Infinity)
   .map((animation) => animation.finished)));
+
+test('the live Overview has no endless animations during active work', async ({ page, request }) => {
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await request.post('/__push', { data: { type: 'job', data: { id: 'cx-question', state: 'running', waiting: null } } });
+  const mission = page.locator('[data-key="mission-1"]');
+  await expect(mission.locator('.mission-head .chip[data-state="running"]')).toBeVisible();
+  await expect(mission.locator('.track > li[data-pos="now"] .track-node b')).toBeVisible();
+  await expect(page.locator('.nav-dot[data-state="working"]')).toBeVisible();
+  await expect(page.getByText('Live', { exact: true })).toBeVisible();
+  await settle(page);
+  expect(await page.evaluate(() => document.getAnimations()
+    .filter((animation) => animation.effect?.getTiming().iterations === Infinity)
+    .map((animation) => (animation as CSSAnimation).animationName))).toEqual([]);
+});
+
 test('entrances let go once played, so a mission\'s menu opens above the cards after it', async ({ page, request }) => {
   const data = fixture();
   data.missions.push({ ...data.missions[0], id: 'mission-2', title: 'Ship the next one', state: 'done', endedAt: NOW - 1000 });

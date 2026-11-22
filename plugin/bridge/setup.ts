@@ -201,6 +201,46 @@ const shellQuote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`;
 
 export type SetupItem = { id: string; label: string; ok: boolean; detail: string; repairable?: boolean };
 
+/**
+ * The checklist's answer, kept for a while: a check starts five CLIs, and the board and the app each ask every
+ * minute for as long as they are open. A complete checklist is kept for ten minutes; one with something missing,
+ * or a check that failed, for one, so a fix shows soon.
+ */
+export class SetupCache {
+  static readonly COMPLETE_MS = 10 * 60_000;
+  static readonly INCOMPLETE_MS = 60_000;
+  private check: () => Promise<SetupItem[]>;
+  private now: () => number;
+  private kept: Promise<SetupItem[]> | null = null;
+  private since = 0;
+  private complete = false;
+
+  constructor(check: () => Promise<SetupItem[]>, now: () => number = Date.now) {
+    this.check = check;
+    this.now = now;
+  }
+
+  /** `after` is waited for before a new check starts, so a check never reads a registration still being made. */
+  get(refresh: boolean, after: Promise<unknown> = Promise.resolve()): Promise<SetupItem[]> {
+    if (refresh || !this.kept || this.now() - this.since > (this.complete ? SetupCache.COMPLETE_MS : SetupCache.INCOMPLETE_MS)) {
+      this.since = this.now();
+      this.complete = false;
+      const checking = after.then(() => this.check());
+      this.kept = checking;
+      // Only the check still kept says how long it is kept: an older one that ends later must not vouch for a newer answer.
+      checking.then((items) => {
+        if (this.kept === checking) this.complete = items.every((item) => item.ok);
+      }, () => {});
+    }
+    return this.kept;
+  }
+
+  /** The next answer is checked anew. */
+  reset(): void {
+    this.kept = null;
+  }
+}
+
 /** What Crew needs, as the app's checklist and `crew doctor` show it. Signing in is always left to the user. */
 export async function checks(): Promise<SetupItem[]> {
   const config = loadConfig();

@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { memo, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { CSSProperties } from 'react';
 import { board } from './store.ts';
 import {
@@ -6,34 +6,32 @@ import {
   ChevronDown16Regular, ChevronDownRegular, ChevronRight16Regular, Clock16Regular, DismissCircleRegular,
   GaugeRegular, Merge16Regular, MoreHorizontalRegular,
 } from '@fluentui/react-icons';
-import type { BoardJob, BoardPull, ClaudeSession, Mission, PresetName } from './types.ts';
+import type { BoardJob, BoardPull, ClaudeSession, Mission, PresetName, Snapshot } from './types.ts';
 import { actions, request } from './api.ts';
 import {
-  agentSummary, elapsed, jobLabel, jobRole, leadMission, missionJobStep, missionLooksFinished, missionStep, missionStopPosition,
+  agentSummary, elapsed, jobLabel, jobRole, missionJobStep, missionLooksFinished, missionStep, missionStopPosition,
   missionStops, NAMES, pullIsStale, pullStatuses, roleLabel,
 } from './model.ts';
-import { ActionStatus, AgentMark, Chip, Collapse, Icon, Menu, StatusIcon, useAction, useFade, useNow } from './ui.tsx';
+import { ActionStatus, AgentMark, Chip, Collapse, Elapsed, Icon, Menu, StatusIcon, sameItems, useAction, useFade, useClock } from './ui.tsx';
 
 const capitalized = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 export const jobStatusState = (job: BoardJob) => (job.stalled ? 'stalled' : job.state);
 /** What a job is, as the app names it in a row: its role, or Question for a question. */
-export function jobKind(job: BoardJob) {
-  return job.debate ? 'Debate' : job.ask ? 'Question' : roleLabel(board.getSnapshot(), jobRole(job));
+export function jobKind(job: BoardJob, state: Pick<Snapshot, 'roleInfo'>) {
+  return job.debate ? 'Debate' : job.ask ? 'Question' : roleLabel(state, jobRole(job));
 }
 
 /** A job: the agent's mark leads, the kind and phase follow the title, then status and time. */
-export function JobRow({ job, selected, openJob, showsKind = true, index = 0 }: {
+export const JobRow = memo(function JobRow({ job, selected, openJob, kind, index = 0 }: {
   job: BoardJob;
   selected?: boolean;
   openJob: (id: string) => void;
-  /** Under a mission's stage, which already names the kind. */
-  showsKind?: boolean;
+  kind?: string;
   index?: number;
 }) {
-  const now = useNow();
   const active = job.endedAt == null;
   const detail = [
-    showsKind ? jobKind(job) : job.debate ? 'Debate' : job.ask ? 'Question' : null,
+    kind ?? (job.debate ? 'Debate' : job.ask ? 'Question' : null),
     job.error?.message ?? (active ? job.phase : null),
     job.runsApp ? 'Runs the app' : null,
     job.exclusive ? 'Runs alone' : null,
@@ -56,16 +54,16 @@ export function JobRow({ job, selected, openJob, showsKind = true, index = 0 }: 
         {detail && <span data-error={job.error ? '' : undefined} key={detail} className="swap">{detail}</span>}
       </span>
       <StatusIcon state={jobStatusState(job)} label={jobLabel(job)} />
-      <span className="job-row-time">{elapsed((job.endedAt ?? now) - job.createdAt)}</span>
+      <span className="job-row-time"><Elapsed start={job.createdAt} end={job.endedAt} /></span>
       <Icon icon={ChevronRight16Regular} className="row-chevron" />
     </button>
   );
-}
+});
 
 type SessionAgent = ClaudeSession['agents'][number];
 
 /** Sub-agents, each as what it is and what it is doing, with how long it has run. */
-export function SessionAgents({ agents, now, label }: { agents: SessionAgent[]; now: number; label: string }) {
+export function SessionAgents({ agents, label }: { agents: SessionAgent[]; label: string }) {
   return (
     <ul className="session-agents" aria-label={label}>
       {agents.map((agent) => (
@@ -74,7 +72,7 @@ export function SessionAgents({ agents, now, label }: { agents: SessionAgent[]; 
             <span title={agent.title}>{agent.title}</span>
             <span className="caption secondary" title={agent.phase}>{agent.phase}</span>
           </span>
-          <span className="caption secondary">{elapsed(now - agent.startedAt)}</span>
+          <span className="caption secondary"><Elapsed start={agent.startedAt} /></span>
         </li>
       ))}
     </ul>
@@ -100,9 +98,9 @@ function WorkflowStrip({ done, running }: { done: number; running: number }) {
 }
 
 /** A workflow run, which can hold dozens of agents: the first few by stage, and the rest on request. */
-export function SessionWorkflow({ run, agents, now }: { run: ClaudeSession['workflows'][number]; agents: SessionAgent[]; now: number }) {
+export function SessionWorkflow({ run, agents }: { run: ClaudeSession['workflows'][number]; agents: SessionAgent[] }) {
   const [expanded, setExpanded] = useState(false);
-  const fadeName = useFade<HTMLSpanElement>();
+  const fadeName = useFade<HTMLSpanElement>(run.name);
   const visible = expanded ? agents : agents.slice(0, 5);
   // Grouped after the cut, so the folded view keeps start order across stages; one stage needs no headings.
   const staged = new Set(agents.map((agent) => agent.stage)).size > 1;
@@ -112,7 +110,7 @@ export function SessionWorkflow({ run, agents, now }: { run: ClaudeSession['work
     <section className="detail-section session-workflow" aria-label={run.name}>
       <h3>
         <span className="fade-line" ref={fadeName} title={run.name}>{run.name}</span>
-        <span className="caption secondary digits">{elapsed((agents.length ? now : run.activeAt) - run.startedAt)}</span>
+        <span className="caption secondary digits"><Elapsed start={run.startedAt} end={agents.length ? undefined : run.activeAt} /></span>
       </h3>
       <p className="session-workflow-counts caption secondary">
         <WorkflowStrip done={run.done} running={agents.length} />
@@ -122,7 +120,7 @@ export function SessionWorkflow({ run, agents, now }: { run: ClaudeSession['work
       {[...groups].map(([stage, group]) => (
         <div className="session-stage" key={stage}>
           {staged && stage && <p className="caption secondary" title={stage}>{stage}</p>}
-          <SessionAgents agents={group} now={now} label={staged && stage ? `${run.name}: ${stage}` : run.name} />
+          <SessionAgents agents={group} label={staged && stage ? `${run.name}: ${stage}` : run.name} />
         </div>
       ))}
       {agents.length > 5 && (
@@ -135,8 +133,7 @@ export function SessionWorkflow({ run, agents, now }: { run: ClaudeSession['work
 }
 
 /** A Claude session as a row like a job's, opening its own detail panel. */
-export function SessionRow({ session, selected, openSession }: { session: ClaudeSession; selected?: boolean; openSession: (id: string) => void }) {
-  const now = useNow();
+export const SessionRow = memo(function SessionRow({ session, selected, openSession }: { session: ClaudeSession; selected?: boolean; openSession: (id: string) => void }) {
   // The mark names the agent, so the detail line says only what the session is doing.
   const detail = [session.waitingFor ?? (session.state === 'idle' ? null : session.phase), session.inTool ? 'Running a tool' : null, agentSummary(session)]
     .filter(Boolean).join(' · ');
@@ -158,16 +155,16 @@ export function SessionRow({ session, selected, openSession }: { session: Claude
       </span>
       <StatusIcon state={session.stalled ? 'stalled' : session.state} label={session.stalled ? 'May be stuck' : capitalized(session.state)} />
       {/* An idle session stops its clock at its last activity. */}
-      <span className="job-row-time">{elapsed((session.state === 'idle' ? session.activeAt : now) - session.startedAt)}</span>
+      <span className="job-row-time"><Elapsed start={session.startedAt} end={session.state === 'idle' ? session.activeAt : undefined} /></span>
       <Icon icon={ChevronRight16Regular} className="row-chevron" />
     </button>
   );
-}
+});
 
 /** Measures step names for the track's end insets; one canvas serves every track. */
 let measure: CanvasRenderingContext2D | null | undefined;
 
-export function MissionTrack({ mission }: { mission: Mission }) {
+export const MissionTrack = memo(function MissionTrack({ mission }: { mission: Mission }) {
   const stops = missionStops(mission);
   const at = missionStep(mission);
   const active = mission.state === 'active';
@@ -230,7 +227,7 @@ export function MissionTrack({ mission }: { mission: Mission }) {
       })}
     </ol>
   );
-}
+});
 
 /** Open or closed per mission, kept across pages and layout changes, as the app keeps it. */
 const expandedMissions = new Map<string, boolean>();
@@ -242,9 +239,10 @@ const openStages = new Map<string, boolean>();
 const PRESETS: [PresetName | null, string][] = [[null, 'Default'], ['economy', 'Economy'], ['balanced', 'Balanced'], ['best', 'Best']];
 
 /** A chip that names a pull request's most urgent status and counts the others the lead must act on; it opens the pull request. */
-function MissionPull({ pull, now }: { pull: BoardPull; now: number }) {
+function MissionPull({ pull }: { pull: BoardPull }) {
   const statuses = pullStatuses(pull);
-  const stale = pullIsStale(pull, now);
+  const checked = useClock((now) => pullIsStale(pull, now) ? elapsed(now - pull.checkedAt) : '', pull.state === 'open');
+  const stale = Boolean(checked);
   // A failed read leaves the last statuses in doubt, so the chip names the failure in their place.
   const unread = stale && pull.error != null;
   const word = unread ? 'Could not be read' : statuses[0]?.word;
@@ -253,7 +251,7 @@ function MissionPull({ pull, now }: { pull: BoardPull; now: number }) {
     pull.title,
     ...statuses.map((status) => status.word),
     unread ? 'Could not be read' : null,
-    stale ? `Checked ${elapsed(now - pull.checkedAt)} ago` : null,
+    stale ? `Checked ${checked} ago` : null,
   ].filter(Boolean).join(' · ');
   const glyph = pull.state === 'merged' ? Merge16Regular : pull.state === 'closed' ? BranchRequestClosed16Regular : BranchRequest16Regular;
   return (
@@ -275,19 +273,19 @@ function MissionPull({ pull, now }: { pull: BoardPull; now: number }) {
       {stale && (
         <>
           <Icon icon={Clock16Regular} />
-          <span className="digits">{elapsed(now - pull.checkedAt)}</span>
+          <span className="digits">{checked}</span>
         </>
       )}
     </a>
   );
 }
 
-export function MissionPanel({
+export const MissionPanel = memo(function MissionPanel({
   mission,
   jobs,
-  allJobs,
+  missionJobs,
   owner,
-  allMissions,
+  lead,
   pulls,
   projectName,
   selected,
@@ -297,9 +295,9 @@ export function MissionPanel({
 }: {
   mission: Mission;
   jobs: BoardJob[];
-  allJobs: BoardJob[];
+  missionJobs: BoardJob[];
   owner?: ClaudeSession;
-  allMissions: Mission[];
+  lead?: ClaudeSession;
   pulls?: BoardPull[];
   projectName?: string;
   selected: string;
@@ -307,7 +305,6 @@ export function MissionPanel({
   openSession: (id: string) => void;
   index?: number;
 }) {
-  const now = useNow();
   const [expanded, setExpandedState] = useState(() => expandedMissions.get(mission.id) ?? mission.state === 'active');
   const setExpanded = (value: boolean) => {
     expandedMissions.set(mission.id, value);
@@ -316,14 +313,17 @@ export function MissionPanel({
   // Keyed by state as in the app: once a mission is abandoned, Mark Done takes a fresh lock.
   const key = `mission:${mission.id}:${mission.state}`;
   const action = useAction(key);
-  const stops = missionStops(mission);
+  const stops = useMemo(() => missionStops(mission), [mission]);
+  const jobsByStep = useMemo(() => {
+    const groups = stops.map(() => [] as BoardJob[]);
+    for (const job of jobs) groups[missionJobStep(mission, job, stops)]?.push(job);
+    return groups;
+  }, [mission, jobs, stops]);
   const at = missionStep(mission);
   const tokens = jobs.reduce((sum, job) => sum + (job.tokens ?? 0), 0);
   const active = mission.state === 'active';
-  const lead = owner && leadMission(owner, allMissions)?.id === mission.id ? owner : undefined;
   const tasks = mission.tasks?.filter((task) => task.state !== 'dropped') ?? [];
   const meta = [
-    elapsed((mission.endedAt ?? now) - mission.createdAt),
     tokens > 0 ? `${tokens.toLocaleString()} tokens` : null,
     projectName,
     `${jobs.length} ${jobs.length === 1 ? 'job' : 'jobs'}`,
@@ -336,10 +336,9 @@ export function MissionPanel({
   const markDone = () => update({ done: true, ...(mission.state === 'abandoned' ? { reopen: true } : {}), outcome: 'Marked done on the board.' }, 'Marked done');
   const stopTracking = () => update({ abandoned: true, outcome: 'Dismissed on the board.' }, 'Dismissed');
   // A daemon without the role registry ignores a mission's preset.
-  const presets = Boolean(board.getSnapshot().roleInfo);
-  const finished = missionLooksFinished(mission, allJobs, now, owner);
-  const fadeTitle = useFade<HTMLHeadingElement>();
-  const fadeMeta = useFade<HTMLParagraphElement>();
+  const presets = useSyncExternalStore(board.subscribe, () => Boolean(board.getSnapshot().roleInfo));
+
+  const fadeTitle = useFade<HTMLHeadingElement>(mission.title);
   const foldsStages = jobs.length > FOLD_STAGES_AFTER;
   const [, setStagesVersion] = useState(0);
   const setOpenStage = (stageKey: string, value: boolean) => {
@@ -366,7 +365,7 @@ export function MissionPanel({
       >
         <div className="mission-heading">
           <h2 className="title selectable fade-line" ref={fadeTitle} title={mission.title}>{mission.title}</h2>
-          <p className="mission-meta fade-line" ref={fadeMeta} title={mission.root}>{meta}</p>
+          <MissionMeta mission={mission} meta={meta} />
         </div>
         {/* One group, so the status and the menu move to a line of their own together. */}
         <span className="mission-controls">
@@ -423,7 +422,7 @@ export function MissionPanel({
         <MissionTrack mission={mission} />
         <div className="stage-groups">
           {stops.map(({ name }, stopIndex) => {
-            const mine = jobs.filter((job) => missionJobStep(mission, job) === stopIndex);
+            const mine = jobsByStep[stopIndex];
             const stageLead = active && stopIndex === at ? lead : undefined;
             if (!mine.length && !stageLead) return null;
             const stageKey = `${mission.id}:${stopIndex}`;
@@ -450,7 +449,7 @@ export function MissionPanel({
                 <Collapse open={open} className="rows">
                   {stageLead && <SessionRow session={stageLead} selected={selected === `session:${stageLead.id}`} openSession={openSession} />}
                   {mine.map((job, rowIndex) => (
-                    <JobRow key={job.id} job={job} selected={selected === job.id} openJob={openJob} showsKind={false} index={rowIndex} />
+                    <JobRow key={job.id} job={job} selected={selected === job.id} openJob={openJob} index={rowIndex} />
                   ))}
                 </Collapse>
               </div>
@@ -460,13 +459,33 @@ export function MissionPanel({
         {mission.outcome && <p className="mission-outcome selectable">{mission.outcome}</p>}
       </Collapse>
       {/* Its menu holds Mark Done, so the card only says so. */}
-      {finished && <span className="caption secondary mission-hint reveal">Looks finished</span>}
+      {active && <MissionHint mission={mission} jobs={missionJobs} owner={owner} />}
       <ActionStatus actionKey={key} />
       {!!pulls?.length && (
         <div className="mission-pulls">
-          {pulls.map((pull) => <MissionPull key={pull.id} pull={pull} now={now} />)}
+          {pulls.map((pull) => <MissionPull key={pull.id} pull={pull} />)}
         </div>
       )}
     </section>
   );
+}, (a, b) =>
+  a.mission === b.mission && a.owner === b.owner && a.lead === b.lead &&
+  a.projectName === b.projectName && a.index === b.index &&
+  a.openJob === b.openJob && a.openSession === b.openSession &&
+  (a.selected === b.selected || (!a.jobs.some((job) => job.id === a.selected || job.id === b.selected) &&
+    (!a.lead || (a.selected !== `session:${a.lead.id}` && b.selected !== `session:${a.lead.id}`)))) &&
+  sameItems(a.jobs, b.jobs) && sameItems(a.missionJobs, b.missionJobs) &&
+  (a.pulls === b.pulls || Boolean(a.pulls && b.pulls && sameItems(a.pulls, b.pulls))),
+);
+
+function MissionMeta({ mission, meta }: { mission: Mission; meta: string }) {
+  const text = useClock((now) => elapsed((mission.endedAt ?? now) - mission.createdAt), mission.endedAt == null);
+  const content = `${text} · ${meta}`;
+  const fade = useFade<HTMLParagraphElement>(content);
+  return <p className="mission-meta fade-line" ref={fade} title={mission.root}>{content}</p>;
+}
+
+function MissionHint({ mission, jobs, owner }: { mission: Mission; jobs: BoardJob[]; owner?: ClaudeSession }) {
+  const finished = useClock((now) => missionLooksFinished(mission, jobs, now, owner));
+  return finished ? <span className="caption secondary mission-hint reveal">Looks finished</span> : null;
 }

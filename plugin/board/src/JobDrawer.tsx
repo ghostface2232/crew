@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import {
   ArrowCounterclockwiseRegular, ArrowUndoRegular, BranchFork16Regular, BranchRegular, ChatRegular,
@@ -14,7 +14,7 @@ import type { BoardJob, CrewEvent, Snapshot } from './types.ts';
 import { actions, drafts, request } from './api.ts';
 import { board, mergeEvents } from './store.ts';
 import { elapsed, evidenceTurn, jobLabel, jobRole, MAX_COMPARED, NAMES, orderEvidence, projectOf, roleLabel } from './model.ts';
-import { ActionStatus, CloseButton, CopyButton, CopyMenu, Dialog, Icon, Chip, useAction, useDraft, useNow } from './ui.tsx';
+import { ActionStatus, CloseButton, CopyButton, CopyMenu, Dialog, Icon, Chip, useAction, useDraft, Elapsed, useStableItems } from './ui.tsx';
 import { ReportText as RenderReport } from './Report.ts';
 import { debatePoints, stanceCounts } from './debate.ts';
 import type { Stance } from './debate.ts';
@@ -295,8 +295,8 @@ function StanceMark({ stance, count }: { stance: Stance; count?: number }) {
     </span>
   );
 }
-function Stances({ text }: { text: string }) {
-  const counts = stanceCounts(debatePoints(text));
+function Stances({ points }: { points: ReturnType<typeof debatePoints> }) {
+  const counts = useMemo(() => stanceCounts(points), [points]);
   return <>{(Object.keys(counts) as Stance[]).map((stance) => counts[stance] > 0 && <StanceMark key={stance} stance={stance} count={counts[stance]} />)}</>;
 }
 /** A show/hide toggle under folded content, as the app's RevealToggle is. */
@@ -329,14 +329,15 @@ function DebateRound({ job, turn, label, final, last }: { job: BoardJob; turn: n
   const reply = entries.findLast((entry) => entry.turn === turn && entry.from === 'worker');
   // Earlier rounds start folded to their heading and stances; the latest starts open.
   const [open, setOpen] = useState(last);
-  const points = reply ? debatePoints(reply.text) : [];
+  const text = reply?.text;
+  const points = useMemo(() => text === undefined ? [] : debatePoints(text), [text]);
   const working = job.endedAt == null && turn === job.turns;
   const name = NAMES[job.agent];
   return (
     <li className="debate-round" data-open={open || undefined}>
       <button className="debate-round-head" aria-expanded={open} onClick={() => setOpen(!open)}>
         <b>{final ? `${label} ${turn} · final` : `${label} ${turn}`}</b>
-        {!open && reply && <Stances text={reply.text} />}
+        {!open && reply && <Stances points={points} />}
         <Icon icon={ChevronDownRegular} className="disclosure" />
       </button>
       {open && (
@@ -349,7 +350,7 @@ function DebateRound({ job, turn, label, final, last }: { job: BoardJob; turn: n
           )}
           {reply ? (
             <div className="exchange-entry" data-from="worker">
-              <div className="caption voice">{name} · {label.toLowerCase()} {turn} <Stances text={reply.text} /></div>
+              <div className="caption voice">{name} · {label.toLowerCase()} {turn} <Stances points={points} /></div>
               {points.length ? (
                 <>
                   <ol className="points">
@@ -449,12 +450,22 @@ function FollowUp({ job }: { job: BoardJob }) {
 
 /** JobDetailView in the app: status and close, then the job, its facts, results and controls. */
 export function JobDrawer({ id, state, close }: { id: string; state: Snapshot; close: () => void }) {
+  const current = state.jobs.find((job) => job.id === id);
+  const streamLog = useStableItems(useMemo(() => state.events.filter((event) => event.job_id === id), [state.events, id]));
+  const { agents, roleInfo, revision, connection } = state;
+  return <JobDetails id={id} current={current} streamLog={streamLog} agents={agents} roleInfo={roleInfo} revision={revision} connection={connection} close={close} />;
+}
+
+const JobDetails = memo(function JobDetails({ id, current, streamLog, agents, roleInfo, revision, connection, close }: {
+  id: string;
+  current?: BoardJob;
+  streamLog: CrewEvent[];
+  close: () => void;
+} & Pick<Snapshot, 'agents' | 'roleInfo' | 'revision' | 'connection'>) {
   const [detail, setDetail] = useState<BoardJob | null>(null);
   const [log, setLog] = useState<CrewEvent[]>([]);
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
-  const now = useNow();
-  const current = state.jobs.find((job) => job.id === id);
   const job = detail ? { ...detail, ...current, prompt: detail.prompt ?? current?.prompt } : current;
   const cancelKey = `cancel:${id}:${job?.turns ?? 1}`;
   const cancelling = useAction(cancelKey);
@@ -476,20 +487,20 @@ export function JobDrawer({ id, state, close }: { id: string; state: Snapshot; c
       },
     );
     return () => abort.abort();
-  }, [id, retry, state.revision]);
-  const events = mergeEvents(log, state.events.filter((event) => event.job_id === id), 80);
+  }, [id, retry, revision]);
+  const events = useMemo(() => mergeEvents(log, streamLog, 80), [log, streamLog]);
   const refusals = job?.refusals?.filter((refusal) => refusal.turn === job.turns) ?? [];
-  const live = state.connection === 'live';
-  const facts: [string, string][] = job
+  const live = connection === 'live';
+  const facts: [string, ReactNode][] = job
     ? [
         // The model the session reported, else the configured one.
         ['Agent', [NAMES[job.agent], job.resolvedModel ?? job.model, job.tier && `${job.tier} tier`, (job.resolvedEffort ?? job.effort) && `${job.resolvedEffort ?? job.effort} effort`].filter(Boolean).join(' · ')],
-        ['Role', job.ask && !job.debate ? 'Question' : roleLabel(state, jobRole(job))],
+        ['Role', job.ask && !job.debate ? 'Question' : roleLabel({ roleInfo }, jobRole(job))],
         // What the worker declared, set against what the bridge observed.
         ...(job.state === 'done' && job.outcome ? [['Outcome', job.outcomeContradiction ? `Done as declared, but ${job.outcomeContradiction}` : job.outcome[0].toUpperCase() + job.outcome.slice(1)] as [string, string]] : []),
         ...(job.preset ? [['Preset', job.preset[0].toUpperCase() + job.preset.slice(1)] as [string, string]] : []),
         ['Project', projectOf(job)],
-        ['Duration', elapsed((job.endedAt ?? now) - job.createdAt)],
+        ['Duration', <Elapsed start={job.createdAt} end={job.endedAt} />],
         ...(job.worktree ? [['Branch', `${job.worktree.branch} (from ${job.worktree.base.slice(0, 8)})`] as [string, string]] : []),
         ...(job.tokens != null ? [['Tokens', job.tokens.toLocaleString()] as [string, string]] : []),
         ...(job.tokenUse
@@ -596,8 +607,8 @@ export function JobDrawer({ id, state, close }: { id: string; state: Snapshot; c
             </Section>
           )}
           <Footer id={job.id} status={<ActionStatus actionKey={cancelKey} />}>
-            {job.sessionId && state.agents[job.agent] && (
-              <CopyButton text={`${state.agents[job.agent].resume} ${job.sessionId}`} short="Resume">Resume Command</CopyButton>
+            {job.sessionId && agents[job.agent] && (
+              <CopyButton text={`${agents[job.agent].resume} ${job.sessionId}`} short="Resume">Resume Command</CopyButton>
             )}
             {job.worktree && result && result.files.length > 0 && (
               <CopyButton text={`git diff ${job.worktree.base.slice(0, 8)}..${job.worktree.branch}`} short="Diff">Diff Command</CopyButton>
@@ -617,7 +628,7 @@ export function JobDrawer({ id, state, close }: { id: string; state: Snapshot; c
       )}
     </DetailPanel>
   );
-}
+});
 
 /** A long note is cut, saying how much was left out, as the app cuts it. */
 function trimNote(note: string) {
@@ -626,7 +637,7 @@ function trimNote(note: string) {
   return `${note.slice(0, 2000)}… and ${rest} more line${rest === 1 ? '' : 's'}`;
 }
 
-function Facts({ facts }: { facts: [string, string][] }) {
+function Facts({ facts }: { facts: [string, ReactNode][] }) {
   return (
     <dl className="facts selectable">
       {facts.map(([label, value]) => (
@@ -784,8 +795,7 @@ function DetailPanel({ label, close, chip, title, subtitle, children }: {
 }
 
 /** A Claude session's details, as the app shows them: what it waits on, its facts and missions, and how to resume it. */
-export function SessionDrawer({ id, state, close }: { id: string; state: Snapshot; close: () => void }) {
-  const now = useNow();
+export const SessionDrawer = memo(function SessionDrawer({ id, state, close }: { id: string; state: Snapshot; close: () => void }) {
   const session = state.claude.find((item) => item.id === id);
   const missions = state.missions.filter((mission) => mission.owner === id).sort((a, b) => b.createdAt - a.createdAt);
   const status = session && (session.stalled ? 'stalled' : session.state);
@@ -813,18 +823,18 @@ export function SessionDrawer({ id, state, close }: { id: string; state: Snapsho
               ['Agent', 'Claude · Lead'],
               ['Project', projectOf(session)],
               ...(session.cwd !== projectOf(session) ? [['Directory', session.cwd] as [string, string]] : []),
-              ['Started', `${elapsed(now - session.startedAt)} ago`],
-              ['Last active', `${elapsed(now - session.activeAt)} ago`],
+              ['Started', <Elapsed start={session.startedAt} suffix=" ago" />],
+              ['Last active', <Elapsed start={session.activeAt} suffix=" ago" />],
               ...(session.inTool ? [['Now', 'Running a tool'] as [string, string]] : []),
             ]}
           />
           {plainAgents.length > 0 && (
             <Section title="Sub-agents" icon={PeopleRegular}>
-              <SessionAgents agents={plainAgents} now={now} label="Sub-agents" />
+              <SessionAgents agents={plainAgents} label="Sub-agents" />
             </Section>
           )}
           {(session.workflows ?? []).map((run) => (
-            <SessionWorkflow key={run.id} run={run} agents={(session.agents ?? []).filter((agent) => agent.workflow === run.id)} now={now} />
+            <SessionWorkflow key={run.id} run={run} agents={(session.agents ?? []).filter((agent) => agent.workflow === run.id)} />
           ))}
           {missions.length > 0 && (
             <Section title="Missions" icon={FlagRegular}>
@@ -843,4 +853,6 @@ export function SessionDrawer({ id, state, close }: { id: string; state: Snapsho
       )}
     </DetailPanel>
   );
-}
+}, (a, b) => a.id === b.id && a.close === b.close &&
+  a.state.missions === b.state.missions &&
+  a.state.claude.find((session) => session.id === a.id) === b.state.claude.find((session) => session.id === b.id));

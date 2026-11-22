@@ -267,8 +267,7 @@ kbd {
   transition: background-color 300ms var(--ease-out), color 300ms var(--ease-out);
 }
 .chip svg { width: 12px; height: 12px; }
-/* Only an active mission's chip turns; a turning symbol on every running row would be restless. */
-.mission-head .chip[data-state="running"] svg { animation: spin 4s linear infinite; }
+/* Keep the mission chip, current step halo, working project dot, and live connection light still to avoid rendering animation frames throughout active work. */
 .status-icon { display: inline-flex; flex: none; color: color-mix(in srgb, var(--tone, var(--secondary)), var(--tone-ink) var(--tone-darken)); }
 .status-icon svg { width: 16px; height: 16px; }
 @media (prefers-contrast: more) { .chip { box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 50%, transparent); } }
@@ -843,8 +842,6 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
 .nav-list[data-hovering] .nav-item:not(:hover):not([aria-current="true"]) { opacity: 0.55; }
 @media (hover: hover) { .nav-item:hover { color: var(--label); } }
 .nav-dot { width: 7px; height: 7px; border-radius: 50%; corner-shape: round; background: var(--tone); box-shadow: 0 0 0 3px color-mix(in srgb, var(--tone) 18%, transparent); }
-.nav-dot[data-state="working"] { animation: pulse 2.4s var(--ease-in-out) infinite; }
-@keyframes pulse { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--tone) 0%, transparent); } }
 .nav-count { min-width: 20px; height: 18px; padding: 0 6px; border-radius: 999px; corner-shape: round; background: var(--orange); color: var(--on-orange); font-size: 10.5px; font-weight: 600; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; box-shadow: var(--shadow-bead); animation: swap 360ms var(--ease-out); }
 .nav-key { opacity: 0; transition: opacity 160ms ease-out; }
 @media (hover: hover) { .nav-item:hover .nav-key { opacity: 1; } }
@@ -933,10 +930,8 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
 .search-pill[data-hidden] { opacity: 0; }
 @media (hover: hover) { .search-pill:not(:disabled):hover { background: var(--raised); box-shadow: var(--shadow-raised), 0 4px 12px -6px var(--lift); } }
 .connection { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 11px; border-radius: 999px; corner-shape: round; color: var(--secondary); font-size: 12px; white-space: nowrap; }
-.connection > i { position: relative; width: 7px; height: 7px; border-radius: 50%; corner-shape: round; background: var(--tertiary); }
+.connection > i { width: 7px; height: 7px; border-radius: 50%; corner-shape: round; background: var(--tertiary); }
 .connection[data-state="live"] > i { background: var(--green); }
-.connection[data-state="live"] > i::after { content: ""; position: absolute; inset: 0; border-radius: 50%; corner-shape: round; background: var(--green); animation: ping 2.4s var(--ease-out) infinite; }
-@keyframes ping { 0% { scale: 1; opacity: 0.6; } 70%, 100% { scale: 2.6; opacity: 0; } }
 .connection[data-state="lost"] { color: var(--orange); }
 .connection[data-state="lost"] > i { background: var(--orange); }
 .new-job { min-height: 34px; padding: 0 14px 0 11px; }
@@ -1273,8 +1268,7 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
 }
 .track > li[data-pos="stopped"] .track-node b { background: var(--secondary); box-shadow: none; color: var(--surface); }
 .track[data-abandoned] > li[data-pos="past"] .track-node b, .track[data-abandoned] > li[data-pos="stopped"] .track-node b { background: transparent; box-shadow: inset 0 0 0 1.5px var(--tertiary); color: var(--tertiary); }
-.track > li[data-pos="now"] .track-node b { background: linear-gradient(to bottom, rgb(255 255 255 / 0.34), rgb(255 255 255 / 0) 62%), var(--accent); box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 16%, transparent); color: #fff; animation: halo-accent 2.4s var(--ease-in-out) infinite; }
-@keyframes halo-accent { 50% { box-shadow: 0 0 0 8px color-mix(in srgb, var(--accent) 6%, transparent); } }
+.track > li[data-pos="now"] .track-node b { background: linear-gradient(to bottom, rgb(255 255 255 / 0.34), rgb(255 255 255 / 0) 62%), var(--accent); box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 16%, transparent); color: #fff; }
 .track-name { max-width: var(--span); padding-inline: 4px; color: var(--secondary); font-size: 11px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
 .track > li:is(:first-child, :last-child) .track-name { max-width: calc(2 * var(--inset)); }
 .track > li[data-current] .track-name { font-weight: 600; }

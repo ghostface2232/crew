@@ -58,18 +58,29 @@ export async function stream(route: string, receive: (type: string, data: string
   const reader = response.body.getReader();
   // One decoder for the whole stream: a chunk may end inside a character, or inside an event.
   const decoder = new TextDecoder();
-  let pending = '';
+  const parts: string[] = [];
   for (;;) {
     const { done, value } = await reader.read();
     if (done) return;
-    pending += decoder.decode(value, { stream: true });
-    const frames = pending.split('\n\n');
-    pending = frames.pop()!;
-    for (const frame of frames) {
+    const chunk = decoder.decode(value, { stream: true });
+    if (!chunk) continue;
+    let start = 0;
+    const last = parts.at(-1) ?? '';
+    // A separator can start in the previous chunk, before the search range.
+    const crossesBoundary = last.endsWith('\n') && chunk.startsWith('\n');
+    if (crossesBoundary) parts[parts.length - 1] = last.slice(0, -1);
+    let end = crossesBoundary ? -1 : chunk.indexOf('\n\n');
+    while (end !== -1 || (crossesBoundary && start === 0)) {
+      if (end > start) parts.push(chunk.slice(start, end));
+      const frame = parts.join('');
+      parts.length = 0;
+      start = end + 2;
+      end = chunk.indexOf('\n\n', start);
       const lines = frame.split('\n');
       const data = lines.filter((line) => line.startsWith('data:')).map((line) => line.slice(5).replace(/^ /, ''));
       if (data.length) receive(lines.find((line) => line.startsWith('event:'))?.slice(6).trim() ?? 'message', data.join('\n'));
     }
+    if (start < chunk.length) parts.push(chunk.slice(start));
   }
 }
 export interface ActionState {

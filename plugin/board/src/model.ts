@@ -79,8 +79,7 @@ export function missionStopPosition(mission: Mission | undefined, index: number)
   const at = missionStep(mission);
   return mission?.state === 'done' || index < at ? 'past' : index === at && mission?.state === 'active' ? 'now' : 'todo';
 }
-export function missionJobStep(mission: Mission | undefined, job: Pick<BoardJob, 'kind' | 'missionStep'>) {
-  const stops = missionStops(mission);
+export function missionJobStep(mission: Mission | undefined, job: Pick<BoardJob, 'kind' | 'missionStep'>, stops = missionStops(mission)) {
   const recorded = job.missionStep;
   if (mission?.stages && recorded !== undefined && Number.isInteger(recorded) && recorded >= 0 && recorded < stops.length)
     return recorded;
@@ -163,7 +162,7 @@ export function relativeDuration(ms: number) {
 }
 export const projectOf = (item: { root?: string; project?: string; cwd?: string }) =>
   item.root ?? item.project ?? item.cwd ?? '';
-export const knownProjects = (state: BoardState) =>
+export const knownProjects = (state: Pick<BoardState, 'jobs' | 'claude' | 'missions'>) =>
   [...new Set([...state.jobs, ...state.claude, ...state.missions].map(projectOf).filter(Boolean))].sort();
 /**
  * The folder name; when another project shares it, as many parent folders as tell them apart.

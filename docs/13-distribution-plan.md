@@ -28,7 +28,7 @@ On startup, a packaged daemon checks `~/.crew/setup.json` (`registered()`). When
 
 ## First-run checklist
 
-Both apps show a **Set up Crew** card at the top of the unfiltered Overview page (`SetupView.swift`, `Overview.tsx`), backed by `GET /api/setup` and `POST /api/setup/repair` (matching `crew doctor`). It hides automatically once every item passes.
+Both apps show a **Set up Crew** card at the top of the unfiltered Overview page (`SetupView.swift`, `Overview.tsx`), backed by `GET /api/setup` and `POST /api/setup/repair` (matching `crew doctor`). It hides automatically once every item passes. Both apps poll every minute while open and each check starts five CLIs, so the daemon keeps the answer (`SetupCache` in `setup.ts`): for one minute while an item is missing or a check fails, and for ten minutes once every item passes; it always runs a new check on **Check Again**, after a repair, or after a registration. If the setup breaks while the card is hidden, the card therefore reappears within about ten minutes.
 
 | Item | What the app does |
 | --- | --- |

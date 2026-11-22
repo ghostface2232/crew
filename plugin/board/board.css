@@ -64,10 +64,10 @@
   --heat-3: color-mix(in srgb, var(--accent) 72%, transparent);
   --heat-4: var(--accent);
   /* Raised surfaces: a hairline ring, a tight contact shadow and a soft one cast below, with a lit top edge in dark mode. */
-  --shadow-card: 0 0 0 1px rgb(0 0 0 / 0.05), 0 1px 2px rgb(0 0 0 / 0.05), 0 12px 28px -14px rgb(0 0 0 / 0.18);
-  --shadow-card-hover: 0 0 0 1px rgb(0 0 0 / 0.06), 0 2px 4px rgb(0 0 0 / 0.05), 0 18px 36px -16px rgb(0 0 0 / 0.2);
+  --shadow-card: 0 0 0 1px rgb(0 0 0 / 0.032), 0 1px 2px rgb(0 0 0 / 0.05), 0 12px 28px -14px rgb(0 0 0 / 0.18);
+  --shadow-card-hover: 0 0 0 1px rgb(0 0 0 / 0.04), 0 2px 4px rgb(0 0 0 / 0.05), 0 18px 36px -16px rgb(0 0 0 / 0.2);
   /* The stage's edge against the frame. */
-  --shadow-stage: 0 0 0 1px rgb(0 0 0 / 0.06), 0 1px 3px rgb(0 0 0 / 0.04);
+  --shadow-stage: 0 0 0 1px rgb(0 0 0 / 0.035), 0 1px 3px rgb(0 0 0 / 0.04);
   /* Small raised controls (fields, secondary buttons, a hovered row, the current sidebar item) on --raised. */
   --raised: var(--surface);
   --shadow-raised: var(--outline-ring), 0 0 0 1px rgb(0 0 0 / 0.07), 0 1px 2px rgb(0 0 0 / 0.06);

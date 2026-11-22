@@ -22,13 +22,13 @@ React owns the entire board (`plugin/board/src`), replacing the original imperat
 | `plugin/board/src/store.ts` | One SSE subscription, immutable snapshots, reconnect replacement, bounded event history (400 events) |
 | `plugin/board/src/api.ts` | Launch-ticket sign-in, HTTP requests, SSE reader, shared drafts, and action locks keyed by job/request identity |
 | `plugin/board/src/model.ts` | Project grouping, state priority, mission stop/progress math, usage/heatmap helpers, and duration labels |
-| `plugin/board/src/ui.tsx` | Native `<dialog>` lifecycle, the board's own select, menus and confirm sheet (`ask`), stable composers, Fluent status icons, agent marks, and clock updates |
+| `plugin/board/src/ui.tsx` | Native `<dialog>` lifecycle, the board's own select, menus, and confirm sheet (`ask`), stable composers, Fluent status icons, agent marks, and clock updates |
 | `Missions.tsx`, `NeedsYou.tsx`, `Overview.tsx`, `Palette.tsx`, `Shell.tsx`, `Scores.tsx` | Mission tracks, needs-you cards, workspace/activity/history views, command palette, sidebar navigation, and model scores |
 | `JobDrawer.tsx`, `Settings.tsx`, `Dispatch.tsx` | Job/session details (verification, evidence, rounds, debate), scoped settings/presets/about, and direct dispatch |
 | `desktop/main.ts`, `desktop/preload.cts` | Windows Electron shell: single instance, tray, restored bounds, Mica backdrop, request signing, daemon startup, and updater IPC |
 | `plugin/bridge/assets.ts` | Built-asset allowlist, MIME types, and renderer CSP |
 
-Bridge types are imported type-only; Node modules never enter the renderer. Shared CSS tokens (`plugin/board/board.css`) preserve the workspace surfaces, typography, and state colors, while `Dispatch.tsx`, `Settings.tsx`, and `Scores.tsx` use CSS Modules. All text is set in the bundled Pretendard (`plugin/board/pretendard.woff2`), with no monospace face. Selects, checkboxes, switches, tooltips, and confirmation prompts are drawn by the board rather than in the platform's style, so they match on Windows. Fluent System Icons (`@fluentui/react-icons`) are filled SVGs in `currentColor`, sized by CSS; selected sidebar items swap to the Filled style with `bundleIcon`; agent marks (`AgentMark`) render the SVGs in `plugin/board/src/icons/` as CSS mask templates.
+Bridge types are imported type-only; Node modules never enter the renderer. Shared CSS tokens (`plugin/board/board.css`) preserve the workspace surfaces, typography, and state colors, while `Dispatch.tsx`, `Settings.tsx`, and `Scores.tsx` use CSS Modules. All text is set in the bundled Pretendard font (`plugin/board/pretendard.woff2`), with no monospace face. Selects, checkboxes, switches, tooltips, and confirmation prompts are drawn by the board rather than by the platform, so they look consistent on Windows. Fluent System Icons (`@fluentui/react-icons`) are filled SVGs in `currentColor`, sized by CSS; selected sidebar items swap to the Filled style with `bundleIcon`; agent marks (`AgentMark`) render the SVGs in `plugin/board/src/icons/` as CSS mask templates.
 
 ## Behaviors
 

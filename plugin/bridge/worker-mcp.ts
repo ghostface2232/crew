@@ -5,7 +5,7 @@ import { promisify } from 'node:util';
 import { api } from './client.ts';
 import { VERSION } from './config.ts';
 import type { LeadQuestion } from './jobs.ts';
-import { clip } from './text.ts';
+import { clip as cut } from './text.ts';
 
 const TOOLS = [
   {
@@ -101,7 +101,7 @@ function within(given: unknown): { cwd: string; target: string } {
   return { cwd, target: path.relative(cwd, target) || '.' };
 }
 
-const clip = (text: string) => (text.length > MAX_OUTPUT ? `${clip(text, MAX_OUTPUT)}\n… cut at ${MAX_OUTPUT} characters; narrow the path or the pattern.` : text);
+const clip = (text: string) => (text.length > MAX_OUTPUT ? `${cut(text, MAX_OUTPUT)}\n… cut at ${MAX_OUTPUT} characters; narrow the path or the pattern.` : text);
 
 async function git(cwd: string, args: string[]): Promise<string> {
   try {
@@ -157,7 +157,7 @@ async function callTool(name: string, args: any): Promise<unknown> {
       // Tracked and untracked files, never ignored ones; the pattern goes after -e so it cannot be read as an option.
       const out = await git(cwd, ['grep', '-n', '-I', '-E', '--untracked', ...(args.ignore_case ? ['-i'] : []), '-e', args.pattern, '--', target]);
       const lines = out.split('\n').filter(Boolean);
-      return { matches: lines.length, text: clip(lines.map((line) => (line.length > 300 ? `${clip(line, 300)}…` : line)).join('\n')) || 'No match.' };
+      return { matches: lines.length, text: clip(lines.map((line) => (line.length > 300 ? `${cut(line, 300)}…` : line)).join('\n')) || 'No match.' };
     }
     case 'recent_changes': {
       const { cwd, target } = within(args.path);

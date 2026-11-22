@@ -925,17 +925,15 @@ for (const width of [1440, 390])
     expect(errors).toEqual([]);
   });
 
-test('stage scrolls with keyboard focus outside it and its border blends in forced colors', async ({ page }) => {
+test('stage scrolls with keyboard focus outside it, out under its own rounded edge', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 600 });
   const stage = page.locator('main.page');
   await page.getByRole('button', { name: 'New Job', exact: true }).focus();
   await page.keyboard.press('PageDown');
   await expect.poll(() => stage.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  // No inset border clips the content along a line inside the stage, in forced colors or otherwise.
   await page.emulateMedia({ forcedColors: 'active' });
-  await expect.poll(() => stage.evaluate((element) => {
-    const style = getComputedStyle(element);
-    return style.borderTopColor === style.backgroundColor && style.borderBottomColor === style.backgroundColor;
-  })).toBe(true);
+  expect(await stage.evaluate((element) => getComputedStyle(element).borderTopWidth + getComputedStyle(element).borderBottomWidth)).toBe('0px0px');
 });
 
 test('Return adds a newline in an answer and the next question gets a fresh draft', async ({ page, request }) => {

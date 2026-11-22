@@ -222,7 +222,7 @@ kbd {
 /* Tinted controls raised in their own tone: a lit top edge and a drop of the tone, no outline. Declared on the elements
    themselves, since a custom property resolves its var()s where it is declared, and :root has no --tone. */
 .chip, .answer-card, .job-row {
-  --shadow-tinted: inset 0 1px 0 rgb(255 255 255 / 0.65), 0 1px 2px color-mix(in srgb, var(--tone, var(--secondary)) 22%, transparent), 0 6px 16px -8px color-mix(in srgb, var(--tone, var(--secondary)) 45%, transparent);
+  --shadow-tinted: inset 0 1px 0 rgb(255 255 255 / 0.65), 0 1px 2px rgb(0 0 0 / 0.05), 0 8px 20px -12px color-mix(in srgb, var(--tone, var(--secondary)) 32%, transparent);
   --shadow-tinted-sm: inset 0 1px 0 rgb(255 255 255 / 0.55), 0 1px 1.5px color-mix(in srgb, var(--tone, var(--secondary)) 28%, transparent);
 }
 @media (prefers-color-scheme: dark) {
@@ -590,18 +590,14 @@ html[data-resizing] dialog.detail-panel { transition: none; }
   gap: 8px;
   padding: var(--panel-padding) var(--panel-padding) 12px;
   border-radius: var(--panel-radius) var(--panel-radius) 0 0;
-  transition: box-shadow 200ms ease-out, background-color 200ms ease-out;
-}
-.detail-head[data-scrolled] {
-  background: color-mix(in srgb, var(--surface) 78%, transparent);
-  -webkit-backdrop-filter: blur(16px) saturate(1.4);
-  backdrop-filter: blur(16px) saturate(1.4);
-  box-shadow: 0 1px 0 var(--hairline);
 }
 .detail-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .detail-heading { font-size: 19px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; outline: 0; }
 .detail-subtitle { font-size: 12px; overflow-wrap: anywhere; }
-.detail-scroll { flex: 1; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: var(--section-gap); padding: 4px var(--panel-padding) max(6px, calc(var(--panel-padding) - var(--panel-radius) + 6px)); border-radius: 0 0 var(--panel-radius) var(--panel-radius); border-block-end: calc(var(--panel-radius) - 6px) solid transparent; }
+/* As on the stage, content scrolls out under the panel's rounded foot rather than at a line, and fades out under the
+   header once scrolled instead of meeting it at a rule. */
+.detail-scroll { flex: 1; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: var(--section-gap); padding: 4px var(--panel-padding) var(--panel-padding); border-radius: 0 0 var(--panel-radius) var(--panel-radius); }
+.detail-head[data-scrolled] + .detail-scroll { -webkit-mask-image: linear-gradient(transparent, #000 20px); mask-image: linear-gradient(transparent, #000 20px); }
 /* The bar's gutter is always kept and taken out of the right padding, so both edges of the content sit as far in as the header's. */
 .detail-scroll { scrollbar-gutter: stable; padding-inline-end: calc(var(--panel-padding) - var(--scrollbar-w, 0px)); }
 .detail-title { display: grid; gap: 8px; }

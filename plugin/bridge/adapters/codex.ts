@@ -658,6 +658,13 @@ export class CodexAdapter implements Adapter {
           output: p.tokenUsage.total.outputTokens ?? 0,
         });
         break;
+      case 'model/rerouted':
+        // The rest of the turn runs on the other model, so scores and ratings must name that one.
+        if (p.toModel) {
+          ctl.model(p.toModel, ctl.job.resolvedEffort);
+          ctl.note(`Codex moved this job from ${p.fromModel ?? 'its model'} to ${p.toModel}${p.reason ? ` (${p.reason})` : ''}.`);
+        }
+        break;
       case 'error':
         if (p.willRetry) ctl.progress(`retrying: ${p.error.message}`);
         break;
@@ -708,7 +715,13 @@ export class CodexAdapter implements Adapter {
     else if (turn.status === 'completed') ctl.done(run.message);
     else {
       const info = turn.error?.codexErrorInfo;
-      ctl.fail(turn.error?.message ?? 'turn failed', { limit: typeof info === 'string' && LIMIT_ERRORS.includes(info) });
+      const message = turn.error?.message ?? 'turn failed';
+      // Not a fault in the work: the reviewer's refusals ended it, and they are listed with the job.
+      if (info === 'tooManyDenials') {
+        const listed = ctl.job.refusals?.some((refusal) => refusal.turn === ctl.job.turns);
+        ctl.fail(`Codex stopped the turn after too many of its actions were refused (${message}).${listed ? ' The refused actions are listed with the job.' : ''}`);
+      }
+      else ctl.fail(message, { limit: typeof info === 'string' && LIMIT_ERRORS.includes(info) });
     }
     run.interrupt?.resolve();
   }

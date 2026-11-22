@@ -209,3 +209,28 @@ test('plugin tool approvals without a parsed target cannot be allowed for the jo
   assert.equal((await pending).action, 'accept');
   assert.equal(h.internal.runs.get('parent').grants.size, 0);
 });
+
+test('a rerouted turn records the model it moved to and tells the lead', () => {
+  const h = harness();
+  const models: (string | undefined)[][] = [];
+  Object.assign(h.ctl, { model: (name?: string, effort?: string) => models.push([name, effort]) });
+  h.job.resolvedEffort = 'high';
+  h.notify('model/rerouted', { fromModel: 'gpt-a', toModel: 'gpt-b', reason: 'highRiskCyberActivity' });
+  assert.deepEqual(models, [['gpt-b', 'high']]);
+  assert.match(h.notes[0], /from gpt-a to gpt-b \(highRiskCyberActivity\)/);
+});
+
+test('a turn ended for too many denials fails apart from other errors, pointing at the refusals', () => {
+  for (const refused of [true, false]) {
+    const h = harness();
+    const failures: [string, unknown][] = [];
+    Object.assign(h.ctl, { fail: (message: string, opts?: unknown) => failures.push([message, opts]) });
+    h.job.turns = 2;
+    h.job.refusals = refused ? [{ action: 'rm -rf build', reason: 'destructive', turn: 2 }] : [{ action: 'old', reason: 'old', turn: 1 }];
+    h.notify('turn/completed', { turn: { id: 'turn', status: 'failed', error: { message: 'too many denials', codexErrorInfo: 'tooManyDenials' } } });
+    assert.equal(failures.length, 1);
+    assert.match(failures[0][0], /too many of its actions were refused \(too many denials\)/);
+    assert.equal(/listed with the job/.test(failures[0][0]), refused);
+    assert.equal(failures[0][1], undefined, 'a denial stop is not a usage limit');
+  }
+});

@@ -16,7 +16,7 @@ Only an echoed receipt acknowledges news. Every lead tool accepts `ack: "<receip
 
 ## Hooks and response bounds
 
-- **Hooks.** `SessionStart` (`startup`, `resume`, `clear`, `compact`), `PostToolUse`/`PostToolUseFailure` on Crew tools, and `Stop` arm `wake.ts watch` with `asyncRewake` (needed on `SessionStart` because Claude Desktop can end idle processes under memory pressure). Synchronous `Stop` offers pending news with exit code 2 unless `stop_hook_active` is set. `SessionStart` and `UserPromptSubmit` inject a bounded summary of pending IDs (and open missions on `SessionStart`) via `additionalContext` without offering or acknowledging. All hooks authenticate with `~/.crew/token`, including `/api/hooks/claude`.
+- **Hooks.** `SessionStart` (`startup`, `resume`, `clear`, `compact`, `fork`), `PostToolUse`/`PostToolUseFailure` on Crew tools, and `Stop` arm `wake.ts watch` with `asyncRewake` (needed on `SessionStart` because Claude Desktop can end idle processes under memory pressure). Synchronous `Stop` offers pending news with exit code 2 unless `stop_hook_active` is set. `SessionStart` and `UserPromptSubmit` inject a bounded summary of pending IDs (and open missions on `SessionStart`) via `additionalContext` without offering or acknowledging. All hooks authenticate with `~/.crew/token`, including `/api/hooks/claude`. A forked session (`/branch`, `/fork`, `--fork-session`) gets its own session ID and starts with none of its parent's jobs or missions, since the parent may go on working. It takes over a job only when one of its Crew calls names that job.
 - **Timeout.** Hook timeout is 86,400 seconds (`HOOK_SECONDS`), and the watcher exits 10 seconds earlier. Killed hooks do not re-arm themselves. Persisted news remains recoverable via the next hook, `status`, or the board.
 - **Response bounds.** Digests hold at most 8 snapshots (`OFFER_ITEMS`), and every MCP tool response fits within 32 KiB (`LEAD_BYTES`). Tool text is capped at 24,000 bytes (`LEAD_TEXT_BYTES`) and a report page at 16,000 bytes (`REPORT_PAGE_BYTES`), leaving omitted images on the board and in the evidence list. Read long reports with `status(job_id, report_offset: 0)` using the returned UTF-16 offset (never splitting surrogate pairs) and optional `turn`.
 
@@ -28,7 +28,7 @@ Codex implements `probe` by reading runtime status with `thread/read` (sub-agent
 
 ## Quota events and system notifications
 
-- Quota exhaustion emits a `limit` event from Codex `codexErrorInfo` (`usageLimitExceeded`, `rateLimitExceeded`, `sessionBudgetExceeded`), Antigravity error text, or Claude `StopFailure` (`rate_limit` or `billing_error`).
+- Quota exhaustion emits a `limit` event from Codex `codexErrorInfo` (`usageLimitExceeded`, `rateLimitExceeded`, `sessionBudgetExceeded`), Antigravity error text, or Claude `StopFailure` (`rate_limit` or `billing_error`). A Codex turn ended with `tooManyDenials` is an ordinary failure, not a limit: its message says that refusals stopped the turn and, when the turn's refusals were recorded, that they are listed with the job.
 - `waiting`, `error`, `limit`, and `stalled` (plus `done` when `notifyOnDone` is true) trigger system notifications via `osascript` on macOS or a Windows PowerShell 5.1 toast under Crew's own app identity on Windows (suppressed for waiting/completion while the native desktop app holds a heartbeat lease).
 
 ## Not verified

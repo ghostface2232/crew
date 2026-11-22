@@ -5,7 +5,7 @@ import type { BoardJob, Mission, Snapshot } from './types.ts';
 import { request } from './api.ts';
 import { holdersOf, preferredWorkers, projectOf, rolesOf } from './model.ts';
 import { board } from './store.ts';
-import { Dialog, Icon, Segmented } from './ui.tsx';
+import { ask, Dialog, Icon, Segmented, Select } from './ui.tsx';
 import styles from './Dispatch.module.css';
 
 export function Dispatch({
@@ -57,8 +57,9 @@ export function Dispatch({
       || Boolean(cwd.trim()) && (intent === 'information'
         ? destination === 'project' || missions.some((mission) => `mission:${mission.id}` === destination)
         : worker?.enabled === true));
-  const closeDraft = () => {
-    if (!sendingLock.current && (!dirty || confirm('Discard this job draft?\n\nYour instructions and job options have not been sent.'))) close();
+  const closeDraft = async () => {
+    if (sendingLock.current) return;
+    if (!dirty || await ask('Discard this job draft?', 'Discard', 'Your instructions and job options have not been sent.')) close();
   };
   const send = async () => {
     if (sendingLock.current || !canSend) return;
@@ -150,21 +151,20 @@ export function Dispatch({
             <div className={styles.assignment}>
               {intent === 'command' && <label className="field">
                 <span>Role</span>
-                <select value={role} onChange={(event) => setRole(event.target.value as Role)}>
-                  {choices.map((info) => (
-                    <option key={info.role} value={info.role}>{info.label}</option>
-                  ))}
-                </select>
+                <Select label="Role" value={role} options={choices.map((info) => [info.role, info.label])} onChange={setRole} />
               </label>}
               {workers.length > 1 ? (
                 <label className="field">
                   <span>Assigned to</span>
-                  <select value={agent ?? ''} onChange={(event) => setPicked(event.target.value as WorkerAgent)}>
-                    {!agent && <option value="">Claude, the lead</option>}
-                    {workers.map((id) => (
-                      <option key={id} value={id}>{state.agents[id].name}{state.agents[id].enabled ? '' : ' (disabled)'}</option>
-                    ))}
-                  </select>
+                  <Select<WorkerAgent | ''>
+                    label="Assigned to"
+                    value={agent ?? ''}
+                    options={[
+                      ...(agent ? [] : [['', 'Claude, the lead'] as ['', string]]),
+                      ...workers.map((id): [WorkerAgent, string] => [id, `${state.agents[id].name}${state.agents[id].enabled ? '' : ' (disabled)'}`]),
+                    ]}
+                    onChange={(id) => id && setPicked(id)}
+                  />
                 </label>
               ) : (
                 <div className="field">
@@ -193,17 +193,16 @@ export function Dispatch({
           {intent === 'information' && (
             <label className="field">
               <span>Add to</span>
-              <select
-                aria-label="Information destination"
+              <Select
+                label="Information destination"
                 value={destination}
-                onChange={(event) => setDestination(event.target.value)}
-              >
-                <option value="project">This project's shared instructions</option>
-                <option value="global">Every project's shared instructions</option>
-                {missions.map((mission) => (
-                  <option key={mission.id} value={`mission:${mission.id}`}>{mission.title}</option>
-                ))}
-              </select>
+                options={[
+                  ['project', "This project's shared instructions"],
+                  ['global', "Every project's shared instructions"],
+                  ...missions.map((mission): [string, string] => [`mission:${mission.id}`, mission.title]),
+                ]}
+                onChange={setDestination}
+              />
             </label>
           )}
           <label className="field">

@@ -1,7 +1,7 @@
-import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import {
-  ArrowUp, BellDot, Check, Circle, CircleAlert, CircleCheck, CircleDotDashed, CircleStop, ClockAlert, Copy,
+  ArrowUp, BellDot, Check, ChevronsUpDown, Circle, CircleAlert, CircleCheck, CircleDotDashed, CircleStop, ClockAlert, Copy,
   TriangleAlert, X,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -24,6 +24,8 @@ export function Collapse({ open, className, children }: { open: boolean; classNa
   );
 }
 
+/** Open modal sheets, topmost last; only the topmost takes Escape. */
+const modals: HTMLDialogElement[] = [];
 /** How long a side panel takes to leave, shorter than it takes to arrive. */
 export const PANEL_EXIT_MS = 300;
 /** True while a side panel is still on screen only to play its exit; the Dialog inside reads it. */
@@ -291,16 +293,34 @@ export function Dialog({
     const dialog = ref.current!;
     const previous = document.activeElement as HTMLElement | null;
     unmounting.current = false;
-    if (modal) dialog.showModal();
-    else dialog.show();
+    if (modal) {
+      dialog.showModal();
+      modals.push(dialog);
+    } else dialog.show();
     if (origin) growFrom(dialog, origin);
     if (!modal) dialog.querySelector<HTMLElement>('[data-autofocus]')?.focus({ preventScroll: true });
     return () => {
       unmounting.current = true;
+      if (modals.includes(dialog)) modals.splice(modals.indexOf(dialog), 1);
       dialog.close();
       if (modal || dialog.contains(document.activeElement) || document.activeElement === document.body) previous?.focus({ preventScroll: true });
     };
   }, []);
+  useEffect(() => {
+    if (!modal) return;
+    const dialog = ref.current!;
+    // Escape is handled here rather than left to the browser, which closes a dialog anyway on a repeated Escape and would
+    // then show it again above whatever its parent opened in answer, such as `ask`'s question. It listens on the document,
+    // so an Escape still arrives when focus has fallen out of the dialog; only the topmost sheet takes it, and a held key
+    // acts once.
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || modals.at(-1) !== dialog) return;
+      event.preventDefault();
+      if (!event.repeat) close.current();
+    };
+    document.addEventListener('keydown', escape);
+    return () => document.removeEventListener('keydown', escape);
+  }, [modal]);
   useEffect(() => {
     if (modal) return;
     const dialog = ref.current!;
@@ -466,6 +486,220 @@ export function Menu({ label, icon, children }: { label: string; icon: LucideIco
         </div>
       )}
     </div>
+  );
+}
+/**
+ * A pick-one list in place of the system's select, which draws in the platform's own style. Focus stays on the button, which
+ * names the active option, while the list is open in the top layer so no scrolling box clips it. It sits beside
+ * its button in the DOM, so it stays inside a modal dialog's reach.
+ */
+export function Select<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: T;
+  options: [T, string][];
+  onChange: (value: T) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(0);
+  const button = useRef<HTMLButtonElement>(null);
+  const list = useRef<HTMLUListElement>(null);
+  const id = useId();
+  const chosen = options.findIndex(([option]) => option === value);
+  const typed = useRef({ text: '', at: 0 });
+  const show = () => {
+    setActive(Math.max(0, chosen));
+    setOpen(true);
+    // Safari and Firefox on macOS do not focus a clicked button, and the list's keys go to the button.
+    button.current?.focus();
+  };
+  /** The next option whose text starts with what was typed in the last moment, as the system's list finds one. */
+  const typeahead = (key: string, from: number) => {
+    const now = Date.now();
+    typed.current = { text: (now - typed.current.at < 700 ? typed.current.text : '') + key.toLowerCase(), at: now };
+    const { text } = typed.current;
+    const start = text.length === 1 ? from + 1 : from;
+    for (let step = 0; step < options.length; step++) {
+      const index = (start + step) % options.length;
+      if (options[index][1].toLowerCase().startsWith(text)) return index;
+    }
+    return -1;
+  };
+  const choose = (index: number) => {
+    setOpen(false);
+    const option = options[index];
+    if (option && option[0] !== value) onChange(option[0]);
+  };
+  useLayoutEffect(() => {
+    const popup = list.current;
+    if (!open || !popup) return;
+    popup.showPopover();
+    // Below the button, or above it when there is more room there, as the system's list opens.
+    const opened = button.current!.getBoundingClientRect();
+    const below = innerHeight - opened.bottom - 12;
+    const above = opened.top - 12;
+    const up = popup.scrollHeight > below && above > below;
+    popup.style.minWidth = `${opened.width}px`;
+    popup.style.maxHeight = `${up ? above : below}px`;
+    popup.toggleAttribute('data-up', up);
+    // It follows the button when a box around it scrolls, as a list anchored to it would.
+    const place = () => {
+      const anchor = button.current!.getBoundingClientRect();
+      popup.style.left = `${Math.max(8, Math.min(anchor.left, innerWidth - popup.offsetWidth - 8))}px`;
+      popup.style.top = `${up ? anchor.top - 4 - popup.offsetHeight : anchor.bottom + 4}px`;
+    };
+    place();
+    popup.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' });
+    // A press elsewhere, a resize or leaving the window closes it, as it does the system's.
+    const away = (event: Event) => {
+      const target = event.target as Node;
+      // A press on the button, or on a label around it whose click reaches the button, is left to the button's own toggle.
+      const labelled = [...(button.current?.labels ?? [])].some((label) => label.contains(target));
+      if (!popup.contains(target) && !button.current?.contains(target) && !labelled) setOpen(false);
+    };
+    const scrolled = (event: Event) => !popup.contains(event.target as Node) && place();
+    const leave = () => setOpen(false);
+    document.addEventListener('pointerdown', away, true);
+    document.addEventListener('scroll', scrolled, true);
+    window.addEventListener('resize', leave);
+    window.addEventListener('blur', leave);
+    return () => {
+      document.removeEventListener('pointerdown', away, true);
+      document.removeEventListener('scroll', scrolled, true);
+      window.removeEventListener('resize', leave);
+      window.removeEventListener('blur', leave);
+      if (popup.matches(':popover-open')) popup.hidePopover();
+    };
+  }, [open]);
+  useEffect(() => {
+    if (open) list.current?.children[active]?.scrollIntoView({ block: 'nearest' });
+  }, [active]);
+  return (
+    <>
+      <button
+        ref={button}
+        type="button"
+        className="select"
+        role="combobox"
+        aria-label={label}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={open ? id : undefined}
+        aria-activedescendant={open ? `${id}-${active}` : undefined}
+        onClick={() => (open ? setOpen(false) : show())}
+        onBlur={() => setOpen(false)}
+        onKeyDown={(event) => {
+          const move = { ArrowDown: 1, ArrowUp: -1 }[event.key];
+          const letter = event.key.length === 1 && event.key !== ' ' && !event.ctrlKey && !event.metaKey && !event.altKey;
+          if (!open) {
+            if (move) {
+              event.preventDefault();
+              show();
+            } else if (letter) {
+              const found = typeahead(event.key, chosen);
+              if (found >= 0) choose(found);
+            }
+            return;
+          }
+          if (event.key === 'Tab') {
+            // Tab takes the highlighted option and moves on, as the system's list does.
+            choose(active);
+            return;
+          }
+          if (letter) {
+            const found = typeahead(event.key, active);
+            if (found >= 0) setActive(found);
+          } else if (move) setActive((active + move + options.length) % options.length);
+          else if (event.key === 'Home') setActive(0);
+          else if (event.key === 'End') setActive(options.length - 1);
+          else if (event.key === 'Enter' || event.key === ' ') choose(active);
+          else if (event.key === 'Escape') {
+            // Keeps the Escape from also closing a dialog the list sits in.
+            event.stopPropagation();
+            setOpen(false);
+          } else return;
+          event.preventDefault();
+        }}
+      >
+        {/* A value no option holds shows the first option, as the system's select does. */}
+        <span>{(options[chosen] ?? options[0])?.[1]}</span>
+        <Icon icon={ChevronsUpDown} size={13} />
+      </button>
+      {open && (
+        <ul
+          ref={list}
+          id={id}
+          className="select-list"
+          role="listbox"
+          aria-label={label}
+          popover="manual"
+          // Keeps focus on the button, and stops a click here from also pressing the button through a label around it.
+          onPointerDown={(event) => event.preventDefault()}
+          onClick={(event) => event.preventDefault()}
+        >
+          {options.map(([option, text], index) => (
+            <li
+              key={option}
+              id={`${id}-${index}`}
+              role="option"
+              aria-selected={index === chosen}
+              data-active={index === active || undefined}
+              onPointerMove={() => setActive(index)}
+              onClick={() => choose(index)}
+            >
+              <span>{text}</span>
+              {index === chosen && <Icon icon={Check} size={13} />}
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
+  );
+}
+type Question = { title: string; detail?: string; action: string; answer: (yes: boolean) => void };
+let asker: ((question: Question) => void) | null = null;
+/** Asks before a step that throws work away, in the board's own sheet in place of the system's confirm(). */
+export function ask(title: string, action: string, detail?: string) {
+  return new Promise<boolean>((answer) => (asker ? asker({ title, detail, action, answer }) : answer(false)));
+}
+/** Where `ask` shows its question; mounted once. */
+export function AskHost() {
+  const [question, setQuestion] = useState<Question | null>(null);
+  // The open question, so one that is replaced or left by an unmount is still answered, as no.
+  const open = useRef<Question>(null);
+  useEffect(() => {
+    asker = (next) => {
+      open.current?.answer(false);
+      open.current = next;
+      setQuestion(next);
+    };
+    return () => {
+      asker = null;
+      open.current?.answer(false);
+      open.current = null;
+    };
+  }, []);
+  if (!question) return null;
+  const answer = (yes: boolean) => {
+    open.current = null;
+    setQuestion(null);
+    question.answer(yes);
+  };
+  return (
+    <Dialog labelId="ask-title" className="ask" onClose={() => answer(false)}>
+      <div className="sheet-body">
+        <h2 className="title" id="ask-title">{question.title}</h2>
+        {question.detail && <p className="secondary">{question.detail}</p>}
+        <div className="ask-actions">
+          <button onClick={() => answer(false)}>Cancel</button>
+          <button className="prominent" onClick={() => answer(true)}>{question.action}</button>
+        </div>
+      </div>
+    </Dialog>
   );
 }
 /** A light, centered empty state. */

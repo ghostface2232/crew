@@ -1543,8 +1543,8 @@ export class Jobs {
         }
       }
       // A check that rewrote tracked files passed on a tree the commit does not hold.
-      const listed = check ? `${await git(job.worktree.path, ['diff', '--name-only', 'HEAD'])}\n${await git(job.worktree.path, ['ls-files', '--others', '--exclude-standard'])}` : '';
-      const changed = listed.split('\n').map((line) => line.trim()).filter(Boolean);
+      const listed = check ? `${await git(job.worktree.path, ['diff', '--name-only', '-z', 'HEAD'])}${await git(job.worktree.path, ['ls-files', '--others', '--exclude-standard', '-z'])}` : '';
+      const changed = listed.split('\0').filter(Boolean);
       const stale = changed.length ? `the check itself changed ${changed.slice(0, 3).join(', ')}${changed.length > 3 ? ` and ${changed.length - 3} more` : ''}` : undefined;
       (job.receipts ??= []).push({ turn: job.turns, head, ...(check ? { check } : {}), ...(stale ? { stale } : {}), at: Date.now() });
     } else if (job.kind === 'review' || job.ask) {

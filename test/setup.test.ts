@@ -5,6 +5,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
+import vm from 'node:vm';
+import { writeFakeBin } from './fake-bin.ts';
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-setup-'));
 process.env.CREW_HOME = home;
@@ -141,4 +143,38 @@ test('a check waits for a registration under way', async () => {
   registered();
   await answer;
   assert.deepEqual(order, ['registered', 'checked']);
+});
+
+test('packaged startup under CREW_HOME leaves the user registration and command alone', async (t) => {
+  const profile = fs.mkdtempSync(path.join(home, 'profile-'));
+  const calls = path.join(profile, 'calls');
+  writeFakeBin(path.join(profile, 'claude'), `require('node:fs').appendFileSync(${JSON.stringify(calls)}, JSON.stringify(process.argv.slice(2)) + '\\n'); console.log('[]');`);
+  const originalPath = process.env.PATH;
+  process.env.PATH = profile + path.delimiter + originalPath;
+  t.after(() => { process.env.PATH = originalPath; });
+  t.mock.method(os, 'homedir', () => profile);
+  const { register, COMMAND } = await import(new URL('../plugin/bridge/setup.ts?isolated-profile', import.meta.url).href);
+  assert.equal(COMMAND, path.join(profile, '.local', 'bin', 'crew'));
+  // Exercise just the packaged startup branch, without running an app or a packaged daemon.
+  const daemon = fs.readFileSync(new URL('../plugin/bridge/daemon.ts', import.meta.url), 'utf8');
+  const startup = daemon.slice(daemon.indexOf("// An app's copy registers"), daemon.indexOf('// Keeps idle SSE'));
+  let prunes = 0;
+  let probes = 0;
+  const start = async (env: NodeJS.ProcessEnv, recorded: boolean) => {
+    let pending: Promise<unknown> | undefined;
+    vm.runInNewContext(startup, {
+      PACKAGED: true, process: { env, platform: 'win32' }, registered: () => recorded,
+      registerPlugin: () => pending = register(), prunePlugins: () => { prunes++; },
+      registrationMoved: async () => { probes++; return true; },
+    });
+    await Promise.resolve();
+    await pending;
+  };
+  await start({ CREW_HOME: home }, false);
+  await start({ CREW_HOME: home }, true);
+  assert.deepEqual([fs.existsSync(calls), fs.existsSync(path.dirname(COMMAND)), prunes, probes], [false, false, 0, 0]);
+  // A default-home launch still installs into the isolated profile through the stub.
+  await start({}, false);
+  assert.match(fs.readFileSync(calls, 'utf8'), /"plugin","install","crew@crew"/);
+  assert.ok(fs.lstatSync(COMMAND));
 });

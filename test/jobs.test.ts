@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -1288,6 +1289,35 @@ test('Codex\'s Windows sandbox gets the macOS limits as literal TOML, or nothing
   assert.equal(args[6], 'permissions.crew_check.network.enabled=false');
   assert.equal(windowsSandboxArgs('C:\\wt', 'C:\\tmp\\c', [], true)![6], 'permissions.crew_check.network.enabled=true');
   assert.equal(windowsSandboxArgs("C:\\it's", 'C:\\tmp', [], false), null);
+});
+
+test('a check without the network reaches local servers and its own sockets, and nothing else', { skip: !SANDBOXED || process.platform !== 'darwin' }, async (t) => {
+  const cwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-check-net-')));
+  const outside = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-outside-')));
+  const tmp = path.join(cwd, 'tmp');
+  fs.mkdirSync(tmp);
+  const servers: net.Server[] = [];
+  t.after(() => {
+    for (const server of servers) server.close();
+    for (const dir of [cwd, outside]) fs.rmSync(dir, { recursive: true, force: true });
+  });
+  const serve = async (where: number | string) => {
+    const server = net.createServer((socket) => socket.end('hi'));
+    servers.push(server);
+    await new Promise<void>((resolve) => (typeof where === 'number' ? server.listen(where, '127.0.0.1', resolve) : server.listen(where, resolve)));
+    return server;
+  };
+  const port = ((await serve(0)).address() as net.AddressInfo).port;
+  await serve(path.join(outside, 's'));
+  await serve(path.join(tmp, 's'));
+  const connect = (target: string) => runCheck(
+    `node -e "const s = require('node:net').connect(${target}); s.setTimeout(2000, () => { console.log('TIMEOUT'); s.destroy(); }); s.on('error', (e) => console.log('ERR', e.code)); s.on('data', (d) => console.log('OK', String(d)));"`,
+    cwd, tmp, []).then((result) => result.output);
+  assert.equal(await connect(`${port}, '127.0.0.1'`), 'OK hi');
+  assert.equal(await connect(`'${path.join(tmp, 's')}'`), 'OK hi');
+  // 192.0.2.0/24 is reserved for documentation: refused here, and unreachable if the rule were missing.
+  assert.equal(await connect(`80, '192.0.2.1'`), 'ERR EPERM');
+  assert.equal(await connect(`'${path.join(outside, 's')}'`), 'ERR EPERM');
 });
 
 test('a check is not run where the worker\'s limits cannot be applied', async () => {

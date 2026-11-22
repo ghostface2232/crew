@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { browserProfile } from './browser.ts';
 import { agentCommand, agentEnv } from './config.ts';
+import { clipEnd } from './text.ts';
 
 /** A check the lead asked for, run by the bridge itself so its result is observed, not reported by the worker. */
 export interface CheckResult {
@@ -22,6 +23,12 @@ export interface CheckResult {
 
 export const CHECK_TIMEOUT_MS = 10 * 60_000;
 const KEEP_OUTPUT = 4000;
+const runningChecks = new Set<() => Promise<void>>();
+
+/** Each stop signals the group or job host synchronously, before the daemon exits. */
+export function stopChecks(): void {
+  for (const stop of runningChecks) void stop();
+}
 
 /** The worker's own limits for the check: writes only where it may write, the token hidden, and no outside network unless it had network. */
 function checkProfile(cwd: string, tmp: string, unreadable: string[], network: boolean): string {
@@ -30,11 +37,12 @@ function checkProfile(cwd: string, tmp: string, unreadable: string[], network: b
   const profile = browserProfile([cwd, tmp], unreadable);
   if (network) return profile;
   // Local servers stay reachable for test suites; other local sockets (an SSH agent, Docker) do not.
+  // The socket rules come first: on macOS 27 a later `remote unix-socket` denial also refuses TCP to localhost.
   return `${profile}
-(deny network-outbound (remote ip "*:*"))
-(allow network-outbound (remote ip "localhost:*"))
 (deny network-outbound (remote unix-socket))
-(allow network-outbound (remote unix-socket ${[...both(cwd), ...both(tmp)].map((dir) => `(subpath ${quote(dir)})`).join(' ')}))`;
+(allow network-outbound (remote unix-socket ${[...both(cwd), ...both(tmp)].map((dir) => `(subpath ${quote(dir)})`).join(' ')}))
+(deny network-outbound (remote ip "*:*"))
+(allow network-outbound (remote ip "localhost:*"))`;
 }
 
 function real(file: string): string {
@@ -205,7 +213,7 @@ export async function runCheck(command: string, cwd: string, tmp: string, unread
     let reported: number | null = null;
     let tail = '';
     const keep = (chunk: Buffer) => {
-      output = (output + chunk.toString()).slice(-KEEP_OUTPUT);
+      output = clipEnd(output + chunk.toString(), KEEP_OUTPUT);
     };
     const child = spawn(launch.bin, launch.args, {
       cwd,
@@ -251,6 +259,7 @@ export async function runCheck(command: string, cwd: string, tmp: string, unread
         child.kill('SIGKILL');
       });
     };
+    runningChecks.add(stop);
     const timer = setTimeout(() => {
       timedOut = true;
       stop();
@@ -270,6 +279,7 @@ export async function runCheck(command: string, cwd: string, tmp: string, unread
       // Whatever the check left running in the background could still change the worktree after the receipt.
       // On macOS a process that left the group (setsid) escapes this, though it keeps the sandbox's write limits.
       void stop().then(() => {
+        runningChecks.delete(stop);
         removeFiles();
         if (mark) output = output.replace(new RegExp(`\\n?${mark} \\d+\\n?`), '');
         resolve({ command, exit: signal?.aborted ? null : exit, timedOut, output: output.trimEnd(), ms: Date.now() - started, sandboxed });

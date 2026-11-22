@@ -10,6 +10,7 @@ import { boardAsset, BOARD_CSP } from './assets.ts';
 import { boardCredential, boardExpiry, ensureToken, evidenceSeal, sameToken, SESSION_COOKIE } from './auth.ts';
 import { AntigravityAdapter } from './adapters/antigravity.ts';
 import { CodexAdapter } from './adapters/codex.ts';
+import { stopChecks } from './check.ts';
 import { ClaudeSessions } from './claude.ts';
 import type { ClaudeSession } from './claude.ts';
 import { agentCommand, agentEnv, canonicalPath, HOME, installed, isRole, loadConfig, PLUGIN_ROOT, PORTS, ROLE_INFO, ROLES, VERSION, WORKERS } from './config.ts';
@@ -646,7 +647,14 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     }
     if (method === 'GET' && !questionId) {
       if (!jobs.workerAuthorized(id, url.searchParams.get('token'))) throw new HttpError(403, 'forbidden worker token');
-      return { questions: await jobs.leadAnswers(id, Number(url.searchParams.get('wait') ?? 0)) };
+      const wait = Number(url.searchParams.get('wait') ?? 0);
+      const known = url.searchParams.get('answered');
+      if (known !== null && wait > 0 && Number.isFinite(wait)) {
+        // An answer may arrive between polls while other questions are still open.
+        const questions = jobs.get(id).questions ?? [];
+        if (questions.filter((q) => q.answer !== undefined).length !== Number(known)) return { questions };
+      }
+      return { questions: await jobs.leadAnswers(id, wait) };
     }
   }
   const browserRoute = /^\/api\/jobs\/([\w-]+)\/browser$/.exec(pathname);
@@ -730,7 +738,10 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
   const jobRoute = /^\/api\/jobs\/([\w-]+)(?:\/(\w+))?$/.exec(pathname);
   if (jobRoute) {
     const [, id, action] = jobRoute;
-    if (method === 'GET' && !action) return { ...jobs.get(id), ...sealed(jobs.get(id)) };
+    if (method === 'GET' && !action) {
+      const job = jobs.get(id);
+      return { ...view(job), prompt: job.prompt, instructions: job.instructions };
+    }
     if (method === 'GET' && action === 'events') return jobs.eventsFor(id, 0);
     if (method === 'GET' && action === 'diff') return jobs.liveDiff(id) ?? { turn: jobs.get(id).turns, diff: '', at: null };
     if (method === 'GET' && action === 'wait') {
@@ -1004,14 +1015,25 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
 let stopping = false;
 
 function shutdown(): void {
+  stopping = true;
   log('shutting down');
-  codex.shutdown();
-  antigravity.shutdown();
-  usage.stop();
-  jobs.flush();
-  missions.flush();
-  fs.rmSync(path.join(HOME, 'daemon.json'), { force: true });
-  process.exit(0);
+  let code = 0;
+  const attempt = (step: string, run: () => void) => {
+    try {
+      run();
+    } catch (err) {
+      code = 1;
+      log(`could not ${step} during shutdown:`, err);
+    }
+  };
+  attempt('stop checks', stopChecks);
+  attempt('stop Codex', () => codex.shutdown());
+  attempt('stop Antigravity', () => antigravity.shutdown());
+  attempt('stop the usage monitor', () => usage.stop());
+  attempt('save jobs', () => jobs.flush());
+  attempt('save missions', () => missions.flush());
+  attempt('remove daemon.json', () => fs.rmSync(path.join(HOME, 'daemon.json'), { force: true }));
+  process.exit(code);
 }
 
 fs.writeFileSync(path.join(HOME, 'daemon.json'), JSON.stringify({ pid: process.pid, port: PORT, version: VERSION, build: BUILD, root: PLUGIN_ROOT }));
@@ -1039,11 +1061,12 @@ async function setupState(refresh: boolean): Promise<{ items: SetupItem[]; packa
   const items = await setup.get(refresh, registering ?? undefined);
   return { items, packaged: PACKAGED, registering: registering !== null, registration };
 }
-// An app's copy registers itself on first launch and after each update, so its plugin matches its daemon. Copies that
-// sessions were still running at the last registration are removed once they have closed, and a registration that
+// An app's copy registers itself on first launch and after each update in the default home. The marketplace and
+// CLI are user-wide. Copies still in use at the last registration are removed once they have closed, and a registration that
 // another Claude Code process has undone is made again, checked after startup so the daemon does not wait on it.
-if (PACKAGED && !registered()) void registerPlugin();
-else if (PACKAGED && process.platform === 'win32') {
+const autoRegister = PACKAGED && process.env.CREW_HOME === undefined;
+if (autoRegister && !registered()) void registerPlugin();
+else if (autoRegister && process.platform === 'win32') {
   prunePlugins();
   void registrationMoved().then(
     (moved) => {

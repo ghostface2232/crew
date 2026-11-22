@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react';
-import { Trophy } from 'lucide-react';
+import { TrophyRegular } from '@fluentui/react-icons';
 import type { ModelScore } from './types.ts';
 import { NAMES } from './model.ts';
 import { AgentMark, Icon, RollingNumber } from './ui.tsx';
@@ -62,7 +62,7 @@ function Podium({ top }: { top: ModelScore[] }) {
         return (
           <div className={styles.place} data-place={place} key={score.model} style={{ '--order': 3 - place } as CSSProperties}>
             <div className={styles.contender}>
-              {place === 1 && <span className={styles.trophy}><Icon icon={Trophy} size={18} /></span>}
+              {place === 1 && <span className={styles.trophy}><Icon icon={TrophyRegular} size={18} /></span>}
               <span className={styles.avatar}>
                 <AgentMark agent={score.agent} size={place === 1 ? 28 : 22} />
                 <span className={styles.medal} aria-hidden="true">{place}</span>

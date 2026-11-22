@@ -1,4 +1,7 @@
-import { ArrowUpRight, Check, CheckCheck, CircleCheck, MessagesSquare, Search, X } from 'lucide-react';
+import {
+  ArrowUpRight16Regular, ChatMultipleRegular, CheckmarkCircleRegular, CheckmarkRegular, DismissRegular,
+  SearchRegular,
+} from '@fluentui/react-icons';
 import { useSyncExternalStore } from 'react';
 import type { CSSProperties } from 'react';
 import type { BoardJob, ClaudeSession } from './types.ts';
@@ -25,7 +28,7 @@ export function Answer({ job }: { job: BoardJob }) {
       if (sent) setDraft('');
     });
   };
-  const icons = { approve: Check, deny: X, allow_for_job: CheckCheck };
+  const icons = { approve: CheckmarkRegular, deny: DismissRegular, allow_for_job: CheckmarkCircleRegular };
   const button = (label: string, decision: Decision, prominent: boolean, title?: string) => (
     <button className={prominent ? 'prominent' : ''} disabled={locked} title={title} onClick={() => decide(decision)}>
       <Icon icon={icons[decision]} />
@@ -86,9 +89,9 @@ export function NeedsYou({
   return (
     <>
       {pending === 0 ? (
-        <EmptyState title="All caught up" icon={CircleCheck} />
+        <EmptyState title="All caught up" icon={CheckmarkCircleRegular} />
       ) : (
-        !jobs.length && !sessions.length && <EmptyState title="No matching requests" icon={Search} />
+        !jobs.length && !sessions.length && <EmptyState title="No matching requests" icon={SearchRegular} />
       )}
       {(jobs.length > 0 || sessions.length > 0) && (
         <div className="needs-grid">
@@ -105,7 +108,7 @@ export function NeedsYou({
                   </span>
                   {job.waiting && <span className="need-age digits">{elapsed(now - job.waiting.since)}</span>}
                   <button className="caption small" data-opens-panel="" onClick={() => openJob(job.id)}>
-                    <Icon icon={ArrowUpRight} size={12} />
+                    <Icon icon={ArrowUpRight16Regular} size={12} />
                     Details
                   </button>
                 </div>
@@ -124,14 +127,14 @@ export function NeedsYou({
                     <span>{session.title} · {names.get(projectOf(session)) ?? projectOf(session)}</span>
                   </span>
                   <button className="caption small" data-opens-panel="" onClick={() => openSession(session.id)}>
-                    <Icon icon={ArrowUpRight} size={12} />
+                    <Icon icon={ArrowUpRight16Regular} size={12} />
                     Details
                   </button>
                 </div>
               </div>
               <div className="answer">
                 <p className="headline selectable">{session.waitingFor ?? 'Claude needs your input.'}</p>
-                <p className="callout secondary"><Icon icon={MessagesSquare} size={13} /> Answer in Claude.</p>
+                <p className="callout secondary"><Icon icon={ChatMultipleRegular} size={13} /> Answer in Claude.</p>
               </div>
             </article>
           ))}

@@ -1,10 +1,10 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import type { LucideIcon } from 'lucide-react';
 import {
-  Bell, BellOff, Clock, CornerDownLeft, Flag, FolderClosed, Hammer, LayoutGrid, MessagesSquare, Plus, Search,
-  Settings as SettingsIcon, SquareStack, Zap,
-} from 'lucide-react';
+  AddRegular, AlertOffRegular, AlertRegular, ArrowTurnDownLeftRegular, ChatMultipleRegular, ClockRegular,
+  FlagRegular, FlashRegular, FolderRegular, GridRegular, SearchRegular, SettingsRegular, StackRegular, WrenchRegular,
+} from '@fluentui/react-icons';
+import type { FluentIcon } from '@fluentui/react-icons';
 import type { Snapshot } from './types.ts';
 import { elapsed, jobLabel, missionStep, missionStops, NAMES, projectOf, roleLabel, jobRole } from './model.ts';
 import { AgentMark, Chip, EASE_IN_OUT, EASE_OUT, Icon, reducedMotion, useNow, WordReveal } from './ui.tsx';
@@ -16,7 +16,7 @@ interface Entry {
   group: string;
   title: string;
   subtitle: string;
-  icon?: LucideIcon;
+  icon?: FluentIcon;
   agent?: string;
   run: () => void;
   preview: () => { eyebrow: string; chip?: [string, string]; lines: string[]; text?: string };
@@ -28,11 +28,11 @@ export interface PaletteActions {
   newJob: () => void;
   settings: () => void;
 }
-const PAGE_ENTRIES: [string, string, LucideIcon, string][] = [
-  ['overview', 'Overview', LayoutGrid, 'Every project at a glance'],
-  ['needs', 'Needs You', Bell, 'Approvals and questions waiting on you'],
-  ['activity', 'Activity', Zap, 'What the crew did, as it happened'],
-  ['history', 'History', Clock, 'Finished missions and jobs'],
+const PAGE_ENTRIES: [string, string, FluentIcon, string][] = [
+  ['overview', 'Overview', GridRegular, 'Every project at a glance'],
+  ['needs', 'Needs You', AlertRegular, 'Approvals and questions waiting on you'],
+  ['activity', 'Activity', FlashRegular, 'What the crew did, as it happened'],
+  ['history', 'History', ClockRegular, 'Finished missions and jobs'],
 ];
 
 /**
@@ -73,11 +73,11 @@ export function Palette({ state, names, projects, origin, close, actions }: {
     const list: Entry[] = [];
     const notifyState = notificationPermission();
     list.push({
-      id: 'new-job', group: 'Actions', title: 'New Job', subtitle: 'Hand a task to an agent', icon: Plus,
+      id: 'new-job', group: 'Actions', title: 'New Job', subtitle: 'Hand a task to an agent', icon: AddRegular,
       run: actions.newJob, preview: () => ({ eyebrow: 'Action', lines: ['Shortcut: N'], text: 'Give a command, ask a question, or add information for the crew.' }),
     });
     list.push({
-      id: 'settings', group: 'Actions', title: 'Settings', subtitle: 'Roles, model presets, and instructions', icon: SettingsIcon,
+      id: 'settings', group: 'Actions', title: 'Settings', subtitle: 'Roles, model presets, and instructions', icon: SettingsRegular,
       run: actions.settings, preview: () => ({ eyebrow: 'Action', lines: [], text: 'Configure roles, model presets, and shared instructions.' }),
     });
     if (notifyState !== 'unsupported') {
@@ -85,7 +85,7 @@ export function Palette({ state, names, projects, origin, close, actions }: {
       list.push({
         id: 'notify', group: 'Actions', title: on ? 'Turn off notifications' : 'Turn on notifications',
         subtitle: notifyState === 'denied' ? 'Blocked in this browser' : 'When an agent needs you and the board is in the background',
-        icon: on ? BellOff : Bell,
+        icon: on ? AlertOffRegular : AlertRegular,
         run: () => (on ? setNotificationsWanted(false) : void requestNotifications()),
         preview: () => ({
           eyebrow: 'Notifications',
@@ -96,11 +96,11 @@ export function Palette({ state, names, projects, origin, close, actions }: {
     }
     for (const [id, title, icon, subtitle] of PAGE_ENTRIES)
       list.push({ id: `page:${id}`, group: 'Pages', title, subtitle, icon, run: () => actions.select(id), preview: () => ({ eyebrow: 'Page', lines: [], text: subtitle }) });
-    list.push({ id: 'project:', group: 'Projects', title: 'All projects', subtitle: 'Overview', icon: SquareStack, run: () => actions.select('overview'), preview: () => ({ eyebrow: 'Projects', lines: [`${projects.length} projects`] }) });
+    list.push({ id: 'project:', group: 'Projects', title: 'All projects', subtitle: 'Overview', icon: StackRegular, run: () => actions.select('overview'), preview: () => ({ eyebrow: 'Projects', lines: [`${projects.length} projects`] }) });
     for (const dir of projects) {
       const jobs = state.jobs.filter((job) => projectOf(job) === dir);
       list.push({
-        id: `project:${dir}`, group: 'Projects', title: names.get(dir) ?? dir, subtitle: dir, icon: FolderClosed,
+        id: `project:${dir}`, group: 'Projects', title: names.get(dir) ?? dir, subtitle: dir, icon: FolderRegular,
         run: () => actions.select(`project:${dir}`),
         preview: () => ({
           eyebrow: 'Project',
@@ -112,7 +112,7 @@ export function Palette({ state, names, projects, origin, close, actions }: {
     for (const mission of [...state.missions].sort((a, b) => Number(b.state === 'active') - Number(a.state === 'active') || b.createdAt - a.createdAt)) {
       const stops = missionStops(mission);
       list.push({
-        id: `mission:${mission.id}`, group: 'Missions', title: mission.title, subtitle: names.get(projectOf(mission)) ?? projectOf(mission), icon: Flag,
+        id: `mission:${mission.id}`, group: 'Missions', title: mission.title, subtitle: names.get(projectOf(mission)) ?? projectOf(mission), icon: FlagRegular,
         run: () => {
           actions.select(mission.state === 'active' ? `project:${projectOf(mission)}` : 'history');
           requestAnimationFrame(() => document.querySelector(`[data-key="${CSS.escape(mission.id)}"]`)?.scrollIntoView({ block: 'start', behavior: reducedMotion() ? 'auto' : 'smooth' }));
@@ -142,7 +142,7 @@ export function Palette({ state, names, projects, origin, close, actions }: {
     }
     for (const job of [...state.jobs].sort((a, b) => Number(b.endedAt == null) - Number(a.endedAt == null) || b.createdAt - a.createdAt)) {
       list.push({
-        id: `job:${job.id}`, group: 'Jobs', title: job.title, subtitle: `${NAMES[job.agent]} · ${names.get(projectOf(job)) ?? projectOf(job)}`, agent: job.agent, icon: Hammer,
+        id: `job:${job.id}`, group: 'Jobs', title: job.title, subtitle: `${NAMES[job.agent]} · ${names.get(projectOf(job)) ?? projectOf(job)}`, agent: job.agent, icon: WrenchRegular,
         run: () => actions.openJob(job.id),
         preview: () => ({
           eyebrow: `${NAMES[job.agent]} · ${job.ask && !job.debate ? 'Question' : roleLabel(state, jobRole(job))}`,
@@ -243,7 +243,7 @@ export function Palette({ state, names, projects, origin, close, actions }: {
       <div className="palette" ref={box} style={{ left, top, width, height }}>
         <div className="palette-content" style={{ width, height } as CSSProperties}>
           <label className="palette-search">
-            <Icon icon={Search} size={17} />
+            <Icon icon={SearchRegular} size={17} />
             <input
               role="combobox"
               aria-expanded="true"
@@ -301,7 +301,7 @@ export function Palette({ state, names, projects, origin, close, actions }: {
                       {entry.agent ? <AgentMark agent={entry.agent} size={15} /> : entry.icon && <Icon icon={entry.icon} />}
                       <span className="palette-title">{entry.title}</span>
                       <span className="palette-subtitle">{entry.subtitle}</span>
-                      {entry === current && <Icon icon={CornerDownLeft} size={13} className="palette-enter" />}
+                      {entry === current && <Icon icon={ArrowTurnDownLeftRegular} size={13} className="palette-enter" />}
                     </div>
                   </div>
                 );
@@ -321,7 +321,7 @@ export function Palette({ state, names, projects, origin, close, actions }: {
                   </p>
                 )}
                 <span className="palette-hint">
-                  {current.group === 'Jobs' || current.group === 'Claude sessions' ? <MessagesSquare size={13} /> : null}
+                  {current.group === 'Jobs' || current.group === 'Claude sessions' ? <ChatMultipleRegular fontSize={13} /> : null}
                   Press Return to open
                 </span>
               </aside>

@@ -1,9 +1,10 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import {
-  ArrowRight, ArrowUpRight, ChevronDown, ChevronUp, CircleAlert, CircleCheck, CircleDot, Layers, MessagesSquare, Plus, Search,
-  SquareStack,
-} from 'lucide-react';
+  AddRegular, ArrowRight16Regular, ArrowUpRight16Regular, ChatMultipleRegular, CheckmarkCircle16Regular,
+  CheckmarkCircleRegular, ChevronDown16Regular, ChevronUp16Regular, CircleMultipleConcentric16Regular,
+  ErrorCircle16Regular, ErrorCircleRegular, LayerRegular, SearchRegular, StackRegular,
+} from '@fluentui/react-icons';
 import type { ProviderUsage } from '../../bridge/usage.ts';
 import type { Holder } from '../../bridge/config.ts';
 import type { BoardJob, CrewEvent, Mission, SetupState, Snapshot, WorkerAgent } from './types.ts';
@@ -353,14 +354,14 @@ export function EventList({ events, openJob, limit }: { events: CrewEvent[]; ope
     <ol className="events">
       {shown.map((event, index) => (
         <li className="event" key={event.seq} data-kind={event.kind} style={{ '--i': Math.min(index, 12) } as CSSProperties}>
-          <span className="event-mark"><Icon icon={event.kind === 'error' ? CircleAlert : event.kind === 'done' ? CircleCheck : CircleDot} /></span>
+          <span className="event-mark"><Icon icon={event.kind === 'error' ? ErrorCircle16Regular : event.kind === 'done' ? CheckmarkCircle16Regular : CircleMultipleConcentric16Regular} /></span>
           <div>
             <p className="event-head">
               <b>{NAMES[event.agent as keyof typeof NAMES] ?? event.agent}</b>
               <time dateTime={event.ts}>{new Date(event.ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time>
               {event.job_id && openJob && (
                 <button className="icon small" data-opens-panel="" aria-label="Show job" title="Show job" onClick={() => openJob(event.job_id!)}>
-                  <Icon icon={ArrowUpRight} />
+                  <Icon icon={ArrowUpRight16Regular} />
                 </button>
               )}
             </p>
@@ -452,7 +453,7 @@ function Setup() {
       <ul className="setup-list">
         {setup.items.map((item) => (
           <li key={item.id} data-ok={item.ok || undefined}>
-            <Icon icon={item.ok ? CircleCheck : CircleAlert} size={14} />
+            <Icon icon={item.ok ? CheckmarkCircleRegular : ErrorCircleRegular} size={14} />
             <span>{item.label}</span>
             <span className="secondary caption selectable">{item.detail}</span>
           </li>
@@ -508,18 +509,18 @@ export function Workspace({ state, project, names, selected, openJob, openSessio
           {!project && <Setup />}
           {active.map(panel)}
           {loose.length > 0 && (
-            <Panel label="Other jobs" style={{ '--i': active.length } as CSSProperties} action={<Icon icon={SquareStack} />}>
+            <Panel label="Other jobs" style={{ '--i': active.length } as CSSProperties} action={<Icon icon={StackRegular} />}>
               <div className="rows">{loose.map(row)}</div>
             </Panel>
           )}
           {recent.map((mission, index) => panel(mission, active.length + 1 + index))}
           {recentJobs.length > 0 && (
-            <Panel label="Recently finished" action={<button className="link" onClick={() => openPage('history')}>History <Icon icon={ArrowRight} size={12} /></button>}>
+            <Panel label="Recently finished" action={<button className="link" onClick={() => openPage('history')}>History <Icon icon={ArrowRight16Regular} size={12} /></button>}>
               <div className="rows">{recentJobs.map(row)}</div>
             </Panel>
           )}
           {sessions.length > 0 && (
-            <Panel label="Claude sessions" action={<Icon icon={MessagesSquare} />}>
+            <Panel label="Claude sessions" action={<Icon icon={ChatMultipleRegular} />}>
               <div className="rows">
                 {sessions.map((session) => (
                   <SessionRow key={session.id} session={session} selected={selected === `session:${session.id}`} openSession={openSession} />
@@ -528,9 +529,9 @@ export function Workspace({ state, project, names, selected, openJob, openSessio
             </Panel>
           )}
           {empty && (
-            <EmptyState title="Ready when you are" icon={Layers} detail="Start with New Job, or /crew:run in Claude.">
+            <EmptyState title="Ready when you are" icon={LayerRegular} detail="Start with New Job, or /crew:run in Claude.">
               <button className="prominent" disabled={state.connection !== 'live'} onClick={(event) => newJob(event.currentTarget)}>
-                <Icon icon={Plus} />
+                <Icon icon={AddRegular} />
                 New Job
               </button>
             </EmptyState>
@@ -541,7 +542,7 @@ export function Workspace({ state, project, names, selected, openJob, openSessio
           <section className="card panel" aria-label="Rhythm" style={{ '--i': 1 } as CSSProperties}>
             <Heatmap title="Rhythm" times={jobs.map((job) => job.createdAt)} most={26} label="jobs" one="job" />
           </section>
-          <Panel label="Live feed" action={<button className="link" onClick={() => openPage('activity')}>All <Icon icon={ArrowRight} size={12} /></button>}>
+          <Panel label="Live feed" action={<button className="link" onClick={() => openPage('activity')}>All <Icon icon={ArrowRight16Regular} size={12} /></button>}>
             {events.length ? <EventList events={events} openJob={openJob} limit={6} /> : <p className="secondary caption">Nothing has happened yet.</p>}
           </Panel>
         </aside>
@@ -571,7 +572,7 @@ export function History({ state, project, names, selected, openJob, openSession 
     <th className={className} aria-sort={sort.key === key ? (sort.up ? 'ascending' : 'descending') : undefined}>
       <button className="sort" onClick={() => setSort({ key, up: sort.key === key ? !sort.up : key === 'title' || key === 'agent' || key === 'project' })}>
         {text}
-        {sort.key === key && <Icon icon={sort.up ? ChevronUp : ChevronDown} size={12} />}
+        {sort.key === key && <Icon icon={sort.up ? ChevronUp16Regular : ChevronDown16Regular} size={12} />}
       </button>
     </th>
   );
@@ -585,7 +586,7 @@ export function History({ state, project, names, selected, openJob, openSession 
           onChange={setFilter}
         />
         <label className="filter">
-          <Icon icon={Search} />
+          <Icon icon={SearchRegular} />
           <input type="search" aria-label="Filter history" placeholder="Filter by title, agent, project" value={search} onChange={(event) => setSearch(event.target.value)} />
         </label>
       </div>
@@ -640,7 +641,7 @@ export function History({ state, project, names, selected, openJob, openSession 
           </div>
         </Panel>
       ) : (
-        !missions.length && <EmptyState title={search || filter ? 'No matching work' : 'No completed work yet'} icon={search || filter ? Search : Layers} />
+        !missions.length && <EmptyState title={search || filter ? 'No matching work' : 'No completed work yet'} icon={search || filter ? SearchRegular : LayerRegular} />
       )}
     </>
   );

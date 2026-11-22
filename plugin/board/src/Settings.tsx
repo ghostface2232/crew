@@ -1,6 +1,9 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
-import type { LucideIcon } from 'lucide-react';
-import { ChevronLeft, ChevronRight, FileText, Folder, Gauge, Hammer, Info, ShieldCheck, SlidersHorizontal, Type } from 'lucide-react';
+import {
+  ChevronLeftRegular, ChevronRightRegular, DocumentText16Regular, Folder16Regular, Gauge16Regular, Info16Regular,
+  Options16Regular, ShieldCheckmark16Regular, TextFont16Regular, Wrench16Regular,
+} from '@fluentui/react-icons';
+import type { FluentIcon } from '@fluentui/react-icons';
 import type { AppUpdate, Preset, PresetName, Snapshot } from './types.ts';
 import type { AgentSettings, Holder, JobKind, Role, RoleAssignment, RoleInfo, RoleSettings, WorkerAgent } from '../../bridge/config.ts';
 import { request } from './api.ts';
@@ -46,14 +49,14 @@ function presetDetails(preset: Preset): [string, string][] {
 /** One page of settings, listed in the sidebar: the roles by kind of work, what every agent shares, each project's own instructions, then the desktop app. */
 type Fixed = 'build' | 'review' | 'edit' | 'presets' | 'models' | 'instructions' | 'about';
 type Pane = Fixed | `project:${string}`;
-const PANES: Record<Fixed, { title: string; icon: LucideIcon; tint: string; kind?: JobKind }> = {
-  build: { title: 'Build', icon: Hammer, tint: 'var(--accent)', kind: 'delegate' },
-  review: { title: 'Review', icon: ShieldCheck, tint: 'var(--green)', kind: 'review' },
-  edit: { title: 'Edit', icon: Type, tint: 'var(--orange)', kind: 'polish' },
-  presets: { title: 'Model Presets', icon: SlidersHorizontal, tint: 'var(--gray)' },
-  models: { title: 'Model Scores', icon: Gauge, tint: 'var(--purple)' },
-  instructions: { title: 'Instructions', icon: FileText, tint: 'var(--indigo)' },
-  about: { title: 'About Crew', icon: Info, tint: 'var(--gray)' },
+const PANES: Record<Fixed, { title: string; icon: FluentIcon; tint: string; kind?: JobKind }> = {
+  build: { title: 'Build', icon: Wrench16Regular, tint: 'var(--accent)', kind: 'delegate' },
+  review: { title: 'Review', icon: ShieldCheckmark16Regular, tint: 'var(--green)', kind: 'review' },
+  edit: { title: 'Edit', icon: TextFont16Regular, tint: 'var(--orange)', kind: 'polish' },
+  presets: { title: 'Model Presets', icon: Options16Regular, tint: 'var(--gray)' },
+  models: { title: 'Model Scores', icon: Gauge16Regular, tint: 'var(--purple)' },
+  instructions: { title: 'Instructions', icon: DocumentText16Regular, tint: 'var(--indigo)' },
+  about: { title: 'About Crew', icon: Info16Regular, tint: 'var(--gray)' },
 };
 
 /** Where the desktop app's update stands, in one line. */
@@ -381,9 +384,9 @@ export function Settings({ state, update, close }: { state: Snapshot; update: Ap
         onClick={() => open(id)}
         title={dir ?? undefined}
       >
-        <span className={styles.tile} style={{ background: page?.tint ?? PROJECT_TINT }}><Icon icon={page?.icon ?? Folder} /></span>
+        <span className={styles.tile} style={{ background: page?.tint ?? PROJECT_TINT }}><Icon icon={page?.icon ?? Folder16Regular} /></span>
         <ItemTitle text={page?.title ?? names.get(dir!) ?? dir!} />
-        <Icon icon={ChevronRight} className={styles.chevron} />
+        <Icon icon={ChevronRightRegular} className={styles.chevron} />
       </button>
     );
   };
@@ -509,7 +512,7 @@ export function Settings({ state, update, close }: { state: Snapshot; update: Ap
           <div className={styles.scroll} ref={scroller} onScroll={(event) => setScrolled(event.currentTarget.scrollTop > 0)}>
             <header className={styles.pageHead} data-scrolled={scrolled || undefined}>
               <button type="button" ref={back} className={`borderless ${styles.back}`} onClick={() => setView('list')}>
-                <Icon icon={ChevronLeft} />
+                <Icon icon={ChevronLeftRegular} />
                 Settings
               </button>
               <h2 className={styles.pageTitle}>{title}</h2>
@@ -596,7 +599,7 @@ export function Settings({ state, update, close }: { state: Snapshot; update: Ap
                     </div>
                     {update.error && (
                       <p className={`${styles.footnote} ${styles.note}`}>
-                        <Icon icon={Info} />
+                        <Icon icon={Info16Regular} />
                         {update.error}
                       </p>
                     )}
@@ -652,7 +655,7 @@ export function Settings({ state, update, close }: { state: Snapshot; update: Ap
                     <p className={`${styles.footnote} ${styles.file}`}>{file}</p>
                     {text.length > 9000 && (
                       <p className={`${styles.footnote} ${styles.note}`}>
-                        <Icon icon={Info} />
+                        <Icon icon={Info16Regular} />
                         Claude sessions will be pointed to this file because it is longer than 9,000 characters.
                       </p>
                     )}

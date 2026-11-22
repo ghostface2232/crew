@@ -1,12 +1,15 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import {
-  BadgeCheck, BadgeHelp, Check, CircleCheck, CircleDashed, CircleDot, CircleMinus, CircleStop, CircleX, Clock, FileText, Film, Flag, FlagTriangleRight, GitBranch, GitFork,
-  History, Images, MessageSquare, NotebookText, RotateCcw, ShieldAlert, ShieldCheck, TextAlignStart, TriangleAlert, Undo2, Users, X, Zap,
-} from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
+  ArrowCounterclockwiseRegular, ArrowUndoRegular, BranchFork16Regular, BranchRegular, ChatRegular,
+  CheckmarkCircle16Regular, CheckmarkCircleRegular, CheckmarkRegular, CheckmarkStarburstRegular, ChevronDownRegular,
+  CircleHintRegular, CircleMultipleConcentricRegular, ClockRegular, DismissCircle16Regular, DismissRegular,
+  DocumentTextRegular, FilmstripRegular, FlagCheckeredRegular, FlagRegular, FlashRegular, HistoryRegular,
+  ImageMultipleRegular, NotebookRegular, PeopleRegular, QuestionCircleRegular, RecordStopRegular,
+  ShieldCheckmarkRegular, ShieldErrorRegular, SubtractCircleRegular, TextAlignLeftRegular, WarningRegular,
+} from '@fluentui/react-icons';
+import type { FluentIcon } from '@fluentui/react-icons';
 import type { ReactNode } from 'react';
-import { ChevronDown } from 'lucide-react';
 import type { BoardJob, CrewEvent, Snapshot } from './types.ts';
 import { actions, drafts, request } from './api.ts';
 import { board, mergeEvents } from './store.ts';
@@ -22,7 +25,7 @@ import { jobStatusState, SessionAgents, SessionWorkflow } from './Missions.tsx';
 /** Reports are parsed once per text, not on every clock tick the panel renders for. */
 const ReportText = memo(RenderReport);
 
-function Section({ title, icon, children }: { title: string; icon: LucideIcon; children: ReactNode }) {
+function Section({ title, icon, children }: { title: string; icon: FluentIcon; children: ReactNode }) {
   return (
     <section className="detail-section" aria-label={title}>
       <h3>
@@ -47,7 +50,7 @@ function RoundRow({ job, round }: { job: BoardJob; round: NonNullable<BoardJob['
       <div className="round-head">
         <b>Turn {round.turn}</b>
         <span>
-          <Icon icon={undone ? Undo2 : Check} size={11} />
+          <Icon icon={undone ? ArrowUndoRegular : CheckmarkRegular} size={11} />
           {undone ? 'Undone' : 'Kept'}
         </span>
         <button
@@ -83,7 +86,7 @@ function EvidenceSection({ job }: { job: BoardJob }) {
   // A capture the worker has since deleted leaves the comparison.
   const compared = picked.filter((file) => items.some((item) => item.file === file));
   return (
-    <Section title="Evidence" icon={Images}>
+    <Section title="Evidence" icon={ImageMultipleRegular}>
       <div className="evidence">
         {items.map((item) => {
           const src = evidenceSrc(job, item);
@@ -162,7 +165,7 @@ function EvidenceCompare({ job, items, shown, onShown }: { job: BoardJob; items:
                   title={item.file}
                   onClick={() => onShown(on ? shown.filter((file) => file !== item.file) : [...shown, item.file])}
                 >
-                  {isVideo(item.file) ? <span className="compare-video"><Icon icon={Film} /></span> : <img src={evidenceSrc(job, item)} alt="" loading="lazy" />}
+                  {isVideo(item.file) ? <span className="compare-video"><Icon icon={FilmstripRegular} /></span> : <img src={evidenceSrc(job, item)} alt="" loading="lazy" />}
                   <span className="caption">{caption(item)}</span>
                   <span className="caption secondary">{item.file}</span>
                 </button>
@@ -192,16 +195,16 @@ function ReceiptView({ receipt }: { receipt: NonNullable<BoardJob['receipts']>[n
   const at = receipt.head ? ` · ${receipt.head.slice(0, 8)}` : '';
   const passed = check?.exit === 0 && !check.timedOut;
   const [state, icon, label] = !check
-    ? (['done', Check, 'Reviewed'] as const)
+    ? (['done', CheckmarkRegular, 'Reviewed'] as const)
     : check.skipped
-      ? (['idle', CircleMinus, 'Check not run'] as const)
+      ? (['idle', SubtractCircleRegular, 'Check not run'] as const)
       : passed
-      ? (['done', Check, 'Check passed'] as const)
+      ? (['done', CheckmarkRegular, 'Check passed'] as const)
       : check.timedOut
-        ? (['waiting', Clock, `Check timed out after ${duration(check.ms)}`] as const)
+        ? (['waiting', ClockRegular, `Check timed out after ${duration(check.ms)}`] as const)
         : check.exit == null
-          ? (['failed', X, 'Check stopped before it finished'] as const)
-          : (['failed', X, `Check failed with exit code ${check.exit}`] as const);
+          ? (['failed', DismissRegular, 'Check stopped before it finished'] as const)
+          : (['failed', DismissRegular, `Check failed with exit code ${check.exit}`] as const);
   return (
     // A stale receipt keeps its words but loses its color: it no longer speaks for the branch.
     <div className="receipt" data-state={stale ? 'idle' : state}>
@@ -223,7 +226,7 @@ function ReceiptView({ receipt }: { receipt: NonNullable<BoardJob['receipts']>[n
       </p>
       {stale && (
         <p className="callout stale selectable">
-          <Icon icon={History} size={12} />No longer current: {stale}
+          <Icon icon={HistoryRegular} size={12} />No longer current: {stale}
         </p>
       )}
       {check && !check.skipped && !passed && check.output && (
@@ -248,7 +251,7 @@ function VerificationSection({ job }: { job: BoardJob }) {
   const approvals = job.approvals ?? [];
   if (!shown && !capabilities && !approvals.length) return null;
   return (
-    <Section title="Verification" icon={ShieldCheck}>
+    <Section title="Verification" icon={ShieldCheckmarkRegular}>
       {shown && <ReceiptView receipt={receipt} />}
       {capabilities && (
         <dl className="facts selectable">
@@ -264,7 +267,7 @@ function VerificationSection({ job }: { job: BoardJob }) {
       )}
       {approvals.map((approval, index) => (
         <div className="approval selectable" key={index}>
-          <Icon icon={approval.recorded ? BadgeCheck : BadgeHelp} />
+          <Icon icon={approval.recorded ? CheckmarkStarburstRegular : QuestionCircleRegular} />
           <div>
             <p className="callout">Approval relayed for turn {approval.turn} — {approvalBasis(approval)}.</p>
             <p className="callout secondary">“{approval.quote}”</p>
@@ -281,7 +284,7 @@ const hasConversation = (job: BoardJob) => job.debate ? Boolean(job.exchange?.le
 /** A debate that has had its rounds and stopped: the daemon refuses another reply, whatever state it ended in. */
 const debateConcluded = (job: BoardJob) => Boolean(job.debate && job.state !== 'running' && job.state !== 'waiting' && job.turns >= job.debate.rounds);
 
-const STANCES: Record<Stance, [string, typeof CircleCheck]> = { agree: ['Agree', CircleCheck], disagree: ['Disagree', CircleX], alternative: ['Alternative', GitFork] };
+const STANCES: Record<Stance, [string, typeof CheckmarkCircle16Regular]> = { agree: ['Agree', CheckmarkCircle16Regular], disagree: ['Disagree', DismissCircle16Regular], alternative: ['Alternative', BranchFork16Regular] };
 /** A point's stance as a colored mark, followed in a round's heading by its count. */
 function StanceMark({ stance, count }: { stance: Stance; count?: number }) {
   const [title, icon] = STANCES[stance];
@@ -334,7 +337,7 @@ function DebateRound({ job, turn, label, final, last }: { job: BoardJob; turn: n
       <button className="debate-round-head" aria-expanded={open} onClick={() => setOpen(!open)}>
         <b>{final ? `${label} ${turn} · final` : `${label} ${turn}`}</b>
         {!open && reply && <Stances text={reply.text} />}
-        <Icon icon={ChevronDown} className="disclosure" />
+        <Icon icon={ChevronDownRegular} className="disclosure" />
       </button>
       {open && (
         <div className="debate-round-body reveal">
@@ -376,12 +379,12 @@ function DebateStepper({ job }: { job: BoardJob }) {
     <ol className="stepper" role="img" aria-label={concluded ? `Debate concluded after ${rounds} rounds` : `Debate, round ${Math.min(job.turns, rounds)} of ${rounds}`}>
       {Array.from({ length: rounds }, (_, index) => index + 1).map((round) => (
         <li key={round} data-done={round <= replied || undefined}>
-          <Icon icon={round <= replied ? CircleCheck : round === job.turns && job.endedAt == null ? CircleDashed : CircleDot} size={13} />
+          <Icon icon={round <= replied ? CheckmarkCircleRegular : round === job.turns && job.endedAt == null ? CircleHintRegular : CircleMultipleConcentricRegular} size={13} />
           <span>Round {round}</span>
         </li>
       ))}
       <li data-done={concluded || undefined}>
-        <Icon icon={concluded ? FlagTriangleRight : Flag} size={13} />
+        <Icon icon={concluded ? FlagCheckeredRegular : FlagRegular} size={13} />
         <span>Conclusion</span>
       </li>
     </ol>
@@ -397,7 +400,7 @@ function DebateSection({ job }: { job: BoardJob }) {
   return (
     <section className="detail-section" aria-label={title}>
       <h3>
-        <Icon icon={MessageSquare} />
+        <Icon icon={ChatRegular} />
         {debate ? 'Debate' : 'Conversation'}
         {debate && <DebateStepper job={job} />}
       </h3>
@@ -414,7 +417,7 @@ function DebateSection({ job }: { job: BoardJob }) {
 }
 
 function ConcludedNote() {
-  return <p className="callout secondary concluded"><Icon icon={CircleCheck} size={13} />This debate has used all its rounds. Decide from it, or start a new debate.</p>;
+  return <p className="callout secondary concluded"><Icon icon={CheckmarkCircleRegular} size={13} />This debate has used all its rounds. Decide from it, or start a new debate.</p>;
 }
 
 function FollowUp({ job }: { job: BoardJob }) {
@@ -423,7 +426,7 @@ function FollowUp({ job }: { job: BoardJob }) {
   const state = useAction(key);
   const name = NAMES[job.agent];
   return (
-    <Section title={job.debate ? 'Reply' : job.endedAt == null ? 'Steer' : 'Follow up'} icon={MessageSquare}>
+    <Section title={job.debate ? 'Reply' : job.endedAt == null ? 'Steer' : 'Follow up'} icon={ChatRegular}>
       <textarea aria-label={`Message to ${name}`} value={draft} onChange={(event) => setDraft(event.target.value)} />
       <div>
         <button
@@ -511,7 +514,7 @@ export function JobDrawer({ id, state, close }: { id: string; state: Snapshot; c
           <p className="error selectable">{error}</p>
           <div>
             <button onClick={() => setRetry((value) => value + 1)}>
-              <Icon icon={RotateCcw} />
+              <Icon icon={ArrowCounterclockwiseRegular} />
               Retry
             </button>
           </div>
@@ -532,7 +535,7 @@ export function JobDrawer({ id, state, close }: { id: string; state: Snapshot; c
           )}
           <Facts facts={facts} />
           {result && (
-            <Section title="Changes" icon={GitBranch}>
+            <Section title="Changes" icon={BranchRegular}>
               <pre className="selectable">{result.stat || 'No files changed'}</pre>
               {result.commit && <p className="caption selectable">Commit {result.commit}</p>}
               {files.map((file) => (
@@ -540,7 +543,7 @@ export function JobDrawer({ id, state, close }: { id: string; state: Snapshot; c
                   <code className="selectable">{file}</code>
                   {result.outOfScope.includes(file) && (
                     <span className="caption error">
-                      <Icon icon={TriangleAlert} size={11} />
+                      <Icon icon={WarningRegular} size={11} />
                       {result.files.includes(file) ? 'Outside the allowed targets' : 'Outside the workspace'}
                     </span>
                   )}
@@ -551,14 +554,14 @@ export function JobDrawer({ id, state, close }: { id: string; state: Snapshot; c
           <VerificationSection job={job} />
           <EvidenceSection job={job} />
           {!!job.rounds?.length && (
-            <Section title="Rounds" icon={RotateCcw}>
+            <Section title="Rounds" icon={ArrowCounterclockwiseRegular}>
               {job.rounds.toSorted((a, b) => a.turn - b.turn).map((round) => (
                 <RoundRow key={round.turn} job={job} round={round} />
               ))}
             </Section>
           )}
           {refusals.length > 0 && (
-            <Section title="Automatic review" icon={ShieldAlert}>
+            <Section title="Automatic review" icon={ShieldErrorRegular}>
               {refusals.map((refusal, index) => (
                 <p className="callout error selectable" key={index}>
                   {refusal.action} — {refusal.reason}
@@ -568,7 +571,7 @@ export function JobDrawer({ id, state, close }: { id: string; state: Snapshot; c
             </Section>
           )}
           {job.notes.length > 0 && (
-            <Section title="Notes" icon={NotebookText}>
+            <Section title="Notes" icon={NotebookRegular}>
               {job.notes.map((note, index) => (
                 <p className="callout selectable" key={index}>{trimNote(note)}</p>
               ))}
@@ -577,7 +580,7 @@ export function JobDrawer({ id, state, close }: { id: string; state: Snapshot; c
           {hasConversation(job) ? <DebateSection job={job} /> : (
             <>
               {job.report && (
-                <Section title="Report" icon={FileText}>
+                <Section title="Report" icon={DocumentTextRegular}>
                   <ReportText text={job.report} />
                 </Section>
               )}
@@ -588,7 +591,7 @@ export function JobDrawer({ id, state, close }: { id: string; state: Snapshot; c
           {!debateConcluded(job) && job.sessionId && job.state !== 'waiting' && <FollowUp key={job.id} job={job} />}
           {job.prompt && <OriginalTask text={job.prompt} />}
           {events.length > 0 && (
-            <Section title="Activity" icon={Zap}>
+            <Section title="Activity" icon={FlashRegular}>
               <EventList events={events} />
             </Section>
           )}
@@ -605,7 +608,7 @@ export function JobDrawer({ id, state, close }: { id: string; state: Snapshot; c
                 disabled={!live || cancelling.pending || cancelling.accepted}
                 onClick={() => void actions.run(cancelKey, () => request(`/api/jobs/${job.id}/cancel`, {}), { done: 'Cancelled' })}
               >
-                <Icon icon={CircleStop} />
+                <Icon icon={RecordStopRegular} />
                 Cancel Job
               </button>
             )}
@@ -649,7 +652,7 @@ function OriginalTask({ text }: { text: string }) {
     <section className="detail-section original" aria-label="Original task">
       <h3>
         <button className="section-toggle" aria-expanded={shown} onClick={() => long && setShown(!shown)}>
-          <Icon icon={TextAlignStart} />Original task
+          <Icon icon={TextAlignLeftRegular} />Original task
         </button>
       </h3>
       <pre
@@ -816,7 +819,7 @@ export function SessionDrawer({ id, state, close }: { id: string; state: Snapsho
             ]}
           />
           {plainAgents.length > 0 && (
-            <Section title="Sub-agents" icon={Users}>
+            <Section title="Sub-agents" icon={PeopleRegular}>
               <SessionAgents agents={plainAgents} now={now} label="Sub-agents" />
             </Section>
           )}
@@ -824,7 +827,7 @@ export function SessionDrawer({ id, state, close }: { id: string; state: Snapsho
             <SessionWorkflow key={run.id} run={run} agents={(session.agents ?? []).filter((agent) => agent.workflow === run.id)} now={now} />
           ))}
           {missions.length > 0 && (
-            <Section title="Missions" icon={Flag}>
+            <Section title="Missions" icon={FlagRegular}>
               {missions.map((mission) => (
                 <div className="session-mission" key={mission.id}>
                   <span>{mission.title}</span>

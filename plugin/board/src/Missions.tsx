@@ -1,7 +1,11 @@
 import { useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { CSSProperties } from 'react';
 import { board } from './store.ts';
-import { Check, ChevronDown, ChevronRight, CircleCheck, CircleX, Clock, Ellipsis, Gauge, GitMerge, GitPullRequest, GitPullRequestClosed } from 'lucide-react';
+import {
+  BranchRequest16Regular, BranchRequestClosed16Regular, Checkmark16Regular, CheckmarkCircleRegular, CheckmarkRegular,
+  ChevronDown16Regular, ChevronDownRegular, ChevronRight16Regular, Clock16Regular, DismissCircleRegular,
+  GaugeRegular, Merge16Regular, MoreHorizontalRegular,
+} from '@fluentui/react-icons';
 import type { BoardJob, BoardPull, ClaudeSession, Mission, PresetName } from './types.ts';
 import { actions, request } from './api.ts';
 import {
@@ -53,7 +57,7 @@ export function JobRow({ job, selected, openJob, showsKind = true, index = 0 }: 
       </span>
       <StatusIcon state={jobStatusState(job)} label={jobLabel(job)} />
       <span className="job-row-time">{elapsed((job.endedAt ?? now) - job.createdAt)}</span>
-      <Icon icon={ChevronRight} className="row-chevron" />
+      <Icon icon={ChevronRight16Regular} className="row-chevron" />
     </button>
   );
 }
@@ -155,7 +159,7 @@ export function SessionRow({ session, selected, openSession }: { session: Claude
       <StatusIcon state={session.stalled ? 'stalled' : session.state} label={session.stalled ? 'May be stuck' : capitalized(session.state)} />
       {/* An idle session stops its clock at its last activity. */}
       <span className="job-row-time">{elapsed((session.state === 'idle' ? session.activeAt : now) - session.startedAt)}</span>
-      <Icon icon={ChevronRight} className="row-chevron" />
+      <Icon icon={ChevronRight16Regular} className="row-chevron" />
     </button>
   );
 }
@@ -217,7 +221,7 @@ export function MissionTrack({ mission }: { mission: Mission }) {
             aria-hidden="true"
           >
             <span className="track-node">
-              <b>{pos === 'past' ? <Icon icon={Check} /> : index + 1}</b>
+              <b>{pos === 'past' ? <Icon icon={Checkmark16Regular} /> : index + 1}</b>
             </span>
             {/* A name the lead gave can be longer than its column. */}
             <span className="track-name" title={name}>{name}</span>
@@ -251,7 +255,7 @@ function MissionPull({ pull, now }: { pull: BoardPull; now: number }) {
     unread ? 'Could not be read' : null,
     stale ? `Checked ${elapsed(now - pull.checkedAt)} ago` : null,
   ].filter(Boolean).join(' · ');
-  const glyph = pull.state === 'merged' ? GitMerge : pull.state === 'closed' ? GitPullRequestClosed : GitPullRequest;
+  const glyph = pull.state === 'merged' ? Merge16Regular : pull.state === 'closed' ? BranchRequestClosed16Regular : BranchRequest16Regular;
   return (
     <a
       className="chip pull-chip"
@@ -270,7 +274,7 @@ function MissionPull({ pull, now }: { pull: BoardPull; now: number }) {
       {more > 0 && <span className="pull-more digits">+{more}</span>}
       {stale && (
         <>
-          <Icon icon={Clock} />
+          <Icon icon={Clock16Regular} />
           <span className="digits">{elapsed(now - pull.checkedAt)}</span>
         </>
       )}
@@ -367,14 +371,14 @@ export function MissionPanel({
         <Chip state={active ? 'running' : mission.state}>{capitalized(mission.state)}</Chip>
         <span className="mission-controls">
           {(active || mission.state === 'abandoned') && (
-            <Menu label="Mission options" icon={Ellipsis}>
+            <Menu label="Mission options" icon={MoreHorizontalRegular}>
               <button role="menuitem" disabled={locked} onClick={markDone}>
-                <Icon icon={CircleCheck} />
+                <Icon icon={CheckmarkCircleRegular} />
                 Mark Done
               </button>
               {active && (
                 <button role="menuitem" disabled={locked} title="Stops tracking without marking done. Its jobs keep running." onClick={stopTracking}>
-                  <Icon icon={CircleX} />
+                  <Icon icon={DismissCircleRegular} />
                   Stop Tracking
                 </button>
               )}
@@ -392,7 +396,7 @@ export function MissionPanel({
                       // The meta line and the check show the choice, so only sending and failure are said.
                       onClick={() => void actions.run(key, () => request(`/api/missions/${mission.id}`, { preset }), { done: '', once: false })}
                     >
-                      <Icon icon={(mission.preset ?? null) === preset ? Check : Gauge} />
+                      <Icon icon={(mission.preset ?? null) === preset ? CheckmarkRegular : GaugeRegular} />
                       {name}
                     </button>
                   ))}
@@ -407,7 +411,7 @@ export function MissionPanel({
             title={expanded ? 'Collapse' : 'Expand'}
             onClick={() => setExpanded(!expanded)}
           >
-            <Icon icon={ChevronDown} className="disclosure" />
+            <Icon icon={ChevronDownRegular} className="disclosure" />
           </button>
         </span>
       </div>
@@ -437,7 +441,7 @@ export function MissionPanel({
                     >
                       {name}
                       <span className="digits">{mine.length}</span>
-                      <Icon icon={ChevronDown} className="disclosure" />
+                      <Icon icon={ChevronDown16Regular} className="disclosure" />
                     </button>
                   ) : name}
                 </h3>

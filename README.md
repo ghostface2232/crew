@@ -132,7 +132,7 @@ Antigravity is enabled by default and carries a Terms of Service risk: read [doc
 
 ## Current status
 
-Version 0.4.0 with desktop apps for macOS and Windows. Usage-based routing works when AgentGauge is installed. Planned work is in [docs/06-roadmap.md](docs/06-roadmap.md); the surveys behind it are in [research/](research/).
+Version 0.5.3 with desktop apps for macOS and Windows. Usage-based routing works when AgentGauge is installed. Planned work is in [docs/06-roadmap.md](docs/06-roadmap.md); the surveys behind it are in [research/](research/).
 
 ## Updating the documentation
 

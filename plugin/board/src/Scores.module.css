@@ -29,7 +29,6 @@
   animation-delay: calc(var(--order) * 90ms + 260ms);
 }
 .trophy { display: grid; place-items: center; color: #e6b800; margin-bottom: 2px; }
-.trophy svg { fill: color-mix(in srgb, #ffcc00 35%, transparent); }
 .avatar {
   position: relative;
   display: grid;

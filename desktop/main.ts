@@ -76,6 +76,7 @@ const FRAME_CSS = `
   min-height: ${TOP_BAR_HEIGHT}px;
   padding-inline-end: max(var(--window-inset), calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) + 12px));
 }
+@media (max-width: 760px) { :root dialog.detail-panel { top: ${TOP_BAR_HEIGHT + 4}px; } }
 :root dialog.sheet { max-height: calc(100vh - ${2 * (TOP_BAR_HEIGHT + 4)}px); }`;
 /** Windows 11 22H2 (build 22621) and later draw a backdrop material behind a transparent window; older systems keep the canvas. */
 const BACKDROP = process.platform === 'win32' && Number(os.release().split('.')[2]) >= 22621 ? 'mica' : null;

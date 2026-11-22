@@ -255,7 +255,7 @@ export class CodexAdapter implements Adapter {
     const peer = this.peer;
     const children = [...run.busyChildren];
     run.held = null;
-    run.busyChildren.clear();
+    for (const threadId of run.busyChildren.keys()) this.childSettled(run, threadId);
     for (const request of run.pending.splice(0)) request.resolve({ approve: false, cancelled: true });
     if (!peer) return;
     const acks = children.filter(([, turnId]) => turnId).map(([threadId, turnId]) => peer.request('turn/interrupt', { threadId, turnId }, RPC_TIMEOUT_MS));
@@ -585,13 +585,20 @@ export class CodexAdapter implements Adapter {
     if (id && owner) {
       const confirmed = run ? run.turnId : owner.busyChildren.get(threadId);
       const key = `${threadId}\0${id}`;
-      // A new turn can report before turn/start answers. Until it does, only previously ended ids are stale.
-      if (confirmed ? id !== confirmed : owner.ended?.has(key)) return;
-      if (!confirmed && run && !run.awaitingTurn && method !== 'turn/started') return;
+      if (id !== confirmed && owner.ended?.has(key)) {
+        // Cumulative thread usage can arrive after its turn completes.
+        if (method !== 'thread/tokenUsage/updated') return;
+      } else if (confirmed && id !== confirmed) {
+        if (run || method !== 'turn/started') return;
+        // A child can start its next turn before Crew hears the previous completion.
+        (owner.ended ??= new Set()).add(`${threadId}\0${confirmed}`);
+      }
       if (method === 'turn/completed') (owner.ended ??= new Set()).add(key);
     }
-    if (method === 'turn/started' || method === 'thread/closed') {
-      for (const key of owner?.items.keys() ?? []) if (key.startsWith(`${threadId}\0`)) owner?.items.delete(key);
+    if (method === 'thread/closed' || (!run && method === 'turn/started')) {
+      for (const [key, item] of owner?.items ?? []) {
+        if (key.startsWith(`${threadId}\0`) && (method === 'thread/closed' || item.turnId !== id)) owner?.items.delete(key);
+      }
     }
     if (method === 'item/started' && owner && ['mcpToolCall', 'fileChange'].includes(p.item?.type)) {
       const item = p.item;
@@ -644,7 +651,6 @@ export class CodexAdapter implements Adapter {
       case 'turn/started':
         run.turnId = p.turn.id;
         run.awaitingTurn = null;
-        run.message = '';
         ctl.phase('working');
         break;
       case 'item/started':
@@ -684,9 +690,10 @@ export class CodexAdapter implements Adapter {
         if (p.willRetry) ctl.progress(`retrying: ${p.error.message}`);
         break;
       case 'turn/completed': {
+        run.awaitingTurn = null;
+        run.turnId = null;
         if (run.busyChildren.size && p.turn?.status === 'completed' && !run.interrupt) {
           // Collecting the result now would miss what a sub-agent still writes.
-          run.turnId = null;
           run.held = p;
           ctl.phase(`waiting for ${run.busyChildren.size} sub-agent(s) to finish`);
           break;
@@ -714,20 +721,20 @@ export class CodexAdapter implements Adapter {
 
   private endTurn(run: Run, p: any): void {
     const { ctl } = run;
-    run.turnId = null;
-    run.awaitingTurn = null;
     run.held = null;
     run.crewCalls.clear();
     run.items.clear();
     for (const request of run.pending.splice(0)) request.resolve(null);
     // A failed or interrupted parent ends the job at once, so its sub-agents must not go on editing.
-    if (p.turn?.status !== 'completed') {
+    if (p.turn?.status !== 'completed' || run.interrupt) {
       this.interruptChildren(run);
-      run.busyChildren.clear();
+      for (const threadId of run.busyChildren.keys()) this.childSettled(run, threadId);
     }
+    const report = run.message;
+    run.message = '';
     const turn = p.turn;
     if (run.interrupt || turn.status === 'interrupted') ctl.cancelled();
-    else if (turn.status === 'completed') ctl.done(run.message);
+    else if (turn.status === 'completed') ctl.done(report);
     else {
       const info = turn.error?.codexErrorInfo;
       const message = turn.error?.message ?? 'turn failed';

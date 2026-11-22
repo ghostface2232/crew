@@ -18,7 +18,7 @@ import { writeFakeBin } from './fake-bin.ts';
  * reports right after creating the session; `modeDelay` holds its answer to set_mode; `hold` keeps a turn open, and
  * `ignoreCancel` keeps it open past a cancel.
  */
-function server(options: { append?: boolean; form?: unknown; mode?: string; refuseMode?: boolean; updates?: unknown[]; after?: unknown[]; switched?: string; modeDelay?: number; hold?: boolean; ignoreCancel?: boolean; usage?: unknown; resumeSwitched?: string } = {}): string {
+function server(options: { append?: boolean; form?: unknown; mode?: string; refuseMode?: boolean; updates?: unknown[]; after?: unknown[]; switched?: string; modeDelay?: number; hold?: boolean; ignoreCancel?: boolean; usage?: unknown; resumeSwitched?: string; cancelDelay?: number } = {}): string {
   return `
     const fs = require('node:fs');
     const path = require('node:path');
@@ -62,7 +62,10 @@ function server(options: { append?: boolean; form?: unknown; mode?: string; refu
           send({ id, result: { stopReason: 'end_turn', ...(options.usage ? { usage: options.usage } : {}) } });
           setTimeout(() => { for (const update of options.after ?? []) send({ method: 'session/update', params: { sessionId: 's1', update } }); }, 50);
         }
-      } else if (method === 'session/cancel') { if (!options.ignoreCancel) send({ id: promptId, result: { stopReason: 'cancelled' } }); }
+      } else if (method === 'session/cancel') {
+        const cancelled = promptId;
+        if (!options.ignoreCancel) setTimeout(() => send({ id: cancelled, result: { stopReason: 'cancelled' } }), options.cancelDelay ?? 0);
+      }
       else if (method === 'session/close') send({ id, result: {} });
       else if (id === 'form') {
         send({ method: 'session/update', params: { sessionId: 's1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: JSON.stringify(message.result) } } } });
@@ -314,6 +317,21 @@ test('a switch reported right after a restore is not overwritten by the restore\
   await h.ended(job);
   const order = fs.readFileSync(path.join(h.home, 'log.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line).method);
   assert.deepEqual(order.slice(order.indexOf('session/resume'), order.indexOf('session/resume') + 3), ['session/resume', 'session/set_mode', 'session/prompt']);
+});
+
+test('a cancelled turn that ends late does not close the session a follow-up restored', { timeout: 20000 }, async (t) => {
+  const h = harness(t, server({ hold: true, cancelDelay: 6000 }));
+  const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' });
+  while (job.phase !== 'working' || !fs.existsSync(path.join(h.home, 'log.jsonl')) || !h.sent('session/prompt').length) await new Promise((resolve) => setTimeout(resolve, 20));
+  // Unconfirmed after five seconds, the cancel closes the session itself.
+  await h.jobs.cancel(job.id);
+  assert.equal(h.sent('session/close').length, 1);
+  await h.jobs.reply(job.id, { message: 'start over' });
+  while (h.sent('session/prompt').length < 2) await new Promise((resolve) => setTimeout(resolve, 20));
+  // The first prompt's late answer arrives about a second later.
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  assert.equal(h.sent('session/close').length, 1);
+  assert.equal(job.state, 'running');
 });
 
 test('a follow-up waits for a stopped turn to end and starts a turn of its own', { timeout: 20000 }, async (t) => {

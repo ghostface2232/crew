@@ -300,7 +300,8 @@ export class AntigravityAdapter implements Adapter {
         if (reasons.length && this.peer === peer && this.runs.get(sessionId) === run && !isTerminal(ctl.job)) {
           ctl.resumed();
           this.prompt(peer, run, reasons.join('\n\n'));
-        } else this.close(peer, sessionId);
+        // A run that a cancel or a stop replaced no longer owns the session; a follow-up may have restored it.
+        } else if (this.runs.get(sessionId) === run) this.close(peer, sessionId);
       });
   }
 

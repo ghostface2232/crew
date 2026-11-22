@@ -234,3 +234,26 @@ test('a turn ended for too many denials fails apart from other errors, pointing 
     assert.equal(failures[0][1], undefined, 'a denial stop is not a usage limit');
   }
 });
+
+test('the context window shows how much the latest request filled', () => {
+  const h = harness();
+  const context: number[][] = [];
+  Object.assign(h.ctl, { tokens: () => {}, context: (used: number, size: number) => context.push([used, size]) });
+  const usage = (modelContextWindow: number | null) => h.notify('thread/tokenUsage/updated', { tokenUsage: {
+    total: { totalTokens: 50_000, inputTokens: 45_000, cachedInputTokens: 30_000, outputTokens: 5_000 },
+    last: { totalTokens: 21_000 }, modelContextWindow,
+  } });
+  usage(258_400);
+  usage(null);
+  assert.deepEqual(context, [[21_000, 258_400]]);
+});
+
+test('a running turn\'s diff is passed on only for the current turn', () => {
+  const h = harness();
+  const diffs: string[] = [];
+  Object.assign(h.ctl, { diff: (text: string) => diffs.push(text) });
+  h.notify('turn/started', { turn: { id: 'turn' } });
+  h.notify('turn/diff/updated', { diff: 'diff --git a/x b/x' });
+  h.notify('turn/diff/updated', { turnId: 'old-turn', diff: 'stale' });
+  assert.deepEqual(diffs, ['diff --git a/x b/x']);
+});

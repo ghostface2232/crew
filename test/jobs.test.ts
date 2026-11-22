@@ -2630,3 +2630,21 @@ test('follow-ups count the turns the lead sent a worker back for, not retries of
   assert.equal(followUps({ turns: 3, approvals: [approval] }), 1);
   assert.equal(followUps({ turns: 2, approvals: [approval, approval] }), 0);
 });
+
+test('a running turn\'s diff is kept in memory, bounded, and dropped when the job ends', async (t) => {
+  let ctl!: JobCtl;
+  const { jobs, home } = harness((started) => { ctl = started; });
+  t.after(() => { jobs.flush(); fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }); });
+  const job = await jobs.create({ kind: 'delegate', task: 'edit', cwd: home, isolation: 'in_place' });
+  while (!ctl) await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(jobs.liveDiff(job.id), null);
+  ctl.diff('diff --git a/x b/x');
+  assert.equal(jobs.liveDiff(job.id)?.diff, 'diff --git a/x b/x');
+  assert.equal(job.liveDiff?.chars, 18);
+  ctl.diff('+'.repeat(250_000));
+  assert.match(jobs.liveDiff(job.id)!.diff, /\n… 50,000 more characters; the worktree has the whole change\.$/);
+  ctl.done('## Outcome\ndone');
+  await settled(jobs, job);
+  assert.equal(jobs.liveDiff(job.id), null);
+  assert.equal(job.liveDiff, undefined);
+});

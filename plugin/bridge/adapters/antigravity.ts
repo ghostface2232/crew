@@ -37,6 +37,8 @@ interface Run {
   switched?: string;
   /** The switch back from it; the turn's outcome waits for it. Never rejects. */
   restoring?: Promise<void>;
+  /** A message added during the turn: its prompt request carries the rest of the turn. */
+  next?: Promise<any>;
 }
 
 type ToolCall = { kind?: string; title?: string; locations?: { path?: string }[]; rawInput?: unknown; _meta?: { mcpServerName?: string; mcpToolName?: string } };
@@ -146,7 +148,7 @@ export class AntigravityAdapter implements Adapter {
       run = newRun(ctl);
       this.runs.set(sessionId, run);
     }
-    if (run.prompting) throw new Error('Antigravity is still working on the previous message. Wait for it to finish, or cancel first.');
+    if (run.prompting) return this.steer(peer, run, message);
     this.prompt(peer, run, message, restore ? async () => {
       const res = await peer.request(this.restoreMethod!, { sessionId, cwd: ctl.job.cwd, mcpServers: [crewServer(ctl)], ...this.instructions(ctl) }, RPC_TIMEOUT_MS);
       this.noteMode(sessionId, sessionMode(res));
@@ -237,6 +239,7 @@ export class AntigravityAdapter implements Adapter {
     run.violation = undefined;
     run.switched = undefined;
     run.restoring = undefined;
+    run.next = undefined;
     run.sent = false;
     ctl.phase('working');
     const turn = async (): Promise<any> => {
@@ -245,7 +248,17 @@ export class AntigravityAdapter implements Adapter {
       await this.keepAsking(peer, sessionId);
       if (run.cancelling || isTerminal(ctl.job) || this.runs.get(sessionId) !== run) return { stopReason: 'cancelled' };
       run.sent = true;
-      const res = await peer.request('session/prompt', { sessionId, prompt: [{ type: 'text', text }] });
+      let res = await peer.request('session/prompt', { sessionId, prompt: [{ type: 'text', text }] });
+      this.counted(run, res?.usage);
+      // A message added meanwhile ended that request; the turn goes on under the message's own.
+      while (run.next) {
+        const next = run.next;
+        run.next = undefined;
+        const result = await next;
+        if (result?.refused) throw result.refused;
+        res = result;
+        this.counted(run, res?.usage);
+      }
       // A switch back that agy refused during the turn decides its outcome, even when the reply came first.
       await run.restoring;
       return res;
@@ -279,8 +292,51 @@ export class AntigravityAdapter implements Adapter {
         if (reasons.length && this.peer === peer && this.runs.get(sessionId) === run && !isTerminal(ctl.job)) {
           ctl.resumed();
           this.prompt(peer, run, reasons.join('\n\n'));
-        }
+        } else this.close(peer, sessionId);
       });
+  }
+
+  /**
+   * Closes a session whose turn has ended. Since agy 1.5.10 that stops its subagents and background work too, which
+   * would otherwise go on with no turn to answer their requests. A follow-up restores the session (reply).
+   */
+  private close(peer: RpcPeer, sessionId: string): void {
+    if (!this.canClose || this.peer !== peer || !this.loaded.delete(sessionId)) return;
+    this.modes.delete(sessionId);
+    peer.request('session/close', { sessionId }, RPC_TIMEOUT_MS).catch(() => {});
+  }
+
+  /** agy reports each prompt's tokens; a job's are the sum over its prompts. Its input excludes what was read from cache. */
+  private counted(run: Run, usage: any): void {
+    if (!usage || typeof usage.totalTokens !== 'number') return;
+    const { ctl } = run;
+    const before = ctl.job.tokenUse ?? { input: 0, cachedInput: 0, output: 0 };
+    const cached = usage.cachedReadTokens ?? 0;
+    ctl.tokens((ctl.job.tokens ?? 0) + usage.totalTokens, {
+      input: before.input + (usage.inputTokens ?? 0) + cached,
+      cachedInput: before.cachedInput + cached,
+      output: before.output + (usage.outputTokens ?? 0),
+    });
+  }
+
+  /**
+   * Adds a message to the turn under way. agy 1.5.14 then answers the running prompt request at once with end_turn and
+   * carries the turn on, message included, under the new request. It refuses one at once while a permission or a
+   * question waits.
+   */
+  private async steer(peer: RpcPeer, run: Run, message: string): Promise<void> {
+    if (run.pending.length) throw new Error('Antigravity is waiting for an approval or an answer, and takes no message until it has one. Answer it first, or cancel.');
+    if (!run.sent) throw new Error('Antigravity is still starting this turn. Send the message again in a moment.');
+    const next = peer.request('session/prompt', { sessionId: run.ctl.job.sessionId, prompt: [{ type: 'text', text: message }] })
+      .then((res) => res, (refused) => ({ refused }));
+    // Taken before the earlier request is answered, so the turn waits for this one.
+    run.next = next;
+    const early = await Promise.race([next, delay(2_000, undefined, { ref: false })]);
+    if (early?.refused) {
+      if (run.next === next) run.next = undefined;
+      throw early.refused;
+    }
+    run.ctl.progress('message added to the running turn');
   }
 
   private noteMode(sessionId: string, mode: string | undefined): void {
@@ -457,6 +513,9 @@ export class AntigravityAdapter implements Adapter {
             this.stop(run, (err as Error).message);
           });
         }
+        break;
+      case 'usage_update':
+        if (typeof update.used === 'number' && typeof update.size === 'number') ctl.context(update.used, update.size);
         break;
       case 'plan': {
         const step = update.entries?.find((e: any) => e.status === 'in_progress');

@@ -657,6 +657,11 @@ export class CodexAdapter implements Adapter {
           cachedInput: p.tokenUsage.total.cachedInputTokens ?? 0,
           output: p.tokenUsage.total.outputTokens ?? 0,
         });
+        // The latest request holds the whole context, so its size is how full the window is.
+        if (p.tokenUsage.modelContextWindow) ctl.context(p.tokenUsage.last?.totalTokens ?? 0, p.tokenUsage.modelContextWindow);
+        break;
+      case 'turn/diff/updated':
+        if (!run.turnId || p.turnId === run.turnId) ctl.diff(p.diff);
         break;
       case 'model/rerouted':
         // The rest of the turn runs on the other model, so scores and ratings must name that one.

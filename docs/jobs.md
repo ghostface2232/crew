@@ -58,6 +58,8 @@ Undoing a round changes files only, not the worker's conversation. The next foll
 
 A worker's worktree starts from `HEAD` (or `base`) and does not follow later commits. `reply` with `sync: true` merges the lead's current `HEAD` into the worker's branch before the follow-up turn and advances `worktree.base` so results still show only the worker's changes. On conflict, the merge aborts (leaving worktree, base, and result unchanged) and the follow-up still runs, naming the lead commit and conflicting files in the prompt and adding a job note. Other sync failures reject the reply. Syncing blocks discard and round changes. Rounds still replay from `roundsBase` so pre-sync undos survive.
 
+A message sent while a turn runs joins that turn. Codex takes it through `turn/steer`. Antigravity takes it as another `session/prompt`, which agy 1.5.14 answers at once while the running turn goes on to reply to it; agy refuses one while a permission request or question waits, so Crew refuses it then too. When an Antigravity turn ends, Crew closes the session (`session/close`), which since agy 1.5.10 also stops its subagents and background work, and a follow-up restores it with `session/resume`. agy 1.5.14 kept the conversation across a close and resume.
+
 A job whose worktree was discarded takes no further turn. See [cleanup and garbage collection](#cleanup-and-garbage-collection) for discarded and orphaned worktrees.
 
 ## Question jobs
@@ -84,7 +86,7 @@ For plugin-enabled threads and eligibility, see [Codex plugins](sandbox.md#codex
 
 ## Token use
 
-Where reported (Codex), a job records `tokenUse` with total input, cached input, output, and what the latest turn added. `status`, the board, and the desktop apps display it so follow-up turns show how much input was cached.
+A job records `tokenUse` with total input, cached input, output, and what the latest turn added. Codex reports the running total; for Antigravity, Crew adds up the usage that agy returns with each prompt. `status`, the board, and the desktop apps display it so follow-up turns show how much input was cached. A job also records `context`, how full the worker's context window is, from Codex's latest request (`last.totalTokens` of `modelContextWindow`) or agy's `usage_update`. `status` and the board show it.
 
 Token savings measured on Codex CLI 0.167.0 for a no-op question (dropping 123 user skills, 22 app connectors, recommended plugins, and computer-use REPL tools):
 

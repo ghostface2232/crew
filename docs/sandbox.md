@@ -49,7 +49,7 @@ The bridge enforces exclusivity, network access, review snapshots, and token den
 
 ## Antigravity's own settings
 
-Crew enforces Antigravity's role permissions by answering `session/request_permission`. It never changes Antigravity's settings. So it sees an action in advance only when agy asks about it, and agy asks before every edit and command only in its `default` mode.
+Crew enforces Antigravity's role permissions by answering `session/request_permission`. It never changes Antigravity's settings. So it sees an action in advance only when agy asks about it. agy asks before edits and commands only in its `default` mode, and even there it runs commands covered by the user's own allow rules without asking.
 
 | Action (agy 1.5.14, measured 2026-11-22) | `default` | `accept-edits` | `auto` |
 | --- | --- | --- | --- |
@@ -62,11 +62,11 @@ Crew enforces Antigravity's role permissions by answering `session/request_permi
 
 These results were measured with Non-Workspace Access set to allow and the user's allow rules in place.
 
-- **Mode.** Crew keeps every session in `default`. After `session/new` and every restore, if a session starts in another mode, Crew switches it back to `default` and fails the job if agy refuses. Crew undoes any `current_mode_update` during a turn and any switch reported between turns before the next prompt. It also refuses the agent's own `switch_mode`. While agy 1.5.14 started ACP sessions in `default` even when the saved Agent Mode was `auto`, its default for other sessions became Auto in 1.5.7, so Crew checks the mode instead of assuming it. Crew does not offer Auto as an option because the role table above does not survive it.
-- **Actions that ran without asking.** These are commands covered by the user's allow rules and reads permitted by Non-Workspace Access. Crew sees them only once agy reports them `completed`, then checks them against the role (`unasked` in `adapters/antigravity.ts`). It skips calls that end `failed`—which may never have run—and calls that end while the turn is being cancelled.
+- **Mode.** Crew keeps every session in `default`. It records the mode agy reports for each session, from `session/new`, a restore, and every `current_mode_update` (between turns and during a restore too). Before every prompt, Crew switches a session that is in another mode back to `default`. A turn is taken before that check, so a cancel or a second message meanwhile sends no prompt. If agy refuses, the job fails. During a turn, Crew undoes a switch at once, and the turn's outcome waits for that: a refusal fails the job even when the turn ended first. It also refuses the agent's own `switch_mode`. While agy 1.5.14 started ACP sessions in `default` even when the saved Agent Mode was `auto`, its default for other sessions became Auto in 1.5.7, so Crew checks the mode instead of assuming it. Crew does not offer Auto as an option because the role table above does not survive it.
+- **Actions that ran without asking.** These are commands covered by the user's allow rules and reads permitted by Non-Workspace Access. Crew sees them only once agy reports them `completed`, then checks them against the role (`unasked` in `adapters/antigravity.ts`). It skips calls that came to it as a permission request and calls that end `failed`, which may never have run.
   - An engineer's command is permitted by the user's own rule, so Crew notes it in the result and lets the turn continue.
-  - An edit, delete, move, or command outside the role stops the turn, and so does any read of `~/.crew/token`. Examples: a command in a reviewer's, editor's, or read-only job, or an edit outside the workspace. The job fails and reports what ran and which setting to narrow.
-  - Other kinds outside the role are noted.
+  - An edit, delete, move, or command outside the role stops the turn, and so does any read of `~/.crew/token`. Examples: a command in a reviewer's, editor's, or read-only job, or an edit outside the workspace. The job fails at once and reports what ran and which setting to narrow, or, after a mode switch during the turn, that the switch let it through. Crew cancels the turn, and closes the session where agy supports it if agy has not stopped 5 seconds later.
+  - Other kinds outside the role are noted, and so is anything that completes while the user's cancel is ending the turn.
   - By then, the action has already run. This check reports it and stops the rest of the turn; it does not prevent the action itself.
 - **Not used.**
   - `agy` with `--settings` before `acp`: deny rules, `toolPermission: "strict"`, `allowNonWorkspaceAccess: false`, and `agentMode` passed this way did not change an ACP session. `agy acp` itself rejects `--settings`.

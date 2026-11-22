@@ -15,7 +15,10 @@ type Grant = { program: string; subcommand: string; cwd?: string; label: string 
 
 interface Run {
   ctl: JobCtl;
+  /** Set from the moment a turn is taken, through the mode check and any restore, until it ends. */
   prompting: Promise<void> | null;
+  /** The prompt has gone to agy. Updates before that are a restore replaying the session, not this turn. */
+  sent: boolean;
   cancelling: boolean;
   /** Text since the last tool call. */
   message: string;
@@ -28,10 +31,12 @@ interface Run {
   declined: string[];
   /** This turn's tool calls as agy reported them, and whether each came to Crew as a permission request. */
   calls: Map<string, ToolCall & { asked?: boolean; checked?: boolean }>;
-  /** Why Crew stopped the turn: an action ran outside the role without asking. */
+  /** Why Crew stopped the turn: an action ran outside the role without asking, or agy would not leave a mode. */
   violation?: string;
-  /** The mode agy last reported for the session, including between turns. */
-  mode?: string;
+  /** A mode agy switched the session to during this turn. */
+  switched?: string;
+  /** The switch back from it; the turn's outcome waits for it. Never rejects. */
+  restoring?: Promise<void>;
 }
 
 type ToolCall = { kind?: string; title?: string; locations?: { path?: string }[]; rawInput?: unknown; _meta?: { mcpServerName?: string; mcpToolName?: string } };
@@ -69,6 +74,8 @@ export class AntigravityAdapter implements Adapter {
   private runs = new Map<string, Run>();
   /** Sessions the current server process has in memory. */
   private loaded = new Set<string>();
+  /** The mode agy last reported for each session, numbered so that a switch back cannot overwrite a newer report. */
+  private modes = new Map<string, { mode: string; seq: number }>();
   private restoreMethod: 'session/resume' | 'session/load' | null = null;
   private canClose = false;
   /** The server takes instructions as an addition to its system prompt. */
@@ -101,8 +108,8 @@ export class AntigravityAdapter implements Adapter {
     ctl.session(sessionId);
 
     // Every edit and command must reach onRequest. agy's saved Agent Mode does not reach ACP sessions as of 1.5.14,
-    // but its default for other sessions became Auto in 1.5.7, so the mode is checked rather than assumed.
-    await this.keepAsking(peer, sessionId, res);
+    // but its default for other sessions became Auto in 1.5.7, so the mode is checked before every prompt.
+    this.noteMode(sessionId, sessionMode(res));
     const wanted = ctl.job.model ?? (ctl.job.agentDefault ? undefined : this.config.antigravity.model);
     // A tier names a family ("hydrogen"); the session lists the exact values this account has.
     // A family the session does not list is left to the agent's default; a model named outright is still sent, so a typo shows.
@@ -131,17 +138,8 @@ export class AntigravityAdapter implements Adapter {
   async reply(ctl: JobCtl, message: string): Promise<void> {
     const peer = await this.ensure();
     const sessionId = ctl.job.sessionId!;
-    if (!this.loaded.has(sessionId)) {
-      if (!this.restoreMethod) throw new Error('This Antigravity server cannot restore sessions. Continue it from the Antigravity CLI.');
-      const res = await peer.request(this.restoreMethod, { sessionId, cwd: ctl.job.cwd, mcpServers: [crewServer(ctl)], ...this.instructions(ctl) }, RPC_TIMEOUT_MS);
-      await this.keepAsking(peer, sessionId, res);
-      // A server that restores a session at its default level would run the next turn above the job's effort.
-      const level = ctl.job.effort ? pickEffort(configOption(res, 'thought_level')?.options, ctl.job.effort) : undefined;
-      const restored = level && level !== configOption(res, 'thought_level')?.currentValue
-        ? await peer.request('session/set_config_option', { sessionId, configId: 'thought_level', value: level }, RPC_TIMEOUT_MS) : res;
-      ctl.model(sessionModel(restored) ?? sessionModel(res) ?? ctl.job.resolvedModel ?? ctl.job.model ?? this.config.antigravity.model, sessionEffort(restored) ?? ctl.job.resolvedEffort);
-      this.loaded.add(sessionId);
-    }
+    const restore = !this.loaded.has(sessionId);
+    if (restore && !this.restoreMethod) throw new Error('This Antigravity server cannot restore sessions. Continue it from the Antigravity CLI.');
     if (isTerminal(ctl.job)) return;
     let run = this.runs.get(sessionId);
     if (!run) {
@@ -149,11 +147,16 @@ export class AntigravityAdapter implements Adapter {
       this.runs.set(sessionId, run);
     }
     if (run.prompting) throw new Error('Antigravity is still working on the previous message. Wait for it to finish, or cancel first.');
-    if (run.mode && run.mode !== ASKING_MODE) {
-      await this.keepAsking(peer, sessionId, { modes: { currentModeId: run.mode } });
-      run.mode = ASKING_MODE;
-    }
-    this.prompt(peer, run, message);
+    this.prompt(peer, run, message, restore ? async () => {
+      const res = await peer.request(this.restoreMethod!, { sessionId, cwd: ctl.job.cwd, mcpServers: [crewServer(ctl)], ...this.instructions(ctl) }, RPC_TIMEOUT_MS);
+      this.noteMode(sessionId, sessionMode(res));
+      // A server that restores a session at its default level would run the next turn above the job's effort.
+      const level = ctl.job.effort ? pickEffort(configOption(res, 'thought_level')?.options, ctl.job.effort) : undefined;
+      const restored = level && level !== configOption(res, 'thought_level')?.currentValue
+        ? await peer.request('session/set_config_option', { sessionId, configId: 'thought_level', value: level }, RPC_TIMEOUT_MS) : res;
+      ctl.model(sessionModel(restored) ?? sessionModel(res) ?? ctl.job.resolvedModel ?? ctl.job.model ?? this.config.antigravity.model, sessionEffort(restored) ?? ctl.job.resolvedEffort);
+      this.loaded.add(sessionId);
+    } : undefined);
   }
 
   async answer(ctl: JobCtl, approve: boolean, message?: string, opts?: { forJob?: boolean; by?: 'lead' }): Promise<void> {
@@ -211,6 +214,7 @@ export class AntigravityAdapter implements Adapter {
       });
       this.runs.delete(sessionId);
       this.loaded.delete(sessionId);
+      this.modes.delete(sessionId);
     } finally {
       run.cancelling = false;
     }
@@ -220,19 +224,36 @@ export class AntigravityAdapter implements Adapter {
     this.peer?.close();
   }
 
-  /** A prompt request stays open for the whole turn; its response is the turn's outcome. */
-  private prompt(peer: RpcPeer, run: Run, text: string): void {
+  /**
+   * Takes the turn at once, so that a cancel or a second message during the checks before it sees a turn under way.
+   * A prompt request stays open for the whole turn; its response is the turn's outcome.
+   */
+  private prompt(peer: RpcPeer, run: Run, text: string, prepare?: () => Promise<void>): void {
     const { ctl } = run;
+    const sessionId = ctl.job.sessionId!;
     run.message = '';
     run.earlier = '';
     run.calls.clear();
     run.violation = undefined;
+    run.switched = undefined;
+    run.restoring = undefined;
+    run.sent = false;
     ctl.phase('working');
-    run.prompting = peer
-      .request('session/prompt', { sessionId: ctl.job.sessionId, prompt: [{ type: 'text', text }] })
+    const turn = async (): Promise<any> => {
+      await prepare?.();
+      // Every prompt goes out in the asking mode, whatever agy reported since the last one.
+      await this.keepAsking(peer, sessionId);
+      if (run.cancelling || isTerminal(ctl.job) || this.runs.get(sessionId) !== run) return { stopReason: 'cancelled' };
+      run.sent = true;
+      const res = await peer.request('session/prompt', { sessionId, prompt: [{ type: 'text', text }] });
+      // A switch back that agy refused during the turn decides its outcome, even when the reply came first.
+      await run.restoring;
+      return res;
+    };
+    run.prompting = turn()
       .then(
         (res) => {
-          if (this.runs.get(ctl.job.sessionId!) !== run) return;
+          if (this.runs.get(sessionId) !== run) return;
           if (run.violation) ctl.fail(run.violation);
           else if (res.stopReason === 'cancelled' || run.cancelling) ctl.cancelled();
           else if (res.stopReason === 'end_turn') {
@@ -244,32 +265,64 @@ export class AntigravityAdapter implements Adapter {
           } else ctl.fail(`Antigravity stopped early: ${res.stopReason}`);
         },
         (err) => {
-          if (this.peer === peer && this.runs.get(ctl.job.sessionId!) !== run) return;
+          if (this.peer === peer && this.runs.get(sessionId) !== run) return;
           const detail = `${err.message}${err instanceof RpcError && err.data ? ` ${JSON.stringify(err.data)}` : ''}`;
           ctl.fail(run.violation ?? detail, { limit: !run.violation && LIMIT_PATTERN.test(detail) });
         },
       )
       .finally(() => {
         run.prompting = null;
+        run.sent = false;
         // The turn is over, so nothing it asked for can still be granted.
         drop(run);
         const reasons = run.declined.splice(0);
-        if (reasons.length && this.peer === peer && this.runs.get(ctl.job.sessionId!) === run && !isTerminal(ctl.job)) {
+        if (reasons.length && this.peer === peer && this.runs.get(sessionId) === run && !isTerminal(ctl.job)) {
           ctl.resumed();
           this.prompt(peer, run, reasons.join('\n\n'));
         }
       });
   }
 
-  /** Puts a session back in the mode where agy asks before edits and commands, or fails the job when it cannot. */
-  private async keepAsking(peer: RpcPeer, sessionId: string, response: any): Promise<void> {
-    const mode = sessionMode(response);
-    if (mode === undefined || mode === ASKING_MODE) return;
+  private noteMode(sessionId: string, mode: string | undefined): void {
+    if (mode) this.modes.set(sessionId, { mode, seq: (this.modes.get(sessionId)?.seq ?? 0) + 1 });
+  }
+
+  /** Puts a session back in the mode where agy asks before edits and commands, or throws when agy refuses. */
+  private async keepAsking(peer: RpcPeer, sessionId: string): Promise<void> {
+    const known = this.modes.get(sessionId);
+    if (!known || known.mode === ASKING_MODE) return;
     try {
       await peer.request('session/set_mode', { sessionId, modeId: ASKING_MODE }, RPC_TIMEOUT_MS);
     } catch (err) {
-      throw new Error(`Antigravity's session is in "${mode}" mode, where it does not ask before edits and commands, and it refused to switch to "${ASKING_MODE}": ${(err as Error).message}`);
+      throw new Error(`Antigravity's session is in "${known.mode}" mode, where it does not ask before edits and commands, and it refused to switch to "${ASKING_MODE}": ${(err as Error).message}`);
     }
+    // A report that came in meanwhile is newer than this switch, and is checked again before the next prompt.
+    if (this.modes.get(sessionId)?.seq === known.seq) this.noteMode(sessionId, ASKING_MODE);
+  }
+
+  /**
+   * Ends the turn for a reason Crew found. The job fails now, whether or not agy confirms the cancel: agy may go on
+   * past a cancel it ignores, and closing the session stops it and its background work.
+   */
+  private stop(run: Run, message: string): void {
+    if (run.violation) return;
+    run.violation = message;
+    // Nothing the turn asks for after this can be granted.
+    drop(run);
+    run.ctl.fail(message);
+    const peer = this.peer;
+    const sessionId = run.ctl.job.sessionId!;
+    const prompting = run.prompting;
+    if (!peer || !prompting) return;
+    peer.notify('session/cancel', { sessionId });
+    if (!this.canClose) return;
+    void Promise.race([prompting.then(() => true), delay(5_000, false, { ref: false })]).then(async (stopped) => {
+      if (stopped || this.runs.get(sessionId) !== run) return;
+      this.runs.delete(sessionId);
+      this.loaded.delete(sessionId);
+      this.modes.delete(sessionId);
+      await peer.request('session/close', { sessionId }, RPC_TIMEOUT_MS);
+    }).catch(() => {});
   }
 
   /**
@@ -281,29 +334,33 @@ export class AntigravityAdapter implements Adapter {
     const { ctl } = run;
     const { job } = ctl;
     let verdict = decide(job.kind, job.cwd, call, job.sandbox === 'read-only');
-    // A report may omit the input that a request must carry; the user's own rule has already allowed the action.
+    // A report may omit the input that a request must carry. That rule keeps the user from approving what they cannot
+    // see; here nothing is left to approve, so the action is reported like any other the engineer ran unasked.
     if (typeof verdict === 'object' && verdict.refuse === `${call.kind ?? 'other'} request without its input`) verdict = 'ask';
     if (verdict === 'allow') return;
     const what = `${call.kind ?? 'other'}: ${call.title ?? 'tool call'}`;
+    // In the asking mode only the user's own rules let an action through; after a switch, the switch did.
+    const switched = run.switched && `its session had switched to "${run.switched}" mode`;
     if (verdict === 'ask') {
-      ctl.progress(`ran without asking, under the user's Antigravity rules (${what})`);
-      ctl.note(`Antigravity ran an action without asking Crew, because a rule in the user's Antigravity settings allows it: ${what}`);
+      const cause = switched || "a rule in the user's Antigravity settings allows it";
+      ctl.progress(`ran without asking, because ${cause} (${what})`);
+      ctl.note(`Antigravity ran an action without asking Crew, because ${cause}: ${what}`);
       return;
     }
-    const stop = CHANGING_KINDS.includes(call.kind ?? '') || verdict.refuse === 'the Crew token file';
+    const cause = switched || "the user's Antigravity settings allow it";
     const role = `${job.sandbox === 'read-only' ? 'read-only ' : ''}${ROLE_NAMES[job.kind]}`;
     const reason = verdict.refuse === call.kind ? what : `${verdict.refuse}: ${what}`;
-    const message = `Antigravity ran an action outside the ${role} role without asking Crew (${reason}), because the user's Antigravity settings allow it.`;
+    const message = `Antigravity ran an action outside the ${role} role without asking Crew (${reason}), because ${cause}.`;
+    // A turn being cancelled is ending anyway, and a cancel must not read as a violation; what ran is still reported.
+    const stop = !run.cancelling && (CHANGING_KINDS.includes(call.kind ?? '') || verdict.refuse === 'the Crew token file');
     ctl.progress(`${stop ? 'stopped' : 'reported'}: ${message}`);
     if (!stop) {
       ctl.note(message);
       return;
     }
-    if (run.violation) return;
-    run.violation = `${message} Crew stopped the turn. Narrow the matching allow rule or Non-Workspace Access in Antigravity's /permissions and /config, or give this role to another agent.`;
-    // Nothing the turn asks for after this can be granted.
-    drop(run);
-    this.peer?.notify('session/cancel', { sessionId: job.sessionId });
+    this.stop(run, `${message} Crew stopped the turn. ${run.switched
+      ? 'Crew could not keep the session in its asking mode, so give this role to another agent if it happens again.'
+      : "Narrow the matching allow rule or Non-Workspace Access in Antigravity's /permissions and /config, or give this role to another agent."}`);
   }
 
   private ensure(): Promise<RpcPeer> {
@@ -326,6 +383,7 @@ export class AntigravityAdapter implements Adapter {
       onExit: () => {
         if (this.peer === peer) this.peer = null;
         this.loaded.clear();
+        this.modes.clear();
         // In-flight prompts reject through the peer and fail their jobs there.
         for (const run of this.runs.values()) drop(run);
         this.runs.clear();
@@ -351,10 +409,10 @@ export class AntigravityAdapter implements Adapter {
 
   private onNotification(method: string, p: any): void {
     if (method !== 'session/update') return;
+    // Kept for every session, between turns and during a restore too; the next prompt undoes a switch.
+    if (p.update?.sessionUpdate === 'current_mode_update') this.noteMode(p.sessionId, p.update.currentModeId);
     const run = this.runs.get(p.sessionId);
-    // A switch between turns is undone before the next prompt (reply).
-    if (run && p.update?.sessionUpdate === 'current_mode_update') run.mode = p.update.currentModeId;
-    if (!run || !run.prompting || isTerminal(run.ctl.job)) return;
+    if (!run || !run.prompting || !run.sent || isTerminal(run.ctl.job)) return;
     const { ctl } = run;
     this.lastUsed = Date.now();
     ctl.activity();
@@ -391,14 +449,12 @@ export class AntigravityAdapter implements Adapter {
         break;
       case 'current_mode_update':
         // The agent's own switch_mode is refused in onRequest; a switch that still lands is undone.
-        if (update.currentModeId && update.currentModeId !== ASKING_MODE) {
+        if (update.currentModeId && update.currentModeId !== ASKING_MODE && this.peer) {
+          run.switched = update.currentModeId;
           ctl.progress(`Antigravity switched to "${update.currentModeId}" mode; switching back to "${ASKING_MODE}"`);
-          this.keepAsking(this.peer!, p.sessionId, { modes: { currentModeId: update.currentModeId } }).then(() => {
-            run.mode = ASKING_MODE;
-          }, (err) => {
-            if (!run.violation) run.violation = err.message;
-            drop(run);
-            this.peer?.notify('session/cancel', { sessionId: p.sessionId });
+          const earlier = run.restoring;
+          run.restoring = this.keepAsking(this.peer, p.sessionId).then(() => earlier, (err) => {
+            this.stop(run, (err as Error).message);
           });
         }
         break;
@@ -422,7 +478,7 @@ export class AntigravityAdapter implements Adapter {
     run.calls.set(id, call);
     // agy reports a call as in progress before it asks, so only a completed one is known to have run unasked. A failed
     // one may never have run, and calls end failed when the turn is cancelled.
-    if (update.status === 'completed' && !call.asked && !call.checked && !run.cancelling) {
+    if (update.status === 'completed' && !call.asked && !call.checked) {
       call.checked = true;
       this.unasked(run, call);
     }
@@ -439,7 +495,7 @@ export class AntigravityAdapter implements Adapter {
   /** A question the agent asks through a form. The user answers it, as they do a Codex worker's. */
   private async onQuestion(p: any): Promise<unknown> {
     const run = this.runs.get(p.sessionId);
-    if (!run || run.cancelling || !run.prompting || isTerminal(run.ctl.job)) return { action: 'cancel' };
+    if (!run || run.cancelling || run.violation || !run.sent || isTerminal(run.ctl.job)) return { action: 'cancel' };
     const questions = formQuestions(p.requestedSchema);
     if (p.mode !== 'form' || !questions.length) return { action: 'decline' };
     const unsupported = questions.filter((q) => !q.choices.length && !q.other);
@@ -476,7 +532,7 @@ export class AntigravityAdapter implements Adapter {
       run.calls.set(toolCall.toolCallId, { ...call, asked: true });
     }
     // Outside a turn there is nobody to act on an answer, and a queued request would never be settled.
-    if (run && (run.cancelling || run.violation || !run.prompting || isTerminal(run.ctl.job))) return cancelled;
+    if (run && (run.cancelling || run.violation || !run.sent || isTerminal(run.ctl.job))) return cancelled;
     const verdict = run ? decide(run.ctl.job.kind, run.ctl.job.cwd, toolCall, run.ctl.job.sandbox === 'read-only') : { refuse: 'unknown session' };
 
     let allow = verdict === 'allow';
@@ -509,7 +565,7 @@ export class AntigravityAdapter implements Adapter {
 }
 
 function newRun(ctl: JobCtl): Run {
-  return { ctl, prompting: null, cancelling: false, message: '', earlier: '', pending: [], grants: new Set(), declined: [], calls: new Map() };
+  return { ctl, prompting: null, sent: false, cancelling: false, message: '', earlier: '', pending: [], grants: new Set(), declined: [], calls: new Map() };
 }
 
 /** The session's mode, from ACP's modes or from a config option of the mode category. */

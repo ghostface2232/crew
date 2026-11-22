@@ -14,9 +14,11 @@ import { writeFakeBin } from './fake-bin.ts';
 /**
  * An ACP server that records what Crew sends in `log.jsonl` beside it. It offers thinking levels per model as
  * agy 1.5.9 does, and ends each turn with `report`, or with the answer to `form` when one is given. A session starts in
- * `mode`, and each turn first reports the `updates` given, as tool calls agy ran without asking.
+ * `mode`, and each turn first reports the `updates` given, as tool calls agy ran without asking. `switched` is a mode it
+ * reports right after creating the session; `modeDelay` holds its answer to set_mode; `hold` keeps a turn open, and
+ * `ignoreCancel` keeps it open past a cancel.
  */
-function server(options: { append?: boolean; form?: unknown; mode?: string; refuseMode?: boolean; updates?: unknown[]; after?: unknown[] } = {}): string {
+function server(options: { append?: boolean; form?: unknown; mode?: string; refuseMode?: boolean; updates?: unknown[]; after?: unknown[]; switched?: string; modeDelay?: number; hold?: boolean; ignoreCancel?: boolean } = {}): string {
   return `
     const fs = require('node:fs');
     const path = require('node:path');
@@ -37,8 +39,9 @@ function server(options: { append?: boolean; form?: unknown; mode?: string; refu
       else if (method === 'session/new') {
         model = 'gemini-4-argon'; level = 'medium';
         send({ id, result: { sessionId: 's1', ...config(), ...(options.mode ? { modes: { currentModeId: options.mode } } : {}) } });
+        if (options.switched) send({ method: 'session/update', params: { sessionId: 's1', update: { sessionUpdate: 'current_mode_update', currentModeId: options.switched } } });
       }
-      else if (method === 'session/set_mode') send(options.refuseMode ? { id, error: { code: -32602, message: 'no such mode' } } : { id, result: {} });
+      else if (method === 'session/set_mode') setTimeout(() => send(options.refuseMode ? { id, error: { code: -32602, message: 'no such mode' } } : { id, result: {} }), options.modeDelay ?? 0);
       else if (method === 'session/resume') send({ id, result: { ...config(), ...(options.mode ? { modes: { currentModeId: options.mode } } : {}) } });
       else if (method === 'session/set_config_option') {
         if (params.configId === 'model') { model = params.value; if (!levels[model].includes(level)) level = 'medium'; }
@@ -49,11 +52,13 @@ function server(options: { append?: boolean; form?: unknown; mode?: string; refu
         if (options.form) send({ id: 'form', method: 'elicitation/create', params: { sessionId: 's1', mode: 'form', message: 'The agent has a question.', requestedSchema: options.form } });
         else {
           for (const update of options.updates ?? []) send({ method: 'session/update', params: { sessionId: 's1', update } });
+          if (options.hold) return;
           send({ method: 'session/update', params: { sessionId: 's1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'report' } } } });
           send({ id, result: { stopReason: 'end_turn' } });
           setTimeout(() => { for (const update of options.after ?? []) send({ method: 'session/update', params: { sessionId: 's1', update } }); }, 50);
         }
-      } else if (method === 'session/cancel') send({ id: promptId, result: { stopReason: 'cancelled' } });
+      } else if (method === 'session/cancel') { if (!options.ignoreCancel) send({ id: promptId, result: { stopReason: 'cancelled' } }); }
+      else if (method === 'session/close') send({ id, result: {} });
       else if (id === 'form') {
         send({ method: 'session/update', params: { sessionId: 's1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: JSON.stringify(message.result) } } } });
         send({ id: promptId, result: { stopReason: 'end_turn' } });
@@ -181,6 +186,53 @@ test('a switch to another mode during a turn is undone', { timeout: 5000 }, asyn
   assert.deepEqual(h.sent('session/set_mode').map((p) => p.modeId), ['default']);
 });
 
+test('a switch reported before the first prompt is undone before it goes out', { timeout: 5000 }, async (t) => {
+  const h = harness(t, server({ switched: 'auto' }));
+  const job = await h.ended(await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' }));
+  assert.equal(job.state, 'done');
+  const order = fs.readFileSync(path.join(h.home, 'log.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line).method);
+  assert.ok(order.indexOf('session/set_mode') >= 0 && order.indexOf('session/set_mode') < order.indexOf('session/prompt'), order.join(', '));
+});
+
+test('a switch back that agy refuses during a turn fails it, even when the turn ended first', { timeout: 5000 }, async (t) => {
+  const h = harness(t, server({ refuseMode: true, updates: [{ sessionUpdate: 'current_mode_update', currentModeId: 'auto' }] }));
+  const job = await h.ended(await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' }));
+  assert.equal(job.state, 'failed');
+  assert.match(job.error!.message, /"auto" mode, where it does not ask.*refused to switch/);
+});
+
+test('a cancel or another message while the mode is being put back sends no prompt', { timeout: 5000 }, async (t) => {
+  const h = harness(t, server({ modeDelay: 300, after: [{ sessionUpdate: 'current_mode_update', currentModeId: 'auto' }] }));
+  const job = await h.ended(await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' }));
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  await h.jobs.reply(job.id, { message: 'one more thing' });
+  await assert.rejects(h.adapter.reply((h.jobs as any).ctl(job), 'and another'), /still working/);
+  await h.jobs.cancel(job.id);
+  assert.equal(job.state, 'cancelled');
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  assert.equal(h.sent('session/prompt').length, 1);
+});
+
+test('a violation fails the job at once, and a session that ignores the cancel is closed', { timeout: 10000 }, async (t) => {
+  const h = harness(t, server({ hold: true, ignoreCancel: true, updates: ranUnasked('x1', { kind: 'edit', title: 'File b.txt', locations: [{ path: path.join(os.tmpdir(), 'b.txt') }] }) }));
+  const job = await h.ended(await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' }));
+  assert.equal(job.state, 'failed');
+  assert.match(job.error!.message, /edit outside the workspace.*Crew stopped the turn/);
+  const deadline = Date.now() + 8000;
+  while (!h.sent('session/close').length && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(h.sent('session/close').length, 1);
+});
+
+test('an action that ran unasked after a mode switch names the switch, not the user\'s rules', { timeout: 5000 }, async (t) => {
+  const h = harness(t, server({ updates: [
+    { sessionUpdate: 'current_mode_update', currentModeId: 'accept-edits' },
+    ...ranUnasked('x1', { kind: 'edit', title: 'File b.txt', locations: [{ path: path.join(os.tmpdir(), 'b.txt') }] }),
+  ] }));
+  const job = await h.ended(await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' }));
+  assert.equal(job.state, 'failed');
+  assert.match(job.error!.message, /because its session had switched to "accept-edits" mode.*could not keep the session in its asking mode/);
+});
+
 // agy runs commands the user's own allow rules cover, and reads its Non-Workspace Access setting permits, without asking.
 const ranUnasked = (toolCallId: string, call: Record<string, unknown>) => [
   { sessionUpdate: 'tool_call', toolCallId, status: 'in_progress', ...call },
@@ -209,6 +261,9 @@ test('an action outside the role that ran without asking stops the turn', { time
     const job = await h.ended(await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test', ask }));
     assert.equal(job.state, 'failed', name);
     assert.match(job.error!.message, /without asking Crew .*Crew stopped the turn/, name);
+    // The job fails at once; the cancel reaches the server just after.
+    const deadline = Date.now() + 1000;
+    while (!h.sent('session/cancel').length && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
     assert.equal(h.sent('session/cancel').length, 1, name);
   }
 });
@@ -255,6 +310,8 @@ test('a call that ends with the user\'s cancel is not taken for a violation', { 
   await h.ended(job);
   assert.equal(job.state, 'cancelled');
   assert.ok(!job.error);
+  // What ran is still on record.
+  assert.match(job.notes.join('\n'), /outside the read-only engineer role without asking Crew \(execute: git status\)/);
 });
 
 test('a tool call that came to Crew as a permission request is not checked again when it finishes', { timeout: 5000 }, async (t) => {

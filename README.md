@@ -1,6 +1,11 @@
+<img width="256" alt="crew-icon" src="https://github.com/user-attachments/assets/c3725ff6-85d9-49e6-ba61-08fda7cbcc5a" />
+
+
 # Crew
 
 A Claude Code plugin that splits work across Claude, Codex, and Antigravity. By default, Claude acts as lead and self-reviewer, Codex handles supporting implementation and cross-review, and Antigravity polishes UX copy, comments, and documentation. A native SwiftUI macOS app, a Windows Electron app, and a React web board show all three agents in real time.
+
+<img width="1440" alt="crew-screenshot" src="https://github.com/user-attachments/assets/eec6a201-8395-4dc9-a77c-2e5872aa96d0" />
 
 ## Getting started
 

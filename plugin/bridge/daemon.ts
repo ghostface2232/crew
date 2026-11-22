@@ -997,11 +997,14 @@ function shutdown(): void {
 fs.writeFileSync(path.join(HOME, 'daemon.json'), JSON.stringify({ pid: process.pid, port: PORT, version: VERSION, build: BUILD, root: PLUGIN_ROOT }));
 log(`crew daemon ${VERSION} (${BUILD}) listening on http://127.0.0.1:${PORT}`);
 
-// The setup checklist: what Crew needs, checked by running each CLI, so it is cached for a minute.
+// The setup checklist: what Crew needs, checked by running each CLI, so it is cached: for a minute while something
+// is missing, so a fix shows soon, and for ten once everything is in place. The board and the app both ask every
+// minute for as long as they are open, and each check starts five CLIs.
 let registering: Promise<Registration> | null = null;
 let registration: Registration | undefined;
 let setupChecked: Promise<SetupItem[]> | null = null;
 let setupCheckedAt = 0;
+let setupComplete = false;
 function registerPlugin(): Promise<Registration> {
   registering ??= register()
     .catch((err: Error): Registration => ({ ok: false, detail: err.message }))
@@ -1017,11 +1020,12 @@ function registerPlugin(): Promise<Registration> {
   return registering;
 }
 async function setupState(refresh: boolean): Promise<{ items: SetupItem[]; packaged: boolean; registering: boolean; registration?: Registration }> {
-  if (refresh || !setupChecked || Date.now() - setupCheckedAt > 60_000) {
+  if (refresh || !setupChecked || Date.now() - setupCheckedAt > (setupComplete ? 10 * 60_000 : 60_000)) {
     setupCheckedAt = Date.now();
     setupChecked = (registering ?? Promise.resolve()).then(() => setupChecks());
   }
   const items = await setupChecked;
+  setupComplete = items.every((item) => item.ok);
   return { items, packaged: PACKAGED, registering: registering !== null, registration };
 }
 // An app's copy registers itself on first launch and after each update, so its plugin matches its daemon. Copies that

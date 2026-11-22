@@ -50,6 +50,9 @@ final class CrewStore {
     var events: [CrewEvent] = []
     var limits: [String: LimitUsage?] = [:]
     var usage: Usage?
+    /// `state.pendingCount`, written only when it changes: the menu bar item redraws its image whenever its label is
+    /// evaluated again, which reading `state` would cause on every event.
+    private(set) var pendingCount = 0
     var signInRequired = false
     var connected = false
     var connectionMessage = "Connecting to Crew…"
@@ -194,6 +197,8 @@ final class CrewStore {
         default: break
         }
         if let id = try state.receive(event) { jobVersions[id, default: 0] += 1 }
+        let pending = state.pendingCount
+        if pending != pendingCount { pendingCount = pending }
         if event.name == "state" {
             events = state.events; limits = state.limits; usage = state.usage
             state.events = []; state.limits = [:]; state.usage = nil

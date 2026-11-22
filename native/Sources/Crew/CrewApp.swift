@@ -80,7 +80,7 @@ private struct MenuBarLabel: View {
     let register: (OpenWindowAction) -> Void
     @Environment(\.openWindow) private var openWindow
     var body: some View {
-        let pending = store.state.pendingCount
+        let pending = store.pendingCount
         Group {
             if let mark = Self.mark {
                 // Waiting requests show as a count beside the mark, which has no filled variant to switch to.

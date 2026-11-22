@@ -108,7 +108,7 @@ On macOS and Windows, `check` reads anywhere except the daemon token, writes onl
 
 ## Tests
 
-Sandbox checks used Codex CLI 0.167.0.
+Sandbox checks used Codex CLI 0.167.0, and were run again on 0.171.0 (below).
 
 | Sandbox | Result |
 | --- | --- |
@@ -116,7 +116,9 @@ Sandbox checks used Codex CLI 0.167.0.
 | `workspace-write` | Project and temp writes work. Binding `127.0.0.1` fails with `listen EPERM`, and outbound network access requires escalation |
 | `workspace-write` + network (`runs_app`) | Binds local ports and reaches outside hosts without prompts. Home writes stay blocked. Headless Chrome failed inside the macOS sandbox (exit 134) and browser launch still needed approval. `kill` on the job's own server was refused, although an interrupt stopped it. `crew.browser` provides a sandboxed browser outside Codex's sandbox |
 
-Verified on macOS with Codex CLI 0.167.0 (read-only reviews/questions writing to `$TMPDIR` while repo/home writes fail, and live writable jobs writing to scratch and worktree without prompts) and unit tests. Live shared links on APFS (where cloning succeeds) were tested via injected failures.
+Verified on macOS with Codex CLI 0.167.0 (read-only reviews/questions writing to `$TMPDIR` while repo/home writes fail, and live writable jobs writing to scratch and worktree without prompts) and unit tests.
+
+Re-verified on macOS with Codex CLI 0.171.0 on 2026-11-22. A script drove `CodexAdapter` with a dummy token under a temporary `CREW_HOME` for the four setups: read-only (`crew_read_only`), plain `workspace-write`, a plugin job (`crew_workspace`), and `runs_app` (`crew_app`). It also checked a follow-up resumed in a new app-server. Every result matched the table above. The token was denied wherever a profile applies and readable only under plain `workspace-write`. `.git` and everything under `~/.crew` except scratch and evidence stayed read-only in all four. `/tmp` was writable except in read-only jobs. Ports and outside network opened only with `runs_app`. Resumed threads kept the same profile, and 0.171.0 reported no warnings about the profiles or the overrides on resume. In the `runs_app` job the model itself declined to read the token file, so that read was checked with `codex sandbox` and the same profile instead. Windows was not re-run. Live shared links on APFS (where cloning succeeds) were tested via injected failures.
 
 The Antigravity mode table above came from live ACP probes on 2026-11-22. The probes used agy 1.5.14, Crew's client capabilities, and scratch targets, approving each request once. A live Crew job then confirmed that an engineer's `git branch` under the user's allow rule is noted, while the same command in a read-only job stops the turn.
 
@@ -124,6 +126,7 @@ Related tests include `test/antigravity.test.ts`, `test/policy.test.ts`, `test/b
 
 ## History
 
+- 2026-11-22: Re-ran the Codex sandbox checks on Codex CLI 0.171.0 (macOS), after Codex reworked permission profiles and resume-time override checks in 0.168–0.171. Nothing changed.
 - 2026-11-22: Probes of agy 1.5.14 found two gaps. Actions covered by the user's Antigravity allow rules or Non-Workspace Access never trigger a permission request in any mode, and `auto` and `accept-edits` skip every edit check. Crew now pins sessions to `default`, checks actions that ran without asking against the role, and stops the turn on a violation. A per-job Auto option was considered and dropped because `auto` also skipped the edit, `.git`, token-folder, and network checks.
 - 2026-11-16: Windows bridge parity verified on Windows 11 with Codex CLI 0.166.0 and Git for Windows 2.53. Sandboxed `check` runs Git for Windows' `sh` inside `codex sandbox` under a PowerShell 5.1 kill-on-close job object with a stdin-secret status line because Codex waits on open pipes and sandboxed processes can kill their parent. `crew.browser` stayed macOS-only because Chromium starts inside Codex's Windows sandbox.
 - 2026-11-14: Added the `codex.plugins` default `["browser"]` and the plugin token-denial profile.

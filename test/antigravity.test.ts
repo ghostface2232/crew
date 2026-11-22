@@ -8,15 +8,18 @@ import { tokenFile } from '../plugin/bridge/auth.ts';
 import { HOME, resolveConfig } from '../plugin/bridge/config.ts';
 import { Jobs } from '../plugin/bridge/jobs.ts';
 import type { Job } from '../plugin/bridge/jobs.ts';
+import { RpcError } from '../plugin/bridge/rpc.ts';
 import { pickEffort } from '../plugin/bridge/tiers.ts';
 import { writeFakeBin } from './fake-bin.ts';
 
 /**
  * An ACP server that records what Crew sends in `log.jsonl` beside it. It offers thinking levels per model as
  * agy 1.5.9 does, and ends each turn with `report`, or with the answer to `form` when one is given. A session starts in
- * `mode`, and each turn first reports the `updates` given, as tool calls agy ran without asking.
+ * `mode`, and each turn first reports the `updates` given, as tool calls agy ran without asking. `switched` is a mode it
+ * reports right after creating the session; `modeDelay` holds its answer to set_mode; `hold` keeps a turn open, and
+ * `ignoreCancel` keeps it open past a cancel.
  */
-function server(options: { append?: boolean; form?: unknown; mode?: string; refuseMode?: boolean; updates?: unknown[]; after?: unknown[] } = {}): string {
+function server(options: { append?: boolean; form?: unknown; mode?: string; refuseMode?: boolean; updates?: unknown[]; after?: unknown[]; switched?: string; modeDelay?: number; hold?: boolean; ignoreCancel?: boolean; usage?: unknown; resumeSwitched?: string; cancelDelay?: number } = {}): string {
   return `
     const fs = require('node:fs');
     const path = require('node:path');
@@ -37,9 +40,15 @@ function server(options: { append?: boolean; form?: unknown; mode?: string; refu
       else if (method === 'session/new') {
         model = 'gemini-4-argon'; level = 'medium';
         send({ id, result: { sessionId: 's1', ...config(), ...(options.mode ? { modes: { currentModeId: options.mode } } : {}) } });
+        if (options.switched) send({ method: 'session/update', params: { sessionId: 's1', update: { sessionUpdate: 'current_mode_update', currentModeId: options.switched } } });
       }
-      else if (method === 'session/set_mode') send(options.refuseMode ? { id, error: { code: -32602, message: 'no such mode' } } : { id, result: {} });
-      else if (method === 'session/resume') send({ id, result: { ...config(), ...(options.mode ? { modes: { currentModeId: options.mode } } : {}) } });
+      else if (method === 'session/set_mode') setTimeout(() => send(options.refuseMode ? { id, error: { code: -32602, message: 'no such mode' } } : { id, result: {} }), options.modeDelay ?? 0);
+      else if (method === 'session/resume') {
+        const answer = { jsonrpc: '2.0', id, result: { ...config(), ...(options.mode ? { modes: { currentModeId: options.mode } } : {}) } };
+        // In one write, so Crew reads the switch before it acts on the answer.
+        const switched = options.resumeSwitched && { jsonrpc: '2.0', method: 'session/update', params: { sessionId: 's1', update: { sessionUpdate: 'current_mode_update', currentModeId: options.resumeSwitched } } };
+        process.stdout.write([answer, switched].filter(Boolean).map((m) => JSON.stringify(m) + '\\n').join(''));
+      }
       else if (method === 'session/set_config_option') {
         if (params.configId === 'model') { model = params.value; if (!levels[model].includes(level)) level = 'medium'; }
         else level = params.value;
@@ -49,11 +58,16 @@ function server(options: { append?: boolean; form?: unknown; mode?: string; refu
         if (options.form) send({ id: 'form', method: 'elicitation/create', params: { sessionId: 's1', mode: 'form', message: 'The agent has a question.', requestedSchema: options.form } });
         else {
           for (const update of options.updates ?? []) send({ method: 'session/update', params: { sessionId: 's1', update } });
+          if (options.hold) return;
           send({ method: 'session/update', params: { sessionId: 's1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'report' } } } });
-          send({ id, result: { stopReason: 'end_turn' } });
+          send({ id, result: { stopReason: 'end_turn', ...(options.usage ? { usage: options.usage } : {}) } });
           setTimeout(() => { for (const update of options.after ?? []) send({ method: 'session/update', params: { sessionId: 's1', update } }); }, 50);
         }
-      } else if (method === 'session/cancel') send({ id: promptId, result: { stopReason: 'cancelled' } });
+      } else if (method === 'session/cancel') {
+        const cancelled = promptId;
+        if (!options.ignoreCancel) setTimeout(() => send({ id: cancelled, result: { stopReason: 'cancelled' } }), options.cancelDelay ?? 0);
+      }
+      else if (method === 'session/close') send({ id, result: {} });
       else if (id === 'form') {
         send({ method: 'session/update', params: { sessionId: 's1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: JSON.stringify(message.result) } } } });
         send({ id: promptId, result: { stopReason: 'end_turn' } });
@@ -62,10 +76,10 @@ function server(options: { append?: boolean; form?: unknown; mode?: string; refu
   `;
 }
 
-function harness(t: test.TestContext, source: string, roles: Parameters<typeof resolveConfig>[0]['roles'] = {}) {
+function harness(t: test.TestContext, source?: string, roles: Parameters<typeof resolveConfig>[0]['roles'] = {}) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-agy-test-'));
   const bin = path.join(home, 'agy');
-  writeFakeBin(bin, source);
+  if (source) writeFakeBin(bin, source);
   const config = resolveConfig({ notify: false, antigravity: { bin, enabled: true }, roles: { delegate: { agents: ['antigravity'] }, ...roles } });
   const adapter = new AntigravityAdapter(config);
   const jobs = new Jobs(home, () => config, { codex: adapter, antigravity: adapter }, { onEvent: () => {}, onJob: () => {}, onAttention: () => {} });
@@ -181,6 +195,603 @@ test('a switch to another mode during a turn is undone', { timeout: 5000 }, asyn
   assert.deepEqual(h.sent('session/set_mode').map((p) => p.modeId), ['default']);
 });
 
+test('a switch reported before the first prompt is undone before it goes out', { timeout: 5000 }, async (t) => {
+  const h = harness(t, server({ switched: 'auto' }));
+  const job = await h.ended(await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' }));
+  assert.equal(job.state, 'done');
+  const order = fs.readFileSync(path.join(h.home, 'log.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line).method);
+  assert.ok(order.indexOf('session/set_mode') >= 0 && order.indexOf('session/set_mode') < order.indexOf('session/prompt'), order.join(', '));
+});
+
+test('a switch back that agy refuses during a turn fails it, even when the turn ended first', { timeout: 5000 }, async (t) => {
+  const h = harness(t, server({ refuseMode: true, updates: [{ sessionUpdate: 'current_mode_update', currentModeId: 'auto' }] }));
+  const job = await h.ended(await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' }));
+  assert.equal(job.state, 'failed');
+  assert.match(job.error!.message, /"auto" mode, where it does not ask.*refused to switch/);
+});
+
+test('a cancel or another message while the mode is being put back sends no prompt', { timeout: 5000 }, async (t) => {
+  const h = harness(t, server({ modeDelay: 300, after: [{ sessionUpdate: 'current_mode_update', currentModeId: 'auto' }] }));
+  const job = await h.ended(await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' }));
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  await h.jobs.reply(job.id, { message: 'one more thing' });
+  await assert.rejects(h.adapter.reply((h.jobs as any).ctl(job), 'and another'), /still starting this turn/);
+  await h.jobs.cancel(job.id);
+  assert.equal(job.state, 'cancelled');
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  assert.equal(h.sent('session/prompt').length, 1);
+});
+
+test('a violation fails the job at once, and a session that ignores the cancel is closed', { timeout: 10000 }, async (t) => {
+  const h = harness(t, server({ hold: true, ignoreCancel: true, updates: ranUnasked('x1', { kind: 'edit', title: 'File b.txt', locations: [{ path: path.join(os.tmpdir(), 'b.txt') }] }) }));
+  const job = await h.ended(await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' }));
+  assert.equal(job.state, 'failed');
+  assert.match(job.error!.message, /edit outside the workspace.*Crew stopped the turn/);
+  const deadline = Date.now() + 8000;
+  while (!h.sent('session/close').length && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(h.sent('session/close').length, 1);
+});
+
+test('an action that ran unasked after a mode switch names the switch, not the user\'s rules', { timeout: 5000 }, async (t) => {
+  const h = harness(t, server({ updates: [
+    { sessionUpdate: 'current_mode_update', currentModeId: 'accept-edits' },
+    ...ranUnasked('x1', { kind: 'edit', title: 'File b.txt', locations: [{ path: path.join(os.tmpdir(), 'b.txt') }] }),
+  ] }));
+  const job = await h.ended(await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' }));
+  assert.equal(job.state, 'failed');
+  assert.match(job.error!.message, /because its session had switched to "accept-edits" mode.*could not keep the session in its asking mode/);
+});
+
+test('a finished turn closes its session, and a follow-up restores it', { timeout: 5000 }, async (t) => {
+  const h = harness(t, server());
+  const job = await h.ended(await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' }));
+  const deadline = Date.now() + 1000;
+  while (!h.sent('session/close').length && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(h.sent('session/close').length, 1);
+  await h.jobs.reply(job.id, { message: 'one more thing' });
+  await h.ended(job);
+  assert.equal(job.state, 'done');
+  assert.equal(h.sent('session/resume').length, 1);
+  assert.equal(h.sent('session/prompt').length, 2);
+});
+
+test('the tokens of every prompt add up, and the context window shows how full it is', { timeout: 5000 }, async (t) => {
+  const h = harness(t, server({
+    updates: [{ sessionUpdate: 'usage_update', used: 9000, size: 1048576 }],
+    usage: { inputTokens: 2000, cachedReadTokens: 6700, outputTokens: 300, thoughtTokens: 50, totalTokens: 9000 },
+  }));
+  const job = await h.ended(await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' }));
+  assert.deepEqual(job.context, { used: 9000, size: 1048576 });
+  await h.jobs.reply(job.id, { message: 'one more thing' });
+  await h.ended(job);
+  assert.equal(job.tokens, 18000);
+  assert.deepEqual(job.tokenUse, { input: 17400, cachedInput: 13400, output: 600, turn: 9000 });
+});
+
+/** A turn that runs until a second prompt comes. As agy does, that ends the first request and the turn goes on under the second. */
+const steerServer = (permission: boolean) => `
+  const send = (message) => console.log(JSON.stringify({ jsonrpc: '2.0', ...message }));
+  const update = (update) => send({ method: 'session/update', params: { sessionId: 's1', update } });
+  let promptId;
+  require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
+    const { method, id, params } = JSON.parse(line);
+    if (method === 'initialize') send({ id, result: { agentCapabilities: {} } });
+    else if (method === 'session/new') send({ id, result: { sessionId: 's1' } });
+    else if (method === 'session/prompt' && promptId === undefined) {
+      promptId = id;
+      update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'working ' } });
+      ${permission ? `send({ id: 'p', method: 'session/request_permission', params: { sessionId: 's1', toolCall: { toolCallId: 'c1', kind: 'execute', title: 'ls', rawInput: { CommandLine: 'ls' } }, options: [{ kind: 'allow_once', optionId: 'yes' }, { kind: 'reject_once', optionId: 'no' }] } });` : ''}
+    } else if (method === 'session/prompt') {
+      send({ id: promptId, result: { stopReason: 'end_turn' } });
+      promptId = id;
+      setTimeout(() => {
+        update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'and ' + params.prompt[0].text } });
+        send({ id, result: { stopReason: 'end_turn', usage: { inputTokens: 10, cachedReadTokens: 0, outputTokens: 5, totalTokens: 15 } } });
+      }, 100);
+    } else if (method === 'session/cancel') send({ id: promptId, result: { stopReason: 'cancelled' } });
+  });
+`;
+
+test('a message sent during a turn is added to it', { timeout: 5000 }, async (t) => {
+  const h = harness(t, steerServer(false));
+  const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' });
+  while (!h.jobs.eventsFor(job.id, 0).some((e) => e.detail === 'writing' || job.phase === 'writing')) await h.jobs.wait(job.id, job.seq, 200);
+  await h.jobs.reply(job.id, { message: 'steered' });
+  await h.ended(job);
+  assert.equal(job.state, 'done');
+  assert.equal(job.report, 'working and steered');
+  assert.equal(job.tokens, 15);
+});
+
+test('every message added during a turn has its tokens counted once', { timeout: 10000 }, async (t) => {
+  const h = harness(t, `
+    const send = (message) => console.log(JSON.stringify({ jsonrpc: '2.0', ...message }));
+    const usage = (n) => ({ inputTokens: n, cachedReadTokens: 0, outputTokens: 0, totalTokens: n });
+    let open, count = 0;
+    require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
+      const { method, id } = JSON.parse(line);
+      if (method === 'initialize') send({ id, result: { agentCapabilities: {} } });
+      else if (method === 'session/new') send({ id, result: { sessionId: 's1' } });
+      else if (method === 'session/prompt') {
+        count++;
+        if (open !== undefined) send({ id: open, result: { stopReason: 'end_turn', usage: usage(count === 2 ? 10 : 20) } });
+        open = id;
+        if (count === 1) send({ method: 'session/update', params: { sessionId: 's1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'working' } } } });
+        if (count === 3) setTimeout(() => send({ id, result: { stopReason: 'end_turn', usage: usage(30) } }), 100);
+      }
+    });
+  `);
+  const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' });
+  while (job.phase !== 'writing') await h.jobs.wait(job.id, job.seq, 200);
+  const ctl = (h.jobs as any).ctl(job);
+  await Promise.all([h.adapter.reply(ctl, 'one'), h.adapter.reply(ctl, 'two')]);
+  await h.ended(job);
+  assert.equal(job.state, 'done');
+  assert.equal(job.tokens, 60);
+});
+
+test('a message sent while the session is being set up joins the first turn instead of replacing it', { timeout: 5000 }, async (t) => {
+  const h = harness(t, `
+    const send = (message) => console.log(JSON.stringify({ jsonrpc: '2.0', ...message }));
+    const fs = require('node:fs');
+    const path = require('node:path');
+    let held;
+    require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
+      const { method, id, params } = JSON.parse(line);
+      if (method === 'initialize') send({ id, result: { agentCapabilities: {} } });
+      else if (method === 'session/new') send({ id, result: { sessionId: 's1', configOptions: [{ id: 'model', category: 'model', currentValue: 'a', options: [{ value: 'a' }, { value: 'b' }] }] } });
+      else if (method === 'session/set_config_option') { held = id; fs.writeFileSync(path.join(__dirname, 'held'), ''); }
+      else if (method === 'release') send({ id: held, result: {} });
+      else if (method === 'session/prompt') {
+        fs.appendFileSync(path.join(__dirname, 'prompts'), params.prompt[0].text + '\\n');
+        send({ method: 'session/update', params: { sessionId: 's1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'report' } } } });
+        send({ id, result: { stopReason: 'end_turn' } });
+      }
+    });
+  `);
+  const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'the original task', model: 'b' });
+  while (!fs.existsSync(path.join(h.home, 'held'))) await new Promise((resolve) => setTimeout(resolve, 20));
+  await assert.rejects(h.adapter.reply((h.jobs as any).ctl(job), 'an extra message'), /still starting this turn/);
+  (h.adapter as any).peer.request('release', {}).catch(() => {});
+  await h.ended(job);
+  assert.equal(job.state, 'done');
+  assert.match(fs.readFileSync(path.join(h.home, 'prompts'), 'utf8'), /the original task/);
+});
+
+test('a mode reported while a switch back is answered is switched back too', { timeout: 5000 }, async (t) => {
+  const h = harness(t, `
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const log = (method) => fs.appendFileSync(path.join(__dirname, 'log.jsonl'), JSON.stringify({ method }) + '\\n');
+    const send = (message) => console.log(JSON.stringify({ jsonrpc: '2.0', ...message }));
+    let switches = 0;
+    require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
+      const { method, id } = JSON.parse(line);
+      if (method) log(method);
+      if (method === 'initialize') send({ id, result: { agentCapabilities: {} } });
+      else if (method === 'session/new') send({ id, result: { sessionId: 's1', modes: { currentModeId: 'auto' } } });
+      else if (method === 'session/set_mode') {
+        if (++switches === 1) send({ method: 'session/update', params: { sessionId: 's1', update: { sessionUpdate: 'current_mode_update', currentModeId: 'accept-edits' } } });
+        send({ id, result: {} });
+      } else if (method === 'session/prompt') {
+        send({ method: 'session/update', params: { sessionId: 's1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'report' } } } });
+        send({ id, result: { stopReason: 'end_turn' } });
+      }
+    });
+  `);
+  const job = await h.ended(await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' }));
+  assert.equal(job.state, 'done');
+  const order = fs.readFileSync(path.join(h.home, 'log.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line).method);
+  assert.deepEqual(order.slice(order.indexOf('session/set_mode')), ['session/set_mode', 'session/set_mode', 'session/prompt']);
+});
+
+/** Holds ACP requests so a test can deliver their answers across a turn boundary. */
+async function heldSession(t: test.TestContext, options: { model?: string; effort?: string; canClose?: boolean; holdNew?: boolean; holdResume?: boolean } = {}) {
+  const h = harness(t);
+  const acp = h.adapter as any;
+  const calls: { method: string; params: any; resolve: (res: any) => void; reject: (err: Error) => void }[] = [];
+  acp.peer = {
+    alive: true, close() {},
+    request(method: string, params: unknown) {
+      const result = Promise.withResolvers<unknown>();
+      calls.push({ method, params, ...result });
+      if (method === 'session/new' && !options.holdNew) result.resolve({ sessionId: 's1' });
+      if (method === 'session/resume' && !options.holdResume) result.resolve({ models: { currentModelId: 'restored' }, modes: { currentModeId: 'default' } });
+      return result.promise;
+    },
+    notify(method: string, params: unknown) { calls.push({ method, params, resolve() {}, reject() {} }); },
+  };
+  const keepAlive = setInterval(() => {}, 30_000);
+  t.after(() => clearInterval(keepAlive));
+  acp.canClose = options.canClose ?? true;
+  acp.restoreMethod = 'session/resume';
+  const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'first', model: options.model, effort: options.effort });
+  const sent = (method: string) => calls.filter((call) => call.method === 'session/' + method);
+  const call = async (method: string, index = 0) => {
+    const deadline = Date.now() + 8000;
+    while (!sent(method)[index] && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 5));
+    assert.ok(sent(method)[index], `missing session/${method} request ${index + 1}`);
+    return sent(method)[index];
+  };
+  const update = (update: object) => acp.onNotification('session/update', { sessionId: 's1', update });
+  const mode = (currentModeId: string) => update({ sessionUpdate: 'current_mode_update', currentModeId });
+  const violation = () => update({ sessionUpdate: 'tool_call', toolCallId: 'outside', status: 'completed', kind: 'edit', title: 'edit outside', locations: [{ path: path.join(os.tmpdir(), 'outside') }] });
+  const reply = (message: string) => h.jobs.reply(job.id, { message });
+  return { ...h, acp, job, sent, call, update, mode, violation, reply };
+}
+
+const endTurn = { stopReason: 'end_turn' };
+const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+test('a prompt failure holds the session until an outstanding steer settles or close succeeds', async (t) => {
+  for (const canClose of [false, true]) {
+    const h = await heldSession(t, { canClose });
+    const first = await h.call('prompt');
+    const steering = h.reply('steer');
+    const outstanding = await h.call('prompt', 1);
+    first.reject(new Error('first prompt failed'));
+    await h.ended(h.job);
+    assert.equal(h.job.error?.message, 'first prompt failed');
+    if (canClose) {
+      (await h.call('close')).resolve({});
+    } else {
+      await h.reply('too soon');
+      assert.equal(h.job.state, 'failed');
+      assert.match(h.job.error!.message, /not yet stopped/);
+      assert.equal(h.sent('prompt').length, 2);
+      outstanding.resolve(endTurn);
+      await steering;
+    }
+    await h.reply('next');
+    assert.equal((await h.call('prompt', 2)).params.prompt[0].text, 'next');
+    outstanding.resolve(endTurn);
+    await steering;
+  }
+});
+
+test('cancelling a restore ignores replayed usage and tool calls', async (t) => {
+  const h = await heldSession(t, { holdResume: true });
+  (await h.call('prompt')).resolve(endTurn);
+  (await h.call('close')).resolve({});
+  await h.reply('restore');
+  const restore = await h.call('resume');
+  const cancel = h.jobs.cancel(h.job.id);
+  await h.call('cancel');
+  h.update({ sessionUpdate: 'usage_update', used: 789, size: 999 });
+  h.violation();
+  restore.resolve({});
+  await cancel;
+  assert.equal(h.sent('prompt').length, 1);
+  assert.equal(h.job.context, undefined);
+  assert.deepEqual(h.job.notes, []);
+});
+
+test('overlapping steers wait for refusal or handover before sending the next message', async (t) => {
+  const h = await heldSession(t);
+  const first = await h.call('prompt');
+  const rejected = assert.rejects(h.reply('one'), /first steer refused/);
+  const steer = await h.call('prompt', 1);
+  const accepted = h.reply('two');
+  await tick();
+  const beforeRefusal = h.sent('prompt').length;
+  steer.reject(new Error('first steer refused'));
+  await rejected;
+  const next = await h.call('prompt', 2);
+  first.resolve(endTurn);
+  next.reject(new RpcError(-32603, 'quota exhausted'));
+  await accepted;
+  await h.ended(h.job);
+  assert.equal(beforeRefusal, 2);
+  assert.deepEqual(h.job.error, { message: 'quota exhausted', limit: true });
+});
+
+test('a stopped turn refuses a queued steer before agy answers the previous one', { timeout: 5000 }, async (t) => {
+  const h = await heldSession(t);
+  const first = await h.call('prompt');
+  const sent = h.reply('one');
+  const pending = await h.call('prompt', 1);
+  const queued = assert.rejects(h.reply('two'), /ending this turn/);
+  h.violation();
+  await queued;
+  assert.equal(h.sent('prompt').length, 2);
+  first.resolve(endTurn);
+  pending.resolve(endTurn);
+  (await h.call('close')).resolve({});
+  await sent;
+});
+
+test('a cancelled job closes the session created by a late answer', async (t) => {
+  const h = await heldSession(t, { holdNew: true });
+  const creating = await h.call('new');
+  await h.jobs.cancel(h.job.id);
+  creating.resolve({ sessionId: 'late' });
+  await tick();
+  assert.deepEqual(h.sent('close').map((call) => call.params.sessionId), ['late']);
+  h.sent('close')[0].resolve({});
+  assert.equal(h.sent('prompt').length, 0);
+  assert.equal(h.job.sessionId, null);
+});
+
+test('a drained turn releases its session if the job ends during its final mode check', async (t) => {
+  const h = await heldSession(t, { canClose: false });
+  const first = await h.call('prompt');
+  h.mode('auto');
+  const mode = await h.call('set_mode');
+  first.resolve(endTurn);
+  await tick();
+  (h.jobs as any).ctl(h.job).fail('job ended externally');
+  await h.ended(h.job);
+  const follow = h.reply('continue');
+  h.mode('default');
+  mode.resolve({});
+  await follow;
+  assert.equal(h.job.state, 'running');
+  assert.equal((await h.call('prompt', 1)).params.prompt[0].text, 'continue');
+});
+
+test('an accepted steer that fails during generation fails the turn with its limit', { timeout: 5000 }, async (t) => {
+  const h = await heldSession(t);
+  const first = await h.call('prompt');
+  const steering = h.reply('continue').then(() => undefined, (err) => err);
+  const next = await h.call('prompt', 1);
+  first.resolve(endTurn);
+  h.update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'partial answer' } });
+  next.reject(new RpcError(-32603, '429 quota exhausted during generation'));
+  await h.ended(h.job);
+  assert.equal(h.job.state, 'failed');
+  assert.equal(await steering, undefined);
+  assert.deepEqual(h.job.error, { message: '429 quota exhausted during generation', limit: true });
+});
+
+test('a refused steer is reported once as soon as agy answers it', { timeout: 6000 }, async (t) => {
+  const h = await heldSession(t);
+  const first = await h.call('prompt');
+  const refusal = new RpcError(-32603, "Can't add this prompt while a question is waiting");
+  const early = assert.rejects(h.reply('one'), /waiting/);
+  (await h.call('prompt', 1)).reject(refusal);
+  await early;
+  assert.deepEqual(h.job.notes, []);
+  await h.reply('two');
+  (await h.call('prompt', 2)).reject(refusal);
+  await tick();
+  assert.deepEqual(h.job.notes, [`A message sent during the turn did not reach Antigravity: ${refusal.message}`]);
+  first.resolve(endTurn);
+  await h.ended(h.job);
+  assert.equal(h.job.state, 'done');
+  assert.equal(h.job.notes.length, 1);
+});
+
+test('a cancelled prompt keeps its outcome when an outstanding steer is refused', { timeout: 5000 }, async (t) => {
+  const h = await heldSession(t);
+  const first = await h.call('prompt');
+  const refused = assert.rejects(h.reply('extra'), /no active turn/);
+  const next = await h.call('prompt', 1);
+  const cancel = h.jobs.cancel(h.job.id);
+  await h.call('cancel');
+  first.resolve({ stopReason: 'cancelled' });
+  next.reject(new Error('no active turn'));
+  await Promise.all([refused, cancel]);
+  assert.equal(h.job.state, 'cancelled');
+});
+
+test('a cancelled follow-up waiting on a close cannot take the next turn', { timeout: 5000 }, async (t) => {
+  const h = await heldSession(t);
+  (await h.call('prompt')).resolve(endTurn);
+  const close = await h.call('close');
+  const b = h.reply('B');
+  await tick();
+  await h.jobs.cancel(h.job.id);
+  const c = h.reply('C');
+  close.resolve({});
+  await Promise.all([b, c]);
+  assert.equal((await h.call('prompt', 1)).params.prompt[0].text, 'C');
+  assert.equal(h.sent('resume').length, 1);
+  assert.equal(h.job.state, 'running');
+});
+
+test('a refused close holds a stopped session until its prompt settles', { timeout: 15000 }, async (t) => {
+  const h = await heldSession(t);
+  const first = await h.call('prompt');
+  h.violation();
+  const follow = h.reply('try again');
+  (await h.call('close')).reject(new Error('close refused'));
+  await follow;
+  assert.equal(h.job.state, 'failed');
+  assert.match(h.job.error!.message, /not yet stopped/);
+  assert.equal(h.sent('prompt').length, 1);
+  first.resolve({ stopReason: 'cancelled' });
+  (await h.call('close', 1)).resolve({});
+  await h.reply('now continue');
+  assert.equal((await h.call('prompt', 1)).params.prompt[0].text, 'now continue');
+});
+
+test('an older turn cannot send its lead decline into a follow-up', { timeout: 5000 }, async (t) => {
+  const h = await heldSession(t);
+  const first = await h.call('prompt');
+  const request = h.acp.onRequest('session/request_permission', { sessionId: 's1', toolCall: { kind: 'execute', title: 'ls', rawInput: 'ls' }, options: [{ kind: 'reject_once', optionId: 'no' }] });
+  await h.jobs.reply(h.job.id, { decision: 'decline', message: 'Use the existing notes', request_id: h.job.waiting!.id });
+  await request;
+  h.violation();
+  const follow = h.reply('next task');
+  await tick();
+  first.resolve(endTurn);
+  await tick();
+  assert.equal(h.sent('prompt').length, 1);
+  (await h.call('close')).resolve({});
+  await follow;
+  assert.equal((await h.call('prompt', 1)).params.prompt[0].text, 'next task');
+});
+
+test('a failed cancel enforces the violation that completed during it', { timeout: 10000 }, async (t) => {
+  const h = await heldSession(t, { canClose: false });
+  const first = await h.call('prompt');
+  const cancel = assert.rejects(h.jobs.cancel(h.job.id), /did not confirm/);
+  await h.call('cancel');
+  h.violation();
+  assert.match(h.job.notes.join(' '), /edit outside/);
+  assert.equal(h.job.state, 'running');
+  await cancel;
+  first.resolve(endTurn);
+  await tick();
+  assert.equal(h.job.state, 'failed');
+  assert.match(h.job.error!.message, /edit outside/);
+});
+
+test('a violation held during cancel fails the job if agy refuses to close', { timeout: 10000 }, async (t) => {
+  const h = await heldSession(t);
+  const first = await h.call('prompt');
+  const cancel = assert.rejects(h.jobs.cancel(h.job.id), /close refused/);
+  await h.call('cancel');
+  h.violation();
+  (await h.call('close')).reject(new Error('close refused'));
+  await cancel;
+  assert.equal(h.job.state, 'failed');
+  assert.match(h.job.error!.message, /edit outside/);
+  first.resolve(endTurn);
+  await tick();
+  assert.equal(h.job.state, 'failed');
+});
+
+test('a turn that continues after a failed cancel restores the mode reported during cancellation', { timeout: 10000 }, async (t) => {
+  const h = await heldSession(t);
+  const first = await h.call('prompt');
+  const cancel = assert.rejects(h.jobs.cancel(h.job.id), /close refused/);
+  await h.call('cancel');
+  h.mode('auto');
+  (await h.call('close')).reject(new Error('close refused'));
+  await cancel;
+  (await h.call('set_mode')).resolve({});
+  first.resolve(endTurn);
+  await h.ended(h.job);
+  assert.equal(h.job.state, 'done');
+});
+
+test('mode changes are serialized and a finishing turn waits for the last switch back', { timeout: 5000 }, async (t) => {
+  const h = await heldSession(t);
+  const prompt = await h.call('prompt');
+  h.mode('auto');
+  const first = await h.call('set_mode');
+  prompt.resolve(endTurn);
+  await tick();
+  h.mode('accept-edits');
+  await tick();
+  assert.equal(h.sent('set_mode').length, 1);
+  first.resolve({});
+  const second = await h.call('set_mode', 1);
+  assert.equal(h.job.state, 'running');
+  second.reject(new Error('last switch refused'));
+  await h.ended(h.job);
+  assert.match(h.job.error!.message, /last switch refused/);
+});
+
+test('unasked actions keep the mode in force when each started', { timeout: 5000 }, async (t) => {
+  const h = await heldSession(t);
+  const first = await h.call('prompt');
+  h.mode('auto');
+  const [start, finish] = ranUnasked('one', { kind: 'execute', title: 'first', rawInput: 'ls' });
+  h.update(start);
+  (await h.call('set_mode')).resolve({});
+  await tick();
+  h.update(finish);
+  for (const update of ranUnasked('two', { kind: 'execute', title: 'second', rawInput: 'ls' })) h.update(update);
+  assert.match(h.job.notes[0], /switched to "auto".*first/);
+  assert.match(h.job.notes[1], /user's Antigravity settings.*second/);
+  first.resolve(endTurn);
+  await h.ended(h.job);
+});
+
+test('force-closing a turn invalidates its mode restore and its waiting steer', { timeout: 10000 }, async (t) => {
+  const h = await heldSession(t);
+  const first = await h.call('prompt');
+  h.mode('auto');
+  const mode = await h.call('set_mode');
+  const steering = h.reply('old message').catch(() => {});
+  await tick();
+  const cancel = h.jobs.cancel(h.job.id);
+  (await h.call('close')).resolve({});
+  await cancel;
+  await h.reply('fresh');
+  const next = await h.call('prompt', 1);
+  mode.reject(new Error('old mode refused'));
+  await tick();
+  assert.equal(h.job.state, 'running');
+  assert.equal(h.sent('cancel').length, 1);
+  assert.equal(h.sent('prompt').length, 2);
+  await steering;
+  first.resolve({ ...endTurn, usage: { totalTokens: 100 } });
+  next.resolve({ ...endTurn, usage: { totalTokens: 20 } });
+  await h.ended(h.job);
+  assert.equal(h.job.tokens, 20);
+  assert.equal(h.job.tokenUse?.turn, 20);
+});
+
+for (const option of ['model', 'thought_level']) test(`a late ${option} setup answer belongs to the force-closed turn`, { timeout: 10000 }, async (t) => {
+  const h = await heldSession(t, { model: 'chosen', effort: 'high' });
+  const options = { configOptions: [
+    { id: 'model', currentValue: 'old' },
+    { id: 'thought_level', currentValue: 'low', options: [{ value: 'high' }] },
+  ] };
+  let setup = await h.call('set_config_option');
+  if (option === 'thought_level') {
+    setup.resolve(options);
+    setup = await h.call('set_config_option', 1);
+  }
+  const cancel = h.jobs.cancel(h.job.id);
+  (await h.call('close')).resolve({});
+  await cancel;
+  await h.reply('fresh');
+  await h.call('prompt');
+  setup.resolve(options);
+  await tick();
+  assert.equal(h.sent('set_config_option').length, option === 'model' ? 1 : 2);
+  assert.equal(h.job.resolvedModel, 'restored');
+});
+
+test('a message is refused while Antigravity waits for an approval', { timeout: 5000 }, async (t) => {
+  const h = harness(t, steerServer(true));
+  const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' });
+  await h.waiting(job);
+  await assert.rejects(h.adapter.reply((h.jobs as any).ctl(job), 'steered'), /waiting for an approval or an answer/);
+  await h.jobs.cancel(job.id);
+});
+
+test('a switch reported right after a restore is not overwritten by the restore\'s own answer', { timeout: 5000 }, async (t) => {
+  const h = harness(t, server({ mode: 'default', resumeSwitched: 'auto' }));
+  const job = await h.ended(await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' }));
+  await h.jobs.reply(job.id, { message: 'one more thing' });
+  await h.ended(job);
+  const order = fs.readFileSync(path.join(h.home, 'log.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line).method);
+  assert.deepEqual(order.slice(order.indexOf('session/resume'), order.indexOf('session/resume') + 3), ['session/resume', 'session/set_mode', 'session/prompt']);
+});
+
+test('a cancelled turn that ends late does not close the session a follow-up restored', { timeout: 20000 }, async (t) => {
+  const h = harness(t, server({ hold: true, cancelDelay: 6000 }));
+  const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' });
+  while (job.phase !== 'working' || !fs.existsSync(path.join(h.home, 'log.jsonl')) || !h.sent('session/prompt').length) await new Promise((resolve) => setTimeout(resolve, 20));
+  // Unconfirmed after five seconds, the cancel closes the session itself.
+  await h.jobs.cancel(job.id);
+  assert.equal(h.sent('session/close').length, 1);
+  await h.jobs.reply(job.id, { message: 'start over' });
+  while (h.sent('session/prompt').length < 2) await new Promise((resolve) => setTimeout(resolve, 20));
+  // The first prompt's late answer arrives about a second later.
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  assert.equal(h.sent('session/close').length, 1);
+  assert.equal(job.state, 'running');
+});
+
+test('a follow-up waits for a stopped turn to end and starts a turn of its own', { timeout: 20000 }, async (t) => {
+  const h = harness(t, server({ hold: true, ignoreCancel: true, updates: ranUnasked('x1', { kind: 'edit', title: 'File b.txt', locations: [{ path: path.join(os.tmpdir(), 'b.txt') }] }) }));
+  const job = await h.ended(await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' }));
+  assert.equal(job.state, 'failed');
+  await h.jobs.reply(job.id, { message: 'try again within the workspace' });
+  const methods = () => fs.readFileSync(path.join(h.home, 'log.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line).method);
+  const deadline = Date.now() + 8000;
+  while (methods().filter((m) => m === 'session/prompt').length < 2 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 100));
+  const order = methods();
+  // The fake server runs the same unasked edit again, so the new turn is stopped in its turn; it was still a turn of its own.
+  assert.deepEqual(order.slice(order.indexOf('session/close'), order.indexOf('session/close') + 3), ['session/close', 'session/resume', 'session/prompt']);
+});
+
 // agy runs commands the user's own allow rules cover, and reads its Non-Workspace Access setting permits, without asking.
 const ranUnasked = (toolCallId: string, call: Record<string, unknown>) => [
   { sessionUpdate: 'tool_call', toolCallId, status: 'in_progress', ...call },
@@ -209,6 +820,9 @@ test('an action outside the role that ran without asking stops the turn', { time
     const job = await h.ended(await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test', ask }));
     assert.equal(job.state, 'failed', name);
     assert.match(job.error!.message, /without asking Crew .*Crew stopped the turn/, name);
+    // The job fails at once; the cancel reaches the server just after.
+    const deadline = Date.now() + 1000;
+    while (!h.sent('session/cancel').length && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
     assert.equal(h.sent('session/cancel').length, 1, name);
   }
 });
@@ -255,6 +869,8 @@ test('a call that ends with the user\'s cancel is not taken for a violation', { 
   await h.ended(job);
   assert.equal(job.state, 'cancelled');
   assert.ok(!job.error);
+  // What ran is still on record.
+  assert.match(job.notes.join('\n'), /outside the read-only engineer role without asking Crew \(execute: git status\)/);
 });
 
 test('a tool call that came to Crew as a permission request is not checked again when it finishes', { timeout: 5000 }, async (t) => {

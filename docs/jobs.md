@@ -58,6 +58,12 @@ Undoing a round changes files only, not the worker's conversation. The next foll
 
 A worker's worktree starts from `HEAD` (or `base`) and does not follow later commits. `reply` with `sync: true` merges the lead's current `HEAD` into the worker's branch before the follow-up turn and advances `worktree.base` so results still show only the worker's changes. On conflict, the merge aborts (leaving worktree, base, and result unchanged) and the follow-up still runs, naming the lead commit and conflicting files in the prompt and adding a job note. Other sync failures reject the reply. Syncing blocks discard and round changes. Rounds still replay from `roundsBase` so pre-sync undos survive.
 
+A message sent while a turn runs joins that turn. Codex takes it through `turn/steer`. Antigravity takes it as another `session/prompt`: agy 1.5.14 answers the running request at once with `end_turn` and carries the turn on under the new one, whose answer ends the turn. Crew sends overlapping messages in order, waiting for each handover or refusal before sending the next message. Crew refuses such a message while a permission request or question waits (as agy does), while the turn is still starting or already ending, and after Crew stopped it. If agy refuses a message after Crew has acknowledged it, Crew records the refusal on that turn as soon as it arrives. Once agy accepts the message, an error from its request fails the turn. Each prompt counts toward its own turn unless its usage arrives after a forced end.
+
+When Codex completes a parent turn while its sub-agents are working, Crew waits for their latest turns to finish. A new turn on a child thread replaces the previous one even if its completion has yet to arrive.
+
+Where agy supports `session/close`, Crew closes the session when a turn ends, which since agy 1.5.10 also stops its subagents and background work. A follow-up waits for that close, then restores the session with `session/resume` (or `session/load`). Crew reports a generation error immediately, even if another prompt is still outstanding. If a close is unavailable or unconfirmed, a follow-up can use the session once every prompt already sent has settled. Usage and tool calls replayed during a restore are ignored until the new turn sends its first prompt. agy 1.5.14 kept the conversation across a close and resume. A turn that ends after the job has moved on to the next one leaves the newer turn alone.
+
 A job whose worktree was discarded takes no further turn. See [cleanup and garbage collection](#cleanup-and-garbage-collection) for discarded and orphaned worktrees.
 
 ## Question jobs
@@ -84,7 +90,7 @@ For plugin-enabled threads and eligibility, see [Codex plugins](sandbox.md#codex
 
 ## Token use
 
-Where reported (Codex), a job records `tokenUse` with total input, cached input, output, and what the latest turn added. `status`, the board, and the desktop apps display it so follow-up turns show how much input was cached.
+A job records `tokenUse` with total input, cached input, output, and what the latest turn added. Codex reports cumulative thread usage, including final totals delivered after a turn ends. Crew ignores totals that go backwards. Other notifications that name a turn must match the confirmed turn. Before confirmation, Crew accepts new turn IDs and ignores IDs that have already ended. For Antigravity, Crew counts each prompt's usage once toward the turn that sent it. Usage that arrives after Crew force-ends that turn is omitted. `status`, the board, and the desktop apps display it so follow-up turns show how much input was cached. A job also records `context`, how full the worker's context window is, from Codex's latest request (`last.totalTokens` of `modelContextWindow`) or agy's `usage_update`. `status`, the board, and the desktop apps show it.
 
 Token savings measured on Codex CLI 0.167.0 for a no-op question (dropping 123 user skills, 22 app connectors, recommended plugins, and computer-use REPL tools):
 

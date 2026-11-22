@@ -79,6 +79,31 @@ const isVideo = (file: string) => /\.(webm|mp4)$/i.test(file);
 const evidenceSrc = (job: BoardJob, item: EvidenceItem) => `/api/jobs/${encodeURIComponent(job.id)}/evidence/${encodeURIComponent(item.file)}?v=${item.modified}${item.sig ? `&sig=${item.sig}` : ''}`;
 
 /** What the worker saw, newest turn first, and what the lead attached. */
+/** What a running Codex turn has changed so far. The daemon keeps it only while the turn runs. */
+function LiveDiffSection({ job }: { job: BoardJob }) {
+  const [diff, setDiff] = useState('');
+  const at = job.endedAt == null ? job.liveDiff?.at : undefined;
+  useEffect(() => {
+    // The previous diff stays up until the newer one arrives.
+    if (!at) {
+      setDiff('');
+      return;
+    }
+    const abort = new AbortController();
+    request<{ diff: string }>(`/api/jobs/${job.id}/diff`, undefined, abort.signal).then(
+      (result) => { if (!abort.signal.aborted) setDiff(result.diff); },
+      () => {},
+    );
+    return () => abort.abort();
+  }, [job.id, at]);
+  if (!at || !diff) return null;
+  return (
+    <Section title="Changes so far" icon={BranchRegular}>
+      <pre className="selectable live-diff">{diff}</pre>
+    </Section>
+  );
+}
+
 function EvidenceSection({ job }: { job: BoardJob }) {
   const items = (job.evidence ?? []).toSorted((a, b) => b.turn - a.turn);
   const [picked, setPicked] = useState<string[]>([]);
@@ -448,6 +473,11 @@ function FollowUp({ job }: { job: BoardJob }) {
   );
 }
 
+export function drawerJob(detail: BoardJob | null, current?: BoardJob): BoardJob | undefined {
+  if (!detail || !current) return current ?? detail ?? undefined;
+  return { ...detail, ...current, prompt: detail.prompt ?? current.prompt, liveDiff: current.liveDiff };
+}
+
 /** JobDetailView in the app: status and close, then the job, its facts, results and controls. */
 export function JobDrawer({ id, state, close }: { id: string; state: Snapshot; close: () => void }) {
   const current = state.jobs.find((job) => job.id === id);
@@ -466,7 +496,7 @@ const JobDetails = memo(function JobDetails({ id, current, streamLog, agents, ro
   const [log, setLog] = useState<CrewEvent[]>([]);
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
-  const job = detail ? { ...detail, ...current, prompt: detail.prompt ?? current?.prompt } : current;
+  const job = drawerJob(detail, current);
   const cancelKey = `cancel:${id}:${job?.turns ?? 1}`;
   const cancelling = useAction(cancelKey);
   useEffect(() => {
@@ -506,6 +536,7 @@ const JobDetails = memo(function JobDetails({ id, current, streamLog, agents, ro
         ...(job.tokenUse
           ? [['Of which', `${job.tokenUse.cachedInput.toLocaleString()} cached input · ${(job.tokenUse.input - job.tokenUse.cachedInput).toLocaleString()} uncached input · ${job.tokenUse.output.toLocaleString()} output${job.turns > 1 ? ` · ${job.tokenUse.turn.toLocaleString()} in the latest turn` : ''}`] as [string, string]]
           : []),
+        ...(job.context ? [['Context', `${job.context.used.toLocaleString()} of ${job.context.size.toLocaleString()} (${Math.round((job.context.used / job.context.size) * 100)}%)`] as [string, string]] : []),
         ['Turns', String(job.turns)],
         ...(job.shared?.length ? [['Instructions', job.shared.join('\n')] as [string, string]] : []),
       ]
@@ -545,6 +576,7 @@ const JobDetails = memo(function JobDetails({ id, current, streamLog, agents, ro
             </div>
           )}
           <Facts facts={facts} />
+          <LiveDiffSection job={job} />
           {result && (
             <Section title="Changes" icon={BranchRegular}>
               <pre className="selectable">{result.stat || 'No files changed'}</pre>

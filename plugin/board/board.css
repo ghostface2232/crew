@@ -636,6 +636,7 @@ html[data-resizing] dialog.detail-panel { transition: none; }
 .detail-section > h3 { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; font-size: 13px; font-weight: 600; }
 .detail-section > h3 svg { width: 14px; height: 14px; color: var(--secondary); }
 .detail-section pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+.detail-section pre.live-diff { max-height: 360px; overflow: auto; }
 .section-toggle { min-height: 0; padding: 0; gap: 7px; background: none !important; font-size: 13px; font-weight: 600; }
 .task { margin: 0; padding: 12px 14px; border-radius: var(--row-radius); background: var(--surface-2); font-family: var(--text-face); line-height: 1.5; cursor: auto; }
 .task[data-folded] {

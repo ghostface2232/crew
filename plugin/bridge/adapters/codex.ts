@@ -37,7 +37,7 @@ interface Run {
   pluginsEnabled: boolean;
   /** Id of the turn in flight, or null between turns. */
   turnId: string | null;
-  awaitingTurn: boolean;
+  awaitingTurn: symbol | null;
   interrupt: ReturnType<typeof Promise.withResolvers<void>> | null;
   message: string;
   pending: Pending[];
@@ -47,8 +47,8 @@ interface Run {
   busyChildren: Map<string, string | null>;
   /** The parent's turn/completed, held until busyChildren is empty so the result includes their edits. */
   held: any | null;
-  /** A turn the status check found over without its end; a turn/completed for it arriving later is ignored. */
-  lost: string | null;
+  /** Includes turns the status check found over without a completion. Keys are scoped to the reporting thread. */
+  ended?: Set<string>;
   /** Keys of plugin tool approvals the user allowed for this job. */
   grants: Set<string>;
   /** The lead has been told that this thread's Crew tools did not start. */
@@ -255,7 +255,7 @@ export class CodexAdapter implements Adapter {
     const peer = this.peer;
     const children = [...run.busyChildren];
     run.held = null;
-    run.busyChildren.clear();
+    for (const threadId of run.busyChildren.keys()) this.childSettled(run, threadId);
     for (const request of run.pending.splice(0)) request.resolve({ approve: false, cancelled: true });
     if (!peer) return;
     const acks = children.filter(([, turnId]) => turnId).map(([threadId, turnId]) => peer.request('turn/interrupt', { threadId, turnId }, RPC_TIMEOUT_MS));
@@ -306,7 +306,7 @@ export class CodexAdapter implements Adapter {
         : { verdict: 'working', detail: 'Codex reports the turn still in progress' };
     }
     if (!status?.type) return { verdict: 'unknown', detail: 'Codex did not report the thread status' };
-    run.lost = turnId;
+    if (turnId) (run.ended ??= new Set()).add(`${threadId}\0${turnId}`);
     run.turnId = null;
     return { verdict: 'ended', detail: `Codex's thread is ${status.type}, but the bridge never received the end of its turn. The work may be finished: reply to have it report, or check the worktree.` };
   }
@@ -419,7 +419,7 @@ export class CodexAdapter implements Adapter {
   }
 
   private openRun(ctl: JobCtl, threadId: string, pluginsEnabled = false): Run {
-    const run: Run = { ctl, pluginsEnabled, turnId: null, awaitingTurn: false, interrupt: null, message: '', pending: [], crewCalls: new Set(), items: new Map(), busyChildren: new Map(), held: null, lost: null, grants: new Set(), toolsDown: false };
+    const run: Run = { ctl, pluginsEnabled, turnId: null, awaitingTurn: null, interrupt: null, message: '', pending: [], crewCalls: new Set(), items: new Map(), busyChildren: new Map(), held: null, grants: new Set(), toolsDown: false };
     this.runs.set(threadId, run);
     this.noteToolFailure(threadId);
     return run;
@@ -454,23 +454,22 @@ export class CodexAdapter implements Adapter {
     run.held = null;
     run.message = '';
     run.items.clear();
-    run.awaitingTurn = true;
+    const start = Symbol(method);
+    run.awaitingTurn = start;
     try {
       const res = await peer.request(method, params, RPC_TIMEOUT_MS);
-      if (run.awaitingTurn) {
+      if (run.awaitingTurn === start) {
         run.turnId = res.turn.id;
-        run.awaitingTurn = false;
+        run.awaitingTurn = null;
       }
     } catch (err) {
+      if (run.awaitingTurn !== start) return;
+      run.awaitingTurn = null;
       if (err instanceof RpcTimeoutError) {
-        // Not retried: the turn may have started. Failing ends the job instead of leaving it running and uncancellable.
-        if (run.awaitingTurn) {
-          run.awaitingTurn = false;
-          run.ctl.fail(`${err.message}. The turn may have started anyway; check the worker session (resume command) before retrying.`);
-        }
+        // A retry could start a second turn after one whose acknowledgement was lost.
+        run.ctl.fail(`${err.message}. The turn may have started anyway; check the worker session (resume command) before retrying.`);
         return;
       }
-      run.awaitingTurn = false;
       throw err;
     }
   }
@@ -490,8 +489,9 @@ export class CodexAdapter implements Adapter {
     const { bin, args, shell } = agentCommand(this.config.codex.bin, ['app-server'], env);
     const child = spawn(bin, args, { env, shell, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     const peer = new RpcPeer(child, {
-      onNotification: (method, params) => this.onNotification(method, params),
-      onRequest: (method, params, id) => this.onRequest(method, params, id),
+      // A start acknowledgement and the next event can share a read. Dispatch both in wire order with the RPC continuations.
+      onNotification: (method, params) => queueMicrotask(() => this.onNotification(method, params)),
+      onRequest: (method, params, id) => Promise.resolve().then(() => this.onRequest(method, params, id)),
       onExit: (reason) => {
         if (this.peer === peer) this.peer = null;
         this.loaded.clear();
@@ -579,9 +579,26 @@ export class CodexAdapter implements Adapter {
       return;
     }
     if (method === 'thread/closed') this.toolFailures.delete(threadId);
-    const owner = this.runs.get(threadId) ?? this.children.get(threadId);
-    if (method === 'turn/started' || method === 'thread/closed') {
-      for (const key of owner?.items.keys() ?? []) if (key.startsWith(`${threadId}\0`)) owner?.items.delete(key);
+    const run = this.runs.get(threadId);
+    const owner = run ?? this.children.get(threadId);
+    const id = p.turn?.id ?? p.turnId;
+    if (id && owner) {
+      const confirmed = run ? run.turnId : owner.busyChildren.get(threadId);
+      const key = `${threadId}\0${id}`;
+      if (id !== confirmed && owner.ended?.has(key)) {
+        // Cumulative thread usage can arrive after its turn completes.
+        if (method !== 'thread/tokenUsage/updated') return;
+      } else if (confirmed && id !== confirmed) {
+        if (run || method !== 'turn/started') return;
+        // A child can start its next turn before Crew hears the previous completion.
+        (owner.ended ??= new Set()).add(`${threadId}\0${confirmed}`);
+      }
+      if (method === 'turn/completed') (owner.ended ??= new Set()).add(key);
+    }
+    if (method === 'thread/closed' || (!run && method === 'turn/started')) {
+      for (const [key, item] of owner?.items ?? []) {
+        if (key.startsWith(`${threadId}\0`) && (method === 'thread/closed' || item.turnId !== id)) owner?.items.delete(key);
+      }
     }
     if (method === 'item/started' && owner && ['mcpToolCall', 'fileChange'].includes(p.item?.type)) {
       const item = p.item;
@@ -617,7 +634,6 @@ export class CodexAdapter implements Adapter {
       }
       return;
     }
-    const run = this.runs.get(threadId);
     if (!run) {
       // Sub-agent work only proves the job is alive; its turns must not end the parent job.
       if (method === 'turn/started') owner?.busyChildren.set(threadId, p.turn?.id ?? null);
@@ -634,8 +650,7 @@ export class CodexAdapter implements Adapter {
     switch (method) {
       case 'turn/started':
         run.turnId = p.turn.id;
-        run.awaitingTurn = false;
-        run.message = '';
+        run.awaitingTurn = null;
         ctl.phase('working');
         break;
       case 'item/started':
@@ -652,21 +667,33 @@ export class CodexAdapter implements Adapter {
         break;
       }
       case 'thread/tokenUsage/updated':
+        if (p.tokenUsage.total.totalTokens < (ctl.job.tokens ?? 0)) break;
         ctl.tokens(p.tokenUsage.total.totalTokens, {
           input: p.tokenUsage.total.inputTokens ?? 0,
           cachedInput: p.tokenUsage.total.cachedInputTokens ?? 0,
           output: p.tokenUsage.total.outputTokens ?? 0,
         });
+        // The latest request holds the whole context, so its size is how full the window is.
+        if (p.tokenUsage.modelContextWindow) ctl.context(p.tokenUsage.last?.totalTokens ?? 0, p.tokenUsage.modelContextWindow);
+        break;
+      case 'turn/diff/updated':
+        if (p.turnId) ctl.diff(p.diff);
+        break;
+      case 'model/rerouted':
+        // The rest of the turn runs on the other model, so scores and ratings must name that one.
+        if (p.toModel) {
+          ctl.model(p.toModel, ctl.job.resolvedEffort);
+          ctl.note(`Codex moved this job from ${p.fromModel ?? 'its model'} to ${p.toModel}${p.reason ? ` (${p.reason})` : ''}.`);
+        }
         break;
       case 'error':
         if (p.willRetry) ctl.progress(`retrying: ${p.error.message}`);
         break;
       case 'turn/completed': {
-        // The end of a turn the status check gave up on, or of any turn but the current one, must not end a later turn.
-        if (p.turn?.id && (p.turn.id === run.lost || (run.turnId && p.turn.id !== run.turnId))) break;
+        run.awaitingTurn = null;
+        run.turnId = null;
         if (run.busyChildren.size && p.turn?.status === 'completed' && !run.interrupt) {
           // Collecting the result now would miss what a sub-agent still writes.
-          run.turnId = null;
           run.held = p;
           ctl.phase(`waiting for ${run.busyChildren.size} sub-agent(s) to finish`);
           break;
@@ -682,6 +709,8 @@ export class CodexAdapter implements Adapter {
 
   /** A sub-agent's turn ended; a parent completion held for it goes ahead once none is left. */
   private childSettled(run: Run, threadId: string): void {
+    const turnId = run.busyChildren.get(threadId);
+    if (turnId) (run.ended ??= new Set()).add(`${threadId}\0${turnId}`);
     run.busyChildren.delete(threadId);
     if (run.held && run.busyChildren.size === 0) {
       const held = run.held;
@@ -692,23 +721,29 @@ export class CodexAdapter implements Adapter {
 
   private endTurn(run: Run, p: any): void {
     const { ctl } = run;
-    run.turnId = null;
-    run.awaitingTurn = false;
     run.held = null;
     run.crewCalls.clear();
     run.items.clear();
     for (const request of run.pending.splice(0)) request.resolve(null);
     // A failed or interrupted parent ends the job at once, so its sub-agents must not go on editing.
-    if (p.turn?.status !== 'completed') {
+    if (p.turn?.status !== 'completed' || run.interrupt) {
       this.interruptChildren(run);
-      run.busyChildren.clear();
+      for (const threadId of run.busyChildren.keys()) this.childSettled(run, threadId);
     }
+    const report = run.message;
+    run.message = '';
     const turn = p.turn;
     if (run.interrupt || turn.status === 'interrupted') ctl.cancelled();
-    else if (turn.status === 'completed') ctl.done(run.message);
+    else if (turn.status === 'completed') ctl.done(report);
     else {
       const info = turn.error?.codexErrorInfo;
-      ctl.fail(turn.error?.message ?? 'turn failed', { limit: typeof info === 'string' && LIMIT_ERRORS.includes(info) });
+      const message = turn.error?.message ?? 'turn failed';
+      // Not a fault in the work: the reviewer's refusals ended it, and they are listed with the job.
+      if (info === 'tooManyDenials') {
+        const listed = ctl.job.refusals?.some((refusal) => refusal.turn === ctl.job.turns);
+        ctl.fail(`Codex stopped the turn after too many of its actions were refused (${message}).${listed ? ' The refused actions are listed with the job.' : ''}`);
+      }
+      else ctl.fail(message, { limit: typeof info === 'string' && LIMIT_ERRORS.includes(info) });
     }
     run.interrupt?.resolve();
   }

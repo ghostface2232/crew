@@ -33,6 +33,8 @@
       "notes": [],
       "error": null,
       "tokens": 12000,
+      "context": { "used": 84250, "size": 258400 },
+      "liveDiff": { "turn": 1, "at": 1795000000000, "chars": 18 },
       "seq": 1,
       "delivered": 0,
       "ask": true,

@@ -713,6 +713,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     const [, id, action] = jobRoute;
     if (method === 'GET' && !action) return { ...jobs.get(id), ...sealed(jobs.get(id)) };
     if (method === 'GET' && action === 'events') return jobs.eventsFor(id, 0);
+    if (method === 'GET' && action === 'diff') return jobs.liveDiff(id) ?? { turn: jobs.get(id).turns, diff: '', at: null };
     if (method === 'GET' && action === 'wait') {
       const after = Number(url.searchParams.get('after') ?? 0);
       const timeout = Math.min(Number(url.searchParams.get('timeout') ?? 25), 55);

@@ -292,6 +292,10 @@ export interface Job {
    * worker's tokens are input it has already sent once; this is how to tell that from new work.
    */
   tokenUse?: { input: number; cachedInput: number; output: number; turn: number };
+  /** How full the worker's context window is, as the agent last reported it. */
+  context?: { used: number; size: number };
+  /** Set while a running turn has a diff so far (Codex); the text is held in memory, see Jobs.liveDiff. */
+  liveDiff?: { turn: number; at: number; chars: number };
   /** Seq of the latest event about this job. */
   seq: number;
   /** Compatibility projection of acknowledged news onto event seq; never an ACK input. */
@@ -315,6 +319,9 @@ export interface JobCtl {
   /** The agent's automatic reviewer refused an action in this turn. */
   refused(action: string, reason: string): void;
   tokens(total: number, parts?: { input: number; cachedInput: number; output: number }): void;
+  context(used: number, size: number): void;
+  /** The changes the running turn has made so far, as one unified diff. */
+  diff(text: string): void;
   waiting(type: 'approval' | 'question', reason: string, grant?: string): void;
   resumed(): void;
   done(report: string): void;
@@ -362,6 +369,8 @@ export interface JobsHooks {
 
 const TERMINAL: JobState[] = ['done', 'failed', 'cancelled'];
 const MAX_EXCHANGE_TEXT = 20_000;
+/** A running turn's diff is for watching it, not for review: past this it is cut, and the worktree has the rest. */
+const LIVE_DIFF_CHARS = 200_000;
 const KEEP_EXCHANGE = 40;
 
 /** Adds a message to the job's conversation, bounded so a long debate cannot grow the record without limit. */
@@ -502,6 +511,7 @@ export class Jobs {
   private changingRounds = new Set<string>();
   /** Each job's token total when its current turn began, so the turn's own share can be shown. */
   private turnStartTokens = new Map<string, number>();
+  private liveDiffs = new Map<string, { turn: number; diff: string; at: number }>();
   /** Jobs past the alone-check but not yet registered, so two starts cannot both slip through it. */
   private starting: { exclusive: boolean }[] = [];
   private preparingReviews = new Set<string>();
@@ -1434,6 +1444,23 @@ export class Jobs {
         job.tokens = total;
         if (parts) job.tokenUse = { ...parts, turn: total - (this.turnStartTokens.get(job.id) ?? 0) };
       },
+      context: (used, size) => {
+        // Like tokens, it reaches the board with the job's next change.
+        if (used >= 0 && size > 0) job.context = { used, size };
+      },
+      diff: (text) => {
+        if (!live() || this.finalizing.has(job.id) || typeof text !== 'string') return;
+        // Never between the halves of a surrogate pair, which a strict JSON decoder (the macOS app's) refuses.
+        const cut = /[\uD800-\uDBFF]/.test(text[LIVE_DIFF_CHARS - 1] ?? '') ? LIVE_DIFF_CHARS - 1 : LIVE_DIFF_CHARS;
+        const diff = text.length > LIVE_DIFF_CHARS
+          ? `${text.slice(0, cut)}\n… ${(text.length - cut).toLocaleString('en-US')} more characters; the worktree has the whole change.`
+          : text;
+        // Clients refetch when this changes, so two updates in one millisecond still differ.
+        const at = Math.max(Date.now(), (job.liveDiff?.at ?? 0) + 1);
+        this.liveDiffs.set(job.id, { turn: job.turns, diff, at });
+        job.liveDiff = { turn: job.turns, at, chars: text.length };
+        this.changed(job);
+      },
       waiting: (type, reason, grant) => {
         if (!live()) return;
         job.state = 'waiting';
@@ -1453,6 +1480,8 @@ export class Jobs {
       },
       done: (report) => {
         if (!live() || this.finalizing.has(job.id)) return;
+        // The turn is over; collecting its result can take a while, and the result replaces what it showed.
+        this.dropLiveDiff(job);
         this.finalizing.add(job.id);
         this.finalize(job, report).catch((err) => {
           this.finalizing.delete(job.id);
@@ -1642,12 +1671,27 @@ export class Jobs {
     return path.join(this.home, 'reviews', `${id}${turn === 1 ? '' : `-${turn}`}.diff`);
   }
 
+  private dropLiveDiff(job: Job): void {
+    this.liveDiffs.delete(job.id);
+    if (!job.liveDiff) return;
+    delete job.liveDiff;
+    this.changed(job);
+  }
+
+  /** The diff of a job's running turn so far, while it runs. */
+  liveDiff(id: string): { turn: number; diff: string; at: number } | null {
+    const job = this.get(id);
+    const live = this.liveDiffs.get(id);
+    return live && !isTerminal(job) && live.turn === job.turns ? live : null;
+  }
+
   eventsFor(id: string, after: number): CrewEvent[] {
     return this.recent.filter((e) => e.job_id === id && e.seq > after);
   }
 
   private event(job: Job, kind: EventKind, detail: string, news?: { kind: News['kind']; reason: string; question?: string }): void {
     job.seq = this.record(job.agent, job.sessionId, kind, detail, job.id).seq;
+    if (isTerminal(job)) this.dropLiveDiff(job);
     // Each turn has its own file, so delayed cleanup cannot delete a follow-up's fresh diff.
     if (isTerminal(job) && job.kind === 'review') {
       fs.rm(this.diffFile(job.id, job.turns), { force: true }, () => {});
@@ -1725,6 +1769,8 @@ export class Jobs {
     this.delivery.restore(saved.delivery);
     this.hooks.pulls?.restore(saved.pulls);
     for (const job of saved.jobs) {
+      // The diff text lived in the previous bridge.
+      delete job.liveDiff;
       const legacy = job.news === undefined;
       job.news ??= [];
       job.newsSeq ??= 0;

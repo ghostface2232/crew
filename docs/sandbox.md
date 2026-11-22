@@ -49,7 +49,7 @@ The bridge enforces exclusivity, network access, review snapshots, and token den
 
 ## Antigravity's own settings
 
-Crew enforces Antigravity's role permissions by answering `session/request_permission`. It never changes Antigravity's settings. So it sees an action in advance only when agy asks about it, and agy asks before every edit and command only in its `default` mode.
+Crew enforces Antigravity's role permissions by answering `session/request_permission`. It never changes Antigravity's settings. So it sees an action in advance only when agy asks about it. agy asks before edits and commands only in its `default` mode, and even there it runs commands covered by the user's own allow rules without asking.
 
 | Action (agy 1.5.14, measured 2026-11-22) | `default` | `accept-edits` | `auto` |
 | --- | --- | --- | --- |
@@ -62,11 +62,11 @@ Crew enforces Antigravity's role permissions by answering `session/request_permi
 
 These results were measured with Non-Workspace Access set to allow and the user's allow rules in place.
 
-- **Mode.** Crew keeps every session in `default`. After `session/new` and every restore, if a session starts in another mode, Crew switches it back to `default` and fails the job if agy refuses. Crew undoes any `current_mode_update` during a turn and any switch reported between turns before the next prompt. It also refuses the agent's own `switch_mode`. While agy 1.5.14 started ACP sessions in `default` even when the saved Agent Mode was `auto`, its default for other sessions became Auto in 1.5.7, so Crew checks the mode instead of assuming it. Crew does not offer Auto as an option because the role table above does not survive it.
-- **Actions that ran without asking.** These are commands covered by the user's allow rules and reads permitted by Non-Workspace Access. Crew sees them only once agy reports them `completed`, then checks them against the role (`unasked` in `adapters/antigravity.ts`). It skips calls that end `failed`—which may never have run—and calls that end while the turn is being cancelled.
+- **Mode.** Crew keeps every session in `default`. It records the mode agy reports for each session, from `session/new`, a restore, an option change, and every `current_mode_update` or options update (between turns and during a restore too). A response's mode gives way to a report that came in while the request was out, unless the response names a mode that does not ask. Before every prompt and every message added to a turn, Crew switches a session that is in another mode back to `default`, and checks again if agy reports another switch meanwhile. A turn is taken before that check, so a cancel or a second message meanwhile sends no prompt. If agy refuses, the job fails. During a turn, Crew undoes a switch at once, and the turn's outcome waits for that: a refusal fails the job even when the turn ended first. It also refuses the agent's own `switch_mode`. While agy 1.5.14 started ACP sessions in `default` even when the saved Agent Mode was `auto`, its default for other sessions became Auto in 1.5.7, so Crew checks the mode instead of assuming it. Crew does not offer Auto as an option because the role table above does not survive it.
+- **Actions that ran without asking.** These are commands covered by the user's allow rules and reads permitted by Non-Workspace Access. Crew sees them only once agy reports them `completed`, then checks them against the role (`unasked` in `adapters/antigravity.ts`). It skips calls that came to it as a permission request and calls that end `failed`, which may never have run.
   - An engineer's command is permitted by the user's own rule, so Crew notes it in the result and lets the turn continue.
-  - An edit, delete, move, or command outside the role stops the turn, and so does any read of `~/.crew/token`. Examples: a command in a reviewer's, editor's, or read-only job, or an edit outside the workspace. The job fails and reports what ran and which setting to narrow.
-  - Other kinds outside the role are noted.
+  - An edit, delete, move, or command outside the role stops the turn, and so does any read of `~/.crew/token`. Examples: a command in a reviewer's, editor's, or read-only job, or an edit outside the workspace. The job fails at once and reports what ran and which setting to narrow, or which mode let it through if the action started while the session was switched out of `default`. Crew sends the cancel immediately. If agy has not stopped after 5 seconds, Crew closes the session where supported. An outstanding mode or setup request can delay that close by up to 2 more seconds.
+  - Crew notes other kinds outside the role. If a violation completes during the user's cancel, Crew notes it and a successful cancel leaves the job cancelled. If agy ignores the cancel and the session cannot be closed, the violation fails the job.
   - By then, the action has already run. This check reports it and stops the rest of the turn; it does not prevent the action itself.
 - **Not used.**
   - `agy` with `--settings` before `acp`: deny rules, `toolPermission: "strict"`, `allowNonWorkspaceAccess: false`, and `agentMode` passed this way did not change an ACP session. `agy acp` itself rejects `--settings`.
@@ -108,7 +108,7 @@ On macOS and Windows, `check` reads anywhere except the daemon token, writes onl
 
 ## Tests
 
-Sandbox checks used Codex CLI 0.167.0.
+Sandbox checks used Codex CLI 0.167.0, and were run again on 0.171.0 (below).
 
 | Sandbox | Result |
 | --- | --- |
@@ -116,7 +116,9 @@ Sandbox checks used Codex CLI 0.167.0.
 | `workspace-write` | Project and temp writes work. Binding `127.0.0.1` fails with `listen EPERM`, and outbound network access requires escalation |
 | `workspace-write` + network (`runs_app`) | Binds local ports and reaches outside hosts without prompts. Home writes stay blocked. Headless Chrome failed inside the macOS sandbox (exit 134) and browser launch still needed approval. `kill` on the job's own server was refused, although an interrupt stopped it. `crew.browser` provides a sandboxed browser outside Codex's sandbox |
 
-Verified on macOS with Codex CLI 0.167.0 (read-only reviews/questions writing to `$TMPDIR` while repo/home writes fail, and live writable jobs writing to scratch and worktree without prompts) and unit tests. Live shared links on APFS (where cloning succeeds) were tested via injected failures.
+Verified on macOS with Codex CLI 0.167.0 (read-only reviews/questions writing to `$TMPDIR` while repo/home writes fail, and live writable jobs writing to scratch and worktree without prompts) and unit tests.
+
+Re-verified on macOS with Codex CLI 0.171.0 on 2026-11-22. A script drove `CodexAdapter` with a dummy token under a temporary `CREW_HOME` for the four setups: read-only (`crew_read_only`), plain `workspace-write`, a plugin job (`crew_workspace`), and `runs_app` (`crew_app`). It also checked a follow-up resumed in a new app-server. Every result matched the table above. The token was denied wherever a profile applies and readable only under plain `workspace-write`. `.git` and everything under `~/.crew` except scratch and evidence stayed read-only in all four. `/tmp` was writable except in read-only jobs. Ports and outside network opened only with `runs_app`. Resumed threads kept the same profile, and 0.171.0 reported no warnings about the profiles or the overrides on resume. In the `runs_app` job the model itself declined to read the token file, so that read was checked with `codex sandbox` and the same profile instead. Windows was not re-run. Live shared links on APFS (where cloning succeeds) were tested via injected failures.
 
 The Antigravity mode table above came from live ACP probes on 2026-11-22. The probes used agy 1.5.14, Crew's client capabilities, and scratch targets, approving each request once. A live Crew job then confirmed that an engineer's `git branch` under the user's allow rule is noted, while the same command in a read-only job stops the turn.
 
@@ -124,6 +126,7 @@ Related tests include `test/antigravity.test.ts`, `test/policy.test.ts`, `test/b
 
 ## History
 
+- 2026-11-22: Re-ran the Codex sandbox checks on Codex CLI 0.171.0 (macOS), after Codex reworked permission profiles and resume-time override checks in 0.168–0.171. Nothing changed.
 - 2026-11-22: Probes of agy 1.5.14 found two gaps. Actions covered by the user's Antigravity allow rules or Non-Workspace Access never trigger a permission request in any mode, and `auto` and `accept-edits` skip every edit check. Crew now pins sessions to `default`, checks actions that ran without asking against the role, and stops the turn on a violation. A per-job Auto option was considered and dropped because `auto` also skipped the edit, `.git`, token-folder, and network checks.
 - 2026-11-16: Windows bridge parity verified on Windows 11 with Codex CLI 0.166.0 and Git for Windows 2.53. Sandboxed `check` runs Git for Windows' `sh` inside `codex sandbox` under a PowerShell 5.1 kill-on-close job object with a stdin-secret status line because Codex waits on open pipes and sandboxed processes can kill their parent. `crew.browser` stayed macOS-only because Chromium starts inside Codex's Windows sandbox.
 - 2026-11-14: Added the `codex.plugins` default `["browser"]` and the plugin token-denial profile.

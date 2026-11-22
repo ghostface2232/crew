@@ -113,6 +113,7 @@ export function describe(job: JobView, waitingHint?: string): string {
     const use = job.tokenUse;
     lines.push(`tokens: ${n(job.tokens)}${use ? ` (input ${n(use.input)}, of which ${n(use.cachedInput)} cached; output ${n(use.output)}${job.turns > 1 ? `; this turn ${n(use.turn)}` : ''})` : ''}`);
   }
+  if (job.context) lines.push(`context: ${job.context.used.toLocaleString('en-US')} of ${job.context.size.toLocaleString('en-US')} (${Math.round((job.context.used / job.context.size) * 100)}%)`);
   if (job.worktree) lines.push(`worktree: ${job.worktree.path} (branch ${job.worktree.branch}, base ${job.worktree.base.slice(0, 8)})`);
   if (job.cleanupPending) {
     lines.push(heldFolderOnly(job)

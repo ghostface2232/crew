@@ -76,9 +76,11 @@ struct JobDetailView: View {
             if let use = job.tokenUse {
                 fact("Of which", "\(use.cachedInput.formatted()) cached input · \((use.input - use.cachedInput).formatted()) uncached input · \(use.output.formatted()) output" + (job.turns > 1 ? " · \(use.turn.formatted()) in the latest turn" : ""))
             }
+            if let context = job.context { fact("Context", context.label) }
             fact("Turns", String(job.turns))
             if let shared = job.shared, !shared.isEmpty { fact("Instructions", shared.joined(separator: "\n")) }
         }.font(Typeface.callout).textSelection(.enabled).inset()
+        if let live = job.liveDiff, job.endedAt == nil { LiveDiffSection(store: store, id: job.id, at: live.at) }
         if let result = job.result {
             detailSection("Changes", symbol: "arrow.triangle.branch") {
                 Text(result.stat.isEmpty ? "No files changed" : result.stat).font(Typeface.code).textSelection(.enabled)
@@ -197,6 +199,31 @@ struct JobDetailView: View {
             }
         }
         ActionMessage(state: store.actions["cancel:\(id):\(job.turns)"])
+    }
+}
+
+/// What a running Codex turn has changed so far. The daemon keeps it only while the turn runs.
+private struct LiveDiffSection: View {
+    let store: CrewStore
+    let id: String
+    let at: Double
+    @State private var diff = ""
+    var body: some View {
+        Group {
+            if !diff.isEmpty {
+                detailSection("Changes so far", symbol: "arrow.triangle.branch") {
+                    ScrollView {
+                        // Cut like a note: SwiftUI draws nothing for text that tall. The worktree has the whole change.
+                        Text(noteText(diff, limit: 8_000)).font(Typeface.code).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                    }.frame(maxHeight: WorkspaceStyle.liveDiffHeight)
+                }
+            }
+        }
+        // The previous diff stays up until the newer one arrives.
+        .task(id: at) {
+            guard let result: LiveDiffText = try? await store.api.request("/api/jobs/\(id)/diff"), !Task.isCancelled else { return }
+            diff = result.diff
+        }
     }
 }
 

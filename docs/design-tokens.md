@@ -59,6 +59,7 @@ These aliases name a role for a scale step. Use the alias when the role fits, so
 | `summaryBarHeight` | 5 | The summary bar |
 | `usageBarHeight` | 3 | An agent's usage bar |
 | `editorHeight` | 80–180 | A message editor grows within this range; `answerHeight` (56–160) for an answer field |
+| `liveDiffHeight` | 360 | A running turn's diff scrolls within this height in the job details |
 | `panelShadowRadius` | 26 | The detail panel's shadow, offset by `panelShadowOffset` (−8, 8) |
 | `windowInset` | 8 | The toolbar items' distance from the window edge, kept by floating panels |
 

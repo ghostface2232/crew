@@ -122,6 +122,8 @@ enum WorkspaceStyle {
     /// Message editors grow with their text between these heights.
     static let editorHeight: ClosedRange<CGFloat> = 80...180
     static let answerHeight: ClosedRange<CGFloat> = 56...160
+    /// A running turn's diff scrolls inside this height.
+    static let liveDiffHeight: CGFloat = 360
 
     // MARK: Windows
     /// The page stops widening here and centers; below `contentMinWidth` the window stops narrowing.

@@ -28,6 +28,10 @@ struct Job: Codable, Sendable, Identifiable, Equatable {
     var error: JobError?
     var tokens: Int?
     var tokenUse: TokenUse?
+    /// How full the worker's context window is; absent from older daemons and before the agent reports it.
+    var context: ContextUse?
+    /// Set while a running Codex turn has a diff so far; its text comes from `/api/jobs/:id/diff`.
+    var liveDiff: LiveDiff?
     var seq: Int
     /// Last `seq` the lead has read; absent from older daemons.
     var delivered: Int?
@@ -85,6 +89,14 @@ struct Job: Codable, Sendable, Identifiable, Equatable {
     var requestKey: String { "answer:\(id):\(waiting?.id ?? "")" }
 }
 struct TokenUse: Codable, Sendable, Equatable { var input: Int; var cachedInput: Int; var output: Int; var turn: Int }
+struct LiveDiff: Codable, Sendable, Equatable { var turn: Int; var at: Double; var chars: Int }
+struct LiveDiffText: Decodable, Sendable { var diff: String }
+struct ContextUse: Codable, Sendable, Equatable {
+    var used: Int
+    var size: Int
+    /// As the board shows it: "84,250 of 258,400 (33%)".
+    var label: String { "\(used.formatted()) of \(size.formatted()) (\(size > 0 ? Int((Double(used) / Double(size) * 100).rounded()) : 0)%)" }
+}
 struct Round: Codable, Sendable, Equatable {
     var turn: Int
     var commit: String

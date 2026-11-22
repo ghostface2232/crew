@@ -86,7 +86,7 @@ For plugin-enabled threads and eligibility, see [Codex plugins](sandbox.md#codex
 
 ## Token use
 
-A job records `tokenUse` with total input, cached input, output, and what the latest turn added. Codex reports the running total; for Antigravity, Crew adds up the usage that agy returns with each prompt. `status`, the board, and the desktop apps display it so follow-up turns show how much input was cached. A job also records `context`, how full the worker's context window is, from Codex's latest request (`last.totalTokens` of `modelContextWindow`) or agy's `usage_update`. `status` and the board show it.
+A job records `tokenUse` with total input, cached input, output, and what the latest turn added. Codex reports the running total; for Antigravity, Crew adds up the usage that agy returns with each prompt. `status`, the board, and the desktop apps display it so follow-up turns show how much input was cached. A job also records `context`, how full the worker's context window is, from Codex's latest request (`last.totalTokens` of `modelContextWindow`) or agy's `usage_update`. `status`, the board, and the desktop apps show it.
 
 Token savings measured on Codex CLI 0.167.0 for a no-op question (dropping 123 user skills, 22 app connectors, recommended plugins, and computer-use REPL tools):
 

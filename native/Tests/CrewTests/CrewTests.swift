@@ -220,7 +220,7 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
     @Test func optionalContractFieldsDecodeAndLegacyStateStillWorks() throws {
         let legacy = try fixture()
         #expect(legacy.usage == nil && legacy.preset == nil && legacy.presets == nil)
-        #expect(legacy.jobs.allSatisfy { $0.rounds == nil && $0.ask == nil })
+        #expect(legacy.jobs.allSatisfy { $0.rounds == nil && $0.ask == nil && $0.context == nil && $0.liveDiff == nil })
         #expect(legacy.missions.allSatisfy { $0.notes == nil })
         #expect(legacy.jobs.compactMap(\.waiting).allSatisfy { $0.grant == nil })
         let granted = try JSONDecoder().decode(Waiting.self, from: Data(#"{"type":"approval","reason":"r","id":"w","since":1,"grant":"Computer Use using \"App\""}"#.utf8))
@@ -242,6 +242,8 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
         #expect(current.jobs[0].rounds?.map(\.state) == ["kept", "undone"])
         #expect(current.jobs[0].rounds?.last?.revert == "revert2")
         #expect(current.jobs[0].kindTitle == "Question")
+        #expect(current.jobs[0].liveDiff == LiveDiff(turn: 1, at: 1_795_000_000_000, chars: 18))
+        #expect(current.jobs[0].context?.label == "\(84_250.formatted()) of \(258_400.formatted()) (33%)")
         #expect(current.missions[0].notes?.first?.text == "Preserve compatibility.")
     }
     @Test func evidenceSaysWhichTurnItIsFromOnceAJobHasSeveral() {

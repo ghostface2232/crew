@@ -93,7 +93,7 @@
   --inset-radius: 10px;
   --field-radius: 18px;
   --panel-radius: 24px;
-  --stage-radius: 22px;
+  --stage-radius: 30px;
   --window-inset: 8px;
   --sidebar-width: 232px;
   /* One typeface for all text, the bundled Pretendard; the fallbacks only cover the moment before it loads. */
@@ -543,7 +543,8 @@ dialog.sheet::backdrop { background: var(--scrim); -webkit-backdrop-filter: blur
 /* The detail panel: a card over the page's right edge that leaves the page usable beside it. */
 dialog.detail-panel {
   position: fixed;
-  /* On the stage, as far in from its edges as the stage is from the window's. */
+  /* On the stage, as far in from its edges as the stage is from the window's, with corners concentric to the stage's. */
+  --panel-radius: calc(var(--stage-radius) - var(--window-inset));
   inset: calc(60px + var(--window-inset)) calc(2 * var(--window-inset)) calc(2 * var(--window-inset)) auto;
   z-index: 6;
   width: min(var(--panel-width, 420px), calc(100vw - 4 * var(--window-inset)));
@@ -931,8 +932,8 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
 @media (hover: hover) { .new-job:not(:disabled):hover svg { rotate: 90deg; } }
 
 /* The stage: an inset panel the sidebar and top bar wrap, and the one thing that scrolls. Its content keeps to 1400px,
-   centered by padding so the scrollbar stays at the stage's edge. Transparent borders keep the bar's ends clear of the
-   rounded corners; content passes under them. */
+   centered by padding so the scrollbar stays at the stage's edge. Content scrolls out under the stage's own rounded edge,
+   with no inset line of its own. */
 .page {
   container: page / inline-size;
   flex: 1;
@@ -941,8 +942,7 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
   flex-direction: column;
   gap: var(--card-gap);
   margin: 0 var(--window-inset) var(--window-inset) 0;
-  padding: 18px max(var(--page-margin), calc((100% - 1400px) / 2)) var(--page-margin);
-  border-block: 8px solid transparent;
+  padding: 26px max(var(--page-margin), calc((100% - 1400px) / 2)) calc(var(--page-margin) + 8px);
   border-radius: var(--stage-radius);
   background: var(--stage);
   box-shadow: var(--shadow-stage);
@@ -1487,7 +1487,7 @@ dialog.palette-layer::backdrop { background: var(--scrim-light); animation: fade
   button.topbar-sidebar { display: inline-flex; width: 34px; min-height: 34px; }
   .new-job { width: 34px; padding: 0; }
   .new-job-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-  .page { margin-inline-start: var(--window-inset); padding: 12px 12px 96px; }
+  .page { margin-inline-start: var(--window-inset); padding: 20px 12px 104px; }
   .page-title { font-size: 28px; }
   .dash-side { grid-template-columns: minmax(0, 1fr); }
   dialog.detail-panel { inset: 8px; width: auto; }
@@ -1534,7 +1534,6 @@ dialog.palette-layer::backdrop { background: var(--scrim-light); animation: fade
   .spinner { animation-duration: 0.8s !important; animation-iteration-count: infinite !important; }
 }
 @media (forced-colors: active) {
-  .page { border-color: Canvas; }
   .agent-mark, .share-bar i, .usage-bar i, .connection > i, .nav-dot, .heatmap-grid > i, .spark > i { forced-color-adjust: none; background: CanvasText; }
   /* The drawn controls show their state by fill, which forced colors would take away. */
   input[type="checkbox"] { forced-color-adjust: none; border: 1px solid CanvasText; background: Canvas; }

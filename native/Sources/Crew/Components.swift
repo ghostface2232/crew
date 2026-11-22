@@ -64,7 +64,8 @@ struct Turning<Content: View>: View {
         self.isActive = isActive; self.content = content()
     }
     var body: some View {
-        if isActive {
+        // Without a picture to turn, the content shows as it is rather than leaving its place empty.
+        if isActive, let picture {
             // The content itself keeps its place in the layout, unseen under its turning picture.
             content.hidden().overlay { TurningLayer(image: picture, scale: scale).allowsHitTesting(false) }
         } else {
@@ -81,8 +82,8 @@ struct Turning<Content: View>: View {
     }
 }
 
-private struct TurningLayer: NSViewRepresentable {
-    let image: CGImage?
+struct TurningLayer: NSViewRepresentable {
+    let image: CGImage
     let scale: CGFloat
     func makeNSView(context: Context) -> Surface { Surface() }
     func updateNSView(_ view: Surface, context: Context) {
@@ -91,21 +92,23 @@ private struct TurningLayer: NSViewRepresentable {
         view.turning.contents = image
         view.turning.contentsScale = scale
         // A symbol's weight rarely sits at the middle of its frame; turning about the frame would make it wobble.
-        if let image { view.turning.anchorPoint = Self.inkCenter(of: image) }
+        view.turning.anchorPoint = Self.inkCenter(of: image)
         view.turning.frame = view.bounds
         CATransaction.commit()
     }
     /// Where the picture's ink balances, in the layer's unit coordinates.
     static func inkCenter(of image: CGImage) -> CGPoint {
         let width = image.width, height = image.height
-        var alpha = [UInt8](repeating: 0, count: width * height)
-        guard width > 0, height > 0, let context = CGContext(data: &alpha, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width,
+        // The context owns its bitmap, so the bytes read below are the ones it drew into.
+        guard width > 0, height > 0, let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width,
                                                               space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.alphaOnly.rawValue) else { return CGPoint(x: 0.5, y: 0.5) }
         context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        guard let data = context.data else { return CGPoint(x: 0.5, y: 0.5) }
+        let alpha = data.bindMemory(to: UInt8.self, capacity: context.bytesPerRow * height)
         var total = 0.0, x = 0.0, y = 0.0
         for row in 0..<height {
             for column in 0..<width {
-                let weight = Double(alpha[row * width + column])
+                let weight = Double(alpha[row * context.bytesPerRow + column])
                 total += weight; x += weight * (Double(column) + 0.5); y += weight * (Double(row) + 0.5)
             }
         }

@@ -8,7 +8,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { CodexAdapter } from '../plugin/bridge/adapters/codex.ts';
 import { resolveConfig } from '../plugin/bridge/config.ts';
-import { cloneRefused, cloneTree, commitAll, copyIncluded, createWorktree, detachLinks, dirtyCount, removeDirectory, removeEmptyLeftover, removeWorktree, worktreeSlot } from '../plugin/bridge/git.ts';
+import { cloneDirectory, cloneRefused, cloneTree, commitAll, copyIncluded, createWorktree, detachLinks, dirtyCount, removeDirectory, removeEmptyLeftover, removeWorktree, worktreeSlot } from '../plugin/bridge/git.ts';
 import type { Job, JobCtl } from '../plugin/bridge/jobs.ts';
 import { buildPrompt } from '../plugin/bridge/prompts.ts';
 
@@ -218,6 +218,33 @@ test('a directory is cloned whole in one call, and a refused clone leaves nothin
   // A failed clone leaves no destination for the slower copy to trip over.
   assert.equal(await cloneTree(path.join(dir, 'missing'), path.join(dir, 'none')), false);
   assert.equal(fs.existsSync(path.join(dir, 'none')), false);
+  // What appears at the destination while the clone is made is kept, and the clone made beside it is removed.
+  const taken = path.join(dir, 'taken');
+  const losing = cloneTree(source, taken);
+  fs.mkdirSync(taken);
+  fs.writeFileSync(path.join(taken, 'mine'), 'kept');
+  assert.equal(await losing, false);
+  assert.equal(fs.readFileSync(path.join(taken, 'mine'), 'utf8'), 'kept');
+  // Of two clones to one destination, the one that loses does not remove the winner's.
+  const shared = path.join(dir, 'shared');
+  const results = await Promise.all([cloneTree(source, shared), cloneTree(source, shared)]);
+  assert.deepEqual(results.toSorted(), [false, true]);
+  assert.equal(fs.readFileSync(path.join(shared, 'pkg', 'tool'), 'utf8'), 'original');
+  assert.deepEqual(fs.readdirSync(dir).filter((name) => name.includes('.cloning-')), []);
+});
+
+test('without the whole-directory clone, a directory is still cloned file by file', { skip: process.platform !== 'darwin' }, async (t) => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-clone-files-')));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const source = path.join(dir, 'deps');
+  fs.mkdirSync(path.join(source, '.bin'), { recursive: true });
+  fs.writeFileSync(path.join(source, 'tool'), 'original');
+  fs.symlinkSync('../tool', path.join(source, '.bin', 'tool'));
+  const dest = path.join(dir, 'nested', 'deps');
+  await cloneDirectory(source, dest, async () => false);
+  assert.equal(fs.readlinkSync(path.join(dest, '.bin', 'tool')), '../tool');
+  fs.writeFileSync(path.join(dest, 'tool'), 'private');
+  assert.equal(fs.readFileSync(path.join(source, 'tool'), 'utf8'), 'original');
 });
 
 test('nested APFS includes create missing destination parents before cloning', { skip: process.platform !== 'darwin' }, async (t) => {

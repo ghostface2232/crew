@@ -25,7 +25,7 @@ import { addEvidence, addRating, loadNotes, notesFile, renderNotes, scoreAll, se
 import type { NotesFile } from './notes.ts';
 import { outcomeContradiction } from './render.ts';
 import { runbook } from './runbook.ts';
-import { checks as setupChecks, PACKAGED, prunePlugins, register, registered, registrationMoved } from './setup.ts';
+import { checks as setupChecks, PACKAGED, prunePlugins, register, registered, registrationMoved, SetupCache } from './setup.ts';
 import type { Registration, SetupItem } from './setup.ts';
 import { toastCommand } from './toast.ts';
 import { ANTIGRAVITY_MODELS, codexModels } from './tiers.ts';
@@ -997,14 +997,10 @@ function shutdown(): void {
 fs.writeFileSync(path.join(HOME, 'daemon.json'), JSON.stringify({ pid: process.pid, port: PORT, version: VERSION, build: BUILD, root: PLUGIN_ROOT }));
 log(`crew daemon ${VERSION} (${BUILD}) listening on http://127.0.0.1:${PORT}`);
 
-// The setup checklist: what Crew needs, checked by running each CLI, so it is cached: for a minute while something
-// is missing, so a fix shows soon, and for ten once everything is in place. The board and the app both ask every
-// minute for as long as they are open, and each check starts five CLIs.
+// The setup checklist: what Crew needs, checked by running each CLI, so its answer is kept for a while.
 let registering: Promise<Registration> | null = null;
 let registration: Registration | undefined;
-let setupChecked: Promise<SetupItem[]> | null = null;
-let setupCheckedAt = 0;
-let setupComplete = false;
+const setup = new SetupCache(setupChecks);
 function registerPlugin(): Promise<Registration> {
   registering ??= register()
     .catch((err: Error): Registration => ({ ok: false, detail: err.message }))
@@ -1015,17 +1011,12 @@ function registerPlugin(): Promise<Registration> {
     })
     .finally(() => {
       registering = null;
-      setupChecked = null;
+      setup.reset();
     });
   return registering;
 }
 async function setupState(refresh: boolean): Promise<{ items: SetupItem[]; packaged: boolean; registering: boolean; registration?: Registration }> {
-  if (refresh || !setupChecked || Date.now() - setupCheckedAt > (setupComplete ? 10 * 60_000 : 60_000)) {
-    setupCheckedAt = Date.now();
-    setupChecked = (registering ?? Promise.resolve()).then(() => setupChecks());
-  }
-  const items = await setupChecked;
-  setupComplete = items.every((item) => item.ok);
+  const items = await setup.get(refresh, registering ?? undefined);
   return { items, packaged: PACKAGED, registering: registering !== null, registration };
 }
 // An app's copy registers itself on first launch and after each update, so its plugin matches its daemon. Copies that

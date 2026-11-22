@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { constants, existsSync, lstatSync, readlinkSync, realpathSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -218,21 +218,35 @@ const CLONE_TREE = 'function run(argv) { ObjC.bindFunction("clonefile", ["int", 
 
 /**
  * Clones a whole directory with one clonefile(2) call, which walks the tree inside the kernel: about ten times
- * faster than cp -c's call per file (0.5 s against 5 s for a node_modules of 56,000 files). `dest` must not exist.
- * False when it could not, with nothing left at `dest`, so the caller's slower copy decides what the failure means.
+ * faster than cp -c's call per file (0.5 s against 5 s for a node_modules of 56,000 files). The clone keeps every
+ * mode as the source has it, where cp applies the umask to the directories it makes.
+ *
+ * False when it could not, so the caller's slower copy decides what the failure means. The clone is made beside
+ * `dest` and moved in, so whatever is at `dest`, before the call or by the time the clone is ready, is never
+ * touched: a failed attempt removes only what it made, and throws if even that cannot be removed.
  */
 export async function cloneTree(source: string, dest: string): Promise<boolean> {
   if (process.platform !== 'darwin' || lstatSync(dest, { throwIfNoEntry: false })) return false;
+  const staged = `${dest}.cloning-${randomBytes(4).toString('hex')}`;
   const cloned = await new Promise<boolean>((resolve) => {
-    execFile('/usr/bin/osascript', ['-l', 'JavaScript', '-e', CLONE_TREE, source, dest], { timeout: 120_000 }, (err, stdout) => resolve(!err && stdout.trim() === '0'));
+    execFile('/usr/bin/osascript', ['-l', 'JavaScript', '-e', CLONE_TREE, source, staged], { timeout: 120_000 }, (err, stdout) => resolve(!err && stdout.trim() === '0'));
   });
-  if (!cloned) await removeDirectory(dest);
-  return cloned;
+  if (cloned && !lstatSync(dest, { throwIfNoEntry: false })) {
+    try {
+      await fs.rename(staged, dest);
+      return true;
+    } catch {
+      /* Something took the name meanwhile; the staged clone is removed below. */
+    }
+  }
+  await removeDirectory(staged);
+  return false;
 }
 
-async function cloneDirectory(source: string, dest: string): Promise<void> {
+/** `whole` is the fast path, replaceable so the copy file by file can be tested where the fast path works. */
+export async function cloneDirectory(source: string, dest: string, whole: typeof cloneTree = cloneTree): Promise<void> {
   await fs.mkdir(path.dirname(dest), { recursive: true });
-  if (await cloneTree(source, dest)) return;
+  if (await whole(source, dest)) return;
   if (process.platform === 'darwin') {
     // libuv's forced reflink returns ENOSYS on macOS, even on APFS. cp -c uses clonefile and never falls back.
     // clonefile has also refused with EPERM for hours at a time on a volume where it otherwise works, while plain

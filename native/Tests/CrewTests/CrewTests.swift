@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import Synchronization
 import Testing
@@ -748,6 +749,40 @@ private final class MockProtocol: URLProtocol, @unchecked Sendable {
         store.openJob("cx-question", navigate: true)
         #expect(store.project == "/workspace/Crew")
         #expect(store.selectedJob == "cx-question")
+    }
+    @Test func pendingCountFollowsEveryChangeToTheState() throws {
+        let store = try store()
+        #expect(store.pendingCount == 1)
+        // An answer's HTTP reply reaches the store before the stream's own event for the job.
+        var answered = try #require(store.state.waitingJobs.first)
+        answered.state = "running"; answered.waiting = nil; answered.seq += 1
+        store.applyJob(answered)
+        #expect(store.pendingCount == 0)
+        var session = try #require(store.state.claude.first)
+        session.state = "waiting"
+        struct SessionUpdate: Encodable { var session: ClaudeSession; var removed: Bool }
+        try store.receive(event("claude", SessionUpdate(session: session, removed: false)))
+        #expect(store.pendingCount == 1)
+        try store.receive(event("claude", SessionUpdate(session: session, removed: true)))
+        #expect(store.pendingCount == 0)
+        try store.receive(event("state", fixture()))
+        #expect(store.pendingCount == store.state.pendingCount)
+        #expect(store.pendingCount == 1)
+    }
+    @Test func aTurningPictureTurnsAboutItsInk() throws {
+        // Ink in the top-left quarter only: left of the middle, and above it in the layer's bottom-up unit space.
+        let side = 8
+        let context = try #require(CGContext(data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: side * 4,
+                                             space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.setFillColor(CGColor(red: 0, green: 0, blue: 0, alpha: 1))
+        // Core Graphics counts rows from the bottom, so the top rows are the high ones.
+        context.fill(CGRect(x: 0, y: side / 2, width: side / 2, height: side / 2))
+        let center = TurningLayer.inkCenter(of: try #require(context.makeImage()))
+        #expect(abs(center.x - 0.25) < 0.001)
+        #expect(abs(center.y - 0.75) < 0.001)
+        let empty = try #require(CGContext(data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: side * 4,
+                                           space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        #expect(TurningLayer.inkCenter(of: try #require(empty.makeImage())) == CGPoint(x: 0.5, y: 0.5))
     }
     @Test func openingInspectorPreservesListContext() throws {
         let store = try store()

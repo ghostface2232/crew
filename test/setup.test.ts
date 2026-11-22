@@ -8,7 +8,8 @@ import { after, test } from 'node:test';
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-setup-'));
 process.env.CREW_HOME = home;
-const { copyPlugin, prunePlugins } = await import('../plugin/bridge/setup.ts');
+const { copyPlugin, prunePlugins, SetupCache } = await import('../plugin/bridge/setup.ts');
+type SetupItem = import('../plugin/bridge/setup.ts').SetupItem;
 after(() => fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }));
 
 /** A built marketplace as the app carries it, beside the app's own files. */
@@ -70,4 +71,74 @@ test('prunePlugins keeps the registered copy and copies still running, whole', a
   prunePlugins(dir, [current]);
   assert.deepEqual(fs.readdirSync(dir).sort(), ['1.5.0-open', `1.6.0-new.partial-${process.pid}`, '2.0.0-new']);
   assert.deepEqual(files(running), before);
+});
+
+test('a complete checklist is kept ten minutes, an incomplete or failed one a minute, and a refresh always checks', async () => {
+  let now = 0;
+  let checks = 0;
+  let answer: () => Promise<SetupItem[]> = async () => [{ id: 'claude', label: 'Claude Code', ok: true, detail: '' }];
+  const cache = new SetupCache(() => { checks++; return answer(); }, () => now);
+  await cache.get(false);
+  now = SetupCache.COMPLETE_MS;
+  await cache.get(false);
+  assert.equal(checks, 1);
+  now += 1;
+  await cache.get(false);
+  assert.equal(checks, 2);
+  await cache.get(true);
+  assert.equal(checks, 3);
+
+  answer = async () => [{ id: 'codex', label: 'Codex CLI', ok: false, detail: 'Not found.' }];
+  await cache.get(true);
+  now += SetupCache.INCOMPLETE_MS;
+  await cache.get(false);
+  assert.equal(checks, 4);
+  now += 1;
+  await cache.get(false);
+  assert.equal(checks, 5);
+
+  // A check that fails is not a complete checklist either.
+  answer = async () => [{ id: 'claude', label: 'Claude Code', ok: true, detail: '' }];
+  await cache.get(true);
+  answer = () => Promise.reject(new Error('Invalid config.json'));
+  await assert.rejects(cache.get(true), /Invalid config/);
+  now += SetupCache.INCOMPLETE_MS + 1;
+  await assert.rejects(cache.get(false), /Invalid config/);
+  assert.equal(checks, 8);
+
+  cache.reset();
+  answer = async () => [];
+  await cache.get(false);
+  assert.equal(checks, 9);
+});
+
+test('an older check that ends after a newer one does not vouch for the newer answer', async () => {
+  let now = 0;
+  const pending: ((items: SetupItem[]) => void)[] = [];
+  let checks = 0;
+  const cache = new SetupCache(() => { checks++; return new Promise((resolve) => pending.push(resolve)); }, () => now);
+  // A check starts a turn after it is asked for, once anything it waits for has settled.
+  const started = () => new Promise((resolve) => setImmediate(resolve));
+  const older = cache.get(true);
+  const newer = cache.get(true);
+  await started();
+  pending[1]([{ id: 'codex', label: 'Codex CLI', ok: false, detail: 'Not found.' }]);
+  await newer;
+  pending[0]([{ id: 'codex', label: 'Codex CLI', ok: true, detail: '' }]);
+  await older;
+  now = SetupCache.INCOMPLETE_MS + 1;
+  void cache.get(false);
+  await started();
+  assert.equal(checks, 3);
+});
+
+test('a check waits for a registration under way', async () => {
+  const order: string[] = [];
+  let registered!: () => void;
+  const registering = new Promise<void>((resolve) => { registered = resolve; }).then(() => { order.push('registered'); });
+  const cache = new SetupCache(async () => { order.push('checked'); return []; });
+  const answer = cache.get(false, registering);
+  registered();
+  await answer;
+  assert.deepEqual(order, ['registered', 'checked']);
 });

@@ -150,16 +150,19 @@ import Testing
         return process.terminationStatus
     }
 
-    @Test func aTeamSignedAppRejectsAnAdHocUpdate() throws {
+    /// The requirement of a release signed with the release certificate, as `codesign -d -r-` prints it.
+    private static let release = "identifier \"dev.crew.native\" and certificate leaf = H\"58444d9caca739fa1b4abf0c45fc4e461b00a858\""
+
+    @Test func anAppSignedWithACertificateRejectsAnUpdateSignedOtherwise() throws {
         let file = FileManager.default.temporaryDirectory.appending(path: "crew-signature-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: file) }
         try FileManager.default.copyItem(at: URL(fileURLWithPath: "/usr/bin/true"), to: file)
         try #require(codesign(["--force", "--sign", "-"], file) == 0)
-        #expect(try codesign(AppUpdater.verificationArguments(teamID: nil), file) == 0)
-        #expect(try codesign(AppUpdater.verificationArguments(teamID: "TESTTEAM01"), file) != 0)
+        #expect(try codesign(AppUpdater.verificationArguments(requirement: nil), file) == 0)
+        #expect(try codesign(AppUpdater.verificationArguments(requirement: Self.release), file) != 0)
     }
 
-    @Test(arguments: ["success", "open-failure", "leftover-backup", "quit-timeout", "changed-staged", "wrong-team"]) func swapKeepsTheOriginalOnFailure(scenario: String) throws {
+    @Test(arguments: ["success", "open-failure", "leftover-backup", "quit-timeout", "changed-staged", "wrong-signer"]) func swapKeepsTheOriginalOnFailure(scenario: String) throws {
         let home = FileManager.default.temporaryDirectory.appending(path: "crew-swap-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: home) }
         let target = home.appending(path: "Crew.app"), staged = home.appending(path: "staged.app")
@@ -179,7 +182,7 @@ import Testing
         let info = ["CFBundleIdentifier": "dev.crew.native", "CFBundleExecutable": "Crew", "CFBundlePackageType": "APPL"]
         try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0).write(to: staged.appending(path: "Contents/Info.plist"))
         try #require(codesign(["--force", "--sign", "-"], staged) == 0)
-        let verification = AppUpdater.verificationArguments(teamID: scenario == "wrong-team" ? "TESTTEAM01" : nil)
+        let verification = AppUpdater.verificationArguments(requirement: scenario == "wrong-signer" ? Self.release : nil)
         if scenario == "changed-staged" {
             try "changed".write(to: staged.appending(path: version), atomically: true, encoding: .utf8)
         }
@@ -223,7 +226,7 @@ import Testing
             let reason = try String(contentsOf: result, encoding: .utf8)
             #expect(reason.split(separator: "\n").count == 1)
             if scenario == "quit-timeout" { #expect(reason.contains("did not quit")) }
-            if scenario == "changed-staged" || scenario == "wrong-team" { #expect(reason.contains("verify")) }
+            if scenario == "changed-staged" || scenario == "wrong-signer" { #expect(reason.contains("verify")) }
         }
         if scenario != "quit-timeout" {
             let opened = try String(contentsOf: home.appending(path: "open.log"), encoding: .utf8)

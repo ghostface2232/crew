@@ -284,10 +284,16 @@ enum Releases {
         var errorDescription: String? { "The downloaded update is not a valid Crew \(version)." }
     }
 
-    nonisolated private static func runningTeamID() throws -> String? {
+    /// What an update must satisfy to be this app from the same signer: the running app's own designated requirement,
+    /// which names the certificate it was signed with (the release certificate, self-signed or Apple-issued). An ad hoc
+    /// or unsigned build's requirement names only its own code hash, which no other build meets, so it has none and
+    /// its updates get the integrity check alone.
+    nonisolated private static func runningRequirement() throws -> String? {
         var code: SecCode?
         var origin: SecStaticCode?
         var info: CFDictionary?
+        var requirement: SecRequirement?
+        var text: CFString?
         let failure = CrewFailure("Could not read the running app’s signing identity.")
         guard SecCodeCopySelf([], &code) == errSecSuccess, let code else { throw failure }
         let validity = SecCodeCheckValidity(code, [], nil)
@@ -296,14 +302,17 @@ enum Releases {
               SecCodeCopyStaticCode(code, [], &origin) == errSecSuccess, let origin,
               SecCodeCopySigningInformation(origin, SecCSFlags(rawValue: kSecCSSigningInformation), &info) == errSecSuccess,
               let info else { throw failure }
-        return (info as NSDictionary)[kSecCodeInfoTeamIdentifier] as? String
+        let flags = ((info as NSDictionary)[kSecCodeInfoFlags] as? NSNumber)?.uint32Value ?? 0
+        if flags & SecCodeSignatureFlags.adhoc.rawValue != 0 { return nil }
+        guard SecCodeCopyDesignatedRequirement(origin, [], &requirement) == errSecSuccess, let requirement,
+              SecRequirementCopyString(requirement, [], &text) == errSecSuccess, let text else { throw failure }
+        return text as String
     }
 
-    nonisolated static func verificationArguments(teamID: String?) -> [String] {
+    nonisolated static func verificationArguments(requirement: String?) -> [String] {
         var arguments = ["--verify", "--deep", "--strict"]
-        if let teamID {
-            arguments += ["-R", "=anchor apple generic and certificate leaf[subject.OU] = \"\(teamID)\""]
-        }
+        // codesign reads a requirement given as text from an argument that starts with "=".
+        if let requirement { arguments += ["-R", "=\(requirement)"] }
         return arguments
     }
 
@@ -322,7 +331,7 @@ enum Releases {
         guard run("/usr/bin/ditto", ["-x", "-k", archive.path, unpacked.path]), isExpectedBundle(app, version: version) else {
             throw InvalidArchive(version: version)
         }
-        let verification = verificationArguments(teamID: try runningTeamID())
+        let verification = verificationArguments(requirement: try runningRequirement())
         guard run("/usr/bin/codesign", verification + [app.path]) else {
             throw InvalidArchive(version: version)
         }

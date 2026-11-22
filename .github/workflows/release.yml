@@ -1,5 +1,5 @@
 # Pushing a version tag (v1.2.3) checks the code, builds both desktop apps and publishes them as a GitHub release.
-# The asset names are the ones the apps' updaters look for (docs/08-native-macos.md, docs/12-windows-electron.md).
+# The asset names are the ones the apps' updaters look for (docs/macos-app.md, docs/windows-app.md).
 # Nothing is published unless every job before `publish` passes. Run by hand from the Actions tab, it rehearses
 # all of that on any branch and publishes nothing.
 name: Release

@@ -57,7 +57,7 @@ When something hangs, `crew doctor` checks prerequisites, `crew daemon logs` sho
 
 `crew gc` previews orphan worktrees, Git metadata, and unused worker branches with their merge status against `HEAD`. `crew gc --apply` removes orphan directories and prunes metadata; add `--branches` to delete branches merged into `HEAD`. Unmerged branches stay, with a `git branch -D <name>` command for manual removal. Active and owned worktrees are protected, and Windows cleanup failures name leftovers in job status and notes.
 
-The status board runs at http://127.0.0.1:47615, or on a fallback port in `~/.crew/daemon.json` when the system reserves that one. Open it with `crew board` or from the app to sign in; a browser tab holds a scoped credential in memory (valid up to 7 days, cleared on close or reload). Direct clients send the secret in `~/.crew/token` ([docs/09-usage-presets-rounds.md](docs/09-usage-presets-rounds.md) section 12).
+The status board runs at http://127.0.0.1:47615, or on a fallback port in `~/.crew/daemon.json` when the system reserves that one. Open it with `crew board` or from the app to sign in; a browser tab holds a scoped credential in memory (valid up to 7 days, cleared on close or reload). Direct clients send the secret in `~/.crew/token` ([docs/daemon-api.md](docs/daemon-api.md)).
 
 Each `/crew:run` command appears as a mission with its jobs grouped under it, and the Needs You view lists every job and session waiting on you. Click a job to read its report, changed files, evidence, and activity, or to send a follow-up.
 
@@ -69,9 +69,9 @@ A command given while another is under way opens beside it, and both stay open u
 
 If [AgentGauge](https://github.com/ghostface2232/AgentGauge) is installed, each agent's card shows remaining usage and `/crew:run` routes work accordingly. When an agent runs low, the lead takes over or defers the work and says so.
 
-Job turns appear as rounds that can be undone or kept one by one. New Job also accepts a read-only question or a piece of information to pin ([docs/09-usage-presets-rounds.md](docs/09-usage-presets-rounds.md)).
+Job turns appear as rounds that can be undone or kept one by one. New Job also accepts a read-only question or a piece of information to pin ([docs/jobs.md](docs/jobs.md), [docs/board.md](docs/board.md)).
 
-When a worker asks for approval or has a question, an input dialog pops up in the Claude app; you can also answer on the status board or in the desktop app. A computer-use request about one app or a simple Antigravity command can be allowed for the rest of its job so the worker stops asking on every call. Codex's built-in automatic reviewer answers approval requests first; you are asked only about what it refuses twice ([docs/04-implementation.md](docs/04-implementation.md) section 5.1).
+When a worker asks for approval or has a question, an input dialog pops up in the Claude app; you can also answer on the status board or in the desktop app. A computer-use request about one app or a simple Antigravity command can be allowed for the rest of its job so the worker stops asking on every call. Codex's built-in automatic reviewer answers approval requests first; you are asked only about what it refuses twice ([docs/approvals.md](docs/approvals.md)).
 
 ## Desktop app
 
@@ -83,7 +83,7 @@ On macOS, this builds and opens the native SwiftUI app; on Windows, it builds an
 
 Closing the window hides it to the tray; quitting the app leaves jobs running. Both restore their window, and the macOS app opens approval notifications at the relevant job. The web board stays available.
 
-The board can start jobs directly for any role except debate, using the configured roles; full missions begin in the Claude lead session. See the [native macOS](docs/08-native-macos.md) and [Windows](docs/12-windows-electron.md) notes for development, tests, resource measurements, and distribution limits.
+The board can start jobs directly for any role except debate, using the configured roles; full missions begin in the Claude lead session. See the [native macOS](docs/macos-app.md) and [Windows](docs/windows-app.md) notes for development, tests, resource measurements, and distribution limits.
 
 ## How it works
 
@@ -91,7 +91,7 @@ The board can start jobs directly for any role except debate, using the configur
 - Gitignored files needed for tests (such as `node_modules` or `.env`) are copied into the worktree (or cloned/linked read-only for directories) when listed in `.worktreeinclude` at the repository root. It uses `.gitignore` syntax and shares Claude Code's native worktree file.
 - Codex runs via `codex app-server` and Antigravity runs via `agy acp`. Crew executes only the official binaries and never reads authentication files or tokens.
 - When a background job finishes, asks the lead a question, or needs a decision, the lead session wakes automatically.
-- Agents share the machine without colliding ([docs/04-implementation.md](docs/04-implementation.md) section 5.4):
+- Agents share the machine without colliding ([docs/sandbox.md](docs/sandbox.md)):
   - Each starts an isolated instance of any service it runs.
   - Only one reviewer of a change launches the app.
   - A worker that runs the app gets network access and its own snapshot of the change.
@@ -99,7 +99,7 @@ The board can start jobs directly for any role except debate, using the configur
 - Shared instructions live in `~/.crew/instructions.md` (all projects) and `.crew/instructions.md` at the repository root (that project). Workers receive them with each job and Claude sessions receive them at start; no service's own instruction files are touched.
 - Configuration lives in `~/.crew/config.json` (stall timeout, notifications, Codex approval policy and automatic reviewer, plugins, whether Antigravity is enabled, presets, role holders, and whether agents rate each other's work for model scores).
 
-Antigravity is enabled by default and carries a Terms of Service risk: read [docs/04-implementation.md](docs/04-implementation.md) section 6, and set `antigravity.enabled` to `false` in `~/.crew/config.json` to turn it off.
+Antigravity is enabled by default and carries a Terms of Service risk: read [docs/architecture.md](docs/architecture.md#antigravity-policy-risk), and set `antigravity.enabled` to `false` in `~/.crew/config.json` to turn it off.
 
 ## Directory layout
 
@@ -114,28 +114,8 @@ Antigravity is enabled by default and carries a Terms of Service risk: read [doc
 
 ## Documentation
 
-| Document | Contents |
-| --- | --- |
-| [docs/01-requirements.md](docs/01-requirements.md) | Goal, current requirements (R1–R16), defaults and priorities, acceptance criteria |
-| [docs/02-implementation-plan.md](docs/02-implementation-plan.md) | Architecture decisions, connection methods, roles and workflow, status display, rejected alternatives, risks, build phases |
-| [docs/03-agentgauge-integration.md](docs/03-agentgauge-integration.md) | Current state of AgentGauge, integration gaps, phased integration plan, MCP tool spec, routing policy |
-| [docs/04-implementation.md](docs/04-implementation.md) | Implemented architecture, changes from the plan and why, desktop app visibility findings, verification log |
-| [docs/05-related-work.md](docs/05-related-work.md) | Survey of related projects, adoption candidates vs. current code, UX gaps |
-| [docs/06-roadmap.md](docs/06-roadmap.md) | Near-term rework, long-term expansion, control UI concept, open items |
-| [docs/07-desktop-and-react.md](docs/07-desktop-and-react.md) | React migration and historical Electron implementation |
-| [docs/08-native-macos.md](docs/08-native-macos.md) | Native macOS app, Liquid Glass, Swift 6, packaging and verification |
-| [docs/09-usage-presets-rounds.md](docs/09-usage-presets-rounds.md) | AgentGauge usage and routing, presets, rounds, intents, roles, scores, and peer ratings |
-| [docs/10-design-tokens.md](docs/10-design-tokens.md) | Design tokens of the macOS app: color, type, spacing, radius, motion |
-| [docs/11-mcp-compatibility.md](docs/11-mcp-compatibility.md) | MCP protocol revisions and what each host supports |
-| [docs/12-windows-electron.md](docs/12-windows-electron.md) | Windows Electron app, frameless window, notifications, packaging and verification |
-| [docs/13-distribution-plan.md](docs/13-distribution-plan.md) | Release plan: GitHub Releases, Windows installer, the app installing the plugin, first-run checklist |
+[AGENTS.md](AGENTS.md) maps the repository and says which file in [docs/](docs/) covers each topic: requirements, architecture, jobs, missions, roles, usage and presets, the daemon API, the board, each desktop app, distribution, and the roadmap. Earlier plans and surveys are in [research/](research/).
 
 ## Current status
 
-Version 0.5.3 with desktop apps for macOS and Windows. Usage-based routing works when AgentGauge is installed. Planned work is in [docs/06-roadmap.md](docs/06-roadmap.md); the surveys behind it are in [research/](research/).
-
-## Updating the documentation
-
-- Attach a verification date to facts about external tools. Because protocols and policies across all three services shift every few months, re-verify the sources at the end of document 02 before building.
-- Document 01 always states the current goals and is rewritten when they change; its history is in git.
-- In the other documents, when reversing a recorded decision, do not delete it—append the reason and date to that document's revision log.
+Version 0.5.3 with desktop apps for macOS and Windows. Usage-based routing works when AgentGauge is installed. Planned work is in [docs/roadmap.md](docs/roadmap.md); the surveys behind it are in [research/](research/).

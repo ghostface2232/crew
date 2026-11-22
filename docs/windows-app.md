@@ -1,6 +1,6 @@
-# 12. Windows desktop app (Electron)
+# Windows desktop app (Electron)
 
-Implemented 2026-11-16. macOS keeps the [native SwiftUI app](08-native-macos.md). Windows gets an Electron shell around the current React web board. Both connect to the same independent TypeScript daemon, so jobs, settings, and the browser board are shared. The [earlier Electron shell](07-desktop-and-react.md) was the starting point, updated for the daemon's token sign-in and the board's present layout.
+Implemented 2026-11-16. macOS keeps the [native SwiftUI app](macos-app.md). Windows gets an Electron shell around the current React web board. Both connect to the same independent TypeScript daemon, so jobs, settings, and the browser board are shared. The [earlier Electron shell](board.md) was the starting point, updated for the daemon's token sign-in and the board's present layout.
 
 ## Architecture
 
@@ -12,7 +12,7 @@ Electron main (desktop/main.ts) ── ensureDaemon ── independent daemon �
 ```
 
 - The main process imports the bridge's own `client.ts`, so startup reuses `ensureDaemon`, including version negotiation and active-job protection. The daemon starts using the app's Electron executable in Node mode (`ELECTRON_RUN_AS_NODE`), so no separate Node install is needed.
-- The main process signs the board window's requests to the daemon: it makes a board credential from `~/.crew/token` and adds it as a header (`signBoard` in `desktop/main.ts`), so the page holds nothing and neither a cookie nor an address carries the secret. The tray's Open in browser command opens the board with a one-time ticket in the launch fragment (09 section 12).
+- The main process signs the board window's requests to the daemon: it makes a board credential from `~/.crew/token` and adds it as a header (`signBoard` in `desktop/main.ts`), so the page holds nothing and neither a cookie nor an address carries the secret. The tray's Open in browser command opens the board with a one-time ticket in the launch fragment ([daemon-api.md](daemon-api.md)).
 - The renderer runs with `nodeIntegration: false`, `contextIsolation: true`, and `sandbox: true`. Its preload script (`desktop/preload.cts`) exposes only the updater, as `window.crewDesktop`, and the main process answers it only from the main window's board page. Navigation outside the board and webviews are denied. The only granted permission is clipboard write access for the board's origin, used by its copy buttons.
 - Links in reports open in the default browser. Evidence images are the daemon's to serve, so they open in a separate sandboxed app window that cannot navigate, by an address that carries the file's seal. All other new-window requests are denied.
 

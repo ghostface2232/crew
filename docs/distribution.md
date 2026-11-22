@@ -1,4 +1,4 @@
-# 13. Distribution plan
+# Distribution plan
 
 Recorded 2026-11-16. Steps 1 to 4 of the order of work have shipped; recognized-publisher signing (step 5) has not. This records the direction and current state for releasing Crew to users.
 
@@ -12,10 +12,10 @@ GitHub Releases is the single channel. Pushing a `v<version>` tag triggers `.git
 
 | Platform | Artifact | Signing | Updates |
 | --- | --- | --- | --- |
-| Windows | `Crew-Setup-<version>.exe`, a per-user NSIS installer built by `electron-builder` (no admin rights, Start menu shortcut, uninstaller) | Unsigned. SmartScreen warns on first run; `.github/release-notes.md` explains "More info → Run anyway". A code signing certificate (for example Azure Trusted Signing) is planned | Self-updates from GitHub Releases: downloads while away, verifies SHA-256, and installs on **Restart to Update** ([12-windows-electron.md](12-windows-electron.md#updates)) |
-| macOS | `Crew-macOS-arm64-<version>.dmg` (to install from) and `Crew-macOS-arm64-<version>.zip` (for the updater) | Signed with a self-signed certificate (`MACOS_SIGNING_P12`) to preserve granted folder access across updates. The 0.4.0 → 0.5.0 update kept folder access without asking again. Releases lack an Apple Developer ID and notarization. Gatekeeper blocks first launch; release notes explain System Settings → Privacy & Security → Open Anyway. Building from source (`npm run package:desktop`, Xcode 27+) avoids the block | Self-updates from GitHub Releases: downloads `.zip` while away, verifies SHA-256, and swaps the bundle on **Restart to Update** ([08-native-macos.md](08-native-macos.md#updates)) |
+| Windows | `Crew-Setup-<version>.exe`, a per-user NSIS installer built by `electron-builder` (no admin rights, Start menu shortcut, uninstaller) | Unsigned. SmartScreen warns on first run; `.github/release-notes.md` explains "More info → Run anyway". A code signing certificate (for example Azure Trusted Signing) is planned | Self-updates from GitHub Releases: downloads while away, verifies SHA-256, and installs on **Restart to Update** ([windows-app.md](windows-app.md#updates)) |
+| macOS | `Crew-macOS-arm64-<version>.dmg` (to install from) and `Crew-macOS-arm64-<version>.zip` (for the updater) | Signed with a self-signed certificate (`MACOS_SIGNING_P12`) to preserve granted folder access across updates. The 0.4.0 → 0.5.0 update kept folder access without asking again. Releases lack an Apple Developer ID and notarization. Gatekeeper blocks first launch; release notes explain System Settings → Privacy & Security → Open Anyway. Building from source (`npm run package:desktop`, Xcode 27+) avoids the block | Self-updates from GitHub Releases: downloads `.zip` while away, verifies SHA-256, and swaps the bundle on **Restart to Update** ([macos-app.md](macos-app.md#updates)) |
 
-The Start menu shortcut gives the Windows app an AppUserModelID (`dev.crew.desktop`), while notifications stay with the daemon's PowerShell toasts ([12-windows-electron.md](12-windows-electron.md#notifications)). Joining the Apple Developer Program and acquiring a Windows signing certificate remain the steps to remove first-run OS warnings.
+The Start menu shortcut gives the Windows app an AppUserModelID (`dev.crew.desktop`), while notifications stay with the daemon's PowerShell toasts ([windows-app.md](windows-app.md#notifications)). Joining the Apple Developer Program and acquiring a Windows signing certificate remain the steps to remove first-run OS warnings.
 
 ## The app installs the plugin
 

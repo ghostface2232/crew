@@ -1,10 +1,10 @@
-# 06. Roadmap
+# Roadmap
 
 Written 2026-11-12. Covers the near-term rework and the long-term expansion of Crew, plus the control UI concept. Items are not implemented unless marked. External facts were gathered from vendor documentation on 2026-11-12 unless marked otherwise; items marked "unverified" come from secondary sources or were not checked on this machine.
 
 ## 1. Requirements this roadmap answers
 
-The requirements are in [01-requirements.md](01-requirements.md). Current status against the code:
+The requirements are in [requirements.md](requirements.md). Current status against the code:
 
 | Requirement | Plan item | Status |
 | --- | --- | --- |
@@ -14,11 +14,11 @@ The requirements are in [01-requirements.md](01-requirements.md). Current status
 | R10 (command-centered, clickable board) | B1, B2 | Done (`missions.ts`, `plugin/board/src/`, `native/Sources/Crew/`) |
 | R8 (AgentGauge) | C1, L3 | Partial — G1 done (`usage.ts`); G2, G3, and L3 open |
 | R12 (Cursor) | C2 | Open |
-| R14 (no collisions between agents) | — | Done (`prompts.ts`, `jobs.ts`, [04-implementation.md](04-implementation.md) section 5.4) |
+| R14 (no collisions between agents) | — | Done (`prompts.ts`, `jobs.ts`, [sandbox.md](sandbox.md)) |
 | R15 (approvals with little user involvement) | — | Done for Codex (`config.ts` `auto_review`, `jobs.ts` `retryRefused`) |
 | R13 (other leads, own main screen, direct dispatch) | L1, L2 | Partial — board, desktop apps, and direct jobs done (`Dispatch.tsx`, `DispatchView.swift`); L1, mission start, and merge execution open |
 
-Near-term work targets Claude Desktop lead mode, as 01 section 3 sets out.
+Near-term work targets Claude Desktop lead mode, as [requirements.md](requirements.md#3-defaults-and-priorities) sets out.
 
 ## 2. The one constraint behind most of it
 
@@ -54,9 +54,9 @@ Recommended order is A, then B, then C. Without A, both Cursor support and role 
 
 ### A. Foundation
 
-**A1. Agent registry and role table. *(Done)*** Implemented in [config.ts](../plugin/bridge/config.ts), `settings.ts`, [mcp.ts](../plugin/bridge/mcp.ts), and `plugin/roles/` ([04-implementation.md](04-implementation.md) section 2.1). `ROLES` holds eight configurable roles with inheritance (`delegate`, `refactor`, `release`, `debate`, `review`, `verify`, `fix`, `polish`), defaulting to the R3 agents with `fix` defaulting to Claude. Antigravity defaults to `polish` and automatic routing never moves engineering or review work to it (01 section 3).
+**A1. Agent registry and role table. *(Done)*** Implemented in [config.ts](../plugin/bridge/config.ts), `settings.ts`, [mcp.ts](../plugin/bridge/mcp.ts), and `plugin/roles/` ([roles.md](roles.md)). `ROLES` holds eight configurable roles with inheritance (`delegate`, `refactor`, `release`, `debate`, `review`, `verify`, `fix`, `polish`), defaulting to the R3 agents with `fix` defaulting to Claude. Antigravity defaults to `polish` and automatic routing never moves engineering or review work to it ([requirements.md](requirements.md#3-defaults-and-priorities)).
 
-**A2. Shared instructions. *(Done)*** Implemented in `instructions.ts`, [prompts.ts](../plugin/bridge/prompts.ts), `context.ts`, and [hooks.json](../plugin/hooks/hooks.json) ([04-implementation.md](04-implementation.md) section 2.2). Reads `~/.crew/instructions.md` and `.crew/instructions.md` without writing to any service's own instruction files:
+**A2. Shared instructions. *(Done)*** Implemented in `instructions.ts`, [prompts.ts](../plugin/bridge/prompts.ts), `context.ts`, and [hooks.json](../plugin/hooks/hooks.json) ([roles.md](roles.md)). Reads `~/.crew/instructions.md` and `.crew/instructions.md` without writing to any service's own instruction files:
 
 | Agent | Channel |
 | --- | --- |
@@ -65,31 +65,31 @@ Recommended order is A, then B, then C. Without A, both Cursor support and role 
 | Cursor (planned) | Prompt prefix |
 | Claude (lead) | `SessionStart` and `SubagentStart` hook context (`context.ts`) |
 
-**A3. Model and effort. *(Done)*** Implemented in `config.ts`, `tiers.ts`, `codex.ts`, and `antigravity.ts` ([09-usage-presets-rounds.md](09-usage-presets-rounds.md) section 8). Codex accepts `model` and `effort`; Antigravity maps `effort` to `thought_level` (`tiers.ts`). Role settings override presets (`economy`, `balanced`, `best`), and presets guide lead subagent models.
+**A3. Model and effort. *(Done)*** Implemented in `config.ts`, `tiers.ts`, `codex.ts`, and `antigravity.ts` ([usage-and-presets.md](usage-and-presets.md)). Codex accepts `model` and `effort`; Antigravity maps `effort` to `thought_level` (`tiers.ts`). Role settings override presets (`economy`, `balanced`, `best`), and presets guide lead subagent models.
 
 ### B. Board to control screen
 
-**B1. Decision support. *(Done)*** Implemented in `plugin/board/src/` and `native/Sources/Crew/` ([04-implementation.md](04-implementation.md) section 5.2). Includes the job drawer, free-text question composer, per-job event list, pending count in the tab title and menu bar, project sidebar filter, and settings panes for roles, presets, peer ratings, model scores, and shared instructions. (See [05-related-work.md](05-related-work.md) section 9 for the remaining minor items.)
+**B1. Decision support. *(Done)*** Implemented in `plugin/board/src/` and `native/Sources/Crew/` ([board.md](board.md)). Includes the job drawer, free-text question composer, per-job event list, pending count in the tab title and menu bar, project sidebar filter, and settings panes for roles, presets, peer ratings, model scores, and shared instructions. (See [related-work.md](../research/related-work.md) section 9 for the remaining minor items.)
 
-**B2. Missions. *(Done)*** Implemented in `missions.ts`, `jobs.ts`, `pulls.ts`, `mcp.ts`, [run/SKILL.md](../plugin/skills/run/SKILL.md), `plugin/board/src/`, and `native/Sources/Crew/` ([04-implementation.md](04-implementation.md) section 5.3, [09-usage-presets-rounds.md](09-usage-presets-rounds.md)). Jobs record `mission`, `missionStep`, `taskId`, and per-turn `rounds`; missions track `stages`, named stop `labels`, `tasks`, `notes`, `record`, and watched `pr` links.
+**B2. Missions. *(Done)*** Implemented in `missions.ts`, `jobs.ts`, `pulls.ts`, `mcp.ts`, [run/SKILL.md](../plugin/skills/run/SKILL.md), `plugin/board/src/`, and `native/Sources/Crew/` ([missions.md](missions.md), [usage-and-presets.md](usage-and-presets.md)). Jobs record `mission`, `missionStep`, `taskId`, and per-turn `rounds`; missions track `stages`, named stop `labels`, `tasks`, `notes`, `record`, and watched `pr` links.
 
 ### C. New connections
 
-**C1. AgentGauge. *(Partial: G1 done; G2 and G3 open)*** G1 is implemented inside the Crew daemon (`usage.ts`, `daemon.ts`, `mcp.ts`) rather than as a separate MCP server, reading AgentGauge's macOS (v1) and Windows (v4) caches, `usage-history.db`, and live Codex limits ([09-usage-presets-rounds.md](09-usage-presets-rounds.md) sections 3, 6, 7). G2 (`--json` output in AgentGauge) and G3 (threshold hooks and consumer activity signals) remain open ([03-agentgauge-integration.md](03-agentgauge-integration.md)).
+**C1. AgentGauge. *(Partial: G1 done; G2 and G3 open)*** G1 is implemented inside the Crew daemon (`usage.ts`, `daemon.ts`, `mcp.ts`) rather than as a separate MCP server, reading AgentGauge's macOS (v1) and Windows (v4) caches, `usage-history.db`, and live Codex limits ([usage-and-presets.md](usage-and-presets.md)). G2 (`--json` output in AgentGauge) and G3 (threshold hooks and consumer activity signals) remain open ([agentgauge-integration.md](../research/agentgauge-integration.md)).
 
 **C2. Cursor adapter. *(Open)*** Drive the Cursor CLI in headless mode (`agent -p --output-format stream-json`). Headless mode has no per-action approval: without `--force` it only proposes edits. Start Cursor in a read-only review role, or in a worktree with an allow list, until approvals can be routed to the user as they are for Codex. Open checks before building:
 
 - CLI flags and the hidden `acp` command are from web documentation, not confirmed on this machine.
 - Whether effort is encoded in the model id is unverified.
-- Whether the terms allow a third-party client to run the CLI, as was checked for Antigravity in 04 section 6.
+- Whether the terms allow a third-party client to run the CLI, as was checked for Antigravity in [architecture.md](architecture.md#antigravity-policy-risk).
 
 ### D. Learning from reviews
 
-**D1. Model notes. *(Done)*** Implemented in `notes.ts`, `mcp.ts` (`note`, `note_summary`), `daemon.ts` (`/api/notes`), `Settings.tsx` (`Scores.tsx`), and `SettingsView.swift` ([09](09-usage-presets-rounds.md) sections 15–16). Stored as JSON (`~/.crew/model-notes.json`, version 2) so each model is scored out of 10 from accepted finding rate over change size (`build`), fix quality (`fix`), and review acceptance (`review`). Status (`too few samples`, `on trial`, `settled`) is derived from weighted build reviews (`< 3`, `< 8`, `>= 8`). `route` and the first `delegate` attach recent summaries and evidence (`withNotes` in `mcp.ts`); `note_summary` rewrites summaries after 10 new lines (`CONSOLIDATE_AFTER`). Role assignments and presets stay the user's.
+**D1. Model notes. *(Done)*** Implemented in `notes.ts`, `mcp.ts` (`note`, `note_summary`), `daemon.ts` (`/api/notes`), `Settings.tsx` (`Scores.tsx`), and `SettingsView.swift` ([roles.md](roles.md)). Stored as JSON (`~/.crew/model-notes.json`, version 2) so each model is scored out of 10 from accepted finding rate over change size (`build`), fix quality (`fix`), and review acceptance (`review`). Status (`too few samples`, `on trial`, `settled`) is derived from weighted build reviews (`< 3`, `< 8`, `>= 8`). `route` and the first `delegate` attach recent summaries and evidence (`withNotes` in `mcp.ts`); `note_summary` rewrites summaries after 10 new lines (`CONSOLIDATE_AFTER`). Role assignments and presets stay the user's.
 
 **D2. Fix role. *(Done)*** Implemented as `fix` in `config.ts` (defaulting to Claude), `plugin/roles/fix.md`, `delegate` (`role: "fix"`) in `mcp.ts`, and `route` in `usage.ts`. A worker's own change still goes back via `reply`; `fix` handles the lead's code or merged results in a fresh worktree, keeping build and fix evidence separate in `notes.ts`.
 
-**D3. Peer ratings. *(Done)*** Implemented in `notes.ts`, `worker-mcp.ts` (`rate`), `daemon.ts` (`/api/jobs/:id/rating`, `/api/peer-ratings`), and `config.ts` (`peerRatings`, on by default) ([09](09-usage-presets-rounds.md) section 17). The switch is available because rating adds usage. Ratings require a `fact` and count for half (`PEER_SHARE = 0.5`) beside evidence once at least `MIN_RATINGS = 3` exist.
+**D3. Peer ratings. *(Done)*** Implemented in `notes.ts`, `worker-mcp.ts` (`rate`), `daemon.ts` (`/api/jobs/:id/rating`, `/api/peer-ratings`), and `config.ts` (`peerRatings`, on by default) ([roles.md](roles.md)). The switch is available because rating adds usage. Ratings require a `fact` and count for half (`PEER_SHARE = 0.5`) beside evidence once at least `MIN_RATINGS = 3` exist.
 
 ### E. From the game retrospective
 
@@ -114,7 +114,7 @@ From a game project retrospective (58 jobs, ~110 hours, 1.5B tokens). Project-sp
 
 ## 5. Long-term plan
 
-**L1. The lead as an adapter. *(Open; groundwork done)*** Only three parts are tied to Claude Code: the MCP server, the hooks, and the skills. Jobs, events, and the board belong to the daemon. Defining the lead as the role that plans and decides merges lets Codex or a headless Claude take it, and resolves the temporary-lead handoff in 03 section 8.2.
+**L1. The lead as an adapter. *(Open; groundwork done)*** Only three parts are tied to Claude Code: the MCP server, the hooks, and the skills. Jobs, events, and the board belong to the daemon. Defining the lead as the role that plans and decides merges lets Codex or a headless Claude take it, and resolves the temporary-lead handoff in [agentgauge-integration.md](../research/agentgauge-integration.md) section 8.2.
 
 Groundwork done: worker roles are a configurable registry (`config.ts`) and routing names the lead via `LEAD` (`'claude'`) instead of hardcoding Claude everywhere. No setting chooses the lead yet. What another lead needs, in order:
 
@@ -124,15 +124,17 @@ Groundwork done: worker roles are a configurable registry (`config.ts`) and rout
 4. Relaying approvals and questions to the user through that client.
 5. A Claude worker adapter, needed once Claude holds a worker role under another lead.
 
-**L2. Own main screen. *(Partial)*** React board (`plugin/board/src/`), role-based direct dispatch (`Dispatch.tsx`, `DispatchView.swift`), native macOS SwiftUI/AppKit app (`native/`), and Windows Electron shell (`desktop/`) are done ([07-desktop-and-react.md](07-desktop-and-react.md), [08-native-macos.md](08-native-macos.md)). Closing the UI leaves the daemon and jobs running, and the web board stays available. Mission start with a lead, lead selection, and merge execution remain open.
+**L2. Own main screen. *(Partial)*** React board (`plugin/board/src/`), role-based direct dispatch (`Dispatch.tsx`, `DispatchView.swift`), native macOS SwiftUI/AppKit app (`native/`), and Windows Electron shell (`desktop/`) are done ([board.md](board.md), [macos-app.md](macos-app.md)). Closing the UI leaves the daemon and jobs running, and the web board stays available. Mission start with a lead, lead selection, and merge execution remain open.
 
-**L2a. Distribution. *(Done)*** Implemented via `.github/workflows/release.yml`, `native/Sources/Crew/Updater.swift`, `desktop/updater.ts`, `plugin/bridge/setup.ts`, `Overview.tsx` (`Setup`), and `BoardView.swift` (`SetupCard`): builds and publishes the macOS `.dmg`/`.zip` and Windows installer, self-updates from GitHub Releases, installs/updates the Claude Code plugin on the bundled Node runtime, and shows a setup checklist ([13-distribution-plan.md](13-distribution-plan.md)).
+**L2a. Distribution. *(Done)*** Implemented via `.github/workflows/release.yml`, `native/Sources/Crew/Updater.swift`, `desktop/updater.ts`, `plugin/bridge/setup.ts`, `Overview.tsx` (`Setup`), and `BoardView.swift` (`SetupCard`): builds and publishes the macOS `.dmg`/`.zip` and Windows installer, self-updates from GitHub Releases, installs/updates the Claude Code plugin on the bundled Node runtime, and shows a setup checklist ([distribution.md](distribution.md)).
 
 **L3. Usage-based routing. *(Open)*** With AgentGauge G3 (threshold hooks), trigger lead handoff before the lead's limit runs out.
 
+**L3a. Claude usage display. *(Open)*** Forward `rate_limits` from Claude Code's statusline to the daemon as a supplement to AgentGauge ([agentgauge-integration.md](../research/agentgauge-integration.md) section 9).
+
 **L4. More entry points. *(Open)*** Start missions from GitHub or Linear issues; a read-only mobile view. (Linked PR tracking in `pulls.ts` watches existing PRs rather than starting missions from issues.)
 
-**L5. Board UI foundation and design system. *(Done)*** Implemented in `plugin/board/src/` with React 19, TypeScript, Vite, shared CSS tokens, `Settings.module.css`, Fluent icons, and Playwright e2e tests; Radix, Motion, and Storybook were deferred because native HTML elements and CSS transitions cover the scope ([07-desktop-and-react.md](07-desktop-and-react.md)).
+**L5. Board UI foundation and design system. *(Done)*** Implemented in `plugin/board/src/` with React 19, TypeScript, Vite, shared CSS tokens, `Settings.module.css`, Fluent icons, and Playwright e2e tests; Radix, Motion, and Storybook were deferred because native HTML elements and CSS transitions cover the scope ([board.md](board.md)).
 
 ### Cost of L1 and L2
 
@@ -141,7 +143,7 @@ Requirements R4 and R6 (computer use, side chat, visibility in the desktop app) 
 ## 6. Open items
 
 - Midmap was read from its Microsoft Store listing only (released 2026-11-04, Windows x64); its layout and site were not seen.
-- Conductor's status is inconsistent between sources (planned cloud shutdown in 05 vs. a release on 2026-11-12); does not affect UX references.
+- Conductor's status is inconsistent between sources (planned cloud shutdown in [related-work.md](../research/related-work.md) vs. a release on 2026-11-12); does not affect UX references.
 - Antigravity's native `AGENTS.md` support is unverified; A2 does not depend on it.
 - Direct dispatch shape *(settled in `Dispatch.tsx` / `DispatchView.swift`)*: the board’s New Job creates a job without a mission or lead. The lead’s tools use the same `POST /api/jobs` endpoint and pass lead and mission information.
 - PR watches: the user has yet to decide whether Crew should poll slowly while the owning session is closed (Codex's preference). The current implementation skips polling while the session is closed.
@@ -161,8 +163,8 @@ Requirements R4 and R6 (computer use, side chat, visibility in the desktop app) 
 
 Summary of design turns recorded across the roadmap:
 
-- 2026-11-12–13: **Board and desktop shells**: Built the React + Vite board (L5) and direct dispatch (`POST /api/jobs`) while keeping the independent daemon; replaced Electron with a native SwiftUI/AppKit macOS app (`native/`, Swift 6, macOS 26+) and kept Electron for Windows (`desktop/`) ([07](07-desktop-and-react.md), [08](08-native-macos.md)).
-- 2026-11-13 and 2026-11-15: **Roles, presets, and AgentGauge G1**: Expanded roles into an 8-role registry with inheritance (keeping `release` scoped to preparation because push, publish, and deploy need their own permission, network, and approval design), added global/mission presets, and built AgentGauge G1 inside the daemon ([09](09-usage-presets-rounds.md) sections 3, 6–8, 15).
-- 2026-11-15, 2026-11-16, and 2026-11-18: **Model notes, fix role, and peer ratings (D1–D3)**: Replaced calibrated/clamped scoring (which rewarded tier and let fixes lift build scores) with uncalibrated finding load over change size (`xlarge` exposure 4 for large integrations), a separate `fix` score, `adoption` tracking, and fact-backed `peerRatings` weighted at 50% alongside evidence ([09](09-usage-presets-rounds.md) sections 16–17).
-- 2026-11-20: **Game retrospective (E)**: Adopted lead/worker prompt rules, tool-failure reporting, named stage labels (E3), and side-by-side evidence comparison opening one capture first (E4), leaving E1/E2 open ([04](04-implementation.md)).
-- 2026-11-20: **Release gate, PR watching, and concurrent missions**: Gated releases on passing typechecks and tests, added mission PR watching (no polling while the lead session is closed), and required explicit mission IDs when multiple missions are open instead of an implicit current mission or workflow engine ([04](04-implementation.md) section 5.5, [13](13-distribution-plan.md)).
+- 2026-11-12–13: **Board and desktop shells**: Built the React + Vite board (L5) and direct dispatch (`POST /api/jobs`) while keeping the independent daemon; replaced Electron with a native SwiftUI/AppKit macOS app (`native/`, Swift 6, macOS 26+) and kept Electron for Windows (`desktop/`) ([board.md](board.md), [macos-app.md](macos-app.md)).
+- 2026-11-13 and 2026-11-15: **Roles, presets, and AgentGauge G1**: Expanded roles into an 8-role registry with inheritance (keeping `release` scoped to preparation because push, publish, and deploy need their own permission, network, and approval design), added global/mission presets, and built AgentGauge G1 inside the daemon ([roles.md](roles.md), [usage-and-presets.md](usage-and-presets.md)).
+- 2026-11-15, 2026-11-16, and 2026-11-18: **Model notes, fix role, and peer ratings (D1–D3)**: Replaced calibrated/clamped scoring (which rewarded tier and let fixes lift build scores) with uncalibrated finding load over change size (`xlarge` exposure 4 for large integrations), a separate `fix` score, `adoption` tracking, and fact-backed `peerRatings` weighted at 50% alongside evidence ([roles.md](roles.md)).
+- 2026-11-20: **Game retrospective (E)**: Adopted lead/worker prompt rules, tool-failure reporting, named stage labels (E3), and side-by-side evidence comparison opening one capture first (E4), leaving E1/E2 open ([jobs.md](jobs.md), [missions.md](missions.md)).
+- 2026-11-20: **Release gate, PR watching, and concurrent missions**: Gated releases on passing typechecks and tests, added mission PR watching (no polling while the lead session is closed), and required explicit mission IDs when multiple missions are open instead of an implicit current mission or workflow engine ([missions.md](missions.md), [distribution.md](distribution.md)).

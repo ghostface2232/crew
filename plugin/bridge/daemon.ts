@@ -465,7 +465,7 @@ function signedIn(req: http.IncomingMessage): { board?: number } | null {
   return board ? { board } : null;
 }
 
-/** What answers without the secret; docs/09-usage-presets-rounds.md section 12 says why for each. */
+/** What answers without the secret; docs/daemon-api.md says why for each. */
 function isOpen(method: string, pathname: string): boolean {
   if (method === 'GET') return pathname === '/api/health' || !pathname.startsWith('/api/');
   if (method !== 'POST') return false;

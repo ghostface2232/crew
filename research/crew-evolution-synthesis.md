@@ -40,7 +40,7 @@ The full tables are in Codex's report section 2 and in the lead's surveys. Only 
 | Agent Skills (agentskills.io) | `SKILL.md` + progressive disclosure, shared across hosts | Export format for runbooks (P2-6) |
 | OTel GenAI agent spans | `invoke_workflow` / `invoke_agent` / `execute_tool` | Optional, once evals exist |
 
-Corrections Codex found in Crew's earlier docs: Conductor's cloud shutdown was reversed (0.94.2 changelog). Jules went read-only after 2026-11-11, per the official changelog (the lead's survey still described it as active; Codex's reading of the official source wins). AutoGen is archived in favor of Microsoft Agent Framework. [06-roadmap.md](../docs/06-roadmap.md) section 6 should be updated.
+Corrections Codex found in Crew's earlier docs: Conductor's cloud shutdown was reversed (0.94.2 changelog). Jules went read-only after 2026-11-11, per the official changelog (the lead's survey still described it as active; Codex's reading of the official source wins). AutoGen is archived in favor of Microsoft Agent Framework. [roadmap.md](../docs/roadmap.md) section 6 should be updated.
 
 ## 4. Where the two reports agree and differ
 
@@ -98,7 +98,7 @@ Corrections Codex found in Crew's earlier docs: Conductor's cloud shutdown was r
 
 ### P1-4. Measure before adding orchestration
 
-1. **Production signals first, nearly free.** For each mission, record cross-review findings and the lead's disposition (accepted, declined, reason), whether polish was accepted, the number of fix rounds, and tokens per role. In time this answers whether cross-review or polish is earning its cost (see [05-related-work.md](../docs/05-related-work.md) section 4).
+1. **Production signals first, nearly free.** For each mission, record cross-review findings and the lead's disposition (accepted, declined, reason), whether polish was accepted, the number of fix rounds, and tokens per role. In time this answers whether cross-review or polish is earning its cost (see [related-work.md](related-work.md) section 4).
 2. **Then controlled replays.** Run 8–12 frozen scenarios (Codex E5), with an LLM judge plus human spot checks (Anthropic). Change one preset or stage at a time.
 3. **Success.** Every default-preset change ships with matched outcomes and total cost. Removing a stage that adds nothing counts as success.
 
@@ -121,7 +121,7 @@ Both MCP entry points advertise protocol versions only up to `2025-11-25` ([mcp.
 
 - **Unattended recurring maintenance** (Automations, Routines, OpenClaw heartbeat). This is the most attractive next step, but it waits for P0-1 and P1-3: unclear completion and uncertain side effects get worse with no one watching. Later, build it on the Codex Automations pattern: a background worktree, a triage inbox, and auto-archive for runs with no findings.
 - **A general framework or graph DSL** (LangGraph, CrewAI, ADK).
-- **More reviewers or voting.** A third reviewer adds little ([05-related-work.md](../docs/05-related-work.md) section 4).
+- **More reviewers or voting.** A third reviewer adds little ([related-work.md](related-work.md) section 4).
 - **Duplicating Claude Code agent teams' task queue.** It is experimental, the lead is fixed, and it does not span runtimes.
 - **Automatically promoting transcripts or web pages into instructions.**
 - **A2A federation, MCP sampling, or a Jules adapter.**

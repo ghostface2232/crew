@@ -1,4 +1,4 @@
-# 10. Design tokens (native macOS app)
+# Design tokens (native macOS app)
 
 Written 2026-11-14, updated 2026-11-17. Every size, gap, color and type style in the native app comes from `native/Sources/Crew/DesignTokens.swift`. Views name a token instead of writing a number, so a change made there reaches every screen. This page lists each token and where it is used. The web board has its own CSS and is not covered here.
 

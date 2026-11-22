@@ -57,7 +57,7 @@ export type JobKind = 'delegate' | 'review' | 'polish';
 
 /**
  * Who leads. Only Claude Code can today: the plugin's hooks wake it and record the user's words.
- * docs/06-roadmap.md describes what another lead would need.
+ * docs/roadmap.md describes what another lead would need.
  */
 export const LEAD = 'claude' as const;
 /** Who may hold a role: a worker, or the lead itself, which does the work in its own session or a subagent. */

@@ -1,4 +1,4 @@
-# 08. Native macOS app
+# Native macOS app
 
 Implemented 2026-11-13. The macOS desktop UI is SwiftUI and AppKit, with Swift 6 language mode and a macOS 26 minimum deployment target (`native/Package.swift`). The TypeScript daemon, agent adapters, CLI, worktrees, configuration, and React web board remain the execution and browser layers.
 
@@ -24,7 +24,7 @@ The app bundles a standalone Node runtime (`Contents/Resources/runtime/node`) an
 - Settings (`CrewSettingsView`) uses a sidebar with **About Crew**, **Roles** (`Build`, `Review`, `Edit`), **Shared** (`Presets`, `Model Scores`, `Instructions`), and **Projects** (per-project instructions), with grouped forms, a bottom save bar, failed-load protection, save-generation checks, and unsaved-change confirmation on close and quit. New Job also confirms before discarding a dirty draft with Cancel or Escape.
 - Native text editors preserve marked text and use Return for a newline; sending requires an explicit button, so IME confirmation cannot submit.
 - Navigation, controls, and statuses use SF Symbols. Service marks and the menu bar icon come from SVGs in `assets/`, compiled into `Services.xcassets` as template vector assets for light and dark appearances. Cursor's SVG is packaged, though no Cursor adapter exists.
-- Sizes, spacing, colors, type, motion, and controls come from the design tokens in [10-design-tokens.md](10-design-tokens.md).
+- Sizes, spacing, colors, type, motion, and controls come from the design tokens in [design-tokens.md](design-tokens.md).
 - Liquid Glass is provided by system navigation/toolbars and glass buttons, with a custom glass attention banner. Reports and logs use readable content surfaces. System materials and controls inherit accessibility appearance settings. Views use `Motion.reduced` for shared transitions. `WorkflowStrip` in `JobDetailView.swift` applies its pulse directly and checks `reduceMotion` before animating.
 
 Keyboard shortcuts: Command-N creates a job, Command-comma opens Settings, Command-1 through Command-4 select workspace sections, Command-S saves the active settings pane, Command-F focuses toolbar search, Control-Command-S toggles the sidebar, and Escape closes job details.
@@ -55,7 +55,7 @@ Local builds are ad-hoc signed and verified. Releases are signed with a self-sig
 
 ## Updates
 
-The app updates itself from GitHub Releases (`native/Sources/Crew/Updater.swift`), matching the Windows updater ([12-windows-electron.md](12-windows-electron.md#updates)). It checks a minute after launch and then every six hours (`CrewApp.swift`). A release qualifies when its asset `Crew-macOS-<arch>-<version>.zip` includes GitHub's `sha256:` digest. Background downloads start only after the user has been away from Crew for two minutes (app inactive or Mac idle); **Check for Updates** downloads at once. Verified archives are stored in `~/Library/Application Support/Crew/Updates` (or `$CREW_HOME/desktop/updates` when `CREW_HOME` is set) and persist across relaunches.
+The app updates itself from GitHub Releases (`native/Sources/Crew/Updater.swift`), matching the Windows updater ([windows-app.md](windows-app.md#updates)). It checks a minute after launch and then every six hours (`CrewApp.swift`). A release qualifies when its asset `Crew-macOS-<arch>-<version>.zip` includes GitHub's `sha256:` digest. Background downloads start only after the user has been away from Crew for two minutes (app inactive or Mac idle); **Check for Updates** downloads at once. Verified archives are stored in `~/Library/Application Support/Crew/Updates` (or `$CREW_HOME/desktop/updates` when `CREW_HOME` is set) and persist across relaunches.
 
 When an update is ready, an **Update** button appears above Settings in the sidebar, and **Restart to Update** appears in Settings → About Crew and in the menu bar menu. Nothing installs until the user triggers it.
 
@@ -63,7 +63,7 @@ When an update is ready, an **Update** button appears above Settings in the side
 - The unpacked archive must match the bundle identifier (`dev.crew.native`) and release version and pass `codesign --verify --deep --strict`. It is staged beside the installed bundle, and a detached `/bin/sh` helper waits up to 60 seconds for the app to quit, moves the old bundle to `.previous`, moves the new one in (restoring on failure), and launches the result.
 - The folder holding Crew must be writable (otherwise About Crew tells the user to move it, e.g. to Applications). Jobs, missions, and settings live in `~/.crew`, outside the bundle.
 
-Without an Apple Developer ID, the first launch of a downloaded copy needs System Settings → Privacy & Security → Open Anyway ([13-distribution-plan.md](13-distribution-plan.md)). An update replaces the bundle in place; whether Gatekeeper prompts again after an in-place update has not been verified.
+Without an Apple Developer ID, the first launch of a downloaded copy needs System Settings → Privacy & Security → Open Anyway ([distribution.md](distribution.md)). An update replaces the bundle in place; whether Gatekeeper prompts again after an in-place update has not been verified.
 
 ## Verification
 

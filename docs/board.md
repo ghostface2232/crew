@@ -1,0 +1,149 @@
+# Board
+
+The React web board lets users inspect work and act on it directly, as does the native macOS app (requirement R10, roadmap item B1). The web board is supported on all platforms and also runs in the Windows Electron shell. Claude remains the pipeline lead, with Cursor, alternate leads, and automatic merges remaining separate work.
+
+**Key files:** `plugin/board/src/store.ts`, `plugin/board/src/api.ts`, `plugin/board/src/model.ts`, `plugin/board/src/ui.tsx`, `plugin/board/board.css`, and `plugin/bridge/assets.ts`. See [daemon-api.md](daemon-api.md) for HTTP and SSE, [missions.md](missions.md#display) for mission display, [approvals.md](approvals.md) for approvals and questions, and [usage-and-presets.md](usage-and-presets.md) for usage routing and presets. The current desktop apps are documented in [windows-app.md](windows-app.md) and [macos-app.md](macos-app.md).
+
+## Architecture
+
+The Claude plugin, CLI, and Windows Electron main process connect to an independent Crew daemon that owns worker adapters and worktrees. The daemon serves the React board over HTTP and SSE to browsers and the Windows Electron window. React owns the entire board (`plugin/board/src`). The macOS desktop app uses SwiftUI (`native/Sources/Crew`).
+
+| File | Responsibility |
+| --- | --- |
+| `plugin/board/src/store.ts` | One SSE subscription, immutable snapshots, reconnect replacement, and bounded history of 400 events |
+| `plugin/board/src/api.ts` | Launch-ticket sign-in, HTTP requests, SSE reader, shared drafts, and action locks keyed by job and request identity |
+| `plugin/board/src/model.ts` | Project grouping, state priority, usage and heatmap helpers, duration labels, and [mission stop and progress math](missions.md#progress-roll-up) |
+| `plugin/board/src/ui.tsx` | Native `<dialog>` lifecycle, the board's select, menus, confirm sheet (`ask`), stable composers, Fluent status icons, agent marks, and clock updates |
+| `Missions.tsx`, `NeedsYou.tsx`, `Overview.tsx`, `Palette.tsx`, `Shell.tsx`, `Scores.tsx` | Mission tracks, request cards, workspace/activity/history views, command palette, sidebar navigation, and model scores |
+| `JobDrawer.tsx`, `Settings.tsx`, `Dispatch.tsx` | Job and session details (verification, evidence, rounds, debate), scoped settings/presets/about, and direct dispatch |
+| `desktop/main.ts`, `desktop/preload.cts` | Windows hosting, single instance, tray, restored bounds, Mica backdrop, request signing, daemon startup, and updater IPC |
+| `plugin/bridge/assets.ts` | Built-asset allowlist, MIME types, and renderer CSP |
+
+Bridge types are imported type-only, keeping Node modules out of the renderer. Shared CSS tokens in `plugin/board/board.css` preserve the workspace surfaces, typography, and state colors. `Dispatch.tsx`, `Settings.tsx`, and `Scores.tsx` use CSS Modules. All text uses the bundled Pretendard font (`plugin/board/pretendard.woff2`), with no monospace face. The board draws its own selects, checkboxes, switches, tooltips, and confirmation prompts for a consistent appearance on Windows.
+
+## Navigation and workspace
+
+- The sidebar lists `Overview`, `Needs You`, `Activity`, and `History`, with an alphabetical `Projects` list. The sidebar `NavList` keeps `All projects` visible so users can always clear a persisted filter and dispatch to a different directory. It also offers per-project hover previews. The board saves the selection in `localStorage` under `crew.selection`. Selecting a project scopes Overview to it. Jobs and sessions group under the repository's main working tree even when started from a worktree or subfolder.
+- `⌘K` or `/` opens the search palette, `N` opens New Job, and `1`–`4` switch pages. The board follows system light and dark mode (`color-scheme: light dark`) and scales down to `320px`. At `<= 760px` the sidebar becomes a slide-over drawer, with a bottom dock below `760px`.
+- The workspace shows mission stages and recent completed missions as described in [missions.md](missions.md#display), along with unfinished jobs, lead session disclosures, and limits. Summary KPI counts include ended jobs only while unsettled, meaning they have an undiscarded worktree or unread result.
+- Status uses Fluent icons and tinted chips (`Chip`). Fluent System Icons (`@fluentui/react-icons`) are filled SVGs in `currentColor` and sized by CSS. Selected sidebar items swap to the Filled style with `bundleIcon`. The `AgentPanel` beside the workspace shows agent names and marks. `AgentMark` renders SVGs in `plugin/board/src/icons/` as CSS mask templates.
+
+## Needs You and live answers
+
+- Waiting jobs and Claude sessions appear as full request cards with inline controls on `Needs You`, with badges in the sidebar, header button, and Overview KPI. The cards sit in normal document flow above the work list, so every request stays reachable across project filters. The tab title shows `(<n>) Crew` whenever jobs or Claude sessions wait on the user across all projects.
+- Waiting approvals offer Approve, Deny, and *Allow for This Job* when eligible. Questions accept written replies or Yes/No. Answers carry `request_id` so they cannot settle a later request. Approval buttons and text answers share one lock across the board and drawer (`answer:<job>:<requestId>`). An accepted request stays locked while SSE catches up. A failed request keeps its draft for retry, and a new question gets a new draft.
+- Stable React keys preserve inputs and disclosures across SSE updates. Live updates preserve drafts, caret, focus, and action locks. `Composer` uses a `<textarea>` where Return adds a newline and only the send button submits, preventing accidental sends during IME composition. Inline `ActionStatus` messages and a connection banner report failures.
+- In a standalone browser, `Notifier` shows Web Notifications for waiting requests and completions when permitted and opted in while the tab is unfocused. The Windows Electron shell denies browser notifications and leaves OS toasts to the daemon (`notify.ts`). See [macos-app.md](macos-app.md) for native macOS notifications.
+
+## Job details and evidence
+
+- Clicking a job row opens a non-modal side panel (`#<job id>`). It shows status and errors, inline approval or question controls while waiting, and facts about the agent, model, project, branch, tokens, and shared instructions. It also shows changed files with out-of-scope files marked, the bridge check receipt, evidence, rounds with undo and keep, automatic-review refusals, notes, the report or debate transcript, a follow-up composer, the original task, activity, Resume Command, Diff Command, and Cancel Job. Detail requests abort when the drawer closes or changes jobs.
+- Pressing a capture opens it alone. A thumbnail strip adds or removes up to four panes in a row of up to three or a 2×2 grid. Lead attachments come first, then worker captures by turn, with `<view>-before` ahead of `<view>-after`. Captions show `Turn X of Y` or `Attached by the lead`. The macOS app decodes images natively at pane size and opens recordings in the system player. macOS has no WebM decoder.
+
+## Settings
+
+- The dialog (`Settings.tsx`) edits Build/Review/Edit roles, Presets, Model Scores (including the peer-ratings toggle), shared instructions (global and per-project), and About Crew. Role saves preserve other `config.json` keys and refuse unparseable files. Instruction writes allow only daemon-known projects and never follow symlinks. Closing with unsaved edits prompts first.
+- Settings track loaded scope and generation so late responses cannot overwrite another editor. Saving normalizes only the submitted draft and preserves edits made during the request. Failed loads disable saving and expose a retry.
+
+## New Job
+
+Direct dispatch (`Dispatch.tsx`) sends one of three intents. Direct jobs appear under Other jobs.
+
+| Intent | Behavior | Request |
+| --- | --- | --- |
+| Command | Uses the role table and offers a worker picker when multiple workers hold a role. Implementation and polish run in isolated worktrees, `review` is read-only on uncommitted changes, and `verify` runs in a snapshot. | `POST /api/jobs` for the chosen role (except `debate`) |
+| Question | Runs read-only. | `POST /api/jobs` with `kind: "delegate"` and `ask: true` |
+| Information | Appends to project or shared instructions, or to an [active mission's notes](missions.md#notes-and-runbooks). | `POST /api/missions/:id` with `note` when a mission is chosen, otherwise `POST /api/instructions` with `append` |
+
+## Update frequency and motion
+
+- `ClockProvider` holds a clock store that ticks once a second and skips updates while `document.hidden` is true. Components read it through `useClock(select)` and re-render only when the text they show changes. Finished work does not subscribe.
+- `BoardStore` in `store.ts` applies each stream event to its snapshot immediately. It notifies subscribers once per animation frame, or on a timer in a hidden tab. Connection changes notify subscribers immediately.
+- Four animations now rest as they do under Reduce Motion. The running mission chip's turning symbol, the current step's halo, the working project's dot, and the live connection's ripple together used a third of a core while a mission ran because the browser draws every frame of a looping animation. Three loops remain and run only while their cause lasts. `.spinner` runs while a request is in flight, `.dots` while waiting for a debate reply, and the workflow strip's pulse while its session panel is open. `@media (prefers-reduced-motion: reduce)` disables transitions and animations except the active `.spinner`.
+
+## Dependencies and decisions
+
+Versions match `package.json` and are pinned in `package-lock.json`.
+
+| Dependency | Expected benefit |
+| --- | --- |
+| React / React DOM 19.3 | Stable component identity and declarative updates replace manual HTML patching and input restoration |
+| Vite 8.3 | TypeScript/JSX development and production bundling, hashed assets, and unused-code elimination |
+| Fluent UI React Icons 2 | Windows' icon vocabulary in Regular and Filled styles, with only imported icons in the build. Its Griffel runtime injects a few inline styles, which the board's CSP allows. |
+| Electron 45.3 | Windows desktop shell with tray, window lifecycle, and Mica support |
+| Electron Builder 26.18 | Per-user NSIS Windows installer and unpacked bundle (`asar: false`), replacing the earlier `electron-packager` setup |
+| Playwright 1.65 | Real browser regressions, visual baselines, and automation of the Electron executable |
+
+React state and `useSyncExternalStore` cover the state model. Native `<dialog>` handles focus, the board's own `Select` in `ui.tsx` handles keyboard behavior, and Playwright exercises real screens and component states. The migration added no state manager, router, UI component framework, motion runtime, or Storybook.
+
+Primary references consulted
+
+- [Vite guide](https://vite.dev/guide/)
+- [Fluent UI System Icons](https://github.com/microsoft/fluentui-system-icons)
+- [Electron security checklist](https://github.com/electron/electron/blob/main/docs/tutorial/security.md)
+- [Electron sandboxing](https://www.electronjs.org/docs/latest/tutorial/sandbox)
+- [Electron application distribution](https://github.com/electron/electron/blob/main/docs/tutorial/application-distribution.md)
+- [Playwright Electron API](https://playwright.dev/docs/api/class-electron)
+
+## Run and build
+
+```bash
+npm ci
+npm run build:board
+node plugin/bridge/cli.ts board
+```
+
+For renderer development, start the daemon with `node plugin/bridge/cli.ts daemon start`, then run `npm run dev:board`. Vite listens on `127.0.0.1:5173` and proxies `/api`, `/fonts`, and `/icons` to the local daemon. `CREW_PORT` selects an alternate port, with `47615` as the default. The web board is available at `http://127.0.0.1:47615`.
+
+Source installs need `npm run build:board` after frontend changes. Missing assets return HTTP 503 (`plugin/bridge/daemon.ts`). During an upgrade, let running jobs finish before restarting the daemon, then start the current daemon and reload the board.
+
+```bash
+npm run desktop
+npm run package:desktop
+```
+
+These commands run `scripts/desktop.mjs`, which builds and opens the native SwiftUI app on macOS and Electron on non-macOS systems. Closing the Electron desktop window hides it to the tray. Quitting leaves the daemon and jobs running, and reopening attaches to the same daemon with existing active-job protection. See the platform docs for build and launch steps, packaging, signing, and self-updating. [macOS app](macos-app.md#build-and-run), [Windows app](windows-app.md#build-and-run)
+
+## Renderer security
+
+The Electron renderer uses `nodeIntegration: false`, `contextIsolation: true`, and `sandbox: true`. Its preload (`desktop/preload.cts`) exposes only `window.crewDesktop.update`. `desktop/main.ts` answers it solely from the main window's board origin and permits only `clipboard-sanitized-write` for that origin. The shell denies external navigation, webviews, and unapproved popups. Report links open in the default browser, and evidence files open in a separate sandboxed window.
+
+`BOARD_CSP` in `plugin/bridge/assets.ts` restricts scripts, connections, fonts, and media to `'self'`, with `data:` for images and `'unsafe-inline'` for styles. The daemon retains loopback Host/Origin checks, and Vite removes only its own development origins.
+
+## Not verified
+
+- Screen readers.
+- IME composition.
+
+## Tests
+
+The board was checked in the browser pane and with Playwright regressions (`npm run test:e2e`). Automated handler tests covered instruction saves, concurrent edits, and request locks. The mission and workspace changes were covered by browser checks and `test/mcp.test.ts`, `test/missions.test.ts`, and `test/board.test.ts`.
+
+```bash
+npm test
+npm run typecheck
+npm run build:desktop
+npx playwright install chromium
+npm run test:e2e
+npm run test:desktop
+```
+
+The browser suite (`test/e2e/board.spec.ts`, `playwright.config.ts`) runs in Chromium (`chromium`) and a `development` build that keeps React's StrictMode checks. Firefox and WebKit are omitted because neither launches on macOS 27. Each project gets its own fixture server (`test/e2e/server.ts`) on a free port without starting workers. Screenshot baselines are Chromium's on macOS, and comparisons are skipped on other platforms. Inspect changes before running `npm run test:e2e -- --update-snapshots`.
+
+`npm run test:desktop` runs `scripts/smoke-desktop.mjs` on macOS or `scripts/smoke-electron.mjs` on Windows. `CREW_APP_PATH` points either script at a packaged binary. Desktop smoke tests use a fresh temporary home and free port, separate from the user's real jobs. Current platform verification is documented in [macos-app.md](macos-app.md#verification) and [windows-app.md](windows-app.md#verification).
+
+## History
+
+- **2026-11-13.** The native SwiftUI and AppKit app replaced Electron on macOS, using system Liquid Glass, SF Symbols, and bundled standalone Node while keeping the TypeScript daemon and React web board. The retired Electron output was `release/Crew-darwin-arm64/Crew.app`. The move removed the earlier `@electron/asar` dependency overrides (`73bde30`). See [macos-app.md](macos-app.md) and [windows-app.md](windows-app.md) for the current apps.
+- **2026-11-13.** Review fixes kept `All projects` visible and gave Claude waiting episodes a unique `waitingId`. Duplicate hooks for the same wait share the ID. A new wait gets a new ID even if the message repeats, enabling accurate notification deduplication. For daemons without `waitingId`, notifications fall back to the message key.
+- **2026-11-12–13.** Migrated the board to React/TypeScript/Vite, added desktop apps in place of the earlier web-only setup, and added board decision support. React replaced the imperative `board.js` renderer and took sole ownership of its DOM.
+- **2026-11-12.** The original Crew 0.2.0 implementation served the L5 UI foundation and L2 role-based dispatch. In the original React/Electron setup, the Electron main process owned the window, tray, signing, and updater, with preload IPC only for updates. AgentGauge usage routing (`plugin/bridge/usage.ts`), New Job intents (`Command`, `Question`, `Information`), and per-round undo (`plugin/board/src/JobDrawer.tsx`) shipped after that baseline.
+- **2026-11-12.** The initial React/Electron baseline passed 81 unit tests, typecheck, 14 browser tests, and a macOS arm64 Electron smoke run. The baseline reported ~524 MiB sum of Electron working sets under Playwright, ~255 MiB app bundle, and ~262 kB / 82 kB gzip JS renderer bundle. The working-set sum counts shared pages twice and excludes the daemon and workers, so it cannot serve as a physical-memory budget.
+
+The migration UI review covered the board, requests, details, settings, and dispatch flow, excluding OS notification appearance.
+
+| Severity | Location | Finding and fix | Reason |
+| --- | --- | --- | --- |
+| Medium | `plugin/board/board.css`, `src/ui.tsx`, `src/Missions.tsx` | Mixed mask glyphs, CSS chevrons, and SVG controls changed to Lucide icons with a `strokeWidth` of 1.75 in SVG units. | Keeps small icons legible and consistent. |
+| High | `src/Settings.tsx`, `src/api.ts` | The migration could drop shared locks and late-response protection. Request identities and scoped save generations preserved those guarantees. | Prevents duplicate decisions and overwritten drafts. |
+| Medium | `plugin/board/board.css` | Retired dock stacking rules hid subsequent React request cards. Removing renderer-specific stacking kept all requests in flow. | Keeps every waiting job reachable. |

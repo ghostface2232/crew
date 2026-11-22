@@ -1,12 +1,12 @@
-# 03. AgentGauge Integration Plan
+# AgentGauge Integration Plan
 
-Written 2026-11-11. Covers requirement R8 ([01-requirements.md](01-requirements.md)). The current state of AgentGauge was verified by reading the code and documentation at commit `a52141f` on the `main` branch of `ghostface2232/AgentGauge` (2026-11-11). Builds and tests were not run.
+Written 2026-11-11. Covers requirement R8 ([requirements.md](../docs/requirements.md)). The current state of AgentGauge was verified by reading the code and documentation at commit `a52141f` on the `main` branch of `ghostface2232/AgentGauge` (2026-11-11). Builds and tests were not run.
 
 ## 1. Purpose
 
-Agents check their own remaining quota and that of the other services, and route work accordingly. When all services have room to spare, work follows the original role assignments ([02-implementation-plan.md](02-implementation-plan.md) section 4). AgentGauge handles two things in this setup:
+Agents check their own remaining quota and that of the other services, and route work accordingly. When all services have room to spare, work follows the original role assignments ([implementation-plan.md](implementation-plan.md) section 4). AgentGauge handles two things in this setup:
 
-- Usage measurement: replaces the error-string heuristics from document 02 section 5 with measured quota data.
+- Usage measurement: replaces the error-string heuristics from [implementation-plan.md](implementation-plan.md) section 5 with measured quota data.
 - Routing decisions: supplies the inputs to a deterministic routing policy (`route`).
 
 It does not display live session status (who is doing what right now).
@@ -174,7 +174,7 @@ Proposed input: `tool`, `account`, `detail` (error text), `observed_at`. In `dae
 
 ### 8.1 Classification rules
 
-Status in `plugin/bridge/usage.ts` follows remaining quota alone with hysteresis: `usedRatio >= 0.999` is `exhausted`, remaining `<= 15%` is `tight`, remaining `>= 30%` is `ok`, values in between keep their prior status, and readings older than `45` minutes (`STALE_MS`) are `stale` (see [09](09-usage-presets-rounds.md) section 3). `usage.ts` still computes `projectedExhaustion` from `usage-history.db`, and `native/Sources/Crew/Models.swift` decodes it, though neither the web board (`plugin/board/src/`) nor the native app renders it in the UI. The original two rules:
+Status in `plugin/bridge/usage.ts` follows remaining quota alone with hysteresis: `usedRatio >= 0.999` is `exhausted`, remaining `<= 15%` is `tight`, remaining `>= 30%` is `ok`, values in between keep their prior status, and readings older than `45` minutes (`STALE_MS`) are `stale` (see [usage-and-presets.md](../docs/usage-and-presets.md)). `usage.ts` still computes `projectedExhaustion` from `usage-history.db`, and `native/Sources/Crew/Models.swift` decodes it, though neither the web board (`plugin/board/src/`) nor the native app renders it in the UI. The original two rules:
 
 - Do not judge by remaining percentage alone. Mark a window `tight` if projected exhaustion comes before `reset_time`, and `exhausted` if remaining quota hits 0 or `report_limit` arrives. Ten percent remaining with a reset in 20 minutes is comfortable; forty percent remaining with four days until reset is tight.
 - When samples are too sparse for a projection, fall back to remaining-quota thresholds with hysteresis so routing does not flap: switch away at 15% remaining and switch back at 30% remaining (initial values, tunable).

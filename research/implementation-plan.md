@@ -1,13 +1,13 @@
-# 02. Implementation Plan
+# Implementation Plan
 
-Written 2026-11-11. Requirement IDs (R1–R8) follow [01-requirements.md](01-requirements.md). All facts about external tools were verified on 2026-11-11; sources are listed in section 12.
+Written 2026-11-11. Requirement IDs (R1–R8) follow [requirements.md](../docs/requirements.md). All facts about external tools were verified on 2026-11-11; sources are listed in section 12.
 
 ## 1. Summary of decisions
 
 1. The cockpit is Claude Code Desktop. The lead session runs as an interactive Desktop session.
 2. Codex and Antigravity run in the background through their official runtimes: `codex app-server` for Codex, and `agy acp` or `agy -p` for Antigravity. *(Built: `agy acp` only; `agy -p` was dropped because wrapping it inside third-party agents is unsupported on consumer plans.)*
 3. Calls and events for both workers flow through a single Crew bridge (a local MCP server). This matches Anthropic's guidance for parallel work in Claude Code, where native workers are Claude sessions and external tools attach as MCP servers. *(Built: a long-lived HTTP/SSE daemon in `plugin/bridge/daemon.ts` owns workers, jobs, and the board; `plugin/bridge/mcp.ts` is a stateless stdio MCP server forwarding to it.)*
-4. Session status is shown on a lightweight status board fed by the bridge. Usage measurement and routing decisions belong to AgentGauge ([03-agentgauge-integration.md](03-agentgauge-integration.md)).
+4. Session status is shown on a lightweight status board fed by the bridge. Usage measurement and routing decisions belong to AgentGauge ([agentgauge-integration.md](agentgauge-integration.md)).
 5. We do not build a custom wrapper around the entire frontend (section 8).
 
 ## 2. Architecture
@@ -119,7 +119,7 @@ Stall and limit detection rules:
 
 - Agent view exposes six states—Working, Needs input, Idle, Completed, Failed, Stopped—with no dedicated usage-limit state. Because quota exhaustion surfaces as Failed or silence, the bridge classifies error messages and emits a `limit` event.
 - If no event arrives for a set duration (initially 5 minutes, configurable), the bridge marks the job as suspected stalled and sends a notification.
-- Measured quota numbers come from AgentGauge (document 03).
+- Measured quota numbers come from AgentGauge ([agentgauge-integration.md](agentgauge-integration.md)).
 
 *(Built: Claude session tracking uses all hooks in `plugin/hooks/hooks.json` routed to `claude.ts` rather than `claude agents --json`. `jobs.ts` marks silent running jobs `stalled` after `stallSeconds` (300 s default) and calls `adapter.probe` in `codex.ts` before waking the lead.)*
 
@@ -127,7 +127,7 @@ Status board:
 
 - Three lanes showing the current stage, last event, wait reason, and elapsed time. Controls are limited to cancel and resume.
 - First choice is a Tauri v2 + React tray app (the same stack as Noten), though starting with a local web page is fine.
-- It is not merged into the AgentGauge popover (document 03 section 10).
+- It is not merged into the AgentGauge popover ([agentgauge-integration.md](agentgauge-integration.md) section 10).
 
 *(Built instead: `plugin/board/src/` is a React + Vite web board organized by Overview/missions, Needs You, Activity, and History, paired with a native SwiftUI/AppKit macOS app in `native/` and an Electron shell in `desktop/` for Windows and other systems.)*
 
@@ -168,7 +168,7 @@ Orca (`stablyai/orca`) is an MIT-licensed open-source workbench that runs CLI ag
 
 Its worktree management and usage display are still useful references. ACP-based clients (Codeg, Jockey, acp-ui, etc.) are kept as references for the same reason.
 
-Rechecked 2026-11-17: the first and third reasons no longer describe Orca. See [05-related-work.md](05-related-work.md) section 11.
+Rechecked 2026-11-17: the first and third reasons no longer describe Orca. See [related-work.md](related-work.md) section 11.
 
 ## 9. Risks and constraints
 
@@ -235,7 +235,7 @@ Items based only on secondary sources (recheck against primary sources before im
 
 Key shifts from the original 2026-11-11 plan:
 
-- 2026-11-11: **Direct adapters and ACP only** ([04-implementation.md](04-implementation.md) section 3): skipped Phase 0, dropped `agy -p` (unsupported inside third-party agents on consumer plans), kept role files in `plugin/roles/` instead of writing into project files, switched from WebSocket and `claude agents --json` polling to SSE and Claude hooks, and expanded bridge tools (`wait`, `reply`, `mission`, `route`, `debate`, `answer`, `note`, `note_summary`).
+- 2026-11-11: **Direct adapters and ACP only** ([architecture.md](../docs/architecture.md)): skipped Phase 0, dropped `agy -p` (unsupported inside third-party agents on consumer plans), kept role files in `plugin/roles/` instead of writing into project files, switched from WebSocket and `claude agents --json` polling to SSE and Claude hooks, and expanded bridge tools (`wait`, `reply`, `mission`, `route`, `debate`, `answer`, `note`, `note_summary`).
 - 2026-11-11: **Status board separate from AgentGauge**: dropped merging the board into the AgentGauge popover because it conflicted with AgentGauge's scope (depth over breadth, no local process scanning).
-- 2026-11-12–13: **Desktop clients**: chose React + Vite for the board (`plugin/board/`), wrapped in Electron on Windows (`desktop/`) and replaced Electron with a native SwiftUI/AppKit app on macOS (`native/`); daemon ownership stayed unchanged ([07-desktop-and-react.md](07-desktop-and-react.md), [08-native-macos.md](08-native-macos.md)).
-- 2026-11-17–18: **Orca rechecked (`v1.4.261`)**: Orca now supports `codex app-server`, ACP, structured orchestration, and Antigravity usage tracking, so two of the earlier exclusion reasons in section 8.2 no longer apply. The decision stands because Orca is a full workbench without fixed roles or review stages, writes hooks into tool settings on first start, and starts workers with full access ([05-related-work.md](05-related-work.md) section 11).
+- 2026-11-12–13: **Desktop clients**: chose React + Vite for the board (`plugin/board/`), wrapped in Electron on Windows (`desktop/`) and replaced Electron with a native SwiftUI/AppKit app on macOS (`native/`); daemon ownership stayed unchanged ([board.md](../docs/board.md), [macos-app.md](../docs/macos-app.md)).
+- 2026-11-17–18: **Orca rechecked (`v1.4.261`)**: Orca now supports `codex app-server`, ACP, structured orchestration, and Antigravity usage tracking, so two of the earlier exclusion reasons in section 8.2 no longer apply. The decision stands because Orca is a full workbench without fixed roles or review stages, writes hooks into tool settings on first start, and starts workers with full access ([related-work.md](related-work.md) section 11).

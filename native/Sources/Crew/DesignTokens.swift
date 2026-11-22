@@ -1,7 +1,7 @@
 import SwiftUI
 
 // The app's design tokens. Views take sizes, spacing, colors and type from here rather than writing numbers;
-// docs/10-design-tokens.md lists each token with where it is used.
+// docs/design-tokens.md lists each token with where it is used.
 
 /// The app's motion. Every animation takes one of these, so the same kind of change moves the same way everywhere,
 /// and each passes through `reduced` so Reduce Motion turns it off.

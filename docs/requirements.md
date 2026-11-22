@@ -1,4 +1,4 @@
-# 01. Requirements
+# Requirements
 
 States what Crew is for and what it must do. Earlier versions are in git history.
 
@@ -41,11 +41,11 @@ Current implementation notes:
 ## 3. Defaults and priorities
 
 - **Defaults are the original setup.** With no configuration, roles are the R3 defaults and the lead is Claude in Claude Desktop. Anything else happens only because the user set it.
-- **Only the user changes a role.** Automatic routing (R8) moves work between agents when a service runs low, following [03-agentgauge-integration.md](03-agentgauge-integration.md) section 8. It does not give Antigravity engineering or review work; that requires an explicit assignment by the user.
+- **Only the user changes a role.** Automatic routing (R8) moves work between agents when a service runs low, following [agentgauge-integration.md](../research/agentgauge-integration.md) section 8. It does not give Antigravity engineering or review work; that requires an explicit assignment by the user.
 - **Claude Desktop lead mode comes first.** Work on R9 to R12 targets this mode. R13 is built after it and never replaces it.
 - **R4 and R6 are scoped to the lead's app.** Workers running in the background keep their runtime's subagents, MCP servers, and compaction, but not their desktop-only features. Under R13, a lead outside Claude Desktop loses those features too, and the screen says which ones are unavailable.
 - **Visibility must not cost cleanliness.** R5 and R10 are met by one view that aggregates and summarizes, not by tiled terminals (R1).
-- **The surface stays small.** New agents, roles, and views are added only where a requirement above needs them. Orchestration for its own sake is out ([05-related-work.md](05-related-work.md) section 6).
+- **The surface stays small.** New agents, roles, and views are added only where a requirement above needs them. Orchestration for its own sake is out ([related-work.md](../research/related-work.md) section 6).
 
 ## 4. Acceptance criteria
 

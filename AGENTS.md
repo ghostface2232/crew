@@ -45,7 +45,7 @@ Crew daemon (plugin/bridge/daemon.ts, http://127.0.0.1:47615)
 
 ```bash
 npm ci
-npm run typecheck                    # bridge, tests, board, native helpers, desktop
+npm run typecheck                    # bridge and tests, board, desktop app
 npm test                             # unit tests
 npm run test:e2e                     # board build and Playwright regressions
 npm run test:native                  # macOS app tests (macOS only)

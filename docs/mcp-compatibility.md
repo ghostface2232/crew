@@ -1,4 +1,4 @@
-# 11. MCP host compatibility
+# MCP host compatibility
 
 Tested 2026-11-14 on this Mac (arm64). Follows [P2-7](../research/crew-evolution-synthesis.md). These are installed-host observations, not claims about every release or configuration.
 

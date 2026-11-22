@@ -6,7 +6,7 @@ import type { Config, Role, WorkerAgent } from './config.ts';
 import type { Agent } from './jobs.ts';
 
 /**
- * Usage as measured by AgentGauge, and the routing it implies (docs/03-agentgauge-integration.md).
+ * Usage as measured by AgentGauge, and the routing it implies (research/agentgauge-integration.md; current behavior in docs/usage-and-presets.md).
  * Crew only reads AgentGauge's cache and history files; it never polls a provider itself.
  */
 
@@ -376,7 +376,7 @@ export class UsageMonitor {
 const name = (agent: Agent) => (agent === 'claude' ? 'Claude' : WORKERS[agent].name);
 
 /**
- * Who should take a piece of work, from the role table and current usage (docs/03, section 8.2).
+ * Who should take a piece of work, from the role table and current usage (research/agentgauge-integration.md section 8.2; current rules in docs/usage-and-presets.md).
  * It only ever answers with the role's holder or the lead: it never gives an agent a role the user
  * did not assign. A stale or unknown reading changes nothing, so the default roles are followed.
  */

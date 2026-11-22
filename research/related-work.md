@@ -1,4 +1,4 @@
-# 05. Related Work and Takeaways
+# Related Work and Takeaways
 
 Surveyed 2026-11-12. Star counts, last push dates, and licenses were checked via `gh api`; code analysis was done by shallow-cloning repositories and reading source files without running them. Community reception comes from Hacker News threads and blog summaries, with little direct evidence from Reddit or X. Vendor-reported numbers are marked "(vendor)", and unverified items are marked "unverified".
 
@@ -241,7 +241,7 @@ Checked against code.claude.com docs and Codex CLI 0.167.0 (app-server schema ge
 
 ### Adopted
 
-- Undoing a round now tells the worker on its next turn ([09-usage-presets-rounds.md](09-usage-presets-rounds.md) section 2).
+- Undoing a round now tells the worker on its next turn ([daemon-api.md](../docs/daemon-api.md)).
 
 ### Candidates, not adopted yet
 
@@ -258,7 +258,7 @@ Checked against `stablyai/orca` at `e39fb3a` (v1.4.261, released 2026-11-16), fi
 
 ### What changed since the first look
 
-[02-implementation-plan.md](02-implementation-plan.md) section 8.2 recorded three reasons Orca was not the primary setup. The decision stands. Two of the facts behind it no longer hold.
+[implementation-plan.md](implementation-plan.md) section 8.2 recorded three reasons Orca was not the primary setup. The decision stands. Two of the facts behind it no longer hold.
 
 | Recorded on 2026-11-11 | Now |
 | --- | --- |
@@ -296,7 +296,7 @@ What it puts in other tools' settings on first start, without asking:
 - `~/.codex/hooks.json` with 9 hooks, and matching blocks in `~/.codex/config.toml` that mark its own hooks as trusted.
 - `~/.gemini/config/hooks.json` for Antigravity.
 
-Crew writes into none of these ([04-implementation.md](04-implementation.md) section 3). That is the cost of reading agent state from outside the protocol.
+Crew writes into none of these ([architecture.md](../docs/architecture.md)). That is the cost of reading agent state from outside the protocol.
 
 What worked as documented:
 
@@ -338,10 +338,10 @@ Checked against `plugin/bridge/` and `plugin/roles/` on 2026-11-17. Status is ra
 
 ### What we will not copy
 
-- Anything that touches sign-in: Orca's own Antigravity sign-in and ACP server, account switching, and sending `zed` as the client name to servers before 1.5.1 so they offer more models. Crew runs the official binary and reads no credentials ([04-implementation.md](04-implementation.md) section 6).
+- Anything that touches sign-in: Orca's own Antigravity sign-in and ACP server, account switching, and sending `zed` as the client name to servers before 1.5.1 so they offer more models. Crew runs the official binary and reads no credentials ([architecture.md](../docs/architecture.md)).
 - A setting that lets the coordinator approve worker prompts, and `--dangerously-skip-permissions` for full access.
 - Reading agent state from terminal output (per-agent screen rules, OSC 7501). Crew's protocols report state directly.
-- Mobile, remote hosts, cloud VMs, a plugin catalog, and support for every CLI agent (01 section 5).
+- Mobile, remote hosts, cloud VMs, a plugin catalog, and support for every CLI agent ([requirements.md](../docs/requirements.md) section 5).
 
 ### Limits of this recheck
 

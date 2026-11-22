@@ -905,6 +905,8 @@ for (const width of [1440, 390])
     // The stage scrolls in its own box, so the document alone would not show its overflow.
     const stage = page.locator('main.page');
     expect(await stage.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+    await expect(stage.locator('.share')).toHaveCSS('padding-inline-start', width === 390 ? '16px' : '22px');
+    await expect(page.locator('.topbar .prominent')).toHaveCSS('background-image', 'none');
     expect(await page.locator('.chip svg').first().evaluate((element) => element.tagName)).toBe('svg');
     expect(await page.locator('.agent-mark').first().evaluate((element) => getComputedStyle(element).maskImage)).not.toBe('none');
     // A window as tall as the stage's content captures the whole page, which the document's full-page capture no longer reaches.
@@ -917,8 +919,22 @@ for (const width of [1440, 390])
     await expect(page.getByRole('button', { name: 'Approve', exact: true })).toBeVisible();
     await expect(page.getByRole('textbox', { name: 'Your answer' })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    expect(await stage.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
     expect(errors).toEqual([]);
   });
+
+test('stage scrolls with keyboard focus outside it and its border blends in forced colors', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 600 });
+  const stage = page.locator('main.page');
+  await page.getByRole('button', { name: 'New Job', exact: true }).focus();
+  await page.keyboard.press('PageDown');
+  await expect.poll(() => stage.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  await page.emulateMedia({ forcedColors: 'active' });
+  await expect.poll(() => stage.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return style.borderTopColor === style.backgroundColor && style.borderBottomColor === style.backgroundColor;
+  })).toBe(true);
+});
 
 test('Return adds a newline in an answer and the next question gets a fresh draft', async ({ page, request }) => {
   await needsYou(page);
@@ -956,6 +972,7 @@ test('the top bar keeps its controls on one row at every width', async ({ page }
 test('320px sheets keep controls within the viewport and support reduced motion', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 800 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  expect(await page.locator('main.page').evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
   // The sidebar floats out over the page and folds away again once a project is chosen.
   const toggle = page.getByRole('button', { name: 'Show sidebar' });
   await expect(page.getByRole('navigation', { name: 'Projects' })).toBeHidden();
@@ -1024,6 +1041,7 @@ test('model scores list each model with its score, counts and summary, and have 
   // The best three stand on a podium, first in the middle.
   const podium = page.getByRole('region', { name: 'Top models' });
   await expect(podium.getByText(/^gpt-6\.1-sol$|^gemini-4-hydrogen$|^gpt-6-astra$/)).toHaveText(['gemini-4-hydrogen', 'gpt-6.1-sol', 'gpt-6-astra']);
+  await expect(podium.locator('[data-place="1"] svg').first()).toHaveCSS('fill', 'rgb(230, 184, 0)');
   const standings = page.getByRole('region', { name: 'Standings' });
   const sol = standings.getByRole('article').filter({ hasText: 'gpt-6.1-sol' });
   await expect(sol.getByRole('img', { name: '8.6 out of 10' })).toBeVisible();
@@ -1280,6 +1298,9 @@ test.describe('authenticated daemon', () => {
     expect(before.length).toBeLessThanOrEqual(4);
     await page.waitForTimeout(2000);
     expect(await (await request.get('/__traffic')).json()).toEqual(before);
+    await page.setViewportSize({ width: 390, height: 180 });
+    await page.mouse.wheel(0, 300);
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
   });
 
   test('a wrong ticket shows the same screen and removes the fragment', async ({ page, request }) => {
@@ -1367,6 +1388,7 @@ for (const width of [390, 1440]) {
     await toggle.click();
     await expect(run.locator('li')).toHaveCount(5);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    expect(await page.locator('main.page').evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
     expect(await run.locator('.session-agents > li > span:first-child > span:first-child').first().evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
     session.agents = session.agents.filter((agent) => !agent.workflow);
     await request.post('/__push', { data: { type: 'state', data } });

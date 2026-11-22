@@ -70,10 +70,16 @@ try {
   await browser.close();
 }
 
-const licenses = ['react', 'react-dom', 'scheduler', 'lucide-react'].map(
-  (name) => `${name}\n${fs.readFileSync(`node_modules/${name}/LICENSE`, 'utf8')}`,
-);
-licenses.push(`Pretendard\n${fs.readFileSync('plugin/board/pretendard-LICENSE.txt', 'utf8')}`);
+const licenses = [
+  ['react', 'node_modules/react/LICENSE'],
+  ['react-dom', 'node_modules/react-dom/LICENSE'],
+  ['scheduler', 'node_modules/scheduler/LICENSE'],
+  ['@fluentui/react-icons', 'plugin/board/fluentui-react-icons-LICENSE.txt'],
+  ['@griffel/react', 'node_modules/@griffel/react/LICENSE.md'],
+  ['@griffel/core', 'node_modules/@griffel/core/LICENSE.md'],
+  ['@emotion/hash', 'node_modules/@emotion/hash/LICENSE'],
+  ['Pretendard', 'plugin/board/pretendard-LICENSE.txt'],
+].map(([name, file]) => `${name}\n${fs.readFileSync(file, 'utf8')}`);
 if (process.platform === 'win32') licenses.push(`Node.js ${process.version}\nSee runtime/LICENSE for Node.js and its bundled dependencies.`);
 fs.writeFileSync(path.join(root, 'THIRD-PARTY-NOTICES.txt'), licenses.join('\n\n'));
 console.log(root);

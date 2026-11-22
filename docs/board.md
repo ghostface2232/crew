@@ -19,7 +19,7 @@ The Claude plugin, CLI, and Windows Electron main process connect to an independ
 | `desktop/main.ts`, `desktop/preload.cts` | Windows hosting, single instance, tray, restored bounds, Mica backdrop, request signing, daemon startup, and updater IPC |
 | `plugin/bridge/assets.ts` | Built-asset allowlist, MIME types, and renderer CSP |
 
-Bridge types are imported type-only, keeping Node modules out of the renderer. Shared CSS tokens in `plugin/board/board.css` preserve the workspace surfaces, typography, and state colors. `Dispatch.tsx`, `Settings.tsx`, and `Scores.tsx` use CSS Modules. All text uses the bundled Pretendard font (`plugin/board/pretendard.woff2`), with no monospace face. The board draws its own selects, checkboxes, switches, tooltips, and confirmation prompts for a consistent appearance on Windows.
+Bridge types are imported type-only, keeping Node modules out of the renderer. Shared CSS tokens in `plugin/board/board.css` preserve the workspace surfaces, typography, and state colors. `Dispatch.tsx`, `Settings.tsx`, and `Scores.tsx` use CSS Modules. All text uses the bundled variable Pretendard font (`plugin/board/pretendard.woff2`) in three weights, 450, 550, and 600, with no monospace face. The board draws its own selects, checkboxes, switches, tooltips, and confirmation prompts for a consistent appearance on Windows.
 
 ## Navigation and workspace
 

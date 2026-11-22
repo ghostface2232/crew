@@ -59,7 +59,7 @@
   max-width: 100%;
   margin-top: 4px;
   overflow: hidden;
-  font-weight: 500;
+  font-weight: 550;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -73,7 +73,7 @@
   color: color-mix(in srgb, var(--tone), var(--tone-ink) var(--tone-darken));
 }
 .pillNumber { font: 600 17px/1 var(--text-face); }
-.pillUnit { font: 500 11px/1 var(--text-face); }
+.pillUnit { font: 550 11px/1 var(--text-face); }
 .pedestal {
   display: grid;
   place-items: start center;
@@ -113,7 +113,7 @@
 .rowAvatar { display: grid; flex: none; place-items: center; width: 34px; height: 34px; border-radius: 50%; corner-shape: round; background: var(--fill); color: var(--label); }
 .rowText { position: relative; display: grid; gap: 3px; flex: 1; min-width: 0; }
 .rowHead { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.rowName { min-width: 0; overflow: hidden; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.rowName { min-width: 0; overflow: hidden; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
 .word {
   flex: none;
   padding: 1px 7px;

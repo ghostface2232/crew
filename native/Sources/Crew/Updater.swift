@@ -2,6 +2,7 @@ import AppKit
 import CryptoKit
 import Foundation
 import Observation
+import Security
 
 /// The macOS build a GitHub release offers for this Mac.
 struct ReleaseInfo: Equatable, Sendable {
@@ -283,6 +284,29 @@ enum Releases {
         var errorDescription: String? { "The downloaded update is not a valid Crew \(version)." }
     }
 
+    nonisolated private static func runningTeamID() throws -> String? {
+        var code: SecCode?
+        var origin: SecStaticCode?
+        var info: CFDictionary?
+        let failure = CrewFailure("Could not read the running app’s signing identity.")
+        guard SecCodeCopySelf([], &code) == errSecSuccess, let code else { throw failure }
+        let validity = SecCodeCheckValidity(code, [], nil)
+        if validity == errSecCSUnsigned { return nil }
+        guard validity == errSecSuccess,
+              SecCodeCopyStaticCode(code, [], &origin) == errSecSuccess, let origin,
+              SecCodeCopySigningInformation(origin, SecCSFlags(rawValue: kSecCSSigningInformation), &info) == errSecSuccess,
+              let info else { throw failure }
+        return (info as NSDictionary)[kSecCodeInfoTeamIdentifier] as? String
+    }
+
+    nonisolated static func verificationArguments(teamID: String?) -> [String] {
+        var arguments = ["--verify", "--deep", "--strict"]
+        if let teamID {
+            arguments += ["-R", "=anchor apple generic and certificate leaf[subject.OU] = \"\(teamID)\""]
+        }
+        return arguments
+    }
+
     /// Unpacks the staged archive and checks that it is this app at the release's version, signed intact, then starts a
     /// helper that swaps it in for `installed` once this process exits and opens the new copy. The caller must then quit;
     /// it gets the helper's process and the staged bundle, to undo the hand-over if the quit is cancelled.
@@ -290,30 +314,30 @@ enum Releases {
         if let reason = canReplace(installed: installed) { throw CrewFailure(reason) }
         let parent = installed.deletingLastPathComponent()
         let work = FileManager.default.temporaryDirectory.appending(path: "Crew-update-\(UUID().uuidString)", directoryHint: .isDirectory)
-        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: false)
         var handedOff = false
         defer { if !handedOff { try? FileManager.default.removeItem(at: work) } }
         let unpacked = work.appending(path: "unpacked", directoryHint: .isDirectory)
         let app = unpacked.appending(path: "Crew.app", directoryHint: .isDirectory)
-        guard run("/usr/bin/ditto", ["-x", "-k", archive.path, unpacked.path]), isExpectedBundle(app, version: version),
-              run("/usr/bin/codesign", ["--verify", "--deep", "--strict", app.path]) else {
+        guard run("/usr/bin/ditto", ["-x", "-k", archive.path, unpacked.path]), isExpectedBundle(app, version: version) else {
+            throw InvalidArchive(version: version)
+        }
+        let verification = verificationArguments(teamID: try runningTeamID())
+        guard run("/usr/bin/codesign", verification + [app.path]) else {
             throw InvalidArchive(version: version)
         }
         // Staged beside the installed copy so the final move is a same-volume rename; named apart from an earlier
         // attempt's, whose helper may still be waiting to clean up.
-        let staged = parent.appending(path: ".Crew-update-\(version)-\(UUID().uuidString.prefix(8)).app", directoryHint: .isDirectory)
-        try? FileManager.default.removeItem(at: staged)
+        let staged = parent.appending(path: ".Crew-update-\(version)-\(UUID().uuidString).app", directoryHint: .isDirectory)
         try FileManager.default.moveItem(at: app, to: staged)
-        let helper = work.appending(path: "swap.sh")
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         // Paths travel as arguments, never interpolated into the script.
-        process.arguments = [helper.path, String(processID), installed.path, staged.path, work.path, result.path]
+        process.arguments = ["-c", swapScript, "crew-swap", String(processID), installed.path, staged.path, work.path, result.path] + verification
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         do {
-            try swapScript.write(to: helper, atomically: true, encoding: .utf8)
             try process.run()
             handedOff = true
             return (process.processIdentifier, staged, work)
@@ -341,12 +365,13 @@ enum Releases {
         return process.terminationStatus == 0
     }
 
-    /// $1 the app's process, $2 the installed bundle, $3 the staged bundle, $4 the work folder (removed), $5 the failure report.
+    /// The app's PID, installed and staged bundles, work folder, failure report, then the original codesign arguments.
     /// The old copy is kept until the new one opens, and put back if the move or launch fails. If the app has not quit within
     /// a minute (its quit was cancelled), nothing is swapped: a running copy is never moved out from under itself.
     nonisolated static let swapScript = """
     #!/bin/sh
     pid="$1"; target="$2"; staged="$3"; work="$4"; result="$5"
+    shift 5
     fail() {
         printf '%s\\n' "$1" > "$result"
         rm -rf "$staged" "$work"
@@ -361,24 +386,30 @@ enum Releases {
         fail "Crew did not quit within 60 seconds." no
     fi
     backup="$target.previous"
-    rm -rf "$backup"
-    if [ -e "$backup" ] || [ -L "$backup" ]; then
-        fail "Could not remove the previous update backup."
+    if ! /usr/bin/codesign "$@" "$staged"; then
+        fail "Could not verify the staged Crew app."
     fi
-    if ! mv "$target" "$backup"; then
+    if ! mkdir "$backup"; then
+        fail "Could not reserve the update backup at $backup."
+    fi
+    previous="$backup/${target##*/}"
+    if ! mv "$target" "$previous"; then
+        rmdir "$backup"
         fail "Could not back up the installed Crew app."
     fi
     if ! mv "$staged" "$target"; then
-        mv "$backup" "$target" || fail "Could not restore Crew from its backup." no
+        mv "$previous" "$target" || fail "Could not restore Crew from its backup." no
+        rmdir "$backup"
         fail "Could not move the updated Crew app into place."
     fi
     if ! open "$target" --args --updated; then
         mv "$target" "$staged" || fail "Could not move the failed update aside; the previous Crew app is in its backup." no
-        mv "$backup" "$target" || fail "Could not restore Crew from its backup." no
+        mv "$previous" "$target" || fail "Could not restore Crew from its backup." no
+        rmdir "$backup"
         fail "The updated Crew app could not open."
     fi
-    # The update succeeded; a backup left behind here stops the next swap, which reports it then.
-    rm -rf "$backup" "$work"
+    rm -rf "$previous" "$work"
+    rmdir "$backup"
     """
 }
 

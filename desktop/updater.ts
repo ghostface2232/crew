@@ -13,6 +13,36 @@ import type { AppUpdate } from '../plugin/board/src/types.ts';
 export const RELEASES = 'https://api.github.com/repos/ghostface2232/crew/releases/latest';
 export const installerName = (version: string) => `Crew-Setup-${version}.exe`;
 
+/** Runs in the detached Windows supervisor after Crew exits. OpenRead denies writes and replacement through launch. */
+export const installScript = `
+function Start-CrewInstaller([switch]$Silent) {
+  $file = $null
+  try {
+    try {
+      $file = [IO.File]::OpenRead($env:CREW_INSTALLER)
+      $digest = (Get-FileHash -InputStream $file -Algorithm SHA256 -ErrorAction Stop).Hash
+      if ($digest -ne $env:CREW_INSTALLER_SHA256) { throw 'SHA-256 mismatch' }
+    } catch {
+      throw 'Crew could not verify the update. Download it again from Settings.'
+    }
+    if ($Silent) {
+      Start-Process -FilePath $env:CREW_INSTALLER -ArgumentList '/S','--force-run' -PassThru -ErrorAction Stop
+    } else {
+      Start-Process -FilePath $env:CREW_INSTALLER -ErrorAction Stop
+    }
+  } finally {
+    if ($file) { $file.Dispose() }
+  }
+}
+$p = Start-CrewInstaller -Silent
+$null = $p.Handle
+$p.WaitForExit()
+if ($p.ExitCode -ne 0) {
+  if (Test-Path -LiteralPath $env:CREW_APP) { Start-Process -FilePath $env:CREW_APP }
+  else { Start-CrewInstaller }
+}
+`;
+
 export interface Release {
   version: string;
   url: string;
@@ -83,6 +113,10 @@ export class Updater {
   get installer(): string | null {
     const { state, latest } = this.status;
     return (state === 'ready' || state === 'installing') && latest ? path.join(this.dir, installerName(latest)) : null;
+  }
+
+  get installerSHA256(): string | null {
+    return this.installer ? this.release?.sha256 ?? null : null;
   }
 
   private set(next: Omit<AppUpdate, 'current'>) {

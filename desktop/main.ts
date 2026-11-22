@@ -8,7 +8,7 @@ import { boardCredential, boardUrl, readToken, SESSION_COOKIE } from '../plugin/
 import { api, ensureDaemon, health } from '../plugin/bridge/client.ts';
 import { baseUrl, HOME, PLUGIN_ROOT } from '../plugin/bridge/config.ts';
 import type { BoardState } from '../plugin/board/src/types.ts';
-import { Updater } from './updater.ts';
+import { installScript, Updater } from './updater.ts';
 import { isBoardNavigation, linkTarget, windowBounds } from './window-state.ts';
 
 // The Electron shell for Windows (and other non-macOS systems); macOS uses the native app in native/.
@@ -529,13 +529,18 @@ async function installUpdate() {
  */
 async function handOver() {
   const installer = updater.installer;
+  const sha256 = updater.installerSHA256;
   updateLog(`installer ${installer ?? 'missing'}`);
-  if (!installer) return;
   try {
+    if (!installer || !sha256) throw new Error('Crew could not verify the update. Download it again from Settings.');
     // Paths travel in the environment, never in the script text.
-    const supervise = "$p = Start-Process -FilePath $env:CREW_INSTALLER -ArgumentList '/S','--force-run' -PassThru; $null = $p.Handle; $p.WaitForExit(); " +
-      'if ($p.ExitCode -ne 0) { if (Test-Path -LiteralPath $env:CREW_APP) { Start-Process -FilePath $env:CREW_APP } ' +
-      'else { Start-Process -FilePath $env:CREW_INSTALLER } }';
+    const supervise = `try { ${installScript} } catch {
+      $reason = $_.Exception.Message
+      Add-Type -AssemblyName System.Windows.Forms
+      [void][System.Windows.Forms.MessageBox]::Show($reason, 'Crew could not update', 'OK', 'Error')
+      Wait-Process -Id $env:CREW_PARENT_PID -ErrorAction SilentlyContinue
+      if (Test-Path -LiteralPath $env:CREW_APP) { Start-Process -FilePath $env:CREW_APP }
+    }`;
     // The supervisor must outlive the app, so it is detached: a child that is not is killed with the app (libuv's job).
     // But a detached PowerShell has no console and exits without running its script, so a detached cmd starts it in a
     // console of its own, which -WindowStyle Hidden then hides. The script is encoded so cmd does not parse it.
@@ -545,7 +550,7 @@ async function handOver() {
       detached: true, stdio: 'ignore', windowsHide: true,
       // Not the install folder, which the installer replaces.
       cwd: os.tmpdir(),
-      env: { ...process.env, CREW_INSTALLER: installer, CREW_APP: process.execPath },
+      env: { ...process.env, CREW_INSTALLER: installer, CREW_INSTALLER_SHA256: sha256, CREW_APP: process.execPath, CREW_PARENT_PID: String(process.pid) },
     });
     await new Promise<void>((resolve, reject) => {
       child.once('spawn', resolve);

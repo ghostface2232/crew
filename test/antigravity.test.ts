@@ -16,7 +16,7 @@ import { writeFakeBin } from './fake-bin.ts';
  * agy 1.5.9 does, and ends each turn with `report`, or with the answer to `form` when one is given. A session starts in
  * `mode`, and each turn first reports the `updates` given, as tool calls agy ran without asking.
  */
-function server(options: { append?: boolean; form?: unknown; mode?: string; refuseMode?: boolean; updates?: unknown[] } = {}): string {
+function server(options: { append?: boolean; form?: unknown; mode?: string; refuseMode?: boolean; updates?: unknown[]; after?: unknown[] } = {}): string {
   return `
     const fs = require('node:fs');
     const path = require('node:path');
@@ -39,7 +39,7 @@ function server(options: { append?: boolean; form?: unknown; mode?: string; refu
         send({ id, result: { sessionId: 's1', ...config(), ...(options.mode ? { modes: { currentModeId: options.mode } } : {}) } });
       }
       else if (method === 'session/set_mode') send(options.refuseMode ? { id, error: { code: -32602, message: 'no such mode' } } : { id, result: {} });
-      else if (method === 'session/resume') send({ id, result: config() });
+      else if (method === 'session/resume') send({ id, result: { ...config(), ...(options.mode ? { modes: { currentModeId: options.mode } } : {}) } });
       else if (method === 'session/set_config_option') {
         if (params.configId === 'model') { model = params.value; if (!levels[model].includes(level)) level = 'medium'; }
         else level = params.value;
@@ -51,6 +51,7 @@ function server(options: { append?: boolean; form?: unknown; mode?: string; refu
           for (const update of options.updates ?? []) send({ method: 'session/update', params: { sessionId: 's1', update } });
           send({ method: 'session/update', params: { sessionId: 's1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'report' } } } });
           send({ id, result: { stopReason: 'end_turn' } });
+          setTimeout(() => { for (const update of options.after ?? []) send({ method: 'session/update', params: { sessionId: 's1', update } }); }, 50);
         }
       } else if (method === 'session/cancel') send({ id: promptId, result: { stopReason: 'cancelled' } });
       else if (id === 'form') {
@@ -155,6 +156,24 @@ test('a session that starts in a mode that does not ask is put back in the defau
   assert.equal(refused.sent('session/prompt').length, 0);
 });
 
+test('a restored session, and one switched between turns, are put back in the default mode before the next prompt', { timeout: 5000 }, async (t) => {
+  const restored = harness(t, server({ mode: 'auto' }));
+  const first = await restored.ended(await restored.jobs.create({ kind: 'delegate', cwd: restored.home, isolation: 'in_place', task: 'test' }));
+  restored.adapter.shutdown();
+  await restored.jobs.reply(first.id, { message: 'one more thing' });
+  await restored.ended(first);
+  assert.deepEqual(restored.sent('session/set_mode').map((p) => p.modeId), ['default', 'default']);
+
+  const between = harness(t, server({ after: [{ sessionUpdate: 'current_mode_update', currentModeId: 'auto' }] }));
+  const job = await between.ended(await between.jobs.create({ kind: 'delegate', cwd: between.home, isolation: 'in_place', task: 'test' }));
+  // The switch arrives 50 ms after the turn's reply.
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  assert.equal(between.sent('session/set_mode').length, 0);
+  await between.jobs.reply(job.id, { message: 'one more thing' });
+  await between.ended(job);
+  assert.deepEqual(between.sent('session/set_mode').map((p) => p.modeId), ['default']);
+});
+
 test('a switch to another mode during a turn is undone', { timeout: 5000 }, async (t) => {
   const h = harness(t, server({ updates: [{ sessionUpdate: 'current_mode_update', currentModeId: 'accept-edits' }] }));
   const job = await h.ended(await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' }));
@@ -192,6 +211,50 @@ test('an action outside the role that ran without asking stops the turn', { time
     assert.match(job.error!.message, /without asking Crew .*Crew stopped the turn/, name);
     assert.equal(h.sent('session/cancel').length, 1, name);
   }
+});
+
+test('a tool call is judged on its final fields, and Crew\'s own tools and failed calls are not reported', { timeout: 5000 }, async (t) => {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-agy-work-'));
+  t.after(() => fs.rmSync(work, { recursive: true, force: true }));
+  const h = harness(t, server({ updates: [
+    { sessionUpdate: 'tool_call', toolCallId: 'e1', status: 'pending', kind: 'edit', title: 'Edit', locations: [] },
+    { sessionUpdate: 'tool_call_update', toolCallId: 'e1', locations: [{ path: path.join(work, 'a.txt') }] },
+    { sessionUpdate: 'tool_call_update', toolCallId: 'e1', status: 'completed' },
+    ...ranUnasked('m1', { kind: 'other', title: 'mcp_crew_ask_lead' }),
+    { sessionUpdate: 'tool_call', toolCallId: 'f1', status: 'in_progress', kind: 'execute', title: 'git push', rawInput: { CommandLine: 'git push' } },
+    { sessionUpdate: 'tool_call_update', toolCallId: 'f1', status: 'failed' },
+  ] }));
+  const job = await h.ended(await h.jobs.create({ kind: 'delegate', cwd: work, isolation: 'in_place', task: 'test' }));
+  assert.equal(job.state, 'done');
+  assert.deepEqual(job.notes ?? [], []);
+});
+
+test('a call that ends with the user\'s cancel is not taken for a violation', { timeout: 5000 }, async (t) => {
+  const h = harness(t, `
+    const send = (message) => console.log(JSON.stringify({ jsonrpc: '2.0', ...message }));
+    const update = (update) => send({ method: 'session/update', params: { sessionId: 's1', update } });
+    let promptId;
+    require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
+      const { method, id } = JSON.parse(line);
+      if (method === 'initialize') send({ id, result: { agentCapabilities: {} } });
+      else if (method === 'session/new') send({ id, result: { sessionId: 's1' } });
+      else if (method === 'session/prompt') {
+        promptId = id;
+        update({ sessionUpdate: 'tool_call', toolCallId: 'c1', status: 'in_progress', kind: 'execute', title: 'git status', rawInput: { CommandLine: 'git status' } });
+      } else if (method === 'session/cancel') {
+        send({ id: 'p', method: 'session/request_permission', params: { sessionId: 's1', toolCall: { toolCallId: 'c2', kind: 'execute', title: 'ls', rawInput: { CommandLine: 'ls' } }, options: [{ kind: 'allow_once', optionId: 'yes' }] } });
+        update({ sessionUpdate: 'tool_call_update', toolCallId: 'c1', status: 'completed' });
+        update({ sessionUpdate: 'tool_call_update', toolCallId: 'c2', status: 'failed' });
+        send({ id: promptId, result: { stopReason: 'cancelled' } });
+      }
+    });
+  `);
+  const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test', ask: true });
+  while (!h.jobs.eventsFor(job.id, 0).some((e) => e.detail === 'git status')) await h.jobs.wait(job.id, job.seq, 1000);
+  await h.jobs.cancel(job.id);
+  await h.ended(job);
+  assert.equal(job.state, 'cancelled');
+  assert.ok(!job.error);
 });
 
 test('a tool call that came to Crew as a permission request is not checked again when it finishes', { timeout: 5000 }, async (t) => {

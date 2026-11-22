@@ -30,6 +30,8 @@ interface Run {
   calls: Map<string, ToolCall & { asked?: boolean; checked?: boolean }>;
   /** Why Crew stopped the turn: an action ran outside the role without asking. */
   violation?: string;
+  /** The mode agy last reported for the session, including between turns. */
+  mode?: string;
 }
 
 type ToolCall = { kind?: string; title?: string; locations?: { path?: string }[]; rawInput?: unknown; _meta?: { mcpServerName?: string; mcpToolName?: string } };
@@ -147,6 +149,10 @@ export class AntigravityAdapter implements Adapter {
       this.runs.set(sessionId, run);
     }
     if (run.prompting) throw new Error('Antigravity is still working on the previous message. Wait for it to finish, or cancel first.');
+    if (run.mode && run.mode !== ASKING_MODE) {
+      await this.keepAsking(peer, sessionId, { modes: { currentModeId: run.mode } });
+      run.mode = ASKING_MODE;
+    }
     this.prompt(peer, run, message);
   }
 
@@ -240,7 +246,7 @@ export class AntigravityAdapter implements Adapter {
         (err) => {
           if (this.peer === peer && this.runs.get(ctl.job.sessionId!) !== run) return;
           const detail = `${err.message}${err instanceof RpcError && err.data ? ` ${JSON.stringify(err.data)}` : ''}`;
-          ctl.fail(detail, { limit: LIMIT_PATTERN.test(detail) });
+          ctl.fail(run.violation ?? detail, { limit: !run.violation && LIMIT_PATTERN.test(detail) });
         },
       )
       .finally(() => {
@@ -262,7 +268,7 @@ export class AntigravityAdapter implements Adapter {
     try {
       await peer.request('session/set_mode', { sessionId, modeId: ASKING_MODE }, RPC_TIMEOUT_MS);
     } catch (err) {
-      throw new Error(`Antigravity started the session in "${mode}" mode, where it does not ask before edits and commands, and refused to switch to "${ASKING_MODE}": ${(err as Error).message}`);
+      throw new Error(`Antigravity's session is in "${mode}" mode, where it does not ask before edits and commands, and it refused to switch to "${ASKING_MODE}": ${(err as Error).message}`);
     }
   }
 
@@ -274,8 +280,9 @@ export class AntigravityAdapter implements Adapter {
   private unasked(run: Run, call: ToolCall): void {
     const { ctl } = run;
     const { job } = ctl;
-    // A report without the input still names the action, and the user's rule has already allowed it.
-    const verdict = decide(job.kind, job.cwd, { ...call, rawInput: call.rawInput ?? call.title }, job.sandbox === 'read-only');
+    let verdict = decide(job.kind, job.cwd, call, job.sandbox === 'read-only');
+    // A report may omit the input that a request must carry; the user's own rule has already allowed the action.
+    if (typeof verdict === 'object' && verdict.refuse === `${call.kind ?? 'other'} request without its input`) verdict = 'ask';
     if (verdict === 'allow') return;
     const what = `${call.kind ?? 'other'}: ${call.title ?? 'tool call'}`;
     if (verdict === 'ask') {
@@ -294,6 +301,8 @@ export class AntigravityAdapter implements Adapter {
     }
     if (run.violation) return;
     run.violation = `${message} Crew stopped the turn. Narrow the matching allow rule or Non-Workspace Access in Antigravity's /permissions and /config, or give this role to another agent.`;
+    // Nothing the turn asks for after this can be granted.
+    drop(run);
     this.peer?.notify('session/cancel', { sessionId: job.sessionId });
   }
 
@@ -343,6 +352,8 @@ export class AntigravityAdapter implements Adapter {
   private onNotification(method: string, p: any): void {
     if (method !== 'session/update') return;
     const run = this.runs.get(p.sessionId);
+    // A switch between turns is undone before the next prompt (reply).
+    if (run && p.update?.sessionUpdate === 'current_mode_update') run.mode = p.update.currentModeId;
     if (!run || !run.prompting || isTerminal(run.ctl.job)) return;
     const { ctl } = run;
     this.lastUsed = Date.now();
@@ -382,8 +393,11 @@ export class AntigravityAdapter implements Adapter {
         // The agent's own switch_mode is refused in onRequest; a switch that still lands is undone.
         if (update.currentModeId && update.currentModeId !== ASKING_MODE) {
           ctl.progress(`Antigravity switched to "${update.currentModeId}" mode; switching back to "${ASKING_MODE}"`);
-          this.keepAsking(this.peer!, p.sessionId, { modes: { currentModeId: update.currentModeId } }).catch((err) => {
+          this.keepAsking(this.peer!, p.sessionId, { modes: { currentModeId: update.currentModeId } }).then(() => {
+            run.mode = ASKING_MODE;
+          }, (err) => {
             if (!run.violation) run.violation = err.message;
+            drop(run);
             this.peer?.notify('session/cancel', { sessionId: p.sessionId });
           });
         }
@@ -403,10 +417,12 @@ export class AntigravityAdapter implements Adapter {
     const id = update.toolCallId;
     if (typeof id !== 'string') return;
     const call = run.calls.get(id) ?? {};
-    for (const key of ['kind', 'title', 'locations', 'rawInput', '_meta'] as const) if (update[key] !== undefined) (call as any)[key] ??= update[key];
+    // An ACP update replaces the fields it carries.
+    for (const key of ['kind', 'title', 'locations', 'rawInput', '_meta'] as const) if (update[key] !== undefined) (call as any)[key] = update[key];
     run.calls.set(id, call);
-    // agy reports a call as in progress before it asks, so only a finished one is known to have run unasked.
-    if ((update.status === 'completed' || update.status === 'failed') && !call.asked && !call.checked) {
+    // agy reports a call as in progress before it asks, so only a completed one is known to have run unasked. A failed
+    // one may never have run, and calls end failed when the turn is cancelled.
+    if (update.status === 'completed' && !call.asked && !call.checked && !run.cancelling) {
       call.checked = true;
       this.unasked(run, call);
     }
@@ -454,13 +470,13 @@ export class AntigravityAdapter implements Adapter {
     if (method !== 'session/request_permission') throw new RpcError(-32601, `${method} is not supported by Crew`);
     const cancelled = { outcome: { outcome: 'cancelled' } };
     const run = this.runs.get(p.sessionId);
-    // Outside a turn there is nobody to act on an answer, and a queued request would never be settled.
-    if (run && (run.cancelling || !run.prompting || isTerminal(run.ctl.job))) return cancelled;
     const toolCall = p.toolCall ?? {};
     if (run && typeof toolCall.toolCallId === 'string') {
       const call = run.calls.get(toolCall.toolCallId) ?? {};
       run.calls.set(toolCall.toolCallId, { ...call, asked: true });
     }
+    // Outside a turn there is nobody to act on an answer, and a queued request would never be settled.
+    if (run && (run.cancelling || run.violation || !run.prompting || isTerminal(run.ctl.job))) return cancelled;
     const verdict = run ? decide(run.ctl.job.kind, run.ctl.job.cwd, toolCall, run.ctl.job.sandbox === 'read-only') : { refuse: 'unknown session' };
 
     let allow = verdict === 'allow';

@@ -245,6 +245,9 @@ enum MarkSize {
 /// A status chip: chip type in a tinted capsule.
 enum Chip {
     static let insets = EdgeInsets(top: 5, leading: Space.m, bottom: 5, trailing: Space.m)
+    /// A chip that leads with a symbol: the symbol's own side bearing already stands it off the edge, so the
+    /// leading inset is two points less and the symbol looks as far in as the text does at the other end.
+    static let symbolInsets = EdgeInsets(top: 5, leading: Space.s, bottom: 5, trailing: Space.m)
     /// A pull request's chip is a rounded square, so it does not read as one more status pill beside the mission's.
     static let squareRadius: CGFloat = 6
 }

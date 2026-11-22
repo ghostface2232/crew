@@ -14,7 +14,7 @@ struct AgentMark: View {
 struct StatusLabel: View {
     let state: String
     var title: String? = nil
-    /// Only an active mission's chip turns; a turning symbol on every running row would be restless.
+    /// An active mission's chip and a working agent's turn; a turning symbol on every running row would be restless.
     var spins = false
     var symbol: String {
         switch state {
@@ -38,7 +38,7 @@ struct StatusLabel: View {
         }
     }
     var body: some View {
-        Label { Text(title ?? state.capitalized) } icon: { StatusSymbol(name: symbol, spins: spins) }.chip(color)
+        Label { Text(title ?? state.capitalized) } icon: { StatusSymbol(name: symbol, spins: spins) }.chip(color, insets: Chip.symbolInsets)
     }
 }
 
@@ -166,13 +166,14 @@ struct StatusIcon: View {
 private struct ChipStyle<S: InsettableShape>: ViewModifier {
     let color: Color
     let shape: S
+    let insets: EdgeInsets
     @Environment(\.colorScheme) private var scheme
     @Environment(\.colorSchemeContrast) private var contrast
     func body(content: Content) -> some View {
         let text = color.ink(scheme)
         content
             .font(Typeface.chip).foregroundStyle(text).lineLimit(1).fixedSize()
-            .padding(Chip.insets)
+            .padding(insets)
             .background(Palette.chip(color), in: shape)
             .overlay { if contrast == .increased { shape.strokeBorder(text.opacity(0.5)) } }
     }
@@ -180,9 +181,9 @@ private struct ChipStyle<S: InsettableShape>: ViewModifier {
 
 extension View {
     /// A status chip's face in `color`, as `StatusLabel` draws it.
-    func chip(_ color: Color) -> some View { chip(color, in: Capsule()) }
+    func chip(_ color: Color, insets: EdgeInsets = Chip.insets) -> some View { chip(color, in: Capsule(), insets: insets) }
     /// The same face in another shape.
-    func chip(_ color: Color, in shape: some InsettableShape) -> some View { modifier(ChipStyle(color: color, shape: shape)) }
+    func chip(_ color: Color, in shape: some InsettableShape, insets: EdgeInsets = Chip.insets) -> some View { modifier(ChipStyle(color: color, shape: shape, insets: insets)) }
     /// A text field's or editor's surface: the card's surface in a hairline outline.
     func fieldSurface() -> some View {
         background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: WorkspaceStyle.fieldRadius))

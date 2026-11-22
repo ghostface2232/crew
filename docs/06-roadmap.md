@@ -132,7 +132,7 @@ Groundwork done: worker roles are a configurable registry (`config.ts`) and rout
 
 **L4. More entry points. *(Open)*** Start missions from GitHub or Linear issues; a read-only mobile view. (Linked PR tracking in `pulls.ts` watches existing PRs rather than starting missions from issues.)
 
-**L5. Board UI foundation and design system. *(Done)*** Implemented in `plugin/board/src/` with React 19, TypeScript, Vite, shared CSS tokens, `Settings.module.css`, Lucide, and Playwright e2e tests; Radix, Motion, and Storybook were deferred because native HTML elements and CSS transitions cover the scope ([07-desktop-and-react.md](07-desktop-and-react.md)).
+**L5. Board UI foundation and design system. *(Done)*** Implemented in `plugin/board/src/` with React 19, TypeScript, Vite, shared CSS tokens, `Settings.module.css`, Fluent icons, and Playwright e2e tests; Radix, Motion, and Storybook were deferred because native HTML elements and CSS transitions cover the scope ([07-desktop-and-react.md](07-desktop-and-react.md)).
 
 ### Cost of L1 and L2
 

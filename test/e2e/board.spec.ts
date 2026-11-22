@@ -910,6 +910,8 @@ for (const width of [1440, 390])
     expect(await page.locator('.chip svg').first().evaluate((element) => element.tagName)).toBe('svg');
     expect(await page.locator('.agent-mark').first().evaluate((element) => getComputedStyle(element).maskImage)).not.toBe('none');
     // A window as tall as the stage's content captures the whole page, which the document's full-page capture no longer reaches.
+    // Measured once the font has loaded, as wrapping depends on it.
+    await page.evaluate(() => document.fonts.ready);
     await page.setViewportSize({ width, height: 1000 + (await stage.evaluate((element) => element.scrollHeight - element.clientHeight)) });
     // One baseline, Chromium's on macOS: text renders differently in other engines and systems, where the checks above still run.
     if (testInfo.project.name === 'chromium' && process.platform === 'darwin') await expect(page).toHaveScreenshot(`board-${width}.png`, { animations: 'disabled' });

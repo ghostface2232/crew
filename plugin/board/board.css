@@ -10,8 +10,10 @@
 
 :root {
   color-scheme: light dark;
-  /* The Mac app's tokens (native/Sources/Crew/DesignTokens.swift): WorkspaceStyle surfaces, system colors, Space. */
-  --canvas: #f4f4f6;
+  /* The window's frame (sidebar and top bar) on --canvas, wrapped around the stage, an inset panel the page scrolls in;
+     cards sit raised on the stage. In the Windows app the frame shows the system backdrop instead of --canvas. */
+  --canvas: #f1f2f4;
+  --stage: #fafbfc;
   --surface: #fff;
   /* WorkspaceStyle.rowFill: rows and insets inside a card. */
   --surface-2: rgb(0 0 0 / 0.04);
@@ -57,7 +59,16 @@
   --heat-2: color-mix(in srgb, var(--accent) 45%, transparent);
   --heat-3: color-mix(in srgb, var(--accent) 72%, transparent);
   --heat-4: var(--accent);
-  --shadow-card: 0 0 0 transparent;
+  /* Raised surfaces: a hairline ring, a tight contact shadow and a soft one cast below, with a lit top edge in dark mode. */
+  --shadow-card: 0 0 0 1px rgb(0 0 0 / 0.05), 0 1px 2px rgb(0 0 0 / 0.05), 0 12px 28px -14px rgb(0 0 0 / 0.18);
+  --shadow-card-hover: 0 0 0 1px rgb(0 0 0 / 0.06), 0 2px 4px rgb(0 0 0 / 0.05), 0 18px 36px -16px rgb(0 0 0 / 0.2);
+  /* The stage's edge against the frame. */
+  --shadow-stage: 0 0 0 1px rgb(0 0 0 / 0.06), 0 1px 3px rgb(0 0 0 / 0.04);
+  /* Small raised controls (fields, secondary buttons, a hovered row, the current sidebar item) on --raised. */
+  --raised: var(--surface);
+  --shadow-raised: 0 0 0 1px rgb(0 0 0 / 0.07), 0 1px 2px rgb(0 0 0 / 0.06);
+  /* The prominent control: a lit top edge and a drop in its own color. */
+  --shadow-accent: inset 0 1px 0 rgb(255 255 255 / 0.22), 0 1px 2px rgb(0 0 0 / 0.12), 0 4px 12px -4px color-mix(in srgb, var(--accent) 60%, transparent);
   /* Cards and panels have no outline; with more contrast this ring draws one. */
   --outline-ring: 0 0 0 transparent;
   /* Palette.panelShadow, cast down and away from the edge the panel floats beside. */
@@ -76,6 +87,7 @@
   --inset-radius: 10px;
   --field-radius: 18px;
   --panel-radius: 24px;
+  --stage-radius: 22px;
   --window-inset: 8px;
   --sidebar-width: 232px;
   /* One typeface for all text, the bundled Pretendard; the fallbacks only cover the moment before it loads. */
@@ -83,9 +95,10 @@
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    /* Apple's own apps: a near-black canvas and #1C1C1E cards, the same as the app. */
-    --canvas: #0b0b0c;
-    --surface: #1c1c1e;
+    /* The frame is lighter than the stage, and cards lift off the stage again, as layered dark surfaces read. */
+    --canvas: #1f1f22;
+    --stage: #151518;
+    --surface: #1d1d20;
     --surface-2: rgb(255 255 255 / 0.06);
     --row: rgb(255 255 255 / 0.06);
     --hairline: rgb(255 255 255 / 0.08);
@@ -115,6 +128,12 @@
     --track: rgb(255 255 255 / 0.22);
     --heat-0: rgb(255 255 255 / 0.06);
     --shadow-pop: var(--outline-ring), -8px 8px 26px rgb(0 0 0 / 0.4);
+    --shadow-card: inset 0 1px 0 rgb(255 255 255 / 0.06), 0 0 0 1px rgb(0 0 0 / 0.6), 0 1px 2px rgb(0 0 0 / 0.4), 0 12px 28px -12px rgb(0 0 0 / 0.75);
+    --shadow-card-hover: inset 0 1px 0 rgb(255 255 255 / 0.08), 0 0 0 1px rgb(0 0 0 / 0.6), 0 2px 4px rgb(0 0 0 / 0.45), 0 20px 40px -14px rgb(0 0 0 / 0.85);
+    /* No inset ring: the stage's transparent borders would push it inside them. */
+    --shadow-stage: 0 0 0 1px rgb(0 0 0 / 0.45);
+    --raised: #2a2a2e;
+    --shadow-raised: inset 0 1px 0 rgb(255 255 255 / 0.07), 0 0 0 1px rgb(0 0 0 / 0.5), 0 1px 2px rgb(0 0 0 / 0.4);
   }
 }
 @media (prefers-contrast: more) {
@@ -203,6 +222,7 @@ kbd {
   padding: 0 8px 0 7px;
   border-radius: 999px; corner-shape: round;
   background: color-mix(in srgb, var(--tone, var(--secondary)) 11%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tone, var(--secondary)) 14%, transparent);
   color: color-mix(in srgb, var(--tone, var(--secondary)), var(--tone-ink) var(--tone-darken));
   font-size: 11px;
   font-weight: 500;
@@ -247,8 +267,8 @@ button {
   transition: background-color 160ms ease-out, color 160ms ease-out, opacity 160ms ease-out, scale 160ms var(--ease-out), box-shadow 160ms ease-out;
 }
 button svg { flex: none; width: 15px; height: 15px; }
-button.prominent { background: var(--ink); color: var(--on-ink); }
-button.glass { background: var(--surface); box-shadow: inset 0 0 0 1px var(--hairline); }
+button.prominent { background: linear-gradient(rgb(255 255 255 / 0.12), rgb(255 255 255 / 0)) var(--ink); box-shadow: var(--shadow-accent); color: var(--on-ink); }
+button.glass { background: var(--raised); box-shadow: var(--shadow-raised); }
 button.large { min-height: 38px; padding: 0 18px; }
 button.small { min-height: 24px; padding: 0 9px; font-size: 11.5px; }
 button.small svg { width: 13px; height: 13px; }
@@ -265,8 +285,8 @@ button:focus-visible, summary:focus-visible, [role="tab"]:focus-visible, [role="
 }
 @media (hover: hover) {
   button:not(:disabled):hover { background: var(--fill-strong); }
-  button.prominent:not(:disabled):hover { background: color-mix(in srgb, var(--ink), var(--canvas) 14%); }
-  button.glass:not(:disabled):hover { background: var(--surface-2); }
+  button.prominent:not(:disabled):hover { background: linear-gradient(rgb(255 255 255 / 0.18), rgb(255 255 255 / 0.04)) var(--ink); }
+  button.glass:not(:disabled):hover { background: color-mix(in srgb, var(--raised), var(--label) 4%); }
   button.borderless:not(:disabled):hover, button.link:not(:disabled):hover { background: none; color: var(--label); }
   button.link:not(:disabled):hover svg { translate: 2px 0; }
 }
@@ -399,19 +419,16 @@ dialog.sheet.ask { width: min(380px, calc(100vw - 32px)); }
 .segmented { display: inline-flex; gap: 2px; padding: 3px; border-radius: 999px; corner-shape: round; background: var(--fill); }
 .segmented > button { min-height: 26px; padding: 0 12px; border-radius: 999px; corner-shape: round; background: none; color: var(--secondary); font-weight: 500; }
 .segmented > button[aria-selected="true"], .segmented > button[aria-checked="true"] {
-  background: var(--surface);
+  background: var(--raised);
   color: var(--label);
-  box-shadow: 0 0 0 0.5px var(--hairline), 0 1px 3px var(--lift);
-}
-@media (prefers-color-scheme: dark) {
-  .segmented > button[aria-selected="true"], .segmented > button[aria-checked="true"] { background: rgb(255 255 255 / 0.14); }
+  box-shadow: var(--shadow-raised);
 }
 
 /* Filter pills: the chosen one in ink, each with its count. */
 .pills { display: flex; flex-wrap: wrap; gap: 6px; }
-.pills > button { min-height: 28px; padding: 0 12px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--hairline); color: var(--secondary); }
+.pills > button { min-height: 28px; padding: 0 12px; background: var(--raised); box-shadow: var(--shadow-raised); color: var(--secondary); }
 .pills > button > span { color: var(--tertiary); font-size: 11px; }
-.pills > button[aria-checked="true"] { background: var(--ink); color: var(--on-ink); box-shadow: none; }
+.pills > button[aria-checked="true"] { background: linear-gradient(rgb(255 255 255 / 0.12), rgb(255 255 255 / 0)) var(--ink); color: var(--on-ink); box-shadow: var(--shadow-accent); }
 .pills > button[aria-checked="true"] > span { color: color-mix(in srgb, var(--on-ink) 60%, transparent); }
 
 /* --- Surfaces --- */
@@ -506,9 +523,10 @@ dialog.sheet::backdrop { background: var(--scrim); -webkit-backdrop-filter: blur
 /* The detail panel: a card over the page's right edge that leaves the page usable beside it. */
 dialog.detail-panel {
   position: fixed;
-  inset: 64px var(--window-inset) var(--window-inset) auto;
+  /* On the stage, as far in from its edges as the stage is from the window's. */
+  inset: calc(60px + var(--window-inset)) calc(2 * var(--window-inset)) calc(2 * var(--window-inset)) auto;
   z-index: 6;
-  width: min(var(--panel-width, 420px), calc(100vw - 2 * var(--window-inset)));
+  width: min(var(--panel-width, 420px), calc(100vw - 4 * var(--window-inset)));
   height: auto;
   max-height: none;
   margin: 0;
@@ -719,18 +737,18 @@ dialog.detail-panel { container: panel / inline-size; }
 @keyframes strip-pulse { 50% { opacity: 0.45; } }
 
 /* --- Shell: sidebar, top bar, page --- */
-.app { display: grid; grid-template-columns: var(--sidebar-width) minmax(0, 1fr); min-height: 100vh; }
+.app { display: grid; grid-template-columns: var(--sidebar-width) minmax(0, 1fr); height: 100vh; }
+/* The window holds still and only the stage scrolls, so the frame keeps wrapping it. */
+html, body { height: 100%; overflow: hidden; }
 .sidebar {
-  position: sticky;
-  top: 0;
+  position: relative;
   z-index: 4;
   height: 100vh;
   display: flex;
   flex-direction: column;
   gap: 14px;
   /* The brand row (34px tall with its padding) centers on the top bar's 60px row. */
-  padding: 13px 14px 14px;
-  border-inline-end: 1px solid var(--hairline);
+  padding: 13px 10px 14px 14px;
   overflow-y: auto;
 }
 .brand { display: flex; align-items: center; gap: 10px; padding: 4px 0; }
@@ -772,7 +790,22 @@ dialog.detail-panel { container: panel / inline-size; }
 }
 .nav-item svg { width: 16px; height: 16px; }
 .nav-label { flex: 1; min-width: 0; }
-.nav-item[aria-current="true"] { color: var(--label); font-weight: 550; background: var(--surface) !important; box-shadow: inset 0 0 0 1px var(--hairline), 0 1px 2px var(--lift); }
+.nav-item[aria-current="true"] { color: var(--label); font-weight: 550; background: var(--raised) !important; box-shadow: var(--shadow-raised); }
+.nav-item[aria-current="true"] svg { color: var(--accent); }
+/* A short accent bar marks the page you are on. */
+.nav-item::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 50%;
+  width: 3px;
+  height: 0;
+  translate: 0 -50%;
+  border-radius: 999px; corner-shape: round;
+  background: var(--accent);
+  transition: height 300ms var(--ease-out);
+}
+.nav-item[aria-current="true"]::before { height: 14px; }
 /* The others dim while the pointer rests on one, as the reference menus do. */
 .nav-list[data-hovering] .nav-item:not(:hover):not([aria-current="true"]) { opacity: 0.55; }
 @media (hover: hover) { .nav-item:hover { color: var(--label); } }
@@ -826,22 +859,17 @@ dialog.detail-panel { container: panel / inline-size; }
 .peek-line { color: var(--secondary); font-size: 12px; }
 .peek-mission { padding: 7px 10px; border-radius: var(--inset-radius); background: var(--surface-2); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.workspace { min-width: 0; display: flex; flex-direction: column; }
+.workspace { min-width: 0; height: 100vh; display: flex; flex-direction: column; }
 .topbar {
-  position: sticky;
-  top: 0;
+  position: relative;
   z-index: 3;
+  flex: none;
   display: flex;
   align-items: center;
   gap: 10px;
   min-height: 60px;
-  padding: 12px max(var(--page-margin), calc((100% - 1400px) / 2));
-  background: color-mix(in srgb, var(--canvas) 80%, transparent);
-  -webkit-backdrop-filter: blur(20px) saturate(1.5);
-  backdrop-filter: blur(20px) saturate(1.5);
-  transition: box-shadow 200ms ease-out;
+  padding: 12px var(--window-inset) 12px 10px;
 }
-.topbar[data-scrolled] { box-shadow: 0 1px 0 var(--hairline); }
 .topbar button { flex: none; white-space: nowrap; }
 .topbar-sidebar { display: none; }
 .topbar-spacer { flex: 1; }
@@ -855,9 +883,8 @@ dialog.detail-panel { container: panel / inline-size; }
   width: 260px;
   min-height: 34px;
   padding: 0 12px;
-  background: var(--surface);
-  /* Outside the box: an inset ring eats the fill's edge and the pill reads smaller than the New Job button beside it. */
-  box-shadow: 0 0 0 1px var(--hairline-strong);
+  background: var(--raised);
+  box-shadow: var(--shadow-raised);
   color: var(--tertiary);
   font-weight: 400;
   transition: opacity 120ms ease-out, background-color 160ms ease-out, box-shadow 200ms ease-out;
@@ -865,7 +892,7 @@ dialog.detail-panel { container: panel / inline-size; }
 .search-pill > span { flex: 1; text-align: start; overflow: hidden; text-overflow: ellipsis; }
 .search-pill svg { color: var(--secondary); }
 .search-pill[data-hidden] { opacity: 0; }
-@media (hover: hover) { .search-pill:hover { box-shadow: 0 0 0 1px var(--hairline-strong), 0 2px 8px -4px var(--lift); } }
+@media (hover: hover) { .search-pill:not(:disabled):hover { background: var(--raised); box-shadow: var(--shadow-raised), 0 4px 12px -6px var(--lift); } }
 .connection { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 11px; border-radius: 999px; corner-shape: round; color: var(--secondary); font-size: 12px; white-space: nowrap; }
 .connection > i { position: relative; width: 7px; height: 7px; border-radius: 50%; corner-shape: round; background: var(--tertiary); }
 .connection[data-state="live"] > i { background: var(--green); }
@@ -877,16 +904,27 @@ dialog.detail-panel { container: panel / inline-size; }
 .new-job svg { transition: rotate 420ms var(--ease-out); }
 @media (hover: hover) { .new-job:not(:disabled):hover svg { rotate: 90deg; } }
 
+/* The stage: an inset panel the sidebar and top bar wrap, and the one thing that scrolls. Its content keeps to 1400px,
+   centered by padding so the scrollbar stays at the stage's edge. Transparent borders keep the bar's ends clear of the
+   rounded corners; content passes under them. */
 .page {
   container: page / inline-size;
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: var(--card-gap);
-  width: 100%;
-  max-width: calc(1400px + 2 * var(--page-margin));
-  margin: 0 auto;
-  padding: 0 var(--page-margin) var(--page-margin);
+  margin: 0 var(--window-inset) var(--window-inset) 0;
+  padding: 18px max(var(--page-margin), calc((100% - 1400px) / 2)) var(--page-margin);
+  border-block: 8px solid transparent;
+  border-radius: var(--stage-radius);
+  background: var(--stage);
+  box-shadow: var(--shadow-stage);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
+/* As a fixed-height flex scroller the page would shrink its sections to fit, crushing any that clip their overflow (the KPI card). */
+.page > * { flex-shrink: 0; }
 .banner { display: flex; align-items: center; gap: 10px; padding: 12px 14px 12px 16px; border-radius: 18px; background: color-mix(in srgb, var(--orange) 10%, transparent); color: color-mix(in srgb, var(--orange), var(--tone-ink) var(--tone-darken)); font-size: 12.5px; animation: reveal 400ms var(--ease-out); }
 .banner > span { flex: 1; overflow-wrap: anywhere; }
 .banner svg { flex: none; width: 15px; height: 15px; }
@@ -902,7 +940,7 @@ dialog.detail-panel { container: panel / inline-size; }
   min-height: 40px;
   padding: 0 14px 0 6px;
   background: color-mix(in srgb, var(--orange) 11%, var(--surface));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--orange) 24%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--orange) 24%, transparent), 0 1px 2px var(--lift), 0 6px 16px -10px color-mix(in srgb, var(--orange) 60%, transparent);
   color: var(--label);
 }
 .attention-count { display: grid; place-items: center; min-width: 28px; height: 28px; padding: 0 8px; border-radius: 999px; corner-shape: round; background: var(--orange); color: var(--on-orange); font-size: 13px; font-weight: 600; }
@@ -919,7 +957,7 @@ dialog.detail-panel { container: panel / inline-size; }
 }
 
 /* KPIs: one card, four cells split by hairlines, each with its last day by the hour. */
-.kpis { display: grid; border-radius: var(--card-radius); background: var(--surface); box-shadow: var(--outline-ring), var(--shadow-card); overflow: hidden; animation: rise 560ms var(--ease-out) backwards; }
+.kpis { container: kpis / inline-size; display: grid; border-radius: var(--card-radius); background: var(--surface); box-shadow: var(--outline-ring), var(--shadow-card); overflow: hidden; animation: rise 560ms var(--ease-out) backwards; }
 .kpi-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .kpi { display: grid; gap: 12px; align-content: start; min-width: 0; padding: 20px 22px 18px; }
 .kpi + .kpi { box-shadow: inset 1px 0 0 var(--hairline); }
@@ -964,6 +1002,20 @@ dialog.detail-panel { container: panel / inline-size; }
 .kpi-marks { display: flex; align-items: center; padding-bottom: 4px; }
 .kpi-marks > span { display: grid; place-items: center; width: 30px; height: 30px; margin-inline-start: -8px; border-radius: 50%; corner-shape: round; background: var(--surface); box-shadow: 0 0 0 2px var(--surface), inset 0 0 0 1px color-mix(in srgb, var(--tone) 40%, transparent); color: var(--label); animation: swap 420ms var(--ease-out) backwards; animation-delay: calc(var(--i, 0) * 60ms + 200ms); }
 .kpi-marks > span:first-child { margin-inline-start: 0; }
+/* Narrow, each cell keeps its number and line; the sparkline and faces would crowd the number. Narrower still, two by two. */
+@container kpis (max-width: 760px) {
+  .spark, .kpi-marks { display: none; }
+  .kpi { padding: 18px; }
+}
+@container kpis (max-width: 520px) {
+  .kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .kpi:nth-child(3) { box-shadow: inset 0 1px 0 var(--hairline); }
+  .kpi:nth-child(4) { box-shadow: inset 1px 0 0 var(--hairline), inset 0 1px 0 var(--hairline); }
+  .kpi { padding: 16px; }
+  .kpi-number { font-size: 36px; }
+  .kpi-figure { min-height: 40px; }
+  .share { padding-inline: 16px; }
+}
 .kpi-marks > .kpi-more { color: var(--secondary); font-size: 11px; font-weight: 600; }
 .share { display: grid; gap: 10px; padding: 16px 22px 20px; border-top: 1px solid var(--hairline); }
 .share-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; font-size: 12px; color: var(--secondary); }
@@ -980,8 +1032,9 @@ dialog.detail-panel { container: panel / inline-size; }
 /* The dashboard: what is going on, with the agents and the crew's rhythm beside it. */
 .dash { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: var(--card-gap); align-items: start; }
 .dash-main, .dash-side { display: grid; gap: var(--card-gap); min-width: 0; align-content: start; }
-.dash-side { position: sticky; top: 72px; }
-@container page (max-width: 1120px) {
+.dash-side { position: sticky; top: 0; }
+/* The stage's inset and scrollbar take about 90px from the page's width; this keeps two columns where they fit at 1440px. */
+@container page (max-width: 1040px) {
   .dash { grid-template-columns: minmax(0, 1fr); }
   .dash-side { position: static; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); align-items: start; }
 }
@@ -1083,20 +1136,21 @@ dialog.detail-panel { container: panel / inline-size; }
 .event p { font-size: 12px; overflow-wrap: anywhere; white-space: pre-wrap; color: var(--secondary); }
 .event-day { display: grid; gap: 12px; }
 .event-day + .event-day { margin-top: 10px; }
-.event-day-name { position: sticky; top: 60px; z-index: 1; padding: 6px 0; background: var(--surface); color: var(--tertiary); font: 500 10.5px/1.2 var(--text-face); letter-spacing: 0.06em; text-transform: uppercase; }
+.event-day-name { position: sticky; top: 0; z-index: 1; padding: 6px 0; background: var(--surface); color: var(--tertiary); font: 500 10.5px/1.2 var(--text-face); letter-spacing: 0.06em; text-transform: uppercase; }
 
 /* Mission panel */
 /* No row gap: the collapsing body would leave its share of it behind, so spacing sits on the parts instead. */
-.mission { display: grid; transition: box-shadow 200ms ease-out; }
+.mission { display: grid; transition: box-shadow 260ms var(--ease-out); }
 .mission > .action-message { margin-block-start: 14px; }
 .mission:not([data-expanded]) { cursor: pointer; }
-@media (hover: hover) { .mission:not([data-expanded]):hover { box-shadow: var(--outline-ring), 0 6px 20px -12px color-mix(in srgb, var(--lift), black 10%); } }
-.mission-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+@media (hover: hover) { .mission:not([data-expanded]):hover { box-shadow: var(--outline-ring), var(--shadow-card-hover); } }
+.mission-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-width: 0; }
 .mission[data-expanded] .mission-head { cursor: pointer; }
 .mission[data-state="active"] { --tone: var(--accent); }
 .mission[data-state="done"] { --tone: var(--green); }
 .mission[data-state="abandoned"] { --tone: var(--secondary); }
-.mission-heading { flex: 1; min-width: 0; display: grid; gap: 2px; }
+/* The status and menu stay beside the title until the title would drop under 220px; then they move to a line of their own. */
+.mission-heading { flex: 1 1 220px; min-width: 0; display: grid; gap: 2px; }
 .mission-meta { color: var(--secondary); font-size: 11.5px; font-variant-numeric: tabular-nums; }
 /* Pull requests sit in a band across the card's foot, below a hairline that runs to the card's edges, whether the
    card is open or closed. */
@@ -1115,13 +1169,11 @@ dialog.detail-panel { container: panel / inline-size; }
 .pull-more { font-weight: 400; }
 .pull-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 @media (hover: hover) { .pull-chip:hover { background: color-mix(in srgb, var(--tone, var(--secondary)) 19%, transparent); } }
-.mission-controls { display: flex; gap: 6px; }
+.mission-controls { display: flex; align-items: center; gap: 6px; margin-inline-start: auto; }
 .mission-hint { margin-top: 8px; }
 .mission-body { display: grid; gap: 16px; padding-block-start: 14px; }
-@container page (max-width: 600px) {
-  .mission-head { flex-wrap: wrap; }
-  .mission-heading { flex-basis: 100%; }
-  .mission-controls { margin-inline-start: auto; }
+/* Only where the title would be left too little room beside them do a row's status and time move under it. */
+@container page (max-width: 340px) {
   .job-row { flex-wrap: wrap; row-gap: 6px; }
   .job-row > .job-row-text { flex-basis: calc(100% - 40px); }
   .job-row > .status-icon { margin-inline-start: 38px; }
@@ -1170,7 +1222,7 @@ dialog.detail-panel { container: panel / inline-size; }
   font-weight: 600;
   transition: background-color 400ms var(--ease-out), box-shadow 400ms, color 400ms;
 }
-.track-node b svg { width: 12px; height: 12px; stroke-width: 3; }
+.track-node b svg { width: 12px; height: 12px; }
 /* A passed step is a glass bead, as in the app: a lit top edge and a soft drop instead of a solid disc. */
 .track > li[data-pos="past"] .track-node b {
   background: linear-gradient(to bottom, rgb(255 255 255 / 0.5), rgb(255 255 255 / 0.08)), var(--fill-strong);
@@ -1215,11 +1267,13 @@ dialog.detail-panel { container: panel / inline-size; }
   text-align: start;
   animation: rise 440ms var(--ease-out) backwards;
   animation-delay: calc(var(--i, 0) * 35ms);
+  transition: background-color 200ms ease-out, box-shadow 240ms var(--ease-out), scale 160ms var(--ease-out);
 }
 .job-row[data-waiting] { background: color-mix(in srgb, var(--orange) 8%, transparent); }
 .job-row[aria-current="true"] { background: color-mix(in srgb, var(--accent) 10%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 26%, transparent); }
 @media (hover: hover) {
-  .job-row:not(:disabled):hover { background: var(--fill-strong); }
+  /* A hovered row lifts out of the card. */
+  .job-row:not(:disabled):hover { background: var(--raised); box-shadow: var(--shadow-raised); }
   .job-row[data-waiting]:not(:disabled):hover { background: color-mix(in srgb, var(--orange) 12%, transparent); }
   .job-row[aria-current="true"]:not(:disabled):hover { background: color-mix(in srgb, var(--accent) 14%, transparent); }
   .job-row:hover .row-chevron { translate: 2px 0; color: var(--secondary); }
@@ -1237,7 +1291,7 @@ dialog.detail-panel { container: panel / inline-size; }
 .toolbar-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; animation: rise 520ms var(--ease-out) backwards; }
 .filter { position: relative; flex: 0 1 280px; min-width: 180px; }
 .filter svg { position: absolute; left: 11px; top: 50%; translate: 0 -50%; width: 14px; height: 14px; color: var(--tertiary); pointer-events: none; }
-.filter input { min-height: 32px; padding-inline-start: 32px; border-radius: 999px; corner-shape: round; background: var(--surface); border-color: var(--hairline); }
+.filter input { min-height: 32px; padding-inline-start: 32px; border-radius: 999px; corner-shape: round; background: var(--raised); border-color: transparent; box-shadow: var(--shadow-raised); }
 .table-panel { padding-bottom: 8px; }
 .table-scroll { margin-inline: calc(var(--card-padding) * -1); overflow-x: auto; }
 .jobs-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12.5px; }
@@ -1280,15 +1334,15 @@ th[aria-sort] .sort { color: var(--label); }
 .answer-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
 .answer-actions > .action-message { flex: 1 1 auto; min-width: 0; }
 .answer-actions button { font-size: 12.5px; }
-.composer { position: relative; display: grid; border-radius: var(--field-radius); background: var(--surface); box-shadow: inset 0 0 0 1px var(--hairline-strong); transition: box-shadow 160ms ease-out; }
+.composer { position: relative; display: grid; border-radius: var(--field-radius); background: var(--raised); box-shadow: var(--shadow-raised); transition: box-shadow 160ms ease-out; }
 .composer textarea { min-height: 60px; max-height: 160px; padding: 11px 46px 9px 14px; border: 0; background: none; box-shadow: none !important; }
 .composer:focus-within { box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
 .composer > button { position: absolute; right: 8px; bottom: 8px; width: 26px; min-height: 26px; padding: 0; }
-.composer > button svg { width: 13px; height: 13px; stroke-width: 2.6; }
+.composer > button svg { width: 13px; height: 13px; }
 
 /* Empty states */
 .empty-state { display: grid; justify-items: center; gap: 6px; padding-block: 14vh 10vh; text-align: center; animation: rise 520ms var(--ease-out) backwards; }
-.empty-state > svg { width: 36px; height: 36px; color: var(--secondary); stroke-width: 1.5; margin-bottom: 6px; }
+.empty-state > svg { width: 36px; height: 36px; color: var(--secondary); margin-bottom: 6px; }
 .empty-state b { font: 500 17px/1.3 var(--text-face); color: var(--label); }
 .empty-state p { color: var(--tertiary); font-size: 12.5px; }
 .empty-state button { margin-top: 12px; }
@@ -1403,19 +1457,13 @@ dialog.palette-layer::backdrop { background: var(--scrim-light); animation: fade
   }
   .sidebar[data-open] { translate: 0 0; visibility: visible; transition: translate 420ms var(--ease-out); }
   .sidebar > .nav:first-of-type { display: none; }
-  .topbar { gap: 8px; min-height: 54px; padding: 8px 16px; }
+  .topbar { gap: 8px; min-height: 54px; padding: 8px var(--window-inset); }
   /* As tall as the search and New Job controls beside it. */
   button.topbar-sidebar { display: inline-flex; width: 34px; min-height: 34px; }
   .new-job { width: 34px; padding: 0; }
   .new-job-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-  .page { padding: 0 16px 104px; }
+  .page { margin-inline-start: var(--window-inset); padding: 12px 12px 96px; }
   .page-title { font-size: 28px; }
-  .kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .kpi:nth-child(3) { box-shadow: inset 0 1px 0 var(--hairline); }
-  .kpi:nth-child(4) { box-shadow: inset 1px 0 0 var(--hairline), inset 0 1px 0 var(--hairline); }
-  .kpi { padding: 16px; }
-  .kpi-number { font-size: 36px; }
-  .spark { display: none; }
   .dash-side { grid-template-columns: minmax(0, 1fr); }
   dialog.detail-panel { inset: 8px; width: auto; }
   .panel-grip { display: none; }
@@ -1441,7 +1489,10 @@ dialog.palette-layer::backdrop { background: var(--scrim-light); animation: fade
   .dock .nav-list { display: flex; gap: 2px; }
   .dock .nav-glide { display: none; }
   .dock .nav-item { width: auto; min-height: 40px; padding: 0 14px; border-radius: 999px; corner-shape: round; gap: 6px; }
-  .dock .nav-item[aria-current="true"] { background: var(--ink) !important; color: var(--on-ink); box-shadow: none; }
+  .dock .nav-item[aria-current="true"] { background: var(--ink) !important; color: var(--on-ink); box-shadow: var(--shadow-accent); }
+  /* On the ink pill the glyph takes the pill's text color, and the sidebar's accent bar has no place. */
+  .dock .nav-item[aria-current="true"] svg { color: inherit; }
+  .dock .nav-item::before { display: none; }
   /* Out of sight but still the item's name. */
   .dock .nav-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .dock .nav-item[aria-current="true"] .nav-label { position: static; width: auto; height: auto; clip-path: none; font-size: 12px; }

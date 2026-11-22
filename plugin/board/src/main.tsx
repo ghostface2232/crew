@@ -57,8 +57,8 @@ document.addEventListener(
 // Moving onto the page's bar also leaves the page, so that bar stays marked until the pointer is seen elsewhere.
 document.documentElement.addEventListener('pointerleave', () => overBar !== document.documentElement && markBar(null));
 
-// Where the page scrolls in its own box rather than the document (the Windows app), keys that scroll the document
-// reach it only once something inside it has focus; until then they are passed to it here.
+// The page scrolls in its own box, the stage, rather than the document, so keys that scroll the document reach it
+// only once something inside it has focus; until then they are passed to it here.
 const SCROLL_KEYS: Record<string, (page: HTMLElement) => number> = {
   PageDown: (page) => page.clientHeight * 0.875,
   PageUp: (page) => -page.clientHeight * 0.875,

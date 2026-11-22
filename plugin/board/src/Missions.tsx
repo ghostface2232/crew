@@ -368,8 +368,9 @@ export function MissionPanel({
           <h2 className="title selectable fade-line" ref={fadeTitle} title={mission.title}>{mission.title}</h2>
           <p className="mission-meta fade-line" ref={fadeMeta} title={mission.root}>{meta}</p>
         </div>
-        <Chip state={active ? 'running' : mission.state}>{capitalized(mission.state)}</Chip>
+        {/* One group, so the status and the menu move to a line of their own together. */}
         <span className="mission-controls">
+          <Chip state={active ? 'running' : mission.state}>{capitalized(mission.state)}</Chip>
           {(active || mission.state === 'abandoned') && (
             <Menu label="Mission options" icon={MoreHorizontalRegular}>
               <button role="menuitem" disabled={locked} onClick={markDone}>

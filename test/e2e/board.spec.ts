@@ -902,11 +902,17 @@ for (const width of [1440, 390])
     await request.post('/__push', { data: { type: 'state', data } });
     await expect(page.locator('[data-key="mission-1"]')).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    // The stage scrolls in its own box, so the document alone would not show its overflow.
+    const stage = page.locator('main.page');
+    expect(await stage.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
     expect(await page.locator('.chip svg').first().evaluate((element) => element.tagName)).toBe('svg');
     expect(await page.locator('.agent-mark').first().evaluate((element) => getComputedStyle(element).maskImage)).not.toBe('none');
+    // A window as tall as the stage's content captures the whole page, which the document's full-page capture no longer reaches.
+    await page.setViewportSize({ width, height: 1000 + (await stage.evaluate((element) => element.scrollHeight - element.clientHeight)) });
     // One baseline, Chromium's on macOS: text renders differently in other engines and systems, where the checks above still run.
-    if (testInfo.project.name === 'chromium' && process.platform === 'darwin') await expect(page).toHaveScreenshot(`board-${width}.png`, { fullPage: true, animations: 'disabled' });
-    await page.screenshot({ path: testInfo.outputPath(`board-${width}.png`), fullPage: true });
+    if (testInfo.project.name === 'chromium' && process.platform === 'darwin') await expect(page).toHaveScreenshot(`board-${width}.png`, { animations: 'disabled' });
+    await page.screenshot({ path: testInfo.outputPath(`board-${width}.png`) });
+    await page.setViewportSize({ width, height: 1000 });
     await needsYou(page);
     await expect(page.getByRole('button', { name: 'Approve', exact: true })).toBeVisible();
     await expect(page.getByRole('textbox', { name: 'Your answer' })).toBeVisible();

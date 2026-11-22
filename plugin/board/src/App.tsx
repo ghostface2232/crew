@@ -75,14 +75,6 @@ export function App() {
   const narrow = useNarrow();
   // Narrow windows keep the sidebar folded away until its button brings it out over the page.
   const [drawer, setDrawer] = useState(false);
-  // The topbar gets its bottom rule once the page has scrolled under it.
-  const [scrolled, setScrolled] = useState(false);
-  useEffect(() => {
-    const listener = () => setScrolled(window.scrollY > 0);
-    listener();
-    window.addEventListener('scroll', listener, { passive: true });
-    return () => window.removeEventListener('scroll', listener);
-  }, []);
   const toggle = useRef<HTMLButtonElement>(null);
   const sidebar = useRef<HTMLElement>(null);
   const searchButton = useRef<HTMLButtonElement>(null);
@@ -254,7 +246,7 @@ export function App() {
         {drawer && <div className="sidebar-scrim" aria-hidden="true" onClick={fold} />}
         {/* While the drawer is out over it, the page is out of reach, so Tab stays in the drawer. */}
         <div className="workspace" inert={drawer}>
-          <header className="topbar" data-scrolled={scrolled || undefined}>
+          <header className="topbar">
             <button
               className="icon topbar-sidebar"
               ref={toggle}

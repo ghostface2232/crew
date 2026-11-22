@@ -15,7 +15,7 @@ Codex approval requests go first to its automatic reviewer (`codex.approvalsRevi
 
 ### Antigravity approvals
 
-The user answers Antigravity approvals one at a time and sees the full request fields and workspace. Grants use only `allow_once`. Crew excludes `allow_always` and `accept-edits` because `accept-edits` skips per-edit path checks. Denials use `reject_once` when offered. Cancelling the job, ending the turn, or exiting the server cancels open requests.
+The user answers Antigravity approvals one at a time and sees the full request fields and workspace. Grants use only `allow_once`. Crew excludes `allow_always`, and keeps sessions in `default` mode, because `accept-edits` and `auto` skip per-edit path checks ([Antigravity's own settings](sandbox.md#antigravitys-own-settings)). Denials use `reject_once` when offered. Cancelling the job, ending the turn, or exiting the server cancels open requests.
 
 ### Allow for This Job
 

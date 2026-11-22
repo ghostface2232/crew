@@ -13,9 +13,10 @@ import { writeFakeBin } from './fake-bin.ts';
 
 /**
  * An ACP server that records what Crew sends in `log.jsonl` beside it. It offers thinking levels per model as
- * agy 1.5.9 does, and ends each turn with `report`, or with the answer to `form` when one is given.
+ * agy 1.5.9 does, and ends each turn with `report`, or with the answer to `form` when one is given. A session starts in
+ * `mode`, and each turn first reports the `updates` given, as tool calls agy ran without asking.
  */
-function server(options: { append?: boolean; form?: unknown } = {}): string {
+function server(options: { append?: boolean; form?: unknown; mode?: string; refuseMode?: boolean; updates?: unknown[] } = {}): string {
   return `
     const fs = require('node:fs');
     const path = require('node:path');
@@ -35,8 +36,9 @@ function server(options: { append?: boolean; form?: unknown } = {}): string {
       if (method === 'initialize') send({ id, result: { agentCapabilities: { sessionCapabilities: { resume: {}, close: {} }, ...(options.append ? { _meta: { antigravity: { systemPrompt: { append: true } } } } : {}) } } });
       else if (method === 'session/new') {
         model = 'gemini-4-argon'; level = 'medium';
-        send({ id, result: { sessionId: 's1', ...config() } });
+        send({ id, result: { sessionId: 's1', ...config(), ...(options.mode ? { modes: { currentModeId: options.mode } } : {}) } });
       }
+      else if (method === 'session/set_mode') send(options.refuseMode ? { id, error: { code: -32602, message: 'no such mode' } } : { id, result: {} });
       else if (method === 'session/resume') send({ id, result: config() });
       else if (method === 'session/set_config_option') {
         if (params.configId === 'model') { model = params.value; if (!levels[model].includes(level)) level = 'medium'; }
@@ -45,7 +47,11 @@ function server(options: { append?: boolean; form?: unknown } = {}): string {
       } else if (method === 'session/prompt') {
         promptId = id;
         if (options.form) send({ id: 'form', method: 'elicitation/create', params: { sessionId: 's1', mode: 'form', message: 'The agent has a question.', requestedSchema: options.form } });
-        else { send({ method: 'session/update', params: { sessionId: 's1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'report' } } } }); send({ id, result: { stopReason: 'end_turn' } }); }
+        else {
+          for (const update of options.updates ?? []) send({ method: 'session/update', params: { sessionId: 's1', update } });
+          send({ method: 'session/update', params: { sessionId: 's1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'report' } } } });
+          send({ id, result: { stopReason: 'end_turn' } });
+        }
       } else if (method === 'session/cancel') send({ id: promptId, result: { stopReason: 'cancelled' } });
       else if (id === 'form') {
         send({ method: 'session/update', params: { sessionId: 's1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: JSON.stringify(message.result) } } } });
@@ -133,6 +139,86 @@ test('the role goes in the system prompt where the server takes an addition, and
   await h.ended(job);
   assert.equal(h.sent('session/resume')[0]._meta.antigravity.systemPrompt.append, job.instructions);
   assert.equal(h.sent('session/prompt')[1].prompt[0].text.includes(job.instructions), false);
+});
+
+test('a session that starts in a mode that does not ask is put back in the default mode', { timeout: 5000 }, async (t) => {
+  for (const mode of ['default', 'auto']) {
+    const h = harness(t, server({ mode }));
+    const job = await h.ended(await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' }));
+    assert.equal(job.state, 'done');
+    assert.deepEqual(h.sent('session/set_mode').map((p) => p.modeId), mode === 'default' ? [] : ['default']);
+  }
+  const refused = harness(t, server({ mode: 'auto', refuseMode: true }));
+  const job = await refused.ended(await refused.jobs.create({ kind: 'delegate', cwd: refused.home, isolation: 'in_place', task: 'test' }));
+  assert.equal(job.state, 'failed');
+  assert.match(job.error!.message, /"auto" mode, where it does not ask/);
+  assert.equal(refused.sent('session/prompt').length, 0);
+});
+
+test('a switch to another mode during a turn is undone', { timeout: 5000 }, async (t) => {
+  const h = harness(t, server({ updates: [{ sessionUpdate: 'current_mode_update', currentModeId: 'accept-edits' }] }));
+  const job = await h.ended(await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' }));
+  assert.equal(job.state, 'done');
+  assert.deepEqual(h.sent('session/set_mode').map((p) => p.modeId), ['default']);
+});
+
+// agy runs commands the user's own allow rules cover, and reads its Non-Workspace Access setting permits, without asking.
+const ranUnasked = (toolCallId: string, call: Record<string, unknown>) => [
+  { sessionUpdate: 'tool_call', toolCallId, status: 'in_progress', ...call },
+  { sessionUpdate: 'tool_call_update', toolCallId, status: 'completed' },
+];
+
+test('an engineer\'s command that ran under the user\'s Antigravity rules is reported, and the turn goes on', { timeout: 5000 }, async (t) => {
+  const h = harness(t, server({ updates: [
+    ...ranUnasked('c1', { kind: 'execute', title: 'git branch', rawInput: { CommandLine: 'git branch' } }),
+    ...ranUnasked('r1', { kind: 'read', title: 'File note.txt', locations: [{ path: path.join(os.tmpdir(), 'note.txt') }] }),
+  ] }));
+  const job = await h.ended(await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' }));
+  assert.equal(job.state, 'done');
+  assert.equal(job.report, 'report');
+  assert.deepEqual(job.notes, ['Antigravity ran an action without asking Crew, because a rule in the user\'s Antigravity settings allows it: execute: git branch']);
+  assert.equal(h.sent('session/cancel').length, 0);
+});
+
+test('an action outside the role that ran without asking stops the turn', { timeout: 5000 }, async (t) => {
+  for (const [name, call, ask] of [
+    ['a command in a read-only job', { kind: 'execute', title: 'git push origin main', rawInput: { CommandLine: 'git push origin main' } }, true],
+    ['an edit outside the workspace', { kind: 'edit', title: 'File b.txt', locations: [{ path: path.join(os.tmpdir(), 'b.txt') }] }, false],
+    ['a read of the Crew token', { kind: 'read', title: 'File token', locations: [{ path: tokenFile(HOME) }] }, false],
+  ] as const) {
+    const h = harness(t, server({ updates: ranUnasked('x1', call) }));
+    const job = await h.ended(await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test', ask }));
+    assert.equal(job.state, 'failed', name);
+    assert.match(job.error!.message, /without asking Crew .*Crew stopped the turn/, name);
+    assert.equal(h.sent('session/cancel').length, 1, name);
+  }
+});
+
+test('a tool call that came to Crew as a permission request is not checked again when it finishes', { timeout: 5000 }, async (t) => {
+  const h = harness(t, `
+    const send = (message) => console.log(JSON.stringify({ jsonrpc: '2.0', ...message }));
+    const update = (update) => send({ method: 'session/update', params: { sessionId: 's1', update } });
+    let promptId;
+    require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
+      const { method, id } = JSON.parse(line);
+      if (method === 'initialize') send({ id, result: { agentCapabilities: {} } });
+      else if (method === 'session/new') send({ id, result: { sessionId: 's1' } });
+      else if (method === 'session/prompt') {
+        promptId = id;
+        update({ sessionUpdate: 'tool_call', toolCallId: 'c1', status: 'in_progress', kind: 'execute', title: 'npm test' });
+        send({ id: 'p', method: 'session/request_permission', params: { sessionId: 's1', toolCall: { toolCallId: 'c1', kind: 'execute', title: 'npm test', rawInput: { CommandLine: 'npm test' } }, options: [{ kind: 'allow_once', optionId: 'yes' }] } });
+      } else if (id === 'p') {
+        update({ sessionUpdate: 'tool_call_update', toolCallId: 'c1', status: 'completed' });
+        update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'report' } });
+        send({ id: promptId, result: { stopReason: 'end_turn' } });
+      }
+    });
+  `);
+  const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' });
+  await h.jobs.reply(job.id, { decision: 'approve', request_id: (await h.waiting(job)).id });
+  await h.ended(job);
+  assert.equal(job.state, 'done');
+  assert.deepEqual(job.notes ?? [], []);
 });
 
 test('the role travels with the first prompt when the server takes no addition', { timeout: 5000 }, async (t) => {

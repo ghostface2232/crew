@@ -26,7 +26,13 @@ interface Run {
   grants: Set<string>;
   /** The lead's reasons for declining requests in this turn, sent as the next prompt once it ends. */
   declined: string[];
+  /** This turn's tool calls as agy reported them, and whether each came to Crew as a permission request. */
+  calls: Map<string, ToolCall & { asked?: boolean; checked?: boolean }>;
+  /** Why Crew stopped the turn: an action ran outside the role without asking. */
+  violation?: string;
 }
+
+type ToolCall = { kind?: string; title?: string; locations?: { path?: string }[]; rawInput?: unknown; _meta?: { mcpServerName?: string; mcpToolName?: string } };
 
 /** The user's answer to a request; null when it can no longer be answered. */
 interface Answer {
@@ -40,6 +46,13 @@ const CWD_FIELDS = ['cwd', 'Cwd', 'workingDirectory', 'WorkingDirectory', 'worki
 
 /** ACP tool kinds that cannot change anything. */
 const PASSIVE_KINDS = ['read', 'search', 'think'];
+/** Kinds whose run outside the role Crew stops the turn for; the rest are only reported. */
+const CHANGING_KINDS = ['edit', 'delete', 'move', 'execute'];
+/**
+ * The only mode in which agy asks before edits and commands. Measured on agy 1.5.14: in "accept-edits" and "auto",
+ * edits outside the workspace and in .git, commands, and network requests ran without a permission request.
+ */
+const ASKING_MODE = 'default';
 const LIMIT_PATTERN = /quota|rate.?limit|resource.?exhausted|\b429\b|credits? balance/i;
 const IDLE_SHUTDOWN_MS = 10 * 60_000;
 
@@ -80,13 +93,14 @@ export class AntigravityAdapter implements Adapter {
       plugins: [],
     });
     const sessionId: string = res.sessionId;
-    const run: Run = { ctl, prompting: null, cancelling: false, message: '', earlier: '', pending: [], grants: new Set(), declined: [] };
+    const run: Run = newRun(ctl);
     this.runs.set(sessionId, run);
     this.loaded.add(sessionId);
     ctl.session(sessionId);
 
-    // Stay in the default mode, where every edit asks first and onRequest decides it.
-    // "accept-edits" was measured to apply edits outside the workspace without asking.
+    // Every edit and command must reach onRequest. agy's saved Agent Mode does not reach ACP sessions as of 1.5.14,
+    // but its default for other sessions became Auto in 1.5.7, so the mode is checked rather than assumed.
+    await this.keepAsking(peer, sessionId, res);
     const wanted = ctl.job.model ?? (ctl.job.agentDefault ? undefined : this.config.antigravity.model);
     // A tier names a family ("hydrogen"); the session lists the exact values this account has.
     // A family the session does not list is left to the agent's default; a model named outright is still sent, so a typo shows.
@@ -118,6 +132,7 @@ export class AntigravityAdapter implements Adapter {
     if (!this.loaded.has(sessionId)) {
       if (!this.restoreMethod) throw new Error('This Antigravity server cannot restore sessions. Continue it from the Antigravity CLI.');
       const res = await peer.request(this.restoreMethod, { sessionId, cwd: ctl.job.cwd, mcpServers: [crewServer(ctl)], ...this.instructions(ctl) }, RPC_TIMEOUT_MS);
+      await this.keepAsking(peer, sessionId, res);
       // A server that restores a session at its default level would run the next turn above the job's effort.
       const level = ctl.job.effort ? pickEffort(configOption(res, 'thought_level')?.options, ctl.job.effort) : undefined;
       const restored = level && level !== configOption(res, 'thought_level')?.currentValue
@@ -128,7 +143,7 @@ export class AntigravityAdapter implements Adapter {
     if (isTerminal(ctl.job)) return;
     let run = this.runs.get(sessionId);
     if (!run) {
-      run = { ctl, prompting: null, cancelling: false, message: '', earlier: '', pending: [], grants: new Set(), declined: [] };
+      run = newRun(ctl);
       this.runs.set(sessionId, run);
     }
     if (run.prompting) throw new Error('Antigravity is still working on the previous message. Wait for it to finish, or cancel first.');
@@ -204,13 +219,16 @@ export class AntigravityAdapter implements Adapter {
     const { ctl } = run;
     run.message = '';
     run.earlier = '';
+    run.calls.clear();
+    run.violation = undefined;
     ctl.phase('working');
     run.prompting = peer
       .request('session/prompt', { sessionId: ctl.job.sessionId, prompt: [{ type: 'text', text }] })
       .then(
         (res) => {
           if (this.runs.get(ctl.job.sessionId!) !== run) return;
-          if (res.stopReason === 'cancelled' || run.cancelling) ctl.cancelled();
+          if (run.violation) ctl.fail(run.violation);
+          else if (res.stopReason === 'cancelled' || run.cancelling) ctl.cancelled();
           else if (res.stopReason === 'end_turn') {
             const report = run.message.trim() || run.earlier;
             // agy can end a rejected turn without a report, so send the lead's reason in the next prompt.
@@ -235,6 +253,48 @@ export class AntigravityAdapter implements Adapter {
           this.prompt(peer, run, reasons.join('\n\n'));
         }
       });
+  }
+
+  /** Puts a session back in the mode where agy asks before edits and commands, or fails the job when it cannot. */
+  private async keepAsking(peer: RpcPeer, sessionId: string, response: any): Promise<void> {
+    const mode = sessionMode(response);
+    if (mode === undefined || mode === ASKING_MODE) return;
+    try {
+      await peer.request('session/set_mode', { sessionId, modeId: ASKING_MODE }, RPC_TIMEOUT_MS);
+    } catch (err) {
+      throw new Error(`Antigravity started the session in "${mode}" mode, where it does not ask before edits and commands, and refused to switch to "${ASKING_MODE}": ${(err as Error).message}`);
+    }
+  }
+
+  /**
+   * agy runs some actions without asking: commands that the user's own Antigravity allow rules cover, and file reads
+   * that its Non-Workspace Access setting permits. Crew sees them only once they have run, so it checks them against
+   * the role then. One that the role would refuse stops the turn; an engineer's command is the user's own rule, so it is reported.
+   */
+  private unasked(run: Run, call: ToolCall): void {
+    const { ctl } = run;
+    const { job } = ctl;
+    // A report without the input still names the action, and the user's rule has already allowed it.
+    const verdict = decide(job.kind, job.cwd, { ...call, rawInput: call.rawInput ?? call.title }, job.sandbox === 'read-only');
+    if (verdict === 'allow') return;
+    const what = `${call.kind ?? 'other'}: ${call.title ?? 'tool call'}`;
+    if (verdict === 'ask') {
+      ctl.progress(`ran without asking, under the user's Antigravity rules (${what})`);
+      ctl.note(`Antigravity ran an action without asking Crew, because a rule in the user's Antigravity settings allows it: ${what}`);
+      return;
+    }
+    const stop = CHANGING_KINDS.includes(call.kind ?? '') || verdict.refuse === 'the Crew token file';
+    const role = `${job.sandbox === 'read-only' ? 'read-only ' : ''}${ROLE_NAMES[job.kind]}`;
+    const reason = verdict.refuse === call.kind ? what : `${verdict.refuse}: ${what}`;
+    const message = `Antigravity ran an action outside the ${role} role without asking Crew (${reason}), because the user's Antigravity settings allow it.`;
+    ctl.progress(`${stop ? 'stopped' : 'reported'}: ${message}`);
+    if (!stop) {
+      ctl.note(message);
+      return;
+    }
+    if (run.violation) return;
+    run.violation = `${message} Crew stopped the turn. Narrow the matching allow rule or Non-Workspace Access in Antigravity's /permissions and /config, or give this role to another agent.`;
+    this.peer?.notify('session/cancel', { sessionId: job.sessionId });
   }
 
   private ensure(): Promise<RpcPeer> {
@@ -308,6 +368,7 @@ export class AntigravityAdapter implements Adapter {
         if (run.message.trim()) run.earlier = run.message.trim();
         run.message = '';
         ctl.progress(describeCall(update));
+        this.track(run, update);
         break;
       case 'tool_call_update':
         if (update.status === 'completed' && update.kind !== 'read') {
@@ -315,6 +376,17 @@ export class AntigravityAdapter implements Adapter {
         }
         if (update.status === 'failed') ctl.progress(`failed: ${update.title ?? 'tool call'}`);
         else ctl.activity();
+        this.track(run, update);
+        break;
+      case 'current_mode_update':
+        // The agent's own switch_mode is refused in onRequest; a switch that still lands is undone.
+        if (update.currentModeId && update.currentModeId !== ASKING_MODE) {
+          ctl.progress(`Antigravity switched to "${update.currentModeId}" mode; switching back to "${ASKING_MODE}"`);
+          this.keepAsking(this.peer!, p.sessionId, { modes: { currentModeId: update.currentModeId } }).catch((err) => {
+            if (!run.violation) run.violation = err.message;
+            this.peer?.notify('session/cancel', { sessionId: p.sessionId });
+          });
+        }
         break;
       case 'plan': {
         const step = update.entries?.find((e: any) => e.status === 'in_progress');
@@ -323,6 +395,20 @@ export class AntigravityAdapter implements Adapter {
       }
       default:
         ctl.activity();
+    }
+  }
+
+  /** Merges what agy reports about a tool call, and checks one that ran without coming to Crew first. */
+  private track(run: Run, update: any): void {
+    const id = update.toolCallId;
+    if (typeof id !== 'string') return;
+    const call = run.calls.get(id) ?? {};
+    for (const key of ['kind', 'title', 'locations', 'rawInput', '_meta'] as const) if (update[key] !== undefined) (call as any)[key] ??= update[key];
+    run.calls.set(id, call);
+    // agy reports a call as in progress before it asks, so only a finished one is known to have run unasked.
+    if ((update.status === 'completed' || update.status === 'failed') && !call.asked && !call.checked) {
+      call.checked = true;
+      this.unasked(run, call);
     }
   }
 
@@ -371,6 +457,10 @@ export class AntigravityAdapter implements Adapter {
     // Outside a turn there is nobody to act on an answer, and a queued request would never be settled.
     if (run && (run.cancelling || !run.prompting || isTerminal(run.ctl.job))) return cancelled;
     const toolCall = p.toolCall ?? {};
+    if (run && typeof toolCall.toolCallId === 'string') {
+      const call = run.calls.get(toolCall.toolCallId) ?? {};
+      run.calls.set(toolCall.toolCallId, { ...call, asked: true });
+    }
     const verdict = run ? decide(run.ctl.job.kind, run.ctl.job.cwd, toolCall, run.ctl.job.sandbox === 'read-only') : { refuse: 'unknown session' };
 
     let allow = verdict === 'allow';
@@ -400,6 +490,16 @@ export class AntigravityAdapter implements Adapter {
     // Without a matching option the answer is "cancelled", which grants nothing.
     return option ? { outcome: { outcome: 'selected', optionId: option.optionId } } : cancelled;
   }
+}
+
+function newRun(ctl: JobCtl): Run {
+  return { ctl, prompting: null, cancelling: false, message: '', earlier: '', pending: [], grants: new Set(), declined: [], calls: new Map() };
+}
+
+/** The session's mode, from ACP's modes or from a config option of the mode category. */
+function sessionMode(response: any): string | undefined {
+  const mode = response?.modes?.currentModeId ?? configOption(response, 'mode')?.currentValue;
+  return typeof mode === 'string' && mode ? mode : undefined;
 }
 
 function configOption(response: any, id: string): { currentValue?: unknown; options?: { value?: unknown }[] } | undefined {
@@ -558,7 +658,7 @@ function commandGrantKey({ program, subcommand, cwd }: Grant): string | undefine
  *   the user's call, provided the request says exactly what it will do.
  * - A read-only job changes nothing whatever its role: a question is answered by the engineer, with a reviewer's limits.
  */
-export function decide(role: JobKind, cwd: string, toolCall: { kind?: string; title?: string; locations?: { path?: string }[]; rawInput?: unknown; _meta?: { mcpServerName?: string; mcpToolName?: string } }, readOnly = false): 'allow' | 'ask' | { refuse: string } {
+export function decide(role: JobKind, cwd: string, toolCall: ToolCall, readOnly = false): 'allow' | 'ask' | { refuse: string } {
   if (toolCall._meta?.mcpServerName === 'crew' && ['ask_lead', 'lead_answers', 'siblings', 'search', 'recent_changes', 'rate'].includes(toolCall._meta.mcpToolName ?? '')) return 'allow';
   const kind = toolCall.kind ?? 'other';
   // The daemon's secret is not a worker's to read, whatever the role. Commands are the user's to approve as before.

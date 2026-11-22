@@ -32,6 +32,9 @@ let movedTo = '';
 let pending = 0;
 const stateFile = path.join(app.getPath('userData'), 'window.json');
 const asset = (name: string) => path.join(import.meta.dirname, name);
+/** The tray sits on the taskbar, which follows the Windows mode rather than the app mode the window follows. */
+const trayIcon = () =>
+  nativeImage.createFromPath(asset(nativeTheme.shouldUseDarkColorsForSystemIntegratedUI ? 'tray-white.png' : 'tray-black.png'));
 /** The window looks out of reach once it has been out of focus, or the system idle, this long; only then does an update download. */
 const AWAY_MS = 120_000;
 const CHECK_EVERY_MS = 6 * 3_600_000;
@@ -319,6 +322,7 @@ async function startDesktop() {
     callback(allowed(permission, URL.canParse(details.requestingUrl) ? new URL(details.requestingUrl).origin : '')));
   session.defaultSession.setPermissionCheckHandler((_contents, permission, origin) => allowed(permission, origin));
   nativeTheme.on('updated', () => {
+    tray?.setImage(trayIcon());
     if (!window || window.isDestroyed()) return;
     window.setBackgroundColor(frame().color);
     window.setTitleBarOverlay({ ...frame(), height: TOP_BAR_HEIGHT });
@@ -343,7 +347,7 @@ async function startDesktop() {
       }
     }
   }
-  tray = new Tray(nativeImage.createFromPath(asset('tray.png')));
+  tray = new Tray(trayIcon());
   tray.on('click', () => show());
   createWindow();
   trayMenu();

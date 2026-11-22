@@ -47,8 +47,13 @@ try {
   const images = [];
   for (const size of sizes) images.push(await render(appIcon, size));
   fs.writeFileSync(path.join(out, 'icon.png'), images.at(-1));
-  fs.writeFileSync(path.join(out, 'tray.png'), images[0]);
-  fs.writeFileSync(path.join(out, 'tray@2x.png'), images[2]);
+  // The tray takes the macOS menu bar mark as a flat glyph, in black or white to suit the taskbar (main.ts picks).
+  const mark = fs.readFileSync('assets/crew_menubar.svg', 'utf8');
+  for (const [name, color] of [['black', '#000000'], ['white', '#ffffff']]) {
+    const glyph = mark.replaceAll('fill="white"', `fill="${color}"`);
+    fs.writeFileSync(path.join(out, `tray-${name}.png`), await render(glyph, 16));
+    fs.writeFileSync(path.join(out, `tray-${name}@2x.png`), await render(glyph, 32));
+  }
   fs.writeFileSync(path.join(out, 'badge.png'), await render(badge, 16));
   const header = Buffer.alloc(6);
   header.writeUInt16LE(1, 2);

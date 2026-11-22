@@ -213,15 +213,20 @@ import Testing
         process.environment = ["PATH": "\(commands.path):/usr/bin:/bin", "SCENARIO": scenario, "OPEN_LOG": home.appending(path: "open.log").path]
         try process.run()
         process.waitUntilExit()
-        #expect(process.terminationStatus == (scenario == "success" ? 0 : 1))
-        #expect(try String(contentsOf: target.appending(path: version), encoding: .utf8) == (scenario == "success" ? "new" : "old"))
+        // Something already at the old backup name is not this run's: it neither stops the swap nor is touched by it.
+        let succeeds = scenario == "success" || scenario == "leftover-backup"
+        #expect(process.terminationStatus == (succeeds ? 0 : 1))
+        #expect(try String(contentsOf: target.appending(path: version), encoding: .utf8) == (succeeds ? "new" : "old"))
         if scenario == "leftover-backup" {
             #expect(try String(contentsOf: backup.appending(path: "sentinel"), encoding: .utf8) == "keep")
+        } else {
+            #expect(!FileManager.default.fileExists(atPath: backup.path))
         }
-        #expect(!FileManager.default.fileExists(atPath: backup.appending(path: "Crew.app").path))
+        // The run's own backup folder is gone whichever way it ended.
+        #expect(try FileManager.default.contentsOfDirectory(atPath: home.path).filter { $0.hasPrefix("Crew.app.previous.") }.isEmpty)
         #expect(!FileManager.default.fileExists(atPath: staged.path) && !FileManager.default.fileExists(atPath: work.path))
-        if scenario == "success" {
-            #expect(!FileManager.default.fileExists(atPath: backup.path) && !FileManager.default.fileExists(atPath: result.path))
+        if succeeds {
+            #expect(!FileManager.default.fileExists(atPath: result.path))
         } else {
             let reason = try String(contentsOf: result, encoding: .utf8)
             #expect(reason.split(separator: "\n").count == 1)

@@ -60,12 +60,20 @@ export function inlineMarkdown(text: string): InlineNode[] {
   }
   function delimiterBoundary(start: number, delimiter: string, opening: boolean): boolean {
     const length = delimiter.length;
-    if (text[start - 1] === delimiter[0] || text[start + length] === delimiter[0]) return false;
     if (delimiter[0] === '*') {
+      if (length === 1) {
+        // A lone asterisk is never half of a `**`. In a run of three it stands by itself, after or before the pair.
+        let from = start;
+        let to = start;
+        while (text[from - 1] === '*') from--;
+        while (text[to + 1] === '*') to++;
+        if (to - from === 1) return false;
+      }
       // A wildcard starting a path component can have non-space characters on both sides.
       if (/[/\\]/.test(text[start - 1] ?? '') && /\S/u.test(text[start + length] ?? '')) return false;
       return /\S/u.test(text[opening ? start + length : start - 1] ?? '');
     }
+    if (text[start - 1] === delimiter[0] || text[start + length] === delimiter[0]) return false;
     // Only the neighboring code points matter; two code units cover a surrogate pair.
     const before = Array.from(text.slice(Math.max(0, start - 2), start)).at(-1) ?? '';
     const after = Array.from(text.slice(start + length, start + length + 2))[0] ?? '';

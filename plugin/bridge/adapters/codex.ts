@@ -153,15 +153,18 @@ export class CodexAdapter implements Adapter {
   }
 
   async reply(ctl: JobCtl, message: string): Promise<void> {
+    // Starting the server, reading the settings or a resume can outlast a cancel and the next reply; only the turn
+    // that asked may go on to send its message.
+    const turn = ctl.job.turns;
     const peer = await this.ensure();
+    if (ctl.job.turns !== turn) return;
     const threadId = ctl.job.sessionId!;
     let pluginsEnabled = this.runs.get(threadId)?.pluginsEnabled ?? false;
     if (!this.loaded.has(threadId)) {
       const params = await this.threadParams(ctl, peer);
+      if (ctl.job.turns !== turn) return;
       ctl.capabilities(capabilitiesOf(ctl.job, params));
       const resume = () => peer.request('thread/resume', { threadId, ...params, excludeTurns: true }, THREAD_TIMEOUT_MS);
-      // A resume can outlast a cancel and the next reply; only the turn that asked for it may go on to send its message.
-      const turn = ctl.job.turns;
       this.resuming.add(threadId);
       this.opening.add(ctl.job.id);
       // `tidy` archives a worker's thread after a week; a reply to that job brings it back.

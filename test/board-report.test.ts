@@ -125,6 +125,12 @@ test('asterisk bullets, file globs and unmatched runs stay literal beside emphas
   for (const text of ['* item one\n* item two', 'src/*.ts and test/*.ts', 'src\\*.ts and test\\*.ts', '**unpaired*', '*word *']) {
     assert.deepEqual(inlineMarkdown(text), [plain(text)]);
   }
+  // A run of three is a pair and a single: emphasis that touches other emphasis still formats.
+  assert.deepEqual(inlineMarkdown('**bold***italic* and *a**b**c*'), [
+    { type: 'strong', children: [plain('bold')] }, { type: 'em', children: [plain('italic')] }, plain(' and '),
+    { type: 'em', children: [plain('a'), { type: 'strong', children: [plain('b')] }, plain('c')] },
+  ]);
+  assert.deepEqual(inlineMarkdown('***Important:*** read'), [{ type: 'strong', children: [plain('*Important:')] }, plain('* read')]);
   assert.deepEqual(inlineMarkdown('* item one\n* *italic* and **bold**'), [
     plain('* item one\n* '), { type: 'em', children: [plain('italic')] }, plain(' and '),
     { type: 'strong', children: [plain('bold')] },

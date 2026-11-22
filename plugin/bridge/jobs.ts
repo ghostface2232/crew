@@ -497,7 +497,7 @@ export function isTerminal(job: Job): boolean {
   return TERMINAL.includes(job.state);
 }
 
-/** jobs.json exists but could not be read as a ledger. Nothing was changed; the caller decides what becomes of the file. */
+/** jobs.json was read but does not hold a ledger. Nothing was changed; the caller decides what becomes of the file. */
 export class UnreadableLedger extends Error {}
 
 export class Jobs {
@@ -985,6 +985,7 @@ export class Jobs {
         }
       }
       await adapter.reply(ctl, message);
+      if (job.turns !== turn) return job;
       for (const round of untold) {
         if (round.state === 'undone') round.toldWorker = 'undone';
         else delete round.toldWorker;
@@ -1773,11 +1774,18 @@ export class Jobs {
 
   private load(): void {
     const file = path.join(this.home, 'jobs.json');
-    let saved: { seq: number; jobs: Job[]; delivery?: DeliveryState; pulls?: unknown } | null;
+    let text: string;
     try {
-      saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+      text = fs.readFileSync(file, 'utf8');
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
+      // The file may be whole and only out of reach for now (permissions, a scanner holding it): not a ledger to set aside.
+      throw new Error(`Could not read ${file}, so it was left untouched: ${(err as Error).message}`);
+    }
+    let saved: { seq: number; jobs: Job[]; delivery?: DeliveryState; pulls?: unknown } | null;
+    try {
+      saved = JSON.parse(text);
+    } catch (err) {
       // Starting empty here would have the next save write that emptiness over every job on record.
       throw new UnreadableLedger(`Could not load ${file}, so it was left untouched: ${(err as Error).message}`);
     }
@@ -1831,7 +1839,9 @@ export class Jobs {
     }
     // No turn survives a restart, so neither does any scratch.
     this.removeScratch(path.join(this.home, 'scratch'));
-    // Evidence lives as long as its job's record.
+    // Evidence lives as long as its job's record. A ledger that was set aside still names its jobs' evidence, so
+    // nothing is removed until the user has dealt with that file.
+    if (fs.readdirSync(this.home).some((name) => name.startsWith('jobs.json.unreadable-'))) return;
     const evidence = path.join(this.home, 'evidence');
     for (const id of fs.existsSync(evidence) ? fs.readdirSync(evidence) : []) {
       if (!this.jobs.has(id)) this.removeScratch(path.join(evidence, id));

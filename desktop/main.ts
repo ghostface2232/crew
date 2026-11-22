@@ -536,10 +536,11 @@ async function handOver() {
     // Paths travel in the environment, never in the script text.
     const supervise = `try { ${installScript} } catch {
       $reason = $_.Exception.Message
-      Add-Type -AssemblyName System.Windows.Forms
-      [void][System.Windows.Forms.MessageBox]::Show($reason, 'Crew could not update', 'OK', 'Error')
+      # Crew comes back first: the alert can open behind other windows, and must not keep Crew closed meanwhile.
       Wait-Process -Id $env:CREW_PARENT_PID -ErrorAction SilentlyContinue
       if (Test-Path -LiteralPath $env:CREW_APP) { Start-Process -FilePath $env:CREW_APP }
+      Add-Type -AssemblyName System.Windows.Forms
+      [void][System.Windows.Forms.MessageBox]::Show($reason, 'Crew could not update', 'OK', 'Error')
     }`;
     // The supervisor must outlive the app, so it is detached: a child that is not is killed with the app (libuv's job).
     // But a detached PowerShell has no console and exits without running its script, so a detached cmd starts it in a

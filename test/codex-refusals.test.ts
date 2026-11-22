@@ -89,6 +89,24 @@ test('replies to loaded threads with shared links start a turn without resuming'
   assert.deepEqual(calls, ['turn/start']);
 });
 
+test('a reply held up while the server starts sends nothing once the job has moved to another turn', async (t) => {
+  const h = harness(false);
+  const calls: string[] = [];
+  const started = Promise.withResolvers<{ request: (method: string) => Promise<unknown> }>();
+  t.mock.method(h.internal, 'ensure', () => started.promise);
+  t.mock.method(h.internal, 'threadParams', async () => ({}));
+  h.internal.loaded.add('parent');
+  h.job.turns = 2;
+  const stale = h.adapter.reply(h.ctl as any, 'A');
+  // Cancelled, and followed by turn 3, before the server was up.
+  h.job.turns = 3;
+  started.resolve({ request: async (method) => { calls.push(method); return { turn: { id: 'next' } }; } });
+  await stale;
+  assert.deepEqual(calls, []);
+  await h.adapter.reply(h.ctl as any, 'B');
+  assert.deepEqual(calls, ['turn/start']);
+});
+
 test('Codex approvals show bounded action details without protocol ids or environment fields', async () => {
   const h = harness();
   const env = { SECRET_TOKEN: 'never-print-this' };

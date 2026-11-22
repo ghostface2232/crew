@@ -29,7 +29,7 @@ plugin/bridge/mcp.ts ──HTTP──▶ Crew Daemon (127.0.0.1:47615)
 - TypeScript runs directly via Node.js 22.18+ type stripping. The bridge has zero runtime dependencies and no build step.
 - The bridge implements MCP directly without the official SDK because it only needs lifecycle, tools, progress, elicitation, and cancellation.
 - The event log is JSONL (`~/.crew/events.jsonl`). Jobs, delivery state, and PR watches live in `~/.crew/jobs.json`. Missions live in `~/.crew/missions.json`.
-- A `jobs.json` that exists but cannot be read as a ledger is never saved over: the daemon moves it to `jobs.json.unreadable-<time>` and starts with no jobs, and does not start at all if the file cannot be moved. Evidence of the jobs in the moved file is kept for that run.
+- A `jobs.json` that does not parse as a ledger is never saved over: the daemon moves it to `jobs.json.unreadable-<time>` and starts with no jobs. It does not start at all if the file cannot be read (permissions, I/O) or cannot be moved. While a `jobs.json.unreadable-*` file is in `~/.crew`, no job evidence is removed, so restoring that file brings its jobs back whole.
 - Text cut by length on its way into saved or broadcast state goes through `clip` and `clipEnd` in `plugin/bridge/text.ts`, which never leave half of a surrogate pair: the macOS app's JSON decoder refuses a lone half, and the whole state with it.
 - Codex thread start and resume time out after 3 minutes (`THREAD_TIMEOUT_MS`) because Windows sandbox ACL setup can exceed a minute under load. Other RPC calls time out after 30 seconds (`RPC_TIMEOUT_MS`). Stall probes report opening threads as working.
 - The suspected stall timeout is set by [`stallSeconds`](delivery.md#stalls) in `~/.crew/config.json`.

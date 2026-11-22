@@ -394,12 +394,12 @@ enum Releases {
     if kill -0 "$pid" 2>/dev/null; then
         fail "Crew did not quit within 60 seconds." no
     fi
-    backup="$target.previous"
     if ! /usr/bin/codesign "$@" "$staged"; then
         fail "Could not verify the staged Crew app."
     fi
-    if ! mkdir "$backup"; then
-        fail "Could not reserve the update backup at $backup."
+    # A folder of this run's own: nothing already there is touched, and one left by a failed run cannot stop the next.
+    if ! backup=$(/usr/bin/mktemp -d "$target.previous.XXXXXX"); then
+        fail "Could not make a folder beside Crew for the update backup."
     fi
     previous="$backup/${target##*/}"
     if ! mv "$target" "$previous"; then
@@ -407,13 +407,13 @@ enum Releases {
         fail "Could not back up the installed Crew app."
     fi
     if ! mv "$staged" "$target"; then
-        mv "$previous" "$target" || fail "Could not restore Crew from its backup." no
+        mv "$previous" "$target" || fail "Could not restore Crew; the previous app is at $previous." no
         rmdir "$backup"
         fail "Could not move the updated Crew app into place."
     fi
     if ! open "$target" --args --updated; then
-        mv "$target" "$staged" || fail "Could not move the failed update aside; the previous Crew app is in its backup." no
-        mv "$previous" "$target" || fail "Could not restore Crew from its backup." no
+        mv "$target" "$staged" || fail "Could not move the failed update aside; the previous Crew app is at $previous." no
+        mv "$previous" "$target" || fail "Could not restore Crew; the previous app is at $previous." no
         rmdir "$backup"
         fail "The updated Crew app could not open."
     fi

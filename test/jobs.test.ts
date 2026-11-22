@@ -2740,6 +2740,22 @@ test('a job ledger that cannot be read is left as it is, not replaced by an empt
   const jobs = new Jobs(home, () => config, {} as never, quiet);
   assert.deepEqual(jobs.list(), []);
   jobs.flush();
+  // A file that is there but out of reach is not a broken ledger: nothing may set it aside.
+  fs.rmSync(path.join(home, 'jobs.json'));
+  fs.mkdirSync(path.join(home, 'jobs.json'));
+  assert.throws(() => new Jobs(home, () => config, {} as never, quiet), (err: Error) => err.constructor === Error && /left untouched/.test(err.message));
+  fs.rmdirSync(path.join(home, 'jobs.json'));
+  // Evidence of the jobs in a ledger that was set aside stays until that file is gone.
+  const aside = path.join(home, 'jobs.json.unreadable-1');
+  const evidence = path.join(home, 'evidence', 'cx-kept');
+  fs.writeFileSync(aside, '{broken');
+  fs.mkdirSync(evidence, { recursive: true });
+  new Jobs(home, () => config, {} as never, quiet).flush();
+  new Jobs(home, () => config, {} as never, quiet).flush();
+  assert.equal(fs.existsSync(evidence), true);
+  fs.rmSync(aside);
+  new Jobs(home, () => config, {} as never, quiet).flush();
+  assert.equal(fs.existsSync(evidence), false);
   fs.rmSync(home, { recursive: true, force: true });
 });
 

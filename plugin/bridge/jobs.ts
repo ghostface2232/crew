@@ -1769,6 +1769,8 @@ export class Jobs {
     this.delivery.restore(saved.delivery);
     this.hooks.pulls?.restore(saved.pulls);
     for (const job of saved.jobs) {
+      // The diff text lived in the previous bridge.
+      delete job.liveDiff;
       const legacy = job.news === undefined;
       job.news ??= [];
       job.newsSeq ??= 0;

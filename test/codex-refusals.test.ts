@@ -7,7 +7,7 @@ import { CodexAdapter } from '../plugin/bridge/adapters/codex.ts';
 import { resolveConfig } from '../plugin/bridge/config.ts';
 import type { Job } from '../plugin/bridge/jobs.ts';
 
-function harness() {
+function harness(working = true) {
   const adapter = new CodexAdapter(resolveConfig({}));
   const refusals: { action: string; reason: string }[] = [];
   const notes: string[] = [];
@@ -21,6 +21,7 @@ function harness() {
   const internal = adapter as any;
   internal.openRun(ctl, 'parent', true);
   const notify = (method: string, params: object) => internal.onNotification(method, { threadId: 'parent', turnId: 'turn', ...params });
+  if (working) notify('turn/started', { turn: { id: 'turn' } });
   const request = (method: string, params: object) => internal.onRequest(method, { threadId: 'parent', turnId: 'turn', ...params }, 1);
   return { adapter, internal, ctl, job, refusals, notes, waiting, notify, request };
 }
@@ -43,6 +44,7 @@ test('MCP refusals correlate targetItemId with started input, including child th
   h.notify('item/autoApprovalReview/completed', { targetItemId: 'missing', action, review: { status: 'denied' } });
   assert.match(h.refusals[2].action, /input missing/i);
   h.notify('turn/completed', { turn: { id: 'turn', status: 'completed' } });
+  h.notify('turn/started', { turn: { id: 'next-turn' } });
   h.notify('item/autoApprovalReview/completed', { turnId: 'next-turn', targetItemId: 'same-id', action, review: { status: 'denied' } });
   assert.match(h.refusals[3].action, /input missing/i, 'ended turns must not supply stale input');
 });
@@ -77,7 +79,7 @@ test('broken shared links keep their own read rule without preventing thread par
 });
 
 test('replies to loaded threads with shared links start a turn without resuming', async (t) => {
-  const h = harness();
+  const h = harness(false);
   const calls: string[] = [];
   t.mock.method(h.internal, 'ensure', async () => ({ request: async (method: string) => { calls.push(method); return { turn: { id: 'next' } }; } }));
   t.mock.method(h.internal, 'threadParams', async () => ({}));
@@ -256,4 +258,74 @@ test('a running turn\'s diff is passed on only for the current turn', () => {
   h.notify('turn/diff/updated', { diff: 'diff --git a/x b/x' });
   h.notify('turn/diff/updated', { turnId: 'old-turn', diff: 'stale' });
   assert.deepEqual(diffs, ['diff --git a/x b/x']);
+});
+
+test('a confirmed turn ignores stale reroutes and context, and cumulative tokens never go backwards', () => {
+  const h = harness(false);
+  Object.assign(h.ctl, {
+    model: (name: string) => { h.job.resolvedModel = name; },
+    tokens: (total: number) => { h.job.tokens = total; },
+    context: (used: number, size: number) => { h.job.context = { used, size }; },
+  });
+  h.notify('turn/started', { turn: { id: 'two' } });
+  const usage = (turnId: string | undefined, totalTokens: number, used: number) => h.notify('thread/tokenUsage/updated', {
+    turnId, tokenUsage: { total: { totalTokens }, last: { totalTokens: used }, modelContextWindow: 1000 },
+  });
+  h.notify('model/rerouted', { turnId: 'two', toModel: 'current' });
+  usage('two', 160, 60);
+  h.notify('model/rerouted', { turnId: 'one', toModel: 'old' });
+  usage('one', 110, 10);
+  assert.equal(h.job.resolvedModel, 'current');
+  assert.equal(h.notes.length, 1);
+  assert.deepEqual(h.job.context, { used: 60, size: 1000 });
+  assert.equal(h.job.tokens, 160);
+  usage(undefined, 120, 20);
+  assert.equal(h.job.tokens, 160);
+  usage('one', 170, 70);
+  assert.equal(h.job.tokens, 160);
+  assert.deepEqual(h.job.context, { used: 60, size: 1000 });
+  usage(undefined, 180, 80);
+  assert.deepEqual(h.job.context, { used: 80, size: 1000 });
+});
+
+test('notifications before the turn/start reply apply only to a turn that has not ended', async () => {
+  const h = harness();
+  const diffs: string[] = [];
+  Object.assign(h.ctl, { diff: (text: string) => diffs.push(text) });
+  h.notify('turn/completed', { turn: { id: 'turn', status: 'completed' } });
+  const start = Promise.withResolvers<unknown>();
+  h.internal.peer = { alive: true, request: () => start.promise };
+  h.internal.loaded.add('parent');
+  const follow = h.adapter.reply(h.ctl as any, 'again');
+  await new Promise((resolve) => setImmediate(resolve));
+  h.notify('turn/diff/updated', { turnId: 'turn', diff: 'stale' });
+  h.notify('turn/completed', { turn: { id: 'turn', status: 'completed' } });
+  h.notify('turn/diff/updated', { turnId: 'new', diff: 'new' });
+  start.resolve({ turn: { id: 'new' } });
+  await follow;
+  h.notify('turn/diff/updated', { turnId: 'new', diff: 'confirmed' });
+  assert.deepEqual(diffs, ['new', 'confirmed']);
+});
+
+test('a late start acknowledgement cannot confirm a later pending turn', async () => {
+  const h = harness(false);
+  const starts = [Promise.withResolvers<unknown>(), Promise.withResolvers<unknown>()];
+  let index = 0;
+  h.internal.peer = { alive: true, request: () => starts[index++].promise };
+  h.internal.loaded.add('parent');
+  const diffs: string[] = [];
+  Object.assign(h.ctl, { diff: (text: string) => diffs.push(text) });
+  const first = h.adapter.reply(h.ctl as any, 'first');
+  await new Promise((resolve) => setImmediate(resolve));
+  h.notify('turn/started', { turn: { id: 'one' } });
+  h.notify('turn/completed', { turn: { id: 'one', status: 'completed' } });
+  const second = h.adapter.reply(h.ctl as any, 'second');
+  await new Promise((resolve) => setImmediate(resolve));
+  starts[0].resolve({ turn: { id: 'one' } });
+  await first;
+  h.notify('turn/diff/updated', { turnId: 'one', diff: 'stale' });
+  starts[1].resolve({ turn: { id: 'two' } });
+  await second;
+  h.notify('turn/diff/updated', { turnId: 'two', diff: 'current' });
+  assert.deepEqual(diffs, ['current']);
 });

@@ -473,6 +473,11 @@ function FollowUp({ job }: { job: BoardJob }) {
   );
 }
 
+export function drawerJob(detail: BoardJob | null, current?: BoardJob): BoardJob | undefined {
+  if (!detail || !current) return current ?? detail ?? undefined;
+  return { ...detail, ...current, prompt: detail.prompt ?? current.prompt, liveDiff: current.liveDiff };
+}
+
 /** JobDetailView in the app: status and close, then the job, its facts, results and controls. */
 export function JobDrawer({ id, state, close }: { id: string; state: Snapshot; close: () => void }) {
   const current = state.jobs.find((job) => job.id === id);
@@ -491,7 +496,7 @@ const JobDetails = memo(function JobDetails({ id, current, streamLog, agents, ro
   const [log, setLog] = useState<CrewEvent[]>([]);
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
-  const job = detail ? { ...detail, ...current, prompt: detail.prompt ?? current?.prompt } : current;
+  const job = drawerJob(detail, current);
   const cancelKey = `cancel:${id}:${job?.turns ?? 1}`;
   const cancelling = useAction(cancelKey);
   useEffect(() => {

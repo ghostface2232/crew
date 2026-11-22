@@ -72,7 +72,7 @@ export const NavList = memo(function NavList({ label, heading, items, current, o
             onClick={() => onSelect(item.id)}
           >
             <Icon icon={item.icon} filled={current === item.id} />
-            <NavLabel label={item.label} />
+            <NavLabel label={item.label} current={current === item.id} />
             {item.dot && <i className="nav-dot" data-state={item.dot} aria-hidden="true" />}
             {item.count ? <span className="nav-count" aria-label={`${item.count} waiting`}>{item.count}</span> : null}
             {shortcut && !item.count && <kbd className="nav-key" aria-hidden="true">{index + 1}</kbd>}
@@ -84,8 +84,8 @@ export const NavList = memo(function NavList({ label, heading, items, current, o
 });
 
 /** An item's name, fading at its end instead of widening the sidebar when it is too long for it. */
-function NavLabel({ label }: { label: string }) {
-  const fade = useFade<HTMLSpanElement>(label);
+function NavLabel({ label, current }: { label: string; current: boolean }) {
+  const fade = useFade<HTMLSpanElement>(label, current);
   return <span className="nav-label fade-line" ref={fade}>{label}</span>;
 }
 

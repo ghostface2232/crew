@@ -426,8 +426,6 @@ function Pills<T extends string>({ label, value, options, onChange }: { label: s
   );
 }
 
-const eventDays = new WeakMap<CrewEvent, string>();
-
 export const Activity = memo(function Activity({ events, jobs, missions, openJob }: Pick<Snapshot, 'events' | 'jobs' | 'missions'> & Pick<Scope, 'openJob'>) {
   const [agent, setAgent] = useState('');
   // Days, newest first, each under its own sticky heading.
@@ -437,11 +435,7 @@ export const Activity = memo(function Activity({ events, jobs, missions, openJob
     for (const event of events) {
       counts.set(event.agent, (counts.get(event.agent) ?? 0) + 1);
       if (agent && event.agent !== agent) continue;
-      let day = eventDays.get(event);
-      if (day === undefined) {
-        day = formatDate(longDay, new Date(event.ts));
-        eventDays.set(event, day);
-      }
+      const day = formatDate(longDay, new Date(event.ts));
       const list = days.get(day);
       if (list) list.push(event);
       else days.set(day, [event]);

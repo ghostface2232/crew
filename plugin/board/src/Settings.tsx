@@ -18,8 +18,8 @@ import styles from './Settings.module.css';
 
 /** The app's one-line summary of a preset. */
 /** A sidebar item's name, fading at its end when it is too long for the sidebar. */
-function ItemTitle({ text }: { text: string }) {
-  const fade = useFade<HTMLSpanElement>(text);
+function ItemTitle({ text, current }: { text: string; current: boolean }) {
+  const fade = useFade<HTMLSpanElement>(text, current);
   return <span className={`${styles.itemTitle} fade-line`} ref={fade}>{text}</span>;
 }
 
@@ -386,7 +386,7 @@ export function Settings({ state, update, close }: { state: Snapshot; update: Ap
         title={dir ?? undefined}
       >
         <span className={styles.tile} style={{ background: page?.tint ?? PROJECT_TINT }}><Icon icon={page?.icon ?? Folder16Regular} /></span>
-        <ItemTitle text={page?.title ?? names.get(dir!) ?? dir!} />
+        <ItemTitle text={page?.title ?? names.get(dir!) ?? dir!} current={current === id} />
         <Icon icon={ChevronRightRegular} className={styles.chevron} />
       </button>
     );

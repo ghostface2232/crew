@@ -8,7 +8,6 @@ import {
 } from '@fluentui/react-icons';
 import type { FluentIcon } from '@fluentui/react-icons';
 import { board } from './store.ts';
-import type { Snapshot } from './types.ts';
 import { formatDate, longDay } from './dates.ts';
 import { knownProjects, projectNames, projectOf } from './model.ts';
 import { AskHost, ClockProvider, CopyMenu, Icon, PANEL_EXIT_MS, PanelLeavingContext, RollingNumber, useLinger, useStableItems } from './ui.tsx';
@@ -157,14 +156,7 @@ export function App() {
   const notifier = useRef<Notifier>(null);
   notifier.current ??= new Notifier();
   notifier.current.onOpen = (id) => id && show(id);
-  // A request can appear and be answered between two paints.
-  const notificationStates = useRef<Snapshot[]>([]);
-  useEffect(() => board.connect(undefined, (snapshot) => notificationStates.current.push(snapshot)), []);
-  useEffect(() => {
-    const snapshots = notificationStates.current;
-    notificationStates.current = [];
-    for (const snapshot of snapshots) notifier.current!.update(snapshot, document.hasFocus());
-  }, [state]);
+  useEffect(() => board.connect(undefined, notifier.current!), []);
   // Shortcuts that stay clear of the browser's: ⌘K or / to search, N for a new job, 1–4 for the pages.
   const keys = useRef<(event: KeyboardEvent) => void>(null);
   keys.current = (event) => {

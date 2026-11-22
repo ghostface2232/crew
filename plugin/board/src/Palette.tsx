@@ -73,7 +73,7 @@ export function Palette({ state, names, projects, origin, close, actions }: {
   const anchor = below ? undefined : origin;
   const { jobs, claude, missions, roleInfo } = state;
   const notifyState = useClock(notificationPermission);
-  const notifyOn = useClock(notificationsWanted, notifyState === 'granted');
+  const notifyOn = useClock(() => notifyState === 'granted' && notificationsWanted(), notifyState === 'granted');
   const entries = useMemo(() => {
     const list: Entry[] = [];
     list.push({

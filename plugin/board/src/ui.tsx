@@ -860,28 +860,23 @@ export function CopyMenu({ text, label, children }: { text: string; label: strin
  * A ref for one line of text that fades at its end only when it is cut, as the app's fadeTruncated does; text
  * that fits keeps every letter.
  */
-export function useFade<T extends HTMLElement>(text: string) {
-  const measurement = useRef<{ check: () => void; text: string | null }>(null);
+export function useFade<T extends HTMLElement>(text: string, current?: boolean) {
+  const measurement = useRef<(() => void) | null>(null);
   useLayoutEffect(() => {
-    if (measurement.current?.text !== text) measurement.current?.check();
-  }, [text]);
+    measurement.current?.();
+  }, [text, current]);
   return useCallback((element: T | null) => {
     if (!element) return;
-    const current = {
-      text: null as string | null,
-      check: () => {
-        current.text = element.textContent;
-        element.toggleAttribute('data-cut', element.scrollWidth > element.clientWidth + 1);
-      },
+    const check = () => {
+      element.toggleAttribute('data-cut', element.scrollWidth > element.clientWidth + 1);
     };
-    const observer = new ResizeObserver(current.check);
+    const observer = new ResizeObserver(check);
     const fonts = document.fonts;
-    measurement.current = current;
+    measurement.current = check;
     observer.observe(element);
-    fonts?.addEventListener('loadingdone', current.check);
-    current.check();
+    fonts?.addEventListener('loadingdone', check);
     return () => {
-      fonts?.removeEventListener('loadingdone', current.check);
+      fonts?.removeEventListener('loadingdone', check);
       observer.disconnect();
       measurement.current = null;
     };

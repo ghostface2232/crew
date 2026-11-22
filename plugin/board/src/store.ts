@@ -1,5 +1,6 @@
 import type { BoardJob, BoardPull, BoardState, ClaudeSession, CrewEvent, Mission, Snapshot } from './types.ts';
 import { onUnauthorized, stream } from './api.ts';
+import type { Notifier } from './notify.ts';
 
 const replace = <T extends { id: string }>(items: T[], next: T) =>
   items.some((item) => item.id === next.id)
@@ -165,7 +166,7 @@ export class BoardStore {
   private reconnect?: () => void;
   retry = () => this.reconnect?.();
   signOut = () => this.update({ connection: 'unauthorized' });
-  connect(read = stream, onNotificationState?: (state: Snapshot) => void) {
+  connect(read = stream, notifier?: Pick<Notifier, 'update'>) {
     let generation = 0;
     let controller: AbortController | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -189,8 +190,8 @@ export class BoardStore {
             const previous = this.snapshot;
             const value: unknown = JSON.parse(data);
             this.receive(type, value);
-            if (onNotificationState && this.snapshot.connection === 'live' && notificationsChanged(type, value, previous)) {
-              onNotificationState(this.snapshot);
+            if (notifier && this.snapshot.connection === 'live' && notificationsChanged(type, value, previous)) {
+              notifier.update(this.snapshot, document.hasFocus());
             }
           } catch {
             this.update({ connection: 'lost' });

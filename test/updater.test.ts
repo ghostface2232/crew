@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -63,6 +64,63 @@ function updater(dir: string, current = '0.2.0') {
   return { instance, seen };
 }
 const tempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'crew-updater-'));
+
+test('hand-over retains the digest verified at load even if the staged files change', async () => {
+  const dir = tempDir();
+  try {
+    const file = path.join(dir, installerName('0.3.0'));
+    const manifest = path.join(dir, 'staged.json');
+    fs.writeFileSync(file, payload);
+    fs.writeFileSync(manifest, JSON.stringify({ version: '0.3.0', sha256: sha(payload) }));
+    const { instance } = updater(dir);
+    await instance.load();
+    fs.writeFileSync(file, 'changed');
+    fs.writeFileSync(manifest, JSON.stringify({ version: '0.3.0', sha256: sha('changed') }));
+    assert.ok(instance.installing());
+    assert.equal(instance.installerSHA256, sha(payload));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the Windows supervisor verifies every installer launch, including interactive recovery', { skip: process.platform !== 'win32' }, async () => {
+  const { installScript } = await import('../desktop/updater.ts');
+  const dir = tempDir();
+  try {
+    const file = path.join(dir, 'installer.exe');
+    for (const scenario of ['intact', 'changed', 'recovery', 'changed-before-recovery']) {
+      fs.writeFileSync(file, scenario === 'changed' ? 'changed' : payload);
+      // Record launches without executing the fixture. WaitForExit can change it before the fallback.
+      const script = `
+        function Start-Process($FilePath, $ArgumentList, [switch]$PassThru, $ErrorAction) {
+          [Console]::WriteLine('launch')
+          $p = [PSCustomObject]@{ Handle = 0; ExitCode = 0 }
+          $p | Add-Member ScriptMethod WaitForExit {
+            if ($env:SCENARIO -eq 'recovery') { $this.ExitCode = 1 }
+            if ($env:SCENARIO -eq 'changed-before-recovery') {
+              [IO.File]::WriteAllText($env:CREW_INSTALLER, 'changed')
+              $this.ExitCode = 1
+            }
+          }
+          if ($PassThru) { return $p }
+        }
+        try { ${installScript} } catch { [Console]::WriteLine($_.Exception.Message); exit 1 }
+      `;
+      const run = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], {
+        env: { ...process.env, CREW_INSTALLER: file, CREW_INSTALLER_SHA256: sha(payload), CREW_APP: path.join(dir, 'missing.exe'), SCENARIO: scenario },
+        encoding: 'utf8',
+      });
+      assert.ifError(run.error);
+      const changed = scenario.startsWith('changed');
+      assert.equal(run.status, changed ? 1 : 0, run.stderr);
+      const launches = run.stdout.match(/^launch\r?$/gm)?.length ?? 0;
+      assert.equal(launches, { intact: 1, changed: 0, recovery: 2, 'changed-before-recovery': 1 }[scenario]);
+      if (changed) assert.match(run.stdout, /could not verify the update/i);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test('a check during load cannot remove the installer being restored', async () => {
   const dir = tempDir();
@@ -135,6 +193,7 @@ test('downloads allow ongoing data and time out on missing headers or stalled bo
         await downloading;
         if (scenario === 'slow') {
           assert.equal(instance.status.state, 'ready');
+          assert.equal(instance.installerSHA256, sha(bytes));
           assert.deepEqual(fs.readFileSync(instance.installer!), bytes);
           t.mock.timers.tick(60_000);
           assert.equal(signal!.aborted, false);

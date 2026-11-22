@@ -41,13 +41,31 @@ export function reportBlocks(text: string): ReportBlock[] {
 
 export function inlineMarkdown(text: string): InlineNode[] {
   const nodes: InlineNode[] = [];
+  const labels = new Map<number, number>();
+  if (text.includes('](')) {
+    const brackets: number[] = [];
+    // Brackets inside inline code belong to the code, even inside a link label.
+    for (const match of text.matchAll(/`[^`]+`|\[|\]/g)) {
+      if (match[0] === '[') brackets.push(match.index);
+      if (match[0] === ']') {
+        const start = brackets.pop();
+        if (start !== undefined && text[match.index + 1] === '(') labels.set(start, match.index);
+      }
+    }
+  }
   function plain(value: string) {
     const last = nodes.at(-1);
     if (last?.type === 'text') last.text += value;
     else nodes.push({ type: 'text', text: value });
   }
-  function underscoreBoundary(start: number, length: number, opening: boolean): boolean {
-    if (text[start - 1] === '_' || text[start + length] === '_') return false;
+  function delimiterBoundary(start: number, delimiter: string, opening: boolean): boolean {
+    const length = delimiter.length;
+    if (text[start - 1] === delimiter[0] || text[start + length] === delimiter[0]) return false;
+    if (delimiter[0] === '*') {
+      // A wildcard starting a path component can have non-space characters on both sides.
+      if (/[/\\]/.test(text[start - 1] ?? '') && /\S/u.test(text[start + length] ?? '')) return false;
+      return /\S/u.test(text[opening ? start + length : start - 1] ?? '');
+    }
     // Only the neighboring code points matter; two code units cover a surrogate pair.
     const before = Array.from(text.slice(Math.max(0, start - 2), start)).at(-1) ?? '';
     const after = Array.from(text.slice(start + length, start + length + 2))[0] ?? '';
@@ -69,8 +87,8 @@ export function inlineMarkdown(text: string): InlineNode[] {
       }
     }
     if (text[i] === '[') {
-      const labelEnd = text.indexOf('](', i + 1);
-      if (labelEnd !== -1) {
+      const labelEnd = labels.get(i);
+      if (labelEnd !== undefined) {
         let end = labelEnd + 2;
         let depth = 1;
         for (; end < text.length; end++) {
@@ -90,10 +108,10 @@ export function inlineMarkdown(text: string): InlineNode[] {
       }
     }
     const delimiter = ['**', '__', '*', '_'].find((value) => text.startsWith(value, i)
-      && (value[0] !== '_' || underscoreBoundary(i, value.length, true)));
+      && delimiterBoundary(i, value, true));
     if (delimiter) {
       let end = text.indexOf(delimiter, i + delimiter.length);
-      while (end !== -1 && delimiter[0] === '_' && !underscoreBoundary(end, delimiter.length, false)) {
+      while (end !== -1 && !delimiterBoundary(end, delimiter, false)) {
         end = text.indexOf(delimiter, end + 1);
       }
       if (end > i + delimiter.length) {

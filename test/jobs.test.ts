@@ -450,9 +450,10 @@ test('a worktree job can be continued as soon as its result is published', async
 
 test('jobs left running by a previous bridge are restored as failed but resumable', async () => {
   const repo = tempRepo();
-  const first = harness(() => {});
+  const first = harness((ctl) => ctl.diff('pending diff'));
   const job = await first.jobs.create({ kind: 'review', cwd: repo, review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } });
   await first.jobs.wait(job.id, 0, 100);
+  assert.ok(job.liveDiff);
   first.jobs.flush();
   // As saved by a bridge from before jobs recorded their project.
   const file = path.join(first.home, 'jobs.json');
@@ -463,6 +464,8 @@ test('jobs left running by a previous bridge are restored as failed but resumabl
   const second = new Jobs(first.home, () => config, {} as never, { onEvent: () => {}, onJob: () => {}, onAttention: () => {} });
   const restored = second.get(job.id);
   assert.equal(restored.state, 'failed');
+  assert.equal(restored.liveDiff, undefined);
+  assert.equal(second.liveDiff(job.id), null);
   assert.equal(restored.sessionId, 'session-1');
   assert.equal(restored.project, canonicalPath(repo));
 });
@@ -2629,6 +2632,30 @@ test('follow-ups count the turns the lead sent a worker back for, not retries of
   assert.equal(followUps({ turns: 3 }), 2);
   assert.equal(followUps({ turns: 3, approvals: [approval] }), 1);
   assert.equal(followUps({ turns: 2, approvals: [approval, approval] }), 0);
+});
+
+test('collecting a result removes the live diff from a drawer with an older detail snapshot', async (t) => {
+  const { runnerImport } = await import('vite');
+  const { module: { drawerJob } } = await runnerImport<{ drawerJob(detail: Job, current?: Job): Job }>(
+    path.resolve(import.meta.dirname, '../plugin/board/src/JobDrawer.tsx'),
+  );
+  let ctl!: JobCtl;
+  const { jobs, home } = harness((started) => { ctl = started; });
+  const repo = tempRepo();
+  t.after(() => {
+    jobs.flush();
+    for (const dir of [home, repo]) fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5 });
+  });
+  const job = await jobs.create({ kind: 'delegate', task: 'edit', cwd: repo });
+  while (!ctl) await new Promise((resolve) => setTimeout(resolve, 5));
+  ctl.diff('live patch');
+  const detail = { ...job };
+  assert.ok(drawerJob(detail).liveDiff);
+  ctl.done('finished');
+  const current = { ...job };
+  await settled(jobs, job);
+  assert.equal(current.endedAt, null);
+  assert.equal(drawerJob(detail, current).liveDiff, undefined);
 });
 
 test('a running turn\'s diff is kept in memory, bounded, and dropped when the job ends', async (t) => {

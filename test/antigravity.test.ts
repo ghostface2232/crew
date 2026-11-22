@@ -18,7 +18,7 @@ import { writeFakeBin } from './fake-bin.ts';
  * reports right after creating the session; `modeDelay` holds its answer to set_mode; `hold` keeps a turn open, and
  * `ignoreCancel` keeps it open past a cancel.
  */
-function server(options: { append?: boolean; form?: unknown; mode?: string; refuseMode?: boolean; updates?: unknown[]; after?: unknown[]; switched?: string; modeDelay?: number; hold?: boolean; ignoreCancel?: boolean; usage?: unknown } = {}): string {
+function server(options: { append?: boolean; form?: unknown; mode?: string; refuseMode?: boolean; updates?: unknown[]; after?: unknown[]; switched?: string; modeDelay?: number; hold?: boolean; ignoreCancel?: boolean; usage?: unknown; resumeSwitched?: string } = {}): string {
   return `
     const fs = require('node:fs');
     const path = require('node:path');
@@ -42,7 +42,12 @@ function server(options: { append?: boolean; form?: unknown; mode?: string; refu
         if (options.switched) send({ method: 'session/update', params: { sessionId: 's1', update: { sessionUpdate: 'current_mode_update', currentModeId: options.switched } } });
       }
       else if (method === 'session/set_mode') setTimeout(() => send(options.refuseMode ? { id, error: { code: -32602, message: 'no such mode' } } : { id, result: {} }), options.modeDelay ?? 0);
-      else if (method === 'session/resume') send({ id, result: { ...config(), ...(options.mode ? { modes: { currentModeId: options.mode } } : {}) } });
+      else if (method === 'session/resume') {
+        const answer = { jsonrpc: '2.0', id, result: { ...config(), ...(options.mode ? { modes: { currentModeId: options.mode } } : {}) } };
+        // In one write, so Crew reads the switch before it acts on the answer.
+        const switched = options.resumeSwitched && { jsonrpc: '2.0', method: 'session/update', params: { sessionId: 's1', update: { sessionUpdate: 'current_mode_update', currentModeId: options.resumeSwitched } } };
+        process.stdout.write([answer, switched].filter(Boolean).map((m) => JSON.stringify(m) + '\\n').join(''));
+      }
       else if (method === 'session/set_config_option') {
         if (params.configId === 'model') { model = params.value; if (!levels[model].includes(level)) level = 'medium'; }
         else level = params.value;
@@ -300,6 +305,28 @@ test('a message is refused while Antigravity waits for an approval', { timeout: 
   await h.waiting(job);
   await assert.rejects(h.adapter.reply((h.jobs as any).ctl(job), 'steered'), /waiting for an approval or an answer/);
   await h.jobs.cancel(job.id);
+});
+
+test('a switch reported right after a restore is not overwritten by the restore\'s own answer', { timeout: 5000 }, async (t) => {
+  const h = harness(t, server({ mode: 'default', resumeSwitched: 'auto' }));
+  const job = await h.ended(await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' }));
+  await h.jobs.reply(job.id, { message: 'one more thing' });
+  await h.ended(job);
+  const order = fs.readFileSync(path.join(h.home, 'log.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line).method);
+  assert.deepEqual(order.slice(order.indexOf('session/resume'), order.indexOf('session/resume') + 3), ['session/resume', 'session/set_mode', 'session/prompt']);
+});
+
+test('a follow-up waits for a stopped turn to end and starts a turn of its own', { timeout: 20000 }, async (t) => {
+  const h = harness(t, server({ hold: true, ignoreCancel: true, updates: ranUnasked('x1', { kind: 'edit', title: 'File b.txt', locations: [{ path: path.join(os.tmpdir(), 'b.txt') }] }) }));
+  const job = await h.ended(await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test' }));
+  assert.equal(job.state, 'failed');
+  await h.jobs.reply(job.id, { message: 'try again within the workspace' });
+  const methods = () => fs.readFileSync(path.join(h.home, 'log.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line).method);
+  const deadline = Date.now() + 8000;
+  while (methods().filter((m) => m === 'session/prompt').length < 2 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 100));
+  const order = methods();
+  // The fake server runs the same unasked edit again, so the new turn is stopped in its turn; it was still a turn of its own.
+  assert.deepEqual(order.slice(order.indexOf('session/close'), order.indexOf('session/close') + 3), ['session/close', 'session/resume', 'session/prompt']);
 });
 
 // agy runs commands the user's own allow rules cover, and reads its Non-Workspace Access setting permits, without asking.

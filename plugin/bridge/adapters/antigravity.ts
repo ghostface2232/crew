@@ -111,7 +111,8 @@ export class AntigravityAdapter implements Adapter {
 
     // Every edit and command must reach onRequest. agy's saved Agent Mode does not reach ACP sessions as of 1.5.14,
     // but its default for other sessions became Auto in 1.5.7, so the mode is checked before every prompt.
-    this.noteMode(sessionId, sessionMode(res));
+    // A new session has no reports before this request; any it has now came in meanwhile.
+    this.noteResponseMode(sessionId, res, undefined);
     const wanted = ctl.job.model ?? (ctl.job.agentDefault ? undefined : this.config.antigravity.model);
     // A tier names a family ("hydrogen"); the session lists the exact values this account has.
     // A family the session does not list is left to the agent's default; a model named outright is still sent, so a typo shows.
@@ -140,6 +141,12 @@ export class AntigravityAdapter implements Adapter {
   async reply(ctl: JobCtl, message: string): Promise<void> {
     const peer = await this.ensure();
     const sessionId = ctl.job.sessionId!;
+    // A turn Crew stopped may still be winding down (stop). The follow-up is a turn of its own, not a message for that one.
+    const stopping = this.runs.get(sessionId);
+    if (stopping?.prompting && stopping.violation) {
+      const stopped = await Promise.race([stopping.prompting.then(() => true), delay(6_000, false, { ref: false })]);
+      if (!stopped && this.runs.get(sessionId) === stopping) throw new Error('Antigravity has not yet stopped the turn Crew ended. Send the message again in a moment.');
+    }
     const restore = !this.loaded.has(sessionId);
     if (restore && !this.restoreMethod) throw new Error('This Antigravity server cannot restore sessions. Continue it from the Antigravity CLI.');
     if (isTerminal(ctl.job)) return;
@@ -150,8 +157,9 @@ export class AntigravityAdapter implements Adapter {
     }
     if (run.prompting) return this.steer(peer, run, message);
     this.prompt(peer, run, message, restore ? async () => {
+      const before = this.modes.get(sessionId)?.seq;
       const res = await peer.request(this.restoreMethod!, { sessionId, cwd: ctl.job.cwd, mcpServers: [crewServer(ctl)], ...this.instructions(ctl) }, RPC_TIMEOUT_MS);
-      this.noteMode(sessionId, sessionMode(res));
+      this.noteResponseMode(sessionId, res, before);
       // A server that restores a session at its default level would run the next turn above the job's effort.
       const level = ctl.job.effort ? pickEffort(configOption(res, 'thought_level')?.options, ctl.job.effort) : undefined;
       const restored = level && level !== configOption(res, 'thought_level')?.currentValue
@@ -341,6 +349,15 @@ export class AntigravityAdapter implements Adapter {
 
   private noteMode(sessionId: string, mode: string | undefined): void {
     if (mode) this.modes.set(sessionId, { mode, seq: (this.modes.get(sessionId)?.seq ?? 0) + 1 });
+  }
+
+  /**
+   * The mode a response reports, unless agy reported one while the request was out: a report read after the response
+   * may be the newer of the two. Either way a mode that does not ask wins, so the next prompt checks it.
+   */
+  private noteResponseMode(sessionId: string, response: any, before: number | undefined): void {
+    const mode = sessionMode(response);
+    if (this.modes.get(sessionId)?.seq === before || (mode && mode !== ASKING_MODE)) this.noteMode(sessionId, mode);
   }
 
   /** Puts a session back in the mode where agy asks before edits and commands, or throws when agy refuses. */

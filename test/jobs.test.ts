@@ -2675,3 +2675,82 @@ test('a running turn\'s diff is kept in memory, bounded, and dropped when the jo
   assert.equal(jobs.liveDiff(job.id), null);
   assert.equal(job.liveDiff, undefined);
 });
+
+test('text cut for the record stays well-formed when the cut lands inside an emoji', async (t) => {
+  let ctl!: JobCtl;
+  const { jobs, home, events, adapter } = harness((started) => { ctl = started; });
+  t.after(() => { jobs.flush(); fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }); });
+  // The 80th UTF-16 unit of the title, and the 140th of the report's first line, is the first half of the pair.
+  const job = await jobs.create({ kind: 'delegate', task: `${'a'.repeat(79)}😀 and more`, cwd: home, isolation: 'in_place' });
+  while (!ctl) await new Promise((resolve) => setTimeout(resolve, 5));
+  ctl.refused(`${'r'.repeat(119)}😀 tail`, 'outside the task');
+  ctl.done(`${'b'.repeat(139)}😀 tail\n${'c'.repeat(19_999)}😀 tail`);
+  await settled(jobs, job);
+  adapter.reply = async () => {};
+  await jobs.reply(job.id, { message: `${'d'.repeat(79)}😀 tail` });
+  // What the macOS app decodes: one lone half anywhere and it refuses the whole state.
+  for (const [name, text] of [['job', JSON.stringify(job)], ['events', JSON.stringify(events)]] as const) {
+    assert.doesNotMatch(text, /\\ud[89ab][0-9a-f]{2}(?!\\ud[c-f])/i, name);
+  }
+  assert.equal(job.title, 'a'.repeat(79));
+});
+
+test('a job ledger that cannot be read is left as it is, not replaced by an empty one', () => {
+  const quiet = { onEvent: () => {}, onJob: () => {}, onAttention: () => {} };
+  for (const content of ['{"seq":3,"jobs":[{"id":"cx-1"', '{}', 'null', '{"seq":1,"jobs":[null]}']) {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-home-'));
+    const file = path.join(home, 'jobs.json');
+    fs.writeFileSync(file, content);
+    assert.throws(() => new Jobs(home, () => config, {} as never, quiet), /left untouched/, content);
+    assert.equal(fs.readFileSync(file, 'utf8'), content);
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+  // No file is a first start.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-home-'));
+  const jobs = new Jobs(home, () => config, {} as never, quiet);
+  assert.deepEqual(jobs.list(), []);
+  jobs.flush();
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+test('a cancelled turn whose send fails late does not end the turn that followed it', async (t) => {
+  const { jobs, home, adapter } = harness((ctl) => ctl.done('first'));
+  t.after(() => { jobs.flush(); fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }); });
+  const job = await settled(jobs, await jobs.create({ kind: 'delegate', task: 'edit', cwd: home, isolation: 'in_place' }));
+  const held = Promise.withResolvers<void>();
+  const reached = Promise.withResolvers<void>();
+  adapter.reply = () => { reached.resolve(); return held.promise; };
+  const stale = jobs.reply(job.id, { message: 'A' });
+  await reached.promise;
+  await jobs.cancel(job.id);
+  assert.equal(job.state, 'cancelled');
+  adapter.reply = async () => {};
+  await jobs.reply(job.id, { message: 'B' });
+  assert.equal(job.state, 'running');
+  held.reject(new Error('turn A was interrupted'));
+  await stale;
+  assert.equal(job.state, 'running');
+  assert.equal(job.error, null);
+  // The turn's own failure still ends it.
+  adapter.reply = async () => { throw new Error('turn C could not start'); };
+  await jobs.cancel(job.id);
+  await jobs.reply(job.id, { message: 'C' });
+  assert.equal(job.state, 'failed');
+  assert.equal(jobs.get(job.id).error?.message, 'turn C could not start');
+});
+
+test('the worker\'s report is kept when its result cannot be collected', async (t) => {
+  const repo = tempRepo();
+  const { jobs, home } = harness((ctl) => {
+    // The transport commit has nothing to run in.
+    fs.rmSync(path.join(ctl.job.cwd, '.git'), { force: true });
+    ctl.done('## Outcome\ndone\n\nEdited app.js as asked.');
+  });
+  t.after(() => { jobs.flush(); fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }); fs.rmSync(repo, { recursive: true, force: true, maxRetries: 5 }); });
+  const job = await settled(jobs, await jobs.create({ kind: 'delegate', task: 'edit', cwd: repo }));
+  assert.equal(job.state, 'failed');
+  assert.match(job.error!.message, /^could not collect the result: /);
+  assert.equal(job.report, '## Outcome\ndone\n\nEdited app.js as asked.');
+  assert.deepEqual(job.exchange?.at(-1), { turn: 1, from: 'worker', text: job.report, at: job.exchange!.at(-1)!.at });
+  assert.match(describe(job), /--- report ---\n## Outcome\ndone\n\nEdited app\.js as asked\./);
+});

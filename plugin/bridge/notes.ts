@@ -5,6 +5,7 @@ import { LEAD } from './config.ts';
 import type { Holder } from './config.ts';
 import { TIERS } from './tiers.ts';
 import type { Tier } from './tiers.ts';
+import { clip } from './text.ts';
 
 // A build line's finding load: the accepted findings by severity.
 const LOAD = { high: 0.35, medium: 0.15, low: 0.05 };
@@ -197,7 +198,7 @@ function save(home: string, file: NotesFile): void {
 
 function cleanText(value: string, name: string, limit: number, oneLine = false): string {
   if (typeof value !== 'string') throw new Error(`${name} must be a non-empty string.`);
-  const text = (oneLine ? value.replace(/[\r\n]+/g, ' ') : value).trim().slice(0, limit).trim();
+  const text = clip((oneLine ? value.replace(/[\r\n]+/g, ' ') : value).trim(), limit).trim();
   if (!text) throw new Error(`${name} must be a non-empty string.`);
   return text;
 }

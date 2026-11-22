@@ -16,6 +16,7 @@ import { describe, needsLead, summarize } from './render.ts';
 import type { JobView } from './render.ts';
 import { TIERS } from './tiers.ts';
 import { RATING_ITEMS } from './notes.ts';
+import { clip } from './text.ts';
 
 /**
  * Stdio MCP server the lead Claude session talks to. It holds no state: every
@@ -876,7 +877,7 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
   }
   switch (name) {
     case 'debate':
-      return runJob({ kind: 'delegate', role: 'debate', cwd, title: args.title ?? `Debate: ${String(args.topic).split('\n')[0].slice(0, 60)}`, task: `${args.topic}\n\n# The lead's position\n${args.position}`, debate: { rounds: args.rounds ?? 3 }, agent: args.agent, tier: args.tier, model: args.model, effort: args.effort, taskId: args.task_id }, args.background !== false, ctx, args.mission);
+      return runJob({ kind: 'delegate', role: 'debate', cwd, title: args.title ?? `Debate: ${clip(String(args.topic).split('\n')[0], 60)}`, task: `${args.topic}\n\n# The lead's position\n${args.position}`, debate: { rounds: args.rounds ?? 3 }, agent: args.agent, tier: args.tier, model: args.model, effort: args.effort, taskId: args.task_id }, args.background !== false, ctx, args.mission);
     case 'delegate':
       return withNotes(await runJob({ kind: 'delegate', role: args.role ?? 'delegate', cwd, title: args.title, task: args.task, done_when: args.done_when, check: args.check, base: args.base, isolation: args.isolation, agent: args.agent, tier: args.tier, model: args.model, effort: args.effort, exclusive: Boolean(args.exclusive), runsApp: Boolean(args.runs_app), plugins: args.plugins, skills: args.skills, attachments: args.attachments, taskId: args.task_id }, args.background !== false, ctx, args.mission), [args.agent], 2, true);
     case 'review': {

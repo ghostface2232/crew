@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import readline from 'node:readline';
+import { clipEnd } from './text.ts';
 
 export class RpcError extends Error {
   code: number;
@@ -42,7 +43,7 @@ export class RpcPeer {
     this.shell = shell;
     readline.createInterface({ input: child.stdout }).on('line', (line) => this.onLine(line));
     child.stderr.on('data', (chunk) => {
-      this.stderrTail = (this.stderrTail + String(chunk)).slice(-2000);
+      this.stderrTail = clipEnd(this.stderrTail + String(chunk), 2000);
     });
     child.on('error', (err) => this.onClose(`failed to start: ${err.message}`));
     child.on('exit', (code, signal) => {

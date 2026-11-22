@@ -30,6 +30,7 @@ The bridge is everything in Crew that is not a user interface: the daemon, the M
 | Notifications | `toast.ts` (Windows); macOS uses `osascript` in `daemon.ts` |
 | Plugin registration and the first-run checklist | `setup.ts` |
 | `crew` command | `cli.ts` |
+| Cutting text by length without splitting a surrogate pair | `text.ts` |
 
 ## Tests
 

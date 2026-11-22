@@ -177,7 +177,8 @@ async function freePort(): Promise<number> {
   return port;
 }
 
-async function daemon(t: TestContext) {
+/** `prepare` fills the home before the daemon first reads it. */
+async function daemon(t: TestContext, prepare?: (home: string) => void) {
   const port = await freePort();
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-question-http-'));
   const bin = path.join(home, 'codex');
@@ -208,6 +209,7 @@ async function daemon(t: TestContext) {
   // A job's model is read from Codex's own model cache, which a machine without Codex does not have.
   fs.writeFileSync(path.join(home, 'models_cache.json'), JSON.stringify({ models: [{ slug: 'gpt-test-sol' }] }));
   const env = { ...process.env, CREW_HOME: home, CREW_PORT: String(port), CLAUDE_PROJECT_DIR: home, CLAUDE_CODE_SESSION_ID: 'test-lead', CREW_AGENTGAUGE_DIR: path.join(home, 'gauge'), CODEX_HOME: home };
+  prepare?.(home);
   const child = spawn(process.execPath, [path.resolve('plugin/bridge/daemon.ts')], { env, stdio: ['ignore', 'pipe', 'pipe'] });
   t.after(async () => { await stop(child); fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }); });
   await new Promise<void>((resolve, reject) => {
@@ -893,4 +895,17 @@ test('a hook report reaches the daemon with the secret the hook reads from the t
   assert.equal(report({ ...h.env, CREW_HOME: elsewhere }, 'forged').status, 0);
   const sessions = (await h.api('GET', '/api/state')).body.claude.map((session: { id: string }) => session.id);
   assert.deepEqual([sessions.includes('typed'), sessions.includes('forged')], [true, false]);
+});
+
+test('a job ledger the daemon cannot read is set aside whole, and the daemon starts without it', { timeout: 15000 }, async (t) => {
+  const broken = '{"seq":7,"jobs":[{"id":"cx-kept","title":"work the user still wants"';
+  const h = await daemon(t, (home) => fs.writeFileSync(path.join(home, 'jobs.json'), broken));
+  assert.deepEqual((await h.api('GET', '/api/state')).body.jobs, []);
+  const aside = fs.readdirSync(h.home).filter((name) => name.startsWith('jobs.json.unreadable-'));
+  assert.equal(aside.length, 1);
+  assert.equal(fs.readFileSync(path.join(h.home, aside[0]), 'utf8'), broken);
+  // The new ledger starts beside it, not over it.
+  await h.create();
+  assert.equal(JSON.parse(fs.readFileSync(path.join(h.home, 'jobs.json'), 'utf8')).jobs.length, 1);
+  assert.equal(fs.readFileSync(path.join(h.home, aside[0]), 'utf8'), broken);
 });

@@ -74,6 +74,8 @@ Question jobs (`ask: true`) are read-only. Codex runs without approval prompts a
 
 Work roles open their report with `## Outcome` (`done`, `partial`, or `blocked`), stored in `Job.outcome` for the latest turn (omitted on reviews, debates, and questions). Results flag mismatches with bridge observations—such as `outcome: done as declared, but the bridge check failed`, no files changed after a refusal/decline, or `outcome: not declared`. Acceptance lines list kept round commits for cherry-picking when known.
 
+If the bridge cannot collect a finished turn's result (the transport commit or the diff fails), the job fails with `could not collect the result: …` and still keeps the worker's report, so the lead reads what the worker did beside the failure. A turn that was cancelled and followed by another cannot fail its successor: a start or send that fails after the job has moved on is dropped.
+
 ## Worker tools
 
 - Antigravity allows six Crew worker tools (`ask_lead`, `lead_answers`, `siblings`, `search`, `recent_changes`, `rate`) when matched by MCP metadata (`_meta.mcpServerName === 'crew'`) or exact `mcp_crew_<tool>` / `mcp_crew_<8 hex>_<tool>` title, with an optional `Run ` prefix. The 8-hex suffix matches the per-job `crew` server names used by one `agy acp` process from the second job on. Title matching applies only to `other` calls without conflicting MCP metadata or command fields. `execute` and edits still follow role policy.

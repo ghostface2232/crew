@@ -9,6 +9,7 @@ import { isTerminal, noteLeadDecline } from '../jobs.ts';
 import type { Adapter, Capabilities, Job, JobCtl, Probe } from '../jobs.ts';
 import { PLUGIN_USER_APP } from '../prompts.ts';
 import { RPC_TIMEOUT_MS, RpcError, RpcPeer, RpcTimeoutError } from '../rpc.ts';
+import { clip } from '../text.ts';
 
 type Answer = { approve: boolean; message?: string; cancelled?: boolean; forJob?: boolean };
 /** A plugin tool approval the user may allow for the rest of the job: `key` matches later requests, `label` names what it covers. */
@@ -913,7 +914,7 @@ export class CodexAdapter implements Adapter {
 
 /** Bound free-form provider text before putting it in a report or approval prompt. */
 function detail(text: string, limit = 4000): string {
-  return text.length > limit ? `${text.slice(0, limit)}… (truncated)` : text;
+  return text.length > limit ? `${clip(text, limit)}… (truncated)` : text;
 }
 
 /** Render only tool input; environment fields are never part of an approval display. */
@@ -923,7 +924,7 @@ function inputText(input: unknown): string {
   let truncated = false;
   const append = (part: string) => {
     const room = 4000 - text.length;
-    text += part.slice(0, Math.max(0, room));
+    text += clip(part, Math.max(0, room));
     if (part.length > room) truncated = true;
   };
   const visit = (value: unknown, label: string, depth: number) => {
@@ -1020,7 +1021,7 @@ function textInput(text: string) {
 
 function firstLine(text: string): string {
   const line = text.trim().split('\n')[0];
-  return line.length > 140 ? `${line.slice(0, 139)}…` : line;
+  return line.length > 140 ? `${clip(line, 139)}…` : line;
 }
 
 function basename(file: string): string {

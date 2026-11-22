@@ -16,7 +16,7 @@ import { agentCommand, agentEnv, canonicalPath, HOME, installed, isRole, loadCon
 import type { Config } from './config.ts';
 import { evidenceType, openEvidence } from './evidence.ts';
 import { projectRoot } from './git.ts';
-import { followUps, isTerminal, Jobs } from './jobs.ts';
+import { followUps, isTerminal, Jobs, UnreadableLedger } from './jobs.ts';
 import { missionPreset, Missions } from './missions.ts';
 import type { Mission } from './missions.ts';
 import { Pulls } from './pulls.ts';
@@ -32,7 +32,7 @@ import { ANTIGRAVITY_MODELS, codexModels } from './tiers.ts';
 import { appendInstructions, instructionsFile, readInstructions, savePeerRatings, savePreset, saveRoles, writeInstructions } from './settings.ts';
 import { agentGaugeDir, fromCodexLimits, route as routeWork, UsageMonitor } from './usage.ts';
 import type { RouteKind } from './usage.ts';
-import type { EventKind, Job } from './jobs.ts';
+import type { EventKind, Job, JobsHooks } from './jobs.ts';
 
 /**
  * The Crew daemon: one long-lived process that owns the worker agents, the
@@ -273,7 +273,26 @@ codex.onLimits = (limits) => {
   usage.supplement(fromCodexLimits(limits, Date.now()));
 };
 
-const jobs = new Jobs(HOME, loadConfig, { codex, antigravity }, {
+/**
+ * The job ledger. One that cannot be read is set aside, as missions.json is: the daemon starts with no jobs and the
+ * file keeps what it held. If it cannot be moved either, the error stands and the daemon does not start, since
+ * running on would save an empty ledger over it.
+ */
+function loadJobs(hooks: JobsHooks): Jobs {
+  const open = () => new Jobs(HOME, loadConfig, { codex, antigravity }, hooks);
+  try {
+    return open();
+  } catch (err) {
+    if (!(err instanceof UnreadableLedger)) throw err;
+    const file = path.join(HOME, 'jobs.json');
+    const aside = `${file}.unreadable-${Date.now()}`;
+    fs.renameSync(file, aside);
+    log(`jobs.json could not be used and was set aside as ${aside}; starting with no jobs. Cause: ${err.message}`);
+    return open();
+  }
+}
+
+const jobs: Jobs = loadJobs({
   onEvent: (event) => {
     broadcast('event', event);
     // A mission is alive as long as its jobs are; the lead need not report in while it waits on them.

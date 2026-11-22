@@ -1,5 +1,5 @@
 import {
-  ArrowUpRight16Regular, ChatMultipleRegular, CheckmarkCircleRegular, CheckmarkRegular, DismissRegular,
+  ArrowUpRight16Filled, ChatMultipleRegular, CheckmarkCircleRegular, CheckmarkRegular, DismissRegular,
   SearchRegular,
 } from '@fluentui/react-icons';
 import { useSyncExternalStore } from 'react';
@@ -108,7 +108,7 @@ export function NeedsYou({
                   </span>
                   {job.waiting && <span className="need-age digits">{elapsed(now - job.waiting.since)}</span>}
                   <button className="caption small" data-opens-panel="" onClick={() => openJob(job.id)}>
-                    <Icon icon={ArrowUpRight16Regular} size={12} />
+                    <Icon icon={ArrowUpRight16Filled} size={12} />
                     Details
                   </button>
                 </div>
@@ -127,7 +127,7 @@ export function NeedsYou({
                     <span>{session.title} · {names.get(projectOf(session)) ?? projectOf(session)}</span>
                   </span>
                   <button className="caption small" data-opens-panel="" onClick={() => openSession(session.id)}>
-                    <Icon icon={ArrowUpRight16Regular} size={12} />
+                    <Icon icon={ArrowUpRight16Filled} size={12} />
                     Details
                   </button>
                 </div>

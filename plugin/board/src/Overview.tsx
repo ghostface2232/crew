@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import {
-  AddRegular, ArrowRight16Regular, ArrowUpRight16Regular, ChatMultipleRegular, CheckmarkCircle16Regular,
+  AddRegular, ArrowRight16Filled, ArrowUpRight16Filled, ChatMultipleRegular, CheckmarkCircle16Regular,
   CheckmarkCircleRegular, ChevronDown16Regular, ChevronUp16Regular, CircleMultipleConcentric16Regular,
   ErrorCircle16Regular, ErrorCircleRegular, LayerRegular, SearchRegular, StackRegular,
 } from '@fluentui/react-icons';
@@ -355,7 +355,7 @@ export function EventList({ events, openJob, limit }: { events: CrewEvent[]; ope
               <time dateTime={event.ts}>{new Date(event.ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time>
               {event.job_id && openJob && (
                 <button className="icon small" data-opens-panel="" aria-label="Show job" title="Show job" onClick={() => openJob(event.job_id!)}>
-                  <Icon icon={ArrowUpRight16Regular} />
+                  <Icon icon={ArrowUpRight16Filled} />
                 </button>
               )}
             </p>
@@ -509,7 +509,7 @@ export function Workspace({ state, project, names, selected, openJob, openSessio
           )}
           {recent.map((mission, index) => panel(mission, active.length + 1 + index))}
           {recentJobs.length > 0 && (
-            <Panel label="Recently finished" action={<button className="link" onClick={() => openPage('history')}>History <Icon icon={ArrowRight16Regular} size={12} /></button>}>
+            <Panel label="Recently finished" action={<button className="link" onClick={() => openPage('history')}>History <Icon icon={ArrowRight16Filled} size={12} /></button>}>
               <div className="rows">{recentJobs.map(row)}</div>
             </Panel>
           )}
@@ -536,7 +536,7 @@ export function Workspace({ state, project, names, selected, openJob, openSessio
           <section className="card panel" aria-label="Rhythm" style={{ '--i': 1 } as CSSProperties}>
             <Heatmap title="Rhythm" times={jobs.map((job) => job.createdAt)} most={26} label="jobs" one="job" />
           </section>
-          <Panel label="Live feed" action={<button className="link" onClick={() => openPage('activity')}>All <Icon icon={ArrowRight16Regular} size={12} /></button>}>
+          <Panel label="Live feed" action={<button className="link" onClick={() => openPage('activity')}>All <Icon icon={ArrowRight16Filled} size={12} /></button>}>
             {events.length ? <EventList events={events} openJob={openJob} limit={6} /> : <p className="secondary caption">Nothing has happened yet.</p>}
           </Panel>
         </aside>

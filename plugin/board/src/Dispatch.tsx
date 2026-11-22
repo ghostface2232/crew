@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { ArrowUpRegular, ErrorCircleRegular, SendRegular } from '@fluentui/react-icons';
+import { ArrowUp16Filled, ErrorCircleRegular, SendRegular } from '@fluentui/react-icons';
 import type { Role, WorkerAgent } from '../../bridge/config.ts';
 import type { BoardJob, Mission, Snapshot } from './types.ts';
 import { request } from './api.ts';
@@ -233,7 +233,7 @@ export function Dispatch({
         <footer className={styles.footer}>
           <button type="button" className="large" onClick={closeDraft}>Cancel</button>
           <button type="button" className="large prominent" disabled={!canSend} onClick={() => void send()}>
-            <Icon icon={ArrowUpRegular} />
+            <Icon icon={ArrowUp16Filled} />
             {sending ? 'Sending…' : intent === 'information' ? 'Save Information'
               : intent === 'question' ? 'Ask Question' : 'Send Job'}
           </button>

@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import {
-  AlertBadge16Regular, ArrowUp16Regular, Checkmark16Regular, CheckmarkCircle16Regular, CheckmarkRegular,
+  AlertBadge16Regular, ArrowUp16Filled, Checkmark16Regular, CheckmarkCircle16Regular, CheckmarkRegular,
   ChevronUpDown16Regular, Circle16Regular, ClockWarning16Regular, CopyRegular, DismissRegular, ErrorCircle16Regular,
   RecordStop16Regular, SpinnerIos16Regular, Warning16Regular,
 } from '@fluentui/react-icons';
@@ -239,7 +239,7 @@ export function Composer({
           if (sent && draftRef.current.trim() === message) setDraft('');
         }}
       >
-        <Icon icon={ArrowUp16Regular} />
+        <Icon icon={ArrowUp16Filled} />
       </button>
     </div>
   );

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { flushSync } from 'react-dom';
 import {
   bundleIcon, AddRegular, AlertFilled, AlertRegular, ArrowCircleDownRegular, ArrowClockwiseRegular,
-  ArrowRightRegular, ClockFilled, ClockRegular, FlashFilled, FlashRegular, FolderFilled,
+  ArrowRight16Filled, ClockFilled, ClockRegular, FlashFilled, FlashRegular, FolderFilled,
   FolderRegular, GridFilled, GridRegular, LockClosedKeyRegular, PanelLeftRegular, SearchRegular, SettingsRegular,
   StackFilled, StackRegular, WifiOffRegular,
 } from '@fluentui/react-icons';
@@ -315,7 +315,7 @@ export function App() {
                 >
                   <span className="attention-count"><RollingNumber value={pending} /></span>
                   <span>Needs You</span>
-                  <Icon icon={ArrowRightRegular} />
+                  <Icon icon={ArrowRight16Filled} />
                 </button>
               )}
             </header>

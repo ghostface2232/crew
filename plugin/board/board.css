@@ -957,15 +957,15 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
   gap: 10px;
   min-height: 40px;
   padding: 0 14px 0 6px;
-  --tone: var(--orange);
-  background: color-mix(in srgb, var(--orange) 11%, var(--surface));
-  box-shadow: var(--shadow-tinted);
+  /* A raised neutral pill, as the cards are; the orange count alone carries the state. */
+  background: var(--raised);
+  box-shadow: var(--shadow-raised), 0 6px 16px -10px var(--lift);
   color: var(--label);
 }
 .attention-count { display: grid; place-items: center; min-width: 28px; height: 28px; padding: 0 8px; border-radius: 999px; corner-shape: round; background: var(--orange); box-shadow: var(--shadow-bead); color: var(--on-orange); font-size: 13px; font-weight: 600; }
-.attention > svg { color: var(--orange); transition: translate 260ms var(--ease-out); }
+.attention > svg { width: 16px; height: 16px; color: var(--label); transition: translate 260ms var(--ease-out); }
 @media (hover: hover) {
-  .attention:hover { background: color-mix(in srgb, var(--orange) 16%, var(--surface)) !important; }
+  .attention:hover { background: var(--raised) !important; box-shadow: var(--shadow-raised), 0 8px 20px -10px var(--lift); }
   .attention:hover > svg { translate: 3px 0; }
 }
 

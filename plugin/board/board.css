@@ -6,7 +6,11 @@
  * Motion: things open on a long, soft ease-out (--ease-out) and close quicker (--ease-in-out); lists dim around
  * the item under the pointer; new content rises out of a slight blur.
  */
-@font-face { font-family: "Pretendard"; src: url("./pretendard.woff2") format("woff2"); font-weight: 45 920; font-display: swap; }
+/* Pretendard's own metrics (ascent 95.21%, descent 24.12% of the em) center its capitals in the line box, but Chrome rounds
+   ascent and descent to whole pixels, and at 10.5-13px that put text about 0.5px high in every control at every pixel ratio.
+   Moving 1.79% of the em from descent to ascent, with their sum and so every line height unchanged, makes the rounding fall
+   evenly (measured over 120 size and box combinations at 1x-2x: mean offset -0.55px to about 0). */
+@font-face { font-family: "Pretendard"; src: url("./pretendard.woff2") format("woff2"); font-weight: 45 920; font-display: swap; ascent-override: 97%; descent-override: 22.33%; line-gap-override: 0%; }
 
 :root {
   color-scheme: light dark;
@@ -67,6 +71,12 @@
   /* Small raised controls (fields, secondary buttons, a hovered row, the current sidebar item) on --raised. */
   --raised: var(--surface);
   --shadow-raised: 0 0 0 1px rgb(0 0 0 / 0.07), 0 1px 2px rgb(0 0 0 / 0.06);
+  /* A tinted control raised in its own tone (--tone): a lit top edge and a drop of the tone, no outline. */
+  --shadow-tinted: inset 0 1px 0 rgb(255 255 255 / 0.65), 0 1px 2px color-mix(in srgb, var(--tone, var(--secondary)) 22%, transparent), 0 6px 16px -8px color-mix(in srgb, var(--tone, var(--secondary)) 45%, transparent);
+  /* The same at chip size. */
+  --shadow-tinted-sm: inset 0 1px 0 rgb(255 255 255 / 0.55), 0 1px 1.5px color-mix(in srgb, var(--tone, var(--secondary)) 28%, transparent);
+  /* A solid orange count: a lit top edge and a drop of its color. */
+  --shadow-bead: inset 0 1px 0 rgb(255 255 255 / 0.35), 0 1px 2px color-mix(in srgb, var(--orange) 45%, transparent);
   /* The prominent control: a lit top edge and a drop in its own color. */
   --shadow-accent: inset 0 1px 0 rgb(255 255 255 / 0.22), 0 1px 2px rgb(0 0 0 / 0.12), 0 4px 12px -4px color-mix(in srgb, var(--accent) 60%, transparent);
   /* Cards and panels have no outline; with more contrast this ring draws one. */
@@ -132,8 +142,11 @@
     --shadow-card-hover: inset 0 1px 0 rgb(255 255 255 / 0.08), 0 0 0 1px rgb(0 0 0 / 0.6), 0 2px 4px rgb(0 0 0 / 0.45), 0 20px 40px -14px rgb(0 0 0 / 0.85);
     /* No inset ring: the stage's transparent borders would push it inside them. */
     --shadow-stage: 0 0 0 1px rgb(0 0 0 / 0.45);
-    --raised: #2a2a2e;
-    --shadow-raised: inset 0 1px 0 rgb(255 255 255 / 0.07), 0 0 0 1px rgb(0 0 0 / 0.5), 0 1px 2px rgb(0 0 0 / 0.4);
+    /* Clearly lighter than the frame, so the current sidebar item stands out on it. */
+    --raised: #34343a;
+    --shadow-raised: inset 0 1px 0 rgb(255 255 255 / 0.08), 0 0 0 1px rgb(0 0 0 / 0.3), 0 1px 2px rgb(0 0 0 / 0.4), 0 4px 10px -6px rgb(0 0 0 / 0.6);
+    --shadow-tinted: inset 0 1px 0 rgb(255 255 255 / 0.08), 0 1px 2px rgb(0 0 0 / 0.4), 0 6px 16px -8px rgb(0 0 0 / 0.7);
+    --shadow-tinted-sm: inset 0 1px 0 rgb(255 255 255 / 0.07), 0 1px 1.5px rgb(0 0 0 / 0.35);
   }
 }
 @media (prefers-contrast: more) {
@@ -222,7 +235,7 @@ kbd {
   padding: 0 8px 0 7px;
   border-radius: 999px; corner-shape: round;
   background: color-mix(in srgb, var(--tone, var(--secondary)) 11%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tone, var(--secondary)) 14%, transparent);
+  box-shadow: var(--shadow-tinted-sm);
   color: color-mix(in srgb, var(--tone, var(--secondary)), var(--tone-ink) var(--tone-darken));
   font-size: 11px;
   font-weight: 500;
@@ -664,7 +677,7 @@ dialog.sheet.evidence-compare { width: min(1320px, calc(100vw - 32px)); }
 .approval { display: flex; gap: 10px; }
 .approval > svg { flex: none; width: 15px; height: 15px; margin-top: 2px; color: var(--secondary); }
 .approval > div { display: grid; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
-.answer-card { background: color-mix(in srgb, var(--orange) 7%, var(--surface)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--orange) 22%, transparent); }
+.answer-card { --tone: var(--orange); background: color-mix(in srgb, var(--orange) 7%, var(--surface)); box-shadow: var(--shadow-tinted); }
 /* An inset in the panel, not a card of its own: a card's corner would be rounder than the panel's. */
 .detail-scroll .answer-card { padding: 14px; border-radius: var(--row-radius); }
 .session-mission { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12.5px; }
@@ -758,7 +771,7 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
 .nav { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
 .nav-heading { padding: 6px 10px 4px; }
 .nav-heading { color: var(--tertiary); font: 500 10.5px/1.2 var(--text-face); letter-spacing: 0.06em; text-transform: uppercase; }
-.nav-list { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; }
+.nav-list { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
 /* A soft highlight that glides to the item under the pointer. */
 .nav-glide {
   position: absolute;
@@ -811,7 +824,7 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
 .nav-dot { width: 7px; height: 7px; border-radius: 50%; corner-shape: round; background: var(--tone); box-shadow: 0 0 0 3px color-mix(in srgb, var(--tone) 18%, transparent); }
 .nav-dot[data-state="working"] { animation: pulse 2.4s var(--ease-in-out) infinite; }
 @keyframes pulse { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--tone) 0%, transparent); } }
-.nav-count { min-width: 20px; height: 18px; padding: 0 6px; border-radius: 999px; corner-shape: round; background: var(--orange); color: var(--on-orange); font-size: 10.5px; font-weight: 600; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; animation: swap 360ms var(--ease-out); }
+.nav-count { min-width: 20px; height: 18px; padding: 0 6px; border-radius: 999px; corner-shape: round; background: var(--orange); color: var(--on-orange); font-size: 10.5px; font-weight: 600; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; box-shadow: var(--shadow-bead); animation: swap 360ms var(--ease-out); }
 .nav-key { opacity: 0; transition: opacity 160ms ease-out; }
 @media (hover: hover) { .nav-item:hover .nav-key { opacity: 1; } }
 .sidebar-foot { display: grid; gap: 6px; margin-top: auto; padding-top: 13px; border-top: 1px solid var(--hairline); }
@@ -944,11 +957,12 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
   gap: 10px;
   min-height: 40px;
   padding: 0 14px 0 6px;
+  --tone: var(--orange);
   background: color-mix(in srgb, var(--orange) 11%, var(--surface));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--orange) 24%, transparent), 0 1px 2px var(--lift), 0 6px 16px -10px color-mix(in srgb, var(--orange) 60%, transparent);
+  box-shadow: var(--shadow-tinted);
   color: var(--label);
 }
-.attention-count { display: grid; place-items: center; min-width: 28px; height: 28px; padding: 0 8px; border-radius: 999px; corner-shape: round; background: var(--orange); color: var(--on-orange); font-size: 13px; font-weight: 600; }
+.attention-count { display: grid; place-items: center; min-width: 28px; height: 28px; padding: 0 8px; border-radius: 999px; corner-shape: round; background: var(--orange); box-shadow: var(--shadow-bead); color: var(--on-orange); font-size: 13px; font-weight: 600; }
 .attention > svg { color: var(--orange); transition: translate 260ms var(--ease-out); }
 @media (hover: hover) {
   .attention:hover { background: color-mix(in srgb, var(--orange) 16%, var(--surface)) !important; }
@@ -1004,10 +1018,6 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
   transition: left 140ms var(--ease-out);
   animation: fade 160ms ease-out;
 }
-.kpi-marks { display: flex; align-items: center; padding-bottom: 4px; }
-.kpi-marks > span { display: grid; place-items: center; width: 30px; height: 30px; margin-inline-start: -8px; border-radius: 50%; corner-shape: round; background: var(--surface); box-shadow: 0 0 0 2px var(--surface), inset 0 0 0 1px color-mix(in srgb, var(--tone) 40%, transparent); color: var(--label); animation: swap 420ms var(--ease-out) backwards; animation-delay: calc(var(--i, 0) * 60ms + 200ms); }
-.kpi-marks > span:first-child { margin-inline-start: 0; }
-.kpi-marks > .kpi-more { color: var(--secondary); font-size: 11px; font-weight: 600; }
 .share { display: grid; gap: 10px; padding: 16px 22px 20px; border-top: 1px solid var(--hairline); }
 .share-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; font-size: 12px; color: var(--secondary); }
 .share-legend > span { display: inline-flex; align-items: center; gap: 6px; }
@@ -1018,9 +1028,9 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
 .share-bar { display: flex; gap: 4px; height: 8px; }
 .share-bar > i { min-width: 8px; border-radius: 999px; corner-shape: round; background: var(--tone); transition: flex-grow 800ms var(--ease-out); animation: grow-x 900ms var(--ease-out) backwards 200ms; transform-origin: left; }
 .share-bar[data-empty] { border-radius: 999px; corner-shape: round; background: var(--quaternary); }
-/* Narrow, each cell keeps its number and line; the sparkline and faces would crowd the number. Narrower still, two by two. */
+/* Narrow, each cell keeps its number and line; the sparkline would crowd the number. Narrower still, two by two. */
 @container kpis (max-width: 760px) {
-  .spark, .kpi-marks { display: none; }
+  .spark { display: none; }
   .kpi { padding: 18px; }
 }
 @container kpis (max-width: 520px) {
@@ -1275,7 +1285,7 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
   transition: background-color 200ms ease-out, box-shadow 240ms var(--ease-out), scale 160ms var(--ease-out);
 }
 .job-row[data-waiting] { background: color-mix(in srgb, var(--orange) 8%, transparent); }
-.job-row[aria-current="true"] { background: color-mix(in srgb, var(--accent) 10%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 26%, transparent); }
+.job-row[aria-current="true"] { --tone: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--raised)); box-shadow: var(--shadow-tinted); }
 @media (hover: hover) {
   /* A hovered row lifts out of the card. */
   .job-row:not(:disabled):hover { background: var(--raised); box-shadow: var(--shadow-raised); }

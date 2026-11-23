@@ -74,32 +74,39 @@ These results were measured with Non-Workspace Access set to allow and the user'
 
 ## The confined server
 
-On macOS Crew starts a second `agy acp` server inside a sandbox of its own (`serverProfile` in `adapters/antigravity.ts`, run with `sandbox-exec`), and with it every command that server runs. A job goes to it when its files are Crew's to hold: a job in a worktree, a `runs_app` review in its snapshot, and every read-only job. A job that edits the user's directory (`isolation: "in_place"`) keeps the server without the sandbox, as every job does on Windows.
+On macOS Crew starts a second `agy acp` server inside a sandbox of its own (`serverProfile` in `adapters/antigravity.ts`, run with `sandbox-exec`), and with it every command that server runs. A new job goes to it when its files are Crew's to hold: a job in a worktree, and every read-only job (`confines`). A job that edits the user's directory (`isolation: "in_place"`) keeps the server without the sandbox, as every job does on Windows. So does a job whose worktree has the older layout, with the worktree in the job's own folder. `"antigravity": {"sandbox": false}` in `~/.crew/config.json` turns the confined server off at the next daemon start.
 
 | Inside the sandbox | |
 | --- | --- |
-| Writable | `~/.crew/worktrees`, the user's temp directory and `/tmp`, and agy's state in `~/.gemini/antigravity-cli` |
-| Read-only | Everything else, including a worktree's `.git` pointer, and agy's settings, programs, plugins, MCP servers and updates (`settings.json`, `bin`, `builtin`, `mcp`, `updater`), which a later agy outside the sandbox would obey or run. One file there stays writable: `bin/agentapi`, a script agy rewrites before each command |
-| Unreadable | `~/.crew/token`, and `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.kube`, `~/.docker`, `~/.netrc`, `~/.git-credentials`, `~/.config/gh` |
-| Network | Open. The server needs it to reach its model, and its commands share its sandbox |
+| Writable | `~/.crew/worktrees`, the user's temp directory and `/tmp`, and the server's own state in `~/.gemini/antigravity-crew` |
+| Read-only | Everything else: the rest of `~/.crew` even when it sits in a temp directory, a worktree's `.git` pointer, the folders above a worktree (a renamed folder would bring a `.git` of its own), and the user's agy in `~/.gemini/antigravity-cli` |
+| Unreadable | `~/.crew/token`, and `~/.ssh`, `~/.aws`, `~/.azure`, `~/.gnupg`, `~/.kube`, `~/.docker`, `~/.netrc`, `~/.git-credentials`, `~/.npmrc`, `~/.pypirc`, `~/.codex`, `~/.config/gh`, `~/.config/gcloud`, `~/.claude/.credentials.json` |
+| Environment | The daemon's, without `SSH_AUTH_SOCK` and without variables whose names contain `KEY`, `SECRET`, `TOKEN`, `PASSWORD` or `CREDENTIAL` (`confinedEnv`), except agy's own sign-in (`GEMINI_API_KEY`, `GOOGLE_API_KEY`, `GOOGLE_APPLICATION_CREDENTIALS`) |
+| Network | Open, except the SSH agent's socket. The server needs it to reach its model, and its commands share its sandbox |
 
-Because the sandbox holds a command to those files, Crew answers an engineer's command request with `allow_once` instead of asking the user. This is as far as it matches Codex's `workspace-write`, and it differs in three ways:
+Because the sandbox holds a command to those files, Crew answers an engineer's command request with `allow_once` instead of asking the user, provided the request names its command. This is as far as it matches Codex's `workspace-write`, and it is weaker in these ways:
 
-- **Network.** A command can reach outside hosts, so it can send out any file it can read. The unreadable list above is what keeps credentials out of that.
+- **Network.** A command can reach outside hosts, so it can send out anything it can read. The unreadable list and the trimmed environment narrow that; they are lists, not a wall.
+- **Keychain.** agy reads its own sign-in from the keychain, so the keychain service stays reachable. A helper that hands out a stored secret without a prompt, such as `git credential-osxkeychain`, does so inside the sandbox too.
 - **One server for every job.** A command can write another job's worktree. agy's own edit tool cannot: Crew still refuses an edit outside the job's workspace.
 - **agy's other tools.** Deletes, moves and network requests that agy makes itself, and plugin tools, still go to the user. In practice agy deletes and moves with `rm` and `mv`, which are commands.
 
-The sandbox also holds agy's own edits, in any mode: an edit outside the writable folders fails even if agy does not ask about it. The mode and unasked-action checks above stay as they are.
+The sandbox also holds agy's own edits, in any mode: an edit outside the writable folders fails even if agy does not ask about it. The mode and unasked-action checks above are unchanged, and a command that ran without asking is still reported.
+
+The confined server keeps its sessions, settings and command script in `~/.gemini/antigravity-crew` (`--app-data-dir`, which agy takes only as a name under `~/.gemini`). The user's own agy, and the server outside the sandbox, run a script from `~/.gemini/antigravity-cli/bin` before each command and restore sessions from that folder, so a sandbox that could write there would reach outside itself. Two things follow:
+
+- A job stays on the server that opened its session (`capabilities.confined` on the job), since the other server's store does not have it. A job started before the confined server existed continues outside it.
+- A confined job's session cannot be continued with `agy --conversation`: the CLI has no option for another state folder.
 
 Crew cannot use agy's own terminal sandbox for this, or run agy's commands itself (agy 1.5.14, measured 2026-11-23):
 
 - With `clientCapabilities.terminal` on, agy still ran `run_command` itself and sent no `terminal/create`.
 - With `agy acp --sandbox`, a command could not write the session's workspace. The session's `cwd`, `additionalDirectories`, `--add-dir`, `accept-edits`, the server's own working directory, `--process-per-session`, and a `write_file(<workspace>/)` allow rule in a separate `--app-data-dir` all left it read-only; the server's log shows `workspaceDirs=[]`. Print mode (`agy -p --sandbox`) does write the workspace.
-- `agy acp` does not take `--settings`.
+- `agy acp` does not take `--settings`, and `--app-data-dir` refuses an absolute path.
 
-So the confined server starts agy with `--sandbox=false`: one sandbox cannot start inside another, and agy's would leave the workspace unwritable. Three rules of the profile came from failures: agy reads its sign-in through `~/Library/Keychains` (unreadable, every session failed with "Authentication required"), writes the script `~/.gemini/antigravity-cli/bin/agentapi` before each command (unwritable, no command started), and a worktree's `.git` pointer sits three folders below `~/.crew/worktrees`.
+So the confined server starts agy with `--sandbox=false`: one sandbox cannot start inside another, and agy's would leave the workspace unwritable. Without read access to `~/Library/Keychains` every session failed with "Authentication required".
 
-A daemon that cannot start a sandbox (one that is itself sandboxed) runs every job on the server that asks.
+The confined server is prepared with the first job that needs it. If its folders cannot be made or no sandbox can start (a daemon that is itself sandboxed), such jobs run on the server that asks.
 
 ## Codex plugins
 
@@ -132,7 +139,8 @@ On macOS and Windows, `check` reads anywhere except the daemon token, writes onl
 
 - Whether Antigravity follows isolation instructions.
 - Antigravity actions that ran without asking were checked live only for a command covered by an allow rule (2026-11-22, agy 1.5.14). Edits, token reads, and mode switches are covered by protocol stubs.
-- On the confined server: a long job, a `runs_app` job that starts a browser, a server restarted after sitting idle, and whether agy needs to write anywhere else in the home folder. The live check ran two short turns.
+- On the confined server: a long job, two jobs at once, a review or polish job, a server restarted after sitting idle, and whether agy needs to write anywhere else in the home folder. The live checks ran one engineer job at a time, for one or two short turns.
+- What the keychain hands out inside the confined server. Only `security list-keychains` was run there (it succeeded); no stored secret was requested.
 - Whether Codex's `standard` review honors injected instructions.
 - Live plugin approvals reaching the bridge.
 
@@ -150,7 +158,7 @@ Verified on macOS with Codex CLI 0.167.0 (read-only reviews/questions writing to
 
 Re-verified on macOS with Codex CLI 0.171.0 on 2026-11-22. A script drove `CodexAdapter` with a dummy token under a temporary `CREW_HOME` for the four setups: read-only (`crew_read_only`), plain `workspace-write`, a plugin job (`crew_workspace`), and `runs_app` (`crew_app`). It also checked a follow-up resumed in a new app-server. Every result matched the table above. The token was denied wherever a profile applies and readable only under plain `workspace-write`. `.git` and everything under `~/.crew` except scratch and evidence stayed read-only in all four. `/tmp` was writable except in read-only jobs. Ports and outside network opened only with `runs_app`. Resumed threads kept the same profile, and 0.171.0 reported no warnings about the profiles or the overrides on resume. In the `runs_app` job the model itself declined to read the token file, so that read was checked with `codex sandbox` and the same profile instead. Windows was not re-run. Live shared links on APFS (where cloning succeeds) were tested via injected failures.
 
-The confined server was checked live on 2026-11-23 (macOS 27, agy 1.5.14) with a daemon under a temporary `CREW_HOME`: a two-turn engineer job edited files, ran `ls`, a Node script that wrote a file, `rm … && mv …`, and a local HTTP server, and called `crew.siblings` and `crew.recent_changes`, with no approval request; `touch $HOME/…` and a write to the worktree's `.git` were refused; the follow-up restored the closed session. `test/antigravity.test.ts` runs the profile under `sandbox-exec` and routes a worktree job and an in-place job through a stub server.
+The confined server was checked live on 2026-11-23 (macOS 27, agy 1.5.14) with a daemon under a temporary `CREW_HOME`: a two-turn engineer job edited files, ran `ls`, a Node script that wrote a file, `rm … && mv …`, and a local HTTP server, and called `crew.siblings` and `crew.recent_changes`, with no approval request; `touch $HOME/…` and a write to the worktree's `.git` were refused; the follow-up restored the closed session. `test/antigravity.test.ts` runs the profile under `sandbox-exec`, including attempts to move a worktree, the folders above it and the state folder aside, and routes a worktree job and an in-place job through a stub server that reports whether it could write beside itself.
 
 The Antigravity mode table above came from live ACP probes on 2026-11-22. The probes used agy 1.5.14, Crew's client capabilities, and scratch targets, approving each request once. A live Crew job then confirmed that an engineer's `git branch` under the user's allow rule is noted, while the same command in a read-only job stops the turn.
 
@@ -158,7 +166,7 @@ Related tests include `test/antigravity.test.ts`, `test/policy.test.ts`, `test/b
 
 ## History
 
-- 2026-11-23: An Antigravity engineer's commands no longer ask on macOS. The plan was to match Codex by having Crew run agy's commands in its own sandbox, or by auto-approving agy's delete and move requests; probes of agy 1.5.14 ruled both out (it ignores ACP's terminal capability, and deletes and moves arrive as `rm` and `mv` commands), and agy's own terminal sandbox cannot write an ACP session's workspace. Crew now runs the `agy acp` server itself inside a Seatbelt profile and allows an engineer's commands there. The network stays open and one server still serves every job, which the user accepted; a server per job was left out for its start-up cost.
+- 2026-11-23: An Antigravity engineer's commands no longer ask on macOS. The plan was to match Codex by having Crew run agy's commands in its own sandbox, or by auto-approving agy's delete and move requests; probes of agy 1.5.14 ruled both out (it ignores ACP's terminal capability, and deletes and moves arrive as `rm` and `mv` commands), and agy's own terminal sandbox cannot write an ACP session's workspace. Crew now runs the `agy acp` server itself inside a Seatbelt profile and allows an engineer's commands there. The network stays open and one server still serves every job, which the user accepted; a server per job was left out for its start-up cost. Two reviews of the first version found that a command could move a worktree aside and put a prepared one, with its own `.git`, in its place (reproduced through to the bridge's own `git` running a filter outside the sandbox), and that the confined server shared `bin/agentapi` and the session store with the user's agy. The profile now refuses writes to the folders above a worktree, and the confined server has a state folder of its own.
 - 2026-11-23: The macOS watchdog was meant to get a Windows half, a limit on the job host's wait. On Windows 11 with Codex CLI 0.170.0, killing a daemon stand-in, started attached or detached, ended its check within 6 ms with nothing left running, because of Node's job object, so the host got no limit of its own. `test/jobs.test.ts` keeps this on Windows.
 - 2026-11-22: Re-ran the Codex sandbox checks on Codex CLI 0.171.0 (macOS), after Codex reworked permission profiles and resume-time override checks in 0.168–0.171. Nothing changed.
 - 2026-11-22: Probes of agy 1.5.14 found two gaps. Actions covered by the user's Antigravity allow rules or Non-Workspace Access never trigger a permission request in any mode, and `auto` and `accept-edits` skip every edit check. Crew now pins sessions to `default`, checks actions that ran without asking against the role, and stops the turn on a violation. A per-job Auto option was considered and dropped because `auto` also skipped the edit, `.git`, token-folder, and network checks.

@@ -206,6 +206,8 @@ export interface Config {
     enabled: boolean;
     /** Value for the ACP "model" config option, e.g. "gemini-3.8-flash". */
     model?: string;
+    /** macOS: false keeps every job on a server outside Crew's sandbox, which asks before each of an engineer's commands. */
+    sandbox?: boolean;
   };
   /** Which worker takes each role, with inheritance resolved. Read when a job starts, so edits apply to the next job. */
   roles: Record<Role, RoleAssignment>;

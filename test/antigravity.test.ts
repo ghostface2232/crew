@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { antigravityAdapter, AntigravityAdapter, decide, formAnswer, formQuestions, serverProfile } from '../plugin/bridge/adapters/antigravity.ts';
+import { antigravityAdapter, AntigravityAdapter, confinedEnv, confines, decide, formAnswer, formQuestions, serverProfile } from '../plugin/bridge/adapters/antigravity.ts';
 import { tokenFile } from '../plugin/bridge/auth.ts';
 import { HOME, resolveConfig } from '../plugin/bridge/config.ts';
 import { Jobs } from '../plugin/bridge/jobs.ts';
@@ -1420,60 +1420,147 @@ test('a confined engineer\'s command is allowed, and nothing else changes', () =
   // agy's other tools run in the server itself, and a Crew or plugin tool is not a command the sandbox holds.
   assert.equal(decide('delegate', '/work', command('https://example.com', undefined, 'fetch'), false, true), 'ask');
   assert.equal(decide('delegate', '/work', { ...run, _meta: { mcpServerName: 'other' } }, false, true), 'ask');
+  // Only a request that names its command is taken for one.
+  assert.equal(decide('delegate', '/work', { kind: 'execute', title: 'Run', rawInput: { target: 'build' } }, false, true), 'ask');
+  assert.equal(decide('delegate', '/work', { kind: 'execute', title: 'Run', rawInput: { CommandLine: ' ' } }, false, true), 'ask');
+  assert.deepEqual(decide('delegate', '/work', { kind: 'execute', title: 'Run' }, false, true), { refuse: 'execute request without its input' });
   assert.deepEqual(decide('delegate', '/work', { ...run, locations: [{ path: tokenFile(HOME) }] }, false, true), { refuse: 'the Crew token file' });
   assert.deepEqual(decide('polish', '/work', run, false, true), { refuse: 'execute' });
   assert.deepEqual(decide('review', '/work', run, false, true), { refuse: 'execute' });
   assert.deepEqual(decide('delegate', '/work', run, true, true), { refuse: 'execute' });
 });
 
-test('the server\'s sandbox writes only worktrees, temp and agy\'s state, and hides the token and credentials', { skip: unconfined }, (t) => {
+test('a job goes to the confined server when its files are Crew\'s to hold, and stays where its session was opened', () => {
+  const home = path.join(path.sep, 'crew');
+  const worktree = (...parts: string[]) => ({ path: path.join(home, 'worktrees', ...parts), branch: 'crew-ag-1', base: 'abc' });
+  const job = { sandbox: 'workspace-write' as const, worktree: worktree('repo-1234', 'ag-1', 'repo'), sessionId: null };
+  assert.equal(confines(job, home), true);
+  assert.equal(confines({ ...job, sandbox: 'read-only', worktree: null }, home), true);
+  // Edited in place, even inside another job's worktree, and the older layout with the worktree in the job's own folder.
+  assert.equal(confines({ ...job, worktree: null }, home), false);
+  assert.equal(confines({ ...job, worktree: worktree('repo-1234', 'ag-1') }, home), false);
+  assert.equal(confines({ ...job, worktree: { ...job.worktree, path: path.join(path.sep, 'elsewhere', 'a', 'b', 'c') } }, home), false);
+  // A session opened before the sandbox, or outside it, is in the other server's store.
+  assert.equal(confines({ ...job, sessionId: 's1' }, home), false);
+  assert.equal(confines({ ...job, sessionId: 's1', capabilities: { filesystem: '', network: 'on', plugins: [], confined: true } }, home), true);
+  assert.equal(confines({ ...job, sandbox: 'read-only', sessionId: 's1' }, home), false);
+});
+
+test('a confined server\'s environment has no secrets and no SSH agent, but keeps agy\'s own sign-in', () => {
+  const env = confinedEnv({ PATH: '/bin', HOME: '/home', GH_TOKEN: 'a', NPM_AUTH_TOKEN: 'b', aws_secret_access_key: 'c', OPENAI_API_KEY: 'd', DB_PASSWORD: 'e', SSH_AUTH_SOCK: '/sock', GEMINI_API_KEY: 'g', GOOGLE_APPLICATION_CREDENTIALS: '/adc.json' });
+  assert.deepEqual(env, { PATH: '/bin', HOME: '/home', GEMINI_API_KEY: 'g', GOOGLE_APPLICATION_CREDENTIALS: '/adc.json' });
+});
+
+test('the server\'s sandbox writes only worktrees, temp and its own state, keeps their folders in place, and hides the token and credentials', { skip: unconfined }, (t) => {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-agy-profile-')));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const [home, user, tmp] = ['crew', 'user', 'tmp'].map((name) => path.join(root, name));
-  const worktree = path.join(home, 'worktrees', 'repo-1234', 'ag-1', 'repo');
-  const state = path.join(user, '.gemini', 'antigravity-cli');
-  for (const dir of [worktree, path.join(state, 'bin'), path.join(state, 'mcp'), path.join(user, '.ssh'), tmp, path.join(root, 'project')]) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(worktree, '.git'), 'gitdir: elsewhere\n');
-  fs.writeFileSync(path.join(state, 'settings.json'), '{}');
-  fs.writeFileSync(path.join(user, '.ssh', 'id'), 'key');
-  fs.writeFileSync(tokenFile(home), 'secret');
+  const slot = path.join(home, 'worktrees', 'repo-1234', 'ag-1');
+  const worktree = path.join(slot, 'repo');
+  const legacy = path.join(home, 'worktrees', 'repo-1234', 'ag-0');
+  const state = path.join(user, '.gemini', 'antigravity-crew');
+  const own = path.join(user, '.gemini', 'antigravity-cli');
+  for (const dir of [worktree, legacy, path.join(state, 'bin'), path.join(own, 'bin'), path.join(user, '.ssh'), path.join(user, '.codex'), path.join(tmp, 'prepared', '.git'), path.join(root, 'project')]) fs.mkdirSync(dir, { recursive: true });
+  for (const pointer of [path.join(worktree, '.git'), path.join(legacy, '.git')]) fs.writeFileSync(pointer, 'gitdir: elsewhere\n');
+  for (const file of [path.join(own, 'settings.json'), path.join(home, 'config.json'), path.join(user, '.ssh', 'id'), path.join(user, '.codex', 'auth.json'), tokenFile(home)]) fs.writeFileSync(file, 'kept');
   const profile = serverProfile(home, user, tmp)!;
   const attempt = (script: string) => spawnSync('/usr/bin/sandbox-exec', ['-p', profile, '/bin/sh', '-c', script]).status === 0;
-  for (const file of [path.join(worktree, 'made'), path.join(worktree, 'src', 'deep'), path.join(tmp, 'made'), path.join(state, 'bin', 'agentapi'), path.join(state, 'log')]) {
+  for (const file of [path.join(worktree, 'made'), path.join(worktree, 'src', 'deep'), path.join(tmp, 'made'), path.join(state, 'bin', 'agentapi'), path.join(state, 'settings.json')]) {
     assert.equal(attempt(`mkdir -p "${path.dirname(file)}" && echo x > "${file}"`), true, `writes ${file}`);
   }
-  for (const file of [path.join(worktree, '.git'), path.join(root, 'project', 'made'), path.join(home, 'made'), path.join(state, 'settings.json'), path.join(state, 'mcp', 'server'), path.join(state, 'bin', 'webm_encoder'), path.join(user, 'made')]) {
-    assert.equal(attempt(`echo x >> "${file}"`), false, `does not write ${file}`);
+  const refused = [
+    path.join(worktree, '.git'), path.join(legacy, '.git'), path.join(root, 'project', 'made'), path.join(user, 'made'),
+    // The daemon's own files, and the agy an unconfined server or the user runs.
+    path.join(home, 'config.json'), path.join(home, 'made'), path.join(own, 'settings.json'), path.join(own, 'bin', 'agentapi'),
+  ];
+  for (const file of refused) assert.equal(attempt(`echo x >> "${file}"`), false, `does not write ${file}`);
+  // A folder moved aside and replaced would bring its own .git, or its own settings, into a protected place.
+  const prepared = path.join(tmp, 'prepared');
+  for (const folder of [worktree, slot, path.dirname(slot), path.join(home, 'worktrees'), legacy, state]) {
+    assert.equal(attempt(`mv "${folder}" "${path.join(tmp, 'aside')}" && mv "${prepared}" "${folder}"`), false, `does not replace ${folder}`);
+    assert.equal(fs.existsSync(folder) && fs.existsSync(prepared), true, `${folder} is where it was`);
   }
-  assert.equal(attempt(`cat "${path.join(worktree, '.git')}" "${path.join(state, 'settings.json')}"`), true);
-  for (const file of [tokenFile(home), path.join(user, '.ssh', 'id')]) assert.equal(attempt(`cat "${file}"`), false, `does not read ${file}`);
+  assert.equal(fs.readFileSync(path.join(worktree, '.git'), 'utf8'), 'gitdir: elsewhere\n');
+  assert.equal(attempt(`cat "${path.join(worktree, '.git')}" "${path.join(own, 'settings.json')}"`), true);
+  for (const file of [tokenFile(home), path.join(user, '.ssh', 'id'), path.join(user, '.codex', 'auth.json')]) assert.equal(attempt(`cat "${file}"`), false, `does not read ${file}`);
+
+  // A home inside the temp directory keeps its ledger and settings, and still lends its worktrees.
+  const inTemp = path.join(tmp, 'crew');
+  fs.mkdirSync(path.join(inTemp, 'worktrees', 'repo-1234', 'ag-2', 'repo'), { recursive: true });
+  fs.writeFileSync(path.join(inTemp, 'jobs.json'), '[]');
+  const nested = serverProfile(inTemp, user, tmp)!;
+  const inside = (script: string) => spawnSync('/usr/bin/sandbox-exec', ['-p', nested, '/bin/sh', '-c', script]).status === 0;
+  assert.equal(inside(`echo x >> "${path.join(inTemp, 'jobs.json')}"`), false);
+  assert.equal(inside(`echo x > "${path.join(inTemp, 'worktrees', 'repo-1234', 'ag-2', 'repo', 'made')}"`), true);
   // A path the profile cannot quote confines nothing, so there is no profile to run under.
   assert.equal(serverProfile(path.join(root, 'a"b'), user, tmp), null);
 });
 
-test('a job in a worktree runs its commands unasked on the confined server; one in the user\'s directory still asks', { timeout: 20000, skip: unconfined }, async (t) => {
+/** A server that asks about one command, then reports the answer with what it could do and was started with. */
+const probeServer = `
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const send = (message) => console.log(JSON.stringify({ jsonrpc: '2.0', ...message }));
+  let sessionId, promptId;
+  require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
+    const { method, id, params, result } = JSON.parse(line);
+    if (method === 'initialize') send({ id, result: { agentCapabilities: {} } });
+    else if (method === 'session/new') send({ id, result: { sessionId: 's1' } });
+    else if (method === 'session/prompt') {
+      sessionId = params.sessionId; promptId = id;
+      send({ id: 'command', method: 'session/request_permission', params: { sessionId, toolCall: { kind: 'execute', rawInput: { CommandLine: 'rm -rf build && npm test' } },
+        options: ['allow_once', 'reject_once'].map((kind) => ({ kind, optionId: kind })) } });
+    } else if (id === 'command') {
+      let outside = true;
+      try { fs.writeFileSync(path.join(__dirname, 'outside'), 'x'); } catch { outside = false; }
+      const report = { answer: result.outcome.optionId, outside, args: process.argv.slice(2), secret: process.env.CREW_TEST_TOKEN ?? null };
+      send({ method: 'session/update', params: { sessionId, update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: JSON.stringify(report) } } } });
+      send({ id: promptId, result: { stopReason: 'end_turn' } });
+    }
+  });
+`;
+
+function confinedHarness(t: test.TestContext, prepare: (home: string) => void = () => {}) {
   const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-agy-confined-')));
   const repo = path.join(home, 'repo');
   fs.mkdirSync(repo);
   for (const args of [['init', '-q'], ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'init']]) execFileSync('git', args, { cwd: repo });
   const bin = path.join(home, 'agy');
-  writeFakeBin(bin, commandServer([[command('rm -rf build && npm test')]]));
+  writeFakeBin(bin, probeServer);
+  prepare(home);
   const config = resolveConfig({ notify: false, antigravity: { bin, enabled: true }, roles: { delegate: { agents: ['antigravity'] } } });
-  const adapter = antigravityAdapter(config, home);
+  const adapter = antigravityAdapter(config, home, path.join(home, 'user'));
   const jobs = new Jobs(home, () => config, { codex: adapter, antigravity: adapter }, { onEvent: () => {}, onJob: () => {}, onAttention: () => {} });
+  process.env.CREW_TEST_TOKEN = 'secret';
   t.after(async () => {
+    delete process.env.CREW_TEST_TOKEN;
     adapter.shutdown();
     await new Promise((resolve) => setImmediate(resolve));
     jobs.flush();
     fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
   });
-  const isolated = await jobs.create({ kind: 'delegate', cwd: repo, task: 'test' });
-  while (!isolated.endedAt) await jobs.wait(isolated.id, isolated.seq, 1000);
-  assert.deepEqual(JSON.parse(isolated.report!), { 'command-1-0': 'allow_once' });
+  const ended = async (job: Job) => { while (!job.endedAt) await jobs.wait(job.id, job.seq, 1000); return JSON.parse(job.report!); };
+  return { home, repo, jobs, ended };
+}
 
-  const inPlace = await jobs.create({ kind: 'delegate', cwd: repo, isolation: 'in_place', task: 'test' });
-  while (!inPlace.waiting) await jobs.wait(inPlace.id, inPlace.seq, 1000);
-  await jobs.reply(inPlace.id, { decision: 'deny', request_id: inPlace.waiting.id });
-  while (!inPlace.endedAt) await jobs.wait(inPlace.id, inPlace.seq, 1000);
-  assert.deepEqual(JSON.parse(inPlace.report!), { 'command-1-0': 'reject_once' });
+test('a job in a worktree runs its commands unasked inside the sandbox; one in the user\'s directory still asks, outside it', { timeout: 20000, skip: unconfined }, async (t) => {
+  const h = confinedHarness(t);
+  const isolated = await h.jobs.create({ kind: 'delegate', cwd: h.repo, task: 'test' });
+  // Allowed without a prompt only where the sandbox really holds the server: it could not write beside itself.
+  assert.deepEqual(await h.ended(isolated), { answer: 'allow_once', outside: false, args: ['acp', '--sandbox=false', '--app-data-dir', 'antigravity-crew'], secret: null });
+  assert.equal(isolated.capabilities?.confined, true);
+  assert.equal(fs.existsSync(path.join(h.home, 'user', '.gemini', 'antigravity-crew')), true);
+
+  const inPlace = await h.jobs.create({ kind: 'delegate', cwd: h.repo, isolation: 'in_place', task: 'test' });
+  while (!inPlace.waiting) await h.jobs.wait(inPlace.id, inPlace.seq, 1000);
+  await h.jobs.reply(inPlace.id, { decision: 'deny', request_id: inPlace.waiting.id });
+  assert.deepEqual(await h.ended(inPlace), { answer: 'reject_once', outside: true, args: ['acp'], secret: 'secret' });
+  assert.equal(inPlace.capabilities?.confined, undefined);
+});
+
+test('a sandbox that cannot be prepared leaves every job on the server that asks', { timeout: 20000, skip: unconfined }, async (t) => {
+  // The folder the profile is built around is taken by a file.
+  const h = confinedHarness(t, (home) => fs.mkdirSync(path.join(home, 'user', '.gemini'), { recursive: true }) && fs.writeFileSync(path.join(home, 'user', '.gemini', 'antigravity-crew'), ''));
+  const question = await h.jobs.create({ kind: 'delegate', ask: true, cwd: h.repo, task: 'test' });
+  assert.deepEqual(await h.ended(question), { answer: 'reject_once', outside: true, args: ['acp'], secret: 'secret' });
 });

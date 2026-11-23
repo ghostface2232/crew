@@ -126,6 +126,8 @@ export interface Capabilities {
   network: 'on' | 'off' | 'agent-managed';
   /** Plugins on for the job. Their tools act outside the sandbox. */
   plugins: string[];
+  /** The agent's server runs inside a sandbox of Crew's own, with its own session store: the job continues there. */
+  confined?: boolean;
 }
 
 export interface ExchangeEntry {

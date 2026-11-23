@@ -320,7 +320,6 @@ struct CrewSettingsView: View {
         } footer: {
             VStack(alignment: .leading, spacing: Space.s) {
                 saveRow
-                Text(model.file).font(Typeface.codeSmall).foregroundStyle(.tertiary).textSelection(.enabled)
                 if model.text.count > 9000 {
                     Label("Claude sessions will be pointed to this file because it is longer than 9,000 characters.", systemImage: "info.circle").settingsFootnote()
                 }
@@ -338,10 +337,10 @@ struct CrewSettingsView: View {
             }
             Spacer()
             if !model.loaded && !model.loading {
-                Button("Retry Loading") { Task { await model.load(scope: model.scope) } }
+                Button("Retry Loading") { Task { await model.load(scope: model.scope) } }.pillButton()
             }
-            Button(model.savingText ? "Saving…" : "Save Instructions") { Task { await model.saveInstructions() } }
-                .buttonStyle(.borderedProminent).keyboardShortcut("s")
+            Button(model.savingText ? "Saving…" : "Save") { Task { await model.saveInstructions() } }
+                .glassPillButton().morphs(on: model.savingText).keyboardShortcut("s")
                 .disabled(!store.connected || model.savingText || !model.loaded)
         }
     }

@@ -57,7 +57,7 @@ enum CrewHome {
 }
 
 struct EmptyReply: Codable, Sendable {}
-struct Instructions: Codable, Sendable { var file: String; var text: String }
+struct Instructions: Codable, Sendable { var text: String }
 
 final class CrewAPI: Sendable {
     let baseURL: URL

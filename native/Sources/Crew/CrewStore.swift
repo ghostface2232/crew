@@ -340,7 +340,6 @@ final class SettingsModel {
     var scope = ""
     var text = ""
     var savedText = ""
-    var file = ""
     var loaded = false
     var loading = false
     var savingText = false
@@ -517,10 +516,10 @@ final class SettingsModel {
         do {
             let result: Instructions = try await api.request(components.string!)
             guard generation == attempt else { return }
-            text = result.text; savedText = result.text; file = result.file; loaded = true
+            text = result.text; savedText = result.text; loaded = true
         } catch {
             guard generation == attempt else { return }
-            text = ""; savedText = ""; file = ""; textStatus = error.localizedDescription
+            text = ""; savedText = ""; textStatus = error.localizedDescription
         }
         if generation == attempt { loading = false }
     }
@@ -533,7 +532,7 @@ final class SettingsModel {
             let result: Instructions = try await api.post("/api/instructions", Save(project: scope.isEmpty ? nil : scope, text: draft))
             guard generation == attempt else { return }
             if text == draft { text = result.text }
-            savedText = result.text; file = result.file; textStatus = "Saved"
+            savedText = result.text; textStatus = "Saved"
         } catch { if generation == attempt { textStatus = error.localizedDescription } }
         if generation == attempt { savingText = false }
     }

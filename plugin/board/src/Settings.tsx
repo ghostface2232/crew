@@ -214,7 +214,6 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
   const [loadedScope, setLoadedScope] = useState<string | null>(null);
   const [text, setText] = useState('');
   const [saved, setSaved] = useState('');
-  const [file, setFile] = useState('');
   const [load, setLoad] = useState<'loading' | 'ready' | 'failed'>('loading');
   const [status, setStatus] = useState('');
   const [saving, setSaving] = useState(false);
@@ -235,7 +234,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
     setStatus('');
     setSaving(false);
     saveLock.current = false;
-    void request<{ file: string; text: string }>(
+    void request<{ text: string }>(
       `/api/instructions${scope ? `?project=${encodeURIComponent(scope)}` : ''}`,
       undefined,
       abort.signal,
@@ -244,7 +243,6 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
         if (attempt !== generation.current) return;
         setText(result.text);
         setSaved(result.text);
-        setFile(result.file);
         setLoadedScope(scope);
         setLoad('ready');
       },
@@ -252,7 +250,6 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
         if (abort.signal.aborted || attempt !== generation.current) return;
         setText('');
         setSaved('');
-        setFile('');
         setLoad('failed');
         setStatus(`Could not load instructions: ${error.message}`);
       },
@@ -356,14 +353,13 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
     const attempt = generation.current;
     const draft = text;
     try {
-      const result = await request<{ file: string; text: string }>('/api/instructions', {
+      const result = await request<{ text: string }>('/api/instructions', {
         project: scope || null,
         text: draft,
       });
       if (attempt !== generation.current) return;
       setText((current) => (current === draft ? result.text : current));
       setSaved(result.text);
-      setFile(result.file);
       setStatus('Saved');
     } catch (error) {
       if (attempt === generation.current) setStatus((error as Error).message);
@@ -726,11 +722,10 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
                       <div className={styles.actions}>
                         {load === 'failed' && <button type="button" onClick={() => setRetry((value) => value + 1)}>Retry Loading</button>}
                         <button type="button" className="prominent" disabled={!canSave} onClick={() => void saveInstructions()}>
-                          {saving ? 'Saving…' : 'Save Instructions'}
+                          {saving ? 'Saving…' : 'Save'}
                         </button>
                       </div>
                     </div>
-                    <p className={`${styles.footnote} ${styles.file}`}>{file}</p>
                     {text.length > 9000 && (
                       <p className={`${styles.footnote} ${styles.note}`}>
                         <Icon icon={Info16Regular} />

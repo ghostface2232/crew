@@ -1137,7 +1137,6 @@ private final class MockProtocol: URLProtocol, @unchecked Sendable {
         await first.value
         #expect(settings.scope == "/project")
         #expect(settings.text == "new")
-        #expect(settings.file == "project")
     }
     @Test func editsDuringSaveArePreserved() async throws {
         let api = api { request in

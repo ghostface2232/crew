@@ -222,7 +222,7 @@ A pill or glass pill whose words follow state, such as Copied, Saving… or Keep
 
 | Kind | How | Use |
 | --- | --- | --- |
-| Primary | `.glassPillButton()`, or `.glassPillButton(prominent: false)` for clear glass: Liquid Glass at the pill's size and face. Glass pills side by side share a `GlassEffectContainer` | Send Message, New Job, Save Roles / Save Preset / Save Instructions, Send Job, approval decisions; Review Requests in clear glass |
+| Primary | `.glassPillButton()`, or `.glassPillButton(prominent: false)` for clear glass: Liquid Glass at the pill's size and face. Glass pills side by side share a `GlassEffectContainer` | Send Message, New Job, Save (instructions), Send Job, approval decisions; Review Requests in clear glass |
 | Pill | `.pillButton()`; a destructive role tints it with the danger color | Details, Retry, Copy, Undo/Keep, Check Again, Install, Cancel Job |
 | Icon | `.iconButton()`: `IconButtonStyle`, a `Pill.fill` circle of `IconButton.diameter` (28 points), a little larger than a chip, with its symbol in `Symbol.control`; `.iconButton(prominent: true)` fills it with the accent | Close, Show Job, expand a mission; Send Answer (prominent) |
 | Chip | `.chip(color)`: `Typeface.chip` inked in its color, in a `Palette.chip` capsule with `Chip.insets` (5 × 8), outlined under Increase Contrast. `StatusLabel` draws status with it, passing `Chip.symbolInsets` (6 on the leading side) because the symbol's own side bearing already spaces it from the edge; `.chip(color, in:)` gives it another shape, such as a PR's rounded square | Status of missions and agents; a model's verdict word. Job and session rows and the History table show `StatusIcon`, the status symbol alone, with the word as its tooltip and accessible name |

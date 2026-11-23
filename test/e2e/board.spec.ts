@@ -318,10 +318,10 @@ test('saving instructions preserves edits typed while the request is in flight',
   const field = page.getByRole('textbox', { name: 'Shared instructions' });
   await expect(field).toBeEnabled();
   await field.fill('First draft');
-  await page.getByRole('button', { name: 'Save Instructions' }).click();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
   await field.fill('First draft with a new requirement');
   release();
-  await expect(page.getByRole('button', { name: 'Save Instructions' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeEnabled();
   await expect(field).toHaveValue('First draft with a new requirement');
   await expect(page.getByText('Unsaved changes')).toBeVisible();
 });
@@ -343,7 +343,7 @@ test('the scope cannot change during a save and failed loads cannot be saved', a
   const field = page.getByRole('textbox', { name: 'Shared instructions' });
   await expect(field).toBeEnabled();
   await field.fill('Old text');
-  await page.getByRole('button', { name: 'Save Instructions' }).click();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
   // As in the app, other instructions cannot load while these are being saved.
   const other = page.getByRole('navigation', { name: 'Settings pages' }).getByRole('button', { name: 'Other', exact: true });
   await expect(other).toBeDisabled();
@@ -351,7 +351,7 @@ test('the scope cannot change during a save and failed loads cannot be saved', a
   await expect(page.getByText('Unsaved changes')).toHaveCount(0);
   await other.click();
   await expect(field).toBeDisabled();
-  await expect(page.getByRole('button', { name: 'Save Instructions' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Retry Loading' })).toBeVisible();
 });
 
@@ -387,7 +387,7 @@ test('settings can retry failed saves and confirm unsaved close', async ({ page 
   await expect(field).toBeEnabled();
   await field.fill('Draft');
   await page.route('**/api/instructions', (route) => route.fulfill({ status: 500, json: { error: 'Save failed' } }));
-  await page.getByRole('button', { name: 'Save Instructions' }).click();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page.getByText('Save failed', { exact: true })).toBeVisible();
   await expect(field).toHaveValue('Draft');
   await page.keyboard.press('Escape');
@@ -396,7 +396,7 @@ test('settings can retry failed saves and confirm unsaved close', async ({ page 
   await expect(ask).toHaveCount(0);
   await expect(page.getByRole('dialog')).toBeVisible();
   await page.unroute('**/api/instructions');
-  await page.getByRole('button', { name: 'Save Instructions' }).click();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page.getByText('Unsaved changes')).toHaveCount(0);
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);
@@ -877,7 +877,7 @@ test('each project has its own instructions page', async ({ page, request }) => 
   await settingsPage(page, 'Instructions');
   await page.getByRole('dialog', { name: 'Discard the unsaved changes to these instructions?' }).getByRole('button', { name: 'Cancel' }).click();
   await expect(field).toHaveValue('Use tabs here.');
-  await page.getByRole('button', { name: 'Save Instructions' }).click();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page.getByText('Unsaved changes')).toHaveCount(0);
   const calls = await (await request.get('/__requests')).json();
   expect(calls.findLast((call: { route: string }) => call.route === '/api/instructions').body).toEqual({ project: '/workspace/Other', text: 'Use tabs here.' });
@@ -1112,7 +1112,7 @@ test('320px sheets keep controls within the viewport and support reduced motion'
   const settings = page.getByRole('dialog');
   await expect(page.getByRole('textbox', { name: 'Shared instructions' })).toBeEnabled();
   expect(await settings.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
-  await expect(page.getByRole('button', { name: 'Save Instructions' })).toBeInViewport();
+  await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeInViewport();
 });
 
 test('usage windows show every status and reset, with model limits in the help text', async ({ page, request }) => {

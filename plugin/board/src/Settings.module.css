@@ -71,7 +71,6 @@
 .value { min-width: 0; color: var(--secondary); text-align: end; overflow-wrap: anywhere; }
 .footnote { padding: 0 4px; color: var(--secondary); font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
 .editor { min-height: 240px; max-height: none; padding: 14px; border-radius: var(--row-radius); }
-.file { color: var(--tertiary); }
 .note { display: flex; align-items: start; gap: 6px; }
 .note svg { flex: none; width: 13px; height: 13px; margin-top: 2px; }
 

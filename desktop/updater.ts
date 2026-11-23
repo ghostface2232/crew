@@ -43,6 +43,14 @@ if ($p.ExitCode -ne 0) {
 }
 `;
 
+/**
+ * The supervisor's environment, without a module path. Windows PowerShell that inherits the one PowerShell 7 sets loads
+ * PowerShell 7's own modules, which lack Get-FileHash; without one it uses its own.
+ */
+export function supervisorEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(env).filter(([key]) => key.toLowerCase() !== 'psmodulepath'));
+}
+
 export interface Release {
   version: string;
   url: string;

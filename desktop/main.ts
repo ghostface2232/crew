@@ -8,7 +8,7 @@ import { boardCredential, boardUrl, readToken, SESSION_COOKIE } from '../plugin/
 import { api, ensureDaemon, health } from '../plugin/bridge/client.ts';
 import { baseUrl, HOME, PLUGIN_ROOT } from '../plugin/bridge/config.ts';
 import type { BoardState } from '../plugin/board/src/types.ts';
-import { installScript, Updater } from './updater.ts';
+import { installScript, supervisorEnv, Updater } from './updater.ts';
 import { isBoardNavigation, linkTarget, windowBounds } from './window-state.ts';
 
 // The Electron shell for Windows (and other non-macOS systems); macOS uses the native app in native/.
@@ -551,7 +551,7 @@ async function handOver() {
       detached: true, stdio: 'ignore', windowsHide: true,
       // Not the install folder, which the installer replaces.
       cwd: os.tmpdir(),
-      env: { ...process.env, CREW_INSTALLER: installer, CREW_INSTALLER_SHA256: sha256, CREW_APP: process.execPath, CREW_PARENT_PID: String(process.pid) },
+      env: { ...supervisorEnv(process.env), CREW_INSTALLER: installer, CREW_INSTALLER_SHA256: sha256, CREW_APP: process.execPath, CREW_PARENT_PID: String(process.pid) },
     });
     await new Promise<void>((resolve, reject) => {
       child.once('spawn', resolve);

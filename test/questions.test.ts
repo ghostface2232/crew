@@ -181,7 +181,7 @@ async function freePort(): Promise<number> {
 }
 
 /** `prepare` fills the home before the daemon first reads it; `preload` is a module imported before the daemon's own. */
-async function daemon(t: TestContext, prepare?: (home: string) => void, preload?: string) {
+async function daemon(t: TestContext, prepare?: (home: string) => void, preload?: string, overrides: NodeJS.ProcessEnv = {}) {
   const port = await freePort();
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-question-http-'));
   const bin = path.join(home, 'codex');
@@ -211,7 +211,7 @@ async function daemon(t: TestContext, prepare?: (home: string) => void, preload?
   fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ notify: false, codex: { bin } }));
   // A job's model is read from Codex's own model cache, which a machine without Codex does not have.
   fs.writeFileSync(path.join(home, 'models_cache.json'), JSON.stringify({ models: [{ slug: 'gpt-test-sol' }] }));
-  const env = { ...process.env, CREW_HOME: home, CREW_PORT: String(port), CLAUDE_PROJECT_DIR: home, CLAUDE_CODE_SESSION_ID: 'test-lead', CREW_AGENTGAUGE_DIR: path.join(home, 'gauge'), CODEX_HOME: home };
+  const env = { ...process.env, CREW_HOME: home, CREW_PORT: String(port), CLAUDE_PROJECT_DIR: home, CLAUDE_CODE_SESSION_ID: 'test-lead', CREW_AGENTGAUGE_DIR: path.join(home, 'gauge'), CODEX_HOME: home, ...overrides };
   prepare?.(home);
   const args = preload ? ['--import', preload] : [];
   const child = spawn(process.execPath, [...args, path.resolve('plugin/bridge/daemon.ts')], { env, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -1037,7 +1037,9 @@ test('daemon shutdown closes a live sandboxed check and its descendants', {
   const command = `node -e "const s = require('node:net').connect(${port}, '127.0.0.1'); s.setTimeout(25000, () => s.destroy()); s.resume()"`;
   const preload = `import { runCheck } from ${JSON.stringify(new URL('../plugin/bridge/check.ts', import.meta.url).href)};
     void runCheck(${JSON.stringify(command)}, process.env.CREW_HOME, process.env.CREW_HOME + '/scratch-check', []);`;
-  const h = await daemon(t, (home) => fs.mkdirSync(path.join(home, 'scratch-check')), 'data:text/javascript,' + encodeURIComponent(preload));
+  // On Windows the check runs in the real Codex sandbox, which fails under a fresh Codex home; give it the probe's.
+  const codexHome = process.platform === 'win32' ? { CODEX_HOME: process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex') } : {};
+  const h = await daemon(t, (home) => fs.mkdirSync(path.join(home, 'scratch-check')), 'data:text/javascript,' + encodeURIComponent(preload), codexHome);
   const [socket] = await connected;
   try {
     const closed = once(socket, 'close', { signal: AbortSignal.timeout(4000) });

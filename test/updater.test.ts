@@ -84,7 +84,7 @@ test('hand-over retains the digest verified at load even if the staged files cha
 });
 
 test('the Windows supervisor verifies every installer launch, including interactive recovery', { skip: process.platform !== 'win32' }, async () => {
-  const { installScript } = await import('../desktop/updater.ts');
+  const { installScript, supervisorEnv } = await import('../desktop/updater.ts');
   const dir = tempDir();
   try {
     const file = path.join(dir, 'installer.exe');
@@ -107,7 +107,7 @@ test('the Windows supervisor verifies every installer launch, including interact
         try { ${installScript} } catch { [Console]::WriteLine($_.Exception.Message); exit 1 }
       `;
       const run = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], {
-        env: { ...process.env, CREW_INSTALLER: file, CREW_INSTALLER_SHA256: sha(payload), CREW_APP: path.join(dir, 'missing.exe'), SCENARIO: scenario },
+        env: { ...supervisorEnv(process.env), CREW_INSTALLER: file, CREW_INSTALLER_SHA256: sha(payload), CREW_APP: path.join(dir, 'missing.exe'), SCENARIO: scenario },
         encoding: 'utf8',
       });
       assert.ifError(run.error);

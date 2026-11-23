@@ -241,18 +241,16 @@ kbd {
 
 /* Tinted controls raised in their own tone: a lit top edge and a drop of the tone, no outline. Declared on the elements
    themselves, since a custom property resolves its var()s where it is declared, and :root has no --tone. */
-.chip, .answer-card, .job-row {
+.answer-card, .job-row {
   --shadow-tinted: inset 0 1px 0 rgb(255 255 255 / 0.65), 0 1px 2px rgb(0 0 0 / 0.05), 0 8px 20px -12px color-mix(in srgb, var(--tone, var(--secondary)) 32%, transparent);
-  --shadow-tinted-sm: inset 0 1px 0 rgb(255 255 255 / 0.55), 0 1px 1.5px color-mix(in srgb, var(--tone, var(--secondary)) 28%, transparent);
 }
 @media (prefers-color-scheme: dark) {
-  .chip, .answer-card, .job-row {
+  .answer-card, .job-row {
     --shadow-tinted: inset 0 1px 0 rgb(255 255 255 / 0.08), 0 1px 2px rgb(0 0 0 / 0.4), 0 6px 16px -8px rgb(0 0 0 / 0.7);
-    --shadow-tinted-sm: inset 0 1px 0 rgb(255 255 255 / 0.07), 0 1px 1.5px rgb(0 0 0 / 0.35);
   }
 }
 
-/* StatusLabel: the symbol, then the word, on a tint of the state's color. */
+/* StatusLabel: the symbol, then the word, on a flat tint of the state's color; a chip labels, so it is not raised. */
 .chip {
   display: inline-flex;
   align-items: center;
@@ -262,7 +260,6 @@ kbd {
   padding: 0 8px 0 7px;
   border-radius: 999px; corner-shape: round;
   background: color-mix(in srgb, var(--tone, var(--secondary)) 11%, transparent);
-  box-shadow: var(--shadow-tinted-sm);
   color: color-mix(in srgb, var(--tone, var(--secondary)), var(--tone-ink) var(--tone-darken));
   font-size: 11px;
   font-weight: 550;

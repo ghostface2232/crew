@@ -932,6 +932,40 @@ private final class MockProtocol: URLProtocol, @unchecked Sendable {
         #expect(!settings.dirty && !settings.busy)
         #expect(settings.savedPreset == .best && settings.presetStatus == "Saved")
     }
+    @Test func typedTextStaysOutOfAStoreUnderWayUntilItIsCommitted() async throws {
+        let state = try fixture("state-extended")
+        let models = Mutex<[String?]>([])
+        let api = api { request in
+            let roles = try #require(try requestBody(request)["roles"] as? [String: [String: Any]])
+            let model = (roles["delegate"]?["codex"] as? [String: String])?["model"]
+            let count = models.withLock { $0.append(model); return $0.count }
+            if count == 2 { return (400, Data(#"{"error":"Cannot save roles"}"#.utf8), 0) }
+            var stored = state
+            stored.roleSettings?["delegate"]?.codex?.model = model
+            return (200, try JSONEncoder().encode(stored), 0.05)
+        }
+        let settings = SettingsModel(api: api, roles: state.roles, roleSettings: state.roleSettings, roleInfo: state.roleInfo)
+        let field = SettingsModel.TypedField(role: "delegate", agent: "codex", model: true)
+        settings.setRole("delegate", agent: "codex", \.effort, to: "low")
+        let apply = Task { await settings.applyRoles() }
+        try await Task.sleep(for: .milliseconds(10))
+        settings.type(field, "new-mo")
+        await apply.value
+        // The store under way went out without the half-typed name, and its answer left the typing alone.
+        #expect(models.withLock { $0 } == ["build-model"])
+        #expect(settings.typed(field) == "new-mo" && settings.roleSettings["delegate"]?.codex?.model == "build-model")
+        #expect(settings.dirty && !settings.rolesDirty)
+        // A failed store of the committed name undoes it, and the field shows what is stored.
+        settings.type(field, "new-model")
+        settings.commit(field)
+        await settings.applyRoles()
+        #expect(models.withLock { $0 } == ["build-model", "new-model"])
+        #expect(settings.typed(field) == "build-model" && !settings.dirty && settings.roleError == "Cannot save roles")
+        // Closing with Save commits a draft and stores it.
+        settings.type(field, "closing-model")
+        #expect(await settings.saveAll())
+        #expect(models.withLock { $0.last } == "closing-model" && settings.drafts.isEmpty)
+    }
     @Test func appliedPresetStoresAPickMadeWhileSavingAndUndoesOneThatFails() async throws {
         let definitions = try #require(fixture("state-extended").presets)
         let calls = Mutex(0)

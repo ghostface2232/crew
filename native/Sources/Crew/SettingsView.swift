@@ -50,8 +50,7 @@ struct CrewSettingsView: View {
     @Environment(AppUpdater.self) private var updater
     @State private var selection: SettingsPane? = .build
     /// The model or effort being typed by hand, stored when it is left as when Return is pressed.
-    @FocusState private var typing: TypedField?
-    private struct TypedField: Hashable { let role: String; let agent: String; let model: Bool }
+    @FocusState private var typing: SettingsModel.TypedField?
     /// Moving to another set of instructions loads it in place of the one being edited, so unsaved edits are asked about first.
     private var pages: Binding<SettingsPane?> {
         Binding(get: { selection }, set: { next in
@@ -90,7 +89,7 @@ struct CrewSettingsView: View {
                 .navigationTitle(title(pane))
                 // NSHostingController does not carry navigationTitle into the window, so the toolbar would be blank.
                 .background(WindowTitleSetter(title: title(pane)))
-                .onChange(of: typing) { left, _ in if left != nil { storeRoles() } }
+                .onChange(of: typing) { left, _ in if let left { commit(left) } }
         }
         .frame(minWidth: WorkspaceStyle.settingsMinSize.width, idealWidth: WorkspaceStyle.settingsSize.width, minHeight: WorkspaceStyle.settingsMinSize.height, idealHeight: WorkspaceStyle.settingsSize.height)
         .task { if !model.loaded && !model.loading { await model.load(scope: model.scope) } }
@@ -177,6 +176,10 @@ struct CrewSettingsView: View {
     /// Stores the table after a change, as the change is made.
     private func storeRoles() {
         Task { await model.applyRoles() }
+    }
+    private func commit(_ field: SettingsModel.TypedField) {
+        model.commit(field)
+        storeRoles()
     }
     @ViewBuilder private var presets: some View {
         let selected = model.preset.flatMap { model.presets?[$0.rawValue] }
@@ -355,11 +358,12 @@ struct CrewSettingsView: View {
         let blank = model.blankTitle(role.role, agent: agent, key, models: offered)
         let binding = roleBinding(role, agent: agent, key)
         if offered.isEmpty {
-            // Typed by hand, so stored on Return or when the field is left rather than at every keystroke; until then
-            // it is an unsaved change, which closing the window asks about.
-            TextField(title, text: binding, prompt: Text(blank))
-                .focused($typing, equals: TypedField(role: role.role, agent: agent, model: key == \.model))
-                .onSubmit { storeRoles() }
+            // Typed by hand into a draft, which goes into the table on Return or when the field is left; until then it
+            // is an unsaved change, which closing the window asks about.
+            let field = SettingsModel.TypedField(role: role.role, agent: agent, model: key == \.model)
+            TextField(title, text: Binding(get: { model.typed(field) }, set: { model.type(field, $0) }), prompt: Text(blank))
+                .focused($typing, equals: field)
+                .onSubmit { commit(field) }
                 .accessibilityLabel("\(role.label) \(title)")
         } else {
             Picker(title, selection: Binding(get: { binding.wrappedValue }, set: { binding.wrappedValue = $0; storeRoles() })) {

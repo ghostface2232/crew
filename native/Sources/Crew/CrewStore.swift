@@ -358,10 +358,18 @@ final class SettingsModel {
     private let openedRoles: [String: RoleAssignment]
     /// Each agent's settings as it was turned off in a role (`role:agent`), to bring back if it is turned on again.
     private var dropped: [String: RoleAgentSettings] = [:]
+    /// A model or effort being typed by hand, named by its role, agent, and whether it is the model.
+    struct TypedField: Hashable {
+        let role: String; let agent: String; let model: Bool
+        var key: WritableKeyPath<RoleAgentSettings, String?> { model ? \.model : \.effort }
+    }
+    /// Text typed into those fields and not yet committed. It stays out of `roleSettings`, so a store already under
+    /// way never sends half a name and a failed one does not take the typing back; closing asks about it.
+    private(set) var drafts: [TypedField: String] = [:]
     private var generation = 0
     private let api: CrewAPI
     var rolesDirty: Bool { Self.normalized(roleSettings) != Self.normalized(savedRoleSettings) }
-    var dirty: Bool { text != savedText || rolesDirty || preset != savedPreset }
+    var dirty: Bool { text != savedText || rolesDirty || drafts.contains { $0.value != stored($0.key) } || preset != savedPreset }
     var busy: Bool { savingText || savingRoles || savingPreset }
     init(api: CrewAPI, roles: [String: RoleAssignment], roleSettings: [String: RoleSetting]? = nil, roleInfo: [RoleInfo]? = nil, preset: PresetName? = nil, presets: [String: Preset]? = nil) {
         self.api = api
@@ -439,6 +447,7 @@ final class SettingsModel {
         } else {
             dropped[key] = setting[holder]
             setting[holder] = nil
+            drafts = drafts.filter { $0.key.role != role || $0.key.agent != holder }
         }
         // A root with no written holders returns to that form when its original holders are checked again.
         if roleInfo.first(where: { $0.role == role })?.parent == nil,
@@ -446,6 +455,17 @@ final class SettingsModel {
             setting.agents = nil
         }
         storeRole(role, setting)
+    }
+    /// What a typed field shows: its draft, or the value in the table.
+    func typed(_ field: TypedField) -> String { drafts[field] ?? stored(field) }
+    func type(_ field: TypedField, _ text: String) { drafts[field] = text == stored(field) ? nil : text }
+    private func stored(_ field: TypedField) -> String { roleSettings[field.role]?[field.agent]?[keyPath: field.key] ?? "" }
+    /// Drops what was typed, for Don't Save: a field that gives up focus as the window goes then commits nothing.
+    func discardDrafts() { drafts = [:] }
+    /// Moves a field's draft into the table, on Return or when the field is left.
+    func commit(_ field: TypedField) {
+        guard let draft = drafts.removeValue(forKey: field) else { return }
+        setRole(field.role, agent: field.agent, field.key, to: draft)
     }
     func setRole(_ role: String, agent: String, _ key: WritableKeyPath<RoleAgentSettings, String?>, to value: String, offered: [ModelChoice] = []) {
         guard assignment(for: role)?.workerHolders.contains(agent) == true else { return }
@@ -550,6 +570,7 @@ final class SettingsModel {
     }
     /// Saves every page with unsaved changes; true when nothing is left unsaved.
     func saveAll() async -> Bool {
+        for field in Array(drafts.keys) { commit(field) }
         // A failure says why where the change was made, and the change stays for another try.
         if rolesDirty { roleError = await saveRoles() ? "" : roleStatus }
         if preset != savedPreset && presets != nil { presetError = await savePreset() ? "" : presetStatus }

@@ -88,8 +88,10 @@ cases.push({ name: 'antigravity debate', agent: 'antigravity', role: 'debate' })
 for (const c of cases) {
   test(`instructions for ${c.name}`, (t) => {
     const built = build(c);
-    // Plain text, so a change reads as a wording diff.
-    t.assert.snapshot(`${built.instructions}\n\n----- prompt -----\n\n${built.prompt}`, { serializers: [(v) => v] });
+    // Plain text, so a change reads as a wording diff. The working files path is joined with the platform's
+    // separator, so it is written with / to keep one snapshot for macOS and Windows.
+    const plain = `${built.instructions}\n\n----- prompt -----\n\n${built.prompt}`.replaceAll(path.join(EVIDENCE, 'work'), `${EVIDENCE}/work`);
+    t.assert.snapshot(plain, { serializers: [(v) => v] });
     const text = built.instructions;
     const has = (s: string) => text.includes(s);
     const commands = c.role === 'delegate' || c.agent === 'codex';

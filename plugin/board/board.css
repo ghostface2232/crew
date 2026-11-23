@@ -850,10 +850,9 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
 .sidebar-foot { display: grid; gap: 6px; margin-top: auto; padding-top: 13px; border-top: 1px solid var(--hairline); }
 .sidebar-foot-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .sidebar-foot-row > .sidebar-item { flex: 1; min-width: 0; }
-.sidebar-foot-row > .connection { flex: none; padding-inline: 10px; }
-/* Live, the word stays for assistive technology and the tooltip says it; the light alone is enough to see. */
-.connection[data-state="live"] { padding-inline: 12px; }
-.connection[data-state="live"] > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* The word stays for assistive technology and the tooltip says it; the light alone is enough to see, in every state. */
+.sidebar-foot-row > .connection { flex: none; padding-inline: 12px; }
+.connection > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .sidebar-item { justify-content: flex-start; gap: 10px; width: 100%; min-height: 32px; padding: 0 10px; border-radius: 12px; corner-shape: var(--smooth); background: none; color: var(--secondary); font-weight: 450; }
 .sidebar-item svg { width: 16px; height: 16px; transition: rotate 500ms var(--ease-out); }
 @media (hover: hover) {

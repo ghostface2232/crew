@@ -73,6 +73,7 @@ export function App() {
   const waitingSessions = useMemo(() => claude.filter((session) => session.state === 'waiting'), [claude]);
   const pending = waitingJobs.length + waitingSessions.length;
   const live = state.connection === 'live';
+  const connectionWord = live ? 'Live' : state.connection === 'lost' ? 'Reconnecting…' : 'Connecting…';
   const narrow = useNarrow();
   // Narrow windows keep the sidebar folded away until its button brings it out over the page.
   const [drawer, setDrawer] = useState(false);
@@ -253,10 +254,10 @@ export function App() {
                 <Icon icon={SettingsRegular} />
                 <span>Settings</span>
               </button>
-              {/* A working connection is only its green light; the word shows while connecting or lost. */}
-              <p className="connection" role="status" data-state={state.connection} title={live ? 'Live' : undefined}>
+              {/* Only a light: green live, orange while lost. The word is its tooltip, and the page's banner says a lost one in full. */}
+              <p className="connection" role="status" data-state={state.connection} title={connectionWord}>
                 <i aria-hidden="true" />
-                <span>{live ? 'Live' : state.connection === 'lost' ? 'Reconnecting…' : 'Connecting…'}</span>
+                <span>{connectionWord}</span>
               </p>
             </div>
           </div>

@@ -71,7 +71,7 @@ export function inlineMarkdown(text: string): InlineNode[] {
       }
       if (opening && length === 1) {
         // An extension glob (`*.ts`) opens nothing, unless the dotted name is itself closed (`*.env*`).
-        const name = /^\.[\w.-]*\w/.exec(text.slice(start + 1, start + 81))?.[0];
+        const name = /^\.(?=\w)[\w.-]*\w/.exec(text.slice(start + 1, start + 81))?.[0];
         if (name && text[start + 1 + name.length] !== '*') return false;
       }
       // A wildcard starting a path component can have non-space characters on both sides.

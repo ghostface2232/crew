@@ -1799,8 +1799,8 @@ export class Jobs {
       || new Set(saved.jobs.map((job) => job.id)).size !== saved.jobs.length) {
       throw new UnreadableLedger(`${file} does not hold a job ledger, so it was left untouched.`);
     }
-    // Restoring is the test of everything else in the file: a record this cannot take in sets the whole file aside.
-    // So nothing in it reads the disk or touches what outlives this instance, and a throw leaves nothing behind.
+    // Restoring in memory is the test of the records: one this cannot take in sets the whole file aside. So nothing
+    // in it reads the disk or touches what outlives this instance, and a throw leaves nothing behind.
     const interrupted: Job[] = [];
     try {
       this.restore(saved, interrupted);
@@ -1847,6 +1847,8 @@ export class Jobs {
         else if (job.waiting) addNews(job, 'waiting', job.waiting.reason, { request: job.waiting.id });
         for (const question of job.questions ?? []) if (question.answer === undefined) addNews(job, 'question', question.text, { question: question.id });
       }
+      // Read from the disk after this; a list of another kind would fail there, where it no longer sets the file aside.
+      if (job.evidence !== undefined && !Array.isArray(job.evidence)) throw new Error(`job ${job.id} holds evidence that is not a list`);
       // Jobs saved before ownership was recorded; their repository is the closest stand-in.
       job.project = canonicalPath(job.project ?? job.repo ?? job.cwd);
       // Saved before keys were canonical; a Windows job may hold git's `C:/x` spelling.

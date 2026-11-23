@@ -128,6 +128,7 @@ test('asterisk bullets, file globs and unmatched runs stay literal beside emphas
   // An extension glob beside real emphasis, and dotted names that are emphasized.
   assert.deepEqual(inlineMarkdown('Match *.ts and *italic*.'), [plain('Match *.ts and '), { type: 'em', children: [plain('italic')] }, plain('.')]);
   assert.deepEqual(inlineMarkdown('Load *.env* before testing.'), [plain('Load '), { type: 'em', children: [plain('.env')] }, plain(' before testing.')]);
+  assert.deepEqual(inlineMarkdown('*...and so on*'), [{ type: 'em', children: [plain('...and so on')] }]);
   assert.deepEqual(inlineMarkdown('The *config*.json fixture changed.'), [plain('The '), { type: 'em', children: [plain('config')] }, plain('.json fixture changed.')]);
   // A run of three is a pair and a single: emphasis that touches other emphasis still formats.
   assert.deepEqual(inlineMarkdown('**bold***italic* and *a**b**c*'), [

@@ -28,9 +28,10 @@ const WATCHDOG_GRACE_MS = 30_000;
  * The check's shell on macOS. The time limit above lives in a timer of the daemon, which a killed daemon takes with
  * it, leaving the check's process group running for good. So the group carries a limit of its own: a watchdog that
  * kills the group ($2 seconds), started before the command ($1). The command gets a shell of its own through exec,
- * or its own `wait` would wait for the watchdog too.
+ * or its own `wait` would wait for the watchdog too. Only a sleep that ran its time kills: one the command ended
+ * (`pkill sleep` in a test's cleanup) or that could not start leaves the check running as before.
  */
-const WATCHED = '(sleep "$2"; kill -KILL 0) </dev/null >/dev/null 2>&1 & exec /bin/sh -c "$1"';
+const WATCHED = '(/bin/sleep "$2" && kill -KILL 0) </dev/null >/dev/null 2>&1 & exec /bin/sh -c "$1"';
 const KEEP_OUTPUT = 4000;
 const runningChecks = new Set<() => Promise<void>>();
 

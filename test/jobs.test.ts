@@ -1328,6 +1328,9 @@ test('a check ends at its own limit when the daemon that started it is killed, a
   await new Promise<void>((resolve) => listener.listen(0, '127.0.0.1', resolve));
   t.after(() => { listener.close(); fs.rmSync(cwd, { recursive: true, force: true }); });
   const port = (listener.address() as net.AddressInfo).port;
+  // A watchdog whose sleep the command itself ends does not take the check with it.
+  const spared = await runCheck('sleep 0.2; kill $(pgrep -g 0 -x sleep); sleep 0.5; echo survived', cwd, tmp, [], { timeoutMs: 5000, graceMs: 20_000 });
+  assert.deepEqual([spared.exit, spared.output.split('\n').at(-1)], [0, 'survived']);
   // The command's own jobs and `wait` see nothing of the watchdog: it returns at once, well inside the limit.
   const waited = await runCheck('(sleep 0.2; echo first) & (sleep 0.1; echo second) & wait; echo waited', cwd, tmp, [], { timeoutMs: 5000, graceMs: 20_000 });
   assert.deepEqual([waited.exit, waited.timedOut, waited.output.split('\n').at(-1)], [0, false, 'waited']);
@@ -1337,8 +1340,9 @@ test('a check ends at its own limit when the daemon that started it is killed, a
   const hold = `node -e "const s = require('node:net').connect(${port}, '127.0.0.1'); s.setTimeout(25000, () => s.destroy()); s.resume()"`;
   const daemon = spawn(process.execPath, ['--input-type=module', '-e',
     `import { runCheck } from ${JSON.stringify(new URL('../plugin/bridge/check.ts', import.meta.url).href)};
-     await runCheck(${JSON.stringify(hold)}, ${JSON.stringify(cwd)}, ${JSON.stringify(tmp)}, [], { timeoutMs: 1500, graceMs: 500 });`], { stdio: 'ignore' });
-  const socket = await connected;
+     await runCheck(${JSON.stringify(hold)}, ${JSON.stringify(cwd)}, ${JSON.stringify(tmp)}, [], { timeoutMs: 3000, graceMs: 500 });`], { stdio: 'ignore' });
+  // If the check never connects, its daemon ends it at the timeout and exits: a failure here, not a wait without end.
+  const socket = await Promise.race([connected, new Promise<never>((_resolve, reject) => daemon.once('exit', () => reject(new Error('the check ended before it connected'))))]);
   const closed = new Promise<number>((resolve) => socket.once('close', () => resolve(Date.now())));
   socket.on('error', () => {});
   const killed = Date.now();
@@ -2765,6 +2769,7 @@ test('a job ledger that cannot be read is left as it is, not replaced by an empt
     '{"seq":1,"jobs":[{"id":"cx-1"}]}',
     `{"seq":1,"jobs":[{"id":"cx-1",${record},"news":{}}]}`,
     `{"seq":1,"jobs":[{"id":"cx-1",${record},"project":4}]}`,
+    `{"seq":1,"jobs":[{"id":"cx-1",${record},"evidence":{}}]}`,
     `{"seq":1,"jobs":[{"id":"cx-1",${record}},{"id":"cx-1",${record}}]}`,
     `{"seq":1,"jobs":[{"id":"cx-1",${record}}],"delivery":{"receipts":{"r":{"acknowledged":false}}}}`,
   ]) {
@@ -2839,4 +2844,26 @@ test('the worker\'s report is kept when its result cannot be collected', async (
   assert.equal(job.report, '## Outcome\ndone\n\nEdited app.js as asked.');
   assert.deepEqual(job.exchange?.at(-1), { turn: 1, from: 'worker', text: job.report, at: job.exchange!.at(-1)!.at });
   assert.match(describe(job), /--- report ---\n## Outcome\ndone\n\nEdited app\.js as asked\./);
+  assert.doesNotMatch(job.error!.message, /changes listed/);
+});
+
+test('a failed collection after an earlier turn says whose changes are listed', async (t) => {
+  const repo = tempRepo();
+  const { jobs, home, adapter } = harness((ctl) => {
+    fs.writeFileSync(path.join(ctl.job.cwd, 'app.js'), 'export const x = 2;\n');
+    ctl.done('first turn');
+  });
+  t.after(() => { jobs.flush(); fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }); fs.rmSync(repo, { recursive: true, force: true, maxRetries: 5 }); });
+  const job = await settled(jobs, await jobs.create({ kind: 'delegate', task: 'edit', cwd: repo }));
+  assert.equal(job.state, 'done');
+  const first = job.result!.commit;
+  adapter.reply = async (ctl) => {
+    fs.rmSync(path.join(ctl.job.cwd, '.git'), { force: true });
+    ctl.done('second turn');
+  };
+  await jobs.reply(job.id, { message: 'again' });
+  await settled(jobs, job);
+  assert.equal(job.state, 'failed');
+  assert.match(jobs.get(job.id).error!.message, /^could not collect the result: .* The changes listed are those of the last turn whose result was collected, not of this one\.$/s);
+  assert.deepEqual([job.report, job.result!.commit], ['second turn', first]);
 });

@@ -359,8 +359,9 @@ async function commitSettings(wt: string): Promise<string[]> {
 }
 
 export async function commitChanges(wt: string, commit: string): Promise<{ files: string[]; stat: string }> {
-  const names = await git(wt, ['show', '--format=', '--name-only', '-z', commit]);
-  const stat = await git(wt, ['show', '--format=', '--shortstat', commit]);
+  // As in changesSince: a moved file counts at both ends, so a round and the result agree.
+  const names = await git(wt, ['show', '--format=', '--name-only', '--no-renames', '-z', commit]);
+  const stat = await git(wt, ['show', '--format=', '--shortstat', '--no-renames', commit]);
   return { files: names.split('\0').filter(Boolean), stat };
 }
 

@@ -1070,6 +1070,8 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
 /* Activity and History: one column of cards, or two side by side on a wide page (Columns in Overview.tsx). */
 .columns { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: var(--card-gap); align-items: start; }
 .column { display: grid; gap: var(--card-gap); min-width: 0; align-content: start; }
+.placed { display: contents; }
+.placed[data-still] > .card { animation: none; }
 
 /* Agents */
 .agent-cards { display: grid; gap: 4px; }
@@ -1543,6 +1545,8 @@ dialog.palette-layer::backdrop { background: var(--scrim-light); animation: fade
 }
 @media (forced-colors: active) {
   .agent-mark, .share-bar i, .usage-bar i, .connection > i, .nav-dot, .heatmap-grid > i, .spark > i { forced-color-adjust: none; background: CanvasText; }
+  /* The light's color is gone here, so a connection that is not live shows as a ring. */
+  .connection:not([data-state="live"]) > i { background: Canvas; box-shadow: inset 0 0 0 1px CanvasText; }
   /* The drawn controls show their state by fill, which forced colors would take away. */
   input[type="checkbox"] { forced-color-adjust: none; border: 1px solid CanvasText; background: Canvas; }
   input[type="checkbox"]::before { background: HighlightText; }

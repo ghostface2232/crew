@@ -368,7 +368,8 @@ export function Dialog({
     // so an Escape still arrives when focus has fallen out of the dialog; only the topmost sheet takes it, and a held key
     // acts once.
     const escape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented || modals.at(-1) !== dialog) return;
+      // A sheet that is leaving is inert, and has already answered its close.
+      if (event.key !== 'Escape' || event.defaultPrevented || modals.at(-1) !== dialog || dialog.inert) return;
       event.preventDefault();
       if (!event.repeat) close.current();
     };

@@ -331,7 +331,6 @@ final class CrewStore {
 final class SettingsModel {
     var roleSettings: [String: RoleSetting] = [:]
     var savedRoleSettings: [String: RoleSetting] = [:]
-    var resolvedRoles: [String: RoleAssignment]
     let roleInfo: [RoleInfo]
     var preset: PresetName?
     var savedPreset: PresetName?
@@ -352,7 +351,7 @@ final class SettingsModel {
     var roleError = ""
     var presetError = ""
     /// The role last changed, under whose rows `roleError` shows.
-    var changedRole: String?
+    private(set) var changedRole: String?
     /// The table and the resolved roles as Settings opened. Stored changes lag the form by one request, so a role is
     /// resolved, and returns to writing no holders, against these rather than the last stored.
     private let openedRoleSettings: [String: RoleSetting]
@@ -365,7 +364,7 @@ final class SettingsModel {
     var dirty: Bool { text != savedText || rolesDirty || preset != savedPreset }
     var busy: Bool { savingText || savingRoles || savingPreset }
     init(api: CrewAPI, roles: [String: RoleAssignment], roleSettings: [String: RoleSetting]? = nil, roleInfo: [RoleInfo]? = nil, preset: PresetName? = nil, presets: [String: Preset]? = nil) {
-        self.api = api; self.resolvedRoles = roles
+        self.api = api
         self.roleInfo = roleInfo ?? RoleInfo.legacy
         let table = Self.normalized(roleSettings ?? roles.mapValues(RoleSetting.init))
         self.roleSettings = table; self.savedRoleSettings = table
@@ -463,7 +462,9 @@ final class SettingsModel {
     }
     private func storeRole(_ role: String, _ setting: RoleSetting) {
         let clean = setting.normalized
-        roleSettings[role] = clean == RoleSetting() ? nil : clean
+        let next = clean == RoleSetting() ? nil : clean
+        guard roleSettings[role] != next else { return }
+        roleSettings[role] = next; changedRole = role
     }
     func assignment(for role: String) -> RoleAssignment? {
         let settings = Self.normalized(roleSettings)
@@ -549,8 +550,9 @@ final class SettingsModel {
     }
     /// Saves every page with unsaved changes; true when nothing is left unsaved.
     func saveAll() async -> Bool {
-        if rolesDirty { await saveRoles() }
-        if preset != savedPreset && presets != nil { await savePreset() }
+        // A failure says why where the change was made, and the change stays for another try.
+        if rolesDirty { roleError = await saveRoles() ? "" : roleStatus }
+        if preset != savedPreset && presets != nil { presetError = await savePreset() ? "" : presetStatus }
         if text != savedText && loaded { await saveInstructions() }
         return !dirty
     }
@@ -565,7 +567,7 @@ final class SettingsModel {
             let result: RoleState = try await api.post("/api/roles", Save(roles: draft))
             let stored = Self.normalized(result.roleSettings)
             if Self.normalized(roleSettings) == draft { roleSettings = stored }
-            resolvedRoles = result.roles; savedRoleSettings = stored; roleStatus = "Saved"
+            savedRoleSettings = stored; roleStatus = "Saved"
             return true
         } catch {
             roleStatus = error.localizedDescription

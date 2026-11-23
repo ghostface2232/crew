@@ -269,6 +269,8 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
   // A failed install leaves the sidebar once About has shown why, when Settings closes, so the note stays while it is read.
   const shownInstallError = useRef(false);
   const closeSettings = async () => {
+    // A model or effort typed by hand is stored as its field is left, which a browser need not report for a dialog going away.
+    (document.activeElement as HTMLElement | null)?.blur();
     if ((dirty || saving) && !await ask('Close without saving your changes?', 'Close')) return;
     if (shownInstallError.current) void desktop?.update.seen?.();
     close();

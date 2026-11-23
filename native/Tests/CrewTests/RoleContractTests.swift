@@ -152,9 +152,8 @@ import Testing
         let settings = SettingsModel(api: CrewAPI(port: 0), roles: state.roles, roleSettings: [:], roleInfo: state.roleInfo)
         settings.setHolder("delegate", holder: "antigravity", enabled: true)
         settings.setRole("delegate", agent: "antigravity", \.model, to: "agy-model")
-        // Stored as it was changed, so the stored table and roles no longer say how the role was when Settings opened.
+        // Stored as it was changed, so the stored table no longer says how the role was when Settings opened.
         settings.savedRoleSettings = settings.roleSettings
-        settings.resolvedRoles["delegate"] = RoleAssignment(agents: ["codex", "antigravity"])
         settings.setHolder("delegate", holder: "antigravity", enabled: false)
         #expect(settings.roleSettings["delegate"] == nil)
         #expect(settings.assignment(for: "delegate")?.holders == ["codex"])

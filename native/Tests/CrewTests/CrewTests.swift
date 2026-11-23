@@ -522,7 +522,6 @@ private final class MockProtocol: URLProtocol, @unchecked Sendable {
         await save.value
         #expect(settings.roleSettings["polish"]?.agents == ["codex"])
         #expect(settings.savedRoleSettings == SettingsModel.normalized(normalized))
-        #expect(settings.resolvedRoles == state.roles)
         #expect(settings.dirty && settings.roleStatus == "Saved")
         settings.roleSettings = normalized
         await settings.saveRoles()

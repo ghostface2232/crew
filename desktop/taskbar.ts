@@ -21,7 +21,7 @@ export function taskbarDarkIn(output: string): boolean | undefined {
 export function taskbarDark(): Promise<boolean | undefined> {
   return new Promise((resolve) => {
     const reg = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'reg.exe');
-    execFile(reg, ['query', KEY, '/v', 'SystemUsesLightTheme'], { windowsHide: true }, (error, stdout) =>
+    execFile(reg, ['query', KEY, '/v', 'SystemUsesLightTheme'], { windowsHide: true, timeout: 2000 }, (error, stdout) =>
       resolve(error ? undefined : taskbarDarkIn(stdout)));
   });
 }

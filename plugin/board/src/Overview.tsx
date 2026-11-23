@@ -61,13 +61,30 @@ function Columns({ children }: { children: ReactNode }) {
     fit();
     return () => observer.disconnect();
   }, []);
+  // Cards rise in with the page. One that mounts again later, having changed column as a filter or a new mission moves
+  // the ones before it, appears in place instead of rising again; the first frame is the line, after the layout above.
+  const entered = useRef(false);
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => { entered.current = true; });
+    return () => cancelAnimationFrame(frame);
+  }, []);
   // A column's wrapper stays mounted in both layouts, so only the cards that change column mount again.
   const columns = wide && cards.length > 1 ? [0, 1].map((side) => cards.filter((_, index) => index % 2 === side)) : [cards];
   return (
     <div className="columns" ref={root}>
-      {columns.map((column, index) => <div className="column" key={index}>{column}</div>)}
+      {columns.map((column, index) => (
+        <div className="column" key={index}>
+          {column.map((card) => <Placed key={(card as { key: string }).key} still={entered.current}>{card}</Placed>)}
+        </div>
+      ))}
     </div>
   );
+}
+
+/** Holds whether its card mounted after the page came in, which no later render changes. */
+function Placed({ still, children }: { still: boolean; children: ReactNode }) {
+  const [settled] = useState(still);
+  return <div className="placed" data-still={settled || undefined}>{children}</div>;
 }
 
 /** Bars of hourly counts; the pointer reads one off. */

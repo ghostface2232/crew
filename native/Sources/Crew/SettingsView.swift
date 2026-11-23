@@ -90,7 +90,7 @@ struct CrewSettingsView: View {
                 .navigationTitle(title(pane))
                 // NSHostingController does not carry navigationTitle into the window, so the toolbar would be blank.
                 .background(WindowTitleSetter(title: title(pane)))
-                .onChange(of: typing) { left, _ in if let left { storeRoles(left.role) } }
+                .onChange(of: typing) { left, _ in if left != nil { storeRoles() } }
         }
         .frame(minWidth: WorkspaceStyle.settingsMinSize.width, idealWidth: WorkspaceStyle.settingsSize.width, minHeight: WorkspaceStyle.settingsMinSize.height, idealHeight: WorkspaceStyle.settingsSize.height)
         .task { if !model.loaded && !model.loading { await model.load(scope: model.scope) } }
@@ -141,7 +141,7 @@ struct CrewSettingsView: View {
             if let parent = role.parent {
                 Toggle("Same as \(model.roleInfo.first { $0.role == parent }?.label ?? parent)", isOn: Binding(
                     get: { model.followsParent(role.role) },
-                    set: { model.setFollowParent(role.role, enabled: $0); storeRoles(role.role) }
+                    set: { model.setFollowParent(role.role, enabled: $0); storeRoles() }
                 )).toggleStyle(.checkbox)
             }
             LabeledContent("Agents") {
@@ -149,7 +149,7 @@ struct CrewSettingsView: View {
                     ForEach(RoleAssignment.holderOrder, id: \.self) { holder in
                         Toggle(holderLabel(holder), isOn: Binding(
                             get: { model.assignment(for: role.role)?.holders.contains(holder) == true },
-                            set: { model.setHolder(role.role, holder: holder, enabled: $0); storeRoles(role.role) }
+                            set: { model.setHolder(role.role, holder: holder, enabled: $0); storeRoles() }
                         )).toggleStyle(.checkbox).accessibilityLabel("\(role.label): \(holderLabel(holder))")
                             .disabled(!model.canToggleHolder(role.role, holder: holder))
                     }
@@ -174,9 +174,8 @@ struct CrewSettingsView: View {
             }
         }
     }
-    /// Stores the table after a change to `role`, as the change is made.
-    private func storeRoles(_ role: String) {
-        model.changedRole = role
+    /// Stores the table after a change, as the change is made.
+    private func storeRoles() {
         Task { await model.applyRoles() }
     }
     @ViewBuilder private var presets: some View {
@@ -360,10 +359,10 @@ struct CrewSettingsView: View {
             // it is an unsaved change, which closing the window asks about.
             TextField(title, text: binding, prompt: Text(blank))
                 .focused($typing, equals: TypedField(role: role.role, agent: agent, model: key == \.model))
-                .onSubmit { storeRoles(role.role) }
+                .onSubmit { storeRoles() }
                 .accessibilityLabel("\(role.label) \(title)")
         } else {
-            Picker(title, selection: Binding(get: { binding.wrappedValue }, set: { binding.wrappedValue = $0; storeRoles(role.role) })) {
+            Picker(title, selection: Binding(get: { binding.wrappedValue }, set: { binding.wrappedValue = $0; storeRoles() })) {
                 Text(blank).tag("")
                 ForEach(model.fieldChoices(role.role, agent: agent, key, models: offered)) { choice in
                     Text(choice.name).tag(choice.id)

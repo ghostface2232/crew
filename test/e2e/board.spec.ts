@@ -1520,6 +1520,16 @@ test('History and Activity pair their cards on a wide page, each column stacked 
   expect(await top(below)).toBeGreaterThan(before[1]);
   // The table keeps the page's width.
   expect((await page.locator('.table-panel').boundingBox())!.width).toBeGreaterThan((await first.boundingBox())!.width * 2);
+  // A card a filter moves to the other column shows in place rather than rising in again.
+  const filter = page.getByRole('searchbox', { name: 'Filter history' });
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await filter.fill('Ended b');
+  await expect(columns).toHaveCount(1);
+  expect(await keys(columns)).toEqual(['ended-b']);
+  expect(await beside.evaluate((card) => card.getAnimations().filter((animation) => animation instanceof CSSAnimation).length)).toBe(0);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await filter.fill('');
+  await expect(columns).toHaveCount(2);
   await pages.getByRole('button', { name: 'Activity' }).click();
   await expect(columns.nth(0).getByRole('region', { name: 'Work started' })).toBeVisible();
   await expect(columns.nth(1).getByRole('region', { name: 'Events' })).toBeVisible();

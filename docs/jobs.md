@@ -24,7 +24,7 @@ Lead tools start and manage work in worker sessions. Writable jobs use isolated 
 
 - Job tools (`delegate`, `review`, `polish`, `debate`, `reply`) return the job ID immediately by default. `background: false` blocks until the worker ends or needs the lead. The lead ends its turn instead of blocking in `wait` so the user can keep talking. The wake hook resumes it when [news](delivery.md#news-and-ownership) arrives.
 - Although the daemon is shared across sessions, each job records its canonical starting project (`canonicalPath` in `config.ts`). Argument-less `wait` and `status` filter to the caller's project, while the board and `crew status` show all projects.
-- Workers cannot commit because worktree Git metadata lives outside their sandbox. When a turn ends, the bridge creates a transport commit on `crew-<job id>` (hooks and `fsmonitor` disabled, commit signing off, default identity `Crew <crew@localhost>`), and the lead inspects the diff before merging or rejecting it.
+- Workers cannot commit because worktree Git metadata lives outside their sandbox. When a turn ends, the bridge creates a transport commit on `crew-<job id>` (hooks and `fsmonitor` disabled, commit signing off, default identity `Crew <crew@localhost>`), and the lead inspects the diff before merging or rejecting it. The bridge's own `status` and `diff` of a working tree run the same way and with `--ignore-submodules=all`: Git otherwise asks a repository inside the tree for its state under that repository's settings, so one a worker left there would have its `fsmonitor` command run by the bridge, outside any sandbox. A submodule's own changes are therefore not listed.
 
 ## Worktree includes and shared links
 

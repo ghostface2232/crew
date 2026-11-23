@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFile, execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -1460,12 +1461,13 @@ test('the server\'s sandbox writes only worktrees, temp and its own state, keeps
   const legacy = path.join(home, 'worktrees', 'repo-1234', 'ag-0');
   const state = path.join(user, '.gemini', 'antigravity-crew');
   const own = path.join(user, '.gemini', 'antigravity-cli');
-  for (const dir of [worktree, legacy, path.join(state, 'bin'), path.join(own, 'bin'), path.join(user, '.ssh'), path.join(user, '.codex'), path.join(tmp, 'prepared', '.git'), path.join(root, 'project')]) fs.mkdirSync(dir, { recursive: true });
+  const evidence = path.join(home, 'evidence', 'ag-1');
+  for (const dir of [worktree, legacy, evidence, path.join(state, 'bin'), path.join(own, 'bin'), path.join(user, '.ssh'), path.join(user, '.codex'), path.join(tmp, 'prepared', '.git'), path.join(root, 'project')]) fs.mkdirSync(dir, { recursive: true });
   for (const pointer of [path.join(worktree, '.git'), path.join(legacy, '.git')]) fs.writeFileSync(pointer, 'gitdir: elsewhere\n');
   for (const file of [path.join(own, 'settings.json'), path.join(home, 'config.json'), path.join(user, '.ssh', 'id'), path.join(user, '.codex', 'auth.json'), tokenFile(home)]) fs.writeFileSync(file, 'kept');
   const profile = serverProfile(home, user, tmp)!;
   const attempt = (script: string) => spawnSync('/usr/bin/sandbox-exec', ['-p', profile, '/bin/sh', '-c', script]).status === 0;
-  for (const file of [path.join(worktree, 'made'), path.join(worktree, 'src', 'deep'), path.join(tmp, 'made'), path.join(state, 'bin', 'agentapi'), path.join(state, 'settings.json')]) {
+  for (const file of [path.join(worktree, 'made'), path.join(worktree, 'src', 'deep'), path.join(tmp, 'made'), path.join(evidence, 'shot.png'), path.join(state, 'bin', 'agentapi'), path.join(state, 'settings.json')]) {
     assert.equal(attempt(`mkdir -p "${path.dirname(file)}" && echo x > "${file}"`), true, `writes ${file}`);
   }
   const refused = [
@@ -1476,8 +1478,8 @@ test('the server\'s sandbox writes only worktrees, temp and its own state, keeps
   for (const file of refused) assert.equal(attempt(`echo x >> "${file}"`), false, `does not write ${file}`);
   // A folder moved aside and replaced would bring its own .git, or its own settings, into a protected place.
   const prepared = path.join(tmp, 'prepared');
-  for (const folder of [worktree, slot, path.dirname(slot), path.join(home, 'worktrees'), legacy, state]) {
-    assert.equal(attempt(`mv "${folder}" "${path.join(tmp, 'aside')}" && mv "${prepared}" "${folder}"`), false, `does not replace ${folder}`);
+  for (const folder of [worktree, slot, path.dirname(slot), path.join(home, 'worktrees'), legacy, state, tmp]) {
+    assert.equal(attempt(`mv "${folder}" "${path.join(state, 'aside')}" && mv "${prepared}" "${folder}"`), false, `does not replace ${folder}`);
     assert.equal(fs.existsSync(folder) && fs.existsSync(prepared), true, `${folder} is where it was`);
   }
   assert.equal(fs.readFileSync(path.join(worktree, '.git'), 'utf8'), 'gitdir: elsewhere\n');
@@ -1563,4 +1565,37 @@ test('a sandbox that cannot be prepared leaves every job on the server that asks
   const h = confinedHarness(t, (home) => fs.mkdirSync(path.join(home, 'user', '.gemini'), { recursive: true }) && fs.writeFileSync(path.join(home, 'user', '.gemini', 'antigravity-crew'), ''));
   const question = await h.jobs.create({ kind: 'delegate', ask: true, cwd: h.repo, task: 'test' });
   assert.deepEqual(await h.ended(question), { answer: 'reject_once', outside: true, args: ['acp'], secret: 'secret' });
+});
+
+test('a job from the confined server says why it cannot go on once that server is turned off', { timeout: 20000, skip: unconfined }, async (t) => {
+  const h = confinedHarness(t);
+  const job = await h.jobs.create({ kind: 'delegate', cwd: h.repo, task: 'test' });
+  await h.ended(job);
+  // The daemon restarted with the sandbox off: the other server's store has no such session.
+  const config = resolveConfig({ notify: false, antigravity: { bin: path.join(h.home, 'agy'), enabled: true, sandbox: false }, roles: { delegate: { agents: ['antigravity'] } } });
+  const off = antigravityAdapter(config, h.home, path.join(h.home, 'user'));
+  t.after(() => off.shutdown());
+  const ctl = { job } as Parameters<typeof off.reply>[0];
+  assert.throws(() => off.reply(ctl, 'again'), /confined server.*is turned off \(antigravity\.sandbox\)\. Turn it back on and restart Crew, or start a new job\./);
+  // Nothing of it runs there, so stopping it needs no server.
+  await off.cancel(ctl);
+});
+
+test('the server\'s sandbox does not reach an SSH agent or a container engine through their sockets', { timeout: 20000, skip: unconfined }, async (t) => {
+  // In /tmp, where a socket's path stays short enough to bind.
+  const root = fs.realpathSync(fs.mkdtempSync('/tmp/crew-agy-sock-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const listen = (name: string) => new Promise<net.Server>((resolve) => {
+    const server = net.createServer((socket) => socket.end('reached'));
+    server.listen(path.join(root, name), () => resolve(server));
+  });
+  const servers = await Promise.all(['agent.sock', 'docker.sock', 'docker.raw.sock', 'app.sock'].map(listen));
+  t.after(() => servers.forEach((server) => server.close()));
+  const profile = serverProfile(path.join(root, 'crew'), path.join(root, 'user'), path.join(root, 'tmp'), path.join(root, 'agent.sock'))!;
+  // Not spawnSync: the servers answer from this process.
+  const reach = (name: string) => new Promise<boolean>((resolve) => {
+    execFile('/usr/bin/sandbox-exec', ['-p', profile, '/usr/bin/nc', '-U', path.join(root, name)], { timeout: 5000 }, (_err, stdout) => resolve(stdout === 'reached')).stdin?.end();
+  });
+  assert.equal(await reach('app.sock'), true);
+  for (const name of ['agent.sock', 'docker.sock', 'docker.raw.sock']) assert.equal(await reach(name), false, name);
 });

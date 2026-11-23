@@ -11,7 +11,7 @@ Codex approval requests go first to its automatic reviewer (`codex.approvalsRevi
 - While the lead blocks inside a job call (`wait`, or `background: false`), the MCP server sends `elicitation/create` so Claude shows its native input prompt and forwards the user's answer straight to the worker.
 - For background jobs, the wake hook wakes the lead and the prompt appears when it calls `wait`. Answering first on the board or in the desktop app, or returning early from the call, withdraws the in-app prompt immediately.
 - Multiple waiting jobs prompt sequentially and skip any settled on the board meanwhile. If the prompt is dismissed, unsupported, or fails to show, `wait` returns distinct guidance so the lead asks in chat.
-- Antigravity permission requests follow [role policy](sandbox.md), so only an engineer's non-edit actions reach the user. On macOS an engineer's commands in a worktree do not either: Crew's [sandbox for the server](sandbox.md#the-confined-server) holds them, so Crew allows them. Its questions arrive via `elicitation/create` form prompts (choices match by text or number, free text passes as written, and declining declines the form).
+- Antigravity permission requests follow [role policy](sandbox.md), so only an engineer's non-edit actions reach the user. On macOS an engineer's commands in a worktree do not either, while the [confined server](sandbox.md#the-confined-server) is on and could start: Crew's sandbox holds them, so Crew allows them. Its questions arrive via `elicitation/create` form prompts (choices match by text or number, free text passes as written, and declining declines the form).
 
 ### Antigravity approvals
 

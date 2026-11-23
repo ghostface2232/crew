@@ -8,7 +8,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { CodexAdapter } from '../plugin/bridge/adapters/codex.ts';
 import { resolveConfig } from '../plugin/bridge/config.ts';
-import { changesSince, cloneDirectory, cloneRefused, cloneTree, commitAll, copyIncluded, createWorktree, detachLinks, dirtyCount, projectRoot, removeDirectory, repoRoot, removeEmptyLeftover, removeWorktree, worktreeSlot } from '../plugin/bridge/git.ts';
+import { changesSince, cloneDirectory, cloneRefused, cloneTree, commitAll, copyIncluded, createWorktree, detachLinks, dirtyCount, NO_HOOKS, NO_SUBMODULES, projectRoot, removeDirectory, repoRoot, removeEmptyLeftover, removeWorktree, reviewDiff, worktreeSlot } from '../plugin/bridge/git.ts';
 import type { Job, JobCtl } from '../plugin/bridge/jobs.ts';
 import { buildPrompt } from '../plugin/bridge/prompts.ts';
 
@@ -607,4 +607,36 @@ test('a repository whose folder name ends in a space is not taken for the folder
   assert.equal(await repoRoot(path.join(home, 'repo ')), path.join(home, 'repo '));
   assert.equal(await repoRoot(path.join(home, 'repo')), path.join(home, 'repo'));
   assert.equal(await repoRoot(home), null);
+});
+
+test('the bridge\'s own status and diff do not run the settings of a repository a worker left in its tree', { skip: process.platform === 'win32' ? 'the trap is a shell script' : false }, async (t) => {
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-nested-')));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }));
+  const repo = path.join(home, 'repo');
+  fs.mkdirSync(repo);
+  const run = (cwd: string, ...args: string[]) => execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=t@example.com', ...args], { cwd, encoding: 'utf8' });
+  run(repo, 'init', '-q');
+  run(repo, 'commit', '-qm', 'init', '--allow-empty');
+  const wt = await createWorktree(repo, 'ag-abcdef', 'HEAD', home);
+  // What a command could leave behind: a repository of its own whose fsmonitor "hook" is any program it likes.
+  const marker = path.join(home, 'ran-outside');
+  const trap = path.join(home, 'trap.sh');
+  fs.writeFileSync(trap, `#!/bin/sh\necho ran > "${marker}"\n`, { mode: 0o755 });
+  const nested = path.join(wt.path, 'vendor');
+  fs.mkdirSync(nested);
+  run(nested, 'init', '-q');
+  fs.writeFileSync(path.join(nested, 'file'), 'one');
+  run(nested, 'add', '-A');
+  run(nested, 'commit', '-qm', 'nested');
+  run(nested, 'config', 'core.fsmonitor', trap);
+  fs.writeFileSync(path.join(nested, 'file'), 'two');
+
+  assert.ok(await commitAll(wt.path, 'turn'));
+  await dirtyCount(wt.path);
+  await reviewDiff(wt.path, { type: 'uncommittedChanges' });
+  execFileSync('git', [...NO_HOOKS, 'diff', NO_SUBMODULES, '--name-only', '-z', 'HEAD'], { cwd: wt.path });
+  assert.equal(fs.existsSync(marker), false, 'the nested repository\'s fsmonitor ran');
+  // The trap is armed: the same question asked plainly does run it.
+  execFileSync('git', ['status', '--porcelain'], { cwd: wt.path });
+  assert.equal(fs.existsSync(marker), true);
 });

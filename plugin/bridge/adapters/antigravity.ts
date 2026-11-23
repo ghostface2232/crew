@@ -229,7 +229,7 @@ export class AntigravityAdapter implements Adapter {
       const peer = await this.ensure();
       await this.begin(peer, session, turn, message, async () => {
         if (session.loaded) return;
-        if (!this.restoreMethod) throw new Error('This Antigravity server cannot restore sessions. Continue it from the Antigravity CLI.');
+        if (!this.restoreMethod) throw new Error(`This Antigravity server cannot restore sessions. ${this.profile ? 'Start a new job: the Antigravity CLI cannot open a confined session.' : 'Continue it from the Antigravity CLI.'}`);
         const before = session.mode;
         const res = await turn.control(peer, this.restoreMethod, { sessionId: session.id, cwd: ctl.job.cwd, mcpServers: [crewServer(ctl)], ...this.instructions(ctl) }, (res) => {
           session.loaded = true;
@@ -788,7 +788,7 @@ export class AntigravityAdapter implements Adapter {
  * fails with "Authentication required"), and with it whatever a keychain helper hands out without a prompt.
  */
 const PRIVATE_PATHS = [
-  '.ssh', '.aws', '.azure', '.gnupg', '.kube', '.docker', '.netrc', '.git-credentials', '.npmrc', '.pypirc', '.codex',
+  '.ssh', '.aws', '.azure', '.gnupg', '.kube', '.docker', '.netrc', '.git-credentials', '.pypirc', '.codex',
   '.config/gh', '.config/gcloud', '.claude/.credentials.json',
 ];
 /** agy takes its state folder only as a name under `~/.gemini`. The confined server's is its own. */
@@ -807,11 +807,13 @@ export function confinedEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 /**
  * The sandbox for an `agy acp` server on macOS, and so for every command it runs: agy starts its commands itself, and
  * neither lets a client run them (it ignores ACP's terminal capability) nor lets its own terminal sandbox write an ACP
- * session's workspace (agy 1.5.14, measured 2026-11-23). Writes are held to Crew's worktrees, the temp directories and
- * a state folder the server has to itself, so nothing an agy outside the sandbox runs or reads is in reach. The
- * network stays open, since the server needs it to reach its model. Null when a path cannot be written into a profile.
+ * session's workspace (agy 1.5.14, measured 2026-11-23). Writes are held to Crew's worktrees and evidence, the temp
+ * directories and a state folder the server has to itself, so nothing an agy outside the sandbox runs or reads is in
+ * reach. The network stays open, since the server needs it to reach its model. It is there to keep a command's
+ * writes where they belong, not to keep a determined one from reading: see docs/sandbox.md for what stays reachable.
+ * Null when a path cannot be written into a profile.
  */
-export function serverProfile(home: string = HOME, user: string = os.homedir(), tmp: string = os.tmpdir()): string | null {
+export function serverProfile(home: string = HOME, user: string = os.homedir(), tmp: string = os.tmpdir(), agent: string | undefined = process.env.SSH_AUTH_SOCK): string | null {
   const real = (file: string) => {
     try {
       return realpathSync(file);
@@ -823,24 +825,28 @@ export function serverProfile(home: string = HOME, user: string = os.homedir(), 
   const quote = (value: string) => JSON.stringify(value);
   const pattern = (dir: string) => dir.replace(/[.*+?^${}()|[\]]/g, '\\$&');
   const worktrees = path.join(home, 'worktrees');
+  const evidence = path.join(home, 'evidence');
   const state = path.join(user, '.gemini', CONFINED_STATE);
-  if ([home, state, tmp].some((dir) => both(dir).some((file) => /["\\\r\n]/.test(file)))) return null;
+  if ([home, worktrees, evidence, state, tmp, agent ?? ''].some((dir) => both(dir).some((file) => /["\\\r\n]/.test(file)))) return null;
   return [
-    browserProfile([worktrees, state, tmp, '/tmp'], [tokenFile(home)]),
+    browserProfile([worktrees, evidence, state, tmp, '/tmp'], [tokenFile(home)]),
     // A home under a temp directory would have its ledger and settings writable with it.
     ...both(home).map((dir) => `(deny file-write* (subpath ${quote(dir)}))`),
-    ...both(worktrees).map((dir) => `(allow file-write* (subpath ${quote(dir)}))`),
+    ...[worktrees, evidence].flatMap(both).map((dir) => `(allow file-write* (subpath ${quote(dir)}))`),
     // A worktree is <worktrees>/<repository>/<job>/<name>. The bridge runs git in it outside the sandbox, so neither
     // its .git pointer nor any folder above it may be written: a renamed folder brings a .git of its own with it.
     ...both(worktrees).flatMap((dir) => [
       `(deny file-write* (regex #"^${pattern(dir)}(/[^/]+)?(/[^/]+)?(/[^/]+)?$"))`,
       `(deny file-write* (regex #"^${pattern(dir)}/[^/]+/[^/]+/[^/]+/\\.git(/|$)"))`,
     ]),
-    // Replaced by a link, the state folder would be resolved into the next profile as a writable one.
-    ...both(state).map((dir) => `(deny file-write* (literal ${quote(dir)}))`),
+    // Replaced by a link, the state or temp folder would be resolved into the next profile as a writable one.
+    ...[state, tmp].flatMap(both).map((dir) => `(deny file-write* (literal ${quote(dir)}))`),
     ...PRIVATE_PATHS.flatMap((name) => both(path.join(user, name))).map((file) => `(deny file-read* (literal ${quote(file)}) (subpath ${quote(file)}))`),
-    // The SSH agent signs with keys the files above only store.
+    // The SSH agent signs with keys the files above only store: launchd's, and the one the daemon was given.
     '(deny network-outbound (remote unix-socket (regex #"^(/private)?/(tmp|var/run)/com\\.apple\\.launchd\\.[^/]+/Listeners$")))',
+    ...(agent ? both(agent).map((file) => `(deny network-outbound (remote unix-socket (literal ${quote(file)})))`) : []),
+    // A container engine's socket runs anything, anywhere, for whoever reaches it.
+    '(deny network-outbound (remote unix-socket (regex #"/(docker|podman)[^/]*\\.sock$")))',
   ].join('\n');
 }
 
@@ -863,7 +869,8 @@ export function confines(job: Pick<JobCtl['job'], 'sandbox' | 'worktree' | 'sess
  */
 export function antigravityAdapter(config: Config, home: string = HOME, user: string = os.homedir()): Adapter {
   const open = new AntigravityAdapter(config);
-  if (process.platform !== 'darwin' || config.antigravity.sandbox === false) return open;
+  if (process.platform !== 'darwin') return open;
+  const enabled = config.antigravity.sandbox !== false;
   // Prepared with the first job that needs it, so a machine that never runs one gets no folder and a failure here
   // costs only the sandbox. undefined: not tried yet; null: no sandbox can be had.
   let confined: AntigravityAdapter | null | undefined;
@@ -878,15 +885,19 @@ export function antigravityAdapter(config: Config, home: string = HOME, user: st
       return null;
     }
   };
-  const pick = ({ job }: JobCtl): AntigravityAdapter => {
+  const pick = ({ job }: JobCtl, turn = false): AntigravityAdapter => {
     if (!confines(job, home)) return open;
-    if (confined === undefined) confined = prepare();
-    // A session the confined server opened is not in the other one's store; there the job fails saying it cannot be restored.
+    if (confined === undefined && enabled) confined = prepare();
+    // A session the confined server opened is not in the other one's store, so a turn there would restore nothing.
+    if (!confined && turn && job.sessionId) {
+      const why = enabled ? 'could not start. Start a new job.' : 'is turned off (antigravity.sandbox). Turn it back on and restart Crew, or start a new job.';
+      throw new Error(`Job ${job.id} ran on Antigravity's confined server, whose sessions the other server cannot restore, and that server ${why}`);
+    }
     return confined ?? open;
   };
   return {
-    start: (ctl) => pick(ctl).start(ctl),
-    reply: (ctl, message) => pick(ctl).reply(ctl, message),
+    start: (ctl) => pick(ctl, true).start(ctl),
+    reply: (ctl, message) => pick(ctl, true).reply(ctl, message),
     answer: (ctl, approve, message, opts) => pick(ctl).answer(ctl, approve, message, opts),
     cancel: (ctl) => pick(ctl).cancel(ctl),
     shutdown: () => {

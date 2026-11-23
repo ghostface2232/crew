@@ -8,7 +8,13 @@ import type { ReviewTarget } from './jobs.ts';
 import { clip } from './text.ts';
 
 /** Transport commits run none of the repository's hooks; an fsmonitor command is a hook too, run on every index read. */
-const NO_HOOKS = ['-c', `core.hooksPath=${os.devNull}`, '-c', 'core.fsmonitor=false'];
+export const NO_HOOKS = ['-c', `core.hooksPath=${os.devNull}`, '-c', 'core.fsmonitor=false'];
+/**
+ * For a status or diff of a working tree. Git asks each repository it finds inside for its own state, with that
+ * repository's settings, so one a worker left in its tree would have its fsmonitor command run here, outside any
+ * sandbox. Used with NO_HOOKS, which a nested git inherits. A submodule's changes are then not listed.
+ */
+export const NO_SUBMODULES = '--ignore-submodules=all';
 
 /** Git's output as written. */
 function gitOutput(cwd: string, args: string[], stdin?: string): Promise<string> {
@@ -31,7 +37,7 @@ export async function git(cwd: string, args: string[], stdin?: string): Promise<
 export async function reviewDiff(root: string, target: ReviewTarget): Promise<string> {
   if (target.type === 'baseBranch') return git(root, ['diff', `${target.branch}...HEAD`]);
   if (target.type === 'commit') return git(root, ['show', target.sha]);
-  const diff = await git(root, ['diff', 'HEAD']);
+  const diff = await git(root, [...NO_HOOKS, 'diff', NO_SUBMODULES, 'HEAD']);
   const untracked = await git(root, ['ls-files', '--others', '--exclude-standard']);
   return untracked ? `${diff}\n\nUntracked files, not in the diff above; read each one in full:\n${untracked}` : diff;
 }
@@ -90,7 +96,7 @@ async function besides(root: string, linked: string[]): Promise<string[]> {
 /** Number of uncommitted paths in the main tree; a worktree created from a ref will not contain them. */
 export async function dirtyCount(root: string, linked: string[] = []): Promise<number> {
   // Every untracked file by name, so a folder holding nothing but Finder's metadata is not counted either.
-  const out = await git(root, ['status', '--porcelain', '-z', '--untracked-files=all', ...await besides(root, linked)]);
+  const out = await git(root, [...NO_HOOKS, 'status', '--porcelain', '-z', '--untracked-files=all', NO_SUBMODULES, ...await besides(root, linked)]);
   const entries = out.split('\0');
   let count = 0;
   for (let i = 0; entries[i]; i++) {
@@ -144,7 +150,7 @@ export async function carryUncommitted(root: string, wt: string): Promise<void> 
   try {
     const patch = path.join(dir, 'changes.patch');
     // The user's diff settings (no prefix, an external tool, textconv) would produce a patch `git apply` cannot read.
-    await git(root, ['diff', 'HEAD', '--binary', '--no-ext-diff', '--no-textconv', '--src-prefix=a/', '--dst-prefix=b/', `--output=${patch}`]);
+    await git(root, [...NO_HOOKS, 'diff', NO_SUBMODULES, 'HEAD', '--binary', '--no-ext-diff', '--no-textconv', '--src-prefix=a/', '--dst-prefix=b/', `--output=${patch}`]);
     if ((await fs.stat(patch)).size) await git(wt, ['apply', '--whitespace=nowarn', patch]);
   } finally {
     await removeDirectory(dir);
@@ -375,7 +381,7 @@ export async function mergeInto(wt: string, repo: string, ref: string, linked: s
   try {
     await git(wt, [...await commitSettings(wt), ...NO_HOOKS, 'merge', '--no-edit', commit]);
   } catch (err) {
-    const conflicts = (await git(wt, ['diff', '--name-only', '--diff-filter=U', '-z'])).split('\0').filter(Boolean);
+    const conflicts = (await git(wt, [...NO_HOOKS, 'diff', NO_SUBMODULES, '--name-only', '--diff-filter=U', '-z'])).split('\0').filter(Boolean);
     await git(wt, ['merge', '--abort']).catch((abort) => {
       if (conflicts.length) throw abort;
     });
@@ -406,7 +412,7 @@ export async function revertCommit(wt: string, commit: string, linked: string[] 
   try {
     await git(wt, [...await commitSettings(wt), ...NO_HOOKS, 'revert', '--no-edit', commit]);
   } catch (err) {
-    const conflicts = (await git(wt, ['diff', '--name-only', '--diff-filter=U', '-z'])).split('\0').filter(Boolean);
+    const conflicts = (await git(wt, [...NO_HOOKS, 'diff', NO_SUBMODULES, '--name-only', '--diff-filter=U', '-z'])).split('\0').filter(Boolean);
     // A preflight failure may not have opened a revert, so abort has nothing to do in that case.
     await git(wt, ['revert', '--abort']).catch(async (abort) => {
       if (await dirtyCount(wt, linked)) throw new Error(`${(err as Error).message}; could not abort the revert: ${abort.message}`);

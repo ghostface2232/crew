@@ -122,6 +122,59 @@ test('the Windows supervisor verifies every installer launch, including interact
   }
 });
 
+test('a silent install that fails reopens Crew, which is told why', { skip: process.platform !== 'win32' }, async () => {
+  const { installScript, supervisorEnv, UPDATE_FAILED } = await import('../desktop/updater.ts');
+  const dir = tempDir();
+  try {
+    const file = path.join(dir, 'installer.exe');
+    fs.writeFileSync(file, payload);
+    const script = `
+      function Start-Process($FilePath, $ArgumentList, [switch]$PassThru, $ErrorAction) {
+        [Console]::WriteLine("launch $FilePath | $env:${UPDATE_FAILED}")
+        $p = [PSCustomObject]@{ Handle = 0; ExitCode = 0 }
+        $p | Add-Member ScriptMethod WaitForExit { $this.ExitCode = 2 }
+        if ($PassThru) { return $p }
+      }
+      ${installScript}
+    `;
+    const run = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], {
+      env: { ...supervisorEnv(process.env), CREW_INSTALLER: file, CREW_INSTALLER_SHA256: sha(payload), CREW_APP: process.execPath },
+      encoding: 'utf8',
+    });
+    assert.equal(run.status, 0, run.stderr);
+    assert.deepEqual(run.stdout.trim().split(/\r?\n/), [
+      `launch ${file} | `,
+      `launch ${process.execPath} | The installer stopped with exit code 2, so the update was not installed.`,
+    ]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a failed install stays on show through later checks until it is seen, and a new install clears it', async () => {
+  await startServer();
+  const dir = path.join(tempDir(), 'updates');
+  served = payload;
+  feedStatus = 200;
+  feed = release('0.3.0', `${base}/download/Crew-Setup-0.3.0.exe`, sha(payload));
+  const { instance } = updater(dir);
+  instance.installFailed('The installer stopped with exit code 2, so the update was not installed.');
+  await instance.check();
+  await instance.download();
+  assert.equal(instance.status.state, 'ready');
+  assert.equal(instance.status.installError, 'The installer stopped with exit code 2, so the update was not installed.');
+  instance.seen();
+  assert.equal(instance.status.installError, undefined);
+  // A failed check, which restores the state it started from, does not bring it back.
+  feedStatus = 500;
+  await instance.check();
+  assert.equal(instance.status.state, 'ready');
+  assert.equal(instance.status.installError, undefined);
+  instance.installFailed('again');
+  assert.equal(instance.installing(), true);
+  assert.equal(instance.status.installError, undefined);
+});
+
 test('a check during load cannot remove the installer being restored', async () => {
   const dir = tempDir();
   try {

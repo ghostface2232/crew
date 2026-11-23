@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, use
 import { flushSync } from 'react-dom';
 import {
   bundleIcon, AddRegular, AlertFilled, AlertRegular, ArrowCircleDownRegular, ArrowClockwiseRegular,
-  ArrowRight16Filled, ClockFilled, ClockRegular, FlashFilled, FlashRegular, FolderFilled,
+  ArrowRight16Filled, ClockFilled, ClockRegular, ErrorCircleRegular, FlashFilled, FlashRegular, FolderFilled,
   FolderRegular, GridFilled, GridRegular, LockClosedKeyRegular, PanelLeftRegular, SearchRegular, SettingsRegular,
   StackFilled, StackRegular, WifiOffRegular,
 } from '@fluentui/react-icons';
@@ -56,7 +56,7 @@ const typing = (target: EventTarget | null) =>
 export function App() {
   const state = useSyncExternalStore(board.subscribe, board.getSnapshot);
   const [selection, setSelection] = useState(storedSelection);
-  const [settings, setSettings] = useState(false);
+  const [settings, setSettings] = useState<boolean | 'about'>(false);
   const update = useAppUpdate();
   /** Where a sheet grows from: the control that opened it, or nothing for a keyboard shortcut. */
   const [dispatching, setDispatching] = useState<{ origin?: DOMRect } | null>(null);
@@ -150,6 +150,10 @@ export function App() {
     fold();
     setSettings(true);
   }, [fold]);
+  const openAbout = useCallback(() => {
+    fold();
+    setSettings('about');
+  }, [fold]);
   const paletteActions = useMemo(() => ({ select, openJob: show, openSession: showSession, newJob: () => newJob(), settings: openSettings }), [select, show, showSession, newJob, openSettings]);
   const closePalette = useCallback(() => setPalette(null), []);
   // Notifications for requests that arrive while the board is in the background, as the app sends them.
@@ -222,7 +226,12 @@ export function App() {
           {pageNav}
           <ProjectNav projects={projects} names={names} project={project} state={state} select={select} />
           <div className="sidebar-foot">
-            {(update?.state === 'ready' || update?.state === 'installing') && (
+            {update?.installError ? (
+              <button className="sidebar-item sidebar-update" data-state="failed" id="update-failed" title={update.installError} disabled={!Object.keys(state.roles).length} onClick={openAbout}>
+                <Icon icon={ErrorCircleRegular} />
+                <span>Update failed</span>
+              </button>
+            ) : (update?.state === 'ready' || update?.state === 'installing') && (
               <button
                 className="sidebar-item sidebar-update"
                 id="install-update"
@@ -357,7 +366,7 @@ export function App() {
             panel && <JobDrawer key={panel} id={panel} state={state} close={closeDetail} />
           )}
         </PanelLeavingContext>
-        {settings && <Settings state={state} update={update} close={() => setSettings(false)} />}
+        {settings && <Settings state={state} update={update} close={() => setSettings(false)} initial={settings === 'about' ? 'about' : undefined} />}
         <AskHost />
       </div>
     </ClockProvider>

@@ -870,6 +870,12 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
   .sidebar-update:not(:disabled):hover { color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
   .sidebar-update:not(:disabled):hover svg { rotate: none; }
 }
+/* An install that did not go through: the same button in the failed tone, its label darkened as status text is so it
+   stays readable on its tint. It opens Settings, which says why. */
+.sidebar-update[data-state="failed"] { color: color-mix(in srgb, var(--tone), var(--tone-ink) var(--tone-darken)); background: color-mix(in srgb, var(--tone) 10%, transparent); }
+@media (hover: hover) {
+  .sidebar-update[data-state="failed"]:not(:disabled):hover { color: color-mix(in srgb, var(--tone), var(--tone-ink) var(--tone-darken)); background: color-mix(in srgb, var(--tone) 16%, transparent); }
+}
 .sidebar-scrim { position: fixed; inset: 0; z-index: 4; background: var(--scrim-light); animation: fade 260ms ease-out; }
 
 /* A project's preview beside the sidebar: it opens from its leading edge and glides between projects. */

@@ -13,6 +13,9 @@ import type { AppUpdate } from '../plugin/board/src/types.ts';
 export const RELEASES = 'https://api.github.com/repos/ghostface2232/crew/releases/latest';
 export const installerName = (version: string) => `Crew-Setup-${version}.exe`;
 
+/** Why an install did not go through, set by the supervisor for the Crew it reopens. */
+export const UPDATE_FAILED = 'CREW_UPDATE_FAILED';
+
 /** Runs in the detached Windows supervisor after Crew exits. OpenRead denies writes and replacement through launch. */
 export const installScript = `
 function Start-CrewInstaller([switch]$Silent) {
@@ -23,7 +26,7 @@ function Start-CrewInstaller([switch]$Silent) {
       $digest = (Get-FileHash -InputStream $file -Algorithm SHA256 -ErrorAction Stop).Hash
       if ($digest -ne $env:CREW_INSTALLER_SHA256) { throw 'SHA-256 mismatch' }
     } catch {
-      throw 'Crew could not verify the update. Download it again from Settings.'
+      throw 'Crew could not verify the update, so it was not installed.'
     }
     if ($Silent) {
       Start-Process -FilePath $env:CREW_INSTALLER -ArgumentList '/S','--force-run' -PassThru -ErrorAction Stop
@@ -38,7 +41,10 @@ $p = Start-CrewInstaller -Silent
 $null = $p.Handle
 $p.WaitForExit()
 if ($p.ExitCode -ne 0) {
-  if (Test-Path -LiteralPath $env:CREW_APP) { Start-Process -FilePath $env:CREW_APP }
+  if (Test-Path -LiteralPath $env:CREW_APP) {
+    $env:${UPDATE_FAILED} = "The installer stopped with exit code $($p.ExitCode), so the update was not installed."
+    Start-Process -FilePath $env:CREW_APP
+  }
   else { Start-CrewInstaller }
 }
 `;
@@ -127,9 +133,26 @@ export class Updater {
     return this.installer ? this.release?.sha256 ?? null : null;
   }
 
+  private installError: string | null = null;
+
   private set(next: Omit<AppUpdate, 'current'>) {
-    this.status = { current: this.status.current, ...next };
+    // Kept apart from the state, which later checks and downloads replace, until the user has seen it.
+    const { installError: _, ...rest } = next;
+    this.status = { current: this.status.current, ...rest, ...(this.installError ? { installError: this.installError } : {}) };
     this.onChange(this.status);
+  }
+
+  /** The supervisor reopened Crew after an install that did not go through. */
+  installFailed(message: string) {
+    this.installError = message;
+    this.set(this.status);
+  }
+
+  /** The user has seen why the last install failed. */
+  seen() {
+    if (!this.installError) return;
+    this.installError = null;
+    this.set(this.status);
   }
 
   /** Picks up an installer an earlier launch staged; one no newer than this app, or no longer intact, is removed. */
@@ -271,6 +294,7 @@ export class Updater {
   installing(waiting = 0): boolean {
     const { state, latest, page, checkedAt } = this.status;
     if (state !== 'ready') return false;
+    this.installError = null;
     this.set({ state: 'installing', latest, checkedAt, ...(page ? { page } : {}), waiting });
     return true;
   }

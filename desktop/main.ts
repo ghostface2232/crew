@@ -8,7 +8,7 @@ import { boardCredential, boardUrl, readToken, SESSION_COOKIE } from '../plugin/
 import { api, ensureDaemon, health } from '../plugin/bridge/client.ts';
 import { baseUrl, HOME, PLUGIN_ROOT } from '../plugin/bridge/config.ts';
 import type { BoardState } from '../plugin/board/src/types.ts';
-import { installScript, supervisorEnv, Updater } from './updater.ts';
+import { installScript, supervisorEnv, UPDATE_FAILED, Updater } from './updater.ts';
 import { isBoardNavigation, linkTarget, windowBounds } from './window-state.ts';
 
 // The Electron shell for Windows (and other non-macOS systems); macOS uses the native app in native/.
@@ -53,6 +53,9 @@ const updater = new Updater({
     trayMenu();
   },
 });
+/** Why the install this launch follows did not go through. Taken out first, so the daemon this app starts does not inherit it. */
+const updateFailed = process.env[UPDATE_FAILED];
+delete process.env[UPDATE_FAILED];
 let checkTimer: ReturnType<typeof setTimeout> | undefined;
 let watchTimer: ReturnType<typeof setTimeout> | undefined;
 /** Set once the user chooses to install; the installer starts after the windows have closed. */
@@ -382,6 +385,11 @@ function watchUpdates() {
     // Only an install still waiting can be called off; past that, the daemon is already stopping.
     if (updater.status.state === 'installing' && updater.status.waiting !== undefined) updater.failed();
   });
+  ipcMain.handle('update:seen', (event) => {
+    fromBoard(event);
+    updater.seen();
+  });
+  if (updateFailed) updater.installFailed(updateFailed);
   void updater.load().catch(console.error).then(() => {
     const check = () => {
       void updater.check();
@@ -536,11 +544,16 @@ async function handOver() {
     // Paths travel in the environment, never in the script text.
     const supervise = `try { ${installScript} } catch {
       $reason = $_.Exception.Message
-      # Crew comes back first: the alert can open behind other windows, and must not keep Crew closed meanwhile.
       Wait-Process -Id $env:CREW_PARENT_PID -ErrorAction SilentlyContinue
-      if (Test-Path -LiteralPath $env:CREW_APP) { Start-Process -FilePath $env:CREW_APP }
-      Add-Type -AssemblyName System.Windows.Forms
-      [void][System.Windows.Forms.MessageBox]::Show($reason, 'Crew could not update', 'OK', 'Error')
+      # Crew shows why in its own window. A window of this hidden script cannot take the foreground and opens behind
+      # others, so the alert is only for a Crew that is gone.
+      if (Test-Path -LiteralPath $env:CREW_APP) {
+        $env:${UPDATE_FAILED} = $reason
+        Start-Process -FilePath $env:CREW_APP
+      } else {
+        Add-Type -AssemblyName System.Windows.Forms
+        [void][System.Windows.Forms.MessageBox]::Show($reason, 'Crew could not update', 'OK', 'Error')
+      }
     }`;
     // The supervisor must outlive the app, so it is detached: a child that is not is killed with the app (libuv's job).
     // But a detached PowerShell has no console and exits without running its script, so a detached cmd starts it in a

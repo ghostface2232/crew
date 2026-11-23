@@ -67,6 +67,8 @@ export interface AppUpdate {
   checkedAt?: number;
   /** Why the last check, download or install failed. */
   error?: string;
+  /** Why the install Crew restarted for did not go through, until the user has seen it in Settings. */
+  installError?: string;
   /**
    * While installing: the running jobs the install waits for, 0 while it waits on a daemon that has not answered.
    * The install can be called off while this is set; it is absent once the daemon is being stopped.
@@ -82,6 +84,8 @@ export interface DesktopBridge {
     install(): Promise<void>;
     /** Stops an install that is still waiting for jobs. */
     cancel(): Promise<void>;
+    /** Clears `installError` once Settings has shown it. Absent in an app older than this board. */
+    seen?(): Promise<void>;
     subscribe(listener: (update: AppUpdate) => void): () => void;
   };
 }

@@ -531,28 +531,30 @@ function Setup() {
   if (!setup || setup.items.every((item) => item.ok)) return null;
   const repairable = setup.items.some((item) => !item.ok && item.repairable);
   return (
-    <Panel
-      label="Set up Crew"
-      action={
-        <span className="setup-actions">
-          <button className="small" disabled={busy} onClick={() => act('/api/setup?refresh')}>Check Again</button>
-          {repairable && <button className="prominent small" disabled={busy || setup.registering} onClick={() => act('/api/setup/repair', {})}>{busy ? 'Installing…' : 'Install'}</button>}
-        </span>
-      }
-    >
+    <Panel label="Set up Crew">
       <ul className="setup-list">
         {setup.items.map((item) => (
           <li key={item.id} data-ok={item.ok || undefined}>
             <Icon icon={item.ok ? CheckmarkCircleRegular : ErrorCircleRegular} size={14} />
-            <span>{item.label}</span>
-            <span className="secondary caption selectable">{item.detail}</span>
+            <span>{withCode(item.label)}</span>
+            <span className="secondary caption selectable">{withCode(item.detail)}</span>
           </li>
         ))}
       </ul>
-      {(error || (setup.registration && !setup.registration.ok)) && <p className="secondary caption" role="status">{error || setup.registration?.detail}</p>}
+      {(error || (setup.registration && !setup.registration.ok)) && (
+        <p className="callout error selectable setup-error" role="status"><Icon icon={ErrorCircleRegular} size={13} />{error || setup.registration?.detail}</p>
+      )}
+      {/* The card's actions end it at the trailing edge, as a section's do, and as in the app. */}
+      <div className="setup-actions">
+        <button disabled={busy} onClick={() => act('/api/setup?refresh')}>Check Again</button>
+        {repairable && <button className="prominent" disabled={busy || setup.registering} onClick={() => act('/api/setup/repair', {})}>{busy ? 'Installing…' : 'Install'}</button>}
+      </div>
     </Panel>
   );
 }
+
+/** Shows the `backticked` names in a setup item as code. */
+const withCode = (text: string) => text.split('`').map((part, index) => (index % 2 ? <code key={index}>{part}</code> : part));
 
 const noJobs: BoardJob[] = [];
 

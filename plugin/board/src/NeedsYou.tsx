@@ -120,16 +120,18 @@ export function NeedsYou({
             <article className="card need" key={session.id} data-session={session.id} style={{ '--i': jobs.length + index } as CSSProperties}>
               <div className="need-head">
                 <div className="need-bar">
-                  <Chip state="waiting">Claude</Chip>
+                  <Chip state="waiting">Input</Chip>
                   <span className="need-who" title={projectOf(session)}>
                     <AgentMark agent="claude" size={13} />
-                    <span>{session.title} · {names.get(projectOf(session)) ?? projectOf(session)}</span>
+                    <span>Claude · {names.get(projectOf(session)) ?? projectOf(session)}</span>
                   </span>
                   <button className="caption small" data-opens-panel="" onClick={() => openSession(session.id)}>
                     <Icon icon={ArrowUpRight16Filled} size={12} />
                     Details
                   </button>
                 </div>
+                {/* Laid out as a job's card: who and where on the bar, the session's title under it. */}
+                <p className="need-title" title={session.title}>{session.title}</p>
               </div>
               <div className="answer">
                 <p className="headline selectable">{session.waitingFor ?? 'Claude needs your input.'}</p>

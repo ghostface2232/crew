@@ -32,8 +32,9 @@ struct SetupCard: View {
                             HStack(alignment: .firstTextBaseline, spacing: Space.s) {
                                 Image(systemName: item.ok ? "checkmark.circle" : "exclamationmark.circle")
                                     .font(Typeface.callout).foregroundStyle(item.ok ? .secondary : Palette.warning).frame(width: Symbol.controlFrame)
-                                Text(item.label).font(Typeface.callout)
-                                Text(item.detail).font(Typeface.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                                // Markdown, so the `backticked` names read as code.
+                                Text(LocalizedStringKey(item.label)).font(Typeface.callout)
+                                Text(LocalizedStringKey(item.detail)).font(Typeface.caption).foregroundStyle(.secondary).textSelection(.enabled)
                             }
                         }
                     }
@@ -45,7 +46,7 @@ struct SetupCard: View {
                         Button("Check Again") { act { try await api.request("/api/setup?refresh") } }.pillButton().disabled(busy)
                         if setup.items.contains(where: { !$0.ok && $0.repairable == true }) {
                             Button(busy ? "Installing…" : "Install") { act { try await api.post("/api/setup/repair", [String: String](), timeout: 180) } }
-                                .pillButton().morphs(on: busy).disabled(busy || setup.registering)
+                                .glassPillButton().morphs(on: busy).disabled(busy || setup.registering)
                         }
                     }.frame(maxWidth: .infinity, alignment: .trailing)
                 }

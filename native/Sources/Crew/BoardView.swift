@@ -642,7 +642,11 @@ struct NeedsYouView: View {
             // As on the web board: a Claude session is answered in Claude itself, so its tile says so instead of offering a composer.
             ForEach(sessions) { session in
                 VStack(alignment: .leading, spacing: Space.xl) {
-                    requestHeader("Claude", agent: "claude", who: session.title, project: session.projectPath) { store.openSession(session.id) }
+                    // Laid out as a job's tile: who and where on the header, the session's title under it.
+                    VStack(alignment: .leading, spacing: Space.ml) {
+                        requestHeader("Input", agent: "claude", who: "Claude", project: session.projectPath) { store.openSession(session.id) }
+                        Text(session.title).font(Typeface.callout).foregroundStyle(.secondary).lineLimit(2).help(session.title)
+                    }
                     Text(session.waitingFor ?? "Claude needs your input.").font(Typeface.headline).lineSpacing(4).textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
                     Label("Answer in Claude.", systemImage: "bubble.left.and.bubble.right").font(Typeface.callout).foregroundStyle(.secondary)

@@ -39,11 +39,6 @@
   --orange: #ff9500;
   --red: #ff3b30;
   --green: #34c759;
-  /* Settings tiles: the system colors SettingsView.swift uses. */
-  --gray: #8e8e93;
-  --purple: #af52de;
-  --indigo: #5856d6;
-  --teal: #30b0c7;
   /* GitHub's own merged purple, so a merged PR reads as it does there. */
   --merged: #8250df;
   /* Text on an orange badge: white reaches only about 2:1 there. */
@@ -120,10 +115,6 @@
     --orange: #ff9f0a;
     --red: #ff453a;
     --green: #30d158;
-    --gray: #98989d;
-    --purple: #bf5af2;
-    --indigo: #5e5ce6;
-    --teal: #40c8e0;
     --merged: #a371f7;
     /* A dark canvas swallows light-mode scrims and drops, so both deepen. */
     --scrim: rgb(0 0 0 / 0.5);
@@ -134,13 +125,13 @@
     --track: rgb(255 255 255 / 0.22);
     --heat-0: rgb(255 255 255 / 0.06);
     --shadow-pop: var(--outline-ring), -8px 8px 26px rgb(0 0 0 / 0.4);
-    --shadow-card: inset 0 1px 0 rgb(255 255 255 / 0.06), 0 0 0 1px rgb(0 0 0 / 0.6), 0 1px 2px rgb(0 0 0 / 0.4), 0 12px 28px -12px rgb(0 0 0 / 0.75);
-    --shadow-card-hover: inset 0 1px 0 rgb(255 255 255 / 0.08), 0 0 0 1px rgb(0 0 0 / 0.6), 0 2px 4px rgb(0 0 0 / 0.45), 0 20px 40px -14px rgb(0 0 0 / 0.85);
+    --shadow-card: inset 0 1px 0 rgb(255 255 255 / 0.06), 0 0 0 0.5px rgb(0 0 0 / 0.35), 0 1px 2px rgb(0 0 0 / 0.4), 0 12px 28px -12px rgb(0 0 0 / 0.75);
+    --shadow-card-hover: inset 0 1px 0 rgb(255 255 255 / 0.08), 0 0 0 0.5px rgb(0 0 0 / 0.35), 0 2px 4px rgb(0 0 0 / 0.45), 0 20px 40px -14px rgb(0 0 0 / 0.85);
     /* No inset ring: the stage's transparent borders would push it inside them. */
     --shadow-stage: 0 0 0 1px rgb(0 0 0 / 0.45);
     /* Clearly lighter than the frame, so the current sidebar item stands out on it. */
     --raised: #34343a;
-    --shadow-raised: var(--outline-ring), inset 0 1px 0 rgb(255 255 255 / 0.08), 0 0 0 1px rgb(0 0 0 / 0.3), 0 1px 2px rgb(0 0 0 / 0.4), 0 4px 10px -6px rgb(0 0 0 / 0.6);
+    --shadow-raised: var(--outline-ring), inset 0 1px 0 rgb(255 255 255 / 0.08), 0 0 0 0.5px rgb(0 0 0 / 0.3), 0 1px 2px rgb(0 0 0 / 0.4), 0 4px 10px -6px rgb(0 0 0 / 0.6);
   }
 }
 @media (prefers-contrast: more) {
@@ -241,18 +232,16 @@ kbd {
 
 /* Tinted controls raised in their own tone: a lit top edge and a drop of the tone, no outline. Declared on the elements
    themselves, since a custom property resolves its var()s where it is declared, and :root has no --tone. */
-.chip, .answer-card, .job-row {
+.answer-card, .job-row {
   --shadow-tinted: inset 0 1px 0 rgb(255 255 255 / 0.65), 0 1px 2px rgb(0 0 0 / 0.05), 0 8px 20px -12px color-mix(in srgb, var(--tone, var(--secondary)) 32%, transparent);
-  --shadow-tinted-sm: inset 0 1px 0 rgb(255 255 255 / 0.55), 0 1px 1.5px color-mix(in srgb, var(--tone, var(--secondary)) 28%, transparent);
 }
 @media (prefers-color-scheme: dark) {
-  .chip, .answer-card, .job-row {
+  .answer-card, .job-row {
     --shadow-tinted: inset 0 1px 0 rgb(255 255 255 / 0.08), 0 1px 2px rgb(0 0 0 / 0.4), 0 6px 16px -8px rgb(0 0 0 / 0.7);
-    --shadow-tinted-sm: inset 0 1px 0 rgb(255 255 255 / 0.07), 0 1px 1.5px rgb(0 0 0 / 0.35);
   }
 }
 
-/* StatusLabel: the symbol, then the word, on a tint of the state's color. */
+/* StatusLabel: the symbol, then the word, on a flat tint of the state's color; a chip labels, so it is not raised. */
 .chip {
   display: inline-flex;
   align-items: center;
@@ -262,7 +251,6 @@ kbd {
   padding: 0 8px 0 7px;
   border-radius: 999px; corner-shape: round;
   background: color-mix(in srgb, var(--tone, var(--secondary)) 11%, transparent);
-  box-shadow: var(--shadow-tinted-sm);
   color: color-mix(in srgb, var(--tone, var(--secondary)), var(--tone-ink) var(--tone-darken));
   font-size: 11px;
   font-weight: 550;
@@ -853,10 +841,9 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
 .sidebar-foot { display: grid; gap: 6px; margin-top: auto; padding-top: 13px; border-top: 1px solid var(--hairline); }
 .sidebar-foot-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .sidebar-foot-row > .sidebar-item { flex: 1; min-width: 0; }
-.sidebar-foot-row > .connection { flex: none; padding-inline: 10px; }
-/* Live, the word stays for assistive technology and the tooltip says it; the light alone is enough to see. */
-.connection[data-state="live"] { padding-inline: 12px; }
-.connection[data-state="live"] > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* The word stays for assistive technology and the tooltip says it; the light alone is enough to see, in every state. */
+.sidebar-foot-row > .connection { flex: none; padding-inline: 12px; }
+.connection > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .sidebar-item { justify-content: flex-start; gap: 10px; width: 100%; min-height: 32px; padding: 0 10px; border-radius: 12px; corner-shape: var(--smooth); background: none; color: var(--secondary); font-weight: 450; }
 .sidebar-item svg { width: 16px; height: 16px; transition: rotate 500ms var(--ease-out); }
 @media (hover: hover) {
@@ -1080,6 +1067,11 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
   .dash { grid-template-columns: minmax(0, 1fr); }
   .dash-side { position: static; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); align-items: start; }
 }
+/* Activity and History: one column of cards, or two side by side on a wide page (Columns in Overview.tsx). */
+.columns { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: var(--card-gap); align-items: start; }
+.column { display: grid; gap: var(--card-gap); min-width: 0; align-content: start; }
+.placed { display: contents; }
+.placed[data-still] > .card { animation: none; }
 
 /* Agents */
 .agent-cards { display: grid; gap: 4px; }
@@ -1279,7 +1271,8 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
 }
 .track > li[data-pos="stopped"] .track-node b { background: var(--secondary); box-shadow: none; color: var(--surface); }
 .track[data-abandoned] > li[data-pos="past"] .track-node b, .track[data-abandoned] > li[data-pos="stopped"] .track-node b { background: transparent; box-shadow: inset 0 0 0 1.5px var(--tertiary); color: var(--tertiary); }
-.track > li[data-pos="now"] .track-node b { background: linear-gradient(to bottom, rgb(255 255 255 / 0.34), rgb(255 255 255 / 0) 62%), var(--accent); box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 16%, transparent); color: #fff; }
+/* The step under way is flat accent with the lit top edge of the other accent controls, inside a halo of its color. */
+.track > li[data-pos="now"] .track-node b { background: var(--accent); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.22), 0 0 0 5px color-mix(in srgb, var(--accent) 16%, transparent); color: #fff; }
 .track-name { max-width: var(--span); padding-inline: 4px; color: var(--secondary); font-size: 11px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
 .track > li:is(:first-child, :last-child) .track-name { max-width: calc(2 * var(--inset)); }
 .track > li[data-current] .track-name { font-weight: 600; }
@@ -1552,6 +1545,8 @@ dialog.palette-layer::backdrop { background: var(--scrim-light); animation: fade
 }
 @media (forced-colors: active) {
   .agent-mark, .share-bar i, .usage-bar i, .connection > i, .nav-dot, .heatmap-grid > i, .spark > i { forced-color-adjust: none; background: CanvasText; }
+  /* The light's color is gone here, so a connection that is not live shows as a ring. */
+  .connection:not([data-state="live"]) > i { background: Canvas; box-shadow: inset 0 0 0 1px CanvasText; }
   /* The drawn controls show their state by fill, which forced colors would take away. */
   input[type="checkbox"] { forced-color-adjust: none; border: 1px solid CanvasText; background: Canvas; }
   input[type="checkbox"]::before { background: HighlightText; }

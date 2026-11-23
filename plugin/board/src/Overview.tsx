@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Children, memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import {
   AddRegular, ArrowRight16Filled, ArrowUpRight16Filled, ChatMultipleRegular, CheckmarkCircle16Regular,
@@ -40,6 +40,51 @@ function Panel({ label, action, className, children, style }: { label: string; a
       {children}
     </section>
   );
+}
+
+/** The page width past which cards pair up, where the overview's side column also appears (`.dash` in board.css). */
+const PAIR_WIDTH = 1040;
+/**
+ * A page's cards in two columns on a wide page, each stacked on its own, so a card that grows moves only the cards
+ * below it in its own column. Cards alternate left and right in order and keep their column, as in the app's
+ * masonry. A lone card keeps the full width.
+ */
+function Columns({ children }: { children: ReactNode }) {
+  const cards = Children.toArray(children);
+  const root = useRef<HTMLDivElement>(null);
+  const [wide, setWide] = useState(false);
+  useLayoutEffect(() => {
+    const element = root.current!;
+    const fit = () => setWide(element.clientWidth > PAIR_WIDTH);
+    const observer = new ResizeObserver(fit);
+    observer.observe(element);
+    fit();
+    return () => observer.disconnect();
+  }, []);
+  // Cards rise in with the page. One that mounts again later, having changed column as a filter or a new mission moves
+  // the ones before it, appears in place instead of rising again; the first frame is the line, after the layout above.
+  const entered = useRef(false);
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => { entered.current = true; });
+    return () => cancelAnimationFrame(frame);
+  }, []);
+  // A column's wrapper stays mounted in both layouts, so only the cards that change column mount again.
+  const columns = wide && cards.length > 1 ? [0, 1].map((side) => cards.filter((_, index) => index % 2 === side)) : [cards];
+  return (
+    <div className="columns" ref={root}>
+      {columns.map((column, index) => (
+        <div className="column" key={index}>
+          {column.map((card) => <Placed key={(card as { key: string }).key} still={entered.current}>{card}</Placed>)}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Holds whether its card mounted after the page came in, which no later render changes. */
+function Placed({ still, children }: { still: boolean; children: ReactNode }) {
+  const [settled] = useState(still);
+  return <div className="placed" data-still={settled || undefined}>{children}</div>;
 }
 
 /** Bars of hourly counts; the pointer reads one off. */
@@ -444,7 +489,7 @@ export const Activity = memo(function Activity({ events, jobs, missions, openJob
   }, [events, agent]);
   const times = useStableItems(useMemo(() => [...jobs.map((job) => job.createdAt), ...missions.map((mission) => mission.createdAt)], [jobs, missions]));
   return (
-    <>
+    <Columns>
       <section className="card panel activity-map" aria-label="Work started" style={{ '--i': 0 } as CSSProperties}>
         <Heatmap title="Work started" times={times} most={53} label="jobs and missions" one="job or mission" />
       </section>
@@ -460,7 +505,7 @@ export const Activity = memo(function Activity({ events, jobs, missions, openJob
           </div>
         ))}
       </Panel>
-    </>
+    </Columns>
   );
 });
 
@@ -674,18 +719,23 @@ export const History = memo(function History({ state, project, names, selected, 
           <input type="search" aria-label="Filter history" placeholder="Filter by title, agent, project" value={search} onChange={(event) => setSearch(event.target.value)} />
         </label>
       </div>
-      {missions.map((mission, index) => (
-        <MissionPanel
-          key={mission.id}
-          mission={mission}
-          {...missionPanel(mission)}
-          projectName={project ? undefined : names.get(projectOf(mission))}
-          selected={selected}
-          openJob={openJob}
-          openSession={openSession}
-          index={index}
-        />
-      ))}
+      {/* The table below keeps the page's width, which its columns need. */}
+      {missions.length > 0 && (
+        <Columns>
+          {missions.map((mission, index) => (
+            <MissionPanel
+              key={mission.id}
+              mission={mission}
+              {...missionPanel(mission)}
+              projectName={project ? undefined : names.get(projectOf(mission))}
+              selected={selected}
+              openJob={openJob}
+              openSession={openSession}
+              index={index}
+            />
+          ))}
+        </Columns>
+      )}
       {rows.length > 0 ? (
         <Panel label="Completed jobs" className="table-panel">
           <div className="table-scroll">

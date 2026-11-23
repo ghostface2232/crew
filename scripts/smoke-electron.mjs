@@ -118,7 +118,8 @@ try {
   });
   await expect(instructions).toHaveValue('Keep this unsaved draft');
   expect(await visible(application)).toBe(true);
-  await page.getByRole('button', { name: 'Close settings' }).click();
+  // Settings have no close button beside their sidebar; Escape closes them.
+  await page.keyboard.press('Escape');
   await page.getByRole('dialog', { name: 'Close without saving your changes?' }).getByRole('button', { name: 'Close', exact: true }).click();
 
   // No control lies under the window buttons, including at a narrow width with Settings open.
@@ -136,7 +137,7 @@ try {
   expect(await covered()).toEqual([]);
   await page.getByRole('button', { name: 'Show sidebar' }).click();
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Close settings' }).first()).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Settings pages' })).toBeVisible();
   expect(await covered()).toEqual([]);
   await page.keyboard.press('Escape');
   await page.waitForTimeout(500);
@@ -156,7 +157,8 @@ try {
   await page.getByRole('button', { name: 'Check for Updates' }).click();
   await expect(page.getByText('Version 9.9.9 is ready to install')).toBeVisible({ timeout: 15_000 });
   await expect(page.getByRole('link', { name: 'What’s new in 9.9.9' })).toBeVisible();
-  await page.getByRole('button', { name: 'Close settings' }).click();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
   expect(await page.evaluate(() => [...document.querySelectorAll('.sidebar-foot button')].map((button) => button.id)))
     .toEqual(['install-update', 'open-settings']);
   expect(fs.readFileSync(path.join(home, 'desktop', 'updates', 'Crew-Setup-9.9.9.exe'))).toEqual(installer);
@@ -247,7 +249,7 @@ try {
   await expect(reopened.locator('#install-update')).toHaveCount(0);
   await reopened.locator('#update-failed').click();
   await expect(reopened.getByText(reason, { exact: true })).toBeVisible();
-  await reopened.getByRole('button', { name: 'Close settings' }).click();
+  await reopened.keyboard.press('Escape');
   await expect(reopened.locator('#install-update')).toBeVisible();
   await expect(reopened.locator('#update-failed')).toHaveCount(0);
   await quit(application);

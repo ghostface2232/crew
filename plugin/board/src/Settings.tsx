@@ -50,14 +50,14 @@ function presetDetails(preset: Preset): [string, string][] {
 /** One page of settings, listed in the sidebar: the roles by kind of work, what every agent shares, each project's own instructions, then the desktop app. */
 type Fixed = 'build' | 'review' | 'edit' | 'presets' | 'models' | 'instructions' | 'about';
 type Pane = Fixed | `project:${string}`;
-const PANES: Record<Fixed, { title: string; icon: FluentIcon; tint: string; kind?: JobKind }> = {
-  build: { title: 'Build', icon: Wrench16Regular, tint: 'var(--accent)', kind: 'delegate' },
-  review: { title: 'Review', icon: ShieldCheckmark16Regular, tint: 'var(--green)', kind: 'review' },
-  edit: { title: 'Edit', icon: TextFont16Regular, tint: 'var(--orange)', kind: 'polish' },
-  presets: { title: 'Model Presets', icon: Options16Regular, tint: 'var(--gray)' },
-  models: { title: 'Model Scores', icon: Gauge16Regular, tint: 'var(--purple)' },
-  instructions: { title: 'Instructions', icon: DocumentText16Regular, tint: 'var(--indigo)' },
-  about: { title: 'About Crew', icon: Info16Regular, tint: 'var(--gray)' },
+const PANES: Record<Fixed, { title: string; icon: FluentIcon; kind?: JobKind }> = {
+  build: { title: 'Build', icon: Wrench16Regular, kind: 'delegate' },
+  review: { title: 'Review', icon: ShieldCheckmark16Regular, kind: 'review' },
+  edit: { title: 'Edit', icon: TextFont16Regular, kind: 'polish' },
+  presets: { title: 'Model Presets', icon: Options16Regular },
+  models: { title: 'Model Scores', icon: Gauge16Regular },
+  instructions: { title: 'Instructions', icon: DocumentText16Regular },
+  about: { title: 'About Crew', icon: Info16Regular },
 };
 
 /** Where the desktop app's update stands, in one line. */
@@ -81,9 +81,6 @@ function updateSummary(update: AppUpdate) {
 
 /** Fixing review findings sits with the reviews it answers, though it runs as a build job. */
 const paneKind = (role: RoleInfo): JobKind => (role.role === 'fix' ? 'review' : role.kind);
-
-/** Projects share one tile, apart from the roles' colors. */
-const PROJECT_TINT = 'var(--teal)';
 
 /**
  * The role table the form edits: what the user wrote, so a role left to follow its parent keeps following it.
@@ -110,6 +107,75 @@ function sameRoles(a: RoleSettings, b: RoleSettings) {
   return canonical(a) === canonical(b);
 }
 
+/**
+ * A setting stored as it is changed, with no save step. One request runs at a time, and a change made meanwhile goes
+ * out when it returns, so the last one made is the one stored. A change that cannot be stored is undone, and the
+ * reason kept to show.
+ */
+function useStored<T>(initial: () => T, same: (a: T, b: T) => boolean, store: (value: T) => Promise<T>) {
+  const [value, setValue] = useState(initial);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const now = useRef({ value, stored: value, storing: null as Promise<boolean> | null }).current;
+  const send = useRef(store);
+  send.current = store;
+  /** Stores until the value is the stored one; whether that went through. */
+  const run = async () => {
+    try {
+      while (!same(now.value, now.stored)) {
+        const submitted = now.value;
+        now.stored = await send.current(submitted);
+        // The form shows what was stored, unless it was changed meanwhile.
+        if (same(now.value, submitted)) setValue(now.value = now.stored);
+      }
+      setError('');
+      return true;
+    } catch (failure) {
+      setValue(now.value = now.stored);
+      setError((failure as Error).message);
+      return false;
+    }
+  };
+  const change = (next: T) => {
+    now.value = next;
+    setValue(next);
+    if (now.storing) return;
+    setBusy(true);
+    const storing = run();
+    now.storing = storing;
+    void storing.then(() => {
+      now.storing = null;
+      setBusy(false);
+    });
+  };
+  /**
+   * `latest` is the value as last changed, ahead of the render that shows it. `settled` answers once nothing is being
+   * stored, with whether the change that was went through: at once, and true, when none is.
+   */
+  return { value, error, busy, change, latest: () => now.value, settled: () => now.storing ?? Promise.resolve(true) };
+}
+
+/** A setting typed by hand: stored when the field is left or Return is pressed, not at every keystroke. */
+function TypedSetting({ label, value, placeholder, onCommit }: { label: string; value: string; placeholder: string; onCommit: (value: string) => void }) {
+  const [draft, setDraft] = useState(value);
+  const [shown, setShown] = useState(value);
+  // The stored value changed under the field, as when a change that failed is undone.
+  if (value !== shown) {
+    setShown(value);
+    setDraft(value);
+  }
+  return (
+    <input
+      aria-label={label}
+      value={draft}
+      placeholder={placeholder}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={() => { if (draft !== value) onCommit(draft); }}
+      onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
+    />
+  );
+}
+
 /** `initial` opens a page at once, as the sidebar's failed update opens About. */
 export function Settings({ state, update, close, initial }: { state: Snapshot; update: AppUpdate | null; close: () => void; initial?: 'about' }) {
   const [pane, setPane] = useState<Pane>(initial ?? 'build');
@@ -117,20 +183,31 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
   const [view, setView] = useState<'list' | 'page'>(initial ? 'page' : 'list');
   const back = useRef<HTMLButtonElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
-  // The title's blur shows only once the page has scrolled under it.
-  const [scrolled, setScrolled] = useState(false);
-  const [roles, setRoles] = useState<RoleSettings>(() => editableRoles(state));
-  const [savedRoles, setSavedRoles] = useState<RoleSettings>(() => editableRoles(state));
+  // Roles and the preset are stored as they are changed; only the instructions, being prose, have a save of their own.
+  const storedRoles = useStored<RoleSettings>(() => editableRoles(state), sameRoles, async (submitted) => {
+    const result = await request<{ roles?: Snapshot['roles']; roleSettings?: RoleSettings }>('/api/roles', { roles: submitted });
+    // A daemon without the registry answers without the table it stored.
+    if (!result.roleSettings || !result.roles) return submitted;
+    board.receive('roles', result.roles);
+    board.receive('roleSettings', result.roleSettings);
+    return structuredClone(result.roleSettings);
+  });
+  const roles = storedRoles.value;
+  // The table and the resolved roles as Settings opened, and each agent's settings as it was turned off since.
+  const [opened] = useState(() => ({ settings: editableRoles(state), roles: state.roles }));
+  const dropped = useRef<Record<string, AgentSettings | undefined>>({});
+  /** The role last changed, under whose rows a change that could not be stored says so. */
+  const changedRole = useRef<Role | null>(null);
   const info = rolesOf(state);
-  const resolved = resolveDraft(info, roles, state.roles);
-  const [roleStatus, setRoleStatus] = useState('');
-  const [savingRoles, setSavingRoles] = useState(false);
-  const roleLock = useRef(false);
-  const [preset, setPreset] = useState<PresetName | null>(state.preset ?? null);
-  const [savedPreset, setSavedPreset] = useState(preset);
-  const [presetStatus, setPresetStatus] = useState('');
-  const [savingPreset, setSavingPreset] = useState(false);
-  const presetLock = useRef(false);
+  // Against the roles as Settings opened, not as last stored: a role returns to writing no holders only where it wrote
+  // none then, and the holders it had then are what that means until the daemon has answered.
+  const resolved = resolveDraft(info, roles, opened.roles);
+  const storedPreset = useStored<PresetName | null>(() => state.preset ?? null, Object.is, async (submitted) => {
+    const result = await request<Pick<Snapshot, 'preset' | 'presets'>>('/api/preset', { preset: submitted });
+    board.receive('preset', result);
+    return result.preset ?? null;
+  });
+  const preset = storedPreset.value;
   const selectedPreset = preset ? state.presets?.[preset] : undefined;
   const [scope, setScope] = useState('');
   // Whose instructions the editor holds; until a newly chosen set arrives, it still holds the previous one.
@@ -144,8 +221,11 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
   const [retry, setRetry] = useState(0);
   const generation = useRef(0);
   const saveLock = useRef(false);
-  const rolesDirty = !sameRoles(roles, savedRoles);
-  const dirty = text !== saved || rolesDirty || preset !== savedPreset;
+  const dirty = text !== saved;
+  // Whether the instructions are unsaved as they stand now, for a close that waited on a store and so outlived the
+  // render it began in.
+  const unsaved = useRef(false);
+  unsaved.current = dirty || saving;
   const dirs = knownProjects(state);
   const names = projectNames(dirs);
   useEffect(() => {
@@ -183,14 +263,14 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
     };
   }, [scope, retry]);
   useEffect(() => {
-    if (!dirty && !saving && !savingRoles && !savingPreset) return;
+    if (!dirty && !saving && !storedRoles.busy && !storedPreset.busy) return;
     const guard = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = '';
     };
     window.addEventListener('beforeunload', guard);
     return () => window.removeEventListener('beforeunload', guard);
-  }, [dirty, saving, savingRoles, savingPreset]);
+  }, [dirty, saving, storedRoles.busy, storedPreset.busy]);
   // On a phone, opening a page moves focus to its way back, as a pushed screen does, and going back returns it to the page's row.
   const nav = useRef<HTMLElement>(null);
   const pushed = useRef(false);
@@ -203,33 +283,42 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
   // A failed install leaves the sidebar once About has shown why, when Settings closes, so the note stays while it is read.
   const shownInstallError = useRef(false);
   const closeSettings = async () => {
-    const unsaved = dirty || saving || savingRoles || savingPreset;
-    if (unsaved && !await ask('Close without saving your changes?', 'Close')) return;
+    // A model or effort typed by hand is stored as its field is left, which a browser need not report for a dialog going away.
+    (document.activeElement as HTMLElement | null)?.blur();
+    // A change still being stored is waited for. One that cannot be stored keeps Settings open, where it says so:
+    // closed, the change would be undone with nothing left to show why.
+    if (!(await storedRoles.settled()) || !(await storedPreset.settled())) return;
+    if (unsaved.current && !await ask('Close without saving your changes?', 'Close')) return;
     if (shownInstallError.current) void desktop?.update.seen?.();
     close();
   };
-  /** Replaces a role's entry in the draft, dropping it when nothing is left. */
-  const setEntry = (role: Role, change: (own: Partial<RoleAssignment>) => Partial<RoleAssignment>) =>
-    setRoles((current) => {
-      const entry = cleanEntry(change({ ...current[role] }));
-      const { [role]: _entry, ...others } = current;
-      return Object.keys(entry).length ? { ...others, [role]: entry } : others;
-    });
+  /** Replaces a role's entry and stores the table, dropping the entry when nothing is left. */
+  const setEntry = (role: Role, change: (own: Partial<RoleAssignment>) => Partial<RoleAssignment>) => {
+    const current = storedRoles.latest();
+    const entry = cleanEntry(change({ ...current[role] }));
+    const { [role]: _entry, ...others } = current;
+    changedRole.current = role;
+    void storedRoles.change(Object.keys(entry).length ? { ...others, [role]: entry } : others);
+  };
   /**
    * Turns a holder on or off; a role keeps at least one. A role without a parent that comes back to the holders it
-   * resolves to unwritten writes none, as it was saved.
+   * resolved to unwritten when Settings opened writes none again.
    */
   const toggleHolder = (role: RoleInfo, holder: Holder) =>
     setEntry(role.role, (own) => {
       const shown = resolved[role.role]?.agents ?? [];
       const next = shown.includes(holder) ? shown.filter((other) => other !== holder) : sortHolders([...shown, holder]);
       if (!next.length) return own;
-      // Off, an agent's settings go; back on, they come back as saved.
+      // Off, an agent's settings go; back on while Settings stays open, they come back as they were.
       if (holder !== 'claude') {
-        if (next.includes(holder)) own[holder] ??= savedRoles[role.role]?.[holder];
-        else delete own[holder];
+        const key = `${role.role}:${holder}`;
+        if (next.includes(holder)) own[holder] ??= dropped.current[key];
+        else {
+          dropped.current[key] = own[holder];
+          delete own[holder];
+        }
       }
-      const unwritten = !role.parent && !savedRoles[role.role]?.agents ? state.roles[role.role]?.agents : undefined;
+      const unwritten = !role.parent && !opened.settings[role.role]?.agents ? opened.roles[role.role]?.agents : undefined;
       if (unwritten && unwritten.join() === next.join()) delete own.agents;
       else own.agents = next;
       return own;
@@ -257,48 +346,6 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
       board.receive('peerRatings', (await request<{ peerRatings: boolean }>('/api/peer-ratings', { enabled })).peerRatings);
     } catch (error) {
       setRatingsStatus((error as Error).message);
-    }
-  };
-  const savePreset = async () => {
-    if (presetLock.current) return;
-    presetLock.current = true;
-    setSavingPreset(true);
-    setPresetStatus('Saving…');
-    const submitted = preset;
-    try {
-      const result = await request<Pick<Snapshot, 'preset' | 'presets'>>('/api/preset', { preset: submitted });
-      setPreset((current) => (current === submitted ? result.preset ?? null : current));
-      setSavedPreset(result.preset ?? null);
-      board.receive('preset', result);
-      setPresetStatus('Saved');
-    } catch (error) {
-      setPresetStatus((error as Error).message);
-    } finally {
-      presetLock.current = false;
-      setSavingPreset(false);
-    }
-  };
-  const saveRoles = async () => {
-    if (roleLock.current) return;
-    roleLock.current = true;
-    setSavingRoles(true);
-    setRoleStatus('Saving…');
-    const submitted = roles;
-    try {
-      const result = await request<{ roles?: Snapshot['roles']; roleSettings?: RoleSettings }>('/api/roles', { roles });
-      if (result.roleSettings && result.roles) {
-        // The form shows what was stored, unless it was edited meanwhile.
-        setRoles((current) => (sameRoles(current, submitted) ? structuredClone(result.roleSettings!) : current));
-        setSavedRoles(result.roleSettings);
-        board.receive('roles', result.roles);
-        board.receive('roleSettings', result.roleSettings);
-      } else setSavedRoles(submitted);
-      setRoleStatus('Saved');
-    } catch (error) {
-      setRoleStatus((error as Error).message);
-    } finally {
-      roleLock.current = false;
-      setSavingRoles(false);
     }
   };
   const saveInstructions = async () => {
@@ -339,25 +386,14 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
   // The instructions this page edits: '' for every project, a project's own; null on the other pages.
   const pageScope = current === 'instructions' ? '' : project;
   const title = project === null ? fixed!.title : names.get(project) ?? project;
-  // The three roles pages edit one table, so they share one save.
-  const paneSaving = kind ? savingRoles : current === 'presets' ? savingPreset : saving;
-  const paneDirty = kind ? rolesDirty : current === 'presets' ? preset !== savedPreset : text !== saved;
-  const paneStatus = kind ? roleStatus : current === 'presets' ? presetStatus : load === 'loading' ? 'Loading…' : status;
-  const readOnly = current === 'models' || current === 'about';
-  const canSave = !readOnly && state.connection === 'live' && !paneSaving && (pageScope === null || (load === 'ready' && loadedScope === pageScope));
-  const saveCurrent = async () => {
-    if (!canSave) return;
-    if (kind) await saveRoles();
-    else if (current === 'presets') await savePreset();
-    else await saveInstructions();
-  };
+  const canSave = pageScope !== null && state.connection === 'live' && !saving && load === 'ready' && loadedScope === pageScope;
   useEffect(() => {
     const shortcut = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's' && !event.altKey) {
         event.preventDefault();
         // Not while a question is open over Settings, such as whether to close without saving.
         if (event.target instanceof Element && event.target.closest('dialog.ask')) return;
-        void saveCurrent();
+        if (canSave) void saveInstructions();
       }
     };
     window.addEventListener('keydown', shortcut);
@@ -366,7 +402,6 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
   // Each page opens at its top.
   useEffect(() => {
     if (scroller.current) scroller.current.scrollTop = 0;
-    setScrolled(false);
   }, [current, view]);
   const open = async (next: Pane) => {
     const nextScope = next === 'instructions' ? '' : next.startsWith('project:') ? next.slice('project:'.length) : null;
@@ -394,7 +429,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
         onClick={() => open(id)}
         title={dir ?? undefined}
       >
-        <span className={styles.tile} style={{ background: page?.tint ?? PROJECT_TINT }}><Icon icon={page?.icon ?? Folder16Regular} /></span>
+        <Icon icon={page?.icon ?? Folder16Regular} className={styles.glyph} />
         <ItemTitle text={page?.title ?? names.get(dir!) ?? dir!} current={current === id} />
         <Icon icon={ChevronRightRegular} className={styles.chevron} />
       </button>
@@ -403,7 +438,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
   // An older daemon may not know every agent; Claude is always one.
   const holders = HOLDERS.filter((holder) => holder === 'claude' || holder in state.agents);
   const models = (agent: WorkerAgent) => state.agents[agent]?.models ?? [];
-  const holderLabel = (holder: Holder) => holder === 'claude' ? 'Claude (the lead)' : `${state.agents[holder].name}${state.agents[holder].enabled ? '' : ' (disabled)'}`;
+  const holderLabel = (holder: Holder) => holder === 'claude' ? 'Claude' : `${state.agents[holder].name}${state.agents[holder].enabled ? '' : ' (disabled)'}`;
   const roleGroup = (role: RoleInfo) => {
     const own = roles[role.role] ?? {};
     const parentLabel = info.find((other) => other.role === role.parent)?.label ?? role.parent;
@@ -424,7 +459,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
       const value = own[agent]?.[key] ?? '';
       const change = (next: string) => editSetting(role.role, agent, key, next);
       const offered = models(agent);
-      if (!offered.length) return <input aria-label={label} value={value} placeholder={blank(agent, key)} onChange={(event) => change(event.target.value)} />;
+      if (!offered.length) return <TypedSetting label={label} value={value} placeholder={blank(agent, key)} onCommit={change} />;
       const model = own[agent]?.model || inherited(agent, 'model');
       // A model that lists no efforts says nothing about them, so every offered effort stays a choice.
       const listed = offered.find((choice) => choice.id === model)?.efforts;
@@ -488,6 +523,12 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
             </Fragment>
           ))}
         </div>
+        {storedRoles.error && changedRole.current === role.role && (
+          <p className={`${styles.footnote} ${styles.note} error`} role="alert">
+            <Icon icon={ErrorCircle16Regular} />
+            Not saved: {storedRoles.error}
+          </p>
+        )}
       </section>
     );
   };
@@ -519,15 +560,17 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
           )}
         </nav>
         <div className={styles.detail}>
-          <div className={styles.scroll} ref={scroller} onScroll={(event) => setScrolled(event.currentTarget.scrollTop > 0)}>
-            <header className={styles.pageHead} data-scrolled={scrolled || undefined}>
-              <button type="button" ref={back} className={`borderless ${styles.back}`} onClick={() => setView('list')}>
-                <Icon icon={ChevronLeftRegular} />
-                Settings
-              </button>
-              <h2 className={styles.pageTitle}>{title}</h2>
-              <span className={styles.pageClose}><CloseButton label="Close settings" onClose={closeSettings} /></span>
-            </header>
+          <header className={styles.pageHead}>
+            <button type="button" ref={back} className={`borderless ${styles.back}`} onClick={() => setView('list')}>
+              <Icon icon={ChevronLeftRegular} />
+              Settings
+            </button>
+            <h2 className={styles.pageTitle}>{title}</h2>
+            <span className={styles.pageClose}><CloseButton label="Close settings" onClose={closeSettings} /></span>
+          </header>
+          {/* The page is the stage the dialog's frame wraps, as in the window. Named here, since only a phone shows the title row. */}
+          <section className={styles.stage} aria-label={title}>
+          <div className={styles.scroll} ref={scroller}>
             <div className={styles.body}>
               {kind && info.filter((role) => paneKind(role) === kind).map(roleGroup)}
               {kind && (
@@ -546,13 +589,19 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
                           label="Model preset"
                           value={preset ?? ''}
                           options={[['', 'None'], ['economy', 'Economy'], ['balanced', 'Balanced'], ['best', 'Best']]}
-                          onChange={(next) => setPreset(next || null)}
+                          onChange={(next) => void storedPreset.change(next || null)}
                         />
                       </label>
                       {selectedPreset && presetDetails(selectedPreset).map(([label, value]) => (
                         <div className={styles.row} key={label}><span>{label}</span><span className={styles.value}>{value}</span></div>
                       ))}
                     </div>
+                    {storedPreset.error && (
+                      <p className={`${styles.footnote} ${styles.note} error`} role="alert">
+                        <Icon icon={ErrorCircle16Regular} />
+                        Not saved: {storedPreset.error}
+                      </p>
+                    )}
                     <p className={styles.footnote}>{preset ? PRESET_SUMMARY[preset] : "Uses each agent's own model and effort settings."}</p>
                   </section>
                   <section className={styles.group}>
@@ -668,6 +717,19 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
                       onChange={(event) => setText(event.target.value)}
                       disabled={load !== 'ready' || loadedScope !== pageScope}
                     />
+                    {/* Under the editor it saves, not in a bar of its own: no other page has anything to save. */}
+                    <div className={styles.saveRow}>
+                      <div className={styles.status} role="status">
+                        {(load === 'loading' || status) && <span className="callout secondary">{load === 'loading' ? 'Loading…' : status}</span>}
+                        {dirty && <span className="unsaved">Unsaved changes</span>}
+                      </div>
+                      <div className={styles.actions}>
+                        {load === 'failed' && <button type="button" onClick={() => setRetry((value) => value + 1)}>Retry Loading</button>}
+                        <button type="button" className="prominent" disabled={!canSave} onClick={() => void saveInstructions()}>
+                          {saving ? 'Saving…' : 'Save Instructions'}
+                        </button>
+                      </div>
+                    </div>
                     <p className={`${styles.footnote} ${styles.file}`}>{file}</p>
                     {text.length > 9000 && (
                       <p className={`${styles.footnote} ${styles.note}`}>
@@ -680,20 +742,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
               )}
             </div>
           </div>
-          {!readOnly && <footer className={styles.footer}>
-            <div className={styles.status} role="status">
-              {paneStatus && <span className="callout secondary">{paneStatus}</span>}
-              {paneDirty && <span className="unsaved">Unsaved changes</span>}
-            </div>
-            <div className={styles.actions}>
-              {pageScope !== null && load === 'failed' && (
-                <button type="button" className="large" onClick={() => setRetry((value) => value + 1)}>Retry Loading</button>
-              )}
-              <button type="button" className="large prominent" disabled={!canSave} onClick={() => void saveCurrent()}>
-                {paneSaving ? 'Saving…' : kind ? 'Save Roles' : current === 'presets' ? 'Save Preset' : 'Save Instructions'}
-              </button>
-            </div>
-          </footer>}
+          </section>
         </div>
       </div>
     </Dialog>

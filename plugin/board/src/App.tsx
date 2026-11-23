@@ -10,7 +10,7 @@ import type { FluentIcon } from '@fluentui/react-icons';
 import { board } from './store.ts';
 import { formatDate, longDay } from './dates.ts';
 import { knownProjects, projectNames, projectOf } from './model.ts';
-import { AskHost, ClockProvider, CopyMenu, Icon, PANEL_EXIT_MS, PanelLeavingContext, RollingNumber, useLinger, useStableItems } from './ui.tsx';
+import { AskHost, ClockProvider, CopyMenu, Icon, LeavingContext, PANEL_EXIT_MS, RollingNumber, SHEET_EXIT_MS, useLinger, useStableItems } from './ui.tsx';
 import appIcon from './icons/CrewAppIcon.png';
 import { Activity, History, Workspace } from './Overview.tsx';
 import { NeedsYou } from './NeedsYou.tsx';
@@ -73,6 +73,7 @@ export function App() {
   const waitingSessions = useMemo(() => claude.filter((session) => session.state === 'waiting'), [claude]);
   const pending = waitingJobs.length + waitingSessions.length;
   const live = state.connection === 'live';
+  const connectionWord = live ? 'Live' : state.connection === 'lost' ? 'Reconnecting…' : 'Connecting…';
   const narrow = useNarrow();
   // Narrow windows keep the sidebar folded away until its button brings it out over the page.
   const [drawer, setDrawer] = useState(false);
@@ -136,6 +137,8 @@ export function App() {
   const closeDetail = useCallback(() => show(''), [show]);
   // A closed panel stays up while it slides out; a different one replaces it at once.
   const [panel, panelLeaving] = useLinger(detail, PANEL_EXIT_MS);
+  // Settings stay up while they settle out, as the panel does.
+  const [shownSettings, settingsLeaving] = useLinger(settings === 'about' ? 'about' : settings ? 'open' : '', SHEET_EXIT_MS);
   /** After New Job, the job's own project, so the new job is in view, as the app goes there. */
   const openNewJob = (id: string, root?: string) => {
     if (root && project !== root) select(`project:${root}`);
@@ -253,10 +256,10 @@ export function App() {
                 <Icon icon={SettingsRegular} />
                 <span>Settings</span>
               </button>
-              {/* A working connection is only its green light; the word shows while connecting or lost. */}
-              <p className="connection" role="status" data-state={state.connection} title={live ? 'Live' : undefined}>
+              {/* Only a light: green live, orange while lost. The word is its tooltip, and the page's banner says a lost one in full. */}
+              <p className="connection" role="status" data-state={state.connection} title={connectionWord}>
                 <i aria-hidden="true" />
-                <span>{live ? 'Live' : state.connection === 'lost' ? 'Reconnecting…' : 'Connecting…'}</span>
+                <span>{connectionWord}</span>
               </p>
             </div>
           </div>
@@ -359,14 +362,16 @@ export function App() {
             actions={paletteActions}
           />
         )}
-        <PanelLeavingContext value={panelLeaving}>
+        <LeavingContext value={panelLeaving}>
           {panel.startsWith('session:') ? (
             <SessionDrawer key={panel} id={panel.slice(8)} state={state} close={closeDetail} />
           ) : (
             panel && <JobDrawer key={panel} id={panel} state={state} close={closeDetail} />
           )}
-        </PanelLeavingContext>
-        {settings && <Settings state={state} update={update} close={() => setSettings(false)} initial={settings === 'about' ? 'about' : undefined} />}
+        </LeavingContext>
+        <LeavingContext value={settingsLeaving}>
+          {shownSettings && <Settings state={state} update={update} close={() => setSettings(false)} initial={shownSettings === 'about' ? 'about' : undefined} />}
+        </LeavingContext>
         <AskHost />
       </div>
     </ClockProvider>

@@ -38,7 +38,8 @@ enum SettingsPane: Hashable, Identifiable {
 }
 
 /// Laid out like System Settings: a sidebar of pages, and a grouped form whose page title sits in the unified
-/// toolbar, where the system's soft scroll edge takes over from a hard cut.
+/// toolbar, where the system's soft scroll edge takes over from a hard cut. As there, roles and the preset are stored
+/// as they are changed; only the instructions, being prose, have a save, on the line under their editor.
 struct CrewSettingsView: View {
     /// Fixed, as in System Settings; the window pins it (CrewApp.openSettings).
     static let sidebarWidth: CGFloat = 180
@@ -48,6 +49,8 @@ struct CrewSettingsView: View {
     var store: CrewStore
     @Environment(AppUpdater.self) private var updater
     @State private var selection: SettingsPane? = .build
+    /// The model or effort being typed by hand, stored when it is left as when Return is pressed.
+    @FocusState private var typing: SettingsModel.TypedField?
     /// Moving to another set of instructions loads it in place of the one being edited, so unsaved edits are asked about first.
     private var pages: Binding<SettingsPane?> {
         Binding(get: { selection }, set: { next in
@@ -83,10 +86,10 @@ struct CrewSettingsView: View {
                 .formStyle(.grouped)
                 .background(OverlayScrollers())
                 .scrollEdgeEffectStyle(.soft, for: .top)
-                .safeAreaBar(edge: .bottom) { if pane != .models && pane != .about { saveBar(pane) } }
                 .navigationTitle(title(pane))
                 // NSHostingController does not carry navigationTitle into the window, so the toolbar would be blank.
                 .background(WindowTitleSetter(title: title(pane)))
+                .onChange(of: typing) { left, _ in if let left { commit(left) } }
         }
         .frame(minWidth: WorkspaceStyle.settingsMinSize.width, idealWidth: WorkspaceStyle.settingsSize.width, minHeight: WorkspaceStyle.settingsMinSize.height, idealHeight: WorkspaceStyle.settingsSize.height)
         .task { if !model.loaded && !model.loading { await model.load(scope: model.scope) } }
@@ -137,7 +140,7 @@ struct CrewSettingsView: View {
             if let parent = role.parent {
                 Toggle("Same as \(model.roleInfo.first { $0.role == parent }?.label ?? parent)", isOn: Binding(
                     get: { model.followsParent(role.role) },
-                    set: { model.setFollowParent(role.role, enabled: $0) }
+                    set: { model.setFollowParent(role.role, enabled: $0); storeRoles() }
                 )).toggleStyle(.checkbox)
             }
             LabeledContent("Agents") {
@@ -145,7 +148,7 @@ struct CrewSettingsView: View {
                     ForEach(RoleAssignment.holderOrder, id: \.self) { holder in
                         Toggle(holderLabel(holder), isOn: Binding(
                             get: { model.assignment(for: role.role)?.holders.contains(holder) == true },
-                            set: { model.setHolder(role.role, holder: holder, enabled: $0) }
+                            set: { model.setHolder(role.role, holder: holder, enabled: $0); storeRoles() }
                         )).toggleStyle(.checkbox).accessibilityLabel("\(role.label): \(holderLabel(holder))")
                             .disabled(!model.canToggleHolder(role.role, holder: holder))
                     }
@@ -163,7 +166,20 @@ struct CrewSettingsView: View {
                     Text(role.summary).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
             }.textCase(nil)
+        } footer: {
+            // A change that could not be stored was undone; its role says why.
+            if !model.roleError.isEmpty && model.changedRole == role.role {
+                ErrorLabel(message: "Not saved: \(model.roleError)").settingsFootnote()
+            }
         }
+    }
+    /// Stores the table after a change, as the change is made.
+    private func storeRoles() {
+        Task { await model.applyRoles() }
+    }
+    private func commit(_ field: SettingsModel.TypedField) {
+        model.commit(field)
+        storeRoles()
     }
     @ViewBuilder private var presets: some View {
         let selected = model.preset.flatMap { model.presets?[$0.rawValue] }
@@ -174,14 +190,18 @@ struct CrewSettingsView: View {
                     Text(name.rawValue.capitalized).tag(Optional(name))
                 }
             }
+            // Stored as it is picked. Undoing a pick that could not be stored comes through here too, with nothing left to store.
+            .onChange(of: model.preset) { Task { await model.applyPreset() } }
             if let selected {
                 ForEach(selected.details, id: \.label) { row in
                     LabeledContent(row.label, value: row.value)
                 }
             }
         } footer: {
-            Text(model.preset?.summary ?? "Uses each agent's own model and effort settings.")
-                .settingsFootnote()
+            VStack(alignment: .leading, spacing: Space.s) {
+                if !model.presetError.isEmpty { ErrorLabel(message: "Not saved: \(model.presetError)") }
+                Text(model.preset?.summary ?? "Uses each agent's own model and effort settings.")
+            }.settingsFootnote()
         }
         Section {
             LabeledContent("Role settings", value: "Override any preset")
@@ -299,6 +319,7 @@ struct CrewSettingsView: View {
                 .settingsFootnote().textCase(nil)
         } footer: {
             VStack(alignment: .leading, spacing: Space.s) {
+                saveRow
                 Text(model.file).font(Typeface.codeSmall).foregroundStyle(.tertiary).textSelection(.enabled)
                 if model.text.count > 9000 {
                     Label("Claude sessions will be pointed to this file because it is longer than 9,000 characters.", systemImage: "info.circle").settingsFootnote()
@@ -306,32 +327,26 @@ struct CrewSettingsView: View {
             }
         }
     }
-    /// The page's status and its save button. The three roles pages edit one table, so they share one save.
-    private func saveBar(_ pane: SettingsPane) -> some View {
-        let roles = pane.group != nil
-        let status = roles ? model.roleStatus : pane == .presets ? model.presetStatus : model.textStatus
-        let unsaved = roles ? model.rolesDirty : pane == .presets ? model.preset != model.savedPreset : model.text != model.savedText
-        let saving = roles ? model.savingRoles : pane == .presets ? model.savingPreset : model.savingText
-        return HStack(spacing: Space.l) {
-            if model.loading && pane.scope != nil { ProgressView().controlSize(.small) }
-            Text(status).font(Typeface.callout).foregroundStyle(.secondary).textSelection(.enabled)
-            if unsaved {
+    /// The instructions' status and their save, on the line under the editor: no other page has anything to save.
+    private var saveRow: some View {
+        HStack(spacing: Space.l) {
+            if model.loading { ProgressView().controlSize(.small) }
+            Text(model.textStatus).font(Typeface.callout).foregroundStyle(.secondary).textSelection(.enabled)
+            if model.text != model.savedText {
                 Label("Unsaved changes", systemImage: "circle.fill").font(Typeface.calloutStrong).foregroundStyle(Palette.warning)
                     .labelStyle(UnsavedLabelStyle())
             }
             Spacer()
-            if pane.scope != nil && !model.loaded && !model.loading {
-                Button("Retry Loading") { Task { await model.load(scope: model.scope) } }.pillButton()
+            if !model.loaded && !model.loading {
+                Button("Retry Loading") { Task { await model.load(scope: model.scope) } }
             }
-            Button(saving ? "Saving…" : roles ? "Save Roles" : pane == .presets ? "Save Preset" : "Save Instructions") {
-                Task { if roles { await model.saveRoles() } else if pane == .presets { await model.savePreset() } else { await model.saveInstructions() } }
-            }
-            .glassPillButton().morphs(on: [model.savingRoles, model.savingPreset, model.savingText]).keyboardShortcut("s")
-            .disabled(!store.connected || saving || (pane.scope != nil && !model.loaded))
-        }.padding(.horizontal, Space.x3l).padding(.vertical, Space.xl)
+            Button(model.savingText ? "Saving…" : "Save Instructions") { Task { await model.saveInstructions() } }
+                .buttonStyle(.borderedProminent).keyboardShortcut("s")
+                .disabled(!store.connected || model.savingText || !model.loaded)
+        }
     }
     private func holderLabel(_ holder: String) -> String {
-        holder == "claude" ? "Claude (the lead)" : "\(agentName(holder))\(store.state.agents[holder]?.enabled == false ? " (disabled)" : "")"
+        holder == "claude" ? "Claude" : "\(agentName(holder))\(store.state.agents[holder]?.enabled == false ? " (disabled)" : "")"
     }
     private func roleBinding(_ role: RoleInfo, agent: String, _ key: WritableKeyPath<RoleAgentSettings, String?>) -> Binding<String> {
         Binding(get: { model.roleSettings[role.role]?[agent]?[keyPath: key] ?? "" },
@@ -341,11 +356,17 @@ struct CrewSettingsView: View {
         let title = "\(agentName(agent)) \(key == \.model ? "model" : "reasoning effort")"
         let offered = store.state.agents[agent]?.models ?? []
         let blank = model.blankTitle(role.role, agent: agent, key, models: offered)
+        let binding = roleBinding(role, agent: agent, key)
         if offered.isEmpty {
-            TextField(title, text: roleBinding(role, agent: agent, key), prompt: Text(blank))
+            // Typed by hand into a draft, which goes into the table on Return or when the field is left; until then it
+            // is an unsaved change, which closing the window asks about.
+            let field = SettingsModel.TypedField(role: role.role, agent: agent, model: key == \.model)
+            TextField(title, text: Binding(get: { model.typed(field) }, set: { model.type(field, $0) }), prompt: Text(blank))
+                .focused($typing, equals: field)
+                .onSubmit { commit(field) }
                 .accessibilityLabel("\(role.label) \(title)")
         } else {
-            Picker(title, selection: roleBinding(role, agent: agent, key)) {
+            Picker(title, selection: Binding(get: { binding.wrappedValue }, set: { binding.wrappedValue = $0; storeRoles() })) {
                 Text(blank).tag("")
                 ForEach(model.fieldChoices(role.role, agent: agent, key, models: offered)) { choice in
                     Text(choice.name).tag(choice.id)

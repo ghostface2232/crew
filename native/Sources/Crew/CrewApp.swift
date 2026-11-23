@@ -534,6 +534,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             Task { if await settings.saveAll() { leave() } }
             return false
         case .alertSecondButtonReturn:
+            settings.discardDrafts()
             return true
         default:
             return false

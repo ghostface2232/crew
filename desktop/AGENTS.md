@@ -18,4 +18,5 @@ The Windows app: an Electron shell around the React board, with a tray icon, the
 | `preload.cts` | The updater bridge the board sees as `window.crewDesktop` |
 | `updater.ts` | Checking, downloading, verifying, and installing releases |
 | `window-state.ts` | Restoring window bounds |
+| `taskbar.ts` | Reading the Windows mode, which sets the taskbar's theme, for the tray icon |
 | `installer.nsh` | Launching the app after the NSIS installer finishes |

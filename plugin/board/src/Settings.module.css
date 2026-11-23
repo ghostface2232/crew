@@ -1,12 +1,14 @@
 /* Laid out like System Settings: a sidebar of pages beside the page itself. On a phone the sidebar becomes a list
-   of its own and a page replaces it, as Settings does on iPhone. */
+   of its own and a page replaces it, as Settings does on iPhone. The dialog is a frame on --canvas around the page, an
+   inset stage, as the window's frame wraps its stage: the sidebar beside it, and on a phone the page's title row above. */
 :global(dialog.sheet):has(> .panel) { width: min(800px, calc(100vw - 32px)); overflow: hidden; background: var(--canvas); }
 .panel { display: grid; grid-template-columns: 210px minmax(0, 1fr); height: min(640px, calc(100dvh - 48px)); min-height: 0; }
 
 /* Sidebar */
-/* The title row starts and stands as the page's head does (below the corner, as tall as its close button), so both titles share a line. */
-.sidebar { display: flex; flex-direction: column; gap: 2px; min-height: 0; overflow: auto; padding: var(--panel-radius) 10px 18px; background: var(--sidebar); box-shadow: inset -1px 0 var(--hairline); }
-.sidebarHead { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 0 4px 10px 8px; box-sizing: content-box; }
+/* Beside the sidebar the page has no title row of its own, and the dialog no close button: a press outside it or Escape
+   closes it. A phone leaves too little outside to press, so its list and its pages keep the button. */
+.sidebar { display: flex; flex-direction: column; gap: 2px; min-height: 0; overflow: auto; padding: 0 10px 18px; background: var(--sidebar); }
+.sidebarHead { display: flex; flex: none; align-items: center; gap: 8px; height: 58px; padding: 0 4px 0 8px; }
 .windowTitle { flex: 1; min-width: 0; font: 600 20px/1.2 var(--text-face); }
 .sectionLabel { padding: 12px 8px 4px; color: var(--secondary); font-size: 11px; font-weight: 600; }
 .section { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
@@ -14,38 +16,30 @@
 .item[aria-current="page"] { background: var(--fill-strong); font-weight: 550; }
 @media (hover: hover) { .item:not([aria-current="page"]):hover { background: var(--fill); } }
 .itemTitle { flex: 1; min-width: 0; }
-.tile { display: grid; flex: none; place-items: center; width: 20px; height: 20px; border-radius: 6px; color: #fff; box-shadow: inset 0 0 0 0.5px rgb(255 255 255 / 0.25); }
-.tile svg { width: 12px; height: 12px; }
+/* A plain glyph, as the window's sidebar draws its pages: the accent marks the current one. */
+.glyph { flex: none; width: 16px; height: 16px; color: var(--secondary); }
+.item[aria-current="page"] .glyph { color: var(--accent); }
 .chevron { display: none; }
-/* One close button, at the trailing edge: of the page beside the sidebar, or of the list on a phone. */
 .listClose { display: none; }
-.pageClose { flex: none; }
 
 /* Page */
 .detail { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-/* Reaches the dialog's top edge, so the page scrolls under the whole title bar. */
-.scroll { scrollbar-gutter: stable; flex: 1; min-height: 0; overflow: auto; }
-/* The title stays while the page scrolls under it, blurred and set off by a rule below. */
-.pageHead {
-  position: sticky;
-  top: 0;
-  z-index: 1;
+/* Only a phone's page has a title row: beside the sidebar, the current item names the page and the stage takes the height. */
+.pageHead { display: none; }
+/* The stage: the one thing that scrolls, clipped to a corner concentric with the dialog's. */
+.stage {
+  flex: 1;
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: var(--panel-radius) calc(26px - var(--scrollbar-w, 0px)) 14px 26px;
-  transition: background-color 150ms ease-out, backdrop-filter 150ms ease-out, box-shadow 150ms ease-out;
+  flex-direction: column;
+  min-height: 0;
+  margin: var(--window-inset) var(--window-inset) var(--window-inset) 0;
+  border-radius: calc(var(--panel-radius) - var(--window-inset));
+  background: var(--stage);
+  box-shadow: var(--shadow-stage);
+  overflow: hidden;
 }
-/* At rest the title sits on the page itself; the blur appears only once something scrolls under it. */
-.pageHead[data-scrolled] {
-  background: color-mix(in srgb, var(--canvas) 70%, transparent);
-  -webkit-backdrop-filter: blur(16px) saturate(1.6);
-  backdrop-filter: blur(16px) saturate(1.6);
-  box-shadow: 0 1px 0 var(--hairline);
-}
-.pageTitle { flex: 1; min-width: 0; font: 600 20px/1.2 var(--text-face); overflow-wrap: anywhere; }
-.back { display: none; }
-.body { display: grid; gap: 24px; padding: 10px calc(26px - var(--scrollbar-w, 0px)) 24px 26px; }
+.scroll { scrollbar-gutter: stable; flex: 1; min-height: 0; overflow: auto; }
+.body { display: grid; gap: 24px; padding: 22px calc(22px - var(--scrollbar-w, 0px)) 24px 22px; }
 
 /* Grouped rows, each a label with its control at the trailing edge. */
 .group { display: grid; gap: 8px; min-width: 0; }
@@ -53,7 +47,8 @@
 .groupHead > div { min-width: 0; }
 .groupHead .footnote { padding: 0; }
 .groupTitle { font: 600 14px/1.3 var(--text-face); overflow-wrap: anywhere; }
-.rows { border-radius: var(--row-radius); background: var(--surface); box-shadow: 0 0 0 1px var(--hairline); overflow: hidden; }
+/* A size container, so a row can tell when its checks need a line of their own. */
+.rows { container-type: inline-size; border-radius: var(--row-radius); background: var(--surface); box-shadow: 0 0 0 1px var(--hairline); overflow: hidden; }
 .row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 44px; padding: 6px 14px; }
 .row + .row { box-shadow: inset 0 1px var(--hairline); }
 .row > span:first-child { flex: none; max-width: 50%; }
@@ -64,6 +59,12 @@
 .checks { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px 16px; min-width: 0; }
 .check { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .check:has(input:disabled) { color: var(--secondary); }
+/* Three agents need about 420px beside their label. Below that they would wrap against the trailing edge, so they take a
+   line of their own and run from its start. */
+@container (max-width: 440px) {
+  .row:has(> .checks) { flex-wrap: wrap; row-gap: 8px; padding-block: 10px; }
+  .checks { flex-basis: 100%; justify-content: flex-start; }
+}
 .row a { color: var(--accent); text-decoration: none; }
 .row a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 @media (hover: hover) { .row a:hover { text-decoration: underline; text-underline-offset: 3px; } }
@@ -74,39 +75,39 @@
 .note { display: flex; align-items: start; gap: 6px; }
 .note svg { flex: none; width: 13px; height: 13px; margin-top: 2px; }
 
-.footer { display: flex; flex: none; align-items: center; flex-wrap: wrap; gap: 12px; padding: 14px 26px; box-shadow: inset 0 1px var(--hairline); }
+/* The instructions' save, on the line under their editor. */
+.saveRow { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 0 4px; }
 .status { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 12px; margin-inline-start: auto; }
 
 @media (max-width: 600px) {
-  /* As tall as the sheet may be, so the footer is never cut off. */
+  /* As tall as the sheet may be. */
   .panel { grid-template-columns: minmax(0, 1fr); height: calc(100dvh - 48px); }
   .panel[data-view="list"] .detail, .panel[data-view="page"] .sidebar { display: none; }
-  .sidebar { gap: 0; padding: 16px; background: none; box-shadow: none; }
-  .sidebarHead { padding: 0 0 8px 4px; }
+  .sidebar { gap: 0; padding: 16px; background: none; }
+  .sidebarHead { height: auto; min-height: 30px; padding: 0 0 8px 4px; }
   .windowTitle { font-size: 28px; }
   .sectionLabel { padding: 16px 16px 6px; }
   .section { gap: 0; border-radius: var(--row-radius); background: var(--surface); box-shadow: 0 0 0 1px var(--hairline); overflow: hidden; }
   .item, .item[aria-current="page"] { gap: 12px; min-height: 46px; padding: 0 14px; border-radius: 0; background: none; font-weight: 450; }
   /* The separator starts after the icon, as on iPhone. */
-  .item + .item { background: linear-gradient(var(--hairline), var(--hairline)) no-repeat 52px 0 / calc(100% - 52px) 1px; }
-  .tile { width: 26px; height: 26px; border-radius: 9px; }
-  .tile svg { width: 15px; height: 15px; }
+  .item + .item { background: linear-gradient(var(--hairline), var(--hairline)) no-repeat 44px 0 / calc(100% - 44px) 1px; }
+  .glyph { width: 18px; height: 18px; }
   .chevron { display: block; color: var(--tertiary); }
-  /* The buttons keep their width and the title takes the rest, so a long one is cut instead of covering them. */
-  .pageHead { display: grid; grid-template-columns: minmax(max-content, 1fr) minmax(0, auto) minmax(max-content, 1fr); padding: 12px 12px 12px; }
-  .back { display: inline-flex; justify-self: start; gap: 2px; padding-inline: 4px; }
   .listClose { display: contents; }
+  /* The buttons keep their width and the title takes the rest, so a long one is cut instead of covering them. */
+  .pageHead { display: grid; grid-template-columns: minmax(max-content, 1fr) minmax(0, auto) minmax(max-content, 1fr); align-items: center; gap: 8px; padding: 12px; }
+  /* Under the title row, and inset on both sides, as the window's stage is once its sidebar folds away. */
+  .stage { margin-block-start: 0; margin-inline-start: var(--window-inset); }
+  .back { justify-self: start; gap: 2px; padding-inline: 4px; }
   .pageClose { justify-self: end; }
   .back svg { width: 18px; height: 18px; }
-  .pageTitle { font: 600 16px/1.2 var(--text-face); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .body { padding: 10px 16px 20px; }
+  .pageTitle { min-width: 0; font: 600 16px/1.2 var(--text-face); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .body { padding: 14px calc(12px - var(--scrollbar-w, 0px)) 16px 12px; }
   .row { flex-wrap: wrap; gap: 4px 16px; }
   .row > span:first-child { max-width: none; }
   .row :global(.select), .row input:not([type="checkbox"]) { flex: 1 1 160px; }
-  .footer { padding: 12px 16px; }
-  .status { flex-basis: 100%; gap: 6px 12px; }
-  .status:empty { display: none; }
+  .status { gap: 6px 12px; }
 }
 
 /* The desktop app's About page: its mark and version, above where its update stands. */

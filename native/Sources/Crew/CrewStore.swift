@@ -331,7 +331,6 @@ final class CrewStore {
 final class SettingsModel {
     var roleSettings: [String: RoleSetting] = [:]
     var savedRoleSettings: [String: RoleSetting] = [:]
-    var resolvedRoles: [String: RoleAssignment]
     let roleInfo: [RoleInfo]
     var preset: PresetName?
     var savedPreset: PresetName?
@@ -348,16 +347,36 @@ final class SettingsModel {
     var savingRoles = false
     var textStatus = ""
     var roleStatus = ""
+    /// Why the last change to the roles or to the preset could not be stored; empty once one has been.
+    var roleError = ""
+    var presetError = ""
+    /// The role last changed, under whose rows `roleError` shows.
+    private(set) var changedRole: String?
+    /// The table and the resolved roles as Settings opened. Stored changes lag the form by one request, so a role is
+    /// resolved, and returns to writing no holders, against these rather than the last stored.
+    private let openedRoleSettings: [String: RoleSetting]
+    private let openedRoles: [String: RoleAssignment]
+    /// Each agent's settings as it was turned off in a role (`role:agent`), to bring back if it is turned on again.
+    private var dropped: [String: RoleAgentSettings] = [:]
+    /// A model or effort being typed by hand, named by its role, agent, and whether it is the model.
+    struct TypedField: Hashable {
+        let role: String; let agent: String; let model: Bool
+        var key: WritableKeyPath<RoleAgentSettings, String?> { model ? \.model : \.effort }
+    }
+    /// Text typed into those fields and not yet committed. It stays out of `roleSettings`, so a store already under
+    /// way never sends half a name and a failed one does not take the typing back; closing asks about it.
+    private(set) var drafts: [TypedField: String] = [:]
     private var generation = 0
     private let api: CrewAPI
     var rolesDirty: Bool { Self.normalized(roleSettings) != Self.normalized(savedRoleSettings) }
-    var dirty: Bool { text != savedText || rolesDirty || preset != savedPreset }
+    var dirty: Bool { text != savedText || rolesDirty || drafts.contains { $0.value != stored($0.key) } || preset != savedPreset }
     var busy: Bool { savingText || savingRoles || savingPreset }
     init(api: CrewAPI, roles: [String: RoleAssignment], roleSettings: [String: RoleSetting]? = nil, roleInfo: [RoleInfo]? = nil, preset: PresetName? = nil, presets: [String: Preset]? = nil) {
-        self.api = api; self.resolvedRoles = roles
+        self.api = api
         self.roleInfo = roleInfo ?? RoleInfo.legacy
-        self.roleSettings = Self.normalized(roleSettings ?? roles.mapValues(RoleSetting.init))
-        self.savedRoleSettings = self.roleSettings
+        let table = Self.normalized(roleSettings ?? roles.mapValues(RoleSetting.init))
+        self.roleSettings = table; self.savedRoleSettings = table
+        self.openedRoleSettings = table; self.openedRoles = roles
         self.preset = preset; self.savedPreset = preset; self.presets = presets
     }
     /// Compare and save the same canonical table the daemon stores.
@@ -422,17 +441,31 @@ final class SettingsModel {
         }
         var setting = roleSettings[role] ?? RoleSetting()
         setting.agents = RoleAssignment.holderOrder.filter { holders.contains($0) }
+        let key = "\(role):\(holder)"
         if enabled {
-            setting[holder] = setting[holder] ?? savedRoleSettings[role]?[holder]
+            setting[holder] = setting[holder] ?? dropped[key]
         } else {
+            dropped[key] = setting[holder]
             setting[holder] = nil
+            drafts = drafts.filter { $0.key.role != role || $0.key.agent != holder }
         }
         // A root with no written holders returns to that form when its original holders are checked again.
         if roleInfo.first(where: { $0.role == role })?.parent == nil,
-           savedRoleSettings[role]?.agents == nil, setting.agents == resolvedRoles[role]?.holders {
+           openedRoleSettings[role]?.agents == nil, setting.agents == openedRoles[role]?.holders {
             setting.agents = nil
         }
         storeRole(role, setting)
+    }
+    /// What a typed field shows: its draft, or the value in the table.
+    func typed(_ field: TypedField) -> String { drafts[field] ?? stored(field) }
+    func type(_ field: TypedField, _ text: String) { drafts[field] = text == stored(field) ? nil : text }
+    private func stored(_ field: TypedField) -> String { roleSettings[field.role]?[field.agent]?[keyPath: field.key] ?? "" }
+    /// Drops what was typed, for Don't Save: a field that gives up focus as the window goes then commits nothing.
+    func discardDrafts() { drafts = [:] }
+    /// Moves a field's draft into the table, on Return or when the field is left.
+    func commit(_ field: TypedField) {
+        guard let draft = drafts.removeValue(forKey: field) else { return }
+        setRole(field.role, agent: field.agent, field.key, to: draft)
     }
     func setRole(_ role: String, agent: String, _ key: WritableKeyPath<RoleAgentSettings, String?>, to value: String, offered: [ModelChoice] = []) {
         guard assignment(for: role)?.workerHolders.contains(agent) == true else { return }
@@ -449,7 +482,9 @@ final class SettingsModel {
     }
     private func storeRole(_ role: String, _ setting: RoleSetting) {
         let clean = setting.normalized
-        roleSettings[role] = clean == RoleSetting() ? nil : clean
+        let next = clean == RoleSetting() ? nil : clean
+        guard roleSettings[role] != next else { return }
+        roleSettings[role] = next; changedRole = role
     }
     func assignment(for role: String) -> RoleAssignment? {
         let settings = Self.normalized(roleSettings)
@@ -458,7 +493,7 @@ final class SettingsModel {
             let setting = settings[info.role] ?? RoleSetting()
             let base = setting.agents.map { RoleAssignment(agents: $0) }
                 ?? info.parent.flatMap { resolved[$0] }
-                ?? resolvedRoles[info.role].map { RoleAssignment(agents: $0.holders) }
+                ?? openedRoles[info.role].map { RoleAssignment(agents: $0.holders) }
             if var assignment = base {
                 for agent in assignment.workerHolders {
                     let inherited = RoleSetting(assignment)[agent]
@@ -502,35 +537,62 @@ final class SettingsModel {
         } catch { if generation == attempt { textStatus = error.localizedDescription } }
         if generation == attempt { savingText = false }
     }
-    func savePreset() async {
-        guard presets != nil && !savingPreset else { return }
+    /// True when the preset was stored.
+    @discardableResult func savePreset() async -> Bool {
+        guard presets != nil && !savingPreset else { return false }
         savingPreset = true; presetStatus = ""
+        defer { savingPreset = false }
         let draft = preset
         do {
             let result: PresetState = try await api.post("/api/preset", PresetSelection(preset: draft))
             if preset == draft { preset = result.preset }
             savedPreset = result.preset; presets = result.presets; presetStatus = "Saved"
-        } catch { presetStatus = error.localizedDescription }
-        savingPreset = false
+            return true
+        } catch {
+            presetStatus = error.localizedDescription
+            return false
+        }
+    }
+    /// Stores the preset as it is picked, with no save step, as the board does. A pick made while one is being stored
+    /// goes out when that returns; one that cannot be stored is undone, and `presetError` says why.
+    func applyPreset() async {
+        guard !savingPreset else { return }
+        while presets != nil && preset != savedPreset {
+            if await savePreset() { presetError = "" } else { presetError = presetStatus; preset = savedPreset }
+        }
+    }
+    /// Stores the role table as it is changed, likewise.
+    func applyRoles() async {
+        guard !savingRoles else { return }
+        while rolesDirty {
+            if await saveRoles() { roleError = "" } else { roleError = roleStatus; roleSettings = savedRoleSettings }
+        }
     }
     /// Saves every page with unsaved changes; true when nothing is left unsaved.
     func saveAll() async -> Bool {
-        if rolesDirty { await saveRoles() }
-        if preset != savedPreset && presets != nil { await savePreset() }
+        for field in Array(drafts.keys) { commit(field) }
+        // A failure says why where the change was made, and the change stays for another try.
+        if rolesDirty { roleError = await saveRoles() ? "" : roleStatus }
+        if preset != savedPreset && presets != nil { presetError = await savePreset() ? "" : presetStatus }
         if text != savedText && loaded { await saveInstructions() }
         return !dirty
     }
-    func saveRoles() async {
-        guard !savingRoles else { return }
+    /// True when the table was stored.
+    @discardableResult func saveRoles() async -> Bool {
+        guard !savingRoles else { return false }
         savingRoles = true; roleStatus = ""
+        defer { savingRoles = false }
         let draft = Self.normalized(roleSettings)
         struct Save: Encodable, Sendable { var roles: [String: RoleSetting] }
         do {
             let result: RoleState = try await api.post("/api/roles", Save(roles: draft))
             let stored = Self.normalized(result.roleSettings)
             if Self.normalized(roleSettings) == draft { roleSettings = stored }
-            resolvedRoles = result.roles; savedRoleSettings = stored; roleStatus = "Saved"
-        } catch { roleStatus = error.localizedDescription }
-        savingRoles = false
+            savedRoleSettings = stored; roleStatus = "Saved"
+            return true
+        } catch {
+            roleStatus = error.localizedDescription
+            return false
+        }
     }
 }

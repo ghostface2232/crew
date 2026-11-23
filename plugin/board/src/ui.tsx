@@ -30,8 +30,10 @@ export function Collapse({ open, className, children }: { open: boolean; classNa
 const modals: HTMLDialogElement[] = [];
 /** How long a side panel takes to leave, shorter than it takes to arrive. */
 export const PANEL_EXIT_MS = 300;
-/** True while a side panel is still on screen only to play its exit; the Dialog inside reads it. */
-export const PanelLeavingContext = createContext(false);
+/** How long a sheet takes to leave, likewise. */
+export const SHEET_EXIT_MS = 220;
+/** True while a side panel or a sheet is still on screen only to play its exit; the Dialog inside reads it. */
+export const LeavingContext = createContext(false);
 /**
  * Keeps showing a value for `ms` after it is cleared, so what it names can animate out in place instead of vanishing. A new value
  * replaces it at once. Returns what to show and whether it is only lingering.
@@ -320,18 +322,24 @@ export function Dialog({
   const close = useRef(onClose);
   close.current = onClose;
   const modal = variant !== 'detail-panel';
-  const leaving = useContext(PanelLeavingContext);
+  const leaving = useContext(LeavingContext);
   useEffect(() => {
-    if (modal || !leaving) return;
+    if (!leaving) return;
     const dialog = ref.current!;
     // Out of reach while it goes: nothing it shows can be pressed any more.
     dialog.inert = true;
-    const exit = dialog.animate(
-      [{ translate: '0 0', opacity: 1, filter: 'blur(0px)' }, { translate: '28px 0', opacity: 0, filter: 'blur(6px)' }],
-      { duration: PANEL_EXIT_MS, easing: EASE_IN_OUT, fill: 'forwards' },
-    );
+    // Each leaves the way it came: a panel back toward its edge, a sheet settling down as its backdrop clears.
+    const exits = modal
+      ? [
+        dialog.animate([{ opacity: 1, scale: 1, translate: '0 0' }, { opacity: 0, scale: 0.97, translate: '0 8px' }], { duration: SHEET_EXIT_MS, easing: EASE_IN_OUT, fill: 'forwards' }),
+        dialog.animate([{ opacity: 1 }, { opacity: 0 }], { duration: SHEET_EXIT_MS, easing: 'ease-out', fill: 'forwards', pseudoElement: '::backdrop' }),
+      ]
+      : [dialog.animate(
+        [{ translate: '0 0', opacity: 1, filter: 'blur(0px)' }, { translate: '28px 0', opacity: 0, filter: 'blur(6px)' }],
+        { duration: PANEL_EXIT_MS, easing: EASE_IN_OUT, fill: 'forwards' },
+      )];
     return () => {
-      exit.cancel();
+      for (const exit of exits) exit.cancel();
       dialog.inert = false;
     };
   }, [leaving]);
@@ -360,7 +368,8 @@ export function Dialog({
     // so an Escape still arrives when focus has fallen out of the dialog; only the topmost sheet takes it, and a held key
     // acts once.
     const escape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented || modals.at(-1) !== dialog) return;
+      // A sheet that is leaving is inert, and has already answered its close.
+      if (event.key !== 'Escape' || event.defaultPrevented || modals.at(-1) !== dialog || dialog.inert) return;
       event.preventDefault();
       if (!event.repeat) close.current();
     };

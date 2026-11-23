@@ -1,4 +1,4 @@
-import { test, expect, type Locator, type Page } from '@playwright/test';
+import { test, expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import { resolveConfig } from '../../plugin/bridge/config.ts';
 import type { BoardPull, Mission } from '../../plugin/board/src/types.ts';
 import { fixture, job, NOW, TEST_CREDENTIAL, TEST_TICKET } from './fixtures.ts';
@@ -33,6 +33,14 @@ const optionsOf = async (select: Locator) => {
   const options = await list.getByRole('option').allTextContents();
   await select.page().keyboard.press('Escape');
   return options;
+};
+/** The body of the last request to a route, once it has arrived: settings are stored as they are changed, with no save to wait on. */
+const lastBody = (request: APIRequestContext, route: string) => expect.poll(async () =>
+  (await (await request.get('/__requests')).json()).findLast((call: { route: string }) => call.route === route)?.body);
+/** Types a setting and leaves the field, which is when it is stored. */
+const type = async (field: Locator, text: string) => {
+  await field.fill(text);
+  await field.press('Enter');
 };
 // A folding stage's heading is named by its button, which adds the job count: "Review, 2 jobs".
 const stage = (card: Locator, name: string) =>
@@ -634,7 +642,7 @@ test('project filtering keeps global requests visible and New Job follows roles'
   });
 });
 
-test('roles settings group every role, let one follow its parent, and save what the user wrote', async ({ page, request }) => {
+test('roles settings group every role, let one follow its parent, and store what the user wrote as it is changed', async ({ page, request }) => {
   await openSettings(page);
   const nav = page.getByRole('navigation', { name: 'Settings pages' });
   for (const name of ['Build', 'Review', 'Edit', 'Model Presets', 'Instructions', 'Crew', 'Other']) await expect(nav.getByRole('button', { name, exact: true })).toBeVisible();
@@ -643,7 +651,10 @@ test('roles settings group every role, let one follow its parent, and save what 
   await expect(page.getByRole('checkbox', { name: 'Refactoring: Codex' })).toBeDisabled();
   // A debate cannot be started from New Job, but it can be assigned here.
   await expect(page.getByRole('checkbox', { name: 'Debate: Codex' })).toBeVisible();
+  // A typed setting is stored when its field is left, not while it is typed.
   await page.getByLabel('Implementation Codex reasoning effort').fill('high');
+  await expect(page.getByLabel('Refactoring Codex reasoning effort')).toHaveAttribute('placeholder', 'Agent default');
+  await page.getByLabel('Implementation Codex reasoning effort').press('Enter');
   await expect(page.getByLabel('Refactoring Codex reasoning effort')).toHaveAttribute('placeholder', 'high (same as Implementation)');
   await settingsPage(page, 'Review');
   await page.getByRole('region', { name: 'Review that runs the app' }).getByRole('checkbox', { name: 'Same as Cross-review' }).uncheck();
@@ -651,31 +662,88 @@ test('roles settings group every role, let one follow its parent, and save what 
   await page.getByRole('checkbox', { name: 'Cross-review: Codex' }).uncheck();
   await expect(page.getByLabel('Cross-review Antigravity model')).toBeVisible();
   await expect(page.getByLabel('Cross-review Antigravity reasoning effort')).toBeVisible();
-  await page.getByRole('button', { name: 'Save Roles' }).click();
-  await expect(page.getByText('Unsaved changes')).toHaveCount(0);
-  const calls = await (await request.get('/__requests')).json();
-  expect(calls.findLast((call: { route: string }) => call.route === '/api/roles').body).toEqual({
+  // Nothing to press: the roles pages have no save, and the last change is the table that is stored.
+  await expect(page.getByRole('button', { name: /^Save/ })).toHaveCount(0);
+  await lastBody(request, '/api/roles').toEqual({
     roles: { delegate: { codex: { effort: 'high' } }, verify: { agents: ['codex'] }, review: { agents: ['antigravity'] } },
   });
   await settingsPage(page, 'Build');
   await expect(refactor.getByRole('checkbox', { name: 'Same as Implementation' })).toBeChecked();
 });
 
-test('a setting changed and changed back is no change, and closing then asks nothing', async ({ page }) => {
+test('a setting changed and changed back stores what was there, and Settings closes without a question', async ({ page, request }) => {
   await openSettings(page);
-  await page.getByLabel('Implementation Codex reasoning effort').fill('high');
-  await expect(page.getByText('Unsaved changes')).toBeVisible();
-  await page.getByLabel('Implementation Codex reasoning effort').fill('');
-  // Holders turned on and off again, and a role that stops and starts following its parent, change nothing.
+  await type(page.getByLabel('Implementation Codex reasoning effort'), 'high');
+  await lastBody(request, '/api/roles').toEqual({ roles: { delegate: { codex: { effort: 'high' } } } });
+  await type(page.getByLabel('Implementation Codex reasoning effort'), '');
+  // Holders turned on and off again, and a role that stops and starts following its parent, leave nothing written.
   await page.getByRole('checkbox', { name: 'Implementation: Antigravity' }).check();
   await page.getByRole('checkbox', { name: 'Implementation: Antigravity' }).uncheck();
   const same = page.getByRole('region', { name: 'Refactoring' }).getByRole('checkbox', { name: 'Same as Implementation' });
   await same.uncheck();
   await same.check();
-  await expect(page.getByText('Unsaved changes')).toHaveCount(0);
-  // Nothing is left to ask about, so Settings closes without a question.
-  await page.getByRole('button', { name: 'Close settings' }).click();
+  await lastBody(request, '/api/roles').toEqual({ roles: {} });
+  // Beside the sidebar there is no close button; Escape or a press outside closes, with nothing to ask about.
+  await expect(page.getByRole('button', { name: 'Close settings' })).toHaveCount(0);
+  await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);
+});
+
+test('a role change that cannot be stored is undone and says why under its role', async ({ page }) => {
+  await openSettings(page);
+  await page.route('**/api/roles', (route) => route.fulfill({ status: 500, json: { error: 'Cannot save roles' } }));
+  const antigravity = page.getByRole('checkbox', { name: 'Implementation: Antigravity' });
+  await antigravity.click();
+  await expect(page.getByRole('region', { name: 'Implementation' }).getByRole('alert')).toHaveText('Not saved: Cannot save roles');
+  await expect(antigravity).not.toBeChecked();
+  // The next change that goes through clears it.
+  await page.unroute('**/api/roles');
+  await antigravity.check();
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(antigravity).toBeChecked();
+});
+
+test('Settings wait for a change still being stored before they close, and stay open when it cannot be', async ({ page, request }) => {
+  await openSettings(page);
+  const antigravity = page.getByRole('checkbox', { name: 'Implementation: Antigravity' });
+  const settings = page.getByRole('navigation', { name: 'Settings pages' });
+  // Held at the daemon, then refused: Escape during the wait does not close Settings, and the reason shows in them.
+  let release!: () => void;
+  let gate = new Promise<void>((resolve) => { release = resolve; });
+  await page.route('**/api/roles', async (route) => { await gate; await route.fulfill({ status: 500, json: { error: 'Cannot save roles' } }); });
+  await antigravity.click();
+  await page.keyboard.press('Escape');
+  await expect(settings).toBeVisible();
+  release();
+  await expect(page.getByRole('region', { name: 'Implementation' }).getByRole('alert')).toHaveText('Not saved: Cannot save roles');
+  await expect(settings).toBeVisible();
+  // Held, then stored: Settings close once the daemon has answered, and not before.
+  await page.unroute('**/api/roles');
+  gate = new Promise<void>((resolve) => { release = resolve; });
+  await page.route('**/api/roles', async (route) => { await gate; await route.continue(); });
+  await antigravity.click();
+  await page.keyboard.press('Escape');
+  await expect(settings).toBeVisible();
+  release();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await lastBody(request, '/api/roles').toEqual({ roles: { delegate: { agents: ['codex', 'antigravity'] } } });
+});
+
+test('instructions typed while Settings wait to close are still asked about', async ({ page }) => {
+  await openSettings(page);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  await page.route('**/api/roles', async (route) => { await gate; await route.continue(); });
+  await page.getByRole('checkbox', { name: 'Implementation: Antigravity' }).click();
+  await page.keyboard.press('Escape');
+  // Still open while the change is stored, so the user goes on and types.
+  await settingsPage(page, 'Instructions');
+  const field = page.getByRole('textbox', { name: 'Shared instructions' });
+  await expect(field).toBeEnabled();
+  await field.fill('Typed while closing.');
+  release();
+  await page.getByRole('dialog', { name: 'Close without saving your changes?' }).getByRole('button', { name: 'Cancel' }).click();
+  await expect(field).toHaveValue('Typed while closing.');
 });
 
 test('on a phone, settings move between the list and a page with focus kept, and the drawer hands focus back', async ({ page }) => {
@@ -697,31 +765,28 @@ test('a role can hold Claude and several workers, each with its own settings, an
   await openSettings(page, 'Review');
   const claude = page.getByRole('checkbox', { name: 'Cross-review: Claude' });
   await claude.check();
-  await expect(page.getByText('Unsaved changes')).toBeVisible();
+  await lastBody(request, '/api/roles').toEqual({ roles: { review: { agents: ['codex', 'claude'] } } });
   await claude.uncheck();
-  await expect(page.getByText('Unsaved changes')).toHaveCount(0);
+  await lastBody(request, '/api/roles').toEqual({ roles: {} });
   // The only holder cannot be turned off.
   await expect(page.getByRole('checkbox', { name: 'Cross-review: Codex' })).toBeDisabled();
   // The verify role follows review, its holders included, until it is given its own.
   await claude.check();
   await expect(page.getByRole('checkbox', { name: 'Review that runs the app: Claude' })).toBeChecked();
   await page.getByRole('checkbox', { name: 'Cross-review: Antigravity' }).check();
-  await page.getByLabel('Cross-review Antigravity model').fill('gemini-y');
-  await page.getByLabel('Cross-review Codex model').fill('gpt-x');
+  await type(page.getByLabel('Cross-review Antigravity model'), 'gemini-y');
+  await type(page.getByLabel('Cross-review Codex model'), 'gpt-x');
   // Turning an agent off drops its settings.
   await page.getByRole('checkbox', { name: 'Cross-review: Codex' }).uncheck();
   await settingsPage(page, 'Edit');
   await page.getByRole('checkbox', { name: 'Wording: Claude' }).check();
   await page.getByRole('checkbox', { name: 'Wording: Antigravity' }).uncheck();
-  await page.getByRole('button', { name: 'Save Roles' }).click();
-  await expect(page.getByText('Unsaved changes')).toHaveCount(0);
-  const calls = await (await request.get('/__requests')).json();
-  expect(calls.findLast((call: { route: string }) => call.route === '/api/roles').body).toEqual({
+  await lastBody(request, '/api/roles').toEqual({
     roles: { review: { agents: ['antigravity', 'claude'], antigravity: { model: 'gemini-y' } }, polish: { agents: ['claude'] } },
   });
 });
 
-test('an agent turned off and on again gets its saved settings back', async ({ page, request }) => {
+test('an agent turned off and on again while Settings stays open gets its settings back', async ({ page, request }) => {
   const data = fixture();
   const config = resolveConfig({ roles: { review: { agents: ['codex', 'antigravity'], antigravity: { model: 'gemini-y' } } } });
   data.roles = config.roles;
@@ -731,9 +796,11 @@ test('an agent turned off and on again gets its saved settings back', async ({ p
   const antigravity = page.getByRole('checkbox', { name: 'Cross-review: Antigravity' });
   await antigravity.uncheck();
   await expect(page.getByLabel('Cross-review Antigravity model')).toHaveCount(0);
+  // Off, they are gone from what is stored.
+  await lastBody(request, '/api/roles').toEqual({ roles: { review: { agents: ['codex'] } } });
   await antigravity.check();
   await expect(page.getByLabel('Cross-review Antigravity model')).toHaveValue('gemini-y');
-  await expect(page.getByText('Unsaved changes')).toHaveCount(0);
+  await lastBody(request, '/api/roles').toEqual({ roles: { review: { agents: ['codex', 'antigravity'], antigravity: { model: 'gemini-y' } } } });
 });
 
 test('models and efforts are picked from what each agent offers, and a hand-written one stays', async ({ page, request }) => {
@@ -763,10 +830,7 @@ test('models and efforts are picked from what each agent offers, and a hand-writ
   const verify = page.getByRole('region', { name: 'Review that runs the app' });
   await verify.getByRole('checkbox', { name: 'Same as Cross-review' }).uncheck();
   await expect(page.getByRole('checkbox', { name: 'Review that runs the app: Antigravity' })).toBeDisabled();
-  await page.getByRole('button', { name: 'Save Roles' }).click();
-  await expect(page.getByText('Unsaved changes')).toHaveCount(0);
-  const calls = await (await request.get('/__requests')).json();
-  expect(calls.findLast((call: { route: string }) => call.route === '/api/roles').body).toEqual({
+  await lastBody(request, '/api/roles').toEqual({
     roles: { delegate: { agents: ['codex', 'antigravity'], codex: { model: 'gpt-luna', effort: 'low' }, antigravity: { model: 'argon' } }, verify: { agents: ['codex'] } },
   });
 });
@@ -804,7 +868,8 @@ test('New Job picks among a role\'s worker holders, and a role only Claude holds
 
 test('each project has its own instructions page', async ({ page, request }) => {
   await openSettings(page, 'Other');
-  await expect(page.getByRole('heading', { name: 'Other', exact: true, level: 2 })).toBeVisible();
+  // Beside the sidebar the page has no title row; its stage carries the name.
+  await expect(page.getByRole('dialog').getByRole('region', { name: 'Other', exact: true })).toBeVisible();
   const field = page.getByRole('textbox', { name: 'Shared instructions' });
   await expect(field).toBeEnabled();
   await field.fill('Use tabs here.');
@@ -1105,48 +1170,42 @@ test('model scores list each model with its score, counts and summary, and have 
   await expect(page.getByRole('button', { name: /^Save/ })).toHaveCount(0);
   // Fixing is assigned with the reviews it answers.
   await settingsPage(page, 'Review');
-  await expect(page.getByRole('checkbox', { name: 'Fix: Claude (the lead)' })).toBeChecked();
+  await expect(page.getByRole('checkbox', { name: 'Fix: Claude', exact: true })).toBeChecked();
 });
 
-test('preset saves its selection, describes its models, and permits none', async ({ page, request }) => {
+test('a preset is stored as it is picked, describes its models, and permits none', async ({ page, request }) => {
   await openSettings(page, 'Model Presets');
-  const select = page.getByLabel('Model preset');
+  const select = page.getByRole('combobox', { name: 'Model preset' });
   await expect(select).toHaveText('Balanced');
   await pick(select, 'Economy');
   await expect(page.getByText('small · Low effort', { exact: true })).toBeVisible();
   await expect(page.getByText('flash', { exact: true })).toBeVisible();
   await expect(page.getByText('Haiku', { exact: true })).toBeVisible();
   await expect(page.getByText('Lower cost and faster runs for straightforward tasks.')).toBeVisible();
-  await page.getByRole('button', { name: 'Save Preset' }).click();
-  await expect(page.getByText('Unsaved changes')).toHaveCount(0);
-  let calls = await (await request.get('/__requests')).json();
-  expect(calls.find((call: { route: string }) => call.route === '/api/preset').body).toEqual({ preset: 'economy' });
+  await expect(page.getByRole('button', { name: /^Save/ })).toHaveCount(0);
+  await lastBody(request, '/api/preset').toEqual({ preset: 'economy' });
   await pick(select, 'None');
   await expect(page.getByText("Uses each agent's own model and effort settings.")).toBeVisible();
-  await page.getByRole('button', { name: 'Save Preset' }).click();
-  await expect(page.getByText('Unsaved changes')).toHaveCount(0);
-  calls = await (await request.get('/__requests')).json();
-  expect(calls.at(-1)).toEqual({ route: '/api/preset', body: { preset: null } });
+  await lastBody(request, '/api/preset').toEqual({ preset: null });
 });
 
-test('preset failures keep the draft and saving preserves newer edits', async ({ page }) => {
+test('a preset that cannot be stored is undone, and one picked during a save is stored after it', async ({ page, request }) => {
   await openSettings(page, 'Model Presets');
-  const select = page.getByLabel('Model preset');
-  await pick(select, 'Best');
+  const select = page.getByRole('combobox', { name: 'Model preset' });
   await page.route('**/api/preset', (route) => route.fulfill({ status: 500, json: { error: 'Cannot save preset' } }));
-  await page.getByRole('button', { name: 'Save Preset' }).click();
-  await expect(page.getByText('Cannot save preset')).toBeVisible();
-  await expect(select).toHaveText('Best');
+  await pick(select, 'Best');
+  await expect(page.getByRole('alert')).toHaveText('Not saved: Cannot save preset');
+  await expect(select).toHaveText('Balanced');
   await page.unroute('**/api/preset');
   let release!: () => void;
   const gate = new Promise<void>((resolve) => { release = resolve; });
   await page.route('**/api/preset', async (route) => { await gate; await route.continue(); });
-  await page.getByRole('button', { name: 'Save Preset' }).click();
+  await pick(select, 'Best');
   await pick(select, 'Economy');
   release();
-  await expect(page.getByRole('button', { name: 'Save Preset' })).toBeEnabled();
+  await lastBody(request, '/api/preset').toEqual({ preset: 'economy' });
   await expect(select).toHaveText('Economy');
-  await expect(page.getByText('Unsaved changes')).toBeVisible();
+  await expect(page.getByRole('alert')).toHaveCount(0);
 });
 
 test('rounds are ordered and locked while active, then undo and keep with exact bodies', async ({ page, request }) => {
@@ -1477,6 +1536,52 @@ test('a closed mission opens from a click anywhere on it and closes from its tit
   await expect(card.locator('.track')).toBeVisible();
   await card.locator('.mission-heading').click();
   await expect(card.locator('.track')).toBeHidden();
+});
+
+test('History and Activity pair their cards on a wide page, each column stacked on its own', async ({ page, request }) => {
+  const data = fixture();
+  // Newest first on the page: a, b, c.
+  data.missions.push(...['a', 'b', 'c'].map((id, index): Mission => ({
+    ...data.missions[0], id: `ended-${id}`, title: `Ended ${id}`, state: 'done', createdAt: NOW - (index + 2) * 3_600_000, endedAt: NOW - 60_000,
+  })));
+  data.jobs.push(job({ id: 'cx-ended', state: 'done', endedAt: NOW - 60_000 }));
+  await request.post('/__push', { data: { type: 'state', data } });
+  const pages = page.getByRole('navigation', { name: 'Pages' }).filter({ visible: true });
+  await pages.getByRole('button', { name: 'History' }).click();
+  const columns = page.locator('.columns > .column');
+  const keys = (column: Locator) => column.locator('.mission').evaluateAll((cards) => cards.map((card) => (card as HTMLElement).dataset.key));
+  await expect(columns).toHaveCount(2);
+  expect(await keys(columns.nth(0))).toEqual(['ended-a', 'ended-c']);
+  expect(await keys(columns.nth(1))).toEqual(['ended-b']);
+  // A card that opens moves the card below it, and nothing in the other column.
+  const [first, beside, below] = ['a', 'b', 'c'].map((id) => page.locator(`[data-key="ended-${id}"]`));
+  const top = async (card: Locator) => (await card.boundingBox())!.y;
+  const before = [await top(beside), await top(below)];
+  await first.getByRole('button', { name: 'Expand mission' }).click();
+  await expect(first.locator('.track')).toBeVisible();
+  expect(await top(beside)).toBe(before[0]);
+  expect(await top(below)).toBeGreaterThan(before[1]);
+  // The table keeps the page's width.
+  expect((await page.locator('.table-panel').boundingBox())!.width).toBeGreaterThan((await first.boundingBox())!.width * 2);
+  // A card a filter moves to the other column shows in place rather than rising in again.
+  const filter = page.getByRole('searchbox', { name: 'Filter history' });
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await filter.fill('Ended b');
+  await expect(columns).toHaveCount(1);
+  expect(await keys(columns)).toEqual(['ended-b']);
+  expect(await beside.evaluate((card) => card.getAnimations().filter((animation) => animation instanceof CSSAnimation).length)).toBe(0);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await filter.fill('');
+  await expect(columns).toHaveCount(2);
+  await pages.getByRole('button', { name: 'Activity' }).click();
+  await expect(columns.nth(0).getByRole('region', { name: 'Work started' })).toBeVisible();
+  await expect(columns.nth(1).getByRole('region', { name: 'Events' })).toBeVisible();
+  // A narrower page has one column, in the same order, and the opened card stays open.
+  await page.setViewportSize({ width: 1200, height: 1000 });
+  await expect(columns).toHaveCount(1);
+  await pages.getByRole('button', { name: 'History' }).click();
+  expect(await keys(columns)).toEqual(['ended-a', 'ended-b', 'ended-c']);
+  await expect(first.locator('.track')).toBeVisible();
 });
 
 test('a finished-looking mission is marked done from its menu, and a dropped one marks its stopping step', async ({ page, request }) => {

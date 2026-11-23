@@ -10,6 +10,7 @@ const bridge: Bridge = {
     check: () => ipcRenderer.invoke('update:check'),
     install: () => ipcRenderer.invoke('update:install'),
     cancel: () => ipcRenderer.invoke('update:cancel'),
+    seen: () => ipcRenderer.invoke('update:seen'),
     subscribe(listener) {
       const handler = (_event: unknown, update: Update) => listener(update);
       ipcRenderer.on('update:changed', handler);

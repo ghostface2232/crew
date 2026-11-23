@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import {
-  ChevronLeftRegular, ChevronRightRegular, DocumentText16Regular, Folder16Regular, Gauge16Regular, Info16Regular,
+  ChevronLeftRegular, ChevronRightRegular, DocumentText16Regular, ErrorCircle16Regular, Folder16Regular, Gauge16Regular, Info16Regular,
   Options16Regular, ShieldCheckmark16Regular, TextFont16Regular, Wrench16Regular,
 } from '@fluentui/react-icons';
 import type { FluentIcon } from '@fluentui/react-icons';
@@ -110,10 +110,11 @@ function sameRoles(a: RoleSettings, b: RoleSettings) {
   return canonical(a) === canonical(b);
 }
 
-export function Settings({ state, update, close }: { state: Snapshot; update: AppUpdate | null; close: () => void }) {
-  const [pane, setPane] = useState<Pane>('build');
+/** `initial` opens a page at once, as the sidebar's failed update opens About. */
+export function Settings({ state, update, close, initial }: { state: Snapshot; update: AppUpdate | null; close: () => void; initial?: 'about' }) {
+  const [pane, setPane] = useState<Pane>(initial ?? 'build');
   // On a phone the sidebar is a list of its own, and a page replaces it; wider, both show.
-  const [view, setView] = useState<'list' | 'page'>('list');
+  const [view, setView] = useState<'list' | 'page'>(initial ? 'page' : 'list');
   const back = useRef<HTMLButtonElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
   // The title's blur shows only once the page has scrolled under it.
@@ -199,8 +200,13 @@ export function Settings({ state, update, close }: { state: Snapshot; update: Ap
       if (back.current?.offsetParent) back.current.focus();
     } else if (pushed.current) nav.current?.querySelector<HTMLButtonElement>('[aria-current="page"]')?.focus();
   }, [view, pane]);
+  // A failed install leaves the sidebar once About has shown why, when Settings closes, so the note stays while it is read.
+  const shownInstallError = useRef(false);
   const closeSettings = async () => {
-    if ((!dirty && !saving && !savingRoles && !savingPreset) || await ask('Close without saving your changes?', 'Close')) close();
+    const unsaved = dirty || saving || savingRoles || savingPreset;
+    if (unsaved && !await ask('Close without saving your changes?', 'Close')) return;
+    if (shownInstallError.current) void desktop?.update.seen?.();
+    close();
   };
   /** Replaces a role's entry in the draft, dropping it when nothing is left. */
   const setEntry = (role: Role, change: (own: Partial<RoleAssignment>) => Partial<RoleAssignment>) =>
@@ -324,6 +330,9 @@ export function Settings({ state, update, close }: { state: Snapshot; update: Ap
   // A daemon without presets or notes has no page for them.
   const current: Pane =
     (pane === 'presets' && !state.presets) || (pane === 'models' && !state.modelScores) || (pane === 'about' && !update) ? 'build' : pane;
+  useEffect(() => {
+    if (current === 'about' && update?.installError) shownInstallError.current = true;
+  }, [current, update?.installError]);
   const project = current.startsWith('project:') ? current.slice('project:'.length) : null;
   const fixed = project === null ? PANES[current as Fixed] : undefined;
   const kind = fixed?.kind;
@@ -598,6 +607,12 @@ export function Settings({ state, update, close }: { state: Snapshot; update: Ap
                         </div>
                       )}
                     </div>
+                    {update.installError && (
+                      <p className={`${styles.footnote} ${styles.note} error`}>
+                        <Icon icon={ErrorCircle16Regular} />
+                        {update.installError}
+                      </p>
+                    )}
                     {update.error && (
                       <p className={`${styles.footnote} ${styles.note}`}>
                         <Icon icon={Info16Regular} />

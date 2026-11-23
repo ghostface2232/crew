@@ -56,6 +56,7 @@ Each status event has the shape `{seq, ts, agent, session_id, job_id, kind, deta
 | `POST /api/instructions` | `{ "append": "text", "project": path \| null }` | `{ file, text }`; appends a paragraph to shared instructions (`text` replaces instead) |
 | `POST /api/jobs` | `{ "kind": "delegate", "ask": true, "task": "question", "cwd": path }` | Read-only question job whose report is the answer. Any job may add `"skills": [names]` ([job instructions](jobs.md)) |
 | `POST /api/jobs/:id/rounds/:turn` | `{ "undo": true }` or `{ "keep": true }` | Updated job; `undo` reverts that round's commit on the job branch, `keep` reverts the revert |
+| `GET /api/jobs/:id` | | The job as sent in state and job events, including sealed evidence and `outcomeContradiction` when applicable. The detail response also includes the original `prompt` and worker `instructions` |
 | `GET /api/jobs/:id/diff` | | `{ turn, diff, at }`: the running turn's changes so far, as Codex last reported them (`turn/diff/updated`), cut at 200,000 characters; `diff` is empty once the turn ends or when none was reported. The job's `liveDiff` says when it last changed |
 
 See [jobs.md](jobs.md) for round changes and question jobs, and [approvals.md](approvals.md#questions-to-the-lead) for worker question and tool routes.

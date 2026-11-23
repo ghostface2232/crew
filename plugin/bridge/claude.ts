@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { EventKind } from './jobs.ts';
+import { clip } from './text.ts';
 
 export interface ClaudeSession {
   id: string;
@@ -159,7 +160,7 @@ export class ClaudeSessions {
         s.phase = 'reading the prompt';
         if (typeof p.prompt === 'string' && p.prompt.trim()) {
           const kept = this.prompts.get(id) ?? [];
-          kept.push({ text: p.prompt.trim().slice(0, MAX_PROMPT), at: now });
+          kept.push({ text: clip(p.prompt.trim(), MAX_PROMPT), at: now });
           this.prompts.set(id, kept.slice(-KEEP_PROMPTS));
         }
         this.hooks.onEvent(s, 'started', oneLine(p.prompt ?? 'prompt'));
@@ -394,7 +395,7 @@ export class ClaudeSessions {
 
 function oneLine(text: string): string {
   const line = String(text).trim().split('\n')[0];
-  return line.length > 140 ? `${line.slice(0, 139)}…` : line;
+  return line.length > 140 ? `${clip(line, 139)}…` : line;
 }
 
 function describeTool(name: unknown, input: any): string {

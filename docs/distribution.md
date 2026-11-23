@@ -24,7 +24,7 @@ The Start menu shortcut gives the Windows app an AppUserModelID (`dev.crew.deskt
 1. **Each app carries a built plugin.** Registering the GitHub repository would miss the built board (`plugin/board/dist` is not committed) and let plugin and app code drift. On macOS, the packaged daemon registers the copy inside `Crew.app` (`/Applications/Crew.app/Contents/Resources/bridge`). On Windows, `setup.ts` copies the plugin and `runtime/node.exe` to `~/.crew/plugins/<version>-<build>` and registers that copy so installer updates do not replace files beneath running Claude Code sessions.
 2. **The plugin runs on the app's runtime.** macOS bundles standalone Node (`Contents/Resources/runtime/node`, `scripts/build-desktop.mjs`); Windows bundles `runtime/node.exe` (`scripts/build-electron.mjs`) because a hook command cannot set `ELECTRON_RUN_AS_NODE`. `linkCommand` in `setup.ts` points `~/.local/bin/crew` (and `.cmd`/`.mjs` shims on Windows) at that runtime.
 
-On startup, a packaged daemon checks `~/.crew/setup.json` (`registered()`). Whenever its `root`, `version`, or `build` differs, it runs `claude plugin marketplace add <root>`, runs `claude plugin install crew@crew` or `claude plugin update crew@crew` if needed, and rewrites the `crew` shim (leaving a source-checkout `crew` marketplace alone). On Windows, startup also checks `registrationMoved()` and re-registers if Claude Code rewrote the marketplace path.
+With `CREW_HOME` unset, a packaged daemon checks `~/.crew/setup.json` (`registered()`). Whenever its `root`, `version`, or `build` differs, it runs `claude plugin marketplace add <root>`, runs `claude plugin install crew@crew` or `claude plugin update crew@crew` if needed, and rewrites the `crew` shim (leaving a source-checkout `crew` marketplace alone). On Windows, startup also prunes unused copies and checks `registrationMoved()` to re-register if Claude Code rewrote the marketplace path. With an explicit `CREW_HOME`, startup skips registration, pruning, and that check. Use `crew install` or the setup checklist’s repair action to register explicitly. The marketplace and the command in `~/.local/bin` belong to the user across all Crew homes.
 
 ## First-run checklist
 
@@ -36,6 +36,7 @@ Both apps show a **Set up Crew** card at the top of the unfiltered Overview page
 | Claude Code (`claude` on `PATH`) | Checks `claude --version`; if missing, tells the user to install from `claude.com/code` |
 | Codex CLI and sign-in | Checks `codex --version` and `codex login status`; installing and signing in are left to the user |
 | Antigravity CLI | Checks `agy --version` when `antigravity.enabled` is true; installing and running `agy` to sign in are left to the user |
+| Job ledger | Shown only while a `jobs.json.unreadable-*` file is in the Crew home ([architecture.md](architecture.md#bridge-and-state)): names the file the daemon set aside; repairing or deleting it is left to the user |
 
 Signing in to user accounts is never automated.
 

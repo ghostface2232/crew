@@ -8,7 +8,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { CodexAdapter } from '../plugin/bridge/adapters/codex.ts';
 import { resolveConfig } from '../plugin/bridge/config.ts';
-import { cloneDirectory, cloneRefused, cloneTree, commitAll, copyIncluded, createWorktree, detachLinks, dirtyCount, removeDirectory, removeEmptyLeftover, removeWorktree, worktreeSlot } from '../plugin/bridge/git.ts';
+import { changesSince, cloneDirectory, cloneRefused, cloneTree, commitAll, copyIncluded, createWorktree, detachLinks, dirtyCount, projectRoot, removeDirectory, repoRoot, removeEmptyLeftover, removeWorktree, worktreeSlot } from '../plugin/bridge/git.ts';
 import type { Job, JobCtl } from '../plugin/bridge/jobs.ts';
 import { buildPrompt } from '../plugin/bridge/prompts.ts';
 
@@ -536,4 +536,75 @@ test('a worktree that git creates before a hook fails is removed with its branch
   await assert.rejects(createWorktree(repo, 'cx-hook', 'HEAD', home), /git worktree/);
   assert.equal(git('worktree', 'list', '--porcelain'), before);
   assert.equal(git('branch', '--list', 'crew-cx-hook'), '');
+});
+
+test('changed paths and project roots keep their literal Git names', async (t) => {
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-paths-')));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const repo = path.join(home, process.platform === 'win32' ? 'repo' : 'repo\nname');
+  fs.mkdirSync(repo);
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: repo });
+  git('init', '-q');
+  git('config', 'core.quotePath', 'true');
+  git('-c', 'user.name=Test', '-c', 'user.email=t@example.com', 'commit', '-qm', 'base', '--allow-empty');
+  const names = ['한글.txt', ...(process.platform === 'win32' ? [] : ['a\nb', ' space '])];
+  for (const name of names) fs.writeFileSync(path.join(repo, name), name);
+  assert.ok(await commitAll(repo, 'paths'));
+  const changed = await changesSince(repo, 'HEAD~1');
+  assert.deepEqual(changed.files.sort(), names.sort());
+  assert.match(changed.stat, /files? changed/);
+  assert.deepEqual(await changesSince(repo, 'HEAD'), { files: [], stat: '' });
+  assert.equal(path.resolve((await projectRoot(repo))!), repo);
+});
+
+test('dirty count uses rename destinations and ignores only actual Finder metadata', async (t) => {
+  const repo = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-status-')));
+  t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: repo });
+  git('init', '-q');
+  git('config', 'core.excludesFile', os.devNull);
+  git('config', 'status.renames', 'true');
+  fs.writeFileSync(path.join(repo, 'old'), 'tracked');
+  assert.ok(await commitAll(repo, 'base'));
+  git('mv', 'old', '.DS_Store');
+  assert.equal(await dirtyCount(repo), 0);
+  git('mv', '.DS_Store', '한글');
+  assert.equal(await dirtyCount(repo), 1);
+});
+
+test('a staged filename made of spaces still produces a transport commit', { skip: process.platform === 'win32' }, async (t) => {
+  const repo = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-spaces-')));
+  t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+  execFileSync('git', ['init', '-q'], { cwd: repo });
+  fs.writeFileSync(path.join(repo, '   '), 'content');
+  assert.ok(await commitAll(repo, 'staged'));
+});
+
+test('a file moved between folders is listed at both ends, so a move out of bounds shows', async (t) => {
+  const repo = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-move-')));
+  t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+  const git = (...args: string[]) => execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=t@example.com', ...args], { cwd: repo });
+  git('init', '-q');
+  fs.mkdirSync(path.join(repo, 'other'));
+  fs.mkdirSync(path.join(repo, 'allowed'));
+  fs.writeFileSync(path.join(repo, 'other', 'file.ts'), 'one\ntwo\nthree\n');
+  git('add', '-A');
+  git('commit', '-qm', 'base');
+  git('mv', 'other/file.ts', 'allowed/file.ts');
+  git('commit', '-qm', 'move');
+  const changed = await changesSince(repo, 'HEAD~1');
+  assert.deepEqual(changed.files.sort(), ['allowed/file.ts', 'other/file.ts']);
+  assert.match(changed.stat, /^2 files changed/);
+});
+
+test('a repository whose folder name ends in a space is not taken for the folder beside it', { skip: process.platform === 'win32' }, async (t) => {
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-root-')));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  for (const name of ['repo', 'repo ']) {
+    fs.mkdirSync(path.join(home, name));
+    execFileSync('git', ['init', '-q'], { cwd: path.join(home, name) });
+  }
+  assert.equal(await repoRoot(path.join(home, 'repo ')), path.join(home, 'repo '));
+  assert.equal(await repoRoot(path.join(home, 'repo')), path.join(home, 'repo'));
+  assert.equal(await repoRoot(home), null);
 });

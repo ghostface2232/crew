@@ -31,6 +31,8 @@ export function installed(): { version: string; build: string } {
 }
 
 export const HOME = process.env.CREW_HOME ?? path.join(os.homedir(), '.crew');
+/** How a job ledger that could not be restored is named when the daemon sets it aside, followed by the time. */
+export const LEDGER_ASIDE = 'jobs.json.unreadable-';
 /**
  * Ports the daemon tries, in order; CREW_PORT pins one. Windows can reserve a port with nothing listening on it:
  * WSL's mirrored networking reserves a block of 4096 at each start, wherever it finds room. So each fallback lies

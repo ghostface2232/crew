@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { addNews, jsonBytes, textPage } from './delivery.ts';
 import type { News } from './delivery.ts';
+import { clip } from './text.ts';
 
 /** The fields every query asks `gh pr view` for. */
 export const PULL_FIELDS = 'url,number,title,state,headRefOid,mergeable,reviewDecision,author,statusCheckRollup,reviews';
@@ -106,7 +107,7 @@ const PR_URL = /^https:\/\/[a-z0-9.-]+(?::\d+)?\/([a-z0-9_.-]+\/[a-z0-9_.-]+)\/p
 const WARNING = 'Do not merge, close or deploy from this news.';
 const firstLine = (value: string) => value.split(/\r\n|\r|\n/, 1)[0];
 const oneLine = (value: string) => value.replace(/\s+/g, ' ').trim();
-const checkKey = (value: string) => oneLine(value).slice(0, 100);
+const checkKey = (value: string) => clip(oneLine(value), 100);
 const errorLine = (error: unknown) => firstLine(error instanceof Error ? error.message : String(error));
 const record = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);

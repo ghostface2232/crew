@@ -42,8 +42,8 @@ const base = `http://127.0.0.1:${port}`;
 const getHealth = async () => (await fetch(`${base}/api/health`)).json();
 const auth = () => ({ authorization: `Bearer ${fs.readFileSync(path.join(home, 'token'), 'utf8').trim()}` });
 const appPath = process.env.CREW_APP_PATH;
-const launch = () =>
-  electron.launch({ ...(appPath ? { executablePath: appPath, args: [] } : { args: ['desktop/build'] }), env, timeout: 30_000 });
+const launch = (extra = {}) =>
+  electron.launch({ ...(appPath ? { executablePath: appPath, args: [] } : { args: ['desktop/build'] }), env: { ...env, ...extra }, timeout: 30_000 });
 // On Windows the daemon this app starts inherits the app's stdio pipes, so Playwright's close() would wait on the
 // daemon. Quitting and waiting for the app's own exit tests what a user's quit does.
 const quit = async (application) => {
@@ -238,6 +238,20 @@ try {
   expect(Math.abs(bounds.width - placed.width)).toBeLessThanOrEqual(8);
   expect(Math.abs(bounds.height - placed.height)).toBeLessThanOrEqual(8);
   expect(await relaunchBounds()).toEqual(bounds);
+  // Reopened by the update supervisor after a failed install, the app says so in place of the update button; About
+  // says why, and closing Settings brings the update button back.
+  const reason = 'The installer stopped with exit code 2, so the update was not installed.';
+  application = await launch({ CREW_UPDATE_FAILED: reason });
+  const reopened = await application.firstWindow();
+  await expect(reopened.locator('#update-failed')).toBeVisible({ timeout: 20_000 });
+  await expect(reopened.locator('#install-update')).toHaveCount(0);
+  await reopened.locator('#update-failed').click();
+  await expect(reopened.getByText(reason, { exact: true })).toBeVisible();
+  await reopened.getByRole('button', { name: 'Close settings' }).click();
+  await expect(reopened.locator('#install-update')).toBeVisible();
+  await expect(reopened.locator('#update-failed')).toHaveCount(0);
+  await quit(application);
+  application = null;
   expect((await getHealth()).pid).toBe(daemonPid);
   const result = {
     result: 'passed',
@@ -255,6 +269,7 @@ try {
       'tray count follows waiting sessions',
       'window bounds restored without drift',
       'update checked, downloaded and verified, offered above Settings and after a relaunch, only to the board window',
+      'a failed install shown above Settings, explained in About, and cleared once seen',
       'daemon survives quit and reopen',
     ],
     idleWorkingSetMiB,

@@ -97,7 +97,7 @@ On start or resume, Crew queries `plugin/installed`, enables matching installed-
 
 ## Sandboxed checks
 
-On macOS and Windows, `check` reads anywhere except the daemon token, writes only to the worktree and its temp directory, and keeps `.git` read-only. Local servers remain reachable, outside network access requires `runs_app`, and the check times out after 10 minutes.
+On macOS and Windows, `check` reads anywhere except the daemon token, writes only to the worktree and its temp directory, and keeps `.git` read-only. Local servers remain reachable, outside network access requires `runs_app`, and the check times out after 10 minutes. On macOS the check's process group also carries a limit of its own, 30 seconds past the bridge's: a watchdog started in the check's shell kills the group, so a check does not outlive a daemon that was killed. On Windows a killed daemon takes its checks with it: Node holds a child it does not detach, here the PowerShell job host, in a job object that kills it when the daemon's handle closes, and the host's own job, nested in that one, ends everything in the check. On daemon shutdown, Crew kills each active check’s process group on macOS or terminates its PowerShell host on Windows. Terminating the host closes its Job Object and stops the processes inside it.
 
 ## Not verified
 
@@ -126,6 +126,7 @@ Related tests include `test/antigravity.test.ts`, `test/policy.test.ts`, `test/b
 
 ## History
 
+- 2026-11-23: The macOS watchdog was meant to get a Windows half, a limit on the job host's wait. On Windows 11 with Codex CLI 0.170.0, killing a daemon stand-in, started attached or detached, ended its check within 6 ms with nothing left running, because of Node's job object, so the host got no limit of its own. `test/jobs.test.ts` keeps this on Windows.
 - 2026-11-22: Re-ran the Codex sandbox checks on Codex CLI 0.171.0 (macOS), after Codex reworked permission profiles and resume-time override checks in 0.168–0.171. Nothing changed.
 - 2026-11-22: Probes of agy 1.5.14 found two gaps. Actions covered by the user's Antigravity allow rules or Non-Workspace Access never trigger a permission request in any mode, and `auto` and `accept-edits` skip every edit check. Crew now pins sessions to `default`, checks actions that ran without asking against the role, and stops the turn on a violation. A per-job Auto option was considered and dropped because `auto` also skipped the edit, `.git`, token-folder, and network checks.
 - 2026-11-16: Windows bridge parity verified on Windows 11 with Codex CLI 0.166.0 and Git for Windows 2.53. Sandboxed `check` runs Git for Windows' `sh` inside `codex sandbox` under a PowerShell 5.1 kill-on-close job object with a stdin-secret status line because Codex waits on open pipes and sandboxed processes can kill their parent. `crew.browser` stayed macOS-only because Chromium starts inside Codex's Windows sandbox.

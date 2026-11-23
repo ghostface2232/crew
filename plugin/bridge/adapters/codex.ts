@@ -9,6 +9,7 @@ import { isTerminal, noteLeadDecline } from '../jobs.ts';
 import type { Adapter, Capabilities, Job, JobCtl, Probe } from '../jobs.ts';
 import { PLUGIN_USER_APP } from '../prompts.ts';
 import { RPC_TIMEOUT_MS, RpcError, RpcPeer, RpcTimeoutError } from '../rpc.ts';
+import { clip } from '../text.ts';
 
 type Answer = { approve: boolean; message?: string; cancelled?: boolean; forJob?: boolean };
 /** A plugin tool approval the user may allow for the rest of the job: `key` matches later requests, `label` names what it covers. */
@@ -103,10 +104,10 @@ export class CodexAdapter implements Adapter {
   private loaded = new Set<string>();
   private lastUsed = Date.now();
   private lastTidy = 0;
-  /** Threads a reply is resuming, which `tidy` must leave alone until they are loaded. */
-  private resuming = new Set<string>();
-  /** Jobs whose thread Codex is still starting or resuming, which can take minutes; `probe` vouches for them. */
-  private opening = new Set<string>();
+  /** Threads a reply is resuming, which `tidy` must leave alone until they are loaded. Counted: see `hold`. */
+  private resuming = new Map<string, number>();
+  /** Jobs whose thread Codex is still starting or resuming, which can take minutes; `probe` vouches for them. Counted. */
+  private opening = new Map<string, number>();
   /** Threads whose Crew tools Codex could not start, and why. Codex may say so before the thread has a run to tell. */
   private toolFailures = new Map<string, string>();
   private config: Config;
@@ -120,8 +121,7 @@ export class CodexAdapter implements Adapter {
   }
 
   async start(ctl: JobCtl): Promise<void> {
-    this.opening.add(ctl.job.id);
-    const opened = await this.open(ctl).finally(() => this.opening.delete(ctl.job.id));
+    const opened = await this.open(ctl).finally(hold(this.opening, ctl.job.id));
     if (!opened || isTerminal(ctl.job)) return;
     const { peer, params, res } = opened;
     const threadId: string = res.thread.id;
@@ -152,17 +152,20 @@ export class CodexAdapter implements Adapter {
   }
 
   async reply(ctl: JobCtl, message: string): Promise<void> {
+    // Starting the server, reading the settings or a resume can outlast a cancel and the next reply; only the turn
+    // that asked may go on to send its message.
+    const turn = ctl.job.turns;
     const peer = await this.ensure();
+    if (ctl.job.turns !== turn) return;
     const threadId = ctl.job.sessionId!;
     let pluginsEnabled = this.runs.get(threadId)?.pluginsEnabled ?? false;
     if (!this.loaded.has(threadId)) {
       const params = await this.threadParams(ctl, peer);
+      if (ctl.job.turns !== turn) return;
       ctl.capabilities(capabilitiesOf(ctl.job, params));
       const resume = () => peer.request('thread/resume', { threadId, ...params, excludeTurns: true }, THREAD_TIMEOUT_MS);
-      // A resume can outlast a cancel and the next reply; only the turn that asked for it may go on to send its message.
-      const turn = ctl.job.turns;
-      this.resuming.add(threadId);
-      this.opening.add(ctl.job.id);
+      const loaded = hold(this.resuming, threadId);
+      const opened = hold(this.opening, ctl.job.id);
       // `tidy` archives a worker's thread after a week; a reply to that job brings it back.
       const res = await resume().catch(async (err) => {
         if (!/^session \S+ is archived\b/.test(String(err?.message))) throw err;
@@ -171,8 +174,8 @@ export class CodexAdapter implements Adapter {
         });
         return resume();
       }).finally(() => {
-        this.resuming.delete(threadId);
-        this.opening.delete(ctl.job.id);
+        loaded();
+        opened();
       });
       this.loaded.add(threadId);
       if (ctl.job.turns !== turn) return;
@@ -911,9 +914,22 @@ export class CodexAdapter implements Adapter {
   }
 }
 
+/**
+ * Marks `key` as held until the returned function runs. A cancelled turn's resume can still be pending when the next
+ * turn starts its own for the same job, so each request releases only its own hold and the mark stays while any is left.
+ */
+function hold(held: Map<string, number>, key: string): () => void {
+  held.set(key, (held.get(key) ?? 0) + 1);
+  return () => {
+    const left = (held.get(key) ?? 1) - 1;
+    if (left > 0) held.set(key, left);
+    else held.delete(key);
+  };
+}
+
 /** Bound free-form provider text before putting it in a report or approval prompt. */
 function detail(text: string, limit = 4000): string {
-  return text.length > limit ? `${text.slice(0, limit)}… (truncated)` : text;
+  return text.length > limit ? `${clip(text, limit)}… (truncated)` : text;
 }
 
 /** Render only tool input; environment fields are never part of an approval display. */
@@ -923,7 +939,7 @@ function inputText(input: unknown): string {
   let truncated = false;
   const append = (part: string) => {
     const room = 4000 - text.length;
-    text += part.slice(0, Math.max(0, room));
+    text += clip(part, Math.max(0, room));
     if (part.length > room) truncated = true;
   };
   const visit = (value: unknown, label: string, depth: number) => {
@@ -1020,7 +1036,7 @@ function textInput(text: string) {
 
 function firstLine(text: string): string {
   const line = text.trim().split('\n')[0];
-  return line.length > 140 ? `${line.slice(0, 139)}…` : line;
+  return line.length > 140 ? `${clip(line, 139)}…` : line;
 }
 
 function basename(file: string): string {

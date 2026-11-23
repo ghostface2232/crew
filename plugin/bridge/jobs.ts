@@ -7,7 +7,7 @@ import type { DeliveryState, News } from './delivery.ts';
 import type { Pulls } from './pulls.ts';
 import { runCheck } from './check.ts';
 import type { CheckResult } from './check.ts';
-import { assignHint, canonicalPath, defaultHolder, disabledAgents, effectiveRole, isRole, LEAD, MAX_DEBATE_ROUNDS, daemonPort, nodeEnv, roleInfo, ROLES, runsCommands, WORKERS } from './config.ts';
+import { assignHint, canonicalPath, defaultHolder, disabledAgents, effectiveRole, isRole, LEAD, LEDGER_ASIDE, MAX_DEBATE_ROUNDS, daemonPort, nodeEnv, roleInfo, ROLES, runsCommands, WORKERS } from './config.ts';
 import type { Config, JobKind, PresetName, Role, WorkerAgent } from './config.ts';
 import { carryUncommitted, changesSince, commitAll, commitChanges, copyIncluded, createWorktree, currentBranch, dirtyCount, git, mergeInto, isInside, projectRoot, realpath, removeDirectory, removeEmptyLeftover, removeEmptySlot, removeWorktree, repoRoot, revertCommit, revertsSince, reviewDiff, WorktreeCleanupError } from './git.ts';
 import { collectGarbage } from './gc.ts';
@@ -17,6 +17,7 @@ import { attachEvidence, attachmentsNote, checkAttachments, collectEvidence, det
 import type { Evidence } from './evidence.ts';
 import type { Worktree } from './git.ts';
 import { sharedInstructions } from './instructions.ts';
+import { clip } from './text.ts';
 import { buildPrompt } from './prompts.ts';
 import { findSkills } from './skills.ts';
 import { defaultTier, familyTier, modelId, tierEffort, tierModel, tierOf, TIERS } from './tiers.ts';
@@ -377,7 +378,7 @@ const KEEP_EXCHANGE = 40;
 function exchanged(job: Job, from: ExchangeEntry['from'], text: string): void {
   const trimmed = text.trim();
   if (!trimmed) return;
-  const entry = { turn: job.turns, from, text: trimmed.length > MAX_EXCHANGE_TEXT ? `${trimmed.slice(0, MAX_EXCHANGE_TEXT)}\n… (cut)` : trimmed, at: Date.now() };
+  const entry = { turn: job.turns, from, text: trimmed.length > MAX_EXCHANGE_TEXT ? `${clip(trimmed, MAX_EXCHANGE_TEXT)}\n… (cut)` : trimmed, at: Date.now() };
   job.exchange = [...(job.exchange ?? []), entry].slice(-KEEP_EXCHANGE);
 }
 const KEEP_JOBS = 200;
@@ -495,6 +496,9 @@ function looseText(text: string): string {
 export function isTerminal(job: Job): boolean {
   return TERMINAL.includes(job.state);
 }
+
+/** jobs.json was read but does not hold a ledger. Nothing was changed; the caller decides what becomes of the file. */
+export class UnreadableLedger extends Error {}
 
 export class Jobs {
   readonly jobs = new Map<string, Job>();
@@ -712,7 +716,7 @@ export class Jobs {
       const targetRoot = repo ?? spec.cwd;
       spec.targets = spec.targets?.map((t) => path.relative(targetRoot, path.resolve(spec.cwd, t)));
 
-      const title = (spec.title ?? spec.task ?? spec.targets?.join(', ') ?? spec.kind).split('\n')[0].slice(0, 80);
+      const title = clip((spec.title ?? spec.task ?? spec.targets?.join(', ') ?? spec.kind).split('\n')[0], 80);
       const now = Date.now();
       const job: Job = {
         id,
@@ -779,7 +783,10 @@ export class Jobs {
 
       const ctl = this.ctl(job);
       // Session setup can take seconds; the caller gets the job id right away and follows via wait.
-      this.adapters[agent].start(ctl).catch((err) => ctl.fail(String(err?.message ?? err)));
+      this.adapters[agent].start(ctl).catch((err) => {
+        // As in reply: a start that fails after a cancel and a follow-up must not end that follow-up.
+        if (job.turns === 1) ctl.fail(String(err?.message ?? err));
+      });
       return job;
     } catch (err) {
       if (!registered) {
@@ -909,6 +916,7 @@ export class Jobs {
     job.asksUser = retry !== null && job.retrying !== undefined;
     job.retrying = retry?.actions;
     job.turns += 1;
+    const turn = job.turns;
     if (retry) (job.approvals ??= []).push({ ...retry.approval, turn: job.turns });
     exchanged(job, 'lead', input.message);
     const round = !job.debate ? '' : `\n\n${job.turns === job.debate.rounds
@@ -916,7 +924,7 @@ export class Jobs {
       : `Round ${job.turns} of ${job.debate.rounds}.`}`;
     this.turnStartTokens.set(id, job.tokens ?? 0);
     job.activeAt = Date.now();
-    const what = !retry ? input.message.split('\n')[0].slice(0, 80) : job.asksUser ? 'refused action retried; the user is asked about each request' : 'refused action retried with the user\'s approval';
+    const what = !retry ? clip(input.message.split('\n')[0], 80) : job.asksUser ? 'refused action retried; the user is asked about each request' : 'refused action retried with the user\'s approval';
     this.event(job, 'started', `follow-up: ${what}`);
     try {
       if (job.kind === 'review' && job.repo && !job.runsApp) {
@@ -977,12 +985,14 @@ export class Jobs {
         }
       }
       await adapter.reply(ctl, message);
+      if (job.turns !== turn) return job;
       for (const round of untold) {
         if (round.state === 'undone') round.toldWorker = 'undone';
         else delete round.toldWorker;
       }
     } catch (err) {
-      ctl.fail(String((err as Error)?.message ?? err));
+      // The send can outlast a cancel and the follow-up after it; its failure then belongs to a turn that is over.
+      if (job.turns === turn) ctl.fail(String((err as Error)?.message ?? err));
     }
     return job;
   }
@@ -1438,7 +1448,7 @@ export class Jobs {
       refused: (action, reason) => {
         if (!live()) return;
         (job.refusals ??= []).push({ action, reason, turn: job.turns });
-        this.event(job, 'progress', `refused by the automatic reviewer: ${action.split('\n')[0].slice(0, 120)}`);
+        this.event(job, 'progress', `refused by the automatic reviewer: ${clip(action.split('\n')[0], 120)}`);
       },
       tokens: (total, parts) => {
         job.tokens = total;
@@ -1485,7 +1495,12 @@ export class Jobs {
         this.finalizing.add(job.id);
         this.finalize(job, report).catch((err) => {
           this.finalizing.delete(job.id);
-          if (live()) this.fail(job, `could not collect the result: ${err.message}`, false);
+          if (!live()) return;
+          // The worker finished and said what it did; only the bridge's own bookkeeping failed, so its words are kept.
+          exchanged(job, 'worker', report);
+          job.report = report;
+          // The result on record, if any, is an earlier turn's: its commit and files are not what this report describes.
+          this.fail(job, `could not collect the result: ${err.message}${job.result ? ' The changes listed are those of the last turn whose result was collected, not of this one.' : ''}`, false);
         });
       },
       fail: (message, opts) => {
@@ -1530,8 +1545,8 @@ export class Jobs {
         }
       }
       // A check that rewrote tracked files passed on a tree the commit does not hold.
-      const listed = check ? `${await git(job.worktree.path, ['diff', '--name-only', 'HEAD'])}\n${await git(job.worktree.path, ['ls-files', '--others', '--exclude-standard'])}` : '';
-      const changed = listed.split('\n').map((line) => line.trim()).filter(Boolean);
+      const listed = check ? `${await git(job.worktree.path, ['diff', '--name-only', '-z', 'HEAD'])}${await git(job.worktree.path, ['ls-files', '--others', '--exclude-standard', '-z'])}` : '';
+      const changed = listed.split('\0').filter(Boolean);
       const stale = changed.length ? `the check itself changed ${changed.slice(0, 3).join(', ')}${changed.length > 3 ? ` and ${changed.length - 3} more` : ''}` : undefined;
       (job.receipts ??= []).push({ turn: job.turns, head, ...(check ? { check } : {}), ...(stale ? { stale } : {}), at: Date.now() });
     } else if (job.kind === 'review' || job.ask) {
@@ -1727,10 +1742,14 @@ export class Jobs {
     }, 500);
   }
 
+  /** Jobs a receipt the lead has not echoed yet still names, which an ack must find. */
+  private named(): Set<string> {
+    return new Set(Object.values(this.delivery.state.receipts).filter((receipt) => !receipt.acknowledged).flatMap((receipt) => receipt.items.map((item) => item.jobId)));
+  }
+
   private save(): void {
     let history = 0;
-    // A receipt the lead has not echoed yet still names its jobs, which an ack must find.
-    const named = new Set(Object.values(this.delivery.state.receipts).filter((receipt) => !receipt.acknowledged).flatMap((receipt) => receipt.items.map((item) => item.jobId)));
+    const named = this.named();
     const keep = this.list().filter((job) =>
       job.worktree || job.cleanupPending || !isTerminal(job) || this.finalizing.has(job.id) || this.cancelling.has(job.id)
       || this.discarding.has(job.id) || this.changingRounds.has(job.id) || this.preparingReviews.has(job.id)
@@ -1759,15 +1778,60 @@ export class Jobs {
   }
 
   private load(): void {
-    let saved: { seq: number; jobs: Job[]; delivery?: DeliveryState; pulls?: unknown };
+    const file = path.join(this.home, 'jobs.json');
+    let text: string;
     try {
-      saved = JSON.parse(fs.readFileSync(path.join(this.home, 'jobs.json'), 'utf8'));
-    } catch {
-      return;
+      text = fs.readFileSync(file, 'utf8');
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
+      // The file may be whole and only out of reach for now (permissions, a scanner holding it): not a ledger to set aside.
+      throw new Error(`Could not read ${file}, so it was left untouched: ${(err as Error).message}`);
     }
+    let saved: { seq: number; jobs: Job[]; delivery?: DeliveryState; pulls?: unknown } | null;
+    try {
+      saved = JSON.parse(text);
+    } catch (err) {
+      // Starting empty here would have the next save write that emptiness over every job on record.
+      throw new UnreadableLedger(`Could not load ${file}, so it was left untouched: ${(err as Error).message}`);
+    }
+    if (!saved || !Number.isSafeInteger(saved.seq) || !Array.isArray(saved.jobs) || !saved.jobs.every((job) => job && typeof job === 'object' && typeof job.id === 'string')
+      // Two records under one id would be saved back as one.
+      || new Set(saved.jobs.map((job) => job.id)).size !== saved.jobs.length) {
+      throw new UnreadableLedger(`${file} does not hold a job ledger, so it was left untouched.`);
+    }
+    // Restoring in memory is the test of the records: one this cannot take in sets the whole file aside. So nothing
+    // in it reads the disk or touches what outlives this instance, and a throw leaves nothing behind.
+    const interrupted: Job[] = [];
+    try {
+      this.restore(saved, interrupted);
+    } catch (err) {
+      throw new UnreadableLedger(`${file} holds a record that could not be restored, so it was left untouched: ${(err as Error).message}`);
+    }
+    this.hooks.pulls?.restore(saved.pulls);
+    // The interrupted turns never reached their end, where evidence is otherwise collected.
+    for (const job of interrupted) if (job.evidenceDir) job.evidence = collectEvidence(job.evidenceDir, job.evidence ?? [], job.turns);
+    for (const job of this.jobs.values()) if (job.kind === 'review') this.dropSnapshot(job);
+    try {
+      this.flush();
+    } catch (err) {
+      // The daemon must still start; the state is in memory and the next change saves it again.
+      console.error(`crew: could not save jobs at startup: ${(err as Error).message}`);
+    }
+    // No turn survives a restart, so neither does any scratch.
+    this.removeScratch(path.join(this.home, 'scratch'));
+    // Evidence lives as long as its job's record. A ledger that was set aside still names its jobs' evidence, so
+    // nothing is removed until the user has dealt with that file.
+    if (fs.readdirSync(this.home).some((name) => name.startsWith(LEDGER_ASIDE))) return;
+    const evidence = path.join(this.home, 'evidence');
+    for (const id of fs.existsSync(evidence) ? fs.readdirSync(evidence) : []) {
+      if (!this.jobs.has(id)) this.removeScratch(path.join(evidence, id));
+    }
+  }
+
+  /** The in-memory half of load(): the saved jobs and receipts as this run holds them. */
+  private restore(saved: { seq: number; jobs: Job[]; delivery?: DeliveryState }, interrupted: Job[]): void {
     this.seq = saved.seq;
     this.delivery.restore(saved.delivery);
-    this.hooks.pulls?.restore(saved.pulls);
     for (const job of saved.jobs) {
       // The diff text lived in the previous bridge.
       delete job.liveDiff;
@@ -1783,6 +1847,8 @@ export class Jobs {
         else if (job.waiting) addNews(job, 'waiting', job.waiting.reason, { request: job.waiting.id });
         for (const question of job.questions ?? []) if (question.answer === undefined) addNews(job, 'question', question.text, { question: question.id });
       }
+      // Read from the disk after this; a list of another kind would fail there, where it no longer sets the file aside.
+      if (job.evidence !== undefined && !Array.isArray(job.evidence)) throw new Error(`job ${job.id} holds evidence that is not a list`);
       // Jobs saved before ownership was recorded; their repository is the closest stand-in.
       job.project = canonicalPath(job.project ?? job.repo ?? job.cwd);
       // Saved before keys were canonical; a Windows job may hold git's `C:/x` spelling.
@@ -1797,26 +1863,13 @@ export class Jobs {
         job.error = { message: `The bridge restarted while this job was running. ${next}`, limit: false };
         job.seq = ++this.seq;
         addNews(job, 'failed', job.error.message);
-        // The interrupted turn never reached its end, where evidence is otherwise collected.
-        if (job.evidenceDir) job.evidence = collectEvidence(job.evidenceDir, job.evidence ?? [], job.turns);
+        interrupted.push(job);
       }
       deliveryPosition(job);
       this.jobs.set(job.id, job);
-      if (job.kind === 'review') this.dropSnapshot(job);
     }
-    try {
-      this.flush();
-    } catch (err) {
-      // The daemon must still start; the state is in memory and the next change saves it again.
-      console.error(`crew: could not save jobs at startup: ${(err as Error).message}`);
-    }
-    // No turn survives a restart, so neither does any scratch.
-    this.removeScratch(path.join(this.home, 'scratch'));
-    // Evidence lives as long as its job's record.
-    const evidence = path.join(this.home, 'evidence');
-    for (const id of fs.existsSync(evidence) ? fs.readdirSync(evidence) : []) {
-      if (!this.jobs.has(id)) this.removeScratch(path.join(evidence, id));
-    }
+    // Every save reads the receipts this way; one that cannot be read would fail each of them.
+    this.named();
   }
 }
 
@@ -1824,7 +1877,7 @@ export class Jobs {
 function headline(report: string): string {
   // The word under "## Outcome" says nothing about the work, so the headline is the line after it.
   const line = report.split('\n').find((l) => l.trim() && !l.startsWith('#') && !/^\s*(-\s+)?[*_`]*(done|partial|blocked)[*_`]*\.?\s*$/i.test(l)) ?? '';
-  return line.trim().slice(0, 140);
+  return clip(line.trim(), 140);
 }
 
 /** Tells the worker which of its rounds were undone or restored since it last heard. */

@@ -121,6 +121,41 @@ test('unsafe links, HTML and unmatched delimiters stay text', () => {
   }
 });
 
+test('asterisk bullets, file globs and unmatched runs stay literal beside emphasis', () => {
+  for (const text of ['* item one\n* item two', 'src/*.ts and test/*.ts', 'src\\*.ts and test\\*.ts', '**unpaired*', '*word *']) {
+    assert.deepEqual(inlineMarkdown(text), [plain(text)]);
+  }
+  // An extension glob beside real emphasis, and dotted names that are emphasized.
+  assert.deepEqual(inlineMarkdown('Match *.ts and *italic*.'), [plain('Match *.ts and '), { type: 'em', children: [plain('italic')] }, plain('.')]);
+  assert.deepEqual(inlineMarkdown('Load *.env* before testing.'), [plain('Load '), { type: 'em', children: [plain('.env')] }, plain(' before testing.')]);
+  assert.deepEqual(inlineMarkdown('*...and so on*'), [{ type: 'em', children: [plain('...and so on')] }]);
+  assert.deepEqual(inlineMarkdown('The *config*.json fixture changed.'), [plain('The '), { type: 'em', children: [plain('config')] }, plain('.json fixture changed.')]);
+  // A run of three is a pair and a single: emphasis that touches other emphasis still formats.
+  assert.deepEqual(inlineMarkdown('**bold***italic* and *a**b**c*'), [
+    { type: 'strong', children: [plain('bold')] }, { type: 'em', children: [plain('italic')] }, plain(' and '),
+    { type: 'em', children: [plain('a'), { type: 'strong', children: [plain('b')] }, plain('c')] },
+  ]);
+  assert.deepEqual(inlineMarkdown('***Important:*** read'), [{ type: 'strong', children: [plain('*Important:')] }, plain('* read')]);
+  assert.deepEqual(inlineMarkdown('* item one\n* *italic* and **bold**'), [
+    plain('* item one\n* '), { type: 'em', children: [plain('italic')] }, plain(' and '),
+    { type: 'strong', children: [plain('bold')] },
+  ]);
+});
+
+test('only the matching brackets immediately before a destination form the link label', () => {
+  const href = 'https://example.com';
+  assert.deepEqual(inlineMarkdown(`see [1] and [the docs](${href})`), [
+    plain('see [1] and '), { type: 'link', href, children: [plain('the docs')] },
+  ]);
+  const brackets = '['.repeat(4000);
+  assert.deepEqual(inlineMarkdown(`${brackets}[the [nested] docs](${href})`), [
+    plain(brackets), { type: 'link', href, children: [plain('the [nested] docs')] },
+  ]);
+  assert.deepEqual(inlineMarkdown(`[use \`[\`](${href})`), [
+    { type: 'link', href, children: [plain('use '), { type: 'code', text: '[' }] },
+  ]);
+});
+
 test('ReportText renders safe React elements with preserved whitespace', () => {
   const html = renderToStaticMarkup(ReportText({ text: '# Heading\n```\n<b>code</b>\n```\n<b>literal</b>\n**bold** [safe](https://example.com) [bad](javascript:alert(1))' }));
   assert.ok(html.startsWith('<div class="report selectable">'));

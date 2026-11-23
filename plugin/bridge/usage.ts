@@ -4,6 +4,7 @@ import path from 'node:path';
 import { LEAD, roleInfo, WORKERS, workersFor } from './config.ts';
 import type { Config, Role, WorkerAgent } from './config.ts';
 import type { Agent } from './jobs.ts';
+import { clip } from './text.ts';
 
 /**
  * Usage as measured by AgentGauge, and the routing it implies (research/agentgauge-integration.md; current behavior in docs/usage-and-presets.md).
@@ -253,7 +254,7 @@ export class UsageTracker {
 
     const deciding = applicable(windows, this.models[agent], agent === 'antigravity');
     const base = { decidingKeys: deciding.map((w) => w.key), agent, plan: raw?.plan ?? null, capturedAt: raw?.capturedAt ?? null, windows };
-    if (limited) return { ...base, status: 'exhausted', reason: `A job hit the usage limit: ${limited.detail.split('\n')[0].slice(0, 160)}` };
+    if (limited) return { ...base, status: 'exhausted', reason: `A job hit the usage limit: ${clip(limited.detail.split('\n')[0], 160)}` };
     if (!raw || raw.capturedAt === null) return { ...base, status: 'unknown', reason: 'AgentGauge has no reading for this agent.' };
     if (now - raw.capturedAt > STALE_MS) return { ...base, status: 'stale', reason: `AgentGauge's last reading is ${Math.round((now - raw.capturedAt) / 60_000)} minutes old.` };
     if (!windows.length) return { ...base, status: 'unknown', reason: 'AgentGauge reported no usage windows for this agent.' };

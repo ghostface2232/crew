@@ -5,6 +5,7 @@ import { canonicalPath, isPresetName, PRESET_NAMES } from './config.ts';
 import type { PresetName } from './config.ts';
 import type { Job } from './jobs.ts';
 import type { PullWatch } from './pulls.ts';
+import { clip } from './text.ts';
 
 export const STAGES = ['plan', 'implement', 'self-review', 'cross-review', 'fix', 'polish', 'final'] as const;
 export type Stage = (typeof STAGES)[number];
@@ -79,9 +80,6 @@ const MAX_NOTES = 20;
 const KEEP_MISSIONS = 100;
 /** Finished missions kept for each project whatever the overall limit, since the board shows that many per project. */
 export const KEEP_PER_PROJECT = 2;
-
-/** Cuts to a length without leaving half of a surrogate pair, which the app's JSON decoder refuses with the whole state. */
-const clip = (text: string, length: number) => text.slice(0, length).replace(/[\ud800-\udbff]$/, '');
 
 /** First line of a title, as stored. Lets a caller tell whether a title names a mission that already exists. */
 export function normalizeTitle(text: unknown): string {
@@ -448,11 +446,11 @@ export class Missions {
     // A finished mission stays as it ended. Only an explicit reopen marks an abandoned one done: a lead's late
     // `done`, or a board still showing it active, must not undo the user's Stop tracking.
     if (mission.state !== 'active' && !(mission.state === 'abandoned' && input.reopen && !input.abandoned)) return mission;
-    const outcome = (input.outcome ?? '').split(/\r\n|\r|\n/)[0].trim().slice(0, 200).trim();
+    const outcome = clip((input.outcome ?? '').split(/\r\n|\r|\n/)[0].trim(), 200).trim();
     mission.state = input.abandoned ? 'abandoned' : 'done';
     if (mission.state === 'done' && !mission.stages) mission.stage = 'final';
     mission.outcome = outcome;
-    const record = input.record?.trim().slice(0, MAX_RECORD);
+    const record = input.record ? clip(input.record.trim(), MAX_RECORD) : undefined;
     if (record) mission.record = record;
     if (mission.state === 'done' && input.byLead) mission.doneByLead = true;
     mission.updatedAt = Date.now();
@@ -465,7 +463,7 @@ export class Missions {
   note(id: string, text: string): Mission {
     const mission = this.get(id);
     if (mission.state !== 'active') throw new Error(`Mission ${id} is already ${mission.state}.`);
-    const note = text.trim().slice(0, MAX_NOTE);
+    const note = clip(text.trim(), MAX_NOTE);
     if (!note) throw new Error('A note needs some text.');
     if ((mission.notes?.length ?? 0) >= MAX_NOTES) throw new Error(`Mission ${id} already has ${MAX_NOTES} notes.`);
     (mission.notes ??= []).push({ text: note, at: Date.now() });

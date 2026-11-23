@@ -141,7 +141,28 @@ import Testing
         #expect(AppUpdater.canReplace(installed: bundle.bundleURL) != nil)
     }
 
-    @Test(arguments: ["success", "open-failure", "leftover-backup", "quit-timeout"]) func swapKeepsTheOriginalOnFailure(scenario: String) throws {
+    private func codesign(_ arguments: [String], _ file: URL) throws -> Int32 {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+        process.arguments = arguments + [file.path]
+        try process.run()
+        process.waitUntilExit()
+        return process.terminationStatus
+    }
+
+    /// The requirement of a release signed with the release certificate, as `codesign -d -r-` prints it.
+    private static let release = "identifier \"dev.crew.native\" and certificate leaf = H\"58444d9caca739fa1b4abf0c45fc4e461b00a858\""
+
+    @Test func anAppSignedWithACertificateRejectsAnUpdateSignedOtherwise() throws {
+        let file = FileManager.default.temporaryDirectory.appending(path: "crew-signature-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: file) }
+        try FileManager.default.copyItem(at: URL(fileURLWithPath: "/usr/bin/true"), to: file)
+        try #require(codesign(["--force", "--sign", "-"], file) == 0)
+        #expect(try codesign(AppUpdater.verificationArguments(requirement: nil), file) == 0)
+        #expect(try codesign(AppUpdater.verificationArguments(requirement: Self.release), file) != 0)
+    }
+
+    @Test(arguments: ["success", "open-failure", "leftover-backup", "quit-timeout", "changed-staged", "wrong-signer"]) func swapKeepsTheOriginalOnFailure(scenario: String) throws {
         let home = FileManager.default.temporaryDirectory.appending(path: "crew-swap-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: home) }
         let target = home.appending(path: "Crew.app"), staged = home.appending(path: "staged.app")
@@ -151,23 +172,30 @@ import Testing
         for directory in [target, staged, work, commands] {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         }
-        try "old".write(to: target.appending(path: "version"), atomically: true, encoding: .utf8)
-        try "new".write(to: staged.appending(path: "version"), atomically: true, encoding: .utf8)
-        if scenario == "leftover-backup" { try FileManager.default.createDirectory(at: backup, withIntermediateDirectories: true) }
+        let version = "Contents/Resources/version"
+        for (app, value) in [(target, "old"), (staged, "new")] {
+            try FileManager.default.createDirectory(at: app.appending(path: "Contents/Resources"), withIntermediateDirectories: true)
+            try value.write(to: app.appending(path: version), atomically: true, encoding: .utf8)
+        }
+        try FileManager.default.createDirectory(at: staged.appending(path: "Contents/MacOS"), withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: URL(fileURLWithPath: "/usr/bin/true"), to: staged.appending(path: "Contents/MacOS/Crew"))
+        let info = ["CFBundleIdentifier": "dev.crew.native", "CFBundleExecutable": "Crew", "CFBundlePackageType": "APPL"]
+        try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0).write(to: staged.appending(path: "Contents/Info.plist"))
+        try #require(codesign(["--force", "--sign", "-"], staged) == 0)
+        let verification = AppUpdater.verificationArguments(requirement: scenario == "wrong-signer" ? Self.release : nil)
+        if scenario == "changed-staged" {
+            try "changed".write(to: staged.appending(path: version), atomically: true, encoding: .utf8)
+        }
+        if scenario == "leftover-backup" {
+            try FileManager.default.createDirectory(at: backup, withIntermediateDirectories: true)
+            try "keep".write(to: backup.appending(path: "sentinel"), atomically: true, encoding: .utf8)
+        }
         let scripts = [
             "open": """
             #!/bin/sh
             printf '%s\\n' "$*" >> "$OPEN_LOG"
             if [ "$SCENARIO" = open-failure ] && [ "$3" = --updated ]; then exit 1; fi
             exit 0
-            """,
-            // Fault injection leaves the backup in place even when its parent is writable.
-            "rm": """
-            #!/bin/sh
-            if [ "$SCENARIO" = leftover-backup ]; then
-                for arg in "$@"; do [ "$arg" = "$BACKUP" ] && exit 1; done
-            fi
-            exec /bin/rm "$@"
             """,
             "sleep": "#!/bin/sh\nexit 0\n",
         ]
@@ -181,20 +209,29 @@ import Testing
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         let pid = scenario == "quit-timeout" ? String(ProcessInfo.processInfo.processIdentifier) : "2147483647"
-        process.arguments = [script.path, pid, target.path, staged.path, work.path, result.path]
-        process.environment = ["PATH": "\(commands.path):/usr/bin:/bin", "SCENARIO": scenario, "BACKUP": backup.path, "OPEN_LOG": home.appending(path: "open.log").path]
+        process.arguments = [script.path, pid, target.path, staged.path, work.path, result.path] + verification
+        process.environment = ["PATH": "\(commands.path):/usr/bin:/bin", "SCENARIO": scenario, "OPEN_LOG": home.appending(path: "open.log").path]
         try process.run()
         process.waitUntilExit()
-        #expect(process.terminationStatus == (scenario == "success" ? 0 : 1))
-        #expect(try String(contentsOf: target.appending(path: "version"), encoding: .utf8) == (scenario == "success" ? "new" : "old"))
-        #expect(!FileManager.default.fileExists(atPath: backup.appending(path: "Crew.app").path))
+        // Something already at the old backup name is not this run's: it neither stops the swap nor is touched by it.
+        let succeeds = scenario == "success" || scenario == "leftover-backup"
+        #expect(process.terminationStatus == (succeeds ? 0 : 1))
+        #expect(try String(contentsOf: target.appending(path: version), encoding: .utf8) == (succeeds ? "new" : "old"))
+        if scenario == "leftover-backup" {
+            #expect(try String(contentsOf: backup.appending(path: "sentinel"), encoding: .utf8) == "keep")
+        } else {
+            #expect(!FileManager.default.fileExists(atPath: backup.path))
+        }
+        // The run's own backup folder is gone whichever way it ended.
+        #expect(try FileManager.default.contentsOfDirectory(atPath: home.path).filter { $0.hasPrefix("Crew.app.previous.") }.isEmpty)
         #expect(!FileManager.default.fileExists(atPath: staged.path) && !FileManager.default.fileExists(atPath: work.path))
-        if scenario == "success" {
-            #expect(!FileManager.default.fileExists(atPath: backup.path) && !FileManager.default.fileExists(atPath: result.path))
+        if succeeds {
+            #expect(!FileManager.default.fileExists(atPath: result.path))
         } else {
             let reason = try String(contentsOf: result, encoding: .utf8)
             #expect(reason.split(separator: "\n").count == 1)
             if scenario == "quit-timeout" { #expect(reason.contains("did not quit")) }
+            if scenario == "changed-staged" || scenario == "wrong-signer" { #expect(reason.contains("verify")) }
         }
         if scenario != "quit-timeout" {
             let opened = try String(contentsOf: home.appending(path: "open.log"), encoding: .utf8)

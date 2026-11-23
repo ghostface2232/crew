@@ -6,6 +6,7 @@ import { createRequire } from 'node:module';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import { clipEnd } from './text.ts';
 
 /**
  * Codex's macOS sandbox denies `mach-register`, and Chromium registers a Mach service as it starts
@@ -111,7 +112,7 @@ export class BrowserServers {
       const fail = (err: Error) => {
         clearTimeout(timer);
         child.kill();
-        reject(new Error(`${err.message}${output.trim() ? `\n${output.trim().slice(-2000)}` : ''}`));
+        reject(new Error(`${err.message}${output.trim() ? `\n${clipEnd(output.trim(), 2000)}` : ''}`));
       };
       const read = (chunk: Buffer) => {
         output += chunk;

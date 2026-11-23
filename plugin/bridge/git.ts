@@ -5,18 +5,26 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { ReviewTarget } from './jobs.ts';
+import { clip } from './text.ts';
 
 /** Transport commits run none of the repository's hooks; an fsmonitor command is a hook too, run on every index read. */
 const NO_HOOKS = ['-c', `core.hooksPath=${os.devNull}`, '-c', 'core.fsmonitor=false'];
 
-export function git(cwd: string, args: string[], stdin?: string): Promise<string> {
+/** Git's output as written. */
+function gitOutput(cwd: string, args: string[], stdin?: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = execFile('git', args, { cwd, maxBuffer: 16 * 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
       if (err) reject(new Error(`git ${args[0]}: ${(stderr || err.message).trim()}`));
-      else resolve(stdout.endsWith('\0') ? stdout : stdout.trim());
+      else resolve(stdout);
     });
     if (stdin !== undefined) child.stdin?.end(stdin);
   });
+}
+
+/** Git's output without the whitespace around it; a NUL-terminated list is left as it is. */
+export async function git(cwd: string, args: string[], stdin?: string): Promise<string> {
+  const stdout = await gitOutput(cwd, args, stdin);
+  return stdout.endsWith('\0') ? stdout : stdout.trim();
 }
 
 /** The change under review as text, for a reviewer that cannot run git itself. */
@@ -30,7 +38,8 @@ export async function reviewDiff(root: string, target: ReviewTarget): Promise<st
 
 export async function repoRoot(cwd: string): Promise<string | null> {
   try {
-    return await git(cwd, ['rev-parse', '--show-toplevel']);
+    // Only the newline git adds: a folder name can end in a space, and trimmed it would name the folder beside it.
+    return (await gitOutput(cwd, ['rev-parse', '--show-toplevel'])).replace(/\r?\n$/, '');
   } catch {
     return null;
   }
@@ -44,13 +53,13 @@ export async function repoRoot(cwd: string): Promise<string | null> {
 export async function projectRoot(cwd: string): Promise<string | null> {
   let list: string;
   try {
-    list = await git(cwd, ['worktree', 'list', '--porcelain']);
+    list = await git(cwd, ['worktree', 'list', '--porcelain', '-z']);
   } catch (err) {
     if (/not a git repository/i.test((err as Error).message)) return null;
     throw err;
   }
   // The main working tree is always listed first.
-  return /^worktree (.+)$/m.exec(list)?.[1] ?? null;
+  return /^worktree ([^\0]+)\0/.exec(list)?.[1] ?? null;
 }
 
 export interface Worktree {
@@ -81,9 +90,16 @@ async function besides(root: string, linked: string[]): Promise<string[]> {
 /** Number of uncommitted paths in the main tree; a worktree created from a ref will not contain them. */
 export async function dirtyCount(root: string, linked: string[] = []): Promise<number> {
   // Every untracked file by name, so a folder holding nothing but Finder's metadata is not counted either.
-  const out = await git(root, ['status', '--porcelain', '--untracked-files=all', ...await besides(root, linked)]);
-  // Finder's .DS_Store files are never something a worker needs, and they are in most trees that do not ignore them.
-  return out.split('\n').filter((line) => line && !/(^|\/)\.DS_Store"?$/.test(line.slice(3))).length;
+  const out = await git(root, ['status', '--porcelain', '-z', '--untracked-files=all', ...await besides(root, linked)]);
+  const entries = out.split('\0');
+  let count = 0;
+  for (let i = 0; entries[i]; i++) {
+    const entry = entries[i];
+    if (path.posix.basename(entry.slice(3)) !== '.DS_Store') count++;
+    // With -z, a rename or copy has a second field containing its original path.
+    if (/[RC]/.test(entry.slice(0, 2))) i++;
+  }
+  return count;
 }
 
 /**
@@ -200,7 +216,7 @@ export async function copyIncluded(root: string, wt: string, clone: (source: str
     } catch (err) {
       // cp names every file it could not clone; the note goes into every result the lead reads, so keep its gist.
       const lines = (err as Error).message.split('\n').filter(Boolean);
-      const gist = lines.slice(0, 2).join(' ').slice(0, 400);
+      const gist = clip(lines.slice(0, 2).join(' '), 400);
       result.failed.push(`${entry} (${gist}${lines.length > 2 ? ` … and ${lines.length - 2} more line(s)` : ''})`);
     }
   }
@@ -327,7 +343,7 @@ export function realpath(target: string, base = process.cwd()): string {
  */
 export async function commitAll(wt: string, message: string, linked: string[] = []): Promise<string | null> {
   await git(wt, [...NO_HOOKS, 'add', '-A', ...await besides(wt, linked)]);
-  const staged = await git(wt, [...NO_HOOKS, 'diff', '--cached', '--name-only']);
+  const staged = await git(wt, [...NO_HOOKS, 'diff', '--cached', '--name-only', '-z']);
   if (!staged) return null;
   await git(wt, [...await commitSettings(wt), ...NO_HOOKS, 'commit', '--no-verify', '-m', message]);
   return git(wt, ['rev-parse', '--short', 'HEAD']);
@@ -343,8 +359,9 @@ async function commitSettings(wt: string): Promise<string[]> {
 }
 
 export async function commitChanges(wt: string, commit: string): Promise<{ files: string[]; stat: string }> {
-  const names = await git(wt, ['show', '--format=', '--name-only', '-z', commit]);
-  const stat = await git(wt, ['show', '--format=', '--shortstat', commit]);
+  // As in changesSince: a moved file counts at both ends, so a round and the result agree.
+  const names = await git(wt, ['show', '--format=', '--name-only', '--no-renames', '-z', commit]);
+  const stat = await git(wt, ['show', '--format=', '--shortstat', '--no-renames', commit]);
   return { files: names.split('\0').filter(Boolean), stat };
 }
 
@@ -400,9 +417,11 @@ export async function revertCommit(wt: string, commit: string, linked: string[] 
 }
 
 export async function changesSince(wt: string, base: string): Promise<{ files: string[]; stat: string }> {
-  const names = await git(wt, ['diff', '--name-only', base, 'HEAD']);
-  const stat = await git(wt, ['diff', '--shortstat', base, 'HEAD']);
-  return { files: names ? names.split('\n') : [], stat };
+  // A rename is a removal and an addition here: listed as one path, a file moved into the allowed targets would
+  // hide that it was taken from outside them.
+  const names = await git(wt, ['diff', '--name-only', '--no-renames', '-z', base, 'HEAD']);
+  const stat = await git(wt, ['diff', '--shortstat', '--no-renames', base, 'HEAD']);
+  return { files: names.split('\0').filter(Boolean), stat };
 }
 
 /** Detach links (including Windows junctions) before Git can follow them during deletion. */

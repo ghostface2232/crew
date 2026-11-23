@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { browserProfile } from './browser.ts';
 import { agentCommand, agentEnv } from './config.ts';
+import { clipEnd } from './text.ts';
 
 /** A check the lead asked for, run by the bridge itself so its result is observed, not reported by the worker. */
 export interface CheckResult {
@@ -21,7 +22,23 @@ export interface CheckResult {
 }
 
 export const CHECK_TIMEOUT_MS = 10 * 60_000;
+/** How long after the bridge's own timeout a check ends itself, so the bridge, while alive, is the one to report it. */
+const WATCHDOG_GRACE_MS = 30_000;
+/**
+ * The check's shell on macOS. The time limit above lives in a timer of the daemon, which a killed daemon takes with
+ * it, leaving the check's process group running for good. So the group carries a limit of its own: a watchdog that
+ * kills the group ($2 seconds), started before the command ($1). The command gets a shell of its own through exec,
+ * or its own `wait` would wait for the watchdog too. Only a sleep that ran its time kills: one the command ended
+ * (`pkill sleep` in a test's cleanup) or that could not start leaves the check running as before.
+ */
+const WATCHED = '(/bin/sleep "$2" && kill -KILL 0) </dev/null >/dev/null 2>&1 & exec /bin/sh -c "$1"';
 const KEEP_OUTPUT = 4000;
+const runningChecks = new Set<() => Promise<void>>();
+
+/** Each stop signals the group or job host synchronously, before the daemon exits. */
+export function stopChecks(): void {
+  for (const stop of runningChecks) void stop();
+}
 
 /** The worker's own limits for the check: writes only where it may write, the token hidden, and no outside network unless it had network. */
 function checkProfile(cwd: string, tmp: string, unreadable: string[], network: boolean): string {
@@ -30,11 +47,12 @@ function checkProfile(cwd: string, tmp: string, unreadable: string[], network: b
   const profile = browserProfile([cwd, tmp], unreadable);
   if (network) return profile;
   // Local servers stay reachable for test suites; other local sockets (an SSH agent, Docker) do not.
+  // The socket rules come first: on macOS 27 a later `remote unix-socket` denial also refuses TCP to localhost.
   return `${profile}
-(deny network-outbound (remote ip "*:*"))
-(allow network-outbound (remote ip "localhost:*"))
 (deny network-outbound (remote unix-socket))
-(allow network-outbound (remote unix-socket ${[...both(cwd), ...both(tmp)].map((dir) => `(subpath ${quote(dir)})`).join(' ')}))`;
+(allow network-outbound (remote unix-socket ${[...both(cwd), ...both(tmp)].map((dir) => `(subpath ${quote(dir)})`).join(' ')}))
+(deny network-outbound (remote ip "*:*"))
+(allow network-outbound (remote ip "localhost:*"))`;
 }
 
 function real(file: string): string {
@@ -136,8 +154,8 @@ const skip = (command: string, skipped: string): CheckResult => ({ command, exit
  * with more than the worker could do: on macOS and Windows under the same file and network limits, and elsewhere
  * not at all. Windows uses the sandbox of `codex`, the configured Codex binary.
  */
-export async function runCheck(command: string, cwd: string, tmp: string, unreadable: string[], options: { network?: boolean; timeoutMs?: number; platform?: NodeJS.Platform; signal?: AbortSignal; codex?: string } = {}): Promise<CheckResult> {
-  const { network = false, timeoutMs = CHECK_TIMEOUT_MS, platform = process.platform, signal, codex = 'codex' } = options;
+export async function runCheck(command: string, cwd: string, tmp: string, unreadable: string[], options: { network?: boolean; timeoutMs?: number; graceMs?: number; platform?: NodeJS.Platform; signal?: AbortSignal; codex?: string } = {}): Promise<CheckResult> {
+  const { network = false, timeoutMs = CHECK_TIMEOUT_MS, graceMs = WATCHDOG_GRACE_MS, platform = process.platform, signal, codex = 'codex' } = options;
   if (platform !== 'darwin' && platform !== 'win32') return skip(command, 'only macOS and Windows can hold the check to the worker\'s limits; run it yourself');
   let launch: { bin: string; args: string[]; env: NodeJS.ProcessEnv };
   // Windows only: the secret that marks the wrapper's status line, and the files it reads.
@@ -194,7 +212,7 @@ export async function runCheck(command: string, cwd: string, tmp: string, unread
       env: { ...env, CREW_CHECK_LINE: line },
     };
   } else {
-    launch = { bin: '/usr/bin/sandbox-exec', args: ['-p', checkProfile(cwd, tmp, unreadable, network), '/bin/sh', '-c', command], env: process.env };
+    launch = { bin: '/usr/bin/sandbox-exec', args: ['-p', checkProfile(cwd, tmp, unreadable, network), '/bin/sh', '-c', WATCHED, 'crew-check', command, String((timeoutMs + graceMs) / 1000)], env: process.env };
   }
   const sandboxed = true;
   const started = Date.now();
@@ -205,7 +223,7 @@ export async function runCheck(command: string, cwd: string, tmp: string, unread
     let reported: number | null = null;
     let tail = '';
     const keep = (chunk: Buffer) => {
-      output = (output + chunk.toString()).slice(-KEEP_OUTPUT);
+      output = clipEnd(output + chunk.toString(), KEEP_OUTPUT);
     };
     const child = spawn(launch.bin, launch.args, {
       cwd,
@@ -251,6 +269,7 @@ export async function runCheck(command: string, cwd: string, tmp: string, unread
         child.kill('SIGKILL');
       });
     };
+    runningChecks.add(stop);
     const timer = setTimeout(() => {
       timedOut = true;
       stop();
@@ -270,6 +289,7 @@ export async function runCheck(command: string, cwd: string, tmp: string, unread
       // Whatever the check left running in the background could still change the worktree after the receipt.
       // On macOS a process that left the group (setsid) escapes this, though it keeps the sandbox's write limits.
       void stop().then(() => {
+        runningChecks.delete(stop);
         removeFiles();
         if (mark) output = output.replace(new RegExp(`\\n?${mark} \\d+\\n?`), '');
         resolve({ command, exit: signal?.aborted ? null : exit, timedOut, output: output.trimEnd(), ms: Date.now() - started, sandboxed });

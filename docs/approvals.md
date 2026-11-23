@@ -52,12 +52,14 @@ Each job receives a small per-job MCP server (`plugin/bridge/worker-mcp.ts`) wit
 | `recent_changes` | Shows the last 5 commits and latest diff for a path inside the working tree |
 | `rate` | Offered only when `CREW_JOB_RATES` is set (`review` or `delegate`); submits the worker's peer rating ([peer ratings](roles.md#peer-ratings)) |
 
+The worker waits in requests of at most two minutes against a single deadline. Each request includes the number of answers already shown so an answer arriving between requests wakes the worker even when another question remains open.
+
 A new `ask_lead` question wakes the lead while the worker keeps running. The lead responds with `answer`, a separate tool from the flow for user approvals and user questions.
 
 | Request | Body | From |
 | --- | --- | --- |
 | `POST /api/jobs/:id/questions` | `{ text, blocks?, attachments?, token }` | Worker MCP server |
-| `GET /api/jobs/:id/questions?token=&wait=` | | Worker MCP server |
+| `GET /api/jobs/:id/questions?token=&wait=&answered=` | | Worker MCP server |
 | `GET /api/jobs/:id/siblings?token=` | | Worker MCP server |
 | `POST /api/jobs/:id/browser` | `{ token }` | Worker MCP server |
 | `POST /api/jobs/:id/questions/:questionId` | `{ answer, attachments? }` | Lead |

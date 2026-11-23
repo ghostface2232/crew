@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 import { api } from './client.ts';
 import { VERSION } from './config.ts';
 import type { LeadQuestion } from './jobs.ts';
+import { clip as cut } from './text.ts';
 
 const TOOLS = [
   {
@@ -100,7 +101,7 @@ function within(given: unknown): { cwd: string; target: string } {
   return { cwd, target: path.relative(cwd, target) || '.' };
 }
 
-const clip = (text: string) => (text.length > MAX_OUTPUT ? `${text.slice(0, MAX_OUTPUT)}\n… cut at ${MAX_OUTPUT} characters; narrow the path or the pattern.` : text);
+const clip = (text: string) => (text.length > MAX_OUTPUT ? `${cut(text, MAX_OUTPUT)}\n… cut at ${MAX_OUTPUT} characters; narrow the path or the pattern.` : text);
 
 async function git(cwd: string, args: string[]): Promise<string> {
   try {
@@ -126,14 +127,23 @@ async function callTool(name: string, args: any): Promise<unknown> {
     case 'lead_answers': {
       const seconds = args.wait_seconds ?? 0;
       if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) throw new Error('wait_seconds must be a non-negative number.');
-      const { questions }: { questions: LeadQuestion[] } = await api('GET', `${route}/questions?${auth}&wait=${Math.min(seconds, 600)}`);
-      const fresh = questions.filter((q) => q.answer !== undefined && !shown.has(q.id));
-      for (const q of fresh) shown.add(q.id);
-      return {
-        answered: fresh.map(({ id, text, answer }) => ({ id, question: text, answer })),
-        open: questions.filter((q) => q.answer === undefined).map(({ id, text, blocks }) => ({ id, question: text, blocks })),
-        answered_earlier: questions.filter((q) => q.answer !== undefined).length - fresh.length,
-      };
+      const deadline = Date.now() + Math.min(seconds, 600) * 1000;
+      const known = shown.size;
+      for (;;) {
+        // Each request must receive headers before fetch's five-minute timeout.
+        const wait = Math.max(0, Math.min((deadline - Date.now()) / 1000, 120));
+        const { questions }: { questions: LeadQuestion[] } = await api('GET', `${route}/questions?${auth}&answered=${known}&wait=${wait}`);
+        const answered = questions.filter((q) => q.answer !== undefined);
+        const open = questions.filter((q) => q.answer === undefined);
+        if (open.length && answered.length === known && Date.now() < deadline) continue;
+        const fresh = answered.filter((q) => !shown.has(q.id));
+        for (const q of fresh) shown.add(q.id);
+        return {
+          answered: fresh.map(({ id, text, answer }) => ({ id, question: text, answer })),
+          open: open.map(({ id, text, blocks }) => ({ id, question: text, blocks })),
+          answered_earlier: answered.length - fresh.length,
+        };
+      }
     }
     case 'browser':
       return api('POST', `${route}/browser`, { token });
@@ -147,7 +157,7 @@ async function callTool(name: string, args: any): Promise<unknown> {
       // Tracked and untracked files, never ignored ones; the pattern goes after -e so it cannot be read as an option.
       const out = await git(cwd, ['grep', '-n', '-I', '-E', '--untracked', ...(args.ignore_case ? ['-i'] : []), '-e', args.pattern, '--', target]);
       const lines = out.split('\n').filter(Boolean);
-      return { matches: lines.length, text: clip(lines.map((line) => (line.length > 300 ? `${line.slice(0, 300)}…` : line)).join('\n')) || 'No match.' };
+      return { matches: lines.length, text: clip(lines.map((line) => (line.length > 300 ? `${cut(line, 300)}…` : line)).join('\n')) || 'No match.' };
     }
     case 'recent_changes': {
       const { cwd, target } = within(args.path);

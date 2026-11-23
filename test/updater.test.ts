@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -63,6 +64,116 @@ function updater(dir: string, current = '0.2.0') {
   return { instance, seen };
 }
 const tempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'crew-updater-'));
+
+test('hand-over retains the digest verified at load even if the staged files change', async () => {
+  const dir = tempDir();
+  try {
+    const file = path.join(dir, installerName('0.3.0'));
+    const manifest = path.join(dir, 'staged.json');
+    fs.writeFileSync(file, payload);
+    fs.writeFileSync(manifest, JSON.stringify({ version: '0.3.0', sha256: sha(payload) }));
+    const { instance } = updater(dir);
+    await instance.load();
+    fs.writeFileSync(file, 'changed');
+    fs.writeFileSync(manifest, JSON.stringify({ version: '0.3.0', sha256: sha('changed') }));
+    assert.ok(instance.installing());
+    assert.equal(instance.installerSHA256, sha(payload));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the Windows supervisor verifies every installer launch, including interactive recovery', { skip: process.platform !== 'win32' }, async () => {
+  const { installScript, supervisorEnv } = await import('../desktop/updater.ts');
+  const dir = tempDir();
+  try {
+    const file = path.join(dir, 'installer.exe');
+    for (const scenario of ['intact', 'changed', 'recovery', 'changed-before-recovery']) {
+      fs.writeFileSync(file, scenario === 'changed' ? 'changed' : payload);
+      // Record launches without executing the fixture. WaitForExit can change it before the fallback.
+      const script = `
+        function Start-Process($FilePath, $ArgumentList, [switch]$PassThru, $ErrorAction) {
+          [Console]::WriteLine('launch')
+          $p = [PSCustomObject]@{ Handle = 0; ExitCode = 0 }
+          $p | Add-Member ScriptMethod WaitForExit {
+            if ($env:SCENARIO -eq 'recovery') { $this.ExitCode = 1 }
+            if ($env:SCENARIO -eq 'changed-before-recovery') {
+              [IO.File]::WriteAllText($env:CREW_INSTALLER, 'changed')
+              $this.ExitCode = 1
+            }
+          }
+          if ($PassThru) { return $p }
+        }
+        try { ${installScript} } catch { [Console]::WriteLine($_.Exception.Message); exit 1 }
+      `;
+      const run = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], {
+        env: { ...supervisorEnv(process.env), CREW_INSTALLER: file, CREW_INSTALLER_SHA256: sha(payload), CREW_APP: path.join(dir, 'missing.exe'), SCENARIO: scenario },
+        encoding: 'utf8',
+      });
+      assert.ifError(run.error);
+      const changed = scenario.startsWith('changed');
+      assert.equal(run.status, changed ? 1 : 0, run.stderr);
+      const launches = run.stdout.match(/^launch\r?$/gm)?.length ?? 0;
+      assert.equal(launches, { intact: 1, changed: 0, recovery: 2, 'changed-before-recovery': 1 }[scenario]);
+      if (changed) assert.match(run.stdout, /could not verify the update/i);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a silent install that fails reopens Crew, which is told why', { skip: process.platform !== 'win32' }, async () => {
+  const { installScript, supervisorEnv, UPDATE_FAILED } = await import('../desktop/updater.ts');
+  const dir = tempDir();
+  try {
+    const file = path.join(dir, 'installer.exe');
+    fs.writeFileSync(file, payload);
+    const script = `
+      function Start-Process($FilePath, $ArgumentList, [switch]$PassThru, $ErrorAction) {
+        [Console]::WriteLine("launch $FilePath | $env:${UPDATE_FAILED}")
+        $p = [PSCustomObject]@{ Handle = 0; ExitCode = 0 }
+        $p | Add-Member ScriptMethod WaitForExit { $this.ExitCode = 2 }
+        if ($PassThru) { return $p }
+      }
+      ${installScript}
+    `;
+    const run = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], {
+      env: { ...supervisorEnv(process.env), CREW_INSTALLER: file, CREW_INSTALLER_SHA256: sha(payload), CREW_APP: process.execPath },
+      encoding: 'utf8',
+    });
+    assert.equal(run.status, 0, run.stderr);
+    assert.deepEqual(run.stdout.trim().split(/\r?\n/), [
+      `launch ${file} | `,
+      `launch ${process.execPath} | The installer stopped with exit code 2, so the update was not installed.`,
+    ]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a failed install stays on show through later checks until it is seen, and a new install clears it', async () => {
+  await startServer();
+  const dir = path.join(tempDir(), 'updates');
+  served = payload;
+  feedStatus = 200;
+  feed = release('0.3.0', `${base}/download/Crew-Setup-0.3.0.exe`, sha(payload));
+  const { instance } = updater(dir);
+  instance.installFailed('The installer stopped with exit code 2, so the update was not installed.');
+  await instance.check();
+  await instance.download();
+  assert.equal(instance.status.state, 'ready');
+  assert.equal(instance.status.installError, 'The installer stopped with exit code 2, so the update was not installed.');
+  instance.seen();
+  assert.equal(instance.status.installError, undefined);
+  // A failed check, which restores the state it started from, does not bring it back.
+  feedStatus = 500;
+  await instance.check();
+  assert.equal(instance.status.state, 'ready');
+  assert.equal(instance.status.installError, undefined);
+  instance.installFailed('again');
+  assert.equal(instance.installing(), true);
+  assert.equal(instance.status.installError, undefined);
+});
 
 test('a check during load cannot remove the installer being restored', async () => {
   const dir = tempDir();
@@ -135,6 +246,7 @@ test('downloads allow ongoing data and time out on missing headers or stalled bo
         await downloading;
         if (scenario === 'slow') {
           assert.equal(instance.status.state, 'ready');
+          assert.equal(instance.installerSHA256, sha(bytes));
           assert.deepEqual(fs.readFileSync(instance.installer!), bytes);
           t.mock.timers.tick(60_000);
           assert.equal(signal!.aborted, false);

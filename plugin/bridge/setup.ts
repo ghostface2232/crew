@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { agentCommand, agentEnv, HOME, installed, loadConfig, PLUGIN_ROOT, VERSION } from './config.ts';
+import { agentCommand, agentEnv, HOME, installed, LEDGER_ASIDE, loadConfig, PLUGIN_ROOT, VERSION } from './config.ts';
 
 /**
  * Registering this plugin with Claude Code and checking what Crew needs. A desktop app carries a built copy of the
@@ -241,6 +241,27 @@ export class SetupCache {
   }
 }
 
+/**
+ * A job ledger the daemon set aside is the only sign that the jobs, receipts and pull request watches it held are
+ * gone from view; the checklist is where the board, the apps and `crew doctor` already look.
+ */
+export function ledgerItem(home = HOME): SetupItem | null {
+  let aside: string[];
+  try {
+    aside = fs.readdirSync(home).filter((name) => name.startsWith(LEDGER_ASIDE)).sort();
+  } catch {
+    return null;
+  }
+  if (!aside.length) return null;
+  const file = path.join(home, aside.at(-1)!);
+  return {
+    id: 'ledger',
+    label: 'Job ledger',
+    ok: false,
+    detail: `Crew could not read its job ledger and set it aside as ${file}. The jobs, delivery receipts and pull request watches it held are not in the current ledger. To bring them back, quit Crew, repair the file and put it back as jobs.json; otherwise delete it.`,
+  };
+}
+
 /** What Crew needs, as the app's checklist and `crew doctor` show it. Signing in is always left to the user. */
 export async function checks(): Promise<SetupItem[]> {
   const config = loadConfig();
@@ -270,5 +291,7 @@ export async function checks(): Promise<SetupItem[]> {
   if (config.antigravity.enabled) {
     items.push({ id: 'antigravity', label: 'Antigravity CLI', ok: agy.ok, detail: agy.ok ? agy.out : 'Not found. Install it, then run `agy` once to sign in.' });
   }
+  const ledger = ledgerItem();
+  if (ledger) items.push(ledger);
   return items;
 }

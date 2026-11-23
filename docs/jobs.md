@@ -10,7 +10,7 @@ Lead tools start and manage work in worker sessions. Writable jobs use isolated 
 | --- | --- |
 | `delegate` | Hand a piece of work (`role`: `delegate`, `refactor`, `release`, or `fix`) to a role holder in an isolated git worktree (`~/.crew/worktrees/<repo>-<hash>/<job id>/<repo folder>`) on branch `crew-<job id>`. Optional `check` runs a sandboxed shell command in the worktree after each turn |
 | `review` | Hand a read-only review to a cross-reviewer (`review` role). `runs_app: true` routes to `verify` in a writable snapshot. Defaults to `adversarial`. `mode: "standard"` uses Codex's built-in review |
-| `polish` | Hand UI copy, comment, and doc cleanup to the `polish` role. Edits outside `targets` are reported as out of scope |
+| `polish` | Hand UI copy, comment, and doc cleanup to the `polish` role. Edits outside `targets` are reported as out of scope. Scope checks compare literal Git paths, including non-ASCII names and embedded newlines, and count a moved file at both its old and new path |
 | `debate` | Run a read-only multi-round debate (`debate` role, up to 6 rounds, default 3) over a hard decision |
 | [`mission`](missions.md) | Start, advance, revise, or close a mission and manage its `tasks` and linked pull requests (`pr`) |
 | [`route`](usage-and-presets.md) | Ask who should take a role (or `lead`) based on remaining usage and role holders, plus active preset policy and recent model notes |
@@ -73,6 +73,8 @@ Question jobs (`ask: true`) are read-only. Codex runs without approval prompts a
 ## Outcome reporting
 
 Work roles open their report with `## Outcome` (`done`, `partial`, or `blocked`), stored in `Job.outcome` for the latest turn (omitted on reviews, debates, and questions). Results flag mismatches with bridge observations—such as `outcome: done as declared, but the bridge check failed`, no files changed after a refusal/decline, or `outcome: not declared`. Acceptance lines list kept round commits for cherry-picking when known.
+
+If the bridge cannot collect a finished turn's result (the transport commit or the diff fails), the job fails with `could not collect the result: …` and still keeps the worker's report, so the lead reads what the worker did beside the failure; when an earlier turn's result is on record, the message says the listed changes are that turn's. A turn that was cancelled and followed by another cannot fail its successor: a start or send that fails after the job has moved on is dropped.
 
 ## Worker tools
 

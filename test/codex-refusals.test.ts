@@ -89,6 +89,50 @@ test('replies to loaded threads with shared links start a turn without resuming'
   assert.deepEqual(calls, ['turn/start']);
 });
 
+test('a reply held up while the server starts sends nothing once the job has moved to another turn', async (t) => {
+  const h = harness(false);
+  const calls: string[] = [];
+  const started = Promise.withResolvers<{ request: (method: string) => Promise<unknown> }>();
+  t.mock.method(h.internal, 'ensure', () => started.promise);
+  t.mock.method(h.internal, 'threadParams', async () => ({}));
+  h.internal.loaded.add('parent');
+  h.job.turns = 2;
+  const stale = h.adapter.reply(h.ctl as any, 'A');
+  // Cancelled, and followed by turn 3, before the server was up.
+  h.job.turns = 3;
+  started.resolve({ request: async (method) => { calls.push(method); return { turn: { id: 'next' } }; } });
+  await stale;
+  assert.deepEqual(calls, []);
+  await h.adapter.reply(h.ctl as any, 'B');
+  assert.deepEqual(calls, ['turn/start']);
+});
+
+test('a cancelled turn whose resume ends first leaves the next turn\'s resume vouched for', async (t) => {
+  const h = harness(false);
+  const resumes: PromiseWithResolvers<object>[] = [];
+  t.mock.method(h.internal, 'ensure', async () => ({
+    request: (method: string) => {
+      if (method !== 'thread/resume') return Promise.resolve({ turn: { id: 'next' } });
+      resumes.push(Promise.withResolvers());
+      return resumes.at(-1)!.promise;
+    },
+  }));
+  t.mock.method(h.internal, 'threadParams', async () => ({ config: { features: { plugins: false } } }));
+  Object.assign(h.job, { id: 'cx-1', turns: 2 });
+  Object.assign(h.ctl, { capabilities: () => {} });
+  const stale = h.adapter.reply(h.ctl as any, 'A');
+  while (resumes.length < 1) await new Promise((resolve) => setImmediate(resolve));
+  h.job.turns = 3;
+  const current = h.adapter.reply(h.ctl as any, 'B');
+  while (resumes.length < 2) await new Promise((resolve) => setImmediate(resolve));
+  resumes[0].resolve({});
+  await stale;
+  // B is still waiting on Codex: a stall check must not call the job ended.
+  assert.equal((await h.adapter.probe(h.ctl as any)).verdict, 'working');
+  resumes[1].resolve({});
+  await current;
+});
+
 test('Codex approvals show bounded action details without protocol ids or environment fields', async () => {
   const h = harness();
   const env = { SECRET_TOKEN: 'never-print-this' };

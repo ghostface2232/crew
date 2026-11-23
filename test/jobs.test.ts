@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -1288,6 +1289,94 @@ test('Codex\'s Windows sandbox gets the macOS limits as literal TOML, or nothing
   assert.equal(args[6], 'permissions.crew_check.network.enabled=false');
   assert.equal(windowsSandboxArgs('C:\\wt', 'C:\\tmp\\c', [], true)![6], 'permissions.crew_check.network.enabled=true');
   assert.equal(windowsSandboxArgs("C:\\it's", 'C:\\tmp', [], false), null);
+});
+
+test('a check without the network reaches local servers and its own sockets, and nothing else', { skip: !SANDBOXED || process.platform !== 'darwin' }, async (t) => {
+  const cwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-check-net-')));
+  const outside = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-outside-')));
+  const tmp = path.join(cwd, 'tmp');
+  fs.mkdirSync(tmp);
+  const servers: net.Server[] = [];
+  t.after(() => {
+    for (const server of servers) server.close();
+    for (const dir of [cwd, outside]) fs.rmSync(dir, { recursive: true, force: true });
+  });
+  const serve = async (where: number | string) => {
+    const server = net.createServer((socket) => socket.end('hi'));
+    servers.push(server);
+    await new Promise<void>((resolve) => (typeof where === 'number' ? server.listen(where, '127.0.0.1', resolve) : server.listen(where, resolve)));
+    return server;
+  };
+  const port = ((await serve(0)).address() as net.AddressInfo).port;
+  await serve(path.join(outside, 's'));
+  await serve(path.join(tmp, 's'));
+  const connect = (target: string) => runCheck(
+    `node -e "const s = require('node:net').connect(${target}); s.setTimeout(2000, () => { console.log('TIMEOUT'); s.destroy(); }); s.on('error', (e) => console.log('ERR', e.code)); s.on('data', (d) => console.log('OK', String(d)));"`,
+    cwd, tmp, []).then((result) => result.output);
+  assert.equal(await connect(`${port}, '127.0.0.1'`), 'OK hi');
+  assert.equal(await connect(`'${path.join(tmp, 's')}'`), 'OK hi');
+  // 192.0.2.0/24 is reserved for documentation: refused here, and unreachable if the rule were missing.
+  assert.equal(await connect(`80, '192.0.2.1'`), 'ERR EPERM');
+  assert.equal(await connect(`'${path.join(outside, 's')}'`), 'ERR EPERM');
+});
+
+test('a check ends at its own limit when the daemon that started it is killed, and its own wait is not held up', { skip: !SANDBOXED || process.platform !== 'darwin' }, async (t) => {
+  const cwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-check-orphan-')));
+  const tmp = path.join(cwd, 'tmp');
+  fs.mkdirSync(tmp);
+  const listener = net.createServer();
+  await new Promise<void>((resolve) => listener.listen(0, '127.0.0.1', resolve));
+  t.after(() => { listener.close(); fs.rmSync(cwd, { recursive: true, force: true }); });
+  const port = (listener.address() as net.AddressInfo).port;
+  // A watchdog whose sleep the command itself ends does not take the check with it.
+  const spared = await runCheck('sleep 0.2; kill $(pgrep -g 0 -x sleep); sleep 0.5; echo survived', cwd, tmp, [], { timeoutMs: 5000, graceMs: 20_000 });
+  assert.deepEqual([spared.exit, spared.output.split('\n').at(-1)], [0, 'survived']);
+  // The command's own jobs and `wait` see nothing of the watchdog: it returns at once, well inside the limit.
+  const waited = await runCheck('(sleep 0.2; echo first) & (sleep 0.1; echo second) & wait; echo waited', cwd, tmp, [], { timeoutMs: 5000, graceMs: 20_000 });
+  assert.deepEqual([waited.exit, waited.timedOut, waited.output.split('\n').at(-1)], [0, false, 'waited']);
+  assert.ok(waited.ms < 3000, `took ${waited.ms} ms`);
+  // A daemon that is killed takes its timer with it; the check holds a socket until something ends it.
+  const connected = new Promise<net.Socket>((resolve) => listener.once('connection', resolve));
+  const hold = `node -e "const s = require('node:net').connect(${port}, '127.0.0.1'); s.setTimeout(25000, () => s.destroy()); s.resume()"`;
+  const daemon = spawn(process.execPath, ['--input-type=module', '-e',
+    `import { runCheck } from ${JSON.stringify(new URL('../plugin/bridge/check.ts', import.meta.url).href)};
+     await runCheck(${JSON.stringify(hold)}, ${JSON.stringify(cwd)}, ${JSON.stringify(tmp)}, [], { timeoutMs: 3000, graceMs: 500 });`], { stdio: 'ignore' });
+  // If the check never connects, its daemon ends it at the timeout and exits: a failure here, not a wait without end.
+  const socket = await Promise.race([connected, new Promise<never>((_resolve, reject) => daemon.once('exit', () => reject(new Error('the check ended before it connected'))))]);
+  const closed = new Promise<number>((resolve) => socket.once('close', () => resolve(Date.now())));
+  socket.on('error', () => {});
+  const killed = Date.now();
+  daemon.kill('SIGKILL');
+  const ended = await Promise.race([closed, new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000))]);
+  socket.destroy();
+  assert.ok(ended !== null, 'the check outlived its limit');
+  // It was the limit that ended it, not the daemon's death: the group is its own.
+  assert.ok(ended - killed > 500, `ended ${ended - killed} ms after the kill`);
+});
+
+test('on Windows a check ends with the daemon that started it when the daemon is killed', { skip: !SANDBOXED || process.platform !== 'win32' }, async (t) => {
+  const cwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-check-orphan-')));
+  const tmp = path.join(cwd, 'tmp');
+  fs.mkdirSync(tmp);
+  const listener = net.createServer();
+  await new Promise<void>((resolve) => listener.listen(0, '127.0.0.1', resolve));
+  t.after(() => { listener.close(); fs.rmSync(cwd, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); });
+  const port = (listener.address() as net.AddressInfo).port;
+  const connected = new Promise<net.Socket>((resolve) => listener.once('connection', resolve));
+  const hold = `node -e "const s = require('node:net').connect(${port}, '127.0.0.1'); s.setTimeout(25000, () => s.destroy()); s.resume()"`;
+  // Detached, as the plugin and the app start the daemon. Its own timer is far off, so only its death can end the check.
+  const daemon = spawn(process.execPath, ['--input-type=module', '-e',
+    `import { runCheck } from ${JSON.stringify(new URL('../plugin/bridge/check.ts', import.meta.url).href)};
+     await runCheck(${JSON.stringify(hold)}, ${JSON.stringify(cwd)}, ${JSON.stringify(tmp)}, [], { timeoutMs: 60_000 });`], { stdio: 'ignore', detached: true, windowsHide: true });
+  const socket = await Promise.race([connected, new Promise<never>((_resolve, reject) => daemon.once('exit', () => reject(new Error('the check ended before it connected'))))]);
+  const closed = new Promise<void>((resolve) => socket.once('close', () => resolve()));
+  socket.on('error', () => {});
+  daemon.kill('SIGKILL');
+  // Node holds a child it does not detach, the job host here, in a job object that kills it when the daemon's handle
+  // closes; the host's own job, nested in that one, takes the rest of the check.
+  const ended = await Promise.race([closed.then(() => true), new Promise<false>((resolve) => setTimeout(() => resolve(false), 8000))]);
+  socket.destroy();
+  assert.ok(ended, 'the check outlived the daemon');
 });
 
 test('a check is not run where the worker\'s limits cannot be applied', async () => {
@@ -2674,4 +2763,132 @@ test('a running turn\'s diff is kept in memory, bounded, and dropped when the jo
   await settled(jobs, job);
   assert.equal(jobs.liveDiff(job.id), null);
   assert.equal(job.liveDiff, undefined);
+});
+
+test('text cut for the record stays well-formed when the cut lands inside an emoji', async (t) => {
+  let ctl!: JobCtl;
+  const { jobs, home, events, adapter } = harness((started) => { ctl = started; });
+  t.after(() => { jobs.flush(); fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }); });
+  // The 80th UTF-16 unit of the title, and the 140th of the report's first line, is the first half of the pair.
+  const job = await jobs.create({ kind: 'delegate', task: `${'a'.repeat(79)}😀 and more`, cwd: home, isolation: 'in_place' });
+  while (!ctl) await new Promise((resolve) => setTimeout(resolve, 5));
+  ctl.refused(`${'r'.repeat(119)}😀 tail`, 'outside the task');
+  ctl.done(`${'b'.repeat(139)}😀 tail\n${'c'.repeat(19_999)}😀 tail`);
+  await settled(jobs, job);
+  adapter.reply = async () => {};
+  await jobs.reply(job.id, { message: `${'d'.repeat(79)}😀 tail` });
+  // What the macOS app decodes: one lone half anywhere and it refuses the whole state.
+  for (const [name, text] of [['job', JSON.stringify(job)], ['events', JSON.stringify(events)]] as const) {
+    assert.doesNotMatch(text, /\\ud[89ab][0-9a-f]{2}(?!\\ud[c-f])/i, name);
+  }
+  assert.equal(job.title, 'a'.repeat(79));
+});
+
+test('a job ledger that cannot be read is left as it is, not replaced by an empty one', () => {
+  const quiet = { onEvent: () => {}, onJob: () => {}, onAttention: () => {} };
+  const record = '"state":"done","cwd":"/x","seq":1,"delivered":1';
+  for (const content of [
+    '{"seq":3,"jobs":[{"id":"cx-1"', '{}', 'null', '{"seq":1,"jobs":[null]}',
+    // Whatever the restore itself cannot take in: a record with nothing but an id, a field of the wrong kind,
+    // two records under one id (saved back, they would be one), a receipt no save could read.
+    '{"seq":1,"jobs":[{"id":"cx-1"}]}',
+    `{"seq":1,"jobs":[{"id":"cx-1",${record},"news":{}}]}`,
+    `{"seq":1,"jobs":[{"id":"cx-1",${record},"project":4}]}`,
+    `{"seq":1,"jobs":[{"id":"cx-1",${record},"evidence":{}}]}`,
+    `{"seq":1,"jobs":[{"id":"cx-1",${record}},{"id":"cx-1",${record}}]}`,
+    `{"seq":1,"jobs":[{"id":"cx-1",${record}}],"delivery":{"receipts":{"r":{"acknowledged":false}}}}`,
+  ]) {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-home-'));
+    const file = path.join(home, 'jobs.json');
+    fs.writeFileSync(file, content);
+    assert.throws(() => new Jobs(home, () => config, {} as never, quiet), /left untouched/, content);
+    assert.equal(fs.readFileSync(file, 'utf8'), content);
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+  // No file is a first start.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-home-'));
+  const jobs = new Jobs(home, () => config, {} as never, quiet);
+  assert.deepEqual(jobs.list(), []);
+  jobs.flush();
+  // A file that is there but out of reach is not a broken ledger: nothing may set it aside.
+  fs.rmSync(path.join(home, 'jobs.json'));
+  fs.mkdirSync(path.join(home, 'jobs.json'));
+  assert.throws(() => new Jobs(home, () => config, {} as never, quiet), (err: Error) => err.constructor === Error && /left untouched/.test(err.message));
+  fs.rmdirSync(path.join(home, 'jobs.json'));
+  // Evidence of the jobs in a ledger that was set aside stays until that file is gone.
+  const aside = path.join(home, 'jobs.json.unreadable-1');
+  const evidence = path.join(home, 'evidence', 'cx-kept');
+  fs.writeFileSync(aside, '{broken');
+  fs.mkdirSync(evidence, { recursive: true });
+  new Jobs(home, () => config, {} as never, quiet).flush();
+  new Jobs(home, () => config, {} as never, quiet).flush();
+  assert.equal(fs.existsSync(evidence), true);
+  fs.rmSync(aside);
+  new Jobs(home, () => config, {} as never, quiet).flush();
+  assert.equal(fs.existsSync(evidence), false);
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+test('a cancelled turn whose send fails late does not end the turn that followed it', async (t) => {
+  const { jobs, home, adapter } = harness((ctl) => ctl.done('first'));
+  t.after(() => { jobs.flush(); fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }); });
+  const job = await settled(jobs, await jobs.create({ kind: 'delegate', task: 'edit', cwd: home, isolation: 'in_place' }));
+  const held = Promise.withResolvers<void>();
+  const reached = Promise.withResolvers<void>();
+  adapter.reply = () => { reached.resolve(); return held.promise; };
+  const stale = jobs.reply(job.id, { message: 'A' });
+  await reached.promise;
+  await jobs.cancel(job.id);
+  assert.equal(job.state, 'cancelled');
+  adapter.reply = async () => {};
+  await jobs.reply(job.id, { message: 'B' });
+  assert.equal(job.state, 'running');
+  held.reject(new Error('turn A was interrupted'));
+  await stale;
+  assert.equal(job.state, 'running');
+  assert.equal(job.error, null);
+  // The turn's own failure still ends it.
+  adapter.reply = async () => { throw new Error('turn C could not start'); };
+  await jobs.cancel(job.id);
+  await jobs.reply(job.id, { message: 'C' });
+  assert.equal(job.state, 'failed');
+  assert.equal(jobs.get(job.id).error?.message, 'turn C could not start');
+});
+
+test('the worker\'s report is kept when its result cannot be collected', async (t) => {
+  const repo = tempRepo();
+  const { jobs, home } = harness((ctl) => {
+    // The transport commit has nothing to run in.
+    fs.rmSync(path.join(ctl.job.cwd, '.git'), { force: true });
+    ctl.done('## Outcome\ndone\n\nEdited app.js as asked.');
+  });
+  t.after(() => { jobs.flush(); fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }); fs.rmSync(repo, { recursive: true, force: true, maxRetries: 5 }); });
+  const job = await settled(jobs, await jobs.create({ kind: 'delegate', task: 'edit', cwd: repo }));
+  assert.equal(job.state, 'failed');
+  assert.match(job.error!.message, /^could not collect the result: /);
+  assert.equal(job.report, '## Outcome\ndone\n\nEdited app.js as asked.');
+  assert.deepEqual(job.exchange?.at(-1), { turn: 1, from: 'worker', text: job.report, at: job.exchange!.at(-1)!.at });
+  assert.match(describe(job), /--- report ---\n## Outcome\ndone\n\nEdited app\.js as asked\./);
+  assert.doesNotMatch(job.error!.message, /changes listed/);
+});
+
+test('a failed collection after an earlier turn says whose changes are listed', async (t) => {
+  const repo = tempRepo();
+  const { jobs, home, adapter } = harness((ctl) => {
+    fs.writeFileSync(path.join(ctl.job.cwd, 'app.js'), 'export const x = 2;\n');
+    ctl.done('first turn');
+  });
+  t.after(() => { jobs.flush(); fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }); fs.rmSync(repo, { recursive: true, force: true, maxRetries: 5 }); });
+  const job = await settled(jobs, await jobs.create({ kind: 'delegate', task: 'edit', cwd: repo }));
+  assert.equal(job.state, 'done');
+  const first = job.result!.commit;
+  adapter.reply = async (ctl) => {
+    fs.rmSync(path.join(ctl.job.cwd, '.git'), { force: true });
+    ctl.done('second turn');
+  };
+  await jobs.reply(job.id, { message: 'again' });
+  await settled(jobs, job);
+  assert.equal(job.state, 'failed');
+  assert.match(jobs.get(job.id).error!.message, /^could not collect the result: .* The changes listed are those of the last turn whose result was collected, not of this one\.$/s);
+  assert.deepEqual([job.report, job.result!.commit], ['second turn', first]);
 });

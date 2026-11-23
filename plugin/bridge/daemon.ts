@@ -10,13 +10,15 @@ import { boardAsset, BOARD_CSP } from './assets.ts';
 import { boardCredential, boardExpiry, ensureToken, evidenceSeal, sameToken, SESSION_COOKIE } from './auth.ts';
 import { AntigravityAdapter } from './adapters/antigravity.ts';
 import { CodexAdapter } from './adapters/codex.ts';
+import { stopChecks } from './check.ts';
+import { clientJson } from './text.ts';
 import { ClaudeSessions } from './claude.ts';
 import type { ClaudeSession } from './claude.ts';
-import { agentCommand, agentEnv, canonicalPath, HOME, installed, isRole, loadConfig, PLUGIN_ROOT, PORTS, ROLE_INFO, ROLES, VERSION, WORKERS } from './config.ts';
+import { agentCommand, agentEnv, canonicalPath, HOME, installed, isRole, LEDGER_ASIDE, loadConfig, PLUGIN_ROOT, PORTS, ROLE_INFO, ROLES, VERSION, WORKERS } from './config.ts';
 import type { Config } from './config.ts';
 import { evidenceType, openEvidence } from './evidence.ts';
 import { projectRoot } from './git.ts';
-import { followUps, isTerminal, Jobs } from './jobs.ts';
+import { followUps, isTerminal, Jobs, UnreadableLedger } from './jobs.ts';
 import { missionPreset, Missions } from './missions.ts';
 import type { Mission } from './missions.ts';
 import { Pulls } from './pulls.ts';
@@ -32,7 +34,7 @@ import { ANTIGRAVITY_MODELS, codexModels } from './tiers.ts';
 import { appendInstructions, instructionsFile, readInstructions, savePeerRatings, savePreset, saveRoles, writeInstructions } from './settings.ts';
 import { agentGaugeDir, fromCodexLimits, route as routeWork, UsageMonitor } from './usage.ts';
 import type { RouteKind } from './usage.ts';
-import type { EventKind, Job } from './jobs.ts';
+import type { EventKind, Job, JobsHooks } from './jobs.ts';
 
 /**
  * The Crew daemon: one long-lived process that owns the worker agents, the
@@ -62,12 +64,12 @@ const server = http.createServer((req, res) => {
     (result) => {
       if (result === undefined) return;
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify(result));
+      res.end(clientJson(result));
     },
     (err) => {
       const status = err instanceof HttpError ? err.status : 400;
       if (!res.headersSent) res.writeHead(status, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ error: String(err?.message ?? err) }));
+      res.end(clientJson({ error: String(err?.message ?? err) }));
     },
   );
 });
@@ -143,7 +145,7 @@ const BUILD = installed().build;
 
 const streams = new Set<http.ServerResponse>();
 function broadcast(type: string, data: unknown): void {
-  const frame = `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`;
+  const frame = `event: ${type}\ndata: ${clientJson(data)}\n\n`;
   for (const res of streams) res.write(frame);
 }
 
@@ -273,7 +275,26 @@ codex.onLimits = (limits) => {
   usage.supplement(fromCodexLimits(limits, Date.now()));
 };
 
-const jobs = new Jobs(HOME, loadConfig, { codex, antigravity }, {
+/**
+ * The job ledger. One that cannot be read is set aside, as missions.json is: the daemon starts with no jobs and the
+ * file keeps what it held. If it cannot be moved either, the error stands and the daemon does not start, since
+ * running on would save an empty ledger over it.
+ */
+function loadJobs(hooks: JobsHooks): Jobs {
+  const open = () => new Jobs(HOME, loadConfig, { codex, antigravity }, hooks);
+  try {
+    return open();
+  } catch (err) {
+    if (!(err instanceof UnreadableLedger)) throw err;
+    const file = path.join(HOME, 'jobs.json');
+    const aside = path.join(HOME, `${LEDGER_ASIDE}${Date.now()}`);
+    fs.renameSync(file, aside);
+    log(`jobs.json could not be used and was set aside as ${aside}; starting with no jobs. Cause: ${err.message}`);
+    return open();
+  }
+}
+
+const jobs: Jobs = loadJobs({
   onEvent: (event) => {
     broadcast('event', event);
     // A mission is alive as long as its jobs are; the lead need not report in while it waits on them.
@@ -601,7 +622,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     }
     if (pathname === '/api/stream') {
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
-      res.write(`event: state\ndata: ${JSON.stringify(state())}\n\n`);
+      res.write(`event: state\ndata: ${clientJson(state())}\n\n`);
       streams.add(res);
       // A stream outlives the check made when it opened, so a board's is ended when its credential lapses.
       const lapse = who?.board ? setTimeout(() => {
@@ -627,7 +648,14 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     }
     if (method === 'GET' && !questionId) {
       if (!jobs.workerAuthorized(id, url.searchParams.get('token'))) throw new HttpError(403, 'forbidden worker token');
-      return { questions: await jobs.leadAnswers(id, Number(url.searchParams.get('wait') ?? 0)) };
+      const wait = Number(url.searchParams.get('wait') ?? 0);
+      const known = url.searchParams.get('answered');
+      if (known !== null && wait > 0 && Number.isFinite(wait)) {
+        // An answer may arrive between polls while other questions are still open.
+        const questions = jobs.get(id).questions ?? [];
+        if (questions.filter((q) => q.answer !== undefined).length !== Number(known)) return { questions };
+      }
+      return { questions: await jobs.leadAnswers(id, wait) };
     }
   }
   const browserRoute = /^\/api\/jobs\/([\w-]+)\/browser$/.exec(pathname);
@@ -711,7 +739,10 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
   const jobRoute = /^\/api\/jobs\/([\w-]+)(?:\/(\w+))?$/.exec(pathname);
   if (jobRoute) {
     const [, id, action] = jobRoute;
-    if (method === 'GET' && !action) return { ...jobs.get(id), ...sealed(jobs.get(id)) };
+    if (method === 'GET' && !action) {
+      const job = jobs.get(id);
+      return { ...view(job), prompt: job.prompt, instructions: job.instructions };
+    }
     if (method === 'GET' && action === 'events') return jobs.eventsFor(id, 0);
     if (method === 'GET' && action === 'diff') return jobs.liveDiff(id) ?? { turn: jobs.get(id).turns, diff: '', at: null };
     if (method === 'GET' && action === 'wait') {
@@ -985,14 +1016,25 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
 let stopping = false;
 
 function shutdown(): void {
+  stopping = true;
   log('shutting down');
-  codex.shutdown();
-  antigravity.shutdown();
-  usage.stop();
-  jobs.flush();
-  missions.flush();
-  fs.rmSync(path.join(HOME, 'daemon.json'), { force: true });
-  process.exit(0);
+  let code = 0;
+  const attempt = (step: string, run: () => void) => {
+    try {
+      run();
+    } catch (err) {
+      code = 1;
+      log(`could not ${step} during shutdown:`, err);
+    }
+  };
+  attempt('stop checks', stopChecks);
+  attempt('stop Codex', () => codex.shutdown());
+  attempt('stop Antigravity', () => antigravity.shutdown());
+  attempt('stop the usage monitor', () => usage.stop());
+  attempt('save jobs', () => jobs.flush());
+  attempt('save missions', () => missions.flush());
+  attempt('remove daemon.json', () => fs.rmSync(path.join(HOME, 'daemon.json'), { force: true }));
+  process.exit(code);
 }
 
 fs.writeFileSync(path.join(HOME, 'daemon.json'), JSON.stringify({ pid: process.pid, port: PORT, version: VERSION, build: BUILD, root: PLUGIN_ROOT }));
@@ -1020,11 +1062,12 @@ async function setupState(refresh: boolean): Promise<{ items: SetupItem[]; packa
   const items = await setup.get(refresh, registering ?? undefined);
   return { items, packaged: PACKAGED, registering: registering !== null, registration };
 }
-// An app's copy registers itself on first launch and after each update, so its plugin matches its daemon. Copies that
-// sessions were still running at the last registration are removed once they have closed, and a registration that
+// An app's copy registers itself on first launch and after each update in the default home. The marketplace and
+// CLI are user-wide. Copies still in use at the last registration are removed once they have closed, and a registration that
 // another Claude Code process has undone is made again, checked after startup so the daemon does not wait on it.
-if (PACKAGED && !registered()) void registerPlugin();
-else if (PACKAGED && process.platform === 'win32') {
+const autoRegister = PACKAGED && process.env.CREW_HOME === undefined;
+if (autoRegister && !registered()) void registerPlugin();
+else if (autoRegister && process.platform === 'win32') {
   prunePlugins();
   void registrationMoved().then(
     (moved) => {

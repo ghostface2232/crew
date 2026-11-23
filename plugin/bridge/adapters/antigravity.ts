@@ -1,8 +1,10 @@
-import { spawn } from 'node:child_process';
-import { realpathSync, statSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { mkdirSync, realpathSync, statSync } from 'node:fs';
+import os from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 import path from 'node:path';
 import { tokenFile } from '../auth.ts';
+import { browserProfile } from '../browser.ts';
 import { agentCommand, agentEnv, HOME, VERSION } from '../config.ts';
 import type { Config } from '../config.ts';
 import { isTerminal, noteLeadDecline } from '../jobs.ts';
@@ -145,9 +147,12 @@ export class AntigravityAdapter implements Adapter {
   private appendsPrompt = false;
   private lastUsed = Date.now();
   private config: Config;
+  /** The Seatbelt profile the server runs under, when it is confined (`serverProfile`). */
+  private profile: string | null;
 
-  constructor(config: Config) {
+  constructor(config: Config, profile: string | null = null) {
     this.config = config;
+    this.profile = profile;
     setInterval(() => {
       const busy = [...this.sessions.values()].some((session) => session.turn?.alive);
       if (this.peer && !busy && Date.now() - this.lastUsed > IDLE_SHUTDOWN_MS) this.peer.close();
@@ -166,8 +171,11 @@ export class AntigravityAdapter implements Adapter {
       return;
     }
     ctl.capabilities({
-      filesystem: ctl.job.sandbox === 'read-only' ? 'read-only; Crew refuses every edit' : 'edits inside the workspace only; Crew refuses the rest',
-      network: 'agent-managed',
+      filesystem: ctl.job.sandbox === 'read-only' ? 'read-only; Crew refuses every edit'
+        : this.profile ? "edits inside the workspace only; a sandbox holds commands to Crew's worktrees and temp"
+          : 'edits inside the workspace only; Crew refuses the rest',
+      // A confined engineer's commands run unasked, in a sandbox that leaves the network open.
+      network: this.profile && ctl.job.sandbox !== 'read-only' && ctl.job.kind === 'delegate' ? 'on' : 'agent-managed',
       plugins: [],
     });
     const session = this.session(res.sessionId);
@@ -536,7 +544,7 @@ export class AntigravityAdapter implements Adapter {
   private unasked(session: Session, turn: Turn, call: ToolCall, mode?: string): void {
     const { ctl } = turn;
     const { job } = ctl;
-    let verdict = decide(job.kind, job.cwd, call, job.sandbox === 'read-only');
+    let verdict = decide(job.kind, job.cwd, call, job.sandbox === 'read-only', this.profile !== null);
     // A report may omit the input that a request must carry. That rule keeps the user from approving what they cannot
     // see; here nothing is left to approve, so the action is reported like any other the engineer ran unasked.
     if (typeof verdict === 'object' && verdict.refuse === `${call.kind ?? 'other'} request without its input`) verdict = 'ask';
@@ -577,7 +585,11 @@ export class AntigravityAdapter implements Adapter {
   private async launch(): Promise<RpcPeer> {
     const env = agentEnv();
     const { bin, args, shell } = agentCommand(this.config.antigravity.bin, ['acp'], env);
-    const child = spawn(bin, args, { env, shell, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    // Confined, the server and every command it runs share one sandbox. agy's own terminal sandbox cannot start inside
+    // another, and its ACP sessions do not let it write the workspace (agy 1.5.14), so it is turned off here.
+    const child = this.profile
+      ? spawn('/usr/bin/sandbox-exec', ['-p', this.profile, bin, ...(args ?? []), '--sandbox=false'], { env, stdio: ['pipe', 'pipe', 'pipe'] })
+      : spawn(bin, args, { env, shell, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     const peer = new RpcPeer(child, {
       onNotification: (method, params) => this.onNotification(method, params),
       onRequest: (method, params) => this.onRequest(method, params),
@@ -736,7 +748,7 @@ export class AntigravityAdapter implements Adapter {
     }
     // Outside a turn there is nobody to act on an answer, and a queued request would never be settled.
     if (!session || !turn?.alive || turn.phase !== 'working') return cancelled;
-    const verdict = decide(turn.ctl.job.kind, turn.ctl.job.cwd, toolCall, turn.ctl.job.sandbox === 'read-only');
+    const verdict = decide(turn.ctl.job.kind, turn.ctl.job.cwd, toolCall, turn.ctl.job.sandbox === 'read-only', this.profile !== null);
 
     let allow = verdict === 'allow';
     if (verdict === 'ask') {
@@ -765,6 +777,72 @@ export class AntigravityAdapter implements Adapter {
     // Without a matching option the answer is "cancelled", which grants nothing.
     return option ? { outcome: { outcome: 'selected', optionId: option.optionId } } : cancelled;
   }
+}
+
+/**
+ * What a confined server may not read: where credentials for other services usually live. Not the keychain files,
+ * which agy reads its own sign-in from: without them every session fails with "Authentication required".
+ */
+const PRIVATE_PATHS = ['.ssh', '.aws', '.gnupg', '.kube', '.docker', '.netrc', '.git-credentials', '.config/gh'];
+/** agy's own files that a later, unconfined agy would run or obey: its programs, plugins, MCP servers, updates and settings. */
+const AGY_FIXED = ['bin', 'builtin', 'mcp', 'updater', 'settings.json'];
+/** The one file among them agy must write: a script it rewrites before each command, without which none starts. */
+const AGY_COMMAND_SCRIPT = path.join('bin', 'agentapi');
+
+/**
+ * The sandbox for an `agy acp` server on macOS, and so for every command it runs: agy starts its commands itself, and
+ * neither lets a client run them (it ignores ACP's terminal capability) nor lets its own terminal sandbox write an ACP
+ * session's workspace (agy 1.5.14, measured 2026-11-23). Writes are held to Crew's worktrees, the temp directories and
+ * agy's own state; `.git` in a worktree, the daemon's token and the usual credential folders are out of reach. The
+ * network stays open, since the server needs it to reach its model. Null when a path cannot be written into a profile.
+ */
+export function serverProfile(home: string = HOME, user: string = os.homedir(), tmp: string = os.tmpdir()): string | null {
+  const real = (file: string) => {
+    try {
+      return realpathSync(file);
+    } catch {
+      return file;
+    }
+  };
+  const both = (file: string) => [...new Set([file, real(file)])];
+  const quote = (value: string) => JSON.stringify(value);
+  const worktrees = path.join(home, 'worktrees');
+  const state = path.join(user, '.gemini', 'antigravity-cli');
+  if ([worktrees, state, tmp].some((dir) => both(dir).some((file) => /["\\\r\n]/.test(file)))) return null;
+  // A worktree is <worktrees>/<repository>/<job>/<name>, and its .git is a pointer the bridge's own git reads outside the sandbox.
+  const pointers = both(worktrees).map((dir) => `(deny file-write* (regex #"^${dir.replace(/[.*+?^${}()|[\]]/g, '\\$&')}/[^/]+/[^/]+/[^/]+/\\.git(/|$)"))`);
+  const fixed = AGY_FIXED.flatMap((name) => both(path.join(state, name))).map((file) => `(deny file-write* (literal ${quote(file)}) (subpath ${quote(file)}))`);
+  const hidden = PRIVATE_PATHS.flatMap((name) => both(path.join(user, name))).map((file) => `(deny file-read* (literal ${quote(file)}) (subpath ${quote(file)}))`);
+  const script = both(path.join(state, AGY_COMMAND_SCRIPT)).map((file) => `(allow file-write* (literal ${quote(file)}))`);
+  return [browserProfile([worktrees, state, tmp, '/tmp'], [tokenFile(home)]), ...pointers, ...fixed, ...script, ...hidden].join('\n');
+}
+
+/**
+ * Antigravity for the daemon. On macOS a job that writes only inside Crew's worktrees, or not at all, goes to a server
+ * confined by `serverProfile`, where an engineer's commands need no approval. A job that edits the user's own
+ * directory keeps a server without that sandbox, which asks before each command, as every job does elsewhere.
+ */
+export function antigravityAdapter(config: Config, home: string = HOME): Adapter {
+  const open = new AntigravityAdapter(config);
+  if (process.platform !== 'darwin') return open;
+  const worktrees = path.join(home, 'worktrees');
+  // The profile names real paths, which a directory has only once it exists.
+  mkdirSync(worktrees, { recursive: true });
+  const profile = serverProfile(home);
+  // A daemon that is itself sandboxed cannot start another sandbox.
+  if (!profile || spawnSync('/usr/bin/sandbox-exec', ['-p', profile, '/usr/bin/true']).status !== 0) return open;
+  const confined = new AntigravityAdapter(config, profile);
+  const pick = ({ job }: JobCtl) => (job.sandbox === 'read-only' || isInside(worktrees, job.cwd) ? confined : open);
+  return {
+    start: (ctl) => pick(ctl).start(ctl),
+    reply: (ctl, message) => pick(ctl).reply(ctl, message),
+    answer: (ctl, approve, message, opts) => pick(ctl).answer(ctl, approve, message, opts),
+    cancel: (ctl) => pick(ctl).cancel(ctl),
+    shutdown: () => {
+      open.shutdown();
+      confined.shutdown();
+    },
+  };
 }
 
 /** The session's mode, from ACP's modes or from a config option of the mode category. */
@@ -927,9 +1005,10 @@ function commandGrantKey({ program, subcommand, cwd }: Grant): string | undefine
  * - Switching mode is refused: "accept-edits" was measured to apply edits outside the workspace without asking.
  * - Anything else (execute, delete, move, fetch, unknown kinds) is refused for a reviewer or editor. For an engineer it is
  *   the user's call, provided the request says exactly what it will do.
+ * - An engineer's command is allowed when the server is confined: the sandbox, not the user, then keeps it to the job.
  * - A read-only job changes nothing whatever its role: a question is answered by the engineer, with a reviewer's limits.
  */
-export function decide(role: JobKind, cwd: string, toolCall: ToolCall, readOnly = false): 'allow' | 'ask' | { refuse: string } {
+export function decide(role: JobKind, cwd: string, toolCall: ToolCall, readOnly = false, confined = false): 'allow' | 'ask' | { refuse: string } {
   if (toolCall._meta?.mcpServerName === 'crew' && ['ask_lead', 'lead_answers', 'siblings', 'search', 'recent_changes', 'rate'].includes(toolCall._meta.mcpToolName ?? '')) return 'allow';
   const kind = toolCall.kind ?? 'other';
   // The daemon's secret is not a worker's to read, whatever the role. Commands are the user's to approve as before.
@@ -946,6 +1025,9 @@ export function decide(role: JobKind, cwd: string, toolCall: ToolCall, readOnly 
   if (readOnly && role !== 'review') return { refuse: kind === 'edit' ? 'edit in a read-only job' : kind };
   if (kind !== 'edit') {
     if (role !== 'delegate') return { refuse: kind };
+    // A command Crew's sandbox holds needs nobody's approval. agy's own tools for the other kinds run in the server
+    // itself, with its network, so they stay the user's call.
+    if (confined && kind === 'execute' && !toolCall._meta?.mcpServerName && !toolCall._meta?.mcpToolName) return 'allow';
     // A title alone may be a shortened form; the user must not approve what they cannot see in full.
     return toolCall.rawInput == null || toolCall.rawInput === '' ? { refuse: `${kind} request without its input` } : 'ask';
   }

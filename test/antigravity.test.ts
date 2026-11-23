@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
+import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { AntigravityAdapter, decide, formAnswer, formQuestions } from '../plugin/bridge/adapters/antigravity.ts';
+import { antigravityAdapter, AntigravityAdapter, decide, formAnswer, formQuestions, serverProfile } from '../plugin/bridge/adapters/antigravity.ts';
 import { tokenFile } from '../plugin/bridge/auth.ts';
 import { HOME, resolveConfig } from '../plugin/bridge/config.ts';
 import { Jobs } from '../plugin/bridge/jobs.ts';
@@ -1406,4 +1407,73 @@ for (const report of ['empty', 'narration', 'message', 'earlier'] as const) test
   assert.equal(job.turns, 1);
   assert.equal(job.declinedTurn, job.turns);
   assert.deepEqual(job.notes, [note]);
+});
+
+// The confined server needs macOS's sandbox, which a test run that is itself sandboxed cannot start.
+const unconfined = process.platform !== 'darwin' ? 'the confined server is macOS only'
+  : spawnSync('/usr/bin/sandbox-exec', ['-p', '(version 1)(allow default)', '/usr/bin/true']).status !== 0 ? 'no sandbox can start here' : false;
+
+test('a confined engineer\'s command is allowed, and nothing else changes', () => {
+  const run = command('rm -rf build && npm test');
+  assert.equal(decide('delegate', '/work', run), 'ask');
+  assert.equal(decide('delegate', '/work', run, false, true), 'allow');
+  // agy's other tools run in the server itself, and a Crew or plugin tool is not a command the sandbox holds.
+  assert.equal(decide('delegate', '/work', command('https://example.com', undefined, 'fetch'), false, true), 'ask');
+  assert.equal(decide('delegate', '/work', { ...run, _meta: { mcpServerName: 'other' } }, false, true), 'ask');
+  assert.deepEqual(decide('delegate', '/work', { ...run, locations: [{ path: tokenFile(HOME) }] }, false, true), { refuse: 'the Crew token file' });
+  assert.deepEqual(decide('polish', '/work', run, false, true), { refuse: 'execute' });
+  assert.deepEqual(decide('review', '/work', run, false, true), { refuse: 'execute' });
+  assert.deepEqual(decide('delegate', '/work', run, true, true), { refuse: 'execute' });
+});
+
+test('the server\'s sandbox writes only worktrees, temp and agy\'s state, and hides the token and credentials', { skip: unconfined }, (t) => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-agy-profile-')));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const [home, user, tmp] = ['crew', 'user', 'tmp'].map((name) => path.join(root, name));
+  const worktree = path.join(home, 'worktrees', 'repo-1234', 'ag-1', 'repo');
+  const state = path.join(user, '.gemini', 'antigravity-cli');
+  for (const dir of [worktree, path.join(state, 'bin'), path.join(state, 'mcp'), path.join(user, '.ssh'), tmp, path.join(root, 'project')]) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(worktree, '.git'), 'gitdir: elsewhere\n');
+  fs.writeFileSync(path.join(state, 'settings.json'), '{}');
+  fs.writeFileSync(path.join(user, '.ssh', 'id'), 'key');
+  fs.writeFileSync(tokenFile(home), 'secret');
+  const profile = serverProfile(home, user, tmp)!;
+  const attempt = (script: string) => spawnSync('/usr/bin/sandbox-exec', ['-p', profile, '/bin/sh', '-c', script]).status === 0;
+  for (const file of [path.join(worktree, 'made'), path.join(worktree, 'src', 'deep'), path.join(tmp, 'made'), path.join(state, 'bin', 'agentapi'), path.join(state, 'log')]) {
+    assert.equal(attempt(`mkdir -p "${path.dirname(file)}" && echo x > "${file}"`), true, `writes ${file}`);
+  }
+  for (const file of [path.join(worktree, '.git'), path.join(root, 'project', 'made'), path.join(home, 'made'), path.join(state, 'settings.json'), path.join(state, 'mcp', 'server'), path.join(state, 'bin', 'webm_encoder'), path.join(user, 'made')]) {
+    assert.equal(attempt(`echo x >> "${file}"`), false, `does not write ${file}`);
+  }
+  assert.equal(attempt(`cat "${path.join(worktree, '.git')}" "${path.join(state, 'settings.json')}"`), true);
+  for (const file of [tokenFile(home), path.join(user, '.ssh', 'id')]) assert.equal(attempt(`cat "${file}"`), false, `does not read ${file}`);
+  // A path the profile cannot quote confines nothing, so there is no profile to run under.
+  assert.equal(serverProfile(path.join(root, 'a"b'), user, tmp), null);
+});
+
+test('a job in a worktree runs its commands unasked on the confined server; one in the user\'s directory still asks', { timeout: 20000, skip: unconfined }, async (t) => {
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-agy-confined-')));
+  const repo = path.join(home, 'repo');
+  fs.mkdirSync(repo);
+  for (const args of [['init', '-q'], ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'init']]) execFileSync('git', args, { cwd: repo });
+  const bin = path.join(home, 'agy');
+  writeFakeBin(bin, commandServer([[command('rm -rf build && npm test')]]));
+  const config = resolveConfig({ notify: false, antigravity: { bin, enabled: true }, roles: { delegate: { agents: ['antigravity'] } } });
+  const adapter = antigravityAdapter(config, home);
+  const jobs = new Jobs(home, () => config, { codex: adapter, antigravity: adapter }, { onEvent: () => {}, onJob: () => {}, onAttention: () => {} });
+  t.after(async () => {
+    adapter.shutdown();
+    await new Promise((resolve) => setImmediate(resolve));
+    jobs.flush();
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 });
+  });
+  const isolated = await jobs.create({ kind: 'delegate', cwd: repo, task: 'test' });
+  while (!isolated.endedAt) await jobs.wait(isolated.id, isolated.seq, 1000);
+  assert.deepEqual(JSON.parse(isolated.report!), { 'command-1-0': 'allow_once' });
+
+  const inPlace = await jobs.create({ kind: 'delegate', cwd: repo, isolation: 'in_place', task: 'test' });
+  while (!inPlace.waiting) await jobs.wait(inPlace.id, inPlace.seq, 1000);
+  await jobs.reply(inPlace.id, { decision: 'deny', request_id: inPlace.waiting.id });
+  while (!inPlace.endedAt) await jobs.wait(inPlace.id, inPlace.seq, 1000);
+  assert.deepEqual(JSON.parse(inPlace.report!), { 'command-1-0': 'reject_once' });
 });

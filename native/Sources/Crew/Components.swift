@@ -696,39 +696,13 @@ extension DetailItem where Accessory == EmptyView {
     }
 }
 
-/// The detail panel's last row: the job's or session's id at the leading edge, its actions at the trailing edge,
-/// centered on one line. The id gives way first, shortening in the middle; when even a short id leaves the actions
-/// too little room, it moves below them. Its menu copies it whole.
+/// The detail panel's last row: its actions at the trailing edge.
 struct DetailFooter<Actions: View>: View {
-    let id: String
     @ViewBuilder var actions: Actions
-    /// The least of the id worth showing beside the actions before it moves below them. It is also the id's ideal
-    /// width: `ViewThatFits` measures ideal sizes, so the full id would otherwise push the row to the fallback.
-    private static var idMinWidth: CGFloat { 80 }
     var body: some View {
         VStack(alignment: .leading, spacing: Space.ml) {
             Divider().padding(.bottom, Space.xs)
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: Space.m) {
-                    idText.frame(minWidth: Self.idMinWidth, idealWidth: Self.idMinWidth, maxWidth: .infinity, alignment: .leading).layoutPriority(-1)
-                    Spacer(minLength: WorkspaceStyle.rowSpacer)
-                    HStack(spacing: Space.m) { actions }.fixedSize()
-                }
-                VStack(alignment: .leading, spacing: Space.ml) {
-                    HStack(spacing: Space.m) { Spacer(minLength: 0); actions }
-                    idText
-                }
-            }
+            HStack(spacing: Space.m) { Spacer(minLength: 0); actions }
         }
-    }
-    private var idText: some View {
-        Text(id).font(Typeface.codeSmall).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle)
-            .help(id)
-            .contextMenu {
-                Button("Copy ID", systemImage: "doc.on.doc") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(id, forType: .string)
-                }
-            }
     }
 }

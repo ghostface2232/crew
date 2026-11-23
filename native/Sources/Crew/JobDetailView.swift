@@ -189,13 +189,18 @@ struct JobDetailView: View {
         if !combined.isEmpty {
             detailSection("Activity", symbol: "bolt") { EventList(events: combined) }
         }
-        DetailFooter(id: job.id) {
-            if let session = job.sessionId, let worker = store.state.agents[job.agent], job.capabilities?.confined != true {
-                CopyButton(title: "Resume Command", text: "\(worker.resume) \(session)", help: "Copy the command that resumes this job's session")
-            }
-            if job.isActive {
-                Button("Cancel Job", systemImage: "stop.circle", role: .destructive) { Task { await store.cancel(job) } }.pillButton()
-                    .disabled(!store.connected || store.actions["cancel:\(id):\(job.turns)"]?.locked == true)
+        let resume = job.capabilities?.confined == true ? nil
+            : job.sessionId.flatMap { session in store.state.agents[job.agent].map { "\($0.resume) \(session)" } }
+        // A finished job may have nothing left to do, and then has no footer.
+        if resume != nil || job.isActive {
+            DetailFooter {
+                if let resume {
+                    CopyButton(title: "Resume Command", text: resume, help: "Copy the command that resumes this job's session")
+                }
+                if job.isActive {
+                    Button("Cancel Job", systemImage: "stop.circle", role: .destructive) { Task { await store.cancel(job) } }.pillButton()
+                        .disabled(!store.connected || store.actions["cancel:\(id):\(job.turns)"]?.locked == true)
+                }
             }
         }
         ActionMessage(state: store.actions["cancel:\(id):\(job.turns)"])
@@ -386,7 +391,7 @@ struct SessionDetailView: View {
                 }
             }
         }
-        DetailFooter(id: session.id) {
+        DetailFooter {
             CopyButton(title: "Resume Command", text: "claude --resume \(session.id)", help: "Copy the command that resumes this session")
         }
     }

@@ -694,10 +694,9 @@ dialog.sheet.evidence-compare { width: min(1320px, calc(100vw - 32px)); }
 .detail-scroll .answer-card { padding: 14px; border-radius: var(--row-radius); }
 .session-mission { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12.5px; }
 .detail-foot { display: grid; gap: 10px; padding-top: var(--panel-padding); border-top: 1px solid var(--hairline); font-size: 12px; }
-.detail-foot > div { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
-.detail-foot .copy-menu { flex: 1 1 72px; min-width: 72px; }
-.detail-id { display: block; color: var(--tertiary); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
-.detail-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-inline-start: auto; }
+/* A finished job may have nothing left to do, and then has no footer. */
+.detail-foot:not(:has(.detail-actions > *, .action-message > *)) { display: none; }
+.detail-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .copy-button { background: var(--fill); }
 /* Two actions and the id need up to 396px on a row. Narrower than that the copy buttons give up their second word instead of dropping to a line of their own. */
 .detail-foot { container-type: inline-size; }

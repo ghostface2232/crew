@@ -638,7 +638,7 @@ const JobDetails = memo(function JobDetails({ id, current, streamLog, agents, ro
               <EventList events={events} />
             </Section>
           )}
-          <Footer id={job.id} status={<ActionStatus actionKey={cancelKey} />}>
+          <Footer status={<ActionStatus actionKey={cancelKey} />}>
             {job.sessionId && agents[job.agent] && !job.capabilities?.confined && (
               <CopyButton text={`${agents[job.agent].resume} ${job.sessionId}`} short="Resume">Resume Command</CopyButton>
             )}
@@ -712,16 +712,11 @@ function OriginalTask({ text }: { text: string }) {
   );
 }
 
-/** The panel's last row: the id at the leading edge, its menu copying it, and the actions at the trailing edge. */
-function Footer({ id, status, children }: { id: string; status?: ReactNode; children: ReactNode }) {
+/** The panel's last row: its actions at the trailing edge, and the outcome of one under them. */
+function Footer({ status, children }: { status?: ReactNode; children: ReactNode }) {
   return (
     <footer className="detail-foot">
-      <div>
-        <CopyMenu text={id} label="Copy ID">
-          <code className="selectable detail-id" title={id}>{id}</code>
-        </CopyMenu>
-        <span className="detail-actions">{children}</span>
-      </div>
+      <span className="detail-actions">{children}</span>
       {status}
     </footer>
   );
@@ -878,7 +873,7 @@ export const SessionDrawer = memo(function SessionDrawer({ id, state, close }: {
               ))}
             </Section>
           )}
-          <Footer id={session.id}>
+          <Footer>
             <CopyButton text={`claude --resume ${session.id}`} short="Resume">Resume Command</CopyButton>
           </Footer>
         </>

@@ -109,11 +109,12 @@
   .status { gap: 6px 12px; }
 }
 
-/* The desktop app's About page: its mark and version, above where its update stands. */
-.about { display: flex; align-items: center; gap: 14px; padding: 4px 4px 8px; }
-.aboutIcon { width: 56px; height: 56px; }
-.aboutName { font: 600 17px/1.3 var(--text-face); }
-.row > span.updateLine { flex: 1; max-width: none; min-width: 0; overflow-wrap: anywhere; }
+/* The desktop app's About page: where its update stands, beside the app's mark. */
+.row.update { justify-content: flex-start; gap: 12px; padding-block: 10px; }
+.aboutIcon { flex: none; width: 40px; height: 40px; }
+.updateText { display: grid; gap: 4px; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.updateVersion { color: var(--secondary); font-size: 12px; }
+.saveRow > .footnote { flex: 1; min-width: 0; padding: 0; }
 /* The download bar, drawn here rather than by the platform. */
 .progress { -webkit-appearance: none; appearance: none; width: 100%; height: 6px; border: 0; border-radius: 999px; corner-shape: round; background: var(--fill-strong); overflow: hidden; }
 .progress::-webkit-progress-bar { background: transparent; }

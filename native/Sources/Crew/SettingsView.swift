@@ -44,7 +44,7 @@ struct CrewSettingsView: View {
     /// Fixed, as in System Settings; the window pins it (CrewApp.openSettings).
     static let sidebarWidth: CGFloat = 180
     private static let editorHeight: CGFloat = 260
-    private static let aboutIconSize: CGFloat = 56
+    private static let aboutIconSize: CGFloat = 40
     @Bindable var model: SettingsModel
     var store: CrewStore
     @Environment(AppUpdater.self) private var updater
@@ -212,55 +212,52 @@ struct CrewSettingsView: View {
             Text("Change a mission's preset from its menu, or name one in your prompt.").settingsFootnote()
         }
     }
+    /// Laid out like Software Update: the state and the installed version beside the app's icon, with the check on
+    /// that row; an update under way shows its progress there and adds its notes, and its action goes under the list,
+    /// as Save does under the instructions.
     @ViewBuilder private var about: some View {
         Section {
             HStack(spacing: Space.l) {
                 Image(nsImage: NSApp.applicationIconImage).resizable().interpolation(.high).scaledToFit()
                     .frame(width: Self.aboutIconSize, height: Self.aboutIconSize).accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: Space.xxs) {
-                    Text("Crew").font(.title3.weight(.semibold))
-                    Text("Version \(updater.current)").foregroundStyle(.secondary)
+                    Text(updater.summary)
+                    if updater.phase == .downloading {
+                        ProgressView(value: updater.progress).accessibilityLabel("Download progress").padding(.vertical, Space.xs)
+                    }
+                    Text("Crew \(updater.current)").font(Typeface.callout).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: Space.l)
+                if updater.phase == .idle || updater.phase == .checking {
+                    Button("Check for Updates") { Task { await updater.checkNow() } }.disabled(updater.phase != .idle)
                 }
             }.padding(.vertical, Space.xs)
-        }
-        Section {
-            // Centered rather than a LabeledContent: a form row pins its label's baseline at the height of a text row,
-            // so a button taller than the text would run into the row's top padding and leave more room below it.
-            // The small button is kept out of the row's height, so this row is as tall as the text rows around it.
-            HStack {
-                Text(updater.summary)
-                Spacer()
-                Group {
-                    switch updater.phase {
-                    case .unsupported: EmptyView()
-                    case .installing where updater.waiting != nil:
-                        Button("Cancel Update") { updater.failed() }
-                    case .ready, .installing:
-                        Button("Restart to Update") { updater.onInstall() }
-                            .buttonStyle(.borderedProminent).disabled(updater.phase == .installing)
-                    case .available:
-                        Button("Download Now") { Task { await updater.checkNow() } }
-                    // The progress bar below says what a download is doing; a disabled button beside it adds nothing.
-                    case .downloading: EmptyView()
-                    case .idle, .checking:
-                        Button("Check for Updates") { Task { await updater.checkNow() } }
-                            .disabled(updater.phase != .idle)
-                    }
-                }.controlSize(.small).frame(height: 0)
-            }
-            if updater.phase == .downloading {
-                ProgressView(value: updater.progress).accessibilityLabel("Download progress")
-            }
             if let page = updater.page, let latest = updater.latest {
                 LabeledContent("Release notes") { Link("What’s new in \(latest)", destination: page) }
             }
         } footer: {
-            VStack(alignment: .leading, spacing: Space.s) {
-                if let error = updater.error { ErrorLabel(message: error) }
-                Text(updater.phase == .unsupported
-                    ? "This copy of Crew is not running from an app bundle, so it cannot update itself."
-                    : "Updates download in the background and install only on Restart to Update, after running jobs finish.")
-            }.settingsFootnote()
+            VStack(alignment: .leading, spacing: Space.ml) {
+                if let error = updater.error { ErrorLabel(message: error).settingsFootnote() }
+                // The note and the action share one line, so the action is not left between the list and a note.
+                HStack(spacing: Space.l) {
+                    Text(updater.phase == .unsupported
+                        ? "This copy of Crew is not running from an app bundle, so it cannot update itself."
+                        : "Updates install after running jobs finish.")
+                        .settingsFootnote().frame(maxWidth: .infinity, alignment: .leading)
+                    updateAction
+                }
+            }
+        }
+    }
+    @ViewBuilder private var updateAction: some View {
+        switch updater.phase {
+        case .installing where updater.waiting != nil:
+            Button("Cancel Update") { updater.failed() }.pillButton()
+        case .ready, .installing:
+            Button("Update Now") { updater.onInstall() }.glassPillButton().disabled(updater.phase == .installing)
+        case .available:
+            Button("Download Now") { Task { await updater.checkNow() } }.glassPillButton()
+        case .unsupported, .downloading, .idle, .checking: EmptyView()
         }
     }
     @ViewBuilder private var modelScores: some View {

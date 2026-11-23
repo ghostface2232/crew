@@ -611,66 +611,61 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
                 </>
               )}
               {current === 'about' && update && (
-                <>
-                  <section className={styles.about}>
-                    <img className={styles.aboutIcon} src={appIcon} alt="" />
-                    <div>
-                      <p className={styles.aboutName}>Crew</p>
-                      <p className={styles.footnote}>Version {update.current}</p>
-                    </div>
-                  </section>
-                  <section className={styles.group}>
-                    <div className={styles.rows}>
-                      <div className={styles.row}>
-                        <span className={styles.updateLine} role="status">{updateSummary(update)}</span>
-                        {update.state === 'installing' && update.waiting !== undefined ? (
-                          <button type="button" className="small" onClick={() => void desktop?.update.cancel()}>Cancel Update</button>
-                        ) : update.state === 'ready' || update.state === 'installing' ? (
-                          <button type="button" className="prominent small" disabled={update.state === 'installing'} onClick={() => void desktop?.update.install()}>
-                            Restart to Update
-                          </button>
-                        ) : update.state !== 'unsupported' && update.state !== 'downloading' && (
-                          <button
-                            type="button"
-                            className="small"
-                            disabled={update.state === 'checking'}
-                            onClick={() => void desktop?.update.check()}
-                          >
-                            {update.state === 'available' ? 'Download Now' : 'Check for Updates'}
-                          </button>
-                        )}
-                      </div>
-                      {update.state === 'downloading' && (
-                        <div className={styles.row}>
+                // Laid out like Software Update, as in the macOS app: the state beside the app's icon with the check on
+                // that row, and an update's action under the list on one line with the note.
+                <section className={styles.group}>
+                  <div className={styles.rows}>
+                    <div className={`${styles.row} ${styles.update}`}>
+                      <img className={styles.aboutIcon} src={appIcon} alt="" />
+                      <div className={styles.updateText}>
+                        <span role="status">{updateSummary(update)}</span>
+                        {update.state === 'downloading' && (
                           <progress className={styles.progress} value={update.progress ?? 0} max={1} aria-label="Download progress" />
-                        </div>
-                      )}
-                      {update.page && update.latest && (
-                        <div className={styles.row}>
-                          <span>Release notes</span>
-                          <a href={update.page} target="_blank" rel="noreferrer">What’s new in {update.latest}</a>
-                        </div>
+                        )}
+                        <span className={styles.updateVersion}>Crew {update.current}</span>
+                      </div>
+                      {(update.state === 'idle' || update.state === 'checking') && (
+                        <button type="button" disabled={update.state === 'checking'} onClick={() => void desktop?.update.check()}>
+                          Check for Updates
+                        </button>
                       )}
                     </div>
-                    {update.installError && (
-                      <p className={`${styles.footnote} ${styles.note} error`}>
-                        <Icon icon={ErrorCircle16Regular} />
-                        {update.installError}
-                      </p>
+                    {update.page && update.latest && (
+                      <div className={styles.row}>
+                        <span>Release notes</span>
+                        <a href={update.page} target="_blank" rel="noreferrer">What’s new in {update.latest}</a>
+                      </div>
                     )}
-                    {update.error && (
-                      <p className={`${styles.footnote} ${styles.note}`}>
-                        <Icon icon={Info16Regular} />
-                        {update.error}
-                      </p>
-                    )}
+                  </div>
+                  {update.installError && (
+                    <p className={`${styles.footnote} ${styles.note} error`}>
+                      <Icon icon={ErrorCircle16Regular} />
+                      {update.installError}
+                    </p>
+                  )}
+                  {update.error && (
+                    <p className={`${styles.footnote} ${styles.note}`}>
+                      <Icon icon={Info16Regular} />
+                      {update.error}
+                    </p>
+                  )}
+                  <div className={styles.saveRow}>
                     <p className={styles.footnote}>
                       {update.state === 'unsupported'
                         ? 'This copy cannot update itself. Install Crew from GitHub releases for updates.'
-                        : 'Updates download in the background and install only on Restart to Update, after running jobs finish.'}
+                        : 'Updates install after running jobs finish.'}
                     </p>
-                  </section>
-                </>
+                    {update.state === 'installing' && update.waiting !== undefined ? (
+                      <button type="button" onClick={() => void desktop?.update.cancel()}>Cancel Update</button>
+                    ) : update.state === 'ready' || update.state === 'installing' ? (
+                      <button type="button" className="prominent" disabled={update.state === 'installing'} onClick={() => void desktop?.update.install()}>
+                        Update Now
+                      </button>
+                    ) : update.state === 'available' && (
+                      <button type="button" className="prominent" onClick={() => void desktop?.update.check()}>Download Now</button>
+                    )}
+                  </div>
+                </section>
               )}
               {current === 'models' && (
                 <section className={styles.group}>

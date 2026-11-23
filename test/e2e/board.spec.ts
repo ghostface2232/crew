@@ -1626,3 +1626,37 @@ test('New Job shows who takes a question, and says when only the lead can', asyn
   await page.getByRole('radio', { name: 'Question' }).click();
   await expect(page.getByText('Start this job from a Claude session. Claude does the work itself or in a subagent.')).toBeVisible();
 });
+
+test('About Crew puts the check on the status row and an update action beside the note', async ({ page }) => {
+  await page.addInitScript(() => {
+    const listeners = new Set<(update: unknown) => void>();
+    let update = { current: '0.7.0', state: 'idle', checkedAt: Date.now() } as Record<string, unknown>;
+    Object.defineProperty(window, 'crewDesktop', { value: { update: {
+      state: async () => update,
+      check: async () => {
+        update = { current: '0.7.0', state: 'ready', latest: '0.8.0', page: 'https://example.com/notes' };
+        listeners.forEach((listener) => listener(update));
+      },
+      install: async () => {},
+      cancel: async () => {},
+      subscribe: (listener: (update: unknown) => void) => { listeners.add(listener); return () => listeners.delete(listener); },
+    } } });
+  });
+  await page.goto('/');
+  await openSettings(page, 'About Crew');
+  const status = page.getByRole('status').filter({ hasText: 'Crew is up to date' });
+  const check = page.getByRole('button', { name: 'Check for Updates' });
+  await expect(status).toBeVisible();
+  const [statusBox, checkBox] = [await status.boundingBox(), await check.boundingBox()];
+  expect(Math.abs(statusBox!.y + statusBox!.height / 2 - (checkBox!.y + checkBox!.height / 2))).toBeLessThan(20);
+
+  await check.click();
+  const note = page.getByText('Updates install after running jobs finish.');
+  const install = page.getByRole('button', { name: 'Update Now' });
+  await expect(install).toBeVisible();
+  await expect(check).toHaveCount(0);
+  // The action shares the note's line rather than sitting between the list and the note.
+  const [noteBox, installBox] = [await note.boundingBox(), await install.boundingBox()];
+  expect(installBox!.x).toBeGreaterThan(noteBox!.x + noteBox!.width - 1);
+  expect(Math.abs(noteBox!.y + noteBox!.height / 2 - (installBox!.y + installBox!.height / 2))).toBeLessThan(12);
+});

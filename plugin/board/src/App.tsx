@@ -10,7 +10,7 @@ import type { FluentIcon } from '@fluentui/react-icons';
 import { board } from './store.ts';
 import { formatDate, longDay } from './dates.ts';
 import { knownProjects, projectNames, projectOf } from './model.ts';
-import { AskHost, ClockProvider, CopyMenu, Icon, PANEL_EXIT_MS, PanelLeavingContext, RollingNumber, useLinger, useStableItems } from './ui.tsx';
+import { AskHost, ClockProvider, CopyMenu, Icon, LeavingContext, PANEL_EXIT_MS, RollingNumber, SHEET_EXIT_MS, useLinger, useStableItems } from './ui.tsx';
 import appIcon from './icons/CrewAppIcon.png';
 import { Activity, History, Workspace } from './Overview.tsx';
 import { NeedsYou } from './NeedsYou.tsx';
@@ -137,6 +137,8 @@ export function App() {
   const closeDetail = useCallback(() => show(''), [show]);
   // A closed panel stays up while it slides out; a different one replaces it at once.
   const [panel, panelLeaving] = useLinger(detail, PANEL_EXIT_MS);
+  // Settings stay up while they settle out, as the panel does.
+  const [shownSettings, settingsLeaving] = useLinger(settings === 'about' ? 'about' : settings ? 'open' : '', SHEET_EXIT_MS);
   /** After New Job, the job's own project, so the new job is in view, as the app goes there. */
   const openNewJob = (id: string, root?: string) => {
     if (root && project !== root) select(`project:${root}`);
@@ -360,14 +362,16 @@ export function App() {
             actions={paletteActions}
           />
         )}
-        <PanelLeavingContext value={panelLeaving}>
+        <LeavingContext value={panelLeaving}>
           {panel.startsWith('session:') ? (
             <SessionDrawer key={panel} id={panel.slice(8)} state={state} close={closeDetail} />
           ) : (
             panel && <JobDrawer key={panel} id={panel} state={state} close={closeDetail} />
           )}
-        </PanelLeavingContext>
-        {settings && <Settings state={state} update={update} close={() => setSettings(false)} initial={settings === 'about' ? 'about' : undefined} />}
+        </LeavingContext>
+        <LeavingContext value={settingsLeaving}>
+          {shownSettings && <Settings state={state} update={update} close={() => setSettings(false)} initial={shownSettings === 'about' ? 'about' : undefined} />}
+        </LeavingContext>
         <AskHost />
       </div>
     </ClockProvider>

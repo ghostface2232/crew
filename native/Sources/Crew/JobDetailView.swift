@@ -190,7 +190,7 @@ struct JobDetailView: View {
             detailSection("Activity", symbol: "bolt") { EventList(events: combined) }
         }
         DetailFooter(id: job.id) {
-            if let session = job.sessionId, let worker = store.state.agents[job.agent] {
+            if let session = job.sessionId, let worker = store.state.agents[job.agent], job.capabilities?.confined != true {
                 CopyButton(title: "Resume Command", text: "\(worker.resume) \(session)", help: "Copy the command that resumes this job's session")
             }
             if job.isActive {

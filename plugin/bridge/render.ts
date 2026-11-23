@@ -164,7 +164,8 @@ export function describe(job: JobView, waitingHint?: string): string {
     lines.push(`evidence: ${latest.length ? `${latest.length} file(s) from turn ${job.turns}` : 'none from this turn'}${evidence.length > latest.length ? `, ${evidence.length - latest.length} earlier` : ''}`);
     for (const item of latest) lines.push(`  ${item.path}`);
   }
-  if (job.sessionId) lines.push(`session: ${resumeCommand(job)}`);
+  // A confined Antigravity session is in a store the agy CLI cannot open.
+  if (job.sessionId && !job.capabilities?.confined) lines.push(`session: ${resumeCommand(job)}`);
   // While a follow-up turn runs, the report is the previous turn's, which the lead has already read.
   if (job.report && job.state !== 'running') lines.push('', '--- report ---', job.report);
   else if (job.report) lines.push(`(The report of turn ${job.turns - 1} is not repeated here.)`);

@@ -639,7 +639,7 @@ const JobDetails = memo(function JobDetails({ id, current, streamLog, agents, ro
             </Section>
           )}
           <Footer id={job.id} status={<ActionStatus actionKey={cancelKey} />}>
-            {job.sessionId && agents[job.agent] && (
+            {job.sessionId && agents[job.agent] && !job.capabilities?.confined && (
               <CopyButton text={`${agents[job.agent].resume} ${job.sessionId}`} short="Resume">Resume Command</CopyButton>
             )}
             {job.worktree && result && result.files.length > 0 && (

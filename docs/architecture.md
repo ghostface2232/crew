@@ -56,7 +56,7 @@ These findings cover requirement R6.
 | --- | --- |
 | Claude | Claude sessions are visible when the lead runs in Claude Desktop, where the plugin works in local sessions |
 | Codex | Bridge threads land in the ChatGPT app's store titled `Crew · <title>`. Because the ChatGPT app spawns its own private stdio `app-server`, Crew cannot attach live. The app controls when the list refreshes. Resume from the CLI with `codex resume <id>` |
-| Antigravity | ACP sessions save to the CLI store (`~/.gemini/antigravity-cli/`) under `default-cli-project`, not the desktop app store (`~/.gemini/antigravity/`), so they do not appear in the Antigravity app. Resume from the CLI with `agy --conversation <id>`. The sidecar-only `agentapi` endpoint provides no way to read responses, so it is not used |
+| Antigravity | ACP sessions save to the CLI store (`~/.gemini/antigravity-cli/`) under `default-cli-project`, not the desktop app store (`~/.gemini/antigravity/`), so they do not appear in the Antigravity app. Resume from the CLI with `agy --conversation <id>`. On macOS the [confined server](sandbox.md#the-confined-server) saves its sessions to `~/.gemini/antigravity-crew/` instead, which the CLI cannot open, so such a job offers no resume command. The sidecar-only `agentapi` endpoint provides no way to read responses, so it is not used |
 
 Resume commands appear in job results and in the board's job details panel.
 

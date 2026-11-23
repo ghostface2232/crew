@@ -175,7 +175,8 @@ struct TurnReceipt: Codable, Sendable, Equatable {
     var stale: String?
     var at: Double
 }
-struct Capabilities: Codable, Sendable, Equatable { var filesystem: String; var network: String; var plugins: [String] }
+/// `confined`: the session is in a store the agent's own CLI cannot open, so there is no command to resume it with.
+struct Capabilities: Codable, Sendable, Equatable { var filesystem: String; var network: String; var plugins: [String]; var confined: Bool? }
 struct RelayedApproval: Codable, Sendable, Equatable { var turn: Int; var quote: String; var matched: Bool; var recorded: Int; var at: Double }
 struct ExchangeEntry: Codable, Sendable, Equatable { var turn: Int; var from: String; var text: String; var at: Double }
 struct DebateLimit: Codable, Sendable, Equatable { var rounds: Int }

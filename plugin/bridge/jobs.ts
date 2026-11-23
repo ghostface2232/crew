@@ -9,7 +9,7 @@ import { runCheck } from './check.ts';
 import type { CheckResult } from './check.ts';
 import { assignHint, canonicalPath, defaultHolder, disabledAgents, effectiveRole, isRole, LEAD, LEDGER_ASIDE, MAX_DEBATE_ROUNDS, daemonPort, nodeEnv, roleInfo, ROLES, runsCommands, WORKERS } from './config.ts';
 import type { Config, JobKind, PresetName, Role, WorkerAgent } from './config.ts';
-import { carryUncommitted, changesSince, commitAll, commitChanges, copyIncluded, createWorktree, currentBranch, dirtyCount, git, mergeInto, isInside, projectRoot, realpath, removeDirectory, removeEmptyLeftover, removeEmptySlot, removeWorktree, repoRoot, revertCommit, revertsSince, reviewDiff, WorktreeCleanupError } from './git.ts';
+import { carryUncommitted, changesSince, commitAll, commitChanges, copyIncluded, createWorktree, currentBranch, dirtyCount, git, mergeInto, isInside, NO_HOOKS, NO_SUBMODULES, projectRoot, realpath, removeDirectory, removeEmptyLeftover, removeEmptySlot, removeWorktree, repoRoot, revertCommit, revertsSince, reviewDiff, WorktreeCleanupError } from './git.ts';
 import { collectGarbage } from './gc.ts';
 import { BrowserServers, jobWritable } from './browser.ts';
 import { tokenFile } from './auth.ts';
@@ -126,6 +126,8 @@ export interface Capabilities {
   network: 'on' | 'off' | 'agent-managed';
   /** Plugins on for the job. Their tools act outside the sandbox. */
   plugins: string[];
+  /** The agent's server runs inside a sandbox of Crew's own, with its own session store: the job continues there. */
+  confined?: boolean;
 }
 
 export interface ExchangeEntry {
@@ -1545,7 +1547,7 @@ export class Jobs {
         }
       }
       // A check that rewrote tracked files passed on a tree the commit does not hold.
-      const listed = check ? `${await git(job.worktree.path, ['diff', '--name-only', '-z', 'HEAD'])}${await git(job.worktree.path, ['ls-files', '--others', '--exclude-standard', '-z'])}` : '';
+      const listed = check ? `${await git(job.worktree.path, [...NO_HOOKS, 'diff', NO_SUBMODULES, '--name-only', '-z', 'HEAD'])}${await git(job.worktree.path, ['ls-files', '--others', '--exclude-standard', '-z'])}` : '';
       const changed = listed.split('\0').filter(Boolean);
       const stale = changed.length ? `the check itself changed ${changed.slice(0, 3).join(', ')}${changed.length > 3 ? ` and ${changed.length - 3} more` : ''}` : undefined;
       (job.receipts ??= []).push({ turn: job.turns, head, ...(check ? { check } : {}), ...(stale ? { stale } : {}), at: Date.now() });

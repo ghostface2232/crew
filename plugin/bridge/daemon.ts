@@ -8,7 +8,7 @@ import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { boardAsset, BOARD_CSP } from './assets.ts';
 import { boardCredential, boardExpiry, ensureToken, evidenceSeal, sameToken, SESSION_COOKIE } from './auth.ts';
-import { AntigravityAdapter } from './adapters/antigravity.ts';
+import { antigravityAdapter } from './adapters/antigravity.ts';
 import { CodexAdapter } from './adapters/codex.ts';
 import { stopChecks } from './check.ts';
 import { clientJson } from './text.ts';
@@ -195,7 +195,7 @@ function liveConfig(): Config {
 }
 
 const codex = new CodexAdapter(config);
-const antigravity = new AntigravityAdapter(config);
+const antigravity = antigravityAdapter(config);
 
 // Roles are read per job, so a change to config.json applies to the next one, and an invalid file fails
 // that job with the reason instead of silently running old roles. Adapters keep the settings they started with.

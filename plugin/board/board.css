@@ -140,7 +140,7 @@
     --shadow-stage: 0 0 0 1px rgb(0 0 0 / 0.45);
     /* Clearly lighter than the frame, so the current sidebar item stands out on it. */
     --raised: #34343a;
-    --shadow-raised: var(--outline-ring), inset 0 1px 0 rgb(255 255 255 / 0.08), 0 0 0 1px rgb(0 0 0 / 0.3), 0 1px 2px rgb(0 0 0 / 0.4), 0 4px 10px -6px rgb(0 0 0 / 0.6);
+    --shadow-raised: var(--outline-ring), inset 0 1px 0 rgb(255 255 255 / 0.08), 0 0 0 0.5px rgb(0 0 0 / 0.3), 0 1px 2px rgb(0 0 0 / 0.4), 0 4px 10px -6px rgb(0 0 0 / 0.6);
   }
 }
 @media (prefers-contrast: more) {

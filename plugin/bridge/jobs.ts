@@ -16,7 +16,7 @@ import { tokenFile } from './auth.ts';
 import { attachEvidence, attachmentsNote, checkAttachments, collectEvidence, detachEvidence, questionAttachments } from './evidence.ts';
 import type { Evidence } from './evidence.ts';
 import type { Worktree } from './git.ts';
-import { sharedInstructions } from './instructions.ts';
+import { sharedInstructions, type SharedScope } from './instructions.ts';
 import { clip } from './text.ts';
 import { buildPrompt } from './prompts.ts';
 import { findSkills } from './skills.ts';
@@ -252,6 +252,8 @@ export interface Job {
   instructions: string;
   /** Files of shared instructions the worker was given; absent on jobs saved before they existed. */
   shared?: string[];
+  /** Each of `shared`'s scope, by position; absent on jobs saved before it was recorded. */
+  sharedScopes?: SharedScope[];
   /** Set when the review should use the agent's native review mode instead of a prompted turn. */
   nativeReview: ReviewTarget | null;
   /** Preserved for refreshed review diffs; absent on older saved jobs. */
@@ -754,6 +756,7 @@ export class Jobs {
         evidence: attached.length ? attached : undefined,
         ...buildPrompt(spec, worktree, diffFile, shared.text, scratch, runsCommands(agent, spec), skills, evidenceDir, rates),
         shared: shared.sources,
+        sharedScopes: shared.scopes,
         // Only Codex has a built-in review mode; other agents get the prompted review.
         nativeReview: spec.kind === 'review' && agent === 'codex' && spec.review?.mode === 'standard' ? spec.review.target : null,
         reviewTarget: spec.review?.target,

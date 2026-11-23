@@ -32,9 +32,8 @@ struct SetupCard: View {
                             HStack(alignment: .firstTextBaseline, spacing: Space.s) {
                                 Image(systemName: item.ok ? "checkmark.circle" : "exclamationmark.circle")
                                     .font(Typeface.callout).foregroundStyle(item.ok ? .secondary : Palette.warning).frame(width: Symbol.controlFrame)
-                                // Markdown, so the `backticked` names read as code.
-                                Text(LocalizedStringKey(item.label)).font(Typeface.callout)
-                                Text(LocalizedStringKey(item.detail)).font(Typeface.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                                Text(withCode(item.label)).font(Typeface.callout)
+                                Text(withCode(item.detail)).font(Typeface.caption).foregroundStyle(.secondary).textSelection(.enabled)
                             }
                         }
                     }
@@ -67,4 +66,16 @@ struct SetupCard: View {
             busy = false
         }
     }
+}
+
+/// Shows the `backticked` names in a setup item as code. Only backticks count: details carry paths and command output,
+/// which Markdown would reshape.
+func withCode(_ text: String) -> AttributedString {
+    var result = AttributedString()
+    for (index, part) in text.split(separator: "`", omittingEmptySubsequences: false).enumerated() {
+        var run = AttributedString(String(part))
+        if index % 2 == 1 { run.inlinePresentationIntent = .code }
+        result += run
+    }
+    return result
 }

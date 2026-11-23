@@ -209,10 +209,9 @@ const NETWORK: Record<NonNullable<BoardJob['capabilities']>['network'], string> 
   'agent-managed': 'network as the agent allows',
 };
 
-/** Which shared instructions a file holds: the project's own `.crew/instructions.md`, or those for every project. */
-function instructionScope(file: string, project: string) {
-  const slashes = (path: string) => path.replaceAll('\\', '/');
-  return slashes(file) === `${slashes(project)}/.crew/instructions.md` ? 'This project' : 'Every project';
+/** Whose shared instructions a job was given, as the bridge recorded them; jobs from before that list their files. */
+function sharedLabel(job: BoardJob) {
+  return job.sharedScopes?.map((scope) => (scope === 'project' ? 'This project' : 'Every project')).join(' · ') ?? job.shared!.join('\n');
 }
 
 function duration(ms: number) {
@@ -541,7 +540,7 @@ const JobDetails = memo(function JobDetails({ id, current, streamLog, agents, ro
           : []),
         ...(job.context ? [['Context', `${job.context.used.toLocaleString()} of ${job.context.size.toLocaleString()} (${Math.round((job.context.used / job.context.size) * 100)}%)`] as [string, string]] : []),
         ['Turns', String(job.turns)],
-        ...(job.shared?.length ? [['Instructions', job.shared.map((file) => instructionScope(file, projectOf(job))).join(' · ')] as [string, string]] : []),
+        ...(job.shared?.length ? [['Instructions', sharedLabel(job)] as [string, string]] : []),
       ]
     : [];
   const result = job?.result;

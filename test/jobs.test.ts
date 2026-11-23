@@ -694,6 +694,7 @@ test('shared instructions reach every worker after its role, global then project
     const order = ['# Role:', '# Shared instructions', 'do not widen what the role allows', '## From the user, for every project\nPrefer small diffs.', '## From this repository (`.crew/instructions.md`)\nUse tabs in this repository.'].map((part) => text.indexOf(part));
     assert.ok(order.every((at, i) => at >= 0 && (i === 0 || at > order[i - 1])), `${spec.kind}: ${text}`);
     assert.deepEqual(job.shared, [globalFile, projectFile]);
+    assert.deepEqual(job.sharedScopes, ['every', 'project']);
     // The assignment itself is unchanged; instructions travel on their own channel.
     assert.ok(!job.prompt.includes('Prefer small diffs'));
   }

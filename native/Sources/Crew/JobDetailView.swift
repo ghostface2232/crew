@@ -79,8 +79,8 @@ struct JobDetailView: View {
             if let context = job.context { fact("Context", context.label) }
             fact("Turns", String(job.turns))
             if let shared = job.shared, !shared.isEmpty {
-                // Which shared instructions it was given: the project's own `.crew/instructions.md`, or those for every project.
-                fact("Instructions", shared.map { $0 == "\(job.projectPath)/.crew/instructions.md" ? "This project" : "Every project" }.joined(separator: " · "))
+                // Whose instructions, as the bridge recorded them; jobs from before that list their files.
+                fact("Instructions", job.sharedScopes.map { $0.map { $0 == "project" ? "This project" : "Every project" }.joined(separator: " · ") } ?? shared.joined(separator: "\n"))
             }
         }.font(Typeface.callout).textSelection(.enabled).inset()
         if let live = job.liveDiff, job.endedAt == nil { LiveDiffSection(store: store, id: job.id, at: live.at) }

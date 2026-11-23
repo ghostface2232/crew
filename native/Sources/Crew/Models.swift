@@ -37,6 +37,8 @@ struct Job: Codable, Sendable, Identifiable, Equatable {
     var delivered: Int?
     var prompt: String?
     var shared: [String]?
+    /// Each of `shared`'s scope, by position: every, or project. Absent on jobs from before it was recorded.
+    var sharedScopes: [String]?
     var model: String?
     var effort: String?
     var resolvedModel: String?

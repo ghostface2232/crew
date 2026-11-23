@@ -1660,3 +1660,36 @@ test('About Crew puts the check on the status row and an update action beside th
   expect(installBox!.x).toBeGreaterThan(noteBox!.x + noteBox!.width - 1);
   expect(Math.abs(noteBox!.y + noteBox!.height / 2 - (installBox!.y + installBox!.height / 2))).toBeLessThan(12);
 });
+
+test('job details name whose instructions a job got and end Changes with Diff Command', async ({ page, request }) => {
+  const data = fixture();
+  data.jobs[0] = {
+    ...data.jobs[0],
+    shared: ['/home/me/.crew/instructions.md', '/workspace/Crew/.crew/instructions.md'],
+    sharedScopes: ['every', 'project'],
+    result: { files: ['src/app.ts'], stat: ' src/app.ts | 2 +-', commit: 'abc1234', outOfScope: [] },
+  };
+  await request.post('/__push', { data: { type: 'state', data } });
+  await page.locator(`button[data-job="${data.jobs[0].id}"]`).first().click();
+  const panel = page.getByRole('dialog');
+  await expect(panel.getByText('Every project · This project', { exact: true })).toBeVisible();
+  await expect(panel.getByText('/home/me/.crew/instructions.md')).toHaveCount(0);
+  const changes = panel.getByRole('region', { name: 'Changes' });
+  await expect(changes.getByText('Commit abc1234')).toBeVisible();
+  await expect(changes.getByRole('button', { name: 'Diff Command' })).toBeVisible();
+  await expect(panel.locator('.detail-foot').getByRole('button', { name: /Diff/ })).toHaveCount(0);
+});
+
+test('Set up Crew shows backticked names as code, a failed registration as an error, and its actions last', async ({ page }) => {
+  await page.route('**/api/setup*', (route) => route.fulfill({ json: {
+    packaged: false, registering: false, registration: { ok: false, detail: 'Could not register the plugin.' },
+    items: [{ id: 'command', label: '`crew` command', ok: false, detail: 'Not installed.', repairable: true }],
+  } }));
+  await page.goto('/');
+  const card = page.locator('.setup-list').locator('..');
+  await expect(card.locator('code', { hasText: 'crew' })).toBeVisible();
+  await expect(card.getByText('`crew`')).toHaveCount(0);
+  await expect(card.locator('.error', { hasText: 'Could not register the plugin.' })).toBeVisible();
+  const [list, install] = [await card.locator('.setup-list').boundingBox(), await card.getByRole('button', { name: 'Install' }).boundingBox()];
+  expect(install!.y).toBeGreaterThan(list!.y + list!.height);
+});

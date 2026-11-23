@@ -1,8 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+/** Whose instructions a file holds: the user's for every project, or the repository's own. */
+export type SharedScope = 'every' | 'project';
+
 interface Section {
   heading: string;
+  scope: SharedScope;
   file: string;
   text: string;
 }
@@ -12,6 +16,8 @@ export interface Shared {
   text: string;
   /** Files the text came from, for showing what a job was given. */
   sources: string[];
+  /** Each source's scope, by position. A path cannot say it: the Crew home can sit inside the project. */
+  scopes: SharedScope[];
   sections: Section[];
 }
 
@@ -36,12 +42,12 @@ const render = (section: Section) => `## ${section.heading}\n${section.text}`;
  */
 export function sharedInstructions(home: string, project: string | null): Shared {
   const globalFile = path.join(home, 'instructions.md');
-  const candidates: [heading: string, file: string][] = [['From the user, for every project', globalFile]];
+  const candidates: [heading: string, scope: SharedScope, file: string][] = [['From the user, for every project', 'every', globalFile]];
   // With the home directory as the project, both names are one file.
   const projectFile = project && path.join(project, '.crew', 'instructions.md');
-  if (projectFile && path.resolve(projectFile) !== path.resolve(globalFile)) candidates.push(['From this repository (`.crew/instructions.md`)', projectFile]);
-  const sections = candidates.map(([heading, file]) => ({ heading, file, text: read(file) })).filter((s) => s.text);
-  return { text: sections.map(render).join('\n\n'), sources: sections.map((s) => s.file), sections };
+  if (projectFile && path.resolve(projectFile) !== path.resolve(globalFile)) candidates.push(['From this repository (`.crew/instructions.md`)', 'project', projectFile]);
+  const sections = candidates.map(([heading, scope, file]) => ({ heading, scope, file, text: read(file) })).filter((s) => s.text);
+  return { text: sections.map(render).join('\n\n'), sources: sections.map((s) => s.file), scopes: sections.map((s) => s.scope), sections };
 }
 
 /** Claude Code replaces hook context longer than 10,000 characters with a 2,000-character preview. */

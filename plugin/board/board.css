@@ -1279,7 +1279,8 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
 }
 .track > li[data-pos="stopped"] .track-node b { background: var(--secondary); box-shadow: none; color: var(--surface); }
 .track[data-abandoned] > li[data-pos="past"] .track-node b, .track[data-abandoned] > li[data-pos="stopped"] .track-node b { background: transparent; box-shadow: inset 0 0 0 1.5px var(--tertiary); color: var(--tertiary); }
-.track > li[data-pos="now"] .track-node b { background: linear-gradient(to bottom, rgb(255 255 255 / 0.34), rgb(255 255 255 / 0) 62%), var(--accent); box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 16%, transparent); color: #fff; }
+/* The step under way is flat accent with the lit top edge of the other accent controls, inside a halo of its color. */
+.track > li[data-pos="now"] .track-node b { background: var(--accent); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.22), 0 0 0 5px color-mix(in srgb, var(--accent) 16%, transparent); color: #fff; }
 .track-name { max-width: var(--span); padding-inline: 4px; color: var(--secondary); font-size: 11px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
 .track > li:is(:first-child, :last-child) .track-name { max-width: calc(2 * var(--inset)); }
 .track > li[data-current] .track-name { font-weight: 600; }

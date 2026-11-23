@@ -153,7 +153,7 @@ try {
   const version = JSON.parse(fs.readFileSync('package.json', 'utf8')).version;
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByRole('navigation', { name: 'Settings pages' }).getByRole('button', { name: 'About Crew', exact: true }).click();
-  await expect(page.getByText(`Version ${version}`, { exact: true })).toBeVisible();
+  await expect(page.getByText(`Crew ${version}`, { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Check for Updates' }).click();
   await expect(page.getByText('Version 9.9.9 is ready to install')).toBeVisible({ timeout: 15_000 });
   await expect(page.getByRole('link', { name: 'What’s new in 9.9.9' })).toBeVisible();

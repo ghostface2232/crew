@@ -192,7 +192,7 @@ These views keep their own geometry next to their code, built from the tokens ab
 - Dragging the detail panel's leading edge resizes it with no animation, so it follows the pointer. The width is kept across launches.
 - Double-clicking the edge returns the panel to `panelWidth` with `Motion.panel`.
 - The edge shows the frame-resize pointer, and a 5 × 44 pt grip fades in on hover. VoiceOver adjusts the width in 40-point steps.
-- Content reflows with the width. A debate's round stepper drops its step names when they no longer fit, and the footer's id shortens.
+- Content reflows with the width. A debate's round stepper drops its step names when they no longer fit.
 
 **Detail panel header (`DetailHeader`).**
 - The status and title are pinned above the details. The title runs to two lines at most, and what the work is doing now appears as a `callout` subtitle under it.

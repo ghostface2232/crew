@@ -10,14 +10,21 @@ import { clip } from './text.ts';
 /** Transport commits run none of the repository's hooks; an fsmonitor command is a hook too, run on every index read. */
 const NO_HOOKS = ['-c', `core.hooksPath=${os.devNull}`, '-c', 'core.fsmonitor=false'];
 
-export function git(cwd: string, args: string[], stdin?: string): Promise<string> {
+/** Git's output as written. */
+function gitOutput(cwd: string, args: string[], stdin?: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = execFile('git', args, { cwd, maxBuffer: 16 * 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
       if (err) reject(new Error(`git ${args[0]}: ${(stderr || err.message).trim()}`));
-      else resolve(stdout.endsWith('\0') ? stdout : stdout.trim());
+      else resolve(stdout);
     });
     if (stdin !== undefined) child.stdin?.end(stdin);
   });
+}
+
+/** Git's output without the whitespace around it; a NUL-terminated list is left as it is. */
+export async function git(cwd: string, args: string[], stdin?: string): Promise<string> {
+  const stdout = await gitOutput(cwd, args, stdin);
+  return stdout.endsWith('\0') ? stdout : stdout.trim();
 }
 
 /** The change under review as text, for a reviewer that cannot run git itself. */
@@ -31,7 +38,8 @@ export async function reviewDiff(root: string, target: ReviewTarget): Promise<st
 
 export async function repoRoot(cwd: string): Promise<string | null> {
   try {
-    return await git(cwd, ['rev-parse', '--show-toplevel']);
+    // Only the newline git adds: a folder name can end in a space, and trimmed it would name the folder beside it.
+    return (await gitOutput(cwd, ['rev-parse', '--show-toplevel'])).replace(/\r?\n$/, '');
   } catch {
     return null;
   }
@@ -408,8 +416,10 @@ export async function revertCommit(wt: string, commit: string, linked: string[] 
 }
 
 export async function changesSince(wt: string, base: string): Promise<{ files: string[]; stat: string }> {
-  const names = await git(wt, ['diff', '--name-only', '-z', base, 'HEAD']);
-  const stat = await git(wt, ['diff', '--shortstat', base, 'HEAD']);
+  // A rename is a removal and an addition here: listed as one path, a file moved into the allowed targets would
+  // hide that it was taken from outside them.
+  const names = await git(wt, ['diff', '--name-only', '--no-renames', '-z', base, 'HEAD']);
+  const stat = await git(wt, ['diff', '--shortstat', '--no-renames', base, 'HEAD']);
   return { files: names.split('\0').filter(Boolean), stat };
 }
 

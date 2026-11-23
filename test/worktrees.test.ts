@@ -8,7 +8,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { CodexAdapter } from '../plugin/bridge/adapters/codex.ts';
 import { resolveConfig } from '../plugin/bridge/config.ts';
-import { changesSince, cloneDirectory, cloneRefused, cloneTree, commitAll, copyIncluded, createWorktree, detachLinks, dirtyCount, projectRoot, removeDirectory, removeEmptyLeftover, removeWorktree, worktreeSlot } from '../plugin/bridge/git.ts';
+import { changesSince, cloneDirectory, cloneRefused, cloneTree, commitAll, copyIncluded, createWorktree, detachLinks, dirtyCount, projectRoot, removeDirectory, repoRoot, removeEmptyLeftover, removeWorktree, worktreeSlot } from '../plugin/bridge/git.ts';
 import type { Job, JobCtl } from '../plugin/bridge/jobs.ts';
 import { buildPrompt } from '../plugin/bridge/prompts.ts';
 
@@ -578,4 +578,33 @@ test('a staged filename made of spaces still produces a transport commit', { ski
   execFileSync('git', ['init', '-q'], { cwd: repo });
   fs.writeFileSync(path.join(repo, '   '), 'content');
   assert.ok(await commitAll(repo, 'staged'));
+});
+
+test('a file moved between folders is listed at both ends, so a move out of bounds shows', async (t) => {
+  const repo = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-move-')));
+  t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+  const git = (...args: string[]) => execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=t@example.com', ...args], { cwd: repo });
+  git('init', '-q');
+  fs.mkdirSync(path.join(repo, 'other'));
+  fs.mkdirSync(path.join(repo, 'allowed'));
+  fs.writeFileSync(path.join(repo, 'other', 'file.ts'), 'one\ntwo\nthree\n');
+  git('add', '-A');
+  git('commit', '-qm', 'base');
+  git('mv', 'other/file.ts', 'allowed/file.ts');
+  git('commit', '-qm', 'move');
+  const changed = await changesSince(repo, 'HEAD~1');
+  assert.deepEqual(changed.files.sort(), ['allowed/file.ts', 'other/file.ts']);
+  assert.match(changed.stat, /^2 files changed/);
+});
+
+test('a repository whose folder name ends in a space is not taken for the folder beside it', { skip: process.platform === 'win32' }, async (t) => {
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-root-')));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  for (const name of ['repo', 'repo ']) {
+    fs.mkdirSync(path.join(home, name));
+    execFileSync('git', ['init', '-q'], { cwd: path.join(home, name) });
+  }
+  assert.equal(await repoRoot(path.join(home, 'repo ')), path.join(home, 'repo '));
+  assert.equal(await repoRoot(path.join(home, 'repo')), path.join(home, 'repo'));
+  assert.equal(await repoRoot(home), null);
 });

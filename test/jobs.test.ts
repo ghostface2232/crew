@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
@@ -1318,6 +1318,36 @@ test('a check without the network reaches local servers and its own sockets, and
   // 192.0.2.0/24 is reserved for documentation: refused here, and unreachable if the rule were missing.
   assert.equal(await connect(`80, '192.0.2.1'`), 'ERR EPERM');
   assert.equal(await connect(`'${path.join(outside, 's')}'`), 'ERR EPERM');
+});
+
+test('a check ends at its own limit when the daemon that started it is killed, and its own wait is not held up', { skip: !SANDBOXED || process.platform !== 'darwin' }, async (t) => {
+  const cwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-check-orphan-')));
+  const tmp = path.join(cwd, 'tmp');
+  fs.mkdirSync(tmp);
+  const listener = net.createServer();
+  await new Promise<void>((resolve) => listener.listen(0, '127.0.0.1', resolve));
+  t.after(() => { listener.close(); fs.rmSync(cwd, { recursive: true, force: true }); });
+  const port = (listener.address() as net.AddressInfo).port;
+  // The command's own jobs and `wait` see nothing of the watchdog: it returns at once, well inside the limit.
+  const waited = await runCheck('(sleep 0.2; echo first) & (sleep 0.1; echo second) & wait; echo waited', cwd, tmp, [], { timeoutMs: 5000, graceMs: 20_000 });
+  assert.deepEqual([waited.exit, waited.timedOut, waited.output.split('\n').at(-1)], [0, false, 'waited']);
+  assert.ok(waited.ms < 3000, `took ${waited.ms} ms`);
+  // A daemon that is killed takes its timer with it; the check holds a socket until something ends it.
+  const connected = new Promise<net.Socket>((resolve) => listener.once('connection', resolve));
+  const hold = `node -e "const s = require('node:net').connect(${port}, '127.0.0.1'); s.setTimeout(25000, () => s.destroy()); s.resume()"`;
+  const daemon = spawn(process.execPath, ['--input-type=module', '-e',
+    `import { runCheck } from ${JSON.stringify(new URL('../plugin/bridge/check.ts', import.meta.url).href)};
+     await runCheck(${JSON.stringify(hold)}, ${JSON.stringify(cwd)}, ${JSON.stringify(tmp)}, [], { timeoutMs: 1500, graceMs: 500 });`], { stdio: 'ignore' });
+  const socket = await connected;
+  const closed = new Promise<number>((resolve) => socket.once('close', () => resolve(Date.now())));
+  socket.on('error', () => {});
+  const killed = Date.now();
+  daemon.kill('SIGKILL');
+  const ended = await Promise.race([closed, new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000))]);
+  socket.destroy();
+  assert.ok(ended !== null, 'the check outlived its limit');
+  // It was the limit that ended it, not the daemon's death: the group is its own.
+  assert.ok(ended - killed > 500, `ended ${ended - killed} ms after the kill`);
 });
 
 test('a check is not run where the worker\'s limits cannot be applied', async () => {
@@ -2727,7 +2757,17 @@ test('text cut for the record stays well-formed when the cut lands inside an emo
 
 test('a job ledger that cannot be read is left as it is, not replaced by an empty one', () => {
   const quiet = { onEvent: () => {}, onJob: () => {}, onAttention: () => {} };
-  for (const content of ['{"seq":3,"jobs":[{"id":"cx-1"', '{}', 'null', '{"seq":1,"jobs":[null]}']) {
+  const record = '"state":"done","cwd":"/x","seq":1,"delivered":1';
+  for (const content of [
+    '{"seq":3,"jobs":[{"id":"cx-1"', '{}', 'null', '{"seq":1,"jobs":[null]}',
+    // Whatever the restore itself cannot take in: a record with nothing but an id, a field of the wrong kind,
+    // two records under one id (saved back, they would be one), a receipt no save could read.
+    '{"seq":1,"jobs":[{"id":"cx-1"}]}',
+    `{"seq":1,"jobs":[{"id":"cx-1",${record},"news":{}}]}`,
+    `{"seq":1,"jobs":[{"id":"cx-1",${record},"project":4}]}`,
+    `{"seq":1,"jobs":[{"id":"cx-1",${record}},{"id":"cx-1",${record}}]}`,
+    `{"seq":1,"jobs":[{"id":"cx-1",${record}}],"delivery":{"receipts":{"r":{"acknowledged":false}}}}`,
+  ]) {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-home-'));
     const file = path.join(home, 'jobs.json');
     fs.writeFileSync(file, content);

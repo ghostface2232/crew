@@ -22,6 +22,15 @@ export interface CheckResult {
 }
 
 export const CHECK_TIMEOUT_MS = 10 * 60_000;
+/** How long after the bridge's own timeout a check ends itself, so the bridge, while alive, is the one to report it. */
+const WATCHDOG_GRACE_MS = 30_000;
+/**
+ * The check's shell on macOS. The time limit above lives in a timer of the daemon, which a killed daemon takes with
+ * it, leaving the check's process group running for good. So the group carries a limit of its own: a watchdog that
+ * kills the group ($2 seconds), started before the command ($1). The command gets a shell of its own through exec,
+ * or its own `wait` would wait for the watchdog too.
+ */
+const WATCHED = '(sleep "$2"; kill -KILL 0) </dev/null >/dev/null 2>&1 & exec /bin/sh -c "$1"';
 const KEEP_OUTPUT = 4000;
 const runningChecks = new Set<() => Promise<void>>();
 
@@ -144,8 +153,8 @@ const skip = (command: string, skipped: string): CheckResult => ({ command, exit
  * with more than the worker could do: on macOS and Windows under the same file and network limits, and elsewhere
  * not at all. Windows uses the sandbox of `codex`, the configured Codex binary.
  */
-export async function runCheck(command: string, cwd: string, tmp: string, unreadable: string[], options: { network?: boolean; timeoutMs?: number; platform?: NodeJS.Platform; signal?: AbortSignal; codex?: string } = {}): Promise<CheckResult> {
-  const { network = false, timeoutMs = CHECK_TIMEOUT_MS, platform = process.platform, signal, codex = 'codex' } = options;
+export async function runCheck(command: string, cwd: string, tmp: string, unreadable: string[], options: { network?: boolean; timeoutMs?: number; graceMs?: number; platform?: NodeJS.Platform; signal?: AbortSignal; codex?: string } = {}): Promise<CheckResult> {
+  const { network = false, timeoutMs = CHECK_TIMEOUT_MS, graceMs = WATCHDOG_GRACE_MS, platform = process.platform, signal, codex = 'codex' } = options;
   if (platform !== 'darwin' && platform !== 'win32') return skip(command, 'only macOS and Windows can hold the check to the worker\'s limits; run it yourself');
   let launch: { bin: string; args: string[]; env: NodeJS.ProcessEnv };
   // Windows only: the secret that marks the wrapper's status line, and the files it reads.
@@ -202,7 +211,7 @@ export async function runCheck(command: string, cwd: string, tmp: string, unread
       env: { ...env, CREW_CHECK_LINE: line },
     };
   } else {
-    launch = { bin: '/usr/bin/sandbox-exec', args: ['-p', checkProfile(cwd, tmp, unreadable, network), '/bin/sh', '-c', command], env: process.env };
+    launch = { bin: '/usr/bin/sandbox-exec', args: ['-p', checkProfile(cwd, tmp, unreadable, network), '/bin/sh', '-c', WATCHED, 'crew-check', command, String((timeoutMs + graceMs) / 1000)], env: process.env };
   }
   const sandboxed = true;
   const started = Date.now();

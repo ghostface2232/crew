@@ -178,3 +178,17 @@ test('packaged startup under CREW_HOME leaves the user registration and command 
   assert.match(fs.readFileSync(calls, 'utf8'), /"plugin","install","crew@crew"/);
   assert.ok(fs.lstatSync(COMMAND));
 });
+
+test('a job ledger that was set aside shows in the checklist until the file is gone', async () => {
+  const { ledgerItem } = await import('../plugin/bridge/setup.ts');
+  const dir = fs.mkdtempSync(path.join(home, 'ledger-'));
+  assert.equal(ledgerItem(dir), null);
+  assert.equal(ledgerItem(path.join(dir, 'missing')), null);
+  fs.writeFileSync(path.join(dir, 'jobs.json.unreadable-1'), '{');
+  fs.writeFileSync(path.join(dir, 'jobs.json.unreadable-2'), '{');
+  const item = ledgerItem(dir)!;
+  assert.equal(item.ok, false);
+  assert.match(item.detail, /jobs\.json\.unreadable-2\b[^]*receipts and pull request watches/);
+  for (const name of ['jobs.json.unreadable-1', 'jobs.json.unreadable-2']) fs.rmSync(path.join(dir, name));
+  assert.equal(ledgerItem(dir), null);
+});

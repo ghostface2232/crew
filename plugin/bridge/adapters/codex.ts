@@ -104,10 +104,10 @@ export class CodexAdapter implements Adapter {
   private loaded = new Set<string>();
   private lastUsed = Date.now();
   private lastTidy = 0;
-  /** Threads a reply is resuming, which `tidy` must leave alone until they are loaded. */
-  private resuming = new Set<string>();
-  /** Jobs whose thread Codex is still starting or resuming, which can take minutes; `probe` vouches for them. */
-  private opening = new Set<string>();
+  /** Threads a reply is resuming, which `tidy` must leave alone until they are loaded. Counted: see `hold`. */
+  private resuming = new Map<string, number>();
+  /** Jobs whose thread Codex is still starting or resuming, which can take minutes; `probe` vouches for them. Counted. */
+  private opening = new Map<string, number>();
   /** Threads whose Crew tools Codex could not start, and why. Codex may say so before the thread has a run to tell. */
   private toolFailures = new Map<string, string>();
   private config: Config;
@@ -121,8 +121,7 @@ export class CodexAdapter implements Adapter {
   }
 
   async start(ctl: JobCtl): Promise<void> {
-    this.opening.add(ctl.job.id);
-    const opened = await this.open(ctl).finally(() => this.opening.delete(ctl.job.id));
+    const opened = await this.open(ctl).finally(hold(this.opening, ctl.job.id));
     if (!opened || isTerminal(ctl.job)) return;
     const { peer, params, res } = opened;
     const threadId: string = res.thread.id;
@@ -165,8 +164,8 @@ export class CodexAdapter implements Adapter {
       if (ctl.job.turns !== turn) return;
       ctl.capabilities(capabilitiesOf(ctl.job, params));
       const resume = () => peer.request('thread/resume', { threadId, ...params, excludeTurns: true }, THREAD_TIMEOUT_MS);
-      this.resuming.add(threadId);
-      this.opening.add(ctl.job.id);
+      const loaded = hold(this.resuming, threadId);
+      const opened = hold(this.opening, ctl.job.id);
       // `tidy` archives a worker's thread after a week; a reply to that job brings it back.
       const res = await resume().catch(async (err) => {
         if (!/^session \S+ is archived\b/.test(String(err?.message))) throw err;
@@ -175,8 +174,8 @@ export class CodexAdapter implements Adapter {
         });
         return resume();
       }).finally(() => {
-        this.resuming.delete(threadId);
-        this.opening.delete(ctl.job.id);
+        loaded();
+        opened();
       });
       this.loaded.add(threadId);
       if (ctl.job.turns !== turn) return;
@@ -913,6 +912,19 @@ export class CodexAdapter implements Adapter {
         throw new RpcError(-32601, `${method} is not supported by Crew`);
     }
   }
+}
+
+/**
+ * Marks `key` as held until the returned function runs. A cancelled turn's resume can still be pending when the next
+ * turn starts its own for the same job, so each request releases only its own hold and the mark stays while any is left.
+ */
+function hold(held: Map<string, number>, key: string): () => void {
+  held.set(key, (held.get(key) ?? 0) + 1);
+  return () => {
+    const left = (held.get(key) ?? 1) - 1;
+    if (left > 0) held.set(key, left);
+    else held.delete(key);
+  };
 }
 
 /** Bound free-form provider text before putting it in a report or approval prompt. */

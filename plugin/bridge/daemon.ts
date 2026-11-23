@@ -11,9 +11,10 @@ import { boardCredential, boardExpiry, ensureToken, evidenceSeal, sameToken, SES
 import { AntigravityAdapter } from './adapters/antigravity.ts';
 import { CodexAdapter } from './adapters/codex.ts';
 import { stopChecks } from './check.ts';
+import { clientJson } from './text.ts';
 import { ClaudeSessions } from './claude.ts';
 import type { ClaudeSession } from './claude.ts';
-import { agentCommand, agentEnv, canonicalPath, HOME, installed, isRole, loadConfig, PLUGIN_ROOT, PORTS, ROLE_INFO, ROLES, VERSION, WORKERS } from './config.ts';
+import { agentCommand, agentEnv, canonicalPath, HOME, installed, isRole, LEDGER_ASIDE, loadConfig, PLUGIN_ROOT, PORTS, ROLE_INFO, ROLES, VERSION, WORKERS } from './config.ts';
 import type { Config } from './config.ts';
 import { evidenceType, openEvidence } from './evidence.ts';
 import { projectRoot } from './git.ts';
@@ -63,12 +64,12 @@ const server = http.createServer((req, res) => {
     (result) => {
       if (result === undefined) return;
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify(result));
+      res.end(clientJson(result));
     },
     (err) => {
       const status = err instanceof HttpError ? err.status : 400;
       if (!res.headersSent) res.writeHead(status, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ error: String(err?.message ?? err) }));
+      res.end(clientJson({ error: String(err?.message ?? err) }));
     },
   );
 });
@@ -144,7 +145,7 @@ const BUILD = installed().build;
 
 const streams = new Set<http.ServerResponse>();
 function broadcast(type: string, data: unknown): void {
-  const frame = `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`;
+  const frame = `event: ${type}\ndata: ${clientJson(data)}\n\n`;
   for (const res of streams) res.write(frame);
 }
 
@@ -286,7 +287,7 @@ function loadJobs(hooks: JobsHooks): Jobs {
   } catch (err) {
     if (!(err instanceof UnreadableLedger)) throw err;
     const file = path.join(HOME, 'jobs.json');
-    const aside = `${file}.unreadable-${Date.now()}`;
+    const aside = path.join(HOME, `${LEDGER_ASIDE}${Date.now()}`);
     fs.renameSync(file, aside);
     log(`jobs.json could not be used and was set aside as ${aside}; starting with no jobs. Cause: ${err.message}`);
     return open();
@@ -621,7 +622,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     }
     if (pathname === '/api/stream') {
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
-      res.write(`event: state\ndata: ${JSON.stringify(state())}\n\n`);
+      res.write(`event: state\ndata: ${clientJson(state())}\n\n`);
       streams.add(res);
       // A stream outlives the check made when it opened, so a board's is ended when its credential lapses.
       const lapse = who?.board ? setTimeout(() => {

@@ -97,7 +97,7 @@ On start or resume, Crew queries `plugin/installed`, enables matching installed-
 
 ## Sandboxed checks
 
-On macOS and Windows, `check` reads anywhere except the daemon token, writes only to the worktree and its temp directory, and keeps `.git` read-only. Local servers remain reachable, outside network access requires `runs_app`, and the check times out after 10 minutes. On daemon shutdown, Crew kills each active check’s process group on macOS or terminates its PowerShell host on Windows. Terminating the host closes its Job Object and stops the processes inside it.
+On macOS and Windows, `check` reads anywhere except the daemon token, writes only to the worktree and its temp directory, and keeps `.git` read-only. Local servers remain reachable, outside network access requires `runs_app`, and the check times out after 10 minutes. On macOS the check's process group also carries a limit of its own, 30 seconds past the bridge's: a watchdog started in the check's shell kills the group, so a check does not outlive a daemon that was killed (on Windows that case is still open: the job host waits without a limit). On daemon shutdown, Crew kills each active check’s process group on macOS or terminates its PowerShell host on Windows. Terminating the host closes its Job Object and stops the processes inside it.
 
 ## Not verified
 

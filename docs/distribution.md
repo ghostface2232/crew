@@ -36,6 +36,7 @@ Both apps show a **Set up Crew** card at the top of the unfiltered Overview page
 | Claude Code (`claude` on `PATH`) | Checks `claude --version`; if missing, tells the user to install from `claude.com/code` |
 | Codex CLI and sign-in | Checks `codex --version` and `codex login status`; installing and signing in are left to the user |
 | Antigravity CLI | Checks `agy --version` when `antigravity.enabled` is true; installing and running `agy` to sign in are left to the user |
+| Job ledger | Shown only while a `jobs.json.unreadable-*` file is in the Crew home ([architecture.md](architecture.md#bridge-and-state)): names the file the daemon set aside; repairing or deleting it is left to the user |
 
 Signing in to user accounts is never automated.
 

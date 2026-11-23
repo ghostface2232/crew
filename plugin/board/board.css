@@ -134,8 +134,8 @@
     --track: rgb(255 255 255 / 0.22);
     --heat-0: rgb(255 255 255 / 0.06);
     --shadow-pop: var(--outline-ring), -8px 8px 26px rgb(0 0 0 / 0.4);
-    --shadow-card: inset 0 1px 0 rgb(255 255 255 / 0.06), 0 0 0 1px rgb(0 0 0 / 0.6), 0 1px 2px rgb(0 0 0 / 0.4), 0 12px 28px -12px rgb(0 0 0 / 0.75);
-    --shadow-card-hover: inset 0 1px 0 rgb(255 255 255 / 0.08), 0 0 0 1px rgb(0 0 0 / 0.6), 0 2px 4px rgb(0 0 0 / 0.45), 0 20px 40px -14px rgb(0 0 0 / 0.85);
+    --shadow-card: inset 0 1px 0 rgb(255 255 255 / 0.06), 0 0 0 0.5px rgb(0 0 0 / 0.35), 0 1px 2px rgb(0 0 0 / 0.4), 0 12px 28px -12px rgb(0 0 0 / 0.75);
+    --shadow-card-hover: inset 0 1px 0 rgb(255 255 255 / 0.08), 0 0 0 0.5px rgb(0 0 0 / 0.35), 0 2px 4px rgb(0 0 0 / 0.45), 0 20px 40px -14px rgb(0 0 0 / 0.85);
     /* No inset ring: the stage's transparent borders would push it inside them. */
     --shadow-stage: 0 0 0 1px rgb(0 0 0 / 0.45);
     /* Clearly lighter than the frame, so the current sidebar item stands out on it. */

@@ -804,7 +804,8 @@ test('New Job picks among a role\'s worker holders, and a role only Claude holds
 
 test('each project has its own instructions page', async ({ page, request }) => {
   await openSettings(page, 'Other');
-  await expect(page.getByRole('heading', { name: 'Other', exact: true, level: 2 })).toBeVisible();
+  // Beside the sidebar the page has no title row; its stage carries the name.
+  await expect(page.getByRole('dialog').getByRole('region', { name: 'Other', exact: true })).toBeVisible();
   const field = page.getByRole('textbox', { name: 'Shared instructions' });
   await expect(field).toBeEnabled();
   await field.fill('Use tabs here.');
@@ -1105,12 +1106,12 @@ test('model scores list each model with its score, counts and summary, and have 
   await expect(page.getByRole('button', { name: /^Save/ })).toHaveCount(0);
   // Fixing is assigned with the reviews it answers.
   await settingsPage(page, 'Review');
-  await expect(page.getByRole('checkbox', { name: 'Fix: Claude (the lead)' })).toBeChecked();
+  await expect(page.getByRole('checkbox', { name: 'Fix: Claude', exact: true })).toBeChecked();
 });
 
 test('preset saves its selection, describes its models, and permits none', async ({ page, request }) => {
   await openSettings(page, 'Model Presets');
-  const select = page.getByLabel('Model preset');
+  const select = page.getByRole('combobox', { name: 'Model preset' });
   await expect(select).toHaveText('Balanced');
   await pick(select, 'Economy');
   await expect(page.getByText('small · Low effort', { exact: true })).toBeVisible();
@@ -1131,7 +1132,7 @@ test('preset saves its selection, describes its models, and permits none', async
 
 test('preset failures keep the draft and saving preserves newer edits', async ({ page }) => {
   await openSettings(page, 'Model Presets');
-  const select = page.getByLabel('Model preset');
+  const select = page.getByRole('combobox', { name: 'Model preset' });
   await pick(select, 'Best');
   await page.route('**/api/preset', (route) => route.fulfill({ status: 500, json: { error: 'Cannot save preset' } }));
   await page.getByRole('button', { name: 'Save Preset' }).click();

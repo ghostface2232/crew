@@ -117,8 +117,6 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
   const [view, setView] = useState<'list' | 'page'>(initial ? 'page' : 'list');
   const back = useRef<HTMLButtonElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
-  // The title's blur shows only once the page has scrolled under it.
-  const [scrolled, setScrolled] = useState(false);
   const [roles, setRoles] = useState<RoleSettings>(() => editableRoles(state));
   const [savedRoles, setSavedRoles] = useState<RoleSettings>(() => editableRoles(state));
   const info = rolesOf(state);
@@ -366,7 +364,6 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
   // Each page opens at its top.
   useEffect(() => {
     if (scroller.current) scroller.current.scrollTop = 0;
-    setScrolled(false);
   }, [current, view]);
   const open = async (next: Pane) => {
     const nextScope = next === 'instructions' ? '' : next.startsWith('project:') ? next.slice('project:'.length) : null;
@@ -403,7 +400,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
   // An older daemon may not know every agent; Claude is always one.
   const holders = HOLDERS.filter((holder) => holder === 'claude' || holder in state.agents);
   const models = (agent: WorkerAgent) => state.agents[agent]?.models ?? [];
-  const holderLabel = (holder: Holder) => holder === 'claude' ? 'Claude (the lead)' : `${state.agents[holder].name}${state.agents[holder].enabled ? '' : ' (disabled)'}`;
+  const holderLabel = (holder: Holder) => holder === 'claude' ? 'Claude' : `${state.agents[holder].name}${state.agents[holder].enabled ? '' : ' (disabled)'}`;
   const roleGroup = (role: RoleInfo) => {
     const own = roles[role.role] ?? {};
     const parentLabel = info.find((other) => other.role === role.parent)?.label ?? role.parent;
@@ -497,7 +494,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
         <nav className={styles.sidebar} aria-label="Settings pages" ref={nav}>
           <header className={styles.sidebarHead}>
             <h2 className={styles.windowTitle} id="settings-title">Settings</h2>
-            <span className={styles.listClose}><CloseButton label="Close settings" onClose={closeSettings} /></span>
+            <CloseButton label="Close settings" onClose={closeSettings} />
           </header>
           <p className={styles.sectionLabel}>Roles</p>
           <div className={styles.section}>{(['build', 'review', 'edit'] as Pane[]).map(item)}</div>
@@ -519,15 +516,17 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
           )}
         </nav>
         <div className={styles.detail}>
-          <div className={styles.scroll} ref={scroller} onScroll={(event) => setScrolled(event.currentTarget.scrollTop > 0)}>
-            <header className={styles.pageHead} data-scrolled={scrolled || undefined}>
-              <button type="button" ref={back} className={`borderless ${styles.back}`} onClick={() => setView('list')}>
-                <Icon icon={ChevronLeftRegular} />
-                Settings
-              </button>
-              <h2 className={styles.pageTitle}>{title}</h2>
-              <span className={styles.pageClose}><CloseButton label="Close settings" onClose={closeSettings} /></span>
-            </header>
+          <header className={styles.pageHead}>
+            <button type="button" ref={back} className={`borderless ${styles.back}`} onClick={() => setView('list')}>
+              <Icon icon={ChevronLeftRegular} />
+              Settings
+            </button>
+            <h2 className={styles.pageTitle}>{title}</h2>
+            <span className={styles.pageClose}><CloseButton label="Close settings" onClose={closeSettings} /></span>
+          </header>
+          {/* The page is the stage the dialog's frame wraps, as in the window. Named here, since only a phone shows the title row. */}
+          <section className={styles.stage} aria-label={title}>
+          <div className={styles.scroll} ref={scroller}>
             <div className={styles.body}>
               {kind && info.filter((role) => paneKind(role) === kind).map(roleGroup)}
               {kind && (
@@ -694,6 +693,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
               </button>
             </div>
           </footer>}
+          </section>
         </div>
       </div>
     </Dialog>

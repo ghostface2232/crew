@@ -331,7 +331,7 @@ struct CrewSettingsView: View {
         }.padding(.horizontal, Space.x3l).padding(.vertical, Space.xl)
     }
     private func holderLabel(_ holder: String) -> String {
-        holder == "claude" ? "Claude (the lead)" : "\(agentName(holder))\(store.state.agents[holder]?.enabled == false ? " (disabled)" : "")"
+        holder == "claude" ? "Claude" : "\(agentName(holder))\(store.state.agents[holder]?.enabled == false ? " (disabled)" : "")"
     }
     private func roleBinding(_ role: RoleInfo, agent: String, _ key: WritableKeyPath<RoleAgentSettings, String?>) -> Binding<String> {
         Binding(get: { model.roleSettings[role.role]?[agent]?[keyPath: key] ?? "" },

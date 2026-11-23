@@ -45,6 +45,8 @@ Bridge types are imported type-only, keeping Node modules out of the renderer. S
 ## Settings
 
 - The dialog (`Settings.tsx`) edits Build/Review/Edit roles, Presets, Model Scores (including the peer-ratings toggle), shared instructions (global and per-project), and About Crew. Role saves preserve other `config.json` keys and refuse unparseable files. Instruction writes allow only daemon-known projects and never follow symlinks. Closing with unsaved edits prompts first.
+- The dialog is laid out as the window is: a frame on `--canvas` around the page, an inset stage on `--stage` that holds the scrolling page and its save bar. Beside the sidebar the stage takes the dialog's full height and has no title row: the sidebar's current item names the page, and the sidebar's head holds the title and the close button. On a phone the sidebar is a list of its own, and a page gets a title row with Back and Close above a stage inset on both sides.
+- A role's agent checkboxes take a line of their own, running from its start, where their group is too narrow (440px) to hold them beside the label; wrapped against the trailing edge they read as scattered.
 - Settings track loaded scope and generation so late responses cannot overwrite another editor. Saving normalizes only the submitted draft and preserves edits made during the request. Failed loads disable saving and expose a retry.
 
 ## New Job

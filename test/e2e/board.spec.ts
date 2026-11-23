@@ -414,7 +414,7 @@ test('detail panel cancels, follows up, and escapes task text', async ({ page, r
   // Return adds a newline; only the button sends.
   await message.press('Enter');
   expect((await (await request.get('/__requests')).json()).some((call: { route: string }) => call.route.endsWith('/reply'))).toBe(false);
-  await drawer.getByRole('button', { name: 'Send Message' }).click();
+  await drawer.getByRole('button', { name: 'Send', exact: true }).click();
   await expect(message).toHaveValue('');
   await drawer.getByRole('button', { name: 'Cancel Job' }).click();
   await expect(drawer.getByText('Cancelled', { exact: true }).first()).toBeVisible();
@@ -564,7 +564,7 @@ test('the detail panel shows what verified the result and nothing for jobs witho
   let section = (await open('cx-build')).getByRole('region', { name: 'Verification' });
   await expect(section.getByText('Check passed')).toBeVisible();
   await expect(section.getByText('npm test', { exact: true })).toBeVisible();
-  await expect(section.getByText('Turn 1 · f00dbabe · 4s')).toBeVisible();
+  await expect(section.getByText('Turn 1 · 4s', { exact: true })).toBeVisible();
   await expect(section.getByRole('button', { name: 'Show the end of the output' })).toHaveCount(0);
   await expect(section.getByText('writes in the worktree only · no network · plugins figma (act outside the sandbox)')).toBeVisible();
   await expect(section.getByText('Approval relayed for turn 1 — the user’s own words went with it, and the quote matches them.')).toBeVisible();
@@ -584,7 +584,7 @@ test('the detail panel shows what verified the result and nothing for jobs witho
   section = (await open('cx-review')).getByRole('region', { name: 'Verification' });
   await expect(section.getByText('Reviewed', { exact: true })).toBeVisible();
   await expect(section.getByText('uncommitted changes')).toBeVisible();
-  await expect(section.getByText('Turn 1 · cafe0123 · diff 9f8e7d6c')).toBeVisible();
+  await expect(section.getByText('Turn 1', { exact: true })).toBeVisible();
   await close();
 
   await expect((await open('cx-plain')).getByRole('region', { name: 'Verification' })).toHaveCount(0);

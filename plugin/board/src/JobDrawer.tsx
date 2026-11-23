@@ -209,6 +209,12 @@ const NETWORK: Record<NonNullable<BoardJob['capabilities']>['network'], string> 
   'agent-managed': 'network as the agent allows',
 };
 
+/** Which shared instructions a file holds: the project's own `.crew/instructions.md`, or those for every project. */
+function instructionScope(file: string, project: string) {
+  const slashes = (path: string) => path.replaceAll('\\', '/');
+  return slashes(file) === `${slashes(project)}/.crew/instructions.md` ? 'This project' : 'Every project';
+}
+
 function duration(ms: number) {
   return ms < 60_000 ? `${Math.max(1, Math.round(ms / 1000))}s` : elapsed(ms);
 }
@@ -217,7 +223,6 @@ function duration(ms: number) {
 function ReceiptView({ receipt }: { receipt: NonNullable<BoardJob['receipts']>[number] }) {
   const { check, reviewed, stale } = receipt;
   if (!check && !reviewed) return null;
-  const at = receipt.head ? ` · ${receipt.head.slice(0, 8)}` : '';
   const passed = check?.exit === 0 && !check.timedOut;
   const [state, icon, label] = !check
     ? (['done', CheckmarkRegular, 'Reviewed'] as const)
@@ -245,9 +250,7 @@ function ReceiptView({ receipt }: { receipt: NonNullable<BoardJob['receipts']>[n
       )}
       <p className="caption secondary selectable">
         Turn {receipt.turn}
-        {at}
         {check && !check.skipped && ` · ${duration(check.ms)}${check.sandboxed ? '' : ' · not sandboxed'}`}
-        {reviewed?.diff && ` · diff ${reviewed.diff}`}
       </p>
       {stale && (
         <p className="callout stale selectable">
@@ -453,8 +456,9 @@ function FollowUp({ job }: { job: BoardJob }) {
   const name = NAMES[job.agent];
   return (
     <Section title={job.endedAt == null ? 'Steer' : job.debate ? 'Reply' : 'Follow up'} icon={ChatRegular}>
-      <textarea aria-label={`Message to ${name}`} value={draft} onChange={(event) => setDraft(event.target.value)} />
-      <div>
+      <textarea aria-label={`Message to ${name}`} placeholder="Write a message…" value={draft} onChange={(event) => setDraft(event.target.value)} />
+      <div className="answer-actions">
+        <ActionStatus actionKey={key} />
         <button
           className="prominent"
           disabled={!draft.trim() || state.pending || board.getSnapshot().connection !== 'live'}
@@ -465,10 +469,9 @@ function FollowUp({ job }: { job: BoardJob }) {
             if (sent && drafts.get(key)?.trim() === message) setDraft('');
           }}
         >
-          Send Message
+          Send
         </button>
       </div>
-      <ActionStatus actionKey={key} />
     </Section>
   );
 }
@@ -531,14 +534,14 @@ const JobDetails = memo(function JobDetails({ id, current, streamLog, agents, ro
         ...(job.preset ? [['Preset', job.preset[0].toUpperCase() + job.preset.slice(1)] as [string, string]] : []),
         ['Project', projectOf(job)],
         ['Duration', <Elapsed start={job.createdAt} end={job.endedAt} />],
-        ...(job.worktree ? [['Branch', `${job.worktree.branch} (from ${job.worktree.base.slice(0, 8)})`] as [string, string]] : []),
+        ...(job.worktree ? [['Branch', job.worktree.branch] as [string, string]] : []),
         ...(job.tokens != null ? [['Tokens', job.tokens.toLocaleString()] as [string, string]] : []),
         ...(job.tokenUse
           ? [['Of which', `${job.tokenUse.cachedInput.toLocaleString()} cached input · ${(job.tokenUse.input - job.tokenUse.cachedInput).toLocaleString()} uncached input · ${job.tokenUse.output.toLocaleString()} output${job.turns > 1 ? ` · ${job.tokenUse.turn.toLocaleString()} in the latest turn` : ''}`] as [string, string]]
           : []),
         ...(job.context ? [['Context', `${job.context.used.toLocaleString()} of ${job.context.size.toLocaleString()} (${Math.round((job.context.used / job.context.size) * 100)}%)`] as [string, string]] : []),
         ['Turns', String(job.turns)],
-        ...(job.shared?.length ? [['Instructions', job.shared.join('\n')] as [string, string]] : []),
+        ...(job.shared?.length ? [['Instructions', job.shared.map((file) => instructionScope(file, projectOf(job))).join(' · ')] as [string, string]] : []),
       ]
     : [];
   const result = job?.result;
@@ -592,6 +595,12 @@ const JobDetails = memo(function JobDetails({ id, current, streamLog, agents, ro
                   )}
                 </div>
               ))}
+              {/* A section's own action ends it at the trailing edge, as in the app. */}
+              {job.worktree && result.files.length > 0 && (
+                <div className="answer-actions">
+                  <CopyButton text={`git diff ${job.worktree.base.slice(0, 8)}..${job.worktree.branch}`}>Diff Command</CopyButton>
+                </div>
+              )}
             </Section>
           )}
           <VerificationSection job={job} />
@@ -641,9 +650,6 @@ const JobDetails = memo(function JobDetails({ id, current, streamLog, agents, ro
           <Footer status={<ActionStatus actionKey={cancelKey} />}>
             {job.sessionId && agents[job.agent] && !job.capabilities?.confined && (
               <CopyButton text={`${agents[job.agent].resume} ${job.sessionId}`} short="Resume">Resume Command</CopyButton>
-            )}
-            {job.worktree && result && result.files.length > 0 && (
-              <CopyButton text={`git diff ${job.worktree.base.slice(0, 8)}..${job.worktree.branch}`} short="Diff">Diff Command</CopyButton>
             )}
             {job.endedAt == null && (
               <button

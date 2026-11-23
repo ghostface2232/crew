@@ -71,14 +71,17 @@ struct JobDetailView: View {
             if let preset = job.preset { fact("Preset", preset.capitalized) }
             fact("Project", job.projectPath)
             fact("Duration", elapsed((job.endedAt ?? store.now) - job.createdAt))
-            if let worktree = job.worktree { fact("Branch", "\(worktree.branch) (from \(worktree.base.prefix(8)))") }
+            if let worktree = job.worktree { fact("Branch", worktree.branch) }
             if let tokens = job.tokens { fact("Tokens", tokens.formatted()) }
             if let use = job.tokenUse {
                 fact("Of which", "\(use.cachedInput.formatted()) cached input · \((use.input - use.cachedInput).formatted()) uncached input · \(use.output.formatted()) output" + (job.turns > 1 ? " · \(use.turn.formatted()) in the latest turn" : ""))
             }
             if let context = job.context { fact("Context", context.label) }
             fact("Turns", String(job.turns))
-            if let shared = job.shared, !shared.isEmpty { fact("Instructions", shared.joined(separator: "\n")) }
+            if let shared = job.shared, !shared.isEmpty {
+                // Which shared instructions it was given: the project's own `.crew/instructions.md`, or those for every project.
+                fact("Instructions", shared.map { $0 == "\(job.projectPath)/.crew/instructions.md" ? "This project" : "Every project" }.joined(separator: " · "))
+            }
         }.font(Typeface.callout).textSelection(.enabled).inset()
         if let live = job.liveDiff, job.endedAt == nil { LiveDiffSection(store: store, id: job.id, at: live.at) }
         if let result = job.result {
@@ -175,7 +178,7 @@ struct JobDetailView: View {
                 MessageEditor(title: "Message to \(agentName(job.agent))", text: Binding(get: { store.drafts[key] ?? "" }, set: { store.drafts[key] = $0 }), prompt: "Write a message…")
                 HStack {
                     Spacer(minLength: 0)
-                    Button("Send Message", systemImage: "arrow.up") { Task { await store.followUp(job) } }
+                    Button("Send", systemImage: "arrow.up") { Task { await store.followUp(job) } }
                         .glassPillButton()
                         .disabled(!store.connected || store.actions[key]?.locked == true || (store.drafts[key] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
@@ -614,7 +617,7 @@ private struct VerificationView: View {
             } else if let reviewed = receipt.reviewed {
                 DetailItem(title: "Reviewed", symbol: "eye", tint: receipt.stale == nil ? nil : .secondary) {
                     Text(reviewed.target).font(Typeface.callout).textSelection(.enabled)
-                    Text(caption(receipt, extra: reviewed.diff.map { "diff \($0)" })).font(Typeface.caption).foregroundStyle(.secondary)
+                    Text(caption(receipt, extra: nil)).font(Typeface.caption).foregroundStyle(.secondary)
                     stale(receipt)
                 }
             }
@@ -652,7 +655,7 @@ private struct VerificationView: View {
     }
 
     private func caption(_ receipt: TurnReceipt, extra: String?) -> String {
-        ["Turn \(receipt.turn)", receipt.head.map { String($0.prefix(8)) }, extra].compactMap { $0 }.joined(separator: " · ")
+        ["Turn \(receipt.turn)", extra].compactMap { $0 }.joined(separator: " · ")
     }
 
     private func duration(_ ms: Double) -> String {

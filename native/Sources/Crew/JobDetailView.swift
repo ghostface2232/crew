@@ -361,6 +361,7 @@ struct SessionDetailView: View {
         if session.state == "waiting" {
             VStack(alignment: .leading, spacing: Space.m) {
                 Text(session.waitingFor ?? "Claude needs your input.").font(Typeface.callout).textSelection(.enabled)
+                ClaudeAskView(session: session)
                 Text("Answer in Claude.").font(Typeface.callout).foregroundStyle(.secondary)
             }.card(fill: Palette.attention(Palette.warning))
         }
@@ -395,6 +396,7 @@ struct SessionDetailView: View {
             }
         }
         DetailFooter {
+            OpenInClaudeButton(session: session)
             CopyButton(title: "Resume Command", text: "claude --resume \(session.id)", help: "Copy the command that resumes this session")
         }
     }

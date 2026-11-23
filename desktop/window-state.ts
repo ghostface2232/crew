@@ -34,6 +34,16 @@ export function isBoardNavigation(candidate: string, base: string) {
     return false;
   }
 }
+/** Whether the board is opening a session in the Claude desktop app, which the system hands the link to. */
+export function isClaudeSessionLink(candidate: string) {
+  try {
+    const url = new URL(candidate);
+    return url.protocol === 'claude:' && url.host === 'code' && url.pathname === '/continue' && !url.username && !url.password && !url.hash
+      && [...url.searchParams.keys()].join() === 'session' && /^local_[A-Za-z0-9-]{1,64}$/.test(url.searchParams.get('session')!);
+  } catch {
+    return false;
+  }
+}
 /** Where a link the board opens in a new window goes: its own evidence viewer, the user's browser, or nowhere. */
 export function linkTarget(candidate: string, base: string): 'evidence' | 'external' | null {
   let url: URL;

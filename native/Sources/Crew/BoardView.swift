@@ -642,16 +642,30 @@ struct NeedsYouView: View {
             // As on the web board: a Claude session is answered in Claude itself, so its tile says so instead of offering a composer.
             ForEach(sessions) { session in
                 VStack(alignment: .leading, spacing: Space.xl) {
-                    // Laid out as a job's tile: who and where on the header, the session's title under it.
+                    // Laid out as a job's tile: who on the header, the session's title under it.
                     VStack(alignment: .leading, spacing: Space.ml) {
-                        requestHeader("Input", agent: "claude", who: "Claude", project: session.projectPath) { store.openSession(session.id) }
+                        HStack(spacing: Space.ml) {
+                            StatusLabel(state: "waiting", title: "Input")
+                            HStack(spacing: Space.s) {
+                                AgentMark(agent: "claude", size: MarkSize.inline)
+                                Text("Claude").lineLimit(1)
+                            }.font(Typeface.chip).foregroundStyle(.secondary).help(session.projectPath)
+                            Spacer(minLength: WorkspaceStyle.rowSpacer)
+                            OpenInClaudeButton(session: session)
+                        }
                         Text(session.title).font(Typeface.callout).foregroundStyle(.secondary).lineLimit(2).help(session.title)
                     }
                     Text(session.waitingFor ?? "Claude needs your input.").font(Typeface.headline).lineSpacing(4).textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
-                    Label("Answer in Claude.", systemImage: "bubble.left.and.bubble.right").font(Typeface.callout).foregroundStyle(.secondary)
+                    ClaudeAskView(session: session)
+                    if session.claudeURL == nil {
+                        Label("Answer in Claude.", systemImage: "bubble.left.and.bubble.right").font(Typeface.callout).foregroundStyle(.secondary)
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading).card()
+                // The whole tile opens the details, as a row does.
+                .contentShape(.rect).onTapGesture { store.toggleSession(session.id) }
+                .accessibilityAction(named: "Show Details") { store.openSession(session.id) }
                 .transition(.card)
             }
         }
@@ -662,7 +676,7 @@ struct NeedsYouView: View {
             StatusLabel(state: "waiting", title: kind)
             HStack(spacing: Space.s) {
                 AgentMark(agent: agent, size: MarkSize.inline)
-                Text("\(who) · \(projectName(project, among: store.projects))").lineLimit(1)
+                Text(who).lineLimit(1)
             }.font(Typeface.chip).foregroundStyle(.secondary).help(project)
             Spacer(minLength: WorkspaceStyle.rowSpacer)
             // How long the request has waited, as the web board's request cards show.

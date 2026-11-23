@@ -26,6 +26,26 @@ export interface ClaudeSession {
   workflows: WorkflowRun[];
   /** The open mission this session last acted on as its lead. With several open, the board shows the session on that card alone. Memory only. */
   mission?: string;
+  /** The Claude desktop app's id for the session (local_…), which `claude://code/continue?session=` opens. Absent for a CLI session. */
+  desktopId?: string;
+  /** What the waiting prompt asks, where the hooks show more than its one line. Present only while waiting. */
+  ask?: ClaudeAsk;
+}
+
+/** A waiting prompt's content. The user still answers it in Claude: hooks cannot answer it for them. */
+export interface ClaudeAsk {
+  /** Questions with their choices, from AskUserQuestion or the desktop app's end-of-turn box. */
+  questions?: AskQuestion[];
+  /** For an approval: the tool, as the session's phase names it, and what it would act on (a command, a path, a URL). */
+  tool?: string;
+  input?: string;
+}
+
+export interface AskQuestion {
+  header?: string;
+  question: string;
+  options: string[];
+  multiSelect?: boolean;
 }
 
 export interface SubAgent {
@@ -79,6 +99,13 @@ const KEEP_WORKFLOW_MS = 10 * 60_000;
 const FORGET_AGENT_MS = 60 * 60_000;
 /** How often an unknown workflow agent may send the journals to be read again. */
 const RESCAN_JOURNALS_MS = 2_000;
+/** The id the desktop app's claude:// links accept for a session. */
+const DESKTOP_ID = /^local_[A-Za-z0-9-]{1,64}$/;
+/** What an approval card shows of a tool's input, and of each question and choice. */
+const MAX_ASK_INPUT = 2000;
+const MAX_ASK_TEXT = 500;
+const MAX_QUESTIONS = 4;
+const MAX_OPTIONS = 8;
 
 interface JournalEntry {
   run: string;
@@ -112,7 +139,13 @@ export class ClaudeSessions {
    * The question a session's turn ended on, from the desktop app's wrap-up box. No hook reports it as a prompt,
    * and Stop would clear it, so it is kept to show the session as waiting until the user answers.
    */
-  private asked = new Map<string, string>();
+  private asked = new Map<string, AskQuestion>();
+  /**
+   * The tool calls under way in each session, by caller (the main loop '', or a sub-agent's id) and then by call id.
+   * PreToolUse runs before the permission check, so a permission prompt asks about one of its caller's open calls;
+   * with several open at once, which one is unknown.
+   */
+  private calls = new Map<string, Map<string, Map<string, { name: unknown; input: any }>>>();
   private hooks: ClaudeHooks;
   private stallMs: number;
 
@@ -133,6 +166,7 @@ export class ClaudeSessions {
       this.sessions.set(id, s);
     }
     if (typeof p.session_title === 'string' && p.session_title) s.title = p.session_title;
+    if (typeof p.desktop_session_id === 'string' && DESKTOP_ID.test(p.desktop_session_id)) s.desktopId = p.desktop_session_id;
     s.activeAt = now;
     s.stalled = false;
     // Sub-agents run beside the main loop, so their tool calls go to the sub-agent, not the session.
@@ -173,6 +207,7 @@ export class ClaudeSessions {
         s.waitingFor = null;
         s.inTool = true;
         s.phase = describeTool(p.tool_name, p.tool_input);
+        this.call(id, '', p);
         if ((p.tool_name === 'Agent' || p.tool_name === 'Task') && typeof p.tool_input?.description === 'string') {
           const type = typeof p.tool_input.subagent_type === 'string' ? p.tool_input.subagent_type : undefined;
           const call = typeof p.tool_use_id === 'string' ? p.tool_use_id : undefined;
@@ -185,7 +220,8 @@ export class ClaudeSessions {
       case 'PostToolUseFailure':
         s.state = 'working';
         s.inTool = false;
-        if (p.tool_name === WRAP_UP && typeof p.tool_input?.ask === 'string' && p.tool_input.ask.trim()) this.asked.set(id, oneLine(p.tool_input.ask));
+        this.ended(id, '', p);
+        if (p.tool_name === WRAP_UP && typeof p.tool_input?.ask === 'string' && p.tool_input.ask.trim()) this.asked.set(id, wrapUpQuestion(p.tool_input));
         // A failed Agent call starts no sub-agent, so its title must not go to the next one.
         if (p.hook_event_name === 'PostToolUseFailure' && typeof p.tool_use_id === 'string') {
           this.pending.set(id, (this.pending.get(id) ?? []).filter((c) => c.call !== p.tool_use_id));
@@ -201,11 +237,18 @@ export class ClaudeSessions {
           if (this.asked.has(id)) break;
           s.state = s.agents.length ? 'working' : 'idle';
         } else if (type === 'permission_prompt' || type === 'agent_needs_input' || type === 'elicitation_dialog') {
-          const message = oneLine(p.message ?? 'needs input');
+          const from = typeof p.agent_id === 'string' ? p.agent_id : '';
+          const open = type === 'permission_prompt' ? this.calls.get(id)?.get(from) : undefined;
+          const call = open?.size === 1 ? [...open.values()][0] : undefined;
+          const ask = call && askOf(call.name, call.input);
+          // A question reads better than the prompt's "needs your permission to use AskUserQuestion".
+          const message = ask?.questions ? oneLine(ask.questions[0].question) : oneLine(p.message ?? 'needs input');
           if (s.state !== 'waiting' || s.waitingFor !== message || !s.waitingId) s.waitingId = randomUUID();
-          this.waitingFrom.set(id, typeof p.agent_id === 'string' ? p.agent_id : '');
+          this.waitingFrom.set(id, from);
           s.state = 'waiting';
           s.waitingFor = message;
+          if (ask) s.ask = ask;
+          else delete s.ask;
           this.hooks.onEvent(s, 'waiting', s.waitingFor);
         }
         break;
@@ -218,10 +261,13 @@ export class ClaudeSessions {
         s.phase = 'finished the turn';
         this.hooks.onEvent(s, 'done', oneLine(p.last_assistant_message ?? 'turn finished'));
         if (this.asked.has(id)) {
+          const asked = this.asked.get(id)!;
           s.waitingId = randomUUID();
           this.waitingFrom.set(id, '');
           s.state = 'waiting';
-          s.waitingFor = this.asked.get(id)!;
+          s.waitingFor = oneLine(asked.question);
+          if (asked.options.length) s.ask = { questions: [asked] };
+          else delete s.ask;
           this.hooks.onEvent(s, 'waiting', s.waitingFor);
         }
         break;
@@ -241,7 +287,10 @@ export class ClaudeSessions {
         this.hooks.onSession(s, true);
         return;
     }
-    if (s.state !== 'waiting') delete s.waitingId;
+    if (s.state !== 'waiting') {
+      delete s.waitingId;
+      delete s.ask;
+    }
     this.hooks.onSession(s);
   }
 
@@ -265,6 +314,7 @@ export class ClaudeSessions {
     this.pending.delete(id);
     this.resting.delete(id);
     this.asked.delete(id);
+    this.calls.delete(id);
     this.waitingFrom.delete(id);
     this.journals.delete(id);
   }
@@ -276,6 +326,9 @@ export class ClaudeSessions {
         this.agent(s, id, p, now);
         return true;
       case 'SubagentStop': {
+        this.calls.get(s.id)?.delete(id);
+        // A prompt the sub-agent raised ends with it, answered or not.
+        this.answered(s, id);
         const agent = s.agents.find((a) => a.id === id);
         if (agent) this.placeInWorkflow(s, agent, p, now);
         const run = agent?.workflow && s.workflows.find((w) => w.id === agent.workflow);
@@ -291,12 +344,14 @@ export class ClaudeSessions {
         const agent = this.agent(s, id, p, now);
         agent.inTool = true;
         agent.phase = describeTool(p.tool_name, p.tool_input);
+        this.call(s.id, id, p);
         this.answered(s, id);
         return true;
       }
       case 'PostToolUse':
       case 'PostToolUseFailure':
         this.agent(s, id, p, now).inTool = false;
+        this.ended(s.id, id, p);
         this.answered(s, id);
         return true;
     }
@@ -327,6 +382,25 @@ export class ClaudeSessions {
     s.state = 'working';
     s.waitingFor = null;
     delete s.waitingId;
+    delete s.ask;
+  }
+
+  /** Keeps a tool call open for the permission prompt that may follow it. A payload without a call id replaces the caller's last one. */
+  private call(sessionId: string, caller: string, p: any): void {
+    let callers = this.calls.get(sessionId);
+    if (!callers) this.calls.set(sessionId, (callers = new Map()));
+    let open = callers.get(caller);
+    if (!open) callers.set(caller, (open = new Map()));
+    if (typeof p.tool_use_id !== 'string') open.clear();
+    open.set(typeof p.tool_use_id === 'string' ? p.tool_use_id : '', { name: p.tool_name, input: p.tool_input });
+  }
+
+  private ended(sessionId: string, caller: string, p: any): void {
+    const open = this.calls.get(sessionId)?.get(caller);
+    if (!open) return;
+    if (typeof p.tool_use_id === 'string') open.delete(p.tool_use_id);
+    else open.clear();
+    if (!open.size) this.calls.get(sessionId)!.delete(caller);
   }
 
   /** Finds a workflow agent's run and label; the journal is written around the agent's start, so it looks again until found. */
@@ -396,6 +470,43 @@ export class ClaudeSessions {
 function oneLine(text: string): string {
   const line = String(text).trim().split('\n')[0];
   return line.length > 140 ? `${clip(line, 139)}…` : line;
+}
+
+/** A permission prompt's content from the tool call it asks about: the questions it puts, or what the tool would act on. */
+function askOf(name: unknown, input: any): ClaudeAsk | undefined {
+  if (name === 'AskUserQuestion') {
+    const questions = (Array.isArray(input?.questions) ? input.questions : [])
+      .filter((q: any) => typeof q?.question === 'string' && q.question.trim())
+      .slice(0, MAX_QUESTIONS)
+      .map((q: any): AskQuestion => ({
+        ...(typeof q.header === 'string' && q.header.trim() ? { header: clip(q.header.trim(), MAX_ASK_TEXT) } : {}),
+        question: clip(q.question.trim(), MAX_ASK_TEXT),
+        options: (Array.isArray(q.options) ? q.options : [])
+          .map((o: any) => (typeof o === 'string' ? o : o?.label))
+          .filter((label: unknown): label is string => typeof label === 'string' && !!label.trim())
+          .slice(0, MAX_OPTIONS)
+          .map((label: string) => clip(label.trim(), MAX_ASK_TEXT)),
+        ...(q.multiSelect === true ? { multiSelect: true } : {}),
+      }));
+    return questions.length ? { questions } : undefined;
+  }
+  if (typeof name !== 'string' || !name) return undefined;
+  const mcp = /^mcp__(?:plugin_[^_]+_)?(.+?)__(.+)$/.exec(name);
+  const tool = mcp ? `${mcp[1]} ${mcp[2]}` : name;
+  const value = [input?.command, input?.file_path, input?.notebook_path, input?.url, input?.path].find((v) => typeof v === 'string' && v.trim());
+  let text = value as string | undefined;
+  if (!text && input && typeof input === 'object' && Object.keys(input).length) text = JSON.stringify(input, null, 2);
+  return text ? { tool, input: clip(text.trim(), MAX_ASK_INPUT) } : { tool };
+}
+
+/** The desktop app's end-of-turn question, with its buttons as the choices; an app action may carry no label. */
+function wrapUpQuestion(input: any): AskQuestion {
+  const options = (Array.isArray(input.actions) ? input.actions : [])
+    .map((a: any) => (typeof a?.label === 'string' && a.label.trim() ? a.label : typeof a?.action === 'string' ? a.action.replace(/_/g, ' ') : ''))
+    .filter((label: string) => label.trim())
+    .slice(0, MAX_OPTIONS)
+    .map((label: string) => clip(label.trim(), MAX_ASK_TEXT));
+  return { question: clip(input.ask.trim(), MAX_ASK_TEXT), options };
 }
 
 function describeTool(name: unknown, input: any): string {

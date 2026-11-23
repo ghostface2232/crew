@@ -314,7 +314,16 @@ struct ClaudeSession: Codable, Sendable, Identifiable, Equatable {
     /// Missing from a daemon older than sub-agent tracking, as are the workflows.
     var agents: [SubAgent]?
     var workflows: [WorkflowRun]?
+    /// The Claude desktop app's id for the session (local_…); absent for a session started from a terminal.
+    var desktopId: String?
+    /// What the waiting prompt asks beyond its one line; present only while waiting.
+    var ask: ClaudeAsk?
     var projectPath: String { root ?? cwd }
+    /// The link that opens the session in the Claude desktop app, which accepts only a well-formed local_ id.
+    var claudeURL: URL? {
+        guard let desktopId, desktopId.wholeMatch(of: /local_[A-Za-z0-9-]{1,64}/) != nil else { return nil }
+        return URL(string: "claude://code/continue?session=\(desktopId)")
+    }
     func leadMission(in missions: [Mission]) -> Mission? {
         let active = missions.filter { $0.owner == id && $0.state == "active" }
         return active.first { $0.id == mission } ?? active.max { $0.createdAt < $1.createdAt }
@@ -331,6 +340,18 @@ struct ClaudeSession: Codable, Sendable, Identifiable, Equatable {
         return summary.isEmpty ? nil : summary
     }
     var notificationKey: String { "session:\(id):\(waitingId ?? waitingFor ?? "")" }
+}
+/// A waiting prompt's questions and choices, or the tool call an approval is for.
+struct ClaudeAsk: Codable, Sendable, Equatable {
+    struct Question: Codable, Sendable, Equatable {
+        var header: String?
+        var question: String
+        var options: [String]
+        var multiSelect: Bool?
+    }
+    var questions: [Question]?
+    var tool: String?
+    var input: String?
 }
 struct SubAgent: Codable, Sendable, Identifiable, Equatable {
     var id: String

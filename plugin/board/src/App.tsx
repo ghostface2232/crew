@@ -338,7 +338,7 @@ export function App() {
               )}
             </header>
             {page === 'needs' ? (
-              <NeedsYou jobs={waitingJobs} sessions={waitingSessions} pending={pending} names={names} openJob={openJob} openSession={openSession} />
+              <NeedsYou jobs={waitingJobs} sessions={waitingSessions} pending={pending} openJob={openJob} openSession={openSession} />
             ) : page === 'activity' ? (
               <Activity events={state.events} jobs={jobs} missions={missions} openJob={openJob} />
             ) : page === 'history' ? (

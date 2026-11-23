@@ -1516,6 +1516,40 @@ test('a session row opens its own panel and closes it again, as job rows do', as
   await expect(page.getByRole('dialog')).toHaveCount(0);
 });
 
+test('a waiting Claude session shows what it asks, opens in Claude, and opens its panel from the card', async ({ page, request }, testInfo) => {
+  const data = fixture();
+  Object.assign(data.claude[0], {
+    state: 'waiting', waitingFor: 'Which layout should the drawer use?', waitingId: 'w-1',
+    desktopId: 'local_e97eb8b4-b9ff-4551-b625-3c06c77253c7',
+    ask: { questions: [{ question: 'Which layout should the drawer use?', options: ['Tabs (Recommended)', 'Single column'] }] },
+  });
+  Object.assign(data.claude[1], {
+    state: 'waiting', waitingFor: 'Claude needs your permission to use Bash', waitingId: 'w-2',
+    ask: { tool: 'Bash', input: 'git push origin main' },
+  });
+  await request.post('/__push', { data: { type: 'state', data } });
+  await needsYou(page);
+  const card = page.locator('article[data-session="lead-1"]');
+  await expect(card.locator('.need-who')).toHaveText('Claude');
+  await expect(card.getByRole('listitem')).toHaveText(['Tabs (Recommended)', 'Single column']);
+  await expect(card.getByText('Answer in Claude.')).toHaveCount(0);
+  // A terminal session has no desktop id, so it keeps the hint instead of the button.
+  const cli = page.locator('article[data-session="lead-2"]');
+  await expect(cli.locator('.ask-input')).toHaveText('git push origin main');
+  await expect(cli.getByRole('button', { name: 'Open in Claude' })).toHaveCount(0);
+  await expect(cli.getByText('Answer in Claude.')).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('claude-cards.png') });
+
+  // The button leaves for the Claude app without opening the panel.
+  await card.getByRole('button', { name: 'Open in Claude' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+
+  await card.locator('.headline').click();
+  const panel = page.getByRole('dialog');
+  await expect(panel.getByRole('listitem')).toHaveText(['Tabs (Recommended)', 'Single column']);
+  await expect(panel.getByRole('button', { name: 'Open in Claude' })).toBeVisible();
+});
+
 test('the panel resizes from its edge and keeps the width', async ({ page }) => {
   await page.locator('button[data-job="cx-build"]').click();
   const grip = page.getByRole('separator', { name: 'Panel width' });

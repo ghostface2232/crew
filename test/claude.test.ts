@@ -233,3 +233,89 @@ test('a question asked in the wrap-up box keeps the session waiting after the tu
     assert.equal(s.state, 'idle');
   }
 });
+
+test('a permission prompt carries the call it asks about, and a question its choices', () => {
+  const { sessions, events, hook } = tracker();
+  hook('PreToolUse', { tool_name: 'Bash', tool_input: { command: 'git push origin main', description: 'Push' } });
+  hook('Notification', { notification_type: 'permission_prompt', message: 'Claude needs your permission to use Bash' });
+  const s = sessions.sessions.get('s1')!;
+  assert.equal(s.waitingFor, 'Claude needs your permission to use Bash');
+  assert.deepEqual(s.ask, { tool: 'Bash', input: 'git push origin main' });
+
+  hook('PostToolUse', { tool_name: 'Bash' });
+  assert.equal(s.ask, undefined);
+
+  hook('PreToolUse', {
+    tool_name: 'AskUserQuestion',
+    tool_input: { questions: [{ header: 'Layout', question: 'Which layout?', options: [{ label: 'Tabs', description: 'x' }, { label: 'Single column' }], multiSelect: false }] },
+  });
+  hook('Notification', { notification_type: 'permission_prompt', message: 'Claude needs your permission to use AskUserQuestion' });
+  assert.equal(s.waitingFor, 'Which layout?');
+  assert.deepEqual(s.ask, { questions: [{ header: 'Layout', question: 'Which layout?', options: ['Tabs', 'Single column'] }] });
+  assert.equal(events.at(-1), 'waiting:Which layout?');
+
+  // A sub-agent's prompt is about its own call, not the main loop's.
+  hook('PreToolUse', { agent_id: 'a1', tool_name: 'mcp__plugin_crew_crew__delegate', tool_input: { task: 'Build it' } });
+  hook('Notification', { notification_type: 'permission_prompt', message: 'Allow?', agent_id: 'a1' });
+  // Read again: the assertions above narrowed s.ask for the type checker.
+  const delegated = sessions.sessions.get('s1')!.ask;
+  assert.equal(delegated?.tool, 'crew delegate');
+  assert.match(delegated?.input ?? '', /"task": "Build it"/);
+
+  // A prompt that is not about a tool call shows only its message.
+  hook('Notification', { notification_type: 'elicitation_dialog', message: 'Sign in' });
+  assert.equal(s.ask, undefined);
+});
+
+test('a prompt shows a call only while it is the one open call of its caller', () => {
+  const { sessions, hook } = tracker();
+  const prompt = { notification_type: 'permission_prompt', message: 'Claude needs your permission to use Bash' };
+  const ask = () => sessions.sessions.get('s1')!.ask;
+  // A finished call is not what a later prompt asks about, even when that prompt's own PreToolUse was lost.
+  hook('PreToolUse', { tool_name: 'Read', tool_use_id: 't1', tool_input: { file_path: '/w/a.ts' } });
+  hook('PostToolUse', { tool_name: 'Read', tool_use_id: 't1' });
+  hook('Notification', prompt);
+  assert.equal(ask(), undefined);
+  // Two calls running side by side leave it unknown which one asks.
+  hook('PreToolUse', { tool_name: 'WebFetch', tool_use_id: 't2', tool_input: { url: 'https://a.example' } });
+  hook('PreToolUse', { tool_name: 'WebFetch', tool_use_id: 't3', tool_input: { url: 'https://b.example' } });
+  hook('Notification', prompt);
+  assert.equal(ask(), undefined);
+  hook('PostToolUse', { tool_name: 'WebFetch', tool_use_id: 't2' });
+  hook('Notification', prompt);
+  assert.deepEqual(ask(), { tool: 'WebFetch', input: 'https://b.example' });
+});
+
+test('a sub-agent that stops ends the prompt it raised', () => {
+  const { sessions, hook } = tracker();
+  hook('SubagentStart', { agent_id: 'a1', agent_type: 'Explore' });
+  hook('PreToolUse', { agent_id: 'a1', tool_name: 'Bash', tool_use_id: 't1', tool_input: { command: 'rm x' } });
+  hook('Notification', { notification_type: 'permission_prompt', message: 'Allow Bash?', agent_id: 'a1' });
+  const s = sessions.sessions.get('s1')!;
+  assert.deepEqual(s.ask, { tool: 'Bash', input: 'rm x' });
+  hook('SubagentStop', { agent_id: 'a1', agent_type: 'Explore' });
+  assert.notEqual(s.state, 'waiting');
+  assert.equal(s.ask, undefined);
+});
+
+test('the wrap-up box offers its buttons as the question\'s choices', () => {
+  const { sessions, hook } = tracker();
+  hook('PostToolUse', {
+    tool_name: 'mcp__ccd_turn__wrap_up',
+    tool_input: { recap: 'Done.', ask: 'Commit this?', actions: [{ action: 'commit' }, { label: 'Not now' }] },
+  });
+  hook('Stop', {});
+  const s = sessions.sessions.get('s1')!;
+  assert.deepEqual(s.ask, { questions: [{ question: 'Commit this?', options: ['commit', 'Not now'] }] });
+  hook('UserPromptSubmit', { prompt: 'yes' });
+  assert.equal(s.ask, undefined);
+});
+
+test('a desktop session keeps the id its claude:// links open, and a malformed one is ignored', () => {
+  const { sessions, hook } = tracker();
+  hook('SessionStart', { source: 'startup', desktop_session_id: 'local_e97eb8b4-b9ff-4551-b625-3c06c77253c7' });
+  const s = sessions.sessions.get('s1')!;
+  assert.equal(s.desktopId, 'local_e97eb8b4-b9ff-4551-b625-3c06c77253c7');
+  hook('UserPromptSubmit', { prompt: 'x', desktop_session_id: 'local_../../evil' });
+  assert.equal(s.desktopId, 'local_e97eb8b4-b9ff-4551-b625-3c06c77253c7');
+});

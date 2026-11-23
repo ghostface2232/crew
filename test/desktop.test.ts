@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { taskbarDarkIn } from '../desktop/taskbar.ts';
-import { windowBounds, isBoardNavigation, linkTarget } from '../desktop/window-state.ts';
+import { windowBounds, isBoardNavigation, isClaudeSessionLink, linkTarget } from '../desktop/window-state.ts';
 import { boardAsset, BOARD_CSP } from '../plugin/bridge/assets.ts';
 
 test('restores visible bounds but recenters a removed monitor or malformed values', () => {
@@ -51,6 +51,20 @@ test('new windows open only evidence in the app and send web links to the browse
   assert.equal(linkTarget('mailto:a@example.com', base), 'external');
   for (const url of [`${base}/api/state`, `${base}/`, 'file:///C:/x', 'javascript:alert(1)', 'http://user@example.com/', 'nonsense'])
     assert.equal(linkTarget(url, base), null);
+});
+
+test('hands only a Claude session link to the system, not other claude:// addresses', () => {
+  assert.equal(isClaudeSessionLink('claude://code/continue?session=local_e97eb8b4-b9ff-4551-b625-3c06c77253c7'), true);
+  for (const url of [
+    'claude://code/continue?session=last',
+    'claude://code/new?q=rm%20-rf',
+    'claude://code/continue?session=local_1&q=x',
+    'claude://u:p@code/continue?session=local_1',
+    'claude://code/continue?session=local_1#x',
+    'claude://claude.ai/new',
+    'https://code/continue?session=local_1',
+    'nonsense',
+  ]) assert.equal(isClaudeSessionLink(url), false, url);
 });
 
 test('serves only built assets with explicit types and a renderer security policy', () => {

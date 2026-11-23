@@ -696,6 +696,44 @@ extension DetailItem where Accessory == EmptyView {
     }
 }
 
+/// What a waiting Claude session asks beyond its headline: each question's choices, or what an approval would act on.
+struct ClaudeAskView: View {
+    let session: ClaudeSession
+    var body: some View {
+        if session.state == "waiting", let ask = session.ask {
+            if let questions = ask.questions {
+                VStack(alignment: .leading, spacing: Space.m) {
+                    ForEach(Array(questions.enumerated()), id: \.offset) { index, question in
+                        // The first question is the headline above.
+                        if index > 0 { Text(question.question).font(Typeface.callout).textSelection(.enabled) }
+                        ForEach(Array(question.options.enumerated()), id: \.offset) { _, option in
+                            Text(option).font(Typeface.callout).foregroundStyle(.secondary).textSelection(.enabled)
+                                .padding(.horizontal, Space.ml).padding(.vertical, Space.s)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .overlay(RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius).strokeBorder(WorkspaceStyle.hairline))
+                        }
+                    }
+                }
+            } else if let input = ask.input {
+                ScrollView {
+                    Text(input).font(Typeface.codeSmall).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                }.frame(maxHeight: 160).fixedSize(horizontal: false, vertical: true).inset()
+            }
+        }
+    }
+}
+
+/// Opens the session in the Claude desktop app, where its prompts are answered; nothing for a terminal session.
+struct OpenInClaudeButton: View {
+    let session: ClaudeSession
+    var body: some View {
+        if let url = session.claudeURL {
+            Button("Open in Claude", systemImage: "arrow.up.right") { NSWorkspace.shared.open(url) }
+                .pillButton().help("Open this session in the Claude app")
+        }
+    }
+}
+
 /// The detail panel's last row: its actions at the trailing edge.
 struct DetailFooter<Actions: View>: View {
     @ViewBuilder var actions: Actions

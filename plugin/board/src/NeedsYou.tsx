@@ -10,6 +10,54 @@ import { actions, answerKey, request } from './api.ts';
 import { NAMES, projectOf } from './model.ts';
 import { ActionStatus, AgentMark, Chip, Composer, EmptyState, Icon, useAction, useDraft, Elapsed } from './ui.tsx';
 
+/** The link the Claude desktop app opens a session by; a session started from a terminal has none. */
+export function claudeLink(session: ClaudeSession): string | null {
+  return session.desktopId ? `claude://code/continue?session=${encodeURIComponent(session.desktopId)}` : null;
+}
+
+/** Opens the session in the Claude desktop app, where its prompts are answered. */
+export function OpenInClaude({ session, small }: { session: ClaudeSession; small?: boolean }) {
+  const link = claudeLink(session);
+  if (!link) return null;
+  return (
+    <button
+      className={small ? 'caption small' : undefined}
+      onClick={(event) => {
+        // Inside a card that opens the details on a press.
+        event.stopPropagation();
+        window.location.href = link;
+      }}
+    >
+      <Icon icon={ArrowUpRight16Filled} size={12} />
+      Open in Claude
+    </button>
+  );
+}
+
+/** What a waiting Claude session asks beyond its headline: each question's choices, or what an approval would act on. */
+export function ClaudeAsk({ session }: { session: ClaudeSession }) {
+  const ask = session.ask;
+  if (session.state !== 'waiting' || !ask) return null;
+  if (ask.questions) {
+    return (
+      <div className="ask">
+        {ask.questions.map((question, index) => (
+          <div className="ask" key={index}>
+            {/* The first question is the card's headline. */}
+            {index > 0 && <p className="selectable">{question.question}</p>}
+            {question.options.length > 0 && (
+              <ol className="ask-options" aria-label={question.multiSelect ? 'Choices, any number' : 'Choices'}>
+                {question.options.map((option, n) => <li className="selectable" key={n}>{option}</li>)}
+              </ol>
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  }
+  return ask.input ? <pre className="ask-input selectable">{ask.input}</pre> : null;
+}
+
 /** AnswerView in the app: the request leads, then the reply controls. */
 export function Answer({ job }: { job: BoardJob }) {
   const waiting = job.waiting;
@@ -74,14 +122,12 @@ export function NeedsYou({
   jobs,
   sessions,
   pending,
-  names,
   openJob,
   openSession,
 }: {
   jobs: BoardJob[];
   sessions: ClaudeSession[];
   pending: number;
-  names: Map<string, string>;
   openJob: (id: string) => void;
   openSession: (id: string) => void;
 }) {
@@ -102,7 +148,7 @@ export function NeedsYou({
                   <span className="need-who" title={projectOf(job)}>
                     <AgentMark agent={job.agent} size={13} />
                     <span>
-                      {NAMES[job.agent]} · {names.get(projectOf(job)) ?? projectOf(job)}
+                      {NAMES[job.agent]}
                     </span>
                   </span>
                   {job.waiting && <span className="need-age digits"><Elapsed start={job.waiting.since} /></span>}
@@ -117,25 +163,36 @@ export function NeedsYou({
             </article>
           ))}
           {sessions.map((session, index) => (
-            <article className="card need" key={session.id} data-session={session.id} style={{ '--i': jobs.length + index } as CSSProperties}>
+            // The whole card opens the details, as a row does; its title is the button a keyboard reaches.
+            <article
+              className="card need need-session"
+              key={session.id}
+              data-session={session.id}
+              data-opens-panel=""
+              style={{ '--i': jobs.length + index } as CSSProperties}
+              onClick={() => {
+                // Selecting the prompt's text to copy it ends in a click too.
+                if (!getSelection()?.isCollapsed) return;
+                openSession(session.id);
+              }}
+            >
               <div className="need-head">
                 <div className="need-bar">
                   <Chip state="waiting">Input</Chip>
                   <span className="need-who" title={projectOf(session)}>
                     <AgentMark agent="claude" size={13} />
-                    <span>Claude · {names.get(projectOf(session)) ?? projectOf(session)}</span>
+                    <span>Claude</span>
                   </span>
-                  <button className="caption small" data-opens-panel="" onClick={() => openSession(session.id)}>
-                    <Icon icon={ArrowUpRight16Filled} size={12} />
-                    Details
-                  </button>
+                  <OpenInClaude session={session} small />
                 </div>
-                {/* Laid out as a job's card: who and where on the bar, the session's title under it. */}
-                <p className="need-title" title={session.title}>{session.title}</p>
+                <button className="need-title" data-opens-panel="" title={session.title} onClick={(event) => { event.stopPropagation(); openSession(session.id); }}>
+                  {session.title}
+                </button>
               </div>
               <div className="answer">
                 <p className="headline selectable">{session.waitingFor ?? 'Claude needs your input.'}</p>
-                <p className="callout secondary"><Icon icon={ChatMultipleRegular} size={13} /> Answer in Claude.</p>
+                <ClaudeAsk session={session} />
+                {!session.desktopId && <p className="callout secondary"><Icon icon={ChatMultipleRegular} size={13} /> Answer in Claude.</p>}
               </div>
             </article>
           ))}

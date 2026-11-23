@@ -62,12 +62,17 @@ test('a hook report retries with the newly created token and exits successfully 
       return Response.json({ error: 'unauthorized' }, { status: 401 });
     };
     await import(${JSON.stringify(new URL('../plugin/bridge/report.ts', import.meta.url).href)});
-  `], { env: { ...process.env, CREW_HOME: reportHome }, input: JSON.stringify(input), encoding: 'utf8', timeout: 5000 });
+  `], {
+    // The desktop app's id for the session goes along with the hook's payload.
+    env: { ...process.env, CREW_HOME: reportHome, CLAUDE_CODE_HOST_SESSION_ID: 'local_1' },
+    input: JSON.stringify(input), encoding: 'utf8', timeout: 5000,
+  });
   assert.ifError(result.error);
   assert.equal(result.status, 0, result.stderr);
+  const sent = { ...input, desktop_session_id: 'local_1' };
   assert.deepEqual(result.stdout.trim().split('\n').map((line) => JSON.parse(line)), [
-    ['/api/hooks/claude', null, input],
-    ['/api/hooks/claude', `Bearer ${'a'.repeat(64)}`, input],
+    ['/api/hooks/claude', null, sent],
+    ['/api/hooks/claude', `Bearer ${'a'.repeat(64)}`, sent],
   ]);
 });
 

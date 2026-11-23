@@ -1360,6 +1360,13 @@ th[aria-sort] .sort { color: var(--label); }
 .need-who span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .need-age { color: var(--tertiary); font-size: 11px; }
 .need-title { color: var(--secondary); font-size: 12px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.need-session { cursor: pointer; }
+/* The title is the card's keyboard stop, so it keeps the look of text. */
+button.need-title { min-height: 0; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; text-align: start; font-weight: inherit; }
+.ask { display: grid; gap: 10px; }
+.ask-options { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.ask-options li { padding: 6px 10px; border-radius: var(--row-radius); box-shadow: inset 0 0 0 1px var(--hairline); font-size: 12.5px; overflow-wrap: anywhere; }
+.ask-input { margin: 0; max-height: 180px; overflow: auto; padding: 8px 10px; border-radius: var(--row-radius); background: var(--fill); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* AnswerView */
 .answer { display: grid; gap: 14px; }

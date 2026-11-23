@@ -459,6 +459,19 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
         session.agents = [agent, agent]
         #expect(session.agentSummary == "2 sub-agents")
     }
+
+    @Test func desktopSessionsOpenInClaudeAndAsksDecode() throws {
+        var session = try fixture().claude[0]
+        #expect(session.claudeURL == nil)
+        session.desktopId = "local_e97eb8b4-b9ff-4551-b625-3c06c77253c7"
+        #expect(session.claudeURL?.absoluteString == "claude://code/continue?session=local_e97eb8b4-b9ff-4551-b625-3c06c77253c7")
+        session.desktopId = "local_x&q=1"
+        #expect(session.claudeURL == nil)
+        let json = #"{"questions":[{"header":"Layout","question":"Which?","options":["Tabs","Single"]}]}"#
+        let ask = try JSONDecoder().decode(ClaudeAsk.self, from: Data(json.utf8))
+        #expect(ask.questions?.first?.options == ["Tabs", "Single"])
+        #expect(ask.tool == nil)
+    }
 }
 
 private final class MockProtocol: URLProtocol, @unchecked Sendable {

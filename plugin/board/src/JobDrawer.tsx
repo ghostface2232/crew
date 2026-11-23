@@ -18,7 +18,7 @@ import { ActionStatus, CloseButton, CopyButton, CopyMenu, Dialog, Icon, Chip, us
 import { ReportText as RenderReport } from './Report.ts';
 import { debatePoints, stanceCounts } from './debate.ts';
 import type { Stance } from './debate.ts';
-import { Answer } from './NeedsYou.tsx';
+import { Answer, ClaudeAsk, OpenInClaude } from './NeedsYou.tsx';
 import { EventList } from './Overview.tsx';
 import { jobStatusState, SessionAgents, SessionWorkflow } from './Missions.tsx';
 
@@ -847,6 +847,7 @@ export const SessionDrawer = memo(function SessionDrawer({ id, state, close }: {
           {session.state === 'waiting' && (
             <div className="card answer-card answer">
               <p className="headline selectable">{session.waitingFor ?? 'Claude needs your input.'}</p>
+              <ClaudeAsk session={session} />
               <p className="callout secondary">Answer in Claude.</p>
             </div>
           )}
@@ -879,6 +880,7 @@ export const SessionDrawer = memo(function SessionDrawer({ id, state, close }: {
             </Section>
           )}
           <Footer>
+            <OpenInClaude session={session} />
             <CopyButton text={`claude --resume ${session.id}`} short="Resume">Resume Command</CopyButton>
           </Footer>
         </>

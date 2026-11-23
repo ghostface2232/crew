@@ -353,6 +353,12 @@ final class SettingsModel {
     var presetError = ""
     /// The role last changed, under whose rows `roleError` shows.
     var changedRole: String?
+    /// The table and the resolved roles as Settings opened. Stored changes lag the form by one request, so a role is
+    /// resolved, and returns to writing no holders, against these rather than the last stored.
+    private let openedRoleSettings: [String: RoleSetting]
+    private let openedRoles: [String: RoleAssignment]
+    /// Each agent's settings as it was turned off in a role (`role:agent`), to bring back if it is turned on again.
+    private var dropped: [String: RoleAgentSettings] = [:]
     private var generation = 0
     private let api: CrewAPI
     var rolesDirty: Bool { Self.normalized(roleSettings) != Self.normalized(savedRoleSettings) }
@@ -361,8 +367,9 @@ final class SettingsModel {
     init(api: CrewAPI, roles: [String: RoleAssignment], roleSettings: [String: RoleSetting]? = nil, roleInfo: [RoleInfo]? = nil, preset: PresetName? = nil, presets: [String: Preset]? = nil) {
         self.api = api; self.resolvedRoles = roles
         self.roleInfo = roleInfo ?? RoleInfo.legacy
-        self.roleSettings = Self.normalized(roleSettings ?? roles.mapValues(RoleSetting.init))
-        self.savedRoleSettings = self.roleSettings
+        let table = Self.normalized(roleSettings ?? roles.mapValues(RoleSetting.init))
+        self.roleSettings = table; self.savedRoleSettings = table
+        self.openedRoleSettings = table; self.openedRoles = roles
         self.preset = preset; self.savedPreset = preset; self.presets = presets
     }
     /// Compare and save the same canonical table the daemon stores.
@@ -427,14 +434,16 @@ final class SettingsModel {
         }
         var setting = roleSettings[role] ?? RoleSetting()
         setting.agents = RoleAssignment.holderOrder.filter { holders.contains($0) }
+        let key = "\(role):\(holder)"
         if enabled {
-            setting[holder] = setting[holder] ?? savedRoleSettings[role]?[holder]
+            setting[holder] = setting[holder] ?? dropped[key]
         } else {
+            dropped[key] = setting[holder]
             setting[holder] = nil
         }
         // A root with no written holders returns to that form when its original holders are checked again.
         if roleInfo.first(where: { $0.role == role })?.parent == nil,
-           savedRoleSettings[role]?.agents == nil, setting.agents == resolvedRoles[role]?.holders {
+           openedRoleSettings[role]?.agents == nil, setting.agents == openedRoles[role]?.holders {
             setting.agents = nil
         }
         storeRole(role, setting)
@@ -463,7 +472,7 @@ final class SettingsModel {
             let setting = settings[info.role] ?? RoleSetting()
             let base = setting.agents.map { RoleAssignment(agents: $0) }
                 ?? info.parent.flatMap { resolved[$0] }
-                ?? resolvedRoles[info.role].map { RoleAssignment(agents: $0.holders) }
+                ?? openedRoles[info.role].map { RoleAssignment(agents: $0.holders) }
             if var assignment = base {
                 for agent in assignment.workerHolders {
                     let inherited = RoleSetting(assignment)[agent]

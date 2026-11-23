@@ -49,6 +49,9 @@ struct CrewSettingsView: View {
     var store: CrewStore
     @Environment(AppUpdater.self) private var updater
     @State private var selection: SettingsPane? = .build
+    /// The model or effort being typed by hand, stored when it is left as when Return is pressed.
+    @FocusState private var typing: TypedField?
+    private struct TypedField: Hashable { let role: String; let agent: String; let model: Bool }
     /// Moving to another set of instructions loads it in place of the one being edited, so unsaved edits are asked about first.
     private var pages: Binding<SettingsPane?> {
         Binding(get: { selection }, set: { next in
@@ -87,6 +90,7 @@ struct CrewSettingsView: View {
                 .navigationTitle(title(pane))
                 // NSHostingController does not carry navigationTitle into the window, so the toolbar would be blank.
                 .background(WindowTitleSetter(title: title(pane)))
+                .onChange(of: typing) { left, _ in if let left { storeRoles(left.role) } }
         }
         .frame(minWidth: WorkspaceStyle.settingsMinSize.width, idealWidth: WorkspaceStyle.settingsSize.width, minHeight: WorkspaceStyle.settingsMinSize.height, idealHeight: WorkspaceStyle.settingsSize.height)
         .task { if !model.loaded && !model.loading { await model.load(scope: model.scope) } }
@@ -137,7 +141,7 @@ struct CrewSettingsView: View {
             if let parent = role.parent {
                 Toggle("Same as \(model.roleInfo.first { $0.role == parent }?.label ?? parent)", isOn: Binding(
                     get: { model.followsParent(role.role) },
-                    set: { model.setFollowParent(role.role, enabled: $0); storeRoles(role) }
+                    set: { model.setFollowParent(role.role, enabled: $0); storeRoles(role.role) }
                 )).toggleStyle(.checkbox)
             }
             LabeledContent("Agents") {
@@ -145,7 +149,7 @@ struct CrewSettingsView: View {
                     ForEach(RoleAssignment.holderOrder, id: \.self) { holder in
                         Toggle(holderLabel(holder), isOn: Binding(
                             get: { model.assignment(for: role.role)?.holders.contains(holder) == true },
-                            set: { model.setHolder(role.role, holder: holder, enabled: $0); storeRoles(role) }
+                            set: { model.setHolder(role.role, holder: holder, enabled: $0); storeRoles(role.role) }
                         )).toggleStyle(.checkbox).accessibilityLabel("\(role.label): \(holderLabel(holder))")
                             .disabled(!model.canToggleHolder(role.role, holder: holder))
                     }
@@ -171,8 +175,8 @@ struct CrewSettingsView: View {
         }
     }
     /// Stores the table after a change to `role`, as the change is made.
-    private func storeRoles(_ role: RoleInfo) {
-        model.changedRole = role.role
+    private func storeRoles(_ role: String) {
+        model.changedRole = role
         Task { await model.applyRoles() }
     }
     @ViewBuilder private var presets: some View {
@@ -352,13 +356,14 @@ struct CrewSettingsView: View {
         let blank = model.blankTitle(role.role, agent: agent, key, models: offered)
         let binding = roleBinding(role, agent: agent, key)
         if offered.isEmpty {
-            // Typed by hand, so stored on Return rather than at every keystroke; until then it is an unsaved change,
-            // which closing the window asks about.
+            // Typed by hand, so stored on Return or when the field is left rather than at every keystroke; until then
+            // it is an unsaved change, which closing the window asks about.
             TextField(title, text: binding, prompt: Text(blank))
-                .onSubmit { storeRoles(role) }
+                .focused($typing, equals: TypedField(role: role.role, agent: agent, model: key == \.model))
+                .onSubmit { storeRoles(role.role) }
                 .accessibilityLabel("\(role.label) \(title)")
         } else {
-            Picker(title, selection: Binding(get: { binding.wrappedValue }, set: { binding.wrappedValue = $0; storeRoles(role) })) {
+            Picker(title, selection: Binding(get: { binding.wrappedValue }, set: { binding.wrappedValue = $0; storeRoles(role.role) })) {
                 Text(blank).tag("")
                 ForEach(model.fieldChoices(role.role, agent: agent, key, models: offered)) { choice in
                     Text(choice.name).tag(choice.id)

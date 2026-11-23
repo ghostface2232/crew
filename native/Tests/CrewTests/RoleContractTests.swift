@@ -147,6 +147,21 @@ import Testing
         settings.setRole("refactor", agent: "codex", \.effort, to: "")
         #expect(!settings.dirty)
     }
+    @Test @MainActor func holdersResolveAgainstTheRolesAsSettingsOpened() throws {
+        let state = try fixture("state-extended")
+        let settings = SettingsModel(api: CrewAPI(port: 0), roles: state.roles, roleSettings: [:], roleInfo: state.roleInfo)
+        settings.setHolder("delegate", holder: "antigravity", enabled: true)
+        settings.setRole("delegate", agent: "antigravity", \.model, to: "agy-model")
+        // Stored as it was changed, so the stored table and roles no longer say how the role was when Settings opened.
+        settings.savedRoleSettings = settings.roleSettings
+        settings.resolvedRoles["delegate"] = RoleAssignment(agents: ["codex", "antigravity"])
+        settings.setHolder("delegate", holder: "antigravity", enabled: false)
+        #expect(settings.roleSettings["delegate"] == nil)
+        #expect(settings.assignment(for: "delegate")?.holders == ["codex"])
+        settings.savedRoleSettings = settings.roleSettings
+        settings.setHolder("delegate", holder: "antigravity", enabled: true)
+        #expect(settings.roleSettings["delegate"]?.antigravity == RoleAgentSettings(model: "agy-model"))
+    }
     @Test @MainActor func uncheckingAWorkerDropsOnlyItsOwnSettings() throws {
         let state = try fixture("state-extended")
         let settings = SettingsModel(api: CrewAPI(port: 0), roles: state.roles, roleSettings: [:], roleInfo: state.roleInfo)

@@ -597,6 +597,45 @@ private final class MockProtocol: URLProtocol, @unchecked Sendable {
         #expect(calls.withLock { $0 } == 2)
         #expect(!settings.dirty && !settings.busy && settings.roleStatus == "Saved")
     }
+    @Test func appliedRolesStoreAChangeMadeWhileSavingAndUndoOneThatFails() async throws {
+        let state = try fixture("state-extended")
+        let first = RoleSetting(antigravity: .init(model: "verify-model"))
+        var stored = state
+        stored.roleSettings?["verify"] = first
+        let firstResponse = try JSONEncoder().encode(stored), lastResponse = try JSONEncoder().encode(state)
+        let calls = Mutex(0)
+        let api = api { request in
+            let roles = try #require(try requestBody(request)["roles"] as? [String: [String: Any]])
+            let model = (roles["verify"]?["antigravity"] as? [String: String])?["model"]
+            switch calls.withLock({ $0 += 1; return $0 }) {
+            case 1:
+                #expect(model == "verify-model")
+                return (200, firstResponse, 0.05)
+            case 2:
+                #expect(model == "second-model")
+                return (400, Data(#"{"error":"Cannot save roles"}"#.utf8), 0)
+            default:
+                #expect(model == nil)
+                return (200, lastResponse, 0)
+            }
+        }
+        let settings = SettingsModel(api: api, roles: state.roles, roleSettings: state.roleSettings, roleInfo: state.roleInfo)
+        settings.roleSettings["verify"] = first
+        let apply = Task { await settings.applyRoles() }
+        try await Task.sleep(for: .milliseconds(10))
+        #expect(settings.busy)
+        // A change made while one is being stored goes out when that returns, from the apply already running.
+        settings.roleSettings["verify"] = RoleSetting(antigravity: .init(model: "second-model"))
+        await settings.applyRoles()
+        await apply.value
+        #expect(calls.withLock { $0 } == 2)
+        #expect(settings.roleSettings["verify"] == first && settings.savedRoleSettings["verify"] == first)
+        #expect(!settings.dirty && !settings.busy && settings.roleError == "Cannot save roles")
+        settings.roleSettings["verify"] = nil
+        await settings.applyRoles()
+        #expect(calls.withLock { $0 } == 3)
+        #expect(!settings.dirty && settings.roleError.isEmpty)
+    }
     @Test func roleEventsKeepResolvedAndRawTablesSeparateAndReconnectClearsNewFields() throws {
         let store = try store()
         let state = try fixture("state-extended")
@@ -893,6 +932,39 @@ private final class MockProtocol: URLProtocol, @unchecked Sendable {
         await settings.savePreset()
         #expect(!settings.dirty && !settings.busy)
         #expect(settings.savedPreset == .best && settings.presetStatus == "Saved")
+    }
+    @Test func appliedPresetStoresAPickMadeWhileSavingAndUndoesOneThatFails() async throws {
+        let definitions = try #require(fixture("state-extended").presets)
+        let calls = Mutex(0)
+        let api = api { request in
+            let body = try requestBody(request)
+            switch calls.withLock({ $0 += 1; return $0 }) {
+            case 1:
+                #expect(body["preset"] as? String == "economy")
+                return (200, try JSONEncoder().encode(PresetState(preset: .economy, presets: definitions)), 0.05)
+            case 2:
+                #expect(body["preset"] as? String == "best")
+                return (400, Data(#"{"error":"Cannot save preset"}"#.utf8), 0)
+            default:
+                #expect(body["preset"] is NSNull)
+                return (200, try JSONEncoder().encode(PresetState(preset: nil, presets: definitions)), 0)
+            }
+        }
+        let settings = SettingsModel(api: api, roles: [:], preset: .balanced, presets: definitions)
+        settings.preset = .economy
+        let apply = Task { await settings.applyPreset() }
+        try await Task.sleep(for: .milliseconds(10))
+        #expect(settings.busy)
+        settings.preset = .best
+        await settings.applyPreset()
+        await apply.value
+        #expect(calls.withLock { $0 } == 2)
+        #expect(settings.preset == .economy && settings.savedPreset == .economy)
+        #expect(!settings.dirty && !settings.busy && settings.presetError == "Cannot save preset")
+        settings.preset = nil
+        await settings.applyPreset()
+        #expect(calls.withLock { $0 } == 3)
+        #expect(settings.savedPreset == nil && !settings.dirty && settings.presetError.isEmpty)
     }
     @Test func roundRequestsLockAndSendUndoOrKeep() async throws {
         var job = try fixture("state-extended").jobs[0]

@@ -26,7 +26,7 @@ One scale for gaps (`spacing:`) and padding. Values between two steps are rounde
 | `l` | 12 | Controls in a group; a row's horizontal padding; gray insets |
 | `xl` | 16 | Blocks inside a card; the gap between cards; banner padding |
 | `xxl` | 20 | Card padding |
-| `x3l` | 24 | Detail panel and sheet padding; the Settings save bar's side padding |
+| `x3l` | 24 | Detail panel and sheet padding |
 | `x4l` | 28 | Sections of the detail panel |
 | `x5l` | 32 | The page heading's columns |
 | `x6l` | 40 | The page margin |

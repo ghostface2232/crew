@@ -348,6 +348,11 @@ final class SettingsModel {
     var savingRoles = false
     var textStatus = ""
     var roleStatus = ""
+    /// Why the last change to the roles or to the preset could not be stored; empty once one has been.
+    var roleError = ""
+    var presetError = ""
+    /// The role last changed, under whose rows `roleError` shows.
+    var changedRole: String?
     private var generation = 0
     private let api: CrewAPI
     var rolesDirty: Bool { Self.normalized(roleSettings) != Self.normalized(savedRoleSettings) }
@@ -502,16 +507,36 @@ final class SettingsModel {
         } catch { if generation == attempt { textStatus = error.localizedDescription } }
         if generation == attempt { savingText = false }
     }
-    func savePreset() async {
-        guard presets != nil && !savingPreset else { return }
+    /// True when the preset was stored.
+    @discardableResult func savePreset() async -> Bool {
+        guard presets != nil && !savingPreset else { return false }
         savingPreset = true; presetStatus = ""
+        defer { savingPreset = false }
         let draft = preset
         do {
             let result: PresetState = try await api.post("/api/preset", PresetSelection(preset: draft))
             if preset == draft { preset = result.preset }
             savedPreset = result.preset; presets = result.presets; presetStatus = "Saved"
-        } catch { presetStatus = error.localizedDescription }
-        savingPreset = false
+            return true
+        } catch {
+            presetStatus = error.localizedDescription
+            return false
+        }
+    }
+    /// Stores the preset as it is picked, with no save step, as the board does. A pick made while one is being stored
+    /// goes out when that returns; one that cannot be stored is undone, and `presetError` says why.
+    func applyPreset() async {
+        guard !savingPreset else { return }
+        while presets != nil && preset != savedPreset {
+            if await savePreset() { presetError = "" } else { presetError = presetStatus; preset = savedPreset }
+        }
+    }
+    /// Stores the role table as it is changed, likewise.
+    func applyRoles() async {
+        guard !savingRoles else { return }
+        while rolesDirty {
+            if await saveRoles() { roleError = "" } else { roleError = roleStatus; roleSettings = savedRoleSettings }
+        }
     }
     /// Saves every page with unsaved changes; true when nothing is left unsaved.
     func saveAll() async -> Bool {
@@ -520,9 +545,11 @@ final class SettingsModel {
         if text != savedText && loaded { await saveInstructions() }
         return !dirty
     }
-    func saveRoles() async {
-        guard !savingRoles else { return }
+    /// True when the table was stored.
+    @discardableResult func saveRoles() async -> Bool {
+        guard !savingRoles else { return false }
         savingRoles = true; roleStatus = ""
+        defer { savingRoles = false }
         let draft = Self.normalized(roleSettings)
         struct Save: Encodable, Sendable { var roles: [String: RoleSetting] }
         do {
@@ -530,7 +557,10 @@ final class SettingsModel {
             let stored = Self.normalized(result.roleSettings)
             if Self.normalized(roleSettings) == draft { roleSettings = stored }
             resolvedRoles = result.roles; savedRoleSettings = stored; roleStatus = "Saved"
-        } catch { roleStatus = error.localizedDescription }
-        savingRoles = false
+            return true
+        } catch {
+            roleStatus = error.localizedDescription
+            return false
+        }
     }
 }

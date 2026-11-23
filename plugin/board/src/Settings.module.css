@@ -5,7 +5,8 @@
 .panel { display: grid; grid-template-columns: 210px minmax(0, 1fr); height: min(640px, calc(100dvh - 48px)); min-height: 0; }
 
 /* Sidebar */
-/* Its head holds the dialog's title and its close button: beside the sidebar the page has no title row of its own. */
+/* Beside the sidebar the page has no title row of its own, and the dialog no close button: a press outside it or Escape
+   closes it. A phone leaves too little outside to press, so its list and its pages keep the button. */
 .sidebar { display: flex; flex-direction: column; gap: 2px; min-height: 0; overflow: auto; padding: 0 10px 18px; background: var(--sidebar); }
 .sidebarHead { display: flex; flex: none; align-items: center; gap: 8px; height: 58px; padding: 0 4px 0 8px; }
 .windowTitle { flex: 1; min-width: 0; font: 600 20px/1.2 var(--text-face); }
@@ -15,15 +16,17 @@
 .item[aria-current="page"] { background: var(--fill-strong); font-weight: 550; }
 @media (hover: hover) { .item:not([aria-current="page"]):hover { background: var(--fill); } }
 .itemTitle { flex: 1; min-width: 0; }
-.tile { display: grid; flex: none; place-items: center; width: 20px; height: 20px; border-radius: 6px; color: #fff; box-shadow: inset 0 0 0 0.5px rgb(255 255 255 / 0.25); }
-.tile svg { width: 12px; height: 12px; }
+/* A plain glyph, as the window's sidebar draws its pages: the accent marks the current one. */
+.glyph { flex: none; width: 16px; height: 16px; color: var(--secondary); }
+.item[aria-current="page"] .glyph { color: var(--accent); }
 .chevron { display: none; }
+.listClose { display: none; }
 
 /* Page */
 .detail { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 /* Only a phone's page has a title row: beside the sidebar, the current item names the page and the stage takes the height. */
 .pageHead { display: none; }
-/* The stage: the page and its save bar, clipped to a corner concentric with the dialog's. */
+/* The stage: the one thing that scrolls, clipped to a corner concentric with the dialog's. */
 .stage {
   flex: 1;
   display: flex;
@@ -72,12 +75,13 @@
 .note { display: flex; align-items: start; gap: 6px; }
 .note svg { flex: none; width: 13px; height: 13px; margin-top: 2px; }
 
-.footer { display: flex; flex: none; align-items: center; flex-wrap: wrap; gap: 12px; padding: 14px 22px; box-shadow: inset 0 1px var(--hairline); }
+/* The instructions' save, on the line under their editor. */
+.saveRow { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 0 4px; }
 .status { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 12px; margin-inline-start: auto; }
 
 @media (max-width: 600px) {
-  /* As tall as the sheet may be, so the footer is never cut off. */
+  /* As tall as the sheet may be. */
   .panel { grid-template-columns: minmax(0, 1fr); height: calc(100dvh - 48px); }
   .panel[data-view="list"] .detail, .panel[data-view="page"] .sidebar { display: none; }
   .sidebar { gap: 0; padding: 16px; background: none; }
@@ -87,10 +91,10 @@
   .section { gap: 0; border-radius: var(--row-radius); background: var(--surface); box-shadow: 0 0 0 1px var(--hairline); overflow: hidden; }
   .item, .item[aria-current="page"] { gap: 12px; min-height: 46px; padding: 0 14px; border-radius: 0; background: none; font-weight: 450; }
   /* The separator starts after the icon, as on iPhone. */
-  .item + .item { background: linear-gradient(var(--hairline), var(--hairline)) no-repeat 52px 0 / calc(100% - 52px) 1px; }
-  .tile { width: 26px; height: 26px; border-radius: 9px; }
-  .tile svg { width: 15px; height: 15px; }
+  .item + .item { background: linear-gradient(var(--hairline), var(--hairline)) no-repeat 44px 0 / calc(100% - 44px) 1px; }
+  .glyph { width: 18px; height: 18px; }
   .chevron { display: block; color: var(--tertiary); }
+  .listClose { display: contents; }
   /* The buttons keep their width and the title takes the rest, so a long one is cut instead of covering them. */
   .pageHead { display: grid; grid-template-columns: minmax(max-content, 1fr) minmax(0, auto) minmax(max-content, 1fr); align-items: center; gap: 8px; padding: 12px; }
   /* Under the title row, and inset on both sides, as the window's stage is once its sidebar folds away. */
@@ -103,9 +107,7 @@
   .row { flex-wrap: wrap; gap: 4px 16px; }
   .row > span:first-child { max-width: none; }
   .row :global(.select), .row input:not([type="checkbox"]) { flex: 1 1 160px; }
-  .footer { padding: 12px; }
-  .status { flex-basis: 100%; gap: 6px 12px; }
-  .status:empty { display: none; }
+  .status { gap: 6px 12px; }
 }
 
 /* The desktop app's About page: its mark and version, above where its update stands. */

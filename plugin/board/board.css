@@ -39,11 +39,6 @@
   --orange: #ff9500;
   --red: #ff3b30;
   --green: #34c759;
-  /* Settings tiles: the system colors SettingsView.swift uses. */
-  --gray: #8e8e93;
-  --purple: #af52de;
-  --indigo: #5856d6;
-  --teal: #30b0c7;
   /* GitHub's own merged purple, so a merged PR reads as it does there. */
   --merged: #8250df;
   /* Text on an orange badge: white reaches only about 2:1 there. */
@@ -120,10 +115,6 @@
     --orange: #ff9f0a;
     --red: #ff453a;
     --green: #30d158;
-    --gray: #98989d;
-    --purple: #bf5af2;
-    --indigo: #5e5ce6;
-    --teal: #40c8e0;
     --merged: #a371f7;
     /* A dark canvas swallows light-mode scrims and drops, so both deepen. */
     --scrim: rgb(0 0 0 / 0.5);

@@ -116,15 +116,11 @@ function useStored<T>(initial: () => T, same: (a: T, b: T) => boolean, store: (v
   const [value, setValue] = useState(initial);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const now = useRef({ value, stored: value, busy: false }).current;
+  const now = useRef({ value, stored: value, storing: null as Promise<boolean> | null }).current;
   const send = useRef(store);
   send.current = store;
-  const change = async (next: T) => {
-    now.value = next;
-    setValue(next);
-    if (now.busy) return;
-    now.busy = true;
-    setBusy(true);
+  /** Stores until the value is the stored one; whether that went through. */
+  const run = async () => {
     try {
       while (!same(now.value, now.stored)) {
         const submitted = now.value;
@@ -133,16 +129,30 @@ function useStored<T>(initial: () => T, same: (a: T, b: T) => boolean, store: (v
         if (same(now.value, submitted)) setValue(now.value = now.stored);
       }
       setError('');
+      return true;
     } catch (failure) {
       setValue(now.value = now.stored);
       setError((failure as Error).message);
-    } finally {
-      now.busy = false;
-      setBusy(false);
+      return false;
     }
   };
-  /** `latest` is the value as last changed, ahead of the render that shows it. */
-  return { value, error, busy, change, latest: () => now.value };
+  const change = (next: T) => {
+    now.value = next;
+    setValue(next);
+    if (now.storing) return;
+    setBusy(true);
+    const storing = run();
+    now.storing = storing;
+    void storing.then(() => {
+      now.storing = null;
+      setBusy(false);
+    });
+  };
+  /**
+   * `latest` is the value as last changed, ahead of the render that shows it. `settled` answers once nothing is being
+   * stored, with whether the change that was went through: at once, and true, when none is.
+   */
+  return { value, error, busy, change, latest: () => now.value, settled: () => now.storing ?? Promise.resolve(true) };
 }
 
 /** A setting typed by hand: stored when the field is left or Return is pressed, not at every keystroke. */
@@ -271,6 +281,9 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
   const closeSettings = async () => {
     // A model or effort typed by hand is stored as its field is left, which a browser need not report for a dialog going away.
     (document.activeElement as HTMLElement | null)?.blur();
+    // A change still being stored is waited for. One that cannot be stored keeps Settings open, where it says so:
+    // closed, the change would be undone with nothing left to show why.
+    if (!(await storedRoles.settled()) || !(await storedPreset.settled())) return;
     if ((dirty || saving) && !await ask('Close without saving your changes?', 'Close')) return;
     if (shownInstallError.current) void desktop?.update.seen?.();
     close();

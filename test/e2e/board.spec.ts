@@ -703,6 +703,32 @@ test('a role change that cannot be stored is undone and says why under its role'
   await expect(antigravity).toBeChecked();
 });
 
+test('Settings wait for a change still being stored before they close, and stay open when it cannot be', async ({ page, request }) => {
+  await openSettings(page);
+  const antigravity = page.getByRole('checkbox', { name: 'Implementation: Antigravity' });
+  const settings = page.getByRole('navigation', { name: 'Settings pages' });
+  // Held at the daemon, then refused: Escape during the wait does not close Settings, and the reason shows in them.
+  let release!: () => void;
+  let gate = new Promise<void>((resolve) => { release = resolve; });
+  await page.route('**/api/roles', async (route) => { await gate; await route.fulfill({ status: 500, json: { error: 'Cannot save roles' } }); });
+  await antigravity.click();
+  await page.keyboard.press('Escape');
+  await expect(settings).toBeVisible();
+  release();
+  await expect(page.getByRole('region', { name: 'Implementation' }).getByRole('alert')).toHaveText('Not saved: Cannot save roles');
+  await expect(settings).toBeVisible();
+  // Held, then stored: Settings close once the daemon has answered, and not before.
+  await page.unroute('**/api/roles');
+  gate = new Promise<void>((resolve) => { release = resolve; });
+  await page.route('**/api/roles', async (route) => { await gate; await route.continue(); });
+  await antigravity.click();
+  await page.keyboard.press('Escape');
+  await expect(settings).toBeVisible();
+  release();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await lastBody(request, '/api/roles').toEqual({ roles: { delegate: { agents: ['codex', 'antigravity'] } } });
+});
+
 test('on a phone, settings move between the list and a page with focus kept, and the drawer hands focus back', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 800 });
   await page.getByRole('button', { name: 'Show sidebar' }).click();

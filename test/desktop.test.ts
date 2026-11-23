@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
+import { taskbarDarkIn } from '../desktop/taskbar.ts';
 import { windowBounds, isBoardNavigation, linkTarget } from '../desktop/window-state.ts';
 import { boardAsset, BOARD_CSP } from '../plugin/bridge/assets.ts';
 
@@ -18,6 +19,16 @@ test('restores visible bounds but recenters a removed monitor or malformed value
   assert.equal(windowBounds({ x: 2000, y: 0, width: 900, height: 600 }, displays).x, undefined);
   assert.equal(windowBounds({ width: NaN, height: -5 }, displays).width, 1380);
   assert.equal(windowBounds({ height: -5 }, displays).height, 480);
+});
+
+test('the tray reads the Windows mode from what reg query prints, and nothing from a missing value', () => {
+  const printed = (value: string) =>
+    `\r\nHKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize\r\n    SystemUsesLightTheme    REG_DWORD    ${value}\r\n\r\n`;
+  assert.equal(taskbarDarkIn(printed('0x0')), true);
+  assert.equal(taskbarDarkIn(printed('0x1')), false);
+  // The app mode's value is not the taskbar's.
+  assert.equal(taskbarDarkIn(printed('0x0').replace('SystemUsesLightTheme', 'AppsUseLightTheme')), undefined);
+  assert.equal(taskbarDarkIn('ERROR: The system was unable to find the specified registry key or value.'), undefined);
 });
 
 test('desktop navigation is confined to the board, never API routes or remote pages', () => {

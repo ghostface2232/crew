@@ -8,6 +8,7 @@ import { boardCredential, boardUrl, readToken, SESSION_COOKIE } from '../plugin/
 import { api, ensureDaemon, health } from '../plugin/bridge/client.ts';
 import { baseUrl, HOME, PLUGIN_ROOT } from '../plugin/bridge/config.ts';
 import type { BoardState } from '../plugin/board/src/types.ts';
+import { SETTING_CHANGE, taskbarDark } from './taskbar.ts';
 import { installScript, supervisorEnv, UPDATE_FAILED, Updater } from './updater.ts';
 import { isBoardNavigation, linkTarget, windowBounds } from './window-state.ts';
 
@@ -33,8 +34,24 @@ let pending = 0;
 const stateFile = path.join(app.getPath('userData'), 'window.json');
 const asset = (name: string) => path.join(import.meta.dirname, name);
 /** The tray sits on the taskbar, which follows the Windows mode rather than the app mode the window follows. */
-const trayIcon = () =>
-  nativeImage.createFromPath(asset(nativeTheme.shouldUseDarkColorsForSystemIntegratedUI ? 'tray-white.png' : 'tray-black.png'));
+const trayIcon = (dark: boolean) => nativeImage.createFromPath(asset(dark ? 'tray-white.png' : 'tray-black.png'));
+/** The Windows mode the tray was last drawn for; the app mode stands in where the Windows mode cannot be read. */
+let trayDark = false;
+const readTrayDark = async () => (await taskbarDark()) ?? nativeTheme.shouldUseDarkColors;
+let trayTimer: ReturnType<typeof setTimeout> | undefined;
+/**
+ * Redraws the tray once a mode change has settled: Windows announces one in a burst of messages, and the first can
+ * arrive before the registry holds the new mode.
+ */
+function refreshTray() {
+  clearTimeout(trayTimer);
+  trayTimer = setTimeout(async () => {
+    const dark = await readTrayDark();
+    if (dark === trayDark) return;
+    trayDark = dark;
+    tray?.setImage(trayIcon(dark));
+  }, 300);
+}
 /** The window looks out of reach once it has been out of focus, or the system idle, this long; only then does an update download. */
 const AWAY_MS = 120_000;
 const CHECK_EVERY_MS = 6 * 3_600_000;
@@ -171,6 +188,9 @@ function createWindow() {
   restored = { bounds: { ...settled, ...bounds }, settled };
   if (bounds.maximized) window.maximize();
   signBoard(window);
+  // A theme update is tied to the app mode, so for the Windows mode the tray also takes the system's own message,
+  // which reaches the window while it is hidden too.
+  if (process.platform === 'win32') window.hookWindowMessage(SETTING_CHANGE, refreshTray);
   window.once('ready-to-show', () => show());
   window.webContents.on('dom-ready', () => {
     void window?.webContents.insertCSS(BACKDROP ? FRAME_CSS + BACKDROP_CSS : FRAME_CSS).catch(console.error);
@@ -325,7 +345,7 @@ async function startDesktop() {
     callback(allowed(permission, URL.canParse(details.requestingUrl) ? new URL(details.requestingUrl).origin : '')));
   session.defaultSession.setPermissionCheckHandler((_contents, permission, origin) => allowed(permission, origin));
   nativeTheme.on('updated', () => {
-    tray?.setImage(trayIcon());
+    refreshTray();
     if (!window || window.isDestroyed()) return;
     window.setBackgroundColor(frame().color);
     window.setTitleBarOverlay({ ...frame(), height: TOP_BAR_HEIGHT });
@@ -350,7 +370,8 @@ async function startDesktop() {
       }
     }
   }
-  tray = new Tray(trayIcon());
+  trayDark = await readTrayDark();
+  tray = new Tray(trayIcon(trayDark));
   tray.on('click', () => show());
   createWindow();
   trayMenu();

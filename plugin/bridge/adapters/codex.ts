@@ -7,7 +7,7 @@ import { agentCommand, agentEnv, HOME, VERSION } from '../config.ts';
 import type { Config } from '../config.ts';
 import { isTerminal, noteLeadDecline } from '../jobs.ts';
 import type { Adapter, Capabilities, Job, JobCtl, Probe } from '../jobs.ts';
-import { PLUGIN_USER_APP } from '../prompts.ts';
+import { withUserApps } from '../prompts.ts';
 import { RPC_TIMEOUT_MS, RpcError, RpcPeer, RpcTimeoutError } from '../rpc.ts';
 import { clip } from '../text.ts';
 
@@ -412,7 +412,7 @@ export class CodexAdapter implements Adapter {
       // is refused the call outright, and any other job would stop to ask.
       mcp_servers: { crew: { ...ctl.mcp, default_tools_approval_mode: 'approve' } },
       ...lean },
-      developerInstructions: lean.features.plugins && !job.nativeReview ? `${job.instructions}\n\n${PLUGIN_USER_APP}` : job.instructions,
+      developerInstructions: lean.features.plugins && !job.nativeReview ? withUserApps(job.instructions) : job.instructions,
       model: job.model ?? (job.agentDefault ? null : this.config.codex.model) ?? null,
     };
   }

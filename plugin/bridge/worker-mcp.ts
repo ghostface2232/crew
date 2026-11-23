@@ -23,13 +23,13 @@ const TOOLS = [
   },
   {
     name: 'lead_answers',
-    description: 'Answers that have arrived since you last asked, and the questions still open. With wait_seconds, returns as soon as one open question is answered or the time is up. If one stays unanswered, leave what it blocks and say so in your report.',
+    description: 'Answers you have not been shown yet, and the questions still open. With wait_seconds, returns as soon as one open question is answered or the time is up. If one stays unanswered, leave what it blocks and say so in your report.',
     annotations: { readOnlyHint: true },
     inputSchema: { type: 'object', properties: { wait_seconds: { type: 'number', minimum: 0, maximum: 600 } } },
   },
   {
     name: 'browser',
-    description: 'Start a headless browser server outside your sandbox, for when a browser cannot start inside it (on macOS it cannot). It runs your working tree\'s Playwright, with the same file limits as your sandbox, until your turn ends. Returns its endpoint: set PW_TEST_CONNECT_WS_ENDPOINT to it for `playwright test`, or call chromium.connect(endpoint) (or webkit, firefox) in a script.',
+    description: 'For a job that runs the app (runs_app): start a headless browser server outside your sandbox, for when a browser cannot start inside it (on macOS it cannot). It runs your working tree\'s Playwright, with the same file limits as your sandbox, until your turn ends. Returns its endpoint: set PW_TEST_CONNECT_WS_ENDPOINT to it for `playwright test`, or call chromium.connect(endpoint) (or webkit, firefox) in a script.',
     inputSchema: { type: 'object', properties: {} },
   },
   {

@@ -1,6 +1,6 @@
 # This machine is shared
 
-The user, the lead, and other agents are working on this computer at the same time as you. Whatever you start must not collide with what they are running. These rules cover what your role lets you run; they allow nothing the role forbids.
+The user, the lead, and other agents are working on this computer at the same time as you. Whatever you start must not collide with what they are running.
 
 - **Your own instance, never theirs.** If you need the app, a server, or a database running, start your own copy. Do not connect to, restart, or stop one that was already running, and do not use the app's default port or its real data directory.
 - **A free port.** Let the system choose one (port 0), or ask it for a free port and pass that on. Never hard-code a port.

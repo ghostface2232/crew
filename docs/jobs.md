@@ -72,7 +72,7 @@ Question jobs (`ask: true`) are read-only. Codex runs without approval prompts a
 
 ## Outcome reporting
 
-Work roles open their report with `## Outcome` (`done`, `partial`, or `blocked`), stored in `Job.outcome` for the latest turn (omitted on reviews, debates, and questions). Results flag mismatches with bridge observations—such as `outcome: done as declared, but the bridge check failed`, no files changed after a refusal/decline, or `outcome: not declared`. Acceptance lines list kept round commits for cherry-picking when known.
+Work roles open their report with `## Outcome` (`done`, `partial`, or `blocked`; an engineer's report also has `## Decisions`, the choices the task did not settle, which the lead passes to the jobs they affect), stored in `Job.outcome` for the latest turn (omitted on reviews, debates, and questions). Results flag mismatches with bridge observations—such as `outcome: done as declared, but the bridge check failed`, no files changed after a refusal/decline, or `outcome: not declared`. Acceptance lines list kept round commits for cherry-picking when known.
 
 If the bridge cannot collect a finished turn's result (the transport commit or the diff fails), the job fails with `could not collect the result: …` and still keeps the worker's report, so the lead reads what the worker did beside the failure; when an earlier turn's result is on record, the message says the listed changes are that turn's. A turn that was cancelled and followed by another cannot fail its successor: a start or send that fails after the job has moved on is dropped.
 
@@ -84,7 +84,7 @@ If the bridge cannot collect a finished turn's result (the transport commit or t
 
 ## Worker instructions
 
-Job instructions combine the role, shared-machine rules (omitted for workers that cannot run commands, namely Antigravity as reviewer, editor, or question responder), `ask_lead` usage, sandbox/scratch limits, refused-action rules, optional rating/evidence/plugin/skill sections, and shared instructions ([prompts.ts](../plugin/bridge/prompts.ts)).
+Job instructions combine the role, shared-machine rules, `ask_lead` usage, sandbox/scratch limits, refused-action rules, optional rating/evidence/plugin/skill sections, and shared instructions, in that order ([prompts.ts](../plugin/bridge/prompts.ts)). Only a job that may start the app (an implementation, or a review with `runs_app`) gets `plugin/roles/machine.md` and the evidence section. A job that runs commands but starts nothing (a Codex question, debate, static review, or polish) gets one paragraph telling it to run only commands that end by themselves, and a worker that runs no commands (Antigravity as reviewer, editor, or question responder) gets neither. Each rule is stated once, where it applies: refusals in the refused-action section, the scratch directory in its own section, the rating scales in the `rate` tool. On a Codex job with plugins on, the note on acting in the user's apps goes before the shared instructions, which stay last and subordinate to the rest.
 
 To avoid injecting the user's entire Codex skill/app catalog into every thread, Crew starts Codex threads with `skills.include_instructions = false` and `features.apps`, `features.plugins`, and `features.tool_suggest` off. The lead can attach specific skills from `~/.agents/skills` via `skills` on `delegate`, `review`, and `polish`. Crew validates names and adds each skill's description and `SKILL.md` path (for Antigravity too). User MCP servers in `~/.codex/config.toml` remain available.
 

@@ -1172,7 +1172,7 @@ test('Codex refusal results preserve exact actions and mark generic or missing r
   assert.match(result, /no reason given/);
   assert.match(result, /approved_by_user/);
   assert.match(result, /Do it another way/);
-  assert.match(job.instructions, /exact command or tool and its full input, and the exact message/);
+  assert.match(job.instructions, /exact command or tool with its full input, the exact message you received/);
 });
 
 test('Codex writable and read-only thread parameters set all temp variables and retain each sandbox', async () => {

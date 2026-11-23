@@ -85,12 +85,13 @@ How jobs work:
 - A delegate or polish job runs in its own git worktree and branch (crew-<job id>) created from HEAD, so commit what the worker needs first; gitignored files it needs are copied in only if .worktreeinclude lists them. Read its diff, then merge it or reject it, and reject what goes beyond the task. Nothing reaches your branch unless you merge it.
 - Job calls return at once. Do your own part, then end your turn: you are woken when a job ends, needs a decision, or asks you a question. Do not sit in \`wait\` on a running job, since the user cannot talk to you meanwhile.
 - A result that carries a receipt is acknowledged only by passing its id as \`ack\` with your next Crew call.
-- Approval is the user's call; never approve on your own. Decline a request clearly outside the task or role with \`reply\`. For any other, call \`wait\` so the user is asked, or pass on an answer they already gave. When a result lists an action Codex's automatic reviewer REFUSED and the user's request in this conversation clearly covers it, send it back with \`reply\` and approved_by_user, quoting their words; if it does not, tell them and let them decide. A question a worker asks you (ask_lead) is yours to answer, with \`answer\`.
+- Approval is the user's call; never approve on your own. Decline a request clearly outside the task or role with \`reply\`. For any other, call \`wait\` so the user is asked, or pass on an answer they already gave. A result that lists a REFUSED action says how to send it back when the user's request covers it; never run it yourself. A question a worker asks you (ask_lead) is yours to answer, with \`answer\`.
+- A worker has not seen this conversation: give it what it needs and no more (the goal, what is decided, how it is judged), accurately and briefly.
 - Leave \`tier\` and \`effort\` out for ordinary work, so the model and effort the user set for the role or preset apply. Name one only when a job clearly needs another, since it overrides them.
 - If a job fails on a usage limit, do that piece yourself and say what was skipped. If Crew cannot start a job at all, retry once, then tell the user the error and do that piece yourself.
 - /crew:run says when its pipeline reviews. Outside it, review only when the user asks: do not hold back a commit or a push for one. After a review and its fix, record what it showed with \`note\`: facts only, never impressions.
 - When you take a user's command through several steps, report it with \`mission\`: title and stages first, done as soon as the work finishes. Skip it for a single delegated job. Work the user asks for after done gets a new mission before you begin; a command given while another is under way gets its own beside it. \`tasks\` keep the work's split for a resumed session; \`pr\` links a pull request.
-- When a worker reports a workaround for this machine or project, add it to the project's .crew/instructions.md, which every later job is given.
+- Add a machine or project workaround a worker reports to the project's .crew/instructions.md, which every later job is given.
 - \`route\` says who should take a kind of work now, from each agent's remaining usage. /crew:run calls it at each stage; outside it, follow the roles unless a job fails on a limit.
 ${PRESET_LINE}
 
@@ -111,7 +112,7 @@ const aloneProp = {
 };
 const runsAppProp = (what: string) => ({
   runs_app: { type: 'boolean', description: `The job has to start the app (a server, a headless browser) to ${what}. Its sandbox gets network access for that; without this a worker cannot bind a port. Codex gets computer-use plugins by default and can operate the real, shared screen. Pass it when running the app is needed: always for work whose result only shows while it runs (UI, interaction, traffic between processes, startup, concurrency) or whose checks start a server or browser.` },
-  plugins: { type: 'array', items: { type: 'string' }, description: 'Additional Codex plugin names beyond configured defaults (by default the browser, for web research and docs): documents/pdf/spreadsheets/presentations when reading or producing those files; figma/github when working with them. Personal accounts (mail/calendar/drive/notes) and the user\'s own Chrome require an explicit task request. Plugin tools act outside the sandbox; computer use operates the real, shared screen, so do not run two such jobs at once. Workers use their own instances unless the task explicitly names an action in the user\'s app, through plugin tools only; never credentials, payments, messages, or settings. Ignored for other agents.' },
+  plugins: { type: 'array', items: { type: 'string' }, description: 'Additional Codex plugin names beyond configured defaults (by default the browser, for web research and docs): documents/pdf/spreadsheets/presentations when reading or producing those files; figma/github when working with them. Personal accounts (mail/calendar/drive/notes) and the user\'s own Chrome need an explicit request in the task, and only a task that names an action in the user\'s app lets the worker act there, never with credentials, payments, messages, or settings. Plugin tools act outside the sandbox; computer use operates the real, shared screen, so do not run two such jobs at once. Ignored for other agents.' },
 });
 const installedSkills = listSkills();
 const skillsProp = installedSkills.length ? {
@@ -124,7 +125,7 @@ const agentProp = {
   agent: { type: 'string', enum: [...Object.keys(WORKERS), LEAD], description: 'Which of the role\'s holders takes this job; the roles in your instructions list them. Without it, Antigravity for wording and Codex for other work, among the holders that can take it. claude starts no worker: you do it.' },
 };
 const modelProps = {
-  tier: { type: 'string', enum: [...TIERS], description: 'How demanding the job is; Crew picks the model from it. Leave it out for ordinary work: the model the user set for the role or preset then applies, or standard without one. A tier named here overrides that model. standard: most work, including most UI changes. frontier: only especially hard or complex work, or a UI rebuilt from scratch or a very large UI change. light: simple, well-specified tasks. fast: plain searches and lookups. For Codex these are Sol, Astra, Terra and Luna; for Antigravity, Neon for frontier (literary or very complex documents) and Hydrogen otherwise. Newer models of each family are picked up automatically.' },
+  tier: { type: 'string', enum: [...TIERS], description: 'How demanding the job is; Crew picks the model from it. Leave it out for ordinary work, so the model the user set for the role or preset applies (standard without one); naming one overrides it. standard: most work, including most UI changes. frontier: especially hard or complex work, or a UI rebuilt from scratch. light: simple, well-specified tasks. fast: plain searches and lookups. Codex runs Sol, Astra, Terra and Luna for these; Antigravity runs Neon for frontier (literary or very complex documents) and Hydrogen otherwise. Newer models of each family are picked up automatically.' },
   model: { type: 'string', description: 'Exact model ID for this job, as the notes list it, overriding tier. Rarely needed; prefer tier. When the user names a family such as Astra, pass its tier; a family name passed here is taken as that tier.' },
   effort: { type: 'string', description: 'Leave it out to keep the effort the user set for the role or preset; an effort named here overrides it. With none set, Codex runs at medium, or high at the frontier tier. Antigravity sets its thinking level only when an effort is named, using the nearest lower offered level if needed and keeping the session default if no level fits.' },
 };
@@ -138,10 +139,10 @@ const TOOLS = [
       type: 'object',
       properties: {
         role: { type: 'string', enum: ['delegate', 'refactor', 'release', 'fix'], description: 'delegate (default): implementation. refactor: restructure code without changing behavior, with the checks run before and after. release: prepare a release (version, changelog, build, checks, and written steps to publish); it publishes, pushes, and deploys nothing. fix: fix the review findings you accepted in your own code or a merged result; give the findings with their reasons and your decisions. A worker\'s own change goes back to it with reply instead.' },
-        task: { type: 'string', description: 'What to build, with the context the engineer needs: relevant files, constraints, interfaces to match. It has not seen this conversation. If the result must match something (a design, screenshots, another implementation), name it by file path and commit, and pass images in attachments.' },
+        task: { type: 'string', description: 'What to build, for an engineer who has not seen this conversation and follows every line literally: the goal, the relevant files and interfaces, which files it may edit when others work nearby, the choices already made that it must follow, and what you assumed without checking. Give the context it needs and no more. If the result must match something (a design, screenshots, another implementation), name it by file path and commit, pass images in attachments, and ask what still differs. Shared instructions reach it already.' },
         title: { type: 'string', description: 'Short label shown on the status board.' },
         done_when: { type: 'string', description: 'Concrete completion criteria the engineer can check, e.g. tests that must pass, or what must be true on screen and at which widths.' },
-        check: { type: 'string', description: 'A shell command (e.g. "npm test") the bridge itself runs in the worktree after every turn, so the result shows an observed exit status instead of the worker\'s word. Runs with the worker\'s file limits, up to 10 minutes. Needs a worktree.' },
+        check: { type: 'string', description: 'A shell command (e.g. "npm test") the bridge itself runs in the worktree after every turn, so the result shows an observed exit status instead of the worker\'s word. Pick one that fails without the change. Runs with the worker\'s file limits, up to 10 minutes. Needs a worktree.' },
         ...worktreeProps,
         ...modelProps,
         ...agentProp,
@@ -157,14 +158,14 @@ const TOOLS = [
   {
     name: 'review',
     title: 'Cross-review',
-    description: `Ask the cross-reviewer (${holder('review')}; with runs_app, the verify role, ${holder('verify')}) for a review of changes in this repository; it changes nothing in your tree. By default it is static and read-only: the worker reads the change and runs checks that end by themselves. In the pipeline, one review (this or your own self-review) covers a stopping point or a push; before a push or pull request, review only what no review has covered, and run both together where security, concurrency, or data loss is involved. Do not loop reviews.`,
+    description: `Ask the cross-reviewer (${holder('review')}; with runs_app, the verify role, ${holder('verify')}) for a review of changes in this repository; it changes nothing in your tree. By default it is static and read-only: the worker reads the change and runs checks that end by themselves.`,
     inputSchema: {
       type: 'object',
       properties: {
         target: { type: 'string', enum: ['uncommitted', 'branch', 'commit'], description: 'uncommitted (default): staged, unstaged and untracked changes. branch: current branch against `base`. commit: a single commit.' },
         base: { type: 'string', description: 'For target "branch": the branch or commit to compare against, e.g. main, or the commit before your first one when you work on main itself.' },
         commit: { type: 'string', description: 'Commit SHA for target "commit".' },
-        focus: { type: 'string', description: 'What to scrutinize: the design decisions, assumptions or risks you are least sure about.' },
+        focus: { type: 'string', description: 'What to scrutinize: the design decisions, assumptions or risks you are least sure about, with a short factual map of which file holds what and what the tests mock or fake. Do not assert that the change is right.' },
         mode: { type: 'string', enum: ['adversarial', 'standard'], description: 'adversarial (default): challenges design and assumptions. standard: Codex\'s built-in code review, which is given no focus or done_when; other agents run the adversarial review instead.' },
         done_when: { type: 'string', description: 'Acceptance criteria to verify in adversarial mode.' },
         ...runsAppProp('judge the change. It then goes to the verify role and runs in a snapshot worktree holding the change; your own self-review must stay static'),
@@ -265,7 +266,7 @@ const TOOLS = [
   {
     name: 'note',
     title: 'Note a review result',
-    description: 'Record one line of evidence in a model\'s notes after a review and its fix: who built, fixed or reviewed, the findings you accepted, and how the fix went. The notes score each model out of 10 from the rate of accepted findings per change size (build), from how its fixes went (fix, shown apart), and from how many of its review findings you accepted (review), with the peer ratings laid over them, and \`route\` shows them. Give job_id or model. To rewrite a model\'s summary, use note_summary.',
+    description: 'Record one line of evidence in a model\'s notes after a review and its fix: who built, fixed or reviewed, the findings you accepted, and how the fix went. The notes score each model from these lines and the peer ratings, and \`route\` shows them. Give job_id or model. To rewrite a model\'s summary, use note_summary.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -276,23 +277,23 @@ const TOOLS = [
         of_job: { type: 'string', description: 'For review: the job that built the work the review covered. Its reviewer\'s rating of that work, and that job\'s rating of the review, are then counted.' },
         of_model: { type: 'string', description: 'For review, without of_job: the exact model that built the work, for work done in this session or your subagent.' },
         size: { type: 'string', enum: ['small', 'medium', 'large', 'xlarge'], description: 'Size of the change: small (a few lines or one function), medium (a feature in a few files), large (many files or a new subsystem), xlarge (several subsystems at once, roughly 1,500 changed lines or more).' },
-        tier: { type: 'string', enum: [...TIERS], description: 'Without job_id: how demanding the work was, as you would have given it a tier. Shown with the notes, not scored.' },
+        tier: { type: 'string', enum: [...TIERS], description: 'Without job_id: how demanding the work was, as you would have given it a tier.' },
         findings: {
           type: 'object',
           properties: { high: { type: 'integer', minimum: 0 }, medium: { type: 'integer', minimum: 0 }, low: { type: 'integer', minimum: 0 } },
-          description: 'For build: the findings you accepted, by severity (high: wrong behavior, data loss, security; medium: a real bug in an edge case; low: minor; these are the blocker, major and minor of a review report). When several reviews covered the work, one line with every accepted finding counted once, naming as reviewer one from another agent if any ran. For fix: the findings the check of the fix raised; they lower the fix line. For review: the findings of this review that you accepted.',
+          description: 'For build: the findings you accepted, by severity (high: wrong behavior, data loss, security; medium: a real bug in an edge case; low: minor; these are the blocker, major and minor of a review report). When several reviews covered the work, one line with every accepted finding counted once, naming as reviewer one from another agent if any ran. For fix: the findings the check of the fix raised. For review: the findings of this review that you accepted.',
         },
         declined: {
           type: 'object',
           properties: { high: { type: 'integer', minimum: 0 }, medium: { type: 'integer', minimum: 0 }, low: { type: 'integer', minimum: 0 } },
           description: 'The findings you declined, by the severity the reviewer gave. For build: not scored; kept so your triage can be checked. For review: this review\'s, weighed against the ones you accepted.',
         },
-        adoption: { type: 'string', enum: ['as-is', 'after-reply', 'partly', 'rejected'], description: 'For a delegated job\'s build line: how you took its work. as-is (merged as delivered), after-reply (merged after you sent it back), partly (merged in part), rejected. Its follow-up rounds are read from the job. Noting the job again replaces its line, so give adoption again. Shown with the notes, not scored.' },
+        adoption: { type: 'string', enum: ['as-is', 'after-reply', 'partly', 'rejected'], description: 'For a delegated job\'s build line: how you took its work. as-is (merged as delivered), after-reply (merged after you sent it back), partly (merged in part), rejected. Its follow-up rounds are read from the job. Noting the job again replaces its line, so give adoption again.' },
         outcome: { type: 'string', enum: ['root-cause', 'patch', 'another-review'], description: 'Required for fix: root-cause (fixed the cause), patch (handled the case without the cause), another-review (the fix needed another round).' },
         rating: {
           type: 'object',
           properties: Object.fromEntries(RATING_ITEMS.map((item) => [item, { type: 'integer', minimum: 1, maximum: 5 }])),
-          description: 'With job_id only: your rating of the job\'s work as you saw it, 1 to 5 per item, resting on text. For build: correctness, brief (how it followed your brief), report (how well its report matched the work). For fix: brief and report. For review: findings (how useful they were). Noting the job again without one keeps the rating it had. Not kept when the user turned peer ratings off.',
+          description: 'With job_id only: your rating of the job\'s work as you saw it, 1 to 5 per item, resting on text. For build: correctness, brief (how it followed your brief), report (how well its report matched the work). For fix: brief and report. For review: findings (how useful they were). Noting the job again without one keeps the rating it had.',
         },
         text: { type: 'string', description: 'One line of facts from the review, e.g. "Markdown parser, no findings, one follow-up on underscore boundaries". No impressions.' },
       },
@@ -354,7 +355,7 @@ const TOOLS = [
       type: 'object',
       properties: {
         job_id: { type: 'string' },
-        message: { type: 'string', description: 'Follow-up instruction, the user\'s answer, or, with decline, why you declined and what to do instead. From the second correction on, restate the whole brief as it now stands and say it replaces your earlier messages, naming what is approved and must stay.' },
+        message: { type: 'string', description: 'Follow-up instruction, the user\'s answer, or, with decline, why you declined and what to do instead. For a correction, name what is wrong, where, and what is approved so it stays. From the second correction on, restate the whole brief as it now stands and say it replaces your earlier messages.' },
         decision: { type: 'string', enum: ['approve', 'deny', 'allow_for_job', 'decline'], description: 'Use decline with a reason in message only for a waiting approval clearly outside the task or role. Approve, deny, and allow_for_job relay the user\'s decision. Use allow_for_job only when offered and the user allowed later requests on the same target. Otherwise call wait.' },
         request_id: { type: 'string', description: 'Required to settle a waiting request. Use the request ID shown in the job status.' },
         sync: { type: 'boolean', description: 'For a finished delegate or polish job: first merge your current HEAD into the worker\'s branch, so the next turn sees what you committed since it started (a fix it was waiting for, an interface you changed). Commit first. If the merge conflicts, it is aborted; the message is still sent, naming the conflicting files, and the job\'s result notes the failed sync.' },

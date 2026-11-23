@@ -884,9 +884,10 @@ test('every worker that runs commands is given the shared-machine rules, and a r
     const text = job.instructions;
     // After the role, so the role still comes first, and saying that the role still decides.
     assert.ok(text.indexOf('# Role:') === 0 && text.indexOf('# This machine is shared') > 0, job.kind);
-    assert.ok(text.includes('they allow nothing the role forbids'));
-    assert.equal(text.includes('# Static review\nReview by reading, and by running checks that end by themselves'), job.kind === 'review', job.kind);
-    assert.ok(!job.prompt.includes('Static review'));
+    // A reviewer that only reads starts nothing, so it is told to run checks that end by themselves instead.
+    assert.equal(text.includes('Run only commands that end by themselves'), job.kind === 'review', job.kind);
+    assert.equal(text.includes('Let the system choose one'), job.kind === 'delegate', job.kind);
+    assert.ok(!job.prompt.includes('This machine is shared'));
   }
 
   // A reviewer that cannot run commands is not told to run checks.
@@ -894,7 +895,7 @@ test('every worker that runs commands is given the shared-machine rules, and a r
   const other = harness((ctl) => ctl.done('ok'), () => reader);
   const handed = await settled(other.jobs, await other.jobs.create({ kind: 'review', cwd: repo, review: { target, mode: 'adversarial' } }));
   assert.match(handed.instructions, /# Static review\nReview by reading\. You cannot run anything in this role/);
-  assert.ok(!handed.instructions.includes('Run only checks that end by themselves'));
+  assert.ok(!handed.instructions.includes('Run only commands that end by themselves'));
   // Nor told how to share the machine: it can start nothing on it. The same holds for the default editor, Antigravity.
   assert.ok(!handed.instructions.includes('# This machine is shared'));
   assert.equal(polish.agent, 'antigravity');
@@ -932,7 +933,7 @@ test('a review that runs the app gets a snapshot of the change and leaves nothin
   assert.equal(job.sandbox, 'workspace-write');
   assert.equal(job.result, null);
   assert.match(job.instructions, /# Running the app\n[^]*snapshot of the change/);
-  assert.ok(!job.instructions.includes('# Static review'));
+  assert.ok(!job.instructions.includes('Run only commands that end by themselves'));
   await gone(job);
   assert.ok(!fs.existsSync(seen.cwd));
   assert.ok(!fs.existsSync(path.join(repo, 'scratch.txt')));

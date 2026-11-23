@@ -84,8 +84,12 @@ for (const c of cases) {
     const has = (s: string) => text.includes(s);
     const commands = c.role === 'delegate' || c.agent === 'codex';
 
-    // A worker that can start nothing is not told how to share the machine, what it may run, or to run checks.
+    // A worker that can run nothing is not told how to share the machine, what it may run, or to run checks.
     assert.equal(has('# This machine is shared'), commands);
+    // Only a worker that may start the app is told how to run one; a reader or an editor is told to start nothing.
+    const starts = commands && (c.role === 'delegate' || (c.role === 'review' && Boolean(c.runsApp)));
+    assert.equal(has('Let the system choose one'), starts);
+    assert.equal(has('Do not start the app, a server, or a browser'), commands && !starts);
     if (!commands) {
       assert.ok(!has('# What you can run') && !has('# Running the app') && !has('running checks that end by themselves'));
     }
@@ -103,7 +107,7 @@ for (const c of cases) {
       assert.ok(!has('# Static review'));
       assert.ok(has('# This machine is shared') && text.indexOf('# This machine is shared') < text.indexOf('# Running the app'));
     }
-    if (c.role === 'question') assert.ok(has('Do not start the app') && !has('# Running the app'));
+    if (c.role === 'question') assert.ok(!has('# Running the app'));
     // Measuring needs the machine rules to say it is allowed, and is only for an engineer.
     assert.equal(has('# Measurement'), Boolean(c.exclusive));
     assert.equal(has('# Skills for this task'), Boolean(c.skills));

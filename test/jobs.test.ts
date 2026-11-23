@@ -1354,6 +1354,31 @@ test('a check ends at its own limit when the daemon that started it is killed, a
   assert.ok(ended - killed > 500, `ended ${ended - killed} ms after the kill`);
 });
 
+test('on Windows a check ends with the daemon that started it when the daemon is killed', { skip: !SANDBOXED || process.platform !== 'win32' }, async (t) => {
+  const cwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-check-orphan-')));
+  const tmp = path.join(cwd, 'tmp');
+  fs.mkdirSync(tmp);
+  const listener = net.createServer();
+  await new Promise<void>((resolve) => listener.listen(0, '127.0.0.1', resolve));
+  t.after(() => { listener.close(); fs.rmSync(cwd, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); });
+  const port = (listener.address() as net.AddressInfo).port;
+  const connected = new Promise<net.Socket>((resolve) => listener.once('connection', resolve));
+  const hold = `node -e "const s = require('node:net').connect(${port}, '127.0.0.1'); s.setTimeout(25000, () => s.destroy()); s.resume()"`;
+  // Detached, as the plugin and the app start the daemon. Its own timer is far off, so only its death can end the check.
+  const daemon = spawn(process.execPath, ['--input-type=module', '-e',
+    `import { runCheck } from ${JSON.stringify(new URL('../plugin/bridge/check.ts', import.meta.url).href)};
+     await runCheck(${JSON.stringify(hold)}, ${JSON.stringify(cwd)}, ${JSON.stringify(tmp)}, [], { timeoutMs: 60_000 });`], { stdio: 'ignore', detached: true, windowsHide: true });
+  const socket = await Promise.race([connected, new Promise<never>((_resolve, reject) => daemon.once('exit', () => reject(new Error('the check ended before it connected'))))]);
+  const closed = new Promise<void>((resolve) => socket.once('close', () => resolve()));
+  socket.on('error', () => {});
+  daemon.kill('SIGKILL');
+  // Node holds a child it does not detach, the job host here, in a job object that kills it when the daemon's handle
+  // closes; the host's own job, nested in that one, takes the rest of the check.
+  const ended = await Promise.race([closed.then(() => true), new Promise<false>((resolve) => setTimeout(() => resolve(false), 8000))]);
+  socket.destroy();
+  assert.ok(ended, 'the check outlived the daemon');
+});
+
 test('a check is not run where the worker\'s limits cannot be applied', async () => {
   const result = await runCheck('true', os.tmpdir(), os.tmpdir(), [], { platform: 'linux' });
   assert.equal(result.exit, null);

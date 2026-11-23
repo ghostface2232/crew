@@ -15,6 +15,6 @@ The apps are not yet signed by a recognized publisher, so the first launch may t
 - **macOS:** Gatekeeper blocks the first launch. Open System Settings → Privacy & Security, then click **Open Anyway** next to the message about Crew.
 - **Windows:** If SmartScreen shows "Windows protected your PC", click **More info**, then **Run anyway**.
 
-After that, both apps update themselves from this page: a newer release downloads while you are away and installs only when you choose **Restart to Update**.
+After that, both apps update themselves from this page: a newer release downloads while you are away and installs only when you choose **Update Now**.
 
 On first launch the app installs the Crew plugin for Claude Code and the `crew` command, then lists anything else Crew needs: Claude Code, and the Codex and Antigravity CLIs signed in. Open a new Claude Code session afterwards to use `/crew:run`.

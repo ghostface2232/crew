@@ -10,7 +10,7 @@ import { actions, answerKey, request } from './api.ts';
 import { NAMES, projectOf } from './model.ts';
 import { ActionStatus, AgentMark, Chip, Composer, EmptyState, Icon, useAction, useDraft, Elapsed } from './ui.tsx';
 
-/** The link the Claude desktop app opens a session by; a session started from a terminal has none. */
+/** Deep link that opens the session in the Claude desktop app; terminal sessions have none. */
 export function claudeLink(session: ClaudeSession): string | null {
   return session.desktopId ? `claude://code/continue?session=${encodeURIComponent(session.desktopId)}` : null;
 }
@@ -23,7 +23,7 @@ export function OpenInClaude({ session, small }: { session: ClaudeSession; small
     <button
       className={small ? 'caption small' : undefined}
       onClick={(event) => {
-        // Inside a card that opens the details on a press.
+        // Keep clicks on this button from opening the card's detail panel.
         event.stopPropagation();
         window.location.href = link;
       }}
@@ -34,7 +34,7 @@ export function OpenInClaude({ session, small }: { session: ClaudeSession; small
   );
 }
 
-/** What a waiting Claude session asks beyond its headline: each question's choices, or what an approval would act on. */
+/** What a waiting Claude session asks beyond its headline: follow-up questions and choices, or the tool input an approval is for. */
 export function ClaudeAsk({ session }: { session: ClaudeSession }) {
   const ask = session.ask;
   if (session.state !== 'waiting' || !ask) return null;
@@ -163,7 +163,7 @@ export function NeedsYou({
             </article>
           ))}
           {sessions.map((session, index) => (
-            // The whole card opens the details, as a row does; its title is the button a keyboard reaches.
+            // Clicking anywhere on the card opens its details; the title button provides keyboard access.
             <article
               className="card need need-session"
               key={session.id}

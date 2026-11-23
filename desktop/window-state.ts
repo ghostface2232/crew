@@ -34,7 +34,7 @@ export function isBoardNavigation(candidate: string, base: string) {
     return false;
   }
 }
-/** Whether the board is opening a session in the Claude desktop app, which the system hands the link to. */
+/** Whether the link opens a session in the Claude desktop app so it can be handed to the OS. */
 export function isClaudeSessionLink(candidate: string) {
   try {
     const url = new URL(candidate);

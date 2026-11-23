@@ -28,7 +28,7 @@ export interface ClaudeSession {
   mission?: string;
   /** The Claude desktop app's id for the session (local_…), which `claude://code/continue?session=` opens. Absent for a CLI session. */
   desktopId?: string;
-  /** What the waiting prompt asks, where the hooks show more than its one line. Present only while waiting. */
+  /** Details of what the waiting prompt asks, when hooks provide more than a single summary line. Present only while waiting. */
   ask?: ClaudeAsk;
 }
 
@@ -36,7 +36,7 @@ export interface ClaudeSession {
 export interface ClaudeAsk {
   /** Questions with their choices, from AskUserQuestion or the desktop app's end-of-turn box. */
   questions?: AskQuestion[];
-  /** For an approval: the tool, as the session's phase names it, and what it would act on (a command, a path, a URL). */
+  /** For an approval: the formatted tool name (matching phase) and what it would act on (a command, path, URL, or input). */
   tool?: string;
   input?: string;
 }
@@ -101,7 +101,7 @@ const FORGET_AGENT_MS = 60 * 60_000;
 const RESCAN_JOURNALS_MS = 2_000;
 /** The id the desktop app's claude:// links accept for a session. */
 const DESKTOP_ID = /^local_[A-Za-z0-9-]{1,64}$/;
-/** What an approval card shows of a tool's input, and of each question and choice. */
+/** Display limits for a waiting prompt's tool input, questions, and choices. */
 const MAX_ASK_INPUT = 2000;
 const MAX_ASK_TEXT = 500;
 const MAX_QUESTIONS = 4;
@@ -472,7 +472,7 @@ function oneLine(text: string): string {
   return line.length > 140 ? `${clip(line, 139)}…` : line;
 }
 
-/** A permission prompt's content from the tool call it asks about: the questions it puts, or what the tool would act on. */
+/** Builds prompt details from the tool call being approved: its questions and choices, or the tool and what it acts on. */
 function askOf(name: unknown, input: any): ClaudeAsk | undefined {
   if (name === 'AskUserQuestion') {
     const questions = (Array.isArray(input?.questions) ? input.questions : [])
@@ -499,7 +499,7 @@ function askOf(name: unknown, input: any): ClaudeAsk | undefined {
   return text ? { tool, input: clip(text.trim(), MAX_ASK_INPUT) } : { tool };
 }
 
-/** The desktop app's end-of-turn question, with its buttons as the choices; an app action may carry no label. */
+/** Extracts the desktop app's end-of-turn question and its button choices, falling back to the action name when an action has no label. */
 function wrapUpQuestion(input: any): AskQuestion {
   const options = (Array.isArray(input.actions) ? input.actions : [])
     .map((a: any) => (typeof a?.label === 'string' && a.label.trim() ? a.label : typeof a?.action === 'string' ? a.action.replace(/_/g, ' ') : ''))

@@ -2,6 +2,6 @@
 
 This task prepares a release. You change files in your worktree; you publish nothing.
 
-- Do the preparation the task names, such as the version bump, the changelog, the build, and the checks a release needs. Follow how this repository has done earlier releases (its tags, changelog, and release scripts).
-- Do not push, tag, publish, upload, or deploy. Run a release script only up to the step that would, or as a dry run when the tool has one.
-- Report the exact remaining steps to publish or deploy, as commands in order, with what each one does and what must be true before it runs. The lead and the user carry them out.
+- Complete the preparation steps named in the task (such as the version bump, changelog, build, and release checks). Match how this repository handled earlier releases (tags, changelog, and release scripts).
+- Do not push, tag, publish, upload, or deploy. Run a release script only as a dry run (if supported) or stop before any step that would do so.
+- Report the remaining publish or deploy steps as exact commands in order, with what each does and what must be true before running it. The lead and the user will run them.

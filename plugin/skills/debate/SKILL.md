@@ -8,9 +8,9 @@ argument-hint: <decision to debate>
 
 Topic: $ARGUMENTS
 
-1. Understand the decision first: read the code and docs it touches, and form your own position. If the topic is unclear, ask the user one question before starting.
-2. Call `route` with `debate` and follow its assignee, then call `debate` with `topic` and `position`, naming `tier` `frontier` only when the decision is especially hard; then end your turn.
-3. For each round, concede what holds up, push back with evidence where you disagree, and continue with `reply`.
-4. Tell the user what was agreed, what disagreement remains and what would settle it, and anything that needs their decision; pass the decision as `record` when closing an open mission.
+1. Read the code and docs the decision touches, and form your own position. If the topic is unclear, ask the user one question before starting.
+2. Call `route` with `debate` and follow its assignee. Then call `debate` with `topic` and `position` (setting `tier` to `frontier` only when the decision is especially hard), and end your turn.
+3. In each round, concede what holds up, push back with evidence where you disagree, and continue with `reply`.
+4. Tell the user what was agreed, what disagreement remains and what would settle it, and anything that needs their decision. When closing an open mission, save the decision in `record`.
 
-Implement the outcome only if the user asked for that.
+Implement the outcome only if the user asked for it.

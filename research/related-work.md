@@ -4,7 +4,7 @@ Surveyed 2026-11-12. Star counts, last push dates, and licenses were checked via
 
 ## 1. Summary
 
-- **Worktrees plus a dashboard is already commodity infrastructure.** Plenty of human-driven GUIs and TUIs do this, and several have already shut down or stalled (Conductor is shutting down its cloud on Nov 20 after joining Meta; Vibe Kanban is community-maintained after the company wound down). What sets Crew apart is that a lead agent delegates over MCP and reviews/merges diffs, workers run through structured protocols with no blind auto-approval (Codex defaults to its automatic reviewer with user escalation, and Antigravity routes delegate commands to the user and refuses commands in other roles), and Codex performs adversarial cross-review.
+- **Worktrees plus a dashboard is already commodity infrastructure.** Plenty of human-driven GUIs and TUIs do this, and some have stalled (Vibe Kanban is community-maintained after the company wound down). Conductor joined Meta and announced a cloud shutdown on Nov 4, withdrew the shutdown on Nov 12–13, and keeps developing the product, cloud included. What sets Crew apart is that a lead agent delegates over MCP and reviews/merges diffs, workers run through structured protocols with no blind auto-approval (Codex defaults to its automatic reviewer with user escalation, and Antigravity routes delegate commands to the user and refuses commands in other roles), and Codex performs adversarial cross-review.
 - **The closest point of comparison is `openai/codex-plugin-cc`** (35k★, Apache-2.0). It lacks worktree isolation, user approval routing, and a polish role—and its top open issues are almost all process lifecycle bugs. Crew needs to guard against the same class of bugs.
 - **Evidence for cross-model code review is weaker than commonly assumed.** For code, existing research suggests a fresh reviewer with a clean context matters more than switching model vendors—whereas for documentation and prose, cross-model review showed a large gain (section 4).
 - **The industry broadly warns against parallel writes and over-orchestration.** Both Anthropic and Cognition favor read-heavy fan-out while treating parallel writes as high-risk. Crew's "delegate only separable slices + single lead merges" design matches that consensus.
@@ -15,7 +15,7 @@ Surveyed 2026-11-12. Star counts, last push dates, and licenses were checked via
 
 | Project | Metrics | Key points |
 | --- | --- | --- |
-| Conductor (proprietary) | Joined Meta; cloud shutting down 11/20 | 222 pts on HN. Praised for UX; criticized for shutdown timeline and lock-in. Early complaints: did not use local checkout, reinstalled dependencies per workspace, skipped `.env`, needed notifications |
+| Conductor (proprietary) | Joined Meta and announced a cloud shutdown 11/4; withdrew the shutdown 11/12–13 (0.94.2 changelog: "Conductor isn't shutting down"); development continues, cloud included | 222 pts on HN. Praised for UX; the shutdown announcement drew criticism for its timeline and lock-in. Early complaints: did not use local checkout, reinstalled dependencies per workspace, skipped `.env`, needed notifications |
 | Vibe Kanban | 28.6k★, Apache-2.0 | Community-maintained after company shut down in 2026-04. Rust. Worktree creation lock, orphan run cleanup on boot, structured approval objects (id, question flag, timeout) |
 | cmux | 28.8k★, GPL-3.0+ | Swift/Ghostty. Notification ring praised. CHANGELOG documents subagent status misreporting and session-restore storm bugs |
 | Paradev (formerly Superset) | 16.2k★, MIT | Hook-based state detection; PTY daemon keeps sessions alive across app updates. Supports Antigravity via hooks |
@@ -118,7 +118,7 @@ Each item below comes from the surveyed projects; section 8 checks them against 
 - Stop-hook review gates that run on every turn (token burn and runaway loops).
 - Dozens of agents and watcher hierarchies (Gas Town), 19 agents and 85 skills (OMC), or large persona catalogs (`wshobson/agents`).
 - Graph DSLs, handoff-as-tool patterns, A2A agent cards, or MCP OAuth / stateless transport machinery.
-- Single-vendor cloud lock-in and closed distribution (the fate of Conductor and Vibe Kanban), or heavy Electron wrappers.
+- Single-vendor cloud lock-in and closed distribution (what Vibe Kanban's users went through, and Conductor's withdrawn shutdown announcement threatened), or heavy Electron wrappers.
 - ACP `fs/*` and `terminal/*` client methods that grant workers direct host access.
 
 ## 7. Limitations of this survey

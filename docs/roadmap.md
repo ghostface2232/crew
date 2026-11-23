@@ -143,14 +143,14 @@ Requirements R4 and R6 (computer use, side chat, visibility in the desktop app) 
 ## 6. Open items
 
 - Midmap was read from its Microsoft Store listing only (released 2026-11-04, Windows x64); its layout and site were not seen.
-- Conductor's status is inconsistent between sources (planned cloud shutdown in [related-work.md](../research/related-work.md) vs. a release on 2026-11-12); does not affect UX references.
+- Conductor's status *(settled)*: it joined Meta and announced a cloud shutdown on 2026-11-04, withdrew the shutdown on 2026-11-12–13 (0.94.2 changelog), and continues development, cloud included. [related-work.md](../research/related-work.md) is corrected to match.
 - Antigravity's native `AGENTS.md` support is unverified; A2 does not depend on it.
 - Direct dispatch shape *(settled in `Dispatch.tsx` / `DispatchView.swift`)*: the board’s New Job creates a job without a mission or lead. The lead’s tools use the same `POST /api/jobs` endpoint and pass lead and mission information.
 - PR watches: the user has yet to decide whether Crew should poll slowly while the owning session is closed (Codex's preference). The current implementation skips polling while the session is closed.
 
 ## 7. Sources
 
-- Conductor: https://www.conductor.build/docs/reference/harnesses, https://www.conductor.build/changelog/0.85.0-sections-routines-and-a-new-model-picker
+- Conductor: https://www.conductor.build/docs/reference/harnesses, https://www.conductor.build/changelog/0.85.0-sections-routines-and-a-new-model-picker, https://www.conductor.build/changelog
 - Emdash: https://emdash.com/docs, https://emdash.com/docs/providers
 - OpenHands: https://docs.openhands.dev/openhands/usage/agent-canvas/acp-agents, https://docs.openhands.dev/sdk/guides/security
 - Linear for Agents: https://linear.app/developers/agent-interaction, https://linear.app/docs/agents-in-linear

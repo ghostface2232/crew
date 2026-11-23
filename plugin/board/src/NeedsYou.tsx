@@ -34,7 +34,7 @@ export function OpenInClaude({ session, small }: { session: ClaudeSession; small
   );
 }
 
-/** What a waiting Claude session asks beyond its headline: follow-up questions and choices, or the tool input an approval is for. */
+/** What a waiting Claude session asks beyond its headline: each question's choices, or the tool input an approval is for. */
 export function ClaudeAsk({ session }: { session: ClaudeSession }) {
   const ask = session.ask;
   if (session.state !== 'waiting' || !ask) return null;

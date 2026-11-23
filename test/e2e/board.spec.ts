@@ -729,6 +729,23 @@ test('Settings wait for a change still being stored before they close, and stay 
   await lastBody(request, '/api/roles').toEqual({ roles: { delegate: { agents: ['codex', 'antigravity'] } } });
 });
 
+test('instructions typed while Settings wait to close are still asked about', async ({ page }) => {
+  await openSettings(page);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  await page.route('**/api/roles', async (route) => { await gate; await route.continue(); });
+  await page.getByRole('checkbox', { name: 'Implementation: Antigravity' }).click();
+  await page.keyboard.press('Escape');
+  // Still open while the change is stored, so the user goes on and types.
+  await settingsPage(page, 'Instructions');
+  const field = page.getByRole('textbox', { name: 'Shared instructions' });
+  await expect(field).toBeEnabled();
+  await field.fill('Typed while closing.');
+  release();
+  await page.getByRole('dialog', { name: 'Close without saving your changes?' }).getByRole('button', { name: 'Cancel' }).click();
+  await expect(field).toHaveValue('Typed while closing.');
+});
+
 test('on a phone, settings move between the list and a page with focus kept, and the drawer hands focus back', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 800 });
   await page.getByRole('button', { name: 'Show sidebar' }).click();

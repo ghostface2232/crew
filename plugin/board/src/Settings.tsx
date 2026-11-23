@@ -222,6 +222,10 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
   const generation = useRef(0);
   const saveLock = useRef(false);
   const dirty = text !== saved;
+  // Whether the instructions are unsaved as they stand now, for a close that waited on a store and so outlived the
+  // render it began in.
+  const unsaved = useRef(false);
+  unsaved.current = dirty || saving;
   const dirs = knownProjects(state);
   const names = projectNames(dirs);
   useEffect(() => {
@@ -284,7 +288,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
     // A change still being stored is waited for. One that cannot be stored keeps Settings open, where it says so:
     // closed, the change would be undone with nothing left to show why.
     if (!(await storedRoles.settled()) || !(await storedPreset.settled())) return;
-    if ((dirty || saving) && !await ask('Close without saving your changes?', 'Close')) return;
+    if (unsaved.current && !await ask('Close without saving your changes?', 'Close')) return;
     if (shownInstallError.current) void desktop?.update.seen?.();
     close();
   };

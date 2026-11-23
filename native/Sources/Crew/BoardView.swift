@@ -232,7 +232,7 @@ struct BoardView: View {
             case .mission(let mission):
                 MissionPanel(store: store, mission: mission, jobs: missionJobs(mission))
             case .loose:
-                ContentPanel(title: history ? "Completed jobs" : "Other jobs", symbol: "rectangle.stack") {
+                ContentPanel(title: history ? "Jobs" : "Other jobs", symbol: "rectangle.stack") {
                     VStack(spacing: WorkspaceStyle.rowGap) { ForEach(loose) { job in JobRow(job: job, selected: store.selectedJob == job.id, store: store) { store.toggleJob(job.id) }.transition(.card) } }
                 }
             case .finished:
@@ -248,7 +248,7 @@ struct BoardView: View {
         if emptyHistory || emptyWorkspace {
             EmptyState(title: store.search.isEmpty ? (emptyHistory ? "No completed work yet" : "Ready when you are") : "No matching work",
                        symbol: store.search.isEmpty ? "square.stack.3d.up" : "magnifyingglass",
-                       detail: store.search.isEmpty && !emptyHistory ? "Start with New Job, or /crew:run in Claude." : nil) {
+                       detail: store.search.isEmpty && !emptyHistory ? "Hand a task to an agent, or run /crew:run in Claude." : nil) {
                 if store.search.isEmpty && !emptyHistory { Button("New Job", systemImage: "plus") { store.showingDispatch = true }.glassPillButton().disabled(!store.connected) }
             }.transition(.card)
         }
@@ -258,7 +258,7 @@ struct BoardView: View {
         // The page heading already names this list.
         ContentPanel(title: nil) {
             let events = store.events.filter { matches("\($0.detail) \($0.agent)") }
-            if events.isEmpty { Text("No activity yet.").foregroundStyle(.secondary) }
+            if events.isEmpty { Text(store.search.isEmpty ? "No activity yet." : "No matching activity.").foregroundStyle(.secondary) }
             EventList(events: events) { store.openJob($0) }
         }
         // On the panel rather than the list, so the panel grows with the rows instead of snapping to its new height.
@@ -737,7 +737,7 @@ struct ProjectSidebar: View {
     }
     private var updateTitle: String {
         // Kept short enough to fit on one line at the narrowest sidebar width; the tooltip says what happens.
-        if updater.phase == .ready { return "Update" }
+        if updater.phase == .ready { return "Update Now" }
         guard let jobs = updater.waiting else { return "Updating…" }
         return jobs > 0 ? "\(jobs) job\(jobs == 1 ? "" : "s") left…" : "Waiting…"
     }

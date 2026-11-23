@@ -318,7 +318,7 @@ struct CrewSettingsView: View {
             VStack(alignment: .leading, spacing: Space.s) {
                 saveRow
                 if model.text.count > 9000 {
-                    Label("Claude sessions will be pointed to this file because it is longer than 9,000 characters.", systemImage: "info.circle").settingsFootnote()
+                    Label("Over 9,000 characters, so Claude sessions are pointed to them rather than given the full text.", systemImage: "info.circle").settingsFootnote()
                 }
             }
         }

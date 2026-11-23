@@ -124,6 +124,8 @@ export function ClockProvider({ skew, children }: { skew: number; children: Reac
 export const EASE_OUT = 'cubic-bezier(0.22, 1, 0.36, 1)';
 export const EASE_IN_OUT = 'cubic-bezier(0.65, 0, 0.35, 1)';
 export const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+/** A count with its noun, singular for one. */
+export const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
 /**
  * A container transform: the element grows out of the control that opened it. Only transform and opacity
  * move, so text inside stays crisp once it lands; the contents fade in after the shape has mostly settled.

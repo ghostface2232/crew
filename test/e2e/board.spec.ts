@@ -1652,7 +1652,7 @@ test('About Crew puts the check on the status row and an update action beside th
 
   await check.click();
   const note = page.getByText('Updates install after running jobs finish.');
-  const install = page.getByRole('button', { name: 'Update Now' });
+  const install = page.getByRole('dialog').getByRole('button', { name: 'Update Now', exact: true });
   await expect(install).toBeVisible();
   await expect(check).toHaveCount(0);
   // The action shares the note's line rather than sitting between the list and the note.

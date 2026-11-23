@@ -7,7 +7,7 @@ import {
 import type { FluentIcon } from '@fluentui/react-icons';
 import type { Snapshot } from './types.ts';
 import { jobLabel, missionStep, missionStops, NAMES, projectOf, roleLabel, jobRole } from './model.ts';
-import { AgentMark, Chip, EASE_IN_OUT, EASE_OUT, Icon, reducedMotion, Elapsed, useClock, WordReveal } from './ui.tsx';
+import { AgentMark, Chip, EASE_IN_OUT, EASE_OUT, Icon, plural, reducedMotion, Elapsed, useClock, WordReveal } from './ui.tsx';
 import { jobStatusState } from './Missions.tsx';
 import { notificationPermission, notificationsWanted, requestNotifications, setNotificationsWanted } from './notify.ts';
 
@@ -100,7 +100,7 @@ export function Palette({ state, names, projects, origin, close, actions }: {
     }
     for (const [id, title, icon, subtitle] of PAGE_ENTRIES)
       list.push({ id: `page:${id}`, group: 'Pages', title, subtitle, icon, run: () => actions.select(id), preview: () => ({ eyebrow: 'Page', lines: [], text: subtitle }) });
-    list.push({ id: 'project:', group: 'Projects', title: 'All projects', subtitle: 'Overview', icon: StackRegular, run: () => actions.select('overview'), preview: () => ({ eyebrow: 'Projects', lines: [`${projects.length} projects`] }) });
+    list.push({ id: 'project:', group: 'Projects', title: 'All projects', subtitle: 'Overview', icon: StackRegular, run: () => actions.select('overview'), preview: () => ({ eyebrow: 'Projects', lines: [plural(projects.length, 'project')] }) });
     for (const dir of projects) {
       const projectJobs = jobs.filter((job) => projectOf(job) === dir);
       list.push({
@@ -108,8 +108,8 @@ export function Palette({ state, names, projects, origin, close, actions }: {
         run: () => actions.select(`project:${dir}`),
         preview: () => ({
           eyebrow: 'Project',
-          lines: [dir, `${projectJobs.filter((job) => job.endedAt == null).length} active jobs · ${projectJobs.length} in all`],
-          text: `${missions.filter((mission) => projectOf(mission) === dir && mission.state === 'active').length} missions in progress`,
+          lines: [dir, `${plural(projectJobs.filter((job) => job.endedAt == null).length, 'active job')} · ${projectJobs.length} in all`],
+          text: `${plural(missions.filter((mission) => projectOf(mission) === dir && mission.state === 'active').length, 'mission')} in progress`,
         }),
       });
     }

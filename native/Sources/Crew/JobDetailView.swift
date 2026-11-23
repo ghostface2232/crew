@@ -63,7 +63,7 @@ struct JobDetailView: View {
         Grid(alignment: .leading, horizontalSpacing: WorkspaceStyle.factColumnGap, verticalSpacing: WorkspaceStyle.factRowGap) {
             // The model the session reported, else the configured one.
             fact("Agent", [agentName(job.agent), job.resolvedModel ?? job.model, (job.resolvedEffort ?? job.effort).map { "\($0) effort" }, job.tier.map { "\($0) tier" }].compactMap { $0 }.joined(separator: " · "))
-            fact("Role", store.state.roleLabel(job.assignedRole))
+            fact("Role", job.ask == true && job.debate == nil ? "Question" : store.state.roleLabel(job.assignedRole))
             // What the worker declared, set against what the bridge observed.
             if job.state == "done", let outcome = job.outcome {
                 fact("Outcome", job.outcomeContradiction.map { "Done as declared, but \($0)" } ?? outcome.capitalized)
@@ -723,7 +723,7 @@ private struct DebateStepper: View {
         }
         .font(Typeface.caption)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(concluded ? "Debate concluded after \(rounds) rounds" : "Debate, round \(current) of \(rounds)")
+        .accessibilityLabel(concluded ? "Debate concluded after \(rounds) round\(rounds == 1 ? "" : "s")" : "Debate, round \(current) of \(rounds)")
     }
 
     private func steps(named: Bool) -> some View {

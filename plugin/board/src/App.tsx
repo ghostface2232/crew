@@ -244,7 +244,7 @@ export function App() {
               >
                 <Icon icon={ArrowCircleDownRegular} />
                 <span>
-                  {update.state === 'ready' ? 'Update'
+                  {update.state === 'ready' ? 'Update Now'
                     : update.waiting ? `${update.waiting} job${update.waiting === 1 ? '' : 's'} left…`
                     : update.waiting === 0 ? 'Waiting…' : 'Updating…'}
                 </span>

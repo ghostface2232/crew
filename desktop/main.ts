@@ -261,7 +261,7 @@ function trayMenu(waiting = pending) {
       { label: pending ? `Open Crew (${pending} waiting)` : 'Open Crew', click: () => show() },
       { label: 'Open in browser', click: () => void openInBrowser() },
       { label: 'Reload board', click: () => void loadBoard().catch(console.error) },
-      ...(updater.status.state === 'ready' ? [{ label: `Restart to update to ${updater.status.latest}`, click: () => void installUpdate() }] : []),
+      ...(updater.status.state === 'ready' ? [{ label: `Update to ${updater.status.latest}`, click: () => void installUpdate() }] : []),
       ...(updater.status.state === 'installing' && updater.status.waiting !== undefined
         ? [{ label: 'Cancel the waiting update', click: () => updater.failed() }]
         : []),

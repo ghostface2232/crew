@@ -349,7 +349,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
     if (saveLock.current || load !== 'ready') return;
     saveLock.current = true;
     setSaving(true);
-    setStatus('Saving…');
+    setStatus('');
     const attempt = generation.current;
     const draft = text;
     try {
@@ -724,7 +724,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
                     {text.length > 9000 && (
                       <p className={`${styles.footnote} ${styles.note}`}>
                         <Icon icon={Info16Regular} />
-                        Claude sessions will be pointed to this file because it is longer than 9,000 characters.
+                        Over 9,000 characters, so Claude sessions are pointed to them rather than given the full text.
                       </p>
                     )}
                   </section>

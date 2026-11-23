@@ -402,7 +402,7 @@ function DebateStepper({ job }: { job: BoardJob }) {
   const replied = Math.max(0, ...(job.exchange ?? []).filter((entry) => entry.from === 'worker').map((entry) => entry.turn));
   const concluded = debateConcluded(job);
   return (
-    <ol className="stepper" role="img" aria-label={concluded ? `Debate concluded after ${rounds} rounds` : `Debate, round ${Math.min(job.turns, rounds)} of ${rounds}`}>
+    <ol className="stepper" role="img" aria-label={concluded ? `Debate concluded after ${rounds} round${rounds === 1 ? '' : 's'}` : `Debate, round ${Math.min(job.turns, rounds)} of ${rounds}`}>
       {Array.from({ length: rounds }, (_, index) => index + 1).map((round) => (
         <li key={round} data-done={round <= replied || undefined}>
           <Icon icon={round <= replied ? CheckmarkCircleRegular : round === job.turns && job.endedAt == null ? CircleHintRegular : CircleMultipleConcentricRegular} size={13} />
@@ -452,7 +452,7 @@ function FollowUp({ job }: { job: BoardJob }) {
   const state = useAction(key);
   const name = NAMES[job.agent];
   return (
-    <Section title={job.debate ? 'Reply' : job.endedAt == null ? 'Steer' : 'Follow up'} icon={ChatRegular}>
+    <Section title={job.endedAt == null ? 'Steer' : job.debate ? 'Reply' : 'Follow up'} icon={ChatRegular}>
       <textarea aria-label={`Message to ${name}`} value={draft} onChange={(event) => setDraft(event.target.value)} />
       <div>
         <button

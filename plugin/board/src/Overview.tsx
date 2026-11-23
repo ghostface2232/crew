@@ -14,7 +14,7 @@ import {
   dailyCounts, elapsed, endedPerHour, holdersOf, jobLabel, leadMission, NAMES, projectOf, relativeDuration, rolesOf, runningPerHour,
   usageWindowName, unsettled,
 } from './model.ts';
-import { AgentMark, Chip, EmptyState, Icon, RollingNumber, StatusIcon, useFade, useClock, useStableItems } from './ui.tsx';
+import { AgentMark, Chip, EmptyState, Icon, plural, RollingNumber, StatusIcon, useFade, useClock, useStableItems } from './ui.tsx';
 import { JobRow, jobKind, jobStatusState, MissionPanel, SessionRow } from './Missions.tsx';
 
 export interface Scope {
@@ -138,7 +138,7 @@ export const Kpis = memo(function Kpis({ state, project }: { state: Snapshot; pr
   const metrics = [
     // Lead sessions count like jobs, as they already do under Needs you.
     { label: 'In progress', state: 'working', count: jobs.filter((job) => job.state === 'running').length + sessions.filter((session) => session.state === 'working').length,
-      spark: runningSpark, unit: 'running', foot: `${sessions.filter((session) => session.state === 'working').length} lead sessions` },
+      spark: runningSpark, unit: 'running', foot: plural(sessions.filter((session) => session.state === 'working').length, 'lead session') },
     { label: 'Needs you', state: 'waiting', count: waitingCount, foot: waitingFoot },
     // Settled jobs stay in the list but leave the totals, which would otherwise only grow.
     { label: 'Finished', state: 'done', count: jobs.filter((job) => job.state === 'done' && unsettled(job)).length,
@@ -652,7 +652,7 @@ export function Workspace({ state, project, names, selected, openJob, openSessio
             </Panel>
           )}
           {empty && (
-            <EmptyState title="Ready when you are" icon={LayerRegular} detail="Start with New Job, or /crew:run in Claude.">
+            <EmptyState title="Ready when you are" icon={LayerRegular} detail="Hand a task to an agent, or run /crew:run in Claude.">
               <button className="prominent" disabled={state.connection !== 'live'} onClick={(event) => newJob(event.currentTarget)}>
                 <Icon icon={AddRegular} />
                 New Job
@@ -666,7 +666,7 @@ export function Workspace({ state, project, names, selected, openJob, openSessio
             <Heatmap title="Rhythm" times={times} most={26} label="jobs" one="job" />
           </section>
           <Panel label="Live feed" action={<button className="link" onClick={() => openPage('activity')}>All <Icon icon={ArrowRight16Filled} size={12} /></button>}>
-            {events.length ? <EventList events={events} openJob={openJob} limit={6} /> : <p className="secondary caption">Nothing has happened yet.</p>}
+            {events.length ? <EventList events={events} openJob={openJob} limit={6} /> : <p className="secondary caption">No activity yet.</p>}
           </Panel>
         </aside>
       </div>
@@ -737,7 +737,7 @@ export const History = memo(function History({ state, project, names, selected, 
         </Columns>
       )}
       {rows.length > 0 ? (
-        <Panel label="Completed jobs" className="table-panel">
+        <Panel label="Jobs" className="table-panel">
           <div className="table-scroll">
             <table className="jobs-table">
               <thead>
@@ -746,7 +746,7 @@ export const History = memo(function History({ state, project, names, selected, 
                   {column('agent', 'Agent', 'narrow-hide')}
                   {!project && column('project', 'Project', 'narrow-hide')}
                   {column('state', 'Status')}
-                  {column('duration', 'Took', 'num')}
+                  {column('duration', 'Duration', 'num')}
                   {column('ended', 'Ended', 'num narrow-hide')}
                 </tr>
               </thead>

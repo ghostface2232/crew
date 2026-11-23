@@ -57,7 +57,7 @@ private struct MenuBarMenu: View {
         Text(store.connected ? "Crew is connected" : "Crew is reconnecting")
         Button("Open Crew") { show(nil) }
         if pending > 0 {
-            Button("\(pending) requests need you") { show(nil); store.selection = "needs" }
+            Button(pending == 1 ? "1 request needs you" : "\(pending) requests need you") { show(nil); store.selection = "needs" }
         }
         Divider()
         ForEach(Array(waiting.prefix(5))) { job in
@@ -67,7 +67,7 @@ private struct MenuBarMenu: View {
         SettingsCommand(store: store, open: openSettings)
         Button("Open Web Board") { Task { NSWorkspace.shared.open(await store.api.webBoardURL()) } }
         if updater.phase == .ready {
-            Button("Restart to Update to \(updater.latest ?? "")") { updater.onInstall() }
+            Button("Update to \(updater.latest ?? "")") { updater.onInstall() }
         }
         Divider()
         Button("Quit Crew — jobs keep running") { NSApp.terminate(nil) }

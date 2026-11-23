@@ -362,7 +362,7 @@ struct SessionDetailView: View {
             VStack(alignment: .leading, spacing: Space.m) {
                 Text(session.waitingFor ?? "Claude needs your input.").font(Typeface.callout).textSelection(.enabled)
                 ClaudeAskView(session: session)
-                Text("Answer in Claude.").font(Typeface.callout).foregroundStyle(.secondary)
+                if session.claudeURL == nil { Text("Answer in Claude.").font(Typeface.callout).foregroundStyle(.secondary) }
             }.card(fill: Palette.attention(Palette.warning))
         }
         Grid(alignment: .leading, horizontalSpacing: WorkspaceStyle.factColumnGap, verticalSpacing: WorkspaceStyle.factRowGap) {

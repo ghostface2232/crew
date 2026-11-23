@@ -385,7 +385,7 @@ export class ClaudeSessions {
     delete s.ask;
   }
 
-  /** Keeps a tool call open for the permission prompt that may follow it. A payload without a call id replaces the caller's last one. */
+  /** Keeps a tool call open for the permission prompt that may follow it. A payload without a call id replaces the caller's open calls. */
   private call(sessionId: string, caller: string, p: any): void {
     let callers = this.calls.get(sessionId);
     if (!callers) this.calls.set(sessionId, (callers = new Map()));

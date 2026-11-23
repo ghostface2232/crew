@@ -848,7 +848,7 @@ export const SessionDrawer = memo(function SessionDrawer({ id, state, close }: {
             <div className="card answer-card answer">
               <p className="headline selectable">{session.waitingFor ?? 'Claude needs your input.'}</p>
               <ClaudeAsk session={session} />
-              <p className="callout secondary">Answer in Claude.</p>
+              {!session.desktopId && <p className="callout secondary">Answer in Claude.</p>}
             </div>
           )}
           <Facts

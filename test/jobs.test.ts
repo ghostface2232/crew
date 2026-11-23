@@ -1123,7 +1123,7 @@ test('each job goes to its role\'s holder, gets the role\'s brief, and refuses a
   assert.match(release.instructions, /# This job: release preparation[^]*Do not push, tag, publish/);
   const fix = await jobs.create({ kind: 'delegate', role: 'fix', cwd: repo, task: 'fix the two findings', isolation: 'in_place' });
   assert.deepEqual([fix.role, fix.agent], ['fix', 'codex']);
-  assert.match(fix.instructions, /# Role: supporting engineer[^]*# This job: fixing review findings[^]*fix its cause/);
+  assert.match(fix.instructions, /# Role: supporting engineer[^]*# This job: fixing review findings[^]*hides the symptom/);
   // A review that runs the app is the verify role, so it can go to an agent that runs commands while static review does not.
   const verify = await jobs.create({ kind: 'review', cwd: repo, review, runsApp: true });
   assert.deepEqual([verify.role, verify.agent], ['verify', 'codex']);

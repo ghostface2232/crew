@@ -41,14 +41,16 @@ export function buildPrompt(spec: JobSpec, worktree: Worktree | null, diffFile: 
   if (starts) parts.push(role('machine'));
   else if (commands) parts.push(checksOnly(spec.kind === 'polish'));
   else if (spec.kind === 'review') parts.push(READ_ONLY_REVIEW);
+  else if (readOnly) parts.push(NO_COMMANDS);
   if (spec.runsApp) parts.push(spec.kind === 'review' ? `${RUNS_APP}\n${SNAPSHOT}` : RUNS_APP);
   if (spec.exclusive) parts.push(ALONE);
   if (spec.plugins?.length) parts.push(pluginsNote(spec.plugins));
-  if (scratch) parts.push(scratchNote(scratch, readOnly));
+  if (scratch && spec.kind !== 'polish') parts.push(scratchNote(scratch, readOnly));
   if (evidence && starts) parts.push(evidenceNote(evidence));
-  if (evidence && scratch && spec.kind !== 'polish') parts.push(workNote(evidence));
+  // A read-only job writes in its scratch directory and only there.
+  if (evidence && scratch && starts) parts.push(workNote(evidence));
   if (worktree?.linked?.length) parts.push(`# Shared dependencies\nThese directories link to the main checkout and are shared read-only: ${worktree.linked.map((dir) => `\`${dir}\``).join(', ')}. Do not install into them or delete them. Point tool caches at the temp directory.`);
-  parts.push(leadQuestions(readOnly, commands), REFUSED);
+  parts.push(leadQuestions({ edits: !readOnly && spec.kind !== 'review', approvals: starts, search: !commands }), REFUSED);
   if (rates) parts.push(spec.kind === 'review' ? RATE_WORK : RATE_REVIEW);
   if (skills.length) parts.push(skillsNote(skills));
   const built = { ...assigned, instructions: parts.join('\n\n') };
@@ -62,17 +64,19 @@ export function buildPrompt(spec: JobSpec, worktree: Worktree | null, diffFile: 
  * For a job that runs commands but starts nothing: a read-only review or question in a sandbox that cannot hold
  * an instance of the app, or an editor. A second reviewer is often at work on the same change.
  */
-const checksOnly = (editor: boolean) => `# This machine is shared\nThe user and other agents are using this computer at the same time as you. ${editor ? 'Run only commands that read and search files.' : 'Run only commands that end by themselves, such as reading and searching files, tests, and type checks.'} Do not start the app, a server, or a browser, and leave alone anything already running: stop nothing you did not start. Do not time or benchmark anything; other work on the machine makes the numbers meaningless.`;
-/** Only what the job can use: a read-only job has no allowed files to leave and no approvals to ask for. */
-function leadQuestions(readOnly: boolean, commands: boolean): string {
+const checksOnly = (editor: boolean) => `# This machine is shared\nThe user and other agents are using this computer at the same time as you. ${editor ? 'Run only commands that read and search files.' : 'Run only commands that end by themselves, such as reading and searching files, tests, and type checks.'} Do not start the app, a server, or a browser, and leave alone anything already running: stop nothing you did not start.${editor ? '' : ' Do not time or benchmark anything; other work on the machine makes the numbers meaningless.'}`;
+/** Said outright, so a worker reads files instead of trying a command and losing its turn to the refusal. */
+const NO_COMMANDS = '# No commands\nCommands are refused in this job, so read files directly. For what only a command would show, such as a diff, a log, or a test run, ask the lead, or say in your answer that you could not check it.';
+/** Only what the job can use: a reviewer has no files to edit, and only a job that starts things is asked for approvals. */
+function leadQuestions(can: { edits: boolean; approvals: boolean; search: boolean }): string {
   const lines = [
-    `- Ask with crew.ask_lead for a decision or a fact only the lead has${readOnly ? '' : ', or when something outside the files you may edit must change'}. Keep working on what the answer does not affect, and call crew.lead_answers when you reach what it blocks (wait_seconds waits for an answer).`,
+    `- Ask with crew.ask_lead for a decision or a fact only the lead has${can.edits ? ', or when something outside the files you may edit must change' : ''}. Keep working on what the answer does not affect, and call crew.lead_answers when you reach what it blocks (wait_seconds waits for an answer).`,
     '- Look up what you can find yourself. "Which error format should the new endpoint return?" is a question for the lead when neither the task nor the code settles it; "Where is the config loaded?" is not.',
     '- Make each question one the lead can answer from the question alone: what you found, the options you see, and the one you would pick.',
   ];
-  if (!readOnly) lines.push('- Approvals go to the user through the normal approval flow, not ask_lead.');
+  if (can.approvals) lines.push('- Approvals go to the user through the normal approval flow, not ask_lead.');
   lines.push('- crew.siblings shows who else is working, and on which files.');
-  if (!commands) lines.push('- crew.search finds text across your working tree, and crew.recent_changes shows what was just written.');
+  if (can.search) lines.push('- crew.search finds text across your working tree, and crew.recent_changes shows what was just written.');
   lines.push('- Your tool list may show these names with a prefix, such as mcp_crew_ask_lead. If none of them is there, they did not start: put your questions in your report and carry on.');
   return `# Questions for the lead\n${lines.join('\n')}`;
 }
@@ -82,7 +86,7 @@ const REFUSED = '# Refused actions\nWhen the sandbox, the automatic reviewer, or
  * Says what the sandbox allows before the worker finds out by failing: a check that writes a temporary
  * file is still a check that ends by itself.
  */
-const scratchNote = (dir: string, readOnly: boolean) => readOnly ? `# What you can run\nYour sandbox is read-only, with no network and no listening ports, except for one directory of your own: \`${dir}\`. TMPDIR, TMP and TEMP point there. Use it for anything a check has to write: temporary files, caches, a throwaway copy or clone of the repository to try a change or a git operation in. A few of the bridge's own files are closed even to reading. The directory is deleted when this turn ends, so nothing in it is a result: put the commands you ran and what they showed in your report. If a check needs more than this, do not work around it; list it under what you could not verify.` : `# Temporary files\nYour temp directory for this turn is \`${dir}\`; TMPDIR, TMP and TEMP point there. Use it for temporary files and tool caches. It is deleted when the turn ends, and a follow-up gets a fresh one.`;
+const scratchNote = (dir: string, readOnly: boolean) => readOnly ? `# What you can run\nYour sandbox is read-only, with no network and no listening ports, except for one directory of your own: \`${dir}\`. TMPDIR, TMP and TEMP point there. Use it for anything a check has to write: temporary files, caches, a throwaway copy or clone of the repository to try a change or a git operation in. A few of the bridge's own files are closed even to reading. The directory is deleted when this turn ends, so nothing in it is a result: put the commands you ran and what they showed in your report.` : `# Temporary files\nYour temp directory for this turn is \`${dir}\`; TMPDIR, TMP and TEMP point there. Use it for temporary files and tool caches. It is deleted when the turn ends, and a follow-up gets a fresh one.`;
 /** Unlike scratch, kept with the job: what the worker saw is what the lead and the user get to see. */
 const evidenceNote = (dir: string) => `# Evidence\nSave screenshots and recordings that show your result, or what you could not get working, in \`${dir}\` as PNG, JPEG, GIF, WebP, WebM, or MP4, named for what they show. Keep to the few that decide whether the task is done. For a visual change, capture the same view before and after, as \`<view>-before\` and \`<view>-after\`. Replace or delete any capture a later change made out of date. They are kept with the job and shown beside your report: name each one in your report, and pass a name in ask_lead's attachments to show it with a question.`;
 /** Only where scratch is emptied after each turn: the one place a worker's own files outlive it. */
@@ -104,8 +108,12 @@ const PLUGIN_USER_APP = `# User's apps\nOnly when the lead's task explicitly tel
  * instructions, which are subordinate to everything the bridge itself says.
  */
 export function withUserApps(instructions: string): string {
-  const at = instructions.indexOf(`\n\n${SHARED_HEADING}`);
-  return at < 0 ? `${instructions}\n\n${PLUGIN_USER_APP}` : `${instructions.slice(0, at)}\n\n${PLUGIN_USER_APP}${instructions.slice(at)}`;
+  // Right after the plugins it is about; else before the shared instructions; else last.
+  const plugins = instructions.indexOf('\n\n# Plugins\n');
+  const next = plugins < 0 ? -1 : instructions.indexOf('\n\n#', plugins + 2);
+  const shared = instructions.indexOf(`\n\n${SHARED_HEADING}`);
+  const at = next >= 0 ? next : shared >= 0 ? shared : instructions.length;
+  return `${instructions.slice(0, at)}\n\n${PLUGIN_USER_APP}${instructions.slice(at)}`;
 }
 /**
  * Peer ratings ride on a turn the worker already has, so they cost no turn of their own. Each rests on one fact from
@@ -129,14 +137,15 @@ function assignment(spec: JobSpec, worktree: Worktree | null, diffFile: string |
     return { instructions: role('question'), prompt: parts.join('\n\n') };
   }
   const where = worktree
-    ? `You are working in an isolated git worktree (branch \`${worktree.branch}\`). Edit files only inside it. Do not commit, push, or switch branches: the bridge commits your changes when you finish.`
+    ? `You are working in an isolated git worktree (branch \`${worktree.branch}\`). Edit files only inside it. Do not commit, merge, push, or switch branches: the bridge commits your changes when you finish.`
     : spec.kind === 'review'
       ? ''
-      : 'You are editing the working directory in place. Do not commit, push, or switch branches.';
+      : 'You are editing the working directory in place. Do not commit, merge, push, or switch branches.';
 
   if (spec.kind === 'delegate') {
     const parts = [`# Task\n${spec.task}`];
     if (spec.done_when) parts.push(`# Done when\n${spec.done_when}`);
+    if (spec.check?.trim()) parts.push(`# Check\nAfter each turn the bridge runs \`${spec.check.trim()}\` in your workspace and shows the lead its exit status.`);
     parts.push(`# Workspace\n${where}`);
     // Refactoring, release preparation and fixing are an engineer's work with a narrower brief, so their text adds to the engineer's.
     const extra = spec.role === 'refactor' || spec.role === 'release' || spec.role === 'fix' ? `\n\n${role(spec.role)}` : '';

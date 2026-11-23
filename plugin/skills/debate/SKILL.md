@@ -9,7 +9,7 @@ argument-hint: <decision to debate>
 Topic: $ARGUMENTS
 
 1. Understand the decision first: read the code and docs it touches, and form your own position. If the topic is unclear, ask the user one question before starting.
-2. Call `route` with `debate`, then `debate` with `topic` and `position`, naming `tier` `frontier` only when the decision is especially hard; then end your turn.
+2. Call `route` with `debate` and follow its assignee, then call `debate` with `topic` and `position`, naming `tier` `frontier` only when the decision is especially hard; then end your turn.
 3. For each round, concede what holds up, push back with evidence where you disagree, and continue with `reply`.
 4. Tell the user what was agreed, what disagreement remains and what would settle it, and anything that needs their decision; pass the decision as `record` when closing an open mission.
 

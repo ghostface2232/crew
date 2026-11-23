@@ -105,6 +105,22 @@ test('an effort is set as the thinking level the model offers, after the model',
   assert.equal(job.resolvedEffort, 'xhigh');
 });
 
+test('a restored session is put back on the job\'s model, then its level, when it comes back on another', { timeout: 5000 }, async (t) => {
+  const h = harness(t, server());
+  const job = await h.ended(await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test', model: 'hydrogen', effort: 'xhigh' }));
+  // A new server process resumes the session on its own default model.
+  h.adapter.shutdown();
+  await h.jobs.reply(job.id, { message: 'one more thing' });
+  await h.ended(job);
+  assert.deepEqual(h.sent('session/set_config_option').map((p) => [p.configId, p.value]).slice(2), [['model', 'gemini-4-hydrogen'], ['thought_level', 'xhigh']]);
+  assert.equal(job.resolvedModel, 'gemini-4-hydrogen');
+  assert.equal(job.resolvedEffort, 'xhigh');
+  // One that comes back on the right model is left alone.
+  await h.jobs.reply(job.id, { message: 'and another' });
+  await h.ended(job);
+  assert.equal(h.sent('session/set_config_option').length, 4);
+});
+
 test('an effort the model does not offer runs at the nearest lower level, and none is sent without one', { timeout: 5000 }, async (t) => {
   const h = harness(t, server());
   const capped = await h.ended(await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'test', model: 'argon', effort: 'xhigh' }));

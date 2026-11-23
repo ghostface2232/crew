@@ -1171,7 +1171,7 @@ test('Codex refusal results preserve exact actions and mark generic or missing r
   assert.match(result, /blocked by policy \(generic; no specific reason supplied\)/);
   assert.match(result, /no reason given/);
   assert.match(result, /approved_by_user/);
-  assert.match(result, /Do it another way/);
+  assert.match(result, /Never run a refused action yourself/);
   assert.match(job.instructions, /exact command or tool with its full input, the exact message you received/);
 });
 

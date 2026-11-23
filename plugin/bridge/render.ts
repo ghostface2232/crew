@@ -106,7 +106,7 @@ export function describe(job: JobView, waitingHint?: string): string {
   }
   if (job.error) {
     lines.push(`error: ${job.error.message}`);
-    if (job.error.limit) lines.push(`${WORKERS[job.agent].name} is out of usage for now. Do this piece yourself, and tell the user the ${job.kind === 'review' ? 'cross-review was skipped' : 'work was not delegated'}.`);
+    if (job.error.limit) lines.push(`${WORKERS[job.agent].name} is out of usage for now. ${job.kind === 'review' ? 'Run crew:self-reviewer again with the review focus, and tell the user the cross-review was skipped' : 'Do this piece yourself, in a subagent if it is large, and tell the user the work was not delegated'}.`);
   }
   if (job.tokens != null) {
     const n = (value: number) => value.toLocaleString('en-US');
@@ -155,7 +155,7 @@ export function describe(job: JobView, waitingHint?: string): string {
         ? 'This was already sent back once. If the user\'s request still covers it, call reply with approved_by_user again: the user is then asked about each request directly.'
         : 'If the user\'s request in this conversation covers the refused action, call reply with approved_by_user quoting their words, without asking them again; the reviewer then judges it once more. If it does not, tell the user what was refused and let them decide.');
     }
-    lines.push('Do it another way within the job permissions, or report the exact action and message as not verified.');
+    lines.push('Never run a refused action yourself.');
   }
   // Paths, so a reader without the images (the wake hook, the CLI) can still open them.
   const evidence = (job.evidence ?? []).filter((item) => item.from === 'worker');

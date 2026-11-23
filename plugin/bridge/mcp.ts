@@ -95,7 +95,7 @@ How jobs work:
 - \`route\` says who should take a kind of work now, from each agent's remaining usage. /crew:run calls it at each stage; outside it, follow the roles unless a job fails on a limit.
 ${PRESET_LINE}
 
-The user can watch every agent live on the status board, which /crew:board opens.`;
+The status board, opened with /crew:board, shows every agent live.`;
 
 const common = {
   cwd: { type: 'string', description: 'Project directory. Defaults to this session\'s project.' },
@@ -111,8 +111,8 @@ const aloneProp = {
   exclusive: { type: 'boolean', description: 'The job measures performance (benchmark, profile, load test) and must have the machine to itself. It is refused while any other job runs, and no other job can start until it ends: wait for running jobs first, and start nothing alongside it.' },
 };
 const runsAppProp = (what: string) => ({
-  runs_app: { type: 'boolean', description: `The job has to start the app (a server, a headless browser) to ${what}. Its sandbox gets network access for that; without this a worker cannot bind a port. Codex gets computer-use plugins by default and can operate the real, shared screen. Pass it when running the app is needed: always for work whose result only shows while it runs (UI, interaction, traffic between processes, startup, concurrency) or whose checks start a server or browser.` },
-  plugins: { type: 'array', items: { type: 'string' }, description: 'Additional Codex plugin names beyond configured defaults (by default the browser, for web research and docs): documents/pdf/spreadsheets/presentations when reading or producing those files; figma/github when working with them. Personal accounts (mail/calendar/drive/notes) and the user\'s own Chrome need an explicit request in the task, and only a task that names an action in the user\'s app lets the worker act there, never with credentials, payments, messages, or settings. Plugin tools act outside the sandbox; computer use operates the real, shared screen, so do not run two such jobs at once. Ignored for other agents.' },
+  runs_app: { type: 'boolean', description: `The job has to start the app (a server, a headless browser) to ${what}. Its sandbox gets network access for that; without this a worker cannot bind a port. Codex gets computer-use plugins by default and can operate the real, shared screen, so do not run two such jobs at once. Pass it when running the app is needed: always for work whose result only shows while it runs (UI, interaction, traffic between processes, startup, concurrency) or whose checks start a server or browser.` },
+  plugins: { type: 'array', items: { type: 'string' }, description: 'Additional Codex plugin names beyond configured defaults (by default the browser, for web research and docs): documents/pdf/spreadsheets/presentations when reading or producing those files; figma/github when working with them. Personal accounts (mail/calendar/drive/notes) and the user\'s own Chrome need an explicit request in the task, and only a task that names an action in the user\'s app lets the worker act there, never with credentials, payments, messages, or settings. Plugin tools act outside the sandbox. Ignored for other agents.' },
 });
 const installedSkills = listSkills();
 const skillsProp = installedSkills.length ? {
@@ -204,7 +204,7 @@ const TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        topic: { type: 'string', description: 'The decision to debate and its context: the problem, constraints, files and docs involved. It has not seen this conversation.' },
+        topic: { type: 'string', description: 'The decision to debate and its context: the problem, constraints, files and docs involved. It has not seen this conversation. Antigravity runs no commands in a debate, so point it at files to read, not commands to run.' },
         position: { type: 'string', description: 'Your current position and reasoning, for it to test.' },
         rounds: { type: 'integer', minimum: 1, maximum: MAX_DEBATE_ROUNDS, description: 'How many exchanges at most, counting the first. Default 3.' },
         title: { type: 'string', description: 'Short label shown on the status board.' },
@@ -340,7 +340,7 @@ const TOOLS = [
   {
     name: 'answer',
     title: 'Answer a worker question',
-    description: 'Answer a lead question without ending or restarting the worker turn. Then end your turn: you are woken when the worker ends or needs you.',
+    description: 'Answer a lead question without ending or restarting the worker turn: the decision and the fact it rests on, in a few lines. Then end your turn: you are woken when the worker ends or needs you.',
     inputSchema: {
       type: 'object',
       properties: { job_id: { type: 'string' }, question_id: { type: 'string' }, answer: { type: 'string' }, ...attachmentsProp },

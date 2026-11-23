@@ -238,7 +238,7 @@ export function observe(watch: PullWatch, view: PullView): { kind: News['kind'];
     watch.conflict = true;
     if (!watch.conflictTold) {
       watch.conflictTold = true;
-      send('conflict', `${pr} no longer merges cleanly into its base. Hand the conflict to an agent to resolve on the PR's branch, then Crew checks the new head.`);
+      send('conflict', `${pr} no longer merges cleanly into its base. Resolve it on the PR's branch, handing a code conflict that needs real work to the fix role; once the result is pushed, Crew checks the new head.`);
     }
   } else if (view.mergeable === 'MERGEABLE') {
     watch.conflict = false;

@@ -235,9 +235,13 @@ export class AntigravityAdapter implements Adapter {
           session.loaded = true;
           this.noteResponseMode(session, res, before);
         });
-        const level = ctl.job.effort ? pickEffort(configOption(res, 'thought_level')?.options, ctl.job.effort) : undefined;
-        const restored = level && level !== configOption(res, 'thought_level')?.currentValue
-          ? await this.configure(peer, session, turn, 'thought_level', level) : res;
+        // A restored session can come back on another model than the job ran on (seen with agy 1.5.14: a job on
+        // Argon resumed on Neon), so the model is set again, then the level, whose choices depend on the model.
+        const wanted = ctl.job.resolvedModel ?? ctl.job.model;
+        const model = wanted && sessionModel(res) !== wanted ? pickModel(configOption(res, 'model')?.options, wanted) : undefined;
+        let restored = model && model !== sessionModel(res) ? await this.configure(peer, session, turn, 'model', model) : res;
+        const level = ctl.job.effort ? pickEffort(configOption(restored, 'thought_level')?.options, ctl.job.effort) : undefined;
+        if (level && level !== configOption(restored, 'thought_level')?.currentValue) restored = await this.configure(peer, session, turn, 'thought_level', level);
         turn.ctl.model(sessionModel(restored) ?? sessionModel(res) ?? ctl.job.resolvedModel ?? ctl.job.model ?? this.config.antigravity.model, sessionEffort(restored) ?? ctl.job.resolvedEffort);
       });
     } catch (err) {

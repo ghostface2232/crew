@@ -135,6 +135,9 @@ export class BoardStore {
         });
         break;
       }
+      case 'agents':
+        this.update({ agents: value as BoardState['agents'] });
+        break;
       case 'roles':
         this.update({ roles: value as BoardState['roles'] });
         break;

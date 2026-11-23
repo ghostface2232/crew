@@ -30,7 +30,8 @@ import { runbook } from './runbook.ts';
 import { checks as setupChecks, PACKAGED, prunePlugins, register, registered, registrationMoved, SetupCache } from './setup.ts';
 import type { Registration, SetupItem } from './setup.ts';
 import { toastCommand } from './toast.ts';
-import { ANTIGRAVITY_MODELS, codexModels } from './tiers.ts';
+import { ANTIGRAVITY_MODELS, antigravityModels, codexModels } from './tiers.ts';
+import type { ModelChoice } from './tiers.ts';
 import { appendInstructions, instructionsFile, readInstructions, savePeerRatings, savePreset, saveRoles, writeInstructions } from './settings.ts';
 import { agentGaugeDir, fromCodexLimits, route as routeWork, UsageMonitor } from './usage.ts';
 import type { RouteKind } from './usage.ts';
@@ -243,6 +244,36 @@ function gh(args: string[], cwd?: string): Promise<string> {
   });
 }
 
+/**
+ * The models Antigravity offers this account, as `agy models` lists them; the tier families until it has answered or
+ * when it cannot. It is asked when a client reads the state, at most hourly (five minutes after a failure), and the
+ * clients hear of the answer.
+ */
+let antigravityOffer = { models: ANTIGRAVITY_MODELS, next: 0, asking: false };
+function refreshAntigravityModels(live: Config): void {
+  if (!live.antigravity.enabled || antigravityOffer.asking || Date.now() < antigravityOffer.next) return;
+  const answered = (models: ModelChoice[]) => {
+    antigravityOffer = { models: models.length ? models : antigravityOffer.models, next: Date.now() + (models.length ? 60 : 5) * 60_000, asking: false };
+    if (models.length) broadcast('agents', agents(liveConfig()));
+  };
+  antigravityOffer.asking = true;
+  try {
+    const env = agentEnv();
+    // Throws on a Windows command line it cannot quote safely, which must not fail the state read.
+    const command = agentCommand(live.antigravity.bin, ['models'], env);
+    execFile(command.bin, command.args ?? [], { env, shell: command.shell, timeout: 60_000, windowsHide: true }, (err, stdout) => answered(err ? [] : antigravityModels(stdout)));
+  } catch {
+    answered([]);
+  }
+}
+
+function agents(live: Config) {
+  return {
+    codex: { ...WORKERS.codex, enabled: true, models: codexModels() },
+    antigravity: { ...WORKERS.antigravity, enabled: live.antigravity.enabled, models: antigravityOffer.models },
+  };
+}
+
 /** A watch without the ledger and the memory behind it, as the board and the lead's state read it. */
 function pullView(watch: PullWatch) {
   const { news, newsSeq, reviews, ...rest } = watch;
@@ -338,6 +369,7 @@ const claude = new ClaudeSessions(config.stallSeconds, {
 
 function state() {
   const live = liveConfig();
+  refreshAntigravityModels(live);
   return {
     version: VERSION,
     notifications: { enabled: config.notify, onDone: config.notifyOnDone },
@@ -348,10 +380,7 @@ function state() {
     pulls: pulls.list().map(pullView),
     claude: [...claude.sessions.values()],
     limits: { codex: codex.limits },
-    agents: {
-      codex: { ...WORKERS.codex, enabled: true, models: codexModels() },
-      antigravity: { ...WORKERS.antigravity, enabled: live.antigravity.enabled, models: ANTIGRAVITY_MODELS },
-    },
+    agents: agents(live),
     roles: live.roles,
     roleSettings: live.roleSettings,
     roleInfo: ROLE_INFO,

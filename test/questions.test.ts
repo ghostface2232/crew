@@ -208,7 +208,8 @@ async function daemon(t: TestContext, prepare?: (home: string) => void, preload?
       if (m.method && m.id != null) send({ id: m.id, result: {} });
     });
   `);
-  fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ notify: false, codex: { bin } }));
+  // Antigravity points nowhere, so reading the state never asks this machine's real agy for its models.
+  fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ notify: false, codex: { bin }, antigravity: { bin: path.join(home, 'no-agy') } }));
   // A job's model is read from Codex's own model cache, which a machine without Codex does not have.
   fs.writeFileSync(path.join(home, 'models_cache.json'), JSON.stringify({ models: [{ slug: 'gpt-test-sol' }] }));
   const env = { ...process.env, CREW_HOME: home, CREW_PORT: String(port), CLAUDE_PROJECT_DIR: home, CLAUDE_CODE_SESSION_ID: 'test-lead', CREW_AGENTGAUGE_DIR: path.join(home, 'gauge'), CODEX_HOME: home, ...overrides };

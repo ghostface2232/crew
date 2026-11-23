@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { ANTIGRAVITY_MODELS, codexModel, codexModels, defaultTier, familyTier, modelId, pickModel, tierEffort, tierModel, tierOf } from '../plugin/bridge/tiers.ts';
+import { ANTIGRAVITY_MODELS, antigravityModels, codexModel, codexModels, defaultTier, familyTier, modelId, pickModel, tierEffort, tierModel, tierOf } from '../plugin/bridge/tiers.ts';
 
 function cache(t: { after: (fn: () => void) => void }, models: unknown): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-tiers-'));
@@ -91,4 +91,27 @@ test('the settings offer the models Codex lists, with the efforts each accepts, 
   ]);
   assert.deepEqual(codexModels(path.join(os.tmpdir(), 'no-such-cache.json')), []);
   assert.deepEqual(ANTIGRAVITY_MODELS, [{ id: 'hydrogen', name: 'Hydrogen', efforts: ['low', 'medium', 'high', 'xhigh'] }, { id: 'neon', name: 'Neon', efforts: ['low', 'medium', 'high', 'xhigh'] }]);
+});
+
+test('the settings offer every model agy lists, one per model with its thinking levels', () => {
+  // As agy 1.5.14 prints it, trimmed.
+  const listing = [
+    'gemini-4-neon-high\tGemini 4 Neon (High)',
+    'gemini-4-neon-xhigh\tGemini 4 Neon (XHigh)',
+    'gemini-4-neon-low\tGemini 4 Neon (Low)',
+    'gemini-pro-orchestrator-neon\tOrchestrator (Neon)',
+    'claude-opus-5-5-medium\tClaude Opus 5.5 (Medium)',
+    'claude-opus-5-5-low\tClaude Opus 5.5 (Low)',
+    'gpt-oss-120b-medium\tGPT-OSS 120B (Medium)',
+    '',
+  ].join('\n');
+  assert.deepEqual(antigravityModels(listing), [
+    { id: 'gemini-4-neon', name: 'Gemini 4 Neon', efforts: ['low', 'high', 'xhigh'] },
+    { id: 'gemini-pro-orchestrator-neon', name: 'Orchestrator (Neon)', efforts: [] },
+    { id: 'claude-opus-5-5', name: 'Claude Opus 5.5', efforts: ['low', 'medium'] },
+    { id: 'gpt-oss-120b', name: 'GPT-OSS 120B', efforts: ['medium'] },
+  ]);
+  // A folded ID is what the session lists, or a part of it that a job's model match still finds.
+  assert.equal(pickModel([{ value: 'gemini-4-neon' }, { value: 'gpt-oss-120b-medium' }], 'gpt-oss-120b'), 'gpt-oss-120b-medium');
+  assert.deepEqual(antigravityModels('Fetching available models...\n'), []);
 });

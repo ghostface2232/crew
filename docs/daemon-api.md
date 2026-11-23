@@ -27,6 +27,7 @@ Server-sent events on `GET /api/stream` (in addition to `job`, `mission`, `event
 | `usage` | `Usage` | AgentGauge's cache changes, a live Codex limit updates, a limit error is reported, or status changes with time |
 | `preset` | `{ preset, presets }` | `config.json` changes or `POST /api/preset` saves |
 | `roles` / `roleSettings` | `Record<Role, RoleAssignment>` / `RoleSettings` | `config.json` changes or `POST /api/roles` saves |
+| `agents` | `Agents` (`board/src/types.ts`) | `agy models` answers with this account's Antigravity models ([model settings](roles.md#model-and-effort-settings)) |
 | `peerRatings` | `boolean` | `config.json` changes or `POST /api/peer-ratings` saves (followed by `modelScores`) |
 | `modelScores` | `ModelScore[]` | Notes, peer ratings, or the `peerRatings` switch change |
 | `pull` | `PullWatch` (view) | A watched pull request is linked, changes, or is polled |

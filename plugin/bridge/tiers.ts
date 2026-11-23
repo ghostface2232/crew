@@ -104,9 +104,33 @@ const EFFORT_ORDER = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'
  */
 const ANTIGRAVITY_EFFORTS: Record<string, string[]> = { hydrogen: ['low', 'medium', 'high', 'xhigh'], neon: ['low', 'medium', 'high', 'xhigh'] };
 
-/** Antigravity's models are matched by family against the session's own list, so its choices are the families. */
+/**
+ * The tier families, offered until `agy models` has answered or when it cannot. A job matches a family against
+ * its session's own list, so these work as settings on any account.
+ */
 export const ANTIGRAVITY_MODELS: ModelChoice[] = [...new Set(Object.values(TIER_FAMILIES.antigravity))]
   .map((family) => ({ id: family, name: family[0].toUpperCase() + family.slice(1), efforts: ANTIGRAVITY_EFFORTS[family] }));
+
+/**
+ * The models this Antigravity account offers, in agy's order, from `agy models` ("gemini-4-neon-high\tGemini 4 Neon (High)").
+ * agy lists one line per model and thinking level, while a session takes the model ("gemini-4-neon") and the level
+ * apart, so lines whose ID and name end in the same level are folded into one model with that level among its efforts.
+ */
+export function antigravityModels(listing: string): ModelChoice[] {
+  const models = new Map<string, ModelChoice>();
+  for (const line of listing.split(/\r?\n/)) {
+    const [id, name] = line.split('\t').map((part) => part.trim());
+    if (!id || !name) continue;
+    const level = /^(.+)-([a-z]+)$/.exec(id);
+    const label = level && EFFORT_ORDER.includes(level[2]) ? new RegExp(`^(.+?)\\s*\\(${level[2]}\\)$`, 'i').exec(name) : null;
+    const key = label ? level![1] : id;
+    const model = models.get(key) ?? { id: key, name: label ? label[1] : name, efforts: [] };
+    if (label) model.efforts!.push(level![2]);
+    models.set(key, model);
+  }
+  for (const model of models.values()) model.efforts!.sort((a, b) => EFFORT_ORDER.indexOf(a) - EFFORT_ORDER.indexOf(b));
+  return [...models.values()];
+}
 
 /** The model a tier gives an agent's job. For Antigravity it is the family, matched against the session's own list. */
 export function tierModel(agent: WorkerAgent, tier: Tier, cache?: string): string | undefined {

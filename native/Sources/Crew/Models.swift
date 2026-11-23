@@ -623,6 +623,7 @@ struct BoardState: Codable, Sendable, Equatable {
             preset = change.preset; presets = change.presets
         case "modelScores": modelScores = try decoder.decode([ModelScore].self, from: event.data)
         case "peerRatings": peerRatings = try decoder.decode(Bool.self, from: event.data)
+        case "agents": agents = try decoder.decode([String: Worker].self, from: event.data)
         case "roles": roles = try decoder.decode([String: RoleAssignment].self, from: event.data)
         case "roleSettings": roleSettings = try decoder.decode([String: RoleSetting].self, from: event.data)
         default: break

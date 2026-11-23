@@ -1479,6 +1479,42 @@ test('a closed mission opens from a click anywhere on it and closes from its tit
   await expect(card.locator('.track')).toBeHidden();
 });
 
+test('History and Activity pair their cards on a wide page, each column stacked on its own', async ({ page, request }) => {
+  const data = fixture();
+  // Newest first on the page: a, b, c.
+  data.missions.push(...['a', 'b', 'c'].map((id, index): Mission => ({
+    ...data.missions[0], id: `ended-${id}`, title: `Ended ${id}`, state: 'done', createdAt: NOW - (index + 2) * 3_600_000, endedAt: NOW - 60_000,
+  })));
+  data.jobs.push(job({ id: 'cx-ended', state: 'done', endedAt: NOW - 60_000 }));
+  await request.post('/__push', { data: { type: 'state', data } });
+  const pages = page.getByRole('navigation', { name: 'Pages' }).filter({ visible: true });
+  await pages.getByRole('button', { name: 'History' }).click();
+  const columns = page.locator('.columns > .column');
+  const keys = (column: Locator) => column.locator('.mission').evaluateAll((cards) => cards.map((card) => (card as HTMLElement).dataset.key));
+  await expect(columns).toHaveCount(2);
+  expect(await keys(columns.nth(0))).toEqual(['ended-a', 'ended-c']);
+  expect(await keys(columns.nth(1))).toEqual(['ended-b']);
+  // A card that opens moves the card below it, and nothing in the other column.
+  const [first, beside, below] = ['a', 'b', 'c'].map((id) => page.locator(`[data-key="ended-${id}"]`));
+  const top = async (card: Locator) => (await card.boundingBox())!.y;
+  const before = [await top(beside), await top(below)];
+  await first.getByRole('button', { name: 'Expand mission' }).click();
+  await expect(first.locator('.track')).toBeVisible();
+  expect(await top(beside)).toBe(before[0]);
+  expect(await top(below)).toBeGreaterThan(before[1]);
+  // The table keeps the page's width.
+  expect((await page.locator('.table-panel').boundingBox())!.width).toBeGreaterThan((await first.boundingBox())!.width * 2);
+  await pages.getByRole('button', { name: 'Activity' }).click();
+  await expect(columns.nth(0).getByRole('region', { name: 'Work started' })).toBeVisible();
+  await expect(columns.nth(1).getByRole('region', { name: 'Events' })).toBeVisible();
+  // A narrower page has one column, in the same order, and the opened card stays open.
+  await page.setViewportSize({ width: 1200, height: 1000 });
+  await expect(columns).toHaveCount(1);
+  await pages.getByRole('button', { name: 'History' }).click();
+  expect(await keys(columns)).toEqual(['ended-a', 'ended-b', 'ended-c']);
+  await expect(first.locator('.track')).toBeVisible();
+});
+
 test('a finished-looking mission is marked done from its menu, and a dropped one marks its stopping step', async ({ page, request }) => {
   const data = fixture();
   data.missions[0].stages = ['implement', 'cross-review', 'final'];

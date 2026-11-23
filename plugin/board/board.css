@@ -1080,6 +1080,9 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
   .dash { grid-template-columns: minmax(0, 1fr); }
   .dash-side { position: static; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); align-items: start; }
 }
+/* Activity and History: one column of cards, or two side by side on a wide page (Columns in Overview.tsx). */
+.columns { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: var(--card-gap); align-items: start; }
+.column { display: grid; gap: var(--card-gap); min-width: 0; align-content: start; }
 
 /* Agents */
 .agent-cards { display: grid; gap: 4px; }

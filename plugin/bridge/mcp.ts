@@ -65,7 +65,7 @@ function currentPolicy(name: PresetName | null, whose: string): string {
   return presetPolicy(name, name ? presets?.[name] : undefined, whose);
 }
 
-const PRESET_LINE = `- Presets set the cost of a command. The global one is ${started?.preset ? `"${started.preset}"` : 'not set'}. When the user names one for a command (${PRESET_NAMES.join(', ')}), pass it as \`preset\` when you start its mission; never pick one yourself. \`mission\` and \`route\` state the preset in effect and what it asks of your subagents; the latest one you were told holds. A setting the user gave a role wins over any preset.`;
+const PRESET_LINE = `- Presets set command cost. The global one is ${started?.preset ? `"${started.preset}"` : 'not set'}. If the user names one (${PRESET_NAMES.join(', ')}), pass \`preset\` on mission start; never pick one yourself. \`mission\` and \`route\` state the active preset and its subagent rule; the latest holds. Role settings override any preset.`;
 
 /** One line per role: who holds it now, as of this session's start. The tool descriptions say what each role does. */
 const ROLE_LINES = ROLE_INFO.map((info) => `- ${info.label} (\`${info.role}\`): ${holder(info.role)}`).join('\n');
@@ -75,27 +75,27 @@ const ROLE_LINES = ROLE_INFO.map((info) => `- ${info.label} (\`${info.role}\`): 
  * instructions at 4,096 characters (seen 2026-11-20), so this holds only what no tool description, job
  * result or skill says at the moment it is needed; test/mcp.test.ts holds it under that length.
  */
-const INSTRUCTIONS = `Crew connects this session to other coding agents that run in the background. You are the lead: you plan, do the main implementation, review, and decide what is merged.
+const INSTRUCTIONS = `Crew connects this session to background coding agents. You lead: plan, do the main implementation, review, and decide what merges.
 
-Roles are the user's to assign (settings or ~/.crew/config.json); a job goes to an agent holding its role. As of this session's start:
+The user assigns roles (settings or ~/.crew/config.json); jobs go to an agent holding the role. At session start:
 ${ROLE_LINES}
-\`delegate\` takes role delegate, refactor, release, or fix; \`review\` is the review role, or verify with runs_app. Where a role has several holders, pick one with \`agent\`. Picking yourself (\`claude\`) starts no worker: do the work in this session or in a subagent.
+\`delegate\` takes role delegate, refactor, release, or fix; \`review\` uses review, or verify with runs_app. With multiple holders, pick one with \`agent\`. Picking yourself (\`claude\`) starts no worker: do it here or in a subagent.
 
-How jobs work:
-- A delegate or polish job runs in its own git worktree and branch (crew-<job id>) created from HEAD, so commit what the worker needs first; gitignored files it needs are copied in only if .worktreeinclude lists them. Read its diff, then merge it or reject it, and reject what goes beyond the task. Nothing reaches your branch unless you merge it.
-- Job calls return at once. Do your own part, then end your turn: you are woken when a job ends, needs a decision, or asks you a question. Do not sit in \`wait\` on a running job, since the user cannot talk to you meanwhile.
-- A result that carries a receipt is acknowledged only by passing its id as \`ack\` with your next Crew call.
-- Approval is the user's call; never approve on your own. Decline a request clearly outside the task or role with \`reply\`. For any other, call \`wait\` so the user is asked, or pass on an answer they already gave. A result that lists a REFUSED action says how to send it back when the user's request covers it; never run it yourself. A question a worker asks you (ask_lead) is yours to answer, with \`answer\`.
-- A worker has not seen this conversation: give it what it needs and no more (the goal, what is decided, how it is judged), accurately and briefly.
-- Leave \`tier\` and \`effort\` out for ordinary work, so the model and effort the user set for the role or preset apply. Name one only when a job clearly needs another, since it overrides them.
-- If a job fails on a usage limit, do that piece yourself and say what was skipped. If Crew cannot start a job at all, retry once, then tell the user the error and do that piece yourself.
-- /crew:run says when its pipeline reviews. Outside it, review only when the user asks: do not hold back a commit or a push for one. After a review and its fix, record what it showed with \`note\`: facts only, never impressions.
-- When you take a user's command through several steps, report it with \`mission\`: title and stages first, done as soon as the work finishes. Skip it for a single delegated job. Work the user asks for after done gets a new mission before you begin; a command given while another is under way gets its own beside it. \`tasks\` keep the work's split for a resumed session; \`pr\` links a pull request.
-- Add a machine or project workaround a worker reports to the project's .crew/instructions.md, which every later job is given.
-- \`route\` says who should take a kind of work now, from each agent's remaining usage. /crew:run calls it at each stage; outside it, follow the roles unless a job fails on a limit.
+Rules:
+- A delegate or polish job runs in its own git worktree and branch (crew-<job id>) from HEAD: commit what it needs first; gitignored files are copied only if in .worktreeinclude. Read its diff, then merge or reject (reject work beyond the task). Nothing reaches your branch unless you merge it.
+- Job calls return at once. Do your part and end your turn: you are woken when a job ends, needs a decision, or asks a question. Do not sit in \`wait\` on a running job; the user cannot talk to you then.
+- Acknowledge a receipt only by passing its id as \`ack\` on your next Crew call.
+- Approval is the user's; never approve on your own. Decline requests clearly outside the task or role with \`reply\`; otherwise call \`wait\` so the user is asked, or relay their prior answer. A result with a REFUSED action says how to send it back if the user's request covers it; never run it yourself. Answer worker questions (ask_lead) yourself with \`answer\`.
+- Workers do not see this conversation: give only what they need (goal, decisions, how it is judged), accurately and briefly.
+- Omit \`tier\` and \`effort\` for ordinary work so role or preset settings apply; pass one only when a job clearly needs another, as it overrides them.
+- If a job hits a usage limit, do it yourself and say what was skipped. If Crew cannot start a job, retry once, then tell the user the error and do it yourself.
+- /crew:run sets when to review; outside it, review only if the user asks (never hold a commit or push for one). After a review and its fix, record the result with \`note\`: facts only, no impressions.
+- Report multi-step user commands with \`mission\` (title and stages first; done once work finishes); skip for a single delegated job. Open a new mission before further work after done; a command while one is open gets its own beside it. \`tasks\` saves the split for resumed sessions; \`pr\` links a pull request.
+- Add worker-reported machine or project workarounds to .crew/instructions.md (given to every later job).
+- \`route\` says who should take a kind of work from remaining usage. /crew:run calls it each stage; outside it, follow roles unless a job hits a limit.
 ${PRESET_LINE}
 
-The status board, opened with /crew:board, shows every agent live.`;
+The status board (/crew:board) shows every agent live.`;
 
 const common = {
   cwd: { type: 'string', description: 'Project directory. Defaults to this session\'s project.' },

@@ -321,7 +321,7 @@ test('lead wait delivers a running question once, ignores further progress, and 
   const { job, server } = await h.create();
   const lead = stdio(t, 'mcp.ts', h.env);
   const init = await lead.request('initialize', { protocolVersion: '2025-11-25', capabilities: {} });
-  assert.match(init.instructions, /\(ask_lead\) is yours to answer/);
+  assert.match(init.instructions, /questions \(ask_lead\) yourself with `answer`/);
   assert.ok((await lead.request('tools/list')).tools.some((tool: any) => tool.name === 'answer'));
   const route = `/api/jobs/${job.id}`;
   const waiting = lead.call('wait', { job_ids: [job.id], timeout_seconds: 5 });

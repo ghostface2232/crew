@@ -575,12 +575,15 @@ let hello: { id: string; done: Promise<void> } | null = null;
  * Codex starts a server per thread, so the session changes only if a thread's server is reused. The first call
  * tells the daemon that Codex hosts the session, so it is woken through Codex, and learns its project from the thread.
  * A hello that fails fails the call and is tried again with the next one: without it the session is never woken.
+ * A call that names no session is refused: it would act as the last session, or start a job nobody is told of.
  */
 async function codexSession(meta: any): Promise<void> {
   const id = meta?.sessionId;
-  if (typeof id !== 'string' || !id || id.length > 200) return;
+  if (typeof id !== 'string' || !id || id.length > 200) throw new Error('This Codex call named no session (no _meta.sessionId), so Crew cannot tell whose it is. Nothing was changed or started.');
   if (hello?.id !== id) {
     const done: Promise<void> = api('POST', '/api/lead/hello', { session: id, host: 'codex' }).then(({ cwd }) => {
+      // Missions are per session; one this server tracked belongs to the session it served before.
+      if (SESSION && SESSION !== id) forgetMissions();
       SESSION = id;
       // A thread Codex did not persist (an ephemeral session) has no folder to read.
       projectUnknown = typeof cwd !== 'string' || !cwd;
@@ -617,6 +620,16 @@ let closedElsewhere: Mission | null = null;
 let fresh = true;
 /** The missions this server opened, for a client that passes no session id: the daemon cannot then say whose a mission is. */
 const openedHere = new Set<string>();
+
+/** Starts a new session with none of the last one's mission tracking, as a fresh server would. */
+function forgetMissions(): void {
+  missionId = null;
+  costMission = null;
+  lastDone = null;
+  closedElsewhere = null;
+  fresh = true;
+  openedHere.clear();
+}
 
 /** The global preset as the config on disk has it; null when it cannot be read, as jobs would then fail anyway. */
 function globalPreset(): PresetName | null {
@@ -930,8 +943,9 @@ const noted = new Set<Holder>();
 
 async function callTool(name: string, args: any, ctx: CallContext): Promise<string> {
   if (projectUnknown) {
-    // A call that names its job needs no project; the rest list, open or start work in it.
-    const named = ['answer', 'reply', 'cancel', 'note', 'note_summary'].includes(name) || (name === 'status' && args.job_id);
+    // A call that names its job, or reads usage, needs no project; the rest list, open or start work in it.
+    const named = ['answer', 'reply', 'cancel', 'note', 'note_summary'].includes(name) || (name === 'status' && args.job_id)
+      || (name === 'wait' && Array.isArray(args.job_ids) && args.job_ids.length > 0) || (name === 'route' && !args.kind);
     if (typeof args.cwd === 'string' && args.cwd) {
       PROJECT = canonicalPath(args.cwd);
       projectUnknown = false;

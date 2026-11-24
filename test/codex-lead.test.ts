@@ -19,7 +19,7 @@ test('a Codex lead is queued a one-line note under the automatic offer budget', 
   await leads.pass(0);
   assert.deepEqual(queued, []);
   delivery.host('codex-thread', 'codex');
-  assert.deepEqual(saved?.hosts, { 'codex-thread': 'codex' });
+  assert.deepEqual(Object.keys(saved?.hosts ?? {}), ['codex-thread']);
 
   await leads.pass(1);
   assert.equal(queued.length, 1);
@@ -43,26 +43,57 @@ test('a Codex lead is queued a one-line note under the automatic offer budget', 
   assert.deepEqual(delivery.codexWaiting(), []);
 });
 
-test('a failed queue command leaves the news for a later wake', async () => {
+test('failed queue commands back off and keep the news offerable until Codex takes a note', async () => {
   const jobs = [job('cx-cccccc', 'thread')];
   addNews(jobs[0], 'failed', 'Broke.');
   const delivery = new Delivery(() => jobs, () => {});
-  delivery.host('thread', 'codex');
+  delivery.host('thread', 'codex', 0);
   let tries = 0;
-  const leads = new CodexLeads(delivery, async () => { tries++; throw new Error('codex queue failed'); });
-  await leads.pass(0);
+  const leads = new CodexLeads(delivery, async () => { if (++tries <= 2) throw new Error('codex queue failed'); });
+  await leads.pass(1);
+  assert.equal(jobs[0].news![0].offers, 0);
+  // Backing off: 30 s after the first failure, then 60 s after the second.
+  assert.equal(await leads.pass(OFFER_MS / 2), OFFER_MS / 2 + 1);
+  assert.equal(tries, 1);
   await leads.pass(OFFER_MS + 1);
   assert.equal(tries, 2);
-  assert.equal(jobs[0].news![0].acked, false);
+  await leads.pass(2 * OFFER_MS + 1);
+  assert.equal(tries, 2);
+  await leads.pass(3 * OFFER_MS + 2);
+  assert.equal(tries, 3);
+  assert.deepEqual([jobs[0].news![0].offers, jobs[0].news![0].acked], [2, false]);
 });
 
-test('the Codex lead hosts survive a restart and drop sessions that lead nothing, and the note names each subject once', () => {
-  const jobs = [job('cx-dddddd', 'thread')];
+test('a note settles every snapshot it named, so none is queued again', async () => {
+  const jobs = [job('cx-eeeeee', 'thread')];
+  addNews(jobs[0], 'question', 'First.');
+  addNews(jobs[0], 'done', 'Second.');
   const delivery = new Delivery(() => jobs, () => {});
-  delivery.restore({ receipts: {}, offering: {}, hosts: { thread: 'codex', gone: 'codex' } });
-  assert.deepEqual({ ...delivery.state.hosts }, { thread: 'codex', gone: 'codex' });
-  delivery.host('new', 'codex');
-  assert.deepEqual({ ...delivery.state.hosts }, { thread: 'codex', new: 'codex' });
+  delivery.host('thread', 'codex', 0);
+  const queued: string[] = [];
+  const leads = new CodexLeads(delivery, async (_thread, message) => { queued.push(message); });
+  await leads.pass(1);
+  assert.deepEqual(jobs[0].news!.map((news) => news.offers), [2, 2]);
+  await leads.pass(OFFER_MS + 2);
+  assert.equal(queued.length, 1);
+});
+
+test('a Codex session keeps its record between its hello and its first job, and old idle records go', () => {
+  const jobs: Job[] = [job('cx-dddddd', 'leading')];
+  const delivery = new Delivery(() => jobs, () => {});
+  const DAY = 86_400_000;
+  delivery.restore({ receipts: {}, offering: {}, hosts: { leading: { host: 'codex', at: 0 }, stale: { host: 'codex', at: 0 }, bad: 'codex' as never } });
+  assert.deepEqual(Object.keys(delivery.state.hosts!), ['leading', 'stale']);
+  // A said hello and has yet to start a job when B says hello: A stays, so its first job can wake it.
+  delivery.host('a', 'codex', 8 * DAY);
+  delivery.host('b', 'codex', 8 * DAY + 1);
+  assert.deepEqual(Object.keys(delivery.state.hosts!).sort(), ['a', 'b', 'leading']);
+  jobs.push(job('cx-ffffff', 'a'));
+  addNews(jobs[1], 'done', 'Done.');
+  assert.deepEqual(delivery.codexWaiting(), ['a']);
+});
+
+test('the note names each subject once', () => {
   assert.equal(note({ receipt: 'r', text: '', items: [{ jobId: 'cx-1', newsSeq: 1 }, { jobId: 'cx-1', newsSeq: 2 }, { jobId: 'pr-2', newsSeq: 1 }] }),
     'Crew has news for cx-1, pr-2. Call the Crew status tool to read it, then act on it.');
 });

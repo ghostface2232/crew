@@ -4,6 +4,9 @@ import type { Delivery, Offer } from './delivery.ts';
 
 /** How long a queue command may take before it is given up; the offer it carried is retried once its lease ends. */
 const QUEUE_TIMEOUT_MS = 30_000;
+/** The first wait after a failed queue command, doubled after each further failure up to the cap. */
+const RETRY_MS = 30_000;
+const RETRY_MAX_MS = 10 * 60_000;
 
 /**
  * Wakes idle Codex lead sessions. Codex has no hook that can start a turn later, as Claude Code's asyncRewake does,
@@ -33,10 +36,18 @@ export class CodexLeads {
     this.stopped.abort();
   }
 
-  /** One pass over the waiting sessions; returns how long until a lease it waited on ends. Exposed for tests. */
+  /** Sessions whose last queue command failed: how many times in a row, and when to try again. */
+  private failing = new Map<string, { count: number; at: number }>();
+
+  /** One pass over the waiting sessions; returns how long until a lease or retry it waited on ends. Exposed for tests. */
   async pass(now = Date.now()): Promise<number> {
     let next = 20_000;
     for (const session of this.delivery.codexWaiting()) {
+      const failed = this.failing.get(session);
+      if (failed && failed.at > now) {
+        next = Math.min(next, failed.at - now);
+        continue;
+      }
       let offer: Offer | null = null;
       try {
         offer = this.delivery.offer(session, { automatic: true }, now);
@@ -44,8 +55,21 @@ export class CodexLeads {
         // A save that failed leaves the news unoffered; the next pass tries again.
       }
       if (offer) {
-        // A failed command leaves the second automatic offer for a later pass or the Stop hook.
-        await this.queue(session, note(offer)).then(() => this.delivery.settle(offer)).catch(() => {});
+        try {
+          await this.queue(session, note(offer));
+          this.failing.delete(session);
+          this.delivery.settle(offer);
+        } catch {
+          // Codex never got the note, so the offer stays unspent and the command is tried again, backing off while
+          // it keeps failing (Codex missing or updating), so the news can still wake the lead once Codex recovers.
+          const count = (failed?.count ?? 0) + 1;
+          this.failing.set(session, { count, at: now + Math.min(RETRY_MS * 2 ** (count - 1), RETRY_MAX_MS) });
+          try {
+            this.delivery.retract(offer);
+          } catch {
+            // The offer then counts as spent; the Stop hook and the lead's own calls still carry the news.
+          }
+        }
         continue;
       }
       const lease = this.delivery.state.offering[session];

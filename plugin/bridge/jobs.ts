@@ -9,7 +9,7 @@ import { runCheck } from './check.ts';
 import type { CheckResult } from './check.ts';
 import { assignHint, canonicalPath, defaultHolder, disabledAgents, effectiveRole, isRole, LEAD, LEDGER_ASIDE, MAX_DEBATE_ROUNDS, daemonPort, nodeEnv, roleInfo, ROLES, runsCommands, WORKERS } from './config.ts';
 import type { Config, JobKind, PresetName, Role, WorkerAgent } from './config.ts';
-import { attached, carryUncommitted, changesSince, commitAll, commitChanges, copyIncluded, createWorktree, currentBranch, dirtyCount, git, mergeInto, isInside, NO_HOOKS, NO_SUBMODULES, projectRoot, realpath, removeDirectory, removeEmptyLeftover, removeEmptySlot, removeWorktree, repoRoot, revertCommit, revertsSince, reviewDiff, WorktreeCleanupError } from './git.ts';
+import { attached, untrackedPaths, carryUncommitted, changesSince, commitAll, commitChanges, copyIncluded, createWorktree, currentBranch, dirtyCount, git, mergeInto, isInside, NO_HOOKS, NO_SUBMODULES, projectRoot, realpath, removeDirectory, removeEmptyLeftover, removeEmptySlot, removeWorktree, repoRoot, revertCommit, revertsSince, reviewDiff, WorktreeCleanupError } from './git.ts';
 import { collectGarbage } from './gc.ts';
 import { BrowserServers, jobWritable } from './browser.ts';
 import { tokenFile } from './auth.ts';
@@ -43,7 +43,10 @@ export type ReviewTarget =
   | { type: 'uncommittedChanges' }
   | { type: 'baseBranch'; branch: string }
   | { type: 'commit'; sha: string }
-  /** Files or directories as they stand, relative to the job's directory: an audit of the code, with no change and so no diff. */
+  /**
+   * Files or directories as they stand: an audit of the code, with no change and so no diff. The paths are relative
+   * to the directory the reviewer starts in, which for one that runs the app is its snapshot's root.
+   */
   | { type: 'files'; paths: string[] };
 /** How many paths one audit may name; past this the lead means a directory. */
 const AUDIT_PATHS = 50;
@@ -676,6 +679,8 @@ export class Jobs {
       if (outside) throw new Error(`${outside} is not inside ${spec.cwd}. Give paths relative to the project.`);
       const missing = paths.find((file) => !fs.existsSync(path.join(spec.cwd, file)));
       if (missing) throw new Error(`${missing} does not exist in ${spec.cwd}.`);
+      // As checked: the reviewer is given these names, and `a/../b` would be resolved by its system, link by link.
+      audit.paths = paths.map((file) => slashed(path.normalize(file)));
       if (spec.review!.mode === 'standard' && agent === 'codex') {
         throw new Error('Codex\'s standard review reads a change, and files as they stand are not one. Use the adversarial mode.');
       }
@@ -715,7 +720,9 @@ export class Jobs {
         cwd = worktree.path;
         const included = await copyIncluded(repo, worktree.path);
         worktree.linked = included.linked;
-        if (included.created.length) worktree.copied = included.created;
+        // Asked of Git rather than of the copy: a copy into a directory the base already has adds files of its own.
+        const copied = included.copied.length ? await untrackedPaths(worktree.path) : [];
+        if (copied.length) worktree.copied = copied;
         if (included.linked.length) notes.push(`Shared read-only from .worktreeinclude: ${included.linked.join(', ')}`);
         if (included.copied.length) notes.push(`Copied from .worktreeinclude: ${included.copied.join(', ')}`);
         if (included.failed.length) notes.push(`Could not copy from .worktreeinclude: ${included.failed.join('; ')}`);
@@ -727,6 +734,12 @@ export class Jobs {
         if (!repo) throw new Error(`${spec.cwd} is not inside a git repository, so there is no snapshot to run the app in. Drop runs_app.`);
         worktree = await this.snapshot(repo, id, spec.review!.target, notes);
         cwd = worktree.path;
+        if (audit) {
+          // The reviewer starts at the snapshot's root, not in the subdirectory the paths were given from.
+          audit.paths = audit.paths.map((file) => slashed(path.relative(realpath(repo), realpath(path.join(spec.cwd, file)))));
+          const absent = audit.paths.find((file) => !fs.existsSync(path.join(worktree!.path, file)));
+          if (absent) throw new Error(`${absent} is not in the snapshot a review that runs the app reads: Git ignores it and .worktreeinclude does not list it. Drop runs_app, or list it there.`);
+        }
       }
 
       let diffFile: string | null = null;

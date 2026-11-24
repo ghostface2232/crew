@@ -129,7 +129,7 @@ On start or resume, Crew queries `plugin/installed`, enables matching installed-
 
 ## Jobs that run the app
 
-`runs_app` enables network access so the worker can bind local ports. A `runs_app` review (`verify`) runs in a writable snapshot worktree from `HEAD` (or the target commit) with [`.worktreeinclude` paths](jobs.md#worktree-includes-and-shared-links) attached. For uncommitted targets, Crew also copies uncommitted and untracked files. Snapshots omit submodules and leave `skip-worktree` files as committed. They are deleted at turn end and regenerated on follow-ups.
+`runs_app` enables network access so the worker can bind local ports. A `runs_app` review (`verify`) runs in a writable snapshot worktree from `HEAD` (or the target commit) with [`.worktreeinclude` paths](jobs.md#worktree-includes-and-shared-links) attached. For uncommitted targets, and for an audit of files as they stand, Crew also copies uncommitted and untracked files; an audit's paths are then named from the snapshot's root, and one that Git ignores and `.worktreeinclude` does not list is refused before the job starts. Snapshots omit submodules and leave `skip-worktree` files as committed. They are deleted at turn end and regenerated on follow-ups.
 
 `polish` and reviewers that cannot run commands refuse `runs_app`. On macOS, Codex's sandbox blocks Chromium's Mach service, so `crew.browser` starts a sandboxed Playwright server outside it. On Windows, Chromium starts inside Codex's sandbox.
 

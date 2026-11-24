@@ -275,7 +275,9 @@ export function detailFromFragment(fragment: string) {
  * key (Korean `ㅜ`, or `Process` on Windows), so a key that is not a Latin letter is told by its place on the keyboard.
  */
 export const isNewJobKey = (event: Pick<KeyboardEvent, 'key' | 'code' | 'isComposing'>) =>
-  !event.isComposing && (/^[a-z]$/i.test(event.key) ? event.key.toLowerCase() === 'n' : event.code === 'KeyN');
+  !event.isComposing && (/^[a-z]$/i.test(event.key) ? event.key.toLowerCase() === 'n'
+    // Not punctuation a Latin layout has there (BÉPO's apostrophe): only a character of another script, or a named key.
+    : (event.key.length > 1 || event.key.charCodeAt(0) > 127) && event.code === 'KeyN');
 /** The search shortcut as the platform's keyboard has it; the key handler takes either modifier. */
 export const searchShortcut = (platform: string) => /Mac|iPhone|iPad/.test(platform)
   ? { keys: '⌘K', title: t('Search (⌘K)'), aria: 'Meta+K /' }

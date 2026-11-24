@@ -614,6 +614,15 @@ final class SettingsModel {
         if text != savedText && loaded { await saveInstructions() }
         return !dirty
     }
+    /// Takes a role table stored elsewhere (the board, `config.json`) as the stored one, so the next change here
+    /// starts from it: each change stores the whole table, and an older copy would undo that change. Not while a
+    /// change made here is unsaved or being stored, which goes out as it was made. Text being typed is kept apart
+    /// in `drafts` and stays.
+    func adopt(roleSettings table: [String: RoleSetting]) {
+        let table = Self.normalized(table)
+        guard !savingRoles, !rolesDirty, table != Self.normalized(savedRoleSettings) else { return }
+        roleSettings = table; savedRoleSettings = table
+    }
     /// True when the table was stored.
     @discardableResult func saveRoles() async -> Bool {
         guard !savingRoles else { return false }

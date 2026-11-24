@@ -76,7 +76,7 @@ export interface Worktree {
   base: string;
   /** Relative paths of shared directories attached by Crew. */
   linked?: string[];
-  /** Relative paths Crew copied in from `.worktreeinclude` that were not there before: local files, never the worker's change. */
+  /** Relative paths that were untracked when the job got its worktree: copies from `.worktreeinclude`, never the worker's change. */
   copied?: string[];
   /** Validated before Windows deletion, which can remove gitdir before the admin directory. */
   admin?: string;
@@ -86,19 +86,30 @@ export interface Worktree {
 export const attached = (wt: Pick<Worktree, 'linked' | 'copied'>): string[] => [...(wt.linked ?? []), ...(wt.copied ?? [])];
 
 /**
- * Pathspecs that leave out Crew's shared-dependency links and local copies. The worktree's base may not ignore what
- * the main tree ignores (an older base, or a `.gitignore` edit not yet committed), and a copied `.env` would then
- * be committed with the worker's change. A directory-only ignore rule such as `node_modules/`
- * does not cover a symlink, and the only exclude file Git reads is shared with the user's own checkout.
- * A link Git already ignores (a Windows junction counts as a directory) is left out of the list: naming an
- * ignored path in a pathspec makes `git add` fail.
+ * What is in a new worktree without being in its commit and without being ignored there: what Crew copied in. The
+ * base may not ignore what the main tree ignores (an older base, or a `.gitignore` edit not yet committed), and a
+ * copied `.env` would then be committed with the worker's change. A directory holding nothing tracked is one entry.
  */
-async function besides(root: string, linked: string[]): Promise<string[]> {
-  const unignored: string[] = [];
-  for (const rel of linked) {
-    if (await git(root, ['check-ignore', '-q', '--', rel]).then(() => false, () => true)) unignored.push(rel);
+export async function untrackedPaths(wt: string): Promise<string[]> {
+  const listed = await git(wt, ['ls-files', '--others', '--exclude-standard', '--directory', '--no-empty-directory', '-z']);
+  return listed.split('\0').filter(Boolean).map((entry) => entry.replace(/\/$/, ''));
+}
+
+/**
+ * Pathspecs that leave out Crew's shared-dependency links and local copies. A directory-only ignore rule such as
+ * `node_modules/` does not cover a symlink, and the only exclude file Git reads is shared with the user's own checkout.
+ * A path Git already ignores (a Windows junction counts as a directory) is left out of the list: naming an
+ * ignored path in a pathspec makes `git add` fail. So is one that has since become tracked, as when a sync brings
+ * in a commit that adds it: from then on a change to it is the worker's.
+ */
+async function besides(root: string, attachments: string[]): Promise<string[]> {
+  const left: string[] = [];
+  for (const rel of attachments) {
+    if (await git(root, ['check-ignore', '-q', '--', rel]).then(() => true, () => false)) continue;
+    if (await git(root, ['ls-files', '-z', '--', `:(literal)${rel}`]).catch(() => '')) continue;
+    left.push(rel);
   }
-  return unignored.length ? ['--', '.', ...unignored.map((rel) => `:(exclude,literal)${rel}`)] : [];
+  return left.length ? ['--', '.', ...left.map((rel) => `:(exclude,literal)${rel}`)] : [];
 }
 
 /** Number of uncommitted paths in the main tree; a worktree created from a ref will not contain them. */
@@ -192,9 +203,8 @@ export async function removeEmptySlot(root: string, wt: string, id: string, home
 }
 
 /** Copies included files, cloning directories when supported and otherwise sharing them read-only. */
-export async function copyIncluded(root: string, wt: string, clone: (source: string, dest: string) => Promise<void> = cloneDirectory): Promise<{ copied: string[]; created: string[]; linked: string[]; failed: string[] }> {
-  // `created`: the copies that put a path where the base had none, as relative paths.
-  const result = { copied: [] as string[], created: [] as string[], linked: [] as string[], failed: [] as string[] };
+export async function copyIncluded(root: string, wt: string, clone: (source: string, dest: string) => Promise<void> = cloneDirectory): Promise<{ copied: string[]; linked: string[]; failed: string[] }> {
+  const result = { copied: [] as string[], linked: [] as string[], failed: [] as string[] };
   const include = await fs.stat(path.join(root, '.worktreeinclude')).catch(() => null);
   if (!include) return result;
   // Git for Windows reads a directory as an empty exclude file, where Git on macOS refuses it.
@@ -220,7 +230,6 @@ export async function copyIncluded(root: string, wt: string, clone: (source: str
           mode: directory ? constants.COPYFILE_FICLONE_FORCE : constants.COPYFILE_FICLONE,
         });
         result.copied.push(entry);
-        if (!existed) result.created.push(rel);
       } catch (err) {
         // FORCE is essential: FICLONE silently copies an entire dependency tree on unsupported filesystems.
         if (!directory || existed || !['ENOTSUP', 'EOPNOTSUPP', 'EXDEV', 'ENOSYS', 'EINVAL'].includes((err as NodeJS.ErrnoException).code ?? '')) throw err;

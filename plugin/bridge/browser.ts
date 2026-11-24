@@ -88,7 +88,7 @@ export class BrowserServers {
     // Codex's Windows sandbox lets Chromium start (checked 2026-11-16 with codex-cli 0.166), so only macOS needs this.
     if (process.platform !== 'darwin') throw new Error('Start the browser yourself, headless: on this system it starts inside your sandbox.');
     const running = this.servers.get(id);
-    if (running && running.cwd === options.cwd && (!running.child || running.child.exitCode === null)) return running.endpoint;
+    if (running && running.cwd === options.cwd && (!running.child || (running.child.exitCode === null && running.child.signalCode === null))) return running.endpoint;
     this.stop(id);
     const cli = playwrightCli(options.cwd);
     if (!cli) throw new Error(`No Playwright in ${options.cwd}. Install it there (npm i -D playwright), then ask again.`);

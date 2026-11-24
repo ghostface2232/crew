@@ -374,7 +374,10 @@ export class Pulls {
     }
     if (ended) {
       delete watch.ended;
-      // As on the first link: what stands now is in the summary, and only what comes after is news.
+      // As on the first link: what stands now is in the summary, only what comes after is news, and the count of
+      // failing heads starts over, or a head failing now could put the watch on hold with nobody told.
+      delete watch.held;
+      watch.failingHeads = 0;
       observe(watch, view);
       watch.checkedAt = watch.changedAt = now;
     }

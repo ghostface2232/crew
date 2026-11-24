@@ -98,10 +98,11 @@ test('an incomplete UTF-8 sequence after valid JSON makes the body malformed', a
   await rejected;
 });
 
-test('an event stream whose reader has stopped is dropped once its backlog passes the cap, and a reading one is kept', async (t) => {
+test('an event stream whose reader has stopped is dropped once it is behind at two pings running, and a reading one is kept', async (t) => {
   const source = fs.readFileSync(new URL('../plugin/bridge/daemon.ts', import.meta.url), 'utf8');
   const slice = source.slice(source.indexOf('const streams = new Set'), source.indexOf('\nconst AGENT_NAMES'));
-  const { streams, broadcast } = vm.runInNewContext(stripTypeScriptTypes(slice) + '; ({ streams, broadcast })', { clientJson }) as { streams: Set<http.ServerResponse>; broadcast: (type: string, data: unknown) => void };
+  const { streams, broadcast, dropStalled } = vm.runInNewContext(stripTypeScriptTypes(slice) + '; ({ streams, broadcast, dropStalled })', { clientJson }) as
+    { streams: Set<http.ServerResponse>; broadcast: (type: string, data: unknown) => void; dropStalled: () => void };
   const server = http.createServer((req, res) => {
     res.writeHead(200, { 'content-type': 'text/event-stream' });
     res.write(': open\n\n');
@@ -128,17 +129,21 @@ test('an event stream whose reader has stopped is dropped once its backlog passe
   const reading = await connect(true);
   await opened(2);
 
-  // 64 MiB in all: what the system buffers for a socket is a small part of it, and the rest waits in the daemon.
+  // 16 MiB in all: what the system buffers for a socket is a small part of it, and the rest waits in the daemon.
   const data = 'x'.repeat(1024 * 1024);
-  let peak = 0;
-  for (let i = 0; i < 64; i++) {
+  for (let i = 0; i < 16; i++) {
     broadcast('job', data);
-    peak = Math.max(peak, stalledStream.writableLength);
     // Lets the reading stream drain, as a live board does between events.
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
+  // Behind at one ping is not yet stalled: a whole state on its way to a reader that keeps up looks the same.
+  dropStalled();
+  assert.deepEqual([stalledStream.destroyed, streams.size], [false, 2]);
+  // A reader that caught up in between is not counted as behind from before.
+  const [, readingStream] = streams;
+  assert.ok(readingStream.writableLength <= 8 * 1024 * 1024);
+  dropStalled();
   assert.equal(stalledStream.destroyed, true);
-  assert.ok(peak < 10 * 1024 * 1024, `queued ${peak} bytes`);
   assert.equal(streams.size, 1);
   assert.equal(reading.destroyed, false);
   // The dropped client sees its connection end, which is what makes it reconnect.

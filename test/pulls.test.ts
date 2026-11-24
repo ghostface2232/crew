@@ -266,6 +266,8 @@ test('linking a closed pull request again once it is open watches it again, unle
   ] });
   h.responses.set(URL, reopened);
   h.advance(1000);
+  // Two failing heads were counted before it closed; the count starts over, or this third would hold the watch unsaid.
+  watch.failingHeads = 2;
   const ended = structuredClone(watch);
   const save = h.deps.save;
   h.deps.save = () => { throw new Error('disk full'); };
@@ -277,6 +279,7 @@ test('linking a closed pull request again once it is open watches it again, unle
   assert.equal(again.watch, watch);
   assert.match(again.summary, /^octo\/crew#12 · open · checks failing \(CI \/ build\)$/);
   assert.deepEqual([watch.state, watch.ended, watch.title, watch.head, watch.checks, watch.checkedAt], ['open', undefined, 'Reopened', 'new-head', 'failing', 311_000]);
+  assert.deepEqual([watch.held, watch.failingHeads < 3], [undefined, true]);
   // What the summary said is not sent again as news; what comes after is.
   assert.equal(again.watch.news, undefined);
   h.responses.set(URL, { ...reopened, reviews: [...reopened.reviews!, { id: 'later', author: { login: 'reviewer' }, state: 'CHANGES_REQUESTED', body: 'Please fix' }] });

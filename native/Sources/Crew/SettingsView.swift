@@ -95,6 +95,7 @@ struct CrewSettingsView: View {
         }
         .frame(minWidth: WorkspaceStyle.settingsMinSize.width, idealWidth: WorkspaceStyle.settingsSize.width, minHeight: WorkspaceStyle.settingsMinSize.height, idealHeight: WorkspaceStyle.settingsSize.height)
         .task { if !model.loaded && !model.loading { await model.load(scope: model.scope) } }
+        .onChange(of: store.state.editableRoleSettings) { _, table in model.adopt(roleSettings: table) }
     }
     /// A daemon without presets, model notes, or the language setting has no page for them.
     private func available(_ pane: SettingsPane) -> Bool {

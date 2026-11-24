@@ -164,9 +164,11 @@ export class CodexAdapter implements Adapter {
     if (ctl.job.turns !== turn) return;
     const threadId = ctl.job.sessionId!;
     let pluginsEnabled = this.runs.get(threadId)?.pluginsEnabled ?? false;
-    if (!this.loaded.has(threadId)) {
-      const key = `${threadId}\0${turn}`;
-      let resuming = this.resumes.get(key);
+    const key = `${threadId}\0${turn}`;
+    // A resume this turn began is waited for even once the thread is loaded: an overtaken turn's resume may have
+    // loaded it meanwhile, and going ahead would start the turn with this message before the one that opened it.
+    let resuming = this.resumes.get(key);
+    if (resuming || !this.loaded.has(threadId)) {
       if (!resuming) {
         resuming = this.resume(ctl, peer, threadId, turn).finally(() => this.resumes.delete(key));
         this.resumes.set(key, resuming);

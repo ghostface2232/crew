@@ -674,6 +674,23 @@ private final class MockProtocol: URLProtocol, @unchecked Sendable {
         #expect(calls.withLock { $0 } == 2)
         #expect(!settings.dirty && !settings.busy && settings.roleStatus == "Saved")
     }
+    @Test func aRoleTableStoredElsewhereIsTakenUnlessAChangeHereIsPending() async throws {
+        let state = try fixture("state-extended")
+        let api = api { _ in (200, Data("{}".utf8), 0) }
+        let settings = SettingsModel(api: api, roles: state.roles, roleSettings: state.roleSettings, roleInfo: state.roleInfo)
+        var elsewhere = state.roleSettings ?? [:]
+        elsewhere["review"] = RoleSetting(codex: .init(model: "remote-review"))
+        settings.adopt(roleSettings: elsewhere)
+        #expect(settings.roleSettings["review"] == RoleSetting(codex: .init(model: "remote-review")))
+        #expect(!settings.dirty)
+        // A change made here and not yet stored is not replaced; it goes out as it was made.
+        settings.roleSettings["verify"] = RoleSetting(antigravity: .init(model: "local-verify"))
+        var later = elsewhere
+        later["review"] = RoleSetting(codex: .init(model: "later-review"))
+        settings.adopt(roleSettings: later)
+        #expect(settings.roleSettings["verify"] == RoleSetting(antigravity: .init(model: "local-verify")))
+        #expect(settings.roleSettings["review"] == RoleSetting(codex: .init(model: "remote-review")))
+    }
     @Test func appliedRolesStoreAChangeMadeWhileSavingAndUndoOneThatFails() async throws {
         let state = try fixture("state-extended")
         let first = RoleSetting(antigravity: .init(model: "verify-model"))

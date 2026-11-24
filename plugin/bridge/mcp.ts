@@ -710,9 +710,11 @@ async function updateMission(args: any, ctx?: CallContext): Promise<string> {
     }
     if (current.state !== 'active') throw new Error(`Mission ${current.id} is already ${current.state}${current.outcome ? ` (${current.outcome})` : ''}. ${now.open.length ? `Open: ${listed(now.open)}.` : 'Start a new one by passing title.'}`);
   } else if (titled) {
-    const match = now.open.find((m) => m.title === titled);
-    if (!match) throw new Error(`No open mission is titled ${JSON.stringify(titled)}. Open: ${listed(now.open)}. Pass id to say which one this call ends. Nothing was changed or started.`);
-    current = match;
+    const matches = now.open.filter((m) => m.title === titled);
+    if (!matches.length) throw new Error(`No open mission is titled ${JSON.stringify(titled)}. Open: ${listed(now.open)}. Pass id to say which one this call ends. Nothing was changed or started.`);
+    // Renamed on the board, two can share a title.
+    if (matches.length > 1) throw unnamed(matches, 'id');
+    current = matches[0];
   } else if (now.open.length > 1) {
     if (ending || changing || args.pr !== undefined) throw unnamed(now.open, 'id');
     return `This session has ${now.open.length} missions open. ${NAME_THE_MISSION}\n\n${now.open.map((m) => describeMission(m, now)).join('\n\n')}`;

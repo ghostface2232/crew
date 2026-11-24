@@ -65,7 +65,7 @@ async function doctor(): Promise<void> {
 }
 
 async function install(): Promise<void> {
-  const result = await register();
+  const result = await register(true);
   console.log(`${result.ok ? '✓' : '✗'} ${result.detail}`);
   if (!result.ok) process.exitCode = 1;
   else console.log(`✓ crew command: ${COMMAND}\n\nRestart Claude Code sessions (or run /reload-plugins) to load the plugin, then try /crew:run.`);
@@ -133,8 +133,18 @@ try {
         // Read here rather than with tail, which Windows has only inside Git Bash.
         const file = path.join(HOME, 'daemon.log');
         if (!fs.existsSync(file)) throw new Error(`No daemon log yet at ${file}: the daemon has not been started.`);
-        const lines = fs.readFileSync(file, 'utf8').split('\n');
-        // The newline that ends the last line starts no further one.
+        // Only the end of the file: the log is appended to for as long as the daemon is used.
+        const size = fs.statSync(file).size;
+        const tail = Buffer.alloc(Math.min(size, 256 * 1024));
+        const fd = fs.openSync(file, 'r');
+        try {
+          fs.readSync(fd, tail, 0, tail.length, size - tail.length);
+        } finally {
+          fs.closeSync(fd);
+        }
+        const lines = tail.toString('utf8').split('\n');
+        // A read that began mid-file began mid-line; the newline that ends the last line starts no further one.
+        if (tail.length < size) lines.shift();
         if (lines.at(-1) === '') lines.pop();
         process.stdout.write(lines.slice(-60).map((line) => `${line}\n`).join(''));
         break;

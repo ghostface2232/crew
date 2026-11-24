@@ -86,6 +86,9 @@ export function checkAttachments(sources: unknown): string[] {
     // The daemon's working directory means nothing to the caller.
     if (!path.isAbsolute(source)) throw new Error(`Attachments must be absolute paths: ${source}`);
     if (!evidenceType(source)) throw new Error(`${source} is not an image or video: attach ${Object.keys(EVIDENCE_TYPES).join(', ')} files.`);
+    // Its bytes are copied to where the worker reads them, and a link named like an image could point at a file the
+    // worker's sandbox denies, such as the daemon's token.
+    if (fs.lstatSync(source, { throwIfNoEntry: false })?.isSymbolicLink()) throw new Error(`${source} is a symbolic link. Attach the file it points to.`);
     const stat = fs.statSync(source, { throwIfNoEntry: false });
     if (!stat?.isFile()) throw new Error(`Attachment not found: ${source}`);
     if (stat.size > MAX_BYTES) throw new Error(`${source} is larger than ${MAX_BYTES / 1024 / 1024} MB.`);

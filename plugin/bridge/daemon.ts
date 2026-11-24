@@ -146,19 +146,26 @@ const BUILD = installed().build;
 
 const streams = new Set<http.ServerResponse>();
 /**
- * How much may wait unsent for one stream. A reader that has stopped (a frozen tab, a suspended app) would otherwise
- * have every later frame kept in memory; past this its connection is dropped, and it gets the whole state when it reconnects.
+ * How much may wait unsent for one stream from one ping to the next. A reader that has stopped (a frozen tab, a
+ * suspended app) would otherwise have every later frame kept in memory; its connection is dropped, and it gets the
+ * whole state when it reconnects. Judged over time, not at a write: the first frame of a stream is the whole state,
+ * which alone can pass this and still be on its way to a reader that is keeping up.
  */
 const STREAM_BACKLOG = 8 * 1024 * 1024;
-function broadcast(type: string, data: unknown): void {
-  const frame = `event: ${type}\ndata: ${clientJson(data)}\n\n`;
+const behind = new WeakSet<http.ServerResponse>();
+function dropStalled(): void {
   for (const res of streams) {
-    res.write(frame);
-    if (res.writableLength > STREAM_BACKLOG) {
+    if (res.writableLength <= STREAM_BACKLOG) behind.delete(res);
+    else if (!behind.has(res)) behind.add(res);
+    else {
       streams.delete(res);
       res.destroy();
     }
   }
+}
+function broadcast(type: string, data: unknown): void {
+  const frame = `event: ${type}\ndata: ${clientJson(data)}\n\n`;
+  for (const res of streams) res.write(frame);
 }
 
 const AGENT_NAMES = { claude: 'Claude', codex: WORKERS.codex.name, antigravity: WORKERS.antigravity.name };
@@ -842,7 +849,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
 
   if (method === 'POST') {
     if (pathname === '/api/setup/repair') {
-      await registerPlugin();
+      await registerPlugin(true);
       return setupState(true);
     }
     if (pathname === '/api/gc') {
@@ -1097,8 +1104,9 @@ log(`crew daemon ${VERSION} (${BUILD}) listening on http://127.0.0.1:${PORT}`);
 let registering: Promise<Registration> | null = null;
 let registration: Registration | undefined;
 const setup = new SetupCache(setupChecks);
-function registerPlugin(): Promise<Registration> {
-  registering ??= register()
+/** `asked`: the user asked for it (the checklist's repair), which an older copy's own start-up never stands for. */
+function registerPlugin(asked = false): Promise<Registration> {
+  registering ??= register(asked)
     .catch((err: Error): Registration => ({ ok: false, detail: err.message }))
     .then((result) => {
       registration = result;
@@ -1132,6 +1140,7 @@ else if (autoRegister && process.platform === 'win32') {
 
 // Keeps idle SSE connections from being dropped by intermediaries and detects dead ones.
 setInterval(() => {
+  dropStalled();
   for (const res of streams) res.write(': ping\n\n');
 }, 25_000).unref();
 

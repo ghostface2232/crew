@@ -328,6 +328,8 @@ test('N opens New Job by its place on the keyboard under an input source for ano
   // Another Latin layout goes by its letter: Dvorak has B on this key and N on another.
   assert.equal(press('b', 'KeyN'), false);
   assert.equal(press('n', 'KeyL'), true);
+  // Nor is punctuation a Latin layout has on that key (BÉPO's apostrophe) taken for N.
+  assert.equal(press('\'', 'KeyN'), false);
 });
 
 test('the search shortcut is shown as the platform\'s keyboard has it', () => {

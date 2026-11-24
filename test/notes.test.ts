@@ -292,6 +292,14 @@ test('loading drops an adoption the writer would refuse', (t) => {
 const high = { high: 1, medium: 0, low: 0 };
 const review = { role: 'review', of: { model: 'model-b' } } as const;
 
+test('a stored review line whose builder is not an object is dropped by itself, not with the whole file', (t) => {
+  const dir = home(t);
+  fs.mkdirSync(dir, { recursive: true });
+  const bad = [{ role: 'review', job: 'rv-1', of: null }, { role: 'review', job: 'rv-2', of: 'model-b' }, { role: 'review', job: 'rv-3' }, { job: 'cx-1' }] as unknown as Partial<Evidence>[];
+  fs.writeFileSync(notesFile(dir), JSON.stringify(fixture(bad)));
+  assert.deepEqual(loadNotes(dir).models['model-a'].evidence.map((e) => e.job), ['rv-3', 'cx-1']);
+});
+
 test('a review line that names no builder is an audit, and its reviewer\'s rating of the code counts for no one', (t) => {
   const dir = home(t);
   addEvidence(dir, { ...input, model: 'model-b', job: 'cx-1' });

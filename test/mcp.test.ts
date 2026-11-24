@@ -177,6 +177,13 @@ test('a title on a call that ends a mission picks the open mission of that title
   const typo = missions.list().find((mission) => mission.title === 'Fix typo in README')!;
   assert.match(await reportMission({ title: ' Fix typo in README\n', done: true, outcome: 'Typo fixed.' }), new RegExp(`^Mission ${typo.id} · done[^]*Still open in this session: ${billing.id} `));
   assert.equal(billing.state, 'active');
+  // Two open missions can share a title once one is renamed on the board; the title then picks neither.
+  await reportMission({ title: 'Second', stages: ['implement'] });
+  const second = missions.list().find((mission) => mission.title === 'Second')!;
+  second.title = 'Refactor billing';
+  await assert.rejects(reportMission({ title: 'Refactor billing', done: true }), /2 missions open:[^]*Pass id/);
+  assert.deepEqual([billing.state, second.state], ['active', 'active']);
+  await reportMission({ id: second.id, abandoned: true });
   assert.match(await reportMission({ title: 'Refactor billing', done: true }), new RegExp(`^Mission ${billing.id} · done`));
   // With none open there is nothing a title could be mistaken for.
   await assert.rejects(reportMission({ title: 'Fix typo in README', done: true }), /no open mission/);

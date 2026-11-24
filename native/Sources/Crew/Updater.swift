@@ -70,7 +70,8 @@ enum Releases {
     private(set) var checkedAt: Date?
     private(set) var error: String?
     /// Why the last install did not happen. A later check or download replaces `error` but not this, which lasts until
-    /// an install starts again, so the reason stays beside the offer to try once more.
+    /// an install starts again, so the reason stays beside the offer to try once more. An archive thrown away as
+    /// invalid (`discard`) leaves nothing to try again, so its reason goes in `error` like a failed download's.
     private(set) var installError: String?
     /// While installing: the running jobs the install waits for, 0 while it waits on a daemon that has not answered.
     /// The install can be called off while this is set; it is nil once the daemon is being stopped.

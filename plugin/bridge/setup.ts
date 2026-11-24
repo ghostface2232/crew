@@ -130,9 +130,10 @@ function newerRegistration(): string | null {
  * Registers this copy's marketplace and installs or updates the plugin from it, then points the `crew` command here.
  * An app leaves a plugin registered from a source checkout alone: that is a developer's install.
  */
-export async function register(): Promise<Registration> {
-  const newer = PACKAGED ? newerRegistration() : null;
-  if (newer) return { ok: true, detail: `A newer Crew (${newer}) is registered; this copy (${VERSION}) leaves it as it is.` };
+export async function register(asked = false): Promise<Registration> {
+  // Only on its own account: a user who installs an older version and asks for it to be registered gets it.
+  const newer = PACKAGED && !asked ? newerRegistration() : null;
+  if (newer) return { ok: true, detail: `A newer Crew (${newer}) is registered; this copy (${VERSION}) leaves it as it is. To use this copy instead, run the setup checklist's repair from it, or its \`crew install\`.` };
   const marketplaces = await claudeJSON<Marketplace[]>(['plugin', 'marketplace', 'list']);
   if (!marketplaces) return { ok: false, detail: 'Claude Code was not found. Install it, then try again.' };
   const current = marketplaces.find((entry) => entry.name === 'crew');

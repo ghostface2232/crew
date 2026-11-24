@@ -320,6 +320,28 @@ test('a review of files as they stand audits the code: no diff, no rating of any
   assert.equal(told.startsWith('and the tests?'), true);
   assert.doesNotMatch(told, /review diff has been refreshed/);
   assert.equal(fs.existsSync(path.join(home, 'reviews')), false);
+
+  // One that runs the app starts at its snapshot's root, so paths given from a subdirectory are named from there,
+  // and the same name at the root is not taken for them.
+  fs.mkdirSync(path.join(repo, 'pkg'));
+  fs.writeFileSync(path.join(repo, 'pkg', 'app.js'), 'export const y = 2;\n');
+  fs.writeFileSync(path.join(repo, '.gitignore'), 'dist/\n');
+  fs.mkdirSync(path.join(repo, 'dist'));
+  fs.writeFileSync(path.join(repo, 'dist', 'out.js'), 'built\n');
+  adapter.start = async (ctl) => {
+    prompts.push(ctl.job.prompt);
+    assert.equal(fs.readFileSync(path.join(ctl.job.cwd, 'pkg', 'app.js'), 'utf8'), 'export const y = 2;\n', 'the uncommitted file is in the snapshot');
+    ctl.session('s');
+    ctl.done('ok');
+  };
+  const ran = await settled(jobs, await jobs.create({ kind: 'review', cwd: path.join(repo, 'pkg'), runsApp: true, review: { target: { type: 'files', paths: ['./app.js'] }, mode: 'adversarial' } }));
+  assert.match(prompts.at(-1)!, /- `pkg\/app\.js`\n/);
+  assert.deepEqual(ran.reviewTarget, { type: 'files', paths: ['pkg/app.js'] });
+  // A path Git ignores is not carried into the snapshot unless .worktreeinclude lists it: said before the job starts.
+  const before = jobs.list().length;
+  await assert.rejects(audit(['dist/out.js'], { runsApp: true }), /dist\/out\.js is not in the snapshot[^]*\.worktreeinclude/);
+  assert.equal(jobs.list().length, before);
+  assert.equal(execFileSync('git', ['worktree', 'list'], { cwd: repo, encoding: 'utf8' }).trim().split('\n').length, 1);
 });
 
 test('an edit the worker reports outside its worktree is listed as out of scope', async () => {

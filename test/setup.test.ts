@@ -203,10 +203,14 @@ test('an older copy of the app leaves the registration to a newer copy that is s
   fs.writeFileSync(record, taken);
   const { register } = await import(pathToFileURL(path.join(older, 'plugin/bridge/setup.ts')).href);
 
-  // What a daemon started from the older copy does at startup, and a repair asked of it.
+  // What a daemon started from the older copy does at startup.
   const left = await register();
-  assert.match(left.detail, /newer Crew \(0\.0\.2\) is registered/);
+  assert.match(left.detail, /newer Crew \(0\.0\.2\) is registered[^]*repair from it, or its `crew install`/);
   assert.deepEqual([fs.existsSync(calls), fs.readFileSync(record, 'utf8')], [false, taken]);
+  // Asked for by the user (the checklist's repair, `crew install`), the older copy is registered: a downgrade on purpose.
+  assert.match((await register(true)).detail, /^Installed/);
+  assert.equal(JSON.parse(fs.readFileSync(record, 'utf8')).version, '0.0.1');
+  fs.writeFileSync(record, taken);
 
   // A record of a copy that is gone, or of what this copy's own folder held before a downgrade, holds nothing back.
   fs.rmSync(newer, { recursive: true });

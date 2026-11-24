@@ -150,7 +150,7 @@ function wellFormed(models: Record<string, any>): Record<string, ModelNote> {
     const evidence = note.evidence.filter((e: any) => e && typeof e.id === 'string' && Number.isFinite(e.at) && e.model === model && e.agent === note.agent && HOLDERS.includes(e.reviewer)
       && CHANGE_SIZES.includes(e.size) && NOTE_ROLES.includes(e.role) && (e.tier === undefined || TIERS.includes(e.tier))
       && (e.role !== 'fix' || FIX_OUTCOMES.includes(e.outcome)) && typeof e.text === 'string'
-      && (e.of === undefined || (e.role === 'review' && typeof e.of.model === 'string' && e.of.model !== '' && (e.of.job === undefined || typeof e.of.job === 'string') && (e.of.fix === undefined || e.of.fix === true)))
+      && (e.of === undefined || (e.role === 'review' && e.of !== null && typeof e.of === 'object' && typeof e.of.model === 'string' && e.of.model !== '' && (e.of.job === undefined || typeof e.of.job === 'string') && (e.of.fix === undefined || e.of.fix === true)))
       && (e.rating === undefined || (typeof e.job === 'string' && e.job !== '' && rated(e.rating, LEAD_ITEMS[e.role as NoteRole])))
       && counts(e.findings) && (e.declined === undefined || counts(e.declined))
       && (e.adoption === undefined || (e.role === 'build' && typeof e.job === 'string' && e.job && ADOPTIONS.includes(e.adoption)))

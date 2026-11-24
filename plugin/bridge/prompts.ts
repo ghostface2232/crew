@@ -12,10 +12,7 @@ function role(name: string): string {
   return fs.readFileSync(path.join(PLUGIN_ROOT, 'roles', `${name}.md`), 'utf8').trim();
 }
 
-/**
- * An audit has no change to read, and the reviewer's role is written for one, so the target says how to read the role.
- * The paths are relative to the directory the reviewer starts in.
- */
+/** An audit has no change to read, and the reviewer's role is written for one, so the target says how to read the role. */
 const auditTarget = (paths: string[]) => `# Review target\nReview ${paths.length > 1 ? 'these files and directories as they stand' : 'this as it stands'}, in the working tree:\n${paths.map((file) => `- \`${file}\``).join('\n')}\nThis is an audit of the code, not of a change: there is no diff to read and no author's summary to distrust. Where your role speaks of the change or its diff, read it as this code; judge what is wrong in it as it is.`;
 
 /** With `commands`, says how to see the change; a reviewer that is handed the diff has no use for them. */

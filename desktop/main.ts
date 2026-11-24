@@ -46,6 +46,17 @@ let movedTo = '';
 let pending = 0;
 const stateFile = path.join(app.getPath('userData'), 'window.json');
 const asset = (name: string) => path.join(import.meta.dirname, name);
+/**
+ * Given an .ico path, Electron loads the image Windows asks for at each size. Given a PNG, it passes the whole bitmap
+ * as the window icon and leaves Windows to scale 256px down to each size.
+ */
+const APP_ICON = asset('icon.ico');
+/** The overlay drawn for the primary display's scale, which Windows would otherwise stretch from 16px. */
+function badgeIcon() {
+  const want = 16 * screen.getPrimaryDisplay().scaleFactor;
+  const size = [16, 20, 24, 28, 32, 40].reduce((best, size) => (Math.abs(size - want) < Math.abs(best - want) ? size : best));
+  return nativeImage.createFromPath(asset(`badge-${size}.png`));
+}
 /** The tray sits on the taskbar, which follows the Windows mode rather than the app mode the window follows. */
 const trayIcon = (dark: boolean) => nativeImage.createFromPath(asset(dark ? 'tray-white.png' : 'tray-black.png'));
 /** The Windows mode the tray was last drawn for; the app mode stands in where the Windows mode cannot be read. */
@@ -188,7 +199,7 @@ function createWindow() {
     minHeight: 480,
     show: false,
     title: 'Crew',
-    icon: asset('icon.png'),
+    icon: APP_ICON,
     backgroundColor: frame().color,
     ...(BACKDROP ? { backgroundMaterial: BACKDROP } : {}),
     autoHideMenuBar: true,
@@ -219,7 +230,7 @@ function createWindow() {
       overrideBrowserWindowOptions: {
         autoHideMenuBar: true,
         backgroundColor: theme().color,
-        icon: asset('icon.png'),
+        icon: APP_ICON,
         webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true },
       },
     };
@@ -284,7 +295,7 @@ function trayMenu(waiting = pending) {
       { label: t('Quit Crew — jobs keep running'), click: () => app.quit() },
     ]),
   );
-  window?.setOverlayIcon(pending ? nativeImage.createFromPath(asset('badge.png')) : null, pending ? `${pending} waiting` : '');
+  window?.setOverlayIcon(pending ? badgeIcon() : null, pending ? `${pending} waiting` : '');
 }
 /** The browser signs in with a ticket in the launch fragment, as /crew:board opens it. Without one it shows how to sign in. */
 async function openInBrowser() {

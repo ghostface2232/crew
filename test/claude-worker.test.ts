@@ -156,17 +156,17 @@ for (const kind of ['delegate', 'polish', 'review', 'ask', 'debate'] as const) {
     assert.equal(result.prompt, h.ctl.job.prompt);
     assert.deepEqual(await h.event('session'), ['claude-session']);
     assert.deepEqual(await h.event('model'), ['test-model', 'medium']);
+    // The MCP config carries the job's token, so it is always a file only the user can read, removed on release.
     const configArg = flag(args, '--mcp-config')!;
-    if (process.platform === 'win32') {
-      assert.ok(path.isAbsolute(configArg));
-      if (writable) assert.equal(path.dirname(path.dirname(configArg)), h.ctl.job.scratch);
-      await h.adapter.release!(h.ctl);
-      assert.equal(fs.existsSync(configArg), false);
-      assert.equal(fs.existsSync(flag(args, '--append-system-prompt-file')!), false);
-    } else {
-      assert.ok(configArg.startsWith('{'));
+    assert.ok(path.isAbsolute(configArg));
+    if (writable) assert.equal(path.dirname(path.dirname(configArg)), h.ctl.job.scratch);
+    if (process.platform !== 'win32') {
+      assert.equal(fs.statSync(configArg).mode & 0o777, 0o600);
       assert.equal(flag(args, '--append-system-prompt'), h.ctl.job.instructions);
     }
+    await h.adapter.release!(h.ctl);
+    assert.equal(fs.existsSync(configArg), false);
+    if (process.platform === 'win32') assert.equal(fs.existsSync(flag(args, '--append-system-prompt-file')!), false);
   });
 }
 

@@ -4,7 +4,7 @@ import type { News } from './delivery.ts';
 import { clip } from './text.ts';
 
 /** The fields every query asks `gh pr view` for. */
-export const PULL_FIELDS = 'url,number,title,state,headRefOid,mergeable,reviewDecision,author,statusCheckRollup,reviews';
+export const PULL_FIELDS = 'url,number,title,state,baseRefName,headRefOid,mergeable,reviewDecision,author,statusCheckRollup,reviews';
 
 /** A check run or commit status, as `gh pr view --json statusCheckRollup` lists it. */
 export interface PullCheck {
@@ -32,6 +32,7 @@ export interface PullView {
   number: number;
   title: string;
   state: 'OPEN' | 'MERGED' | 'CLOSED';
+  baseRefName: string;
   headRefOid: string;
   mergeable: 'MERGEABLE' | 'CONFLICTING' | 'UNKNOWN';
   reviewDecision: string;
@@ -161,18 +162,22 @@ function withDetails<T>(prefix: string, items: T[], limit: number, suffix: strin
  * `review`, `conflict`, `title`, `ended`), and nothing else: the caller adds the news and saves.
  */
 export function observe(watch: PullWatch, view: PullView): { kind: News['kind']; reason: string }[] {
+  const wasOpen = watch.state === 'open';
   watch.title = view.title;
   watch.state = view.state === 'OPEN' ? 'open' : view.state === 'MERGED' ? 'merged' : 'closed';
+  const url = PR_URL.test(watch.url) && watch.url.length <= 170 ? watch.url : '<url>';
+  const repo = fit(watch.repo, 120, 120);
+  const pr = `${repo}#${watch.number}`;
   if (watch.state !== 'open') {
     watch.ended = true;
-    return [];
+    // A merge is the one ending the lead acts on: its local base branch is now behind. A close needs nothing.
+    if (!wasOpen || watch.state !== 'merged') return [];
+    const base = fit(oneLine(view.baseRefName), 100, 100);
+    return [{ kind: 'merged', reason: `${pr} was merged into ${base}. Bring the local ${base} up to date (git fetch, then git merge --ff-only on ${base}) unless that would touch the user's uncommitted work or the branches have diverged; in that case tell the user instead. Do not deploy from this news.` }];
   }
 
   const news: { kind: News['kind']; reason: string }[] = [];
   const send = (kind: News['kind'], reason: string) => news.push({ kind, reason: `${reason} ${WARNING}` });
-  const url = PR_URL.test(watch.url) && watch.url.length <= 170 ? watch.url : '<url>';
-  const repo = fit(watch.repo, 120, 120);
-  const pr = `${repo}#${watch.number}`;
   const head = view.headRefOid;
   const short = head.slice(0, 7);
   if (watch.told.head !== head) watch.told = { head, checks: [] };
@@ -268,7 +273,7 @@ function parseView(output: string): PullView {
     throw new Error(invalid);
   }
   if (!record(value) || typeof value.url !== 'string' || !PR_URL.test(value.url) || !Number.isSafeInteger(value.number)
-    || typeof value.title !== 'string' || typeof value.headRefOid !== 'string' || typeof value.reviewDecision !== 'string'
+    || typeof value.title !== 'string' || typeof value.baseRefName !== 'string' || typeof value.headRefOid !== 'string' || typeof value.reviewDecision !== 'string'
     || (value.state !== 'OPEN' && value.state !== 'MERGED' && value.state !== 'CLOSED')
     || (value.mergeable !== 'MERGEABLE' && value.mergeable !== 'CONFLICTING' && value.mergeable !== 'UNKNOWN')
     || !validAuthor(value.author) || !validList(value.statusCheckRollup, validCheck) || !validList(value.reviews, validReview)) {
@@ -288,7 +293,7 @@ function restoreWatch(value: unknown): PullWatch | undefined {
   const checks = value.checks === 'failing' || value.checks === 'pending' || value.checks === 'passing' ? value.checks : 'none';
   const news: News[] | undefined = Array.isArray(value.news) ? value.news.filter((item): item is News =>
     record(item) && typeof item.seq === 'number' && Number.isSafeInteger(item.seq) && typeof item.reason === 'string'
-    && (item.kind === 'checks' || item.kind === 'passed' || item.kind === 'review' || item.kind === 'conflict'))
+    && (item.kind === 'checks' || item.kind === 'passed' || item.kind === 'review' || item.kind === 'conflict' || item.kind === 'merged'))
     .map((item) => ({ seq: item.seq, kind: item.kind, reason: item.reason, eventSeq: 0, acked: item.acked === true, offers: numberField(item.offers) }))
     : undefined;
   const createdAt = numberField(value.createdAt);

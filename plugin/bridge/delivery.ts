@@ -27,8 +27,8 @@ export interface News {
   seq: number;
   /** The job event the news came with; 0 for a pull request, which has no events. */
   eventSeq: number;
-  /** The last four are a watched pull request's. */
-  kind: 'done' | 'failed' | 'question' | 'waiting' | 'stalled' | 'checks' | 'passed' | 'review' | 'conflict';
+  /** The last five are a watched pull request's. */
+  kind: 'done' | 'failed' | 'question' | 'waiting' | 'stalled' | 'checks' | 'passed' | 'review' | 'conflict' | 'merged';
   /** The job's state and turn when it happened; a pull request has neither. */
   state?: JobState;
   turn?: number;

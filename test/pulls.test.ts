@@ -10,7 +10,7 @@ const WARNING = 'Do not merge, close or deploy from this news.';
 
 function view(overrides: Partial<PullView> = {}): PullView {
   return {
-    url: URL, number: 12, title: 'Update Crew', state: 'OPEN', headRefOid: HEAD,
+    url: URL, number: 12, title: 'Update Crew', state: 'OPEN', baseRefName: 'main', headRefOid: HEAD,
     author: { login: 'author' }, mergeable: 'MERGEABLE', reviewDecision: '',
     statusCheckRollup: [], reviews: [], ...overrides,
   };
@@ -149,7 +149,7 @@ test('reviews record every id and send only new feedback from other reviewers', 
   assert.deepEqual(watch.reviews, ['200']);
 });
 
-test('a conflict only returns after a mergeable observation; a merged PR only updates its title and state', async () => {
+test('a conflict only returns after a mergeable observation; a merge is sent once and ends the watch', async () => {
   const { watch } = await harness().pulls.link('one', '12');
   const conflict = view({ mergeable: 'CONFLICTING' });
   assert.deepEqual(observe(watch, conflict).map((item) => item.kind), ['conflict']);
@@ -161,15 +161,37 @@ test('a conflict only returns after a mergeable observation; a merged PR only up
   assert.equal(watch.conflictTold, undefined);
   assert.deepEqual(observe(watch, conflict).map((item) => item.kind), ['conflict']);
 
-  assert.deepEqual(observe(watch, view({
+  const merged = view({
     state: 'MERGED', title: 'Merged title', headRefOid: 'other', statusCheckRollup: [run('build')],
     reviews: [{ id: 'later', state: 'COMMENTED', author: { login: 'reviewer' } }],
-  })), []);
+  });
+  const news = observe(watch, merged);
+  assert.deepEqual(news.map((item) => item.kind), ['merged']);
+  assert.match(news[0].reason, /^octo\/crew#12 was merged into main\. .*git merge --ff-only on main/);
+  assert.deepEqual(observe(watch, merged), []);
   assert.equal(watch.ended, true);
   assert.equal(watch.state, 'merged');
   assert.equal(watch.title, 'Merged title');
   assert.equal(watch.head, HEAD);
   assert.deepEqual(watch.reviews, []);
+});
+
+test('a poll sends a merge once and stops polling; a close ends the watch without news', async () => {
+  const h = harness();
+  const { watch } = await h.pulls.link('one', '12');
+  const { watch: second } = await h.pulls.link('one', SECOND_URL);
+  h.responses.set(URL, view({ state: 'MERGED' }));
+  h.responses.set(SECOND_URL, view({ url: SECOND_URL, number: 13, state: 'CLOSED' }));
+  h.advance(300_000);
+  await h.pulls.tick();
+  assert.deepEqual(watch.news?.map(({ kind }) => kind), ['merged']);
+  assert.equal(second.news, undefined);
+  assert.equal(watch.ended, true);
+  assert.equal(second.ended, true);
+  const calls = h.calls.length;
+  h.advance(300_000);
+  await h.pulls.tick();
+  assert.equal(h.calls.length, calls);
 });
 
 test('news stays within the caps and keeps its guidance and closing sentence after delivery', async () => {

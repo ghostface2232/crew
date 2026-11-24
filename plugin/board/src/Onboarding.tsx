@@ -212,7 +212,7 @@ const PAGES = translated((): Page[] => [
     art: <NeedsArt />,
     body: (
       <p className="secondary">
-        {t('Approvals and questions from agents appear in Needs You. Answer them here, or open a waiting Claude session in Claude.')}{' '}
+        {t('Approvals and questions from agents appear in Needs You. Answer them here, or open a waiting lead session in its app.')}{' '}
         {desktop
           ? t('Close the window and Crew stays in the tray, still running jobs.')
           : t('Jobs keep running after you close the board.')}

@@ -48,6 +48,47 @@ test('replacement leaves a daemon another client started in the meantime', async
   assert.equal(spawn.mock.callCount(), 0);
 });
 
+// On Windows a daemon started through WMI writes its log through cmd.exe, which holds it unshared until that daemon
+// exits. `busy` opens of daemon.log fail with EBUSY; `rival` is a daemon that answers while the log is still busy.
+for (const [name, busy, rival] of [
+  ['replacement waits for the log a stopping daemon still holds', 2, false],
+  ['replacement leaves a daemon that comes up while the log is held', 2, true],
+  ['replacement explains a log that stays held', Infinity, false],
+] as const) {
+  test(name, async (t) => {
+    fastWaits(t);
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    t.after(() => Object.defineProperty(process, 'platform', platform));
+    let phase: 'old' | 'down' | 'new' = 'old';
+    t.mock.method(globalThis, 'fetch', async (url: string) => {
+      if (url.endsWith('/api/shutdown')) { phase = 'down'; return Response.json({}); }
+      if (phase === 'down') throw new Error('down');
+      return Response.json({ name: 'crew', version: '0.0.0', build: 'b', root: PLUGIN_ROOT, active: 0, pid: phase === 'old' ? 12345 : 54321, ...(phase === 'old' ? { partialEnv: true } : {}) });
+    });
+    let opens = 0;
+    const { openSync, closeSync } = fs;
+    t.mock.method(fs, 'openSync', (target: fs.PathLike, flags: fs.OpenMode = 'r', mode?: fs.Mode) => {
+      if (!String(target).endsWith('daemon.log')) return openSync(target, flags, mode);
+      if (++opens <= busy) {
+        if (rival && opens === busy) phase = 'new';
+        throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
+      }
+      return -1;
+    });
+    t.mock.method(fs, 'closeSync', (fd: number) => { if (fd !== -1) closeSync(fd); });
+    const spawn = t.mock.method(childProcess, 'spawn', () => {
+      phase = 'new';
+      return { on() {}, unref() {} };
+    });
+    syncBuiltinESMExports();
+    t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+    if (busy === Infinity) await assert.rejects(ensureDaemon(), /another process still holds .*daemon\.log/);
+    else await ensureDaemon();
+    assert.equal(spawn.mock.callCount(), busy === Infinity || rival ? 0 : 1);
+  });
+}
+
 test('a hook report retries with the newly created token and exits successfully on failure', (t) => {
   const reportHome = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-report-'));
   t.after(() => fs.rmSync(reportHome, { recursive: true, force: true }));

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { api, ensureDaemon } from './client.ts';
+import { api, codexJob, ensureDaemon } from './client.ts';
 import { JOB_ID as ANY_JOB } from './config.ts';
 import { HOOK_SECONDS } from './delivery.ts';
 
@@ -102,7 +102,10 @@ if (process.argv[1] && real(process.argv[1]) === real(fileURLToPath(import.meta.
     let raw = '';
     for await (const chunk of process.stdin) raw += chunk;
     // A daemon that cannot start leaves the context empty, as a missing daemon always has.
-    if (starts) await ensureDaemon().catch(() => {});
+    if (starts) {
+      codexJob();
+      await ensureDaemon().catch(() => {});
+    }
     const result = await leadHook(JSON.parse(raw), mode, api, deadline);
     if (result.stdout) await new Promise<void>((resolve) => process.stdout.write(result.stdout + '\n', () => resolve()));
     if (result.stderr) await new Promise<void>((resolve) => process.stderr.write(result.stderr + '\n', () => resolve()));

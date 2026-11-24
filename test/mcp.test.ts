@@ -578,7 +578,7 @@ test('status and mission explicitly read this session\'s watch news without any 
   assert.deepEqual(offered, [undefined, ['pr-0'], ['pr-0']]);
 });
 
-test('a Codex session says hello once, retries a failed hello, refuses a call naming no session, and starts a new session fresh', async () => {
+test('a Codex session says hello once, retries a failed hello or one with no folder, refuses a call naming no session, and starts a new session fresh', async () => {
   const source = fs.readFileSync(new URL('../plugin/bridge/mcp.ts', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
   const code = source.slice(source.indexOf('/** The hello for the Codex session'), source.indexOf('/** How a mission ended'));
   const hellos: string[] = [];
@@ -604,6 +604,16 @@ test('a Codex session says hello once, retries a failed hello, refuses a call na
   answer = async () => ({ cwd: null });
   await codexSession({ sessionId: 'next' });
   assert.deepEqual([hellos.length, context.SESSION, context.projectUnknown, forgotten], [3, 'next', true, 1]);
+  // Without a folder the next call asks again: the daemon may have failed to read it just then. A folder the lead
+  // passed meanwhile stays until one is read.
+  context.projectUnknown = false;
+  context.PROJECT = '/lead/cwd';
+  await codexSession({ sessionId: 'next' });
+  assert.deepEqual([hellos.length, context.projectUnknown, context.PROJECT], [4, false, '/lead/cwd']);
+  answer = async () => ({ cwd: '/work/next' });
+  await codexSession({ sessionId: 'next' });
+  await codexSession({ sessionId: 'next' });
+  assert.deepEqual([hellos.length, context.PROJECT, forgotten], [5, 'canon:/work/next', 1]);
   // A desktop thread says so, whether Codex sends its turn metadata as an object or as JSON; anything else does not.
   await codexSession({ sessionId: 'app', 'x-codex-turn-metadata': { client_type: 'desktop_app' } });
   await codexSession({ sessionId: 'app-json', 'x-codex-turn-metadata': JSON.stringify({ client_type: 'desktop_app' }) });

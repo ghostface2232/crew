@@ -38,13 +38,22 @@ function toolPath(input: ToolInput, tool?: string): string | undefined {
 }
 
 function canEdit(ctl: JobCtl, file: string | undefined): boolean {
-  const { cwd, sandbox, evidenceDir } = ctl.job;
-  if (!file) return false;
+  const { cwd, sandbox } = ctl.job;
+  // Claude Code's file tools take absolute paths. A relative one would be judged against the evidence directory here
+  // but written in the job's folder, `.git` included.
+  if (!file || !path.isAbsolute(file)) return false;
   // Every job keeps its screenshots in its evidence directory, as a Codex job may, read-only or not.
   // The bridge runs git in the worker's tree itself, so `.git` is never the worker's to change.
   try {
-    return Boolean(evidenceDir && isInside(evidenceDir, file))
+    return inEvidence(ctl, file)
       || (sandbox === 'workspace-write' && isInside(cwd, file) && !isGitPath(cwd, file));
+  } catch { return false; }
+}
+
+function inEvidence(ctl: JobCtl, file: string): boolean {
+  const { evidenceDir } = ctl.job;
+  try {
+    return Boolean(evidenceDir && isInside(evidenceDir, file));
   } catch { return false; }
 }
 
@@ -91,13 +100,35 @@ function counted(ctl: JobCtl, usage: Usage): void {
   });
 }
 
+/**
+ * What a Claude Code session, and the desktop app or SDK host around it, sets for the processes it starts, which a
+ * daemon that session started keeps (read from a desktop app session, Claude Code 2.1.331). Left in, a worker takes
+ * itself for a child of that session or for an SDK host's: its socket, session id and effort, MCP tool names without
+ * their prefix, an auth refresh Crew never answers. The user's own settings, such as CLAUDE_CODE_USE_BEDROCK, stay.
+ */
+const SESSION_VARS = new RegExp(`^(${[
+  'AI_AGENT', 'CLAUDECODE', 'CLAUDE_PID', 'CLAUDE_EFFORT', 'CLAUDE_PREVIEW_\\w+', 'CLAUDE_AGENT_SDK_\\w+', 'CLAUDE_CODE_SDK_\\w+',
+  'CLAUDE_CODE_HOST_\\w+', 'CLAUDE_CODE_EMIT_\\w+', 'CLAUDE_CODE_MESSAGING_\\w+',
+  ...['ENTRYPOINT', 'EXECPATH', 'SESSION_ID', 'CHILD_SESSION', 'SESSION_ATTENDED', 'CHILD_NOTES_DIR', 'LAUNCHED_BY_SESSION_IDS',
+    'DESKTOP_APP_VERSION', 'ENABLE_SDK_FILE_CHECKPOINTING', 'ENABLE_ASK_USER_QUESTION_TOOL', 'DISABLE_TERMINAL_TITLE', 'SIMPLE',
+    'DISABLE_CRON', 'TERMINAL_MCP_TOOLS', 'EAGER_FLUSH', 'STARTUP_FAILURE_RESULTS', 'REPORT_FINDINGS', 'ORGANIZATION_UUID',
+    'ACCOUNT_UUID', 'USER_EMAIL'].map((name) => `CLAUDE_CODE_${name}`),
+].join('|')})$`);
+
+export function workerEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const env = agentEnv(process.platform, source);
+  for (const key of Object.keys(env)) if (SESSION_VARS.test(key.toUpperCase())) delete env[key];
+  return env;
+}
+
 function launchClaude(config: Config, ctl: JobCtl, resume?: string) {
-  const env = agentEnv();
+  const env = workerEnv();
   const { cwd, sandbox, scratch, evidenceDir, instructions, model, effort } = ctl.job;
   const mcp = JSON.stringify({ mcpServers: { crew: { type: 'stdio', ...ctl.mcp } } });
   const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
     '--permission-mode', permissionMode(ctl.job), '--permission-prompt-tool', 'stdio', '--restricted', '--tools',
-    sandbox === 'workspace-write' ? 'Read,Edit,Write,Glob,Grep,Bash' : 'Read,Glob,Grep,Bash', '--strict-mcp-config'];
+    // A read-only job gets Write for its evidence directory alone (canEdit).
+    sandbox === 'workspace-write' ? 'Read,Edit,Write,Glob,Grep,Bash' : 'Read,Write,Glob,Grep,Bash', '--strict-mcp-config'];
   // Restricted mode keeps the file tools to the working directories; the lead's attachments and the worker's
   // screenshots are in the evidence directory.
   if (evidenceDir) args.push('--add-dir', evidenceDir);
@@ -162,11 +193,21 @@ class Session {
   readonly grants: Set<string>;
   /** This turn's tool calls by id, so a refusal, which names only the id, can say what was refused. */
   private readonly uses = new Map<string, { name: string; input: ToolInput }>();
-  private mode: 'auto' | 'default';
+  /** The mode this session was last asked for; unknown for a resumed session until it is set, since one may bring back the mode it was saved in. */
+  private mode?: 'auto' | 'default';
   private modeRequest?: string;
+  /** Claude Code left automatic mode for the manual one, as where the model or plan does not offer it. */
+  private manualOnly = false;
   private modeRequests = 0;
-  /** Messages held until Claude Code confirms the mode they are to be read in. */
-  private held: string[] = [];
+  /**
+   * Messages not yet written: one waits while a turn runs, or until Claude Code confirms the mode it is to be read in.
+   * Claude Code may read several queued sends in one turn, and its result cannot say whether a message still in the
+   * pipe was read, so each is written only once the turn before it has its result.
+   */
+  private queue: string[] = [];
+  /** A message was written and its result has not come. */
+  private open = false;
+  /** Messages sent and not yet answered by a result, written or queued. */
   turns = 0;
   stopping = false;
   private idle?: NodeJS.Timeout;
@@ -176,7 +217,7 @@ class Session {
   constructor(config: Config, ctl: JobCtl, grants: Set<string>, onClose: () => void, resume?: string) {
     this.ctl = ctl;
     this.grants = grants;
-    this.mode = permissionMode(ctl.job);
+    if (!resume) this.mode = permissionMode(ctl.job);
     const { child, cleanup } = launchClaude(config, ctl, resume);
     this.child = child;
     this.cleanup = cleanup;
@@ -194,6 +235,8 @@ class Session {
       clearTimeout(this.forceClose);
       const failed = !this.stopping && this.turns > 0;
       this.turns = 0;
+      this.queue.length = 0;
+      this.open = false;
       this.pending.length = 0;
       onClose();
       this.cleanLaunchFiles();
@@ -217,15 +260,23 @@ class Session {
     clearTimeout(this.idle);
     this.ctl = ctl;
     if (this.turns++ === 0) ctl.phase('working');
+    this.queue.push(text);
+    this.flush();
+  }
+
+  /** Writes the next message once no turn runs, switching the mode it is to be read in first. */
+  private flush(): void {
+    if (this.open || this.modeRequest || !this.queue.length || !this.alive) return;
     // A session outlives its turns, so a turn that needs another mode switches it before the message is read.
-    const mode = permissionMode(ctl.job);
+    const mode = permissionMode(this.ctl.job);
     if (mode !== this.mode) {
       this.mode = mode;
       this.modeRequest = `crew-mode-${++this.modeRequests}`;
       this.write({ type: 'control_request', request_id: this.modeRequest, request: { subtype: 'set_permission_mode', mode } });
+      return;
     }
-    if (this.modeRequest) this.held.push(text);
-    else this.write({ type: 'user', message: { role: 'user', content: text } });
+    this.open = true;
+    this.write({ type: 'user', message: { role: 'user', content: this.queue.shift() } });
   }
 
   stop(mode: 'graceful' | 'cancel' | 'shutdown' = 'graceful'): Promise<void> {
@@ -328,9 +379,11 @@ class Session {
         if (message.subtype === 'init') {
           if (typeof message.session_id === 'string') ctl.session(message.session_id);
           ctl.model(message.model, message.effort ?? ctl.job.effort);
-          // Also catches a resumed session that brought back the mode it was saved in.
-          if (typeof message.permissionMode === 'string' && message.permissionMode !== this.mode) {
-            this.fail(`Claude Code started the turn in ${message.permissionMode} permissions, not ${this.mode}.`, false, true);
+          const actual = message.permissionMode;
+          if (typeof actual === 'string' && actual !== this.mode) {
+            // The manual mode only asks more than the automatic one; any other mismatch could ask less than intended.
+            if (this.mode === 'auto' && actual === 'default') this.fellBack();
+            else this.fail(`Claude Code started the turn in ${actual} permissions, not ${this.mode}.`, false, true);
           }
         } else if (message.subtype === 'permission_denied') {
           const use = typeof message.tool_use_id === 'string' ? this.uses.get(message.tool_use_id) : undefined;
@@ -355,7 +408,8 @@ class Session {
             if (typeof block.id === 'string') this.uses.set(block.id, { name: block.name, input });
             ctl.progress(toolDetail(block.name, input));
             const file = toolPath(input, block.name);
-            if (EDIT_TOOLS.includes(block.name) && file && canEdit(ctl, file)) ctl.touched(file);
+            // A screenshot saved in the evidence directory is no change to the job's files.
+            if (EDIT_TOOLS.includes(block.name) && file && canEdit(ctl, file) && !inEvidence(ctl, file)) ctl.touched(file);
           } else if (block?.type === 'text' && typeof block.text === 'string' && block.text.trim()) {
             ctl.phase('writing response');
             ctl.progress(clip(block.text.trim().split(/\r?\n/, 1)[0], 120));
@@ -370,11 +424,12 @@ class Session {
       case 'control_response':
         if (!this.modeRequest || message.response?.request_id !== this.modeRequest) break;
         this.modeRequest = undefined;
-        if (message.response.subtype === 'success') {
-          for (const text of this.held.splice(0)) this.write({ type: 'user', message: { role: 'user', content: text } });
+        if (message.response.subtype === 'success' || this.mode === 'auto') {
+          if (message.response.subtype !== 'success') this.fellBack();
+          this.flush();
         } else {
           // Left in the old mode, the turn would decide what the user was to be asked about, so it is never sent.
-          this.held.length = 0;
+          this.queue.length = 0;
           this.fail(`Claude Code could not switch to ${this.mode} permissions: ${message.response.error ?? 'no reason given'}.`, false, true);
         }
         break;
@@ -399,7 +454,8 @@ class Session {
           for (const request of this.pending.splice(0)) this.respond(request.id, { behavior: 'deny', message: 'The turn ended before this was answered.' });
           ctl.resumed();
         }
-        this.turns--;
+        this.open = false;
+        this.turns = Math.max(0, this.turns - 1);
         if (!this.turns) this.uses.clear();
         if (message.is_error || message.subtype !== 'success') {
           const errors = Array.isArray(message.errors) ? message.errors.join('\n') : '';
@@ -408,9 +464,15 @@ class Session {
         } else if (!this.turns) {
           this.idle = setTimeout(() => void this.stop(), IDLE_SHUTDOWN_MS).unref();
           ctl.done(message.result ?? '');
-        }
+        } else this.flush();
         break;
     }
+  }
+
+  private fellBack(): void {
+    if (this.manualOnly) return;
+    this.manualOnly = true;
+    this.ctl.note('Claude Code runs this job in its manual permission mode, as automatic mode is not available to it (for this model or plan). Actions it would have judged itself go to the user.');
   }
 
   /** `now` stops the process at once, for a turn that must not go on running. */
@@ -418,6 +480,7 @@ class Session {
     if (this.turns) void this.stop(now ? 'cancel' : 'graceful');
     else this.idle = setTimeout(() => void this.stop(), IDLE_SHUTDOWN_MS).unref();
     this.turns = 0;
+    this.queue.length = 0;
     this.ctl.fail(message, limit ? { limit: true } : undefined);
   }
 }

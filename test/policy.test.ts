@@ -271,14 +271,30 @@ test('only Windows agents launched through a shell need a tree kill command', as
   }
 });
 
+test('a timed-out command that ignores SIGTERM is killed, and output past the limit is not kept', { skip: process.platform === 'win32' }, async () => {
+  const { execTimed } = await import('../plugin/bridge/rpc.ts');
+  const run = (script: string, options: { timeout: number; maxBuffer?: number }) => new Promise<{ err: Error | null; out: string; ms: number }>((resolve) => {
+    const start = Date.now();
+    execTimed(process.execPath, ['-e', script], options, (err, out) => resolve({ err, out, ms: Date.now() - start }));
+  });
+  const stubborn = await run(`process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)`, { timeout: 200 });
+  assert.match(String(stubborn.err?.message), /timed out/);
+  assert.ok(stubborn.ms < 4_000, `returned after ${stubborn.ms} ms`);
+  const chatty = await run(`process.on('SIGTERM', () => {}); setInterval(() => process.stdout.write('x'.repeat(1024)), 5)`, { timeout: 10_000, maxBuffer: 4096 });
+  assert.match(String(chatty.err?.message), /maxBuffer/);
+  assert.ok(chatty.out.length <= 4096 + 1024, `kept ${chatty.out.length} characters`);
+});
+
 test('a daemon started outside Codex\'s job is pointed at this client\'s Crew over the user\'s own environment', () => {
   const home = String.raw`C:\Users\me\문서 crew`;
   // Windows keeps a variable's name as it was set, so a lowercase one is found too; PATH is the user's own.
   const env = { crew_port: '50756', PATH: String.raw`C:\filtered`, ELECTRON_RUN_AS_NODE: '1' };
-  const command = outsideJobCommand(String.raw`C:\node\node.exe`, String.raw`C:\crew\daemon.js`, String.raw`C:\Users\me\.crew\daemon.log`, home, env)!;
+  const command = outsideJobCommand(String.raw`C:\node\node.exe`, String.raw`C:\crew\daemon.js`, String.raw`C:\Users\me\.crew\daemon.log`, home, env, true)!;
   // A setting this client lacks is cleared, so one only the user's environment holds cannot send the daemon elsewhere.
   assert.equal(command, String.raw`cmd.exe /d /v:off /s /c "set "CREW_HOME=C:\Users\me\문서 crew"&& set "CREW_PARTIAL_ENV=1"&& set "CREW_PORT=50756"&& set "CREW_AGENTGAUGE_DIR="&& set "ELECTRON_RUN_AS_NODE=1"&& "C:\node\node.exe" "C:\crew\daemon.js" >> "C:\Users\me\.crew\daemon.log" 2>&1"`);
   // cmd.exe would expand a percent sign or end the quoting at a double quote, so such a start goes the usual way.
-  assert.equal(outsideJobCommand('node', 'daemon.js', 'log', String.raw`C:\100%`, {}), null);
-  assert.equal(outsideJobCommand('node', 'daemon.js', 'log', home, { CREW_PORT: '1"2' }), null);
+  assert.equal(outsideJobCommand('node', 'daemon.js', 'log', String.raw`C:\100%`, {}, true), null);
+  // A Codex hook's environment is whole, so its daemon is not marked as started from a filtered one.
+  assert.match(outsideJobCommand('node', 'daemon.js', 'log', 'home', {}, false)!, /set "CREW_PARTIAL_ENV="&& /);
+  assert.equal(outsideJobCommand('node', 'daemon.js', 'log', home, { CREW_PORT: '1"2' }, true), null);
 });

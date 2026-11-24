@@ -510,7 +510,7 @@ export const ko: Record<string, string> = {
   'What the crew did, as it happened': '크루가 한 일을 일어난 순서대로',
   'What would you like to know?': '무엇이 궁금한가요?',
   'What’s new in {version}': '{version}의 새로운 기능',
-  'Approvals and questions from agents appear in Needs You. Answer them here, or open a waiting Claude session in Claude.': '에이전트의 승인 요청과 질문은 확인 필요에 표시돼요. 여기서 답하거나, 대기 중인 Claude 세션을 Claude에서 열 수 있어요.',
+  'Approvals and questions from agents appear in Needs You. Answer them here, or open a waiting lead session in its app.': '에이전트의 승인 요청과 질문은 확인 필요에 표시돼요. 여기서 답하거나, 대기 중인 리드 세션을 해당 앱에서 열 수 있어요.',
   'When an agent needs you and the board is in the background': '보드가 백그라운드에 있고 에이전트가 내 확인을 기다릴 때',
   'Wording': '문구 다듬기',
   'Wording polish': '문구 다듬기',

@@ -608,11 +608,19 @@ async function codexSession(meta: any): Promise<void> {
   if (hello?.id !== id) {
     const done: Promise<void> = api('POST', '/api/lead/hello', { session: id, host: 'codex', ...(fromCodexDesktop(meta) ? { desktop: true } : {}) }).then(({ cwd }) => {
       // Missions are per session; one this server tracked belongs to the session it served before.
-      if (SESSION && SESSION !== id) forgetMissions();
+      const fresh = SESSION !== id;
+      if (SESSION && fresh) forgetMissions();
       SESSION = id;
-      // A thread Codex did not persist (an ephemeral session) has no folder to read.
-      projectUnknown = typeof cwd !== 'string' || !cwd;
-      if (!projectUnknown) PROJECT = canonicalPath(cwd);
+      if (typeof cwd === 'string' && cwd) {
+        PROJECT = canonicalPath(cwd);
+        projectUnknown = false;
+      } else {
+        // A thread Codex did not persist (an ephemeral session) has no folder to read. Nor has one whose folder the
+        // daemon could not read just then (its app-server updating), so the next call asks again, keeping a folder
+        // the lead has since passed as cwd.
+        if (fresh) projectUnknown = true;
+        if (hello?.done === done) hello = null;
+      }
     }, (err) => {
       if (hello?.done === done) hello = null;
       throw new Error(`Crew could not register this Codex session with its daemon: ${String((err as Error).message ?? err).split('\n')[0]}`, { cause: err });

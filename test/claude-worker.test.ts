@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { claudeAdapter } from '../plugin/bridge/adapters/claude.ts';
+import { claudeAdapter, workerEnv } from '../plugin/bridge/adapters/claude.ts';
 import { resolveConfig } from '../plugin/bridge/config.ts';
 import type { Job, JobCtl } from '../plugin/bridge/jobs.ts';
 import { writeFakeBin } from './fake-bin.ts';
@@ -20,15 +20,20 @@ const fakeClaude = `
   const instructions = flag('--append-system-prompt') ?? fs.readFileSync(flag('--append-system-prompt-file'), 'utf8');
   const session = flag('--resume') ?? 'claude-session';
   const cwd = process.cwd();
-  let turns = 0, prompt, step = 0, hold = false;
+  let turns = 0, prompt, step = 0, running = false, overlap = false;
   let replies = [];
   const modes = [flag('--permission-mode')];
-  let current = modes[0];
-  const success = () => send({
-    type: 'result', subtype: 'success', is_error: false, session_id: session,
-    result: JSON.stringify({ prompt, turns, args, mcp, instructions, replies, cwd, modes }),
-    usage: { input_tokens: 3, cache_creation_input_tokens: 5, cache_read_input_tokens: 7, output_tokens: 11 },
-  });
+  // As where the model or plan does not offer automatic mode: Claude Code falls back to the manual one.
+  const noAuto = fs.existsSync(path.join(cwd, 'no-auto'));
+  let current = noAuto && modes[0] === 'auto' ? 'default' : modes[0];
+  const success = () => {
+    running = false;
+    send({
+      type: 'result', subtype: 'success', is_error: false, session_id: session,
+      result: JSON.stringify({ prompt, turns, args, mcp, instructions, replies, cwd, modes, overlap }),
+      usage: { input_tokens: 3, cache_creation_input_tokens: 5, cache_read_input_tokens: 7, output_tokens: 11 },
+    });
+  };
   const ask = (tool, input) => {
     const id = 'tool-' + step;
     send({ type: 'assistant', message: { content: [{ type: 'tool_use', name: tool, input, id }] } });
@@ -50,14 +55,14 @@ const fakeClaude = `
     const message = JSON.parse(line);
     if (message.type === 'control_request' && message.request.subtype === 'set_permission_mode') {
       modes.push(message.request.mode);
-      if (fs.existsSync(path.join(cwd, 'mode-error'))) return send({ type: 'control_response', response: { subtype: 'error', request_id: message.request_id, error: 'Unsupported mode' } });
+      if (fs.existsSync(path.join(cwd, 'mode-error')) || (noAuto && message.request.mode === 'auto')) return send({ type: 'control_response', response: { subtype: 'error', request_id: message.request_id, error: 'Unsupported mode' } });
       if (!fs.existsSync(path.join(cwd, 'mode-ignore'))) current = message.request.mode;
       return send({ type: 'control_response', response: { subtype: 'success', request_id: message.request_id, response: { mode: message.request.mode } } });
     }
     if (message.type === 'control_response') {
       const reply = message.response;
       replies.push(reply);
-      if (['read-only edit', 'linked edit', 'git edit', 'evidence edit', 'browser', 'granted follow-up'].includes(prompt)) return success();
+      if (['read-only edit', 'linked edit', 'git edit', 'evidence edit', 'relative edit', 'browser', 'granted follow-up'].includes(prompt)) return success();
       if (step === 0 && reply.response.behavior === 'allow') fs.writeFileSync(reply.response.updatedInput.file_path, 'inside');
       if (++step < policy.length) return ask(...policy[step]);
       send({ type: 'system', subtype: 'permission_denied', tool_name: 'Write', decision_reason_type: 'other', decision_reason: '--restricted: path outside the working directory', blocked_path: outside });
@@ -65,7 +70,9 @@ const fakeClaude = `
       return success();
     }
     if (message.type !== 'user' || message.message.role !== 'user') throw new Error('Expected user turn');
-    if (hold) success();
+    // Claude Code may read a message written during a turn together with it, so Crew writes none until the result.
+    if (running) overlap = true;
+    running = true;
     prompt = message.message.content;
     turns++;
     replies = [];
@@ -76,6 +83,7 @@ const fakeClaude = `
     if (prompt === 'linked edit') return ask('Edit', { file_path: path.join(cwd, 'link', 'new', 'file.txt') });
     if (prompt === 'git edit') return ask('Write', { file_path: path.join(cwd, '.git', 'config'), content: '' });
     if (prompt === 'evidence edit') return ask('Write', { file_path: path.join(flag('--add-dir'), 'view-after.png'), content: '' });
+    if (prompt === 'relative edit') return ask('Write', { file_path: 'review.txt', content: '' });
     if (prompt === 'browser') return ask('mcp__crew__browser', {});
     if (prompt === 'classifier') {
       send({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: 'git push --force' }, id: 'use-1' }] } });
@@ -92,8 +100,8 @@ const fakeClaude = `
       console.error('Worker disappeared');
       return process.exit(2);
     }
-    hold = prompt === 'hold';
-    if (!hold) success();
+    if (prompt === 'hold') return setTimeout(success, 500);
+    success();
   });
 `;
 
@@ -164,7 +172,7 @@ for (const kind of ['delegate', 'polish', 'review', 'ask', 'debate'] as const) {
     assert.equal(flag(args, '--output-format'), 'stream-json');
     assert.equal(flag(args, '--permission-mode'), writable ? 'auto' : 'default');
     assert.equal(flag(args, '--permission-prompt-tool'), 'stdio');
-    assert.equal(flag(args, '--tools'), writable ? 'Read,Edit,Write,Glob,Grep,Bash' : 'Read,Glob,Grep,Bash');
+    assert.equal(flag(args, '--tools'), writable ? 'Read,Edit,Write,Glob,Grep,Bash' : 'Read,Write,Glob,Grep,Bash');
     assert.equal(flag(args, '--model'), writable ? 'requested-model' : undefined);
     assert.equal(flag(args, '--effort'), writable ? 'medium' : undefined);
     assert.equal(flag(args, '--resume'), undefined);
@@ -251,7 +259,7 @@ test('Claude Code refuses edits through a link to a directory outside the job', 
   assert.equal(h.events.touched, undefined);
 });
 
-test('Claude Code queues an in-flight reply, reuses an idle process, and resumes after release', async (t) => {
+test('Claude Code holds an in-flight reply until the turn ends, reuses an idle process, and resumes after release', async (t) => {
   const h = harness(t, 'hold');
   await h.adapter.start(h.ctl);
   await h.event('session');
@@ -260,6 +268,9 @@ test('Claude Code queues an in-flight reply, reuses an idle process, and resumes
   const live = await h.report();
   assert.equal(live.prompt, 'live reply');
   assert.equal(live.turns, 2);
+  // Written only once the running turn had its result, so Claude Code could not read the two as one turn.
+  assert.equal(live.overlap, false);
+  assert.equal(h.events.done.length, 1);
   assert.equal((await h.adapter.probe!(h.ctl)).verdict, 'unknown');
   await h.adapter.reply(h.ctl, 'idle reply');
   assert.equal((await h.report(1)).turns, 3);
@@ -318,6 +329,40 @@ test('Claude Code reaches its evidence directory and saves screenshots there una
   const result = await h.report();
   assert.equal(flag(result.args, '--add-dir'), h.ctl.job.evidenceDir);
   assert.equal(result.replies[0].response.behavior, 'allow');
+  // Evidence is no change to the job's files, so it is not reported as one outside the job.
+  assert.equal(h.events.touched, undefined);
+});
+
+test('Claude Code may not edit by a relative path, which it would resolve against the job folder', async (t) => {
+  const h = harness(t, 'relative edit', { sandbox: 'read-only' });
+  h.ctl.job.evidenceDir = fs.mkdirSync(path.join(h.root, 'evidence'), { recursive: true }) && fs.realpathSync.native(path.join(h.root, 'evidence'));
+  await h.adapter.start(h.ctl);
+  assert.deepEqual((await h.report()).replies[0].response, { behavior: 'deny', message: 'This job is read-only.' });
+});
+
+test('Without automatic mode, a writable job runs in the manual one and says so', async (t) => {
+  const h = harness(t, 'first');
+  fs.writeFileSync(path.join(h.cwd, 'no-auto'), '');
+  await h.adapter.start(h.ctl);
+  await h.report();
+  assert.equal(h.events.fail, undefined);
+  h.ctl.job.asksUser = true;
+  await h.adapter.reply(h.ctl, 'retry');
+  await h.report(1);
+  h.ctl.job.asksUser = false;
+  await h.adapter.reply(h.ctl, 'next');
+  // Switching back to automatic mode is refused; the turn still runs, in the manual mode.
+  assert.deepEqual((await h.report(2)).modes, ['auto', 'default', 'auto']);
+  assert.equal(h.events.fail, undefined);
+  assert.equal(h.events.note.filter(([note]) => String(note).includes('manual permission mode')).length, 1);
+});
+
+test("A Claude worker does not inherit the session variables of the Claude Code session that started the daemon", () => {
+  const host = ['CLAUDECODE', 'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_EFFORT', 'CLAUDE_AGENT_SDK_MCP_NO_PREFIX', 'CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH', 'CLAUDE_CODE_MESSAGING_SOCKET'];
+  const env = workerEnv({ PATH: '/bin', ...Object.fromEntries(host.map((key) => [key, '1'])), CLAUDE_CODE_USE_BEDROCK: '1', ANTHROPIC_API_KEY: 'k' });
+  for (const key of host) assert.equal(env[key], undefined, key);
+  assert.equal(env.CLAUDE_CODE_USE_BEDROCK, '1');
+  assert.equal(env.ANTHROPIC_API_KEY, 'k');
 });
 
 test("Claude Code's automatic mode refusals reach the lead, and a second retry turn is the user's to answer", async (t) => {
@@ -351,7 +396,8 @@ test('A turn whose manual mode Claude Code does not confirm never runs', async (
 test('A session relaunched for a turn the user answers starts in the manual mode', async (t) => {
   const h = harness(t, 'first', { asksUser: true, sessionId: 'saved' });
   await h.adapter.reply(h.ctl, 'retry');
-  assert.deepEqual((await h.report()).modes, ['default']);
+  // A resumed session may bring back the mode it was saved in, so the mode is set and confirmed before the message.
+  assert.deepEqual((await h.report()).modes, ['default', 'default']);
 });
 
 test('Claude Code may not edit .git, and the browser tool asks the user', async (t) => {

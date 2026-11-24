@@ -226,7 +226,7 @@ test('an older copy of the app leaves the registration to a newer copy that is s
   assert.equal(JSON.parse(fs.readFileSync(record, 'utf8')).version, '0.0.1');
 });
 
-test('a built copy registers with Codex, records only when both hosts run it, and leaves a registration it did not write', async (t) => {
+test('a built copy registers with Codex, records it as complete only when both hosts run it, and leaves a registration it did not write', async (t) => {
   const profile = fs.mkdtempSync(path.join(home, 'profile-'));
   const calls = path.join(profile, 'calls');
   const marketplaces = path.join(profile, 'marketplaces');
@@ -272,23 +272,27 @@ test('a built copy registers with Codex, records only when both hosts run it, an
   assert.match(left.detail, /Codex: Registered from .*checkout; the app leaves it as it is\./);
   assert.deepEqual(codexCalls().filter((call) => /remove|add/.test(call)), []);
   assert.ok(fs.existsSync(path.join(theirs, 'untracked')));
-  // Claude Code runs this copy, but Codex does not, so nothing is recorded and the next start tries again.
-  assert.equal(fs.existsSync(record), false);
+  // Claude Code runs this copy, but Codex does not: recorded, so an older copy finds this one registered, but not
+  // complete, so the next start tries again.
+  const complete = () => JSON.parse(fs.readFileSync(record, 'utf8')).complete;
+  assert.equal(complete(), false);
   assert.ok(fs.existsSync(path.join(profile, '.local', 'bin', 'crew')));
 
-  // A Codex install that fails is reported and leaves the record unwritten.
+  // A Codex install that fails is reported and leaves the record incomplete.
+  fs.rmSync(record);
   fs.rmSync(marketplaces);
   fs.rmSync(calls);
   fs.writeFileSync(failAdd, '');
   const failed = await register(true);
   assert.equal(failed.ok, false);
   assert.match(failed.detail, /Codex: Could not install the plugin in Codex: no space left/);
-  assert.equal(fs.existsSync(record), false);
+  assert.equal(complete(), false);
   assert.deepEqual(codexCalls().filter((call) => /add/.test(call)), [`plugin marketplace add ${ours}`, 'plugin add crew@crew']);
 
   // Once both hosts run this copy it is recorded; the marketplace carries the agents the skills read.
   fs.rmSync(failAdd);
   assert.equal((await register(true)).ok, true);
+  assert.equal(complete(), true);
   // On Windows the registered root is the copy in the Crew home, which open sessions keep running through an update.
   const registeredRoot = JSON.parse(fs.readFileSync(record, 'utf8')).root;
   if (process.platform === 'win32') assert.match(registeredRoot, /[\\/]plugins[\\/][^\\/]+-built$/);
@@ -373,8 +377,10 @@ test('the Codex hooks item asks app-server hooks/list and is trusted only when C
   const silent = await codexHooksItem(fake('silent', '[]', 'silent'), undefined, 300);
   assert.equal(silent.ok, false);
   assert.match(silent.detail, /^Could not ask Codex whether they are trusted .*timed out/);
-  const pid = Number(fs.readFileSync(path.join(dir, 'silent.pid'), 'utf8'));
-  const alive = () => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  // A fake ended before it got as far as writing its pid was not left running either.
+  const pidFile = path.join(dir, 'silent.pid');
+  const pid = fs.existsSync(pidFile) ? Number(fs.readFileSync(pidFile, 'utf8')) : 0;
+  const alive = () => { if (!pid) return false; try { process.kill(pid, 0); return true; } catch { return false; } };
   for (let i = 0; i < 50 && alive(); i++) await new Promise((resolve) => setTimeout(resolve, 100));
   assert.equal(alive(), false);
   const missing = await codexHooksItem(path.join(dir, 'no-such-codex'));

@@ -193,7 +193,8 @@ struct JobDetailView: View {
             detailSection(String(localized: "Activity"), symbol: "bolt") { EventList(events: combined) }
         }
         let resume = job.capabilities?.confined == true ? nil
-            : job.sessionId.flatMap { session in store.state.agents[job.agent].map { "\($0.resume) \(session)" } }
+            // The daemon lists only workers it runs for every lead; a Claude worker resumes as a Claude session does.
+            : job.sessionId.flatMap { session in (job.agent == "claude" ? "claude --resume" : store.state.agents[job.agent]?.resume).map { "\($0) \(session)" } }
         // A finished job may have nothing left to do, and then has no footer.
         if resume != nil || job.isActive {
             DetailFooter {
@@ -360,13 +361,13 @@ struct SessionDetailView: View {
     @ViewBuilder private func contents(_ session: ClaudeSession) -> some View {
         if session.state == "waiting" {
             VStack(alignment: .leading, spacing: Space.m) {
-                Text(session.waitingFor ?? String(localized: "Claude needs your input.")).font(Typeface.callout).textSelection(.enabled)
+                Text(session.waitingFor ?? String(localized: "\(agentName(session.agent)) needs your input.")).font(Typeface.callout).textSelection(.enabled)
                 ClaudeAskView(session: session)
-                if session.claudeURL == nil { Text("Answer in Claude.").font(Typeface.callout).foregroundStyle(.secondary) }
+                if session.claudeURL == nil { Text("Answer in \(agentName(session.agent)).").font(Typeface.callout).foregroundStyle(.secondary) }
             }.card(fill: Palette.attention(Palette.warning))
         }
         Grid(alignment: .leading, horizontalSpacing: WorkspaceStyle.factColumnGap, verticalSpacing: WorkspaceStyle.factRowGap) {
-            fact(String(localized: "Agent"), String(localized: "Claude · Lead"))
+            fact(String(localized: "Agent"), String(localized: "\(agentName(session.agent)) · Lead"))
             fact(String(localized: "Project"), session.projectPath)
             if session.cwd != session.projectPath { fact(String(localized: "Directory"), session.cwd) }
             fact(String(localized: "Started"), String(localized: "\(elapsed(store.now - session.startedAt)) ago"))
@@ -397,7 +398,7 @@ struct SessionDetailView: View {
         }
         DetailFooter {
             OpenInClaudeButton(session: session)
-            CopyButton(title: String(localized: "Resume Command"), text: "claude --resume \(session.id)", help: String(localized: "Copy the command that resumes this session"))
+            CopyButton(title: String(localized: "Resume Command"), text: session.resumeCommand, help: String(localized: "Copy the command that resumes this session"))
         }
     }
 }

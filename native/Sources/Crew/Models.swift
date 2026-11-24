@@ -302,8 +302,11 @@ struct PullStatus: Equatable {
     var needsLead = false
 }
 
+/// A lead session, reported by Claude Code's hooks or, with host "codex", by Codex's.
 struct ClaudeSession: Codable, Sendable, Identifiable, Equatable {
     var id: String
+    /// "codex" for a Codex session; absent for Claude Code.
+    var host: String?
     var mission: String?
     var cwd: String
     var root: String?
@@ -324,9 +327,12 @@ struct ClaudeSession: Codable, Sendable, Identifiable, Equatable {
     /// What the waiting prompt asks beyond its one line; present only while waiting.
     var ask: ClaudeAsk?
     var projectPath: String { root ?? cwd }
+    /// The agent the session runs in, as jobs name theirs.
+    var agent: String { host ?? "claude" }
+    var resumeCommand: String { agent == "codex" ? "codex resume \(id)" : "claude --resume \(id)" }
     /// The link that opens the session in the Claude desktop app, which accepts only a well-formed local_ id.
     var claudeURL: URL? {
-        guard let desktopId, desktopId.wholeMatch(of: /local_[A-Za-z0-9-]{1,64}/) != nil else { return nil }
+        guard agent == "claude", let desktopId, desktopId.wholeMatch(of: /local_[A-Za-z0-9-]{1,64}/) != nil else { return nil }
         return URL(string: "claude://code/continue?session=\(desktopId)")
     }
     func leadMission(in missions: [Mission]) -> Mission? {

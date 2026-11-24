@@ -322,5 +322,13 @@ import Testing
         #expect(agentRole("antigravity", store: store) == delegate)
         store.state.roleSettings = ["refactor": RoleSetting(agents: RoleAssignment.holderOrder)]
         #expect(agentRole("antigravity", store: store) == "\(delegate) · \(state.roleLabel("refactor"))")
+        // Codex's card says Lead while one of its lead sessions, working or idle, is open in scope.
+        store.state.roleSettings = nil
+        var codex = state.claude[0]
+        codex.host = "codex"; codex.state = "idle"
+        store.state.claude = [codex]
+        #expect(agentRole("codex", store: store) == "Lead · \(delegate) · \(release)")
+        store.selection = "project:/elsewhere"
+        #expect(agentRole("codex", store: store) == "\(delegate) · \(release)")
     }
 }

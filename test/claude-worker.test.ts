@@ -22,9 +22,11 @@ const fakeClaude = `
   const cwd = process.cwd();
   let turns = 0, prompt, step = 0, hold = false;
   let replies = [];
+  const modes = [flag('--permission-mode')];
+  let current = modes[0];
   const success = () => send({
     type: 'result', subtype: 'success', is_error: false, session_id: session,
-    result: JSON.stringify({ prompt, turns, args, mcp, instructions, replies, cwd }),
+    result: JSON.stringify({ prompt, turns, args, mcp, instructions, replies, cwd, modes }),
     usage: { input_tokens: 3, cache_creation_input_tokens: 5, cache_read_input_tokens: 7, output_tokens: 11 },
   });
   const ask = (tool, input) => {
@@ -46,13 +48,19 @@ const fakeClaude = `
   ];
   require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
     const message = JSON.parse(line);
+    if (message.type === 'control_request' && message.request.subtype === 'set_permission_mode') {
+      modes.push(message.request.mode);
+      if (fs.existsSync(path.join(cwd, 'mode-error'))) return send({ type: 'control_response', response: { subtype: 'error', request_id: message.request_id, error: 'Unsupported mode' } });
+      if (!fs.existsSync(path.join(cwd, 'mode-ignore'))) current = message.request.mode;
+      return send({ type: 'control_response', response: { subtype: 'success', request_id: message.request_id, response: { mode: message.request.mode } } });
+    }
     if (message.type === 'control_response') {
       const reply = message.response;
       replies.push(reply);
       if (['read-only edit', 'linked edit', 'git edit', 'evidence edit', 'browser', 'granted follow-up'].includes(prompt)) return success();
       if (step === 0 && reply.response.behavior === 'allow') fs.writeFileSync(reply.response.updatedInput.file_path, 'inside');
       if (++step < policy.length) return ask(...policy[step]);
-      send({ type: 'system', subtype: 'permission_denied', tool_name: 'Write', blocked_path: outside });
+      send({ type: 'system', subtype: 'permission_denied', tool_name: 'Write', decision_reason_type: 'other', decision_reason: '--restricted: path outside the working directory', blocked_path: outside });
       send({ type: 'assistant', message: { content: [{ type: 'text', text: 'Edited inside.' }] } });
       return success();
     }
@@ -62,13 +70,18 @@ const fakeClaude = `
     turns++;
     replies = [];
     step = 0;
-    send({ type: 'system', subtype: 'init', session_id: session, model: 'test-model', effort: 'medium' });
+    send({ type: 'system', subtype: 'init', session_id: session, model: 'test-model', effort: 'medium', permissionMode: current });
     if (prompt === 'policy') return ask(...policy[0]);
     if (prompt === 'read-only edit') return ask('NotebookEdit', { notebook_path: local });
     if (prompt === 'linked edit') return ask('Edit', { file_path: path.join(cwd, 'link', 'new', 'file.txt') });
     if (prompt === 'git edit') return ask('Write', { file_path: path.join(cwd, '.git', 'config'), content: '' });
     if (prompt === 'evidence edit') return ask('Write', { file_path: path.join(flag('--add-dir'), 'view-after.png'), content: '' });
     if (prompt === 'browser') return ask('mcp__crew__browser', {});
+    if (prompt === 'classifier') {
+      send({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: 'git push --force' }, id: 'use-1' }] } });
+      send({ type: 'system', subtype: 'permission_denied', tool_name: 'Bash', tool_use_id: 'use-1', decision_reason_type: 'classifier', decision_reason: 'Force push not asked for.' });
+      return success();
+    }
     if (prompt === 'granted follow-up') return ask(...policy[3]);
     if (prompt === '429') return send({ type: 'result', subtype: 'error_during_execution', is_error: true, api_error_status: 429, errors: ['Too many requests'] });
     if (prompt === 'rate event') return send({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected' } });
@@ -147,7 +160,7 @@ for (const kind of ['delegate', 'polish', 'review', 'ask', 'debate'] as const) {
     for (const option of ['-p', '--verbose', '--restricted', '--strict-mcp-config']) assert.ok(args.includes(option), option);
     assert.equal(flag(args, '--input-format'), 'stream-json');
     assert.equal(flag(args, '--output-format'), 'stream-json');
-    assert.equal(flag(args, '--permission-mode'), 'default');
+    assert.equal(flag(args, '--permission-mode'), writable ? 'auto' : 'default');
     assert.equal(flag(args, '--permission-prompt-tool'), 'stdio');
     assert.equal(flag(args, '--tools'), writable ? 'Read,Edit,Write,Glob,Grep,Bash' : 'Read,Glob,Grep,Bash');
     assert.equal(flag(args, '--model'), writable ? 'requested-model' : undefined);
@@ -305,12 +318,45 @@ test('Claude Code reaches its evidence directory and saves screenshots there una
   assert.equal(result.replies[0].response.behavior, 'allow');
 });
 
+test("Claude Code's automatic mode refusals reach the lead, and a second retry turn is the user's to answer", async (t) => {
+  const h = harness(t, 'classifier');
+  await h.adapter.start(h.ctl);
+  await h.report();
+  assert.deepEqual(h.events.refused, [['Bash: git push --force', 'Force push not asked for.']]);
+  h.ctl.job.asksUser = true;
+  await h.adapter.reply(h.ctl, 'retry');
+  assert.deepEqual((await h.report(1)).modes, ['auto', 'default']);
+  h.ctl.job.asksUser = false;
+  await h.adapter.reply(h.ctl, 'next');
+  assert.deepEqual((await h.report(2)).modes, ['auto', 'default', 'auto']);
+});
+
+test('A turn whose manual mode Claude Code does not confirm never runs', async (t) => {
+  for (const marker of ['mode-error', 'mode-ignore']) {
+    const h = harness(t, 'first');
+    await h.adapter.start(h.ctl);
+    await h.report();
+    fs.writeFileSync(path.join(h.cwd, marker), '');
+    h.ctl.job.asksUser = true;
+    await h.adapter.reply(h.ctl, 'retry');
+    const [message] = await h.event('fail');
+    assert.match(String(message), marker === 'mode-error' ? /could not switch to default permissions: Unsupported mode/ : /started the turn in auto permissions, not default/);
+    assert.equal(h.events.done.length, 1);
+  }
+});
+
+test('A session relaunched for a turn the user answers starts in the manual mode', async (t) => {
+  const h = harness(t, 'first', { asksUser: true, sessionId: 'saved' });
+  await h.adapter.reply(h.ctl, 'retry');
+  assert.deepEqual((await h.report()).modes, ['default']);
+});
+
 test('Claude Code may not edit .git, and the browser tool asks the user', async (t) => {
   const git = harness(t, 'git edit');
   fs.mkdirSync(path.join(git.cwd, '.git'), { recursive: true });
   await git.adapter.start(git.ctl);
   assert.deepEqual((await git.report()).replies[0].response, { behavior: 'deny', message: 'Edit paths must be inside the job workspace.' });
-  const browser = harness(t, 'browser');
+  const browser = harness(t, 'browser', { sandbox: 'read-only' });
   await browser.adapter.start(browser.ctl);
   assert.deepEqual(await browser.event('waiting'), ['approval', 'mcp__crew__browser', undefined]);
 });

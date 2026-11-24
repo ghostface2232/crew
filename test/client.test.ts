@@ -48,6 +48,33 @@ test('replacement leaves a daemon another client started in the meantime', async
   assert.equal(spawn.mock.callCount(), 0);
 });
 
+test('replacement waits for the log a stopping daemon started through cmd.exe still holds', async (t) => {
+  fastWaits(t);
+  let phase: 'old' | 'down' | 'new' = 'old';
+  t.mock.method(globalThis, 'fetch', async (url: string) => {
+    if (url.endsWith('/api/shutdown')) { phase = 'down'; return Response.json({}); }
+    if (phase === 'down') throw new Error('down');
+    return Response.json({ name: 'crew', version: '0.0.0', build: 'b', root: PLUGIN_ROOT, active: 0, pid: phase === 'old' ? 12345 : 54321, ...(phase === 'old' ? { partialEnv: true } : {}) });
+  });
+  let opens = 0;
+  const { openSync, closeSync } = fs;
+  t.mock.method(fs, 'openSync', (target: fs.PathLike, flags: fs.OpenMode = 'r', mode?: fs.Mode) => {
+    if (!String(target).endsWith('daemon.log')) return openSync(target, flags, mode);
+    if (++opens < 3) throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
+    return -1;
+  });
+  t.mock.method(fs, 'closeSync', (fd: number) => { if (fd !== -1) closeSync(fd); });
+  const spawn = t.mock.method(childProcess, 'spawn', () => {
+    phase = 'new';
+    return { on() {}, unref() {} };
+  });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  await ensureDaemon();
+  assert.equal(opens, 3);
+  assert.equal(spawn.mock.callCount(), 1);
+});
+
 test('a hook report retries with the newly created token and exits successfully on failure', (t) => {
   const reportHome = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-report-'));
   t.after(() => fs.rmSync(reportHome, { recursive: true, force: true }));

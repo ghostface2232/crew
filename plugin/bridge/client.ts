@@ -216,8 +216,20 @@ async function startDaemon(): Promise<void> {
   const script = path.join(import.meta.dirname, `daemon${path.extname(import.meta.filename)}`);
   const env = { ...agentEnv(), ...nodeEnv(), ...(partial ? { CREW_PARTIAL_ENV: '1' } : {}) };
   let spawnError: Error | undefined;
-  const spawnHere = () => {
-    const out = fs.openSync(path.join(HOME, 'daemon.log'), 'a');
+  const spawnHere = async () => {
+    let out: number | undefined;
+    // A daemon started outside a Codex job writes through cmd.exe, which holds the log unshared until it exits. One
+    // still stopping there is waited for, and one starting there is left to come up instead of this one.
+    await waitFor(async () => {
+      try {
+        out = fs.openSync(path.join(HOME, 'daemon.log'), 'a');
+        return true;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EBUSY') throw error;
+        return (await health()) !== null;
+      }
+    }, 5000);
+    if (out === undefined) return;
     const child = spawn(process.execPath, [script], { detached: true, windowsHide: true, stdio: ['ignore', out, out], env });
     child.on('error', (error) => { spawnError = error; });
     child.unref();
@@ -228,10 +240,10 @@ async function startDaemon(): Promise<void> {
     return (await health()) !== null;
   }, 8000);
   const outside = inCodexJob && process.platform === 'win32' && await startOutsideJob(script, env);
-  if (!outside) spawnHere();
+  if (!outside) await spawnHere();
   // WMI vouches only that cmd.exe was created, so a daemon that did not come up from there is started the usual way.
   // One that comes up late finds this one recorded and exits (daemon.ts bind).
-  if (!(await started()) && !(outside && (spawnHere(), await started()))) {
+  if (!(await started()) && !(outside && (await spawnHere(), await started()))) {
     throw new Error(`The Crew daemon did not start. See ${path.join(HOME, 'daemon.log')}.`);
   }
 }

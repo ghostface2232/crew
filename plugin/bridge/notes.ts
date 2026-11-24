@@ -48,10 +48,15 @@ export type NoteRole = 'build' | 'fix' | 'review';
 export type FixOutcome = 'root-cause' | 'patch' | 'another-review';
 export type ChangeSize = 'small' | 'medium' | 'large' | 'xlarge';
 export type Adoption = 'as-is' | 'after-reply' | 'partly' | 'rejected';
+/** How hard a piece of work was, set when it was handed out rather than after its review, so a result cannot change it. */
+export type Difficulty = 'routine' | 'standard' | 'hard';
 export const NOTE_ROLES = ['build', 'fix', 'review'] as const;
 export const FIX_OUTCOMES = ['root-cause', 'patch', 'another-review'] as const;
 export const CHANGE_SIZES = ['small', 'medium', 'large', 'xlarge'] as const;
 export const ADOPTIONS = ['as-is', 'after-reply', 'partly', 'rejected'] as const;
+export const DIFFICULTIES = ['routine', 'standard', 'hard'] as const;
+// A build line names at most this many reviews of its work.
+export const MAX_REVIEWS = 10;
 /** What a peer rates, each from 1 to 5: the work's correctness, how it followed its brief, how honest its report was, and how useful a review's findings were. */
 export const RATING_ITEMS = ['correctness', 'brief', 'report', 'findings'] as const;
 export type RatingItem = (typeof RATING_ITEMS)[number];
@@ -82,6 +87,10 @@ export interface Evidence {
   /** How the lead took a delegated job's work, and the follow-up turns it took; shown, not scored. */
   adoption?: Adoption;
   rounds?: number;
+  /** For a build line: how hard the work was, as set when it was handed out. A line without one counts as standard. */
+  difficulty?: Difficulty;
+  /** For a build line: the model of each review its accepted findings came from, the lead reading a worker's diff included. */
+  reviewedBy?: string[];
   /** For a review line: the work it reviewed, by its job when a worker built it; `fix` when that job was a fix. */
   of?: { job?: string; model: string; fix?: true };
   /** The lead's rating of this line's work, resting on `text`. Only a job's work is rated, never the lead's own. */
@@ -137,6 +146,7 @@ const rated = (items: any, allowed: readonly string[]) => items && typeof items 
   && Object.entries(items).every(([item, value]) => allowed.includes(item) && Number.isInteger(value) && (value as number) >= 1 && (value as number) <= 5);
 const wellRated = (ratings: unknown): Rating[] => (Array.isArray(ratings) ? ratings : []).filter((r: any) => r && typeof r.id === 'string' && Number.isFinite(r.at) && HOLDERS.includes(r.by)
   && (r.byModel === undefined || typeof r.byModel === 'string') && typeof r.byJob === 'string' && r.byJob && rated(r.items, RATING_ITEMS) && typeof r.fact === 'string' && r.fact.trim() !== '');
+const reviewModels = (list: unknown) => Array.isArray(list) && list.length > 0 && list.length <= MAX_REVIEWS && list.every((m) => typeof m === 'string' && m.trim() !== '');
 const counts = (f: any) => f && typeof f === 'object' && ['high', 'medium', 'low'].every((key) => Number.isInteger(f[key]) && f[key] >= 0);
 
 /**
@@ -154,7 +164,9 @@ function wellFormed(models: Record<string, any>): Record<string, ModelNote> {
       && (e.rating === undefined || (typeof e.job === 'string' && e.job !== '' && rated(e.rating, LEAD_ITEMS[e.role as NoteRole])))
       && counts(e.findings) && (e.declined === undefined || counts(e.declined))
       && (e.adoption === undefined || (e.role === 'build' && typeof e.job === 'string' && e.job && ADOPTIONS.includes(e.adoption)))
-      && (e.rounds === undefined || (e.adoption !== undefined && Number.isInteger(e.rounds) && e.rounds >= 0)));
+      && (e.rounds === undefined || (e.adoption !== undefined && Number.isInteger(e.rounds) && e.rounds >= 0))
+      && (e.difficulty === undefined || (e.role === 'build' && DIFFICULTIES.includes(e.difficulty)))
+      && (e.reviewedBy === undefined || (e.role === 'build' && reviewModels(e.reviewedBy))));
     Object.defineProperty(kept, model, {
       value: { model, agent: note.agent, summary: typeof note.summary === 'string' ? note.summary : '', summaryAt: Number.isFinite(note.summaryAt) ? note.summaryAt : null, evidence },
       enumerable: true, configurable: true, writable: true,
@@ -226,6 +238,8 @@ export function addEvidence(home: string, input: Omit<Evidence, 'id' | 'at'> & {
   }
   check(input.adoption === undefined || (input.role === 'build' && Boolean(input.job) && ADOPTIONS.includes(input.adoption)), `adoption (only for a delegated job's build line: ${oneOf(ADOPTIONS)})`);
   check(input.rounds === undefined || (input.adoption !== undefined && Number.isInteger(input.rounds) && input.rounds >= 0), 'rounds (a non-negative integer, given with adoption)');
+  check(input.difficulty === undefined || (input.role === 'build' && DIFFICULTIES.includes(input.difficulty)), `difficulty (only for a build line: ${oneOf(DIFFICULTIES)})`);
+  check(input.reviewedBy === undefined || (input.role === 'build' && reviewModels(input.reviewedBy)), `reviewed_by (only for a build line: 1 to ${MAX_REVIEWS} model ids, one per review)`);
   const counted = (given: Partial<Findings> | undefined, name: string): Findings => {
     const result = {} as Findings;
     for (const key of ['high', 'medium', 'low'] as const) {
@@ -250,7 +264,7 @@ export function addEvidence(home: string, input: Omit<Evidence, 'id' | 'at'> & {
   let id: string;
   const ids = new Set(Object.values(file.models).flatMap((m) => m.evidence.map((e) => e.id)));
   do { id = `ev-${randomBytes(3).toString('hex')}`; } while (ids.has(id));
-  const evidence: Evidence = { ...input, model, findings, ...(declined ? { declined } : {}), text, id, at };
+  const evidence: Evidence = { ...input, model, findings, ...(declined ? { declined } : {}), ...(input.reviewedBy ? { reviewedBy: input.reviewedBy.map((m) => m.trim()) } : {}), text, id, at };
   if (input.of) evidence.of = { ...(input.of.job ? { job: input.of.job } : {}), model: input.of.model.trim(), ...(input.of.fix ? { fix: true } : {}) };
   // Noting a job again (a retried call, a resumed session, a model the session reported later) replaces its line
   // rather than counting the job twice; the line moves to the model named now, and a model it leaves empty goes.

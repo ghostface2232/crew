@@ -19,7 +19,7 @@ The bridge is everything in Crew that is not a user interface: the daemon, the M
 | Lead MCP server and its responses | `mcp.ts`, `render.ts`, `delivery.ts` (news, receipts, and response bounds) |
 | Worker MCP server (`ask_lead`, `siblings`, `search`, `rate`, …) | `worker-mcp.ts` |
 | Jobs, missions, and pull request watches | `jobs.ts`, `missions.ts`, `pulls.ts`, `runbook.ts` |
-| Agent adapters | `adapters/codex.ts` (`codex app-server`), `adapters/antigravity.ts` (`agy acp`), `rpc.ts` |
+| Agent adapters | `adapters/codex.ts` (`codex app-server`), `adapters/antigravity.ts` (`agy acp`), `adapters/claude.ts` (`claude -p`, for a Codex lead), `rpc.ts` |
 | Worktrees, includes, transport commits, and cleanup | `git.ts`, `gc.ts` |
 | What a worker is told | `prompts.ts`, `instructions.ts`, `skills.ts`, `../roles/*.md` |
 | Sandboxed checks and the macOS browser | `check.ts`, `browser.ts` |

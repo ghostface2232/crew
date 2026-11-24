@@ -64,7 +64,7 @@ function harness(onStart: (ctl: JobCtl) => void, readConfig: () => Config = () =
   const events: CrewEvent[] = [];
   const attention: string[] = [];
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-home-'));
-  const jobs = new Jobs(home, readConfig, { codex: adapter, antigravity: adapter }, {
+  const jobs = new Jobs(home, readConfig, { codex: adapter, antigravity: adapter, claude: adapter }, {
     onEvent: (e) => events.push(e),
     onJob: () => {},
     onAttention: (_job, kind) => attention.push(kind),
@@ -1299,6 +1299,16 @@ test('the lead picks one of a role\'s holders per job, and a role Claude holds s
   t.after(() => { plain.jobs.flush(); fs.rmSync(plain.home, { recursive: true, force: true, maxRetries: 5 }); });
   await assert.rejects(plain.jobs.create({ kind: 'delegate', cwd: repo, task: 'x', isolation: 'in_place', agent: 'antigravity' }), /antigravity does not hold delegate; its holders are: codex/);
   await assert.rejects(jobs.create({ kind: 'polish', cwd: repo, targets: ['README.md'], isolation: 'in_place' }), /polish is held by Claude, which runs no worker here: start it from a lead session/);
+  // A Codex lead that names Claude starts a Claude worker; a Claude Code lead, or one that names no holder, does not.
+  const codexLead = '019d0000-0000-7000-8000-000000000001';
+  const claudeLead = '019d0000-0000-7000-8000-000000000002';
+  jobs.delivery.host(codexLead, 'codex');
+  const polish = { kind: 'polish' as const, cwd: repo, targets: ['README.md'], isolation: 'in_place' as const };
+  const worker = await jobs.create({ ...polish, agent: 'claude', lead: codexLead });
+  assert.equal(worker.agent, 'claude');
+  assert.match(worker.id, /^cl-/);
+  await assert.rejects(jobs.create({ ...polish, lead: codexLead }), /held by Claude, which runs no worker here/);
+  await assert.rejects(jobs.create({ ...polish, agent: 'claude', lead: claudeLead }), /held by Claude, which runs no worker here/);
 });
 
 test('a job runs under the preset it was given and keeps it, capping its tier by that preset', async (t) => {

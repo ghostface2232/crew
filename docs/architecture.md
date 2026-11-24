@@ -13,6 +13,7 @@ Claude Code (Desktop or CLI) ── Lead
 plugin/bridge/mcp.ts ──HTTP──▶ Crew Daemon (127.0.0.1:47615)
                                  ├─ codex app-server   (Codex)
                                  ├─ agy acp            (Antigravity)
+                                 ├─ claude -p          (Claude, under a Codex lead)
                                  ├─ Event log ~/.crew/events.jsonl
                                  └─ Status board (SSE) http://127.0.0.1:47615
 ```

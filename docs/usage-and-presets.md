@@ -90,12 +90,12 @@ The preset belongs to the work, not the card. Stopping tracking on the board kee
 
 A job can name its difficulty via `tier` (`delegate`, `review`, `polish`, `debate`), and the bridge maps it to a model family ([tiers.ts](../plugin/bridge/tiers.ts)). Jobs without a tier use the default (`light` for read-only questions, `standard` otherwise).
 
-| Tier | Use | Codex | Antigravity | Codex effort |
-| --- | --- | --- | --- | --- |
-| `fast` | Plain searches and lookups | Luna | Hydrogen | `medium` |
-| `light` | Simple, well-specified tasks; default for a question | Terra | Hydrogen | `medium` |
-| `standard` | Most work, including most UI changes; the default | Sol | Hydrogen | `medium` |
-| `frontier` | Especially hard/complex work, a UI rebuilt from scratch, or literary/very complex documents | Astra | Neon | `high` |
+| Tier | Use | Codex | Antigravity | Claude worker | Codex effort |
+| --- | --- | --- | --- | --- | --- |
+| `fast` | Plain searches and lookups | Luna | Hydrogen | `haiku` | `medium` |
+| `light` | Simple, well-specified tasks; default for a question | Terra | Hydrogen | `haiku` | `medium` |
+| `standard` | Most work, including most UI changes; the default | Sol | Hydrogen | `sonnet` | `medium` |
+| `frontier` | Especially hard/complex work, a UI rebuilt from scratch, or literary/very complex documents | Astra | Neon | `opus` | `high` |
 
 Tiers name model families, not versions. For Codex, Crew picks the newest unhidden model in that family from `$CODEX_HOME/models_cache.json` (falling back to Codex's default). For Antigravity, Crew matches the session's offered model list (skipping orchestrators) and falls back to the agent's default. Because Antigravity element names do not encode rank, families are mapped manually. `Neon` holds `frontier`. The displaced `Argon` stays recorded in `FORMER_FAMILIES` so explicit Argon models still run and preset caps still lower them.
 

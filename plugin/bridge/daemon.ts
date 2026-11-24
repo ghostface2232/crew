@@ -9,6 +9,7 @@ import { StringDecoder } from 'node:string_decoder';
 import { boardAsset, BOARD_CSP } from './assets.ts';
 import { boardCredential, boardExpiry, ensureToken, evidenceSeal, sameToken, SESSION_COOKIE } from './auth.ts';
 import { antigravityAdapter } from './adapters/antigravity.ts';
+import { claudeAdapter } from './adapters/claude.ts';
 import { CodexAdapter } from './adapters/codex.ts';
 import { CodexLeads, codexQueue } from './codex-lead.ts';
 import { stopChecks } from './check.ts';
@@ -219,6 +220,7 @@ function liveConfig(): Config {
 
 const codex = new CodexAdapter(config);
 const antigravity = antigravityAdapter(config);
+const claudeWorker = claudeAdapter(config);
 
 // Roles are read per job, so a change to config.json applies to the next one, and an invalid file fails
 // that job with the reason instead of silently running old roles. Adapters keep the settings they started with.
@@ -334,7 +336,7 @@ codex.onLimits = (limits) => {
  * running on would save an empty ledger over it.
  */
 function loadJobs(hooks: JobsHooks): Jobs {
-  const open = () => new Jobs(HOME, loadConfig, { codex, antigravity }, hooks);
+  const open = () => new Jobs(HOME, loadConfig, { codex, antigravity, claude: claudeWorker }, hooks);
   try {
     return open();
   } catch (err) {
@@ -1108,6 +1110,7 @@ function shutdown(): void {
   attempt('stop waking Codex leads', () => codexLeads.stop());
   attempt('stop Codex', () => codex.shutdown());
   attempt('stop Antigravity', () => antigravity.shutdown());
+  attempt('stop Claude workers', () => claudeWorker.shutdown());
   attempt('stop the usage monitor', () => usage.stop());
   attempt('save jobs', () => jobs.flush());
   attempt('save missions', () => missions.flush());

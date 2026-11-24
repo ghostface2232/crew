@@ -89,17 +89,19 @@ function launchClaude(config: Config, ctl: JobCtl, resume?: string) {
     files = undefined;
   };
   try {
-    // cmd.exe shims cannot take the quotes in JSON or the newlines in role instructions.
+    // The MCP config carries the job's token, which a command line would show to every local process, so it always
+    // goes in a file only the user can read. cmd.exe shims cannot take the newlines in role instructions either.
+    if (scratch) mkdirSync(scratch, { recursive: true });
+    files = mkdtempSync(path.join(scratch ?? os.tmpdir(), 'crew-claude-'));
+    const mcpFile = path.join(files, 'mcp.json');
+    writeFileSync(mcpFile, mcp, { mode: 0o600 });
+    args.push('--mcp-config', mcpFile);
     if (agentCommand(config.claude.bin, [], env).shell) {
-      if (scratch) mkdirSync(scratch, { recursive: true });
-      files = mkdtempSync(path.join(scratch ?? os.tmpdir(), 'crew-claude-'));
-      const mcpFile = path.join(files, 'mcp.json');
       const promptFile = path.join(files, 'instructions.txt');
-      writeFileSync(mcpFile, mcp, { mode: 0o600 });
       writeFileSync(promptFile, instructions, { mode: 0o600 });
-      args.push('--mcp-config', mcpFile, '--append-system-prompt-file', promptFile);
+      args.push('--append-system-prompt-file', promptFile);
     } else {
-      args.push('--mcp-config', mcp, '--append-system-prompt', instructions);
+      args.push('--append-system-prompt', instructions);
     }
     const launch = agentCommand(config.claude.bin, args, env);
     const child = spawn(launch.bin, launch.args ?? [], {

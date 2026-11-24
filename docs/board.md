@@ -19,7 +19,7 @@ The Claude plugin, CLI, and Windows Electron main process connect to an independ
 | `desktop/main.ts`, `desktop/preload.cts` | Windows hosting, single instance, tray, restored bounds, Mica backdrop, request signing, daemon startup, and updater IPC |
 | `plugin/bridge/assets.ts` | Built-asset allowlist, MIME types, and renderer CSP |
 
-Bridge types are imported type-only, keeping Node modules out of the renderer. Shared CSS tokens in `plugin/board/board.css` preserve the workspace surfaces, typography, and state colors. `Dispatch.tsx`, `Settings.tsx`, and `Scores.tsx` use CSS Modules. All text uses the bundled variable Pretendard font (`plugin/board/pretendard.woff2`) in three weights, 450, 550, and 600, with no monospace face. The board draws its own selects, checkboxes, switches, tooltips, and confirmation prompts for a consistent appearance on Windows.
+Bridge types are imported type-only, keeping Node modules out of the renderer. Shared CSS tokens in `plugin/board/board.css` preserve the workspace surfaces, typography, and state colors. `Dispatch.tsx`, `Settings.tsx`, `Scores.tsx`, and `Onboarding.tsx` use CSS Modules. All text uses the bundled variable Pretendard font (`plugin/board/pretendard.woff2`) in three weights, 450, 550, and 600, with no monospace face. The board draws its own selects, checkboxes, switches, tooltips, and confirmation prompts for a consistent appearance on Windows.
 
 ## Navigation and workspace
 
@@ -115,7 +115,7 @@ These commands run `scripts/desktop.mjs`, which builds and opens the native Swif
 
 ## Renderer security
 
-The Electron renderer uses `nodeIntegration: false`, `contextIsolation: true`, and `sandbox: true`. Its preload (`desktop/preload.cts`) exposes only `window.crewDesktop.update`. `desktop/main.ts` answers it solely from the main window's board origin and permits only `clipboard-sanitized-write` for that origin. The shell denies external navigation, webviews, and unapproved popups. Report links open in the default browser, and evidence files open in a separate sandboxed window.
+The Electron renderer uses `nodeIntegration: false`, `contextIsolation: true`, and `sandbox: true`. Its preload (`desktop/preload.cts`) exposes only `window.crewDesktop.update` and `window.crewDesktop.welcome`. `desktop/main.ts` answers it solely from the main window's board origin and permits only `clipboard-sanitized-write` for that origin. The shell denies external navigation, webviews, and unapproved popups. Report links open in the default browser, and evidence files open in a separate sandboxed window.
 
 `BOARD_CSP` in `plugin/bridge/assets.ts` restricts scripts, connections, fonts, and media to `'self'`, with `data:` for images and `'unsafe-inline'` for styles. The daemon retains loopback Host/Origin checks, and Vite removes only its own development origins.
 

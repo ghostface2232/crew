@@ -1903,6 +1903,7 @@ const slashed = (file: string) => file.split(path.sep).join('/');
 /** Files changed outside the paths the worker was told it may touch. */
 export function outOfScope(files: string[], targets: string[]): string[] {
   if (targets.length === 0) return [];
-  const allowed = targets.map((t) => t.replace(/^\.\//, '').replace(/\/+$/, ''));
+  // Jobs saved before targets were slashed on Windows still hold backslashes.
+  const allowed = targets.map((t) => slashed(t).replace(/^\.\//, '').replace(/\/+$/, ''));
   return files.filter((file) => !allowed.some((t) => file === t || file.startsWith(`${t}/`) || path.matchesGlob(file, t)));
 }

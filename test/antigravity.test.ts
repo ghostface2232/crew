@@ -861,6 +861,14 @@ test('a tool call is judged on its final fields, and Crew\'s own tools and faile
   assert.deepEqual(job.notes ?? [], []);
 });
 
+test('the Crew token is refused whatever the case of its path on Windows', { skip: process.platform !== 'win32' }, () => {
+  const token = tokenFile(HOME);
+  for (const file of [token.toLowerCase(), token.toUpperCase()]) {
+    const call = { kind: 'read', title: 'File token', locations: [{ path: file }] };
+    assert.deepEqual(decide('delegate', HOME, call), { refuse: 'the Crew token file' }, file);
+  }
+});
+
 test('a Windows path agy writes as a URL path reads as the same file', () => {
   assert.equal(localPath('/C:/Users/me/repo/a.txt', 'win32'), 'C:/Users/me/repo/a.txt');
   assert.equal(localPath('C:\\Users\\me\\a.txt', 'win32'), 'C:\\Users\\me\\a.txt');
@@ -878,6 +886,47 @@ test('an edit agy reports with a URL path on Windows stays inside the workspace'
     { sessionUpdate: 'tool_call_update', toolCallId: 'e1', status: 'completed', locations: [{ path: urlPath }] },
   ] }));
   const job = await h.ended(await h.jobs.create({ kind: 'polish', cwd: work, isolation: 'in_place', targets: ['docs'], task: 'test' }));
+  assert.equal(job.state, 'done');
+  assert.deepEqual(job.notes ?? [], []);
+  assert.deepEqual(job.result?.files, ['docs/a.txt']);
+  assert.deepEqual(job.result?.outOfScope, []);
+});
+
+test('a worktree edit agy asks about natively and reports finished as a URL path is in scope', { timeout: 10000, skip: process.platform !== 'win32' }, async (t) => {
+  const h = harness(t, `
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const send = (message) => console.log(JSON.stringify({ jsonrpc: '2.0', ...message }));
+    const update = (update) => send({ method: 'session/update', params: { sessionId: 's1', update } });
+    let promptId, file;
+    require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
+      const { method, id, params } = JSON.parse(line);
+      if (method === 'initialize') send({ id, result: { agentCapabilities: {} } });
+      else if (method === 'session/new') {
+        file = path.join(params.cwd, 'docs', 'a.txt');
+        send({ id, result: { sessionId: 's1' } });
+      } else if (method === 'session/prompt') {
+        promptId = id;
+        update({ sessionUpdate: 'tool_call', toolCallId: 'e1', status: 'pending', kind: 'edit', title: 'Edit', locations: [{ path: file }] });
+        send({ id: 'p', method: 'session/request_permission', params: { sessionId: 's1', toolCall: { toolCallId: 'e1', kind: 'edit', title: 'Edit', locations: [{ path: file }] }, options: [{ kind: 'allow_once', optionId: 'yes' }] } });
+      } else if (id === 'p') {
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.writeFileSync(file, 'Hello.\\n');
+        update({ sessionUpdate: 'tool_call_update', toolCallId: 'e1', locations: [{ path: '/' + file.replaceAll('\\\\', '/') }] });
+        update({ sessionUpdate: 'tool_call_update', toolCallId: 'e1', status: 'completed' });
+        update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'report' } });
+        send({ id: promptId, result: { stopReason: 'end_turn' } });
+      }
+    });
+  `, { polish: { agents: ['antigravity'] } });
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-agy-repo-'));
+  t.after(() => fs.rmSync(repo, { recursive: true, force: true, maxRetries: 5 }));
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: repo });
+  git('init', '-q');
+  fs.writeFileSync(path.join(repo, 'README.md'), 'hello\n');
+  git('add', '.');
+  git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'init');
+  const job = await h.ended(await h.jobs.create({ kind: 'polish', cwd: repo, targets: ['docs'], task: 'test' }));
   assert.equal(job.state, 'done');
   assert.deepEqual(job.notes ?? [], []);
   assert.deepEqual(job.result?.files, ['docs/a.txt']);

@@ -674,14 +674,13 @@ export class AntigravityAdapter implements Adapter {
         turn.message = '';
         ctl.progress(describeCall(update));
         this.track(session, turn, update);
+        this.touched(turn, update);
         break;
       case 'tool_call_update':
-        if (update.status === 'completed' && update.kind !== 'read') {
-          for (const loc of update.locations ?? []) if (loc.path) ctl.touched(loc.path);
-        }
         if (update.status === 'failed') ctl.progress(`failed: ${update.title ?? 'tool call'}`);
         else ctl.activity();
         this.track(session, turn, update);
+        this.touched(turn, update);
         break;
       case 'current_mode_update':
         break;
@@ -696,6 +695,14 @@ export class AntigravityAdapter implements Adapter {
       default:
         ctl.activity();
     }
+  }
+
+  /** Records the files a completed call wrote, from all agy said about it: the completion may carry only its status. */
+  private touched(turn: Turn, update: any): void {
+    if (update.status !== 'completed') return;
+    const call = (typeof update.toolCallId === 'string' && turn.calls.get(update.toolCallId)) || update;
+    if (call.kind === 'read') return;
+    for (const location of call.locations ?? []) if (location?.path) turn.ctl.touched(location.path);
   }
 
   /** Merges what agy reports about a tool call, and checks one that ran without coming to Crew first. */
@@ -1095,7 +1102,9 @@ export function decide(role: JobKind, cwd: string, toolCall: ToolCall, readOnly 
   const kind = toolCall.kind ?? 'other';
   // The daemon's secret is not a worker's to read, whatever the role. Commands are the user's to approve as before.
   const secret = tokenFile(HOME);
-  if ((toolCall.locations ?? []).some((l) => l.path && path.resolve(l.path) === secret)) return { refuse: 'the Crew token file' };
+  // Windows names one file in any case, starting with the drive letter.
+  const same = (file: string) => process.platform === 'win32' ? path.resolve(file).toLowerCase() === secret.toLowerCase() : path.resolve(file) === secret;
+  if ((toolCall.locations ?? []).some((l) => l.path && same(l.path))) return { refuse: 'the Crew token file' };
   // A qualified title can identify an MCP call, but must never disguise a command. One agy process serves many jobs, and
   // each job's server is another one named crew to it: from the second on it tells them apart by eight hex digits in the name.
   const input = toolCall.rawInput;

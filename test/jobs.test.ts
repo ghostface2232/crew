@@ -307,6 +307,10 @@ test('a file under a nested target directory is in scope, in a worktree or in pl
   assert.deepEqual(inPlace.result?.outOfScope, []);
 });
 
+test('a target saved with backslashes still covers the files under it', () => {
+  assert.deepEqual(outOfScope(['docs/guide/a.md', 'src/b.ts'], [['docs', 'guide'].join(path.sep)]), ['src/b.ts']);
+});
+
 test('polish reports files changed outside the allowed targets', async () => {
   const repo = tempRepo();
   const { jobs } = harness((ctl) => {

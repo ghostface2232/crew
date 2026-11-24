@@ -309,8 +309,9 @@ final class CrewStore {
         if let language {
             defaults.set([language], forKey: "AppleLanguages")
             defaults.set(language, forKey: Self.appliedLanguageKey)
-        } else if defaults.string(forKey: Self.appliedLanguageKey) != nil {
-            defaults.removeObject(forKey: "AppleLanguages")
+        } else if let applied = defaults.string(forKey: Self.appliedLanguageKey) {
+            // A language picked in System Settings since replaced Crew's and is not Crew's to clear.
+            if defaults.stringArray(forKey: "AppleLanguages") == [applied] { defaults.removeObject(forKey: "AppleLanguages") }
             defaults.removeObject(forKey: Self.appliedLanguageKey)
         }
     }

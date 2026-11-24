@@ -241,17 +241,22 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
         let store = CrewStore(api: CrewAPI(port: 0), defaults: defaults)
         // Read the suite's own domain: the global domain also holds AppleLanguages.
         let written = { defaults.persistentDomain(forName: suite)?["AppleLanguages"] as? [String] }
-        store.applyLanguage("ko")
+        try store.receive(ServerEvent(name: "language", data: Data(#"{"language":"ko"}"#.utf8)))
         #expect(written() == ["ko"])
         store.applyLanguage("en")
         #expect(written() == ["en"])
-        store.applyLanguage(nil)
+        try store.receive(ServerEvent(name: "language", data: Data(#"{"language":null}"#.utf8)))
         #expect(written() == nil)
         #expect(defaults.persistentDomain(forName: suite)?[CrewStore.appliedLanguageKey] == nil)
-        // A language picked for Crew in System Settings is not Crew's to clear.
+        // A language picked for Crew in System Settings is not Crew's to clear, before or after Crew wrote its own.
         defaults.set(["ja"], forKey: "AppleLanguages")
         store.applyLanguage(nil)
         #expect(written() == ["ja"])
+        store.applyLanguage("ko")
+        defaults.set(["ja"], forKey: "AppleLanguages")
+        store.applyLanguage(nil)
+        #expect(written() == ["ja"])
+        #expect(defaults.persistentDomain(forName: suite)?[CrewStore.appliedLanguageKey] == nil)
     }
     @Test func optionalContractFieldsDecodeAndLegacyStateStillWorks() throws {
         let legacy = try fixture()

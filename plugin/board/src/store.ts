@@ -158,6 +158,9 @@ export class BoardStore {
       case 'peerRatings':
         this.update({ peerRatings: value as boolean });
         break;
+      case 'language':
+        this.update({ language: (value as Pick<BoardState, 'language'>).language });
+        break;
       case 'limits':
         this.update({ limits: { ...current.limits, ...(value as BoardState['limits']) } });
         break;

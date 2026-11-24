@@ -17,6 +17,7 @@ The Crew daemon provides HTTP routes and server-sent events for the React board,
 | `roleSettings` | `RoleSettings` | Raw role assignments as written in `config.json` (preserving inheritance) |
 | `roleInfo` | `RoleInfo[]` | Role registry metadata in display order |
 | `peerRatings` | `boolean` | Whether peer ratings are enabled |
+| `language` | `"en" \| "ko" \| null` | Interface language of the board and the apps; `null` follows the system ([localization.md](localization.md#how-the-language-is-chosen)) |
 | `modelScores` | `ModelScore[]` (`notes.ts`) | Per-model scores and item breakdowns |
 | `pulls` | `PullWatch[]` (`pulls.ts`) | Watched pull requests linked to missions (without internal delivery fields) |
 
@@ -29,6 +30,7 @@ Server-sent events on `GET /api/stream` (in addition to `job`, `mission`, `event
 | `roles` / `roleSettings` | `Record<Role, RoleAssignment>` / `RoleSettings` | `config.json` changes or `POST /api/roles` saves |
 | `agents` | `Agents` (`board/src/types.ts`) | `agy models` answers with this account's Antigravity models ([model settings](roles.md#model-and-effort-settings)) |
 | `peerRatings` | `boolean` | `config.json` changes or `POST /api/peer-ratings` saves (followed by `modelScores`) |
+| `language` | `{ language }` | `config.json` changes or `POST /api/language` saves |
 | `modelScores` | `ModelScore[]` | Notes, peer ratings, or the `peerRatings` switch change |
 | `pull` | `PullWatch` (view) | A watched pull request is linked, changes, or is polled |
 
@@ -47,6 +49,7 @@ Each status event has the shape `{seq, ts, agent, session_id, job_id, kind, deta
 | `POST /api/gc` | `{ "apply": false, "branches": false }` (both optional) | `{ text }`; user secret required; dry run unless `apply`; branches deleted only with both flags |
 | `POST /api/preset` | `{ "preset": "economy" \| "balanced" \| "best" \| null }` | `{ preset, presets }`; writes `preset` in `~/.crew/config.json` |
 | `POST /api/peer-ratings` | `{ "enabled": true \| false }` | `{ peerRatings }`; writes `peerRatings: false` or removes the key to turn on |
+| `POST /api/language` | `{ "language": "en" \| "ko" \| null }` | `{ language }`; writes `language` in `~/.crew/config.json`, or removes it (`null`) to follow the system |
 | `POST /api/notes` | Evidence line or `{ "model", "summary" }` | `ModelScore`; user secret required ([model notes](roles.md#model-notes-and-scores) and [peer ratings](roles.md#peer-ratings)) |
 | `POST /api/jobs/:id/rating` | `{ "correctness"?, "report"?, "findings"?, "fact", "token" }` | `{ kept }`. The worker MCP server must supply the job token, and only jobs asked to rate can use the route ([peer ratings](roles.md#peer-ratings)) |
 | `POST /api/missions` | `{ "title", "project", "stages"?, "preset"?, "tasks"?, ... }` | New (or matching open) mission |
@@ -90,7 +93,7 @@ All other requests without valid credentials return `401` (`{ "error": "unauthor
 
 - **No secret in browsers (no cookies, no web storage).** Workers can read most of the disk. Antigravity and Codex jobs using a permissions profile are denied access to `~/.crew/token`. Browser cookies are sent across ports on `127.0.0.1` (leaking to a `runs_app` worker's local server) and stored plaintext on disk. Web storage is also plaintext on disk. Any legacy `crew_session` cookie is ignored and cleared via `Set-Cookie: Max-Age=0`. Keeping the board credential in memory means a reload, bookmark, or 7-day expiry signs the browser tab out. Desktop apps retain their sign-in.
 - **Tickets and credentials.** `POST /api/session/ticket` returns a 64-hex single-use ticket valid for 60 seconds in memory. `POST /api/session` trades it atomically for `board.<expiry>.<HMAC>`, valid for 7 days. Because the daemon uses an HMAC seal in place of storage, an open board reconnects across daemon restarts and stops working when it expires or the secret rotates (active SSE streams close at expiry).
-- **Scoped board permissions.** A board credential may read and call only the 10 board routes (`BOARD_POSTS` in `daemon.ts`: `/api/jobs`, job `reply`/`cancel`/`rounds/:turn`, `/api/missions/:id`, `/api/instructions`, `/api/setup/repair`, `/api/peer-ratings`, `/api/preset`, `/api/roles`). All other POSTs (tickets, hooks, lead routes, `answer`, `discard`, `gc`, heartbeat, starting missions, `notes`, `pulls`, `shutdown`) return `403`. Within allowed routes, `LEAD_FIELDS` (`approved_by_user`, `lead_session`, `lead`, `by`, `check`, `attachments`) also return `403`.
+- **Scoped board permissions.** A board credential may read and call only the 11 board routes (`BOARD_POSTS` in `daemon.ts`: `/api/jobs`, job `reply`/`cancel`/`rounds/:turn`, `/api/missions/:id`, `/api/instructions`, `/api/setup/repair`, `/api/peer-ratings`, `/api/preset`, `/api/language`, `/api/roles`). All other POSTs (tickets, hooks, lead routes, `answer`, `discard`, `gc`, heartbeat, starting missions, `notes`, `pulls`, `shutdown`) return `403`. Within allowed routes, `LEAD_FIELDS` (`approved_by_user`, `lead_session`, `lead`, `by`, `check`, `attachments`) also return `403`.
 - **Evidence seals.** `sig` is an HMAC over `(job, file, modified)`, allowing access only to that recorded file version. The seal stops working if the file changes or the secret rotates.
 - **Authenticated hooks and sandbox hardening.** `POST /api/hooks/claude` requires `~/.crew/token` because user prompt hooks are recorded and passed to Codex's automatic reviewer on refusal retries (a `runs_app` worker without the secret must not forge them). Codex profiles (`crew_read_only`, `crew_app`, `crew_workspace`) deny `~/.crew/token` and mark `.git` read-only so workers cannot repoint git filters/hooks that the bridge runs outside the sandbox. Antigravity policy refuses reading `~/.crew/token` and editing `.git`. Every Codex job runs under one of those three profiles ([sandbox.md](sandbox.md#role-permissions)). On macOS, the bridge's `sandbox-exec` profile for `browser` and `check` denies `lsopen`, `appleevent-send`, and `job-creation`.
 - **Residual window.** `crew board --url` prints a live ticket into the calling session's transcript for up to 60 seconds until traded (`crew board` opens the browser directly without printing). If a worker with network access trades it first, the user's tab lands on the sign-in screen.

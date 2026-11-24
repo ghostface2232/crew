@@ -51,7 +51,7 @@ const server = http.createServer(async (req, res) => {
       state.jobs = state.jobs.map((job) => (job.id === body.data.id ? { ...job, ...body.data } : job));
     if (body.type === 'state') state = body.data;
     if (body.type === 'usage') state.usage = body.data;
-    if (body.type === 'preset') Object.assign(state, body.data);
+    if (body.type === 'preset' || body.type === 'language') Object.assign(state, body.data);
     if (body.type === 'disconnect') {
       for (const stream of streams) stream.end();
       return json({});
@@ -90,6 +90,11 @@ const server = http.createServer(async (req, res) => {
     const result = { preset: state.preset, presets: state.presets };
     send('preset', result);
     return json(result);
+  }
+  if (url.pathname === '/api/language') {
+    state.language = body.language ?? null;
+    send('language', { language: state.language });
+    return json({ language: state.language });
   }
   const missionMatch = /^\/api\/missions\/([^/]+)$/.exec(url.pathname);
   if (missionMatch) {

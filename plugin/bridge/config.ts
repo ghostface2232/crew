@@ -166,6 +166,10 @@ export const MAX_DEBATE_ROUNDS = 6;
 
 export type PresetName = 'economy' | 'balanced' | 'best';
 
+/** The languages the board and the apps are written in (plugin/board/src/i18n.ts, native/Resources). */
+export const LANGUAGES = ['en', 'ko'] as const;
+export type Language = (typeof LANGUAGES)[number];
+
 /** Model and effort a preset gives each agent, and the model the lead should give its subagents. */
 export interface Preset {
   codex?: { model?: string; effort?: string };
@@ -218,6 +222,8 @@ export interface Config {
    * worker is asked to rate and the scores come from the review evidence alone; ratings already given are kept.
    */
   peerRatings: boolean;
+  /** The interface language of the board and the apps; null, the default, follows the system's or the browser's. */
+  language: Language | null;
   /** The preset in effect; none by default, so an unconfigured install runs each agent's own settings. */
   preset: PresetName | null;
   /** What each preset sets. The built-in ones set effort only; a user's entry replaces fields of the same name. */
@@ -252,6 +258,7 @@ const defaults: Config = {
   roles: resolveRoles({}),
   roleSettings: {},
   peerRatings: true,
+  language: null,
   preset: null,
   presets: PRESETS,
 };
@@ -368,6 +375,7 @@ export function resolveConfig(user: UserConfig): Config {
   }
   // Any other value would read as on, and "false" in quotes is the likely one.
   if (user.peerRatings !== undefined && typeof user.peerRatings !== 'boolean') throw new Error('peerRatings must be true or false.');
+  if (user.language != null && !LANGUAGES.includes(user.language)) throw new Error(`language is "${String(user.language)}"; use one of: ${LANGUAGES.join(', ')}, or leave it out to follow the system.`);
   return {
     ...defaults,
     ...user,

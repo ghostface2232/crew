@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import {
   ChevronLeftRegular, ChevronRightRegular, DocumentText16Regular, ErrorCircle16Regular, Folder16Regular, Gauge16Regular, Info16Regular,
-  Options16Regular, ShieldCheckmark16Regular, TextFont16Regular, Wrench16Regular,
+  LocalLanguage16Regular, Options16Regular, ShieldCheckmark16Regular, TextFont16Regular, Wrench16Regular,
 } from '@fluentui/react-icons';
 import type { FluentIcon } from '@fluentui/react-icons';
 import type { AppUpdate, Preset, PresetName, Snapshot } from './types.ts';
@@ -13,7 +13,8 @@ import { agentSettings, HOLDERS, knownProjects, NAMES, projectNames, resolveDraf
 import { AgentMark, ask, CloseButton, Dialog, Icon, Select, useFade } from './ui.tsx';
 import { Scores } from './Scores.tsx';
 import { desktop } from './desktop.ts';
-import { t } from './i18n.ts';
+import { t, translated } from './i18n.ts';
+import type { Language } from './i18n.ts';
 import appIcon from './icons/CrewAppIcon.png';
 import styles from './Settings.module.css';
 
@@ -24,11 +25,11 @@ function ItemTitle({ text, current }: { text: string; current: boolean }) {
   return <span className={`${styles.itemTitle} fade-line`} ref={fade}>{text}</span>;
 }
 
-const PRESET_SUMMARY: Record<PresetName, string> = {
+const PRESET_SUMMARY = translated((): Record<PresetName, string> => ({
   economy: t('Lower cost and faster runs for straightforward tasks.'),
   balanced: t('Everyday balance of quality, speed, and cost.'),
   best: t('Maximum reasoning depth for complex work.'),
-};
+}));
 
 function formatModelName(name: string) {
   if (name === 'inherit') return t('Same as lead');
@@ -49,17 +50,18 @@ function presetDetails(preset: Preset): [string, string][] {
 }
 
 /** One page of settings, listed in the sidebar: the roles by kind of work, what every agent shares, each project's own instructions, then the desktop app. */
-type Fixed = 'build' | 'review' | 'edit' | 'presets' | 'models' | 'instructions' | 'about';
+type Fixed = 'build' | 'review' | 'edit' | 'presets' | 'models' | 'instructions' | 'language' | 'about';
 type Pane = Fixed | `project:${string}`;
-const PANES: Record<Fixed, { title: string; icon: FluentIcon; kind?: JobKind }> = {
+const PANES = translated((): Record<Fixed, { title: string; icon: FluentIcon; kind?: JobKind }> => ({
   build: { title: t('Build'), icon: Wrench16Regular, kind: 'delegate' },
   review: { title: t('Review'), icon: ShieldCheckmark16Regular, kind: 'review' },
   edit: { title: t('Edit'), icon: TextFont16Regular, kind: 'polish' },
   presets: { title: t('Model Presets'), icon: Options16Regular },
   models: { title: t('Model Scores'), icon: Gauge16Regular },
   instructions: { title: t('Instructions'), icon: DocumentText16Regular },
+  language: { title: t('Language'), icon: LocalLanguage16Regular },
   about: { title: t('About Crew'), icon: Info16Regular },
-};
+}));
 
 /** Where the desktop app's update stands, in one line. */
 function updateSummary(update: AppUpdate) {
@@ -191,7 +193,7 @@ function TypedSetting({ label, value, placeholder, onCommit }: { label: string; 
 }
 
 /** `initial` opens a page at once, as the sidebar's failed update opens About. */
-export function Settings({ state, update, close, initial }: { state: Snapshot; update: AppUpdate | null; close: () => void; initial?: 'about' }) {
+export function Settings({ state, update, close, initial }: { state: Snapshot; update: AppUpdate | null; close: () => void; initial?: 'about' | 'language' }) {
   const [pane, setPane] = useState<Pane>(initial ?? 'build');
   // On a phone the sidebar is a list of its own, and a page replaces it; wider, both show.
   const [view, setView] = useState<'list' | 'page'>(initial ? 'page' : 'list');
@@ -365,6 +367,18 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
       setRatingsStatus((error as Error).message);
     }
   };
+  // Stored as it is picked; the board then switches to the language the daemon reports (followSetting in i18n.ts).
+  const [languageStatus, setLanguageStatus] = useState('');
+  const chooseLanguage = async (language: Language | null) => {
+    // The new language draws Settings again, which would drop instructions still being edited.
+    if (text !== saved && !(await ask(t('Discard the unsaved changes to these instructions?'), t('Discard')))) return;
+    setLanguageStatus('');
+    try {
+      board.receive('language', await request<Pick<Snapshot, 'language'>>('/api/language', { language }));
+    } catch (error) {
+      setLanguageStatus(t('Not saved: {error}', { error: (error as Error).message }));
+    }
+  };
   const saveInstructions = async () => {
     if (saveLock.current || load !== 'ready') return;
     saveLock.current = true;
@@ -390,14 +404,15 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
       }
     }
   };
-  // A daemon without presets or notes has no page for them.
+  // A daemon without presets, notes, or the language setting has no page for them.
   const current: Pane =
-    (pane === 'presets' && !state.presets) || (pane === 'models' && !state.modelScores) || (pane === 'about' && !update) ? 'build' : pane;
+    (pane === 'presets' && !state.presets) || (pane === 'models' && !state.modelScores) || (pane === 'language' && state.language === undefined) ||
+    (pane === 'about' && !update) ? 'build' : pane;
   useEffect(() => {
     if (current === 'about' && update?.installError) shownInstallError.current = true;
   }, [current, update?.installError]);
   const project = current.startsWith('project:') ? current.slice('project:'.length) : null;
-  const fixed = project === null ? PANES[current as Fixed] : undefined;
+  const fixed = project === null ? PANES()[current as Fixed] : undefined;
   const kind = fixed?.kind;
   // The instructions this page edits: '' for every project, a project's own; null on the other pages.
   const pageScope = current === 'instructions' ? '' : project;
@@ -433,7 +448,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
   };
   const item = (id: Pane) => {
     const dir = id.startsWith('project:') ? id.slice('project:'.length) : null;
-    const page = dir === null ? PANES[id as Fixed] : undefined;
+    const page = dir === null ? PANES()[id as Fixed] : undefined;
     return (
       <button
         type="button"
@@ -566,7 +581,10 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
           <div className={styles.section}>{(['build', 'review', 'edit'] as Pane[]).map(item)}</div>
           <p className={styles.sectionLabel}>{t('Shared')}</p>
           <div className={styles.section}>
-            {([...(state.presets ? ['presets'] : []), ...(state.modelScores ? ['models'] : []), 'instructions'] as Pane[]).map(item)}
+            {([
+              ...(state.presets ? ['presets'] : []), ...(state.modelScores ? ['models'] : []), 'instructions',
+              ...(state.language !== undefined ? ['language'] : []),
+            ] as Pane[]).map(item)}
           </div>
           {dirs.length > 0 && (
             <>
@@ -623,7 +641,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
                         {t('Not saved: {error}', { error: storedPreset.error })}
                       </p>
                     )}
-                    <p className={styles.footnote}>{preset ? PRESET_SUMMARY[preset] : t("Uses each agent's own model and effort settings.")}</p>
+                    <p className={styles.footnote}>{preset ? PRESET_SUMMARY()[preset] : t("Uses each agent's own model and effort settings.")}</p>
                   </section>
                   <section className={styles.group}>
                     <header className={styles.groupHead}><h3 className={styles.groupTitle}>{t('Priority')}</h3></header>
@@ -710,6 +728,25 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
                   </div>
                   <p className={styles.footnote} role={ratingsStatus ? 'alert' : undefined}>
                     {ratingsStatus || t('The lead and the workers rate each other\'s work as they see it, in turns they already have, and the ratings move half of a score from where the review findings put it. Off, nobody is asked to rate and the scores come from the review findings alone; ratings already given are kept.')}
+                  </p>
+                </section>
+              )}
+              {current === 'language' && (
+                <section className={styles.group}>
+                  <div className={styles.rows}>
+                    <label className={styles.row}>
+                      <span>{t('Language')}</span>
+                      {/* Each language is named in itself, so it can be found whatever the page reads in. */}
+                      <Select<Language | ''>
+                        label={t('Language')}
+                        value={state.language ?? ''}
+                        options={[['', t('Match System')], ['en', 'English'], ['ko', '한국어']]}
+                        onChange={(next) => void chooseLanguage(next || null)}
+                      />
+                    </label>
+                  </div>
+                  <p className={styles.footnote} role={languageStatus ? 'alert' : undefined}>
+                    {languageStatus || t('For the board and the Crew app on this computer. The macOS app switches the next time it opens.')}
                   </p>
                 </section>
               )}

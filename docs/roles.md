@@ -72,7 +72,7 @@ The project file is part of the repository and is trusted like its `AGENTS.md` o
 - **Claude:** A `SessionStart` and `SubagentStart` command hook (`bridge/context.ts`) prints them as `additionalContext`, including after compaction, noting that workers already receive them.
 - Nothing is written to any service's own instruction files (`AGENTS.md`, `CLAUDE.md`, rules folders).
 - Missing or empty files contribute no instructions. An unreadable file fails the job or surfaces an error in the Claude hook.
-- The project file is read only as a regular file. If it or its `.crew` folder is a symbolic link, the read fails the same way: a link could name a file the worker's sandbox denies, such as the daemon's token. The user's own `~/.crew/instructions.md` may be a link.
+- Crew reads the project file only as a regular file. If it or its `.crew` folder is a symbolic link, the read fails the same way, because a link could point to a file the worker's sandbox denies (such as the daemon's token). The user's own `~/.crew/instructions.md` may be a symbolic link.
 - Because Claude Code replaces hook context over 10,000 characters with a 2,000-character preview, any file that would push the hook output past 9,000 characters (`CONTEXT_LIMIT`) is shown only by its path. Workers have no such cap.
 - Each section is headed by its source so the agent can distinguish user instructions from repository instructions. Role limits are enforced by the bridge and sandbox, not by prose.
 

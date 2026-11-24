@@ -91,7 +91,7 @@ struct DispatchView: View {
                 }
                 if intent == "question" { assignedTo }
                 if intent != "information" && dispatch.requiresClaude {
-                    Text("Start this job from a Claude session. Claude does the work itself or in a subagent.")
+                    Text("Start this job from a Claude Code or Codex session, which does the work itself or in a subagent.")
                         .font(Typeface.caption).foregroundStyle(.secondary)
                 }
                 if intent == "information" {

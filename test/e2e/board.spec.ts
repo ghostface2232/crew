@@ -168,6 +168,22 @@ test('short mission plans render in order with matching tracks', async ({ page, 
   await expect(stage(card, 'Final').locator('button[data-job]')).toHaveCount(2);
 });
 
+test('a mission card names its lead the same way for Claude and Codex, and keeps it after the session ends', async ({ page, request }) => {
+  const data = fixture();
+  const card = page.locator('[data-key="mission-1"]');
+  // A mission from before the lead was recorded takes it from its owning session.
+  await expect(card.locator('.mission-meta')).toContainText(/^Led by Claude · /);
+  await expect(card.locator('.mission-lead .agent-mark')).toHaveCount(1);
+  data.missions[0].lead = 'codex';
+  data.claude = data.claude.filter((session) => session.id !== data.missions[0].owner);
+  await request.post('/__push', { data: { type: 'state', data } });
+  await expect(card.locator('.mission-meta')).toContainText(/^Led by Codex · /);
+  delete data.missions[0].lead;
+  await request.post('/__push', { data: { type: 'state', data } });
+  await expect(card.locator('.mission-meta')).not.toContainText('Led by');
+  await expect(card.locator('.mission-lead')).toHaveCount(0);
+});
+
 test('a mission with more than one job folds the busy stages it has moved past, and each stage folds on its own', async ({ page, request }) => {
   const data = fixture();
   data.missions[0].stages = ['plan', 'implement', 'cross-review'];
@@ -1732,7 +1748,7 @@ test('New Job shows who takes a question, and says when only the lead can', asyn
   await request.post('/__push', { data: { type: 'state', data } });
   await newJob(page);
   await page.getByRole('radio', { name: 'Question' }).click();
-  await expect(page.getByText('Start this job from a Claude Code or Codex session, which does the work itself or in a subagent.')).toBeVisible();
+  await expect(page.getByText('Start this job from a Claude Code or Codex session: Claude Code does it itself or in a subagent, and Codex hands it to a Claude worker.')).toBeVisible();
 });
 
 test('About Crew puts the check on the status row and an update action beside the note', async ({ page }) => {

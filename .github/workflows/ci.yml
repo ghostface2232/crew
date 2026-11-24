@@ -1,6 +1,7 @@
 # Type checks and unit tests on the two platforms Crew ships for. Runs on every pull request, and the release
 # workflow calls it, so a tag is not built until both pass. A push to main is not checked again: its pull request
-# was, and a release checks the tagged commit.
+# was, and a release checks the tagged commit. A pull request run is skipped when it would only re-check docs (see
+# `changes`).
 name: CI
 
 on:
@@ -12,7 +13,54 @@ permissions:
   contents: read
 
 jobs:
+  # Skips the check when the pull request changes nothing but docs, or when this push adds only docs on top of a
+  # head whose CI passed. Anything else runs, including a force-push or rebase (the old head is not an ancestor),
+  # and a failure here. Docs are what no test reads: plugin/roles, plugin/skills and plugin/agents are not docs.
+  # A skip lets the old head's merge with main stand, as a pull request whose main moved under it already does.
+  changes:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # To read the old head's CI run. A caller of this workflow must grant it too (release.yml).
+      actions: read
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ACTION: ${{ github.event.action }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          # --no-renames: a file moved into docs/ still counts as a change where it came from.
+          only_docs() {
+            local files
+            files=$(git diff --no-renames --name-only "$@") || return 1
+            ! grep -qvE '^(docs|research)/|^README\.md$|(^|/)AGENTS\.md$' <<<"$files"
+          }
+          code=true
+          if only_docs "$BASE...$HEAD"; then
+            echo "The pull request changes only docs."
+            code=false
+          elif [ "$ACTION" = synchronize ] && git merge-base --is-ancestor "$BEFORE" "$HEAD" 2>/dev/null &&
+            only_docs "$BEFORE" "$HEAD" &&
+            [ "$(gh run list --workflow ci.yml --commit "$BEFORE" --event pull_request --limit 1 --json conclusion --jq '.[0].conclusion // ""')" = success ]; then
+            echo "This push adds only docs, and CI passed on $BEFORE."
+            code=false
+          fi
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
   check:
+    needs: changes
+    # changes is skipped outside pull requests, and a failed changes job leaves the output empty: both run the check.
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     strategy:
       # One platform's failure should not hide the other's.
       fail-fast: false

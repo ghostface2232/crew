@@ -342,11 +342,12 @@ test('the Codex hooks item asks app-server hooks/list and is trusted only when C
       if (process.argv[2] !== 'app-server') process.exit(2);
       const keys = ${JSON.stringify(keys)};
       if (${JSON.stringify(mode)} === 'exit') process.exit(1);
+      require('node:fs').writeFileSync(${JSON.stringify(path.join(dir, name))} + '.pid', String(process.pid));
       require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
         const msg = JSON.parse(line);
         if (msg.id === undefined) return;
         if (msg.method === 'initialize') return console.log(JSON.stringify({ id: msg.id, result: {} }));
-        if (msg.method !== 'hooks/list') return;
+        if (msg.method !== 'hooks/list' || ${JSON.stringify(mode)} === 'silent') return;
         if (${JSON.stringify(mode)} === 'error') return console.log(JSON.stringify({ id: msg.id, error: { code: -32601, message: 'method not found' } }));
         console.log(JSON.stringify({ id: msg.id, result: { data: [{ cwd: msg.params.cwds[0], hooks: ${reply} }] } }));
       });`);
@@ -368,6 +369,14 @@ test('the Codex hooks item asks app-server hooks/list and is trusted only when C
     assert.match(unknown.detail, /^Could not ask Codex whether they are trusted/, name);
     assert.match(unknown.detail, reason, name);
   }
+  // A Codex that never answers fails the item once the request times out, and is not left running.
+  const silent = await codexHooksItem(fake('silent', '[]', 'silent'), undefined, 300);
+  assert.equal(silent.ok, false);
+  assert.match(silent.detail, /^Could not ask Codex whether they are trusted .*timed out/);
+  const pid = Number(fs.readFileSync(path.join(dir, 'silent.pid'), 'utf8'));
+  const alive = () => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  for (let i = 0; i < 50 && alive(); i++) await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(alive(), false);
   const missing = await codexHooksItem(path.join(dir, 'no-such-codex'));
   assert.equal(missing.ok, false);
   assert.match(missing.detail, /^Could not ask Codex/);

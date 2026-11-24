@@ -579,11 +579,20 @@ let hello: { id: string; done: Promise<void> } | null = null;
  * A hello that fails fails the call and is tried again with the next one: without it the session is never woken.
  * A call that names no session is refused: it would act as the last session, or start a job nobody is told of.
  */
+/** Whether a Codex call comes from the desktop app, whose turn metadata (an object or its JSON) names the client. */
+function fromCodexDesktop(meta: any): boolean {
+  let turn = meta?.['x-codex-turn-metadata'];
+  if (typeof turn === 'string') {
+    try { turn = JSON.parse(turn); } catch { return false; }
+  }
+  return turn?.client_type === 'desktop_app';
+}
+
 async function codexSession(meta: any): Promise<void> {
   const id = meta?.sessionId;
   if (typeof id !== 'string' || !id || id.length > 200) throw new Error('This Codex call named no session (no _meta.sessionId), so Crew cannot tell whose it is. Nothing was changed or started.');
   if (hello?.id !== id) {
-    const done: Promise<void> = api('POST', '/api/lead/hello', { session: id, host: 'codex' }).then(({ cwd }) => {
+    const done: Promise<void> = api('POST', '/api/lead/hello', { session: id, host: 'codex', ...(fromCodexDesktop(meta) ? { desktop: true } : {}) }).then(({ cwd }) => {
       // Missions are per session; one this server tracked belongs to the session it served before.
       if (SESSION && SESSION !== id) forgetMissions();
       SESSION = id;

@@ -324,7 +324,8 @@ struct ClaudeSession: Codable, Sendable, Identifiable, Equatable {
     /// Missing from a daemon older than sub-agent tracking, as are the workflows.
     var agents: [SubAgent]?
     var workflows: [WorkflowRun]?
-    /// The Claude desktop app's id for the session (local_…); absent for a session started from a terminal.
+    /// The id the session's desktop app opens it by: Claude's local_…, or a Codex desktop thread's own id; absent for a
+    /// session in a terminal.
     var desktopId: String?
     /// What the waiting prompt asks beyond its one line; present only while waiting.
     var ask: ClaudeAsk?
@@ -332,11 +333,12 @@ struct ClaudeSession: Codable, Sendable, Identifiable, Equatable {
     /// The agent the session runs in, as jobs name theirs.
     var agent: String { host ?? "claude" }
     var resumeCommand: String { agent == "codex" ? "codex resume \(id)" : "claude --resume \(id)" }
-    /// The link that opens the session in its desktop app: Claude's needs a well-formed local_ id, Codex's a thread id.
+    /// The link that opens the session in its desktop app; a session in a terminal has none, Claude's or Codex's.
+    /// Claude's needs a well-formed local_ id, Codex's the desktop thread's id.
     var appURL: URL? {
         if agent == "codex" {
-            guard UUID(uuidString: id) != nil else { return nil }
-            return URL(string: "codex://threads/\(id)")
+            guard let desktopId, UUID(uuidString: desktopId) != nil else { return nil }
+            return URL(string: "codex://threads/\(desktopId)")
         }
         guard agent == "claude", let desktopId, desktopId.wholeMatch(of: /local_[A-Za-z0-9-]{1,64}/) != nil else { return nil }
         return URL(string: "claude://code/continue?session=\(desktopId)")

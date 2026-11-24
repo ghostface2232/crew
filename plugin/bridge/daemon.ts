@@ -949,7 +949,8 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
         // A Codex lead's MCP server runs from the plugin's folder, so it learns its project here, from the thread.
         case 'hello': {
           if (body.host !== 'codex') throw new HttpError(400, 'host must be codex');
-          delivery.host(session, 'codex');
+          delivery.host(session, 'codex', Date.now(), body.desktop === true);
+          if (delivery.desktopOf(session)) claude.desktop(session);
           return { cwd: await codex.threadCwd(session).catch(() => null) };
         }
         case 'watch': return { watch: delivery.watch(session, body.deadline) };
@@ -985,6 +986,8 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       const payload = await readJson(req);
       if (payload?.hook_event_name === 'SessionEnd' && typeof payload.session_id === 'string') jobs.delivery.forget(payload.session_id);
       claude.ingest(payload);
+      // A Codex desktop thread is known from its hello, which may come before or after the session's first hook.
+      if (typeof payload?.session_id === 'string' && jobs.delivery.desktopOf(payload.session_id)) claude.desktop(payload.session_id);
       locate(claude.sessions.get(payload?.session_id));
       return {};
     }

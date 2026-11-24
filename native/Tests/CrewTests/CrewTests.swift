@@ -532,10 +532,14 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
         #expect(session.appURL?.absoluteString == "claude://code/continue?session=local_e97eb8b4-b9ff-4551-b625-3c06c77253c7")
         session.desktopId = "local_x&q=1"
         #expect(session.appURL == nil)
+        // A Codex session links to its thread only once the daemon knows it is a desktop thread.
         session.host = "codex"
         session.id = "e97eb8b4-b9ff-4551-b625-3c06c77253c7"
+        session.desktopId = nil
+        #expect(session.appURL == nil)
+        session.desktopId = session.id
         #expect(session.appURL?.absoluteString == "codex://threads/e97eb8b4-b9ff-4551-b625-3c06c77253c7")
-        session.id += "?x=1"
+        session.desktopId = session.id + "?x=1"
         #expect(session.appURL == nil)
         let json = #"{"questions":[{"header":"Layout","question":"Which?","options":["Tabs","Single"]}]}"#
         let ask = try JSONDecoder().decode(ClaudeAsk.self, from: Data(json.utf8))

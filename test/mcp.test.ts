@@ -543,7 +543,7 @@ test('a Codex session says hello once, retries a failed hello, refuses a call na
   let answer: () => Promise<any> = async () => ({ cwd: '/work/repo' });
   const context: Record<string, any> = {
     SESSION: undefined, PROJECT: '/plugin', projectUnknown: true, forgetMissions: () => { forgotten++; }, canonicalPath: (p: string) => `canon:${p}`,
-    api: async (_method: string, route: string, body: any) => { hellos.push(`${route} ${body.session} ${body.host}`); return answer(); },
+    api: async (_method: string, route: string, body: any) => { hellos.push(`${route} ${body.session} ${body.host}${body.desktop ? ' desktop' : ''}`); return answer(); },
   };
   const codexSession = vm.runInNewContext(`${stripTypeScriptTypes(code)}; codexSession`, context);
   // Calls arriving together wait on one hello, and none runs before the project is known.
@@ -561,4 +561,9 @@ test('a Codex session says hello once, retries a failed hello, refuses a call na
   answer = async () => ({ cwd: null });
   await codexSession({ sessionId: 'next' });
   assert.deepEqual([hellos.length, context.SESSION, context.projectUnknown, forgotten], [3, 'next', true, 1]);
+  // A desktop thread says so, whether Codex sends its turn metadata as an object or as JSON; anything else does not.
+  await codexSession({ sessionId: 'app', 'x-codex-turn-metadata': { client_type: 'desktop_app' } });
+  await codexSession({ sessionId: 'app-json', 'x-codex-turn-metadata': JSON.stringify({ client_type: 'desktop_app' }) });
+  await codexSession({ sessionId: 'tui', 'x-codex-turn-metadata': '{not json' });
+  assert.deepEqual(hellos.slice(-3), ['/api/lead/hello app codex desktop', '/api/lead/hello app-json codex desktop', '/api/lead/hello tui codex']);
 });

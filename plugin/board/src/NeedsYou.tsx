@@ -11,13 +11,12 @@ import { NAMES, projectOf, sessionAgent } from './model.ts';
 import { ActionStatus, AgentMark, Chip, Composer, EmptyState, Icon, useAction, useDraft, Elapsed } from './ui.tsx';
 import { t } from './i18n.ts';
 
-/** The link that opens the session in its desktop app: Claude's for a desktop session, Codex's for any thread. */
+/** The link that opens the session in its desktop app; a session in a terminal has none, Claude's or Codex's. */
 export function sessionAppLink(session: ClaudeSession): string | null {
-  if (sessionAgent(session) === 'codex') {
-    return /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(session.id)
-      ? `codex://threads/${encodeURIComponent(session.id)}` : null;
-  }
-  return session.desktopId ? `claude://code/continue?session=${encodeURIComponent(session.desktopId)}` : null;
+  const id = session.desktopId;
+  if (!id) return null;
+  if (sessionAgent(session) === 'codex') return /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id) ? `codex://threads/${id}` : null;
+  return `claude://code/continue?session=${encodeURIComponent(id)}`;
 }
 
 /** Opens the session in its agent's desktop app, where its prompts are answered. */

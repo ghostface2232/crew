@@ -917,7 +917,7 @@ test('New Job picks among a role\'s worker holders, and a role only Claude holds
   await pick(assigned, 'Antigravity');
   await page.getByRole('textbox', { name: 'New job instructions' }).fill('Build the piece');
   await pick(page.getByRole('combobox', { name: 'Role', exact: true }), 'Wording');
-  await expect(page.getByText('Claude, the lead', { exact: true })).toBeVisible();
+  await expect(page.getByText('Claude, in a lead session', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Send Job' })).toBeDisabled();
   await pick(page.getByRole('combobox', { name: 'Role', exact: true }), 'Implementation');
   await page.getByRole('button', { name: 'Send Job' }).click();

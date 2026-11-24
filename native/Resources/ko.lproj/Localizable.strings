@@ -166,7 +166,7 @@
 "Role" = "역할";
 "Allowed files or directories" = "허용할 파일 또는 디렉터리";
 "One path per line" = "한 줄에 경로 하나";
-"Start this job from a Claude Code or Codex session, which does the work itself or in a subagent." = "Claude Code나 Codex 세션에서 이 작업을 시작해 주세요. 세션이 직접 하거나 서브에이전트에게 맡겨요.";
+"Start this job from a Claude Code or Codex session: Claude Code does it itself or in a subagent, and Codex hands it to a Claude worker." = "Claude Code나 Codex 세션에서 이 작업을 시작해 주세요. Claude Code는 직접 하거나 서브에이전트에게 맡기고, Codex는 Claude 워커에게 맡겨요.";
 "Add to" = "추가할 위치";
 "Information destination" = "정보를 추가할 위치";
 "This project's shared instructions" = "이 프로젝트의 공유 지침";
@@ -191,7 +191,7 @@
 "Discard Draft" = "초안 폐기";
 "Your instructions and job options have not been sent." = "지시 내용과 작업 옵션은 아직 보내지 않았어요.";
 "Assigned to" = "담당 에이전트";
-"Claude (lead)" = "Claude (리드)";
+"Claude, in a lead session" = "Claude (리드 세션)";
 "No agent assigned" = "배정된 에이전트 없음";
 "%@ (disabled)" = "%@ (사용 안 함)";
 "Choose Project" = "프로젝트 선택";
@@ -475,7 +475,7 @@
 "About Crew" = "Crew 정보";
 "Model Presets" = "모델 프리셋";
 "Model Scores" = "모델 점수";
-"The lead picks the holder; by default, Antigravity takes wording and Codex the rest, among holders that can. Claude means the lead does it itself." = "담당 에이전트는 리드가 정해요. 기본적으로 가능한 에이전트 중에서 문구 다듬기는 Antigravity가, 나머지는 Codex가 맡아요. Claude를 선택하면 리드가 직접 처리해요.";
+"The lead picks the holder; by default, Antigravity takes wording and Codex the rest, among holders that can. A role held by the lead's own agent is the lead's own work; any other holder, Claude too under a Codex lead, runs as a worker." = "담당 에이전트는 리드가 정해요. 기본적으로 가능한 에이전트 중에서 문구 다듬기는 Antigravity가, 나머지는 Codex가 맡아요. 리드와 같은 에이전트가 맡은 역할은 리드가 직접 하고, 다른 에이전트가 맡은 역할은 워커가 해요. Codex가 리드일 때는 Claude도 워커로 실행돼요.";
 "Same as %@" = "%@ 설정 따르기";
 "Not saved: %@" = "저장하지 못했어요: %@";
 "None" = "없음";

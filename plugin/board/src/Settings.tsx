@@ -615,7 +615,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
               {kind && info.filter((role) => paneKind(role) === kind).map(roleGroup)}
               {kind && (
                 <p className={styles.footnote}>
-                  {t('The lead picks the holder; by default, Antigravity takes wording and Codex the rest, among holders that can. Claude means the lead does it itself.')}
+                  {t("The lead picks the holder; by default, Antigravity takes wording and Codex the rest, among holders that can. A role held by the lead's own agent is the lead's own work; any other holder, Claude too under a Codex lead, runs as a worker.")}
                 </p>
               )}
               {current === 'presets' && (

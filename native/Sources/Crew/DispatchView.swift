@@ -91,7 +91,7 @@ struct DispatchView: View {
                 }
                 if intent == "question" { assignedTo }
                 if intent != "information" && dispatch.requiresClaude {
-                    Text("Start this job from a Claude Code or Codex session, which does the work itself or in a subagent.")
+                    Text("Start this job from a Claude Code or Codex session: Claude Code does it itself or in a subagent, and Codex hands it to a Claude worker.")
                         .font(Typeface.caption).foregroundStyle(.secondary)
                 }
                 if intent == "information" {
@@ -129,11 +129,11 @@ struct DispatchView: View {
         field(String(localized: "Assigned to")) {
             if dispatch.holders.count > 1 {
                 Picker("Assigned to", selection: Binding(get: { dispatch.agent ?? "" }, set: { pickedAgent = $0.isEmpty ? nil : $0 })) {
-                    if dispatch.agent == nil { Text("Claude (lead)").tag("") }
+                    if dispatch.agent == nil { Text("Claude, in a lead session").tag("") }
                     ForEach(dispatch.holders, id: \.self) { holder in Text(workerLabel(holder)).tag(holder) }
                 }.labelsHidden().fixedSize()
             } else {
-                Text(dispatch.agent.map(workerLabel) ?? (dispatch.requiresClaude ? String(localized: "Claude (lead)") : String(localized: "No agent assigned")))
+                Text(dispatch.agent.map(workerLabel) ?? (dispatch.requiresClaude ? String(localized: "Claude, in a lead session") : String(localized: "No agent assigned")))
                     .font(Typeface.body).frame(minHeight: Self.fieldHeight)
             }
         }

@@ -375,7 +375,7 @@ test('a Codex lead does the roles Codex holds itself, and a role Claude holds go
   assert.equal(route('delegate', usageOf({ codex: 'tight', claude: 'ok' }), shared).assignee, 'claude');
   const fix = route('fix', usageOf({}), DEFAULT_ROLES, [], 'codex');
   assert.equal(fix.assignee, 'claude');
-  assert.match(fix.reason, /^Claude holds the role\./);
+  assert.match(fix.reason, /^Claude holds the role/);
   // Claude short of usage gives the work back to the lead, with Claude as the fallback.
   const tight = route('fix', usageOf({ claude: 'tight', codex: 'ok' }), DEFAULT_ROLES, [], 'codex');
   assert.deepEqual([tight.assignee, tight.fallback], ['codex', ['claude']]);

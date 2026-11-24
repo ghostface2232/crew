@@ -259,7 +259,7 @@ test('a role may hold Claude and several workers, each with its own settings', (
   assert.deepEqual(effectiveRole(config, 'review', null, 'antigravity'), { agent: 'antigravity', model: 'gemini-y' });
   // Named no holder, a job goes to the first worker.
   assert.deepEqual(effectiveRole(config, 'review', null), { agent: 'codex', model: 'gpt-x', effort: 'high' });
-  assert.throws(() => effectiveRole(config, 'polish'), /held by Claude, the lead/);
+  assert.throws(() => effectiveRole(config, 'polish'), /held only by Claude, so a lead session takes it/);
   assert.throws(() => resolveConfig({ roles: { review: { agents: ['cursor'] } } as never }), /roles\.review\.agents must be a non-empty list of: codex, antigravity, claude/);
   assert.throws(() => resolveConfig({ roles: { review: { agents: [] } } }), /non-empty list/);
   assert.throws(() => resolveConfig({ roles: { review: { agents: ['codex', 'codex'] } } }), /names a holder twice/);

@@ -638,6 +638,8 @@ test('a worker that cannot run commands can search its tree and see what was jus
   assert.deepEqual(await call('search', { pattern: 'no such thing' }), { matches: 0, text: 'No match.' });
   // A misnamed option fails rather than being dropped, which would have searched case-sensitively without a word.
   assert.match((await call('search', { pattern: 'x', case_insensitive: true })).error, /^search does not take `case_insensitive`, so nothing was done\. Its arguments: pattern, path, ignore_case\./);
+  // agy adds toolSummary to every Antigravity call; it is the host's, not a mistake.
+  assert.deepEqual(await call('search', { pattern: 'no such thing', toolSummary: 'Look for it' }), { matches: 0, text: 'No match.' });
   // A pattern that looks like an option is still a pattern.
   assert.equal((await call('search', { pattern: '--open-files-in-pager=touch pwned' })).matches, 0);
   assert.equal(fs.existsSync(path.join(tree, 'pwned')), false);

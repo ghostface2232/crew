@@ -1727,3 +1727,46 @@ test('Set up Crew shows backticked names as code, a failed registration as an er
   const [list, install] = [await card.locator('.setup-list').boundingBox(), await card.getByRole('button', { name: 'Install' }).boundingBox()];
   expect(install!.y).toBeGreaterThan(list!.y + list!.height);
 });
+
+test('the desktop app greets a first install once, and the palette shows the guide again', async ({ page }) => {
+  const stub = (pending: boolean) => {
+    let owed = pending;
+    Object.defineProperty(window, 'crewDesktop', { value: {
+      update: {
+        state: async () => ({ current: '0.7.2', state: 'idle' }), check: async () => {}, install: async () => {}, cancel: async () => {},
+        subscribe: () => () => {},
+      },
+      welcome: { pending: async () => owed, done: async () => { owed = false; (window as { welcomeDone?: boolean }).welcomeDone = true; } },
+    } });
+  };
+  // An update owes no guide.
+  await page.addInitScript(stub, false);
+  await page.goto('/');
+  await expect(page.getByText('Live', { exact: true })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Welcome to Crew' })).toHaveCount(0);
+
+  const installed = await page.context().newPage();
+  await installed.addInitScript(stub, true);
+  await installed.goto('/');
+  const guide = installed.getByRole('dialog', { name: 'Welcome to Crew' });
+  await expect(guide).toBeVisible();
+  // Every page keeps the sheet's height, so its buttons stay put.
+  const height = (await guide.boundingBox())!.height;
+  for (const title of ['Start in Claude Code', 'Answer from here', 'Finish setting up']) {
+    await guide.getByRole('button', { name: 'Continue' }).click();
+    await expect(installed.getByRole('heading', { name: title })).toBeVisible();
+    expect((await guide.boundingBox())!.height).toBe(height);
+  }
+  await guide.getByRole('button', { name: 'Get Started' }).click();
+  await expect(guide).toHaveCount(0);
+  expect(await installed.evaluate(() => (window as { welcomeDone?: boolean }).welcomeDone)).toBe(true);
+
+  await installed.keyboard.press('/');
+  await installed.keyboard.type('Welcome to Crew');
+  await installed.keyboard.press('Enter');
+  await expect(guide).toBeVisible();
+  await installed.keyboard.press('ArrowRight');
+  await expect(installed.getByRole('heading', { name: 'Start in Claude Code' })).toBeVisible();
+  await installed.keyboard.press('Escape');
+  await expect(guide).toHaveCount(0);
+});

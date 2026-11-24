@@ -16,12 +16,23 @@ import { isBoardNavigation, isClaudeSessionLink, linkTarget, windowBounds } from
 // It hosts the same React board the browser shows. Notifications stay with the daemon, whose Windows toasts
 // need no installed shortcut or app identity, so this app never claims the desktop notification lease.
 
+/**
+ * A first install has no Crew home yet: the daemon this app starts creates it, and an update finds it in place. Read
+ * first, since under CREW_HOME the user data folder below sits in the home and the instance lock may create it.
+ */
+const firstInstall = !fs.existsSync(HOME);
 // Test and alternate daemon profiles must not claim the user's normal desktop instance.
 if (process.env.CREW_HOME) app.setPath('userData', path.join(HOME, 'desktop'));
 // The Start menu shortcut's identity (electron-builder's appId), so a launch of Crew.exe itself, as the installer
 // does (desktop/installer.nsh), groups on the taskbar with the shortcut and its pin.
 if (process.platform === 'win32') app.setAppUserModelId('dev.crew.desktop');
 const locked = app.requestSingleInstanceLock();
+/** Marks the welcome guide as owed on a first install. The mark stays until the board says the guide closed. */
+const welcomeFile = path.join(app.getPath('userData'), 'welcome-pending');
+if (locked && firstInstall) {
+  fs.mkdirSync(path.dirname(welcomeFile), { recursive: true });
+  fs.writeFileSync(welcomeFile, '');
+}
 let window: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let quitting = false;
@@ -411,6 +422,14 @@ function watchUpdates() {
   ipcMain.handle('update:seen', (event) => {
     fromBoard(event);
     updater.seen();
+  });
+  ipcMain.handle('welcome:pending', (event) => {
+    fromBoard(event);
+    return fs.existsSync(welcomeFile);
+  });
+  ipcMain.handle('welcome:done', (event) => {
+    fromBoard(event);
+    fs.rmSync(welcomeFile, { force: true });
   });
   if (updateFailed) updater.installFailed(updateFailed);
   void updater.load().catch(console.error).then(() => {

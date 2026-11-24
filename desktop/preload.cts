@@ -17,5 +17,9 @@ const bridge: Bridge = {
       return () => void ipcRenderer.removeListener('update:changed', handler);
     },
   },
+  welcome: {
+    pending: () => ipcRenderer.invoke('welcome:pending'),
+    done: () => ipcRenderer.invoke('welcome:done'),
+  },
 };
 contextBridge.exposeInMainWorld('crewDesktop', bridge);

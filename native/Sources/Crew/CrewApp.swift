@@ -27,6 +27,9 @@ struct CrewApp: App {
             CommandGroup(after: .textEditing) {
                 Button("Search Work") { delegate.show(); delegate.store.searchRequest += 1 }.keyboardShortcut("f")
             }
+            CommandGroup(replacing: .help) {
+                Button("Welcome to Crew") { delegate.show(); delegate.store.showingWelcome = true }
+            }
             CommandMenu("Workspace") {
                 Button("Overview") { delegate.show(); delegate.store.selection = "overview" }.keyboardShortcut("1")
                 Button("Needs You") { delegate.show(); delegate.store.selection = "needs" }.keyboardShortcut("2")
@@ -143,6 +146,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
                 defaults.set(old, forKey: "selection")
             }
         } else { defaults = .standard }
+        // A first install has no Crew home yet: the instance lock and the daemon create it. An update finds it in
+        // place, so only a first install owes the welcome guide.
+        if !FileManager.default.fileExists(atPath: CrewHome.directory().path) { defaults.set(true, forKey: CrewStore.welcomePending) }
         store = CrewStore(defaults: defaults)
         // AppKit's password AutoFill check walks the key view loop when a field takes focus, and in full screen
         // that walk never ends inside the toolbar's separate window, which froze the app on search. Crew has no

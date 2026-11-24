@@ -41,6 +41,7 @@ struct BoardView: View {
         }
         .onExitCommand { store.closeDetail() }
         .sheet(isPresented: $store.showingDispatch) { DispatchView(store: store) }
+        .sheet(isPresented: $store.showingWelcome, onDismiss: store.markWelcomed) { WelcomeView(store: store) }
     }
     private var page: some View {
         ScrollView {

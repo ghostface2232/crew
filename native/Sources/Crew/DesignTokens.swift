@@ -258,6 +258,8 @@ enum Chip {
 /// bottom made its label look pressed flat against the edges.
 enum Pill {
     static let insets = EdgeInsets(top: 7, leading: 14, bottom: 7, trailing: 14)
+    /// A sheet's footer pill that spans its half of the row, as tall as the web board's large buttons.
+    static let largeInsets = EdgeInsets(top: 11, leading: 18, bottom: 11, trailing: 18)
     /// Taken off the leading inset when the label starts with a symbol: a symbol's round shape sits inside its
     /// frame, so an even inset looks wider on that side. Text-only pills stay symmetric.
     static let symbolTrim: CGFloat = 3
@@ -265,6 +267,51 @@ enum Pill {
     static let symbolGap = Space.s
     /// The plain pill's fill, close to the system bordered button's.
     static let fill = Color.primary.opacity(0.08)
+}
+
+/// The first-run welcome sheet, matching the web board's (`Onboarding.module.css`).
+enum Welcome {
+    static let width: CGFloat = 480
+    /// One margin frames both the picture and the buttons.
+    static let gutter = Space.ml
+    static let artHeight: CGFloat = 232
+    /// The system sheet's corner, which an app cannot set (`presentationCornerRadius` has no effect on a macOS sheet);
+    /// measured from the macOS 27 sheet, about 18 points.
+    static let sheetRadius: CGFloat = 18
+    /// The picture's corner, concentric with the sheet's around the gutter.
+    static let artRadius = sheetRadius - gutter
+    /// The app icon's image, whose artwork fills about four fifths of it.
+    static let appIcon: CGFloat = 88
+    /// One agent's column in the first page's card.
+    static let agentColumn: CGFloat = 116
+    /// The width of the pictures that show a card, such as the Claude Code prompt.
+    static let artCard: CGFloat = 340
+    static let textInset = Space.x5l
+    static let dot: CGFloat = 7
+    static let dotOff = Color.primary.opacity(0.12)
+    /// The pages' paragraphs, as loose as the board's 1.55 line height.
+    static let lineSpacing: CGFloat = 3
+    /// An agent's working dot with its ring in the card's color, and the ring's width.
+    static let statusDot: CGFloat = 14
+    static let dotRing: CGFloat = 2
+    /// The command column on the second page.
+    static let commandGap = Space.l
+    /// The picture's accent tint, fading toward the sheet.
+    static let tintTop = Palette.accent.opacity(0.13)
+    static let tintBottom = Palette.accent.opacity(0.03)
+    /// The soft drop under the pictures' cards and the app icon.
+    static let cardShadow = Color.black.opacity(0.06)
+    static let iconShadow = Color.black.opacity(0.16)
+    static let shadowRadius: CGFloat = 12
+    static let shadowOffset: CGFloat = 8
+    /// The waiting Claude session's card, set back behind the approval.
+    static let behindScale: CGFloat = 0.92
+    static let behindOpacity: CGFloat = 0.7
+    /// The text cursor in the Claude Code prompt.
+    static let caret = CGSize(width: 1.5, height: 17)
+    /// The prompt's send button, a little smaller than an icon button so it sits inside the prompt card, and its arrow.
+    static let sendButton: CGFloat = 26
+    static let onAccent = Color.white
 }
 
 /// An icon button: a filled circle a little larger than a chip, where the system's regular circle read smaller
@@ -328,13 +375,14 @@ struct PillLabelStyle: LabelStyle {
 /// A primary action in Liquid Glass, at the pill's size and face so it lines up with the pills around it.
 struct GlassPillButtonStyle: ButtonStyle {
     var prominent = true
+    var insets = Pill.insets
     @Environment(\.isEnabled) private var enabled
     @Environment(\.pillSwap) private var swap
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     func makeBody(configuration: Configuration) -> some View {
         PillWords(label: configuration.label)
             .font(Typeface.calloutStrong).foregroundStyle(prominent ? Color.white : .primary).lineLimit(1)
-            .padding(Pill.insets).clipShape(Capsule())
+            .padding(insets).clipShape(Capsule())
             .glassEffect(prominent ? .regular.tint(Palette.accent).interactive() : .regular.interactive(), in: .capsule)
             .opacity(enabled ? 1 : 0.45)
             .contentShape(Capsule())
@@ -345,6 +393,7 @@ struct GlassPillButtonStyle: ButtonStyle {
 
 /// Draws pills with `Pill.insets`. A destructive role takes the danger color.
 struct PillButtonStyle: ButtonStyle {
+    var insets = Pill.insets
     @Environment(\.isEnabled) private var enabled
     @Environment(\.colorScheme) private var scheme
     @Environment(\.colorSchemeContrast) private var contrast
@@ -357,7 +406,7 @@ struct PillButtonStyle: ButtonStyle {
         let fill: Color = status.map(Palette.chip) ?? Pill.fill
         PillWords(label: configuration.label)
             .font(Typeface.calloutStrong).foregroundStyle(text).lineLimit(1)
-            .padding(Pill.insets).clipShape(Capsule())
+            .padding(insets).clipShape(Capsule())
             .background(fill, in: Capsule())
             .overlay { if contrast == .increased { Capsule().strokeBorder(text.opacity(0.5)) } }
             .overlay { if configuration.isPressed { Capsule().fill(Color.primary.opacity(0.08)) } }
@@ -436,9 +485,11 @@ extension View {
             .background(WorkspaceStyle.rowFill, in: RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius))
     }
     /// A secondary action as a pill, so pills read the same wherever they sit.
-    func pillButton() -> some View { buttonStyle(PillButtonStyle()).labelStyle(PillLabelStyle()) }
+    func pillButton(insets: EdgeInsets = Pill.insets) -> some View { buttonStyle(PillButtonStyle(insets: insets)).labelStyle(PillLabelStyle()) }
     /// A primary action in glass at the pill's size; `prominent` tints it with the accent.
-    func glassPillButton(prominent: Bool = true) -> some View { buttonStyle(GlassPillButtonStyle(prominent: prominent)).labelStyle(PillLabelStyle()) }
+    func glassPillButton(prominent: Bool = true, insets: EdgeInsets = Pill.insets) -> some View {
+        buttonStyle(GlassPillButtonStyle(prominent: prominent, insets: insets)).labelStyle(PillLabelStyle())
+    }
     /// An icon-only circle at `IconButton.diameter`; its symbol takes `Symbol.control`.
     func iconButton(prominent: Bool = false) -> some View { labelStyle(.iconOnly).buttonStyle(IconButtonStyle(prominent: prominent)) }
 }

@@ -18,6 +18,7 @@ import { JobDrawer, SessionDrawer } from './JobDrawer.tsx';
 import { Settings } from './Settings.tsx';
 import { Dispatch } from './Dispatch.tsx';
 import { Palette } from './Palette.tsx';
+import { Onboarding } from './Onboarding.tsx';
 import { NavList, ProjectPeek } from './Shell.tsx';
 import { Notifier } from './notify.ts';
 import { desktop, useAppUpdate } from './desktop.ts';
@@ -61,6 +62,7 @@ export function App() {
   /** Where a sheet grows from: the control that opened it, or nothing for a keyboard shortcut. */
   const [dispatching, setDispatching] = useState<{ origin?: DOMRect } | null>(null);
   const [palette, setPalette] = useState<{ origin?: DOMRect } | null>(null);
+  const [welcome, setWelcome] = useState(false);
   const [detail, setDetail] = useState(detailFromHash);
   const project = selection.startsWith('project:') ? selection.slice(8) : '';
   const page: Page = project ? 'overview' : (PAGES.find(([id]) => id === selection)?.[0] ?? 'overview');
@@ -157,7 +159,15 @@ export function App() {
     fold();
     setSettings('about');
   }, [fold]);
-  const paletteActions = useMemo(() => ({ select, openJob: show, openSession: showSession, newJob: () => newJob(), settings: openSettings }), [select, show, showSession, newJob, openSettings]);
+  const openWelcome = useCallback(() => {
+    fold();
+    setWelcome(true);
+  }, [fold]);
+  const paletteActions = useMemo(() => ({ select, openJob: show, openSession: showSession, newJob: () => newJob(), settings: openSettings, welcome: openWelcome }), [select, show, showSession, newJob, openSettings, openWelcome]);
+  // The desktop app greets a new user once, on a first install; it owes no guide after an update.
+  useEffect(() => {
+    void desktop?.welcome?.pending().then((pending) => pending && setWelcome(true), () => {});
+  }, []);
   const closePalette = useCallback(() => setPalette(null), []);
   // Notifications for requests that arrive while the board is in the background, as the app sends them.
   const notifier = useRef<Notifier>(null);
@@ -352,6 +362,7 @@ export function App() {
         {dispatching && (
           <Dispatch state={state} project={project} origin={dispatching.origin} openJob={openNewJob} close={() => setDispatching(null)} />
         )}
+        {welcome && <Onboarding close={() => setWelcome(false)} />}
         {palette && (
           <Palette
             state={state}

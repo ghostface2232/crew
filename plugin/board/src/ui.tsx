@@ -354,7 +354,7 @@ export function Dialog({
       modals.push(dialog);
     } else dialog.show();
     if (origin) growFrom(dialog, origin);
-    if (!modal) dialog.querySelector<HTMLElement>('[data-autofocus]')?.focus({ preventScroll: true });
+    dialog.querySelector<HTMLElement>('[data-autofocus]')?.focus({ preventScroll: true });
     return () => {
       unmounting.current = true;
       if (modals.includes(dialog)) modals.splice(modals.indexOf(dialog), 1);

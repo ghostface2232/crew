@@ -36,7 +36,7 @@ Server-sent events on `GET /api/stream` (in addition to `job`, `mission`, `event
 | `modelScores` | `ModelScore[]` | Notes, peer ratings, or the `peerRatings` switch change |
 | `pull` | `PullWatch` (view) | A watched pull request is linked, changes, or is polled |
 
-Jobs also carry `rounds?: Round[]`, `ask?: boolean`, `role?: Role`, and `preset?: PresetName | null` (`jobs.ts`). Missions carry `notes?: MissionNote[]`, `preset?: PresetName`, and `tasks?: MissionTask[]` (`missions.ts`).
+Jobs also carry `rounds?: Round[]`, `ask?: boolean`, `role?: Role`, and `preset?: PresetName | null` (`jobs.ts`). Missions carry `lead?: 'claude' | 'codex'`, `notes?: MissionNote[]`, `preset?: PresetName`, and `tasks?: MissionTask[]` (`missions.ts`).
 
 Each status event has the shape `{seq, ts, agent, session_id, job_id, kind, detail}`. Its `kind` is `started`, `progress`, `waiting`, `error`, `limit`, `stalled`, `done`, or `cancelled`.
 
@@ -54,7 +54,7 @@ Each status event has the shape `{seq, ts, agent, session_id, job_id, kind, deta
 | `POST /api/language` | `{ "language": "en" \| "ko" \| null }` | `{ language }`; writes `language` in `~/.crew/config.json`, or removes it (`null`) to follow the system |
 | `POST /api/notes` | Evidence line or `{ "model", "summary" }` | `ModelScore`; user secret required ([model notes](roles.md#model-notes-and-scores) and [peer ratings](roles.md#peer-ratings)) |
 | `POST /api/jobs/:id/rating` | `{ "correctness"?, "report"?, "findings"?, "fact", "token" }` | `{ kept }`. The worker MCP server must supply the job token, and only jobs asked to rate can use the route ([peer ratings](roles.md#peer-ratings)) |
-| `POST /api/missions` | `{ "title", "project", "stages"?, "preset"?, "tasks"?, ... }` | New (or matching open) mission |
+| `POST /api/missions` | `{ "title", "project", "lead"?: "claude" \| "codex", "stages"?, "preset"?, "tasks"?, ... }` | New (or matching open) mission |
 | `POST /api/missions/:id` | `{ "note": "text" }` | Mission with note appended; refused if not active |
 | `POST /api/missions/:id` | `{ "preset": "economy" \| "balanced" \| "best" \| null }` | Mission with preset set or cleared (`null`); refused if not active; applies to its next jobs |
 | `POST /api/missions/:id/pulls` | `{ "pr": "<number or URL>" }` | `{ watch, resumed, summary }`; user secret required |

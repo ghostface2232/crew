@@ -320,6 +320,21 @@ test('a desktop session keeps the id its claude:// links open, and a malformed o
   assert.equal(s.desktopId, 'local_e97eb8b4-b9ff-4551-b625-3c06c77253c7');
 });
 
+test('a Codex session gets its desktop id only when marked as a desktop thread, and a Claude session never does', () => {
+  const { sessions, hook } = tracker();
+  hook('SessionStart', { source: 'startup', host: 'codex' });
+  const s = sessions.sessions.get('s1')!;
+  assert.equal(s.desktopId, undefined);
+  sessions.desktop('s1');
+  assert.equal(s.desktopId, 's1');
+  sessions.desktop('unknown');
+  assert.equal(sessions.sessions.has('unknown'), false);
+  const claude = tracker();
+  claude.hook('SessionStart', { source: 'startup' });
+  claude.sessions.desktop('s1');
+  assert.equal(claude.sessions.sessions.get('s1')!.desktopId, undefined);
+});
+
 test('a Codex lead session is tracked from the same hooks, with its own prompts, approvals and interruptions', () => {
   const { sessions, events, hook } = tracker();
   const codex = (name: string, extra: object = {}) => hook(name, { host: 'codex', turn_id: 't1', model: 'gpt-6.2-sol', ...extra });

@@ -12,7 +12,7 @@ import { pickLanguage, setLanguage, t } from '../plugin/board/src/i18n.ts';
 import type { Language } from '../plugin/board/src/i18n.ts';
 import { SETTING_CHANGE, taskbarDark } from './taskbar.ts';
 import { installScript, supervisorEnv, UPDATE_FAILED, Updater } from './updater.ts';
-import { isBoardNavigation, isClaudeSessionLink, linkTarget, windowBounds } from './window-state.ts';
+import { isBoardNavigation, isSessionAppLink, linkTarget, windowBounds } from './window-state.ts';
 
 // The Electron shell for Windows (and other non-macOS systems); macOS uses the native app in native/.
 // It hosts the same React board the browser shows. Notifications stay with the daemon, whose Windows toasts
@@ -243,7 +243,7 @@ function createWindow() {
   window.webContents.on('will-navigate', (event, url) => {
     if (isBoardNavigation(url, baseUrl())) return;
     event.preventDefault();
-    if (isClaudeSessionLink(url)) void shell.openExternal(url);
+    if (isSessionAppLink(url)) void shell.openExternal(url);
   });
   window.webContents.on('will-redirect', (event, url) => {
     if (!isBoardNavigation(url, baseUrl())) event.preventDefault();

@@ -53,8 +53,11 @@ interface Watch extends Lease { deadline: number; beat: number }
  * has no hook that can, so the daemon wakes it (codex-lead.ts). A session not listed here is a Claude one.
  */
 export type LeadHost = 'codex';
-/** `at`: when the session last said hello. A session may say it well before it starts its first job. */
-interface Hosted { host: LeadHost; at: number }
+/**
+ * `at`: when the session last said hello. A session may say it well before it starts its first job. `desktop`: the
+ * session is a thread of the Codex desktop app, which a `codex://threads/` link opens.
+ */
+interface Hosted { host: LeadHost; at: number; desktop?: true }
 /** How long a Codex session that leads nothing stays recorded; a session that leads a job or a watch always does. */
 const HOST_KEEP_MS = 7 * 86_400_000;
 export interface DeliveryState {
@@ -160,12 +163,12 @@ export class Delivery {
    * Sessions that lead nothing and have not said hello for a week are dropped at the same time, so the record does not
    * grow with every thread, while a session that has yet to start its first job keeps its place.
    */
-  host(session: string, host: LeadHost, now = Date.now()): void {
+  host(session: string, host: LeadHost, now = Date.now(), desktop = false): void {
     leadSession(session);
     const before = { ...this.state.hosts };
     const leading = new Set(this.subjects().map((job) => job.lead));
     const kept = Object.entries(before).filter(([id, entry]) => id !== session && (leading.has(id) || now - entry.at < HOST_KEEP_MS));
-    this.state.hosts = Object.assign(Object.create(null), Object.fromEntries(kept), { [session]: { host, at: now } });
+    this.state.hosts = Object.assign(Object.create(null), Object.fromEntries(kept), { [session]: { host, at: now, ...(desktop || before[session]?.desktop ? { desktop: true as const } : {}) } });
     try {
       this.save();
     } catch (error) {
@@ -203,6 +206,11 @@ export class Delivery {
   /** The host a lead session said hello from, for those that do (Codex); undefined for Claude Code's. */
   hostOf(session: string): LeadHost | undefined {
     return this.state.hosts?.[session]?.host;
+  }
+
+  /** Whether the lead session said hello from the Codex desktop app. */
+  desktopOf(session: string): boolean {
+    return this.state.hosts?.[session]?.desktop === true;
   }
 
   /** The lead sessions Codex hosts that have unacknowledged news. */

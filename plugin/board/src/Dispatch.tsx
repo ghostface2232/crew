@@ -38,7 +38,7 @@ export function Dispatch({
   // A debate needs the lead to answer each round, so it is not started from here.
   const choices = rolesOf(state).filter((info) => info.role !== 'debate');
   const kind = choices.find((info) => info.role === role)?.kind ?? 'delegate';
-  // The role's holders that are workers; Claude holding it means the lead does it, from a Claude session.
+  // The role's holders that are workers; Claude holding it means a lead session takes it.
   const assignment = state.roles[intent === 'question' ? 'delegate' : role];
   const info = rolesOf(state).find((other) => other.role === (intent === 'question' ? 'delegate' : role));
   const workers = preferredWorkers(info, holdersOf(assignment)).filter((holder) => holder in state.agents);

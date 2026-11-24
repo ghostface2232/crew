@@ -1309,6 +1309,15 @@ test('the lead picks one of a role\'s holders per job, and a role Claude holds s
   assert.match(worker.id, /^cl-/);
   assert.equal((await jobs.create({ ...polish, lead: codexLead })).agent, 'claude');
   await assert.rejects(jobs.create({ ...polish, agent: 'claude', lead: claudeLead }), /held by Claude, which runs no worker here/);
+  // A Codex lead starts no Codex worker, named or the default, and its default skips to the next worker that holds the role.
+  const delegate = { kind: 'delegate' as const, cwd: repo, task: 'x', isolation: 'in_place' as const };
+  await assert.rejects(jobs.create({ ...delegate, agent: 'codex', lead: codexLead }), /held by Codex, the lead's own agent, which starts no Codex worker/);
+  assert.equal((await jobs.create({ ...delegate, lead: codexLead })).agent, 'antigravity');
+  assert.equal((await jobs.create({ ...delegate, lead: claudeLead })).agent, 'codex');
+  // Held by Codex alone, the role is the Codex lead's own work, while a board-started job still goes to Codex.
+  plain.jobs.delivery.host(codexLead, 'codex');
+  await assert.rejects(plain.jobs.create({ ...delegate, lead: codexLead }), /held by Codex, the lead's own agent/);
+  assert.equal((await plain.jobs.create(delegate)).agent, 'codex');
 });
 
 test('a job runs under the preset it was given and keeps it, capping its tier by that preset', async (t) => {

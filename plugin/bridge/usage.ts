@@ -400,10 +400,11 @@ export function route(kind: RouteKind, usage: Usage, roles: Config['roles'], dis
   const keeps = (agent: Agent) => (status(agent) === 'ok' ? `${label(agent)} holds the role and has room.` : `${label(agent)} holds the role. Its usage is not known (${of(agent)?.reason ?? 'no reading.'}), so the assignment is followed.`);
 
   if (kind === 'lead') {
-    // The engineer is the first worker holding implementation: Claude may hold it too, and cannot hand work to itself.
+    // The engineer is the first worker holding implementation: the lead's own agent may hold it too, and cannot hand work to itself.
     const engineer = workersFor('delegate', roles.delegate, disabled, you)[0];
     if (status(you) === 'exhausted') {
-      const engineerHasRoom = engineer !== undefined && status(engineer) === 'ok';
+      // Antigravity holding implementation does not count: only the other agent that can lead carries the work on.
+      const engineerHasRoom = (engineer === 'codex' || engineer === LEAD) && status(engineer) === 'ok';
       return { kind, assignee: you, reason: `${why(you)} ${engineerHasRoom ? `Finish the step you are on, tell the user that ${label(you)} is out of usage and when it resets, and say what is left.` : 'No other agent can lead; stop and tell the user.'}`, fallback: [], degraded: true, deferUntil: resets(you) };
     }
     if (status(you) === 'tight') {

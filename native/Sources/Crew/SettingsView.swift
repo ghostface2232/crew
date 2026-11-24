@@ -128,7 +128,7 @@ struct CrewSettingsView: View {
         if let group = pane.group {
             ForEach(model.roleInfo.filter { $0.group == group }) { roleSection($0) }
             Section {} footer: {
-                Text("The lead picks the holder; by default, Antigravity takes wording and Codex the rest, among holders that can. A role held by the lead's own agent is the lead's own work; any other holder, Claude too under a Codex lead, runs as a worker.").settingsFootnote()
+                Text("The lead picks the holder. By default, among holders that can: Antigravity first for wording, Codex first for the rest, then Claude, with the lead's own agent always last. A role held by the lead's own agent is the lead's own work; any other holder, Claude too under a Codex lead, runs as a worker.").settingsFootnote()
             }
         } else if pane == .about {
             about

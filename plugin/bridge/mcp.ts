@@ -137,7 +137,7 @@ const attachmentsProp = {
 };
 /** Built with the tools: what naming claude does depends on the host. */
 const agentProp = () => ({
-  agent: { type: 'string', enum: [...Object.keys(WORKERS), LEAD], description: `Which of the role's holders takes this job; the roles in your instructions list them. Without it, Antigravity for wording and Codex for other work, among the holders that can take it. ${host} starts no worker: you do it.${host === 'codex' ? ' claude starts a Claude worker.' : ''}` },
+  agent: { type: 'string', enum: [...Object.keys(WORKERS), LEAD], description: `Which of the role's holders takes this job; the roles in your instructions list them. Without it, the first holder that can take it: Antigravity first for wording and Codex first for other work, then Claude, with yourself (${host}) always last. ${host} starts no worker: you do it.${host === 'codex' ? ' claude starts a Claude worker.' : ''}` },
 });
 const modelProps = {
   tier: { type: 'string', enum: [...TIERS], description: 'How demanding the job is; Crew picks the model from it. Leave it out for ordinary work, so the model the user set for the role or preset applies (standard without one); naming one overrides it. standard: most work, including most UI changes. frontier: especially hard or complex work, or a UI rebuilt from scratch. light: simple, well-specified tasks. fast: plain searches and lookups. Codex runs Sol, Astra, Terra and Luna for these; Antigravity runs Neon for frontier (literary or very complex documents) and Hydrogen otherwise. Newer models of each family are picked up automatically.' },

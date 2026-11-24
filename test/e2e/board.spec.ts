@@ -1732,7 +1732,7 @@ test('New Job shows who takes a question, and says when only the lead can', asyn
   await request.post('/__push', { data: { type: 'state', data } });
   await newJob(page);
   await page.getByRole('radio', { name: 'Question' }).click();
-  await expect(page.getByText('Start this job from a Claude Code or Codex session, which does the work itself or in a subagent.')).toBeVisible();
+  await expect(page.getByText('Start this job from a Claude Code or Codex session: Claude Code does it itself or in a subagent, and Codex hands it to a Claude worker.')).toBeVisible();
 });
 
 test('About Crew puts the check on the status row and an update action beside the note', async ({ page }) => {

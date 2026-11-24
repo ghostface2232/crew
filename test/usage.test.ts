@@ -356,7 +356,9 @@ test('a short lead hands off implementation, and an exhausted one keeps the sess
   }
   // Antigravity as engineer is the user's choice, but it is never given the lead.
   const roles = { ...DEFAULT_ROLES, delegate: { agents: ['antigravity' as const] } };
-  assert.equal(route('lead', usageOf({ claude: 'exhausted' }), roles).assignee, 'claude');
+  const antigravity = route('lead', usageOf({ claude: 'exhausted', antigravity: 'ok' }), roles);
+  assert.equal(antigravity.assignee, 'claude');
+  assert.match(antigravity.reason, /No other agent can lead/);
 });
 
 test('a Codex lead does the roles Codex holds itself, and a role Claude holds goes to a Claude worker', () => {

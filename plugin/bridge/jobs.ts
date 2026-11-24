@@ -646,6 +646,8 @@ export class Jobs {
     const picked = spec.agent ?? defaultHolder(roleName, config.roles[roleName], disabledAgents(config), codexLead ? 'codex' : LEAD);
     if (!holders.includes(picked)) throw new Error(`${spec.agent} does not hold ${roleName}; its holders are: ${holders.join(', ')}. Pick one of them. ${assignHint(roleName)}`);
     const claudeWorker = picked === LEAD && codexLead;
+    // The MCP server keeps a role the lead's own agent holds with the lead; a lead calling the API directly gets the same answer.
+    if (picked === 'codex' && codexLead) throw new Error(`${roleName} is held by Codex, the lead's own agent, which starts no Codex worker: the lead does the work itself, in a subagent, or in a session it starts.`);
     if (picked === LEAD && !claudeWorker) throw new Error(`${roleName} is held by Claude, which runs no worker here: start it from a lead session. Claude Code does the work itself or in a subagent, and a Codex lead starts a Claude worker.`);
     const role: { agent: Agent; model?: string; effort?: string; ownModel?: boolean } = claudeWorker ? { agent: LEAD } : effectiveRole(config, roleName, preset, picked as WorkerAgent);
     const { agent } = role;

@@ -34,7 +34,7 @@ export async function git(cwd: string, args: string[], stdin?: string): Promise<
 }
 
 /** The change under review as text, for a reviewer that cannot run git itself. */
-export async function reviewDiff(root: string, target: ReviewTarget): Promise<string> {
+export async function reviewDiff(root: string, target: Exclude<ReviewTarget, { type: 'files' }>): Promise<string> {
   // The ref is the caller's text: without the marker, one starting with a dash would be read as an option.
   if (target.type === 'baseBranch') return git(root, ['diff', '--end-of-options', `${target.branch}...HEAD`]);
   if (target.type === 'commit') return git(root, ['show', '--end-of-options', target.sha]);

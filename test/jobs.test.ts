@@ -283,6 +283,45 @@ test('a new job never takes the id of one on record, so a failed start removes o
   assert.deepEqual(jobs.list().map((job) => job.id).sort(), [first.id, second.id].sort());
 });
 
+test('a review of files as they stand audits the code: no diff, no rating of anyone\'s work, no built-in review', async () => {
+  const repo = tempRepo();
+  const prompts: string[] = [];
+  const { jobs, adapter, home } = harness((ctl) => {
+    prompts.push(ctl.job.prompt);
+    ctl.done('ok');
+  }, () => resolveConfig({ notify: false, roles: { review: { agents: ['codex', 'antigravity'] } } }));
+  const audit = (paths: unknown, spec: Partial<JobSpec> = {}) => jobs.create({ kind: 'review', cwd: repo, review: { target: { type: 'files', paths: paths as string[] }, mode: 'adversarial' }, ...spec });
+  await assert.rejects(audit([]), /needs paths: 1 to 50 files or directories/);
+  await assert.rejects(audit('README.md'), /needs paths/);
+  await assert.rejects(audit(['../elsewhere']), /is not inside/);
+  await assert.rejects(audit([path.join(repo, 'README.md')]), /is not inside/);
+  await assert.rejects(audit(['missing.js']), /missing\.js does not exist/);
+  await assert.rejects(audit(['app.js'], { review: { target: { type: 'files', paths: ['app.js'] }, mode: 'standard' } }), /reads a change, and files as they stand are not one/);
+  assert.equal(jobs.list().length, 0);
+
+  const job = await settled(jobs, await audit(['app.js', 'README.md']));
+  assert.match(prompts[0], /as they stand, in the working tree:\n- `app\.js`\n- `README\.md`\nThis is an audit of the code/);
+  assert.match(describe(job), /reviewed \(turn 1\): app\.js, README\.md as they stand/);
+  // The same reviewer is asked to rate a change it reviews, but not code that is no one job's work.
+  assert.equal(job.rates, undefined);
+  assert.equal((await settled(jobs, await jobs.create({ kind: 'review', cwd: repo, review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } }))).rates, true);
+
+  // A reviewer that cannot run git is handed no diff, at the start or on a follow-up.
+  const read = await settled(jobs, await audit(['app.js'], { agent: 'antigravity' }));
+  assert.match(read.notes.join(' '), /read the files and could not run tests or checks/);
+  assert.doesNotMatch(prompts.at(-1)!, /diff is saved/);
+  let told = '';
+  adapter.reply = async (ctl, message) => {
+    told = message;
+    ctl.done('again');
+  };
+  await jobs.reply(read.id, { message: 'and the tests?' });
+  await settled(jobs, read);
+  assert.equal(told.startsWith('and the tests?'), true);
+  assert.doesNotMatch(told, /review diff has been refreshed/);
+  assert.equal(fs.existsSync(path.join(home, 'reviews')), false);
+});
+
 test('an edit the worker reports outside its worktree is listed as out of scope', async () => {
   const repo = tempRepo();
   const { jobs } = harness((ctl) => {

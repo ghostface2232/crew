@@ -1000,6 +1000,12 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
         if (built && (built.kind === 'review' || built.role === 'debate')) throw new HttpError(400, `Job ${built.id} is a ${built.role ?? built.kind}, which built nothing a review could cover.`);
         const builtModel = built ? built.resolvedModel ?? (built.agent === 'codex' ? built.model : undefined) : body.of_model;
         if (built && !builtModel) throw new HttpError(400, `Job ${built.id} has no recorded model, so a review of it cannot be noted.`);
+        // Said outright, so a builder left out by mistake is still asked for.
+        const audit = body.audit === true;
+        if (audit && (role !== 'review' || builtModel)) throw new HttpError(400, 'audit is for a review line that names no builder: drop audit, or drop of_job and of_model.');
+        if (role === 'review' && !audit && !builtModel) {
+          throw new HttpError(400, 'Missing or invalid: of (the work the review covered: of_job, or of_model for work done in your session; or audit: true for a review of code as it stands, by several builders).');
+        }
         const peerRatings = liveConfig().peerRatings;
         // Antigravity's configured model is a family name; only the model the session reported names one model.
         const model = job ? job.resolvedModel ?? (job.agent === 'codex' ? job.model : undefined) : body.model;
@@ -1016,7 +1022,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
           ...(job ? { job: job.id } : {}),
           // A review line is about the reviewer itself; its job says who that was.
           reviewer: role === 'review' && job ? job.agent : body.reviewer,
-          ...(role === 'review' || body.of_job !== undefined || body.of_model !== undefined ? { of: { ...(built ? { job: built.id } : {}), model: builtModel, ...(built?.role === 'fix' ? { fix: true as const } : {}) } } : {}),
+          ...(!audit && (role === 'review' || body.of_job !== undefined || body.of_model !== undefined) ? { of: { ...(built ? { job: built.id } : {}), model: builtModel, ...(built?.role === 'fix' ? { fix: true as const } : {}) } } : {}),
           // Off, a rating is not kept: the lead is told so, and the line stands without it.
           ...(body.rating !== undefined && peerRatings ? { rating: body.rating } : {}),
           findings: body.findings ?? {},

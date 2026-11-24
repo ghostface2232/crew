@@ -136,6 +136,19 @@ for (const c of cases) {
   });
 }
 
+test('an audit of files names them and says there is no diff to read', () => {
+  const spec: JobSpec = { kind: 'review', cwd: CWD, review: { target: { type: 'files', paths: ['plugin/bridge', 'docs/jobs.md'] }, mode: 'adversarial' }, task: 'Trust boundaries.' };
+  // The same for a reviewer that runs commands and one that only reads.
+  for (const commands of [true, false]) {
+    const { prompt } = buildPrompt(spec, null, null, '', undefined, commands);
+    assert.match(prompt, /^# Review target\nReview these files and directories as they stand, in the working tree:\n- `plugin\/bridge`\n- `docs\/jobs\.md`\nThis is an audit of the code, not of a change: there is no diff to read/);
+    assert.doesNotMatch(prompt, /git diff|git status|The diff is saved/);
+    assert.match(prompt, /# Focus\nTrust boundaries\.$/);
+  }
+  const one = buildPrompt({ ...spec, review: { target: { type: 'files', paths: ['README.md'] }, mode: 'adversarial' } }, null, null, '').prompt;
+  assert.match(one, /^# Review target\nReview this as it stands, in the working tree:\n- `README\.md`\n/);
+});
+
 test('a debate of one round opens on its final round', () => {
   const rounds = (count: number) => buildPrompt({ kind: 'delegate', cwd: CWD, ask: true, debate: { rounds: count }, task: 'Which cache?' }, null, null, '').prompt.split('# Rounds\n')[1];
   assert.equal(rounds(1), 'This is the final round (1 of 1). Answer, then close with your Conclusion.');

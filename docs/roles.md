@@ -109,7 +109,7 @@ Workers provide `fact` (one line from the work). The lead's rating rests on the 
 
 **No extra turn.** Jobs created while `peerRatings` is on get `rates: true`, a `# Rating` prompt section, and the `rate` tool on `worker-mcp.ts`. Debates, questions, polish jobs, `fix` jobs, and `release` jobs are excluded.
 
-**Review lines and storage.** `note` accepts `role: "review"` (the default when noting a review job) with `of_job` or `of_model` naming the reviewed work plus accepted `findings` and `declined`. Review lines bind worker ratings to their target: reviewer ratings go to `of` (the job's build model or `of_model`), and engineer ratings go once per reviewing model on `of_job` (staying inactive until the review job is noted).
+**Review lines and storage.** `note` accepts `role: "review"` (the default when noting a review job) with `of_job` or `of_model` naming the reviewed work plus accepted `findings` and `declined`. A review of code as it stands, by several builders, has no such work to name: it is noted with `audit: true` in their place, its line shows as `audit`, and what its reviewer made of the code is a rating of no one. Leaving all three out is refused, so a builder forgotten by mistake is still asked for. Review lines bind worker ratings to their target: reviewer ratings go to `of` (the job's build model or `of_model`), and engineer ratings go once per reviewing model on `of_job` (staying inactive until the review job is noted).
 
 `~/.crew/model-notes.json` is version 2. The `ratings` field holds worker ratings, one per job. Lead ratings sit in `rating` on evidence lines and are preserved when re-noted without `rating`. Version 1 files load directly and back up once to `model-notes.json.v1` on first save.
 

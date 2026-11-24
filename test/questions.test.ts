@@ -821,7 +821,10 @@ test('model notes take a job\'s own model, refuse a model it did not run, and re
   const review = (await h.api('POST', '/api/jobs', { kind: 'review', cwd: h.home, project: h.home, review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } })).body;
   assert.match((await h.api('POST', '/api/notes', { job: review.id, role: 'build', reviewer: 'claude', size: 'small', text: 'x' })).body.error, /builds nothing/);
   assert.match((await h.api('POST', '/api/notes', { job: job.id, role: 'review', of_model: 'm', size: 'small', text: 'x' })).body.error, /is not a review/);
-  assert.match((await h.api('POST', '/api/notes', { job: review.id, size: 'small', text: 'x' })).body.error, /of \(the work the review covered/);
+  assert.match((await h.api('POST', '/api/notes', { job: review.id, size: 'small', text: 'x' })).body.error, /of \(the work the review covered: of_job, or of_model[^)]*; or audit: true/);
+  // An audit names no builder, and says so; with one named, or on a build line, it is a contradiction.
+  assert.match((await h.api('POST', '/api/notes', { job: review.id, audit: true, of_model: 'm', size: 'small', text: 'x' })).body.error, /audit is for a review line that names no builder/);
+  assert.match((await h.api('POST', '/api/notes', { job: job.id, audit: true, reviewer: 'claude', size: 'small', text: 'x' })).body.error, /audit is for a review line that names no builder/);
   assert.match((await h.api('POST', '/api/notes', { job: review.id, of_job: review.id, size: 'small', text: 'x' })).body.error, /built nothing a review could cover/);
   assert.match((await h.api('POST', '/api/notes', { model: model, summary: null })).body.error, /summary must be text/);
   // Noting the job again corrects its line, and its tier stays the job's own whatever the call says.
@@ -840,6 +843,10 @@ test('model notes take a job\'s own model, refuse a model it did not run, and re
   const view = (await h.api('GET', '/api/notes?agents=claude&evidence=1')).body.text;
   assert.match(view, /### claude-test \(claude\)[^]*Fixes at the cause\.[^]*fixed at the cause/);
   assert.doesNotMatch(view, /one edge case/);
+  // An audit is noted with no builder at all.
+  const audited = await h.api('POST', '/api/notes', { job: review.id, audit: true, size: 'small', text: 'An audit of the bridge as it stands.' });
+  assert.equal(audited.status, 200, JSON.stringify(audited.body));
+  assert.match((await h.api('GET', '/api/notes')).body.text, new RegExp(`${review.id} \\(audit, review, `));
   // An unreadable file is set aside, and noting starts afresh.
   fs.writeFileSync(path.join(h.home, 'model-notes.json'), '{broken');
   assert.deepEqual((await h.api('GET', '/api/state')).body.modelScores, []);

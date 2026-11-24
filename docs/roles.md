@@ -33,7 +33,7 @@ Each tool maps to one or more roles, and `roles` in `~/.crew/config.json` names 
 }
 ```
 
-Unassigned roles and roles without `agents` inherit their parent's holders with their own per-agent settings overlaid. Listing `agents` starts fresh. Settings stay scoped per agent (`codex`, `antigravity`), and unused agents' settings are omitted. A role may have several holders, including `claude` (all have the same status in the assignment). Under a Claude lead, a role held by `claude` is the lead's own work. Under a Codex lead it is too, because Claude cannot run as a worker yet ([roadmap.md](roadmap.md#5-long-term-plan) L1, item 5). A role held by `codex` still starts a separate Codex worker job.
+Unassigned roles and roles without `agents` inherit their parent's holders with their own per-agent settings overlaid. Listing `agents` starts fresh. Settings stay scoped per agent (`codex`, `antigravity`), and unused agents' settings are omitted. A role may have several holders, including `claude` (all have the same status in the assignment). Under a Claude lead, a role held by `claude` is the lead's own work. Under a Codex lead it is too, unless the lead names `claude` for the job, which starts a Claude Code worker. A role held by `codex` still starts a separate Codex worker job.
 
 ```json
 { "roles": { "review": { "agents": ["codex", "claude"], "codex": { "effort": "high" } }, "polish": { "agents": ["claude"] } } }

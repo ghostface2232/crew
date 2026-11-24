@@ -1,10 +1,11 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { commonGitDir, git, isInside, prepareRemoval, realpath, removeDirectory, requireAdminDir, worktreeSlot } from './git.ts';
+import { JOB_ID } from './config.ts';
 import type { Job } from './jobs.ts';
 
-const workerId = /^(cx|ag)-[0-9a-f]{6}$/;
-const workerBranch = /^crew-((cx|ag)-[0-9a-f]{6})$/;
+const workerId = new RegExp(`^${JOB_ID}$`);
+const workerBranch = new RegExp(`^crew-(${JOB_ID})$`);
 
 async function exists(file: string): Promise<boolean> {
   return fs.lstat(file).then(() => true, (err: NodeJS.ErrnoException) => {

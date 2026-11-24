@@ -844,6 +844,31 @@ test('models and efforts are picked from what each agent offers, and a hand-writ
   });
 });
 
+test('a role changed elsewhere while Settings is open is kept by the next change here, and by text being typed', async ({ page, request }) => {
+  await openSettings(page);
+  const model = page.getByLabel('Implementation Codex model');
+  const effort = page.getByLabel('Implementation Codex reasoning effort');
+  const elsewhere = (roles: object) => request.post('/api/roles', { data: { roles } });
+
+  // Another window stores two roles. Once the form shows that, a change made here does not undo either.
+  await elsewhere({ delegate: { codex: { effort: 'low' } }, review: { codex: { model: 'remote-review' } } });
+  await expect(effort).toHaveValue('low');
+  const answered = page.waitForResponse((response) => response.url().endsWith('/api/roles'));
+  await type(model, 'local-build');
+  await lastBody(request, '/api/roles').toEqual({ roles: { delegate: { codex: { model: 'local-build', effort: 'low' } }, review: { codex: { model: 'remote-review' } } } });
+  // The form takes an outside table only once its own change is stored, so let the page handle the answer first.
+  await (await answered).finished();
+  await page.evaluate(() => new Promise((resolve) => setTimeout(resolve)));
+
+  // Text being typed in a field stays when that field's stored value changes elsewhere, and is what leaving the field stores.
+  await model.fill('local-draft');
+  await elsewhere({ delegate: { codex: { model: 'remote-build', effort: 'high' } }, review: { codex: { model: 'remote-review' } } });
+  await expect(effort).toHaveValue('high');
+  await expect(model).toHaveValue('local-draft');
+  await model.press('Enter');
+  await lastBody(request, '/api/roles').toEqual({ roles: { delegate: { codex: { model: 'local-draft', effort: 'high' } }, review: { codex: { model: 'remote-review' } } } });
+});
+
 test('New Job gives wording to Antigravity and other work to Codex when a role has both', async ({ page }) => {
   const data = fixture();
   data.roles = resolveConfig({ roles: { delegate: { agents: ['codex', 'antigravity'] }, polish: { agents: ['codex', 'antigravity'] } } }).roles;

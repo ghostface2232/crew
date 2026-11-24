@@ -172,10 +172,11 @@ function useStored<T>(initial: () => T, same: (a: T, b: T) => boolean, store: (v
 function TypedSetting({ label, value, placeholder, onCommit }: { label: string; value: string; placeholder: string; onCommit: (value: string) => void }) {
   const [draft, setDraft] = useState(value);
   const [shown, setShown] = useState(value);
-  // The stored value changed under the field, as when a change that failed is undone.
+  // The stored value changed under the field, as when a change that failed is undone. Text being typed and not yet
+  // stored is kept: a change made elsewhere must not replace what the user is in the middle of writing.
   if (value !== shown) {
     setShown(value);
-    setDraft(value);
+    if (draft === shown) setDraft(value);
   }
   return (
     <input

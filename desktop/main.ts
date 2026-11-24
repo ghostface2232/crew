@@ -6,9 +6,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { boardCredential, boardUrl, readToken, SESSION_COOKIE } from '../plugin/bridge/auth.ts';
 import { api, ensureDaemon, health } from '../plugin/bridge/client.ts';
-import { baseUrl, HOME, PLUGIN_ROOT } from '../plugin/bridge/config.ts';
+import { baseUrl, HOME, loadConfig, PLUGIN_ROOT } from '../plugin/bridge/config.ts';
 import type { BoardState } from '../plugin/board/src/types.ts';
 import { pickLanguage, setLanguage, t } from '../plugin/board/src/i18n.ts';
+import type { Language } from '../plugin/board/src/i18n.ts';
 import { SETTING_CHANGE, taskbarDark } from './taskbar.ts';
 import { installScript, supervisorEnv, UPDATE_FAILED, Updater } from './updater.ts';
 import { isBoardNavigation, isClaudeSessionLink, linkTarget, windowBounds } from './window-state.ts';
@@ -290,13 +291,19 @@ async function openInBrowser() {
   const ticket = await api<{ ticket: string }>('POST', '/api/session/ticket').then((issued) => issued.ticket, () => null);
   await shell.openExternal(boardUrl(baseUrl(), ticket));
 }
-/** Keeps the tray's waiting count current; the board itself follows the daemon's live stream. */
+/**
+ * The tray and dialogs read the language setting, or the system's where none is set: the same choice the board makes,
+ * since the board's Chromium takes its languages from this locale. Undefined (an older daemon) also follows the system.
+ */
+const applyLanguage = (choice: Language | null | undefined) => setLanguage(choice ?? pickLanguage([app.getLocale()]));
+/** Keeps the tray's waiting count and language current; the board itself follows the daemon's live stream. */
 async function poll() {
   pollAbort = new AbortController();
   try {
     const signal = AbortSignal.any([pollAbort.signal, AbortSignal.timeout(4000)]);
     const state = await api<BoardState>('GET', '/api/state', undefined, signal);
     if (stopping) return;
+    applyLanguage(state.language);
     // A daemon that restarted on another port leaves the board reconnecting to the old one. Moved once per port:
     // a board that refuses to unload (unsaved settings) is not asked again every poll.
     const shown = window && !window.isDestroyed() ? window.webContents.getURL() : '';
@@ -352,8 +359,12 @@ else {
 
 async function startDesktop() {
   await app.whenReady();
-  // The board's Chromium takes its language from the same locale, so the tray and dialogs agree with it.
-  setLanguage(pickLanguage([app.getLocale()]));
+  // Read from the file until the daemon answers, so a dialog about starting it is in the chosen language too.
+  try {
+    applyLanguage(loadConfig().language);
+  } catch {
+    applyLanguage(null);
+  }
   Menu.setApplicationMenu(Menu.buildFromTemplate([{ role: 'editMenu' }, { role: 'viewMenu' }, { role: 'windowMenu' }]));
   // The board's copy buttons are the only permission it needs; notifications come from the daemon.
   const allowed = (permission: string, origin: string) => permission === 'clipboard-sanitized-write' && origin === baseUrl();

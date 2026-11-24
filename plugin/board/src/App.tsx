@@ -22,7 +22,7 @@ import { Onboarding } from './Onboarding.tsx';
 import { NavList, ProjectPeek } from './Shell.tsx';
 import { Notifier } from './notify.ts';
 import { desktop, useAppUpdate } from './desktop.ts';
-import { t } from './i18n.ts';
+import { followSetting, t } from './i18n.ts';
 
 export type Page = 'overview' | 'needs' | 'activity' | 'history';
 const GridNavIcon = bundleIcon(GridFilled, GridRegular);
@@ -111,6 +111,7 @@ export function App() {
   useEffect(() => {
     document.title = pending ? `(${pending}) Crew` : 'Crew';
   }, [pending]);
+  useEffect(() => followSetting(state.language), [state.language]);
   useEffect(() => {
     const change = () => setDetail(detailFromHash());
     window.addEventListener('hashchange', change);

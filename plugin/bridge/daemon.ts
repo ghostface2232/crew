@@ -32,7 +32,7 @@ import type { Registration, SetupItem } from './setup.ts';
 import { toastCommand } from './toast.ts';
 import { ANTIGRAVITY_MODELS, antigravityModels, codexModels } from './tiers.ts';
 import type { ModelChoice } from './tiers.ts';
-import { appendInstructions, instructionsFile, readInstructions, savePeerRatings, savePreset, saveRoles, writeInstructions } from './settings.ts';
+import { appendInstructions, instructionsFile, readInstructions, saveLanguage, savePeerRatings, savePreset, saveRoles, writeInstructions } from './settings.ts';
 import { agentGaugeDir, fromCodexLimits, route as routeWork, UsageMonitor } from './usage.ts';
 import type { RouteKind } from './usage.ts';
 import type { EventKind, Job, JobsHooks } from './jobs.ts';
@@ -355,6 +355,7 @@ fs.watchFile(path.join(HOME, 'config.json'), { interval: 2000 }, () => {
   broadcast('roles', live.roles);
   broadcast('roleSettings', live.roleSettings);
   broadcast('preset', { preset: live.preset, presets: live.presets });
+  broadcast('language', { language: live.language });
   // Turning peer ratings off or on changes what the scores are made of.
   broadcast('peerRatings', live.peerRatings);
   broadcast('modelScores', modelScores());
@@ -388,6 +389,7 @@ function state() {
     preset: live.preset,
     presets: live.presets,
     peerRatings: live.peerRatings,
+    language: live.language,
     modelScores: modelScores(),
     events: jobs.recent.slice(-200),
   };
@@ -534,7 +536,7 @@ const BOARD_POSTS = [
   /^\/api\/jobs$/,
   /^\/api\/jobs\/[\w-]+\/(?:reply|cancel|rounds\/\d+)$/,
   /^\/api\/missions\/[\w-]+$/,
-  /^\/api\/(?:instructions|setup\/repair|peer-ratings|preset|roles)$/,
+  /^\/api\/(?:instructions|setup\/repair|peer-ratings|preset|language|roles)$/,
 ];
 /**
  * Parts of those requests that only the lead sends: they speak for the user or the lead, or have the daemon read a
@@ -1029,6 +1031,11 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     if (pathname === '/api/preset') {
       const saved = savePreset(HOME, (await readJson(req)).preset);
       broadcast('preset', saved);
+      return saved;
+    }
+    if (pathname === '/api/language') {
+      const saved = saveLanguage(HOME, (await readJson(req)).language);
+      broadcast('language', saved);
       return saved;
     }
     if (pathname === '/api/shutdown') {

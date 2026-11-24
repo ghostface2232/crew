@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import {
   ChevronLeftRegular, ChevronRightRegular, DocumentText16Regular, ErrorCircle16Regular, Folder16Regular, Gauge16Regular, Info16Regular,
-  Options16Regular, ShieldCheckmark16Regular, TextFont16Regular, Wrench16Regular,
+  LocalLanguage16Regular, Options16Regular, ShieldCheckmark16Regular, TextFont16Regular, Wrench16Regular,
 } from '@fluentui/react-icons';
 import type { FluentIcon } from '@fluentui/react-icons';
 import type { AppUpdate, Preset, PresetName, Snapshot } from './types.ts';
@@ -14,6 +14,7 @@ import { AgentMark, ask, CloseButton, Dialog, Icon, Select, useFade } from './ui
 import { Scores } from './Scores.tsx';
 import { desktop } from './desktop.ts';
 import { t } from './i18n.ts';
+import type { Language } from './i18n.ts';
 import appIcon from './icons/CrewAppIcon.png';
 import styles from './Settings.module.css';
 
@@ -49,7 +50,7 @@ function presetDetails(preset: Preset): [string, string][] {
 }
 
 /** One page of settings, listed in the sidebar: the roles by kind of work, what every agent shares, each project's own instructions, then the desktop app. */
-type Fixed = 'build' | 'review' | 'edit' | 'presets' | 'models' | 'instructions' | 'about';
+type Fixed = 'build' | 'review' | 'edit' | 'presets' | 'models' | 'instructions' | 'language' | 'about';
 type Pane = Fixed | `project:${string}`;
 const PANES: Record<Fixed, { title: string; icon: FluentIcon; kind?: JobKind }> = {
   build: { title: t('Build'), icon: Wrench16Regular, kind: 'delegate' },
@@ -58,6 +59,7 @@ const PANES: Record<Fixed, { title: string; icon: FluentIcon; kind?: JobKind }> 
   presets: { title: t('Model Presets'), icon: Options16Regular },
   models: { title: t('Model Scores'), icon: Gauge16Regular },
   instructions: { title: t('Instructions'), icon: DocumentText16Regular },
+  language: { title: t('Language'), icon: LocalLanguage16Regular },
   about: { title: t('About Crew'), icon: Info16Regular },
 };
 
@@ -349,6 +351,16 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
       setRatingsStatus((error as Error).message);
     }
   };
+  // Stored as it is picked; the page then reloads into the language the daemon reports (followSetting in i18n.ts).
+  const [languageStatus, setLanguageStatus] = useState('');
+  const chooseLanguage = async (language: Language | null) => {
+    setLanguageStatus('');
+    try {
+      board.receive('language', await request<Pick<Snapshot, 'language'>>('/api/language', { language }));
+    } catch (error) {
+      setLanguageStatus(t('Not saved: {error}', { error: (error as Error).message }));
+    }
+  };
   const saveInstructions = async () => {
     if (saveLock.current || load !== 'ready') return;
     saveLock.current = true;
@@ -374,9 +386,10 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
       }
     }
   };
-  // A daemon without presets or notes has no page for them.
+  // A daemon without presets, notes, or the language setting has no page for them.
   const current: Pane =
-    (pane === 'presets' && !state.presets) || (pane === 'models' && !state.modelScores) || (pane === 'about' && !update) ? 'build' : pane;
+    (pane === 'presets' && !state.presets) || (pane === 'models' && !state.modelScores) || (pane === 'language' && state.language === undefined) ||
+    (pane === 'about' && !update) ? 'build' : pane;
   useEffect(() => {
     if (current === 'about' && update?.installError) shownInstallError.current = true;
   }, [current, update?.installError]);
@@ -550,7 +563,10 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
           <div className={styles.section}>{(['build', 'review', 'edit'] as Pane[]).map(item)}</div>
           <p className={styles.sectionLabel}>{t('Shared')}</p>
           <div className={styles.section}>
-            {([...(state.presets ? ['presets'] : []), ...(state.modelScores ? ['models'] : []), 'instructions'] as Pane[]).map(item)}
+            {([
+              ...(state.presets ? ['presets'] : []), ...(state.modelScores ? ['models'] : []), 'instructions',
+              ...(state.language !== undefined ? ['language'] : []),
+            ] as Pane[]).map(item)}
           </div>
           {dirs.length > 0 && (
             <>
@@ -694,6 +710,25 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
                   </div>
                   <p className={styles.footnote} role={ratingsStatus ? 'alert' : undefined}>
                     {ratingsStatus || t('The lead and the workers rate each other\'s work as they see it, in turns they already have, and the ratings move half of a score from where the review findings put it. Off, nobody is asked to rate and the scores come from the review findings alone; ratings already given are kept.')}
+                  </p>
+                </section>
+              )}
+              {current === 'language' && (
+                <section className={styles.group}>
+                  <div className={styles.rows}>
+                    <label className={styles.row}>
+                      <span>{t('Language')}</span>
+                      {/* Each language is named in itself, so it can be found whatever the page reads in. */}
+                      <Select<Language | ''>
+                        label={t('Language')}
+                        value={state.language ?? ''}
+                        options={[['', t('Match System')], ['en', 'English'], ['ko', '한국어']]}
+                        onChange={(next) => void chooseLanguage(next || null)}
+                      />
+                    </label>
+                  </div>
+                  <p className={styles.footnote} role={languageStatus ? 'alert' : undefined}>
+                    {languageStatus || t('For the board and the Crew app on this computer. The board reloads into it; the macOS app switches the next time it opens.')}
                   </p>
                 </section>
               )}

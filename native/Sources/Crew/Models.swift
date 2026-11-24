@@ -609,6 +609,8 @@ struct BoardState: Codable, Sendable, Equatable {
     var presets: [String: Preset]?
     /// Whether the lead and the workers rate each other's work; absent from a daemon that predates peer ratings.
     var peerRatings: Bool?
+    /// The interface language ("en" or "ko"), or nil to follow macOS.
+    var language: String?
     /// Absent from a daemon that predates model notes.
     var modelScores: [ModelScore]?
     var availableRoles: [RoleInfo] { roleInfo ?? RoleInfo.legacy }
@@ -652,6 +654,7 @@ struct BoardState: Codable, Sendable, Equatable {
             preset = change.preset; presets = change.presets
         case "modelScores": modelScores = try decoder.decode([ModelScore].self, from: event.data)
         case "peerRatings": peerRatings = try decoder.decode(Bool.self, from: event.data)
+        case "language": language = try decoder.decode(LanguageState.self, from: event.data).language
         case "agents": agents = try decoder.decode([String: Worker].self, from: event.data)
         case "roles": roles = try decoder.decode([String: RoleAssignment].self, from: event.data)
         case "roleSettings": roleSettings = try decoder.decode([String: RoleSetting].self, from: event.data)
@@ -661,6 +664,7 @@ struct BoardState: Codable, Sendable, Equatable {
     }
 }
 private struct SessionChange: Decodable, Sendable { var session: ClaudeSession; var removed: Bool? }
+struct LanguageState: Codable, Sendable { var language: String? }
 func upsert<T: Identifiable>(_ items: inout [T], _ value: T) {
     if let index = items.firstIndex(where: { $0.id == value.id }) { items[index] = value }
     else { items.append(value) }

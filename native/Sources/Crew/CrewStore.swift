@@ -210,6 +210,7 @@ final class CrewStore {
         default: break
         }
         if let id = try state.receive(event) { jobVersions[id, default: 0] += 1 }
+        if event.name == "state" || event.name == "language" { applyLanguage(state.language) }
         if event.name == "state" {
             events = state.events; limits = state.limits; usage = state.usage
             state.events = []; state.limits = [:]; state.usage = nil
@@ -289,6 +290,28 @@ final class CrewStore {
         await run(Self.peerRatingsKey) {
             let saved: Saved = try await api.post("/api/peer-ratings", Change(enabled: enabled))
             state.peerRatings = saved.peerRatings
+        }
+    }
+    static let languageKey = "language"
+    func setLanguage(_ language: String?) async {
+        await run(Self.languageKey) {
+            let saved: LanguageState = try await api.post("/api/language", LanguageState(language: language))
+            state.language = saved.language
+            applyLanguage(saved.language)
+        }
+    }
+    /// What the app last wrote to AppleLanguages, so that only its own write is undone.
+    static let appliedLanguageKey = "appliedLanguage"
+    /// Keeps the app's own language list, which macOS reads as the app opens, on the language setting. Without a
+    /// setting the app follows macOS, including a language chosen for Crew in System Settings, which is kept unless
+    /// the setting wrote over it.
+    func applyLanguage(_ language: String?) {
+        if let language {
+            defaults.set([language], forKey: "AppleLanguages")
+            defaults.set(language, forKey: Self.appliedLanguageKey)
+        } else if defaults.string(forKey: Self.appliedLanguageKey) != nil {
+            defaults.removeObject(forKey: "AppleLanguages")
+            defaults.removeObject(forKey: Self.appliedLanguageKey)
         }
     }
     func setRound(_ job: Job, turn: Int, undo: Bool) async {

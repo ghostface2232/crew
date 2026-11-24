@@ -1,16 +1,16 @@
 # Localization
 
-The board, the Windows app, and the macOS app show their interface in English or Korean. Each follows the language the person already chose for their system or browser; there is no language setting of Crew's own, so the board and the app beside it never disagree. English is the source language: text written in English in the code is the key to its translation, and anything without a translation reads in English.
+The board, the Windows app, and the macOS app show their interface in English or Korean. By default each follows the language the person already chose for their system or browser; Settings › Language can pick one for all of them instead. English is the source language: text written in English in the code is the key to its translation, and anything without a translation reads in English.
 
-**Key files:** `plugin/board/src/i18n.ts`, `plugin/board/src/ko.ts`, `native/Resources/ko.lproj/Localizable.strings`, `scripts/build-desktop.mjs`, `test/i18n.test.ts`
+**Key files:** `plugin/board/src/i18n.ts`, `plugin/board/src/ko.ts`, `native/Resources/ko.lproj/Localizable.strings`, `plugin/bridge/settings.ts` (`saveLanguage`), `desktop/main.ts`, `native/Sources/Crew/CrewStore.swift` (`applyLanguage`), `scripts/build-desktop.mjs`, `test/i18n.test.ts`
 
 ## How the language is chosen
 
-- **Board.** The first language in `navigator.languages` that Crew speaks; English when none is. In a browser that is the browser's language list, and inside the Windows app it is the system's, since Electron's Chromium takes it from Windows. The page sets `<html lang>` to match, so Korean text wraps between words (`word-break: keep-all`) instead of mid-word.
-- **Windows app.** The main process (tray menu, dialogs, update messages) passes `app.getLocale()` through the same choice once the app is ready. That is the locale the board's Chromium takes its languages from, so the tray and the board agree.
-- **macOS app.** macOS picks the language from the system list or the app's own entry in System Settings › General › Language & Region, among the languages the bundle declares (`CFBundleLocalizations`). SwiftUI looks up literal text in `Text`, `Button`, `Label`, and the like in the bundle's `Localizable.strings` by itself; text built as a `String` outside a view goes through `String(localized:)`.
+The setting is `language` in `~/.crew/config.json`: `"en"`, `"ko"`, or left out to follow the system. It lives with the daemon rather than in each app, so a browser board and the app beside it read one source and agree. Settings › Language in the board and the macOS app writes it through `POST /api/language` ([daemon-api.md](daemon-api.md#endpoints)), and every client hears the change as a `language` event. A value other than a known language makes the whole file invalid, as other settings do.
 
-Choosing per platform convention rather than adding a setting keeps one source of truth and keeps the board and the app in the same language. Revisit if people ask for a language different from their system's.
+- **Board.** The setting when one is given, otherwise the first language in `navigator.languages` that Crew speaks, and English when none is. In a browser that list is the browser's, and inside the Windows app it is the system's, since Electron's Chromium takes it from Windows. Some modules translate text into constants as they load, so the language is fixed for the life of the page: the board keeps the setting it last heard in `localStorage` (`crew.language`) to read before anything else loads, and reloads when the daemon reports a setting that would read differently. Where storage is blocked it stays in the language it loaded in, since a reload would come back the same. The page sets `<html lang>` to match, so Korean text wraps between words (`word-break: keep-all`) instead of mid-word.
+- **Windows app.** The main process (tray menu, dialogs, update messages) reads the setting from `config.json` as it starts, so a dialog about starting the daemon already uses it, then takes it from each state poll, so the tray switches within a few seconds. Without a setting it passes `app.getLocale()` through the board's choice; that is the locale the board's Chromium takes its languages from, so the tray and the board agree.
+- **macOS app.** macOS picks the language from the app's `AppleLanguages` preference, else the system list or the app's entry in System Settings › General › Language & Region, among the languages the bundle declares (`CFBundleLocalizations`). The app writes the setting to its own `AppleLanguages` whenever it hears one, and removes it only if Crew wrote it (`appliedLanguage`), so a language picked for Crew in System Settings survives while the setting follows the system. macOS reads that preference as the app opens, so the app changes language the next time it opens. SwiftUI looks up literal text in `Text`, `Button`, `Label`, and the like in the bundle's `Localizable.strings` by itself; text built as a `String` outside a view goes through `String(localized:)`.
 
 ## Writing interface text
 
@@ -64,13 +64,15 @@ The board's `ko.ts` and the macOS app's `Localizable.strings` give the same Engl
 
 ## Not verified
 
-- The macOS app's Korean text is checked by `npm run test:native` and a look at the built app, which need a Mac.
+- The macOS app's Korean text and its language setting are checked by `npm run test:native` and a look at the built app, which need a Mac.
 
 ## Tests
 
-- `test/i18n.test.ts`: every literal `t()` key in the board and Windows app has Korean text with the same placeholders, the language choice, and the English fallback.
+- `test/i18n.test.ts`: every literal `t()` key in the board and Windows app has Korean text with the same placeholders, the language choice, the English fallback, and how the board remembers the setting and reloads into it.
+- `test/settings.test.ts` and `test/questions.test.ts`: storing and validating `language`, and the board's right to change it.
 - `playwright.config.ts` pins the browser to `en-US`, so the board regressions and layout snapshots read English on any machine.
 
 ## History
 
-- 2026-11-24: Korean added to the board, the Windows app, and the macOS app.
+- 2026-11-24: Korean added to the board, the Windows app, and the macOS app. Each followed the system's or the browser's language, with no setting of Crew's own, to keep one source of truth.
+- 2026-11-24: Settings › Language added, for people who want Crew in a language other than their system's. The daemon keeps it, so the board and the apps still read one source and agree.

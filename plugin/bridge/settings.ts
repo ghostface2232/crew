@@ -94,6 +94,23 @@ export function savePreset(home: string, preset: unknown): Pick<Config, 'preset'
   return { preset: resolved.preset, presets: resolved.presets };
 }
 
+/** Sets the interface language in config.json, or clears it to follow the system, keeping every other setting. */
+export function saveLanguage(home: string, language: unknown): Pick<Config, 'language'> {
+  const file = path.join(home, 'config.json');
+  let current: Record<string, unknown> = {};
+  try {
+    current = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error(`${file} is not valid JSON, so it was left untouched: ${(err as Error).message}`);
+  }
+  if (!current || typeof current !== 'object' || Array.isArray(current)) throw new Error(`${file} does not hold a settings object, so it was left untouched.`);
+  const { language: _old, ...rest } = current;
+  const next = language === null || language === undefined || language === '' ? rest : { ...rest, language };
+  const resolved = resolveConfig(next as never);
+  writeAtomic(file, `${JSON.stringify(next, null, 2)}\n`);
+  return { language: resolved.language };
+}
+
 /** File holding the shared instructions for one project, or for every project when `project` is null. */
 export function instructionsFile(home: string, project: string | null): string {
   return project ? path.join(project, '.crew', 'instructions.md') : path.join(home, 'instructions.md');

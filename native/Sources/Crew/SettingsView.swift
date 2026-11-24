@@ -3,11 +3,11 @@ import SwiftUI
 /// One page of the settings window, listed in the sidebar: the app itself, the roles by kind of work, what every agent
 /// shares, then each project's own instructions.
 enum SettingsPane: Hashable, Identifiable {
-    case about, build, review, edit, presets, models, instructions
+    case about, build, review, edit, presets, models, instructions, language
     case project(String)
     var id: Self { self }
     static let roles: [SettingsPane] = [.build, .review, .edit]
-    static let shared: [SettingsPane] = [.presets, .models, .instructions]
+    static let shared: [SettingsPane] = [.presets, .models, .instructions, .language]
     /// The role group (`RoleInfo.group`) a roles page shows; nil for the other pages.
     var group: String? { switch self { case .build: "Build"; case .review: "Review"; case .edit: "Edit"; default: nil } }
     /// The instructions a page edits: "" for every project, a project's path for its own; nil for the other pages.
@@ -21,6 +21,7 @@ enum SettingsPane: Hashable, Identifiable {
         case .presets: "slider.horizontal.3"
         case .models: "gauge.with.dots.needle.67percent"
         case .instructions: "doc.text.fill"
+        case .language: "globe"
         case .project: "folder.fill"
         }
     }
@@ -33,6 +34,7 @@ enum SettingsPane: Hashable, Identifiable {
         case .presets, .about: .gray
         case .models: .purple
         case .instructions: .indigo
+        case .language: .cyan
         }
     }
 }
@@ -108,6 +110,7 @@ struct CrewSettingsView: View {
         case .presets: String(localized: "Model Presets")
         case .models: String(localized: "Model Scores")
         case .instructions: String(localized: "Instructions")
+        case .language: String(localized: "Language")
         case .project(let path): projectName(path, among: store.projects)
         default: pane.group.map(localizedCrewLabel) ?? ""
         }
@@ -131,6 +134,8 @@ struct CrewSettingsView: View {
             presets
         } else if pane == .models {
             modelScores
+        } else if pane == .language {
+            language
         } else {
             instructions(pane)
         }
@@ -301,6 +306,21 @@ struct CrewSettingsView: View {
                     Text("The lead and the workers rate each other's work as they see it, in turns they already have, and the ratings move half of a score from where the review findings put it. Off, nobody is asked to rate and the scores come from the review findings alone; ratings already given are kept.")
                 }.settingsFootnote()
             }
+        }
+    }
+    /// Stored as it is picked, as in the board. Each language is named in itself, so it can be found whatever the app reads in.
+    @ViewBuilder private var language: some View {
+        Section {
+            Picker("Language", selection: Binding(get: { store.state.language ?? "" }, set: { next in Task { await store.setLanguage(next.isEmpty ? nil : next) } })) {
+                Text("Match System").tag("")
+                Text(verbatim: "English").tag("en")
+                Text(verbatim: "한국어").tag("ko")
+            }
+        } footer: {
+            VStack(alignment: .leading, spacing: Space.s) {
+                if let error = store.actions[CrewStore.languageKey]?.error { ErrorLabel(message: error) }
+                Text("For the board and the Crew app on this computer. The app switches the next time it opens.")
+            }.settingsFootnote()
         }
     }
     @ViewBuilder private func instructions(_ pane: SettingsPane) -> some View {

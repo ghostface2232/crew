@@ -409,6 +409,8 @@ struct MissionPanel: View {
             mission.preset.map { localizedCrewLabel($0.rawValue.capitalized) },
         ].compactMap { $0 }.joined(separator: " · ")
     }
+    /// Missions from before the daemon recorded their lead fall back to their session while it is still known.
+    private var leadAgent: String? { mission.lead ?? store.state.claude.first { $0.id == mission.owner }?.agent }
     var body: some View {
         let leadRow = store.state.leadRow(for: mission)
         let pulls = (store.state.pulls ?? []).filter { $0.mission == mission.id }
@@ -416,10 +418,13 @@ struct MissionPanel: View {
             VStack(alignment: .leading, spacing: Space.xs) {
                 // Status and the controls sit on the middle of the title and its meta line together.
                 HStack(alignment: .center, spacing: Space.m) {
+                    // The lead's mark sits before the title and meta together, the same for every lead.
+                    if let leadAgent { AgentMark(agent: leadAgent, size: MarkSize.list) }
                     VStack(alignment: .leading, spacing: Space.xs) {
                         // One line each, so cards side by side keep the same height whatever their titles.
                         Text(mission.title).font(Typeface.title).fadeTruncated().help(mission.title)
                         HStack(spacing: 0) {
+                            if let leadAgent { Text(String(localized: "Led by \(agentName(leadAgent))") + " · ") }
                             ElapsedText(store: store, start: mission.createdAt, end: mission.endedAt)
                             Text(" · " + meta)
                         }.font(Typeface.caption).monospacedDigit().foregroundStyle(.secondary).fadeTruncated().help(mission.root)

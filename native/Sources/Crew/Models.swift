@@ -201,6 +201,8 @@ struct Mission: Codable, Sendable, Identifiable, Equatable {
     var project: String
     var root: String
     var owner: String?
+    /// The agent whose session opened it; absent on missions opened before it was recorded.
+    var lead: String?
     var stage: String
     var state: String
     var outcome: String

@@ -109,7 +109,7 @@ function CommandArt() {
             <p className={styles.prompt}>
               <span className={styles.slash}>{command}</span> {t('Add a dark mode')}
             </p>
-            <span className={styles.send}><Icon icon={ArrowUp16Filled} size={12} /></span>
+            <span className={styles.send}><Icon icon={ArrowUp16Filled} size={14} /></span>
           </div>
         </div>
       ))}

@@ -13,6 +13,7 @@ A mission groups one user command and the jobs it took, so the board can answer 
 ## Display
 
 - Missions render planned stops in order: Plan, Build, Review (shared by `self-review` and `cross-review`), Fix, Polish, Final, numbering unnamed repeats (`Review 2`, `Fix 2`). Daemon-assigned `missionStep` pins jobs to their step across plan revisions; legacy jobs attach by kind. The card's stage track shows progress; the title row carries no separate indicator. Ended missions start folded; loose jobs stay separate.
+- The card names its lead the same way for Claude and Codex: the lead's mark before the title, and "Led by Claude" or "Led by Codex" first on the meta line. It reads the mission's `lead`, or for a mission opened before that was recorded, its owning session's agent while that session is still known; with neither, the card shows no lead.
 - A job given a known mission that is no longer open runs on its own under that mission's preset with a note attached. An unknown mission ID is refused.
 - Both UIs offer *Mark Done* and *Stop Tracking* in an active mission's ellipsis menu. Abandoned missions also offer *Mark Done*, which sends `reopen: true`—without an explicit reopen, late lead calls cannot undo *Stop Tracking*. *Stop Tracking* marks a mission `abandoned` without stopping its jobs.
 - Clients show "Looks finished" after 20 quiet minutes with no active jobs or open tasks (`todo`/`doing`) unless the owning lead session is working.

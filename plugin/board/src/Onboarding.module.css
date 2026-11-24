@@ -49,7 +49,7 @@
 .prompt { margin: 0; font-size: 14px; line-height: 1.45; }
 .slash { color: var(--accent); font-weight: 550; }
 .composerFoot { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.send { display: grid; flex: none; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--ink); color: var(--on-ink); box-shadow: var(--shadow-accent); }
+.send { display: grid; flex: none; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: var(--ink); color: var(--on-ink); box-shadow: var(--shadow-accent); }
 
 /* Page 3: a Needs You approval card over a waiting Claude session's. */
 .needs { position: relative; width: 320px; height: 196px; translate: 0 6px; }

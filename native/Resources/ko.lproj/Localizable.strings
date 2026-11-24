@@ -44,6 +44,7 @@
 "Collapse" = "접기";
 "Expand" = "펼치기";
 "Looks finished" = "끝난 것 같아요";
+"Led by %@" = "%@ 리드";
 "Mark Done" = "완료로 표시";
 "Stop Tracking" = "추적 중지";
 "Stops tracking without marking done. Its jobs keep running." = "완료로 표시하지 않고 추적만 중지해요. 미션의 작업은 계속 실행돼요.";

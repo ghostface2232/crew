@@ -615,7 +615,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
               {kind && info.filter((role) => paneKind(role) === kind).map(roleGroup)}
               {kind && (
                 <p className={styles.footnote}>
-                  {t("The lead picks a holder for each job, other agents before its own. A role held by the lead's own agent is its own work.")}
+                  {t("The lead picks an agent for each job, preferring other agents over its own. When a role is assigned to the lead's agent, the lead does the work itself.")}
                 </p>
               )}
               {current === 'presets' && (
@@ -714,7 +714,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
                 <section className={styles.group}>
                   <Scores scores={state.modelScores!} />
                   <p className={styles.footnote}>
-                    {t('Scored from review findings by build size, with fixes scored apart. Ranked after three build reviews; a review by the same agent counts half.')}
+                    {t('Scores weigh review findings against build size, with fixes scored separately. Models are ranked after three reviewed builds, and reviews by the same agent count half as much.')}
                   </p>
                 </section>
               )}
@@ -727,7 +727,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
                     </label>
                   </div>
                   <p className={styles.footnote} role={ratingsStatus ? 'alert' : undefined}>
-                    {ratingsStatus || t('The lead and the workers rate each other\'s work, which counts for half of each score. Off, scores come from review findings alone; ratings already given are kept.')}
+                    {ratingsStatus || t('The lead and workers rate each other\'s work, and those ratings make up half of each score. When off, scores come from review findings alone, and existing ratings are kept.')}
                   </p>
                 </section>
               )}

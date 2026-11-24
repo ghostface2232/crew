@@ -475,7 +475,7 @@
 "About Crew" = "Crew 정보";
 "Model Presets" = "모델 프리셋";
 "Model Scores" = "모델 점수";
-"The lead picks a holder for each job, other agents before its own. A role held by the lead's own agent is its own work." = "작업마다 리드가 담당을 정하고, 다른 에이전트를 먼저 골라요. 리드와 같은 에이전트가 맡은 역할은 리드가 직접 해요.";
+"The lead picks an agent for each job, preferring other agents over its own. When a role is assigned to the lead's agent, the lead does the work itself." = "리드는 작업마다 자신보다 다른 에이전트를 먼저 선택해요. 리드와 같은 에이전트에 배정된 역할은 리드가 직접 진행해요.";
 "Same as %@" = "%@ 설정 따르기";
 "Not saved: %@" = "저장하지 못했어요: %@";
 "None" = "없음";
@@ -497,9 +497,9 @@
 "No reviews noted yet." = "아직 기록된 리뷰가 없어요.";
 "Too early to rank" = "순위 산정 전";
 "Reviewers" = "리뷰어";
-"Scored from review findings by build size, with fixes scored apart. Ranked after three build reviews; a review by the same agent counts half." = "리뷰 지적 사항과 구현 규모로 점수를 매기고, 수정은 따로 평가해요. 구현 리뷰가 세 건 쌓이면 순위에 오르고, 같은 에이전트의 리뷰는 절반만 반영해요.";
+"Scores weigh review findings against build size, with fixes scored separately. Models are ranked after three reviewed builds, and reviews by the same agent count half as much." = "구현 규모 대비 리뷰 지적 사항으로 점수를 매기고, 수정은 따로 평가해요. 리뷰를 거친 구현이 3건 이상이면 순위에 오르고, 같은 에이전트가 한 리뷰는 절반만 반영해요.";
 "Peer ratings" = "상호 평가";
-"The lead and the workers rate each other's work, which counts for half of each score. Off, scores come from review findings alone; ratings already given are kept." = "리드와 워커가 서로의 작업을 평가해 점수의 절반에 반영해요. 끄면 리뷰 지적 사항만으로 점수를 매기고, 기존 평가는 유지돼요.";
+"The lead and workers rate each other's work, and those ratings make up half of each score. When off, scores come from review findings alone, and existing ratings are kept." = "리드와 워커가 서로의 작업을 평가하고, 그 결과가 점수의 절반을 차지해요. 끄면 리뷰 지적 사항만으로 점수를 매기고, 기존 평가는 그대로 유지돼요.";
 "Language" = "언어";
 "Match System" = "시스템 설정과 같게";
 "For the board and the Crew app on this computer. The app switches the next time it opens." = "이 컴퓨터의 보드와 Crew 앱에 적용돼요. 앱은 다음에 열 때 바뀌어요.";

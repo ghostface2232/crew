@@ -640,12 +640,13 @@ export class Jobs {
     const rates = config.peerRatings && !spec.debate && !spec.ask && spec.kind !== 'polish' && roleName !== 'fix' && roleName !== 'release'
       && spec.review?.target.type !== 'files';
     const holders = config.roles[roleName].agents;
-    // Named no holder, the job goes to the role's first worker.
-    const picked = spec.agent ?? defaultHolder(roleName, config.roles[roleName], disabledAgents(config));
+    // Claude runs as a worker only for a Codex lead; under a Claude lead, or with none, a role Claude holds is a lead session's own work.
+    const codexLead = spec.lead !== undefined && this.delivery.hostOf(spec.lead) === 'codex';
+    // Named no holder, the job goes to the role's first worker, Claude included for a Codex lead.
+    const picked = spec.agent ?? defaultHolder(roleName, config.roles[roleName], disabledAgents(config), codexLead ? 'codex' : LEAD);
     if (!holders.includes(picked)) throw new Error(`${spec.agent} does not hold ${roleName}; its holders are: ${holders.join(', ')}. Pick one of them. ${assignHint(roleName)}`);
-    // Claude runs as a worker only for a Codex lead that names it: by default a role Claude holds is the lead's own work.
-    const claudeWorker = picked === LEAD && spec.agent === LEAD && spec.lead !== undefined && this.delivery.hostOf(spec.lead) === 'codex';
-    if (picked === LEAD && !claudeWorker) throw new Error(`${roleName} is held by Claude, which runs no worker here: start it from a lead session, which does the work itself or in a subagent. A Codex lead can name claude to start a Claude worker.`);
+    const claudeWorker = picked === LEAD && codexLead;
+    if (picked === LEAD && !claudeWorker) throw new Error(`${roleName} is held by Claude, which runs no worker here: start it from a lead session. Claude Code does the work itself or in a subagent, and a Codex lead starts a Claude worker.`);
     const role: { agent: Agent; model?: string; effort?: string; ownModel?: boolean } = claudeWorker ? { agent: LEAD } : effectiveRole(config, roleName, preset, picked as WorkerAgent);
     const { agent } = role;
     if (spec.runsApp && spec.kind === 'polish') throw new Error('A polish job cannot run the app: an editor only changes wording. Drop runs_app.');

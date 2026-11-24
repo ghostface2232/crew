@@ -44,6 +44,7 @@ Codex implements `probe` by reading runtime status with `thread/read` (sub-agent
 - Codex leads, as reviewed but not tested:
   - When a Codex lead's MCP server still starts the daemon, because the Crew hooks are not trusted yet, the daemon inherits the filtered environment Codex gives MCP servers. On Windows 0.170 that was the system variables, `APPDATA`, `LOCALAPPDATA`, `USERPROFILE`, `TEMP` and `PATH`; on macOS only `HOME` and `PATH`. A custom `CODEX_HOME`, proxy settings or `CREW_*` variables then do not reach that daemon or its workers until a client with the whole environment replaces it, which only `test/policy.test.ts` covers. That client replaces it even from another copy of the plugin, such as a source checkout of the same version.
   - On Windows a `codex queue` command that times out stops `cmd.exe` but may leave `codex` running.
+  - That Codex skips a Crew hook it reports as `modified` (trusted, then changed by an update) until the user trusts it again. This was read from app-server `hooks/list`, not seen in a session.
 - Verify the finite hook timeout and `asyncRewake` behavior on the installed Claude Code/Desktop host before relying on that lifetime.
 
 ## Tests

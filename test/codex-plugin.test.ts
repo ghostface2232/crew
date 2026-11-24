@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
-import { codexHooks, hookKeys, untrustedHooks, writeCodexPlugin, writtenByCrew } from '../plugin/bridge/codex-plugin.ts';
+import { codexHooks, hookKeys, hookTrust, writeCodexPlugin, writtenByCrew } from '../plugin/bridge/codex-plugin.ts';
 
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-codex-plugin-'));
 after(() => fs.rmSync(temp, { recursive: true, force: true }));
@@ -97,18 +97,21 @@ test('a hook in another form is refused rather than written wrong', () => {
   assert.throws(() => codexHooks({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'node x.js' }] }] } }, '/hook', 'darwin'), /Cannot rewrite/);
 });
 
-test("untrustedHooks reads Codex's trust records for every Crew hook", () => {
+test("hookTrust reads Codex's hooks/list for every Crew hook", () => {
   const keys = hookKeys(sourceHooks(), 'hooks/codex.json');
   assert.ok(keys.includes('crew@crew:hooks/codex.json:session_start:0:0'));
   assert.ok(keys.includes('crew@crew:hooks/codex.json:user_prompt_submit:0:0'));
-  const record = (key: string) => `[hooks.state."${key}"]\ntrusted_hash = "sha256:00"\n`;
-  assert.deepEqual(untrustedHooks('', keys), keys);
-  assert.deepEqual(untrustedHooks(keys.map(record).join('\n'), keys), []);
-  assert.deepEqual(untrustedHooks(keys.slice(1).map(record).join('\n'), keys), [keys[0]]);
-  // Other keys may come first in a record's table; the next table's hash is not this one's.
-  const withOther = keys.map((key) => `[hooks.state."${key}"]\nenabled = true\ntrusted_hash = "sha256:00"\n`).join('\n');
-  assert.deepEqual(untrustedHooks(withOther, keys), []);
-  assert.deepEqual(untrustedHooks(`[hooks.state."${keys[0]}"]\nenabled = true\n\n[other]\ntrusted_hash = "x"\n`, keys.slice(0, 1)), keys.slice(0, 1));
+  const listed = (status: (key: string, index: number) => string, other: object[] = []) =>
+    ({ data: [{ cwd: '/home', hooks: [...other, ...keys.map((key, index) => ({ key, pluginId: 'crew@crew', trustStatus: status(key, index) }))] }] });
+  assert.equal(hookTrust(listed(() => 'trusted'), keys), 'trusted');
+  // Another plugin's untrusted hook is not Crew's to report.
+  assert.equal(hookTrust(listed(() => 'trusted', [{ key: 'other@x:hooks.json:stop:0:0', trustStatus: 'untrusted' }]), keys), 'trusted');
+  assert.equal(hookTrust(listed((_, i) => (i === 0 ? 'modified' : 'trusted')), keys), 'modified');
+  // A hook never trusted outweighs one changed since: either way the user trusts them again, but the first never ran.
+  assert.equal(hookTrust(listed((_, i) => (i === 0 ? 'modified' : i === 1 ? 'untrusted' : 'trusted')), keys), 'untrusted');
+  assert.equal(hookTrust(listed(() => 'trusted'), [...keys, 'crew@crew:hooks/codex.json:post_compact:0:0']), 'untrusted');
+  assert.equal(hookTrust(listed(() => 'someNewState'), keys), 'untrusted');
+  assert.throws(() => hookTrust({}, keys), /without a list/);
 });
 
 test('the compiled bridge the launcher runs is laid out by the desktop build', () => {

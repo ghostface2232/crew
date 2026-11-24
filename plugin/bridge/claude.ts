@@ -545,6 +545,9 @@ function describeTool(name: unknown, input: any): string {
   const tool = String(name ?? 'tool');
   const mcp = /^mcp__(?:plugin_[^_]+_)?(.+?)__(.+)$/.exec(tool);
   if (mcp) return `${mcp[1]} ${mcp[2]}`;
+  // Codex runs its sub-agent tools' namespace into the name: `collaborationspawn_agent`, `collaborationwait_agent`.
+  const codex = /^collaboration([a-z]\w*)$/.exec(tool);
+  if (codex) return codex[1].replaceAll('_', ' ');
   const subject =
     (typeof input?.file_path === 'string' && path.basename(input.file_path)) ||
     input?.description ||

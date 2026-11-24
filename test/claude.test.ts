@@ -348,6 +348,10 @@ test('a Codex lead session is tracked from the same hooks, with its own prompts,
   assert.equal(s.waitingFor, null);
   assert.equal(s.ask, undefined);
 
+  // Codex's own sub-agent tools, as Codex 0.172 names them in hooks.
+  codex('PreToolUse', { tool_name: 'collaborationwait_agent', tool_input: { targets: ['a1'] } });
+  assert.equal(s.phase, 'wait agent');
+  codex('PostToolUse', { tool_name: 'collaborationwait_agent' });
   codex('SubagentStart', { agent_id: 'a2', agent_type: 'explorer' });
   assert.deepEqual(s.agents.map((a) => a.id).sort(), ['a1', 'a2', 'a3']);
   for (const agent of ['a1', 'a3']) codex('SubagentStop', { agent_id: agent, agent_type: 'default', last_assistant_message: 'ok' });

@@ -4,6 +4,7 @@ import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { readToken, tokenFile } from './auth.ts';
 import { agentEnv, baseUrl, HOME, installed, nodeEnv, PLUGIN_ROOT } from './config.ts';
+import { execTimed } from './rpc.ts';
 
 export async function api<T = any>(method: 'GET' | 'POST', route: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const send = (token: string | null) => fetch(`${baseUrl()}${route}`, {
@@ -140,6 +141,37 @@ export async function stopDaemon(): Promise<void> {
   }
 }
 
+/**
+ * The command that starts the daemon outside Codex's job, or null when cmd.exe could not carry it as written. The new
+ * process starts from the user's own environment, which is whole; only the variables that point it at this Crew, and
+ * mark how it was started, are set over it, as they must match this client's.
+ */
+export function outsideJobCommand(node: string, script: string, log: string, env: NodeJS.ProcessEnv): string | null {
+  const set = Object.entries(env).filter(([key]) => key.startsWith('CREW_') || key === 'ELECTRON_RUN_AS_NODE');
+  if ([node, script, log, ...set.flat()].some((text) => text === undefined || /["%\r\n]/.test(text))) return null;
+  return `cmd.exe /d /s /c "${set.map(([key, value]) => `set "${key}=${value}"&& `).join('')}"${node}" "${script}" >> "${log}" 2>&1"`;
+}
+
+/**
+ * Starts the daemon through WMI, outside the job object Codex runs its MCP servers in on Windows: that job ends every
+ * process in it when Codex exits, which took a daemon this server spawned, and its workers, down with the lead
+ * session. False when WMI could not start it, to spawn it as usual instead.
+ */
+async function startOutsideJob(script: string, env: NodeJS.ProcessEnv): Promise<boolean> {
+  const command = outsideJobCommand(process.execPath, script, path.join(HOME, 'daemon.log'), env);
+  if (!command) return false;
+  const literal = (text: string) => `'${text.replace(/'/g, "''")}'`;
+  const ps = [
+    '$startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]0 }',
+    `$result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = ${literal(command)}; CurrentDirectory = ${literal(HOME)}; ProcessStartupInformation = $startup }`,
+    'exit $result.ReturnValue',
+  ].join('; ');
+  return new Promise((resolve) => {
+    execTimed('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(ps, 'utf16le').toString('base64')],
+      { timeout: 20_000, windowsHide: true }, (err) => resolve(!err));
+  });
+}
+
 async function startDaemon(): Promise<void> {
   const running = await health();
   if (running) {
@@ -160,17 +192,16 @@ async function startDaemon(): Promise<void> {
     if (await health()) return;
   }
   fs.mkdirSync(HOME, { recursive: true });
-  const out = fs.openSync(path.join(HOME, 'daemon.log'), 'a');
-  const child = spawn(process.execPath, [path.join(import.meta.dirname, `daemon${path.extname(import.meta.filename)}`)], {
-    detached: true,
-    windowsHide: true,
-    stdio: ['ignore', out, out],
-    env: { ...agentEnv(), ...nodeEnv(), ...(partial ? { CREW_PARTIAL_ENV: '1' } : {}) },
-  });
+  const script = path.join(import.meta.dirname, `daemon${path.extname(import.meta.filename)}`);
+  const env = { ...agentEnv(), ...nodeEnv(), ...(partial ? { CREW_PARTIAL_ENV: '1' } : {}) };
   let spawnError: Error | undefined;
-  child.on('error', (error) => { spawnError = error; });
-  child.unref();
-  fs.closeSync(out);
+  if (!(partial && process.platform === 'win32' && await startOutsideJob(script, env))) {
+    const out = fs.openSync(path.join(HOME, 'daemon.log'), 'a');
+    const child = spawn(process.execPath, [script], { detached: true, windowsHide: true, stdio: ['ignore', out, out], env });
+    child.on('error', (error) => { spawnError = error; });
+    child.unref();
+    fs.closeSync(out);
+  }
   if (!(await waitFor(async () => {
     if (spawnError) throw new Error(`Could not start the Crew daemon: ${spawnError.message}`);
     return (await health()) !== null;

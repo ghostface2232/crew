@@ -394,7 +394,7 @@ export async function codexHooksItem(bin: string, root = PLUGIN_ROOT, timeout = 
     return { ...item, ok: false, detail: `Could not ask Codex whether they are trusted (${(err as Error).message}). If Codex does not run them, trust them in \`/hooks\`.` };
   }
   if (trust === 'trusted') return { ...item, ok: true, detail: 'Trusted.' };
-  if (trust === 'modified') return { ...item, ok: false, detail: `Changed by an update since you trusted them, so Codex asks again. ${CODEX_TRUST}` };
+  if (trust === 'modified') return { ...item, ok: false, detail: `Changed by an update since you trusted them, so Codex skips them until you trust them again. ${CODEX_TRUST}` };
   return { ...item, ok: false, detail: CODEX_TRUST };
 }
 

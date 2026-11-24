@@ -359,7 +359,7 @@ test('the Codex hooks item asks app-server hooks/list and is trusted only when C
   assert.deepEqual([trusted.ok, trusted.detail], [true, 'Trusted.']);
   const modified = await codexHooksItem(fake('modified', hooks('modified')));
   assert.equal(modified.ok, false);
-  assert.match(modified.detail, /^Changed by an update since you trusted them, so Codex asks again\. .*`\/hooks`/);
+  assert.match(modified.detail, /^Changed by an update since you trusted them, so Codex skips them until you trust them again\. .*`\/hooks`/);
   const untrusted = await codexHooksItem(fake('untrusted', hooks('untrusted')));
   assert.equal(untrusted.ok, false);
   assert.match(untrusted.detail, /^Codex runs its hooks only once trusted/);

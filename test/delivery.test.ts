@@ -430,7 +430,7 @@ test('a watched pull request\'s news is offered, acknowledged and saved beside t
   const adapter: Adapter = { start: async () => {}, reply: async () => {}, answer: async () => {}, cancel: async () => {}, shutdown: () => {} };
   const config = resolveConfig({ notify: false });
   let now = 1_000_000;
-  let view = { url: 'https://github.com/o/r/pull/7', number: 7, title: 'T', state: 'OPEN', headRefOid: 'a'.repeat(40), mergeable: 'MERGEABLE', reviewDecision: '',
+  let view = { url: 'https://github.com/o/r/pull/7', number: 7, title: 'T', state: 'OPEN', baseRefName: 'main', headRefOid: 'a'.repeat(40), mergeable: 'MERGEABLE', reviewDecision: '',
     author: { login: 'me' }, statusCheckRollup: [] as object[], reviews: [] };
   const start = () => {
     const pulls: Pulls = new Pulls({
@@ -474,7 +474,7 @@ test('a mixed receipt survives restart after its watch news is acknowledged and 
   const h = harness(t);
   const pulls = new Pulls({
     gh: async () => JSON.stringify({ url: 'https://github.com/o/r/pull/7', number: 7, title: 'T', state: 'OPEN',
-      headRefOid: 'abc', mergeable: 'MERGEABLE', reviewDecision: '' }),
+      baseRefName: 'main', headRefOid: 'abc', mergeable: 'MERGEABLE', reviewDecision: '' }),
     mission: () => ({ state: 'active', owner: 'lead', root: '/project' }),
     present: () => true, save: () => {}, changed: () => {},
   });

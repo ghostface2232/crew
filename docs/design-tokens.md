@@ -73,7 +73,7 @@ These aliases name a role for a scale step. Use the alias when the role fits, so
 | `windowDefaultSize` | 1180 × 780 | The main window's first size |
 | `sidebarWidth` | 180 / 210 / 300 | The project sidebar's minimum, ideal and maximum width |
 | `sheetWidth` | 560 | The New Job sheet |
-| `Welcome.width` | 480 | The welcome sheet; the rest of `Welcome` sets its picture (232 high, inset by a 12-point `gutter`), agent columns (116), and dots to match the board's `Onboarding.module.css`. The picture's corner is the system sheet's (about 18 points, which an app cannot set) less the gutter, so the two stay concentric |
+| `Welcome.width` | 480 | The welcome sheet; the rest of `Welcome` sets its picture (232 high, inset by a 10-point `gutter`), agent columns (116), and dots to match the board's `Onboarding.module.css`. The picture's corner is the system sheet's (about 18 points, which an app cannot set) less the gutter, so the two stay concentric |
 | `settingsSize` | 720 × 620 | The Settings window, which shrinks no smaller than `settingsMinSize` (640 × 570) |
 
 ## Radii

@@ -273,7 +273,7 @@ enum Pill {
 enum Welcome {
     static let width: CGFloat = 480
     /// One margin frames both the picture and the buttons.
-    static let gutter = Space.l
+    static let gutter = Space.ml
     static let artHeight: CGFloat = 232
     /// The system sheet's corner, which an app cannot set (`presentationCornerRadius` has no effect on a macOS sheet);
     /// measured from the macOS 27 sheet, about 18 points.

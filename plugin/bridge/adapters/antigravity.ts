@@ -45,6 +45,8 @@ class Session {
   }
 }
 
+/** How many times a turn that a role refusal ended with nothing is sent the reason and continued. */
+const REFUSAL_RESENDS = 2;
 const TURN_ENDED = new Error('Antigravity is ending this turn. Send the message again once it has ended.');
 type TurnPhase = 'starting' | 'working' | 'finishing' | 'cancelling' | 'stopping' | 'stopped' | 'ended';
 
@@ -57,6 +59,8 @@ class Turn {
   earlier = '';
   pending: { type: 'approval' | 'question'; reason: string; grant?: Grant; resolve: (answer: Answer | null) => void }[] = [];
   declined: string[] = [];
+  /** Turns resent after a role refusal ended one with nothing, carried to each continuation so a repeat cannot loop. */
+  refusalResends = 0;
   calls = new Map<string, ToolCall & { asked?: boolean; checked?: boolean; mode?: string }>();
   prompts: Promise<PromptAnswer>[] = [];
   /** Steers wait for each other without occupying the session queue needed by mode changes and close. */
@@ -79,7 +83,11 @@ class Turn {
     });
   }
 
-  continuation(): Turn { return new Turn(this.controller, this.number); }
+  continuation(): Turn {
+    const next = new Turn(this.controller, this.number);
+    next.refusalResends = this.refusalResends;
+    return next;
+  }
 
   get alive(): boolean {
     return this.phase !== 'ended' && this.phase !== 'stopping' && this.phase !== 'stopped' && this.controller.job.turns === this.number && !isTerminal(this.controller.job);
@@ -361,6 +369,7 @@ export class AntigravityAdapter implements Adapter {
       session.release(turn);
       session.end(turn);
       session.turn = turn.continuation();
+      if (turn.declined.some((note) => note.startsWith('The bridge refused'))) session.turn.refusalResends++;
       void this.begin(peer, session, session.turn, turn.declined.join('\n\n'));
       return;
     }
@@ -773,8 +782,13 @@ export class AntigravityAdapter implements Adapter {
     }
     if (typeof verdict === 'object') {
       const what = `${verdict.refuse}: ${describeRequest(toolCall, turn.ctl.job.cwd)}`;
+      const note = `The bridge refused an action outside the ${ROLE_NAMES[turn.ctl.job.kind]} role (${what}). Do it another way within the role permissions, or ask the lead to reassign the work.`;
       turn.ctl.progress(`refused (${what})`);
-      turn.ctl.note(`The bridge refused an action outside the ${ROLE_NAMES[turn.ctl.job.kind]} role (${what}). Do it another way within the role permissions, or ask the lead to reassign the work.`, { declined: true });
+      turn.ctl.note(note, { declined: true });
+      // agy ends a turn on a rejection, often before the worker has done anything, and the rejection carries no
+      // words. As with the lead's decline, the reason then goes back as the next prompt so the work goes on, a few
+      // times at most, so a worker that keeps trying the same thing ends with the refusal in its notes.
+      if (turn.refusalResends < REFUSAL_RESENDS && !turn.declined.includes(note)) turn.declined.push(note);
     }
     // Never "always": each action must come back here for Crew's role policy and job grants.
     // A refusal is for this request only, so "reject always" is used just when it is the only way to say no.

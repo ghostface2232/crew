@@ -180,7 +180,7 @@ const TOOLS = [
   {
     name: 'polish',
     title: 'Polish wording',
-    description: `Have the editor (${holder('polish')}) improve UI strings, comments, and documentation in the given files, in its own worktree. It may not change logic or structure. Not a merge gate: run it after the code is settled.`,
+    description: `Have the editor (${holder('polish')}) improve UI strings, comments, and documentation in the given files, in its own worktree. It may not change logic or structure. Not a merge gate: run it after the code is settled. Antigravity as editor runs no commands, so name the files and lines to polish rather than a command such as git diff.`,
     inputSchema: {
       type: 'object',
       properties: {

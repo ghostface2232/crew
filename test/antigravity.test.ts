@@ -1615,3 +1615,39 @@ test('the server\'s sandbox does not reach an SSH agent or a container engine th
   assert.equal(await reach('app.sock'), true);
   for (const name of ['agent.sock', 'docker.sock', 'docker.raw.sock']) assert.equal(await reach(name), false, name);
 });
+
+for (const worker of ['recovers', 'repeats'] as const) test(`a role refusal that ends the turn is sent back so the work goes on (${worker})`, { timeout: 5000 }, async (t) => {
+  // agy 1.5.14 ends a turn on a rejected permission with no text, so a refused editor command used to end the job unfinished.
+  const h = harness(t, `
+    const send = (message) => console.log(JSON.stringify({ jsonrpc: '2.0', ...message }));
+    const worker = ${JSON.stringify(worker)};
+    const text = (text) => send({ method: 'session/update', params: { sessionId: 's1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } } } });
+    let promptId, prompts = 0;
+    require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
+      const { method, id, params } = JSON.parse(line);
+      if (method === 'initialize') send({ id, result: { agentCapabilities: {} } });
+      else if (method === 'session/new') send({ id, result: { sessionId: 's1' } });
+      else if (method === 'session/prompt') {
+        promptId = id;
+        if (++prompts > 1 && worker === 'recovers') {
+          text('Polished after: ' + params.prompt[0].text.split('\\n')[0]);
+          return send({ id, result: { stopReason: 'end_turn' } });
+        }
+        send({ id: 'p' + prompts, method: 'session/request_permission', params: { sessionId: 's1', toolCall: { kind: 'execute', title: 'ls', rawInput: { CommandLine: 'ls src' } }, options: [{ kind: 'allow_once', optionId: 'yes' }, { kind: 'reject_once', optionId: 'no' }] } });
+      } else if (typeof id === 'string' && id.startsWith('p')) send({ id: promptId, result: { stopReason: 'end_turn' } });
+    });
+  `);
+  const job = await h.ended(await h.jobs.create({ kind: 'polish', cwd: h.home, isolation: 'in_place', targets: ['README.md'] }));
+  assert.equal(job.state, 'done');
+  assert.equal(job.turns, 1);
+  assert.equal(job.notes.length, 1);
+  assert.match(job.notes[0], /^The bridge refused an action outside the editor role \(execute: /);
+  const refusals = h.jobs.eventsFor(job.id, 0).filter((e) => e.kind === 'progress' && e.detail.startsWith('refused (')).length;
+  if (worker === 'recovers') {
+    assert.match(job.report!, /^Polished after: The bridge refused an action outside the editor role/);
+    assert.equal(refusals, 1);
+  } else {
+    // A worker that keeps trying the refused action is sent the reason twice, then ends with it in its notes.
+    assert.equal(refusals, 3);
+  }
+});

@@ -51,7 +51,7 @@ The worker has not seen this conversation and follows every line literally. Give
 - **Where taste decides**: quote the user's words, pass the reference in `attachments`, name the one to three points that matter most, and ask what still differs from the reference rather than for a self-rating.
 - **Stop conditions**: state which part a condition stops and that the rest continues; otherwise the worker stops the whole job.
 
-Leave `tier` and `effort` out unless the job clearly departs from the default the user set for the role or preset. Pass `runs_app: true` when the work or its checks must start the app, a server, or a browser, or when the result only shows at runtime (how it looks, or how it behaves under timing and concurrency); one reviewer of that work then runs the app too. Because such Codex jobs can use the real screen, run only one at a time. An Antigravity debate, question, or review runs no commands: point it at files to read, not commands to run.
+Leave `tier` and `effort` out unless the job clearly departs from the default the user set for the role or preset. Pass `runs_app: true` when the work or its checks must start the app, a server, or a browser, or when the result only shows at runtime (how it looks, or how it behaves under timing and concurrency); one reviewer of that work then runs the app too. Because such Codex jobs can use the real screen, run only one at a time. An Antigravity debate, question, review, or polish runs no commands: point it at files and lines to read, not commands to run (such as `git diff`).
 
 ### Reading the result
 

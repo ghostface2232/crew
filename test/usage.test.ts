@@ -375,7 +375,9 @@ test('a Codex lead is judged by its own usage, and a role held by Claude is its 
   assert.equal(route('delegate', usageOf({ codex: 'tight', claude: 'ok' }), shared).assignee, 'claude');
   const fix = route('fix', usageOf({}), DEFAULT_ROLES, [], 'codex');
   assert.equal(fix.assignee, 'claude');
-  assert.match(fix.reason, /runs no worker under another lead: do the work yourself/);
+  assert.match(fix.reason, /do the work yourself or in a subagent, or name agent claude to start a Claude worker.$/);
+  // Claude short of usage keeps the work with the lead.
+  assert.match(route('fix', usageOf({ claude: 'tight' }), DEFAULT_ROLES, [], 'codex').reason, /Claude is tight: .*keep it yourself.$/);
 });
 
 test('the history database is opened read-only and read per window', async () => {

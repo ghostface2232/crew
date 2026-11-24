@@ -1,6 +1,6 @@
 import { unread } from './delivery.ts';
 import { checkLine } from './check.ts';
-import { WORKERS } from './config.ts';
+import { workerInfo } from './config.ts';
 import { expectsOutcome, jobRole, openRefusals } from './jobs.ts';
 import type { Job } from './jobs.ts';
 
@@ -10,7 +10,7 @@ export type JobView = Omit<Job, 'prompt' | 'instructions'> & { outcomeContradict
 
 /** Command that reopens the worker's session in its own CLI, for the user to take over by hand. */
 export function resumeCommand(job: JobView): string {
-  return `${WORKERS[job.agent].resume} ${job.sessionId}`;
+  return `${workerInfo(job.agent).resume} ${job.sessionId}`;
 }
 
 export function duration(ms: number): string {
@@ -50,7 +50,7 @@ export function outcomeContradiction(job: JobView): string | undefined {
 export function describe(job: JobView, waitingHint?: string): string {
   const elapsed = duration((job.endedAt ?? Date.now()) - job.createdAt);
   const kind = job.debate ? `debate, round ${job.turns} of ${job.debate.rounds}` : jobRole(job);
-  const lines = [`[${job.id}] ${WORKERS[job.agent].name} · ${kind} · ${job.state.toUpperCase()} (${elapsed}) — ${job.title}`];
+  const lines = [`[${job.id}] ${workerInfo(job.agent).name} · ${kind} · ${job.state.toUpperCase()} (${elapsed}) — ${job.title}`];
 
   const effort = job.resolvedEffort ?? (job.agent === 'codex' && !job.nativeReview ? job.effort : undefined);
   lines.push(`model: ${job.resolvedModel ?? job.model ?? 'unknown (agent default)'}${effort ? ` · effort: ${effort}` : ''}${job.tier && job.tier !== 'standard' ? ` · tier: ${job.tier}` : ''}${job.preset ? ` · preset: ${job.preset}` : ''}`);
@@ -106,7 +106,7 @@ export function describe(job: JobView, waitingHint?: string): string {
   }
   if (job.error) {
     lines.push(`error: ${job.error.message}`);
-    if (job.error.limit) lines.push(`${WORKERS[job.agent].name} is out of usage for now. ${job.kind === 'review' ? 'Run crew:self-reviewer again with the review focus, and tell the user the cross-review was skipped' : 'Do this piece yourself, in a subagent if it is large, and tell the user the work was not delegated'}.`);
+    if (job.error.limit) lines.push(`${workerInfo(job.agent).name} is out of usage for now. ${job.kind === 'review' ? 'Run crew:self-reviewer again with the review focus, and tell the user the cross-review was skipped' : 'Do this piece yourself, in a subagent if it is large, and tell the user the work was not delegated'}.`);
   }
   if (job.tokens != null) {
     const n = (value: number) => value.toLocaleString('en-US');
@@ -144,7 +144,7 @@ export function describe(job: JobView, waitingHint?: string): string {
   for (const note of job.notes) lines.push(`note: ${note}`);
   const refused = openRefusals(job);
   if (refused.length) {
-    lines.push(`REFUSED by ${WORKERS[job.agent].name}'s automatic reviewer:`);
+    lines.push(`REFUSED by ${workerInfo(job.agent).name}'s automatic reviewer:`);
     for (const refusal of refused) {
       const reason = refusal.reason?.trim();
       const generic = reason && /^(?:blocked by policy|denied|refused|not allowed|policy violation)[.!]?$/i.test(reason);
@@ -193,5 +193,5 @@ function heldFolderOnly(job: JobView): boolean {
 export function summarize(job: JobView): string {
   const tail = job.state === 'running' ? job.phase : job.state === 'waiting' ? `needs a decision: ${job.waiting!.reason}` : (job.error?.message ?? job.result?.stat ?? '');
   const unread = job.endedAt && job.seq > job.delivered ? ' (result not read yet)' : '';
-  return `[${job.id}] ${WORKERS[job.agent].name} · ${jobRole(job)} · ${job.state} (${duration((job.endedAt ?? Date.now()) - job.createdAt)}) — ${job.title}${tail ? ` — ${tail}` : ''}${unread}${job.cleanupPending ? heldFolderOnly(job) ? ' — empty worktree folder still held; removed automatically' : ` — cleanup incomplete (${job.cleanupPending.join('; ')}); run crew gc` : ''}`;
+  return `[${job.id}] ${workerInfo(job.agent).name} · ${jobRole(job)} · ${job.state} (${duration((job.endedAt ?? Date.now()) - job.createdAt)}) — ${job.title}${tail ? ` — ${tail}` : ''}${unread}${job.cleanupPending ? heldFolderOnly(job) ? ' — empty worktree folder still held; removed automatically' : ` — cleanup incomplete (${job.cleanupPending.join('; ')}); run crew gc` : ''}`;
 }

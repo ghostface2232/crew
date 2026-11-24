@@ -432,7 +432,13 @@ export function route(kind: RouteKind, usage: Usage, roles: Config['roles'], dis
   return { ...decision, reason: `${moved}${decision.reason}`, fallback: [...new Set([...decision.fallback, ...others])], holders: listed };
 
   function decide(holder: Agent): RouteDecision {
-  if (holder === LEAD) return plain(LEAD, you === LEAD ? 'Claude holds the role: do the work yourself, or in a subagent.' : 'Claude holds the role and runs no worker under another lead: do the work yourself, or in a subagent.');
+  if (holder === LEAD) {
+    if (you === LEAD) return plain(LEAD, 'Claude holds the role: do the work yourself, or in a subagent.');
+    // Under another lead Claude can also run as a worker, on Claude's own usage.
+    const claude = usage.providers.find((p) => p.agent === LEAD);
+    const room = claude?.status === 'tight' || claude?.status === 'exhausted' ? ` Claude is ${claude.status}: ${claude.reason}, so keep it yourself.` : '';
+    return plain(LEAD, `Claude holds the role: do the work yourself or in a subagent, or name agent claude to start a Claude worker.${room}`);
+  }
   // Each role names its policy, so a new role never falls through to another's.
   const policy: Record<Role, 'build' | 'review' | 'debate' | 'polish'> = { delegate: 'build', refactor: 'build', release: 'build', fix: 'build', review: 'review', verify: 'review', debate: 'debate', polish: 'polish' };
   switch (policy[kind as Role]) {

@@ -54,6 +54,8 @@ export function daemonPort(): number {
 export const baseUrl = () => `http://127.0.0.1:${daemonPort()}`;
 
 export type WorkerAgent = 'codex' | 'antigravity';
+/** The agent a job runs on: a worker, or Claude, which runs as one only under a Codex lead. */
+export type JobAgent = WorkerAgent | 'claude';
 /** How a job runs: its sandbox, workspace, and base prompt. Each role runs as one of these. */
 export type JobKind = 'delegate' | 'review' | 'polish';
 
@@ -129,11 +131,11 @@ export const WORKERS: Record<WorkerAgent, Worker> = {
  */
 export const CLAUDE_WORKER: Worker = { name: 'Claude', idPrefix: 'cl', resume: 'claude --resume', reviewerRunsGit: true, readOnlyScratch: false };
 /** What a job's agent is, worker or Claude. */
-export const workerInfo = (agent: WorkerAgent | typeof LEAD): Worker => (agent === LEAD ? CLAUDE_WORKER : WORKERS[agent]);
+export const workerInfo = (agent: JobAgent): Worker => (agent === LEAD ? CLAUDE_WORKER : WORKERS[agent]);
 
 /** Antigravity's commands are refused in every job but an engineer's (`decide` in adapters/antigravity.ts). */
-export function runsCommands(agent: WorkerAgent, spec: { kind: JobKind; ask?: boolean }): boolean {
-  return (spec.kind === 'delegate' && !spec.ask) || WORKERS[agent].reviewerRunsGit;
+export function runsCommands(agent: JobAgent, spec: { kind: JobKind; ask?: boolean }): boolean {
+  return (spec.kind === 'delegate' && !spec.ask) || workerInfo(agent).reviewerRunsGit;
 }
 
 /** A worker's model and effort for one role, over the agent's own settings. */
@@ -216,6 +218,8 @@ export interface Config {
   /** Claude Code as a worker under a Codex lead. */
   claude: {
     bin: string;
+    model?: string;
+    effort?: string;
   };
   antigravity: {
     bin: string;

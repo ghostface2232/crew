@@ -674,8 +674,8 @@ const JobDetails = memo(function JobDetails({ id, current, streamLog, agents, ro
             </Section>
           )}
           <Footer status={<ActionStatus actionKey={cancelKey} />}>
-            {job.sessionId && agents[job.agent] && !job.capabilities?.confined && (
-              <CopyButton text={`${agents[job.agent].resume} ${job.sessionId}`} short={t('Resume')}>{t('Resume Command')}</CopyButton>
+            {job.sessionId && (job.agent === 'claude' || agents[job.agent]) && !job.capabilities?.confined && (
+              <CopyButton text={`${job.agent === 'claude' ? 'claude --resume' : agents[job.agent].resume} ${job.sessionId}`} short={t('Resume')}>{t('Resume Command')}</CopyButton>
             )}
             {job.endedAt == null && (
               <button

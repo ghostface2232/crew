@@ -1,5 +1,5 @@
 import { checkLine } from './check.ts';
-import { WORKERS } from './config.ts';
+import { workerInfo } from './config.ts';
 import type { Job } from './jobs.ts';
 import { planText } from './missions.ts';
 import type { Mission } from './missions.ts';
@@ -24,7 +24,7 @@ export function runbook(mission: Mission, jobs: Job[]): string {
   const own = jobs.filter((job) => job.mission === mission.id).sort((a, b) => a.createdAt - b.createdAt);
   if (own.length) out.push('', '## Jobs');
   for (const job of own) {
-    out.push('', `### ${job.id} · ${WORKERS[job.agent].name} · ${job.ask ? 'question' : job.kind} — ${job.title}`, '');
+    out.push('', `### ${job.id} · ${workerInfo(job.agent).name} · ${job.ask ? 'question' : job.kind} — ${job.title}`, '');
     const facts = [`state: ${job.state}`, `turns: ${job.turns}`];
     const model = job.resolvedModel ?? job.model;
     if (model) facts.push(`model: ${model}${job.resolvedEffort ?? job.effort ? ` (${job.resolvedEffort ?? job.effort})` : ''}`);
@@ -42,7 +42,7 @@ export function runbook(mission: Mission, jobs: Job[]): string {
     if (job.error) out.push(`- error: ${job.error.message.split('\n')[0]}`);
     if (job.debate && job.exchange?.length) {
       out.push('', '<details><summary>Debate</summary>', '');
-      for (const entry of job.exchange) out.push(`**${entry.from === 'lead' ? 'Lead' : WORKERS[job.agent].name}, round ${entry.turn}**`, '', entry.text, '');
+      for (const entry of job.exchange) out.push(`**${entry.from === 'lead' ? 'Lead' : workerInfo(job.agent).name}, round ${entry.turn}**`, '', entry.text, '');
       out.push('</details>');
     } else if (job.report.trim()) out.push('', '<details><summary>Report</summary>', '', job.report.trim(), '', '</details>');
   }

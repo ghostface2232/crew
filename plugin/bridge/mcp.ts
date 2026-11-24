@@ -2,7 +2,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { clipped, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, REPORT_PAGE_BYTES, textPage, unread } from './delivery.ts';
 import { api, ensureDaemon, partialEnvironment } from './client.ts';
-import { assignHint, baseUrl, canonicalPath, DEFAULT_ROLES, defaultHolder, disabledAgents, LEAD, loadConfig, MAX_DEBATE_ROUNDS, PLUGIN_ROOT, PRESET_NAMES, ROLE_INFO, ROLES, VERSION, WORKERS } from './config.ts';
+import { assignHint, baseUrl, canonicalPath, DEFAULT_ROLES, defaultHolder, disabledAgents, LEAD, loadConfig, MAX_DEBATE_ROUNDS, PLUGIN_ROOT, PRESET_NAMES, ROLE_INFO, ROLES, VERSION, WORKERS, workerInfo } from './config.ts';
 import { listSkills } from './skills.ts';
 import { describeUsage } from './usage.ts';
 import type { RouteDecision, Usage } from './usage.ts';
@@ -47,7 +47,7 @@ const roles = started?.roles ?? DEFAULT_ROLES;
  */
 let host: 'claude' | 'codex' = 'claude';
 // A daemon of another version may name a holder this session does not know.
-const holderName = (agent: Holder) => (agent === LEAD ? (host === 'codex' ? 'you (held by Claude, which cannot run as a worker yet)' : 'you, Claude')
+const holderName = (agent: Holder) => (agent === LEAD ? (host === 'codex' ? 'Claude (you do it, or name claude for a Claude worker)' : 'you, Claude')
   : agent === 'codex' && host === 'codex' ? 'Codex (a separate worker)' : WORKERS[agent]?.name ?? String(agent));
 /** How the lead names a skill: Codex lists plugin skills by name rather than as slash commands. */
 const skill = (name: string) => (host === 'codex' ? `the crew:${name} skill` : `/crew:${name}`);
@@ -93,7 +93,7 @@ const instructions = () => `Crew connects this session to background coding agen
 
 The user assigns roles (settings or ~/.crew/config.json); jobs go to an agent holding the role. At session start:
 ${roleLines()}
-\`delegate\` takes role delegate, refactor, release, or fix; \`review\` uses review, or verify with runs_app. With multiple holders, pick one with \`agent\`. ${host === 'codex' ? 'Picking `claude` starts no worker, since Claude cannot run as a worker yet' : 'Picking yourself (`claude`) starts no worker'}: do it here or in a subagent.
+\`delegate\` takes role delegate, refactor, release, or fix; \`review\` uses review, or verify with runs_app. With multiple holders, pick one with \`agent\`. ${host === 'codex' ? 'A role held by Claude is yours to do here or in a subagent; naming `claude` with `agent` starts a Claude worker instead' : 'Picking yourself (`claude`) starts no worker: do it here or in a subagent'}.
 
 Rules:
 - A delegate or polish job runs in its own git worktree and branch (crew-<job id>) from HEAD: commit what it needs first; gitignored files are copied only if in .worktreeinclude. Read its diff, then merge or reject (reject work beyond the task). Nothing reaches your branch unless you merge it.
@@ -452,7 +452,7 @@ async function askUser(job: JobView, signal: AbortSignal): Promise<'settled' | '
 
   const approval = waiting.type === 'approval';
   const prompt = request('elicitation/create', {
-    message: `${WORKERS[job.agent].name} (${job.title}) ${approval ? 'requests approval' : 'asks a question'}\n\n${waiting.reason}${approval && waiting.grant ? `\n\nallow_for_job also allows its later requests for ${waiting.grant} in this job.` : ''}`,
+    message: `${workerInfo(job.agent).name} (${job.title}) ${approval ? 'requests approval' : 'asks a question'}\n\n${waiting.reason}${approval && waiting.grant ? `\n\nallow_for_job also allows its later requests for ${waiting.grant} in this job.` : ''}`,
     requestedSchema: approval ? approvalForm(waiting.grant) : ANSWER_FORM,
   });
 
@@ -918,7 +918,9 @@ function pickHolder(role: Role, wanted: unknown): { agent?: Holder; yours?: stri
   const agent = (wanted ?? defaultHolder(role, table[role], disabled)) as Holder;
   if (!holders.includes(agent)) throw new Error(`${String(wanted)} does not hold ${role}; its holders are ${holder(role, table)}. ${assignHint(role)}`);
   if (agent !== LEAD) return { agent };
-  return { yours: `${role} is yours: no worker was started. ${YOURS[role]?.replace('SELF_REVIEWER', selfReviewer())} Its other holders: ${holders.filter((h) => h !== LEAD).map(holderName).join(', ') || 'none'}.` };
+  // A Codex lead that names Claude gets a Claude worker; left to the default, Claude's role stays the lead's own work.
+  if (host === 'codex' && wanted === LEAD) return { agent };
+  return { yours: `${role} is yours: no worker was started. ${YOURS[role]?.replace('SELF_REVIEWER', selfReviewer())} Its other holders: ${holders.filter((h) => h !== LEAD).map(holderName).join(', ') || 'none'}.${host === 'codex' ? ' To hand it to a Claude worker instead, start the job again with agent claude.' : ''}` };
 }
 
 /**

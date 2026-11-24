@@ -1298,7 +1298,7 @@ test('the lead picks one of a role\'s holders per job, and a role Claude holds s
   const plain = harness((ctl) => ctl.done('ok'), () => notHeld);
   t.after(() => { plain.jobs.flush(); fs.rmSync(plain.home, { recursive: true, force: true, maxRetries: 5 }); });
   await assert.rejects(plain.jobs.create({ kind: 'delegate', cwd: repo, task: 'x', isolation: 'in_place', agent: 'antigravity' }), /antigravity does not hold delegate; its holders are: codex/);
-  await assert.rejects(jobs.create({ kind: 'polish', cwd: repo, targets: ['README.md'], isolation: 'in_place' }), /polish is held by Claude, which runs no worker: start it from a lead session/);
+  await assert.rejects(jobs.create({ kind: 'polish', cwd: repo, targets: ['README.md'], isolation: 'in_place' }), /polish is held by Claude, which runs no worker here: start it from a lead session/);
 });
 
 test('a job runs under the preset it was given and keeps it, capping its tier by that preset', async (t) => {

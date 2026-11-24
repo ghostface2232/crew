@@ -71,7 +71,7 @@ npm run typecheck
 npm run test:desktop
 ```
 
-The smoke test (`scripts/smoke-electron.mjs`) runs the app against an isolated daemon in a temporary home directory on a free port, without starting any workers. It verifies:
+The smoke test (`scripts/smoke-electron.mjs`) runs the app in English against an isolated daemon in a temporary home directory on a free port, without starting any workers. It verifies:
 
 - sign-in by the main process with no cookie and no secret in the address, across a reload, and renderer isolation
 - hiding to the tray on close, single-instance focus, and daemon survival across quit and reopen

@@ -12,7 +12,8 @@ import { createRequire } from 'node:module';
 // Runs the Electron shell against its own daemon in a fresh home on a free port; it never starts workers.
 const require = createRequire(import.meta.url);
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-desktop-test-'));
-fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ notify: false }));
+// English whatever the system's language, since the checks below look for English text.
+fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ notify: false, language: 'en' }));
 const probe = net.createServer();
 probe.listen(0, '127.0.0.1');
 await once(probe, 'listening');

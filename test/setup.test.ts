@@ -150,6 +150,8 @@ test('packaged startup under CREW_HOME leaves the user registration and command 
   const profile = fs.mkdtempSync(path.join(home, 'profile-'));
   const calls = path.join(profile, 'calls');
   writeFakeBin(path.join(profile, 'claude'), `require('node:fs').appendFileSync(${JSON.stringify(calls)}, JSON.stringify(process.argv.slice(2)) + '\\n'); console.log('[]');`);
+  // Registration also registers with Codex where it is installed; a missing Codex keeps the user's own out of it.
+  writeFakeBin(path.join(profile, 'codex'), 'process.exit(1);');
   const originalPath = process.env.PATH;
   process.env.PATH = profile + path.delimiter + originalPath;
   t.after(() => { process.env.PATH = originalPath; });
@@ -184,6 +186,8 @@ test('an older copy of the app leaves the registration to a newer copy that is s
   const profile = fs.mkdtempSync(path.join(home, 'profile-'));
   const calls = path.join(profile, 'calls');
   writeFakeBin(path.join(profile, 'claude'), `require('node:fs').appendFileSync(${JSON.stringify(calls)}, JSON.stringify(process.argv.slice(2)) + '\\n'); console.log('[]');`);
+  // Registration also registers with Codex where it is installed; a missing Codex keeps the user's own out of it.
+  writeFakeBin(path.join(profile, 'codex'), 'process.exit(1);');
   const originalPath = process.env.PATH;
   process.env.PATH = profile + path.delimiter + originalPath;
   t.after(() => { process.env.PATH = originalPath; });

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { api, ensureDaemon, health, stopDaemon } from './client.ts';
 import { boardUrl } from './auth.ts';
 import { baseUrl, HOME, installed, VERSION } from './config.ts';
-import { checks as setupChecks, COMMAND, PACKAGED, register, registerCodex, run } from './setup.ts';
+import { checks as setupChecks, COMMAND, PACKAGED, register, run } from './setup.ts';
 import { describe, summarize } from './render.ts';
 import type { JobView } from './render.ts';
 
@@ -65,12 +65,11 @@ async function doctor(): Promise<void> {
 }
 
 async function install(): Promise<void> {
+  // Registers with Codex too where it is installed; the detail says how each went.
   const result = await register(true);
   console.log(`${result.ok ? '✓' : '✗'} ${result.detail}`);
-  const codex = await registerCodex();
-  if (codex) console.log(`${codex.ok ? '✓' : '✗'} Codex: ${codex.detail}`);
-  if (!result.ok || codex?.ok === false) process.exitCode = 1;
-  if (result.ok) console.log(`✓ crew command: ${COMMAND}\n\nRestart Claude Code sessions (or run /reload-plugins) to load the plugin, then try /crew:run.`);
+  if (!result.ok) process.exitCode = 1;
+  else console.log(`✓ crew command: ${COMMAND}\n\nRestart Claude Code sessions (or run /reload-plugins) to load the plugin, then try /crew:run.`);
 }
 
 const [command, arg] = process.argv.slice(2);

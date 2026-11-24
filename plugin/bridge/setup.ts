@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { isNewer } from './client.ts';
+import { CODEX_PLUGIN, hookKeys, pointer, untrustedHooks, writeCodexPlugin } from './codex-plugin.ts';
 import { agentCommand, agentEnv, HOME, installed, LEDGER_ASIDE, loadConfig, PLUGIN_ROOT, VERSION } from './config.ts';
 
 /**
@@ -127,13 +128,20 @@ function newerRegistration(): string | null {
 }
 
 /**
- * Registers this copy's marketplace and installs or updates the plugin from it, then points the `crew` command here.
+ * Registers this copy with Claude Code and, where it is installed, with Codex, then points the `crew` command here.
  * An app leaves a plugin registered from a source checkout alone: that is a developer's install.
  */
 export async function register(asked = false): Promise<Registration> {
   // Only on its own account: a user who installs an older version and asks for it to be registered gets it.
   const newer = PACKAGED && !asked ? newerRegistration() : null;
   if (newer) return { ok: true, detail: `A newer Crew (${newer}) is registered; this copy (${VERSION}) leaves it as it is. To use this copy instead, run the setup checklist's repair from it, or its \`crew install\`.` };
+  const claude = await registerClaude();
+  const codex = await registerCodex();
+  return codex ? { ok: claude.ok && codex.ok, detail: `${claude.detail} Codex: ${codex.detail}` } : claude;
+}
+
+/** Registers this copy's marketplace with Claude Code and installs or updates the plugin from it. */
+async function registerClaude(): Promise<Registration> {
   const marketplaces = await claudeJSON<Marketplace[]>(['plugin', 'marketplace', 'list']);
   if (!marketplaces) return { ok: false, detail: 'Claude Code was not found. Install it, then try again.' };
   const current = marketplaces.find((entry) => entry.name === 'crew');
@@ -163,18 +171,45 @@ export async function register(asked = false): Promise<Registration> {
 }
 
 /**
- * Registers a source checkout's plugin with Codex too, so a Codex session can lead. Codex reads the same marketplace
- * but copies the plugin into its own cache, so this runs again after the plugin changes. Null without Codex, or for
- * a built copy, which cannot yet run there: Codex copies only the plugin folder, not the app's Node beside it.
+ * Registers the plugin with Codex too, so a Codex session can lead; null without Codex. Codex copies the plugin into
+ * its own cache, so this runs again after the plugin changes. A source checkout registers its own marketplace. A
+ * built copy registers one written for Codex (codex-plugin.ts), since the app's Node beside the plugin folder is out of
+ * reach from Codex's copy, and leaves a source checkout's registration alone.
  */
 export async function registerCodex(): Promise<Registration | null> {
-  if (PACKAGED || !(await run('codex', ['--version'])).ok) return null;
-  const added = await run('codex', ['plugin', 'marketplace', 'add', MARKETPLACE], 60_000);
+  if (!(await run('codex', ['--version'])).ok) return null;
+  const current = (await codexMarketplaces()).get('crew');
+  const marketplace = PACKAGED ? path.join(HOME, 'codex', 'marketplace') : MARKETPLACE;
+  if (PACKAGED) {
+    if (current && !samePath(current, marketplace) && codexFromSource(current)) {
+      return { ok: true, detail: `Registered from a source checkout (${current}); the app leaves it as it is.` };
+    }
+    const root = registeredRoot();
+    if (COPIED) copyPlugin(MARKETPLACE, root);
+    const runtime = bundledRuntime(root);
+    if (!runtime) return { ok: false, detail: 'This copy of Crew has no Node runtime for Codex to run it on.' };
+    writeCodexPlugin(root, runtime, path.join(HOME, 'codex'));
+  }
+  // Codex refuses to add a marketplace under a name another folder holds.
+  if (current && !samePath(current, marketplace)) await run('codex', ['plugin', 'marketplace', 'remove', 'crew'], 60_000);
+  const added = await run('codex', ['plugin', 'marketplace', 'add', marketplace], 60_000);
   if (!added.ok) return { ok: false, detail: `Could not register the marketplace with Codex: ${lastLine(added.out)}` };
-  const plugin = await run('codex', ['plugin', 'add', 'crew@crew'], 60_000);
+  const plugin = await run('codex', ['plugin', 'add', CODEX_PLUGIN], 60_000);
   if (!plugin.ok) return { ok: false, detail: `Could not install the plugin in Codex: ${lastLine(plugin.out)}` };
-  return { ok: true, detail: 'Installed in Codex. Codex runs its hooks only once trusted: open /hooks in a Codex session, trust the Crew hooks, then start a new session.' };
+  return { ok: true, detail: `Installed in Codex. ${CODEX_TRUST}` };
 }
+
+const CODEX_TRUST = 'Codex runs its hooks only once trusted: open `/hooks` in a Codex session, press `t` to trust the Crew hooks, then start a new session. When Codex first asks to run a Crew tool, choose Always allow.';
+
+/** Codex's marketplaces by name, from `codex plugin marketplace list`: a header row, then name and root folder. */
+async function codexMarketplaces(): Promise<Map<string, string>> {
+  const res = await run('codex', ['plugin', 'marketplace', 'list'], 60_000);
+  const rows = res.ok ? res.out.split('\n').slice(1) : [];
+  return new Map(rows.map((row) => /^(\S+)\s+(.+?)\s*$/.exec(row)).filter((m) => m !== null).map((m) => [m[1], m[2]]));
+}
+
+/** A Codex marketplace folder holding a source checkout, which runs the bridge's TypeScript: a developer's install. */
+const codexFromSource = (folder: string) => fs.existsSync(path.join(folder, 'plugin', 'bridge', 'mcp.ts'));
 
 /** A marketplace folder holding a source checkout rather than a built copy: a developer's install. */
 const fromSource = (folder: string) => fs.existsSync(folder) && !fs.existsSync(path.join(folder, 'plugin', '.claude-plugin', 'build'));
@@ -295,6 +330,50 @@ export function ledgerItem(home = HOME): SetupItem | null {
   };
 }
 
+/**
+ * What a Codex session needs to lead: the plugin installed in Codex, and its hooks trusted. Trusting runs code outside
+ * Codex's sandbox, so it is left to the user, and it is asked for only once Codex has led a crew: most users lead from
+ * Claude Code and need not trust hooks they never run.
+ */
+async function codexLeadItems(bin: string): Promise<SetupItem[]> {
+  const list = await run(bin, ['plugin', 'list'], 60_000);
+  const row = list.ok ? list.out.split('\n').find((line) => line.startsWith(`${CODEX_PLUGIN} `)) : undefined;
+  const installed = Boolean(row && /\binstalled\b/.test(row) && /\benabled\b/.test(row));
+  const version = row?.match(/\s(\d+\.\d+\.\d+\S*)\s/)?.[1];
+  const items: SetupItem[] = [{ id: 'codex-plugin', label: 'Crew plugin in Codex', ok: installed, detail: installed ? `Installed${version ? ` (${version})` : ''}` : 'Not installed.', repairable: true }];
+  if (!installed || !ledFromCodex()) return items;
+  const untrusted = untrustedCodexHooks();
+  items.push({ id: 'codex-hooks', label: 'Crew hooks in Codex', ok: untrusted.length === 0, detail: untrusted.length === 0 ? 'Trusted.' : CODEX_TRUST });
+  return items;
+}
+
+/** The Crew hooks Codex's config does not record as trusted. */
+function untrustedCodexHooks(): string[] {
+  const manifest = JSON.parse(fs.readFileSync(path.join(PLUGIN_ROOT, '.codex-plugin', 'plugin.json'), 'utf8'));
+  const file = pointer(manifest.hooks);
+  const keys = hookKeys(JSON.parse(fs.readFileSync(path.join(PLUGIN_ROOT, file), 'utf8')), file);
+  const codexHome = agentEnv().CODEX_HOME ?? path.join(os.homedir(), '.codex');
+  let config = '';
+  try {
+    config = fs.readFileSync(path.join(codexHome, 'config.toml'), 'utf8');
+  } catch {
+    /* No config yet: nothing is trusted. */
+  }
+  return untrustedHooks(config, keys);
+}
+
+/**
+ * Whether a Codex session has led a crew, as the ledger's delivery state records Codex-hosted leads. The ledger is
+ * large and this runs with every checklist, so the text is searched rather than parsed.
+ */
+function ledFromCodex(): boolean {
+  try {
+    return /"hosts":\{[^}]*:"codex"/.test(fs.readFileSync(path.join(HOME, 'jobs.json'), 'utf8'));
+  } catch {
+    return false;
+  }
+}
+
 /** What Crew needs, as the app's checklist and `crew doctor` show it. Signing in is always left to the user. */
 export async function checks(): Promise<SetupItem[]> {
   const config = loadConfig();
@@ -321,6 +400,7 @@ export async function checks(): Promise<SetupItem[]> {
   const codexLogin = codex.ok ? await run(config.codex.bin, ['login', 'status']) : null;
   items.push({ id: 'codex', label: 'Codex CLI', ok: codex.ok, detail: codex.ok ? codex.out : 'Not found. Install Codex, then run `codex login`.' });
   if (codexLogin) items.push({ id: 'codex-login', label: 'Codex sign-in', ok: codexLogin.ok, detail: codexLogin.ok ? lastLine(codexLogin.out) : 'Run `codex login` in a terminal.' });
+  if (codex.ok) items.push(...(await codexLeadItems(config.codex.bin)));
   if (config.antigravity.enabled) {
     items.push({ id: 'antigravity', label: 'Antigravity CLI', ok: agy.ok, detail: agy.ok ? agy.out : 'Not found. Install it, then run `agy` once to sign in.' });
   }

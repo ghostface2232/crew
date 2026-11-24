@@ -475,7 +475,7 @@
 "About Crew" = "Crew 정보";
 "Model Presets" = "모델 프리셋";
 "Model Scores" = "모델 점수";
-"The lead picks the holder. By default, among holders that can: Antigravity first for wording, Codex first for the rest, then Claude, with the lead's own agent always last. A role held by the lead's own agent is the lead's own work; any other holder, Claude too under a Codex lead, runs as a worker." = "담당 에이전트는 리드가 정해요. 기본적으로 가능한 에이전트 중에서 문구 다듬기는 Antigravity, 나머지는 Codex, 그다음 Claude 순으로 맡고, 리드와 같은 에이전트는 항상 마지막이에요. 리드와 같은 에이전트가 맡은 역할은 리드가 직접 하고, 다른 에이전트가 맡은 역할은 워커가 해요. Codex가 리드일 때는 Claude도 워커로 실행돼요.";
+"The lead picks a holder for each job, other agents before its own. A role held by the lead's own agent is its own work." = "작업마다 리드가 담당을 정하고, 다른 에이전트를 먼저 골라요. 리드와 같은 에이전트가 맡은 역할은 리드가 직접 해요.";
 "Same as %@" = "%@ 설정 따르기";
 "Not saved: %@" = "저장하지 못했어요: %@";
 "None" = "없음";
@@ -497,9 +497,9 @@
 "No reviews noted yet." = "아직 기록된 리뷰가 없어요.";
 "Too early to rank" = "순위 산정 전";
 "Reviewers" = "리뷰어";
-"Scored from review findings per build size, with fixes scored apart. A model is ranked after three build reviews; a review by its own agent counts half." = "구현 규모를 고려해 리뷰 지적 사항으로 점수를 매기고, 수정은 따로 평가해요. 구현 리뷰가 세 건 쌓이면 순위에 올라요. 같은 에이전트가 한 리뷰는 절반만 반영해요.";
+"Scored from review findings by build size, with fixes scored apart. Ranked after three build reviews; a review by the same agent counts half." = "리뷰 지적 사항과 구현 규모로 점수를 매기고, 수정은 따로 평가해요. 구현 리뷰가 세 건 쌓이면 순위에 오르고, 같은 에이전트의 리뷰는 절반만 반영해요.";
 "Peer ratings" = "상호 평가";
-"The lead and the workers rate each other's work as they see it, in turns they already have, and the ratings move half of a score from where the review findings put it. Off, nobody is asked to rate and the scores come from the review findings alone; ratings already given are kept." = "리드와 워커가 각자의 턴에서 서로의 작업을 평가해요. 이 평가는 리뷰 지적 사항으로 매긴 점수와 절반 비중으로 반영돼요. 끄면 평가를 요청하지 않고 리뷰 지적 사항만으로 점수를 매기며, 기존 평가는 그대로 유지돼요.";
+"The lead and the workers rate each other's work, which counts for half of each score. Off, scores come from review findings alone; ratings already given are kept." = "리드와 워커가 서로의 작업을 평가해 점수의 절반에 반영해요. 끄면 리뷰 지적 사항만으로 점수를 매기고, 기존 평가는 유지돼요.";
 "Language" = "언어";
 "Match System" = "시스템 설정과 같게";
 "For the board and the Crew app on this computer. The app switches the next time it opens." = "이 컴퓨터의 보드와 Crew 앱에 적용돼요. 앱은 다음에 열 때 바뀌어요.";

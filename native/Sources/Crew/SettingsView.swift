@@ -128,7 +128,7 @@ struct CrewSettingsView: View {
         if let group = pane.group {
             ForEach(model.roleInfo.filter { $0.group == group }) { roleSection($0) }
             Section {} footer: {
-                Text("The lead picks the holder. By default, among holders that can: Antigravity first for wording, Codex first for the rest, then Claude, with the lead's own agent always last. A role held by the lead's own agent is the lead's own work; any other holder, Claude too under a Codex lead, runs as a worker.").settingsFootnote()
+                Text("The lead picks a holder for each job, other agents before its own. A role held by the lead's own agent is its own work.").settingsFootnote()
             }
         } else if pane == .about {
             about
@@ -296,7 +296,7 @@ struct CrewSettingsView: View {
             }
         }
         Section {} footer: {
-            Text("Scored from review findings per build size, with fixes scored apart. A model is ranked after three build reviews; a review by its own agent counts half.")
+            Text("Scored from review findings by build size, with fixes scored apart. Ranked after three build reviews; a review by the same agent counts half.")
                 .settingsFootnote()
         }
         if let peerRatings = store.state.peerRatings {
@@ -305,7 +305,7 @@ struct CrewSettingsView: View {
             } footer: {
                 VStack(alignment: .leading, spacing: Space.s) {
                     if let error = store.actions[CrewStore.peerRatingsKey]?.error { ErrorLabel(message: error) }
-                    Text("The lead and the workers rate each other's work as they see it, in turns they already have, and the ratings move half of a score from where the review findings put it. Off, nobody is asked to rate and the scores come from the review findings alone; ratings already given are kept.")
+                    Text("The lead and the workers rate each other's work, which counts for half of each score. Off, scores come from review findings alone; ratings already given are kept.")
                 }.settingsFootnote()
             }
         }

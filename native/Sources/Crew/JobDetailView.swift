@@ -23,7 +23,7 @@ struct JobDetailView: View {
                     Text(error).foregroundStyle(Palette.danger.ink(scheme)).textSelection(.enabled)
                     Button("Retry") { retry += 1 }.pillButton()
                 }
-                if job == nil && error.isEmpty { ProgressView("Loading details…") }
+                if job == nil && error.isEmpty { ProgressView(String(localized: "Loading details…")) }
                 if let job { contents(job) }
             }.padding(.horizontal, WorkspaceStyle.panelPadding).padding(.top, Space.m).padding(.bottom, WorkspaceStyle.panelPadding).frame(maxWidth: .infinity, alignment: .leading)
                 .background(OverlayScrollers())
@@ -62,51 +62,51 @@ struct JobDetailView: View {
         }
         Grid(alignment: .leading, horizontalSpacing: WorkspaceStyle.factColumnGap, verticalSpacing: WorkspaceStyle.factRowGap) {
             // The model the session reported, else the configured one.
-            fact("Agent", [agentName(job.agent), job.resolvedModel ?? job.model, (job.resolvedEffort ?? job.effort).map { "\($0) effort" }, job.tier.map { "\($0) tier" }].compactMap { $0 }.joined(separator: " · "))
-            fact("Role", job.ask == true && job.debate == nil ? "Question" : store.state.roleLabel(job.assignedRole))
+            fact(String(localized: "Agent"), [agentName(job.agent), job.resolvedModel ?? job.model, (job.resolvedEffort ?? job.effort).map { String(localized: "\(localizedCrewLabel($0)) effort") }, job.tier.map { String(localized: "\(localizedCrewLabel($0)) tier") }].compactMap { $0 }.joined(separator: " · "))
+            fact(String(localized: "Role"), job.ask == true && job.debate == nil ? String(localized: "Question") : store.state.roleLabel(job.assignedRole))
             // What the worker declared, set against what the bridge observed.
             if job.state == "done", let outcome = job.outcome {
-                fact("Outcome", job.outcomeContradiction.map { "Done as declared, but \($0)" } ?? outcome.capitalized)
+                fact(String(localized: "Outcome"), job.outcomeContradiction.map { String(localized: "Done as declared, but \($0)") } ?? localizedCrewLabel(outcome.capitalized))
             }
-            if let preset = job.preset { fact("Preset", preset.capitalized) }
-            fact("Project", job.projectPath)
-            fact("Duration", elapsed((job.endedAt ?? store.now) - job.createdAt))
-            if let worktree = job.worktree { fact("Branch", worktree.branch) }
-            if let tokens = job.tokens { fact("Tokens", tokens.formatted()) }
+            if let preset = job.preset { fact(String(localized: "Preset"), localizedCrewLabel(preset.capitalized)) }
+            fact(String(localized: "Project"), job.projectPath)
+            fact(String(localized: "Duration"), elapsed((job.endedAt ?? store.now) - job.createdAt))
+            if let worktree = job.worktree { fact(String(localized: "Branch"), worktree.branch) }
+            if let tokens = job.tokens { fact(String(localized: "Tokens"), tokens.formatted()) }
             if let use = job.tokenUse {
-                fact("Of which", "\(use.cachedInput.formatted()) cached input · \((use.input - use.cachedInput).formatted()) uncached input · \(use.output.formatted()) output" + (job.turns > 1 ? " · \(use.turn.formatted()) in the latest turn" : ""))
+                fact(String(localized: "Of which"), String(localized: "\(use.cachedInput.formatted()) cached input · \((use.input - use.cachedInput).formatted()) uncached input · \(use.output.formatted()) output") + (job.turns > 1 ? String(localized: " · \(use.turn.formatted()) in the latest turn") : ""))
             }
-            if let context = job.context { fact("Context", context.label) }
-            fact("Turns", String(job.turns))
+            if let context = job.context { fact(String(localized: "Context"), context.label) }
+            fact(String(localized: "Turns"), String(job.turns))
             if let shared = job.shared, !shared.isEmpty {
                 // Whose instructions, as the bridge recorded them; jobs from before that list their files.
-                fact("Instructions", job.sharedScopes.map { $0.map { $0 == "project" ? "This project" : "Every project" }.joined(separator: " · ") } ?? shared.joined(separator: "\n"))
+                fact(String(localized: "Instructions"), job.sharedScopes.map { $0.map { $0 == "project" ? String(localized: "This project") : String(localized: "Every project") }.joined(separator: " · ") } ?? shared.joined(separator: "\n"))
             }
         }.font(Typeface.callout).textSelection(.enabled).inset()
         if let live = job.liveDiff, job.endedAt == nil { LiveDiffSection(store: store, id: job.id, at: live.at) }
         if let result = job.result {
-            detailSection("Changes", symbol: "arrow.triangle.branch") {
-                Text(result.stat.isEmpty ? "No files changed" : result.stat).font(Typeface.code).textSelection(.enabled)
+            detailSection(String(localized: "Changes"), symbol: "arrow.triangle.branch") {
+                Text(result.stat.isEmpty ? String(localized: "No files changed") : result.stat).font(Typeface.code).textSelection(.enabled)
                 if let commit = result.commit { Text("Commit \(commit)").font(Typeface.caption).textSelection(.enabled) }
                 ForEach(Array(Set(result.files + result.outOfScope)).sorted(), id: \.self) { file in
                     VStack(alignment: .leading, spacing: Space.xs) {
                         Text(file).font(Typeface.code).textSelection(.enabled)
                         if result.outOfScope.contains(file) {
-                            ErrorLabel(message: result.files.contains(file) ? "Outside the allowed targets" : "Outside the workspace").font(Typeface.caption)
+                            ErrorLabel(message: result.files.contains(file) ? String(localized: "Outside the allowed targets") : String(localized: "Outside the workspace")).font(Typeface.caption)
                         }
                     }
                 }
                 // A section's own action ends it at the trailing edge; an item's sits on the item's header row.
                 if let tree = job.worktree, !result.files.isEmpty {
-                    HStack { Spacer(minLength: 0); CopyButton(title: "Diff Command", text: "git diff \(tree.base.prefix(8))..\(tree.branch)", help: "Copy the command that shows this job's changes") }
+                    HStack { Spacer(minLength: 0); CopyButton(title: String(localized: "Diff Command"), text: "git diff \(tree.base.prefix(8))..\(tree.branch)", help: String(localized: "Copy the command that shows this job's changes")) }
                 }
             }
         }
         if job.hasVerification {
-            detailSection("Verification", symbol: "checkmark.shield") { VerificationView(job: job) }
+            detailSection(String(localized: "Verification"), symbol: "checkmark.shield") { VerificationView(job: job) }
         }
         if let evidence = job.evidence, !evidence.isEmpty {
-            detailSection("Evidence", symbol: "photo.on.rectangle") {
+            detailSection(String(localized: "Evidence"), symbol: "photo.on.rectangle") {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: EvidenceTile.minWidth), spacing: Space.l, alignment: .top)], alignment: .leading, spacing: Space.l) {
                     // Newest turn first, as on the web board.
                     ForEach(evidence.sorted { $0.turn > $1.turn }, id: \.file) { item in
@@ -119,20 +119,20 @@ struct JobDetailView: View {
             }
         }
         if let rounds = job.rounds, !rounds.isEmpty {
-            detailSection("Rounds", symbol: "arrow.counterclockwise") {
+            detailSection(String(localized: "Rounds"), symbol: "arrow.counterclockwise") {
                 ForEach(rounds.sorted { $0.turn < $1.turn }, id: \.turn) { round in
                     let key = job.roundActionKey(round.turn)
-                    DetailItem(title: "Turn \(round.turn)") {
-                        Label(round.state == "undone" ? "Undone" : "Kept", systemImage: round.state == "undone" ? "arrow.uturn.backward" : "checkmark")
+                    DetailItem(title: String(localized: "Turn \(round.turn)")) {
+                        Label(round.state == "undone" ? String(localized: "Undone") : String(localized: "Kept"), systemImage: round.state == "undone" ? "arrow.uturn.backward" : "checkmark")
                             .font(Typeface.caption).foregroundStyle(.secondary)
-                        Button(round.state == "undone" ? "Keep" : "Undo") {
+                        Button(round.state == "undone" ? String(localized: "Keep") : String(localized: "Undo")) {
                             Task { await store.setRound(job, turn: round.turn, undo: round.state != "undone") }
                         }
                         .pillButton().morphs(on: round.state)
                         .disabled(!store.connected || job.roundUnavailableReason != nil || store.actions[key]?.locked == true)
-                        .help(job.roundUnavailableReason ?? (!store.connected ? "Connect to Crew to change rounds." : "Change this round on the job branch."))
+                        .help(job.roundUnavailableReason ?? (!store.connected ? String(localized: "Connect to Crew to change rounds.") : String(localized: "Change this round on the job branch.")))
                     } content: {
-                        Text(round.stat.isEmpty ? "No files changed" : round.stat).font(Typeface.code).textSelection(.enabled)
+                        Text(round.stat.isEmpty ? String(localized: "No files changed") : round.stat).font(Typeface.code).textSelection(.enabled)
                         ActionMessage(state: store.actions[key])
                     }
                 }
@@ -140,7 +140,7 @@ struct JobDetailView: View {
         }
         let refusals = (job.refusals ?? []).filter { $0.turn == job.turns }
         if !refusals.isEmpty {
-            detailSection("Automatic review", symbol: "exclamationmark.shield") {
+            detailSection(String(localized: "Automatic review"), symbol: "exclamationmark.shield") {
                 ForEach(Array(refusals.enumerated()), id: \.offset) { _, refusal in
                     Text("\(refusal.action) — \(refusal.reason)").font(Typeface.callout).foregroundStyle(Palette.danger.ink(scheme)).textSelection(.enabled)
                 }
@@ -148,7 +148,7 @@ struct JobDetailView: View {
             }
         }
         if !job.notes.isEmpty {
-            detailSection("Notes", symbol: "note.text") {
+            detailSection(String(localized: "Notes"), symbol: "note.text") {
                 ForEach(Array(job.notes.enumerated()), id: \.offset) { _, note in Text(noteText(note)).font(Typeface.callout).textSelection(.enabled) }
             }
         }
@@ -156,7 +156,7 @@ struct JobDetailView: View {
         if let exchange = conversation {
             // A concluded debate's note belongs to the debate, so it sits closer to it than the next section does.
             VStack(alignment: .leading, spacing: Space.l) {
-                detailSection(job.debate != nil ? "Debate" : "Conversation", symbol: "bubble.left.and.bubble.right") {
+                detailSection(job.debate != nil ? String(localized: "Debate") : String(localized: "Conversation"), symbol: "bubble.left.and.bubble.right") {
                     DebateView(job: job, rounds: job.debate?.rounds, entries: exchange)
                 } accessory: {
                     if let rounds = job.debate?.rounds {
@@ -166,16 +166,16 @@ struct JobDetailView: View {
                 if job.debateConcluded { DebateConcludedNote() }
             }
         } else if !job.report.isEmpty {
-            detailSection("Report", symbol: "doc.text") {
+            detailSection(String(localized: "Report"), symbol: "doc.text") {
                 ReportText(report: job.report)
             }
         }
         if job.debateConcluded {
             if conversation == nil { DebateConcludedNote() }
         } else if job.sessionId != nil && job.state != "waiting" {
-            detailSection(job.isActive ? "Steer" : job.debate != nil ? "Reply" : "Follow up", symbol: "bubble.left") {
+            detailSection(job.isActive ? String(localized: "Steer") : job.debate != nil ? String(localized: "Reply") : String(localized: "Follow up"), symbol: "bubble.left") {
                 let key = "followup:\(job.id)"
-                MessageEditor(title: "Message to \(agentName(job.agent))", text: Binding(get: { store.drafts[key] ?? "" }, set: { store.drafts[key] = $0 }), prompt: "Write a message…")
+                MessageEditor(title: String(localized: "Message to \(agentName(job.agent))"), text: Binding(get: { store.drafts[key] ?? "" }, set: { store.drafts[key] = $0 }), prompt: String(localized: "Write a message…"))
                 HStack {
                     Spacer(minLength: 0)
                     Button("Send", systemImage: "arrow.up") { Task { await store.followUp(job) } }
@@ -190,7 +190,7 @@ struct JobDetailView: View {
         }
         let combined = mergeEvents(events, store.events.filter { $0.job_id == id }, limit: 80)
         if !combined.isEmpty {
-            detailSection("Activity", symbol: "bolt") { EventList(events: combined) }
+            detailSection(String(localized: "Activity"), symbol: "bolt") { EventList(events: combined) }
         }
         let resume = job.capabilities?.confined == true ? nil
             : job.sessionId.flatMap { session in store.state.agents[job.agent].map { "\($0.resume) \(session)" } }
@@ -198,7 +198,7 @@ struct JobDetailView: View {
         if resume != nil || job.isActive {
             DetailFooter {
                 if let resume {
-                    CopyButton(title: "Resume Command", text: resume, help: "Copy the command that resumes this job's session")
+                    CopyButton(title: String(localized: "Resume Command"), text: resume, help: String(localized: "Copy the command that resumes this job's session"))
                 }
                 if job.isActive {
                     Button("Cancel Job", systemImage: "stop.circle", role: .destructive) { Task { await store.cancel(job) } }.pillButton()
@@ -219,7 +219,7 @@ private struct LiveDiffSection: View {
     var body: some View {
         Group {
             if !diff.isEmpty {
-                detailSection("Changes so far", symbol: "arrow.triangle.branch") {
+                detailSection(String(localized: "Changes so far"), symbol: "arrow.triangle.branch") {
                     ScrollView {
                         // Cut like a note: SwiftUI draws nothing for text that tall. The worktree has the whole change.
                         Text(noteText(diff, limit: 8_000)).font(Typeface.code).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
@@ -240,7 +240,7 @@ private struct LiveDiffSection: View {
 private func noteText(_ text: String, limit: Int = 2_000) -> String {
     guard text.count > limit else { return text }
     let rest = text.dropFirst(limit).split(separator: "\n", omittingEmptySubsequences: false).count
-    return text.prefix(limit) + "… and \(rest) more line(s)"
+    return text.prefix(limit) + String(localized: "… and \(rest) more line(s)")
 }
 
 @MainActor private func fact(_ title: String, _ value: String) -> some View {
@@ -349,7 +349,7 @@ struct SessionDetailView: View {
         .safeAreaBar(edge: .top) {
             DetailHeader(title: session?.title, subtitle: session.flatMap { $0.state == "working" ? $0.phase : nil }, scrolled: scrolled, close: store.closeDetail) {
                 if let session {
-                    StatusLabel(state: session.stalled ? "stalled" : session.state, title: session.stalled ? "May be stuck" : session.state.capitalized)
+                    StatusLabel(state: session.stalled ? "stalled" : session.state, title: session.stalled ? String(localized: "May be stuck") : localizedCrewLabel(session.state.capitalized))
                 }
             }
         }
@@ -360,23 +360,23 @@ struct SessionDetailView: View {
     @ViewBuilder private func contents(_ session: ClaudeSession) -> some View {
         if session.state == "waiting" {
             VStack(alignment: .leading, spacing: Space.m) {
-                Text(session.waitingFor ?? "Claude needs your input.").font(Typeface.callout).textSelection(.enabled)
+                Text(session.waitingFor ?? String(localized: "Claude needs your input.")).font(Typeface.callout).textSelection(.enabled)
                 ClaudeAskView(session: session)
                 if session.claudeURL == nil { Text("Answer in Claude.").font(Typeface.callout).foregroundStyle(.secondary) }
             }.card(fill: Palette.attention(Palette.warning))
         }
         Grid(alignment: .leading, horizontalSpacing: WorkspaceStyle.factColumnGap, verticalSpacing: WorkspaceStyle.factRowGap) {
-            fact("Agent", "Claude · Lead")
-            fact("Project", session.projectPath)
-            if session.cwd != session.projectPath { fact("Directory", session.cwd) }
-            fact("Started", "\(elapsed(store.now - session.startedAt)) ago")
-            fact("Last active", "\(elapsed(store.now - session.activeAt)) ago")
-            if session.inTool { fact("Now", "Running a tool") }
+            fact(String(localized: "Agent"), String(localized: "Claude · Lead"))
+            fact(String(localized: "Project"), session.projectPath)
+            if session.cwd != session.projectPath { fact(String(localized: "Directory"), session.cwd) }
+            fact(String(localized: "Started"), String(localized: "\(elapsed(store.now - session.startedAt)) ago"))
+            fact(String(localized: "Last active"), String(localized: "\(elapsed(store.now - session.activeAt)) ago"))
+            if session.inTool { fact(String(localized: "Now"), String(localized: "Running a tool")) }
         }.font(Typeface.callout).textSelection(.enabled).inset()
         let agents = session.agents ?? []
         let plain = agents.filter { $0.workflow == nil }
         if !plain.isEmpty {
-            detailSection("Sub-agents", symbol: "person.2") {
+            detailSection(String(localized: "Sub-agents"), symbol: "person.2") {
                 ForEach(plain) { SubAgentRow(agent: $0, store: store) }
             }
         }
@@ -385,19 +385,19 @@ struct SessionDetailView: View {
         }
         let missions = store.state.missions.filter { $0.owner == session.id }.sorted { $0.createdAt > $1.createdAt }
         if !missions.isEmpty {
-            detailSection("Missions", symbol: "flag") {
+            detailSection(String(localized: "Missions"), symbol: "flag") {
                 ForEach(missions) { mission in
                     HStack(spacing: Space.ml) {
                         Text(mission.title).font(Typeface.callout).lineLimit(2)
                         Spacer(minLength: WorkspaceStyle.rowSpacer)
-                        StatusLabel(state: mission.state == "active" ? "running" : mission.state, title: mission.state.capitalized)
+                        StatusLabel(state: mission.state == "active" ? "running" : mission.state, title: localizedCrewLabel(mission.state.capitalized))
                     }
                 }
             }
         }
         DetailFooter {
             OpenInClaudeButton(session: session)
-            CopyButton(title: "Resume Command", text: "claude --resume \(session.id)", help: "Copy the command that resumes this session")
+            CopyButton(title: String(localized: "Resume Command"), text: "claude --resume \(session.id)", help: String(localized: "Copy the command that resumes this session"))
         }
     }
 }
@@ -454,7 +454,7 @@ private struct WorkflowRunSection: View {
                     }
                     ForEach(stage.agents) { SubAgentRow(agent: $0, store: store) }
                 }
-                if agents.count > Self.folded { RevealToggle(show: "Show all \(agents.count)", subject: run.name, shown: $shown) }
+                if agents.count > Self.folded { RevealToggle(show: String(localized: "Show all \(agents.count)"), subject: run.name, shown: $shown) }
             }
         }) {
             ElapsedText(store: store, start: run.startedAt, end: agents.isEmpty ? run.activeAt : nil)
@@ -532,7 +532,7 @@ private struct OriginalTask: View {
                     }
                     .contentShape(Rectangle())
                     .onTapGesture { if long && !shown { toggle() } }
-                if long { RevealToggle(subject: "the original task", shown: $shown) }
+                if long { RevealToggle(subject: String(localized: "the original task"), shown: $shown) }
             }
             .inset()
         }.frame(maxWidth: .infinity, alignment: .leading)
@@ -605,19 +605,19 @@ private struct VerificationView: View {
                 DetailItem(title: checkTitle(check), symbol: checkSymbol(check), tint: receipt.stale != nil ? .secondary : checkColor(check)) {
                     if let skipped = check.skipped { Text(skipped.prefix(1).uppercased() + skipped.dropFirst() + ".").font(Typeface.caption).foregroundStyle(.secondary) }
                     Text(check.command).font(Typeface.code).textSelection(.enabled)
-                    Text(caption(receipt, extra: check.skipped == nil ? duration(check.ms) + (check.sandboxed ? "" : " · not sandboxed") : nil)).font(Typeface.caption).foregroundStyle(.secondary)
+                    Text(caption(receipt, extra: check.skipped == nil ? duration(check.ms) + (check.sandboxed ? "" : String(localized: " · not sandboxed")) : nil)).font(Typeface.caption).foregroundStyle(.secondary)
                     if check.skipped == nil && check.exit != 0 && !check.output.isEmpty {
                         if outputShown {
                             Text(check.output.split(separator: "\n", omittingEmptySubsequences: false).suffix(15).joined(separator: "\n"))
                                 .font(Typeface.codeSmall).textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        RevealToggle(show: "Show the end of the output", hide: "Hide the output", shown: $outputShown)
+                        RevealToggle(show: String(localized: "Show the end of the output"), hide: String(localized: "Hide the output"), shown: $outputShown)
                     }
                     stale(receipt)
                 }
             } else if let reviewed = receipt.reviewed {
-                DetailItem(title: "Reviewed", symbol: "eye", tint: receipt.stale == nil ? nil : .secondary) {
+                DetailItem(title: String(localized: "Reviewed"), symbol: "eye", tint: receipt.stale == nil ? nil : .secondary) {
                     Text(reviewed.target).font(Typeface.callout).textSelection(.enabled)
                     Text(caption(receipt, extra: nil)).font(Typeface.caption).foregroundStyle(.secondary)
                     stale(receipt)
@@ -625,10 +625,10 @@ private struct VerificationView: View {
             }
         }
         if let capabilities = job.capabilities {
-            DetailItem(title: "Runs with") { Text(runsWith(capabilities)).font(Typeface.callout).textSelection(.enabled) }
+            DetailItem(title: String(localized: "Runs with")) { Text(runsWith(capabilities)).font(Typeface.callout).textSelection(.enabled) }
         }
         ForEach(Array((job.approvals ?? []).enumerated()), id: \.offset) { _, approval in
-            DetailItem(title: "Approval relayed for turn \(approval.turn)", symbol: approval.recorded > 0 ? "person.crop.circle.badge.checkmark" : "person.crop.circle.badge.questionmark") {
+            DetailItem(title: String(localized: "Approval relayed for turn \(approval.turn)"), symbol: approval.recorded > 0 ? "person.crop.circle.badge.checkmark" : "person.crop.circle.badge.questionmark") {
                 Text(approvalBasis(approval)).font(Typeface.caption).foregroundStyle(.secondary)
                 Text("\u{201C}\(approval.quote)\u{201D}").font(Typeface.callout).textSelection(.enabled)
             }
@@ -643,11 +643,11 @@ private struct VerificationView: View {
 
     // A stale result keeps its words but loses its color: it describes a tree that is gone.
     private func checkTitle(_ check: CheckResult) -> String {
-        check.skipped != nil ? "Check not run"
-            : check.timedOut ? "Check timed out after \(duration(check.ms))"
-            : check.exit == 0 ? "Check passed"
-            : check.exit == nil ? "Check stopped before it finished"
-            : "Check failed with exit code \(check.exit!)"
+        check.skipped != nil ? String(localized: "Check not run")
+            : check.timedOut ? String(localized: "Check timed out after \(duration(check.ms))")
+            : check.exit == 0 ? String(localized: "Check passed")
+            : check.exit == nil ? String(localized: "Check stopped before it finished")
+            : String(localized: "Check failed with exit code \(check.exit!)")
     }
     private func checkSymbol(_ check: CheckResult) -> String {
         check.skipped != nil ? "minus.circle" : check.timedOut ? "clock.badge.exclamationmark" : check.exit == 0 ? "checkmark.circle.fill" : "xmark.octagon.fill"
@@ -657,21 +657,21 @@ private struct VerificationView: View {
     }
 
     private func caption(_ receipt: TurnReceipt, extra: String?) -> String {
-        ["Turn \(receipt.turn)", extra].compactMap { $0 }.joined(separator: " · ")
+        [String(localized: "Turn \(receipt.turn)"), extra].compactMap { $0 }.joined(separator: " · ")
     }
 
     private func duration(_ ms: Double) -> String {
-        ms < 60_000 ? "\(max(1, Int((ms / 1000).rounded())))s" : "\(Int(ms / 60_000))m \(Int(ms.truncatingRemainder(dividingBy: 60_000) / 1000))s"
+        ms < 60_000 ? String(localized: "\(max(1, Int((ms / 1000).rounded())))s") : String(localized: "\(Int(ms / 60_000))m \(Int(ms.truncatingRemainder(dividingBy: 60_000) / 1000))s")
     }
 
     private func runsWith(_ c: Capabilities) -> String {
-        let network = ["on": "network on", "off": "no network", "agent-managed": "network as the agent allows"][c.network] ?? "network \(c.network)"
-        return ([c.filesystem, network] + (c.plugins.isEmpty ? [] : ["plugins \(c.plugins.joined(separator: ", ")) (act outside the sandbox)"])).joined(separator: " · ")
+        let network = ["on": String(localized: "network on"), "off": String(localized: "no network"), "agent-managed": String(localized: "network as the agent allows")][c.network] ?? String(localized: "network \(c.network)")
+        return ([c.filesystem, network] + (c.plugins.isEmpty ? [] : [String(localized: "plugins \(c.plugins.joined(separator: ", ")) (act outside the sandbox)")])).joined(separator: " · ")
     }
 
     private func approvalBasis(_ approval: RelayedApproval) -> String {
-        guard approval.recorded > 0 else { return "No messages of the user were recorded, so only the lead\u{2019}s quote went with it." }
-        return "The user\u{2019}s own words went with it" + (approval.matched ? ", and the quote matches them." : "; the quote is a translation or paraphrase.")
+        guard approval.recorded > 0 else { return String(localized: "No messages of the user were recorded, so only the lead\u{2019}s quote went with it.") }
+        return approval.matched ? String(localized: "The user’s own words went with it, and the quote matches them.") : String(localized: "The user’s own words went with it; the quote is a translation or paraphrase.")
     }
 }
 
@@ -696,14 +696,14 @@ private struct DebateView: View {
         // A job that began before the bridge kept its conversation has its first turns missing; say so rather than
         // start the story partway through.
         if let first = turns.first, first > 1 {
-            let label = rounds == nil ? "Turn" : "Round"
-            Text(first == 2 ? "\(label) 1 was not recorded." : "\(label)s 1–\(first - 1) were not recorded.")
+            let label = rounds == nil ? String(localized: "Turn") : String(localized: "Round")
+            Text(first == 2 ? String(localized: "\(label) 1 was not recorded.") : String(localized: "\(label)s 1–\(first - 1) were not recorded."))
                 .font(Typeface.caption).foregroundStyle(.secondary)
         }
         ForEach(turns, id: \.self) { turn in
             let lead = entries.last { $0.turn == turn && $0.from == "lead" }
             let reply = entries.last { $0.turn == turn && $0.from == "worker" }
-            DebateRound(turn: turn, label: rounds == nil ? "Turn" : "Round", final: turn == rounds, last: turn == turns.last,
+            DebateRound(turn: turn, label: rounds == nil ? String(localized: "Turn") : String(localized: "Round"), final: turn == rounds, last: turn == turns.last,
                         lead: lead, reply: reply, worker: agentName(job.agent), working: job.isActive && turn == job.turns)
         }
     }
@@ -728,17 +728,17 @@ private struct DebateStepper: View {
         }
         .font(Typeface.caption)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(concluded ? "Debate concluded after \(rounds) round\(rounds == 1 ? "" : "s")" : "Debate, round \(current) of \(rounds)")
+        .accessibilityLabel(concluded ? (rounds == 1 ? String(localized: "Debate concluded after 1 round") : String(localized: "Debate concluded after \(rounds) rounds")) : String(localized: "Debate, round \(current) of \(rounds)"))
     }
 
     private func steps(named: Bool) -> some View {
         HStack(spacing: Space.s) {
             ForEach(1...rounds, id: \.self) { round in
                 step(round <= replied ? "checkmark.circle.fill" : round == current && working ? "circle.dotted.circle" : "circle",
-                     "Round \(round)", named: named)
+                     String(localized: "Round \(round)"), named: named)
                 Rectangle().fill(WorkspaceStyle.hairline).frame(height: 1).frame(maxWidth: Space.x4l)
             }
-            step(concluded ? "flag.checkered.circle.fill" : "flag.circle", "Conclusion", named: named)
+            step(concluded ? "flag.checkered.circle.fill" : "flag.circle", String(localized: "Conclusion"), named: named)
         }
     }
 
@@ -774,13 +774,13 @@ private struct DebateRound: View {
         VStack(alignment: .leading, spacing: Space.s) {
             VStack(alignment: .leading, spacing: Space.ml) {
                 HStack(spacing: Space.l) {
-                    Text(final ? "\(label) \(turn) · final" : "\(label) \(turn)").font(Typeface.headline)
+                    Text(final ? String(localized: "\(label) \(turn) · final") : String(localized: "\(label) \(turn)")).font(Typeface.headline)
                     // Folded, the title carries the reply's stances beside it, as the worker's name does when open.
                     if !opened.wrappedValue { HStack(spacing: Space.m) { stances(points) } }
                     Spacer(minLength: 0)
                 }
                 if opened.wrappedValue { exchange(points) }
-                RevealToggle(show: "Show this \(label.lowercased())", hide: "Hide this \(label.lowercased())", shown: opened)
+                RevealToggle(show: String(localized: "Show this \(label.lowercased())"), hide: String(localized: "Hide this \(label.lowercased())"), shown: opened)
             }
             // Fixed when the round first appears, so a new round arriving does not fold the one being read.
             .onAppear { if open == nil { open = last } }
@@ -802,7 +802,7 @@ private struct DebateRound: View {
                 Text("Lead").font(Typeface.bodyStrong).foregroundStyle(Palette.accent)
                 ReportText(report: lead.text).lineLimit(leadShown ? nil : 4)
                 if lead.text.split(separator: "\n").count > 4 || lead.text.count > 400 {
-                    RevealToggle(subject: "the lead's message", shown: $leadShown)
+                    RevealToggle(subject: String(localized: "the lead's message"), shown: $leadShown)
                 }
             }
             .padding(.leading, Space.l)
@@ -817,7 +817,7 @@ private struct DebateRound: View {
                 }
                 if points.isEmpty {
                     ReportText(report: reply.text).lineLimit(replyShown ? nil : 8)
-                    RevealToggle(subject: "the reply", shown: $replyShown)
+                    RevealToggle(subject: String(localized: "the reply"), shown: $replyShown)
                 } else {
                     // The points sit on a card as a list: each row leads with its stance, so wrapped lines hang under
                     // the text. How each is known stays in the full reply.
@@ -836,7 +836,7 @@ private struct DebateRound: View {
                     .background(WorkspaceStyle.surface, in: RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius, style: .continuous))
                     .padding(.vertical, Space.xs)
                     if replyShown { ReportText(report: reply.text) }
-                    RevealToggle(show: "Show the full reply", hide: "Hide the full reply", shown: $replyShown)
+                    RevealToggle(show: String(localized: "Show the full reply"), hide: String(localized: "Hide the full reply"), shown: $replyShown)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -857,9 +857,9 @@ private struct StanceMark: View {
 
     var body: some View {
         let (title, symbol, color): (String, String, Color) = switch stance {
-        case .agree: ("Agree", "checkmark.circle.fill", Palette.success)
-        case .disagree: ("Disagree", "xmark.circle.fill", Palette.danger)
-        case .alternative: ("Alternative", "arrow.triangle.branch", Palette.accent)
+        case .agree: (String(localized: "Agree"), "checkmark.circle.fill", Palette.success)
+        case .disagree: (String(localized: "Disagree"), "xmark.circle.fill", Palette.danger)
+        case .alternative: (String(localized: "Alternative"), "arrow.triangle.branch", Palette.accent)
         }
         HStack(spacing: Space.xs) {
             Image(systemName: symbol).font(Symbol.stance).foregroundStyle(color)
@@ -867,7 +867,7 @@ private struct StanceMark: View {
         }
         .help(title)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(count.map { "\($0) \(title.lowercased())" } ?? title)
+        .accessibilityLabel(count.map { String(localized: "\($0) \(title.lowercased())") } ?? title)
     }
 }
 
@@ -896,7 +896,7 @@ private struct EvidenceTile: View {
                 .clipShape(RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius, style: .continuous))
             }
             .buttonStyle(.plain)
-            .help(item.isVideo ? item.path : "Compare")
+            .help(item.isVideo ? item.path : String(localized: "Compare"))
             .evidenceFileMenu(item)
             Text("\(item.turnLabel(of: turns)) · \(item.file)")
                 .font(Typeface.caption).foregroundStyle(.secondary).textSelection(.enabled)

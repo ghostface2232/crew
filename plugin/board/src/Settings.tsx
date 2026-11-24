@@ -13,6 +13,7 @@ import { agentSettings, HOLDERS, knownProjects, NAMES, projectNames, resolveDraf
 import { AgentMark, ask, CloseButton, Dialog, Icon, Select, useFade } from './ui.tsx';
 import { Scores } from './Scores.tsx';
 import { desktop } from './desktop.ts';
+import { t } from './i18n.ts';
 import appIcon from './icons/CrewAppIcon.png';
 import styles from './Settings.module.css';
 
@@ -24,13 +25,13 @@ function ItemTitle({ text, current }: { text: string; current: boolean }) {
 }
 
 const PRESET_SUMMARY: Record<PresetName, string> = {
-  economy: 'Lower cost and faster runs for straightforward tasks.',
-  balanced: 'Everyday balance of quality, speed, and cost.',
-  best: 'Maximum reasoning depth for complex work.',
+  economy: t('Lower cost and faster runs for straightforward tasks.'),
+  balanced: t('Everyday balance of quality, speed, and cost.'),
+  best: t('Maximum reasoning depth for complex work.'),
 };
 
 function formatModelName(name: string) {
-  if (name === 'inherit') return 'Same as lead';
+  if (name === 'inherit') return t('Same as lead');
   return /[-./]/.test(name) ? name : name.charAt(0).toUpperCase() + name.slice(1);
 }
 
@@ -41,9 +42,9 @@ function presetDetails(preset: Preset): [string, string][] {
   const subagent = formatModelName(preset.subagentModel ?? 'inherit');
   return [
     ...agents.flatMap(([name, agent]): [string, string][] =>
-      agent ? [[name, [agent.model ?? 'Default model', agent.effort && `${cap(agent.effort)} effort`].filter(Boolean).join(' · ')]] : []),
-    ['Subagents', preset.subagentMax ? `${subagent} (max ${formatModelName(preset.subagentMax)})` : subagent],
-    ...(preset.maxTier ? [['Worker cap', `Up to ${cap(preset.maxTier)} tier`] as [string, string]] : []),
+      agent ? [[name, [agent.model ?? t('Default model'), agent.effort && t('{effort} effort', { effort: t(cap(agent.effort)) })].filter(Boolean).join(' · ')]] : []),
+    [t('Subagents'), preset.subagentMax ? t('{model} (max {max})', { model: subagent, max: formatModelName(preset.subagentMax) }) : subagent],
+    ...(preset.maxTier ? [[t('Worker cap'), t('Up to {tier} tier', { tier: t(cap(preset.maxTier)) })] as [string, string]] : []),
   ];
 }
 
@@ -51,31 +52,34 @@ function presetDetails(preset: Preset): [string, string][] {
 type Fixed = 'build' | 'review' | 'edit' | 'presets' | 'models' | 'instructions' | 'about';
 type Pane = Fixed | `project:${string}`;
 const PANES: Record<Fixed, { title: string; icon: FluentIcon; kind?: JobKind }> = {
-  build: { title: 'Build', icon: Wrench16Regular, kind: 'delegate' },
-  review: { title: 'Review', icon: ShieldCheckmark16Regular, kind: 'review' },
-  edit: { title: 'Edit', icon: TextFont16Regular, kind: 'polish' },
-  presets: { title: 'Model Presets', icon: Options16Regular },
-  models: { title: 'Model Scores', icon: Gauge16Regular },
-  instructions: { title: 'Instructions', icon: DocumentText16Regular },
-  about: { title: 'About Crew', icon: Info16Regular },
+  build: { title: t('Build'), icon: Wrench16Regular, kind: 'delegate' },
+  review: { title: t('Review'), icon: ShieldCheckmark16Regular, kind: 'review' },
+  edit: { title: t('Edit'), icon: TextFont16Regular, kind: 'polish' },
+  presets: { title: t('Model Presets'), icon: Options16Regular },
+  models: { title: t('Model Scores'), icon: Gauge16Regular },
+  instructions: { title: t('Instructions'), icon: DocumentText16Regular },
+  about: { title: t('About Crew'), icon: Info16Regular },
 };
 
 /** Where the desktop app's update stands, in one line. */
 function updateSummary(update: AppUpdate) {
   const checked = update.checkedAt
-    ? `Last checked at ${formatDate(timeOfDay, new Date(update.checkedAt))}`
-    : 'Not checked yet';
+    ? t('Last checked at {time}', { time: formatDate(timeOfDay, new Date(update.checkedAt)) })
+    : t('Not checked yet');
+  const version = String(update.latest);
   switch (update.state) {
-    case 'unsupported': return 'Updates come with the installed app';
-    case 'idle': return update.checkedAt && !update.error ? 'Crew is up to date' : checked;
-    case 'checking': return 'Checking for updates…';
-    case 'available': return `Version ${update.latest} is available`;
-    case 'downloading': return `Downloading version ${update.latest}… ${Math.round((update.progress ?? 0) * 100)}%`;
-    case 'ready': return `Version ${update.latest} is ready to install`;
+    case 'unsupported': return t('Updates come with the installed app');
+    case 'idle': return update.checkedAt && !update.error ? t('Crew is up to date') : checked;
+    case 'checking': return t('Checking for updates…');
+    case 'available': return t('Version {version} is available', { version });
+    case 'downloading': return t('Downloading version {version}… {percent}%', { version, percent: Math.round((update.progress ?? 0) * 100) });
+    case 'ready': return t('Version {version} is ready to install', { version });
     case 'installing': return update.waiting
-      ? `Version ${update.latest} will install when ${update.waiting} running job${update.waiting === 1 ? '' : 's'} finish${update.waiting === 1 ? 'es' : ''}`
-      : update.waiting === 0 ? `Version ${update.latest} will install once the Crew daemon answers`
-      : `Restarting to install version ${update.latest}…`;
+      ? update.waiting === 1
+        ? t('Version {version} will install when 1 running job finishes', { version })
+        : t('Version {version} will install when {count} running jobs finish', { version, count: update.waiting })
+      : update.waiting === 0 ? t('Version {version} will install once the Crew daemon answers', { version })
+      : t('Restarting to install version {version}…', { version });
   }
 }
 
@@ -251,7 +255,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
         setText('');
         setSaved('');
         setLoad('failed');
-        setStatus(`Could not load instructions: ${error.message}`);
+        setStatus(t('Could not load instructions: {error}', { error: error.message }));
       },
     );
     return () => {
@@ -285,7 +289,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
     // A change still being stored is waited for. One that cannot be stored keeps Settings open, where it says so:
     // closed, the change would be undone with nothing left to show why.
     if (!(await storedRoles.settled()) || !(await storedPreset.settled())) return;
-    if (unsaved.current && !await ask('Close without saving your changes?', 'Close')) return;
+    if (unsaved.current && !await ask(t('Close without saving your changes?'), t('Close'))) return;
     if (shownInstallError.current) void desktop?.update.seen?.();
     close();
   };
@@ -360,7 +364,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
       if (attempt !== generation.current) return;
       setText((current) => (current === draft ? result.text : current));
       setSaved(result.text);
-      setStatus('Saved');
+      setStatus(t('Saved'));
     } catch (error) {
       if (attempt === generation.current) setStatus((error as Error).message);
     } finally {
@@ -403,7 +407,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
     const nextScope = next === 'instructions' ? '' : next.startsWith('project:') ? next.slice('project:'.length) : null;
     // Another set of instructions loads in place of the one being edited, so unsaved edits are asked about first.
     if (nextScope !== null && nextScope !== scope) {
-      if (text !== saved && !(await ask('Discard the unsaved changes to these instructions?', 'Discard'))) return;
+      if (text !== saved && !(await ask(t('Discard the unsaved changes to these instructions?'), t('Discard')))) return;
       // Discarded now, not when the next set arrives: nothing is left to ask about meanwhile.
       setText(saved);
       setScope(nextScope);
@@ -434,24 +438,30 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
   // An older daemon may not know every agent; Claude is always one.
   const holders = HOLDERS.filter((holder) => holder === 'claude' || holder in state.agents);
   const models = (agent: WorkerAgent) => state.agents[agent]?.models ?? [];
-  const holderLabel = (holder: Holder) => holder === 'claude' ? 'Claude' : `${state.agents[holder].name}${state.agents[holder].enabled ? '' : ' (disabled)'}`;
+  const holderLabel = (holder: Holder) =>
+    holder === 'claude' ? 'Claude' : state.agents[holder].enabled ? state.agents[holder].name : t('{name} (disabled)', { name: state.agents[holder].name });
   const roleGroup = (role: RoleInfo) => {
     const own = roles[role.role] ?? {};
-    const parentLabel = info.find((other) => other.role === role.parent)?.label ?? role.parent;
+    const roleLabel = t(role.label);
+    const parentLabel = t(info.find((other) => other.role === role.parent)?.label ?? role.parent ?? '');
     const following = Boolean(role.parent && !own.agents);
     const shown = resolved[role.role];
     // What a field means when left blank: the parent's setting for that agent while the role follows it.
     const inherited = (agent: WorkerAgent, key: keyof AgentSettings) => (following ? resolved[role.parent!]?.[agent]?.[key] : undefined);
     const blank = (agent: WorkerAgent, key: keyof AgentSettings) => {
       const value = inherited(agent, key);
-      return value ? `${models(agent).find((model) => model.id === value)?.name ?? value} (same as ${parentLabel})` : 'Agent default';
+      return value
+        ? t('{model} (same as {role})', { model: models(agent).find((model) => model.id === value)?.name ?? value, role: parentLabel })
+        : t('Agent default');
     };
     /**
      * A model or effort picked from what the agent offers, or typed when the daemon offers nothing. A value written by
      * hand that is not offered stays a choice, so opening the settings never changes it.
      */
     const field = (agent: WorkerAgent, key: keyof AgentSettings) => {
-      const label = `${role.label} ${NAMES[agent]} ${key === 'model' ? 'model' : 'reasoning effort'}`;
+      const label = key === 'model'
+        ? t('{role} {agent} model', { role: roleLabel, agent: NAMES[agent] })
+        : t('{role} {agent} reasoning effort', { role: roleLabel, agent: NAMES[agent] });
       const value = own[agent]?.[key] ?? '';
       const change = (next: string) => editSetting(role.role, agent, key, next);
       const offered = models(agent);
@@ -468,23 +478,23 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
     };
     const workers = (shown?.agents ?? []).filter((holder): holder is WorkerAgent => holder !== 'claude' && holder in state.agents);
     return (
-      <section className={styles.group} key={role.role} aria-label={role.label}>
+      <section className={styles.group} key={role.role} aria-label={roleLabel}>
         <header className={styles.groupHead}>
           <AgentMark agent={shown?.agents[0] ?? 'codex'} size={22} />
           <div>
-            <h3 className={styles.groupTitle}>{role.label}</h3>
-            {state.roleInfo && <p className={styles.footnote}>{role.summary}</p>}
+            <h3 className={styles.groupTitle}>{roleLabel}</h3>
+            {state.roleInfo && <p className={styles.footnote}>{t(role.summary)}</p>}
           </div>
         </header>
         <div className={styles.rows}>
           {role.parent && (
             <label className={styles.row}>
-              <span>Same as {parentLabel}</span>
+              <span>{t('Same as {role}', { role: parentLabel })}</span>
               <input type="checkbox" className="switch" checked={following} onChange={(event) => follow(role, event.target.checked)} />
             </label>
           )}
           <div className={styles.row}>
-            <span id={`${role.role}-agents`}>Agents</span>
+            <span id={`${role.role}-agents`}>{t('Agents')}</span>
             <span className={styles.checks} role="group" aria-labelledby={`${role.role}-agents`}>
               {holders.map((holder) => {
                 const held = shown?.agents.includes(holder) ?? false;
@@ -494,7 +504,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
                   <label key={holder} className={styles.check}>
                     <input
                       type="checkbox"
-                      aria-label={`${role.label}: ${holderLabel(holder)}`}
+                      aria-label={`${roleLabel}: ${holderLabel(holder)}`}
                       checked={held}
                       // A role keeps at least one holder, and a following role shows its parent's.
                       disabled={following || (held && shown?.agents.length === 1) || (unable && !held)}
@@ -509,11 +519,11 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
           {workers.map((agent) => (
             <Fragment key={agent}>
               <label className={styles.row}>
-                <span>{NAMES[agent]} model</span>
+                <span>{t('{agent} model', { agent: NAMES[agent] })}</span>
                 {field(agent, 'model')}
               </label>
               <label className={styles.row}>
-                <span>{NAMES[agent]} reasoning effort</span>
+                <span>{t('{agent} reasoning effort', { agent: NAMES[agent] })}</span>
                 {field(agent, 'effort')}
               </label>
             </Fragment>
@@ -522,7 +532,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
         {storedRoles.error && changedRole.current === role.role && (
           <p className={`${styles.footnote} ${styles.note} error`} role="alert">
             <Icon icon={ErrorCircle16Regular} />
-            Not saved: {storedRoles.error}
+            {t('Not saved: {error}', { error: storedRoles.error })}
           </p>
         )}
       </section>
@@ -531,26 +541,26 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
   return (
     <Dialog labelId="settings-title" onClose={closeSettings}>
       <div className={styles.panel} data-view={view}>
-        <nav className={styles.sidebar} aria-label="Settings pages" ref={nav}>
+        <nav className={styles.sidebar} aria-label={t('Settings pages')} ref={nav}>
           <header className={styles.sidebarHead}>
-            <h2 className={styles.windowTitle} id="settings-title">Settings</h2>
-            <span className={styles.listClose}><CloseButton label="Close settings" onClose={closeSettings} /></span>
+            <h2 className={styles.windowTitle} id="settings-title">{t('Settings')}</h2>
+            <span className={styles.listClose}><CloseButton label={t('Close settings')} onClose={closeSettings} /></span>
           </header>
-          <p className={styles.sectionLabel}>Roles</p>
+          <p className={styles.sectionLabel}>{t('Roles')}</p>
           <div className={styles.section}>{(['build', 'review', 'edit'] as Pane[]).map(item)}</div>
-          <p className={styles.sectionLabel}>Shared</p>
+          <p className={styles.sectionLabel}>{t('Shared')}</p>
           <div className={styles.section}>
             {([...(state.presets ? ['presets'] : []), ...(state.modelScores ? ['models'] : []), 'instructions'] as Pane[]).map(item)}
           </div>
           {dirs.length > 0 && (
             <>
-              <p className={styles.sectionLabel}>Projects</p>
+              <p className={styles.sectionLabel}>{t('Projects')}</p>
               <div className={styles.section}>{dirs.map((dir) => item(`project:${dir}`))}</div>
             </>
           )}
           {update && (
             <>
-              <p className={styles.sectionLabel}>App</p>
+              <p className={styles.sectionLabel}>{t('App')}</p>
               <div className={styles.section}>{item('about')}</div>
             </>
           )}
@@ -559,10 +569,10 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
           <header className={styles.pageHead}>
             <button type="button" ref={back} className={`borderless ${styles.back}`} onClick={() => setView('list')}>
               <Icon icon={ChevronLeftRegular} />
-              Settings
+              {t('Settings')}
             </button>
             <h2 className={styles.pageTitle}>{title}</h2>
-            <span className={styles.pageClose}><CloseButton label="Close settings" onClose={closeSettings} /></span>
+            <span className={styles.pageClose}><CloseButton label={t('Close settings')} onClose={closeSettings} /></span>
           </header>
           {/* The page is the stage the dialog's frame wraps, as in the window. Named here, since only a phone shows the title row. */}
           <section className={styles.stage} aria-label={title}>
@@ -571,8 +581,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
               {kind && info.filter((role) => paneKind(role) === kind).map(roleGroup)}
               {kind && (
                 <p className={styles.footnote}>
-                  The lead picks the holder; by default, Antigravity takes wording and Codex the rest, among holders that can.
-                  Claude means the lead does it itself.
+                  {t('The lead picks the holder; by default, Antigravity takes wording and Codex the rest, among holders that can. Claude means the lead does it itself.')}
                 </p>
               )}
               {current === 'presets' && (
@@ -580,11 +589,11 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
                   <section className={styles.group}>
                     <div className={styles.rows}>
                       <label className={styles.row}>
-                        <span>Default</span>
+                        <span>{t('Default')}</span>
                         <Select<PresetName | ''>
-                          label="Model preset"
+                          label={t('Model preset')}
                           value={preset ?? ''}
-                          options={[['', 'None'], ['economy', 'Economy'], ['balanced', 'Balanced'], ['best', 'Best']]}
+                          options={[['', t('None')], ['economy', t('Economy')], ['balanced', t('Balanced')], ['best', t('Best')]]}
                           onChange={(next) => void storedPreset.change(next || null)}
                         />
                       </label>
@@ -595,18 +604,18 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
                     {storedPreset.error && (
                       <p className={`${styles.footnote} ${styles.note} error`} role="alert">
                         <Icon icon={ErrorCircle16Regular} />
-                        Not saved: {storedPreset.error}
+                        {t('Not saved: {error}', { error: storedPreset.error })}
                       </p>
                     )}
-                    <p className={styles.footnote}>{preset ? PRESET_SUMMARY[preset] : "Uses each agent's own model and effort settings."}</p>
+                    <p className={styles.footnote}>{preset ? PRESET_SUMMARY[preset] : t("Uses each agent's own model and effort settings.")}</p>
                   </section>
                   <section className={styles.group}>
-                    <header className={styles.groupHead}><h3 className={styles.groupTitle}>Priority</h3></header>
+                    <header className={styles.groupHead}><h3 className={styles.groupTitle}>{t('Priority')}</h3></header>
                     <div className={styles.rows}>
-                      <div className={styles.row}><span>Role settings</span><span className={styles.value}>Override any preset</span></div>
-                      <div className={styles.row}><span>Mission preset</span><span className={styles.value}>Overrides default for new jobs</span></div>
+                      <div className={styles.row}><span>{t('Role settings')}</span><span className={styles.value}>{t('Override any preset')}</span></div>
+                      <div className={styles.row}><span>{t('Mission preset')}</span><span className={styles.value}>{t('Overrides default for new jobs')}</span></div>
                     </div>
-                    <p className={styles.footnote}>Change a mission's preset from its menu, or name one in your prompt.</p>
+                    <p className={styles.footnote}>{t("Change a mission's preset from its menu, or name one in your prompt.")}</p>
                   </section>
                 </>
               )}
@@ -620,20 +629,20 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
                       <div className={styles.updateText}>
                         <span role="status">{updateSummary(update)}</span>
                         {update.state === 'downloading' && (
-                          <progress className={styles.progress} value={update.progress ?? 0} max={1} aria-label="Download progress" />
+                          <progress className={styles.progress} value={update.progress ?? 0} max={1} aria-label={t('Download progress')} />
                         )}
                         <span className={styles.updateVersion}>Crew {update.current}</span>
                       </div>
                       {(update.state === 'idle' || update.state === 'checking') && (
                         <button type="button" disabled={update.state === 'checking'} onClick={() => void desktop?.update.check()}>
-                          Check for Updates
+                          {t('Check for Updates')}
                         </button>
                       )}
                     </div>
                     {update.page && update.latest && (
                       <div className={styles.row}>
-                        <span>Release notes</span>
-                        <a href={update.page} target="_blank" rel="noreferrer">What’s new in {update.latest}</a>
+                        <span>{t('Release notes')}</span>
+                        <a href={update.page} target="_blank" rel="noreferrer">{t('What’s new in {version}', { version: update.latest })}</a>
                       </div>
                     )}
                   </div>
@@ -652,17 +661,17 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
                   <div className={styles.saveRow}>
                     <p className={styles.footnote}>
                       {update.state === 'unsupported'
-                        ? 'This copy cannot update itself. Install Crew from GitHub releases for updates.'
-                        : 'Updates install after running jobs finish.'}
+                        ? t('This copy cannot update itself. Install Crew from GitHub releases for updates.')
+                        : t('Updates install after running jobs finish.')}
                     </p>
                     {update.state === 'installing' && update.waiting !== undefined ? (
-                      <button type="button" onClick={() => void desktop?.update.cancel()}>Cancel Update</button>
+                      <button type="button" onClick={() => void desktop?.update.cancel()}>{t('Cancel Update')}</button>
                     ) : update.state === 'ready' || update.state === 'installing' ? (
                       <button type="button" className="prominent" disabled={update.state === 'installing'} onClick={() => void desktop?.update.install()}>
-                        Update Now
+                        {t('Update Now')}
                       </button>
                     ) : update.state === 'available' && (
-                      <button type="button" className="prominent" onClick={() => void desktop?.update.check()}>Download Now</button>
+                      <button type="button" className="prominent" onClick={() => void desktop?.update.check()}>{t('Download Now')}</button>
                     )}
                   </div>
                 </section>
@@ -671,8 +680,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
                 <section className={styles.group}>
                   <Scores scores={state.modelScores!} />
                   <p className={styles.footnote}>
-                    Scored from review findings per build size, with fixes scored apart. A model is ranked after three build
-                    reviews; a review by its own agent counts half.
+                    {t('Scored from review findings per build size, with fixes scored apart. A model is ranked after three build reviews; a review by its own agent counts half.')}
                   </p>
                 </section>
               )}
@@ -680,12 +688,12 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
                 <section className={styles.group}>
                   <div className={styles.rows}>
                     <label className={styles.row}>
-                      <span>Peer ratings</span>
+                      <span>{t('Peer ratings')}</span>
                       <input type="checkbox" className="switch" checked={state.peerRatings} onChange={(event) => void setPeerRatings(event.target.checked)} />
                     </label>
                   </div>
                   <p className={styles.footnote} role={ratingsStatus ? 'alert' : undefined}>
-                    {ratingsStatus || 'The lead and the workers rate each other\'s work as they see it, in turns they already have, and the ratings move half of a score from where the review findings put it. Off, nobody is asked to rate and the scores come from the review findings alone; ratings already given are kept.'}
+                    {ratingsStatus || t('The lead and the workers rate each other\'s work as they see it, in turns they already have, and the ratings move half of a score from where the review findings put it. Off, nobody is asked to rate and the scores come from the review findings alone; ratings already given are kept.')}
                   </p>
                 </section>
               )}
@@ -693,14 +701,14 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
                 <>
                   <p className={styles.footnote} id="instructions-hint">
                     {project === null
-                      ? 'Given to every agent with its next job, in every project, and to Claude sessions when they start.'
-                      : 'Given to every agent working in this project, after the instructions for every project.'}
+                      ? t('Given to every agent with its next job, in every project, and to Claude sessions when they start.')
+                      : t('Given to every agent working in this project, after the instructions for every project.')}
                   </p>
                   <section className={styles.group}>
                     <textarea
                       className={styles.editor}
                       id="instructions-text"
-                      aria-label="Shared instructions"
+                      aria-label={t('Shared instructions')}
                       aria-describedby="instructions-hint"
                       rows={12}
                       spellCheck={false}
@@ -711,20 +719,20 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
                     {/* Under the editor it saves, not in a bar of its own: no other page has anything to save. */}
                     <div className={styles.saveRow}>
                       <div className={styles.status} role="status">
-                        {(load === 'loading' || status) && <span className="callout secondary">{load === 'loading' ? 'Loading…' : status}</span>}
-                        {dirty && <span className="unsaved">Unsaved changes</span>}
+                        {(load === 'loading' || status) && <span className="callout secondary">{load === 'loading' ? t('Loading…') : status}</span>}
+                        {dirty && <span className="unsaved">{t('Unsaved changes')}</span>}
                       </div>
                       <div className={styles.actions}>
-                        {load === 'failed' && <button type="button" onClick={() => setRetry((value) => value + 1)}>Retry Loading</button>}
+                        {load === 'failed' && <button type="button" onClick={() => setRetry((value) => value + 1)}>{t('Retry Loading')}</button>}
                         <button type="button" className="prominent" disabled={!canSave} onClick={() => void saveInstructions()}>
-                          {saving ? 'Saving…' : 'Save'}
+                          {saving ? t('Saving…') : t('Save')}
                         </button>
                       </div>
                     </div>
                     {text.length > 9000 && (
                       <p className={`${styles.footnote} ${styles.note}`}>
                         <Icon icon={Info16Regular} />
-                        Over 9,000 characters, so Claude sessions are pointed to them rather than given the full text.
+                        {t('Over 9,000 characters, so Claude sessions are pointed to them rather than given the full text.')}
                       </p>
                     )}
                   </section>

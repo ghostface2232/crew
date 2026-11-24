@@ -116,7 +116,8 @@ enum Releases {
         busy = true
         defer { busy = false }
         if let reason = try? String(contentsOf: failureReport, encoding: .utf8) {
-            error = "Could not install the update: \(reason.trimmingCharacters(in: .whitespacesAndNewlines))"
+            let message = Self.localizedFailure(reason.trimmingCharacters(in: .whitespacesAndNewlines))
+            error = String(localized: "Could not install the update: \(message)")
             try? FileManager.default.removeItem(at: failureReport)
         }
         if let data = try? Data(contentsOf: manifest), let staged = try? JSONDecoder().decode(Staged.self, from: data),
@@ -145,7 +146,7 @@ enum Releases {
             let (data, response) = try await session.data(for: request)
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             // A repository with no release yet answers 404: there is simply nothing newer.
-            guard status == 404 || (200..<300).contains(status) else { throw CrewFailure("GitHub answered \(status).") }
+            guard status == 404 || (200..<300).contains(status) else { throw CrewFailure(String(localized: "GitHub answered \(status).")) }
             let found = status == 404 ? nil : Releases.parse(data)
             // An install that started while this check ran keeps its archive.
             guard phase != .installing else { return }
@@ -165,7 +166,7 @@ enum Releases {
             }
         } catch {
             // A failed check leaves a staged archive ready, and an install under way alone.
-            if !wasReady && phase != .installing { phase = .idle; self.error = "Could not check for updates: \(error.localizedDescription)" }
+            if !wasReady && phase != .installing { phase = .idle; self.error = String(localized: "Could not check for updates: \(error.localizedDescription)") }
         }
     }
 
@@ -187,14 +188,14 @@ enum Releases {
                 }
             }
             let actual = try await Task.detached { try Self.sha256(of: partial) }.value
-            guard actual == release.sha256 else { throw CrewFailure("the download did not match the release’s SHA-256 digest") }
+            guard actual == release.sha256 else { throw CrewFailure(String(localized: "the download did not match the release’s SHA-256 digest")) }
             try FileManager.default.moveItem(at: partial, to: file)
             try JSONEncoder().encode(Staged(version: release.version, sha256: release.sha256, page: release.page)).write(to: manifest)
             phase = .ready
         } catch {
             try? FileManager.default.removeItem(at: partial)
             phase = .available
-            self.error = "Could not download \(release.version): \(error.localizedDescription)"
+            self.error = String(localized: "Could not download \(release.version): \(error.localizedDescription)")
         }
     }
 
@@ -250,7 +251,7 @@ enum Releases {
                 if let error { continuation.resume(throwing: error); return }
                 let status = (response as? HTTPURLResponse)?.statusCode ?? 0
                 guard let file, (200..<300).contains(status) else {
-                    continuation.resume(throwing: CrewFailure("the download answered \(status)")); return
+                    continuation.resume(throwing: CrewFailure(String(localized: "the download answered \(status)"))); return
                 }
                 do {
                     try? FileManager.default.removeItem(at: destination)
@@ -274,14 +275,14 @@ enum Releases {
     nonisolated static func canReplace(installed: URL) -> String? {
         let parent = installed.deletingLastPathComponent()
         guard FileManager.default.isWritableFile(atPath: parent.path), FileManager.default.isWritableFile(atPath: installed.path) else {
-            return "Crew can’t replace itself in \(parent.path). Move Crew to a folder you can write to, such as Applications, and try again."
+            return String(localized: "Crew can’t replace itself in \(parent.path). Move Crew to a folder you can write to, such as Applications, and try again.")
         }
         return nil
     }
 
     struct InvalidArchive: LocalizedError {
         var version: String
-        var errorDescription: String? { "The downloaded update is not a valid Crew \(version)." }
+        var errorDescription: String? { String(localized: "The downloaded update is not a valid Crew \(version).") }
     }
 
     /// What an update must satisfy to be this app from the same signer: the running app's own designated requirement,
@@ -294,7 +295,7 @@ enum Releases {
         var info: CFDictionary?
         var requirement: SecRequirement?
         var text: CFString?
-        let failure = CrewFailure("Could not read the running app’s signing identity.")
+        let failure = CrewFailure(String(localized: "Could not read the running app’s signing identity."))
         guard SecCodeCopySelf([], &code) == errSecSuccess, let code else { throw failure }
         let validity = SecCodeCheckValidity(code, [], nil)
         if validity == errSecCSUnsigned { return nil }
@@ -352,7 +353,7 @@ enum Releases {
             return (process.processIdentifier, staged, work)
         } catch {
             try? FileManager.default.removeItem(at: staged)
-            throw CrewFailure("Could not start the update: \(error.localizedDescription)")
+            throw CrewFailure(String(localized: "Could not start the update: \(error.localizedDescription)"))
         }
     }
 
@@ -377,6 +378,27 @@ enum Releases {
     /// The app's PID, installed and staged bundles, work folder, failure report, then the original codesign arguments.
     /// The old copy is kept until the new one opens, and put back if the move or launch fails. If the app has not quit within
     /// a minute (its quit was cancelled), nothing is swapped: a running copy is never moved out from under itself.
+    // The helper reports its failure in English so a later launch can render it in the current app language.
+    nonisolated private static func localizedFailure(_ reason: String) -> String {
+        let reopenMessage = "The previous Crew app could not reopen."
+        let suffix = " " + reopenMessage
+        let failedToReopen = reason.hasSuffix(suffix)
+        let message = failedToReopen ? String(reason.dropLast(suffix.count)) : reason
+        let restorePrefix = "Could not restore Crew; the previous app is at "
+        let movePrefix = "Could not move the failed update aside; the previous Crew app is at "
+        let localized: String
+        if message.hasPrefix(restorePrefix), message.hasSuffix(".") {
+            let path = String(message.dropFirst(restorePrefix.count).dropLast())
+            localized = String(localized: "Could not restore Crew; the previous app is at \(path).")
+        } else if message.hasPrefix(movePrefix), message.hasSuffix(".") {
+            let path = String(message.dropFirst(movePrefix.count).dropLast())
+            localized = String(localized: "Could not move the failed update aside; the previous Crew app is at \(path).")
+        } else {
+            localized = localizedCrewLabel(message)
+        }
+        return failedToReopen ? localized + " " + localizedCrewLabel(reopenMessage) : localized
+    }
+
     nonisolated static let swapScript = """
     #!/bin/sh
     pid="$1"; target="$2"; staged="$3"; work="$4"; result="$5"
@@ -425,23 +447,24 @@ enum Releases {
 /// What the About page and the sidebar say about the update.
 extension AppUpdater {
     var summary: String {
-        switch phase {
-        case .unsupported: "Updates come with the Crew app bundle"
+        let percent = "\(Int((progress * 100).rounded()))%"
+        return switch phase {
+        case .unsupported: String(localized: "Updates come with the Crew app bundle")
         case .idle:
-            if checkedAt != nil, error == nil { "Crew is up to date" }
-            else if let checkedAt { "Last checked at \(checkedAt.formatted(date: .omitted, time: .shortened))" }
-            else { "Not checked yet" }
-        case .checking: "Checking for updates…"
-        case .available: "Version \(latest ?? "") is available"
-        case .downloading: "Downloading version \(latest ?? "")… \(Int((progress * 100).rounded()))%"
-        case .ready: "Version \(latest ?? "") is ready to install"
+            if checkedAt != nil, error == nil { String(localized: "Crew is up to date") }
+            else if let checkedAt { String(localized: "Last checked at \(checkedAt.formatted(date: .omitted, time: .shortened))") }
+            else { String(localized: "Not checked yet") }
+        case .checking: String(localized: "Checking for updates…")
+        case .available: String(localized: "Version \(latest ?? "") is available")
+        case .downloading: String(localized: "Downloading version \(latest ?? "")… \(percent)")
+        case .ready: String(localized: "Version \(latest ?? "") is ready to install")
         case .installing:
             if let waiting, waiting > 0 {
-                "Version \(latest ?? "") will install when \(waiting) running job\(waiting == 1 ? " finishes" : "s finish")"
+                waiting == 1 ? String(localized: "Version \(latest ?? "") will install when 1 running job finishes") : String(localized: "Version \(latest ?? "") will install when \(waiting) running jobs finish")
             } else if waiting == 0 {
-                "Version \(latest ?? "") will install once the Crew daemon answers"
+                String(localized: "Version \(latest ?? "") will install once the Crew daemon answers")
             } else {
-                "Restarting to install version \(latest ?? "")…"
+                String(localized: "Restarting to install version \(latest ?? "")…")
             }
         }
     }

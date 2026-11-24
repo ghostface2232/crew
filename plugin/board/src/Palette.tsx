@@ -7,8 +7,9 @@ import {
 import type { FluentIcon } from '@fluentui/react-icons';
 import type { Snapshot } from './types.ts';
 import { jobLabel, missionStep, missionStops, NAMES, projectOf, roleLabel, jobRole } from './model.ts';
-import { AgentMark, Chip, EASE_IN_OUT, EASE_OUT, Icon, plural, reducedMotion, Elapsed, useClock, WordReveal } from './ui.tsx';
-import { jobStatusState } from './Missions.tsx';
+import { AgentMark, Chip, EASE_IN_OUT, EASE_OUT, Icon, reducedMotion, Elapsed, tNodes, useClock, WordReveal } from './ui.tsx';
+import { jobStatusState, missionStateLabel, sessionStateLabel } from './Missions.tsx';
+import { t } from './i18n.ts';
 import { notificationPermission, notificationsWanted, requestNotifications, setNotificationsWanted } from './notify.ts';
 
 interface Entry {
@@ -30,11 +31,15 @@ export interface PaletteActions {
   welcome: () => void;
 }
 const PAGE_ENTRIES: [string, string, FluentIcon, string][] = [
-  ['overview', 'Overview', GridRegular, 'Every project at a glance'],
-  ['needs', 'Needs You', AlertRegular, 'Approvals and questions waiting on you'],
-  ['activity', 'Activity', FlashRegular, 'What the crew did, as it happened'],
-  ['history', 'History', ClockRegular, 'Finished missions and jobs'],
+  ['overview', t('Overview'), GridRegular, t('Every project at a glance')],
+  ['needs', t('Needs You'), AlertRegular, t('Approvals and questions waiting on you')],
+  ['activity', t('Activity'), FlashRegular, t('What the crew did, as it happened')],
+  ['history', t('History'), ClockRegular, t('Finished missions and jobs')],
 ];
+/** Groups are named in English for the code that checks them, and shown in the reader's language. */
+const GROUPS: Record<string, string> = {
+  Actions: t('Actions'), Pages: t('Pages'), Projects: t('Projects'), Missions: t('Missions'), 'Claude sessions': t('Claude sessions'), Jobs: t('Jobs'),
+};
 
 /**
  * Search and jump: the search control grows into this panel, a list beside a preview of what is under the pointer
@@ -78,43 +83,47 @@ export function Palette({ state, names, projects, origin, close, actions }: {
   const entries = useMemo(() => {
     const list: Entry[] = [];
     list.push({
-      id: 'new-job', group: 'Actions', title: 'New Job', subtitle: 'Hand a task to an agent', icon: AddRegular,
-      run: actions.newJob, preview: () => ({ eyebrow: 'Action', lines: ['Shortcut: N'], text: 'Give a command, ask a question, or add information for the crew.' }),
+      id: 'new-job', group: 'Actions', title: t('New Job'), subtitle: t('Hand a task to an agent'), icon: AddRegular,
+      run: actions.newJob, preview: () => ({ eyebrow: t('Action'), lines: [t('Shortcut: N')], text: t('Give a command, ask a question, or add information for the crew.') }),
     });
     list.push({
-      id: 'settings', group: 'Actions', title: 'Settings', subtitle: 'Roles, model presets, and instructions', icon: SettingsRegular,
-      run: actions.settings, preview: () => ({ eyebrow: 'Action', lines: [], text: 'Configure roles, model presets, and shared instructions.' }),
+      id: 'settings', group: 'Actions', title: t('Settings'), subtitle: t('Roles, model presets, and instructions'), icon: SettingsRegular,
+      run: actions.settings, preview: () => ({ eyebrow: t('Action'), lines: [], text: t('Configure roles, model presets, and shared instructions.') }),
     });
     list.push({
-      id: 'welcome', group: 'Actions', title: 'Welcome to Crew', subtitle: 'Commands and where to start', icon: HandWaveRegular,
-      run: actions.welcome, preview: () => ({ eyebrow: 'Action', lines: [], text: 'Show the first-run guide again: the crew commands, Needs You, and setup.' }),
+      id: 'welcome', group: 'Actions', title: t('Welcome to Crew'), subtitle: t('Commands and where to start'), icon: HandWaveRegular,
+      run: actions.welcome, preview: () => ({ eyebrow: t('Action'), lines: [], text: t('Show the first-run guide again: the crew commands, Needs You, and setup.') }),
     });
     if (notifyState !== 'unsupported') {
       const on = notifyOn;
       list.push({
-        id: 'notify', group: 'Actions', title: on ? 'Turn off notifications' : 'Turn on notifications',
-        subtitle: notifyState === 'denied' ? 'Blocked in this browser' : 'When an agent needs you and the board is in the background',
+        id: 'notify', group: 'Actions', title: on ? t('Turn off notifications') : t('Turn on notifications'),
+        subtitle: notifyState === 'denied' ? t('Blocked in this browser') : t('When an agent needs you and the board is in the background'),
         icon: on ? AlertOffRegular : AlertRegular,
         run: () => (on ? setNotificationsWanted(false) : void requestNotifications()),
         preview: () => ({
-          eyebrow: 'Notifications',
-          lines: [notifyState === 'denied' ? 'The browser blocks them for this page; allow them in its site settings.' : on ? 'On' : 'Off'],
-          text: 'Get a notification when a request waits for you, as the Crew app sends them.',
+          eyebrow: t('Notifications'),
+          lines: [notifyState === 'denied' ? t('The browser blocks them for this page; allow them in its site settings.') : on ? t('On') : t('Off')],
+          text: t('Get a notification when a request waits for you, as the Crew app sends them.'),
         }),
       });
     }
     for (const [id, title, icon, subtitle] of PAGE_ENTRIES)
-      list.push({ id: `page:${id}`, group: 'Pages', title, subtitle, icon, run: () => actions.select(id), preview: () => ({ eyebrow: 'Page', lines: [], text: subtitle }) });
-    list.push({ id: 'project:', group: 'Projects', title: 'All projects', subtitle: 'Overview', icon: StackRegular, run: () => actions.select('overview'), preview: () => ({ eyebrow: 'Projects', lines: [plural(projects.length, 'project')] }) });
+      list.push({ id: `page:${id}`, group: 'Pages', title, subtitle, icon, run: () => actions.select(id), preview: () => ({ eyebrow: t('Page'), lines: [], text: subtitle }) });
+    list.push({ id: 'project:', group: 'Projects', title: t('All projects'), subtitle: t('Overview'), icon: StackRegular, run: () => actions.select('overview'), preview: () => ({ eyebrow: t('Projects'), lines: [projects.length === 1 ? t('1 project') : t('{count} projects', { count: projects.length })] }) });
     for (const dir of projects) {
       const projectJobs = jobs.filter((job) => projectOf(job) === dir);
+      const activeJobs = projectJobs.filter((job) => job.endedAt == null).length;
+      const activeMissions = missions.filter((mission) => projectOf(mission) === dir && mission.state === 'active').length;
       list.push({
         id: `project:${dir}`, group: 'Projects', title: names.get(dir) ?? dir, subtitle: dir, icon: FolderRegular,
         run: () => actions.select(`project:${dir}`),
         preview: () => ({
-          eyebrow: 'Project',
-          lines: [dir, `${plural(projectJobs.filter((job) => job.endedAt == null).length, 'active job')} · ${projectJobs.length} in all`],
-          text: `${plural(missions.filter((mission) => projectOf(mission) === dir && mission.state === 'active').length, 'mission')} in progress`,
+          eyebrow: t('Project'),
+          lines: [dir, activeJobs === 1
+            ? t('1 active job · {total} in all', { total: projectJobs.length })
+            : t('{count} active jobs · {total} in all', { count: activeJobs, total: projectJobs.length })],
+          text: activeMissions === 1 ? t('1 mission in progress') : t('{count} missions in progress', { count: activeMissions }),
         }),
       });
     }
@@ -127,10 +136,12 @@ export function Palette({ state, names, projects, origin, close, actions }: {
           requestAnimationFrame(() => document.querySelector(`[data-key="${CSS.escape(mission.id)}"]`)?.scrollIntoView({ block: 'start', behavior: reducedMotion() ? 'auto' : 'smooth' }));
         },
         preview: () => ({
-          eyebrow: 'Mission',
-          chip: [mission.state === 'active' ? 'running' : mission.state, mission.state[0].toUpperCase() + mission.state.slice(1)],
+          eyebrow: t('Mission'),
+          chip: [mission.state === 'active' ? 'running' : mission.state, missionStateLabel(mission.state)],
           lines: [
-            mission.state === 'done' ? `All ${stops.length} steps passed` : `Step ${missionStep(mission) + 1} of ${stops.length}: ${stops[missionStep(mission)]?.name ?? ''}`,
+            mission.state === 'done'
+              ? t('All {count} steps passed', { count: stops.length })
+              : t('Step {step} of {count}: {name}', { step: missionStep(mission) + 1, count: stops.length, name: stops[missionStep(mission)]?.name ?? '' }),
             <Elapsed start={mission.createdAt} end={mission.endedAt} />,
           ],
           text: mission.outcome || mission.notes?.at(-1)?.text,
@@ -142,9 +153,9 @@ export function Palette({ state, names, projects, origin, close, actions }: {
         id: `session:${session.id}`, group: 'Claude sessions', title: session.title, subtitle: names.get(projectOf(session)) ?? projectOf(session), agent: 'claude',
         run: () => actions.openSession(session.id),
         preview: () => ({
-          eyebrow: 'Claude · Lead',
-          chip: [session.stalled ? 'stalled' : session.state, session.stalled ? 'May be stuck' : session.state[0].toUpperCase() + session.state.slice(1)],
-          lines: [<Elapsed start={session.startedAt} prefix="Started " suffix=" ago" />],
+          eyebrow: t('Claude · Lead'),
+          chip: [session.stalled ? 'stalled' : session.state, sessionStateLabel(session)],
+          lines: [tNodes('Started {time} ago', { time: <Elapsed start={session.startedAt} /> })],
           text: session.waitingFor ?? session.phase,
         }),
       });
@@ -154,7 +165,7 @@ export function Palette({ state, names, projects, origin, close, actions }: {
         id: `job:${job.id}`, group: 'Jobs', title: job.title, subtitle: `${NAMES[job.agent]} · ${names.get(projectOf(job)) ?? projectOf(job)}`, agent: job.agent, icon: WrenchRegular,
         run: () => actions.openJob(job.id),
         preview: () => ({
-          eyebrow: `${NAMES[job.agent]} · ${job.ask && !job.debate ? 'Question' : roleLabel({ roleInfo }, jobRole(job))}`,
+          eyebrow: `${NAMES[job.agent]} · ${job.ask && !job.debate ? t('Question') : roleLabel({ roleInfo }, jobRole(job))}`,
           chip: [jobStatusState(job), jobLabel(job)],
           lines: [names.get(projectOf(job)) ?? projectOf(job), <Elapsed start={job.createdAt} end={job.endedAt} />],
           text: job.waiting?.reason ?? job.error?.message ?? (job.endedAt == null ? job.phase : job.result?.stat),
@@ -230,7 +241,7 @@ export function Palette({ state, names, projects, origin, close, actions }: {
     <dialog
       ref={dialog}
       className="palette-layer"
-      aria-label="Search"
+      aria-label={t('Search')}
       onCancel={(event) => {
         event.preventDefault();
         finish();
@@ -266,8 +277,8 @@ export function Palette({ state, names, projects, origin, close, actions }: {
               aria-expanded="true"
               aria-controls={listId}
               aria-activedescendant={current ? `palette-${current.id}` : undefined}
-              aria-label="Search work, projects and actions"
-              placeholder="Search work, projects and actions…"
+              aria-label={t('Search work, projects and actions')}
+              placeholder={t('Search work, projects and actions…')}
               value={query}
               onChange={(event) => {
                 setQuery(event.target.value);
@@ -292,17 +303,17 @@ export function Palette({ state, names, projects, origin, close, actions }: {
               className="palette-list"
               id={listId}
               role="listbox"
-              aria-label="Results"
+              aria-label={t('Results')}
               data-pointer={pointer || undefined}
               onPointerLeave={() => setPointer(false)}
             >
-              {!shown.length && <p className="palette-empty">Nothing matches “{query}”.</p>}
+              {!shown.length && <p className="palette-empty">{t('Nothing matches “{query}”.', { query })}</p>}
               {shown.map((entry, index) => {
                 const heading = entry.group !== lastGroup;
                 lastGroup = entry.group;
                 return (
                   <div key={entry.id} role="presentation">
-                    {heading && <p className="palette-group" role="presentation">{entry.group}</p>}
+                    {heading && <p className="palette-group" role="presentation">{GROUPS[entry.group] ?? entry.group}</p>}
                     <div
                       className="palette-item"
                       role="option"
@@ -339,7 +350,7 @@ export function Palette({ state, names, projects, origin, close, actions }: {
                 )}
                 <span className="palette-hint">
                   {current.group === 'Jobs' || current.group === 'Claude sessions' ? <ChatMultipleRegular fontSize={13} /> : null}
-                  Press Return to open
+                  {t('Press Return to open')}
                 </span>
               </aside>
             )}

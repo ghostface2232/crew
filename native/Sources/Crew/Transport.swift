@@ -19,7 +19,7 @@ struct SSEParser: Sendable {
             buffer.removeSubrange(buffer.startIndex...end)
             scanOffset = 0
             if line.last == 13 { line.removeLast() }
-            guard let text = String(data: line, encoding: .utf8) else { throw CrewFailure("Invalid UTF-8 from the daemon.") }
+            guard let text = String(data: line, encoding: .utf8) else { throw CrewFailure(String(localized: "Invalid UTF-8 from the daemon.")) }
             if text.isEmpty {
                 if !lines.isEmpty { events.append(ServerEvent(name: name, data: Data(lines.joined(separator: "\n").utf8))) }
                 name = "message"; lines = []; eventSize = 0
@@ -28,10 +28,10 @@ struct SSEParser: Sendable {
             } else if text.hasPrefix("data:") {
                 lines.append(field(text)); eventSize += line.count
             }
-            guard eventSize < 16 * 1024 * 1024 else { throw CrewFailure("The daemon sent an oversized event.") }
+            guard eventSize < 16 * 1024 * 1024 else { throw CrewFailure(String(localized: "The daemon sent an oversized event.")) }
         }
         scanOffset = buffer.count
-        guard buffer.count < 16 * 1024 * 1024 else { throw CrewFailure("The daemon sent an oversized event.") }
+        guard buffer.count < 16 * 1024 * 1024 else { throw CrewFailure(String(localized: "The daemon sent an oversized event.")) }
         return events
     }
     private func field(_ text: String) -> String {
@@ -47,7 +47,7 @@ struct CrewFailure: LocalizedError {
 }
 struct DaemonSignInFailure: LocalizedError {
     let tokenFile: URL
-    var errorDescription: String? { "Could not sign in to the Crew daemon. Check the token file at \(tokenFile.path)." }
+    var errorDescription: String? { String(localized: "Could not sign in to the Crew daemon. Check the token file at \(tokenFile.path).") }
 }
 
 enum CrewHome {
@@ -148,7 +148,7 @@ final class CrewAPI: Sendable {
         if (response as? HTTPURLResponse)?.statusCode == 401 { throw DaemonSignInFailure(tokenFile: tokenFile) }
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             struct ErrorBody: Decodable { var error: String }
-            throw CrewFailure((try? JSONDecoder().decode(ErrorBody.self, from: data).error) ?? "The daemon could not complete the request.")
+            throw CrewFailure((try? JSONDecoder().decode(ErrorBody.self, from: data).error) ?? String(localized: "The daemon could not complete the request."))
         }
     }
 }
@@ -160,13 +160,13 @@ enum DaemonLauncher {
         // daemon outlives the app, so one started from there would keep the port after the copy is gone and stop
         // answering, and no later launch could replace it.
         if Bundle.main.bundlePath.contains("/AppTranslocation/") {
-            throw CrewFailure("Move Crew to the Applications folder, then open it from there.")
+            throw CrewFailure(String(localized: "Move Crew to the Applications folder, then open it from there."))
         }
-        guard let resources = Bundle.main.resourceURL else { throw CrewFailure("Missing application resources.") }
+        guard let resources = Bundle.main.resourceURL else { throw CrewFailure(String(localized: "Missing application resources.")) }
         let node = resources.appendingPathComponent("runtime/node")
         let cli = resources.appendingPathComponent("bridge/plugin/bridge/cli.js")
         guard FileManager.default.isExecutableFile(atPath: node.path), FileManager.default.fileExists(atPath: cli.path) else {
-            throw CrewFailure("The bundled daemon is missing. Rebuild Crew with npm run package:desktop.")
+            throw CrewFailure(String(localized: "The bundled daemon is missing. Rebuild Crew with npm run package:desktop."))
         }
         // The existing CLI owns version negotiation and never replaces a daemon with active jobs.
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -178,7 +178,7 @@ enum DaemonLauncher {
             process.standardError = FileHandle.nullDevice
             process.terminationHandler = { process in
                 if process.terminationStatus == 0 { continuation.resume() }
-                else { continuation.resume(throwing: CrewFailure("Could not start the daemon. Check ~/.crew/daemon.log, then retry.")) }
+                else { continuation.resume(throwing: CrewFailure(String(localized: "Could not start the daemon. Check ~/.crew/daemon.log, then retry."))) }
             }
             do { try process.run() } catch { continuation.resume(throwing: error) }
         }
@@ -232,7 +232,7 @@ private final class StreamConnection: NSObject, URLSessionDataDelegate, @uncheck
         guard let http = response as? HTTPURLResponse, http.statusCode == 200,
               http.value(forHTTPHeaderField: "Content-Type")?.hasPrefix("text/event-stream") == true else {
             completionHandler(.cancel)
-            finish(CrewFailure("Could not open the daemon event stream."))
+            finish(CrewFailure(String(localized: "Could not open the daemon event stream.")))
             return
         }
         completionHandler(.allow)
@@ -246,14 +246,14 @@ private final class StreamConnection: NSObject, URLSessionDataDelegate, @uncheck
             for event in events {
                 // Never silently drop state updates when the UI is busy; reconnect for a fresh snapshot.
                 if case .dropped = continuation?.yield(event) {
-                    finish(CrewFailure("Catching up with the daemon…"))
+                    finish(CrewFailure(String(localized: "Catching up with the daemon…")))
                     return
                 }
             }
         } catch { finish(error) }
     }
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        finish(error ?? CrewFailure("Connection closed. Reconnecting…"))
+        finish(error ?? CrewFailure(String(localized: "Connection closed. Reconnecting…")))
     }
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void) {

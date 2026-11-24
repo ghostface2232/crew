@@ -164,6 +164,8 @@
   div.detail-scroll:is([data-scrolling], [data-scrollbar-hover])::-webkit-scrollbar-thumb { background-color: var(--tertiary); }
 }
 html { min-width: 320px; }
+/* Korean breaks between words, not between syllables; a word too long for its line still breaks. */
+html:lang(ko) { word-break: keep-all; overflow-wrap: break-word; }
 body {
   margin: 0;
   background: var(--canvas);

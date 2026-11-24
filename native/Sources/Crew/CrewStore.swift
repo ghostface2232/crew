@@ -60,7 +60,7 @@ final class CrewStore {
     private(set) var pendingCount = 0
     var signInRequired = false
     var connected = false
-    var connectionMessage = "Connecting to Crew…"
+    var connectionMessage = String(localized: "Connecting to Crew…")
     var revision = 0
     var clockSkew: Double = 0
     var selection: String? = "overview" {
@@ -214,7 +214,7 @@ final class CrewStore {
             events = state.events; limits = state.limits; usage = state.usage
             state.events = []; state.limits = [:]; state.usage = nil
             for id in Set(jobVersions.keys).union(state.jobs.map(\.id)) { jobVersions[id, default: 0] += 1 }
-            signInRequired = false; connected = true; connectionMessage = "Connected"
+            signInRequired = false; connected = true; connectionMessage = String(localized: "Connected")
             greetIfNew()
             clockSkew = state.now - Date().timeIntervalSince1970 * 1000
             displayTime = Date().timeIntervalSince1970 * 1000
@@ -409,10 +409,10 @@ final class SettingsModel {
     }
     func blankTitle(_ role: String, agent: String, _ key: KeyPath<RoleAgentSettings, String?>, models: [ModelChoice]) -> String {
         guard let value = inheritedValue(role, agent: agent, key), !value.isEmpty,
-              let parent = roleInfo.first(where: { $0.role == role })?.parent else { return "Agent default" }
+              let parent = roleInfo.first(where: { $0.role == role })?.parent else { return String(localized: "Agent default") }
         let name = models.first { $0.id == value }?.name ?? value
-        let label = roleInfo.first { $0.role == parent }?.label ?? parent
-        return "\(name) (same as \(label))"
+        let label = roleInfo.first { $0.role == parent }?.localizedLabel ?? parent
+        return String(localized: "\(name) (same as \(label))")
     }
     func fieldChoices(_ role: String, agent: String, _ key: KeyPath<RoleAgentSettings, String?>, models: [ModelChoice]) -> [ModelChoice] {
         var choices = models
@@ -541,7 +541,7 @@ final class SettingsModel {
             let result: Instructions = try await api.post("/api/instructions", Save(project: scope.isEmpty ? nil : scope, text: draft))
             guard generation == attempt else { return }
             if text == draft { text = result.text }
-            savedText = result.text; textStatus = "Saved"
+            savedText = result.text; textStatus = String(localized: "Saved")
         } catch { if generation == attempt { textStatus = error.localizedDescription } }
         if generation == attempt { savingText = false }
     }
@@ -554,7 +554,7 @@ final class SettingsModel {
         do {
             let result: PresetState = try await api.post("/api/preset", PresetSelection(preset: draft))
             if preset == draft { preset = result.preset }
-            savedPreset = result.preset; presets = result.presets; presetStatus = "Saved"
+            savedPreset = result.preset; presets = result.presets; presetStatus = String(localized: "Saved")
             return true
         } catch {
             presetStatus = error.localizedDescription
@@ -596,7 +596,7 @@ final class SettingsModel {
             let result: RoleState = try await api.post("/api/roles", Save(roles: draft))
             let stored = Self.normalized(result.roleSettings)
             if Self.normalized(roleSettings) == draft { roleSettings = stored }
-            savedRoleSettings = stored; roleStatus = "Saved"
+            savedRoleSettings = stored; roleStatus = String(localized: "Saved")
             return true
         } catch {
             roleStatus = error.localizedDescription

@@ -26,18 +26,18 @@ struct WorkspaceSummary: View {
     /// The narrowest card that keeps every label on one line in four equal columns, with room for a label's symbol and gap.
     static let minimumWidth: CGFloat = {
         let font = NSFont.systemFont(ofSize: Typeface.chipSize, weight: .medium)
-        let widest = ["In progress", "Needs you", "Finished", "Failed"].map { ($0 as NSString).size(withAttributes: [.font: font]).width }.max() ?? 0
+        let widest = [String(localized: "In progress"), String(localized: "Needs you"), String(localized: "Finished"), String(localized: "Failed")].map { ($0 as NSString).size(withAttributes: [.font: font]).width }.max() ?? 0
         return ceil(4 * (widest + Typeface.chipSize * 2) + 3 * Space.xl + 2 * WorkspaceStyle.cardPadding)
     }()
     var store: CrewStore
     private var jobs: [Job] { store.state.jobs.filter { store.project.isEmpty || $0.projectPath == store.project } }
     private var metrics: [(String, Int, String, Color)] {
         // Lead sessions count like jobs, as they already do under Needs you.
-        [("In progress", jobs.filter { $0.state == "running" }.count + store.state.claude.filter { $0.state == "working" && (store.project.isEmpty || $0.projectPath == store.project) }.count, "circle.dotted.circle", Palette.accent),
-         ("Needs you", jobs.filter { $0.state == "waiting" }.count + store.state.claude.filter { $0.state == "waiting" && (store.project.isEmpty || $0.projectPath == store.project) }.count, "bell.badge", Palette.warning),
+        [(String(localized: "In progress"), jobs.filter { $0.state == "running" }.count + store.state.claude.filter { $0.state == "working" && (store.project.isEmpty || $0.projectPath == store.project) }.count, "circle.dotted.circle", Palette.accent),
+         (String(localized: "Needs you"), jobs.filter { $0.state == "waiting" }.count + store.state.claude.filter { $0.state == "waiting" && (store.project.isEmpty || $0.projectPath == store.project) }.count, "bell.badge", Palette.warning),
          // Settled jobs stay in the list but leave the totals, which would otherwise only grow.
-         ("Finished", jobs.filter { $0.state == "done" && $0.isUnsettled }.count, "checkmark.circle", .secondary),
-         ("Failed", jobs.filter { $0.state == "failed" && $0.isUnsettled }.count, "exclamationmark.circle", Palette.danger)]
+         (String(localized: "Finished"), jobs.filter { $0.state == "done" && $0.isUnsettled }.count, "checkmark.circle", .secondary),
+         (String(localized: "Failed"), jobs.filter { $0.state == "failed" && $0.isUnsettled }.count, "exclamationmark.circle", Palette.danger)]
     }
     var body: some View {
         let metrics = self.metrics
@@ -136,7 +136,7 @@ struct MissionTrack: View {
         }
         .frame(height: Self.marker + Space.m + Self.labelHeight)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(mission.state == "done" ? "Done, all \(mission.stops.count) steps passed" : "Step \(mission.step + 1) of \(mission.stops.count), \(mission.stops[mission.step])")
+        .accessibilityLabel(mission.state == "done" ? String(localized: "Done, all \(mission.stops.count) steps passed") : String(localized: "Step \(mission.step + 1) of \(mission.stops.count), \(mission.stops[mission.step])"))
     }
     private func marker(_ index: Int) -> some View {
         let current = index == mission.step

@@ -8,6 +8,7 @@ import { boardCredential, boardUrl, readToken, SESSION_COOKIE } from '../plugin/
 import { api, ensureDaemon, health } from '../plugin/bridge/client.ts';
 import { baseUrl, HOME, PLUGIN_ROOT } from '../plugin/bridge/config.ts';
 import type { BoardState } from '../plugin/board/src/types.ts';
+import { pickLanguage, setLanguage, t } from '../plugin/board/src/i18n.ts';
 import { SETTING_CHANGE, taskbarDark } from './taskbar.ts';
 import { installScript, supervisorEnv, UPDATE_FAILED, Updater } from './updater.ts';
 import { isBoardNavigation, isClaudeSessionLink, linkTarget, windowBounds } from './window-state.ts';
@@ -238,9 +239,9 @@ function createWindow() {
   // The board's settings editor guards unsaved edits with beforeunload; Electron leaves the prompt to us.
   window.webContents.on('will-prevent-unload', (event) => {
     const choice = dialog.showMessageBoxSync(window!, {
-      type: 'question', message: 'Discard unsaved settings?',
-      detail: 'Edits have not been saved, or a save is still in progress.',
-      buttons: ['Discard changes', 'Keep editing'], defaultId: 1, cancelId: 1,
+      type: 'question', message: t('Discard unsaved settings?'),
+      detail: t('Edits have not been saved, or a save is still in progress.'),
+      buttons: [t('Discard changes'), t('Keep editing')], defaultId: 1, cancelId: 1,
     });
     if (choice === 0) event.preventDefault();
     else {
@@ -268,18 +269,18 @@ function createWindow() {
 }
 function trayMenu(waiting = pending) {
   pending = waiting;
-  tray?.setToolTip(pending ? `Crew · ${pending} need your input` : 'Crew');
+  tray?.setToolTip(pending ? t('Crew · {count} need your input', { count: pending }) : 'Crew');
   tray?.setContextMenu(
     Menu.buildFromTemplate([
-      { label: pending ? `Open Crew (${pending} waiting)` : 'Open Crew', click: () => show() },
-      { label: 'Open in browser', click: () => void openInBrowser() },
-      { label: 'Reload board', click: () => void loadBoard().catch(console.error) },
-      ...(updater.status.state === 'ready' ? [{ label: `Update to ${updater.status.latest}`, click: () => void installUpdate() }] : []),
+      { label: pending ? t('Open Crew ({count} waiting)', { count: pending }) : t('Open Crew'), click: () => show() },
+      { label: t('Open in browser'), click: () => void openInBrowser() },
+      { label: t('Reload board'), click: () => void loadBoard().catch(console.error) },
+      ...(updater.status.state === 'ready' ? [{ label: t('Update to {version}', { version: updater.status.latest ?? '' }), click: () => void installUpdate() }] : []),
       ...(updater.status.state === 'installing' && updater.status.waiting !== undefined
-        ? [{ label: 'Cancel the waiting update', click: () => updater.failed() }]
+        ? [{ label: t('Cancel the waiting update'), click: () => updater.failed() }]
         : []),
       { type: 'separator' },
-      { label: 'Quit Crew — jobs keep running', click: () => app.quit() },
+      { label: t('Quit Crew — jobs keep running'), click: () => app.quit() },
     ]),
   );
   window?.setOverlayIcon(pending ? nativeImage.createFromPath(asset('badge.png')) : null, pending ? `${pending} waiting` : '');
@@ -308,7 +309,7 @@ async function poll() {
         state.claude.filter((claude) => claude.state === 'waiting').length,
     );
   } catch {
-    tray?.setToolTip('Crew · reconnecting to daemon');
+    tray?.setToolTip(t('Crew · reconnecting to daemon'));
   } finally {
     if (!stopping) timer = setTimeout(() => void poll(), 3000);
   }
@@ -351,6 +352,8 @@ else {
 
 async function startDesktop() {
   await app.whenReady();
+  // The board's Chromium takes its language from the same locale, so the tray and dialogs agree with it.
+  setLanguage(pickLanguage([app.getLocale()]));
   Menu.setApplicationMenu(Menu.buildFromTemplate([{ role: 'editMenu' }, { role: 'viewMenu' }, { role: 'windowMenu' }]));
   // The board's copy buttons are the only permission it needs; notifications come from the daemon.
   const allowed = (permission: string, origin: string) => permission === 'clipboard-sanitized-write' && origin === baseUrl();
@@ -371,9 +374,9 @@ async function startDesktop() {
     } catch (error) {
       const answer = await dialog.showMessageBox({
         type: 'error',
-        title: 'Crew could not start',
+        title: t('Crew could not start'),
         message: (error as Error).message,
-        buttons: ['Retry', 'Quit'],
+        buttons: [t('Retry'), t('Quit')],
         defaultId: 0,
         cancelId: 1,
       });
@@ -499,9 +502,9 @@ async function installUpdate() {
   if (daemon?.active) {
     const response = await ask({
       type: 'info',
-      message: `${daemon.active} job${daemon.active === 1 ? ' is' : 's are'} still running.`,
-      detail: 'Crew will install the update as soon as they finish. Nothing is stopped, and jobs, missions and settings are kept.',
-      buttons: ['Update When Finished', 'Cancel'], defaultId: 0, cancelId: 1,
+      message: daemon.active === 1 ? t('1 job is still running.') : t('{count} jobs are still running.', { count: daemon.active }),
+      detail: t('Crew will install the update as soon as they finish. Nothing is stopped, and jobs, missions and settings are kept.'),
+      buttons: [t('Update When Finished'), t('Cancel')], defaultId: 0, cancelId: 1,
     });
     if (response !== 0 || attempt !== installAttempt) return;
   }
@@ -531,7 +534,7 @@ async function installUpdate() {
         accepted = true;
         // It saves jobs and missions, then exits; the process going is what counts, not a quiet health check.
         for (let waited = 0; alive(daemon.pid); waited += 200) {
-          if (waited >= 120_000) throw new Error(`The Crew daemon (process ${daemon.pid}) did not stop.`);
+          if (waited >= 120_000) throw new Error(t('The Crew daemon (process {pid}) did not stop.', { pid: daemon.pid }));
           await sleep(200);
         }
         stopped = true;
@@ -542,7 +545,7 @@ async function installUpdate() {
           stopped = true;
           continue;
         }
-        const message = `Could not stop the Crew daemon for the update: ${(error as Error).message}`;
+        const message = t('Could not stop the Crew daemon for the update: {error}', { error: (error as Error).message });
         if (accepted) {
           // It agreed to stop and will go; once it has, the app that stays gets it back.
           updater.failed(message);
@@ -559,7 +562,7 @@ async function installUpdate() {
     } else if (daemon.active !== null) refusals = 0;
     // A daemon whose health does not answer is waited for, never taken as gone, but not for ever.
     if (daemon.active === null && ++unanswered >= 24) {
-      updater.failed('The Crew daemon is not answering, so the update was not installed. Try again later.');
+      updater.failed(t('The Crew daemon is not answering, so the update was not installed. Try again later.'));
       return abandon();
     }
     if (daemon.active !== null) {
@@ -582,7 +585,7 @@ async function handOver() {
   const sha256 = updater.installerSHA256;
   updateLog(`installer ${installer ?? 'missing'}`);
   try {
-    if (!installer || !sha256) throw new Error('Crew could not verify the update. Download it again from Settings.');
+    if (!installer || !sha256) throw new Error(t('Crew could not verify the update. Download it again from Settings.'));
     // Paths travel in the environment, never in the script text.
     const supervise = `try { ${installScript} } catch {
       $reason = $_.Exception.Message
@@ -618,7 +621,7 @@ async function handOver() {
     updateLog(`supervisor failed: ${(error as Error).message}`);
     // The staged installer stays, so the reopened app offers it again; the reopened app starts its daemon again.
     updater.failed((error as Error).message);
-    dialog.showErrorBox('Crew could not update', `${(error as Error).message}\n\nCrew will reopen; try the update again from Settings.`);
+    dialog.showErrorBox(t('Crew could not update'), t('{error}\n\nCrew will reopen; try the update again from Settings.', { error: (error as Error).message }));
     app.relaunch();
   }
 }

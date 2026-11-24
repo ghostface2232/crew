@@ -26,7 +26,7 @@ struct SetupCard: View {
     var body: some View {
         Group {
             if let setup, !setup.items.allSatisfy(\.ok) {
-                ContentPanel(title: "Set up Crew", symbol: "wrench.and.screwdriver") {
+                ContentPanel(title: String(localized: "Set up Crew"), symbol: "wrench.and.screwdriver") {
                     VStack(alignment: .leading, spacing: Space.m) {
                         ForEach(setup.items) { item in
                             HStack(alignment: .firstTextBaseline, spacing: Space.s) {
@@ -44,7 +44,7 @@ struct SetupCard: View {
                     ActionRow {
                         Button("Check Again") { act { try await api.request("/api/setup?refresh") } }.pillButton().disabled(busy)
                         if setup.items.contains(where: { !$0.ok && $0.repairable == true }) {
-                            Button(busy ? "Installing…" : "Install") { act { try await api.post("/api/setup/repair", [String: String](), timeout: 180) } }
+                            Button(busy ? String(localized: "Installing…") : String(localized: "Install")) { act { try await api.post("/api/setup/repair", [String: String](), timeout: 180) } }
                                 .glassPillButton().morphs(on: busy).disabled(busy || setup.registering)
                         }
                     }.frame(maxWidth: .infinity, alignment: .trailing)

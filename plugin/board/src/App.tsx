@@ -10,7 +10,7 @@ import type { FluentIcon } from '@fluentui/react-icons';
 import { board } from './store.ts';
 import { formatDate, longDay } from './dates.ts';
 import { knownProjects, projectNames, projectOf } from './model.ts';
-import { AskHost, ClockProvider, CopyMenu, Icon, LeavingContext, PANEL_EXIT_MS, RollingNumber, SHEET_EXIT_MS, useLinger, useStableItems } from './ui.tsx';
+import { AskHost, ClockProvider, CopyMenu, Icon, tNodes, LeavingContext, PANEL_EXIT_MS, RollingNumber, SHEET_EXIT_MS, useLinger, useStableItems } from './ui.tsx';
 import appIcon from './icons/CrewAppIcon.png';
 import { Activity, History, Workspace } from './Overview.tsx';
 import { NeedsYou } from './NeedsYou.tsx';
@@ -22,6 +22,7 @@ import { Onboarding } from './Onboarding.tsx';
 import { NavList, ProjectPeek } from './Shell.tsx';
 import { Notifier } from './notify.ts';
 import { desktop, useAppUpdate } from './desktop.ts';
+import { t } from './i18n.ts';
 
 export type Page = 'overview' | 'needs' | 'activity' | 'history';
 const GridNavIcon = bundleIcon(GridFilled, GridRegular);
@@ -31,12 +32,12 @@ const ClockNavIcon = bundleIcon(ClockFilled, ClockRegular);
 const StackNavIcon = bundleIcon(StackFilled, StackRegular);
 const FolderNavIcon = bundleIcon(FolderFilled, FolderRegular);
 export const PAGES: [Page, string, FluentIcon][] = [
-  ['overview', 'Overview', GridNavIcon],
-  ['needs', 'Needs You', AlertNavIcon],
-  ['activity', 'Activity', FlashNavIcon],
-  ['history', 'History', ClockNavIcon],
+  ['overview', t('Overview'), GridNavIcon],
+  ['needs', t('Needs You'), AlertNavIcon],
+  ['activity', t('Activity'), FlashNavIcon],
+  ['history', t('History'), ClockNavIcon],
 ];
-const TITLES: Record<Page, string> = { overview: 'Overview', needs: 'Needs You', activity: 'Activity', history: 'History' };
+const TITLES: Record<Page, string> = { overview: t('Overview'), needs: t('Needs You'), activity: t('Activity'), history: t('History') };
 
 /** One selection, as in the app: a page, or `project:<path>` for a project's overview. */
 function storedSelection() {
@@ -75,7 +76,7 @@ export function App() {
   const waitingSessions = useMemo(() => claude.filter((session) => session.state === 'waiting'), [claude]);
   const pending = waitingJobs.length + waitingSessions.length;
   const live = state.connection === 'live';
-  const connectionWord = live ? 'Live' : state.connection === 'lost' ? 'Reconnecting…' : 'Connecting…';
+  const connectionWord = live ? t('Live') : state.connection === 'lost' ? t('Reconnecting…') : t('Connecting…');
   const narrow = useNarrow();
   // Narrow windows keep the sidebar folded away until its button brings it out over the page.
   const [drawer, setDrawer] = useState(false);
@@ -206,14 +207,14 @@ export function App() {
     return (
       <main className="sign-in" aria-labelledby="sign-in-title">
         <span className="sign-in-mark"><Icon icon={LockClosedKeyRegular} size={36} /></span>
-        <h1 className="title" id="sign-in-title">The board is not signed in</h1>
+        <h1 className="title" id="sign-in-title">{t('The board is not signed in')}</h1>
         <p className="secondary">
-          A browser tab stays signed in only while it is open, so a reload signs it out.
-          Run <code>crew board</code> in a terminal, or choose <strong>Open Web Board</strong> in the Crew app.
+          {t('A browser tab stays signed in only while it is open, so a reload signs it out.')}{' '}
+          {tNodes('Run {command} in a terminal, or choose {action} in the Crew app.', { command: <code>crew board</code>, action: <strong>{t('Open Web Board')}</strong> })}
         </p>
         <button className="prominent" onClick={board.retry}>
           <Icon icon={ArrowClockwiseRegular} />
-          Retry
+          {t('Retry')}
         </button>
       </main>
     );
@@ -221,7 +222,7 @@ export function App() {
   const title = project ? (names.get(project) ?? project) : TITLES[page];
   const pageNav = (
     <NavList
-      label="Pages"
+      label={t('Pages')}
       items={pageItems}
       current={project ? (page === 'overview' ? '' : page) : page}
       onSelect={select}
@@ -231,7 +232,7 @@ export function App() {
   return (
     <ClockProvider skew={state.clockSkew}>
       <div className="app">
-        <aside className="sidebar" id="sidebar" aria-label="Sidebar" ref={sidebar} data-open={drawer || undefined} inert={folded}>
+        <aside className="sidebar" id="sidebar" aria-label={t('Sidebar')} ref={sidebar} data-open={drawer || undefined} inert={folded}>
           <div className="brand">
             <img className="brand-mark" src={appIcon} alt="" />
             <span className="brand-name">Crew</span>
@@ -242,21 +243,21 @@ export function App() {
             {update?.installError ? (
               <button className="sidebar-item sidebar-update" data-state="failed" id="update-failed" title={update.installError} disabled={!Object.keys(state.roles).length} onClick={openAbout}>
                 <Icon icon={ErrorCircleRegular} />
-                <span>Update failed</span>
+                <span>{t('Update failed')}</span>
               </button>
             ) : (update?.state === 'ready' || update?.state === 'installing') && (
               <button
                 className="sidebar-item sidebar-update"
                 id="install-update"
                 disabled={update.state === 'installing'}
-                title={`Restart Crew to install version ${update.latest}`}
+                title={t('Restart Crew to install version {version}', { version: update.latest ?? '' })}
                 onClick={() => void desktop?.update.install()}
               >
                 <Icon icon={ArrowCircleDownRegular} />
                 <span>
-                  {update.state === 'ready' ? 'Update Now'
-                    : update.waiting ? `${update.waiting} job${update.waiting === 1 ? '' : 's'} left…`
-                    : update.waiting === 0 ? 'Waiting…' : 'Updating…'}
+                  {update.state === 'ready' ? t('Update Now')
+                    : update.waiting ? (update.waiting === 1 ? t('1 job left…') : t('{count} jobs left…', { count: update.waiting }))
+                    : update.waiting === 0 ? t('Waiting…') : t('Updating…')}
                 </span>
                 <span className="sidebar-update-version">{update.latest}</span>
               </button>
@@ -264,7 +265,7 @@ export function App() {
             <div className="sidebar-foot-row">
               <button className="sidebar-item" id="open-settings" disabled={!Object.keys(state.roles).length} onClick={openSettings}>
                 <Icon icon={SettingsRegular} />
-                <span>Settings</span>
+                <span>{t('Settings')}</span>
               </button>
               {/* Only a light: green live, orange while lost. The word is its tooltip, and the page's banner says a lost one in full. */}
               <p className="connection" role="status" data-state={state.connection} title={connectionWord}>
@@ -281,17 +282,17 @@ export function App() {
             <button
               className="icon topbar-sidebar"
               ref={toggle}
-              aria-label={drawer ? 'Hide sidebar' : 'Show sidebar'}
-              title={drawer ? 'Hide sidebar' : 'Show sidebar'}
+              aria-label={drawer ? t('Hide sidebar') : t('Show sidebar')}
+              title={drawer ? t('Hide sidebar') : t('Show sidebar')}
               aria-expanded={drawer}
               aria-controls="sidebar"
               onClick={() => setDrawer(!drawer)}
             >
               <Icon icon={PanelLeftRegular} />
             </button>
-            <nav className="crumbs" aria-label="Location">
+            <nav className="crumbs" aria-label={t('Location')}>
               <button className="crumb" onClick={() => select('overview')} disabled={!project && page === 'overview'}>
-                {project ? 'Projects' : 'Crew'}
+                {project ? t('Projects') : 'Crew'}
               </button>
               <span aria-hidden="true">/</span>
               <span className="crumb-current" aria-current="page">{title}</span>
@@ -301,32 +302,32 @@ export function App() {
               className="search-pill"
               ref={searchButton}
               onClick={openPalette}
-              title="Search (⌘K)"
-              aria-label="Search"
+              title={t('Search (⌘K)')}
+              aria-label={t('Search')}
               aria-keyshortcuts="Meta+K /"
               data-hidden={palette ? '' : undefined}
             >
               <Icon icon={SearchRegular} />
-              <span>Search work, projects…</span>
+              <span>{t('Search work, projects…')}</span>
               <kbd>⌘K</kbd>
             </button>
-            <button className="new-job prominent" disabled={!live} title="New job (N)" aria-keyshortcuts="N" onClick={(event) => newJob(event.currentTarget)}>
+            <button className="new-job prominent" disabled={!live} title={t('New job (N)')} aria-keyshortcuts="N" onClick={(event) => newJob(event.currentTarget)}>
               <Icon icon={AddRegular} />
-              <span className="new-job-label">New Job</span>
+              <span className="new-job-label">{t('New Job')}</span>
             </button>
           </header>
           <main className="page" key={selection}>
             {state.connection === 'lost' && (
               <div className="banner" role="alert">
                 <Icon icon={WifiOffRegular} />
-                <span>Lost the connection to Crew. Reconnecting…</span>
-                <button onClick={board.retry}>Retry</button>
+                <span>{t('Lost the connection to Crew. Reconnecting…')}</span>
+                <button onClick={board.retry}>{t('Retry')}</button>
               </div>
             )}
             <header className="page-head">
               <div className="page-head-copy">
                 {project ? (
-                  <CopyMenu text={project} label="Copy Path">
+                  <CopyMenu text={project} label={t('Copy Path')}>
                     <p className="eyebrow path" title={project}><Icon icon={FolderRegular} size={12} />{project}</p>
                   </CopyMenu>
                 ) : (
@@ -338,11 +339,11 @@ export function App() {
                 <button
                   className="attention"
                   // The count already shows in the badge; the name still says it in full.
-                  aria-label={`${pending} ${pending === 1 ? 'request needs' : 'requests need'} your attention`}
+                  aria-label={pending === 1 ? t('1 request needs your attention') : t('{count} requests need your attention', { count: pending })}
                   onClick={() => select('needs')}
                 >
                   <span className="attention-count"><RollingNumber value={pending} /></span>
-                  <span>Needs You</span>
+                  <span>{t('Needs You')}</span>
                   <Icon icon={ArrowRight16Filled} />
                 </button>
               )}
@@ -391,7 +392,7 @@ export function App() {
 
 function eyebrow(page: Page, now: number) {
   const date = formatDate(longDay, new Date(now));
-  return page === 'overview' ? date : page === 'needs' ? 'Requests from your agents' : page === 'activity' ? 'Everything the crew did' : 'Finished work';
+  return page === 'overview' ? date : page === 'needs' ? t('Requests from your agents') : page === 'activity' ? t('Everything the crew did') : t('Finished work');
 }
 
 /** The project list, with a preview of each beside the sidebar while the pointer rests on it. */
@@ -416,7 +417,7 @@ function ProjectNav({ projects, names, project, state, select }: {
     return dots;
   }, [jobs, claude]);
   const items = useStableItems([
-    { id: '', label: 'All projects', icon: StackNavIcon, dot: undefined },
+    { id: '', label: t('All projects'), icon: StackNavIcon, dot: undefined },
     // No tooltip: the preview beside the list shows the path, and a tooltip would cover it.
     ...projects.map((dir) => ({ id: dir, label: names.get(dir) ?? dir, icon: FolderNavIcon, dot: dots.get(dir) })),
   ], (a, b) => a.id === b.id && a.label === b.label && a.dot === b.dot);
@@ -437,8 +438,8 @@ function ProjectNav({ projects, names, project, state, select }: {
   return (
     <>
       <NavList
-        label="Projects"
-        heading="Projects"
+        label={t('Projects')}
+        heading={t('Projects')}
         items={items}
         current={project}
         onSelect={selectProject}

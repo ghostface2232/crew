@@ -8,7 +8,7 @@ struct WorkspaceToolbar: ToolbarContent {
             Button("New Job", systemImage: "plus") { store.showingDispatch = true }
                 .help("New job (⌘N)").disabled(!store.connected)
             Menu {
-                Label(store.connected ? "Connected to Crew" : "Reconnecting…", systemImage: store.connected ? "network" : "wifi.slash")
+                Label(store.connected ? String(localized: "Connected to Crew") : String(localized: "Reconnecting…"), systemImage: store.connected ? "network" : "wifi.slash")
                 Divider()
                 Button("Open Web Board", systemImage: "globe") { Task { NSWorkspace.shared.open(await store.api.webBoardURL()) } }
             } label: { Label("Workspace options", systemImage: "ellipsis") }
@@ -22,14 +22,14 @@ struct WorkspaceToolbar: ToolbarContent {
 struct WorkspaceTabs: NSViewRepresentable {
     @Bindable var store: CrewStore
     private static let pages = ["overview", "needs", "activity", "history"]
-    private static let titles = ["Overview", "Needs You", "Activity", "History"]
+    private static let titles = [String(localized: "Overview"), String(localized: "Needs You"), String(localized: "Activity"), String(localized: "History")]
     private static let symbols = ["square.grid.2x2", "bell", "bolt", "clock.arrow.circlepath"]
     private var current: String { store.project.isEmpty ? store.selection ?? "overview" : "overview" }
 
     func makeNSView(context: Context) -> NSSegmentedControl {
         let control = NSSegmentedControl(labels: Self.titles, trackingMode: .selectOne,
                                          target: context.coordinator, action: #selector(Coordinator.changed(_:)))
-        control.setAccessibilityLabel("Workspace")
+        control.setAccessibilityLabel(String(localized: "Workspace"))
         control.segmentDistribution = .fit
         return control
     }
@@ -55,7 +55,7 @@ struct WorkspaceTabs: NSViewRepresentable {
         let size = NSImage.SymbolConfiguration(pointSize: 10, weight: .medium)
         guard badged else { return NSImage(systemSymbolName: Self.symbols[index], accessibilityDescription: nil)?.withSymbolConfiguration(size) }
         let config = size.applying(NSImage.SymbolConfiguration(paletteColors: [.systemOrange, .labelColor]))
-        let image = NSImage(systemSymbolName: "bell.badge", accessibilityDescription: "Waiting requests")?.withSymbolConfiguration(config)
+        let image = NSImage(systemSymbolName: "bell.badge", accessibilityDescription: String(localized: "Waiting requests"))?.withSymbolConfiguration(config)
         image?.isTemplate = false
         return image
     }

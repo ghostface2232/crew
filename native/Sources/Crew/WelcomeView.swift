@@ -30,7 +30,7 @@ struct WelcomeView: View {
                 } else {
                     Button { move(-1) } label: { Text("Back").frame(maxWidth: .infinity) }.pillButton(insets: Pill.largeInsets)
                 }
-                Button { if last { finish() } else { move(1) } } label: { Text(last ? "Get Started" : "Continue").frame(maxWidth: .infinity) }
+                Button { if last { finish() } else { move(1) } } label: { Text(last ? String(localized: "Get Started") : String(localized: "Continue")).frame(maxWidth: .infinity) }
                     .glassPillButton(insets: Pill.largeInsets).keyboardShortcut(.defaultAction)
             }
             .padding([.horizontal, .bottom], Welcome.gutter)
@@ -81,7 +81,7 @@ struct WelcomeView: View {
                         .padding(Space.xs).contentShape(Circle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("\(page.title), page \(n + 1) of \(Self.pages.count)")
+                .accessibilityLabel(String(localized: "\(page.title), page \(n + 1) of \(Self.pages.count)"))
                 .accessibilityAddTraits(n == index ? .isSelected : [])
             }
         }
@@ -92,19 +92,19 @@ private enum WelcomePage: CaseIterable {
     case welcome, commands, needs, setup
     var title: String {
         switch self {
-        case .welcome: "Welcome to Crew"
-        case .commands: "Start in Claude Code"
-        case .needs: "Answer from here"
-        case .setup: "Finish setting up"
+        case .welcome: String(localized: "Welcome to Crew")
+        case .commands: String(localized: "Start in Claude Code")
+        case .needs: String(localized: "Answer from here")
+        case .setup: String(localized: "Finish setting up")
         }
     }
     @ViewBuilder var body: some View {
         switch self {
         case .welcome:
-            paragraph("Crew runs several coding agents together. Claude leads from Claude Code and hands pieces of the work to the other agents to run in parallel. This app shows every agent live and lets you answer them.")
+            paragraph(String(localized: "Crew runs several coding agents together. Claude leads, splits the work, and hands pieces to the other agents to run in parallel. This app shows every agent live and lets you answer them."))
         case .commands:
             VStack(spacing: Space.l) {
-                paragraph("Open a new Claude Code session, then type a command.")
+                paragraph(String(localized: "Open a new Claude Code session and type a command."))
                 Grid(alignment: .leading, horizontalSpacing: Welcome.commandGap, verticalSpacing: Space.s) {
                     ForEach(Self.commandList, id: \.0) { command, what in
                         GridRow {
@@ -116,16 +116,16 @@ private enum WelcomePage: CaseIterable {
                 .multilineTextAlignment(.leading)
             }
         case .needs:
-            paragraph("When an agent needs approval or asks a question, it appears in Needs You. Answer it here, or open waiting Claude sessions in Claude. Closing the window keeps Crew in the menu bar, and jobs keep running.")
+            paragraph(String(localized: "Approvals and questions from agents appear in Needs You. Answer them here, or open a waiting Claude session in Claude. Close the window and Crew stays in the menu bar, still running jobs."))
         case .setup:
-            paragraph("Overview lists anything still missing, such as signing in to Codex with `codex login` or signing in to Antigravity by running `agy` once. Choose which agent takes which work in Settings.")
+            paragraph(String(localized: "Overview lists what is still missing, such as `codex login` for Codex or running `agy` once for Antigravity. Choose which agent does what in Settings."))
         }
     }
     private static let commandList = [
-        ("/crew:run <task>", "Plan, build, review, and fix with the crew"),
-        ("/crew:review", "Review a change"),
-        ("/crew:debate", "Talk through a hard decision"),
-        ("/crew:board", "Open the board in Claude"),
+        ("/crew:run", String(localized: "Plan, build, review, and fix with the crew")),
+        ("/crew:review", String(localized: "Review a change")),
+        ("/crew:debate", String(localized: "Talk through a hard decision")),
+        ("/crew:board", String(localized: "Open the board in Claude")),
     ]
     private func paragraph(_ text: String) -> some View {
         Text(withCode(text)).font(Typeface.body).foregroundStyle(.secondary).lineSpacing(Welcome.lineSpacing).fixedSize(horizontal: false, vertical: true)
@@ -206,7 +206,7 @@ private struct NeedsArt: View {
     var body: some View {
         ZStack(alignment: .top) {
             HStack(spacing: Space.ml) {
-                StatusLabel(state: "waiting", title: "Input")
+                StatusLabel(state: "waiting", title: String(localized: "Input"))
                 who("claude", "Claude")
                 Spacer()
             }
@@ -216,14 +216,14 @@ private struct NeedsArt: View {
             VStack(alignment: .leading, spacing: Space.l) {
                 VStack(alignment: .leading, spacing: Space.ml) {
                     HStack(spacing: Space.ml) {
-                        StatusLabel(state: "waiting", title: "Approval")
+                        StatusLabel(state: "waiting", title: String(localized: "Approval"))
                         who("codex", "Codex")
                         Spacer()
                         Text("2m").font(Typeface.chip).foregroundStyle(.secondary)
                     }
                     Text("Add a dark mode to the settings page").font(Typeface.callout).foregroundStyle(.secondary)
                 }
-                Text(withCode("Run `npm test`")).font(Typeface.headline)
+                Text(withCode(String(localized: "Run `npm test`"))).font(Typeface.headline)
                 HStack(spacing: Space.m) {
                     Spacer()
                     Button("Deny") {}.pillButton()

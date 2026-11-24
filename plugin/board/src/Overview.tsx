@@ -14,8 +14,9 @@ import {
   dailyCounts, elapsed, endedPerHour, holdersOf, jobLabel, leadMission, NAMES, projectOf, relativeDuration, rolesOf, runningPerHour,
   usageWindowName, unsettled,
 } from './model.ts';
-import { AgentMark, Chip, EmptyState, Icon, plural, RollingNumber, StatusIcon, useFade, useClock, useStableItems } from './ui.tsx';
+import { AgentMark, Chip, EmptyState, Icon, RollingNumber, StatusIcon, tNodes, useFade, useClock, useStableItems } from './ui.tsx';
 import { JobRow, jobKind, jobStatusState, MissionPanel, SessionRow } from './Missions.tsx';
+import { t } from './i18n.ts';
 
 export interface Scope {
   state: Snapshot;
@@ -104,7 +105,9 @@ function Spark({ values, label }: { values: number[]; label: string }) {
       ))}
       {at !== null && (
         <span className="spark-tip" style={{ '--x': (at + 0.5) / values.length } as CSSProperties}>
-          {values[at]} {label} · {values.length - 1 - at === 0 ? 'this hour' : `${values.length - 1 - at}h ago`}
+          {values.length - 1 - at === 0
+            ? t('{count} {label} · this hour', { count: values[at], label })
+            : t('{count} {label} · {hours}h ago', { count: values[at], label, hours: values.length - 1 - at })}
         </span>
       )}
     </div>
@@ -130,28 +133,29 @@ export const Kpis = memo(function Kpis({ state, project }: { state: Snapshot; pr
   const oldest = Math.min(...waiting.map((job) => job.waiting?.since ?? Infinity), ...waitingSessions.map((session) => session.activeAt));
   const missingSince = waiting.some((job) => job.waiting?.since == null);
   const waitingFoot = useClock((now) =>
-    waitingCount ? `Oldest waiting ${elapsed(now - (missingSince ? Math.min(oldest, now) : oldest))}` : 'Nothing waiting',
+    waitingCount ? t('Oldest waiting {time}', { time: elapsed(now - (missingSince ? Math.min(oldest, now) : oldest)) }) : t('Nothing waiting'),
   Boolean(waitingCount));
   const sparkJobs = useStableItems(jobs, (a, b) => a.state === b.state && a.createdAt === b.createdAt && a.endedAt === b.endedAt);
   const getSparks = useMemo(() => kpiClock(sparkJobs), [sparkJobs]);
   const [runningSpark, doneSpark, failedSpark] = useClock(getSparks, jobs.length > 0);
+  const workingSessions = sessions.filter((session) => session.state === 'working').length;
   const metrics = [
     // Lead sessions count like jobs, as they already do under Needs you.
-    { label: 'In progress', state: 'working', count: jobs.filter((job) => job.state === 'running').length + sessions.filter((session) => session.state === 'working').length,
-      spark: runningSpark, unit: 'running', foot: plural(sessions.filter((session) => session.state === 'working').length, 'lead session') },
-    { label: 'Needs you', state: 'waiting', count: waitingCount, foot: waitingFoot },
+    { label: t('In progress'), state: 'working', count: jobs.filter((job) => job.state === 'running').length + workingSessions,
+      spark: runningSpark, unit: t('running'), foot: workingSessions === 1 ? t('1 lead session') : t('{count} lead sessions', { count: workingSessions }) },
+    { label: t('Needs you'), state: 'waiting', count: waitingCount, foot: waitingFoot },
     // Settled jobs stay in the list but leave the totals, which would otherwise only grow.
-    { label: 'Finished', state: 'done', count: jobs.filter((job) => job.state === 'done' && unsettled(job)).length,
-      spark: doneSpark, unit: 'finished', foot: `${jobs.filter((job) => job.state === 'done').length} in all` },
-    { label: 'Failed', state: 'failed', count: jobs.filter((job) => job.state === 'failed' && unsettled(job)).length,
-      spark: failedSpark, unit: 'failed', foot: `${jobs.filter((job) => job.state === 'failed').length} in all` },
+    { label: t('Finished'), state: 'done', count: jobs.filter((job) => job.state === 'done' && unsettled(job)).length,
+      spark: doneSpark, unit: t('finished'), foot: t('{count} in all', { count: jobs.filter((job) => job.state === 'done').length }) },
+    { label: t('Failed'), state: 'failed', count: jobs.filter((job) => job.state === 'failed' && unsettled(job)).length,
+      spark: failedSpark, unit: t('failed'), foot: t('{count} in all', { count: jobs.filter((job) => job.state === 'failed').length }) },
   ];
   const total = metrics.reduce((sum, metric) => sum + metric.count, 0);
   const tokenJobs = useMemo(() => jobs.filter((job) => job.tokens), [jobs]);
   const tokens = useClock((now) => tokenJobs.reduce((sum, job) =>
     now - job.createdAt < 86_400_000 ? sum + job.tokens! : sum, 0), tokenJobs.length > 0);
   return (
-    <section className="kpis" aria-label="Jobs by state">
+    <section className="kpis" aria-label={t('Jobs by state')}>
       <ul className="kpi-row">
         {metrics.map((metric, index) => (
           <li className="kpi" key={metric.label} data-state={metric.state} data-zero={metric.count === 0 || undefined} style={{ '--i': index } as CSSProperties}>
@@ -172,7 +176,7 @@ export const Kpis = memo(function Kpis({ state, project }: { state: Snapshot; pr
               <b className="digits">{total ? Math.round((metric.count / total) * 100) : 0}%</b>
             </span>
           ))}
-          {tokens > 0 && <span className="share-tokens digits">{tokens.toLocaleString()} tokens in 24h</span>}
+          {tokens > 0 && <span className="share-tokens digits">{t('{tokens} tokens in 24h', { tokens: tokens.toLocaleString() })}</span>}
         </div>
         {/* A bare track only when there is nothing to count, as in the app. */}
         <div className="share-bar" aria-hidden="true" data-empty={total === 0 || undefined}>
@@ -189,7 +193,7 @@ export const Kpis = memo(function Kpis({ state, project }: { state: Snapshot; pr
 const usageLevel = (ratio: number, status?: string) => (status === 'exhausted' || ratio >= 0.9 ? 'high' : ratio >= 0.7 || status === 'tight' ? 'mid' : undefined);
 
 function UsageReset({ time }: { time: number }) {
-  const text = useClock((now) => time <= now ? 'Reset due' : `Resets in ${relativeDuration(time - now)}`);
+  const text = useClock((now) => time <= now ? t('Reset due') : t('Resets in {time}', { time: relativeDuration(time - now) }));
   return <span className="usage-reset">{text}</span>;
 }
 
@@ -197,16 +201,16 @@ function AgentUsage({ state, agent }: { state: Snapshot; agent: string }) {
   const usage = state.usage;
   if (usage && usage.source !== 'none') {
     const provider = usage.providers.find((item) => item.agent === agent);
-    if (!provider) return <p className="usage">Usage unknown</p>;
+    if (!provider) return <p className="usage">{t('Usage unknown')}</p>;
     const account = provider.windows.filter((window) => window.group == null);
     const scoped = provider.windows.filter((window) => window.group != null);
     return (
       <div
         className="usage"
-        aria-label={`${NAMES[agent as WorkerAgent] ?? agent} usage`}
-        title={[provider.reason, ...scoped.map((window) => `${window.group}: ${usageWindowName(window.kind)}, ${Math.round(window.usedRatio * 100)}%, ${window.status}`)].join('\n')}
+        aria-label={t('{agent} usage', { agent: NAMES[agent as WorkerAgent] ?? agent })}
+        title={[provider.reason, ...scoped.map((window) => `${window.group}: ${usageWindowName(window.kind)}, ${Math.round(window.usedRatio * 100)}%, ${statusWord(window.status)}`)].join('\n')}
       >
-        {!account.length && <p>{capitalized(provider.status)}</p>}
+        {!account.length && <p>{capitalized(statusWord(provider.status))}</p>}
         {account.map((window) => {
           // The provider's status overrides a window's when the reading is old or a job just hit the limit.
           const status = shownStatus(provider, window.status);
@@ -217,7 +221,7 @@ function AgentUsage({ state, agent }: { state: Snapshot; agent: string }) {
                 <span>{usageWindowName(window.kind)}</span>
                 <span className="digits">{Math.round(window.usedRatio * 100)}%</span>
                 {(status === 'stale' || status === 'unknown' || (status === 'exhausted' && window.status !== 'exhausted')) && (
-                  <span>{status === 'exhausted' ? 'limit reached' : status}</span>
+                  <span>{status === 'exhausted' ? t('limit reached') : statusWord(status)}</span>
                 )}
                 {window.resetTime != null && (
                   <UsageReset time={window.resetTime} />
@@ -239,13 +243,16 @@ function AgentUsage({ state, agent }: { state: Snapshot; agent: string }) {
     <span
       className="usage-limit caption digits"
       data-level={usageLevel(used / 100)}
-      title={windows.map((window) => `${Math.round(window.usedPercent)}% of ${window.minutes}-minute limit`).join('\n')}
+      title={windows.map((window) => t('{percent}% of {minutes}-minute limit', { percent: Math.round(window.usedPercent), minutes: window.minutes })).join('\n')}
     >
-      {used}% of limit
+      {t('{percent}% of limit', { percent: used })}
     </span>
   );
 }
 const capitalized = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+/** A usage status as the daemon names it, lowercase in English. */
+const statusWord = (status: string) =>
+  ({ ok: t('ok'), tight: t('tight'), exhausted: t('exhausted'), stale: t('stale'), unknown: t('unknown') } as Record<string, string>)[status] ?? status;
 function shownStatus(provider: ProviderUsage, status: ProviderUsage['windows'][number]['status']) {
   return ['stale', 'unknown', 'exhausted'].includes(provider.status) ? provider.status : status;
 }
@@ -257,13 +264,16 @@ function agentActivity(state: Snapshot, project: string, agent: string) {
   const idle = sessions.length - open.length;
   const items: { state: string; stalled: boolean }[] = agent === 'claude' ? open : jobs;
   const mark = items.some((item) => item.state === 'waiting') ? 'waiting' : items.some((item) => item.stalled) ? 'stalled' : items.length ? 'working' : 'idle';
-  const title = mark === 'waiting' ? 'Needs you' : mark === 'stalled' ? 'May be stuck' : mark === 'working' ? 'Working'
-    : state.agents[agent as WorkerAgent]?.enabled === false ? 'Disabled' : 'Ready';
+  const title = mark === 'waiting' ? t('Needs you') : mark === 'stalled' ? t('May be stuck') : mark === 'working' ? t('Working')
+    : state.agents[agent as WorkerAgent]?.enabled === false ? t('Disabled') : t('Ready');
   // Busy agents say what they have open; Claude also counts its idle sessions.
-  const noun = agent === 'claude' ? 'session' : 'job';
+  const count = items.length;
+  const active = agent === 'claude'
+    ? (count === 1 ? t('1 active session') : t('{count} active sessions', { count }))
+    : (count === 1 ? t('1 active job') : t('{count} active jobs', { count }));
   const line = [
-    items.length ? `${items.length} active ${noun}${items.length === 1 ? '' : 's'}` : null,
-    agent === 'claude' && idle ? `${idle} idle${items.length ? '' : ` session${idle === 1 ? '' : 's'}`}` : null,
+    count ? active : null,
+    agent === 'claude' && idle ? (count ? t('{count} idle', { count: idle }) : idle === 1 ? t('1 idle session') : t('{count} idle sessions', { count: idle })) : null,
   ].filter(Boolean).join(' · ');
   return { line, mark, title };
 }
@@ -283,7 +293,7 @@ export const AgentPanel = memo(function AgentPanel({ state, project }: { state: 
   const agents = ['claude', ...(['codex', 'antigravity'] as const).filter((agent) => state.agents[agent])];
   const measured = state.usage != null && state.usage.source !== 'none';
   return (
-    <Panel label="Agents" className="agents">
+    <Panel label={t('Agents')} className="agents">
       <ul className="agent-cards">
         {agents.map((agent, index) => {
           const { line, mark, title } = agentActivity(state, project, agent);
@@ -296,8 +306,8 @@ export const AgentPanel = memo(function AgentPanel({ state, project }: { state: 
               const same = Boolean(parent) && parentHolders.length === holders.length && holders.every((holder) => parentHolders.includes(holder));
               return !(same && !state.roleSettings?.[role]?.agents);
             })
-            .map(({ label }) => label);
-          const role = [...(agent === 'claude' ? ['Lead'] : []), ...held].join(' · ');
+            .map(({ label }) => t(label));
+          const role = [...(agent === 'claude' ? [t('Lead')] : []), ...held].join(' · ');
           return (
             <li className="agent-card" key={agent} data-agent={agent} style={{ '--i': index } as CSSProperties}>
               <div className="agent-card-head">
@@ -385,15 +395,15 @@ export const Heatmap = memo(function Heatmap({ title, times, most, label, one }:
       {/* No legend: a square's tooltip gives its count, and darker reads as more without one. */}
       <header className="panel-head">
         <h2 className="label">{title}</h2>
-        <p className="heatmap-sum"><b className="digits">{total.toLocaleString()}</b> {total === 1 ? one : label} · {weeks} weeks</p>
+        <p className="heatmap-sum">{tNodes('{count} {noun} · {weeks} weeks', { count: <b className="digits">{total.toLocaleString()}</b>, noun: total === 1 ? one : label, weeks })}</p>
       </header>
       <div className="heatmap-frame" ref={frame}>
       <div className="heatmap-months" aria-hidden="true">
         {months.map((month) => <span key={month.column} style={{ '--col': month.column } as CSSProperties}>{month.name}</span>)}
       </div>
       <div className="heatmap-body">
-        <div className="heatmap-days" aria-hidden="true"><span>Mon</span><span>Wed</span><span>Fri</span></div>
-        <div className="heatmap-grid" ref={grid} role="img" aria-label={`${total} ${label} in the last ${weeks} weeks`} onPointerLeave={() => setAt(null)}>
+        <div className="heatmap-days" aria-hidden="true"><span>{t('Mon')}</span><span>{t('Wed')}</span><span>{t('Fri')}</span></div>
+        <div className="heatmap-grid" ref={grid} role="img" aria-label={t('{count} {noun} in the last {weeks} weeks', { count: total, noun: label, weeks })} onPointerLeave={() => setAt(null)}>
           {days.map((day, index) => (
             <i
               key={day.day}
@@ -408,7 +418,7 @@ export const Heatmap = memo(function Heatmap({ title, times, most, label, one }:
       </div>
       {at !== null && days[at] && (
         <span className="heatmap-tip" ref={tip}>
-          <b>{days[at].count}</b> {days[at].count === 1 ? one : label} · {formatDate(shortDay, new Date(days[at].day))}
+          {tNodes('{count} {noun} · {date}', { count: <b>{days[at].count}</b>, noun: days[at].count === 1 ? one : label, date: formatDate(shortDay, new Date(days[at].day)) })}
         </span>
       )}
     </div>
@@ -445,7 +455,7 @@ const EventRow = memo(function EventRow({ event, index, openJob }: { event: Crew
           <b>{NAMES[event.agent as keyof typeof NAMES] ?? event.agent}</b>
           <time dateTime={event.ts}>{formatDate(timeOfDay, new Date(event.ts))}</time>
           {event.job_id && openJob && (
-            <button className="icon small" data-opens-panel="" aria-label="Show job" title="Show job" onClick={() => openJob(event.job_id!)}>
+            <button className="icon small" data-opens-panel="" aria-label={t('Show job')} title={t('Show job')} onClick={() => openJob(event.job_id!)}>
               <Icon icon={ArrowUpRight16Filled} />
             </button>
           )}
@@ -456,7 +466,7 @@ const EventRow = memo(function EventRow({ event, index, openJob }: { event: Crew
   );
 });
 
-const AGENT_FILTERS: [string, string][] = [['', 'Everyone'], ['claude', 'Claude'], ['codex', 'Codex'], ['antigravity', 'Antigravity']];
+const AGENT_FILTERS: [string, string][] = [['', t('Everyone')], ['claude', 'Claude'], ['codex', 'Codex'], ['antigravity', 'Antigravity']];
 /** Pills that filter a list, with each one's count, as the reference dashboards filter. */
 function Pills<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: [T, string, number?][]; onChange: (value: T) => void }) {
   return (
@@ -490,14 +500,14 @@ export const Activity = memo(function Activity({ events, jobs, missions, openJob
   const times = useStableItems(useMemo(() => [...jobs.map((job) => job.createdAt), ...missions.map((mission) => mission.createdAt)], [jobs, missions]));
   return (
     <Columns>
-      <section className="card panel activity-map" aria-label="Work started" style={{ '--i': 0 } as CSSProperties}>
-        <Heatmap title="Work started" times={times} most={53} label="jobs and missions" one="job or mission" />
+      <section className="card panel activity-map" aria-label={t('Work started')} style={{ '--i': 0 } as CSSProperties}>
+        <Heatmap title={t('Work started')} times={times} most={53} label={t('jobs and missions')} one={t('job or mission')} />
       </section>
       <Panel
-        label="Events"
-        action={<Pills label="Agent" value={agent} options={AGENT_FILTERS.map(([id, name]) => [id, name, id ? counts.get(id) ?? 0 : events.length])} onChange={setAgent} />}
+        label={t('Events')}
+        action={<Pills label={t('Agent')} value={agent} options={AGENT_FILTERS.map(([id, name]) => [id, name, id ? counts.get(id) ?? 0 : events.length])} onChange={setAgent} />}
       >
-        {!days.size && <p className="secondary">No activity yet.</p>}
+        {!days.size && <p className="secondary">{t('No activity yet.')}</p>}
         {[...days].reverse().map(([day, list]) => (
           <div className="event-day" key={day}>
             <h3 className="event-day-name">{day}</h3>
@@ -531,7 +541,7 @@ function Setup() {
   if (!setup || setup.items.every((item) => item.ok)) return null;
   const repairable = setup.items.some((item) => !item.ok && item.repairable);
   return (
-    <Panel label="Set up Crew">
+    <Panel label={t('Set up Crew')}>
       <ul className="setup-list">
         {setup.items.map((item) => (
           <li key={item.id} data-ok={item.ok || undefined}>
@@ -546,8 +556,8 @@ function Setup() {
       )}
       {/* The card's actions end it at the trailing edge, as a section's do, and as in the app. */}
       <div className="setup-actions">
-        <button disabled={busy} onClick={() => act('/api/setup?refresh')}>Check Again</button>
-        {repairable && <button className="prominent" disabled={busy || setup.registering} onClick={() => act('/api/setup/repair', {})}>{busy ? 'Installing…' : 'Install'}</button>}
+        <button disabled={busy} onClick={() => act('/api/setup?refresh')}>{t('Check Again')}</button>
+        {repairable && <button className="prominent" disabled={busy || setup.registering} onClick={() => act('/api/setup/repair', {})}>{busy ? t('Installing…') : t('Install')}</button>}
       </div>
     </Panel>
   );
@@ -634,18 +644,18 @@ export function Workspace({ state, project, names, selected, openJob, openSessio
           {!project && <Setup />}
           {active.map(panel)}
           {loose.length > 0 && (
-            <Panel label="Other jobs" style={{ '--i': active.length } as CSSProperties} action={<Icon icon={StackRegular} />}>
+            <Panel label={t('Other jobs')} style={{ '--i': active.length } as CSSProperties} action={<Icon icon={StackRegular} />}>
               <div className="rows">{loose.map(row)}</div>
             </Panel>
           )}
           {recent.map((mission, index) => panel(mission, active.length + 1 + index))}
           {recentJobs.length > 0 && (
-            <Panel label="Recently finished" action={<button className="link" onClick={() => openPage('history')}>History <Icon icon={ArrowRight16Filled} size={12} /></button>}>
+            <Panel label={t('Recently finished')} action={<button className="link" onClick={() => openPage('history')}>{t('History')} <Icon icon={ArrowRight16Filled} size={12} /></button>}>
               <div className="rows">{recentJobs.map(row)}</div>
             </Panel>
           )}
           {sessions.length > 0 && (
-            <Panel label="Claude sessions" action={<Icon icon={ChatMultipleRegular} />}>
+            <Panel label={t('Claude sessions')} action={<Icon icon={ChatMultipleRegular} />}>
               <div className="rows">
                 {sessions.map((session) => (
                   <SessionRow key={session.id} session={session} selected={selected === `session:${session.id}`} openSession={openSession} />
@@ -654,21 +664,21 @@ export function Workspace({ state, project, names, selected, openJob, openSessio
             </Panel>
           )}
           {empty && (
-            <EmptyState title="Ready when you are" icon={LayerRegular} detail="Hand a task to an agent, or run /crew:run in Claude.">
+            <EmptyState title={t('Ready when you are')} icon={LayerRegular} detail={t('Hand a task to an agent, or run /crew:run in Claude.')}>
               <button className="prominent" disabled={state.connection !== 'live'} onClick={(event) => newJob(event.currentTarget)}>
                 <Icon icon={AddRegular} />
-                New Job
+                {t('New Job')}
               </button>
             </EmptyState>
           )}
         </div>
-        <aside className="dash-side" aria-label="Agents and activity">
+        <aside className="dash-side" aria-label={t('Agents and activity')}>
           <AgentPanel state={state} project={project} />
-          <section className="card panel" aria-label="Rhythm" style={{ '--i': 1 } as CSSProperties}>
-            <Heatmap title="Rhythm" times={times} most={26} label="jobs" one="job" />
+          <section className="card panel" aria-label={t('Rhythm')} style={{ '--i': 1 } as CSSProperties}>
+            <Heatmap title={t('Rhythm')} times={times} most={26} label={t('jobs')} one={t('job')} />
           </section>
-          <Panel label="Live feed" action={<button className="link" onClick={() => openPage('activity')}>All <Icon icon={ArrowRight16Filled} size={12} /></button>}>
-            {events.length ? <EventList events={events} openJob={openJob} limit={6} /> : <p className="secondary caption">No activity yet.</p>}
+          <Panel label={t('Live feed')} action={<button className="link" onClick={() => openPage('activity')}>{t('All')} <Icon icon={ArrowRight16Filled} size={12} /></button>}>
+            {events.length ? <EventList events={events} openJob={openJob} limit={6} /> : <p className="secondary caption">{t('No activity yet.')}</p>}
           </Panel>
         </aside>
       </div>
@@ -711,14 +721,14 @@ export const History = memo(function History({ state, project, names, selected, 
     <>
       <div className="toolbar-row">
         <Pills
-          label="State"
+          label={t('State')}
           value={filter}
-          options={[['', 'All', ended.length], ['done', 'Done', ended.filter((job) => job.state === 'done').length], ['failed', 'Failed', ended.filter((job) => job.state === 'failed').length], ['cancelled', 'Cancelled', ended.filter((job) => job.state === 'cancelled').length]]}
+          options={[['', t('All'), ended.length], ['done', t('Done'), ended.filter((job) => job.state === 'done').length], ['failed', t('Failed'), ended.filter((job) => job.state === 'failed').length], ['cancelled', t('Cancelled'), ended.filter((job) => job.state === 'cancelled').length]]}
           onChange={setFilter}
         />
         <label className="filter">
           <Icon icon={SearchRegular} />
-          <input type="search" aria-label="Filter history" placeholder="Filter by title, agent, project" value={search} onChange={(event) => setSearch(event.target.value)} />
+          <input type="search" aria-label={t('Filter history')} placeholder={t('Filter by title, agent, project')} value={search} onChange={(event) => setSearch(event.target.value)} />
         </label>
       </div>
       {/* The table below keeps the page's width, which its columns need. */}
@@ -739,17 +749,17 @@ export const History = memo(function History({ state, project, names, selected, 
         </Columns>
       )}
       {rows.length > 0 ? (
-        <Panel label="Jobs" className="table-panel">
+        <Panel label={t('Jobs')} className="table-panel">
           <div className="table-scroll">
             <table className="jobs-table">
               <thead>
                 <tr>
-                  {column('title', 'Job')}
-                  {column('agent', 'Agent', 'narrow-hide')}
-                  {!project && column('project', 'Project', 'narrow-hide')}
-                  {column('state', 'Status')}
-                  {column('duration', 'Duration', 'num')}
-                  {column('ended', 'Ended', 'num narrow-hide')}
+                  {column('title', t('Job'))}
+                  {column('agent', t('Agent'), 'narrow-hide')}
+                  {!project && column('project', t('Project'), 'narrow-hide')}
+                  {column('state', t('Status'))}
+                  {column('duration', t('Duration'), 'num')}
+                  {column('ended', t('Ended'), 'num narrow-hide')}
                 </tr>
               </thead>
               <tbody>
@@ -761,7 +771,7 @@ export const History = memo(function History({ state, project, names, selected, 
           </div>
         </Panel>
       ) : (
-        !missions.length && <EmptyState title={search || filter ? 'No matching work' : 'No completed work yet'} icon={search || filter ? SearchRegular : LayerRegular} />
+        !missions.length && <EmptyState title={search || filter ? t('No matching work') : t('No completed work yet')} icon={search || filter ? SearchRegular : LayerRegular} />
       )}
     </>
   );

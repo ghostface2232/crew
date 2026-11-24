@@ -9,6 +9,7 @@ import { board } from './store.ts';
 import { actions, answerKey, request } from './api.ts';
 import { NAMES, projectOf } from './model.ts';
 import { ActionStatus, AgentMark, Chip, Composer, EmptyState, Icon, useAction, useDraft, Elapsed } from './ui.tsx';
+import { t } from './i18n.ts';
 
 /** Deep link that opens the session in the Claude desktop app; terminal sessions have none. */
 export function claudeLink(session: ClaudeSession): string | null {
@@ -29,7 +30,7 @@ export function OpenInClaude({ session, small }: { session: ClaudeSession; small
       }}
     >
       <Icon icon={ArrowUpRight16Filled} size={12} />
-      Open in Claude
+      {t('Open in Claude')}
     </button>
   );
 }
@@ -46,7 +47,7 @@ export function ClaudeAsk({ session }: { session: ClaudeSession }) {
             {/* The first question is the card's headline. */}
             {index > 0 && <p className="selectable">{question.question}</p>}
             {question.options.length > 0 && (
-              <ol className="ask-options" aria-label={question.multiSelect ? 'Choices, any number' : 'Choices'}>
+              <ol className="ask-options" aria-label={question.multiSelect ? t('Choices, any number') : t('Choices')}>
                 {question.options.map((option, n) => <li className="selectable" key={n}>{option}</li>)}
               </ol>
             )}
@@ -89,8 +90,8 @@ export function Answer({ job }: { job: BoardJob }) {
       {waiting.type === 'question' ? (
         <>
           <Composer
-            label="Your answer"
-            placeholder="Write an answer…"
+            label={t('Your answer')}
+            placeholder={t('Write an answer…')}
             actionKey={key}
             once
             disabled={!live}
@@ -102,16 +103,16 @@ export function Answer({ job }: { job: BoardJob }) {
             {/* Sent or an error shows at the leading edge of the buttons' row. */}
             <ActionStatus actionKey={key} />
             {/* The completing answer comes last, at the trailing edge, as in the app. */}
-            {button('No', 'deny', false)}
-            {button('Yes', 'approve', false)}
+            {button(t('No'), 'deny', false)}
+            {button(t('Yes'), 'approve', false)}
           </div>
         </>
       ) : (
         <div className="answer-actions" data-approval>
           <ActionStatus actionKey={key} />
-          {button('Deny', 'deny', false)}
-          {waiting.grant && button('Allow for This Job', 'allow_for_job', false, `Also allow this job's later requests for ${waiting.grant}, without asking`)}
-          {button('Approve', 'approve', true)}
+          {button(t('Deny'), 'deny', false)}
+          {waiting.grant && button(t('Allow for This Job'), 'allow_for_job', false, t("Also allow this job's later requests for {grant}, without asking", { grant: waiting.grant }))}
+          {button(t('Approve'), 'approve', true)}
         </div>
       )}
     </div>
@@ -134,9 +135,9 @@ export function NeedsYou({
   return (
     <>
       {pending === 0 ? (
-        <EmptyState title="All caught up" icon={CheckmarkCircleRegular} />
+        <EmptyState title={t('All caught up')} icon={CheckmarkCircleRegular} />
       ) : (
-        !jobs.length && !sessions.length && <EmptyState title="No matching requests" icon={SearchRegular} />
+        !jobs.length && !sessions.length && <EmptyState title={t('No matching requests')} icon={SearchRegular} />
       )}
       {(jobs.length > 0 || sessions.length > 0) && (
         <div className="needs-grid">
@@ -144,7 +145,7 @@ export function NeedsYou({
             <article className="card need" key={job.id} data-job={job.id} style={{ '--i': index } as CSSProperties}>
               <div className="need-head">
                 <div className="need-bar">
-                  <Chip state="waiting">{job.waiting?.type === 'approval' ? 'Approval' : 'Question'}</Chip>
+                  <Chip state="waiting">{job.waiting?.type === 'approval' ? t('Approval') : t('Question')}</Chip>
                   <span className="need-who" title={projectOf(job)}>
                     <AgentMark agent={job.agent} size={13} />
                     <span>
@@ -154,7 +155,7 @@ export function NeedsYou({
                   {job.waiting && <span className="need-age digits"><Elapsed start={job.waiting.since} /></span>}
                   <button className="caption small" data-opens-panel="" onClick={() => openJob(job.id)}>
                     <Icon icon={ArrowUpRight16Filled} size={12} />
-                    Details
+                    {t('Details')}
                   </button>
                 </div>
                 <p className="need-title" title={job.title}>{job.title}</p>
@@ -178,7 +179,7 @@ export function NeedsYou({
             >
               <div className="need-head">
                 <div className="need-bar">
-                  <Chip state="waiting">Input</Chip>
+                  <Chip state="waiting">{t('Input')}</Chip>
                   <span className="need-who" title={projectOf(session)}>
                     <AgentMark agent="claude" size={13} />
                     <span>Claude</span>
@@ -190,9 +191,9 @@ export function NeedsYou({
                 </button>
               </div>
               <div className="answer">
-                <p className="headline selectable">{session.waitingFor ?? 'Claude needs your input.'}</p>
+                <p className="headline selectable">{session.waitingFor ?? t('Claude needs your input.')}</p>
                 <ClaudeAsk session={session} />
-                {!session.desktopId && <p className="callout secondary"><Icon icon={ChatMultipleRegular} size={13} /> Answer in Claude.</p>}
+                {!session.desktopId && <p className="callout secondary"><Icon icon={ChatMultipleRegular} size={13} /> {t('Answer in Claude.')}</p>}
               </div>
             </article>
           ))}

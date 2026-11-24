@@ -38,7 +38,7 @@ struct StatusLabel: View {
         }
     }
     var body: some View {
-        Label { Text(title ?? state.capitalized) } icon: { StatusSymbol(name: symbol, color: color, spins: spins) }.chip(color, insets: Chip.symbolInsets)
+        Label { Text(title ?? localizedCrewLabel(state.capitalized)) } icon: { StatusSymbol(name: symbol, color: color, spins: spins) }.chip(color, insets: Chip.symbolInsets)
     }
 }
 
@@ -320,11 +320,11 @@ struct CopyButton: View {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
             copied = true
-        } label: { Label(copied ? "Copied" : title, systemImage: copied ? "checkmark" : "doc.on.doc") }
+        } label: { Label(copied ? String(localized: "Copied") : title, systemImage: copied ? "checkmark" : "doc.on.doc") }
         .pillButton().morphs(on: copied)
         .help(help ?? title)
         // The title names only what is copied; VoiceOver hears the action too.
-        .accessibilityLabel(copied ? "Copied" : "Copy \(title.lowercased())")
+        .accessibilityLabel(copied ? String(localized: "Copied") : String(localized: "Copy \(title.lowercased())"))
         .task(id: copied) {
             if copied {
                 try? await Task.sleep(for: .seconds(2))
@@ -382,18 +382,18 @@ struct AnswerView: View {
                     composer
                     // Quick replies sit apart from the composer so they don't read as part of sending.
                     GlassEffectContainer(spacing: Space.xs) { ActionRow {
-                        decision("No", symbol: "xmark", value: "deny", prominent: false)
-                        decision("Yes", symbol: "checkmark", value: "approve", prominent: false)
+                        decision(String(localized: "No"), symbol: "xmark", value: "deny", prominent: false)
+                        decision(String(localized: "Yes"), symbol: "checkmark", value: "approve", prominent: false)
                     }.frame(maxWidth: .infinity, alignment: .trailing) }
                 } else {
                     // At the trailing edge with the completing action last, as everywhere a choice ends something.
                     GlassEffectContainer(spacing: Space.xs) { ActionRow {
-                        decision("Deny", symbol: "xmark", value: "deny", prominent: false)
+                        decision(String(localized: "Deny"), symbol: "xmark", value: "deny", prominent: false)
                         if let grant = waiting.grant {
-                            decision("Allow for This Job", symbol: "checkmark.circle", value: "allow_for_job", prominent: false)
+                            decision(String(localized: "Allow for This Job"), symbol: "checkmark.circle", value: "allow_for_job", prominent: false)
                                 .help("Also allow this job's later requests for \(grant), without asking")
                         }
-                        decision("Approve", symbol: "checkmark", value: "approve", prominent: true)
+                        decision(String(localized: "Approve"), symbol: "checkmark", value: "approve", prominent: true)
                     }.frame(maxWidth: .infinity, alignment: .trailing) }
                 }
                 ActionMessage(state: store.actions[job.requestKey])
@@ -407,7 +407,7 @@ struct AnswerView: View {
                 .scrollContentBackground(.hidden)
                 .frame(minHeight: WorkspaceStyle.answerHeight.lowerBound, maxHeight: WorkspaceStyle.answerHeight.upperBound)
                 .accessibilityLabel("Your answer")
-            if draft.wrappedValue.isEmpty { FieldPrompt(text: "Write an answer…") }
+            if draft.wrappedValue.isEmpty { FieldPrompt(text: String(localized: "Write an answer…")) }
         }
         // The trailing room keeps text clear of the send button laid over the corner: its diameter and inset.
         .padding(.leading, Space.ml).padding(.top, Space.ml).padding(.trailing, IconButton.diameter + Space.m * 2).padding(.bottom, Space.m)
@@ -449,8 +449,8 @@ struct JobRow: View {
     var open: () -> Void
     @Environment(\.colorScheme) private var scheme
     var body: some View {
-        let detail = [showsKind ? job.kindTitle : job.debate != nil ? "Debate" : job.ask == true ? "Question" : nil, job.error?.message ?? (job.isActive ? job.phase : nil),
-                      job.runsApp == true ? "Runs the app" : nil, job.exclusive == true ? "Runs alone" : nil]
+        let detail = [showsKind ? job.kindTitle : job.debate != nil ? String(localized: "Debate") : job.ask == true ? String(localized: "Question") : nil, job.error?.message ?? (job.isActive ? job.phase : nil),
+                      job.runsApp == true ? String(localized: "Runs the app") : nil, job.exclusive == true ? String(localized: "Runs alone") : nil]
             .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
         Button(action: open) {
             HStack(spacing: Space.l) {
@@ -485,7 +485,7 @@ struct SessionRow: View {
     var open: () -> Void
     var body: some View {
         // The mark names the agent, so the detail line says only what the session is doing.
-        let detail = [session.waitingFor ?? (session.state == "idle" ? nil : session.phase), session.inTool ? "Running a tool" : nil, session.agentSummary]
+        let detail = [session.waitingFor ?? (session.state == "idle" ? nil : session.phase), session.inTool ? String(localized: "Running a tool") : nil, session.agentSummary]
             .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
         Button(action: open) {
             HStack(spacing: Space.l) {
@@ -500,7 +500,7 @@ struct SessionRow: View {
                     }
                 }
                 Spacer(minLength: WorkspaceStyle.rowSpacer)
-                StatusIcon(state: session.stalled ? "stalled" : session.state, title: session.stalled ? "May be stuck" : session.state.capitalized)
+                StatusIcon(state: session.stalled ? "stalled" : session.state, title: session.stalled ? String(localized: "May be stuck") : localizedCrewLabel(session.state.capitalized))
                 // An idle session stops its clock at its last activity.
                 ElapsedText(store: store, start: session.startedAt, end: session.state == "idle" ? session.activeAt : nil)
                     .monospacedDigit().font(Typeface.caption).foregroundStyle(.secondary).frame(minWidth: WorkspaceStyle.elapsedColumn, alignment: .trailing)
@@ -569,7 +569,7 @@ struct AgentUsageView: View {
             if let provider = usage.providers.first(where: { $0.agent == agent }) {
                 VStack(alignment: .leading, spacing: Space.s) {
                     if provider.shownWindows.isEmpty {
-                        Text(provider.status.rawValue.capitalized).foregroundStyle(.secondary)
+                        Text(localizedCrewLabel(provider.status.rawValue.capitalized)).foregroundStyle(.secondary)
                     }
                     ForEach(provider.shownWindows, id: \.key) { window in
                         // The provider's status overrides a window's when the reading is old or a job just hit the limit.
@@ -578,7 +578,7 @@ struct AgentUsageView: View {
                             HStack(spacing: Space.s) {
                                 Text(window.name)
                                 Text(window.usedRatio, format: .percent.precision(.fractionLength(0))).monospacedDigit()
-                                if status == .stale || status == .unknown || (status == .exhausted && window.status != .exhausted) { Text(status == .exhausted ? "limit reached" : status.rawValue) }
+                                if status == .stale || status == .unknown || (status == .exhausted && window.status != .exhausted) { Text(status == .exhausted ? String(localized: "limit reached") : localizedCrewLabel(status.rawValue)) }
                                 Spacer(minLength: 0)
                                 if let reset = window.resetTime {
                                     Text("Resets \(Date(timeIntervalSince1970: reset / 1000), style: .relative)")
@@ -590,15 +590,19 @@ struct AgentUsageView: View {
                         }.foregroundStyle(tint(window.usedRatio, status))
                     }
                 }.font(Typeface.caption).help(([provider.reason] + provider.windows.filter { $0.group != nil }.map {
-                    "\($0.group!): \($0.name), \(Int($0.usedRatio * 100))%, \($0.status.rawValue)"
+                    let percent = "\(Int($0.usedRatio * 100))%"
+                    return String(localized: "\($0.group!): \($0.name), \(percent), \(localizedCrewLabel($0.status.rawValue))")
                 }).joined(separator: "\n"))
             } else {
                 Text("Usage unknown").font(Typeface.caption).foregroundStyle(.secondary)
             }
         } else if let usage = store.limits[agent] ?? nil, let maximum = usage.windows?.map(\.usedPercent).max() {
-            Text("\(Int(maximum))% of limit").font(Typeface.caption).monospacedDigit().foregroundStyle(tint(maximum / 100, .ok))
+            let percent = "\(Int(maximum))%"
+            Text("\(percent) of limit").font(Typeface.caption).monospacedDigit().foregroundStyle(tint(maximum / 100, .ok))
                 .help((usage.windows ?? []).map { window in
-                    "\(Int(window.usedPercent))% of " + (window.minutes.map { "\(Int($0))-minute limit" } ?? "limit")
+                    let percent = "\(Int(window.usedPercent))%"
+                    let limit = window.minutes.map { String(localized: "\(Int($0))-minute limit") } ?? String(localized: "limit")
+                    return String(localized: "\(percent) of \(limit)")
                 }.joined(separator: "\n"))
         }
     }

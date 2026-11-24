@@ -1,4 +1,4 @@
-import { createContext, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { createContext, Fragment, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import {
   AlertBadge16Regular, ArrowUp16Filled, Checkmark16Regular, CheckmarkCircle16Regular, CheckmarkRegular,
@@ -7,6 +7,7 @@ import {
 } from '@fluentui/react-icons';
 import type { FluentIcon } from '@fluentui/react-icons';
 import { elapsed } from './model.ts';
+import { t } from './i18n.ts';
 import { actions, drafts } from './api.ts';
 import claudeMark from './icons/ClaudeCode.svg';
 import codexMark from './icons/Codex.svg';
@@ -233,7 +234,7 @@ export function ActionStatus({ actionKey }: { actionKey: string }) {
   return (
     <span className="action-message" role="status" data-tone={state.tone}>
       {state.pending ? (
-        <i className="spinner" aria-label="Sending" />
+        <i className="spinner" aria-label={t('Sending')} />
       ) : state.text ? (
         <>
           <Icon icon={state.tone ? ErrorCircle16Regular : Checkmark16Regular} />
@@ -279,8 +280,8 @@ export function Composer({
       <button
         className="prominent"
         type="button"
-        aria-label={`Send ${label.toLowerCase()}`}
-        title={`Send ${label.toLowerCase()}`}
+        aria-label={t('Send {what}', { what: label.toLowerCase() })}
+        title={t('Send {what}', { what: label.toLowerCase() })}
         disabled={!draft.trim() || locked}
         onClick={async () => {
           const message = draft.trim();
@@ -469,9 +470,9 @@ export function CopyButton({ text, short, children }: { text: string; short?: st
         }}
       >
         <Icon icon={copied ? CheckmarkRegular : CopyRegular} />
-        {copied ? 'Copied' : short ? <><span className="label-long">{children}</span><span className="label-short" aria-hidden="true">{short}</span></> : children}
+        {copied ? t('Copied') : short ? <><span className="label-long">{children}</span><span className="label-short" aria-hidden="true">{short}</span></> : children}
       </button>
-      {failed && <span className="action-message selectable">Could not copy. Select and copy: {text}</span>}
+      {failed && <span className="action-message selectable">{t('Could not copy. Select and copy: {text}', { text })}</span>}
     </>
   );
 }
@@ -752,12 +753,16 @@ export function AskHost() {
         <h2 className="title" id="ask-title">{question.title}</h2>
         {question.detail && <p className="secondary">{question.detail}</p>}
         <div className="ask-actions">
-          <button onClick={() => answer(false)}>Cancel</button>
+          <button onClick={() => answer(false)}>{t('Cancel')}</button>
           <button className="prominent" onClick={() => answer(true)}>{question.action}</button>
         </div>
       </div>
     </Dialog>
   );
+}
+/** t() for a sentence whose placeholders are elements, such as a command in <code>, so the words around them can move. */
+export function tNodes(text: string, values: Record<string, ReactNode>): ReactNode {
+  return t(text).split(/\{(\w+)\}/).map((part, index) => <Fragment key={index}>{index % 2 ? (values[part] ?? `{${part}}`) : part}</Fragment>);
 }
 /** A light, centered empty state. */
 export function EmptyState({ title, icon, detail, children }: { title: string; icon: FluentIcon; detail?: string; children?: ReactNode }) {
@@ -863,7 +868,7 @@ export function CopyMenu({ text, label, children }: { text: string; label: strin
           </button>
         </div>
       )}
-      {copied && <span className="toast" role="status"><Icon icon={Checkmark16Regular} />Copied</span>}
+      {copied && <span className="toast" role="status"><Icon icon={Checkmark16Regular} />{t('Copied')}</span>}
     </div>
   );
 }

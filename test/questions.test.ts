@@ -840,8 +840,11 @@ test('model notes take a job\'s own model, refuse a model it did not run, and re
   // Work done in the lead's session names its own model and is the lead's.
   const own = (await h.api('POST', '/api/notes', { model: 'claude-test', role: 'fix', outcome: 'root-cause', reviewer: 'codex', size: 'medium', text: 'fixed at the cause' })).body;
   assert.deepEqual([own.agent, own.fixSamples], ['claude', 1]);
+  // A Codex lead's own work is Codex's.
+  const codexOwn = (await h.api('POST', '/api/notes', { model: 'codex-lead-test', lead: 'codex', reviewer: 'codex', size: 'small', text: 'lead-built' })).body;
+  assert.equal(codexOwn.agent, 'codex');
   assert.equal((await h.api('POST', '/api/notes', { model: 'claude-test', summary: 'Fixes at the cause.' })).body.summary, 'Fixes at the cause.');
-  assert.deepEqual((await h.api('GET', '/api/state')).body.modelScores.map((s: any) => s.model).sort(), ['claude-test', model].sort());
+  assert.deepEqual((await h.api('GET', '/api/state')).body.modelScores.map((s: any) => s.model).sort(), ['claude-test', 'codex-lead-test', model].sort());
   const view = (await h.api('GET', '/api/notes?agents=claude&evidence=1')).body.text;
   assert.match(view, /### claude-test \(claude\)[^]*Fixes at the cause\.[^]*fixed at the cause/);
   assert.doesNotMatch(view, /one edge case/);

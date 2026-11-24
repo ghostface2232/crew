@@ -1,11 +1,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { QUEUED_NOTE } from './codex-lead.ts';
 import type { EventKind } from './jobs.ts';
 import { clip } from './text.ts';
 
+/** A lead session reported by Claude Code's hooks or, with host `codex`, by Codex's, whose payloads carry the same fields. */
 export interface ClaudeSession {
   id: string;
+  /** Absent for Claude Code. */
+  host?: 'codex';
   cwd: string;
   /** Main working tree of the repository `cwd` is in, so a session in a worktree or subfolder groups with its project. Set once looked up. */
   root?: string;
@@ -162,7 +166,8 @@ export class ClaudeSessions {
     let s = this.sessions.get(id);
     if (!s) {
       const cwd = typeof p.cwd === 'string' ? p.cwd : '';
-      s = { id, cwd, title: path.basename(cwd) || 'Claude', state: 'idle', phase: '', waitingFor: null, inTool: false, stalled: false, startedAt: now, activeAt: now, agents: [], workflows: [] };
+      const codex = p.host === 'codex';
+      s = { id, ...(codex ? { host: 'codex' as const } : {}), cwd, title: path.basename(cwd) || (codex ? 'Codex' : 'Claude'), state: 'idle', phase: '', waitingFor: null, inTool: false, stalled: false, startedAt: now, activeAt: now, agents: [], workflows: [] };
       this.sessions.set(id, s);
     }
     if (typeof p.session_title === 'string' && p.session_title) s.title = p.session_title;
@@ -192,7 +197,8 @@ export class ClaudeSessions {
         s.state = 'working';
         s.waitingFor = null;
         s.phase = 'reading the prompt';
-        if (typeof p.prompt === 'string' && p.prompt.trim()) {
+        // Only what the user typed: Codex reports a sub-agent's task and Crew's own queued note as prompts too.
+        if (typeof p.prompt === 'string' && p.prompt.trim() && !p.agent_id && !QUEUED_NOTE.test(p.prompt.trim())) {
           const kept = this.prompts.get(id) ?? [];
           kept.push({ text: clip(p.prompt.trim(), MAX_PROMPT), at: now });
           this.prompts.set(id, kept.slice(-KEEP_PROMPTS));
@@ -240,19 +246,26 @@ export class ClaudeSessions {
           const from = typeof p.agent_id === 'string' ? p.agent_id : '';
           const open = type === 'permission_prompt' ? this.calls.get(id)?.get(from) : undefined;
           const call = open?.size === 1 ? [...open.values()][0] : undefined;
-          const ask = call && askOf(call.name, call.input);
-          // A question reads better than the prompt's "needs your permission to use AskUserQuestion".
-          const message = ask?.questions ? oneLine(ask.questions[0].question) : oneLine(p.message ?? 'needs input');
-          if (s.state !== 'waiting' || s.waitingFor !== message || !s.waitingId) s.waitingId = randomUUID();
-          this.waitingFrom.set(id, from);
-          s.state = 'waiting';
-          s.waitingFor = message;
-          if (ask) s.ask = ask;
-          else delete s.ask;
-          this.hooks.onEvent(s, 'waiting', s.waitingFor);
+          this.wait(s, from, call && askOf(call.name, call.input), p.message ?? 'needs input');
         }
         break;
       }
+      case 'PermissionRequest': {
+        // Codex's counterpart of the permission prompt, naming the call it asks about.
+        const ask = askOf(p.tool_name, p.tool_input);
+        this.wait(s, typeof p.agent_id === 'string' ? p.agent_id : '', ask, `needs your permission to use ${ask?.tool ?? 'a tool'}`);
+        break;
+      }
+      case 'Interrupt':
+        // Codex: the user stopped the turn.
+        this.resting.add(id);
+        this.asked.delete(id);
+        s.state = s.agents.length ? 'working' : 'idle';
+        s.inTool = false;
+        s.waitingFor = null;
+        s.phase = 'turn interrupted';
+        this.calls.delete(id);
+        break;
       case 'Stop':
         this.resting.add(id);
         s.state = s.agents.length ? 'working' : 'idle';
@@ -292,6 +305,19 @@ export class ClaudeSessions {
       delete s.ask;
     }
     this.hooks.onSession(s);
+  }
+
+  /** Shows the session waiting on a prompt raised by `from` (a sub-agent's id, or '' for the main loop). */
+  private wait(s: ClaudeSession, from: string, ask: ClaudeAsk | undefined, fallback: string): void {
+    // A question reads better than the prompt's "needs your permission to use AskUserQuestion".
+    const message = ask?.questions ? oneLine(ask.questions[0].question) : oneLine(fallback);
+    if (s.state !== 'waiting' || s.waitingFor !== message || !s.waitingId) s.waitingId = randomUUID();
+    this.waitingFrom.set(s.id, from);
+    s.state = 'waiting';
+    s.waitingFor = message;
+    if (ask) s.ask = ask;
+    else delete s.ask;
+    this.hooks.onEvent(s, 'waiting', s.waitingFor);
   }
 
   /** Records the open mission a lead session just acted on, or that it has none any more. */

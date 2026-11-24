@@ -112,6 +112,13 @@ test('a daemon is replaced when its code differs from what is installed, unless 
   assert.equal(shouldReplace({ ...daemon, build: 'new', root: '/other' }, { version: '0.2.0', build: 'new' }, '/plugin'), true);
   assert.equal(shouldReplace({ ...daemon, version: '0.2.0', build: 'new', root: '/other' }, disk, '/plugin'), false);
   assert.equal(shouldReplace({ ...daemon, build: 'new', root: '/other', active: 1 }, { version: '0.2.0', build: 'new' }, '/plugin'), false);
+  // A daemon started with a filtered environment gives way to a client with the whole one, unless that client is older,
+  // and never to another filtered client.
+  const partial = { ...daemon, build: 'new', root: '/codex-cache', partialEnv: true };
+  assert.equal(shouldReplace(partial, disk, '/plugin'), true);
+  assert.equal(shouldReplace(partial, disk, '/plugin', true), false);
+  assert.equal(shouldReplace({ ...partial, active: 1 }, disk, '/plugin'), false);
+  assert.equal(shouldReplace({ ...partial, version: '0.2.0' }, disk, '/plugin'), false);
 });
 
 test('versions compare numerically', () => {

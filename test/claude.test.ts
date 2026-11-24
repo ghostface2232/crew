@@ -319,3 +319,36 @@ test('a desktop session keeps the id its claude:// links open, and a malformed o
   hook('UserPromptSubmit', { prompt: 'x', desktop_session_id: 'local_../../evil' });
   assert.equal(s.desktopId, 'local_e97eb8b4-b9ff-4551-b625-3c06c77253c7');
 });
+
+test('a Codex lead session is tracked from the same hooks, with its own prompts, approvals and interruptions', () => {
+  const { sessions, events, hook } = tracker();
+  const codex = (name: string, extra: object = {}) => hook(name, { host: 'codex', turn_id: 't1', model: 'gpt-6.2-sol', ...extra });
+  codex('SessionStart', { source: 'startup' });
+  const s = sessions.sessions.get('s1')!;
+  assert.equal(s.host, 'codex');
+  assert.equal(s.title, 'app');
+
+  codex('UserPromptSubmit', { prompt: 'Ship the fix; pushing is fine' });
+  // A sub-agent's task and Crew's own queued note are not the user's words.
+  codex('UserPromptSubmit', { prompt: 'Review the diff', agent_id: 'a1', agent_type: 'default' });
+  codex('UserPromptSubmit', { prompt: 'Crew has news for cx-1, cx-2. Call the Crew status tool to read it, then act on it.' });
+  assert.deepEqual(sessions.recentPrompts('s1').map((p) => p.text), ['Ship the fix; pushing is fine']);
+
+  codex('PreToolUse', { tool_name: 'Bash', tool_input: { command: 'git push' }, tool_use_id: 'c1' });
+  codex('PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'git push' } });
+  assert.equal(s.state, 'waiting');
+  assert.equal(s.waitingFor, 'needs your permission to use Bash');
+  assert.deepEqual(s.ask, { tool: 'Bash', input: 'git push' });
+  codex('PostToolUse', { tool_name: 'Bash', tool_use_id: 'c1' });
+  assert.equal(s.state, 'working');
+  assert.equal(s.ask, undefined);
+
+  codex('SubagentStart', { agent_id: 'a2', agent_type: 'explorer' });
+  assert.deepEqual(s.agents.map((a) => a.type), ['explorer']);
+  codex('SubagentStop', { agent_id: 'a2', agent_type: 'explorer', last_assistant_message: 'ok' });
+  codex('Interrupt');
+  assert.equal(s.state, 'idle');
+  assert.equal(s.phase, 'turn interrupted');
+  assert.ok(events.includes('waiting:needs your permission to use Bash'));
+  assert.ok(!events.some((e) => e.startsWith('done:')));
+});

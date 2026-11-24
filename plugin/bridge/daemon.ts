@@ -144,6 +144,9 @@ const TOKEN = ensureToken(HOME);
 const config = loadConfig();
 /** Fingerprint of the code this process loaded; clients compare it with what is on disk now. */
 const BUILD = installed().build;
+/** Started from a filtered environment (client.ts partialEnvironment); kept out of what the workers inherit. */
+const PARTIAL_ENV = process.env.CREW_PARTIAL_ENV === '1';
+delete process.env.CREW_PARTIAL_ENV;
 
 const streams = new Set<http.ServerResponse>();
 /**
@@ -387,8 +390,8 @@ fs.watchFile(path.join(HOME, 'config.json'), { interval: 2000 }, () => {
 
 const claude = new ClaudeSessions(config.stallSeconds, {
   onSession: (session, removed) => broadcast('claude', { session, removed: Boolean(removed) }),
-  onEvent: (session, kind, detail) => jobs.record('claude', session.id, kind, detail),
-  onAttention: (session, kind, detail) => notify('claude', kind, session.title, detail),
+  onEvent: (session, kind, detail) => jobs.record(session.host ?? 'claude', session.id, kind, detail),
+  onAttention: (session, kind, detail) => notify(session.host ?? 'claude', kind, session.title, detail),
 });
 
 function state() {
@@ -645,7 +648,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       fs.createReadStream(file).pipe(res);
       return undefined;
     }
-    if (pathname === '/api/health') return { name: 'crew', version: VERSION, build: BUILD, root: PLUGIN_ROOT, pid: process.pid, active: jobs.activeCount + mutatingPosts };
+    if (pathname === '/api/health') return { name: 'crew', version: VERSION, build: BUILD, root: PLUGIN_ROOT, pid: process.pid, active: jobs.activeCount + mutatingPosts, ...(PARTIAL_ENV ? { partialEnv: true } : {}) };
     if (pathname === '/api/state') return state();
     if (pathname === '/api/instructions') {
       const file = await sharedFile(url.searchParams.get('project'));
@@ -1035,7 +1038,8 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
         if (job && body.model !== undefined && body.model !== model) throw new HttpError(400, `Job ${job.id} ran on ${model}, not ${String(body.model)}.`);
         score = addEvidence(HOME, {
           model,
-          agent: job ? job.agent : 'claude',
+          // Work done in the lead's own session or subagent is that host's.
+          agent: job ? job.agent : body.lead === 'codex' ? 'codex' : 'claude',
           ...(job ? (job.resolvedEffort ?? job.effort ? { effort: job.resolvedEffort ?? job.effort } : {}) : {}),
           // A job's tier is its own record's. It is kept to show what work a model was given, not scored.
           ...((job ? job.tier : body.tier) ? { tier: job ? job.tier : body.tier } : {}),

@@ -1,7 +1,7 @@
 import path from 'node:path';
 import readline from 'node:readline';
 import { clipped, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, REPORT_PAGE_BYTES, textPage, unread } from './delivery.ts';
-import { api, ensureDaemon } from './client.ts';
+import { api, ensureDaemon, partialEnvironment } from './client.ts';
 import { assignHint, baseUrl, canonicalPath, DEFAULT_ROLES, defaultHolder, disabledAgents, LEAD, loadConfig, MAX_DEBATE_ROUNDS, PLUGIN_ROOT, PRESET_NAMES, ROLE_INFO, ROLES, VERSION, WORKERS } from './config.ts';
 import { listSkills } from './skills.ts';
 import { describeUsage } from './usage.ts';
@@ -289,7 +289,7 @@ const buildTools = () => [
         job_id: { type: 'string', description: 'The job whose work was reviewed or that did the fix, or for role review the review job itself; its model, agent, tier and effort are read from it.' },
         model: { type: 'string', description: 'Without job_id: the exact model of work done in this session or your subagent (yours, e.g. your own model id).' },
         role: { type: 'string', enum: ['build', 'fix', 'review'], description: 'build (default; fix for a fix-role job, review for a review job): the model built the change under review. fix: the model fixed the accepted findings. review: the model reviewed the change.' },
-        reviewer: { type: 'string', enum: [...Object.keys(WORKERS), LEAD], description: 'Required for build and fix: who reviewed the work (for a fix, who checked it): the cross-reviewer\'s agent, or claude for your crew:self-reviewer. A review job\'s line takes it from the job.' },
+        reviewer: { type: 'string', enum: [...Object.keys(WORKERS), LEAD], description: `Required for build and fix: who reviewed the work (for a fix, who checked it): the cross-reviewer's agent, or ${host === 'codex' ? 'codex for your self-reviewer subagent' : 'claude for your crew:self-reviewer'}. A review job's line takes it from the job.` },
         of_job: { type: 'string', description: 'For review: the job that built the work the review covered. Its reviewer\'s rating of that work, and that job\'s rating of the review, are then counted.' },
         of_model: { type: 'string', description: 'For review, without of_job: the exact model that built the work, for work done in this session or your subagent.' },
         audit: { type: 'boolean', description: 'For review, in place of of_job and of_model, one of which a review line otherwise needs: true when the review covered code as it stands, by several builders (a review with target "files"), so there is no one job or model to name. Its reviewer\'s rating of the code then counts for no one.' },
@@ -1011,7 +1011,7 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
     case 'note_summary': {
       const body = name === 'note_summary'
         ? { model: args.model, summary: args.summary }
-        : { job: args.job_id, model: args.model, role: args.role, reviewer: args.reviewer, size: args.size, tier: args.tier, findings: args.findings, declined: args.declined, adoption: args.adoption, outcome: args.outcome, of_job: args.of_job, of_model: args.of_model, audit: args.audit, rating: args.rating, text: args.text };
+        : { job: args.job_id, model: args.model, lead: host === 'codex' ? 'codex' : undefined, role: args.role, reviewer: args.reviewer, size: args.size, tier: args.tier, findings: args.findings, declined: args.declined, adoption: args.adoption, outcome: args.outcome, of_job: args.of_job, of_model: args.of_model, audit: args.audit, rating: args.rating, text: args.text };
       const score = await api('POST', '/api/notes', body);
       const shown = score.score === null ? '—' : score.score.toFixed(1);
       return `Noted. ${score.model} (${score.agent}): ${shown}/10, ${score.status}, ${score.buildSamples} build(s), ${score.fixSamples} fix(es)${score.reviewSamples ? `, ${score.reviewSamples} review(s)` : ''}.${score.ratingDropped ? ' The rating was not kept: the user turned peer ratings off.' : ''}${score.consolidate ? ' Its summary is due: rewrite it from the evidence with note_summary.' : ''}`;
@@ -1129,6 +1129,9 @@ async function handle(msg: any): Promise<void> {
       host = !process.env.CLAUDE_CODE_SESSION_ID && /^codex/i.test(String(params?.clientInfo?.name ?? '')) ? 'codex' : 'claude';
       // Codex starts this server in the plugin's folder, which is no project: one is known only after a hello.
       projectUnknown = host === 'codex';
+      // Codex gives MCP servers a filtered environment; a daemon started from here is replaced once a hook or the CLI,
+      // which have the whole one, finds it idle.
+      if (host === 'codex') partialEnvironment();
       TOOLS = toolList();
       return reply({
         protocolVersion: PROTOCOL_VERSIONS.includes(params?.protocolVersion) ? params.protocolVersion : PROTOCOL_VERSIONS[1],

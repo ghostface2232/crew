@@ -647,6 +647,7 @@ export class AntigravityAdapter implements Adapter {
     this.lastUsed = Date.now();
     ctl.activity();
     const update = p.update ?? {};
+    localLocations(update);
     if (typeof reported === 'string' && reported !== ASKING_MODE && this.peer) {
       const peer = this.peer;
       ctl.progress(`Antigravity switched to "${reported}" mode; switching back to "${ASKING_MODE}"`);
@@ -673,14 +674,13 @@ export class AntigravityAdapter implements Adapter {
         turn.message = '';
         ctl.progress(describeCall(update));
         this.track(session, turn, update);
+        this.touched(turn, update);
         break;
       case 'tool_call_update':
-        if (update.status === 'completed' && update.kind !== 'read') {
-          for (const loc of update.locations ?? []) if (loc.path) ctl.touched(loc.path);
-        }
         if (update.status === 'failed') ctl.progress(`failed: ${update.title ?? 'tool call'}`);
         else ctl.activity();
         this.track(session, turn, update);
+        this.touched(turn, update);
         break;
       case 'current_mode_update':
         break;
@@ -695,6 +695,14 @@ export class AntigravityAdapter implements Adapter {
       default:
         ctl.activity();
     }
+  }
+
+  /** Records the files a completed call wrote, from all agy said about it: the completion may carry only its status. */
+  private touched(turn: Turn, update: any): void {
+    if (update.status !== 'completed') return;
+    const call = (typeof update.toolCallId === 'string' && turn.calls.get(update.toolCallId)) || update;
+    if (call.kind === 'read') return;
+    for (const location of call.locations ?? []) if (location?.path) turn.ctl.touched(location.path);
   }
 
   /** Merges what agy reports about a tool call, and checks one that ran without coming to Crew first. */
@@ -758,6 +766,7 @@ export class AntigravityAdapter implements Adapter {
     const session = this.sessions.get(p.sessionId);
     const turn = session?.owner;
     const toolCall = p.toolCall ?? {};
+    localLocations(toolCall);
     if (turn && typeof toolCall.toolCallId === 'string') {
       const call = turn.calls.get(toolCall.toolCallId) ?? {};
       turn.calls.set(toolCall.toolCallId, { ...call, asked: true });
@@ -1093,7 +1102,9 @@ export function decide(role: JobKind, cwd: string, toolCall: ToolCall, readOnly 
   const kind = toolCall.kind ?? 'other';
   // The daemon's secret is not a worker's to read, whatever the role. Commands are the user's to approve as before.
   const secret = tokenFile(HOME);
-  if ((toolCall.locations ?? []).some((l) => l.path && path.resolve(l.path) === secret)) return { refuse: 'the Crew token file' };
+  // Windows names one file in any case, starting with the drive letter.
+  const same = (file: string) => process.platform === 'win32' ? path.resolve(file).toLowerCase() === secret.toLowerCase() : path.resolve(file) === secret;
+  if ((toolCall.locations ?? []).some((l) => l.path && same(l.path))) return { refuse: 'the Crew token file' };
   // A qualified title can identify an MCP call, but must never disguise a command. One agy process serves many jobs, and
   // each job's server is another one named crew to it: from the second on it tells them apart by eight hex digits in the name.
   const input = toolCall.rawInput;
@@ -1118,6 +1129,20 @@ export function decide(role: JobKind, cwd: string, toolCall: ToolCall, readOnly 
   if (paths.length === 0) return { refuse: 'edit without a path' };
   if (!paths.every((f) => isInside(cwd, f))) return { refuse: 'edit outside the workspace' };
   return paths.some((f) => isGitPath(cwd, f)) ? { refuse: 'edit inside .git' } : 'allow';
+}
+
+/**
+ * agy writes a Windows path as a URL path (`/C:/Users/...`) when it reports a tool call finished, though natively when
+ * it starts or asks for one. Read as a native path, the URL form lands outside every workspace.
+ */
+export function localPath(file: string, platform: NodeJS.Platform = process.platform): string {
+  return platform === 'win32' && /^\/[A-Za-z]:[\\/]/.test(file) ? file.slice(1) : file;
+}
+
+/** Puts a tool call's paths in native form, before anything judges or records them. */
+function localLocations(call: { locations?: unknown }): void {
+  if (!Array.isArray(call.locations)) return;
+  for (const location of call.locations) if (typeof location?.path === 'string') location.path = localPath(location.path);
 }
 
 /** What the user is asked to approve: the whole request, never a shortened form. */

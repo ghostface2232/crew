@@ -5,7 +5,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { antigravityAdapter, AntigravityAdapter, confinedEnv, confines, decide, formAnswer, formQuestions, serverProfile } from '../plugin/bridge/adapters/antigravity.ts';
+import { antigravityAdapter, AntigravityAdapter, confinedEnv, confines, decide, formAnswer, formQuestions, localPath, serverProfile } from '../plugin/bridge/adapters/antigravity.ts';
 import { tokenFile } from '../plugin/bridge/auth.ts';
 import { HOME, resolveConfig } from '../plugin/bridge/config.ts';
 import { Jobs } from '../plugin/bridge/jobs.ts';
@@ -859,6 +859,78 @@ test('a tool call is judged on its final fields, and Crew\'s own tools and faile
   const job = await h.ended(await h.jobs.create({ kind: 'delegate', cwd: work, isolation: 'in_place', task: 'test' }));
   assert.equal(job.state, 'done');
   assert.deepEqual(job.notes ?? [], []);
+});
+
+test('the Crew token is refused whatever the case of its path on Windows', { skip: process.platform !== 'win32' }, () => {
+  const token = tokenFile(HOME);
+  for (const file of [token.toLowerCase(), token.toUpperCase()]) {
+    const call = { kind: 'read', title: 'File token', locations: [{ path: file }] };
+    assert.deepEqual(decide('delegate', HOME, call), { refuse: 'the Crew token file' }, file);
+  }
+});
+
+test('a Windows path agy writes as a URL path reads as the same file', () => {
+  assert.equal(localPath('/C:/Users/me/repo/a.txt', 'win32'), 'C:/Users/me/repo/a.txt');
+  assert.equal(localPath('C:\\Users\\me\\a.txt', 'win32'), 'C:\\Users\\me\\a.txt');
+  assert.equal(localPath('/Users/me/a.txt', 'win32'), '/Users/me/a.txt');
+  assert.equal(localPath('/C:/a.txt', 'darwin'), '/C:/a.txt');
+});
+
+test('an edit agy reports with a URL path on Windows stays inside the workspace', { timeout: 5000, skip: process.platform !== 'win32' }, async (t) => {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-agy-work-'));
+  t.after(() => fs.rmSync(work, { recursive: true, force: true }));
+  const file = path.join(work, 'docs', 'a.txt');
+  const urlPath = `/${file.replaceAll('\\', '/')}`;
+  const h = harness(t, server({ updates: [
+    { sessionUpdate: 'tool_call', toolCallId: 'e1', status: 'pending', kind: 'edit', title: 'Edit', locations: [{ path: file }] },
+    { sessionUpdate: 'tool_call_update', toolCallId: 'e1', status: 'completed', locations: [{ path: urlPath }] },
+  ] }));
+  const job = await h.ended(await h.jobs.create({ kind: 'polish', cwd: work, isolation: 'in_place', targets: ['docs'], task: 'test' }));
+  assert.equal(job.state, 'done');
+  assert.deepEqual(job.notes ?? [], []);
+  assert.deepEqual(job.result?.files, ['docs/a.txt']);
+  assert.deepEqual(job.result?.outOfScope, []);
+});
+
+test('a worktree edit agy asks about natively and reports finished as a URL path is in scope', { timeout: 10000, skip: process.platform !== 'win32' }, async (t) => {
+  const h = harness(t, `
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const send = (message) => console.log(JSON.stringify({ jsonrpc: '2.0', ...message }));
+    const update = (update) => send({ method: 'session/update', params: { sessionId: 's1', update } });
+    let promptId, file;
+    require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
+      const { method, id, params } = JSON.parse(line);
+      if (method === 'initialize') send({ id, result: { agentCapabilities: {} } });
+      else if (method === 'session/new') {
+        file = path.join(params.cwd, 'docs', 'a.txt');
+        send({ id, result: { sessionId: 's1' } });
+      } else if (method === 'session/prompt') {
+        promptId = id;
+        update({ sessionUpdate: 'tool_call', toolCallId: 'e1', status: 'pending', kind: 'edit', title: 'Edit', locations: [{ path: file }] });
+        send({ id: 'p', method: 'session/request_permission', params: { sessionId: 's1', toolCall: { toolCallId: 'e1', kind: 'edit', title: 'Edit', locations: [{ path: file }] }, options: [{ kind: 'allow_once', optionId: 'yes' }] } });
+      } else if (id === 'p') {
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.writeFileSync(file, 'Hello.\\n');
+        update({ sessionUpdate: 'tool_call_update', toolCallId: 'e1', locations: [{ path: '/' + file.replaceAll('\\\\', '/') }] });
+        update({ sessionUpdate: 'tool_call_update', toolCallId: 'e1', status: 'completed' });
+        update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'report' } });
+        send({ id: promptId, result: { stopReason: 'end_turn' } });
+      }
+    });
+  `, { polish: { agents: ['antigravity'] } });
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-agy-repo-'));
+  t.after(() => fs.rmSync(repo, { recursive: true, force: true, maxRetries: 5 }));
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: repo });
+  git('init', '-q');
+  fs.writeFileSync(path.join(repo, 'README.md'), 'hello\n');
+  git('add', '.');
+  git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'init');
+  const job = await h.ended(await h.jobs.create({ kind: 'polish', cwd: repo, targets: ['docs'], task: 'test' }));
+  assert.equal(job.state, 'done');
+  assert.deepEqual(job.notes ?? [], []);
+  assert.deepEqual(job.result?.files, ['docs/a.txt']);
+  assert.deepEqual(job.result?.outOfScope, []);
 });
 
 test('a call that ends with the user\'s cancel is not taken for a violation', { timeout: 5000 }, async (t) => {

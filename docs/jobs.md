@@ -10,7 +10,7 @@ Lead tools start and manage work in worker sessions. Writable jobs use isolated 
 | --- | --- |
 | `delegate` | Hand a piece of work (`role`: `delegate`, `refactor`, `release`, or `fix`) to a role holder in an isolated git worktree (`~/.crew/worktrees/<repo>-<hash>/<job id>/<repo folder>`) on branch `crew-<job id>`. Optional `check` runs a sandboxed shell command in the worktree after each turn |
 | `review` | Hand a read-only review to a cross-reviewer (`review` role). `runs_app: true` routes to `verify` in a writable snapshot. Defaults to `adversarial`. `mode: "standard"` uses Codex's built-in review |
-| `polish` | Hand UI copy, comment, and doc cleanup to the `polish` role. Edits outside `targets` are reported as out of scope. Scope checks compare literal Git paths, including non-ASCII names and embedded newlines, and count a moved file at both its old and new path |
+| `polish` | Hand UI copy, comment, and doc cleanup to the `polish` role. Edits outside `targets` are reported as out of scope. Scope checks compare literal Git paths, including non-ASCII names and embedded newlines, and count a moved file at both its old and new path. Targets and the files an in-place job edits are kept with forward slashes, as Git names files, so a directory target matches on Windows too |
 | `debate` | Run a read-only multi-round debate (`debate` role, up to 6 rounds, default 3) over a hard decision |
 | [`mission`](missions.md) | Start, advance, revise, or close a mission and manage its `tasks` and linked pull requests (`pr`) |
 | [`route`](usage-and-presets.md) | Ask who should take a role (or `lead`) based on remaining usage and role holders, plus active preset policy and recent model notes |
@@ -109,6 +109,7 @@ Related tests include `test/jobs.test.ts`, `test/worktrees.test.ts`, `test/gc.te
 
 ## History
 
+- 2026-11-24: Scope targets keep forward slashes on Windows; with backslashes, every file under a directory target was reported as out of scope.
 - 2026-11-20: Added hex-suffixed Antigravity worker tool title matching and Codex MCP startup failure notes.
 - 2026-11-16: Windows bridge parity included canonical project paths (`canonicalPath`).
 - 2026-11-14: Hardened Windows worktree cleanup, added delayed empty-folder retries (30 s, 2.5 min, startup), and added `crew gc`.

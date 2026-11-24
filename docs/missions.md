@@ -13,7 +13,7 @@ A mission groups one user command and the jobs it took, so the board can answer 
 ## Display
 
 - Missions render planned stops in order: Plan, Build, Review (shared by `self-review` and `cross-review`), Fix, Polish, Final, numbering unnamed repeats (`Review 2`, `Fix 2`). Daemon-assigned `missionStep` pins jobs to their step across plan revisions; legacy jobs attach by kind. The card's stage track shows progress; the title row carries no separate indicator. Ended missions start folded; loose jobs stay separate.
-- The card names its lead the same way for Claude and Codex: the lead's mark before the title, and "Led by Claude" or "Led by Codex" first on the meta line. It reads the mission's `lead`, or for a mission opened before that was recorded, its owning session's agent while that session is still known; with neither, the card shows no lead.
+- The card names its lead the same way for Claude and Codex: the lead's mark before the title, and "Led by Claude" or "Led by Codex" first on the meta line. It reads the mission's `lead`, falling back to the owning session's agent (while still known) for missions opened before `lead` was recorded; with neither, the card shows no lead.
 - A job given a known mission that is no longer open runs on its own under that mission's preset with a note attached. An unknown mission ID is refused.
 - Both UIs offer *Mark Done* and *Stop Tracking* in an active mission's ellipsis menu. Abandoned missions also offer *Mark Done*, which sends `reopen: true`—without an explicit reopen, late lead calls cannot undo *Stop Tracking*. *Stop Tracking* marks a mission `abandoned` without stopping its jobs.
 - Clients show "Looks finished" after 20 quiet minutes with no active jobs or open tasks (`todo`/`doing`) unless the owning lead session is working.
@@ -51,7 +51,7 @@ A mission groups one user command and the jobs it took, so the board can answer 
 - `~/.crew/missions.json` persists all open missions, the 100 most recently ended, the last 2 per project, and any ended mission with a watched PR, retaining their jobs beyond normal history limits. Unreadable `missions.json` files are set aside before starting clean.
 - Idle missions auto-abandon after 12 hours, or after 72 hours while a task is open (`todo`/`doing`) or a PR is watched; open tasks also suppress "Looks finished".
 - A session owns missions via `CLAUDE_CODE_SESSION_ID`. New jobs started after a lead-finished `done` mission (when no other mission is open) auto-create a fallback follow-up mission (`후속 작업: <title>` or `Follow-up: <title>`, matching the title's language). For 12 hours after a lead-finished mission, `UserPromptSubmit` also reminds the lead to open a mission before starting new work.
-- The optional `lead` field records which agent opened the mission (`claude` or `codex`) and remains after the session ends.
+- The optional `lead` field records which agent opened the mission (`claude` or `codex`) and persists after the owning session ends.
 
 ## Not verified
 

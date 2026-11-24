@@ -77,3 +77,20 @@ The first run returned an empty discovery result. The evidence here comes from t
 **Wait** on migrating to the `2026-07-28` transport, Tasks, and MRTR. Do not add `2026-07-28` to `PROTOCOL_VERSIONS` alone: the current dispatcher and server-initiated elicitation path do not implement that protocol.
 
 Re-run this isolated probe after host upgrades or connection failures, and migrate when a supported host requires `2026-07-28` or a Crew feature needs the Tasks extension (retaining legacy negotiation for Codex).
+
+## 5. Codex as a lead host
+
+Tested 2026-11-24 on Windows 11 with `codex-cli 0.170.0`, for [roadmap L1](roadmap.md#5-long-term-plan). Stand-in MCP servers and hook scripts logged what Codex passed them; Crew itself was not loaded. Hook and plugin loading ran in isolated `CODEX_HOME` directories; the tool-call and `codex queue` checks ran three short turns on the real account with `-c` overrides, leaving `~/.codex` files unchanged.
+
+| Question | Observed |
+| --- | --- |
+| Session identity in an MCP server | Not in the environment: Codex starts stdio MCP servers with a filtered environment that has no thread variable (not even `CODEX_HOME`). Every `tools/call` carries it in `params._meta`: `threadId`, `sessionId`, and `x-codex-turn-metadata` (`thread_id`, `turn_id`, `model`, `sandbox_mode`, `thread_source`). Hook payloads carry the same value as `session_id`. |
+| MCP server working directory | The session's working directory, when the server entry sets no `cwd`. |
+| Hook events and payloads | `SessionStart` (`source: startup`), `UserPromptSubmit` (`prompt`, `turn_id`), `PreToolUse` and `PostToolUse` (`tool_name` such as `mcp__probe__whoami`, `tool_input`, `tool_use_id`, `tool_response`), `Stop` (`stop_hook_active`, `last_assistant_message`), and `SessionEnd`, all with `session_id`, `cwd`, `model`, and `permission_mode`. `SessionStart` `hookSpecificOutput.additionalContext` reached the model. Command hooks run under `pwsh.exe` on Windows and inherit the full environment. |
+| Hook trust | Untrusted hooks are skipped without an error in `codex exec`. `--dangerously-bypass-hook-trust` runs them. Users trust hooks in `/hooks` (CLI) or Review hooks (desktop app); the docs say trust is recorded against the hook's hash, so changed hooks or bundled scripts need another review. |
+| Claude plugin format | `codex plugin marketplace add <repo>` read `.claude-plugin/marketplace.json`; `codex plugin add` copied the plugin into `$CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/` and enabled it. Its `skills/` loaded as `<plugin>:<skill>`. Its `hooks/hooks.json` loaded in the CLI, with `PLUGIN_ROOT`, `CLAUDE_PLUGIN_ROOT`, and `PLUGIN_DATA` set. |
+| Hook command form | A string command (`node "${CLAUDE_PLUGIN_ROOT}/bin/hook.cjs" tag`) ran. The `command` plus `args` form that Crew's `hooks.json` uses failed. |
+| Plugin MCP servers | `.mcp.json` servers were listed, but `${CLAUDE_PLUGIN_ROOT}` and `${PLUGIN_ROOT}` in `args` were passed through unexpanded, and the server did not start. Only a relative path with `"cwd": "."` started, and then the server's working directory was the plugin cache rather than the session's. |
+| Waking an idle session | `codex queue --thread <id> --message <text>` stores the message. An open interactive session (`codex` TUI) that was idle ran it as a new turn within seconds. With no open session the message stays queued; `--resume` warns that it needs a local app-server daemon or `--remote`. |
+
+**Not verified:** `codex queue` delivery to a Codex desktop app thread, queueing while a turn is running, elicitation from a Crew tool call, and plugin hooks in the desktop app. MCP elicitation is advertised in `initialize` (section 1).

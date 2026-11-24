@@ -48,9 +48,15 @@ interface Item { jobId: string; newsSeq: number }
 interface Receipt { session: string; items: Item[]; text: string; acknowledged?: boolean; at?: number }
 interface Lease { generation: string; expiresAt: number }
 interface Watch extends Lease { deadline: number; beat: number }
+/**
+ * The lead sessions that Codex hosts. A Claude Code session wakes itself through its own hooks; a Codex session
+ * has no hook that can, so the daemon wakes it (codex-lead.ts). A session not listed here is a Claude one.
+ */
+export type LeadHost = 'codex';
 export interface DeliveryState {
   receipts: Record<string, Receipt>;
   offering: Record<string, Lease>;
+  hosts?: Record<string, LeadHost>;
 }
 export interface Offer { receipt: string; text: string; items: Item[] }
 
@@ -102,7 +108,7 @@ export function leadSession(value: unknown): string {
 
 /** All durable changes use the Jobs snapshot, so receipts and the news they cover commit together. */
 export class Delivery {
-  state: DeliveryState = { receipts: Object.create(null), offering: Object.create(null) };
+  state: DeliveryState = { receipts: Object.create(null), offering: Object.create(null), hosts: Object.create(null) };
   private watching = new Map<string, Watch>();
   private waiters = new Set<() => void>();
   /** When each lead session's hooks last called. */
@@ -140,8 +146,29 @@ export class Delivery {
 
   restore(state?: DeliveryState): void {
     // A restarted daemon must fence every old process, but issued receipts remain valid.
-    this.state = { receipts: Object.assign(Object.create(null), state?.receipts), offering: Object.create(null) };
+    this.state = { receipts: Object.assign(Object.create(null), state?.receipts), offering: Object.create(null), hosts: Object.assign(Object.create(null), state?.hosts) };
     this.watching.clear();
+  }
+
+  /** Records that Codex hosts this lead session. Saved with the receipts, since news may wait for it across a restart. */
+  host(session: string, host: LeadHost): void {
+    leadSession(session);
+    const hosts = (this.state.hosts ??= Object.create(null) as Record<string, LeadHost>);
+    if (hosts[session] === host) return;
+    hosts[session] = host;
+    try {
+      this.save();
+    } catch (error) {
+      delete hosts[session];
+      throw error;
+    }
+  }
+
+  /** The lead sessions Codex hosts that have unacknowledged news. */
+  codexWaiting(): string[] {
+    const hosts = this.state.hosts ?? {};
+    const waiting = new Set(this.subjects().filter((job) => job.lead && hosts[job.lead] === 'codex' && unread(job).length).map((job) => job.lead!));
+    return [...waiting];
   }
 
   changed(): void {

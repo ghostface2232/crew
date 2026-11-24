@@ -124,6 +124,8 @@ Groundwork done: worker roles are a configurable registry (`config.ts`) and rout
 4. Relaying approvals and questions to the user through that client.
 5. A Claude worker adapter, needed once Claude holds a worker role under another lead.
 
+Decided 2026-11-24: one plugin serves both hosts, and the host that starts a conversation leads it, so a Codex session leads its own jobs while a Claude session leads its own. The 2026-11-24 host checks ([mcp-compatibility.md](mcp-compatibility.md#5-codex-as-a-lead-host)) settle items 1 to 3 for Codex: a tool call names its thread in `_meta`, hooks receive the same id, and `codex queue` wakes an idle interactive session. The Claude plugin layout loads in Codex with two changes: hooks must be string commands, and the MCP server cannot rely on `${CLAUDE_PLUGIN_ROOT}`.
+
 **L2. Own main screen. *(Partial)*** React board (`plugin/board/src/`), role-based direct dispatch (`Dispatch.tsx`, `DispatchView.swift`), native macOS SwiftUI/AppKit app (`native/`), and Windows Electron shell (`desktop/`) are done ([board.md](board.md), [macos-app.md](macos-app.md)). Closing the UI leaves the daemon and jobs running, and the web board stays available. Mission start with a lead, lead selection, and merge execution remain open.
 
 **L2a. Distribution. *(Done)*** Implemented via `.github/workflows/release.yml`, `native/Sources/Crew/Updater.swift`, `desktop/updater.ts`, `plugin/bridge/setup.ts`, `Overview.tsx` (`Setup`), and `BoardView.swift` (`SetupCard`): builds and publishes the macOS `.dmg`/`.zip` and Windows installer, self-updates from GitHub Releases, installs/updates the Claude Code plugin on the bundled Node runtime, and shows a setup checklist ([distribution.md](distribution.md)).

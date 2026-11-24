@@ -101,10 +101,19 @@ function counted(ctl: JobCtl, usage: Usage): void {
 }
 
 /**
- * What a Claude Code session sets for the processes it starts, which a daemon that session started keeps. Left in, a
- * worker takes itself for a child of that session (its desktop app's socket, its session id, its effort).
+ * What a Claude Code session, and the desktop app or SDK host around it, sets for the processes it starts, which a
+ * daemon that session started keeps (read from a desktop app session, Claude Code 2.1.331). Left in, a worker takes
+ * itself for a child of that session or for an SDK host's: its socket, session id and effort, MCP tool names without
+ * their prefix, an auth refresh Crew never answers. The user's own settings, such as CLAUDE_CODE_USE_BEDROCK, stay.
  */
-const SESSION_VARS = /^(CLAUDECODE|CLAUDE_PID|CLAUDE_EFFORT|CLAUDE_CODE_(ENTRYPOINT|EXECPATH|SESSION_ID|HOST_SESSION_ID|CHILD_SESSION|SESSION_ATTENDED|CHILD_NOTES_DIR|LAUNCHED_BY_SESSION_IDS|MESSAGING_SOCKET|MESSAGING_TOKEN))$/;
+const SESSION_VARS = new RegExp(`^(${[
+  'AI_AGENT', 'CLAUDECODE', 'CLAUDE_PID', 'CLAUDE_EFFORT', 'CLAUDE_PREVIEW_\\w+', 'CLAUDE_AGENT_SDK_\\w+', 'CLAUDE_CODE_SDK_\\w+',
+  'CLAUDE_CODE_HOST_\\w+', 'CLAUDE_CODE_EMIT_\\w+', 'CLAUDE_CODE_MESSAGING_\\w+',
+  ...['ENTRYPOINT', 'EXECPATH', 'SESSION_ID', 'CHILD_SESSION', 'SESSION_ATTENDED', 'CHILD_NOTES_DIR', 'LAUNCHED_BY_SESSION_IDS',
+    'DESKTOP_APP_VERSION', 'ENABLE_SDK_FILE_CHECKPOINTING', 'ENABLE_ASK_USER_QUESTION_TOOL', 'DISABLE_TERMINAL_TITLE', 'SIMPLE',
+    'DISABLE_CRON', 'TERMINAL_MCP_TOOLS', 'EAGER_FLUSH', 'STARTUP_FAILURE_RESULTS', 'REPORT_FINDINGS', 'ORGANIZATION_UUID',
+    'ACCOUNT_UUID', 'USER_EMAIL'].map((name) => `CLAUDE_CODE_${name}`),
+].join('|')})$`);
 
 export function workerEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const env = agentEnv(process.platform, source);
@@ -190,8 +199,15 @@ class Session {
   /** Claude Code left automatic mode for the manual one, as where the model or plan does not offer it. */
   private manualOnly = false;
   private modeRequests = 0;
-  /** Messages held until Claude Code confirms the mode they are to be read in. */
-  private held: string[] = [];
+  /**
+   * Messages not yet written: one waits while a turn runs, or until Claude Code confirms the mode it is to be read in.
+   * Claude Code may read several queued sends in one turn, and its result cannot say whether a message still in the
+   * pipe was read, so each is written only once the turn before it has its result.
+   */
+  private queue: string[] = [];
+  /** A message was written and its result has not come. */
+  private open = false;
+  /** Messages sent and not yet answered by a result, written or queued. */
   turns = 0;
   stopping = false;
   private idle?: NodeJS.Timeout;
@@ -219,6 +235,8 @@ class Session {
       clearTimeout(this.forceClose);
       const failed = !this.stopping && this.turns > 0;
       this.turns = 0;
+      this.queue.length = 0;
+      this.open = false;
       this.pending.length = 0;
       onClose();
       this.cleanLaunchFiles();
@@ -242,15 +260,23 @@ class Session {
     clearTimeout(this.idle);
     this.ctl = ctl;
     if (this.turns++ === 0) ctl.phase('working');
+    this.queue.push(text);
+    this.flush();
+  }
+
+  /** Writes the next message once no turn runs, switching the mode it is to be read in first. */
+  private flush(): void {
+    if (this.open || this.modeRequest || !this.queue.length || !this.alive) return;
     // A session outlives its turns, so a turn that needs another mode switches it before the message is read.
-    const mode = permissionMode(ctl.job);
+    const mode = permissionMode(this.ctl.job);
     if (mode !== this.mode) {
       this.mode = mode;
       this.modeRequest = `crew-mode-${++this.modeRequests}`;
       this.write({ type: 'control_request', request_id: this.modeRequest, request: { subtype: 'set_permission_mode', mode } });
+      return;
     }
-    if (this.modeRequest) this.held.push(text);
-    else this.write({ type: 'user', message: { role: 'user', content: text } });
+    this.open = true;
+    this.write({ type: 'user', message: { role: 'user', content: this.queue.shift() } });
   }
 
   stop(mode: 'graceful' | 'cancel' | 'shutdown' = 'graceful'): Promise<void> {
@@ -400,10 +426,10 @@ class Session {
         this.modeRequest = undefined;
         if (message.response.subtype === 'success' || this.mode === 'auto') {
           if (message.response.subtype !== 'success') this.fellBack();
-          for (const text of this.held.splice(0)) this.write({ type: 'user', message: { role: 'user', content: text } });
+          this.flush();
         } else {
           // Left in the old mode, the turn would decide what the user was to be asked about, so it is never sent.
-          this.held.length = 0;
+          this.queue.length = 0;
           this.fail(`Claude Code could not switch to ${this.mode} permissions: ${message.response.error ?? 'no reason given'}.`, false, true);
         }
         break;
@@ -428,11 +454,8 @@ class Session {
           for (const request of this.pending.splice(0)) this.respond(request.id, { behavior: 'deny', message: 'The turn ended before this was answered.' });
           ctl.resumed();
         }
-        // Messages sent while a turn ran may be read together in one turn, so the count comes from Claude Code when it
-        // gives one: the sends still queued, plus any held here for a mode switch.
-        this.turns = typeof message.queued_turn_count === 'number'
-          ? Math.max(0, message.queued_turn_count) + this.held.length
-          : Math.max(0, this.turns - 1);
+        this.open = false;
+        this.turns = Math.max(0, this.turns - 1);
         if (!this.turns) this.uses.clear();
         if (message.is_error || message.subtype !== 'success') {
           const errors = Array.isArray(message.errors) ? message.errors.join('\n') : '';
@@ -441,7 +464,7 @@ class Session {
         } else if (!this.turns) {
           this.idle = setTimeout(() => void this.stop(), IDLE_SHUTDOWN_MS).unref();
           ctl.done(message.result ?? '');
-        }
+        } else this.flush();
         break;
     }
   }
@@ -457,6 +480,7 @@ class Session {
     if (this.turns) void this.stop(now ? 'cancel' : 'graceful');
     else this.idle = setTimeout(() => void this.stop(), IDLE_SHUTDOWN_MS).unref();
     this.turns = 0;
+    this.queue.length = 0;
     this.ctl.fail(message, limit ? { limit: true } : undefined);
   }
 }

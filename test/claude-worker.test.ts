@@ -20,18 +20,20 @@ const fakeClaude = `
   const instructions = flag('--append-system-prompt') ?? fs.readFileSync(flag('--append-system-prompt-file'), 'utf8');
   const session = flag('--resume') ?? 'claude-session';
   const cwd = process.cwd();
-  let turns = 0, prompt, step = 0, hold = false, coalesce = false;
+  let turns = 0, prompt, step = 0, running = false, overlap = false;
   let replies = [];
   const modes = [flag('--permission-mode')];
   // As where the model or plan does not offer automatic mode: Claude Code falls back to the manual one.
   const noAuto = fs.existsSync(path.join(cwd, 'no-auto'));
   let current = noAuto && modes[0] === 'auto' ? 'default' : modes[0];
-  const success = (extra = {}) => send({
-    type: 'result', subtype: 'success', is_error: false, session_id: session,
-    result: JSON.stringify({ prompt, turns, args, mcp, instructions, replies, cwd, modes, env: process.env }),
-    usage: { input_tokens: 3, cache_creation_input_tokens: 5, cache_read_input_tokens: 7, output_tokens: 11 },
-    ...extra,
-  });
+  const success = () => {
+    running = false;
+    send({
+      type: 'result', subtype: 'success', is_error: false, session_id: session,
+      result: JSON.stringify({ prompt, turns, args, mcp, instructions, replies, cwd, modes, overlap }),
+      usage: { input_tokens: 3, cache_creation_input_tokens: 5, cache_read_input_tokens: 7, output_tokens: 11 },
+    });
+  };
   const ask = (tool, input) => {
     const id = 'tool-' + step;
     send({ type: 'assistant', message: { content: [{ type: 'tool_use', name: tool, input, id }] } });
@@ -68,13 +70,9 @@ const fakeClaude = `
       return success();
     }
     if (message.type !== 'user' || message.message.role !== 'user') throw new Error('Expected user turn');
-    // Read together with the turn that was running, as Claude Code may: one result for both sends.
-    if (coalesce) {
-      coalesce = false;
-      prompt = message.message.content;
-      return success({ queued_turn_count: 0 });
-    }
-    if (hold) success();
+    // Claude Code may read a message written during a turn together with it, so Crew writes none until the result.
+    if (running) overlap = true;
+    running = true;
     prompt = message.message.content;
     turns++;
     replies = [];
@@ -86,7 +84,6 @@ const fakeClaude = `
     if (prompt === 'git edit') return ask('Write', { file_path: path.join(cwd, '.git', 'config'), content: '' });
     if (prompt === 'evidence edit') return ask('Write', { file_path: path.join(flag('--add-dir'), 'view-after.png'), content: '' });
     if (prompt === 'relative edit') return ask('Write', { file_path: 'review.txt', content: '' });
-    if (prompt === 'coalesce') return void (coalesce = true);
     if (prompt === 'browser') return ask('mcp__crew__browser', {});
     if (prompt === 'classifier') {
       send({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: 'git push --force' }, id: 'use-1' }] } });
@@ -103,8 +100,8 @@ const fakeClaude = `
       console.error('Worker disappeared');
       return process.exit(2);
     }
-    hold = prompt === 'hold';
-    if (!hold) success();
+    if (prompt === 'hold') return setTimeout(success, 500);
+    success();
   });
 `;
 
@@ -262,7 +259,7 @@ test('Claude Code refuses edits through a link to a directory outside the job', 
   assert.equal(h.events.touched, undefined);
 });
 
-test('Claude Code queues an in-flight reply, reuses an idle process, and resumes after release', async (t) => {
+test('Claude Code holds an in-flight reply until the turn ends, reuses an idle process, and resumes after release', async (t) => {
   const h = harness(t, 'hold');
   await h.adapter.start(h.ctl);
   await h.event('session');
@@ -271,6 +268,9 @@ test('Claude Code queues an in-flight reply, reuses an idle process, and resumes
   const live = await h.report();
   assert.equal(live.prompt, 'live reply');
   assert.equal(live.turns, 2);
+  // Written only once the running turn had its result, so Claude Code could not read the two as one turn.
+  assert.equal(live.overlap, false);
+  assert.equal(h.events.done.length, 1);
   assert.equal((await h.adapter.probe!(h.ctl)).verdict, 'unknown');
   await h.adapter.reply(h.ctl, 'idle reply');
   assert.equal((await h.report(1)).turns, 3);
@@ -340,15 +340,6 @@ test('Claude Code may not edit by a relative path, which it would resolve agains
   assert.deepEqual((await h.report()).replies[0].response, { behavior: 'deny', message: 'This job is read-only.' });
 });
 
-test('A reply Claude Code reads together with the running turn ends the job on its one result', async (t) => {
-  const h = harness(t, 'coalesce');
-  await h.adapter.start(h.ctl);
-  await h.event('session');
-  await h.adapter.reply(h.ctl, 'live reply');
-  assert.equal((await h.report()).prompt, 'live reply');
-  assert.equal((await h.adapter.probe!(h.ctl)).verdict, 'unknown');
-});
-
 test('Without automatic mode, a writable job runs in the manual one and says so', async (t) => {
   const h = harness(t, 'first');
   fs.writeFileSync(path.join(h.cwd, 'no-auto'), '');
@@ -367,8 +358,9 @@ test('Without automatic mode, a writable job runs in the manual one and says so'
 });
 
 test("A Claude worker does not inherit the session variables of the Claude Code session that started the daemon", () => {
-  const env = workerEnv({ PATH: '/bin', CLAUDECODE: '1', CLAUDE_CODE_SESSION_ID: 's', CLAUDE_CODE_ENTRYPOINT: 'claude-desktop', CLAUDE_EFFORT: 'high', CLAUDE_CODE_USE_BEDROCK: '1', ANTHROPIC_API_KEY: 'k' });
-  for (const key of ['CLAUDECODE', 'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_EFFORT']) assert.equal(env[key], undefined, key);
+  const host = ['CLAUDECODE', 'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_EFFORT', 'CLAUDE_AGENT_SDK_MCP_NO_PREFIX', 'CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH', 'CLAUDE_CODE_MESSAGING_SOCKET'];
+  const env = workerEnv({ PATH: '/bin', ...Object.fromEntries(host.map((key) => [key, '1'])), CLAUDE_CODE_USE_BEDROCK: '1', ANTHROPIC_API_KEY: 'k' });
+  for (const key of host) assert.equal(env[key], undefined, key);
   assert.equal(env.CLAUDE_CODE_USE_BEDROCK, '1');
   assert.equal(env.ANTHROPIC_API_KEY, 'k');
 });

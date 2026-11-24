@@ -116,7 +116,7 @@ private enum WelcomePage: CaseIterable {
                 .multilineTextAlignment(.leading)
             }
         case .needs:
-            paragraph(String(localized: "Approvals and questions from agents appear in Needs You. Answer them here, or open a waiting Claude session in Claude. Close the window and Crew stays in the menu bar, still running jobs."))
+            paragraph(String(localized: "Approvals and questions from agents appear in Needs You. Answer them here, or open a waiting lead session in its app. Close the window and Crew stays in the menu bar, still running jobs."))
         case .setup:
             paragraph(String(localized: "Overview lists what is still missing, such as `codex login` for Codex or running `agy` once for Antigravity. Choose which agent does what in Settings."))
         }

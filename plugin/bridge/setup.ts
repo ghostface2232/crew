@@ -146,12 +146,14 @@ export async function register(asked = false): Promise<Registration> {
   // The command follows Claude Code's registration, or Codex's for a user without Claude Code.
   const owner = claude ?? codex!;
   if (owner.ok && owner.current) linkCommand(root);
-  // Recorded, and older copies pruned, only once every host runs this copy: a host left on an older copy still needs
-  // it, and the next start tries again.
-  if (hosts.every((host) => host.ok && host.current)) {
-    if (PACKAGED) fs.writeFileSync(RECORD, `${JSON.stringify({ root, version: VERSION, build: installed().build }, null, 2)}\n`);
-    if (COPIED) prunePlugins();
+  // Recorded once the command's host runs this copy, so an older copy finds a newer one registered (newerRegistration)
+  // even while another host fails. Complete, and older copies pruned, only once every host runs it: a host left on an
+  // older copy still needs it, and the next start tries again.
+  const complete = hosts.every((host) => host.ok && host.current);
+  if (PACKAGED && owner.ok && owner.current) {
+    fs.writeFileSync(RECORD, `${JSON.stringify({ root, version: VERSION, build: installed().build, complete }, null, 2)}\n`);
   }
+  if (complete && COPIED) prunePlugins();
   const detail = [claude?.detail ?? 'Claude Code was not found.', codex && `Codex: ${codex.detail}`].filter(Boolean).join(' ');
   return { ok: hosts.every((host) => host.ok), detail };
 }
@@ -262,7 +264,8 @@ export async function registrationMoved(): Promise<boolean> {
 export function registered(): boolean {
   try {
     const record = JSON.parse(fs.readFileSync(RECORD, 'utf8'));
-    return record.root === registeredRoot() && record.version === VERSION && record.build === installed().build;
+    // A record from before `complete` was kept was written only once every host ran its copy.
+    return record.root === registeredRoot() && record.version === VERSION && record.build === installed().build && record.complete !== false;
   } catch {
     return false;
   }
@@ -364,7 +367,8 @@ export function ledgerItem(home = HOME): SetupItem | null {
  * Claude Code and need not trust hooks they never run.
  */
 async function codexLeadItems(bin: string): Promise<SetupItem[]> {
-  const list = await run(bin, ['plugin', 'list'], 60_000);
+  // Only Crew's marketplace: the whole list includes remote marketplaces, which can take a minute and megabytes.
+  const list = await run(bin, ['plugin', 'list', '--marketplace', 'crew'], 60_000);
   // Columns are padded with two or more spaces: id, status ("installed, enabled", "not installed"), version, source.
   const columns = list.ok ? list.out.split('\n').map((line) => line.trim().split(/\s{2,}/)).find((row) => row[0] === CODEX_PLUGIN) : undefined;
   const status = columns?.[1] ?? '';

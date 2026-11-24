@@ -59,15 +59,27 @@ async function waitFor(check: () => Promise<boolean>, ms: number): Promise<boole
 let ensuring: Promise<void> | null = null;
 /** This process got a filtered environment from its host (a Codex MCP server), so a daemon it starts says so. */
 let partial = false;
+/** This process runs in Codex's Windows job object, which ends a daemon it spawns when Codex exits. */
+let inCodexJob = false;
 
 export function partialEnvironment(): void {
   partial = true;
+  inCodexJob = true;
+}
+
+/** For a Codex hook: its environment is whole, but under `codex exec` what it spawns ends with Codex. */
+export function codexJob(): void {
+  inCodexJob = true;
 }
 
 /** Starts the daemon if it is not running, and replaces an idle one that runs code other than what is installed. */
 export function ensureDaemon(): Promise<void> {
   // Concurrent callers share one attempt, so a cold start spawns a single daemon.
-  ensuring ??= startDaemon().finally(() => {
+  ensuring ??= startDaemon().then(async () => {
+    // A Codex MCP server starting at the same moment may have won the start; its daemon gives way to this whole
+    // environment now, rather than on some later call, if it is still idle.
+    if (!partial && (await health())?.partialEnv) await startDaemon();
+  }).finally(() => {
     ensuring = null;
   });
   return ensuring;
@@ -150,9 +162,9 @@ const DAEMON_VARS = ['CREW_PORT', 'CREW_AGENTGAUGE_DIR', 'ELECTRON_RUN_AS_NODE']
  * this client's, and cleared where this client has none: a value only the user's environment holds would send the
  * daemon to a Crew this client does not use. Windows names are case-insensitive, so they are looked up that way.
  */
-export function outsideJobCommand(node: string, script: string, log: string, home: string, env: NodeJS.ProcessEnv): string | null {
+export function outsideJobCommand(node: string, script: string, log: string, home: string, env: NodeJS.ProcessEnv, partialEnv: boolean): string | null {
   const value = (name: string) => env[Object.keys(env).find((key) => key.toUpperCase() === name) ?? name];
-  const vars: [string, string][] = [['CREW_HOME', home], ['CREW_PARTIAL_ENV', '1'], ...DAEMON_VARS.map((name): [string, string] => [name, value(name) ?? ''])];
+  const vars: [string, string][] = [['CREW_HOME', home], ['CREW_PARTIAL_ENV', partialEnv ? '1' : ''], ...DAEMON_VARS.map((name): [string, string] => [name, value(name) ?? ''])];
   if ([node, script, log, ...vars.flat()].some((text) => /["%\r\n]/.test(text))) return null;
   // /v:off: a user's delayed expansion would read `!name!` in a path as a variable.
   return `cmd.exe /d /v:off /s /c "${vars.map(([key, text]) => `set "${key}=${text}"&& `).join('')}"${node}" "${script}" >> "${log}" 2>&1"`;
@@ -164,7 +176,7 @@ export function outsideJobCommand(node: string, script: string, log: string, hom
  * session. False when WMI created nothing, to spawn it as usual instead.
  */
 async function startOutsideJob(script: string, env: NodeJS.ProcessEnv): Promise<boolean> {
-  const command = outsideJobCommand(process.execPath, script, path.join(HOME, 'daemon.log'), path.resolve(HOME), env);
+  const command = outsideJobCommand(process.execPath, script, path.join(HOME, 'daemon.log'), path.resolve(HOME), env, partial);
   if (!command) return false;
   // PowerShell also ends a single-quoted string at a curly quote, so each is doubled like the straight one.
   const literal = (text: string) => `'${text.replace(/['\u2018-\u201B]/g, '$&$&')}'`;
@@ -215,7 +227,7 @@ async function startDaemon(): Promise<void> {
     if (spawnError) throw new Error(`Could not start the Crew daemon: ${spawnError.message}`);
     return (await health()) !== null;
   }, 8000);
-  const outside = partial && process.platform === 'win32' && await startOutsideJob(script, env);
+  const outside = inCodexJob && process.platform === 'win32' && await startOutsideJob(script, env);
   if (!outside) spawnHere();
   // WMI vouches only that cmd.exe was created, so a daemon that did not come up from there is started the usual way.
   // One that comes up late finds this one recorded and exits (daemon.ts bind).

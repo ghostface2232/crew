@@ -147,12 +147,16 @@ export function treeKillCommand(pid: number | undefined, shell: boolean, platfor
 
 type TimedOptions = Pick<SpawnOptions, 'cwd' | 'env' | 'shell' | 'windowsHide'> & { timeout: number; maxBuffer?: number };
 
+/** How long a command stopped with SIGTERM has before it is killed and the call returns without it. */
+const KILL_GRACE_MS = 2_000;
+
 /**
  * Runs a command like `execFile`, with a timeout that ends the whole command. Node's own timeout signals only the
  * process it started, which for a Windows `.cmd` shim is cmd.exe, so the agent the shim ran was left running; elsewhere
  * a wrapper script's child kept running and holding the output, so the call did not return until it ended. So on
  * Windows the tree is ended with taskkill, and elsewhere the command runs in its own process group, which is signalled
- * as a whole. execFile cannot start one: it does not pass `detached` on.
+ * as a whole. execFile cannot start one: it does not pass `detached` on. A group still running after a grace period
+ * is killed, and the call returns even if something that left the group still holds the output.
  */
 export function execTimed(bin: string, args: readonly string[], options: TimedOptions,
   callback: (err: Error | null, stdout: string, stderr: string) => void): ChildProcess {
@@ -164,16 +168,31 @@ export function execTimed(bin: string, args: readonly string[], options: TimedOp
   let timedOut = false;
   let failure: Error | null = null;
   let finished = false;
+  let killer: NodeJS.Timeout | undefined;
+  const signal = (name: NodeJS.Signals) => {
+    if (group && child.pid !== undefined) {
+      try { process.kill(-child.pid, name); } catch { child.kill(name); }
+    } else child.kill(name);
+  };
   const stop = () => {
-    const kill = treeKillCommand(child.pid, Boolean(rest.shell));
+    if (killer) return;
+    // A native executable's children outlive it as a shim's do, so the tree is ended whether or not a shell ran it.
+    const kill = treeKillCommand(child.pid, true);
     if (kill) execFile(kill.bin, kill.args, { windowsHide: true }, (err) => { if (err) child.kill(); });
-    else if (group && child.pid !== undefined) {
-      try { process.kill(-child.pid, 'SIGTERM'); } catch { child.kill(); }
-    } else child.kill();
+    else signal('SIGTERM');
+    killer = setTimeout(() => {
+      if (!kill) signal('SIGKILL');
+      child.stdout.destroy();
+      child.stderr.destroy();
+      finish(null);
+    }, KILL_GRACE_MS);
+    killer.unref();
   };
   const collect = (append: (text: string) => void) => (chunk: string) => {
+    // Past the limit nothing more is kept, even from a command that goes on writing after it is told to stop.
+    if (failure) return;
     append(chunk);
-    if (!failure && stdout.length + stderr.length > maxBuffer) {
+    if (stdout.length + stderr.length > maxBuffer) {
       failure = new Error('maxBuffer exceeded');
       stop();
     }
@@ -184,6 +203,7 @@ export function execTimed(bin: string, args: readonly string[], options: TimedOp
     if (finished) return;
     finished = true;
     clearTimeout(timer);
+    clearTimeout(killer);
     callback(timedOut ? new Error(`timed out after ${timeout / 1000}s`) : failure ?? err, stdout, stderr);
   };
   // A command that cannot start (ENOENT) keeps its code, as execFile's error does.

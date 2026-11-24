@@ -3,7 +3,8 @@ import type { CSSProperties, ReactNode } from 'react';
 import { ArrowUp16Filled, CheckmarkCircleRegular, ErrorCircleRegular } from '@fluentui/react-icons';
 import appIcon from './icons/CrewAppIcon.png';
 import { desktop } from './desktop.ts';
-import { AgentMark, Chip, Dialog, Icon } from './ui.tsx';
+import { AgentMark, Chip, Dialog, Icon, tNodes } from './ui.tsx';
+import { t } from './i18n.ts';
 import styles from './Onboarding.module.css';
 
 type Page = { title: string; art: ReactNode; body: ReactNode };
@@ -28,7 +29,7 @@ export function Onboarding({ close }: { close: () => void }) {
   }, [pages.length]);
   const page = pages[index];
   return (
-    <Dialog label="Welcome to Crew" onClose={finish} className={styles.sheet}>
+    <Dialog label={t('Welcome to Crew')} onClose={finish} className={styles.sheet}>
       {/* Built from the board's own components so each illustration matches the UI it describes. */}
       <div className={styles.stage} aria-hidden="true" inert key={`art-${index}`}>{page.art}</div>
       {/* Every page's text shares one grid cell so the sheet keeps the tallest page's height and never jumps. */}
@@ -40,25 +41,25 @@ export function Onboarding({ close }: { close: () => void }) {
           </div>
         ))}
       </div>
-      <div className={styles.dots} role="tablist" aria-label="Pages">
+      <div className={styles.dots} role="tablist" aria-label={t('Pages')}>
         {pages.map((item, n) => (
           <button
             key={item.title}
             role="tab"
             aria-selected={n === index}
-            aria-label={`${item.title}, page ${n + 1} of ${pages.length}`}
+            aria-label={t('{title}, page {page} of {count}', { title: item.title, page: n + 1, count: pages.length })}
             onClick={() => setIndex(n)}
           />
         ))}
       </div>
       <footer className={styles.footer}>
         {index === 0 ? (
-          <button type="button" className="large" onClick={finish}>Skip</button>
+          <button type="button" className="large" onClick={finish}>{t('Skip')}</button>
         ) : (
-          <button type="button" className="large" onClick={() => setIndex(index - 1)}>Back</button>
+          <button type="button" className="large" onClick={() => setIndex(index - 1)}>{t('Back')}</button>
         )}
         <button type="button" className="large prominent" data-autofocus onClick={() => (last ? finish() : setIndex(index + 1))}>
-          {last ? 'Get Started' : 'Continue'}
+          {last ? t('Get Started') : t('Continue')}
         </button>
       </footer>
     </Dialog>
@@ -72,9 +73,9 @@ const Mark = ({ agent, state }: { agent: string; state: string }) => (
 function WelcomeArt() {
   // Every agent shown working at once; role assignments are user-configured, so none is given a fixed role here.
   const agents: [string, string, string, string][] = [
-    ['claude', 'Claude', 'Working', 'working'],
-    ['codex', 'Codex', 'Working', 'working'],
-    ['antigravity', 'Antigravity', 'Working', 'working'],
+    ['claude', 'Claude', t('Working'), 'working'],
+    ['codex', 'Codex', t('Working'), 'working'],
+    ['antigravity', 'Antigravity', t('Working'), 'working'],
   ];
   return (
     <div className={styles.welcome}>
@@ -100,7 +101,7 @@ function CommandArt() {
         <span>Claude Code</span>
       </div>
       <p className={styles.prompt}>
-        <span className={styles.slash}>/crew:run</span> Add a dark mode<i className={styles.caret} />
+        <span className={styles.slash}>/crew:run</span> {t('Add a dark mode')}<i className={styles.caret} />
       </p>
       <div className={styles.composerFoot}>
         <span className="caption secondary">~/Projects/app</span>
@@ -115,24 +116,24 @@ function NeedsArt() {
     <div className={styles.needs}>
       <div className={`card need ${styles.behind}`}>
         <div className="need-bar">
-          <Chip state="waiting">Input</Chip>
+          <Chip state="waiting">{t('Input')}</Chip>
           <span className="need-who"><AgentMark agent="claude" size={13} /><span>Claude</span></span>
         </div>
       </div>
       <div className={`card need ${styles.front}`}>
         <div className="need-head">
           <div className="need-bar">
-            <Chip state="waiting">Approval</Chip>
+            <Chip state="waiting">{t('Approval')}</Chip>
             <span className="need-who"><AgentMark agent="codex" size={13} /><span>Codex</span></span>
-            <span className="need-age digits">2m</span>
+            <span className="need-age digits">{t('{n}m', { n: 2 })}</span>
           </div>
-          <p className="need-title">Add a dark mode to the settings page</p>
+          <p className="need-title">{t('Add a dark mode to the settings page')}</p>
         </div>
         <div className="answer">
-          <p className="headline">Run <code>npm test</code></p>
+          <p className="headline">{tNodes('Run {command}', { command: <code>npm test</code> })}</p>
           <div className="answer-actions">
-            <button className="small">Deny</button>
-            <button className="small prominent">Approve</button>
+            <button className="small">{t('Deny')}</button>
+            <button className="small prominent">{t('Approve')}</button>
           </div>
         </div>
       </div>
@@ -149,7 +150,7 @@ function SetupArt() {
   ];
   return (
     <div className={`card ${styles.setup}`}>
-      <h3 className="card-title">Set up Crew</h3>
+      <h3 className="card-title">{t('Set up Crew')}</h3>
       <ul className="setup-list">
         {items.map(([label, detail, ok]) => (
           <li key={label} data-ok={ok || undefined}>
@@ -159,7 +160,7 @@ function SetupArt() {
           </li>
         ))}
       </ul>
-      <div className="setup-actions"><button className="small">Check Again</button></div>
+      <div className="setup-actions"><button className="small">{t('Check Again')}</button></div>
     </div>
   );
 }
@@ -167,29 +168,28 @@ function SetupArt() {
 const withCode = (text: string) => text.split('`').map((part, index) => (index % 2 ? <code key={index}>{part}</code> : part));
 
 const COMMANDS: [string, string][] = [
-  ['/crew:run <task>', 'Plan, build, review, and fix with the crew'],
-  ['/crew:review', 'Review a change'],
-  ['/crew:debate', 'Talk through a hard decision'],
-  ['/crew:board', 'Open this board in Claude'],
+  ['/crew:run <task>', t('Plan, build, review, and fix with the crew')],
+  ['/crew:review', t('Review a change')],
+  ['/crew:debate', t('Talk through a hard decision')],
+  ['/crew:board', t('Open this board in Claude')],
 ];
 
 const PAGES: Page[] = [
   {
-    title: 'Welcome to Crew',
+    title: t('Welcome to Crew'),
     art: <WelcomeArt />,
     body: (
       <p className="secondary">
-        Crew runs several coding agents together. Claude leads from Claude Code and hands pieces of the work to the
-        other agents to run in parallel. This app shows every agent live and lets you answer them.
+        {t('Crew runs several coding agents together. Claude leads from Claude Code and hands pieces of the work to the other agents to run in parallel. This app shows every agent live and lets you answer them.')}
       </p>
     ),
   },
   {
-    title: 'Start in Claude Code',
+    title: t('Start in Claude Code'),
     art: <CommandArt />,
     body: (
       <>
-        <p className="secondary">Open a new Claude Code session, then type a command.</p>
+        <p className="secondary">{t('Open a new Claude Code session, then type a command.')}</p>
         <dl className={styles.commands}>
           {COMMANDS.map(([command, what]) => (
             <div key={command}>
@@ -202,24 +202,26 @@ const PAGES: Page[] = [
     ),
   },
   {
-    title: 'Answer from here',
+    title: t('Answer from here'),
     art: <NeedsArt />,
     body: (
       <p className="secondary">
-        When an agent needs approval or asks a question, it appears in Needs You. Answer it here, or open waiting Claude
-        sessions in Claude. {desktop
-          ? 'Closing the window keeps Crew in the tray, and jobs keep running.'
-          : 'Jobs keep running after you close the board.'}
+        {t('When an agent needs approval or asks a question, it appears in Needs You. Answer it here, or open waiting Claude sessions in Claude.')}{' '}
+        {desktop
+          ? t('Closing the window keeps Crew in the tray, and jobs keep running.')
+          : t('Jobs keep running after you close the board.')}
       </p>
     ),
   },
   {
-    title: 'Finish setting up',
+    title: t('Finish setting up'),
     art: <SetupArt />,
     body: (
       <p className="secondary">
-        Overview lists anything still missing, such as signing in to Codex with <code>codex login</code> or signing in to
-        Antigravity by running <code>agy</code> once. Choose which agent takes which work in Settings.
+        {tNodes(
+          'Overview lists anything still missing, such as signing in to Codex with {login} or signing in to Antigravity by running {agy} once. Choose which agent takes which work in Settings.',
+          { login: <code>codex login</code>, agy: <code>agy</code> },
+        )}
       </p>
     ),
   },

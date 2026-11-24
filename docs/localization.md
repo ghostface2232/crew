@@ -52,7 +52,7 @@ Choosing per platform convention rather than adding a setting keeps one source o
 | working, running | 작업 중, 실행 중 | waiting | 대기 중 |
 | done | 완료 | failed | 실패 |
 | cancelled | 취소됨 | New Job | 새 작업 |
-| Overview | 개요 | note | 노트 |
+| Overview | 한눈에 보기 | note | 노트 |
 | sub-agent | 서브에이전트 | details | 세부 정보 |
 | instructions (shared) | 지침 | instructions (a job's) | 지시 내용 |
 

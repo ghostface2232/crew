@@ -91,8 +91,8 @@ export function Palette({ state, names, projects, origin, close, actions }: {
       run: actions.settings, preview: () => ({ eyebrow: t('Action'), lines: [], text: t('Configure roles, model presets, and shared instructions.') }),
     });
     list.push({
-      id: 'welcome', group: 'Actions', title: 'Welcome to Crew', subtitle: 'Commands and where to start', icon: HandWaveRegular,
-      run: actions.welcome, preview: () => ({ eyebrow: 'Action', lines: [], text: 'Show the first-run guide again: the crew commands, Needs You, and setup.' }),
+      id: 'welcome', group: 'Actions', title: t('Welcome to Crew'), subtitle: t('Commands and where to start'), icon: HandWaveRegular,
+      run: actions.welcome, preview: () => ({ eyebrow: t('Action'), lines: [], text: t('Show the first-run guide again: the crew commands, Needs You, and setup.') }),
     });
     if (notifyState !== 'unsupported') {
       const on = notifyOn;

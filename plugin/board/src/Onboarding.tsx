@@ -8,7 +8,7 @@ import styles from './Onboarding.module.css';
 
 type Page = { title: string; art: ReactNode; body: ReactNode };
 
-/** The first-run guide, as WelcomeView in the app: what Crew is, how to start work, where requests arrive, and what to set up. */
+/** First-run guide, matching WelcomeView in the macOS app: what Crew is, how to start work, where requests arrive, and what to set up. */
 export function Onboarding({ close }: { close: () => void }) {
   const [index, setIndex] = useState(0);
   const pages = PAGES;
@@ -29,9 +29,9 @@ export function Onboarding({ close }: { close: () => void }) {
   const page = pages[index];
   return (
     <Dialog label="Welcome to Crew" onClose={finish} className={styles.sheet}>
-      {/* Drawn from the board's own parts, so the pictures match the pages they point to. */}
+      {/* Built from the board's own components so each illustration matches the UI it describes. */}
       <div className={styles.stage} aria-hidden="true" inert key={`art-${index}`}>{page.art}</div>
-      {/* Every page's text takes the same cell, so the sheet keeps the tallest one's height and never jumps. */}
+      {/* Every page's text shares one grid cell so the sheet keeps the tallest page's height and never jumps. */}
       <div className={styles.copies}>
         {pages.map((item, n) => (
           <div className={styles.copy} key={item.title} data-current={n === index || undefined} aria-hidden={n !== index || undefined}>
@@ -70,7 +70,7 @@ const Mark = ({ agent, state }: { agent: string; state: string }) => (
 );
 
 function WelcomeArt() {
-  // Every agent at work at once; which agent takes which work is the user's setting, so none is given a role here.
+  // Every agent shown working at once; role assignments are user-configured, so none is given a fixed role here.
   const agents: [string, string, string, string][] = [
     ['claude', 'Claude', 'Working', 'working'],
     ['codex', 'Codex', 'Working', 'working'],
@@ -180,7 +180,7 @@ const PAGES: Page[] = [
     body: (
       <p className="secondary">
         Crew runs several coding agents together. Claude leads from Claude Code and hands pieces of the work to the
-        other agents, which work in parallel. This app shows every agent live and lets you answer them.
+        other agents to run in parallel. This app shows every agent live and lets you answer them.
       </p>
     ),
   },
@@ -206,8 +206,8 @@ const PAGES: Page[] = [
     art: <NeedsArt />,
     body: (
       <p className="secondary">
-        When an agent needs approval or asks a question, it shows in Needs You. Answer it here, or open a Claude
-        session in Claude. {desktop
+        When an agent needs approval or asks a question, it appears in Needs You. Answer it here, or open waiting Claude
+        sessions in Claude. {desktop
           ? 'Closing the window keeps Crew in the tray, and jobs keep running.'
           : 'Jobs keep running after you close the board.'}
       </p>
@@ -218,7 +218,7 @@ const PAGES: Page[] = [
     art: <SetupArt />,
     body: (
       <p className="secondary">
-        Overview lists anything still missing, such as signing in to Codex with <code>codex login</code>, or to
+        Overview lists anything still missing, such as signing in to Codex with <code>codex login</code> or signing in to
         Antigravity by running <code>agy</code> once. Choose which agent takes which work in Settings.
       </p>
     ),

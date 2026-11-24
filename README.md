@@ -3,7 +3,7 @@
 
 # Crew
 
-A Claude Code plugin that runs several coding agents together: Claude, Codex, and Antigravity. Claude leads from a Claude Code session, plans the work, and hands pieces of it to the other agents, which work in parallel while Claude reviews what comes back and decides what is merged. Which agent takes which kind of work is a setting you can change at any time. A native SwiftUI macOS app, a Windows Electron app, and a React web board show all three agents in real time.
+A Claude Code plugin that runs several coding agents together: Claude, Codex, and Antigravity. Claude leads from a Claude Code session, planning the work and handing pieces of it to the other agents in parallel while reviewing what comes back and deciding what is merged. You can change which agent takes each kind of work at any time. A native SwiftUI macOS app, a Windows Electron app, and a React web board show all three agents in real time.
 
 <img width="1440" alt="crew-screenshot" src="https://github.com/user-attachments/assets/eec6a201-8395-4dc9-a77c-2e5872aa96d0" />
 

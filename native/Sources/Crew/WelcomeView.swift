@@ -1,13 +1,13 @@
 import SwiftUI
 import AppKit
 
-/// The first-run guide, as `Onboarding` on the web board: what Crew is, how to start work, where requests arrive, and
-/// what to set up. Its pictures are drawn from the app's own parts, so they match the pages they point to.
+/// First-run guide, matching `Onboarding` on the web board: what Crew is, how to start work, where requests arrive,
+/// and what to set up. Its illustrations use the app's own views so they match the UI they describe.
 struct WelcomeView: View {
     let store: CrewStore
     @State private var index = 0
     @Environment(\.dismiss) private var dismiss
-    /// Held by the sheet itself, so the arrow keys page through it.
+    /// Keeps focus on the sheet itself so arrow keys page through it.
     @FocusState private var focused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private static let pages = WelcomePage.allCases
@@ -15,8 +15,8 @@ struct WelcomeView: View {
     var body: some View {
         VStack(spacing: 0) {
             art
-            // Every page's text takes the same cell, so the sheet keeps the tallest one's height and never jumps;
-            // a shorter page's text sits centered in it.
+            // Every page's text shares one cell so the sheet keeps the tallest page's height and never jumps;
+            // shorter pages sit centered vertically.
             ZStack {
                 ForEach(Array(Self.pages.enumerated()), id: \.offset) { n, page in
                     copy(page).opacity(n == index ? 1 : 0).accessibilityHidden(n != index)
@@ -53,7 +53,7 @@ struct WelcomeView: View {
     private var art: some View {
         let shape = RoundedRectangle(cornerRadius: Welcome.artRadius)
         return ZStack {
-            // A tint of the accent that fades into the sheet, as on the board.
+            // Accent tint fading into the sheet background, matching the web board.
             LinearGradient(colors: [Welcome.tintTop, Welcome.tintBottom], startPoint: .top, endPoint: .bottom)
             Self.pages[index].art
                 .id(index)
@@ -101,7 +101,7 @@ private enum WelcomePage: CaseIterable {
     @ViewBuilder var body: some View {
         switch self {
         case .welcome:
-            paragraph("Crew runs several coding agents together. Claude leads from Claude Code and hands pieces of the work to the other agents, which work in parallel. This app shows every agent live and lets you answer them.")
+            paragraph("Crew runs several coding agents together. Claude leads from Claude Code and hands pieces of the work to the other agents to run in parallel. This app shows every agent live and lets you answer them.")
         case .commands:
             VStack(spacing: Space.l) {
                 paragraph("Open a new Claude Code session, then type a command.")
@@ -116,9 +116,9 @@ private enum WelcomePage: CaseIterable {
                 .multilineTextAlignment(.leading)
             }
         case .needs:
-            paragraph("When an agent needs approval or asks a question, it shows in Needs You. Answer it here, or open a Claude session in Claude. Closing the window keeps Crew in the menu bar, and jobs keep running.")
+            paragraph("When an agent needs approval or asks a question, it appears in Needs You. Answer it here, or open waiting Claude sessions in Claude. Closing the window keeps Crew in the menu bar, and jobs keep running.")
         case .setup:
-            paragraph("Overview lists anything still missing, such as signing in to Codex with `codex login`, or to Antigravity by running `agy` once. Choose which agent takes which work in Settings.")
+            paragraph("Overview lists anything still missing, such as signing in to Codex with `codex login` or signing in to Antigravity by running `agy` once. Choose which agent takes which work in Settings.")
         }
     }
     private static let commandList = [
@@ -140,22 +140,22 @@ private enum WelcomePage: CaseIterable {
     }
 }
 
-/// The app icon above an agent card, every agent at work at once; which agent takes which work is the user's
-/// setting, so none is given a role here.
+/// The app icon above an agent card with all agents shown working at once; role assignments are user-configured,
+/// so none is given a fixed role here.
 private struct WelcomeArt: View {
     var body: some View {
         VStack(spacing: Space.s) {
             Image(nsImage: NSApp.applicationIconImage).resizable().interpolation(.high).scaledToFit()
                 .frame(width: Welcome.appIcon, height: Welcome.appIcon)
                 .shadow(color: Welcome.iconShadow, radius: Welcome.shadowRadius, y: Welcome.shadowOffset)
-            // Three columns of one width with no padding at the card's ends, so the card's edges frame the end
-            // columns as the dividers frame the middle one.
+            // Three equal-width columns without outer padding so the card edges frame the outer columns just as the
+            // dividers frame the center one.
             HStack(spacing: 0) {
                 ForEach(Array(["claude", "codex", "antigravity"].enumerated()), id: \.offset) { n, agent in
                     VStack(spacing: Space.xxs) {
                         AgentMark(agent: agent, size: MarkSize.card)
                             .overlay(alignment: .bottomTrailing) {
-                                // A working dot ringed in the card's color, as on the Overview's agent avatars.
+                                // Working status dot ringed in the card's surface color, matching Overview's agent avatars.
                                 Circle().fill(Palette.accent).padding(Welcome.dotRing).background(WorkspaceStyle.surface, in: Circle())
                                     .frame(width: Welcome.statusDot, height: Welcome.statusDot)
                                     .offset(x: Welcome.dotRing * 2, y: Welcome.dotRing * 2)
@@ -175,7 +175,7 @@ private struct WelcomeArt: View {
     }
 }
 
-/// A Claude Code prompt with a command typed.
+/// A Claude Code prompt with a command entered.
 private struct CommandArt: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Space.l) {
@@ -201,7 +201,7 @@ private struct CommandArt: View {
     }
 }
 
-/// A Needs You approval over a waiting Claude session's card.
+/// A Needs You approval card layered over a waiting Claude session card.
 private struct NeedsArt: View {
     var body: some View {
         ZStack(alignment: .top) {
@@ -233,7 +233,7 @@ private struct NeedsArt: View {
             .frame(width: Welcome.artCard - 2 * Space.xl)
             .card(padding: Space.xl)
             .shadow(color: Welcome.cardShadow, radius: Welcome.shadowRadius, y: Welcome.shadowOffset)
-            // Low enough that the waiting session's header shows above it.
+            // Positioned low enough that the waiting session's header shows above it.
             .padding(.top, Space.x6l)
         }
     }
@@ -245,7 +245,7 @@ private struct NeedsArt: View {
     }
 }
 
-/// The Overview's setup checklist with one item missing.
+/// Overview's setup checklist with one incomplete item.
 private struct SetupArt: View {
     @Environment(\.colorScheme) private var scheme
     private static let items = [

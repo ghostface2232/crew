@@ -38,7 +38,7 @@ export function Dispatch({
   // A debate needs the lead to answer each round, so it is not started from here.
   const choices = rolesOf(state).filter((info) => info.role !== 'debate');
   const kind = choices.find((info) => info.role === role)?.kind ?? 'delegate';
-  // The role's holders that are workers; Claude holding it means the lead does it, from a Claude session.
+  // The role's holders that are workers; Claude holding it means a lead session takes it.
   const assignment = state.roles[intent === 'question' ? 'delegate' : role];
   const info = rolesOf(state).find((other) => other.role === (intent === 'question' ? 'delegate' : role));
   const workers = preferredWorkers(info, holdersOf(assignment)).filter((holder) => holder in state.agents);
@@ -70,7 +70,7 @@ export function Dispatch({
       if (!(intent === 'information' && target === 'global') && !cwd.trim())
         throw new Error(t('Enter a project directory first.'));
       if (intent !== 'information' && leadOnly)
-        throw new Error(t('Claude, the lead, holds this role: start it from a Claude Code or Codex session.'));
+        throw new Error(t('Claude holds this role, so it starts from a lead session: Claude Code does it itself, and Codex hands it to a Claude worker.'));
       if (intent !== 'information' && !worker?.enabled)
         throw new Error(t('The assigned agent is unavailable. Choose an enabled agent in Settings.'));
       const allowed = targets
@@ -161,7 +161,7 @@ export function Dispatch({
                     label={t('Assigned to')}
                     value={agent ?? ''}
                     options={[
-                      ...(agent ? [] : [['', t('Claude, the lead')] as ['', string]]),
+                      ...(agent ? [] : [['', t('Claude, in a lead session')] as ['', string]]),
                       ...workers.map((id): [WorkerAgent, string] => [id, state.agents[id].enabled ? state.agents[id].name : t('{name} (disabled)', { name: state.agents[id].name })]),
                     ]}
                     onChange={(id) => id && setPicked(id)}
@@ -171,14 +171,14 @@ export function Dispatch({
                 <div className="field">
                   <span>{t('Assigned to')}</span>
                   <p className={styles.worker}>
-                    {worker ? (worker.enabled ? worker.name : t('{name} (disabled)', { name: worker.name })) : leadOnly ? t('Claude, the lead') : t('No agent assigned')}
+                    {worker ? (worker.enabled ? worker.name : t('{name} (disabled)', { name: worker.name })) : leadOnly ? t('Claude, in a lead session') : t('No agent assigned')}
                   </p>
                 </div>
               )}
             </div>
           )}
           {intent !== 'information' && leadOnly && (
-            <p className="callout secondary">{t('Start this job from a Claude Code or Codex session, which does the work itself or in a subagent.')}</p>
+            <p className="callout secondary">{t('Start this job from a Claude Code or Codex session: Claude Code does it itself or in a subagent, and Codex hands it to a Claude worker.')}</p>
           )}
           {intent === 'command' && kind === 'polish' && (
             <label className="field">

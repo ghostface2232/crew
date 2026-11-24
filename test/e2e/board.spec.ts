@@ -917,7 +917,7 @@ test('New Job picks among a role\'s worker holders, and a role only Claude holds
   await pick(assigned, 'Antigravity');
   await page.getByRole('textbox', { name: 'New job instructions' }).fill('Build the piece');
   await pick(page.getByRole('combobox', { name: 'Role', exact: true }), 'Wording');
-  await expect(page.getByText('Claude, the lead', { exact: true })).toBeVisible();
+  await expect(page.getByText('Claude, in a lead session', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Send Job' })).toBeDisabled();
   await pick(page.getByRole('combobox', { name: 'Role', exact: true }), 'Implementation');
   await page.getByRole('button', { name: 'Send Job' }).click();
@@ -1732,7 +1732,7 @@ test('New Job shows who takes a question, and says when only the lead can', asyn
   await request.post('/__push', { data: { type: 'state', data } });
   await newJob(page);
   await page.getByRole('radio', { name: 'Question' }).click();
-  await expect(page.getByText('Start this job from a Claude Code or Codex session, which does the work itself or in a subagent.')).toBeVisible();
+  await expect(page.getByText('Start this job from a Claude Code or Codex session: Claude Code does it itself or in a subagent, and Codex hands it to a Claude worker.')).toBeVisible();
 });
 
 test('About Crew puts the check on the status row and an update action beside the note', async ({ page }) => {

@@ -404,6 +404,15 @@ test('a role the lead holds starts no worker, and a pick outside the holders is 
   assert.match(pick('review', 'claude').yours, /no worker was started\. Run the crew:self-reviewer subagent[^]*other holders: codex/);
   assert.match(pick('polish', undefined).yours, /^polish is yours/);
   assert.throws(() => pick('review', 'antigravity'), /antigravity does not hold review; its holders are codex or claude\. To use another agent, ask the user to add it under Settings, Roles, Cross-review[^]*roles\.review\.agents/);
+  // Under a Codex lead the roles turn around: Codex's are the lead's own, and Claude's start a Claude worker.
+  const codexRoles = { ...roles, delegate: { agents: ['codex'] } };
+  const codexPick = vm.runInNewContext(`const holderName = (a) => a === 'codex' ? 'you, Codex' : a; const holder = (r, t) => t[r].agents.join(' or '); ${stripTypeScriptTypes(code)}; pickHolder`, {
+    roles: codexRoles, LEAD: 'claude', loadConfig: () => ({ roles: codexRoles, antigravity: { enabled: true } }), defaultHolder, disabledAgents, assignHint, selfReviewer: () => 'a subagent', host: 'codex',
+  });
+  assert.deepEqual({ ...codexPick('review', undefined) }, { agent: 'claude' });
+  assert.match(codexPick('review', 'codex').yours, /^review is yours: no worker was started\.[^]*other holders: claude/);
+  assert.deepEqual({ ...codexPick('polish', undefined) }, { agent: 'claude' });
+  assert.match(codexPick('delegate', undefined).yours, /^delegate is yours[^]*other holders: none/);
 });
 
 test('model notes are appended to an answer, and a daemon that cannot give them leaves it as it was', async () => {
@@ -447,7 +456,9 @@ test('the session instructions fit what Claude Code keeps of them', () => {
     assert.ok(instructions.length <= 4096, `${host}: ${instructions.length} characters`);
     for (const role of ROLE_INFO) assert.ok(instructions.includes(`\`${role.role}\``), role.role);
     assert.match(instructions, /The global one is "balanced"/);
-    assert.match(instructions, host === 'codex' ? /naming `claude` with `agent` starts a Claude worker[\s\S]*the crew:run skill/ : /Picking yourself \(`claude`\)[\s\S]*\/crew:run/);
+    assert.match(instructions, host === 'codex' ? /Picking yourself \(`codex`\)[^\n]*a role held by Claude runs as a Claude worker[\s\S]*the crew:run skill/ : /Picking yourself \(`claude`\)[\s\S]*\/crew:run/);
+    // Each host sees its own agent as itself and every other holder as a worker.
+    assert.match(instructions, host === 'codex' ? /you, Codex[\s\S]*Claude \(a Claude worker\)/ : /you, Claude/);
   }
 });
 

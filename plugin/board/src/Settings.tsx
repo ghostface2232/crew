@@ -615,7 +615,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
               {kind && info.filter((role) => paneKind(role) === kind).map(roleGroup)}
               {kind && (
                 <p className={styles.footnote}>
-                  {t('The lead picks the holder; by default, Antigravity takes wording and Codex the rest, among holders that can. Claude means the lead does it itself.')}
+                  {t("The lead picks an agent for each job, preferring other agents over its own. When a role is assigned to the lead's agent, the lead does the work itself.")}
                 </p>
               )}
               {current === 'presets' && (
@@ -714,7 +714,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
                 <section className={styles.group}>
                   <Scores scores={state.modelScores!} />
                   <p className={styles.footnote}>
-                    {t('Scored from review findings per build size, with fixes scored apart. A model is ranked after three build reviews; a review by its own agent counts half.')}
+                    {t('Scores weigh review findings against build size, with fixes scored separately. Models are ranked after three reviewed builds, and reviews by the same agent count half as much.')}
                   </p>
                 </section>
               )}
@@ -727,7 +727,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
                     </label>
                   </div>
                   <p className={styles.footnote} role={ratingsStatus ? 'alert' : undefined}>
-                    {ratingsStatus || t('The lead and the workers rate each other\'s work as they see it, in turns they already have, and the ratings move half of a score from where the review findings put it. Off, nobody is asked to rate and the scores come from the review findings alone; ratings already given are kept.')}
+                    {ratingsStatus || t('The lead and workers rate each other\'s work, and those ratings make up half of each score. When off, scores come from review findings alone, and existing ratings are kept.')}
                   </p>
                 </section>
               )}

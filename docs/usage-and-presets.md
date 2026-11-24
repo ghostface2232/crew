@@ -41,7 +41,7 @@ G2 (`--json` output) and G3 (activity signal and threshold hook) remain open in 
 
 ## Routing
 
-`route` (the lead's tool and `GET /api/route`) implements [the AgentGauge routing plan](../research/agentgauge-integration.md#82-routing-table) (`plugin/bridge/usage.ts`). It assigns work only to a role's configured holder or the lead (`claude`). Where a role has several usable holders, `route` checks them in preferred worker order (Antigravity first for `polish`, Codex first for all other roles, Claude last) and picks the first one that is not `tight` or `exhausted` before falling back to the first usable holder. Reset advice (`deferUntil`) uses only the windows that decided the provider's status, and projected exhaustion never defers work.
+`route` (the lead's tool and `GET /api/route`) implements [the AgentGauge routing plan](../research/agentgauge-integration.md#82-routing-table) (`plugin/bridge/usage.ts`). It assigns work only to a role's configured holder or the lead. Where a role has several usable holders, `route` checks them in preferred worker order (Antigravity first for `polish`, Codex first for all other roles, Claude last when it is a worker, the lead's own agent after the workers) and picks the first one that is not `tight` or `exhausted` before falling back to the first usable holder. Reset advice (`deferUntil`) uses only the windows that decided the provider's status, and projected exhaustion never defers work.
 
 | Kind | Holder `tight` | Holder `exhausted` |
 | --- | --- | --- |
@@ -51,11 +51,11 @@ G2 (`--json` output) and G3 (activity signal and threshold hook) remain open in 
 | `verify` | Still the holder, one round | Lead runs the app in its own self-review; `degraded` |
 | `debate` | Still the holder, one or two rounds | Lead decides alone and notes debate was skipped; `degraded` |
 | `polish` | Deferred until reset; lead makes urgent wording fixes | Same |
-| `lead` | Claude keeps to planning/merging and hands more implementation to the engineer | Still `claude` (`degraded`): finish the current step if Codex is the engineer with room, else stop, and tell the user Claude is out of usage (only Claude can lead) |
+| `lead` | The lead keeps to planning/merging and hands more implementation to the engineer | Still the lead (`degraded`): finish the current step if the engineer has room, else stop, and tell the user the lead is out of usage (no other agent can lead this session) |
 
 Each role maps explicitly to a policy (`build`, `review`, `debate`, or `polish`) in `route()`, so a new role cannot fall through to another's.
 
-A Codex lead asks with `lead=codex`, and the lead's own usage is then Codex's. "The lead" in the table means that session, and the `claude` assignee still means "you, the lead". A Codex worker shares the lead's usage. So when Codex is short, a build keeps going to the Codex holder ("Codex is short too") rather than back to a lead that is short as well.
+A Codex lead asks with `lead=codex`. "The lead" in the table means that session, and an assignee or fallback that is the lead's own agent (`claude` for a Claude lead, `codex` for a Codex lead) means "you, the lead". A role the lead's own agent holds is the lead's own work ("Codex holds the role: do the work yourself"), and under a Codex lead `claude` is a worker judged by Claude's own usage.
 
 ## Presets
 

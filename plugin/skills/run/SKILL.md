@@ -16,7 +16,7 @@ You are the lead. Take the task through the steps below, using the `crew` MCP to
 
 **Tasks.** When the work has more than a couple of pieces, record them as the mission's `tasks` during planning, with `after` for any piece that waits on another. Pass each job its `task_id`, and mark a task `done` with a one-line `result` only after you have verified it. A resumed or compacted session is shown its open missions and tasks again: continue from that record, not from memory.
 
-**Who does what.** Role assignments belong to the user: never give a role's work to an agent that does not hold it, or use another role's tool to get around a usage limit (`polish` is for wording only, whoever holds it). Call `route` with `lead` at the start of step 1, and before handing out any role's work (`delegate`, `review`, `fix`, `polish`, `debate`, and the rest); a self-review or a `reply` to a worker needs none. Follow the assignee and reason `route` returns, including what to do when an agent is out of usage. Take a piece over yourself only when `route` or a failed job tells you to. Where Codex holds the role, give it computer use and work that runs the app, and run two holders at once when a second view is worth the usage. If `route` marks the result `degraded`, carry on and note in the final report what was skipped.
+**Who does what.** Role assignments belong to the user: never give a role's work to an agent that does not hold it, or use another role's tool to get around a usage limit (`polish` is for wording only, whoever holds it). A role held by your own agent is yours, in this session, a subagent, or a session you start; every other holder runs as a worker, Claude too when Codex leads. Call `route` with `lead` at the start of step 1, and before handing out any role's work (`delegate`, `review`, `fix`, `polish`, `debate`, and the rest); a self-review or a `reply` to a worker needs none. Follow the assignee and reason `route` returns, including what to do when an agent is out of usage. Take a piece over yourself only when `route` or a failed job tells you to. Where a Codex worker holds the role, give it computer use and work that runs the app, and run two holders at once when a second view is worth the usage. If `route` marks the result `degraded`, carry on and note in the final report what was skipped.
 
 **Presets.** If the user names a preset for this command (economy, balanced, or best), pass it as `preset` when you start the mission; never choose one yourself. Follow the latest preset and subagent model policy returned by `mission` or `route`.
 
@@ -26,7 +26,7 @@ Skip a step only when it has nothing to act on, such as no separable piece to de
 
 Read the relevant code first, decide the change, and split it:
 
-- **Yours**: the core of the change, anything needing this conversation's context, and most UI work (the user finds Claude's UI results better).
+- **Yours**: the core of the change and anything needing this conversation's context. The user finds Claude's UI results better: a Claude lead keeps most UI work, and a Codex lead gives it to a Claude worker where Claude holds the role.
 - **The engineer's**: pieces that can be specified completely in writing without touching files you will edit, such as a self-contained module, tests for an agreed interface, or a migration.
 
 If nothing separates cleanly, do it all yourself; do not invent work to delegate. Run pieces that wait for nothing and touch different files in parallel.

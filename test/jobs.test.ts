@@ -1299,7 +1299,7 @@ test('the lead picks one of a role\'s holders per job, and a role Claude holds s
   t.after(() => { plain.jobs.flush(); fs.rmSync(plain.home, { recursive: true, force: true, maxRetries: 5 }); });
   await assert.rejects(plain.jobs.create({ kind: 'delegate', cwd: repo, task: 'x', isolation: 'in_place', agent: 'antigravity' }), /antigravity does not hold delegate; its holders are: codex/);
   await assert.rejects(jobs.create({ kind: 'polish', cwd: repo, targets: ['README.md'], isolation: 'in_place' }), /polish is held by Claude, which runs no worker here: start it from a lead session/);
-  // A Codex lead that names Claude starts a Claude worker; a Claude Code lead, or one that names no holder, does not.
+  // A Codex lead starts a Claude worker for a role Claude holds, named or not; a Claude Code lead does not.
   const codexLead = '019d0000-0000-7000-8000-000000000001';
   const claudeLead = '019d0000-0000-7000-8000-000000000002';
   jobs.delivery.host(codexLead, 'codex');
@@ -1307,8 +1307,17 @@ test('the lead picks one of a role\'s holders per job, and a role Claude holds s
   const worker = await jobs.create({ ...polish, agent: 'claude', lead: codexLead });
   assert.equal(worker.agent, 'claude');
   assert.match(worker.id, /^cl-/);
-  await assert.rejects(jobs.create({ ...polish, lead: codexLead }), /held by Claude, which runs no worker here/);
+  assert.equal((await jobs.create({ ...polish, lead: codexLead })).agent, 'claude');
   await assert.rejects(jobs.create({ ...polish, agent: 'claude', lead: claudeLead }), /held by Claude, which runs no worker here/);
+  // A Codex lead starts no Codex worker, named or the default, and its default skips to the next worker that holds the role.
+  const delegate = { kind: 'delegate' as const, cwd: repo, task: 'x', isolation: 'in_place' as const };
+  await assert.rejects(jobs.create({ ...delegate, agent: 'codex', lead: codexLead }), /held by Codex, the lead's own agent, which starts no Codex worker/);
+  assert.equal((await jobs.create({ ...delegate, lead: codexLead })).agent, 'antigravity');
+  assert.equal((await jobs.create({ ...delegate, lead: claudeLead })).agent, 'codex');
+  // Held by Codex alone, the role is the Codex lead's own work, while a board-started job still goes to Codex.
+  plain.jobs.delivery.host(codexLead, 'codex');
+  await assert.rejects(plain.jobs.create({ ...delegate, lead: codexLead }), /held by Codex, the lead's own agent/);
+  assert.equal((await plain.jobs.create(delegate)).agent, 'codex');
 });
 
 test('a job runs under the preset it was given and keeps it, capping its tier by that preset', async (t) => {

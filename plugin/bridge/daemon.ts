@@ -892,7 +892,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       if (typeof body.project !== 'string' || !body.project) throw new HttpError(400, 'project must be the lead session\'s project directory');
       const first = stage(body.stage);
       const owner = text(body.owner, 'owner');
-      const opened = missions.start({ title: text(body.title, 'title') ?? '', project: body.project, root: (await projectRoot(body.project).catch(() => null)) ?? body.project, owner, stage: first, stages: body.stages, preset: body.preset, tasks: body.tasks });
+      const opened = missions.start({ title: text(body.title, 'title') ?? '', project: body.project, root: (await projectRoot(body.project).catch(() => null)) ?? body.project, owner, lead: body.lead, stage: first, stages: body.stages, preset: body.preset, tasks: body.tasks });
       if (owner) claude.focus(owner, opened.id);
       return opened;
     }

@@ -49,7 +49,7 @@ function missionServer(t: TestContext) {
   };
   const server = (session: string | null = 'lead', fresh = false) => {
     const context: Record<string, any> = {
-      missionHead, missionDetail, NAME_THE_MISSION, normalizeTitle, followUpTitle, SESSION: session ?? undefined, PROJECT: canonicalPath('/project'), missionId: null, closedElsewhere: null,
+      missionHead, missionDetail, NAME_THE_MISSION, normalizeTitle, followUpTitle, SESSION: session ?? undefined, host: 'codex', PROJECT: canonicalPath('/project'), missionId: null, closedElsewhere: null,
       costMission: null, lastDone: null, fresh, openedHere: new Set<string>(), SUPERSEDED: 'Superseded by a new mission.', currentPolicy: () => 'policy', globalPreset: () => null,
       describeJob: (job: Job) => `job ${job.id}`, api,
     };
@@ -66,6 +66,7 @@ test('mission forwards plans on start, revision, repeated titles and reattachmen
   const report = await reportMission({ title: 'Review', stages });
   assert.match(report, /step 1 of 3/);
   assert.deepEqual(calls.at(-1)?.body.stages, stages);
+  assert.equal(missions.list()[0].lead, 'codex');
   const id = missions.list()[0].id;
   for (const args of [{ stages: ['fix', 'final'] }, { stage: 'cross-review', stages: ['fix', 'final'] }]) {
     assert.match(await reportMission(args), /Plan: cross-review \(current\) → fix → final/);
@@ -240,6 +241,7 @@ test('work started after a done mission opens a follow-up mission named after it
   const first = await runJob({ kind: 'delegate', task: 'more' }, true, { jobs: [] });
   assert.match(first, /^Opened mission m-[0-9a-f]{6} "후속 작업: 역할 정리"/);
   assert.deepEqual(calls.findLast((call) => call.route === '/api/missions')?.body.stages, ['implement', 'final']);
+  assert.equal(calls.findLast((call) => call.route === '/api/missions')?.body.lead, 'codex');
   assert.equal(calls.at(-1)?.body.mission, context.costMission);
   // Jobs started together open one follow-up, and a job that fails still tells the lead of the mission it opened.
   await finish();
@@ -299,6 +301,17 @@ test('a resumed lead process arms a watcher before any prompt, Stop, or Crew cal
   }
 });
 
+test('MCP refuses a mission call before the host is initialized', async () => {
+  const source = fs.readFileSync(new URL('../plugin/bridge/mcp.ts', import.meta.url), 'utf8');
+  const handler = source.slice(source.indexOf('async function handle('), source.indexOf('readline.createInterface'));
+  const replies: any[] = [];
+  const handle = vm.runInNewContext(`${stripTypeScriptTypes(handler)}; handle`, {
+    initialized: false, send: (msg: unknown) => replies.push(msg),
+  });
+  await handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'mission', arguments: { title: 'Build' } } });
+  assert.equal(replies[0].error.message, 'Server not initialized');
+});
+
 test('MCP bounds a multi-job response and ACKs only echoed receipts before making a new offer', async () => {
   const source = fs.readFileSync(new URL('../plugin/bridge/mcp.ts', import.meta.url), 'utf8');
   const handler = source.slice(source.indexOf('async function handle('), source.indexOf('readline.createInterface'));
@@ -312,7 +325,7 @@ test('MCP bounds a multi-job response and ACKs only echoed receipts before makin
   const replies: any[] = [];
   const order: string[] = [];
   const handle = vm.runInNewContext(`${stripTypeScriptTypes(handler)}; handle`, {
-    AbortController, inFlight: new Map(), ensureDaemon: async () => {}, SESSION: 'lead', host: 'claude',
+    AbortController, inFlight: new Map(), ensureDaemon: async () => {}, SESSION: 'lead', host: 'claude', initialized: true,
     clipped, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, send: (msg: unknown) => replies.push(msg),
     imageContent: () => [{ type: 'image', data: 'x'.repeat(900_000), mimeType: 'image/png' }],
     api: async (_method: string, route: string, body: any) => {
@@ -500,7 +513,7 @@ test('status and mission explicitly read this session\'s watch news without any 
   const missions: object[] = [];
   const offered: (string[] | undefined)[] = [];
   const handle = vm.runInNewContext(`${stripTypeScriptTypes(standing + tool + handler)}; handle`, {
-    AbortController, inFlight: new Map(), ensureDaemon: async () => {}, SESSION: 'lead', host: 'claude', PROJECT: '/project', projectUnknown: false,
+    AbortController, inFlight: new Map(), ensureDaemon: async () => {}, SESSION: 'lead', host: 'claude', initialized: true, PROJECT: '/project', projectUnknown: false,
     fresh: false, missionId: null, costMission: null, closedElsewhere: null,
     missionHead: () => 'Current mission', missionDetail: () => '', currentPolicy: () => '', globalPreset: () => null,
     clipped, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, send: (msg: unknown) => replies.push(msg),

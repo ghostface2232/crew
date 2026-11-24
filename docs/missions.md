@@ -50,6 +50,7 @@ A mission groups one user command and the jobs it took, so the board can answer 
 - `~/.crew/missions.json` persists all open missions, the 100 most recently ended, the last 2 per project, and any ended mission with a watched PR, retaining their jobs beyond normal history limits. Unreadable `missions.json` files are set aside before starting clean.
 - Idle missions auto-abandon after 12 hours, or after 72 hours while a task is open (`todo`/`doing`) or a PR is watched; open tasks also suppress "Looks finished".
 - A session owns missions via `CLAUDE_CODE_SESSION_ID`. New jobs started after a lead-finished `done` mission (when no other mission is open) auto-create a fallback follow-up mission (`후속 작업: <title>` or `Follow-up: <title>`, matching the title's language). For 12 hours after a lead-finished mission, `UserPromptSubmit` also reminds the lead to open a mission before starting new work.
+- The optional `lead` field records which agent opened the mission (`claude` or `codex`) and remains after the session ends.
 
 ## Not verified
 

@@ -13,6 +13,8 @@ Install and open the desktop app from [Releases](https://github.com/ghostface223
 
 You need Claude Code or Codex to lead from, plus signed-in Codex and Antigravity CLIs for the workers (`codex login`; run `agy` once). Every job spends the usage of the plan its agent is signed in to.
 
+Crew works best alongside [AgentGauge](https://github.com/ghostface2232/AgentGauge). Crew reads each agent's remaining usage and reset times from it, shows them on the agent cards, and routes work by them ([Usage](#usage)). Without it, work follows your role assignments.
+
 On first launch, the app installs the Crew plugin for Claude Code and for Codex, whichever you have, and the `crew` command, all running on the app's own Node. Its Overview lists anything else Crew needs. Open a new Claude Code or Codex session afterwards; Codex also needs the steps in [Leading from Codex](#leading-from-codex). The app updates the plugin with itself and leaves a plugin installed from a source checkout alone.
 
 ### From source

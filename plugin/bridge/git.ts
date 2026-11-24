@@ -35,8 +35,9 @@ export async function git(cwd: string, args: string[], stdin?: string): Promise<
 
 /** The change under review as text, for a reviewer that cannot run git itself. */
 export async function reviewDiff(root: string, target: ReviewTarget): Promise<string> {
-  if (target.type === 'baseBranch') return git(root, ['diff', `${target.branch}...HEAD`]);
-  if (target.type === 'commit') return git(root, ['show', target.sha]);
+  // The ref is the caller's text: without the marker, one starting with a dash would be read as an option.
+  if (target.type === 'baseBranch') return git(root, ['diff', '--end-of-options', `${target.branch}...HEAD`]);
+  if (target.type === 'commit') return git(root, ['show', '--end-of-options', target.sha]);
   const diff = await git(root, [...NO_HOOKS, 'diff', NO_SUBMODULES, 'HEAD']);
   const untracked = await git(root, ['ls-files', '--others', '--exclude-standard']);
   return untracked ? `${diff}\n\nUntracked files, not in the diff above; read each one in full:\n${untracked}` : diff;
@@ -75,12 +76,19 @@ export interface Worktree {
   base: string;
   /** Relative paths of shared directories attached by Crew. */
   linked?: string[];
+  /** Relative paths Crew copied in from `.worktreeinclude` that were not there before: local files, never the worker's change. */
+  copied?: string[];
   /** Validated before Windows deletion, which can remove gitdir before the admin directory. */
   admin?: string;
 }
 
+/** What Crew itself put in a worktree, which no commit, status or merge of the worker's change may count. */
+export const attached = (wt: Pick<Worktree, 'linked' | 'copied'>): string[] => [...(wt.linked ?? []), ...(wt.copied ?? [])];
+
 /**
- * Pathspecs that leave out Crew's shared-dependency links. A directory-only ignore rule such as `node_modules/`
+ * Pathspecs that leave out Crew's shared-dependency links and local copies. The worktree's base may not ignore what
+ * the main tree ignores (an older base, or a `.gitignore` edit not yet committed), and a copied `.env` would then
+ * be committed with the worker's change. A directory-only ignore rule such as `node_modules/`
  * does not cover a symlink, and the only exclude file Git reads is shared with the user's own checkout.
  * A link Git already ignores (a Windows junction counts as a directory) is left out of the list: naming an
  * ignored path in a pathspec makes `git add` fail.
@@ -184,8 +192,9 @@ export async function removeEmptySlot(root: string, wt: string, id: string, home
 }
 
 /** Copies included files, cloning directories when supported and otherwise sharing them read-only. */
-export async function copyIncluded(root: string, wt: string, clone: (source: string, dest: string) => Promise<void> = cloneDirectory): Promise<{ copied: string[]; linked: string[]; failed: string[] }> {
-  const result = { copied: [] as string[], linked: [] as string[], failed: [] as string[] };
+export async function copyIncluded(root: string, wt: string, clone: (source: string, dest: string) => Promise<void> = cloneDirectory): Promise<{ copied: string[]; created: string[]; linked: string[]; failed: string[] }> {
+  // `created`: the copies that put a path where the base had none, as relative paths.
+  const result = { copied: [] as string[], created: [] as string[], linked: [] as string[], failed: [] as string[] };
   const include = await fs.stat(path.join(root, '.worktreeinclude')).catch(() => null);
   if (!include) return result;
   // Git for Windows reads a directory as an empty exclude file, where Git on macOS refuses it.
@@ -211,6 +220,7 @@ export async function copyIncluded(root: string, wt: string, clone: (source: str
           mode: directory ? constants.COPYFILE_FICLONE_FORCE : constants.COPYFILE_FICLONE,
         });
         result.copied.push(entry);
+        if (!existed) result.created.push(rel);
       } catch (err) {
         // FORCE is essential: FICLONE silently copies an entire dependency tree on unsupported filesystems.
         if (!directory || existed || !['ENOTSUP', 'EOPNOTSUPP', 'EXDEV', 'ENOSYS', 'EINVAL'].includes((err as NodeJS.ErrnoException).code ?? '')) throw err;

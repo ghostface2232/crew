@@ -107,6 +107,40 @@ test('a reply held up while the server starts sends nothing once the job has mov
   assert.deepEqual(calls, ['turn/start']);
 });
 
+test('a second message for a turn still resuming waits for that resume, and the turn opens with the first', async (t) => {
+  const h = harness(false);
+  const resumes: PromiseWithResolvers<object>[] = [];
+  const turns: string[] = [];
+  const started = Promise.withResolvers<object>();
+  t.mock.method(h.internal, 'ensure', async () => ({
+    request: (method: string, params: { input?: { text: string }[] }) => {
+      if (method === 'thread/resume') {
+        resumes.push(Promise.withResolvers());
+        return resumes.at(-1)!.promise;
+      }
+      turns.push(`${method}:${params.input?.[0].text}`);
+      return method === 'turn/start' ? started.promise : Promise.resolve({});
+    },
+  }));
+  t.mock.method(h.internal, 'threadParams', async () => ({ config: { features: { plugins: false } } }));
+  Object.assign(h.job, { id: 'cx-1', turns: 2 });
+  Object.assign(h.ctl, { capabilities: () => {} });
+  const first = h.adapter.reply(h.ctl as any, 'A');
+  const second = h.adapter.reply(h.ctl as any, 'B');
+  while (resumes.length < 1) await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(resumes.length, 1, 'the thread is resumed once for the turn');
+  resumes[0].resolve({});
+  // The later message is refused to its sender while the turn is unconfirmed; it never replaces the first.
+  await assert.rejects(second, /has not confirmed the turn status/);
+  started.resolve({ turn: { id: 'next' } });
+  await first;
+  assert.deepEqual(turns, ['turn/start:A']);
+  // Once the turn is confirmed, a message steers it.
+  await h.adapter.reply(h.ctl as any, 'C');
+  assert.deepEqual(turns, ['turn/start:A', 'turn/steer:C']);
+});
+
 test('a cancelled turn whose resume ends first leaves the next turn\'s resume vouched for', async (t) => {
   const h = harness(false);
   const resumes: PromiseWithResolvers<object>[] = [];

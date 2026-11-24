@@ -8,7 +8,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { CodexAdapter } from '../plugin/bridge/adapters/codex.ts';
 import { resolveConfig } from '../plugin/bridge/config.ts';
-import { changesSince, cloneDirectory, cloneRefused, cloneTree, commitAll, copyIncluded, createWorktree, detachLinks, dirtyCount, NO_HOOKS, NO_SUBMODULES, projectRoot, removeDirectory, repoRoot, removeEmptyLeftover, removeWorktree, reviewDiff, worktreeSlot } from '../plugin/bridge/git.ts';
+import { attached, changesSince, cloneDirectory, cloneRefused, cloneTree, commitAll, copyIncluded, createWorktree, detachLinks, dirtyCount, NO_HOOKS, NO_SUBMODULES, projectRoot, removeDirectory, repoRoot, removeEmptyLeftover, removeWorktree, reviewDiff, worktreeSlot } from '../plugin/bridge/git.ts';
 import type { Job, JobCtl } from '../plugin/bridge/jobs.ts';
 import { buildPrompt } from '../plugin/bridge/prompts.ts';
 
@@ -38,7 +38,7 @@ for (const code of ['ENOTSUP', 'EOPNOTSUPP', 'EXDEV', 'ENOSYS', 'EINVAL']) {
       fs.writeFileSync(path.join(dest, 'partial'), 'discard');
       throw Object.assign(new Error('forced no-clone fixture'), { code });
     });
-    assert.deepEqual(included, { copied: ['.env'], linked: ['node_modules'], failed: [] });
+    assert.deepEqual(included, { copied: ['.env'], created: ['.env'], linked: ['node_modules'], failed: [] });
     wt.linked = included.linked;
     const link = path.join(wt.path, 'node_modules');
     assert.ok(fs.lstatSync(link).isSymbolicLink());
@@ -184,7 +184,7 @@ test('APFS includes use native clones and preserve dependency symlinks', { skip:
   fs.writeFileSync(path.join(dir, 'deps', 'tool'), 'original');
   fs.symlinkSync('../tool', path.join(dir, 'deps', '.bin', 'tool'));
   const result = await copyIncluded(dir, wt);
-  assert.deepEqual(result, { copied: ['deps/'], linked: [], failed: [] });
+  assert.deepEqual(result, { copied: ['deps/'], created: ['deps'], linked: [], failed: [] });
   assert.ok(!fs.lstatSync(path.join(wt, 'deps')).isSymbolicLink());
   assert.equal(fs.readlinkSync(path.join(wt, 'deps', '.bin', 'tool')), '../tool');
   fs.writeFileSync(path.join(wt, 'deps', 'tool'), 'private');
@@ -258,7 +258,7 @@ test('nested APFS includes create missing destination parents before cloning', {
   fs.mkdirSync(path.join(dir, 'a', 'deps'), { recursive: true });
   fs.writeFileSync(path.join(dir, 'a', 'deps', 'file'), 'original');
   assert.equal(fs.existsSync(path.join(wt, 'a')), false);
-  assert.deepEqual(await copyIncluded(dir, wt), { copied: ['a/deps/'], linked: [], failed: [] });
+  assert.deepEqual(await copyIncluded(dir, wt), { copied: ['a/deps/'], created: ['a/deps'], linked: [], failed: [] });
   assert.equal(fs.readFileSync(path.join(wt, 'a', 'deps', 'file'), 'utf8'), 'original');
 });
 
@@ -520,6 +520,34 @@ test('included paths preserve non-ASCII and newline filenames with quotePath ena
   assert.deepEqual(result.failed, []);
   assert.deepEqual(result.copied.sort(), names.map((name) => `${name}/`).sort());
   for (const name of names) assert.equal(fs.readFileSync(path.join(wt, name, 'file'), 'utf8'), name);
+});
+
+test('local files copied from .worktreeinclude stay out of the worker\'s commit when its base does not ignore them', async (t) => {
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-copied-')));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }));
+  const repo = path.join(home, 'repo');
+  fs.mkdirSync(repo);
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
+  git('init', '-q');
+  fs.writeFileSync(path.join(repo, 'tracked.txt'), 'base');
+  git('add', 'tracked.txt');
+  git('-c', 'user.name=Test', '-c', 'user.email=t@example.com', 'commit', '-qm', 'init');
+  // The ignore rule and the include list exist only in the main tree, not yet in any commit.
+  fs.writeFileSync(path.join(repo, '.gitignore'), '.env\ncache/\n');
+  fs.writeFileSync(path.join(repo, '.worktreeinclude'), '.env\ncache\n');
+  fs.writeFileSync(path.join(repo, '.env'), 'KEY=secret');
+  fs.mkdirSync(path.join(repo, 'cache'));
+  fs.writeFileSync(path.join(repo, 'cache', 'data'), 'local');
+
+  const wt = await createWorktree(repo, 'cx-c0ffee', 'HEAD', home);
+  const included = await copyIncluded(repo, wt.path, async (source, dest) => fs.promises.cp(source, dest, { recursive: true }));
+  assert.deepEqual(included.created.sort(), ['.env', 'cache']);
+  wt.copied = included.created;
+  assert.equal(await dirtyCount(wt.path, attached(wt)), 0);
+  assert.equal(await commitAll(wt.path, 'nothing of the worker\'s', attached(wt)), null);
+  fs.writeFileSync(path.join(wt.path, 'tracked.txt'), 'changed');
+  assert.ok(await commitAll(wt.path, 'work only', attached(wt)));
+  assert.equal(execFileSync('git', ['show', '--format=', '--name-only', 'HEAD'], { cwd: wt.path, encoding: 'utf8' }).trim(), 'tracked.txt');
 });
 
 test('a worktree that git creates before a hook fails is removed with its branch', async (t) => {

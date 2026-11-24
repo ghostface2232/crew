@@ -5,6 +5,8 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
+import crypto from 'node:crypto';
+import { syncBuiltinESMExports } from 'node:module';
 import { canonicalPath, resolveConfig } from '../plugin/bridge/config.ts';
 import type { Config } from '../plugin/bridge/config.ts';
 import { leadContext } from '../plugin/bridge/instructions.ts';
@@ -247,6 +249,38 @@ test('gitignored files listed in .worktreeinclude are copied into the worktree, 
   assert.deepEqual(seen, ['node_modules/pkg/index.js', '.env']);
   assert.deepEqual(job.result?.files, []);
   assert.match(job.notes.join(' '), /(?:Copied|Shared read-only) from \.worktreeinclude: .*node_modules/);
+});
+
+test('a copy from .worktreeinclude stays out of the commit when the job\'s base does not ignore it', async () => {
+  const repo = tempRepo();
+  // Ignored in the main tree only: the rule is not committed yet, so the worktree's base does not have it.
+  fs.writeFileSync(path.join(repo, '.gitignore'), '.env\n');
+  fs.writeFileSync(path.join(repo, '.worktreeinclude'), '.env\n');
+  fs.writeFileSync(path.join(repo, '.env'), 'KEY=secret\n');
+  const { jobs } = harness((ctl) => {
+    fs.writeFileSync(path.join(ctl.job.cwd, 'work.txt'), 'w\n');
+    ctl.done('ok');
+  });
+  const job = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'x' }));
+  assert.deepEqual(job.worktree?.copied, ['.env']);
+  assert.deepEqual(job.result?.files, ['work.txt']);
+  assert.equal(execFileSync('git', ['show', '--format=', '--name-only', job.worktree!.branch], { cwd: repo, encoding: 'utf8' }).trim(), 'work.txt');
+});
+
+test('a new job never takes the id of one on record, so a failed start removes only its own', async (t) => {
+  const repo = tempRepo();
+  const { jobs } = harness((ctl) => ctl.done('ok'));
+  const real = crypto.randomBytes;
+  let ids = 0;
+  // The first two ids drawn are the same.
+  t.mock.method(crypto, 'randomBytes', (size: number, ...rest: []) => size === 3 && ids++ < 2 ? Buffer.from([1, 2, 3]) : real(size, ...rest));
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  const first = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'x' }));
+  const second = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'y' }));
+  assert.equal(first.id, 'cx-010203');
+  assert.notEqual(second.id, first.id);
+  assert.deepEqual(jobs.list().map((job) => job.id).sort(), [first.id, second.id].sort());
 });
 
 test('an edit the worker reports outside its worktree is listed as out of scope', async () => {
@@ -1127,6 +1161,12 @@ test('a job\'s model comes from the lead\'s model, then its tier, then the user\
   assert.deepEqual([astra.tier, astra.model], ['standard', tierModel('codex', 'standard')]);
   const other = await start({ model: 'some-unknown-model' });
   assert.deepEqual([other.tier, other.model], [undefined, 'some-unknown-model']);
+  // A model set on the role is the user's own choice and overrides the preset, its cap included; a tier the lead names is still capped.
+  current = resolveConfig({ preset: 'economy', roles: { delegate: { agents: ['codex'], codex: { model: 'gpt-6-astra' } } } });
+  const own = await start({});
+  assert.deepEqual([own.tier, own.model, own.effort], [undefined, 'gpt-6-astra', 'low']);
+  assert.deepEqual([(await start({ tier: 'frontier' })).tier, (await start({ tier: 'frontier' })).model], ['standard', tierModel('codex', 'standard')]);
+  current = resolveConfig({ preset: 'economy', roles: { polish: { agent: 'antigravity' } } });
   const argon = await jobs.create({ kind: 'polish', cwd: repo, targets: ['README.md'], isolation: 'in_place', model: 'gemini-4-argon' });
   assert.deepEqual([argon.tier, argon.model], ['standard', 'hydrogen']);
   const neon = await jobs.create({ kind: 'polish', cwd: repo, targets: ['README.md'], isolation: 'in_place', model: 'gemini-4-neon' });
@@ -1941,6 +1981,13 @@ test('a follow-up can first bring the worker up to date with the lead, without c
 
   const review = await settled(jobs, await jobs.create({ kind: 'review', cwd: repo, review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } }));
   await assert.rejects(jobs.reply(review.id, { message: 'x', sync: true }), /no worktree of its own/);
+  // A worktree moved to another branch is not merged into, even before the job has any round.
+  adapter.start = async (ctl) => { ctl.session('s-2'); ctl.done('nothing changed'); };
+  const idle = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'y' }));
+  assert.equal(idle.rounds, undefined);
+  execFileSync('git', ['checkout', '-q', '-b', 'personal-wip'], { cwd: idle.cwd });
+  await assert.rejects(jobs.reply(idle.id, { message: 'x', sync: true }), new RegExp(`worktree is not on ${idle.worktree!.branch}`));
+  assert.equal(idle.state, 'done');
   // A sync is for the gap between turns: it is refused while the worker is editing, not dropped without a word.
   let live!: JobCtl;
   adapter.reply = async (ctl) => { live = ctl; };
@@ -2750,7 +2797,7 @@ test('follow-ups count the turns the lead sent a worker back for, not retries of
   assert.equal(followUps({ turns: 2, approvals: [approval, approval] }), 0);
 });
 
-test('collecting a result removes the live diff from a drawer with an older detail snapshot', async (t) => {
+test('a drawer with an older detail snapshot shows the live job, without the live diff or outcome it has since lost', async (t) => {
   const { runnerImport } = await import('vite');
   const { module: { drawerJob } } = await runnerImport<{ drawerJob(detail: Job, current?: Job): Job }>(
     path.resolve(import.meta.dirname, '../plugin/board/src/JobDrawer.tsx'),
@@ -2767,11 +2814,21 @@ test('collecting a result removes the live diff from a drawer with an older deta
   ctl.diff('live patch');
   const detail = { ...job };
   assert.ok(drawerJob(detail).liveDiff);
-  ctl.done('finished');
+  ctl.done('## Outcome\ndone');
   const current = { ...job };
   await settled(jobs, job);
   assert.equal(current.endedAt, null);
   assert.equal(drawerJob(detail, current).liveDiff, undefined);
+  // A client is sent JSON, so what the next turn removed is absent from its frames, which also leave out the prompt.
+  const fetched: Job & { outcomeContradiction?: string } = { ...JSON.parse(JSON.stringify(job)), outcomeContradiction: 'the bridge check failed' };
+  assert.equal(fetched.outcome, 'done');
+  await jobs.reply(job.id, { message: 'again' });
+  await settled(jobs, job);
+  const { prompt: _prompt, instructions: _instructions, ...frame } = JSON.parse(JSON.stringify(job)) as Job;
+  const shown: typeof fetched = drawerJob(fetched, frame as Job);
+  assert.deepEqual([shown.turns, shown.outcome, shown.outcomeContradiction], [2, undefined, undefined]);
+  assert.ok(fetched.prompt);
+  assert.equal(shown.prompt, fetched.prompt);
 });
 
 test('a running turn\'s diff is kept in memory, bounded, and dropped when the job ends', async (t) => {

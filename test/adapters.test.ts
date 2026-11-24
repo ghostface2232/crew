@@ -1190,9 +1190,12 @@ test('Codex writable and read-only thread parameters set all temp variables and 
         assert.equal(params.config.permissions.crew_app.filesystem[job.scratch!], 'write');
         assert.deepEqual(params.config.permissions.crew_app.network, { enabled: true });
       } else {
-        assert.equal(params.sandbox, 'workspace-write');
-        assert.deepEqual(params.config.sandbox_workspace_write.writable_roots, [job.scratch]);
-        assert.equal(params.config.sandbox_workspace_write.exclude_tmpdir_env_var, true);
+        // No plugin, shared link or app: still a profile, since the bare sandbox mode cannot deny the daemon's token.
+        assert.equal(params.sandbox, null);
+        assert.equal(params.config.default_permissions, 'crew_workspace');
+        const files = params.config.permissions.crew_workspace.filesystem;
+        assert.deepEqual([files[':root'], files[job.cwd], files[job.scratch!], files[tokenFile(HOME)]], ['read', 'write', 'write', 'deny']);
+        assert.deepEqual(params.config.permissions.crew_workspace.network, { enabled: false });
       }
     }
   }
@@ -1289,6 +1292,21 @@ function probed(statuses: Record<string, unknown>, run: Record<string, unknown> 
   internals.runs.set('parent', state);
   return { adapter, ctl, job, reads, notes, ended, run: state };
 }
+
+test('cancelling a job held by sub-agents says so when one refuses the interrupt', async () => {
+  for (const refuses of [false, true]) {
+    const held = probed({}, { turnId: null, held: { turn: { id: 'turn', status: 'completed' } }, busyChildren: new Map([['child', 'c']]) });
+    (held.adapter as any).peer.request = async (method: string) => {
+      assert.equal(method, 'turn/interrupt');
+      if (refuses) throw new Error('turn is not interruptible');
+      return {};
+    };
+    await held.adapter.cancel(held.ctl);
+    assert.equal(held.run.busyChildren.size, 0);
+    assert.equal(held.notes.length, refuses ? 1 : 0);
+    if (refuses) assert.match(held.notes[0], /not every one confirmed it stopped\. Check the worktree before reusing it/);
+  }
+});
 
 test('Codex probe vouches for an active turn and flags a request the bridge never received', async () => {
   const working = probed({ parent: { type: 'active', activeFlags: [] } });

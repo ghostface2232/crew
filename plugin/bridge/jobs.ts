@@ -9,7 +9,7 @@ import { runCheck } from './check.ts';
 import type { CheckResult } from './check.ts';
 import { assignHint, canonicalPath, defaultHolder, disabledAgents, effectiveRole, isRole, LEAD, LEDGER_ASIDE, MAX_DEBATE_ROUNDS, daemonPort, nodeEnv, roleInfo, ROLES, runsCommands, WORKERS } from './config.ts';
 import type { Config, JobKind, PresetName, Role, WorkerAgent } from './config.ts';
-import { carryUncommitted, changesSince, commitAll, commitChanges, copyIncluded, createWorktree, currentBranch, dirtyCount, git, mergeInto, isInside, NO_HOOKS, NO_SUBMODULES, projectRoot, realpath, removeDirectory, removeEmptyLeftover, removeEmptySlot, removeWorktree, repoRoot, revertCommit, revertsSince, reviewDiff, WorktreeCleanupError } from './git.ts';
+import { attached, carryUncommitted, changesSince, commitAll, commitChanges, copyIncluded, createWorktree, currentBranch, dirtyCount, git, mergeInto, isInside, NO_HOOKS, NO_SUBMODULES, projectRoot, realpath, removeDirectory, removeEmptyLeftover, removeEmptySlot, removeWorktree, repoRoot, revertCommit, revertsSince, reviewDiff, WorktreeCleanupError } from './git.ts';
 import { collectGarbage } from './gc.ts';
 import { BrowserServers, jobWritable } from './browser.ts';
 import { tokenFile } from './auth.ts';
@@ -466,7 +466,7 @@ export function resolveRole(spec: JobSpec): Role {
  * configured (role, preset, or the agent's own setting in config.json), and last the default tier. Effort differs:
  * a role's or preset's effort holds over a named tier's.
  */
-function pickModel(agent: WorkerAgent, spec: JobSpec, role: { model?: string; effort?: string }, config: Config, preset: PresetName | null): { model?: string; effort?: string; tier?: Tier; agentDefault?: boolean } {
+function pickModel(agent: WorkerAgent, spec: JobSpec, role: { model?: string; effort?: string; ownModel?: boolean }, config: Config, preset: PresetName | null): { model?: string; effort?: string; tier?: Tier; agentDefault?: boolean } {
   const configured = { model: role.model ?? config[agent].model, effort: role.effort ?? (agent === 'codex' ? config.codex.effort : undefined) };
   const cap = preset ? config.presets[preset].maxTier : undefined;
   // A family name passed as the model is that family's tier, so it resolves, caps and sets effort like one.
@@ -475,8 +475,10 @@ function pickModel(agent: WorkerAgent, spec: JobSpec, role: { model?: string; ef
   const wanted = family ?? spec.tier ?? (configured.model ? undefined : defaultTier(spec));
   const tier = wanted && cap && TIERS.indexOf(wanted) > TIERS.indexOf(cap) ? cap : wanted;
   let model = exact ?? (tier ? tierModel(agent, tier) : undefined) ?? configured.model;
-  // The cap holds for a model named outright too; effort stays the lead's to choose.
-  const named = model ? tierOf(agent, model) : undefined;
+  // The cap holds for a model named outright too; effort stays the lead's to choose. A model set on the role is the
+  // user's own choice for that work and overrides the preset, cap included, unless the lead named a tier or a model.
+  const roleModel = role.ownModel && !exact && !tier;
+  const named = model && !roleModel ? tierOf(agent, model) : undefined;
   const capped = Boolean(cap && named && TIERS.indexOf(named) > TIERS.indexOf(cap));
   if (capped) model = tierModel(agent, cap!);
   // With no model of the capped tier to name, the configured fallback could be the very model the cap refused.
@@ -660,7 +662,11 @@ export class Jobs {
       throw new Error('Codex\'s standard review is sent no prompt, so it would never see the attachments. Use the adversarial mode, or drop attachments.');
     }
 
-    const id = `${WORKERS[agent].idPrefix}-${randomBytes(3).toString('hex')}`;
+    // The failure path below removes the record under this id as its own, so it must be no other job's.
+    let id: string;
+    do {
+      id = `${WORKERS[agent].idPrefix}-${randomBytes(3).toString('hex')}`;
+    } while (this.jobs.has(id));
     const repo = await repoRoot(spec.cwd);
     // Read from the main working tree even when the job starts inside a worktree, so an uncommitted edit applies to the next job.
     const root = (await projectRoot(spec.cwd)) ?? spec.project ?? spec.cwd;
@@ -686,6 +692,7 @@ export class Jobs {
         cwd = worktree.path;
         const included = await copyIncluded(repo, worktree.path);
         worktree.linked = included.linked;
+        if (included.created.length) worktree.copied = included.created;
         if (included.linked.length) notes.push(`Shared read-only from .worktreeinclude: ${included.linked.join(', ')}`);
         if (included.copied.length) notes.push(`Copied from .worktreeinclude: ${included.copied.join(', ')}`);
         if (included.failed.length) notes.push(`Could not copy from .worktreeinclude: ${included.failed.join('; ')}`);
@@ -762,7 +769,7 @@ export class Jobs {
         reviewTarget: spec.review?.target,
         targets: spec.targets ?? [],
         check: spec.check?.trim() || undefined,
-        ...pickModel(agent, spec, role, config, preset),
+        ...pickModel(agent, spec, { ...role, ownModel: Boolean(config.roles[roleName][agent]?.model) }, config, preset),
         sessionId: null,
         createdAt: now,
         activeAt: now,
@@ -863,12 +870,14 @@ export class Jobs {
       await this.sendWith(job, attachments, (note) => adapter.reply(ctl, message + note));
       return job;
     }
-    if (job.worktree && job.rounds?.length) {
+    // A review's snapshot is made anew below; any other worktree must still be the job's own branch, or a sync
+    // would merge into, and the turn be committed on, whatever was checked out there since.
+    if (job.worktree && job.kind !== 'review') {
       this.preparingReviews.add(id);
       try {
         if (fs.lstatSync(job.worktree.path).isSymbolicLink()) throw new Error(`Job ${id}'s worktree path is now a link to somewhere else.`);
         if ((await currentBranch(job.worktree.path)) !== job.worktree.branch) throw new Error(`Job ${id}'s worktree is not on ${job.worktree.branch}.`);
-        await this.reconcileRounds(job);
+        if (job.rounds?.length) await this.reconcileRounds(job);
       } finally {
         this.preparingReviews.delete(id);
       }
@@ -882,7 +891,7 @@ export class Jobs {
       if (!job.worktree || !job.repo || job.kind === 'review') throw new Error(`Job ${id} has no worktree of its own to bring up to date. Drop sync.`);
       this.preparingReviews.add(id);
       try {
-        const merged = await mergeInto(job.worktree.path, job.repo, typeof input.sync === 'string' ? input.sync : 'HEAD', job.worktree.linked);
+        const merged = await mergeInto(job.worktree.path, job.repo, typeof input.sync === 'string' ? input.sync : 'HEAD', attached(job.worktree));
         if (merged.conflicts.length) {
           const commit = merged.commit.slice(0, 8);
           const files = merged.conflicts.join(', ');
@@ -1251,7 +1260,7 @@ export class Jobs {
       if (round.state === state) throw new Error(`Round ${turn} is already ${state}.`);
       const commit = action === 'undo' ? round.commit : round.revert;
       if (!commit) throw new Error(`Round ${turn} has no revert commit to keep.`);
-      const reverted = await revertCommit(job.worktree.path, commit, job.worktree.linked);
+      const reverted = await revertCommit(job.worktree.path, commit, attached(job.worktree));
       const result = await this.worktreeResult(job, reverted);
       round.state = state;
       staleReceipts(job, `round ${turn} ${state}`);
@@ -1527,7 +1536,7 @@ export class Jobs {
     let result: Job['result'];
     // A review's worktree is a snapshot to run the app in; nothing in it is kept.
     if (job.worktree && job.kind !== 'review') {
-      const commit = await commitAll(job.worktree.path, `crew(${job.agent}): ${job.title}`, job.worktree.linked);
+      const commit = await commitAll(job.worktree.path, `crew(${job.agent}): ${job.title}`, attached(job.worktree));
       if (commit) (job.rounds ??= []).push({ turn: job.turns, commit, ...await commitChanges(job.worktree.path, commit), state: 'kept', at: Date.now() });
       result = await this.worktreeResult(job, commit);
       const head = (await git(job.worktree.path, ['rev-parse', 'HEAD'])).trim();
@@ -1551,7 +1560,9 @@ export class Jobs {
       }
       // A check that rewrote tracked files passed on a tree the commit does not hold.
       const listed = check ? `${await git(job.worktree.path, [...NO_HOOKS, 'diff', NO_SUBMODULES, '--name-only', '-z', 'HEAD'])}${await git(job.worktree.path, ['ls-files', '--others', '--exclude-standard', '-z'])}` : '';
-      const changed = listed.split('\0').filter(Boolean);
+      // What Crew attached may be untracked there without being the check's doing.
+      const kept = attached(job.worktree);
+      const changed = listed.split('\0').filter(Boolean).filter((file) => !kept.some((rel) => file === rel || file.startsWith(`${rel}/`)));
       const stale = changed.length ? `the check itself changed ${changed.slice(0, 3).join(', ')}${changed.length > 3 ? ` and ${changed.length - 3} more` : ''}` : undefined;
       (job.receipts ??= []).push({ turn: job.turns, head, ...(check ? { check } : {}), ...(stale ? { stale } : {}), at: Date.now() });
     } else if (job.kind === 'review' || job.ask) {

@@ -93,7 +93,7 @@ private enum WelcomePage: CaseIterable {
     var title: String {
         switch self {
         case .welcome: String(localized: "Welcome to Crew")
-        case .commands: String(localized: "Start in Claude Code")
+        case .commands: String(localized: "Start in Claude Code or Codex")
         case .needs: String(localized: "Answer from here")
         case .setup: String(localized: "Finish setting up")
         }
@@ -101,10 +101,10 @@ private enum WelcomePage: CaseIterable {
     @ViewBuilder var body: some View {
         switch self {
         case .welcome:
-            paragraph(String(localized: "Crew runs several coding agents together. Claude leads, splits the work, and hands pieces to the other agents to run in parallel. This app shows every agent live and lets you answer them."))
+            paragraph(String(localized: "Crew runs several coding agents together. The session you start in leads: it splits the work and hands pieces to the other agents to run in parallel. This app shows every agent live and lets you answer them."))
         case .commands:
             VStack(spacing: Space.l) {
-                paragraph(String(localized: "Open a new Claude Code session and type a command."))
+                paragraph(String(localized: "Open a new Claude Code or Codex session and type a command. In Codex, commands start with $ instead of /."))
                 Grid(alignment: .leading, horizontalSpacing: Welcome.commandGap, verticalSpacing: Space.s) {
                     ForEach(Self.commandList, id: \.0) { command, what in
                         GridRow {
@@ -125,7 +125,7 @@ private enum WelcomePage: CaseIterable {
         ("/crew:run", String(localized: "Plan, build, review, and fix with the crew")),
         ("/crew:review", String(localized: "Review a change")),
         ("/crew:debate", String(localized: "Talk through a hard decision")),
-        ("/crew:board", String(localized: "Open the board in Claude")),
+        ("/crew:board", String(localized: "Open the board")),
     ]
     private func paragraph(_ text: String) -> some View {
         Text(withCode(text)).font(Typeface.body).foregroundStyle(.secondary).lineSpacing(Welcome.lineSpacing).fixedSize(horizontal: false, vertical: true)

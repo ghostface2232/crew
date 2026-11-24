@@ -78,6 +78,14 @@ final class CrewStore {
     var search = ""
     var searchRequest = 0
     var showingDispatch = false
+    /// The first-run guide (`WelcomeView`): owed once after a first install (`welcomePending`), or opened from Help.
+    var showingWelcome = false
+    static let welcomePending = "welcomePending"
+    func markWelcomed() { defaults.removeObject(forKey: Self.welcomePending) }
+    /// Shows the guide a first install owes, once the daemon has answered.
+    private func greetIfNew() {
+        if defaults.bool(forKey: Self.welcomePending) { showingWelcome = true }
+    }
     var actions: [String: ActionState] = [:]
     var drafts: [String: String] = [:]
     /// Missions the user opened or closed; the rest are open while active. Kept here rather than in each card,
@@ -207,6 +215,7 @@ final class CrewStore {
             state.events = []; state.limits = [:]; state.usage = nil
             for id in Set(jobVersions.keys).union(state.jobs.map(\.id)) { jobVersions[id, default: 0] += 1 }
             signInRequired = false; connected = true; connectionMessage = "Connected"
+            greetIfNew()
             clockSkew = state.now - Date().timeIntervalSince1970 * 1000
             displayTime = Date().timeIntervalSince1970 * 1000
             revision += 1

@@ -1194,3 +1194,22 @@ private func requestBody(_ request: URLRequest) throws -> [String: Any] {
     }
     return try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
 }
+
+@Suite struct WelcomeTests {
+    @MainActor @Test func greetsOnlyAFirstInstallOnce() throws {
+        let installed = UserDefaults(suiteName: "crew-tests-\(UUID())")!
+        installed.set(true, forKey: CrewStore.welcomePending)
+        let store = CrewStore(api: CrewAPI(port: 0), defaults: installed)
+        try store.receive(event("state", BoardState()))
+        #expect(store.showingWelcome)
+        // Closing the guide, by any button or Escape, keeps it from coming back.
+        store.showingWelcome = false
+        store.markWelcomed()
+        try store.receive(event("state", BoardState()))
+        #expect(!store.showingWelcome)
+        // An update owes no guide, even to someone with no work in the daemon.
+        let updated = CrewStore(api: CrewAPI(port: 0), defaults: UserDefaults(suiteName: "crew-tests-\(UUID())")!)
+        try updated.receive(event("state", BoardState()))
+        #expect(!updated.showingWelcome)
+    }
+}

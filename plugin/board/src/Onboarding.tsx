@@ -6,24 +6,6 @@ import { desktop } from './desktop.ts';
 import { AgentMark, Chip, Dialog, Icon } from './ui.tsx';
 import styles from './Onboarding.module.css';
 
-const SEEN = 'crew.welcomed';
-
-/** Whether this board has shown the welcome, or decided it need not. Storage may be off in an embedded pane. */
-export function welcomed() {
-  try {
-    return localStorage.getItem(SEEN) === '1';
-  } catch {
-    return true;
-  }
-}
-export function markWelcomed() {
-  try {
-    localStorage.setItem(SEEN, '1');
-  } catch {
-    /* Embedded panes may disable storage. */
-  }
-}
-
 type Page = { title: string; art: ReactNode; body: ReactNode };
 
 /** The first-run guide, as WelcomeView in the app: what Crew is, how to start work, where requests arrive, and what to set up. */
@@ -32,7 +14,7 @@ export function Onboarding({ close }: { close: () => void }) {
   const pages = PAGES;
   const last = index === pages.length - 1;
   const finish = () => {
-    markWelcomed();
+    void desktop?.welcome?.done();
     close();
   };
   useEffect(() => {
@@ -46,14 +28,14 @@ export function Onboarding({ close }: { close: () => void }) {
   }, [pages.length]);
   const page = pages[index];
   return (
-    <Dialog labelId="welcome-title" onClose={finish} className={styles.sheet}>
+    <Dialog label="Welcome to Crew" onClose={finish} className={styles.sheet}>
       {/* Drawn from the board's own parts, so the pictures match the pages they point to. */}
       <div className={styles.stage} aria-hidden="true" inert key={`art-${index}`}>{page.art}</div>
       {/* Every page's text takes the same cell, so the sheet keeps the tallest one's height and never jumps. */}
       <div className={styles.copies}>
         {pages.map((item, n) => (
           <div className={styles.copy} key={item.title} data-current={n === index || undefined} aria-hidden={n !== index || undefined}>
-            <h2 className={`title ${styles.title}`} id={n === index ? 'welcome-title' : undefined}>{item.title}</h2>
+            <h2 className={`title ${styles.title}`}>{item.title}</h2>
             {item.body}
           </div>
         ))}

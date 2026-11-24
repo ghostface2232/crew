@@ -88,6 +88,11 @@ export interface DesktopBridge {
     seen?(): Promise<void>;
     subscribe(listener: (update: AppUpdate) => void): () => void;
   };
+  /** The first-run guide, owed only on a first install. Absent in an app older than this board. */
+  welcome?: {
+    pending(): Promise<boolean>;
+    done(): Promise<void>;
+  };
 }
 
 /** What Crew needs and whether each is in place (`GET /api/setup`). Only the plugin and `crew` command can be repaired here. */

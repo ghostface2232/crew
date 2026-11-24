@@ -18,7 +18,7 @@ import { JobDrawer, SessionDrawer } from './JobDrawer.tsx';
 import { Settings } from './Settings.tsx';
 import { Dispatch } from './Dispatch.tsx';
 import { Palette } from './Palette.tsx';
-import { markWelcomed, Onboarding, welcomed } from './Onboarding.tsx';
+import { Onboarding } from './Onboarding.tsx';
 import { NavList, ProjectPeek } from './Shell.tsx';
 import { Notifier } from './notify.ts';
 import { desktop, useAppUpdate } from './desktop.ts';
@@ -164,13 +164,10 @@ export function App() {
     setWelcome(true);
   }, [fold]);
   const paletteActions = useMemo(() => ({ select, openJob: show, openSession: showSession, newJob: () => newJob(), settings: openSettings, welcome: openWelcome }), [select, show, showSession, newJob, openSettings, openWelcome]);
-  // The desktop app greets a new user once, after its first answer from the daemon. Someone who already has work
-  // there has used Crew before, so an update does not greet them.
+  // The desktop app greets a new user once, on a first install; it owes no guide after an update.
   useEffect(() => {
-    if (!desktop || !live || welcomed()) return;
-    if (jobs.length || missions.length) markWelcomed();
-    else setWelcome(true);
-  }, [live]);
+    void desktop?.welcome?.pending().then((pending) => pending && setWelcome(true), () => {});
+  }, []);
   const closePalette = useCallback(() => setPalette(null), []);
   // Notifications for requests that arrive while the board is in the background, as the app sends them.
   const notifier = useRef<Notifier>(null);

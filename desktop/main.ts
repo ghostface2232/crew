@@ -22,6 +22,15 @@ if (process.env.CREW_HOME) app.setPath('userData', path.join(HOME, 'desktop'));
 // does (desktop/installer.nsh), groups on the taskbar with the shortcut and its pin.
 if (process.platform === 'win32') app.setAppUserModelId('dev.crew.desktop');
 const locked = app.requestSingleInstanceLock();
+/**
+ * Marks the welcome guide as owed on a first install: no Crew home yet, since the daemon this app starts creates it.
+ * An update finds the home in place, so it never greets anyone. The mark stays until the board says the guide closed.
+ */
+const welcomeFile = path.join(app.getPath('userData'), 'welcome-pending');
+if (locked && !fs.existsSync(HOME)) {
+  fs.mkdirSync(path.dirname(welcomeFile), { recursive: true });
+  fs.writeFileSync(welcomeFile, '');
+}
 let window: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let quitting = false;
@@ -411,6 +420,14 @@ function watchUpdates() {
   ipcMain.handle('update:seen', (event) => {
     fromBoard(event);
     updater.seen();
+  });
+  ipcMain.handle('welcome:pending', (event) => {
+    fromBoard(event);
+    return fs.existsSync(welcomeFile);
+  });
+  ipcMain.handle('welcome:done', (event) => {
+    fromBoard(event);
+    fs.rmSync(welcomeFile, { force: true });
   });
   if (updateFailed) updater.installFailed(updateFailed);
   void updater.load().catch(console.error).then(() => {

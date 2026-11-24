@@ -32,10 +32,13 @@ export async function leadHook(input: HookInput, mode: string, request: typeof a
     const { text } = await send('context', { event: input.hook_event_name });
     return { code: 0, ...(text ? { stdout: JSON.stringify({ hookSpecificOutput: { hookEventName: input.hook_event_name, additionalContext: text } }) } : {}) };
   }
-  if (mode === 'stop') {
+  if (mode === 'stop' || mode === 'stop-json') {
     if (input.stop_hook_active) return { code: 0 };
     const { offer } = await send('offer', { automatic: true });
-    return offer ? { code: 2, stderr: offer.text } : { code: 0 };
+    if (!offer) return { code: 0 };
+    // Codex runs a hook under pwsh on Windows, which turns node's exit code 2 into 1, so its hooks ask to continue
+    // through the JSON decision instead (docs/mcp-compatibility.md#5-codex-as-a-lead-host).
+    return mode === 'stop-json' ? { code: 0, stdout: JSON.stringify({ decision: 'block', reason: offer.text }) } : { code: 2, stderr: offer.text };
   }
   // The hook knows the session for certain; the lead's MCP server may not (an older server, /clear, no session
   // variable). So the session whose Crew call just acted on these jobs takes them over, before it watches for news.

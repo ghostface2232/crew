@@ -1,6 +1,6 @@
 # Architecture
 
-Crew runs a long-lived daemon that owns worker processes, job state, the event log, and the status board. Claude Code leads from Desktop or the CLI, while the daemon drives Codex through `codex app-server` and Antigravity through `agy acp`.
+Crew runs a long-lived daemon that owns worker processes, job state, the event log, and the status board. A Claude Code session (Desktop or CLI) or a Codex session (TUI or desktop app) leads: whichever host starts the conversation. The daemon drives Codex workers through `codex app-server` and Antigravity through `agy acp`.
 
 **Key files:** `plugin/bridge/mcp.ts`, `daemon.ts`, `config.ts`, and the command hooks `report.ts`, `context.ts`, and `wake.ts`. See [jobs.md](jobs.md) for worker jobs, [delivery.md](delivery.md) for lead wakeups, and [daemon-api.md](daemon-api.md) for the HTTP contract.
 
@@ -22,7 +22,11 @@ plugin/bridge/mcp.ts ──HTTP──▶ Crew Daemon (127.0.0.1:47615)
 - On shutdown the daemon attempts both state saves and removes its PID file even if an earlier step fails. It logs each failed step and exits with a nonzero status if any step failed.
 - `crew daemon stop` and `restart` stop the daemon unconditionally. If the shutdown request goes unanswered, they send `SIGTERM` to the PID in `~/.crew/daemon.json`—only after verifying it matches `/api/health`'s listener, retrying briefly if the PID file is missing—and remove the PID file after a forced stop only if it still names that PID (on Windows, `SIGTERM` terminates immediately). Replacement never spawns a new daemon while the old listener is still up, and `restart` verifies `~/.crew/token` is accepted before reporting "running".
 - The daemon binds its port before reading or writing any state, so a competing daemon that loses the port race exits without creating a token, loading jobs, or clearing active scratch directories and review snapshots. If the system reserves a port with nothing listening (such as WSL mirrored networking's 4096-port blocks), the daemon steps down through `PORTS` in `config.ts`. Clients, hooks (`bridge/report.ts`), and desktop apps read the bound port from `~/.crew/daemon.json`.
-- Everything ships in one Claude Code plugin (`plugin/`) containing the MCP server, hooks, 4 skills, 1 subagent (`self-reviewer`), and 9 role files.
+- Everything ships in one plugin (`plugin/`) containing the MCP server, hooks, 4 skills, 1 subagent (`self-reviewer`), and 9 role files. Claude Code reads `.claude-plugin/plugin.json`, `.mcp.json`, and `hooks/hooks.json`. Codex reads the same marketplace and skills, but its manifest `.codex-plugin/plugin.json` points at `codex.mcp.json` and `hooks/codex.json`, for these reasons:
+  - Codex does not expand plugin-root variables in MCP arguments, so its MCP server starts with `"cwd": "."` in Codex's copy of the plugin. The server learns the session's project from the daemon, which reads the thread with app-server `thread/read`.
+  - Codex runs only hooks written as string commands.
+  - A Codex lead is woken differently ([delivery.md](delivery.md#codex-leads)).
+- The MCP server tells the hosts apart at `initialize`. Claude Code sets `CLAUDE_CODE_SESSION_ID` in the server's environment. Codex names itself `codex-mcp-client` and gives no such variable, so a Codex session is taken from each call's `_meta.sessionId`. The instructions, tool descriptions, and holder names follow the host.
 
 ## Bridge and state
 
@@ -95,6 +99,8 @@ Verified against live accounts and on macOS/Windows hosts across 2026-11-11 to 2
 Related unit tests include `test/adapters.test.ts`, `test/adapter-contracts.test.ts`, `test/client.test.ts`, and `test/desktop.test.ts`.
 
 ## History
+
+- 2026-11-24: A Codex session can lead, from the same plugin through a Codex manifest. Until then, Claude Code was the only lead ([roadmap.md](roadmap.md#5-long-term-plan) L1).
 
 - 2026-11-16: Windows bridge parity verified on Windows 11 with Codex CLI 0.166.0 and Git for Windows 2.53, including `crew.cmd`/Git Bash shims. See [usage-and-presets.md](usage-and-presets.md) for Windows Gauge usage files, [jobs.md](jobs.md#history) for canonical project paths, [delivery.md](delivery.md#history) for Windows toasts, and [sandbox.md](sandbox.md#history) for the Windows check and browser behavior.
 - 2026-11-12–13: Added desktop apps, superseding the earlier web-only design (see the [board history](board.md#history) for the React/TypeScript/Vite migration). Daemon replacement switched to hashing `bridge/` files, and the daemon began binding its port before writing state.

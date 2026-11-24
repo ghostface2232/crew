@@ -19,7 +19,7 @@ The Start menu shortcut gives the Windows app an AppUserModelID (`dev.crew.deskt
 
 ## The app installs the plugin
 
-`crew install` registers the marketplace, installs `crew@crew`, and writes a `crew` shim in `~/.local/bin`. Packaged apps automate this via `plugin/bridge/setup.ts`:
+`crew install` registers the marketplace, installs `crew@crew`, and writes a `crew` shim in `~/.local/bin`. From a source checkout with Codex installed, it also runs `codex plugin marketplace add <checkout>` and `codex plugin add crew@crew` (`registerCodex` in `setup.ts`), so a Codex session can lead. Codex copies the plugin into its own cache, so run `crew install` again after changing it. The user then trusts the Crew hooks in `/hooks` in a Codex session; Crew never writes that trust itself. A built app does not register with Codex yet, because Codex copies only the plugin folder and not the app's Node beside it. Packaged apps automate this via `plugin/bridge/setup.ts`:
 
 1. **Each app carries a built plugin.** Registering the GitHub repository would miss the built board (`plugin/board/dist` is not committed) and let plugin and app code drift. On macOS, the packaged daemon registers the copy inside `Crew.app` (`/Applications/Crew.app/Contents/Resources/bridge`). On Windows, `setup.ts` copies the plugin and `runtime/node.exe` to `~/.crew/plugins/<version>-<build>` and registers that copy so installer updates do not replace files beneath running Claude Code sessions.
 2. **The plugin runs on the app's runtime.** macOS bundles standalone Node (`Contents/Resources/runtime/node`, `scripts/build-desktop.mjs`); Windows bundles `runtime/node.exe` (`scripts/build-electron.mjs`) because a hook command cannot set `ELECTRON_RUN_AS_NODE`. `linkCommand` in `setup.ts` points `~/.local/bin/crew` (and `.cmd`/`.mjs` shims on Windows) at that runtime.
@@ -42,7 +42,7 @@ Signing in to user accounts is never automated.
 
 ## Release housekeeping
 
-- Set `package.json` and `plugin/.claude-plugin/plugin.json` to the release version (daemons compare versions to decide which replaces which), commit to `main`, and push a stable semver tag: `git tag v<version> && git push origin v<version>`.
+- Set `package.json`, `plugin/.claude-plugin/plugin.json`, and `plugin/.codex-plugin/plugin.json` to the release version (daemons compare versions to decide which replaces which), commit to `main`, and push a stable semver tag: `git tag v<version> && git push origin v<version>`.
 - `.github/workflows/release.yml` publishes only when all checks pass: tag matching both version files; `.github/workflows/ci.yml` (`npm run typecheck` on `windows-latest` and `npm test` on both `macos-latest` and `windows-latest`); `npm run test:native` on the self-hosted ARM64 Mac runner (Xcode 27); and `node scripts/desktop.mjs smoke` on the packaged Windows app (`release/win-unpacked/Crew.exe`). Run `Release` via `workflow_dispatch` on any branch to rehearse without publishing.
 - `.github/release-notes.md` documents download links, install paths, and Gatekeeper/SmartScreen steps above GitHub's generated changelog.
 - README documents both the packaged app install and source checkout development.

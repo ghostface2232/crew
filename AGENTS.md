@@ -1,13 +1,13 @@
 # Crew
 
-Crew is a Claude Code plugin that splits one user's coding work across several agents on the same machine. A Claude Code session leads: it plans, does the core of the change, reviews, and decides what is merged. By default Codex implements separable pieces and cross-reviews, and Antigravity polishes wording; which agent takes which kind of work is the user's setting (roles). A status board and desktop apps for macOS and Windows show every agent live and let the user answer approvals and questions in place.
+Crew is a plugin for Claude Code and Codex that splits one user's coding work across several agents on the same machine. The session that starts the conversation leads, whether Claude Code or Codex: it plans, does the core of the change, reviews, and decides what is merged. By default Codex implements separable pieces and cross-reviews, and Antigravity polishes wording; which agent takes which kind of work is the user's setting (roles). A status board and desktop apps for macOS and Windows show every agent live and let the user answer approvals and questions in place.
 
 This file is the map for agents working on this repository. A directory with its own `AGENTS.md` has rules or an overview of its own; read it before editing there.
 
 ## How the app fits together
 
 ```text
-Claude Code session (lead)
+Claude Code or Codex session (lead)
   │ stdio MCP (plugin/bridge/mcp.ts)      │ command hooks (report.ts, context.ts, wake.ts)
   ▼                                       ▼
 Crew daemon (plugin/bridge/daemon.ts, http://127.0.0.1:47615)

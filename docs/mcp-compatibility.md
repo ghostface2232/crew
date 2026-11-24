@@ -103,4 +103,10 @@ Tested 2026-11-24 on Windows 11 with `codex-cli 0.170.0`, for [roadmap L1](roadm
 - **Tool approval.** In the CLI's default approval mode, the first call to a plugin MCP tool asks the user to allow it. The desktop app on "Approve for me" did not ask.
 - **Waking with `codex queue`.** It woke an idle TUI and an idle desktop thread within about four to seven seconds. A message queued while a turn was running waited for that turn to end, then ran as its own turn, in both the TUI and the desktop app.
 
+**Windows, later the same day.** With `codex-cli 0.170.0`:
+- **Stop hooks.** Codex runs hook commands under `pwsh.exe`, which exits 1 when the command `node x.js` exits 2. A Stop hook that exits 2 with a reason on stderr shows "Stop Failed", and the turn does not continue. A Stop hook that prints `{"decision":"block","reason":"…"}` and exits 0 shows "Stop Blocked", and the turn continues with the reason.
+- **Subagents.** A subagent's tool calls carry its own `threadId` but the parent's `sessionId`, with `parent_thread_id`, `subagent_kind`, and `thread_source: "subagent"` in `x-codex-turn-metadata`. Each subagent thread starts its own MCP server process.
+- **Reading a thread's folder.** App-server `thread/read` (`includeTurns: false`) on the daemon's own `codex app-server` returned the `cwd` of a thread another Codex process held. It answered "thread not loaded" for an ephemeral thread.
+- **End to end.** Crew's own bridge ran from this checkout with hooks and MCP passed by `-c`, an isolated `CREW_HOME`, and an interactive TUI lead. The lead's `delegate` call registered its thread as Codex-hosted, and the job's lead was that thread. When the worker finished, the daemon's `codex queue` note woke the idle TUI, which read the news with `status` and acknowledged its receipt.
+
 **Not verified:** elicitation from a Crew tool call. MCP elicitation is advertised in `initialize` (section 1).

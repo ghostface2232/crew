@@ -2,7 +2,7 @@
 
 The daemon keeps news for the lead and uses Claude Code hooks to wake an idle session when a job finishes or needs attention. Lead tools and hook digests offer the news until the lead echoes a receipt.
 
-**Key files:** `plugin/bridge/daemon.ts`, `mcp.ts`, `wake.ts`, `report.ts`, and `context.ts`. See [jobs.md](jobs.md) for lead tools, [missions.md](missions.md#pull-requests) for PR watches, and [daemon-api.md](daemon-api.md) for hook authentication and event formats.
+**Key files:** `plugin/bridge/daemon.ts`, `mcp.ts`, `wake.ts`, `report.ts`, `context.ts`, and `codex-lead.ts`. See [jobs.md](jobs.md) for lead tools, [missions.md](missions.md#pull-requests) for PR watches, and [daemon-api.md](daemon-api.md) for hook authentication and event formats.
 
 ## News and ownership
 
@@ -19,6 +19,14 @@ Only an echoed receipt acknowledges news. Every lead tool accepts `ack: "<receip
 - **Hooks.** `SessionStart` (`startup`, `resume`, `clear`, `compact`, `fork`), `PostToolUse`/`PostToolUseFailure` on Crew tools, and `Stop` arm `wake.ts watch` with `asyncRewake` (needed on `SessionStart` because Claude Desktop can end idle processes under memory pressure). Synchronous `Stop` offers pending news with exit code 2 unless `stop_hook_active` is set. `SessionStart` and `UserPromptSubmit` inject a bounded summary of pending IDs (and open missions on `SessionStart`) via `additionalContext` without offering or acknowledging. All hooks authenticate with `~/.crew/token`, including `/api/hooks/claude`. A forked session (`/branch`, `/fork`, `--fork-session`) gets its own session ID and starts with none of its parent's jobs or missions, since the parent may go on working. It takes over a job only when one of its Crew calls names that job.
 - **Timeout.** Hook timeout is 86,400 seconds (`HOOK_SECONDS`), and the watcher exits 10 seconds earlier. Killed hooks do not re-arm themselves. Persisted news remains recoverable via the next hook, `status`, or the board.
 - **Response bounds.** Digests hold at most 8 snapshots (`OFFER_ITEMS`), and every MCP tool response fits within 32 KiB (`LEAD_BYTES`). Tool text is capped at 24,000 bytes (`LEAD_TEXT_BYTES`) and a report page at 16,000 bytes (`REPORT_PAGE_BYTES`), leaving omitted images on the board and in the evidence list. Read long reports with `status(job_id, report_offset: 0)` using the returned UTF-16 offset (never splitting surrogate pairs) and optional `turn`.
+
+## Codex leads
+
+A Codex session leads with the same lead tools, but Codex has no hook that can start a turn later, so the daemon wakes it instead (`codex-lead.ts`). Host facts are in [mcp-compatibility.md](mcp-compatibility.md#5-codex-as-a-lead-host).
+
+- **Which sessions.** The lead MCP server learns its session from each tool call's `_meta.sessionId`, the root thread, which a subagent's calls name too. The server's first call sends `POST /api/lead/hello` with `host: "codex"`, and the daemon records the session in the delivery state's `hosts`, which is saved with the receipts. A session not listed there is a Claude session that wakes itself.
+- **Waking.** For each Codex-hosted session with unacknowledged news, the daemon takes an automatic offer, under the same 30-second lease and two-offer budget as a hook watcher. It then runs `codex queue --thread <session> --message <note>`. An open TUI or desktop thread that is idle runs the note as its next turn; a note queued during a turn waits for that turn to end. The note only names the subjects ("Crew has news for cx-…. Call the Crew status tool…"), and the lead reads the news with `status`, which offers it again with a fresh receipt. Windows runs `codex` through cmd.exe, which cannot pass the line breaks, quotes and percent signs an offer's text has. With no open session, the note stays in Codex's queue until the thread is resumed.
+- **Hooks.** `plugin/hooks/codex.json` runs `context.ts` and `wake.ts context` on `SessionStart`, `wake.ts context` on `UserPromptSubmit`, and `wake.ts stop-json` on `Stop`. `stop-json` offers pending news as the JSON decision `{"decision":"block","reason":…}` rather than exit code 2, which pwsh does not pass on. Codex runs these hooks only after the user trusts them in `/hooks`; until then a Codex lead still gets the queued notes, but no news at the end of a turn or in its context.
 
 ## Stalls
 
@@ -37,8 +45,10 @@ Codex implements `probe` by reading runtime status with `thread/read` (sub-agent
 
 ## Tests
 
-Related tests include `test/delivery.test.ts`, `test/claude.test.ts`, `test/mcp.test.ts`, and `test/toast.test.ts`. See [architecture.md](architecture.md#tests) for the live `asyncRewake`, Remote Control, and Windows toast checks.
+Related tests include `test/delivery.test.ts`, `test/claude.test.ts`, `test/mcp.test.ts`, `test/codex-lead.test.ts`, and `test/toast.test.ts`. See [architecture.md](architecture.md#tests) for the live `asyncRewake`, Remote Control, and Windows toast checks.
 
 ## History
+
+- 2026-11-24: Codex sessions can lead. The daemon wakes them with `codex queue`, and their Stop hook answers in JSON. Verified end to end on Windows 11 with Codex CLI 0.170.0; `codex queue` was also verified on macOS, for the TUI and the desktop app.
 
 - 2026-11-16: Windows bridge parity added Windows toasts, verified on Windows 11.

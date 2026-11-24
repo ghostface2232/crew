@@ -301,17 +301,6 @@ test('a resumed lead process arms a watcher before any prompt, Stop, or Crew cal
   }
 });
 
-test('MCP refuses a mission call before the host is initialized', async () => {
-  const source = fs.readFileSync(new URL('../plugin/bridge/mcp.ts', import.meta.url), 'utf8');
-  const handler = source.slice(source.indexOf('async function handle('), source.indexOf('readline.createInterface'));
-  const replies: any[] = [];
-  const handle = vm.runInNewContext(`${stripTypeScriptTypes(handler)}; handle`, {
-    initialized: false, send: (msg: unknown) => replies.push(msg),
-  });
-  await handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'mission', arguments: { title: 'Build' } } });
-  assert.equal(replies[0].error.message, 'Server not initialized');
-});
-
 test('MCP bounds a multi-job response and ACKs only echoed receipts before making a new offer', async () => {
   const source = fs.readFileSync(new URL('../plugin/bridge/mcp.ts', import.meta.url), 'utf8');
   const handler = source.slice(source.indexOf('async function handle('), source.indexOf('readline.createInterface'));
@@ -325,7 +314,7 @@ test('MCP bounds a multi-job response and ACKs only echoed receipts before makin
   const replies: any[] = [];
   const order: string[] = [];
   const handle = vm.runInNewContext(`${stripTypeScriptTypes(handler)}; handle`, {
-    AbortController, inFlight: new Map(), ensureDaemon: async () => {}, SESSION: 'lead', host: 'claude', initialized: true,
+    AbortController, inFlight: new Map(), ensureDaemon: async () => {}, SESSION: 'lead', host: 'claude',
     clipped, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, send: (msg: unknown) => replies.push(msg),
     imageContent: () => [{ type: 'image', data: 'x'.repeat(900_000), mimeType: 'image/png' }],
     api: async (_method: string, route: string, body: any) => {
@@ -513,7 +502,7 @@ test('status and mission explicitly read this session\'s watch news without any 
   const missions: object[] = [];
   const offered: (string[] | undefined)[] = [];
   const handle = vm.runInNewContext(`${stripTypeScriptTypes(standing + tool + handler)}; handle`, {
-    AbortController, inFlight: new Map(), ensureDaemon: async () => {}, SESSION: 'lead', host: 'claude', initialized: true, PROJECT: '/project', projectUnknown: false,
+    AbortController, inFlight: new Map(), ensureDaemon: async () => {}, SESSION: 'lead', host: 'claude', PROJECT: '/project', projectUnknown: false,
     fresh: false, missionId: null, costMission: null, closedElsewhere: null,
     missionHead: () => 'Current mission', missionDetail: () => '', currentPolicy: () => '', globalPreset: () => null,
     clipped, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, send: (msg: unknown) => replies.push(msg),

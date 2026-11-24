@@ -1378,6 +1378,28 @@ test('the bridge runs the lead\'s check after each turn and marks it stale when 
   assert.equal(job.receipts?.at(-1)?.stale, 'the check itself changed app.js');
 });
 
+test('a check that rewrites a copied file marks the receipt stale only once the worktree tracks that file', { skip: !SANDBOXED }, async () => {
+  const repo = tempRepo();
+  // Ignored in the main tree only, so the copy is untracked in the worktree without being ignored there.
+  fs.writeFileSync(path.join(repo, '.gitignore'), '.env\n');
+  fs.writeFileSync(path.join(repo, '.worktreeinclude'), '.env\n');
+  fs.writeFileSync(path.join(repo, '.env'), 'KEY=1\n');
+  const { jobs, adapter } = harness((ctl) => ctl.done('ok'));
+  const job = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'x', check: 'echo more >> .env' }));
+  assert.deepEqual(job.worktree?.copied, ['.env']);
+  assert.equal(job.receipts?.at(-1)?.check?.exit, 0);
+  assert.equal(job.receipts?.at(-1)?.stale, undefined);
+
+  // As after a sync that brought in a commit tracking it: the file is now part of what the commit holds.
+  execFileSync('git', ['add', '-f', '.env'], { cwd: job.worktree!.path });
+  execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=t@example.com', 'commit', '-qm', 'the lead tracks it'], { cwd: job.worktree!.path });
+  adapter.reply = async (ctl) => ctl.done('ok');
+  await jobs.reply(job.id, { message: 'again' });
+  await settled(jobs, job);
+  assert.equal(job.receipts?.at(-1)?.check?.exit, 0);
+  assert.equal(job.receipts?.at(-1)?.stale, 'the check itself changed .env');
+});
+
 test('a check cannot rewrite .git, reach outside sockets, or outlive its run, and stops when cancelled', { skip: !SANDBOXED }, async () => {
   const repo = tempRepo();
   const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-check-tmp-')));

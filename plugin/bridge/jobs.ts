@@ -1602,10 +1602,14 @@ export class Jobs {
         }
       }
       // A check that rewrote tracked files passed on a tree the commit does not hold.
-      const listed = check ? `${await git(job.worktree.path, [...NO_HOOKS, 'diff', NO_SUBMODULES, '--name-only', '-z', 'HEAD'])}${await git(job.worktree.path, ['ls-files', '--others', '--exclude-standard', '-z'])}` : '';
-      // What Crew attached may be untracked there without being the check's doing.
+      const rewritten = check ? await git(job.worktree.path, [...NO_HOOKS, 'diff', NO_SUBMODULES, '--name-only', '-z', 'HEAD']) : '';
+      const added = check ? await git(job.worktree.path, ['ls-files', '--others', '--exclude-standard', '-z']) : '';
+      // What Crew attached may be untracked there without being the check's doing; once tracked, a change to it counts.
       const kept = attached(job.worktree);
-      const changed = listed.split('\0').filter(Boolean).filter((file) => !kept.some((rel) => file === rel || file.startsWith(`${rel}/`)));
+      const changed = [
+        ...rewritten.split('\0'),
+        ...added.split('\0').filter((file) => !kept.some((rel) => file === rel || file.startsWith(`${rel}/`))),
+      ].filter(Boolean);
       const stale = changed.length ? `the check itself changed ${changed.slice(0, 3).join(', ')}${changed.length > 3 ? ` and ${changed.length - 3} more` : ''}` : undefined;
       (job.receipts ??= []).push({ turn: job.turns, head, ...(check ? { check } : {}), ...(stale ? { stale } : {}), at: Date.now() });
     } else if (job.kind === 'review' || job.ask) {

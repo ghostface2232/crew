@@ -636,6 +636,10 @@ test('a worker that cannot run commands can search its tree and see what was jus
   assert.match(everywhere.text, /^untracked\.md:1:/m);
   assert.deepEqual(await call('search', { pattern: 'status board', path: 'docs' }), { matches: 1, text: 'docs/a.md:1:The status board shows jobs.' });
   assert.deepEqual(await call('search', { pattern: 'no such thing' }), { matches: 0, text: 'No match.' });
+  // A misnamed option fails rather than being dropped, which would have searched case-sensitively without a word.
+  assert.match((await call('search', { pattern: 'x', case_insensitive: true })).error, /^search does not take `case_insensitive`, so nothing was done\. Its arguments: pattern, path, ignore_case\./);
+  // agy adds toolSummary to every Antigravity call; it is the host's, not a mistake.
+  assert.deepEqual(await call('search', { pattern: 'no such thing', toolSummary: 'Look for it' }), { matches: 0, text: 'No match.' });
   // A pattern that looks like an option is still a pattern.
   assert.equal((await call('search', { pattern: '--open-files-in-pager=touch pwned' })).matches, 0);
   assert.equal(fs.existsSync(path.join(tree, 'pwned')), false);
@@ -869,7 +873,8 @@ test('peer ratings: a worker rates through its own tool, the review line gives t
   const worker = stdio(t, 'worker-mcp.ts', { ...h.env, ...server.env });
   await worker.request('initialize', { protocolVersion: '2025-11-25' });
   assert.deepEqual(JSON.parse(textOf(await worker.call('rate', { findings: 4, fact: 'The race was real.' }))), { kept: { findings: 4 } });
-  assert.match((await worker.call('rate', { correctness: 5, fact: 'x' })).content[0].text, /at least one of findings/);
+  // An item outside its tool is refused by the tool, before the daemon sees it.
+  assert.match((await worker.call('rate', { correctness: 5, fact: 'x' })).content[0].text, /^rate does not take `correctness`, so nothing was done\. Its arguments: findings, fact\./);
   // An item the job may not rate refuses the whole rating, rather than being dropped from it.
   for (const brief of [99, null]) assert.match((await h.api('POST', route, { findings: 4, brief, fact: 'x', token: server.env.CREW_JOB_TOKEN })).body.error, /at least one of findings/);
   const review = (await h.api('POST', '/api/jobs', { kind: 'review', cwd: h.home, project: h.home, review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } })).body;

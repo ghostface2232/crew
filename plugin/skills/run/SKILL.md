@@ -43,7 +43,7 @@ Call `delegate` for each piece with a brief written as below, then do your own p
 
 ### Writing a brief
 
-The worker has not seen this conversation and follows every line literally. Give it the context and facts it needs to decide well, accurately and briefly, and leave out what does not affect acceptance:
+The worker has not seen this conversation and follows every line literally. Give it the context and facts it needs to decide well, accurately and briefly, and leave out what does not affect acceptance. The brief goes in `task` for `delegate` and `polish`, `focus` for `review`, and `topic` and `position` for `debate`, with criteria in `done_when`; a call with an argument its tool does not take fails, so check the tool's arguments rather than reusing another tool's.
 
 - **Goal and place**: what to change and why, the files and interfaces involved, and which files it may edit when you or another worker are editing others.
 - **What is already decided**: the choices this piece must follow (names, formats, error handling, style) and what sibling jobs are building. Distinguish what you have verified from what you are assuming, so the worker checks each assumption before building on it.
@@ -89,7 +89,7 @@ Record what the review showed with `note`, using facts only: one call for each b
 
 ## 6. Polish
 
-If the change touched user-facing strings, comments, or docs, commit your work and call `polish` with only those files as `targets`; prepare the final summary while it runs, since `polish` is not a merge gate. If `route` returns a wait time for `polish`, skip it and report when it can run. Accept the result only if every changed line is wording; reject the whole diff if any file is out of scope, or if code, identifiers, string keys, or structure changed.
+If the change touched user-facing strings, comments, or docs, commit your work and call `polish` with only those files as `targets` and, in `task`, which texts to improve and what each must still say; prepare the final summary while it runs, since `polish` is not a merge gate. If `route` returns a wait time for `polish`, skip it and report when it can run. Accept the result only if every changed line is wording; reject the whole diff if any file is out of scope, or if code, identifiers, string keys, or structure changed.
 
 ## 7. Final check (you)
 

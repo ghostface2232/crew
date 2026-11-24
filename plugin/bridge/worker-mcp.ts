@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import path from 'node:path';
 import readline from 'node:readline';
 import { promisify } from 'node:util';
+import { checkArguments } from './arguments.ts';
 import { api } from './client.ts';
 import { VERSION } from './config.ts';
 import type { LeadQuestion } from './jobs.ts';
@@ -188,6 +189,7 @@ async function handle(msg: any): Promise<void> {
       return reply({ tools: RATE ? [...TOOLS, RATE] : TOOLS });
     case 'tools/call':
       try {
+        checkArguments(RATE ? [...TOOLS, RATE] : TOOLS, params?.name, params?.arguments ?? {});
         const result = await callTool(params?.name, params?.arguments ?? {});
         return reply({ content: [{ type: 'text', text: JSON.stringify(result) }] });
       } catch (err) {

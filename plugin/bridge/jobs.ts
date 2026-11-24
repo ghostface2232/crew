@@ -66,7 +66,7 @@ export interface JobSpec {
   /** Project directory of the session that started the job. */
   project?: string;
   title?: string;
-  /** delegate: what to build. polish: extra guidance. review: what to focus on. */
+  /** delegate: what to build. polish: what to change. review: what to focus on. */
   task?: string;
   done_when?: string;
   /** delegate: a shell command the bridge runs in the worktree after each turn, recording its exit status. */

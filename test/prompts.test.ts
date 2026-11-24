@@ -210,3 +210,11 @@ test('a report that copies the Outcome template line declares nothing', () => {
     assert.equal(parseOutcome(`## Outcome\n${line}\n`), undefined, role);
   }
 });
+
+test('a polish brief reaches the editor as its task, with its criteria', () => {
+  const spec = { kind: 'polish', role: 'polish', cwd: '/project', targets: ['README.md'], task: 'Reword the roles footnote.', done_when: 'Only that footnote changed.' } as JobSpec;
+  const { prompt } = buildPrompt(spec, null);
+  assert.match(prompt, /# Files you may edit\n- README\.md\n\n# Task\nReword the roles footnote\.\n\n# Done when\nOnly that footnote changed\./);
+  // Without a brief the editor improves what it finds, as before.
+  assert.doesNotMatch(buildPrompt({ ...spec, task: undefined, done_when: undefined }, null).prompt, /# Task|# Done when/);
+});

@@ -232,7 +232,7 @@ export function App() {
   return (
     <ClockProvider skew={state.clockSkew}>
       <div className="app">
-        <aside className="sidebar" id="sidebar" aria-label="Sidebar" ref={sidebar} data-open={drawer || undefined} inert={folded}>
+        <aside className="sidebar" id="sidebar" aria-label={t('Sidebar')} ref={sidebar} data-open={drawer || undefined} inert={folded}>
           <div className="brand">
             <img className="brand-mark" src={appIcon} alt="" />
             <span className="brand-name">Crew</span>
@@ -290,7 +290,7 @@ export function App() {
             >
               <Icon icon={PanelLeftRegular} />
             </button>
-            <nav className="crumbs" aria-label="Location">
+            <nav className="crumbs" aria-label={t('Location')}>
               <button className="crumb" onClick={() => select('overview')} disabled={!project && page === 'overview'}>
                 {project ? t('Projects') : 'Crew'}
               </button>
@@ -311,7 +311,7 @@ export function App() {
               <span>{t('Search work, projects…')}</span>
               <kbd>⌘K</kbd>
             </button>
-            <button className="new-job prominent" disabled={!live} title="New job (N)" aria-keyshortcuts="N" onClick={(event) => newJob(event.currentTarget)}>
+            <button className="new-job prominent" disabled={!live} title={t('New job (N)')} aria-keyshortcuts="N" onClick={(event) => newJob(event.currentTarget)}>
               <Icon icon={AddRegular} />
               <span className="new-job-label">{t('New Job')}</span>
             </button>

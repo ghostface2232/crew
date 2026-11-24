@@ -472,7 +472,7 @@ export function CopyButton({ text, short, children }: { text: string; short?: st
         <Icon icon={copied ? CheckmarkRegular : CopyRegular} />
         {copied ? t('Copied') : short ? <><span className="label-long">{children}</span><span className="label-short" aria-hidden="true">{short}</span></> : children}
       </button>
-      {failed && <span className="action-message selectable">Could not copy. Select and copy: {text}</span>}
+      {failed && <span className="action-message selectable">{t('Could not copy. Select and copy: {text}', { text })}</span>}
     </>
   );
 }

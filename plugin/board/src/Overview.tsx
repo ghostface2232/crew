@@ -306,7 +306,7 @@ export const AgentPanel = memo(function AgentPanel({ state, project }: { state: 
               const same = Boolean(parent) && parentHolders.length === holders.length && holders.every((holder) => parentHolders.includes(holder));
               return !(same && !state.roleSettings?.[role]?.agents);
             })
-            .map(({ label }) => label);
+            .map(({ label }) => t(label));
           const role = [...(agent === 'claude' ? [t('Lead')] : []), ...held].join(' · ');
           return (
             <li className="agent-card" key={agent} data-agent={agent} style={{ '--i': index } as CSSProperties}>

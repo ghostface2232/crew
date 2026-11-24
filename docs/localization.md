@@ -32,7 +32,7 @@ Choosing per platform convention rather than adding a setting keeps one source o
 | lead | 리드 | worker | 워커 |
 | agent | 에이전트 | role | 역할 |
 | board | 보드 | session | 세션 |
-| project | 프로젝트 | task | 할 일 |
+| project | 프로젝트 | task (a mission's) | 할 일 |
 | approval, approve | 승인 | deny, decline | 거절 |
 | question | 질문 | answer | 답변 |
 | Needs you | 확인 필요 | waiting on you | 내 응답 대기 |
@@ -53,8 +53,14 @@ Choosing per platform convention rather than adding a setting keeps one source o
 | done | 완료 | failed | 실패 |
 | cancelled | 취소됨 | New Job | 새 작업 |
 | Overview | 개요 | note | 노트 |
+| sub-agent | 서브에이전트 | details | 세부 정보 |
+| instructions (shared) | 지침 | instructions (a job's) | 지시 내용 |
 
 Mission stops: Plan `계획`, Build `구현`, Review `리뷰`, Fix `수정`, Polish `다듬기`, Final `마무리`.
+
+"Task" outside a mission's task list means the work itself and reads `작업`. Tiers: Fast `빠름`, Light `경량`, Standard `표준`, Frontier `최상위`. Presets: Economy `절약`, Balanced `균형`, Best `최고`. Usage states: ok `정상`, tight `한도 임박`, exhausted `한도 도달`, stale `오래됨`.
+
+The board's `ko.ts` and the macOS app's `Localizable.strings` give the same English the same Korean, so the two read alike side by side.
 
 ## Not verified
 

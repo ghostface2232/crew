@@ -168,6 +168,22 @@ test('short mission plans render in order with matching tracks', async ({ page, 
   await expect(stage(card, 'Final').locator('button[data-job]')).toHaveCount(2);
 });
 
+test('a mission card names its lead the same way for Claude and Codex, and keeps it after the session ends', async ({ page, request }) => {
+  const data = fixture();
+  const card = page.locator('[data-key="mission-1"]');
+  // A mission from before the lead was recorded takes it from its owning session.
+  await expect(card.locator('.mission-meta')).toContainText(/^Led by Claude · /);
+  await expect(card.locator('.mission-lead .agent-mark')).toHaveCount(1);
+  data.missions[0].lead = 'codex';
+  data.claude = data.claude.filter((session) => session.id !== data.missions[0].owner);
+  await request.post('/__push', { data: { type: 'state', data } });
+  await expect(card.locator('.mission-meta')).toContainText(/^Led by Codex · /);
+  delete data.missions[0].lead;
+  await request.post('/__push', { data: { type: 'state', data } });
+  await expect(card.locator('.mission-meta')).not.toContainText('Led by');
+  await expect(card.locator('.mission-lead')).toHaveCount(0);
+});
+
 test('a mission with more than one job folds the busy stages it has moved past, and each stage folds on its own', async ({ page, request }) => {
   const data = fixture();
   data.missions[0].stages = ['plan', 'implement', 'cross-review'];
@@ -1587,7 +1603,25 @@ test('a Codex lead session is shown as Codex\'s, on its card, in Needs You and i
   await expect(card.locator('.need-who')).toHaveText('Codex');
   await expect(card.getByText('Answer in Codex.')).toBeVisible();
   await card.locator('.need-title').click();
-  await expect(page.getByRole('dialog').getByText('Codex · Lead', { exact: true })).toBeVisible();
+  const panel = page.getByRole('dialog');
+  await expect(panel.getByText('Codex · Lead', { exact: true })).toBeVisible();
+  await expect(panel.getByRole('button', { name: 'Open in Codex' })).toHaveCount(0);
+  await panel.getByRole('button', { name: 'Close' }).click();
+
+  // A desktop thread opens in Codex as a Claude desktop session opens in Claude; the terminal one keeps the hint.
+  const thread = 'e97eb8b4-b9ff-4551-b625-3c06c77253c7';
+  data.claude.push({ ...data.claude[1], id: thread, desktopId: thread, waitingId: 'w-4', title: 'Codex desktop' });
+  // With no Claude session open, Claude's card no longer says Lead, as Codex's does not without one.
+  data.claude = data.claude.filter((session) => session.host === 'codex');
+  await request.post('/__push', { data: { type: 'state', data } });
+  const desktop = page.locator(`article[data-session="${thread}"]`);
+  await expect(desktop.getByRole('button', { name: 'Open in Codex' })).toBeVisible();
+  await expect(desktop.getByText('Answer in Codex.')).toHaveCount(0);
+  await expect(card.getByRole('button', { name: 'Open in Codex' })).toHaveCount(0);
+  await expect(card.getByText('Answer in Codex.')).toBeVisible();
+  await page.getByRole('navigation', { name: 'Pages' }).getByRole('button', { name: 'Overview' }).filter({ visible: true }).click();
+  await expect(page.locator('.agent-card[data-agent="claude"] .caption')).not.toContainText('Lead');
+  await expect(page.locator('.agent-card[data-agent="codex"] .caption')).toContainText('Lead');
 });
 
 test('a waiting Claude session shows what it asks, opens in Claude, and opens its panel from the card', async ({ page, request }, testInfo) => {

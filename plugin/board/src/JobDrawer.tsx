@@ -18,7 +18,7 @@ import { ActionStatus, CloseButton, CopyButton, CopyMenu, Dialog, Icon, Chip, us
 import { ReportText as RenderReport } from './Report.ts';
 import { debatePoints, stanceCounts } from './debate.ts';
 import type { Stance } from './debate.ts';
-import { Answer, ClaudeAsk, OpenInClaude } from './NeedsYou.tsx';
+import { Answer, ClaudeAsk, OpenInAgent, sessionAppLink } from './NeedsYou.tsx';
 import { EventList } from './Overview.tsx';
 import { jobStatusState, missionStateLabel, SessionAgents, sessionStateLabel, SessionWorkflow } from './Missions.tsx';
 import { t, translated } from './i18n.ts';
@@ -876,7 +876,7 @@ export const SessionDrawer = memo(function SessionDrawer({ id, state, close }: {
             <div className="card answer-card answer">
               <p className="headline selectable">{session.waitingFor ?? t('{agent} needs your input.', { agent: NAMES[sessionAgent(session)] })}</p>
               <ClaudeAsk session={session} />
-              {!session.desktopId && <p className="callout secondary">{t('Answer in {agent}.', { agent: NAMES[sessionAgent(session)] })}</p>}
+              {!sessionAppLink(session) && <p className="callout secondary">{t('Answer in {agent}.', { agent: NAMES[sessionAgent(session)] })}</p>}
             </div>
           )}
           <Facts
@@ -908,7 +908,7 @@ export const SessionDrawer = memo(function SessionDrawer({ id, state, close }: {
             </Section>
           )}
           <Footer>
-            <OpenInClaude session={session} />
+            <OpenInAgent session={session} />
             <CopyButton text={session.host === 'codex' ? `codex resume ${session.id}` : `claude --resume ${session.id}`} short={t('Resume')}>{t('Resume Command')}</CopyButton>
           </Footer>
         </>

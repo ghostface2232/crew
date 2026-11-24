@@ -525,13 +525,22 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
         #expect(session.agentSummary == "2 sub-agents")
     }
 
-    @Test func desktopSessionsOpenInClaudeAndAsksDecode() throws {
+    @Test func desktopSessionsHaveAppLinksAndAsksDecode() throws {
         var session = try fixture().claude[0]
-        #expect(session.claudeURL == nil)
+        #expect(session.appURL == nil)
         session.desktopId = "local_e97eb8b4-b9ff-4551-b625-3c06c77253c7"
-        #expect(session.claudeURL?.absoluteString == "claude://code/continue?session=local_e97eb8b4-b9ff-4551-b625-3c06c77253c7")
+        #expect(session.appURL?.absoluteString == "claude://code/continue?session=local_e97eb8b4-b9ff-4551-b625-3c06c77253c7")
         session.desktopId = "local_x&q=1"
-        #expect(session.claudeURL == nil)
+        #expect(session.appURL == nil)
+        // A Codex session links to its thread only once the daemon knows it is a desktop thread.
+        session.host = "codex"
+        session.id = "e97eb8b4-b9ff-4551-b625-3c06c77253c7"
+        session.desktopId = nil
+        #expect(session.appURL == nil)
+        session.desktopId = session.id
+        #expect(session.appURL?.absoluteString == "codex://threads/e97eb8b4-b9ff-4551-b625-3c06c77253c7")
+        session.desktopId = session.id + "?x=1"
+        #expect(session.appURL == nil)
         let json = #"{"questions":[{"header":"Layout","question":"Which?","options":["Tabs","Single"]}]}"#
         let ask = try JSONDecoder().decode(ClaudeAsk.self, from: Data(json.utf8))
         #expect(ask.questions?.first?.options == ["Tabs", "Single"])
@@ -546,7 +555,7 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
         session = try JSONDecoder().decode(ClaudeSession.self, from: JSONEncoder().encode(session))
         #expect(session.agent == "codex")
         #expect(session.resumeCommand == "codex resume \(session.id)")
-        #expect(session.claudeURL == nil)
+        #expect(session.appURL == nil)
     }
 }
 

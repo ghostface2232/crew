@@ -91,6 +91,12 @@ test('a Codex session keeps its record between its hello and its first job, and 
   jobs.push(job('cx-ffffff', 'a'));
   addNews(jobs[1], 'done', 'Done.');
   assert.deepEqual(delivery.codexWaiting(), ['a']);
+  // A desktop thread stays known as one across later hellos, which need not say it again.
+  assert.equal(delivery.desktopOf('a'), false);
+  delivery.host('a', 'codex', 8 * DAY + 2, true);
+  delivery.host('a', 'codex', 8 * DAY + 3);
+  assert.equal(delivery.desktopOf('a'), true);
+  assert.equal(delivery.desktopOf('b'), false);
 });
 
 test('the note names each subject once', () => {

@@ -52,7 +52,7 @@ function missionServer(t: TestContext) {
   };
   const server = (session: string | null = 'lead', fresh = false) => {
     const context: Record<string, any> = {
-      missionHead, missionDetail, NAME_THE_MISSION, normalizeTitle, followUpTitle, SESSION: session ?? undefined, PROJECT: canonicalPath('/project'), missionId: null, closedElsewhere: null,
+      missionHead, missionDetail, NAME_THE_MISSION, normalizeTitle, followUpTitle, SESSION: session ?? undefined, host: 'codex', PROJECT: canonicalPath('/project'), missionId: null, closedElsewhere: null,
       costMission: null, lastDone: null, fresh, openedHere: new Set<string>(), SUPERSEDED: 'Superseded by a new mission.', currentPolicy: () => 'policy', globalPreset: () => null,
       describeJob: (job: Job) => `job ${job.id}`, api,
     };
@@ -69,6 +69,7 @@ test('mission forwards plans on start, revision, repeated titles and reattachmen
   const report = await reportMission({ title: 'Review', stages });
   assert.match(report, /step 1 of 3/);
   assert.deepEqual(calls.at(-1)?.body.stages, stages);
+  assert.equal(missions.list()[0].lead, 'codex');
   const id = missions.list()[0].id;
   for (const args of [{ stages: ['fix', 'final'] }, { stage: 'cross-review', stages: ['fix', 'final'] }]) {
     assert.match(await reportMission(args), /Plan: cross-review \(current\) → fix → final/);
@@ -243,6 +244,7 @@ test('work started after a done mission opens a follow-up mission named after it
   const first = await runJob({ kind: 'delegate', task: 'more' }, true, { jobs: [] });
   assert.match(first, /^Opened mission m-[0-9a-f]{6} "후속 작업: 역할 정리"/);
   assert.deepEqual(calls.findLast((call) => call.route === '/api/missions')?.body.stages, ['implement', 'final']);
+  assert.equal(calls.findLast((call) => call.route === '/api/missions')?.body.lead, 'codex');
   assert.equal(calls.at(-1)?.body.mission, context.costMission);
   // Jobs started together open one follow-up, and a job that fails still tells the lead of the mission it opened.
   await finish();
@@ -584,7 +586,7 @@ test('a Codex session says hello once, retries a failed hello, refuses a call na
   let answer: () => Promise<any> = async () => ({ cwd: '/work/repo' });
   const context: Record<string, any> = {
     SESSION: undefined, PROJECT: '/plugin', projectUnknown: true, forgetMissions: () => { forgotten++; }, canonicalPath: (p: string) => `canon:${p}`,
-    api: async (_method: string, route: string, body: any) => { hellos.push(`${route} ${body.session} ${body.host}`); return answer(); },
+    api: async (_method: string, route: string, body: any) => { hellos.push(`${route} ${body.session} ${body.host}${body.desktop ? ' desktop' : ''}`); return answer(); },
   };
   const codexSession = vm.runInNewContext(`${stripTypeScriptTypes(code)}; codexSession`, context);
   // Calls arriving together wait on one hello, and none runs before the project is known.
@@ -602,4 +604,9 @@ test('a Codex session says hello once, retries a failed hello, refuses a call na
   answer = async () => ({ cwd: null });
   await codexSession({ sessionId: 'next' });
   assert.deepEqual([hellos.length, context.SESSION, context.projectUnknown, forgotten], [3, 'next', true, 1]);
+  // A desktop thread says so, whether Codex sends its turn metadata as an object or as JSON; anything else does not.
+  await codexSession({ sessionId: 'app', 'x-codex-turn-metadata': { client_type: 'desktop_app' } });
+  await codexSession({ sessionId: 'app-json', 'x-codex-turn-metadata': JSON.stringify({ client_type: 'desktop_app' }) });
+  await codexSession({ sessionId: 'tui', 'x-codex-turn-metadata': '{not json' });
+  assert.deepEqual(hellos.slice(-3), ['/api/lead/hello app codex desktop', '/api/lead/hello app-json codex desktop', '/api/lead/hello tui codex']);
 });

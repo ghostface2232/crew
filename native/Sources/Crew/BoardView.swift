@@ -324,8 +324,8 @@ struct AgentOverview: View {
            Set(assignment.holders) == Set(inherited.holders) { return false }
         return true
     }.map(\.localizedLabel)
-    // Claude leads unless the user starts in Codex, whose card says so while one of its sessions is open.
-    let leads = agent == "claude" || store.state.claude.contains { $0.agent == agent && (store.project.isEmpty || $0.projectPath == store.project) }
+    // Claude and Codex alike say Lead while one of their sessions is open in this scope, as on the board.
+    let leads = store.state.claude.contains { $0.agent == agent && (store.project.isEmpty || $0.projectPath == store.project) }
     return ((leads ? [String(localized: "Lead")] : []) + labels).joined(separator: " · ")
 }
 
@@ -409,6 +409,8 @@ struct MissionPanel: View {
             mission.preset.map { localizedCrewLabel($0.rawValue.capitalized) },
         ].compactMap { $0 }.joined(separator: " · ")
     }
+    /// Missions from before the daemon recorded their lead fall back to their session while it is still known.
+    private var leadAgent: String? { mission.lead ?? store.state.claude.first { $0.id == mission.owner }?.agent }
     var body: some View {
         let leadRow = store.state.leadRow(for: mission)
         let pulls = (store.state.pulls ?? []).filter { $0.mission == mission.id }
@@ -416,10 +418,13 @@ struct MissionPanel: View {
             VStack(alignment: .leading, spacing: Space.xs) {
                 // Status and the controls sit on the middle of the title and its meta line together.
                 HStack(alignment: .center, spacing: Space.m) {
+                    // The lead's mark sits before the title and meta together, the same for every lead.
+                    if let leadAgent { AgentMark(agent: leadAgent, size: MarkSize.list) }
                     VStack(alignment: .leading, spacing: Space.xs) {
                         // One line each, so cards side by side keep the same height whatever their titles.
                         Text(mission.title).font(Typeface.title).fadeTruncated().help(mission.title)
                         HStack(spacing: 0) {
+                            if let leadAgent { Text(String(localized: "Led by \(agentName(leadAgent))") + " · ") }
                             ElapsedText(store: store, start: mission.createdAt, end: mission.endedAt)
                             Text(" · " + meta)
                         }.font(Typeface.caption).monospacedDigit().foregroundStyle(.secondary).fadeTruncated().help(mission.root)
@@ -665,14 +670,14 @@ struct NeedsYouView: View {
                                 Text(verbatim: agentName(session.agent)).lineLimit(1)
                             }.font(Typeface.chip).foregroundStyle(.secondary).help(session.projectPath)
                             Spacer(minLength: WorkspaceStyle.rowSpacer)
-                            OpenInClaudeButton(session: session)
+                            OpenInAgentButton(session: session)
                         }
                         Text(session.title).font(Typeface.callout).foregroundStyle(.secondary).lineLimit(2).help(session.title)
                     }
                     Text(session.waitingFor ?? String(localized: "\(agentName(session.agent)) needs your input.")).font(Typeface.headline).lineSpacing(4).textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
                     ClaudeAskView(session: session)
-                    if session.claudeURL == nil {
+                    if OpenInAgentButton.availableURL(for: session) == nil {
                         Label("Answer in \(agentName(session.agent)).", systemImage: "bubble.left.and.bubble.right").font(Typeface.callout).foregroundStyle(.secondary)
                     }
                 }

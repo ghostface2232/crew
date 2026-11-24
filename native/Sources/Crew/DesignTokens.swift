@@ -284,7 +284,7 @@ enum Welcome {
     static let appIcon: CGFloat = 88
     /// One agent's column in the first page's card.
     static let agentColumn: CGFloat = 116
-    /// The width of the pictures that show a card, such as the Claude Code prompt.
+    /// The width of the pictures that show a card, such as the command prompts.
     static let artCard: CGFloat = 340
     static let textInset = Space.x5l
     static let dot: CGFloat = 7
@@ -307,8 +307,6 @@ enum Welcome {
     /// The waiting Claude session's card, set back behind the approval.
     static let behindScale: CGFloat = 0.92
     static let behindOpacity: CGFloat = 0.7
-    /// The text cursor in the Claude Code prompt.
-    static let caret = CGSize(width: 1.5, height: 17)
     /// The prompt's send button, a little smaller than an icon button so it sits inside the prompt card, and its arrow.
     static let sendButton: CGFloat = 26
     static let onAccent = Color.white

@@ -30,7 +30,10 @@ export interface ClaudeSession {
   workflows: WorkflowRun[];
   /** The open mission this session last acted on as its lead. With several open, the board shows the session on that card alone. Memory only. */
   mission?: string;
-  /** The Claude desktop app's id for the session (local_…), which `claude://code/continue?session=` opens. Absent for a CLI session. */
+  /**
+   * The id the session's desktop app opens it by: Claude's local_… for `claude://code/continue?session=`, or a Codex
+   * desktop thread's own id for `codex://threads/`. Absent for a session in a terminal.
+   */
   desktopId?: string;
   /** Details of what the waiting prompt asks, when hooks provide more than a single summary line. Present only while waiting. */
   ask?: ClaudeAsk;
@@ -323,6 +326,14 @@ export class ClaudeSessions {
   }
 
   /** Records the open mission a lead session just acted on, or that it has none any more. */
+  /** Marks a Codex session as a desktop app thread, once the daemon learns it from the session's hello. */
+  desktop(id: string): void {
+    const s = this.sessions.get(id);
+    if (!s || s.host !== 'codex' || s.desktopId === id) return;
+    s.desktopId = id;
+    this.hooks.onSession(s);
+  }
+
   focus(id: string, mission: string | undefined): void {
     const s = this.sessions.get(id);
     if (!s || s.mission === mission) return;

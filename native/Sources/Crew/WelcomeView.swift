@@ -175,29 +175,30 @@ private struct WelcomeArt: View {
     }
 }
 
-/// A Claude Code prompt with a command entered.
+/// The same command typed in a Claude Code prompt and a Codex prompt, at equal weight: either can lead.
 private struct CommandArt: View {
+    private static let hosts = [("claude", "Claude Code", "/crew:run"), ("codex", "Codex", "$crew:run")]
     var body: some View {
-        VStack(alignment: .leading, spacing: Space.l) {
-            HStack(spacing: Space.s) {
-                AgentMark(agent: "claude", size: MarkSize.inline)
-                Text("Claude Code")
-            }.font(Typeface.chip).foregroundStyle(.secondary)
-            HStack(spacing: Space.xxs) {
-                Text("\(Text("/crew:run").foregroundStyle(Palette.accent).fontWeight(.medium)) Add a dark mode")
-                Rectangle().fill(Palette.accent).frame(width: Welcome.caret.width, height: Welcome.caret.height)
-            }.font(Typeface.body)
-            HStack {
-                Text("~/Projects/app").font(Typeface.caption).foregroundStyle(.secondary)
-                Spacer()
-                Image(systemName: "arrow.up").font(Symbol.control).foregroundStyle(Welcome.onAccent)
-                    .frame(width: Welcome.sendButton, height: Welcome.sendButton)
-                    .background(Palette.accent, in: Circle())
+        VStack(spacing: Space.l) {
+            ForEach(Self.hosts, id: \.0) { agent, name, command in
+                VStack(alignment: .leading, spacing: Space.ml) {
+                    HStack(spacing: Space.s) {
+                        AgentMark(agent: agent, size: MarkSize.inline)
+                        Text(verbatim: name)
+                    }.font(Typeface.chip).foregroundStyle(.secondary)
+                    HStack(spacing: Space.l) {
+                        Text("\(Text(verbatim: command).foregroundStyle(Palette.accent).fontWeight(.medium)) Add a dark mode").font(Typeface.body)
+                        Spacer(minLength: 0)
+                        Image(systemName: "arrow.up").font(Symbol.control).foregroundStyle(Welcome.onAccent)
+                            .frame(width: Welcome.sendButton, height: Welcome.sendButton)
+                            .background(Palette.accent, in: Circle())
+                    }
+                }
+                .frame(width: Welcome.artCard)
+                .card(padding: Space.xl)
+                .shadow(color: Welcome.cardShadow, radius: Welcome.shadowRadius, y: Welcome.shadowOffset)
             }
         }
-        .frame(width: Welcome.artCard)
-        .card(padding: Space.xl)
-        .shadow(color: Welcome.cardShadow, radius: Welcome.shadowRadius, y: Welcome.shadowOffset)
     }
 }
 

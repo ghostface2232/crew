@@ -150,6 +150,32 @@ function harness(t: TestContext) {
   return { home, missions, changes };
 }
 
+test('a mission keeps its opening agent through retries, completion and reload', (t) => {
+  const { home, missions } = harness(t);
+  const owned = { ...input, owner: 'session' };
+  const mission = missions.start({ ...owned, lead: 'codex' });
+  assert.equal(mission.lead, 'codex');
+  assert.strictEqual(missions.start({ ...owned, lead: 'claude' }), mission);
+  missions.finish(mission.id);
+  const claude = missions.start({ ...owned, lead: 'claude' });
+  missions.flush();
+  const loaded = new Missions(home, () => {});
+  assert.equal(loaded.get(mission.id).lead, 'codex');
+  assert.equal(loaded.get(claude.id).lead, 'claude');
+});
+
+test('invalid leads are omitted and stored missions without a lead still load', (t) => {
+  const { home, missions } = harness(t);
+  for (const lead of ['Codex', 'antigravity', null, 42]) {
+    assert.equal(Object.hasOwn(missions.start({ ...input, lead }), 'lead'), false);
+  }
+  const legacy = missions.start({ ...input, owner: 'session' });
+  assert.strictEqual(missions.start({ ...input, owner: 'session', lead: 'claude' }), legacy);
+  assert.equal(Object.hasOwn(legacy, 'lead'), false);
+  missions.flush();
+  assert.equal(Object.hasOwn(new Missions(home, () => {}).get(legacy.id), 'lead'), false);
+});
+
 test('a mission carries its normalized title through updates and completion, notifying once per change', (t) => {
   const { missions, changes } = harness(t);
   let now = 1_000;
@@ -407,7 +433,7 @@ test('a stored record that is not a mission is refused, since records are render
   t.after(() => fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }));
   const file = path.join(home, 'missions.json');
   const good = { id: 'm-000001', title: 't', project: '/p', root: '/p', stage: 'plan', state: 'active', outcome: '', createdAt: 1, updatedAt: 1, endedAt: null };
-  for (const bad of [{ ...good, createdAt: '1" onmouseover="x' }, { ...good, stage: 'nope' }, { ...good, stages: [] }, { ...good, stages: ['plan'], stageIndex: 1 }, { ...good, stages: ['plan'], stageIndex: 0.5 }, { ...good, stageIndex: 0 }, { ...good, stages: ['unknown'] }, { ...good, endedAt: 'soon' }, { ...good, title: 5 }, null]) {
+  for (const bad of [{ ...good, createdAt: '1" onmouseover="x' }, { ...good, stage: 'nope' }, { ...good, stages: [] }, { ...good, stages: ['plan'], stageIndex: 1 }, { ...good, stages: ['plan'], stageIndex: 0.5 }, { ...good, stageIndex: 0 }, { ...good, stages: ['unknown'] }, { ...good, endedAt: 'soon' }, { ...good, title: 5 }, { ...good, lead: 'antigravity' }, null]) {
     const content = JSON.stringify({ missions: [good, bad] });
     fs.writeFileSync(file, content);
     assert.throws(() => new Missions(home, () => {}), /holds a record that is not a mission/);

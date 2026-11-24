@@ -57,10 +57,10 @@ private struct MenuBarMenu: View {
     var body: some View {
         let waiting = store.state.waitingJobs
         let pending = store.state.pendingCount
-        Text(store.connected ? "Crew is connected" : "Crew is reconnecting")
+        Text(store.connected ? String(localized: "Crew is connected") : String(localized: "Crew is reconnecting"))
         Button("Open Crew") { show(nil) }
         if pending > 0 {
-            Button(pending == 1 ? "1 request needs you" : "\(pending) requests need you") { show(nil); store.selection = "needs" }
+            Button(pending == 1 ? String(localized: "1 request needs you") : String(localized: "\(pending) requests need you")) { show(nil); store.selection = "needs" }
         }
         Divider()
         ForEach(Array(waiting.prefix(5))) { job in
@@ -95,7 +95,7 @@ private struct MenuBarLabel: View {
                 Label("Crew", systemImage: pending > 0 ? "circle.dotted.circle.fill" : "circle.dotted.circle")
             }
         }
-        .accessibilityLabel(pending > 0 ? "Crew, \(pending) waiting" : "Crew")
+        .accessibilityLabel(pending > 0 ? String(localized: "Crew, \(pending) waiting") : "Crew")
         .onAppear { register(openWindow) }
     }
     /// The Crew mark at menu bar size. A menu bar label ignores SwiftUI's frame, so the image itself is sized.
@@ -209,8 +209,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             let center = UNUserNotificationCenter.current()
             center.delegate = self
             center.setNotificationCategories([UNNotificationCategory(identifier: "approval", actions: [
-                UNNotificationAction(identifier: "approve", title: "Approve"),
-                UNNotificationAction(identifier: "deny", title: "Deny", options: [.destructive]),
+                UNNotificationAction(identifier: "approve", title: String(localized: "Approve")),
+                UNNotificationAction(identifier: "deny", title: String(localized: "Deny"), options: [.destructive]),
             ], intentIdentifiers: [])])
             Task {
                 _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge])
@@ -253,7 +253,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         // the page's title. A real toolbar is what gives the page the system's soft scroll edge.
         controller.sceneBridgingOptions = [.toolbars]
         let window = NSWindow(contentViewController: controller)
-        window.title = "Settings"
+        window.title = String(localized: "Settings")
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
         let toolbar = NSToolbar(identifier: "CrewSettings")
         // The default display mode reserves a label row, which makes the toolbar taller than System Settings'.
@@ -398,10 +398,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         let first = await ownDaemon()
         if let active = first?.active, active > 0 {
             let alert = NSAlert()
-            alert.messageText = "\(active) job\(active == 1 ? " is" : "s are") still running."
-            alert.informativeText = "Crew will install the update as soon as they finish. Nothing is stopped, and jobs, missions and settings are kept."
-            alert.addButton(withTitle: "Update When Finished")
-            alert.addButton(withTitle: "Cancel")
+            alert.messageText = active == 1 ? String(localized: "1 job is still running.") : String(localized: "\(active) jobs are still running.")
+            alert.informativeText = String(localized: "Crew will install the update as soon as they finish. Nothing is stopped, and jobs, missions and settings are kept.")
+            alert.addButton(withTitle: String(localized: "Update When Finished"))
+            alert.addButton(withTitle: String(localized: "Cancel"))
             guard alert.runModal() == .alertFirstButtonReturn, attempt == installAttempt else { return }
         }
         // A second click while the daemon was asked supersedes this one; only the latest attempt takes the install.
@@ -436,7 +436,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
                     // It saves jobs and missions, then exits; the process going is what counts, not a quiet health check.
                     var waited = 0.0
                     while Self.alive(daemon.pid) {
-                        guard waited < 30 else { throw CrewFailure("The Crew daemon (process \(daemon.pid)) did not stop.") }
+                        guard waited < 30 else { throw CrewFailure(String(localized: "The Crew daemon (process \(Int(daemon.pid))) did not stop.")) }
                         try? await Task.sleep(for: .milliseconds(200))
                         waited += 0.2
                     }
@@ -450,7 +450,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
                     paused = false
                     refusals += 1
                     if refusals >= 3 {
-                        updater.failed("Could not stop the Crew daemon for the update: \(error.localizedDescription)")
+                        updater.failed(String(localized: "Could not stop the Crew daemon for the update: \(error.localizedDescription)"))
                         return
                     }
                     updater.waitFor(0)
@@ -463,7 +463,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             } else {
                 unanswered += 1
                 if unanswered >= 24 {
-                    updater.failed("The Crew daemon is not answering, so the update was not installed. Try again later.")
+                    updater.failed(String(localized: "The Crew daemon is not answering, so the update was not installed. Try again later."))
                     return abandon()
                 }
             }
@@ -497,7 +497,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
                 kill(pending.helper, SIGTERM)
                 try? FileManager.default.removeItem(at: pending.staged)
                 try? FileManager.default.removeItem(at: pending.work)
-                updater.failed("The update was not installed because Crew did not quit. Try again.")
+                updater.failed(String(localized: "The update was not installed because Crew did not quit. Try again."))
                 store.start()
             }
             return .terminateCancel
@@ -521,19 +521,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         guard let settings else { return true }
         if settings.busy {
             let alert = NSAlert()
-            alert.messageText = "Settings are still saving"
-            alert.informativeText = "Wait for the save to finish before closing."
+            alert.messageText = String(localized: "Settings are still saving")
+            alert.informativeText = String(localized: "Wait for the save to finish before closing.")
             alert.runModal()
             return false
         }
         guard settings.dirty else { return true }
         settingsWindow?.makeKeyAndOrderFront(nil)
         let alert = NSAlert()
-        alert.messageText = "Save changes to Settings?"
-        alert.informativeText = "Your changes will be lost if you don't save them."
-        alert.addButton(withTitle: "Save")
-        alert.addButton(withTitle: "Don't Save")
-        alert.addButton(withTitle: "Cancel")
+        alert.messageText = String(localized: "Save changes to Settings?")
+        alert.informativeText = String(localized: "Your changes will be lost if you don't save them.")
+        alert.addButton(withTitle: String(localized: "Save"))
+        alert.addButton(withTitle: String(localized: "Don't Save"))
+        alert.addButton(withTitle: String(localized: "Cancel"))
         switch alert.runModal() {
         case .alertFirstButtonReturn:
             // A save that fails keeps the window open with its error showing, so nothing is lost silently.
@@ -553,7 +553,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         guard ProcessInfo.processInfo.environment["CREW_TEST_MODE"] != "1" else { return }
         if store.state.notifications?.onDone == true {
             for job in finished where job.endedAt.map({ store.ownsCompletion(at: $0) }) == true {
-                notify(key: "done:\(job.id):\(job.turns)", title: "\(agentName(job.agent)) finished", body: job.title, job: job.id, persistent: true)
+                notify(key: "done:\(job.id):\(job.turns)", title: String(localized: "\(agentName(job.agent)) finished"), body: job.title, job: job.id, persistent: true)
             }
         }
         var live = Set<String>()
@@ -561,11 +561,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             guard let waiting = job.waiting else { continue }
             let key = job.requestKey
             live.insert(key)
-            notify(key: key, title: "\(agentName(job.agent)) needs your input", body: waiting.reason, job: job.id, request: waiting.type == "approval" ? waiting.id : nil)
+            notify(key: key, title: String(localized: "\(agentName(job.agent)) needs your input"), body: waiting.reason, job: job.id, request: waiting.type == "approval" ? waiting.id : nil)
         }
         for session in store.state.waitingSessions {
             live.insert(session.notificationKey)
-            notify(key: session.notificationKey, title: "Claude needs your input", body: session.waitingFor ?? session.title)
+            notify(key: session.notificationKey, title: String(localized: "Claude needs your input"), body: session.waitingFor ?? session.title)
         }
         let expired = delivered.subtracting(live)
         // These are calls into the notification service; most updates expire nothing.

@@ -1,4 +1,5 @@
 import { NAMES } from './model.ts';
+import { t } from './i18n.ts';
 import type { BoardJob, Snapshot } from './types.ts';
 
 export function notificationPermission(): NotificationPermission | 'unsupported' {
@@ -64,16 +65,16 @@ export function planNotifications(previous: PlanMemory, state: Snapshot, options
       const key = `done:${job.id}:${job.turns}`;
       if (!done.has(key)) {
         done.add(key);
-        show.push({ key, title: `${NAMES[job.agent]} finished`, body: job.title, jobId: job.id });
+        show.push({ key, title: t('{agent} finished', { agent: NAMES[job.agent] }), body: job.title, jobId: job.id });
       }
     }
     if (job.state === 'waiting' && job.waiting) {
-      request({ key: `${job.id}:${job.waiting.id}`, title: `${NAMES[job.agent]} needs your input`, body: job.waiting.reason, jobId: job.id });
+      request({ key: `${job.id}:${job.waiting.id}`, title: t('{agent} needs your input', { agent: NAMES[job.agent] }), body: job.waiting.reason, jobId: job.id });
     }
   }
   for (const session of state.claude) {
     if (session.state === 'waiting') {
-      request({ key: `session:${session.id}:${session.waitingId ?? session.waitingFor ?? ''}`, title: 'Claude needs your input', body: session.waitingFor ?? session.title, jobId: `session:${session.id}` });
+      request({ key: `session:${session.id}:${session.waitingId ?? session.waitingFor ?? ''}`, title: t('{agent} needs your input', { agent: 'Claude' }), body: session.waitingFor ?? session.title, jobId: `session:${session.id}` });
     }
   }
   return {

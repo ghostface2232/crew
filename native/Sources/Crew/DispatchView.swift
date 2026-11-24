@@ -66,7 +66,7 @@ struct DispatchView: View {
                 Text("Information").tag("information")
             }.pickerStyle(.segmented)
             VStack(alignment: .leading, spacing: Space.xl) {
-                field("Project") {
+                field(String(localized: "Project")) {
                     HStack(spacing: Space.m) {
                         TextField("Project directory", text: $directory, prompt: Text("/path/to/repository"))
                             .surfaceTextField().labelsHidden().accessibilityLabel("Project directory")
@@ -75,16 +75,16 @@ struct DispatchView: View {
                 }
                 if intent == "command" {
                     HStack(alignment: .top, spacing: Space.x3l) {
-                        field("Role") {
+                        field(String(localized: "Role")) {
                             Picker("Role", selection: $role) {
-                                ForEach(store.state.availableRoles.filter { $0.role != "debate" }) { Text($0.label).tag($0.role) }
+                                ForEach(store.state.availableRoles.filter { $0.role != "debate" }) { Text($0.localizedLabel).tag($0.role) }
                             }
                                 .labelsHidden().fixedSize()
                         }
                         assignedTo
                     }
                     if role == "polish" {
-                        field("Allowed files or directories") {
+                        field(String(localized: "Allowed files or directories")) {
                             TextField("One path per line", text: $targets, axis: .vertical).lineLimit(3...6).surfaceTextField()
                         }
                     }
@@ -95,7 +95,7 @@ struct DispatchView: View {
                         .font(Typeface.caption).foregroundStyle(.secondary)
                 }
                 if intent == "information" {
-                    field("Add to") {
+                    field(String(localized: "Add to")) {
                         Picker("Information destination", selection: $destination) {
                             Text("This project's shared instructions").tag("project")
                             Text("Every project's shared instructions").tag("shared")
@@ -103,9 +103,9 @@ struct DispatchView: View {
                         }.labelsHidden()
                     }
                 }
-                field(intent == "question" ? "What would you like to know?" : intent == "information" ? "What should be remembered?" : selectedRole?.kind == "review" ? "What should be checked?" : "What needs to be done?") {
-                    MessageEditor(title: "New job instructions", text: $task)
-                    Text(intent == "information" ? "Adds information only. This starts no work." : intent == "question" ? "Answers the question in read-only mode." : role == "verify" ? "Reviews uncommitted changes by running the app in a snapshot." : selectedRole?.kind == "review" ? "Reviews uncommitted changes in read-only mode." : role == "release" ? "Prepares the release on an isolated worktree branch. Nothing is published or deployed." : "Changes stay on an isolated worktree branch until reviewed and merged.")
+                field(intent == "question" ? String(localized: "What would you like to know?") : intent == "information" ? String(localized: "What should be remembered?") : selectedRole?.kind == "review" ? String(localized: "What should be checked?") : String(localized: "What needs to be done?")) {
+                    MessageEditor(title: String(localized: "New job instructions"), text: $task)
+                    Text(intent == "information" ? String(localized: "Adds information only. This starts no work.") : intent == "question" ? String(localized: "Answers the question in read-only mode.") : role == "verify" ? String(localized: "Reviews uncommitted changes by running the app in a snapshot.") : selectedRole?.kind == "review" ? String(localized: "Reviews uncommitted changes in read-only mode.") : role == "release" ? String(localized: "Prepares the release on an isolated worktree branch. Nothing is published or deployed.") : String(localized: "Changes stay on an isolated worktree branch until reviewed and merged."))
                         .font(Typeface.caption).foregroundStyle(.secondary)
                 }
             }
@@ -113,7 +113,7 @@ struct DispatchView: View {
             HStack(spacing: Space.m) {
                 Spacer()
                 Button("Cancel") { if dirty { confirmingDiscard = true } else { dismiss() } }.pillButton().keyboardShortcut(.cancelAction).disabled(sending)
-                Button(sending ? "Sending…" : intent == "information" ? "Save Information" : intent == "question" ? "Ask Question" : "Send Job", systemImage: "arrow.up") { Task { await send() } }
+                Button(sending ? String(localized: "Sending…") : intent == "information" ? String(localized: "Save Information") : intent == "question" ? String(localized: "Ask Question") : String(localized: "Send Job"), systemImage: "arrow.up") { Task { await send() } }
                     .glassPillButton().morphs(on: sending).disabled(!canSend)
             }
         }.padding(WorkspaceStyle.panelPadding).frame(width: WorkspaceStyle.sheetWidth).disabled(sending).interactiveDismissDisabled(sending || dirty)
@@ -126,20 +126,21 @@ struct DispatchView: View {
         } message: { Text("Your instructions and job options have not been sent.") }
     }
     private var assignedTo: some View {
-        field("Assigned to") {
+        field(String(localized: "Assigned to")) {
             if dispatch.holders.count > 1 {
                 Picker("Assigned to", selection: Binding(get: { dispatch.agent ?? "" }, set: { pickedAgent = $0.isEmpty ? nil : $0 })) {
                     if dispatch.agent == nil { Text("Claude (lead)").tag("") }
                     ForEach(dispatch.holders, id: \.self) { holder in Text(workerLabel(holder)).tag(holder) }
                 }.labelsHidden().fixedSize()
             } else {
-                Text(dispatch.agent.map(workerLabel) ?? (dispatch.requiresClaude ? "Claude (lead)" : "No agent assigned"))
+                Text(dispatch.agent.map(workerLabel) ?? (dispatch.requiresClaude ? String(localized: "Claude (lead)") : String(localized: "No agent assigned")))
                     .font(Typeface.body).frame(minHeight: Self.fieldHeight)
             }
         }
     }
     private func workerLabel(_ agent: String) -> String {
-        "\(store.state.agents[agent]?.name ?? agentName(agent))\(store.state.agents[agent]?.enabled == false ? " (disabled)" : "")"
+        let name = store.state.agents[agent]?.name ?? agentName(agent)
+        return store.state.agents[agent]?.enabled == false ? String(localized: "\(name) (disabled)") : name
     }
     private func field<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: Space.s) {
@@ -150,13 +151,13 @@ struct DispatchView: View {
     private func chooseFolder() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.allowsMultipleSelection = false
-        panel.prompt = "Choose Project"
+        panel.prompt = String(localized: "Choose Project")
         if panel.runModal() == .OK, let url = panel.url { directory = url.path }
     }
     private func send() async {
         guard canSend else { return }
         let allowed = targets.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-        if intent == "command" && role == "polish" && allowed.isEmpty { error = "List the files or directories the editor may change."; return }
+        if intent == "command" && role == "polish" && allowed.isEmpty { error = String(localized: "List the files or directories the editor may change."); return }
         sending = true; error = ""
         let cwd = directory.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
@@ -167,7 +168,7 @@ struct DispatchView: View {
                 let job = try await store.submitQuestion(task, project: cwd, agent: dispatch.submissionAgent)
                 store.openJob(job.id, navigate: true); dismiss()
             } else {
-                guard let selectedRole else { throw CrewFailure("Choose a role for this job.") }
+                guard let selectedRole else { throw CrewFailure(String(localized: "Choose a role for this job.")) }
                 let job: Job = try await store.api.post("/api/jobs", JobSubmission(role: selectedRole, cwd: cwd, project: cwd, task: task, targets: role == "polish" ? allowed : nil, agent: dispatch.submissionAgent))
                 store.applyJob(job, since: 0); store.openJob(job.id, navigate: true); dismiss()
             }

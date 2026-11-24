@@ -7,6 +7,7 @@ import { holdersOf, preferredWorkers, projectOf, rolesOf } from './model.ts';
 import { board } from './store.ts';
 import { ask, Dialog, Icon, Segmented, Select } from './ui.tsx';
 import styles from './Dispatch.module.css';
+import { t } from './i18n.ts';
 
 export function Dispatch({
   state,
@@ -59,7 +60,7 @@ export function Dispatch({
         : worker?.enabled === true));
   const closeDraft = async () => {
     if (sendingLock.current) return;
-    if (!dirty || await ask('Discard this job draft?', 'Discard', 'Your instructions and job options have not been sent.')) close();
+    if (!dirty || await ask(t('Discard this job draft?'), t('Discard'), t('Your instructions and job options have not been sent.'))) close();
   };
   const send = async () => {
     if (sendingLock.current || !canSend) return;
@@ -67,17 +68,17 @@ export function Dispatch({
     const target = destination;
     try {
       if (!(intent === 'information' && target === 'global') && !cwd.trim())
-        throw new Error('Enter a project directory first.');
+        throw new Error(t('Enter a project directory first.'));
       if (intent !== 'information' && leadOnly)
-        throw new Error('Claude, the lead, holds this role: start it from a Claude session.');
+        throw new Error(t('Claude, the lead, holds this role: start it from a Claude session.'));
       if (intent !== 'information' && !worker?.enabled)
-        throw new Error('The assigned agent is unavailable. Choose an enabled agent in Settings.');
+        throw new Error(t('The assigned agent is unavailable. Choose an enabled agent in Settings.'));
       const allowed = targets
         .split('\n')
         .map((value) => value.trim())
         .filter(Boolean);
       if (intent === 'command' && kind === 'polish' && !allowed.length)
-        throw new Error('List the files or directories the editor may change.');
+        throw new Error(t('List the files or directories the editor may change.'));
       sendingLock.current = true;
       setSending(true);
       setError('');
@@ -126,19 +127,19 @@ export function Dispatch({
       <fieldset className={`sheet-body ${styles.body}`} disabled={sending}>
         <h2 className={`title ${styles.title}`} id="dispatch-title">
           <Icon icon={SendRegular} size={18} />
-          New Job
+          {t('New Job')}
         </h2>
         <Segmented
-          label="Intent"
+          label={t('Intent')}
           value={intent}
-          options={[['command', 'Command'], ['question', 'Question'], ['information', 'Information']]}
+          options={[['command', t('Command')], ['question', t('Question')], ['information', t('Information')]]}
           onChange={(next) => { setIntent(next); setPicked(''); }}
         />
         <div className={styles.fields}>
           <label className="field">
-            <span>Project</span>
+            <span>{t('Project')}</span>
             <input
-              aria-label="Project directory"
+              aria-label={t('Project directory')}
               value={cwd}
               placeholder="/path/to/repository"
               onChange={(event) => {
@@ -150,41 +151,41 @@ export function Dispatch({
           {intent !== 'information' && (
             <div className={styles.assignment}>
               {intent === 'command' && <label className="field">
-                <span>Role</span>
-                <Select label="Role" value={role} options={choices.map((info) => [info.role, info.label])} onChange={setRole} />
+                <span>{t('Role')}</span>
+                <Select label={t('Role')} value={role} options={choices.map((info) => [info.role, t(info.label)])} onChange={setRole} />
               </label>}
               {workers.length > 1 ? (
                 <label className="field">
-                  <span>Assigned to</span>
+                  <span>{t('Assigned to')}</span>
                   <Select<WorkerAgent | ''>
-                    label="Assigned to"
+                    label={t('Assigned to')}
                     value={agent ?? ''}
                     options={[
-                      ...(agent ? [] : [['', 'Claude, the lead'] as ['', string]]),
-                      ...workers.map((id): [WorkerAgent, string] => [id, `${state.agents[id].name}${state.agents[id].enabled ? '' : ' (disabled)'}`]),
+                      ...(agent ? [] : [['', t('Claude, the lead')] as ['', string]]),
+                      ...workers.map((id): [WorkerAgent, string] => [id, state.agents[id].enabled ? state.agents[id].name : t('{name} (disabled)', { name: state.agents[id].name })]),
                     ]}
                     onChange={(id) => id && setPicked(id)}
                   />
                 </label>
               ) : (
                 <div className="field">
-                  <span>Assigned to</span>
+                  <span>{t('Assigned to')}</span>
                   <p className={styles.worker}>
-                    {worker ? `${worker.name}${worker.enabled ? '' : ' (disabled)'}` : leadOnly ? 'Claude, the lead' : 'No agent assigned'}
+                    {worker ? (worker.enabled ? worker.name : t('{name} (disabled)', { name: worker.name })) : leadOnly ? t('Claude, the lead') : t('No agent assigned')}
                   </p>
                 </div>
               )}
             </div>
           )}
           {intent !== 'information' && leadOnly && (
-            <p className="callout secondary">Start this job from a Claude session. Claude does the work itself or in a subagent.</p>
+            <p className="callout secondary">{t('Start this job from a Claude session. Claude does the work itself or in a subagent.')}</p>
           )}
           {intent === 'command' && kind === 'polish' && (
             <label className="field">
-              <span>Allowed files or directories</span>
+              <span>{t('Allowed files or directories')}</span>
               <textarea
                 rows={3}
-                placeholder="One path per line"
+                placeholder={t('One path per line')}
                 value={targets}
                 onChange={(event) => setTargets(event.target.value)}
               />
@@ -192,13 +193,13 @@ export function Dispatch({
           )}
           {intent === 'information' && (
             <label className="field">
-              <span>Add to</span>
+              <span>{t('Add to')}</span>
               <Select
-                label="Information destination"
+                label={t('Information destination')}
                 value={destination}
                 options={[
-                  ['project', "This project's shared instructions"],
-                  ['global', "Every project's shared instructions"],
+                  ['project', t("This project's shared instructions")],
+                  ['global', t("Every project's shared instructions")],
                   ...missions.map((mission): [string, string] => [`mission:${mission.id}`, mission.title]),
                 ]}
                 onChange={setDestination}
@@ -207,35 +208,35 @@ export function Dispatch({
           )}
           <label className="field">
             <span>
-              {intent === 'question' ? 'What would you like to know?'
-                : intent === 'information' ? 'What should be remembered?'
-                  : kind === 'review' ? 'What should be checked?' : 'What needs to be done?'}
+              {intent === 'question' ? t('What would you like to know?')
+                : intent === 'information' ? t('What should be remembered?')
+                  : kind === 'review' ? t('What should be checked?') : t('What needs to be done?')}
             </span>
             <textarea
               className={styles.editor}
-              aria-label="New job instructions"
+              aria-label={t('New job instructions')}
               aria-describedby="dispatch-caption"
               value={text}
               onChange={(event) => setText(event.target.value)}
               rows={6}
             />
             <span className="caption secondary" id="dispatch-caption">
-              {intent === 'information' ? 'Adds information only. This starts no work.'
-                : intent === 'question' ? 'Answers the question in read-only mode.'
-                  : role === 'verify' ? 'Reviews uncommitted changes by running the app in a snapshot of them.'
-                    : kind === 'review' ? 'Reviews uncommitted changes in read-only mode.'
-                    : role === 'release' ? 'Prepares the release on an isolated worktree branch. Nothing is published or deployed.'
-                    : 'Changes stay on an isolated worktree branch until reviewed and merged.'}
+              {intent === 'information' ? t('Adds information only. This starts no work.')
+                : intent === 'question' ? t('Answers the question in read-only mode.')
+                  : role === 'verify' ? t('Reviews uncommitted changes by running the app in a snapshot of them.')
+                    : kind === 'review' ? t('Reviews uncommitted changes in read-only mode.')
+                    : role === 'release' ? t('Prepares the release on an isolated worktree branch. Nothing is published or deployed.')
+                    : t('Changes stay on an isolated worktree branch until reviewed and merged.')}
             </span>
           </label>
         </div>
         {error && <p className={`error ${styles.error}`} role="alert"><Icon icon={ErrorCircleRegular} />{error}</p>}
         <footer className={styles.footer}>
-          <button type="button" className="large" onClick={closeDraft}>Cancel</button>
+          <button type="button" className="large" onClick={closeDraft}>{t('Cancel')}</button>
           <button type="button" className="large prominent" disabled={!canSend} onClick={() => void send()}>
             <Icon icon={ArrowUp16Filled} />
-            {sending ? 'Sending…' : intent === 'information' ? 'Save Information'
-              : intent === 'question' ? 'Ask Question' : 'Send Job'}
+            {sending ? t('Sending…') : intent === 'information' ? t('Save Information')
+              : intent === 'question' ? t('Ask Question') : t('Send Job')}
           </button>
         </footer>
       </fieldset>

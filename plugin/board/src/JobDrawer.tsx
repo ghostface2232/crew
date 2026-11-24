@@ -20,7 +20,8 @@ import { debatePoints, stanceCounts } from './debate.ts';
 import type { Stance } from './debate.ts';
 import { Answer, ClaudeAsk, OpenInClaude } from './NeedsYou.tsx';
 import { EventList } from './Overview.tsx';
-import { jobStatusState, SessionAgents, SessionWorkflow } from './Missions.tsx';
+import { jobStatusState, missionStateLabel, SessionAgents, sessionStateLabel, SessionWorkflow } from './Missions.tsx';
+import { t } from './i18n.ts';
 
 /** Reports are parsed once per text, not on every clock tick the panel renders for. */
 const ReportText = memo(RenderReport);
@@ -42,20 +43,20 @@ function RoundRow({ job, round }: { job: BoardJob; round: NonNullable<BoardJob['
   const action = useAction(key);
   const reason =
     job.state === 'running' || job.state === 'waiting'
-      ? 'Wait until the job has stopped before changing rounds.'
-      : !job.worktree ? 'This job has no worktree.' : undefined;
+      ? t('Wait until the job has stopped before changing rounds.')
+      : !job.worktree ? t('This job has no worktree.') : undefined;
   const undone = round.state === 'undone';
   return (
     <div className="round">
       <div className="round-head">
-        <b>Turn {round.turn}</b>
+        <b>{t('Turn {turn}', { turn: round.turn })}</b>
         <span>
           <Icon icon={undone ? ArrowUndoRegular : CheckmarkRegular} size={11} />
-          {undone ? 'Undone' : 'Kept'}
+          {undone ? t('Undone') : t('Kept')}
         </span>
         <button
           disabled={Boolean(reason) || action.pending || board.getSnapshot().connection !== 'live'}
-          title={reason ?? 'Change this round on the job branch.'}
+          title={reason ?? t('Change this round on the job branch.')}
           onClick={() => {
             void actions.run(key, async () => {
               const updated = await request<BoardJob>(`/api/jobs/${job.id}/rounds/${round.turn}`, undone ? { keep: true } : { undo: true });
@@ -63,10 +64,10 @@ function RoundRow({ job, round }: { job: BoardJob; round: NonNullable<BoardJob['
             }, { once: false, done: '' });
           }}
         >
-          {undone ? 'Keep' : 'Undo'}
+          {undone ? t('Keep') : t('Undo')}
         </button>
       </div>
-      <pre>{round.stat || 'No files changed'}</pre>
+      <pre>{round.stat || t('No files changed')}</pre>
       <ActionStatus actionKey={key} />
     </div>
   );
@@ -98,7 +99,7 @@ function LiveDiffSection({ job }: { job: BoardJob }) {
   }, [job.id, at]);
   if (!at || !diff) return null;
   return (
-    <Section title="Changes so far" icon={BranchRegular}>
+    <Section title={t('Changes so far')} icon={BranchRegular}>
       <pre className="selectable live-diff">{diff}</pre>
     </Section>
   );
@@ -111,7 +112,7 @@ function EvidenceSection({ job }: { job: BoardJob }) {
   // A capture the worker has since deleted leaves the comparison.
   const compared = picked.filter((file) => items.some((item) => item.file === file));
   return (
-    <Section title="Evidence" icon={ImageMultipleRegular}>
+    <Section title={t('Evidence')} icon={ImageMultipleRegular}>
       <div className="evidence">
         {items.map((item) => {
           const src = evidenceSrc(job, item);
@@ -124,7 +125,7 @@ function EvidenceSection({ job }: { job: BoardJob }) {
                   href={src}
                   target="_blank"
                   rel="noreferrer"
-                  title="Open"
+                  title={t('Open')}
                   onClick={(event) => {
                     // A plain press opens it here, where others can be added beside it; a modified one opens the file.
                     if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -159,8 +160,8 @@ function EvidenceCompare({ job, items, shown, onShown }: { job: BoardJob; items:
     <Dialog labelId="evidence-compare-title" className="evidence-compare" onClose={close}>
       <div className="sheet-body">
         <div className="sheet-head">
-          <h2 className="title" id="evidence-compare-title">Evidence</h2>
-          <CloseButton label="Close" onClose={close} />
+          <h2 className="title" id="evidence-compare-title">{t('Evidence')}</h2>
+          <CloseButton label={t('Close')} onClose={close} />
         </div>
         <div className="compare" data-panes={shown.length}>
           {orderEvidence(items.filter((item) => shown.includes(item.file))).map((item) => {
@@ -177,7 +178,7 @@ function EvidenceCompare({ job, items, shown, onShown }: { job: BoardJob; items:
           })}
         </div>
         {items.length > 1 && (
-          <div className="compare-picker" role="group" aria-label={`Captures to compare, up to ${MAX_COMPARED}`}>
+          <div className="compare-picker" role="group" aria-label={t('Captures to compare, up to {max}', { max: MAX_COMPARED })}>
             {orderEvidence(items).map((item) => {
               const on = shown.includes(item.file);
               return (
@@ -204,18 +205,25 @@ function EvidenceCompare({ job, items, shown, onShown }: { job: BoardJob; items:
 }
 
 const NETWORK: Record<NonNullable<BoardJob['capabilities']>['network'], string> = {
-  on: 'network on',
-  off: 'no network',
-  'agent-managed': 'network as the agent allows',
+  on: t('network on'),
+  off: t('no network'),
+  'agent-managed': t('network as the agent allows'),
 };
 
 /** Whose shared instructions a job was given, as the bridge recorded them; jobs from before that list their files. */
 function sharedLabel(job: BoardJob) {
-  return job.sharedScopes?.map((scope) => (scope === 'project' ? 'This project' : 'Every project')).join(' · ') ?? job.shared!.join('\n');
+  return job.sharedScopes?.map((scope) => (scope === 'project' ? t('This project') : t('Every project'))).join(' · ') ?? job.shared!.join('\n');
 }
 
 function duration(ms: number) {
-  return ms < 60_000 ? `${Math.max(1, Math.round(ms / 1000))}s` : elapsed(ms);
+  return ms < 60_000 ? t('{n}s', { n: Math.max(1, Math.round(ms / 1000)) }) : elapsed(ms);
+}
+
+function tokenSplit(use: NonNullable<BoardJob['tokenUse']>, turns: number) {
+  const values = { cached: use.cachedInput.toLocaleString(), uncached: (use.input - use.cachedInput).toLocaleString(), output: use.output.toLocaleString() };
+  return turns > 1
+    ? t('{cached} cached input · {uncached} uncached input · {output} output · {latest} in the latest turn', { ...values, latest: use.turn.toLocaleString() })
+    : t('{cached} cached input · {uncached} uncached input · {output} output', values);
 }
 
 /** The latest turn's receipt: the check the bridge ran itself, or what a review looked at. */
@@ -224,16 +232,16 @@ function ReceiptView({ receipt }: { receipt: NonNullable<BoardJob['receipts']>[n
   if (!check && !reviewed) return null;
   const passed = check?.exit === 0 && !check.timedOut;
   const [state, icon, label] = !check
-    ? (['done', CheckmarkRegular, 'Reviewed'] as const)
+    ? (['done', CheckmarkRegular, t('Reviewed')] as const)
     : check.skipped
-      ? (['idle', SubtractCircleRegular, 'Check not run'] as const)
+      ? (['idle', SubtractCircleRegular, t('Check not run')] as const)
       : passed
-      ? (['done', CheckmarkRegular, 'Check passed'] as const)
+      ? (['done', CheckmarkRegular, t('Check passed')] as const)
       : check.timedOut
-        ? (['waiting', ClockRegular, `Check timed out after ${duration(check.ms)}`] as const)
+        ? (['waiting', ClockRegular, t('Check timed out after {duration}', { duration: duration(check.ms) })] as const)
         : check.exit == null
-          ? (['failed', DismissRegular, 'Check stopped before it finished'] as const)
-          : (['failed', DismissRegular, `Check failed with exit code ${check.exit}`] as const);
+          ? (['failed', DismissRegular, t('Check stopped before it finished')] as const)
+          : (['failed', DismissRegular, t('Check failed with exit code {code}', { code: check.exit })] as const);
   return (
     // A stale receipt keeps its words but loses its color: it no longer speaks for the branch.
     <div className="receipt" data-state={stale ? 'idle' : state}>
@@ -248,16 +256,16 @@ function ReceiptView({ receipt }: { receipt: NonNullable<BoardJob['receipts']>[n
         <code className="selectable">{reviewed!.target}</code>
       )}
       <p className="caption secondary selectable">
-        Turn {receipt.turn}
-        {check && !check.skipped && ` · ${duration(check.ms)}${check.sandboxed ? '' : ' · not sandboxed'}`}
+        {t('Turn {turn}', { turn: receipt.turn })}
+        {check && !check.skipped && ` · ${duration(check.ms)}${check.sandboxed ? '' : ` · ${t('not sandboxed')}`}`}
       </p>
       {stale && (
         <p className="callout stale selectable">
-          <Icon icon={HistoryRegular} size={12} />No longer current: {stale}
+          <Icon icon={HistoryRegular} size={12} />{t('No longer current: {reason}', { reason: stale })}
         </p>
       )}
       {check && !check.skipped && !passed && check.output && (
-        <Reveal show="Show the end of the output" hide="Hide the output">
+        <Reveal show={t('Show the end of the output')} hide={t('Hide the output')}>
           <pre className="selectable output">{check.output.split('\n').slice(-15).join('\n')}</pre>
         </Reveal>
       )}
@@ -265,9 +273,11 @@ function ReceiptView({ receipt }: { receipt: NonNullable<BoardJob['receipts']>[n
   );
 }
 
-function approvalBasis({ recorded, matched }: NonNullable<BoardJob['approvals']>[number]) {
-  if (!recorded) return 'no messages of the user were recorded, so only the lead’s quote went with it';
-  return matched ? 'the user’s own words went with it, and the quote matches them' : 'the user’s own words went with it; the quote is a translation or paraphrase';
+function approvalLine({ turn, recorded, matched }: NonNullable<BoardJob['approvals']>[number]) {
+  if (!recorded) return t('Approval relayed for turn {turn} — no messages of the user were recorded, so only the lead’s quote went with it.', { turn });
+  return matched
+    ? t('Approval relayed for turn {turn} — the user’s own words went with it, and the quote matches them.', { turn })
+    : t('Approval relayed for turn {turn} — the user’s own words went with it; the quote is a translation or paraphrase.', { turn });
 }
 
 /** What backs the result: the latest check or review, what the worker could reach, and relayed approvals. */
@@ -278,16 +288,16 @@ function VerificationSection({ job }: { job: BoardJob }) {
   const approvals = job.approvals ?? [];
   if (!shown && !capabilities && !approvals.length) return null;
   return (
-    <Section title="Verification" icon={ShieldCheckmarkRegular}>
+    <Section title={t('Verification')} icon={ShieldCheckmarkRegular}>
       {shown && <ReceiptView receipt={receipt} />}
       {capabilities && (
         <dl className="facts selectable">
-          <dt>Runs with</dt>
+          <dt>{t('Runs with')}</dt>
           <dd>
             {[
               capabilities.filesystem,
               NETWORK[capabilities.network],
-              capabilities.plugins.length && `plugins ${capabilities.plugins.join(', ')} (act outside the sandbox)`,
+              capabilities.plugins.length && t('plugins {plugins} (act outside the sandbox)', { plugins: capabilities.plugins.join(', ') }),
             ].filter(Boolean).join(' · ')}
           </dd>
         </dl>
@@ -296,7 +306,7 @@ function VerificationSection({ job }: { job: BoardJob }) {
         <div className="approval selectable" key={index}>
           <Icon icon={approval.recorded ? CheckmarkStarburstRegular : QuestionCircleRegular} />
           <div>
-            <p className="callout">Approval relayed for turn {approval.turn} — {approvalBasis(approval)}.</p>
+            <p className="callout">{approvalLine(approval)}</p>
             <p className="callout secondary">“{approval.quote}”</p>
           </div>
         </div>
@@ -311,12 +321,16 @@ const hasConversation = (job: BoardJob) => job.debate ? Boolean(job.exchange?.le
 /** A debate that has had its rounds and stopped: the daemon refuses another reply, whatever state it ended in. */
 const debateConcluded = (job: BoardJob) => Boolean(job.debate && job.state !== 'running' && job.state !== 'waiting' && job.turns >= job.debate.rounds);
 
-const STANCES: Record<Stance, [string, typeof CheckmarkCircle16Regular]> = { agree: ['Agree', CheckmarkCircle16Regular], disagree: ['Disagree', DismissCircle16Regular], alternative: ['Alternative', BranchFork16Regular] };
+const STANCES: Record<Stance, [string, (count: number) => string, typeof CheckmarkCircle16Regular]> = {
+  agree: [t('Agree'), (count) => t('{count} agree', { count }), CheckmarkCircle16Regular],
+  disagree: [t('Disagree'), (count) => t('{count} disagree', { count }), DismissCircle16Regular],
+  alternative: [t('Alternative'), (count) => t('{count} alternative', { count }), BranchFork16Regular],
+};
 /** A point's stance as a colored mark, followed in a round's heading by its count. */
 function StanceMark({ stance, count }: { stance: Stance; count?: number }) {
-  const [title, icon] = STANCES[stance];
+  const [title, counted, icon] = STANCES[stance];
   return (
-    <span className="stance" data-stance={stance} title={title} role="img" aria-label={count === undefined ? title : `${count} ${title.toLowerCase()}`}>
+    <span className="stance" data-stance={stance} title={title} role="img" aria-label={count === undefined ? title : counted(count)}>
       <Icon icon={icon} size={13} />
       {count !== undefined && <b className="digits">{count}</b>}
     </span>
@@ -350,7 +364,7 @@ function Clamp({ text, lines, show, hide }: { text: string; lines: number; show:
   );
 }
 
-function DebateRound({ job, turn, label, final, last }: { job: BoardJob; turn: number; label: string; final: boolean; last: boolean }) {
+function DebateRound({ job, turn, final, last }: { job: BoardJob; turn: number; final: boolean; last: boolean }) {
   const entries = job.exchange ?? [];
   const lead = entries.findLast((entry) => entry.turn === turn && entry.from === 'lead');
   const reply = entries.findLast((entry) => entry.turn === turn && entry.from === 'worker');
@@ -363,7 +377,7 @@ function DebateRound({ job, turn, label, final, last }: { job: BoardJob; turn: n
   return (
     <li className="debate-round" data-open={open || undefined}>
       <button className="debate-round-head" aria-expanded={open} onClick={() => setOpen(!open)}>
-        <b>{final ? `${label} ${turn} · final` : `${label} ${turn}`}</b>
+        <b>{final ? t('Round {round} · final', { round: turn }) : job.debate ? t('Round {round}', { round: turn }) : t('Turn {turn}', { turn })}</b>
         {!open && reply && <Stances points={points} />}
         <Icon icon={ChevronDownRegular} className="disclosure" />
       </button>
@@ -371,13 +385,13 @@ function DebateRound({ job, turn, label, final, last }: { job: BoardJob; turn: n
         <div className="debate-round-body reveal">
           {lead && (
             <div className="exchange-entry" data-from="lead">
-              <div className="caption voice">Lead · {label.toLowerCase()} {turn}</div>
-              <Clamp text={lead.text} lines={4} show="Show the lead's message" hide="Hide the lead's message" />
+              <div className="caption voice">{job.debate ? t('Lead · round {round}', { round: turn }) : t('Lead · turn {turn}', { turn })}</div>
+              <Clamp text={lead.text} lines={4} show={t("Show the lead's message")} hide={t("Hide the lead's message")} />
             </div>
           )}
           {reply ? (
             <div className="exchange-entry" data-from="worker">
-              <div className="caption voice">{name} · {label.toLowerCase()} {turn} <Stances points={points} /></div>
+              <div className="caption voice">{job.debate ? t('{name} · round {round}', { name, round: turn }) : t('{name} · turn {turn}', { name, turn })} <Stances points={points} /></div>
               {points.length ? (
                 <>
                   <ol className="points">
@@ -385,13 +399,13 @@ function DebateRound({ job, turn, label, final, last }: { job: BoardJob; turn: n
                       <li key={index}><StanceMark stance={point.stance} /><span className="selectable">{point.title}</span></li>
                     ))}
                   </ol>
-                  <Reveal show="Show the full reply" hide="Hide the full reply"><ReportText text={reply.text} /></Reveal>
+                  <Reveal show={t('Show the full reply')} hide={t('Hide the full reply')}><ReportText text={reply.text} /></Reveal>
                 </>
               ) : (
-                <Clamp text={reply.text} lines={8} show="Show the reply" hide="Hide the reply" />
+                <Clamp text={reply.text} lines={8} show={t('Show the reply')} hide={t('Hide the reply')} />
               )}
             </div>
-          ) : working && <p className="caption secondary answering"><i className="dots" aria-hidden="true" />{name} is answering…</p>}
+          ) : working && <p className="caption secondary answering"><i className="dots" aria-hidden="true" />{t('{name} is answering…', { name })}</p>}
         </div>
       )}
     </li>
@@ -404,16 +418,18 @@ function DebateStepper({ job }: { job: BoardJob }) {
   const replied = Math.max(0, ...(job.exchange ?? []).filter((entry) => entry.from === 'worker').map((entry) => entry.turn));
   const concluded = debateConcluded(job);
   return (
-    <ol className="stepper" role="img" aria-label={concluded ? `Debate concluded after ${rounds} round${rounds === 1 ? '' : 's'}` : `Debate, round ${Math.min(job.turns, rounds)} of ${rounds}`}>
+    <ol className="stepper" role="img" aria-label={concluded
+      ? rounds === 1 ? t('Debate concluded after 1 round') : t('Debate concluded after {rounds} rounds', { rounds })
+      : t('Debate, round {round} of {rounds}', { round: Math.min(job.turns, rounds), rounds })}>
       {Array.from({ length: rounds }, (_, index) => index + 1).map((round) => (
         <li key={round} data-done={round <= replied || undefined}>
           <Icon icon={round <= replied ? CheckmarkCircleRegular : round === job.turns && job.endedAt == null ? CircleHintRegular : CircleMultipleConcentricRegular} size={13} />
-          <span>Round {round}</span>
+          <span>{t('Round {round}', { round })}</span>
         </li>
       ))}
       <li data-done={concluded || undefined}>
         <Icon icon={concluded ? FlagCheckeredRegular : FlagRegular} size={13} />
-        <span>Conclusion</span>
+        <span>{t('Conclusion')}</span>
       </li>
     </ol>
   );
@@ -422,21 +438,30 @@ function DebateStepper({ job }: { job: BoardJob }) {
 function DebateSection({ job }: { job: BoardJob }) {
   const debate = job.debate;
   const settled = debateConcluded(job);
-  const title = debate ? `Debate · round ${Math.min(job.turns, debate.rounds)} of ${debate.rounds}${settled ? ' · concluded' : ''}` : 'Conversation';
+  const progress = debate && { round: Math.min(job.turns, debate.rounds), rounds: debate.rounds };
+  const title = progress
+    ? settled ? t('Debate · round {round} of {rounds} · concluded', progress) : t('Debate · round {round} of {rounds}', progress)
+    : t('Conversation');
   const turns = [...new Set((job.exchange ?? []).map((entry) => entry.turn))].sort((a, b) => a - b);
-  const label = debate ? 'Round' : 'Turn';
+  const last = turns[0] - 1;
   return (
     <section className="detail-section" aria-label={title}>
       <h3>
         <Icon icon={ChatRegular} />
-        {debate ? 'Debate' : 'Conversation'}
+        {debate ? t('Debate') : t('Conversation')}
         {debate && <DebateStepper job={job} />}
       </h3>
       {/* A job begun before conversations were kept has its first turns missing; say so rather than start partway. */}
-      {turns[0] > 1 && <p className="caption secondary">{turns[0] === 2 ? `${label} 1 was not recorded.` : `${label}s 1–${turns[0] - 1} were not recorded.`}</p>}
+      {turns[0] > 1 && (
+        <p className="caption secondary">
+          {last === 1
+            ? debate ? t('Round 1 was not recorded.') : t('Turn 1 was not recorded.')
+            : debate ? t('Rounds 1–{last} were not recorded.', { last }) : t('Turns 1–{last} were not recorded.', { last })}
+        </p>
+      )}
       <ol className="exchange">
         {turns.map((turn) => (
-          <DebateRound key={turn} job={job} turn={turn} label={label} final={turn === debate?.rounds} last={turn === turns.at(-1)} />
+          <DebateRound key={turn} job={job} turn={turn} final={turn === debate?.rounds} last={turn === turns.at(-1)} />
         ))}
       </ol>
       {settled && <ConcludedNote />}
@@ -445,7 +470,7 @@ function DebateSection({ job }: { job: BoardJob }) {
 }
 
 function ConcludedNote() {
-  return <p className="callout secondary concluded"><Icon icon={CheckmarkCircleRegular} size={13} />This debate has used all its rounds. Decide from it, or start a new debate.</p>;
+  return <p className="callout secondary concluded"><Icon icon={CheckmarkCircleRegular} size={13} />{t('This debate has used all its rounds. Decide from it, or start a new debate.')}</p>;
 }
 
 function FollowUp({ job }: { job: BoardJob }) {
@@ -454,8 +479,8 @@ function FollowUp({ job }: { job: BoardJob }) {
   const state = useAction(key);
   const name = NAMES[job.agent];
   return (
-    <Section title={job.endedAt == null ? 'Steer' : job.debate ? 'Reply' : 'Follow up'} icon={ChatRegular}>
-      <textarea aria-label={`Message to ${name}`} placeholder="Write a message…" value={draft} onChange={(event) => setDraft(event.target.value)} />
+    <Section title={job.endedAt == null ? t('Steer') : job.debate ? t('Reply') : t('Follow up')} icon={ChatRegular}>
+      <textarea aria-label={t('Message to {name}', { name })} placeholder={t('Write a message…')} value={draft} onChange={(event) => setDraft(event.target.value)} />
       <div className="answer-actions">
         <ActionStatus actionKey={key} />
         <button
@@ -468,7 +493,7 @@ function FollowUp({ job }: { job: BoardJob }) {
             if (sent && drafts.get(key)?.trim() === message) setDraft('');
           }}
         >
-          Send
+          {t('Send')}
         </button>
       </div>
     </Section>
@@ -526,28 +551,26 @@ const JobDetails = memo(function JobDetails({ id, current, streamLog, agents, ro
   const facts: [string, ReactNode][] = job
     ? [
         // The model the session reported, else the configured one.
-        ['Agent', [NAMES[job.agent], job.resolvedModel ?? job.model, job.tier && `${job.tier} tier`, (job.resolvedEffort ?? job.effort) && `${job.resolvedEffort ?? job.effort} effort`].filter(Boolean).join(' · ')],
-        ['Role', job.ask && !job.debate ? 'Question' : roleLabel({ roleInfo }, jobRole(job))],
+        [t('Agent'), [NAMES[job.agent], job.resolvedModel ?? job.model, job.tier && t('{tier} tier', { tier: job.tier }), (job.resolvedEffort ?? job.effort) && t('{effort} effort', { effort: (job.resolvedEffort ?? job.effort)! })].filter(Boolean).join(' · ')],
+        [t('Role'), job.ask && !job.debate ? t('Question') : roleLabel({ roleInfo }, jobRole(job))],
         // What the worker declared, set against what the bridge observed.
-        ...(job.state === 'done' && job.outcome ? [['Outcome', job.outcomeContradiction ? `Done as declared, but ${job.outcomeContradiction}` : job.outcome[0].toUpperCase() + job.outcome.slice(1)] as [string, string]] : []),
-        ...(job.preset ? [['Preset', job.preset[0].toUpperCase() + job.preset.slice(1)] as [string, string]] : []),
-        ['Project', projectOf(job)],
-        ['Duration', <Elapsed start={job.createdAt} end={job.endedAt} />],
-        ...(job.worktree ? [['Branch', job.worktree.branch] as [string, string]] : []),
-        ...(job.tokens != null ? [['Tokens', job.tokens.toLocaleString()] as [string, string]] : []),
-        ...(job.tokenUse
-          ? [['Of which', `${job.tokenUse.cachedInput.toLocaleString()} cached input · ${(job.tokenUse.input - job.tokenUse.cachedInput).toLocaleString()} uncached input · ${job.tokenUse.output.toLocaleString()} output${job.turns > 1 ? ` · ${job.tokenUse.turn.toLocaleString()} in the latest turn` : ''}`] as [string, string]]
-          : []),
-        ...(job.context ? [['Context', `${job.context.used.toLocaleString()} of ${job.context.size.toLocaleString()} (${Math.round((job.context.used / job.context.size) * 100)}%)`] as [string, string]] : []),
-        ['Turns', String(job.turns)],
-        ...(job.shared?.length ? [['Instructions', sharedLabel(job)] as [string, string]] : []),
+        ...(job.state === 'done' && job.outcome ? [[t('Outcome'), job.outcomeContradiction ? t('Done as declared, but {contradiction}', { contradiction: job.outcomeContradiction }) : job.outcome[0].toUpperCase() + job.outcome.slice(1)] as [string, string]] : []),
+        ...(job.preset ? [[t('Preset'), job.preset[0].toUpperCase() + job.preset.slice(1)] as [string, string]] : []),
+        [t('Project'), projectOf(job)],
+        [t('Duration'), <Elapsed start={job.createdAt} end={job.endedAt} />],
+        ...(job.worktree ? [[t('Branch'), job.worktree.branch] as [string, string]] : []),
+        ...(job.tokens != null ? [[t('Tokens'), job.tokens.toLocaleString()] as [string, string]] : []),
+        ...(job.tokenUse ? [[t('Of which'), tokenSplit(job.tokenUse, job.turns)] as [string, string]] : []),
+        ...(job.context ? [[t('Context'), t('{used} of {size} ({percent}%)', { used: job.context.used.toLocaleString(), size: job.context.size.toLocaleString(), percent: Math.round((job.context.used / job.context.size) * 100) })] as [string, string]] : []),
+        [t('Turns'), String(job.turns)],
+        ...(job.shared?.length ? [[t('Instructions'), sharedLabel(job)] as [string, string]] : []),
       ]
     : [];
   const result = job?.result;
   const files = result ? [...new Set([...result.files, ...result.outOfScope])].sort() : [];
   return (
     <DetailPanel
-      label={job?.title ?? 'Job details'}
+      label={job?.title ?? t('Job details')}
       close={close}
       chip={job && <Chip state={jobStatusState(job)}>{jobLabel(job)}</Chip>}
       title={job?.title}
@@ -559,14 +582,14 @@ const JobDetails = memo(function JobDetails({ id, current, streamLog, agents, ro
           <div>
             <button onClick={() => setRetry((value) => value + 1)}>
               <Icon icon={ArrowCounterclockwiseRegular} />
-              Retry
+              {t('Retry')}
             </button>
           </div>
         </div>
       )}
       {!job && !error && (
         <p className="secondary" role="status">
-          Loading details…
+          {t('Loading details…')}
         </p>
       )}
       {job && (
@@ -580,16 +603,16 @@ const JobDetails = memo(function JobDetails({ id, current, streamLog, agents, ro
           <Facts facts={facts} />
           <LiveDiffSection job={job} />
           {result && (
-            <Section title="Changes" icon={BranchRegular}>
-              <pre className="selectable">{result.stat || 'No files changed'}</pre>
-              {result.commit && <p className="caption selectable">Commit {result.commit}</p>}
+            <Section title={t('Changes')} icon={BranchRegular}>
+              <pre className="selectable">{result.stat || t('No files changed')}</pre>
+              {result.commit && <p className="caption selectable">{t('Commit {commit}', { commit: result.commit })}</p>}
               {files.map((file) => (
                 <div className="file" key={file}>
                   <code className="selectable">{file}</code>
                   {result.outOfScope.includes(file) && (
                     <span className="caption error">
                       <Icon icon={WarningRegular} size={11} />
-                      {result.files.includes(file) ? 'Outside the allowed targets' : 'Outside the workspace'}
+                      {result.files.includes(file) ? t('Outside the allowed targets') : t('Outside the workspace')}
                     </span>
                   )}
                 </div>
@@ -597,7 +620,7 @@ const JobDetails = memo(function JobDetails({ id, current, streamLog, agents, ro
               {/* A section's own action ends it at the trailing edge, as in the app. */}
               {job.worktree && result.files.length > 0 && (
                 <div className="answer-actions">
-                  <CopyButton text={`git diff ${job.worktree.base.slice(0, 8)}..${job.worktree.branch}`}>Diff Command</CopyButton>
+                  <CopyButton text={`git diff ${job.worktree.base.slice(0, 8)}..${job.worktree.branch}`}>{t('Diff Command')}</CopyButton>
                 </div>
               )}
             </Section>
@@ -605,24 +628,24 @@ const JobDetails = memo(function JobDetails({ id, current, streamLog, agents, ro
           <VerificationSection job={job} />
           <EvidenceSection job={job} />
           {!!job.rounds?.length && (
-            <Section title="Rounds" icon={ArrowCounterclockwiseRegular}>
+            <Section title={t('Rounds')} icon={ArrowCounterclockwiseRegular}>
               {job.rounds.toSorted((a, b) => a.turn - b.turn).map((round) => (
                 <RoundRow key={round.turn} job={job} round={round} />
               ))}
             </Section>
           )}
           {refusals.length > 0 && (
-            <Section title="Automatic review" icon={ShieldErrorRegular}>
+            <Section title={t('Automatic review')} icon={ShieldErrorRegular}>
               {refusals.map((refusal, index) => (
                 <p className="callout error selectable" key={index}>
                   {refusal.action} — {refusal.reason}
                 </p>
               ))}
-              {job.retrying && <p className="callout secondary">Sent back once with your approval.</p>}
+              {job.retrying && <p className="callout secondary">{t('Sent back once with your approval.')}</p>}
             </Section>
           )}
           {job.notes.length > 0 && (
-            <Section title="Notes" icon={NotebookRegular}>
+            <Section title={t('Notes')} icon={NotebookRegular}>
               {job.notes.map((note, index) => (
                 <p className="callout selectable" key={index}>{trimNote(note)}</p>
               ))}
@@ -631,7 +654,7 @@ const JobDetails = memo(function JobDetails({ id, current, streamLog, agents, ro
           {hasConversation(job) ? <DebateSection job={job} /> : (
             <>
               {job.report && (
-                <Section title="Report" icon={DocumentTextRegular}>
+                <Section title={t('Report')} icon={DocumentTextRegular}>
                   <ReportText text={job.report} />
                 </Section>
               )}
@@ -642,22 +665,22 @@ const JobDetails = memo(function JobDetails({ id, current, streamLog, agents, ro
           {!debateConcluded(job) && job.sessionId && job.state !== 'waiting' && <FollowUp key={job.id} job={job} />}
           {job.prompt && <OriginalTask text={job.prompt} />}
           {events.length > 0 && (
-            <Section title="Activity" icon={FlashRegular}>
+            <Section title={t('Activity')} icon={FlashRegular}>
               <EventList events={events} />
             </Section>
           )}
           <Footer status={<ActionStatus actionKey={cancelKey} />}>
             {job.sessionId && agents[job.agent] && !job.capabilities?.confined && (
-              <CopyButton text={`${agents[job.agent].resume} ${job.sessionId}`} short="Resume">Resume Command</CopyButton>
+              <CopyButton text={`${agents[job.agent].resume} ${job.sessionId}`} short={t('Resume')}>{t('Resume Command')}</CopyButton>
             )}
             {job.endedAt == null && (
               <button
                 className="destructive"
                 disabled={!live || cancelling.pending || cancelling.accepted}
-                onClick={() => void actions.run(cancelKey, () => request(`/api/jobs/${job.id}/cancel`, {}), { done: 'Cancelled' })}
+                onClick={() => void actions.run(cancelKey, () => request(`/api/jobs/${job.id}/cancel`, {}), { done: t('Cancelled') })}
               >
                 <Icon icon={RecordStopRegular} />
-                Cancel Job
+                {t('Cancel Job')}
               </button>
             )}
           </Footer>
@@ -671,7 +694,8 @@ const JobDetails = memo(function JobDetails({ id, current, streamLog, agents, ro
 function trimNote(note: string) {
   if (note.length <= 2000) return note;
   const rest = note.slice(2000).split('\n').length;
-  return `${note.slice(0, 2000)}… and ${rest} more line${rest === 1 ? '' : 's'}`;
+  const kept = note.slice(0, 2000);
+  return rest === 1 ? t('{note}… and 1 more line', { note: kept }) : t('{note}… and {rest} more lines', { note: kept, rest });
 }
 
 function Facts({ facts }: { facts: [string, ReactNode][] }) {
@@ -697,10 +721,10 @@ function OriginalTask({ text }: { text: string }) {
     if (element) setLong(element.scrollHeight > element.clientHeight + 1 || shown);
   }, [text]);
   return (
-    <section className="detail-section original" aria-label="Original task">
+    <section className="detail-section original" aria-label={t('Original task')}>
       <h3>
         <button className="section-toggle" aria-expanded={shown} onClick={() => long && setShown(!shown)}>
-          <Icon icon={TextAlignLeftRegular} />Original task
+          <Icon icon={TextAlignLeftRegular} />{t('Original task')}
         </button>
       </h3>
       <pre
@@ -712,7 +736,7 @@ function OriginalTask({ text }: { text: string }) {
       >
         {long && !shown ? text : <span className="selectable">{text}</span>}
       </pre>
-      {long && <button className="reveal-toggle" aria-expanded={shown} onClick={() => setShown(!shown)}>{shown ? 'Hide the original task' : 'Show the original task'}</button>}
+      {long && <button className="reveal-toggle" aria-expanded={shown} onClick={() => setShown(!shown)}>{shown ? t('Hide the original task') : t('Show the original task')}</button>}
     </section>
   );
 }
@@ -770,12 +794,12 @@ function DetailPanel({ label, close, chip, title, subtitle, children }: {
         className="panel-grip"
         role="separator"
         aria-orientation="vertical"
-        aria-label="Panel width"
+        aria-label={t('Panel width')}
         aria-valuemin={min}
         aria-valuemax={max}
         aria-valuenow={shown}
         tabIndex={0}
-        title="Drag to resize, double-click to reset"
+        title={t('Drag to resize, double-click to reset')}
         onDoubleClick={() => save(440)}
         onKeyDown={(event) => {
           if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
@@ -810,10 +834,10 @@ function DetailPanel({ label, close, chip, title, subtitle, children }: {
       <header className="detail-head" data-scrolled={scrolled || undefined}>
         <div className="detail-bar">
           {chip ?? <span />}
-          <CloseButton label="Close details" onClose={close} />
+          <CloseButton label={t('Close details')} onClose={close} />
         </div>
         {title && (
-          <CopyMenu text={title} label="Copy Title">
+          <CopyMenu text={title} label={t('Copy Title')}>
             <h2 className="title selectable detail-heading" id="drawer-title" tabIndex={-1} data-autofocus title={title}>{title}</h2>
           </CopyMenu>
         )}
@@ -834,54 +858,54 @@ export const SessionDrawer = memo(function SessionDrawer({ id, state, close }: {
   const plainAgents = (session?.agents ?? []).filter((agent) => !agent.workflow);
   return (
     <DetailPanel
-      label={session?.title ?? 'Session details'}
+      label={session?.title ?? t('Session details')}
       close={close}
-      chip={session && <Chip state={status!}>{session.stalled ? 'May be stuck' : session.state[0].toUpperCase() + session.state.slice(1)}</Chip>}
+      chip={session && <Chip state={status!}>{sessionStateLabel(session)}</Chip>}
       title={session?.title}
       subtitle={session?.state === 'working' ? session.phase : undefined}
     >
       {!session ? (
-        <p className="secondary">This session has ended.</p>
+        <p className="secondary">{t('This session has ended.')}</p>
       ) : (
         <>
           {session.state === 'waiting' && (
             <div className="card answer-card answer">
-              <p className="headline selectable">{session.waitingFor ?? 'Claude needs your input.'}</p>
+              <p className="headline selectable">{session.waitingFor ?? t('Claude needs your input.')}</p>
               <ClaudeAsk session={session} />
-              {!session.desktopId && <p className="callout secondary">Answer in Claude.</p>}
+              {!session.desktopId && <p className="callout secondary">{t('Answer in Claude.')}</p>}
             </div>
           )}
           <Facts
             facts={[
-              ['Agent', 'Claude · Lead'],
-              ['Project', projectOf(session)],
-              ...(session.cwd !== projectOf(session) ? [['Directory', session.cwd] as [string, string]] : []),
-              ['Started', <Elapsed start={session.startedAt} suffix=" ago" />],
-              ['Last active', <Elapsed start={session.activeAt} suffix=" ago" />],
-              ...(session.inTool ? [['Now', 'Running a tool'] as [string, string]] : []),
+              [t('Agent'), t('Claude · Lead')],
+              [t('Project'), projectOf(session)],
+              ...(session.cwd !== projectOf(session) ? [[t('Directory'), session.cwd] as [string, string]] : []),
+              [t('Started'), <Elapsed start={session.startedAt} suffix={t(' ago')} />],
+              [t('Last active'), <Elapsed start={session.activeAt} suffix={t(' ago')} />],
+              ...(session.inTool ? [[t('Now'), t('Running a tool')] as [string, string]] : []),
             ]}
           />
           {plainAgents.length > 0 && (
-            <Section title="Sub-agents" icon={PeopleRegular}>
-              <SessionAgents agents={plainAgents} label="Sub-agents" />
+            <Section title={t('Sub-agents')} icon={PeopleRegular}>
+              <SessionAgents agents={plainAgents} label={t('Sub-agents')} />
             </Section>
           )}
           {(session.workflows ?? []).map((run) => (
             <SessionWorkflow key={run.id} run={run} agents={(session.agents ?? []).filter((agent) => agent.workflow === run.id)} />
           ))}
           {missions.length > 0 && (
-            <Section title="Missions" icon={FlagRegular}>
+            <Section title={t('Missions')} icon={FlagRegular}>
               {missions.map((mission) => (
                 <div className="session-mission" key={mission.id}>
                   <span>{mission.title}</span>
-                  <Chip state={mission.state === 'active' ? 'running' : mission.state}>{mission.state[0].toUpperCase() + mission.state.slice(1)}</Chip>
+                  <Chip state={mission.state === 'active' ? 'running' : mission.state}>{missionStateLabel(mission.state)}</Chip>
                 </div>
               ))}
             </Section>
           )}
           <Footer>
             <OpenInClaude session={session} />
-            <CopyButton text={`claude --resume ${session.id}`} short="Resume">Resume Command</CopyButton>
+            <CopyButton text={`claude --resume ${session.id}`} short={t('Resume')}>{t('Resume Command')}</CopyButton>
           </Footer>
         </>
       )}

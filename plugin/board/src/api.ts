@@ -1,6 +1,8 @@
+import { t } from './i18n.ts';
+
 export class UnauthorizedError extends Error {
   constructor() {
-    super('The board is not signed in.');
+    super(t('The board is not signed in.'));
   }
 }
 const unauthorizedListeners = new Set<() => void>();
@@ -44,7 +46,7 @@ export async function request<T>(route: string, body?: unknown, signal?: AbortSi
   });
   if (response.status === 401) refused();
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error ?? `Request failed (${response.status}). Try again.`);
+  if (!response.ok) throw new Error(data.error ?? t('Request failed ({status}). Try again.', { status: response.status }));
   return data as T;
 }
 /**
@@ -54,7 +56,7 @@ export async function request<T>(route: string, body?: unknown, signal?: AbortSi
 export async function stream(route: string, receive: (type: string, data: string) => void, signal: AbortSignal): Promise<void> {
   const response = await fetch(route, { headers: authorization(), signal });
   if (response.status === 401) refused();
-  if (!response.ok || !response.body) throw new Error(`Request failed (${response.status}). Try again.`);
+  if (!response.ok || !response.body) throw new Error(t('Request failed ({status}). Try again.', { status: response.status }));
   const reader = response.body.getReader();
   // One decoder for the whole stream: a chunk may end inside a character, or inside an event.
   const decoder = new TextDecoder();
@@ -105,16 +107,16 @@ export class Actions {
     this.states.set(key, state);
     this.listeners.forEach((listener) => listener());
   }
-  async run(key: string, work: () => Promise<unknown>, { once = true, done = 'Sent' } = {}) {
+  async run(key: string, work: () => Promise<unknown>, { once = true, done = t('Sent') } = {}) {
     const previous = this.get(key);
     if (previous.pending || previous.accepted) return false;
-    this.set(key, { pending: true, text: 'Sending…' });
+    this.set(key, { pending: true, text: t('Sending…') });
     try {
       await work();
       this.set(key, { accepted: once, text: done });
       return true;
     } catch (error) {
-      this.set(key, { text: error instanceof Error ? error.message : 'Could not send. Try again.', tone: 'failed' });
+      this.set(key, { text: error instanceof Error ? error.message : t('Could not send. Try again.'), tone: 'failed' });
       return false;
     }
   }

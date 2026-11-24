@@ -342,8 +342,8 @@ struct IconButtonStyle: ButtonStyle {
 /// Shows or hides more of something already on screen. Pills run actions; this only reveals, so it reads as a
 /// quiet link with a chevron, sits right under what it reveals, and takes a click on its words or the room around them.
 struct RevealToggle: View {
-    var show = "Show all"
-    var hide = "Show less"
+    var show = String(localized: "Show all")
+    var hide = String(localized: "Show less")
     /// What it reveals, for VoiceOver, where several "Show all" can sit in one view.
     var subject: String? = nil
     @Binding var shown: Bool
@@ -360,7 +360,7 @@ struct RevealToggle: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(subject.map { "\(shown ? hide : show): \($0)" } ?? (shown ? hide : show))
-        .accessibilityValue(shown ? "Expanded" : "Collapsed")
+        .accessibilityValue(shown ? String(localized: "Expanded") : String(localized: "Collapsed"))
     }
 }
 

@@ -15,12 +15,12 @@ final class InstanceLock {
     func acquire(home: URL) throws -> Bool {
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         descriptor = open(home.appendingPathComponent("native.lock").path, O_CREAT | O_RDWR | O_NOFOLLOW, 0o600)
-        guard descriptor >= 0 else { throw CrewFailure("Could not open the Crew instance lock.") }
+        guard descriptor >= 0 else { throw CrewFailure(String(localized: "Could not open the Crew instance lock.")) }
         guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
             let code = errno
             close(descriptor); descriptor = -1
             if code == EWOULDBLOCK { return false }
-            throw CrewFailure("Could not lock the Crew instance file.")
+            throw CrewFailure(String(localized: "Could not lock the Crew instance file."))
         }
         return true
     }

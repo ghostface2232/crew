@@ -13,13 +13,18 @@ import {
   missionStops, NAMES, pullIsStale, pullStatuses, roleLabel,
 } from './model.ts';
 import { ActionStatus, AgentMark, Chip, Collapse, Elapsed, Icon, Menu, StatusIcon, sameItems, useAction, useFade, useClock } from './ui.tsx';
+import { t } from './i18n.ts';
 
-const capitalized = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 export const jobStatusState = (job: BoardJob) => (job.stalled ? 'stalled' : job.state);
 /** What a job is, as the app names it in a row: its role, or Question for a question. */
 export function jobKind(job: BoardJob, state: Pick<Snapshot, 'roleInfo'>) {
-  return job.debate ? 'Debate' : job.ask ? 'Question' : roleLabel(state, jobRole(job));
+  return job.debate ? t('Debate') : job.ask ? t('Question') : roleLabel(state, jobRole(job));
 }
+export const missionStateLabel = (state: Mission['state']) =>
+  ({ active: t('Active'), done: t('Done'), abandoned: t('Abandoned') })[state] ?? state;
+export const sessionStateLabel = (session: ClaudeSession) => session.stalled
+  ? t('May be stuck')
+  : ({ working: t('Working'), waiting: t('Waiting'), idle: t('Idle'), error: t('Error') })[session.state] ?? session.state;
 
 /** A job: the agent's mark leads, the kind and phase follow the title, then status and time. */
 export const JobRow = memo(function JobRow({ job, selected, openJob, kind, index = 0 }: {
@@ -31,10 +36,10 @@ export const JobRow = memo(function JobRow({ job, selected, openJob, kind, index
 }) {
   const active = job.endedAt == null;
   const detail = [
-    kind ?? (job.debate ? 'Debate' : job.ask ? 'Question' : null),
+    kind ?? (job.debate ? t('Debate') : job.ask ? t('Question') : null),
     job.error?.message ?? (active ? job.phase : null),
-    job.runsApp ? 'Runs the app' : null,
-    job.exclusive ? 'Runs alone' : null,
+    job.runsApp ? t('Runs the app') : null,
+    job.exclusive ? t('Runs alone') : null,
   ].filter(Boolean).join(' · ');
   return (
     <button
@@ -114,9 +119,9 @@ export function SessionWorkflow({ run, agents }: { run: ClaudeSession['workflows
       </h3>
       <p className="session-workflow-counts caption secondary">
         <WorkflowStrip done={run.done} running={agents.length} />
-        <span>{agents.length} running · {run.done} done</span>
+        <span>{t('{running} running · {done} done', { running: agents.length, done: run.done })}</span>
       </p>
-      {agents.length === 0 && <p className="callout secondary">No agent running: between phases, or finished.</p>}
+      {agents.length === 0 && <p className="callout secondary">{t('No agent running: between phases, or finished.')}</p>}
       {[...groups].map(([stage, group]) => (
         <div className="session-stage" key={stage}>
           {staged && stage && <p className="caption secondary" title={stage}>{stage}</p>}
@@ -125,7 +130,7 @@ export function SessionWorkflow({ run, agents }: { run: ClaudeSession['workflows
       ))}
       {agents.length > 5 && (
         <button className="reveal-toggle" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
-          {expanded ? 'Show fewer agents' : `Show all ${agents.length} agents`}
+          {expanded ? t('Show fewer agents') : t('Show all {count} agents', { count: agents.length })}
         </button>
       )}
     </section>
@@ -135,7 +140,7 @@ export function SessionWorkflow({ run, agents }: { run: ClaudeSession['workflows
 /** A Claude session as a row like a job's, opening its own detail panel. */
 export const SessionRow = memo(function SessionRow({ session, selected, openSession }: { session: ClaudeSession; selected?: boolean; openSession: (id: string) => void }) {
   // The mark names the agent, so the detail line says only what the session is doing.
-  const detail = [session.waitingFor ?? (session.state === 'idle' ? null : session.phase), session.inTool ? 'Running a tool' : null, agentSummary(session)]
+  const detail = [session.waitingFor ?? (session.state === 'idle' ? null : session.phase), session.inTool ? t('Running a tool') : null, agentSummary(session)]
     .filter(Boolean).join(' · ');
   return (
     <button
@@ -153,7 +158,7 @@ export const SessionRow = memo(function SessionRow({ session, selected, openSess
         <b>{session.title}</b>
         {detail && <span key={detail} className="swap">{detail}</span>}
       </span>
-      <StatusIcon state={session.stalled ? 'stalled' : session.state} label={session.stalled ? 'May be stuck' : capitalized(session.state)} />
+      <StatusIcon state={session.stalled ? 'stalled' : session.state} label={sessionStateLabel(session)} />
       {/* An idle session stops its clock at its last activity. */}
       <span className="job-row-time"><Elapsed start={session.startedAt} end={session.state === 'idle' ? session.activeAt : undefined} /></span>
       <Icon icon={ChevronRight16Regular} className="row-chevron" />
@@ -201,8 +206,8 @@ export const MissionTrack = memo(function MissionTrack({ mission }: { mission: M
       style={{ '--steps': stops.length, '--fit': fit === undefined ? undefined : `${fit}px` } as CSSProperties}
       aria-label={
         mission.state === 'done'
-          ? `Done, all ${stops.length} steps passed`
-          : `Step ${at + 1} of ${stops.length}, ${stops[at]?.name}`
+          ? t('Done, all {count} steps passed', { count: stops.length })
+          : t('Step {step} of {count}, {name}', { step: at + 1, count: stops.length, name: String(stops[at]?.name) })
       }
     >
       {stops.map(({ name }, index) => {
@@ -236,7 +241,7 @@ const FOLD_STAGES_AFTER = 1;
 /** A stage with this many jobs or fewer stays open by default, as reopening each one would cost more than it saves. */
 const STAGE_OPENS_UP_TO = 3;
 const openStages = new Map<string, boolean>();
-const PRESETS: [PresetName | null, string][] = [[null, 'Default'], ['economy', 'Economy'], ['balanced', 'Balanced'], ['best', 'Best']];
+const PRESETS: [PresetName | null, string][] = [[null, t('Default')], ['economy', t('Economy')], ['balanced', t('Balanced')], ['best', t('Best')]];
 
 /** A chip that names a pull request's most urgent status and counts the others the lead must act on; it opens the pull request. */
 function MissionPull({ pull }: { pull: BoardPull }) {
@@ -245,13 +250,13 @@ function MissionPull({ pull }: { pull: BoardPull }) {
   const stale = Boolean(checked);
   // A failed read leaves the last statuses in doubt, so the chip names the failure in their place.
   const unread = stale && pull.error != null;
-  const word = unread ? 'Could not be read' : statuses[0]?.word;
+  const word = unread ? t('Could not be read') : statuses[0]?.word;
   const more = unread ? 0 : statuses.slice(1).filter((status) => status.needsLead).length;
   const details = [
     pull.title,
     ...statuses.map((status) => status.word),
-    unread ? 'Could not be read' : null,
-    stale ? `Checked ${checked} ago` : null,
+    unread ? t('Could not be read') : null,
+    stale ? t('Checked {time} ago', { time: checked }) : null,
   ].filter(Boolean).join(' · ');
   const glyph = pull.state === 'merged' ? Merge16Regular : pull.state === 'closed' ? BranchRequestClosed16Regular : BranchRequest16Regular;
   return (
@@ -264,7 +269,9 @@ function MissionPull({ pull }: { pull: BoardPull }) {
       target="_blank"
       rel="noreferrer"
       title={details}
-      aria-label={`Pull request ${pull.repo} #${pull.number}${details ? `: ${details}` : ''}`}
+      aria-label={details
+        ? t('Pull request {repo} #{number}: {details}', { repo: pull.repo, number: pull.number, details })
+        : t('Pull request {repo} #{number}', { repo: pull.repo, number: pull.number })}
     >
       <Icon icon={glyph} />
       <span className="digits">#{pull.number}</span>
@@ -324,17 +331,17 @@ export const MissionPanel = memo(function MissionPanel({
   const active = mission.state === 'active';
   const tasks = mission.tasks?.filter((task) => task.state !== 'dropped') ?? [];
   const meta = [
-    tokens > 0 ? `${tokens.toLocaleString()} tokens` : null,
+    tokens > 0 ? t('{count} tokens', { count: tokens.toLocaleString() }) : null,
     projectName,
-    `${jobs.length} ${jobs.length === 1 ? 'job' : 'jobs'}`,
-    tasks.length ? `${tasks.filter((task) => task.state === 'done').length}/${tasks.length} tasks` : null,
-    mission.preset ? capitalized(mission.preset) : null,
+    jobs.length === 1 ? t('1 job') : t('{count} jobs', { count: jobs.length }),
+    tasks.length ? t('{done}/{total} tasks', { done: tasks.filter((task) => task.state === 'done').length, total: tasks.length }) : null,
+    mission.preset ? PRESETS.find(([preset]) => preset === mission.preset)?.[1] ?? mission.preset : null,
   ].filter(Boolean).join(' · ');
   const live = useSyncExternalStore(board.subscribe, () => board.getSnapshot().connection === 'live');
   const locked = action.pending || action.accepted || !live;
   const update = (body: object, done: string) => void actions.run(key, () => request(`/api/missions/${mission.id}`, body), { done });
-  const markDone = () => update({ done: true, ...(mission.state === 'abandoned' ? { reopen: true } : {}), outcome: 'Marked done on the board.' }, 'Marked done');
-  const stopTracking = () => update({ abandoned: true, outcome: 'Dismissed on the board.' }, 'Dismissed');
+  const markDone = () => update({ done: true, ...(mission.state === 'abandoned' ? { reopen: true } : {}), outcome: 'Marked done on the board.' }, t('Marked done'));
+  const stopTracking = () => update({ abandoned: true, outcome: 'Dismissed on the board.' }, t('Dismissed'));
   // A daemon without the role registry ignores a mission's preset.
   const presets = useSyncExternalStore(board.subscribe, () => Boolean(board.getSnapshot().roleInfo));
 
@@ -369,30 +376,30 @@ export const MissionPanel = memo(function MissionPanel({
         </div>
         {/* One group, so the status and the menu move to a line of their own together. */}
         <span className="mission-controls">
-          <Chip state={active ? 'running' : mission.state}>{capitalized(mission.state)}</Chip>
+          <Chip state={active ? 'running' : mission.state}>{missionStateLabel(mission.state)}</Chip>
           {(active || mission.state === 'abandoned') && (
-            <Menu label="Mission options" icon={MoreHorizontalRegular}>
+            <Menu label={t('Mission options')} icon={MoreHorizontalRegular}>
               <button role="menuitem" disabled={locked} onClick={markDone}>
                 <Icon icon={CheckmarkCircleRegular} />
-                Mark Done
+                {t('Mark Done')}
               </button>
               {active && (
-                <button role="menuitem" disabled={locked} title="Stops tracking without marking done. Its jobs keep running." onClick={stopTracking}>
+                <button role="menuitem" disabled={locked} title={t('Stops tracking without marking done. Its jobs keep running.')} onClick={stopTracking}>
                   <Icon icon={DismissCircleRegular} />
-                  Stop Tracking
+                  {t('Stop Tracking')}
                 </button>
               )}
               {active && presets && (
                 <>
                   <hr />
-                  <p className="menu-label" role="presentation">Model Preset</p>
+                  <p className="menu-label" role="presentation">{t('Model Preset')}</p>
                   {PRESETS.map(([preset, name]) => (
                     <button
                       key={name}
                       role="menuitemradio"
                       aria-checked={(mission.preset ?? null) === preset}
                       disabled={locked}
-                      title="Applies to new jobs only. Running jobs keep theirs."
+                      title={t('Applies to new jobs only. Running jobs keep theirs.')}
                       // The meta line and the check show the choice, so only sending and failure are said.
                       onClick={() => void actions.run(key, () => request(`/api/missions/${mission.id}`, { preset }), { done: '', once: false })}
                     >
@@ -407,8 +414,8 @@ export const MissionPanel = memo(function MissionPanel({
           <button
             className="icon"
             aria-expanded={expanded}
-            aria-label={expanded ? 'Collapse mission' : 'Expand mission'}
-            title={expanded ? 'Collapse' : 'Expand'}
+            aria-label={expanded ? t('Collapse mission') : t('Expand mission')}
+            title={expanded ? t('Collapse') : t('Expand')}
             onClick={() => setExpanded(!expanded)}
           >
             <Icon icon={ChevronDownRegular} className="disclosure" />
@@ -436,7 +443,7 @@ export const MissionPanel = memo(function MissionPanel({
                   {foldsStages ? (
                     <button
                       aria-expanded={open}
-                      aria-label={`${name}, ${mine.length} ${mine.length === 1 ? 'job' : 'jobs'}`}
+                      aria-label={mine.length === 1 ? t('{name}, 1 job', { name }) : t('{name}, {count} jobs', { name, count: mine.length })}
                       onClick={() => setOpenStage(stageKey, !open)}
                     >
                       {name}
@@ -487,5 +494,5 @@ function MissionMeta({ mission, meta }: { mission: Mission; meta: string }) {
 
 function MissionHint({ mission, jobs, owner }: { mission: Mission; jobs: BoardJob[]; owner?: ClaudeSession }) {
   const finished = useClock((now) => missionLooksFinished(mission, jobs, now, owner));
-  return finished ? <span className="caption secondary mission-hint reveal">Looks finished</span> : null;
+  return finished ? <span className="caption secondary mission-hint reveal">{t('Looks finished')}</span> : null;
 }

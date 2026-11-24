@@ -35,6 +35,8 @@ export default defineConfig({
   snapshotPathTemplate: '{testDir}/{testFileName}-snapshots/{arg}{-snapshotSuffix}{ext}',
   use: {
     viewport: { width: 1440, height: 1000 },
+    // The board follows the browser's language; the regressions read its English text.
+    locale: 'en-US',
     reducedMotion: 'reduce',
     screenshot: 'only-on-failure',
     trace: 'retain-on-failure',

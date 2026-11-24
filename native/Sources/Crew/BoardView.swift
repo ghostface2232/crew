@@ -128,7 +128,7 @@ struct BoardView: View {
     }
     private var title: String {
         if !store.project.isEmpty { return projectName(store.project, among: store.projects) }
-        return ["needs": "Needs You", "activity": "Activity", "history": "History"][store.selection ?? ""] ?? "Overview"
+        return ["needs": String(localized: "Needs You"), "activity": String(localized: "Activity"), "history": String(localized: "History")][store.selection ?? ""] ?? String(localized: "Overview")
     }
     private func matches(_ text: String) -> Bool { store.search.isEmpty || text.localizedCaseInsensitiveContains(store.search) }
     /// A folding mission's stages that fold by default, so a stage folding by itself as its last job ends moves the
@@ -152,7 +152,7 @@ struct BoardView: View {
         Button { store.selection = "needs"; store.search = "" } label: {
             HStack {
                 Image(systemName: "bell.badge.fill").foregroundStyle(Palette.warning)
-                Text("\(store.state.pendingCount) \(store.state.pendingCount == 1 ? "request needs" : "requests need") your attention").font(Typeface.bodyStrong)
+                Text(store.state.pendingCount == 1 ? String(localized: "1 request needs your attention") : String(localized: "\(store.state.pendingCount) requests need your attention")).font(Typeface.bodyStrong)
                 Spacer()
                 Text("Review").font(Typeface.callout)
                 Image(systemName: "chevron.right").font(Typeface.micro)
@@ -233,23 +233,23 @@ struct BoardView: View {
             case .mission(let mission):
                 MissionPanel(store: store, mission: mission, jobs: missionJobs(mission))
             case .loose:
-                ContentPanel(title: history ? "Jobs" : "Other jobs", symbol: "rectangle.stack") {
+                ContentPanel(title: history ? String(localized: "Jobs") : String(localized: "Other jobs"), symbol: "rectangle.stack") {
                     VStack(spacing: WorkspaceStyle.rowGap) { ForEach(loose) { job in JobRow(job: job, selected: store.selectedJob == job.id, store: store) { store.toggleJob(job.id) }.transition(.card) } }
                 }
             case .finished:
-                ContentPanel(title: "Recently finished", symbol: "checkmark.circle") {
+                ContentPanel(title: String(localized: "Recently finished"), symbol: "checkmark.circle") {
                     VStack(spacing: WorkspaceStyle.rowGap) { ForEach(recentJobs) { job in JobRow(job: job, selected: store.selectedJob == job.id, store: store) { store.toggleJob(job.id) }.transition(.card) } }
                 }
             case .sessions:
-                ContentPanel(title: "Claude sessions", symbol: "bubble.left.and.bubble.right") {
+                ContentPanel(title: String(localized: "Claude sessions"), symbol: "bubble.left.and.bubble.right") {
                     VStack(spacing: WorkspaceStyle.rowGap) { ForEach(sessions) { session in SessionRow(session: session, selected: store.selectedSession == session.id, store: store) { store.toggleSession(session.id) }.transition(.card) } }
                 }
             }
         }
         if emptyHistory || emptyWorkspace {
-            EmptyState(title: store.search.isEmpty ? (emptyHistory ? "No completed work yet" : "Ready when you are") : "No matching work",
+            EmptyState(title: store.search.isEmpty ? (emptyHistory ? String(localized: "No completed work yet") : String(localized: "Ready when you are")) : String(localized: "No matching work"),
                        symbol: store.search.isEmpty ? "square.stack.3d.up" : "magnifyingglass",
-                       detail: store.search.isEmpty && !emptyHistory ? "Hand a task to an agent, or run /crew:run in Claude." : nil) {
+                       detail: store.search.isEmpty && !emptyHistory ? String(localized: "Hand a task to an agent, or run /crew:run in Claude.") : nil) {
                 if store.search.isEmpty && !emptyHistory { Button("New Job", systemImage: "plus") { store.showingDispatch = true }.glassPillButton().disabled(!store.connected) }
             }.transition(.card)
         }
@@ -259,7 +259,7 @@ struct BoardView: View {
         // The page heading already names this list.
         ContentPanel(title: nil) {
             let events = store.events.filter { matches("\($0.detail) \($0.agent)") }
-            if events.isEmpty { Text(store.search.isEmpty ? "No activity yet." : "No matching activity.").foregroundStyle(.secondary) }
+            if events.isEmpty { Text(store.search.isEmpty ? String(localized: "No activity yet.") : String(localized: "No matching activity.")).foregroundStyle(.secondary) }
             EventList(events: events) { store.openJob($0) }
         }
         // On the panel rather than the list, so the panel grows with the rows instead of snapping to its new height.
@@ -305,9 +305,9 @@ struct AgentOverview: View {
                         let stalled = agent == "claude" ? sessions.contains { $0.stalled } : jobs.contains { $0.stalled }
                         let mark = waiting ? "waiting" : stalled ? "stalled" : count > 0 ? "working" : "idle"
                         let idle = agent == "claude" ? idleSessions(store) : 0
-                        let summary = [count > 0 ? "\(count) active" : nil, idle > 0 ? "\(idle) idle" : nil].compactMap { $0 }
+                        let summary = [count > 0 ? String(localized: "\(count) active") : nil, idle > 0 ? String(localized: "\(idle) idle") : nil].compactMap { $0 }
                         if !summary.isEmpty { Text(summary.joined(separator: " · ")).font(Typeface.caption).foregroundStyle(.secondary) }
-                        StatusLabel(state: mark, title: waiting ? "Needs you" : stalled ? "May be stuck" : store.state.agents[agent]?.enabled == false ? "Disabled" : count > 0 ? "Working" : "Ready",
+                        StatusLabel(state: mark, title: waiting ? String(localized: "Needs you") : stalled ? String(localized: "May be stuck") : store.state.agents[agent]?.enabled == false ? String(localized: "Disabled") : count > 0 ? String(localized: "Working") : String(localized: "Ready"),
                                     // Only under the word Working: a disabled agent's last job still counts as active.
                                     spins: mark == "working" && store.state.agents[agent]?.enabled != false)
                     }
@@ -327,8 +327,8 @@ struct AgentOverview: View {
         if store.state.roleSettings?[info.role]?.agents == nil, let parent = info.parent, let inherited = roles[parent],
            Set(assignment.holders) == Set(inherited.holders) { return false }
         return true
-    }.map(\.label)
-    return ((agent == "claude" ? ["Lead"] : []) + labels).joined(separator: " · ")
+    }.map(\.localizedLabel)
+    return ((agent == "claude" ? [String(localized: "Lead")] : []) + labels).joined(separator: " · ")
 }
 
 /// Claude sessions open in this scope but between turns.
@@ -348,11 +348,16 @@ private struct AgentCard: View {
     private var busy: Bool { (agent == "claude" ? sessions.count + idleSessions(store) : jobs.count) > 0 }
     private var activity: String {
         let count = agent == "claude" ? sessions.count : jobs.count
-        let noun = agent == "claude" ? "session" : "job"
+        let isLead = agent == "claude"
         // Only Claude sessions sit idle between turns; a worker's job is either running or over.
         let idle = agent == "claude" ? idleSessions(store) : 0
-        if count == 0 { return idle == 0 ? "No active \(noun)s" : "\(idle) idle \(noun)\(idle == 1 ? "" : "s")" }
-        return "\(count) active \(noun)\(count == 1 ? "" : "s")" + (idle > 0 ? " · \(idle) idle" : "")
+        if count == 0 {
+            if idle > 0 { return idle == 1 ? String(localized: "1 idle session") : String(localized: "\(idle) idle sessions") }
+            return isLead ? String(localized: "No active sessions") : String(localized: "No active jobs")
+        }
+        let active = isLead ? (count == 1 ? String(localized: "1 active session") : String(localized: "\(count) active sessions"))
+                            : (count == 1 ? String(localized: "1 active job") : String(localized: "\(count) active jobs"))
+        return active + (idle > 0 ? String(localized: " · \(idle) idle") : "")
     }
     var body: some View {
         VStack(alignment: .leading, spacing: Space.xl) {
@@ -369,7 +374,7 @@ private struct AgentCard: View {
                     }
                 }
                 Spacer(minLength: Space.m)
-                StatusLabel(state: mark, title: mark == "waiting" ? "Needs you" : mark == "working" ? "Working" : mark == "stalled" ? "May be stuck" : store.state.agents[agent]?.enabled == false ? "Disabled" : "Ready", spins: mark == "working")
+                StatusLabel(state: mark, title: mark == "waiting" ? String(localized: "Needs you") : mark == "working" ? String(localized: "Working") : mark == "stalled" ? String(localized: "May be stuck") : store.state.agents[agent]?.enabled == false ? String(localized: "Disabled") : String(localized: "Ready"), spins: mark == "working")
             }
             // The agent's work in a gray inset, apart from its name above and its account usage below; with
             // nothing open, the inset is left out rather than saying so.
@@ -394,11 +399,11 @@ struct MissionPanel: View {
         let tokens = jobs.reduce(0) { $0 + ($1.tokens ?? 0) }
         let tasks = (mission.tasks ?? []).filter { $0.state != "dropped" }
         return [
-            tokens > 0 ? "\(tokens.formatted()) tokens" : nil,
+            tokens > 0 ? String(localized: "\(tokens.formatted()) tokens") : nil,
             store.project.isEmpty ? projectName(mission.root, among: store.projects) : nil,
-            "\(jobs.count) \(jobs.count == 1 ? "job" : "jobs")",
-            tasks.isEmpty ? nil : "\(tasks.filter { $0.state == "done" }.count)/\(tasks.count) tasks",
-            mission.preset.map { $0.rawValue.capitalized },
+            jobs.count == 1 ? String(localized: "1 job") : String(localized: "\(jobs.count) jobs"),
+            tasks.isEmpty ? nil : String(localized: "\(tasks.filter { $0.state == "done" }.count)/\(tasks.count) tasks"),
+            mission.preset.map { localizedCrewLabel($0.rawValue.capitalized) },
         ].compactMap { $0 }.joined(separator: " · ")
     }
     var body: some View {
@@ -417,7 +422,7 @@ struct MissionPanel: View {
                         }.font(Typeface.caption).monospacedDigit().foregroundStyle(.secondary).fadeTruncated().help(mission.root)
                     }
                     Spacer(minLength: WorkspaceStyle.rowSpacer)
-                    StatusLabel(state: mission.state == "active" ? "running" : mission.state, title: mission.state.capitalized, spins: mission.state == "active")
+                    StatusLabel(state: mission.state == "active" ? "running" : mission.state, title: localizedCrewLabel(mission.state.capitalized), spins: mission.state == "active")
                     if mission.state != "done" { missionMenu }
                     // A filled circle, so the control shows its hit area.
                     Button { toggle() } label: {
@@ -425,7 +430,7 @@ struct MissionPanel: View {
                             .rotationEffect(.degrees(expanded ? 0 : -90)).frame(width: Symbol.controlFrame, height: Symbol.controlFrame)
                             // Pointing right, the chevron's weight sits left of its frame; a point over centers it optically.
                             .offset(x: expanded ? 0 : Symbol.chevronNudge)
-                    }.iconButton().accessibilityLabel(expanded ? "Collapse mission" : "Expand mission").help(expanded ? "Collapse" : "Expand")
+                    }.iconButton().accessibilityLabel(expanded ? String(localized: "Collapse mission") : String(localized: "Expand mission")).help(expanded ? String(localized: "Collapse") : String(localized: "Expand"))
                 }
                 // The title row opens and closes the card; its button keeps its own click.
                 .contentShape(Rectangle())
@@ -510,7 +515,7 @@ struct MissionPanel: View {
                 })) {
                     Text("Default").tag(nil as PresetName?)
                     ForEach(PresetName.allCases, id: \.self) { preset in
-                        Text(preset.rawValue.capitalized).tag(Optional(preset))
+                        Text(localizedCrewLabel(preset.rawValue.capitalized)).tag(Optional(preset))
                     }
                 }.pickerStyle(.inline)
             }
@@ -523,7 +528,12 @@ struct MissionPanel: View {
     }
     @ViewBuilder private var outcome: some View {
         if !mission.outcome.isEmpty {
-            Text(mission.outcome).font(Typeface.callout).textSelection(.enabled).padding(.leading, WorkspaceStyle.rowTitleInset)
+            let outcome = switch mission.outcome {
+            case "Dismissed in Crew.": String(localized: "Dismissed in Crew.")
+            case "Marked done in Crew.": String(localized: "Marked done in Crew.")
+            default: mission.outcome
+            }
+            Text(outcome).font(Typeface.callout).textSelection(.enabled).padding(.leading, WorkspaceStyle.rowTitleInset)
         }
     }
     /// Animated from here rather than inside the card, so the cards below move with it instead of jumping.
@@ -552,8 +562,8 @@ struct MissionPanel: View {
             .buttonStyle(WorkspacePressStyle())
             // The padding widens the target only; the label stays where an unfolding stage's name sits.
             .padding(.vertical, -Space.xs)
-            .accessibilityLabel("\(mission.stops[index]), \(count) \(count == 1 ? "job" : "jobs")")
-            .accessibilityValue(open ? "Expanded" : "Collapsed")
+            .accessibilityLabel(count == 1 ? String(localized: "\(mission.stops[index]), 1 job") : String(localized: "\(mission.stops[index]), \(count) jobs"))
+            .accessibilityValue(open ? String(localized: "Expanded") : String(localized: "Collapsed"))
             .accessibilityAddTraits(.isHeader)
         } else {
             name.padding(.leading, WorkspaceStyle.rowTitleInset).accessibilityAddTraits(.isHeader)
@@ -572,10 +582,10 @@ private struct MissionPullChip: View {
         let stale = pull.isStale(now: now)
         // A failed read leaves the last statuses in doubt, so the chip names the failure in their place.
         let unread = stale && pull.error != nil
-        let word = unread ? "Could not be read" : statuses.first?.word
+        let word = unread ? String(localized: "Could not be read") : statuses.first?.localizedWord
         let more = unread ? 0 : statuses.dropFirst().filter(\.needsLead).count
         let checked = elapsed(now - pull.checkedAt)
-        let details = ([pull.title] + statuses.map(\.word) + (unread ? ["Could not be read"] : []) + (stale ? ["Checked \(checked) ago"] : []))
+        let details = ([pull.title] + statuses.map(\.localizedWord) + (unread ? [String(localized: "Could not be read")] : []) + (stale ? [String(localized: "Checked \(checked) ago")] : []))
             .filter { !$0.isEmpty }.joined(separator: " · ")
         Link(destination: pull.url) {
             HStack(spacing: Space.xs) {
@@ -623,15 +633,15 @@ struct NeedsYouView: View {
     }
     @ViewBuilder private func content(jobs: [Job], sessions: [ClaudeSession]) -> some View {
         if store.state.pendingCount == 0 {
-            EmptyState(title: "All caught up", symbol: "checkmark.circle").transition(.card)
+            EmptyState(title: String(localized: "All caught up"), symbol: "checkmark.circle").transition(.card)
         } else if jobs.isEmpty && sessions.isEmpty {
-            EmptyState(title: "No matching requests", symbol: "magnifyingglass").transition(.card)
+            EmptyState(title: String(localized: "No matching requests"), symbol: "magnifyingglass").transition(.card)
         }
         LazyVGrid(columns: [GridItem(.adaptive(minimum: Self.requestWidth.lowerBound, maximum: Self.requestWidth.upperBound), spacing: WorkspaceStyle.cardGap)], alignment: .leading, spacing: WorkspaceStyle.cardGap) {
             ForEach(jobs) { job in
                 VStack(alignment: .leading, spacing: Space.xl) {
                     VStack(alignment: .leading, spacing: Space.ml) {
-                        requestHeader(job.waiting?.type == "approval" ? "Approval" : "Question", agent: job.agent, who: agentName(job.agent),
+                        requestHeader(job.waiting?.type == "approval" ? String(localized: "Approval") : String(localized: "Question"), agent: job.agent, who: agentName(job.agent),
                                       project: job.projectPath, since: job.waiting?.since) { store.openJob(job.id) }
                         Text(job.title).font(Typeface.callout).foregroundStyle(.secondary).lineLimit(2).help(job.title)
                     }
@@ -646,17 +656,17 @@ struct NeedsYouView: View {
                     // Laid out as a job's tile: who on the header, the session's title under it.
                     VStack(alignment: .leading, spacing: Space.ml) {
                         HStack(spacing: Space.ml) {
-                            StatusLabel(state: "waiting", title: "Input")
+                            StatusLabel(state: "waiting", title: String(localized: "Input"))
                             HStack(spacing: Space.s) {
                                 AgentMark(agent: "claude", size: MarkSize.inline)
-                                Text("Claude").lineLimit(1)
+                                Text(verbatim: "Claude").lineLimit(1)
                             }.font(Typeface.chip).foregroundStyle(.secondary).help(session.projectPath)
                             Spacer(minLength: WorkspaceStyle.rowSpacer)
                             OpenInClaudeButton(session: session)
                         }
                         Text(session.title).font(Typeface.callout).foregroundStyle(.secondary).lineLimit(2).help(session.title)
                     }
-                    Text(session.waitingFor ?? "Claude needs your input.").font(Typeface.headline).lineSpacing(4).textSelection(.enabled)
+                    Text(session.waitingFor ?? String(localized: "Claude needs your input.")).font(Typeface.headline).lineSpacing(4).textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
                     ClaudeAskView(session: session)
                     if session.claudeURL == nil {
@@ -756,9 +766,9 @@ struct ProjectSidebar: View {
     }
     private var updateTitle: String {
         // Kept short enough to fit on one line at the narrowest sidebar width; the tooltip says what happens.
-        if updater.phase == .ready { return "Update Now" }
-        guard let jobs = updater.waiting else { return "Updating…" }
-        return jobs > 0 ? "\(jobs) job\(jobs == 1 ? "" : "s") left…" : "Waiting…"
+        if updater.phase == .ready { return String(localized: "Update Now") }
+        guard let jobs = updater.waiting else { return String(localized: "Updating…") }
+        return jobs == 1 ? String(localized: "1 job left…") : jobs > 1 ? String(localized: "\(jobs) jobs left…") : String(localized: "Waiting…")
     }
 }
 

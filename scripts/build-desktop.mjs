@@ -25,6 +25,7 @@ run(process.execPath, ['node_modules/typescript/bin/tsc', '-p', 'tsconfig.native
 fs.rmSync(app, { recursive: true, force: true });
 fs.mkdirSync(path.join(contents, 'MacOS'), { recursive: true });
 fs.mkdirSync(path.join(resources, 'runtime'), { recursive: true });
+fs.cpSync('native/Resources/ko.lproj', path.join(resources, 'ko.lproj'), { recursive: true });
 fs.copyFileSync(path.join(binPath, 'Crew'), path.join(contents, 'MacOS/Crew'));
 fs.chmodSync(path.join(contents, 'MacOS/Crew'), 0o755);
 fs.cpSync(path.join(build, 'bridge'), path.join(resources, 'bridge'), { recursive: true });
@@ -73,6 +74,7 @@ const version = JSON.parse(fs.readFileSync('package.json', 'utf8')).version;
 const plist = {
   CFBundleName: 'Crew', CFBundleDisplayName: 'Crew', CFBundleExecutable: 'Crew',
   CFBundleIdentifier: 'dev.crew.native', CFBundlePackageType: 'APPL',
+  CFBundleDevelopmentRegion: 'en', CFBundleLocalizations: ['en', 'ko'],
   CFBundleShortVersionString: version, CFBundleVersion: version,
   CFBundleIconFile: 'crew', CFBundleIconName: 'crew', LSMinimumSystemVersion: '26.0', NSPrincipalClass: 'NSApplication',
   NSHighResolutionCapable: true, NSSupportsAutomaticTermination: false,

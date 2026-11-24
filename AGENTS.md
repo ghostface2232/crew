@@ -60,6 +60,7 @@ node plugin/bridge/cli.ts install    # register this checkout as the Crew plugin
 - Comments and docs are in English. Write what the code cannot say: intent, constraints, and non-obvious decisions.
 - The bridge has no runtime dependencies and no build step. The only runtime dependencies are the board's (React and Fluent icons), bundled by Vite.
 - When behavior changes, update the doc that owns the topic (below) in the same change.
+- Interface text is written in English and has Korean beside it: `t()` in the board and Windows app, `Localizable.strings` in the macOS app ([docs/localization.md](docs/localization.md)).
 - Do not add a `CLAUDE.md` here: by default Claude Code ignores `AGENTS.md` files while one exists (checked with Claude Code 2.1.326, 2026-11-22).
 
 ## Where each topic is documented
@@ -77,6 +78,7 @@ node plugin/bridge/cli.ts install    # register this checkout as the Crew plugin
 | Usage, routing, presets, and tiers | [docs/usage-and-presets.md](docs/usage-and-presets.md) |
 | The daemon's HTTP API, events, and sign-in | [docs/daemon-api.md](docs/daemon-api.md) |
 | The React board | [docs/board.md](docs/board.md) |
+| Korean and English interface text, and the Korean glossary | [docs/localization.md](docs/localization.md) |
 | The macOS app and its design tokens | [docs/macos-app.md](docs/macos-app.md), [docs/design-tokens.md](docs/design-tokens.md) |
 | The Windows app | [docs/windows-app.md](docs/windows-app.md) |
 | Releases, how the app installs the plugin, and the first-run checklist | [docs/distribution.md](docs/distribution.md) |

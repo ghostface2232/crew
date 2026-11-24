@@ -5,6 +5,7 @@ import type { FluentIcon } from '@fluentui/react-icons';
 import type { Snapshot } from './types.ts';
 import { projectOf, relativeDuration } from './model.ts';
 import { Icon, useFade, useClock, WordReveal } from './ui.tsx';
+import { t } from './i18n.ts';
 
 export interface NavItem {
   id: string;
@@ -63,7 +64,7 @@ export const NavList = memo(function NavList({ label, heading, items, current, o
             data-nav={item.id}
             title={item.title}
             // The dot's state is said apart from the name, so the item is still found by its name.
-            aria-description={item.dot === 'waiting' ? 'Needs you' : item.dot === 'working' ? 'Working' : undefined}
+            aria-description={item.dot === 'waiting' ? t('Needs you') : item.dot === 'working' ? t('Working') : undefined}
             aria-current={current === item.id || undefined}
             onPointerEnter={(event) => {
               setHovered(item.id);
@@ -74,7 +75,7 @@ export const NavList = memo(function NavList({ label, heading, items, current, o
             <Icon icon={item.icon} filled={current === item.id} />
             <NavLabel label={item.label} current={current === item.id} />
             {item.dot && <i className="nav-dot" data-state={item.dot} aria-hidden="true" />}
-            {item.count ? <span className="nav-count" aria-label={`${item.count} waiting`}>{item.count}</span> : null}
+            {item.count ? <span className="nav-count" aria-label={t('{count} waiting', { count: item.count })}>{item.count}</span> : null}
             {shortcut && !item.count && <kbd className="nav-key" aria-hidden="true">{index + 1}</kbd>}
           </button>
         ))}
@@ -97,10 +98,10 @@ export function ProjectPeek({ dir, name, top, state }: { dir: string; name: stri
   const waiting = jobs.filter((job) => job.state === 'waiting').length + sessions.filter((session) => session.state === 'waiting').length;
   const missions = state.missions.filter((mission) => projectOf(mission) === dir && mission.state === 'active');
   const last = Math.max(0, ...jobs.map((job) => job.activeAt ?? job.createdAt), ...sessions.map((session) => session.activeAt));
-  const quiet = useClock((now) => last ? `Quiet for ${relativeDuration(now - last)}` : 'No work yet', !running && !waiting && Boolean(last));
+  const quiet = useClock((now) => last ? t('Quiet for {duration}', { duration: relativeDuration(now - last) }) : t('No work yet'), !running && !waiting && Boolean(last));
   const inset = useClock(() => Math.max(12, Math.min(top - 12, innerHeight - 260)));
   const line = running || waiting
-    ? [running && `${running} working`, waiting && `${waiting} waiting on you`].filter(Boolean).join(', ')
+    ? [running && t('{count} working', { count: running }), waiting && t('{count} waiting on you', { count: waiting })].filter(Boolean).join(', ')
     : quiet;
   return (
     <div className="peek" aria-hidden="true" style={{ '--top': `${inset}px` } as CSSProperties}>

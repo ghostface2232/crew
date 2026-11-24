@@ -57,7 +57,7 @@ struct CrewSettingsView: View {
             if let scope = next?.scope, scope != model.scope {
                 // Text being saved is not unsaved; the next set loads once the save is done.
                 if model.savingText { return }
-                if model.text != model.savedText && !confirmDiscard("Discard unsaved instructions?") { return }
+                if model.text != model.savedText && !confirmDiscard(String(localized: "Discard unsaved instructions?")) { return }
                 Task { await model.load(scope: scope) }
             }
             selection = next
@@ -104,12 +104,12 @@ struct CrewSettingsView: View {
     }
     private func title(_ pane: SettingsPane) -> String {
         switch pane {
-        case .about: "About Crew"
-        case .presets: "Model Presets"
-        case .models: "Model Scores"
-        case .instructions: "Instructions"
+        case .about: String(localized: "About Crew")
+        case .presets: String(localized: "Model Presets")
+        case .models: String(localized: "Model Scores")
+        case .instructions: String(localized: "Instructions")
         case .project(let path): projectName(path, among: store.projects)
-        default: pane.group ?? ""
+        default: pane.group.map(localizedCrewLabel) ?? ""
         }
     }
     private func paneRow(_ pane: SettingsPane) -> some View {
@@ -138,7 +138,7 @@ struct CrewSettingsView: View {
     private func roleSection(_ role: RoleInfo) -> some View {
         Section {
             if let parent = role.parent {
-                Toggle("Same as \(model.roleInfo.first { $0.role == parent }?.label ?? parent)", isOn: Binding(
+                Toggle("Same as \(model.roleInfo.first { $0.role == parent }?.localizedLabel ?? parent)", isOn: Binding(
                     get: { model.followsParent(role.role) },
                     set: { model.setFollowParent(role.role, enabled: $0); storeRoles() }
                 )).toggleStyle(.checkbox)
@@ -149,7 +149,7 @@ struct CrewSettingsView: View {
                         Toggle(holderLabel(holder), isOn: Binding(
                             get: { model.assignment(for: role.role)?.holders.contains(holder) == true },
                             set: { model.setHolder(role.role, holder: holder, enabled: $0); storeRoles() }
-                        )).toggleStyle(.checkbox).accessibilityLabel("\(role.label): \(holderLabel(holder))")
+                        )).toggleStyle(.checkbox).accessibilityLabel("\(role.localizedLabel): \(holderLabel(holder))")
                             .disabled(!model.canToggleHolder(role.role, holder: holder))
                     }
                 }.disabled(model.followsParent(role.role))
@@ -162,14 +162,14 @@ struct CrewSettingsView: View {
             HStack(spacing: Space.ml) {
                 AgentMark(agent: model.assignment(for: role.role)?.holders.first ?? "codex", size: MarkSize.card)
                 VStack(alignment: .leading, spacing: Space.xxs) {
-                    Text(role.label).font(.headline).foregroundStyle(.primary)
-                    Text(role.summary).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    Text(role.localizedLabel).font(.headline).foregroundStyle(.primary)
+                    Text(role.localizedSummary).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
             }.textCase(nil)
         } footer: {
             // A change that could not be stored was undone; its role says why.
             if !model.roleError.isEmpty && model.changedRole == role.role {
-                ErrorLabel(message: "Not saved: \(model.roleError)").settingsFootnote()
+                ErrorLabel(message: String(localized: "Not saved: \(model.roleError)")).settingsFootnote()
             }
         }
     }
@@ -187,7 +187,7 @@ struct CrewSettingsView: View {
             Picker("Default", selection: $model.preset) {
                 Text("None").tag(nil as PresetName?)
                 ForEach(PresetName.allCases, id: \.self) { name in
-                    Text(name.rawValue.capitalized).tag(Optional(name))
+                    Text(localizedCrewLabel(name.rawValue.capitalized)).tag(Optional(name))
                 }
             }
             // Stored as it is picked. Undoing a pick that could not be stored comes through here too, with nothing left to store.
@@ -199,13 +199,13 @@ struct CrewSettingsView: View {
             }
         } footer: {
             VStack(alignment: .leading, spacing: Space.s) {
-                if !model.presetError.isEmpty { ErrorLabel(message: "Not saved: \(model.presetError)") }
-                Text(model.preset?.summary ?? "Uses each agent's own model and effort settings.")
+                if !model.presetError.isEmpty { ErrorLabel(message: String(localized: "Not saved: \(model.presetError)")) }
+                Text(model.preset?.summary ?? String(localized: "Uses each agent's own model and effort settings."))
             }.settingsFootnote()
         }
         Section {
-            LabeledContent("Role settings", value: "Override any preset")
-            LabeledContent("Mission preset", value: "Overrides default for new jobs")
+            LabeledContent(String(localized: "Role settings"), value: String(localized: "Override any preset"))
+            LabeledContent(String(localized: "Mission preset"), value: String(localized: "Overrides default for new jobs"))
         } header: {
             Text("Priority")
         } footer: {
@@ -233,7 +233,7 @@ struct CrewSettingsView: View {
                 }
             }.padding(.vertical, Space.xs)
             if let page = updater.page, let latest = updater.latest {
-                LabeledContent("Release notes") { Link("What’s new in \(latest)", destination: page) }
+                LabeledContent("Release notes") { Link(String(localized: "What’s new in \(latest)"), destination: page) }
             }
         } footer: {
             VStack(alignment: .leading, spacing: Space.ml) {
@@ -241,8 +241,8 @@ struct CrewSettingsView: View {
                 // The note and the action share one line, so the action is not left between the list and a note.
                 HStack(spacing: Space.l) {
                     Text(updater.phase == .unsupported
-                        ? "This copy of Crew is not running from an app bundle, so it cannot update itself."
-                        : "Updates install after running jobs finish.")
+                        ? String(localized: "This copy of Crew is not running from an app bundle, so it cannot update itself.")
+                        : String(localized: "Updates install after running jobs finish."))
                         .settingsFootnote().frame(maxWidth: .infinity, alignment: .leading)
                     updateAction
                 }
@@ -311,8 +311,8 @@ struct CrewSettingsView: View {
                 .frame(minHeight: Self.editorHeight)
                 .accessibilityLabel("Shared instructions").disabled(!model.loaded || model.scope != pane.scope)
         } header: {
-            Text(pane == .instructions ? "Given to every agent with its next job, in every project, and to Claude sessions when they start."
-                 : "Given to every agent working in this project, after the instructions for every project.")
+            Text(pane == .instructions ? String(localized: "Given to every agent with its next job, in every project, and to Claude sessions when they start.")
+                 : String(localized: "Given to every agent working in this project, after the instructions for every project."))
                 .settingsFootnote().textCase(nil)
         } footer: {
             VStack(alignment: .leading, spacing: Space.s) {
@@ -336,20 +336,21 @@ struct CrewSettingsView: View {
             if !model.loaded && !model.loading {
                 Button("Retry Loading") { Task { await model.load(scope: model.scope) } }.pillButton()
             }
-            Button(model.savingText ? "Saving…" : "Save") { Task { await model.saveInstructions() } }
+            Button(model.savingText ? String(localized: "Saving…") : String(localized: "Save")) { Task { await model.saveInstructions() } }
                 .glassPillButton().morphs(on: model.savingText).keyboardShortcut("s")
                 .disabled(!store.connected || model.savingText || !model.loaded)
         }
     }
     private func holderLabel(_ holder: String) -> String {
-        holder == "claude" ? "Claude" : "\(agentName(holder))\(store.state.agents[holder]?.enabled == false ? " (disabled)" : "")"
+        let name = agentName(holder)
+        return holder != "claude" && store.state.agents[holder]?.enabled == false ? String(localized: "\(name) (disabled)") : name
     }
     private func roleBinding(_ role: RoleInfo, agent: String, _ key: WritableKeyPath<RoleAgentSettings, String?>) -> Binding<String> {
         Binding(get: { model.roleSettings[role.role]?[agent]?[keyPath: key] ?? "" },
                 set: { model.setRole(role.role, agent: agent, key, to: $0, offered: store.state.agents[agent]?.models ?? []) })
     }
     @ViewBuilder private func roleField(_ role: RoleInfo, agent: String, _ key: WritableKeyPath<RoleAgentSettings, String?>) -> some View {
-        let title = "\(agentName(agent)) \(key == \.model ? "model" : "reasoning effort")"
+        let title = key == \.model ? String(localized: "\(agentName(agent)) model") : String(localized: "\(agentName(agent)) reasoning effort")
         let offered = store.state.agents[agent]?.models ?? []
         let blank = model.blankTitle(role.role, agent: agent, key, models: offered)
         let binding = roleBinding(role, agent: agent, key)
@@ -360,14 +361,14 @@ struct CrewSettingsView: View {
             TextField(title, text: Binding(get: { model.typed(field) }, set: { model.type(field, $0) }), prompt: Text(blank))
                 .focused($typing, equals: field)
                 .onSubmit { commit(field) }
-                .accessibilityLabel("\(role.label) \(title)")
+                .accessibilityLabel("\(role.localizedLabel) \(title)")
         } else {
             Picker(title, selection: Binding(get: { binding.wrappedValue }, set: { binding.wrappedValue = $0; storeRoles() })) {
                 Text(blank).tag("")
                 ForEach(model.fieldChoices(role.role, agent: agent, key, models: offered)) { choice in
                     Text(choice.name).tag(choice.id)
                 }
-            }.accessibilityLabel("\(role.label) \(title)")
+            }.accessibilityLabel("\(role.localizedLabel) \(title)")
         }
     }
 }
@@ -400,7 +401,7 @@ private struct SettingsAppRow: View {
             Image(nsImage: NSApp.applicationIconImage).resizable().interpolation(.high).scaledToFit()
                 .frame(width: Self.iconSize, height: Self.iconSize).accessibilityHidden(true)
             VStack(alignment: .leading, spacing: Space.xxs) {
-                Text("Crew").font(.body.weight(.semibold))
+                Text(verbatim: "Crew").font(.body.weight(.semibold))
                 if let version { Text("v\(version)").font(.subheadline).foregroundStyle(.secondary) }
             }
             if ready {
@@ -437,8 +438,8 @@ private struct UnsavedLabelStyle: LabelStyle {
 @MainActor func confirmDiscard(_ title: String) -> Bool {
     let alert = NSAlert()
     alert.messageText = title
-    alert.informativeText = "Your changes have not been saved."
-    alert.addButton(withTitle: "Keep Editing")
-    alert.addButton(withTitle: "Discard Changes")
+    alert.informativeText = String(localized: "Your changes have not been saved.")
+    alert.addButton(withTitle: String(localized: "Keep Editing"))
+    alert.addButton(withTitle: String(localized: "Discard Changes"))
     return alert.runModal() == .alertSecondButtonReturn
 }

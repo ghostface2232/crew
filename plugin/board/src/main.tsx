@@ -4,6 +4,9 @@ import { App } from './App.tsx';
 import { initializeSession, UnauthorizedError } from './api.ts';
 import { board } from './store.ts';
 import '../board.css';
+import { language } from './i18n.ts';
+
+document.documentElement.lang = language;
 
 // The thin bar's width, so a scrolling area can take it out of its padding and keep its content's edges even.
 const probe = document.createElement('div');

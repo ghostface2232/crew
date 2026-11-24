@@ -72,21 +72,21 @@ struct Job: Codable, Sendable, Identifiable, Equatable {
     var debateConcluded: Bool { debate.map { state != "running" && state != "waiting" && turns >= $0.rounds } ?? false }
     /// Ended, but its worktree still awaits a merge or discard, or the lead has not read its result.
     var isUnsettled: Bool { worktree != nil || seq > (delivered ?? seq) }
-    var kindTitle: String { debate != nil ? "Debate" : ask == true ? "Question" : roleNames[kind] ?? kind }
+    var kindTitle: String { debate != nil ? String(localized: "Debate") : ask == true ? String(localized: "Question") : roleNames[kind].map(localizedCrewLabel) ?? kind }
     var assignedRole: String { role ?? (debate != nil ? "debate" : kind == "review" && runsApp == true ? "verify" : kind) }
     var roundUnavailableReason: String? {
-        if state == "running" || state == "waiting" { return "Wait until the job has stopped before changing rounds." }
-        if worktree == nil { return "This job has no worktree." }
+        if state == "running" || state == "waiting" { return String(localized: "Wait until the job has stopped before changing rounds.") }
+        if worktree == nil { return String(localized: "This job has no worktree.") }
         return nil
     }
     func roundActionKey(_ turn: Int) -> String { "round:\(id):\(turn)" }
     var projectPath: String { root ?? project }
     var isActive: Bool { endedAt == nil }
     var status: String {
-        if state == "waiting" { return waiting?.type == "approval" ? "Needs approval" : "Has a question" }
-        if stalled { return "May be stuck" }
-        if error?.limit == true { return "Usage limit reached" }
-        return ["running": "Working", "done": "Done", "failed": "Failed", "cancelled": "Cancelled"][state] ?? state
+        if state == "waiting" { return waiting?.type == "approval" ? String(localized: "Needs approval") : String(localized: "Has a question") }
+        if stalled { return String(localized: "May be stuck") }
+        if error?.limit == true { return String(localized: "Usage limit reached") }
+        return ["running": String(localized: "Working"), "done": String(localized: "Done"), "failed": String(localized: "Failed"), "cancelled": String(localized: "Cancelled")][state] ?? state
     }
     var requestKey: String { "answer:\(id):\(waiting?.id ?? "")" }
 }
@@ -97,7 +97,10 @@ struct ContextUse: Codable, Sendable, Equatable {
     var used: Int
     var size: Int
     /// As the board shows it: "84,250 of 258,400 (33%)".
-    var label: String { "\(used.formatted()) of \(size.formatted()) (\(size > 0 ? Int((Double(used) / Double(size) * 100).rounded()) : 0)%)" }
+    var label: String {
+        let percent = "\(size > 0 ? Int((Double(used) / Double(size) * 100).rounded()) : 0)%"
+        return String(localized: "\(used.formatted()) of \(size.formatted()) (\(percent))")
+    }
 }
 struct Round: Codable, Sendable, Equatable {
     var turn: Int
@@ -119,7 +122,7 @@ struct Evidence: Codable, Sendable, Equatable {
     var isVideo: Bool { ["webm", "mp4"].contains((file as NSString).pathExtension.lowercased()) }
     /// Which turn it is from, against how many the job has had: one from an earlier turn may not show the final state.
     func turnLabel(of turns: Int) -> String {
-        from == "lead" ? "Attached by the lead" : turns > 1 ? "Turn \(turn) of \(turns)" : "Turn \(turn)"
+        from == "lead" ? String(localized: "Attached by the lead") : turns > 1 ? String(localized: "Turn \(turn) of \(turns)") : String(localized: "Turn \(turn)")
     }
     /// At most this many captures at once: three in a row, or four in a grid of two by two.
     static let maxCompared = 4
@@ -222,8 +225,9 @@ struct Mission: Codable, Sendable, Identifiable, Equatable {
             let name = Self.steps[Self.stopOfStage[stage] ?? 0]
             let round = (rounds[name] ?? 0) + 1
             rounds[name] = round
-            return name + (round > 1 ? " \(round)" : "")
-        } ?? Self.steps
+            let title = localizedCrewLabel(name)
+            return round > 1 ? String(localized: "\(title) \(round)") : title
+        } ?? Self.steps.map(localizedCrewLabel)
     }
     /// Locks the mission's own controls per state: Stop Tracking and Mark Done exclude each other while it runs,
     /// and once it is abandoned, Mark Done takes a fresh lock.
@@ -292,6 +296,7 @@ struct MissionPull: Codable, Sendable, Identifiable, Equatable {
 }
 /// A pull request's status as a card shows it: a word, and the state whose color it takes (as StatusLabel's).
 struct PullStatus: Equatable {
+    var localizedWord: String { localizedCrewLabel(word) }
     var word: String
     var tone: String
     var needsLead = false
@@ -334,8 +339,9 @@ struct ClaudeSession: Codable, Sendable, Identifiable, Equatable {
         let plain = agents.filter { $0.workflow == nil }.count
         let runs = (workflows ?? []).filter { run in agents.contains { $0.workflow == run.id } }
         let running = agents.count - plain
-        let parts = [plain > 0 ? "\(plain) sub-agent\(plain == 1 ? "" : "s")" : nil,
-                     runs.isEmpty ? nil : "\(runs.count == 1 ? runs[0].name : "\(runs.count) workflows") \(running) running"]
+        let subagents = plain == 1 ? String(localized: "1 sub-agent") : String(localized: "\(plain) sub-agents")
+        let workflows = runs.count == 1 ? runs[0].name : String(localized: "\(runs.count) workflows")
+        let parts = [plain > 0 ? subagents : nil, runs.isEmpty ? nil : String(localized: "\(workflows) \(running) running")]
         let summary = parts.compactMap { $0 }.joined(separator: " · ")
         return summary.isEmpty ? nil : summary
     }
@@ -388,7 +394,7 @@ struct RoleAssignment: Codable, Sendable, Equatable {
     init(from decoder: Decoder) throws {
         let setting = try RoleSetting(from: decoder)
         guard let agents = setting.agents, !agents.isEmpty else {
-            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "A resolved role needs at least one holder."))
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: String(localized: "A resolved role needs at least one holder.")))
         }
         self.init(agents: agents, codex: setting.codex, antigravity: setting.antigravity)
     }
@@ -453,6 +459,8 @@ struct RoleInfo: Codable, Sendable, Identifiable, Equatable {
     var summary: String
     var unable: [String]?
     var id: String { role }
+    var localizedLabel: String { localizedCrewLabel(label) }
+    var localizedSummary: String { localizedCrewLabel(summary) }
     /// Fixing review findings sits with the reviews it answers, though it runs as a build job.
     var group: String { role == "fix" || kind == "review" ? "Review" : kind == "delegate" ? "Build" : "Edit" }
     static let legacy = [
@@ -491,9 +499,9 @@ struct UsageWindow: Codable, Sendable, Equatable {
     var status: UsageStatus
     var name: String {
         switch kind.lowercased() {
-        case "fivehour", "five-hour", "5-hour": return "5-hour"
-        case "weekly": return "Weekly"
-        case "billingcycle", "billing-cycle", "billing cycle", "monthly": return "Billing cycle"
+        case "fivehour", "five-hour", "5-hour": return String(localized: "5-hour")
+        case "weekly": return String(localized: "Weekly")
+        case "billingcycle", "billing-cycle", "billing cycle", "monthly": return String(localized: "Billing cycle")
         default: return kind
         }
     }
@@ -523,9 +531,9 @@ enum PresetName: String, Codable, Sendable, CaseIterable {
     case economy, balanced, best
     var summary: String {
         switch self {
-        case .economy: "Lower cost and faster runs for straightforward tasks."
-        case .balanced: "Everyday balance of quality, speed, and cost."
-        case .best: "Maximum reasoning depth for complex work."
+        case .economy: String(localized: "Lower cost and faster runs for straightforward tasks.")
+        case .balanced: String(localized: "Everyday balance of quality, speed, and cost.")
+        case .best: String(localized: "Maximum reasoning depth for complex work.")
         }
     }
 }
@@ -541,20 +549,20 @@ struct Preset: Codable, Sendable, Equatable {
         var rows: [(String, String)] = []
         for (name, agent) in [("Codex", codex), ("Antigravity", antigravity)] {
             guard let agent else { continue }
-            let value = [agent.model ?? "Default model", agent.effort.map { "\($0.capitalized) effort" }].compactMap { $0 }.joined(separator: " · ")
+            let value = [agent.model ?? String(localized: "Default model"), agent.effort.map { String(localized: "\(localizedCrewLabel($0.capitalized)) effort") }].compactMap { $0 }.joined(separator: " · ")
             rows.append((name, value))
         }
         let subagent = Self.formatModelName(subagentModel ?? "inherit")
-        let subagentValue = subagentMax.map { "\(subagent) (max \(Self.formatModelName($0)))" } ?? subagent
-        rows.append(("Subagents", subagentValue))
-        if let maxTier { rows.append(("Worker cap", "Up to \(maxTier.capitalized) tier")) }
+        let subagentValue = subagentMax.map { String(localized: "\(subagent) (max \(Self.formatModelName($0)))") } ?? subagent
+        rows.append((String(localized: "Subagents"), subagentValue))
+        if let maxTier { rows.append((String(localized: "Worker cap"), String(localized: "Up to \(localizedCrewLabel(maxTier.capitalized)) tier"))) }
         return rows
     }
     var description: String {
         details.map { "\($0.label): \($0.value)" }.joined(separator: "; ")
     }
     private static func formatModelName(_ name: String) -> String {
-        if name == "inherit" { return "Same as lead" }
+        if name == "inherit" { return String(localized: "Same as lead") }
         return name.contains("-") || name.contains(".") || name.contains("/") ? name : name.capitalized
     }
 }
@@ -606,7 +614,7 @@ struct BoardState: Codable, Sendable, Equatable {
     var availableRoles: [RoleInfo] { roleInfo ?? RoleInfo.legacy }
     var editableRoleSettings: [String: RoleSetting] { roleSettings ?? roles.mapValues(RoleSetting.init) }
     func roleLabel(_ role: String) -> String {
-        availableRoles.first { $0.role == role }?.label ?? roleNames[role] ?? role.capitalized
+        availableRoles.first { $0.role == role }?.localizedLabel ?? roleNames[role].map(localizedCrewLabel) ?? role.capitalized
     }
     var projects: [String] {
         Array(Set(jobs.map(\.projectPath) + missions.map(\.root) + claude.map(\.projectPath))).filter { !$0.isEmpty }.sorted()
@@ -671,9 +679,9 @@ func projectName(_ path: String, among paths: [String]) -> String {
 }
 func elapsed(_ milliseconds: Double) -> String {
     let seconds = max(0, Int(milliseconds / 1000))
-    if seconds < 60 { return "<1m" }
-    if seconds < 3600 { return "\(seconds / 60)m" }
-    return "\(seconds / 3600)h \((seconds % 3600) / 60)m"
+    if seconds < 60 { return String(localized: "<1m") }
+    if seconds < 3600 { return String(localized: "\(seconds / 60)m") }
+    return String(localized: "\(seconds / 3600)h \((seconds % 3600) / 60)m")
 }
 
 /// One numbered point of a debater's reply, as its role asks it to end each message.
@@ -708,3 +716,6 @@ func debatePoints(_ text: String) -> [DebatePoint] {
     return points
 }
 
+func localizedCrewLabel(_ english: String) -> String {
+    Bundle.main.localizedString(forKey: english, value: english, table: nil)
+}

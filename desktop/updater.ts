@@ -5,6 +5,7 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { isNewer } from '../plugin/bridge/client.ts';
 import type { AppUpdate } from '../plugin/board/src/types.ts';
+import { t } from '../plugin/board/src/i18n.ts';
 
 // The Windows app's updater. It reads the latest GitHub release, downloads its installer while the user is away, and
 // keeps it staged across launches until the user chooses to install. GitHub's own SHA-256 digest of the asset proves
@@ -229,7 +230,7 @@ export class Updater {
         if (this.status.state === 'installing') return;
         // A failed check leaves a staged installer ready.
         if (before.state === 'ready') this.set({ ...before });
-        else this.set({ state: 'idle', checkedAt: before.checkedAt, error: `Could not check for updates: ${(error as Error).message}` });
+        else this.set({ state: 'idle', checkedAt: before.checkedAt, error: t('Could not check for updates: {error}', { error: (error as Error).message }) });
       }
     });
   }
@@ -280,7 +281,7 @@ export class Updater {
         this.set({ state: 'ready', latest: release.version, checkedAt: this.status.checkedAt, ...page });
       } catch (error) {
         fs.rmSync(partial, { force: true });
-        this.set({ state: 'available', latest: release.version, checkedAt: this.status.checkedAt, ...page, error: `Could not download ${release.version}: ${(error as Error).message}` });
+        this.set({ state: 'available', latest: release.version, checkedAt: this.status.checkedAt, ...page, error: t('Could not download {version}: {error}', { version: release.version, error: (error as Error).message }) });
       } finally {
         clearTimeout(timeout);
       }

@@ -9,35 +9,38 @@ extension ModelScore {
     var band: (word: String, tone: Color)? {
         guard let score, status != "too few samples" else { return nil }
         switch score {
-        case 9...: return ("Outstanding", Palette.success)
-        case 8..<9: return ("Strong", Palette.success)
-        case 7..<8: return ("Solid", Palette.accent)
-        case 6..<7: return ("Mixed", Palette.warning)
-        default: return ("Shaky", Palette.danger)
+        case 9...: return (String(localized: "Outstanding"), Palette.success)
+        case 8..<9: return (String(localized: "Strong"), Palette.success)
+        case 7..<8: return (String(localized: "Solid"), Palette.accent)
+        case 6..<7: return (String(localized: "Mixed"), Palette.warning)
+        default: return (String(localized: "Shaky"), Palette.danger)
         }
     }
     var tone: Color { band?.tone ?? Color.secondary.opacity(0.5) }
     /// Build and fix counts apart, since only builds rank a model; an older daemon gives one total.
     var countsText: String {
-        guard let builds = buildSamples, let fixes = fixSamples else { return "\(statusText) · \(samples) \(samples == 1 ? "review" : "reviews")" }
-        let reviews = reviewSamples.flatMap { $0 > 0 ? " · \($0) \($0 == 1 ? "review" : "reviews")" : nil } ?? ""
-        return "\(statusText) · \(builds) \(builds == 1 ? "build" : "builds") · \(fixes) \(fixes == 1 ? "fix" : "fixes")\(reviews)"
+        guard let builds = buildSamples, let fixes = fixSamples else { return statusText + " · " + (samples == 1 ? String(localized: "1 review") : String(localized: "\(samples) reviews")) }
+        let reviews = reviewSamples.flatMap { count in
+            count > 0 ? (count == 1 ? String(localized: "1 review") : String(localized: "\(count) reviews")) : nil
+        }
+        return [statusText, builds == 1 ? String(localized: "1 build") : String(localized: "\(builds) builds"), fixes == 1 ? String(localized: "1 fix") : String(localized: "\(fixes) fixes"), reviews]
+            .compactMap { $0 }.joined(separator: " · ")
     }
     /// The items beside correctness, which the ring shows; one with nothing behind it is left out. Mirrors itemBars in Scores.tsx.
     var itemBars: [(label: String, value: Double)] {
-        [("Brief", items?.brief), ("Report", items?.report), ("Findings", items?.findings)].compactMap { label, value in value.map { (label, $0) } }
+        [(String(localized: "Brief"), items?.brief), (String(localized: "Report"), items?.report), (String(localized: "Findings"), items?.findings)].compactMap { label, value in value.map { (label, $0) } }
     }
     /// Mirrors adoptionText in Scores.tsx.
     var adoptionText: String? {
         guard let a = adoption else { return nil }
-        return (["Merged \(a.asIs) of \(a.judged) as is", "\(a.afterReply) after a reply"] + (a.partly > 0 ? ["\(a.partly) in part"] : []) + (a.rejected > 0 ? ["\(a.rejected) rejected"] : [])
-            + ["\(a.rounds) \(a.rounds == 1 ? "follow-up" : "follow-ups")"]).joined(separator: " · ")
+        return ([String(localized: "Merged \(a.asIs) of \(a.judged) as is"), String(localized: "\(a.afterReply) after a reply")] + (a.partly > 0 ? [String(localized: "\(a.partly) in part")] : []) + (a.rejected > 0 ? [String(localized: "\(a.rejected) rejected")] : [])
+            + [a.rounds == 1 ? String(localized: "1 follow-up") : String(localized: "\(a.rounds) follow-ups")]).joined(separator: " · ")
     }
-    var statusText: String { status == "settled" ? "Settled" : status == "on trial" ? "On trial" : "Too few reviews" }
+    var statusText: String { status == "settled" ? String(localized: "Settled") : status == "on trial" ? String(localized: "On trial") : String(localized: "Too few reviews") }
     /// What a row says beyond its name and score: its counts, its bars, and the summary.
     var spoken: String {
-        let bars: [(label: String, value: Double?)] = [("Build", build), ("Fix", fix)] + itemBars.map { ($0.label, $0.value) }
-        let values = bars.map { "\($0.label.lowercased()) \($0.value.map { Self.shown($0) } ?? "none")" }
+        let bars: [(label: String, value: Double?)] = [(String(localized: "Build"), build), (String(localized: "Fix"), fix)] + itemBars.map { ($0.label, $0.value) }
+        let values = bars.map { String(localized: "\($0.label.lowercased()) \($0.value.map { Self.shown($0) } ?? String(localized: "None"))") }
         return ([countsText, adoptionText ?? ""] + values + [summary]).filter { !$0.isEmpty }.joined(separator: ". ")
     }
 }
@@ -171,8 +174,8 @@ struct ModelScoreRow: View {
                     Text(adoption).font(Typeface.caption).foregroundStyle(.secondary).monospacedDigit()
                 }
                 HStack(spacing: Space.xl) {
-                    ScoreBar(label: "Build", value: score.build)
-                    ScoreBar(label: "Fix", value: score.fix)
+                    ScoreBar(label: String(localized: "Build"), value: score.build)
+                    ScoreBar(label: String(localized: "Fix"), value: score.fix)
                 }.padding(.top, Space.xxs)
                 if !score.itemBars.isEmpty {
                     ViewThatFits(in: .horizontal) {
@@ -194,7 +197,8 @@ struct ModelScoreRow: View {
         }
         .padding(.vertical, Space.s)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(rank.map { "Rank \($0): " } ?? "")\(score.model), \(agentName(score.agent)), \(score.shown) out of 10\(score.band.map { ", \($0.word)" } ?? "")")
+        .accessibilityLabel([rank.map { String(localized: "Rank \($0)") }, String(localized: "\(score.model), \(agentName(score.agent)), \(score.shown) out of 10"), score.band?.word]
+            .compactMap { $0 }.joined(separator: ", "))
         .accessibilityValue(score.spoken)
     }
 }

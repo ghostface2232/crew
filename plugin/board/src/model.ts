@@ -1,5 +1,6 @@
 import type { AgentSettings, Holder, Role, RoleAssignment, RoleInfo, RoleSettings, WorkerAgent } from '../../bridge/config.ts';
 import type { BoardJob, BoardPull, BoardState, ClaudeSession, Mission } from './types.ts';
+import { t } from './i18n.ts';
 
 export const NAMES = { claude: 'Claude', codex: 'Codex', antigravity: 'Antigravity' };
 /** Every holder, in the order a role lists them, as config.ts HOLDERS does. */
@@ -16,14 +17,18 @@ export function agentSettings(settings?: AgentSettings): AgentSettings | undefin
 }
 /** The roles a daemon that predates the role registry knows; it sends no roleInfo. */
 const LEGACY_ROLES: RoleInfo[] = [
-  { role: 'delegate', kind: 'delegate', label: 'Implementation', summary: 'Builds separable pieces of a change.' },
-  { role: 'review', kind: 'review', label: 'Read-only review', summary: 'Reviews a change by reading it and running checks.' },
-  { role: 'polish', kind: 'polish', label: 'Wording polish', summary: 'Improves UI strings, comments, and docs.' },
+  { role: 'delegate', kind: 'delegate', label: t('Implementation'), summary: t('Builds separable pieces of a change.') },
+  { role: 'review', kind: 'review', label: t('Read-only review'), summary: t('Reviews a change by reading it and running checks.') },
+  { role: 'polish', kind: 'polish', label: t('Wording polish'), summary: t('Improves UI strings, comments, and docs.') },
 ];
 export const rolesOf = (state: Pick<BoardState, 'roleInfo'>): RoleInfo[] => (state.roleInfo?.length ? state.roleInfo : LEGACY_ROLES);
 /** Names for the roles an older daemon's jobs can have without listing them as roles to assign. */
-const LEGACY_LABELS: Record<string, string> = { debate: 'Debate', verify: 'Review that runs the app' };
-export const roleLabel = (state: Pick<BoardState, 'roleInfo'>, role: string) => rolesOf(state).find((info) => info.role === role)?.label ?? LEGACY_LABELS[role] ?? role;
+const LEGACY_LABELS: Record<string, string> = { debate: t('Debate'), verify: t('Review that runs the app') };
+/** The daemon names roles in English; known names read in the viewer's language. */
+export const roleLabel = (state: Pick<BoardState, 'roleInfo'>, role: string) => {
+  const label = rolesOf(state).find((info) => info.role === role)?.label;
+  return label ? t(label) : LEGACY_LABELS[role] ?? role;
+};
 /** A job's role; jobs saved before roles were recorded get theirs from what they were, as the daemon does. */
 export const jobRole = (job: Pick<BoardJob, 'role' | 'kind' | 'debate' | 'runsApp'>): Role =>
   job.role ?? (job.debate ? 'debate' : job.kind === 'review' && job.runsApp ? 'verify' : job.kind);
@@ -46,7 +51,7 @@ export function resolveDraft(info: RoleInfo[], draft: RoleSettings, saved: Board
   }
   return resolved;
 }
-export const STOPS = ['Plan', 'Build', 'Review', 'Fix', 'Polish', 'Final'];
+export const STOPS = [t('Plan'), t('Build'), t('Review'), t('Fix'), t('Polish'), t('Final')];
 export const STOP_OF_STAGE = {
   plan: 0,
   implement: 1,
@@ -113,15 +118,15 @@ export interface PullStatus { word: string; tone: 'failed' | 'waiting' | 'runnin
  * moves the head and reruns the checks. Waiting and good news follow.
  */
 export function pullStatuses(pull: BoardPull): PullStatus[] {
-  if (pull.state === 'merged') return [{ word: 'Merged', tone: 'merged' }];
-  if (pull.state === 'closed') return [{ word: 'Closed', tone: '' }];
+  if (pull.state === 'merged') return [{ word: t('Merged'), tone: 'merged' }];
+  if (pull.state === 'closed') return [{ word: t('Closed'), tone: '' }];
   const statuses: (PullStatus | false)[] = [
-    pull.conflict && { word: 'Conflict', tone: 'failed', needsLead: true },
-    pull.checks === 'failing' && { word: 'Checks failing', tone: 'failed', needsLead: true },
-    pull.review === 'changes_requested' && { word: 'Changes requested', tone: 'waiting', needsLead: true },
-    pull.checks === 'pending' && { word: 'Checks running', tone: 'running' },
-    pull.review === 'approved' && { word: 'Approved', tone: 'done' },
-    pull.checks === 'passing' && { word: 'Checks passed', tone: 'done' },
+    pull.conflict && { word: t('Conflict'), tone: 'failed', needsLead: true },
+    pull.checks === 'failing' && { word: t('Checks failing'), tone: 'failed', needsLead: true },
+    pull.review === 'changes_requested' && { word: t('Changes requested'), tone: 'waiting', needsLead: true },
+    pull.checks === 'pending' && { word: t('Checks running'), tone: 'running' },
+    pull.review === 'approved' && { word: t('Approved'), tone: 'done' },
+    pull.checks === 'passing' && { word: t('Checks passed'), tone: 'done' },
   ];
   return statuses.filter((status): status is PullStatus => Boolean(status));
 }
@@ -145,20 +150,20 @@ export function orderEvidence<T extends Pick<EvidenceItem, 'file' | 'turn' | 'fr
 }
 /** Which turn a capture is from, against how many the job has had: one from an earlier turn may not show the final state. */
 export function evidenceTurn(item: Pick<EvidenceItem, 'turn' | 'from'>, turns: number) {
-  if (item.from === 'lead') return 'Attached by the lead';
-  return turns > 1 ? `Turn ${item.turn} of ${turns}` : `Turn ${item.turn}`;
+  if (item.from === 'lead') return t('Attached by the lead');
+  return turns > 1 ? t('Turn {turn} of {turns}', { turn: item.turn, turns }) : t('Turn {turn}', { turn: item.turn });
 }
 export function usageWindowName(kind: string) {
   return (
-    ({ fiveHour: '5-hour', weekly: 'Weekly', billingCycle: 'Billing cycle' } as Record<string, string>)[kind] ??
+    ({ fiveHour: t('5-hour'), weekly: t('Weekly'), billingCycle: t('Billing cycle') } as Record<string, string>)[kind] ??
     kind.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[-_]/g, ' ')
   );
 }
 export function relativeDuration(ms: number) {
   const minutes = Math.max(1, Math.round(ms / 60_000));
-  if (minutes < 60) return `${minutes}m`;
-  if (minutes < 1440) return `${Math.round(minutes / 60)}h`;
-  return `${Math.round(minutes / 1440)}d`;
+  if (minutes < 60) return t('{n}m', { n: minutes });
+  if (minutes < 1440) return t('{n}h', { n: Math.round(minutes / 60) });
+  return t('{n}d', { n: Math.round(minutes / 1440) });
 }
 export const projectOf = (item: { root?: string; project?: string; cwd?: string }) =>
   item.root ?? item.project ?? item.cwd ?? '';
@@ -188,19 +193,19 @@ export function projectNames(dirs: string[]) {
 /** The app's elapsed label: under a minute reads <1m. */
 export function elapsed(ms: number) {
   const seconds = Math.max(0, Math.floor(ms / 1000));
-  if (seconds < 60) return '<1m';
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
-  return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+  if (seconds < 60) return t('<1m');
+  if (seconds < 3600) return t('{n}m', { n: Math.floor(seconds / 60) });
+  return t('{h}h {m}m', { h: Math.floor(seconds / 3600), m: Math.floor((seconds % 3600) / 60) });
 }
 /** Ended, but its worktree still awaits a merge or discard, or the lead has not read its result. */
 export function unsettled(job: BoardJob): boolean {
   return Boolean(job.worktree) || job.seq > job.delivered;
 }
 export function jobLabel(job: BoardJob) {
-  if (job.state === 'waiting') return job.waiting?.type === 'approval' ? 'Needs approval' : 'Has a question';
-  if (job.stalled) return 'May be stuck';
-  if (job.error?.limit) return 'Usage limit reached';
-  return { running: 'Working', done: 'Done', failed: 'Failed', cancelled: 'Cancelled' }[job.state];
+  if (job.state === 'waiting') return job.waiting?.type === 'approval' ? t('Needs approval') : t('Has a question');
+  if (job.stalled) return t('May be stuck');
+  if (job.error?.limit) return t('Usage limit reached');
+  return { running: t('Working'), done: t('Done'), failed: t('Failed'), cancelled: t('Cancelled') }[job.state];
 }
 
 const HOUR = 3_600_000;
@@ -245,7 +250,9 @@ export function agentSummary(session: Pick<ClaudeSession, 'agents' | 'workflows'
   const running = agents.length - plain.length;
   const active = (session.workflows ?? []).filter((run) => agents.some((agent) => agent.workflow === run.id));
   return [
-    plain.length > 0 ? `${plain.length} sub-agent${plain.length === 1 ? '' : 's'}` : '',
-    active.length > 0 ? `${active.length === 1 ? active[0].name : `${active.length} workflows`} ${running} running` : '',
+    plain.length > 0 ? (plain.length === 1 ? t('1 sub-agent') : t('{count} sub-agents', { count: plain.length })) : '',
+    active.length > 0
+      ? t('{workflow} {running} running', { workflow: active.length === 1 ? active[0].name : t('{count} workflows', { count: active.length }), running })
+      : '',
   ].filter(Boolean).join(' · ');
 }

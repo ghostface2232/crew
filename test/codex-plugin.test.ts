@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
-import { codexHooks, hookKeys, untrustedHooks, writeCodexPlugin } from '../plugin/bridge/codex-plugin.ts';
+import { codexHooks, hookKeys, untrustedHooks, writeCodexPlugin, writtenByCrew } from '../plugin/bridge/codex-plugin.ts';
 
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-codex-plugin-'));
 after(() => fs.rmSync(temp, { recursive: true, force: true }));
@@ -15,7 +15,7 @@ const sourceHooks = () => JSON.parse(fs.readFileSync('plugin/hooks/codex.json', 
 function built(name: string): string {
   const root = path.join(temp, name);
   const plugin = path.join(root, 'plugin');
-  for (const item of ['.codex-plugin', 'codex.mcp.json', 'hooks/codex.json', 'skills']) fs.cpSync(path.join('plugin', item), path.join(plugin, item), { recursive: true });
+  for (const item of ['.codex-plugin', 'codex.mcp.json', 'hooks/codex.json', 'skills', 'agents']) fs.cpSync(path.join('plugin', item), path.join(plugin, item), { recursive: true });
   fs.cpSync('.claude-plugin/marketplace.json', path.join(root, '.claude-plugin', 'marketplace.json'));
   fs.mkdirSync(path.join(plugin, 'bridge'), { recursive: true });
   return root;
@@ -29,6 +29,12 @@ test("writeCodexPlugin points the MCP server and hooks at the app's runtime and 
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(out, '.codex-plugin/plugin.json'), 'utf8')), JSON.parse(fs.readFileSync('plugin/.codex-plugin/plugin.json', 'utf8')));
   assert.deepEqual(fs.readdirSync(path.join(out, 'skills')).sort(), fs.readdirSync('plugin/skills').sort());
   assert.ok(fs.existsSync(path.join(marketplace, '.claude-plugin/marketplace.json')));
+  // The skills name their subagents' instructions relative to themselves; Codex copies only the plugin folder.
+  for (const skill of ['run', 'review']) {
+    const text = fs.readFileSync(path.join(out, 'skills', skill, 'SKILL.md'), 'utf8');
+    for (const [, ref] of text.matchAll(/`(\.\.\/\.\.\/agents\/[\w.-]+)`/g)) assert.ok(fs.existsSync(path.resolve(out, 'skills', skill, ref)), `${skill}: ${ref}`);
+  }
+  assert.ok(writtenByCrew(marketplace));
 
   const mcp = JSON.parse(fs.readFileSync(path.join(out, 'codex.mcp.json'), 'utf8'));
   // No cwd: the server starts in the session's folder, not Codex's cache.
@@ -42,6 +48,16 @@ test("writeCodexPlugin points the MCP server and hooks at the app's runtime and 
   })));
   assert.deepEqual(commands, expected);
   assert.ok(commands.length > 0);
+});
+
+test('a marketplace folder Crew did not write is never replaced', () => {
+  const dest = path.join(temp, 'codex-foreign');
+  const checkout = path.join(dest, 'marketplace');
+  fs.mkdirSync(path.join(checkout, 'plugin', 'bridge'), { recursive: true });
+  fs.writeFileSync(path.join(checkout, 'plugin', 'bridge', 'mcp.ts'), 'keep');
+  assert.throws(() => writeCodexPlugin(built('foreign'), '/runtime/node', dest, 'darwin'), /not written by Crew/);
+  assert.equal(fs.readFileSync(path.join(checkout, 'plugin', 'bridge', 'mcp.ts'), 'utf8'), 'keep');
+  assert.equal(fs.existsSync(path.join(dest, 'bin')), false);
 });
 
 test('hook commands stay the same across builds, so Codex keeps trusting them', () => {
@@ -74,7 +90,7 @@ test('the launcher runs the named script in its own process, passing arguments, 
 
 test('Windows hook commands call the launcher through pwsh', () => {
   const hooks = codexHooks({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'node "${PLUGIN_ROOT}/bridge/wake.ts" stop-json', timeout: 5 }] }] } }, "C:\\Users\\O'Neil\\.crew\\codex\\bin\\hook.cmd", 'win32');
-  assert.deepEqual(hooks.hooks.Stop[0].hooks[0], { type: 'command', command: "& 'C:\\Users\\O''Neil\\.crew\\codex\\bin\\hook.cmd' wake stop-json", timeout: 5 });
+  assert.deepEqual(hooks.hooks.Stop[0].hooks[0], { type: 'command', command: "& 'C:\\Users\\O''Neil\\.crew\\codex\\bin\\hook.cmd' wake stop-json; exit $LASTEXITCODE", timeout: 5 });
 });
 
 test('a hook in another form is refused rather than written wrong', () => {
@@ -89,6 +105,10 @@ test("untrustedHooks reads Codex's trust records for every Crew hook", () => {
   assert.deepEqual(untrustedHooks('', keys), keys);
   assert.deepEqual(untrustedHooks(keys.map(record).join('\n'), keys), []);
   assert.deepEqual(untrustedHooks(keys.slice(1).map(record).join('\n'), keys), [keys[0]]);
+  // Other keys may come first in a record's table; the next table's hash is not this one's.
+  const withOther = keys.map((key) => `[hooks.state."${key}"]\nenabled = true\ntrusted_hash = "sha256:00"\n`).join('\n');
+  assert.deepEqual(untrustedHooks(withOther, keys), []);
+  assert.deepEqual(untrustedHooks(`[hooks.state."${keys[0]}"]\nenabled = true\n\n[other]\ntrusted_hash = "x"\n`, keys.slice(0, 1)), keys.slice(0, 1));
 });
 
 test('the compiled bridge the launcher runs is laid out by the desktop build', () => {

@@ -30,7 +30,8 @@ With `CREW_HOME` unset, a packaged daemon checks `~/.crew/setup.json` (`register
 - **MCP server.** It starts as the app's runtime on the compiled `mcp.js`, both named by absolute path. It has no `cwd`, so it runs in the session's folder.
 - **Hooks.** Each hook runs `~/.crew/codex/bin/hook <script> <args>`. The launcher is rewritten at each registration to run the current build's script on its runtime, in the same process, so the script's output and exit status reach Codex unchanged.
 - **Why the launcher.** Codex records trust against each hook's definition, so the commands stay the same from one update to the next and the user trusts them only once.
-- **Existing registrations.** A source checkout's `crew` marketplace in Codex is left alone. Any other `crew` marketplace is removed first, since Codex refuses to add a second folder under a name.
+- **Existing registrations.** The folder is user-wide, like the `crew` command, whatever the Crew home. A marker file identifies a folder Crew wrote. A built copy replaces or removes only folders with that marker, and only `crew` marketplaces in Codex whose folder has it. Codex refuses to add a second folder under a name, so such a marketplace is removed first. A source checkout's `crew install` replaces any registration.
+- **The setup record.** `setup.json` is written, and on Windows older copies are pruned, only once every installed host runs this copy. A failed Codex install is tried again at the next start, and an older copy a host still points to is kept. Without Claude Code, a Codex registration alone counts, and the `crew` command follows it.
 
 ## First-run checklist
 
@@ -41,7 +42,7 @@ Both apps show a **Set up Crew** card at the top of the unfiltered Overview page
 | Crew plugin and `crew` command | Registers and writes shims automatically; exposes an **Install** repair button when missing |
 | Claude Code (`claude` on `PATH`) | Checks `claude --version`; if missing, tells the user to install from `claude.com/code` |
 | Codex CLI and sign-in | Checks `codex --version` and `codex login status`; installing and signing in are left to the user |
-| Crew plugin in Codex | With Codex installed, checks `codex plugin list` for `crew@crew` installed and enabled; **Install** registers it |
+| Crew plugin in Codex | With Codex installed, checks `codex plugin list` for `crew@crew` installed and enabled at this copy's version; **Install** registers it |
 | Crew hooks in Codex | Shown once a Codex session has led a crew, as the ledger's delivery hosts record. Checks that `~/.codex/config.toml` has a `[hooks.state."crew@crew:hooks/codex.json:…"]` trust record for every Crew hook. Hooks run outside Codex's sandbox, so trusting them is left to the user: open `/hooks` in a Codex session and press `t`, then start a new session. Most users lead from Claude Code, so the item is not shown before a Codex session has led. Whether a recorded hash still matches the current hook is Codex's to report |
 | Antigravity CLI | Checks `agy --version` when `antigravity.enabled` is true; installing and running `agy` to sign in are left to the user |
 | Job ledger | Shown only while a `jobs.json.unreadable-*` file is in the Crew home ([architecture.md](architecture.md#bridge-and-state)): names the file the daemon set aside; repairing or deleting it is left to the user |

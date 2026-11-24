@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { isNewer } from './client.ts';
-import { CODEX_PLUGIN, hookKeys, pointer, untrustedHooks, writeCodexPlugin } from './codex-plugin.ts';
+import { CODEX_PLUGIN, hookKeys, pointer, untrustedHooks, writeCodexPlugin, writtenByCrew } from './codex-plugin.ts';
 import { agentCommand, agentEnv, HOME, installed, LEDGER_ASIDE, loadConfig, PLUGIN_ROOT, VERSION } from './config.ts';
 
 /**
@@ -135,25 +135,40 @@ export async function register(asked = false): Promise<Registration> {
   // Only on its own account: a user who installs an older version and asks for it to be registered gets it.
   const newer = PACKAGED && !asked ? newerRegistration() : null;
   if (newer) return { ok: true, detail: `A newer Crew (${newer}) is registered; this copy (${VERSION}) leaves it as it is. To use this copy instead, run the setup checklist's repair from it, or its \`crew install\`.` };
-  const claude = await registerClaude();
-  const codex = await registerCodex();
-  return codex ? { ok: claude.ok && codex.ok, detail: `${claude.detail} Codex: ${codex.detail}` } : claude;
+  const root = registeredRoot();
+  if (COPIED) copyPlugin(MARKETPLACE, root);
+  const claude = await registerClaude(root);
+  const codex = await registerCodex(root);
+  const hosts = [claude, codex].filter((host) => host !== null);
+  if (!hosts.length) return { ok: false, detail: 'Neither Claude Code nor Codex was found. Install one of them, then try again.' };
+  // The command follows Claude Code's registration, or Codex's for a user without Claude Code.
+  const owner = claude ?? codex!;
+  if (owner.ok && owner.current) linkCommand(root);
+  // Recorded, and older copies pruned, only once every host runs this copy: a host left on an older copy still needs
+  // it, and the next start tries again.
+  if (hosts.every((host) => host.ok && host.current)) {
+    if (PACKAGED) fs.writeFileSync(RECORD, `${JSON.stringify({ root, version: VERSION, build: installed().build }, null, 2)}\n`);
+    if (COPIED) prunePlugins();
+  }
+  const detail = [claude?.detail ?? 'Claude Code was not found.', codex && `Codex: ${codex.detail}`].filter(Boolean).join(' ');
+  return { ok: hosts.every((host) => host.ok), detail };
 }
 
-/** Registers this copy's marketplace with Claude Code and installs or updates the plugin from it. */
-async function registerClaude(): Promise<Registration> {
+/** How registering with one host went; `current` when that host now runs this copy rather than one left alone. */
+type HostRegistration = Registration & { current: boolean };
+
+/** Registers this copy's marketplace with Claude Code and installs or updates the plugin from it; null without Claude Code. */
+async function registerClaude(root: string): Promise<HostRegistration | null> {
   const marketplaces = await claudeJSON<Marketplace[]>(['plugin', 'marketplace', 'list']);
-  if (!marketplaces) return { ok: false, detail: 'Claude Code was not found. Install it, then try again.' };
+  if (!marketplaces) return null;
   const current = marketplaces.find((entry) => entry.name === 'crew');
-  const root = registeredRoot();
   if (PACKAGED && current?.path && !samePath(current.path, root) && fromSource(current.path)) {
-    return { ok: true, detail: `Registered from a source checkout (${current.path}); the app leaves it as it is.` };
+    return { ok: true, current: false, detail: `Registered from a source checkout (${current.path}); the app leaves it as it is.` };
   }
-  if (COPIED) copyPlugin(MARKETPLACE, root);
   if (!current?.path || !samePath(current.path, root)) {
     // Adding a marketplace under a name already taken points that name at the new folder.
     const added = await run('claude', ['plugin', 'marketplace', 'add', root], 60_000);
-    if (!added.ok) return { ok: false, detail: `Could not register the marketplace: ${lastLine(added.out)}` };
+    if (!added.ok) return { ok: false, current: false, detail: `Could not register the marketplace: ${lastLine(added.out)}` };
   }
   const plugins = await claudeJSON<InstalledPlugin[]>(['plugin', 'list']);
   const plugin = plugins?.find((entry) => entry.id === 'crew@crew');
@@ -162,54 +177,65 @@ async function registerClaude(): Promise<Registration> {
   const step = !plugin ? ['install', 'crew@crew'] : plugin.version !== VERSION || (COPIED && moved) ? ['update', 'crew@crew'] : null;
   if (step) {
     const res = await run('claude', ['plugin', ...step], 60_000);
-    if (!res.ok) return { ok: false, detail: `Could not ${step[0]} the plugin: ${lastLine(res.out)}` };
+    if (!res.ok) return { ok: false, current: false, detail: `Could not ${step[0]} the plugin: ${lastLine(res.out)}` };
   }
-  linkCommand(root);
-  if (PACKAGED) fs.writeFileSync(RECORD, `${JSON.stringify({ root, version: VERSION, build: installed().build }, null, 2)}\n`);
-  if (COPIED) prunePlugins();
-  return { ok: true, detail: step ? 'Installed. Open a new Claude Code session, or run /reload-plugins, to load it.' : 'Up to date.' };
+  return { ok: true, current: true, detail: step ? 'Installed. Open a new Claude Code session, or run /reload-plugins, to load it.' : 'Up to date.' };
 }
+
+/** The user-wide folder a built copy writes its Codex marketplace and hook launcher in, whatever the Crew home. */
+const CODEX_DIR = path.join(os.homedir(), '.crew', 'codex');
 
 /**
  * Registers the plugin with Codex too, so a Codex session can lead; null without Codex. Codex copies the plugin into
  * its own cache, so this runs again after the plugin changes. A source checkout registers its own marketplace. A
  * built copy registers one written for Codex (codex-plugin.ts), since the app's Node beside the plugin folder is out of
- * reach from Codex's copy, and leaves a source checkout's registration alone.
+ * reach from Codex's copy, and replaces only a registration Crew wrote: any other is a developer's or the user's own.
  */
-export async function registerCodex(): Promise<Registration | null> {
-  if (!(await run('codex', ['--version'])).ok) return null;
-  const current = (await codexMarketplaces()).get('crew');
-  const marketplace = PACKAGED ? path.join(HOME, 'codex', 'marketplace') : MARKETPLACE;
+async function registerCodex(root: string): Promise<HostRegistration | null> {
+  const bin = loadConfig().codex.bin;
+  if (!(await run(bin, ['--version'])).ok) return null;
+  const current = (await codexMarketplaces(bin)).get('crew');
+  const marketplace = PACKAGED ? path.join(CODEX_DIR, 'marketplace') : MARKETPLACE;
+  const other = current !== undefined && !sameFolder(current, marketplace);
   if (PACKAGED) {
-    if (current && !samePath(current, marketplace) && codexFromSource(current)) {
-      return { ok: true, detail: `Registered from a source checkout (${current}); the app leaves it as it is.` };
-    }
-    const root = registeredRoot();
-    if (COPIED) copyPlugin(MARKETPLACE, root);
+    if (other && !writtenByCrew(current)) return { ok: true, current: false, detail: `Registered from ${current}; the app leaves it as it is.` };
     const runtime = bundledRuntime(root);
-    if (!runtime) return { ok: false, detail: 'This copy of Crew has no Node runtime for Codex to run it on.' };
-    writeCodexPlugin(root, runtime, path.join(HOME, 'codex'));
+    if (!runtime) return { ok: false, current: false, detail: 'This copy of Crew has no Node runtime for Codex to run it on.' };
+    try {
+      writeCodexPlugin(root, runtime, CODEX_DIR);
+    } catch (err) {
+      return { ok: false, current: false, detail: `Could not write the plugin for Codex: ${(err as Error).message}` };
+    }
   }
   // Codex refuses to add a marketplace under a name another folder holds.
-  if (current && !samePath(current, marketplace)) await run('codex', ['plugin', 'marketplace', 'remove', 'crew'], 60_000);
-  const added = await run('codex', ['plugin', 'marketplace', 'add', marketplace], 60_000);
-  if (!added.ok) return { ok: false, detail: `Could not register the marketplace with Codex: ${lastLine(added.out)}` };
-  const plugin = await run('codex', ['plugin', 'add', CODEX_PLUGIN], 60_000);
-  if (!plugin.ok) return { ok: false, detail: `Could not install the plugin in Codex: ${lastLine(plugin.out)}` };
-  return { ok: true, detail: `Installed in Codex. ${CODEX_TRUST}` };
+  if (other) await run(bin, ['plugin', 'marketplace', 'remove', 'crew'], 60_000);
+  const added = await run(bin, ['plugin', 'marketplace', 'add', marketplace], 60_000);
+  if (!added.ok) return { ok: false, current: false, detail: `Could not register the marketplace with Codex: ${lastLine(added.out)}` };
+  const plugin = await run(bin, ['plugin', 'add', CODEX_PLUGIN], 60_000);
+  if (!plugin.ok) return { ok: false, current: false, detail: `Could not install the plugin in Codex: ${lastLine(plugin.out)}` };
+  return { ok: true, current: true, detail: `Installed in Codex. ${CODEX_TRUST}` };
 }
 
 const CODEX_TRUST = 'Codex runs its hooks only once trusted: open `/hooks` in a Codex session, press `t` to trust the Crew hooks, then start a new session. When Codex first asks to run a Crew tool, choose Always allow.';
 
 /** Codex's marketplaces by name, from `codex plugin marketplace list`: a header row, then name and root folder. */
-async function codexMarketplaces(): Promise<Map<string, string>> {
-  const res = await run('codex', ['plugin', 'marketplace', 'list'], 60_000);
+async function codexMarketplaces(bin: string): Promise<Map<string, string>> {
+  const res = await run(bin, ['plugin', 'marketplace', 'list'], 60_000);
   const rows = res.ok ? res.out.split('\n').slice(1) : [];
   return new Map(rows.map((row) => /^(\S+)\s+(.+?)\s*$/.exec(row)).filter((m) => m !== null).map((m) => [m[1], m[2]]));
 }
 
-/** A Codex marketplace folder holding a source checkout, which runs the bridge's TypeScript: a developer's install. */
-const codexFromSource = (folder: string) => fs.existsSync(path.join(folder, 'plugin', 'bridge', 'mcp.ts'));
+/** Two folders compared as the file system resolves them, since Codex records a marketplace by its real path. */
+function sameFolder(a: string, b: string): boolean {
+  const real = (folder: string) => {
+    try {
+      return fs.realpathSync.native(folder);
+    } catch {
+      return path.resolve(folder);
+    }
+  };
+  return samePath(real(a), real(b));
+}
 
 /** A marketplace folder holding a source checkout rather than a built copy: a developer's install. */
 const fromSource = (folder: string) => fs.existsSync(folder) && !fs.existsSync(path.join(folder, 'plugin', '.claude-plugin', 'build'));
@@ -337,13 +363,19 @@ export function ledgerItem(home = HOME): SetupItem | null {
  */
 async function codexLeadItems(bin: string): Promise<SetupItem[]> {
   const list = await run(bin, ['plugin', 'list'], 60_000);
-  const row = list.ok ? list.out.split('\n').find((line) => line.startsWith(`${CODEX_PLUGIN} `)) : undefined;
-  const installed = Boolean(row && /\binstalled\b/.test(row) && /\benabled\b/.test(row));
-  const version = row?.match(/\s(\d+\.\d+\.\d+\S*)\s/)?.[1];
-  const items: SetupItem[] = [{ id: 'codex-plugin', label: 'Crew plugin in Codex', ok: installed, detail: installed ? `Installed${version ? ` (${version})` : ''}` : 'Not installed.', repairable: true }];
+  // Columns are padded with two or more spaces: id, status ("installed, enabled", "not installed"), version, source.
+  const columns = list.ok ? list.out.split('\n').map((line) => line.trim().split(/\s{2,}/)).find((row) => row[0] === CODEX_PLUGIN) : undefined;
+  const status = columns?.[1] ?? '';
+  const installed = /^installed\b/.test(status) && /\benabled\b/.test(status);
+  const version = columns && columns.length > 3 ? columns[2] : undefined;
+  // Another version is a registration that did not finish; on Windows its copy of the runtime may be gone.
+  const expected = JSON.parse(fs.readFileSync(path.join(PLUGIN_ROOT, '.codex-plugin', 'plugin.json'), 'utf8')).version;
+  const ok = installed && version === expected;
+  const detail = !installed ? 'Not installed.' : ok ? `Installed (${version})` : `Installed (${version ?? 'unknown version'}); this copy is ${expected}.`;
+  const items: SetupItem[] = [{ id: 'codex-plugin', label: 'Crew plugin in Codex', ok, detail, repairable: true }];
   if (!installed || !ledFromCodex()) return items;
   const untrusted = untrustedCodexHooks();
-  items.push({ id: 'codex-hooks', label: 'Crew hooks in Codex', ok: untrusted.length === 0, detail: untrusted.length === 0 ? 'Trusted.' : CODEX_TRUST });
+  items.push({ id: 'codex-hooks', label: 'Crew hooks in Codex', ok: untrusted.length === 0, detail: untrusted.length === 0 ? 'Trust recorded. If Codex asks again after an update, trust them in `/hooks`.' : CODEX_TRUST });
   return items;
 }
 

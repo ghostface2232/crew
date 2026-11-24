@@ -397,6 +397,7 @@ export const ko: Record<string, string> = {
   'Saving…': '저장 중…',
   'Scored from review findings per build size, with fixes scored apart. A model is ranked after three build reviews; a review by its own agent counts half.': '구현 규모를 고려해 리뷰 지적 사항으로 점수를 매기고, 수정은 따로 평가해요. 구현 리뷰가 세 건 쌓이면 순위에 올라요. 같은 에이전트가 한 리뷰는 절반만 반영해요.',
   'Search': '검색',
+  'Search (Ctrl+K)': '검색 (Ctrl+K)',
   'Search (⌘K)': '검색 (⌘K)',
   'Search work, projects and actions': '작업, 프로젝트, 동작 검색',
   'Search work, projects and actions…': '작업, 프로젝트, 동작 검색…',

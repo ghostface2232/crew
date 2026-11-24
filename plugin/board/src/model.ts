@@ -159,6 +159,11 @@ export function usageWindowName(kind: string) {
     kind.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[-_]/g, ' ')
   );
 }
+/** A Codex limit window in words, as the app's gauge has it: without its length when Codex does not say it. */
+export function limitWindowLabel(window: NonNullable<NonNullable<BoardState['limits']['codex']>['windows']>[number]) {
+  const percent = Math.round(window.usedPercent);
+  return window.minutes == null ? t('{percent}% of limit', { percent }) : t('{percent}% of {minutes}-minute limit', { percent, minutes: window.minutes });
+}
 export function relativeDuration(ms: number) {
   const minutes = Math.max(1, Math.round(ms / 60_000));
   if (minutes < 60) return t('{n}m', { n: minutes });
@@ -256,3 +261,22 @@ export function agentSummary(session: Pick<ClaudeSession, 'agents' | 'workflows'
       : '',
   ].filter(Boolean).join(' · ');
 }
+
+/** The detail panel a URL fragment names; one that is not valid percent-encoding, such as `#%`, names none. */
+export function detailFromFragment(fragment: string) {
+  try {
+    return decodeURIComponent(fragment.replace(/^#/, ''));
+  } catch {
+    return '';
+  }
+}
+/**
+ * Whether a key press is N, the New Job shortcut. An input source for another script sends its own character for the
+ * key (Korean `ㅜ`, or `Process` on Windows), so a key that is not a Latin letter is told by its place on the keyboard.
+ */
+export const isNewJobKey = (event: Pick<KeyboardEvent, 'key' | 'code' | 'isComposing'>) =>
+  !event.isComposing && (/^[a-z]$/i.test(event.key) ? event.key.toLowerCase() === 'n' : event.code === 'KeyN');
+/** The search shortcut as the platform's keyboard has it; the key handler takes either modifier. */
+export const searchShortcut = (platform: string) => /Mac|iPhone|iPad/.test(platform)
+  ? { keys: '⌘K', title: t('Search (⌘K)'), aria: 'Meta+K /' }
+  : { keys: 'Ctrl K', title: t('Search (Ctrl+K)'), aria: 'Control+K /' };

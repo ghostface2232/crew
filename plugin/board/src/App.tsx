@@ -9,8 +9,8 @@ import {
 import type { FluentIcon } from '@fluentui/react-icons';
 import { board } from './store.ts';
 import { formatDate, longDay } from './dates.ts';
-import { knownProjects, projectNames, projectOf } from './model.ts';
-import { AskHost, ClockProvider, CopyMenu, Icon, tNodes, LeavingContext, PANEL_EXIT_MS, RollingNumber, SHEET_EXIT_MS, useLinger, useStableItems } from './ui.tsx';
+import { detailFromFragment, isNewJobKey, knownProjects, projectNames, projectOf, searchShortcut } from './model.ts';
+import { AskHost, ClockProvider, CopyMenu, Icon, tNodes, LeavingContext, PANEL_EXIT_MS, RollingNumber, SHEET_EXIT_MS, useClock, useLinger, useStableItems } from './ui.tsx';
 import appIcon from './icons/CrewAppIcon.png';
 import { Activity, History, Workspace } from './Overview.tsx';
 import { NeedsYou } from './NeedsYou.tsx';
@@ -51,12 +51,13 @@ function storedSelection() {
   }
 }
 /** The open detail panel, kept in the URL fragment: a job's id, or `session:<id>` for a Claude session. */
-const detailFromHash = () => decodeURIComponent(location.hash.slice(1));
+const detailFromHash = () => detailFromFragment(location.hash);
 const typing = (target: EventTarget | null) =>
   target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName));
 
 export function App() {
   const state = useSyncExternalStore(board.subscribe, board.getSnapshot);
+  const search = searchShortcut(navigator.platform);
   const [selection, setSelection] = useState(storedSelection);
   const [settings, setSettings] = useState<boolean | 'about'>(false);
   const update = useAppUpdate();
@@ -189,7 +190,7 @@ export function App() {
     if (event.key === '/') {
       event.preventDefault();
       openPalette();
-    } else if (event.key === 'n' || event.key === 'N') {
+    } else if (isNewJobKey(event)) {
       event.preventDefault();
       newJob();
     } else if (/^[1-4]$/.test(event.key)) {
@@ -302,14 +303,14 @@ export function App() {
               className="search-pill"
               ref={searchButton}
               onClick={openPalette}
-              title={t('Search (⌘K)')}
+              title={search.title}
               aria-label={t('Search')}
-              aria-keyshortcuts="Meta+K /"
+              aria-keyshortcuts={search.aria}
               data-hidden={palette ? '' : undefined}
             >
               <Icon icon={SearchRegular} />
               <span>{t('Search work, projects…')}</span>
-              <kbd>⌘K</kbd>
+              <kbd>{search.keys}</kbd>
             </button>
             <button className="new-job prominent" disabled={!live} title={t('New job (N)')} aria-keyshortcuts="N" onClick={(event) => newJob(event.currentTarget)}>
               <Icon icon={AddRegular} />
@@ -331,7 +332,7 @@ export function App() {
                     <p className="eyebrow path" title={project}><Icon icon={FolderRegular} size={12} />{project}</p>
                   </CopyMenu>
                 ) : (
-                  <p className="eyebrow">{eyebrow(page, state.now || Date.now())}</p>
+                  <p className="eyebrow">{page === 'overview' ? <Today /> : eyebrow(page)}</p>
                 )}
                 <h1 className="page-title">{title}</h1>
               </div>
@@ -390,9 +391,13 @@ export function App() {
   );
 }
 
-function eyebrow(page: Page, now: number) {
-  const date = formatDate(longDay, new Date(now));
-  return page === 'overview' ? date : page === 'needs' ? t('Requests from your agents') : page === 'activity' ? t('Everything the crew did') : t('Finished work');
+/** Today's date from the clock, so a board left open overnight moves on to the new day. */
+function Today() {
+  const day = useClock((now) => new Date(now).setHours(0, 0, 0, 0));
+  return formatDate(longDay, new Date(day));
+}
+function eyebrow(page: Exclude<Page, 'overview'>) {
+  return page === 'needs' ? t('Requests from your agents') : page === 'activity' ? t('Everything the crew did') : t('Finished work');
 }
 
 /** The project list, with a preview of each beside the sidebar while the pointer rests on it. */

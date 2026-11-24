@@ -270,7 +270,8 @@ function agentActivity(state: Snapshot, project: string, agent: string) {
   const line = [
     open.length ? (open.length === 1 ? t('1 active session') : t('{count} active sessions', { count: open.length })) : null,
     jobs.length ? (jobs.length === 1 ? t('1 active job') : t('{count} active jobs', { count: jobs.length })) : null,
-    idle ? (items.length ? t('{count} idle', { count: idle }) : idle === 1 ? t('1 idle session') : t('{count} idle sessions', { count: idle })) : null,
+    // Beside active sessions alone "idle" is clear; beside jobs it must say sessions.
+    idle ? (open.length && !jobs.length ? t('{count} idle', { count: idle }) : idle === 1 ? t('1 idle session') : t('{count} idle sessions', { count: idle })) : null,
   ].filter(Boolean).join(' · ');
   return { line, mark, title, leads: sessions.length > 0 };
 }
@@ -662,7 +663,7 @@ export function Workspace({ state, project, names, selected, openJob, openSessio
             </Panel>
           )}
           {empty && (
-            <EmptyState title={t('Ready when you are')} icon={LayerRegular} detail={t('Hand a task to an agent, or run /crew:run in Claude Code or Codex.')}>
+            <EmptyState title={t('Ready when you are')} icon={LayerRegular} detail={t('Hand a task to an agent, or run /crew:run in Claude Code or $crew:run in Codex.')}>
               <button className="prominent" disabled={state.connection !== 'live'} onClick={(event) => newJob(event.currentTarget)}>
                 <Icon icon={AddRegular} />
                 {t('New Job')}

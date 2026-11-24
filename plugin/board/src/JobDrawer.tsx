@@ -909,7 +909,7 @@ export const SessionDrawer = memo(function SessionDrawer({ id, state, close }: {
           )}
           <Footer>
             <OpenInClaude session={session} />
-            <CopyButton text={`claude --resume ${session.id}`} short={t('Resume')}>{t('Resume Command')}</CopyButton>
+            <CopyButton text={session.host === 'codex' ? `codex resume ${session.id}` : `claude --resume ${session.id}`} short={t('Resume')}>{t('Resume Command')}</CopyButton>
           </Footer>
         </>
       )}

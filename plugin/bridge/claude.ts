@@ -197,8 +197,8 @@ export class ClaudeSessions {
         s.state = 'working';
         s.waitingFor = null;
         s.phase = 'reading the prompt';
-        // Only what the user typed: Codex reports a sub-agent's task and Crew's own queued note as prompts too.
-        if (typeof p.prompt === 'string' && p.prompt.trim() && !p.agent_id && !QUEUED_NOTE.test(p.prompt.trim())) {
+        // Only what the user typed: Codex reports Crew's own queued note as a prompt too.
+        if (typeof p.prompt === 'string' && p.prompt.trim() && !(s.host === 'codex' && QUEUED_NOTE.test(p.prompt.trim()))) {
           const kept = this.prompts.get(id) ?? [];
           kept.push({ text: clip(p.prompt.trim(), MAX_PROMPT), at: now });
           this.prompts.set(id, kept.slice(-KEEP_PROMPTS));
@@ -226,6 +226,8 @@ export class ClaudeSessions {
       case 'PostToolUseFailure':
         s.state = 'working';
         s.inTool = false;
+        // The call a prompt asked about is over, answered or not.
+        s.waitingFor = null;
         this.ended(id, '', p);
         if (p.tool_name === WRAP_UP && typeof p.tool_input?.ask === 'string' && p.tool_input.ask.trim()) this.asked.set(id, wrapUpQuestion(p.tool_input));
         // A failed Agent call starts no sub-agent, so its title must not go to the next one.
@@ -350,6 +352,10 @@ export class ClaudeSessions {
     switch (p.hook_event_name) {
       case 'SubagentStart':
         this.agent(s, id, p, now);
+        return true;
+      case 'UserPromptSubmit':
+        // Codex reports a sub-agent's task as its prompt: the sub-agent's start, not the user's turn or words.
+        this.agent(s, id, p, now).phase = 'reading the prompt';
         return true;
       case 'SubagentStop': {
         this.calls.get(s.id)?.delete(id);

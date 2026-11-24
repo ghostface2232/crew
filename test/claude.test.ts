@@ -339,16 +339,29 @@ test('a Codex lead session is tracked from the same hooks, with its own prompts,
   assert.equal(s.state, 'waiting');
   assert.equal(s.waitingFor, 'needs your permission to use Bash');
   assert.deepEqual(s.ask, { tool: 'Bash', input: 'git push' });
+  // A sub-agent's task starts the sub-agent; the lead's prompt still waits.
+  codex('UserPromptSubmit', { prompt: 'Check the tests', agent_id: 'a3', agent_type: 'default' });
+  assert.equal(s.state, 'waiting');
+  assert.ok(s.waitingId);
   codex('PostToolUse', { tool_name: 'Bash', tool_use_id: 'c1' });
   assert.equal(s.state, 'working');
+  assert.equal(s.waitingFor, null);
   assert.equal(s.ask, undefined);
 
   codex('SubagentStart', { agent_id: 'a2', agent_type: 'explorer' });
-  assert.deepEqual(s.agents.map((a) => a.type), ['explorer']);
+  assert.deepEqual(s.agents.map((a) => a.id).sort(), ['a1', 'a2', 'a3']);
+  for (const agent of ['a1', 'a3']) codex('SubagentStop', { agent_id: agent, agent_type: 'default', last_assistant_message: 'ok' });
   codex('SubagentStop', { agent_id: 'a2', agent_type: 'explorer', last_assistant_message: 'ok' });
   codex('Interrupt');
   assert.equal(s.state, 'idle');
   assert.equal(s.phase, 'turn interrupted');
   assert.ok(events.includes('waiting:needs your permission to use Bash'));
   assert.ok(!events.some((e) => e.startsWith('done:')));
+});
+
+test('only a Codex session leaves out a prompt that reads like the queued note Crew sends', () => {
+  const { sessions, hook } = tracker();
+  const note = 'Crew has news for cx-1. Call the Crew status tool to read it, then act on it.';
+  hook('UserPromptSubmit', { prompt: note });
+  assert.deepEqual(sessions.recentPrompts('s1').map((p) => p.text), [note]);
 });

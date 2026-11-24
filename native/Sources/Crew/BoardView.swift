@@ -300,11 +300,12 @@ struct AgentOverview: View {
                         Spacer(minLength: WorkspaceStyle.rowSpacer)
                         let activity = AgentActivity(store: store, agent: agent)
                         let count = activity.open + activity.jobs
-                        let summary = [count > 0 ? String(localized: "\(count) active") : nil, activity.idle > 0 ? String(localized: "\(activity.idle) idle") : nil].compactMap { $0 }
+                        // Beside jobs, idle must say sessions, as on the card.
+                        let idle = activity.jobs == 0 ? String(localized: "\(activity.idle) idle")
+                            : activity.idle == 1 ? String(localized: "1 idle session") : String(localized: "\(activity.idle) idle sessions")
+                        let summary = [count > 0 ? String(localized: "\(count) active") : nil, activity.idle > 0 ? idle : nil].compactMap { $0 }
                         if !summary.isEmpty { Text(summary.joined(separator: " · ")).font(Typeface.caption).foregroundStyle(.secondary) }
-                        StatusLabel(state: activity.mark, title: activity.title,
-                                    // Only under the word Working: a disabled agent's last job still counts as active.
-                                    spins: activity.mark == "working" && store.state.agents[agent]?.enabled != false)
+                        StatusLabel(state: activity.mark, title: activity.title, spins: activity.mark == "working")
                     }
                     if let usage = store.usage, usage.source != "none" { AgentUsageView(store: store, agent: agent) }
                 }.padding(.horizontal, WorkspaceStyle.cardPadding).padding(.vertical, Space.l)

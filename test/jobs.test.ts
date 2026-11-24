@@ -286,6 +286,27 @@ test('jobs persist the mission occurrence captured when they were requested', as
   assert.equal(loaded.get(second.id).missionStep, 3);
 });
 
+test('a file under a nested target directory is in scope, in a worktree or in place', async () => {
+  const repo = tempRepo();
+  const write = (ctl: JobCtl) => {
+    const file = path.join(ctl.job.cwd, 'docs', 'guide', 'a.md');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, 'Hello.\n');
+    ctl.touched(file);
+    ctl.done('polished');
+  };
+  const { jobs } = harness(write);
+  const job = await settled(jobs, await jobs.create({ kind: 'polish', cwd: repo, targets: ['docs/guide'] }));
+  assert.deepEqual(job.targets, ['docs/guide']);
+  assert.deepEqual(job.result?.files, ['docs/guide/a.md']);
+  assert.deepEqual(job.result?.outOfScope, []);
+
+  const plain = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-in-place-'));
+  const inPlace = await settled(jobs, await jobs.create({ kind: 'polish', cwd: plain, isolation: 'in_place', targets: ['docs/guide'] }));
+  assert.deepEqual(inPlace.result?.files, ['docs/guide/a.md']);
+  assert.deepEqual(inPlace.result?.outOfScope, []);
+});
+
 test('polish reports files changed outside the allowed targets', async () => {
   const repo = tempRepo();
   const { jobs } = harness((ctl) => {

@@ -716,9 +716,9 @@ export class Jobs {
       const attached = attachEvidence(evidenceDir, attachments, 1);
       if (attached.length) spec.task = `${spec.task ?? ''}${attachmentsNote(attached)}`;
 
-      // Diffs name files relative to the repo root, so scope targets must be too.
+      // Diffs name files relative to the repo root with forward slashes, so scope targets must be too.
       const targetRoot = repo ?? spec.cwd;
-      spec.targets = spec.targets?.map((t) => path.relative(targetRoot, path.resolve(spec.cwd, t)));
+      spec.targets = spec.targets?.map((t) => slashed(path.relative(targetRoot, path.resolve(spec.cwd, t))));
 
       const title = clip((spec.title ?? spec.task ?? spec.targets?.join(', ') ?? spec.kind).split('\n')[0], 80);
       const now = Date.now();
@@ -1558,7 +1558,7 @@ export class Jobs {
       result = null;
     } else {
       const root = job.repo ?? job.cwd;
-      const files = [...(this.touchedFiles.get(job.id) ?? [])].map((f) => path.relative(root, f));
+      const files = [...(this.touchedFiles.get(job.id) ?? [])].map((f) => slashed(path.relative(root, f)));
       result = { files, stat: `${files.length} file(s) edited in place`, commit: null, outOfScope: outOfScope(files, job.targets) };
     }
     this.finalizing.delete(job.id);
@@ -1896,6 +1896,9 @@ function roundsNotice(rounds: Round[]): string {
   if (restored) notice += `\n\nThe changes you made in ${restored}, undone earlier, were restored and are in your worktree again.`;
   return notice;
 }
+
+/** A relative path as git names it: separated by forward slashes on every platform. */
+const slashed = (file: string) => file.split(path.sep).join('/');
 
 /** Files changed outside the paths the worker was told it may touch. */
 export function outOfScope(files: string[], targets: string[]): string[] {

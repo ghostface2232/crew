@@ -647,6 +647,7 @@ export class AntigravityAdapter implements Adapter {
     this.lastUsed = Date.now();
     ctl.activity();
     const update = p.update ?? {};
+    localLocations(update);
     if (typeof reported === 'string' && reported !== ASKING_MODE && this.peer) {
       const peer = this.peer;
       ctl.progress(`Antigravity switched to "${reported}" mode; switching back to "${ASKING_MODE}"`);
@@ -758,6 +759,7 @@ export class AntigravityAdapter implements Adapter {
     const session = this.sessions.get(p.sessionId);
     const turn = session?.owner;
     const toolCall = p.toolCall ?? {};
+    localLocations(toolCall);
     if (turn && typeof toolCall.toolCallId === 'string') {
       const call = turn.calls.get(toolCall.toolCallId) ?? {};
       turn.calls.set(toolCall.toolCallId, { ...call, asked: true });
@@ -1118,6 +1120,20 @@ export function decide(role: JobKind, cwd: string, toolCall: ToolCall, readOnly 
   if (paths.length === 0) return { refuse: 'edit without a path' };
   if (!paths.every((f) => isInside(cwd, f))) return { refuse: 'edit outside the workspace' };
   return paths.some((f) => isGitPath(cwd, f)) ? { refuse: 'edit inside .git' } : 'allow';
+}
+
+/**
+ * agy writes a Windows path as a URL path (`/C:/Users/...`) when it reports a tool call finished, though natively when
+ * it starts or asks for one. Read as a native path, the URL form lands outside every workspace.
+ */
+export function localPath(file: string, platform: NodeJS.Platform = process.platform): string {
+  return platform === 'win32' && /^\/[A-Za-z]:[\\/]/.test(file) ? file.slice(1) : file;
+}
+
+/** Puts a tool call's paths in native form, before anything judges or records them. */
+function localLocations(call: { locations?: unknown }): void {
+  if (!Array.isArray(call.locations)) return;
+  for (const location of call.locations) if (typeof location?.path === 'string') location.path = localPath(location.path);
 }
 
 /** What the user is asked to approve: the whole request, never a shortened form. */

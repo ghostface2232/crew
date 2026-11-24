@@ -5,7 +5,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { antigravityAdapter, AntigravityAdapter, confinedEnv, confines, decide, formAnswer, formQuestions, serverProfile } from '../plugin/bridge/adapters/antigravity.ts';
+import { antigravityAdapter, AntigravityAdapter, confinedEnv, confines, decide, formAnswer, formQuestions, localPath, serverProfile } from '../plugin/bridge/adapters/antigravity.ts';
 import { tokenFile } from '../plugin/bridge/auth.ts';
 import { HOME, resolveConfig } from '../plugin/bridge/config.ts';
 import { Jobs } from '../plugin/bridge/jobs.ts';
@@ -859,6 +859,29 @@ test('a tool call is judged on its final fields, and Crew\'s own tools and faile
   const job = await h.ended(await h.jobs.create({ kind: 'delegate', cwd: work, isolation: 'in_place', task: 'test' }));
   assert.equal(job.state, 'done');
   assert.deepEqual(job.notes ?? [], []);
+});
+
+test('a Windows path agy writes as a URL path reads as the same file', () => {
+  assert.equal(localPath('/C:/Users/me/repo/a.txt', 'win32'), 'C:/Users/me/repo/a.txt');
+  assert.equal(localPath('C:\\Users\\me\\a.txt', 'win32'), 'C:\\Users\\me\\a.txt');
+  assert.equal(localPath('/Users/me/a.txt', 'win32'), '/Users/me/a.txt');
+  assert.equal(localPath('/C:/a.txt', 'darwin'), '/C:/a.txt');
+});
+
+test('an edit agy reports with a URL path on Windows stays inside the workspace', { timeout: 5000, skip: process.platform !== 'win32' }, async (t) => {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-agy-work-'));
+  t.after(() => fs.rmSync(work, { recursive: true, force: true }));
+  const file = path.join(work, 'docs', 'a.txt');
+  const urlPath = `/${file.replaceAll('\\', '/')}`;
+  const h = harness(t, server({ updates: [
+    { sessionUpdate: 'tool_call', toolCallId: 'e1', status: 'pending', kind: 'edit', title: 'Edit', locations: [{ path: file }] },
+    { sessionUpdate: 'tool_call_update', toolCallId: 'e1', status: 'completed', locations: [{ path: urlPath }] },
+  ] }));
+  const job = await h.ended(await h.jobs.create({ kind: 'polish', cwd: work, isolation: 'in_place', targets: ['docs'], task: 'test' }));
+  assert.equal(job.state, 'done');
+  assert.deepEqual(job.notes ?? [], []);
+  assert.deepEqual(job.result?.files, ['docs/a.txt']);
+  assert.deepEqual(job.result?.outOfScope, []);
 });
 
 test('a call that ends with the user\'s cancel is not taken for a violation', { timeout: 5000 }, async (t) => {

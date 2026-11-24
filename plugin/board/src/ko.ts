@@ -248,6 +248,7 @@ export const ko: Record<string, string> = {
   'Loading…': '불러오는 중…',
   'Location': '위치',
   'Looks finished': '끝난 것 같아요',
+  'Led by {agent}': '{agent} 리드',
   'Lost the connection to Crew. Reconnecting…': 'Crew와 연결이 끊겼어요. 다시 연결하는 중…',
   'Low': '낮음',
   'Lower cost and faster runs for straightforward tasks.': '간단한 작업을 더 빠르고 적은 비용으로 처리해요.',

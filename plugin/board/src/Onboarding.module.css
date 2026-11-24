@@ -42,14 +42,14 @@
 .agent :global(.agent-avatar) { margin-bottom: 6px; }
 .agent h3, .agent p { margin: 0; }
 
-/* Page 2: a Claude Code prompt with the command typed. */
-.composer:global(.card) { display: grid; gap: 14px; width: 340px; padding: 14px 16px; border-radius: 20px; }
+/* Page 2: the same command typed in a Claude Code prompt and a Codex prompt, at equal weight. */
+.composers { display: grid; gap: 12px; }
+.composer:global(.card) { display: grid; gap: 10px; width: 340px; padding: 14px 16px; border-radius: 20px; }
 .composerHead { display: flex; align-items: center; gap: 6px; color: var(--secondary); font-size: 11.5px; font-weight: 550; }
 .prompt { margin: 0; font-size: 14px; line-height: 1.45; }
 .slash { color: var(--accent); font-weight: 550; }
-.caret { display: inline-block; width: 1.5px; height: 1.05em; margin-left: 2px; vertical-align: -0.15em; background: var(--accent); }
-.composerFoot { display: flex; align-items: center; justify-content: space-between; }
-.send { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: var(--ink); color: var(--on-ink); box-shadow: var(--shadow-accent); }
+.composerFoot { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.send { display: grid; flex: none; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--ink); color: var(--on-ink); box-shadow: var(--shadow-accent); }
 
 /* Page 3: a Needs You approval card over a waiting Claude session's. */
 .needs { position: relative; width: 320px; height: 196px; translate: 0 6px; }

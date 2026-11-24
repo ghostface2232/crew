@@ -327,6 +327,8 @@ export const MissionPanel = memo(function MissionPanel({
     return groups;
   }, [mission, jobs, stops]);
   const at = missionStep(mission);
+  // Missions from before the daemon recorded their lead fall back to their session while it is still known.
+  const leadAgent = mission.lead ?? (owner ? sessionAgent(owner) : undefined);
   const tokens = jobs.reduce((sum, job) => sum + (job.tokens ?? 0), 0);
   const active = mission.state === 'active';
   const tasks = mission.tasks?.filter((task) => task.state !== 'dropped') ?? [];
@@ -370,9 +372,10 @@ export const MissionPanel = memo(function MissionPanel({
           if (expanded && !(event.target as Element).closest('button, [role="menu"]')) setExpanded(false);
         }}
       >
+        {leadAgent && <span className="mission-lead"><AgentMark agent={leadAgent} size={20} /></span>}
         <div className="mission-heading">
           <h2 className="title selectable fade-line" ref={fadeTitle} title={mission.title}>{mission.title}</h2>
-          <MissionMeta mission={mission} meta={meta} />
+          <MissionMeta mission={mission} meta={meta} lead={leadAgent} />
         </div>
         {/* One group, so the status and the menu move to a line of their own together. */}
         <span className="mission-controls">
@@ -485,9 +488,9 @@ export const MissionPanel = memo(function MissionPanel({
   (a.pulls === b.pulls || Boolean(a.pulls && b.pulls && sameItems(a.pulls, b.pulls))),
 );
 
-function MissionMeta({ mission, meta }: { mission: Mission; meta: string }) {
+function MissionMeta({ mission, meta, lead }: { mission: Mission; meta: string; lead?: keyof typeof NAMES }) {
   const text = useClock((now) => elapsed((mission.endedAt ?? now) - mission.createdAt), mission.endedAt == null);
-  const content = `${text} · ${meta}`;
+  const content = [lead ? t('Led by {agent}', { agent: NAMES[lead] }) : null, text, meta].filter(Boolean).join(' · ');
   const fade = useFade<HTMLParagraphElement>(content);
   return <p className="mission-meta fade-line" ref={fade} title={mission.root}>{content}</p>;
 }

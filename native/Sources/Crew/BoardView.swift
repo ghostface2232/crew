@@ -324,8 +324,8 @@ struct AgentOverview: View {
            Set(assignment.holders) == Set(inherited.holders) { return false }
         return true
     }.map(\.localizedLabel)
-    // Claude leads unless the user starts in Codex, whose card says so while one of its sessions is open.
-    let leads = agent == "claude" || store.state.claude.contains { $0.agent == agent && (store.project.isEmpty || $0.projectPath == store.project) }
+    // Claude and Codex alike say Lead while one of their sessions is open in this scope, as on the board.
+    let leads = store.state.claude.contains { $0.agent == agent && (store.project.isEmpty || $0.projectPath == store.project) }
     return ((leads ? [String(localized: "Lead")] : []) + labels).joined(separator: " · ")
 }
 

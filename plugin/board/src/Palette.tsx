@@ -2,7 +2,7 @@ import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import {
   AddRegular, AlertOffRegular, AlertRegular, ArrowTurnDownLeftRegular, ChatMultipleRegular, ClockRegular,
-  FlagRegular, FlashRegular, FolderRegular, GridRegular, SearchRegular, SettingsRegular, StackRegular, WrenchRegular,
+  FlagRegular, FlashRegular, FolderRegular, GridRegular, HandWaveRegular, SearchRegular, SettingsRegular, StackRegular, WrenchRegular,
 } from '@fluentui/react-icons';
 import type { FluentIcon } from '@fluentui/react-icons';
 import type { Snapshot } from './types.ts';
@@ -27,6 +27,7 @@ export interface PaletteActions {
   openSession: (id: string) => void;
   newJob: () => void;
   settings: () => void;
+  welcome: () => void;
 }
 const PAGE_ENTRIES: [string, string, FluentIcon, string][] = [
   ['overview', 'Overview', GridRegular, 'Every project at a glance'],
@@ -83,6 +84,10 @@ export function Palette({ state, names, projects, origin, close, actions }: {
     list.push({
       id: 'settings', group: 'Actions', title: 'Settings', subtitle: 'Roles, model presets, and instructions', icon: SettingsRegular,
       run: actions.settings, preview: () => ({ eyebrow: 'Action', lines: [], text: 'Configure roles, model presets, and shared instructions.' }),
+    });
+    list.push({
+      id: 'welcome', group: 'Actions', title: 'Welcome to Crew', subtitle: 'Commands and where to start', icon: HandWaveRegular,
+      run: actions.welcome, preview: () => ({ eyebrow: 'Action', lines: [], text: 'Show the first-run guide again: the crew commands, Needs You, and setup.' }),
     });
     if (notifyState !== 'unsupported') {
       const on = notifyOn;

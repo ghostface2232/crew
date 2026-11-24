@@ -162,6 +162,20 @@ export async function register(asked = false): Promise<Registration> {
   return { ok: true, detail: step ? 'Installed. Open a new Claude Code session, or run /reload-plugins, to load it.' : 'Up to date.' };
 }
 
+/**
+ * Registers a source checkout's plugin with Codex too, so a Codex session can lead. Codex reads the same marketplace
+ * but copies the plugin into its own cache, so this runs again after the plugin changes. Null without Codex, or for
+ * a built copy, which cannot yet run there: Codex copies only the plugin folder, not the app's Node beside it.
+ */
+export async function registerCodex(): Promise<Registration | null> {
+  if (PACKAGED || !(await run('codex', ['--version'])).ok) return null;
+  const added = await run('codex', ['plugin', 'marketplace', 'add', MARKETPLACE], 60_000);
+  if (!added.ok) return { ok: false, detail: `Could not register the marketplace with Codex: ${lastLine(added.out)}` };
+  const plugin = await run('codex', ['plugin', 'add', 'crew@crew'], 60_000);
+  if (!plugin.ok) return { ok: false, detail: `Could not install the plugin in Codex: ${lastLine(plugin.out)}` };
+  return { ok: true, detail: 'Installed in Codex. Codex runs its hooks only once trusted: open /hooks in a Codex session, trust the Crew hooks, then start a new session.' };
+}
+
 /** A marketplace folder holding a source checkout rather than a built copy: a developer's install. */
 const fromSource = (folder: string) => fs.existsSync(folder) && !fs.existsSync(path.join(folder, 'plugin', '.claude-plugin', 'build'));
 

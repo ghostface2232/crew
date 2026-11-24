@@ -1,7 +1,8 @@
+import path from 'node:path';
 import readline from 'node:readline';
 import { clipped, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, REPORT_PAGE_BYTES, textPage, unread } from './delivery.ts';
 import { api, ensureDaemon } from './client.ts';
-import { assignHint, baseUrl, canonicalPath, DEFAULT_ROLES, defaultHolder, disabledAgents, LEAD, loadConfig, MAX_DEBATE_ROUNDS, PRESET_NAMES, ROLE_INFO, ROLES, VERSION, WORKERS } from './config.ts';
+import { assignHint, baseUrl, canonicalPath, DEFAULT_ROLES, defaultHolder, disabledAgents, LEAD, loadConfig, MAX_DEBATE_ROUNDS, PLUGIN_ROOT, PRESET_NAMES, ROLE_INFO, ROLES, VERSION, WORKERS } from './config.ts';
 import { listSkills } from './skills.ts';
 import { describeUsage } from './usage.ts';
 import type { RouteDecision, Usage } from './usage.ts';
@@ -19,7 +20,7 @@ import { RATING_ITEMS } from './notes.ts';
 import { clip } from './text.ts';
 
 /**
- * Stdio MCP server the lead Claude session talks to. It holds no state: every
+ * Stdio MCP server the lead session (Claude Code or Codex) talks to. It holds no state: every
  * tool call is forwarded to the Crew daemon, which owns the workers.
  *
  * The protocol subset needed here (lifecycle, tools, progress, cancellation) is
@@ -39,8 +40,19 @@ const started = (() => {
   }
 })();
 const roles = started?.roles ?? DEFAULT_ROLES;
+/**
+ * The host this session runs in, from `initialize`. Claude Code names its session in the environment; Codex names
+ * it in each tool call's `_meta` and starts this server in the plugin's folder (docs/mcp-compatibility.md#5-codex-as-a-lead-host).
+ * Under a Codex lead a role held by Claude is the lead's own work, since Claude cannot run as a worker yet.
+ */
+let host: 'claude' | 'codex' = 'claude';
 // A daemon of another version may name a holder this session does not know.
-const holderName = (agent: Holder) => (agent === LEAD ? 'you, Claude' : WORKERS[agent]?.name ?? String(agent));
+const holderName = (agent: Holder) => (agent === LEAD ? (host === 'codex' ? 'you (held by Claude, which cannot run as a worker yet)' : 'you, Claude')
+  : agent === 'codex' && host === 'codex' ? 'Codex (a separate worker)' : WORKERS[agent]?.name ?? String(agent));
+/** How the lead names a skill: Codex lists plugin skills by name rather than as slash commands. */
+const skill = (name: string) => (host === 'codex' ? `the crew:${name} skill` : `/crew:${name}`);
+/** Claude Code loads the plugin's subagent; Codex has no plugin subagents, so it is given the file. */
+const selfReviewer = () => (host === 'codex' ? `a subagent given ${path.join(PLUGIN_ROOT, 'agents', 'self-reviewer.md')} as its instructions` : 'the crew:self-reviewer subagent');
 /** A role's holders, any of whom the lead may pick for a job. */
 const holder = (role: Role, table: Record<Role, RoleAssignment> = roles) => table[role].agents.map(holderName).join(' or ');
 
@@ -48,7 +60,7 @@ const holder = (role: Role, table: Record<Role, RoleAssignment> = roles) => tabl
 function presetPolicy(name: PresetName | null, preset: Preset | undefined, whose: string): string {
   if (!name || !preset) return `No preset is in effect${whose}: workers use their configured models, and your own subagents stay on your model.`;
   const subagents = preset.subagentModel && preset.subagentModel !== 'inherit'
-    ? `Start your own subagents (including crew:self-reviewer) with model "${preset.subagentModel}"${preset.subagentMax ? `, or "${preset.subagentMax}" when the work needs more, and never a larger model,` : ''} unless the user asks otherwise.`
+    ? `Start your own subagents (including ${host === 'codex' ? 'the self-reviewer' : 'crew:self-reviewer'}) with model "${preset.subagentModel}"${preset.subagentMax ? `, or "${preset.subagentMax}" when the work needs more, and never a larger model,` : ''} unless the user asks otherwise.`
     : 'Your own subagents stay on your model.';
   const cap = preset.maxTier ? ` Worker models are capped at the ${preset.maxTier} tier: a higher tier or a larger model you name is lowered to it. Leave effort out to keep the preset's, or name one when a job needs it.` : '';
   return `The "${name}" preset is in effect${whose}. Workers get its model and effort when their job starts. ${subagents}${cap}`;
@@ -68,18 +80,19 @@ function currentPolicy(name: PresetName | null, whose: string): string {
 const PRESET_LINE = `- Presets set command cost. The global one is ${started?.preset ? `"${started.preset}"` : 'not set'}. If the user names one (${PRESET_NAMES.join(', ')}), pass \`preset\` on mission start; never pick one yourself. \`mission\` and \`route\` state the active preset and its subagent rule; the latest holds. Role settings override any preset.`;
 
 /** One line per role: who holds it now, as of this session's start. The tool descriptions say what each role does. */
-const ROLE_LINES = ROLE_INFO.map((info) => `- ${info.label} (\`${info.role}\`): ${holder(info.role)}`).join('\n');
+const roleLines = () => ROLE_INFO.map((info) => `- ${info.label} (\`${info.role}\`): ${holder(info.role)}`).join('\n');
 
 /**
  * What a lead needs in every session, whether or not it runs the pipeline. Claude Code cuts a server's
  * instructions at 4,096 characters (seen 2026-11-20), so this holds only what no tool description, job
- * result or skill says at the moment it is needed; test/mcp.test.ts holds it under that length.
+ * result or skill says at the moment it is needed; test/mcp.test.ts holds it under that length. Built on
+ * `initialize`, once the host is known.
  */
-const INSTRUCTIONS = `Crew connects this session to background coding agents. You lead: plan, do the main implementation, review, and decide what merges.
+const instructions = () => `Crew connects this session to background coding agents. You lead: plan, do the main implementation, review, and decide what merges.
 
 The user assigns roles (settings or ~/.crew/config.json); jobs go to an agent holding the role. At session start:
-${ROLE_LINES}
-\`delegate\` takes role delegate, refactor, release, or fix; \`review\` uses review, or verify with runs_app. With multiple holders, pick one with \`agent\`. Picking yourself (\`claude\`) starts no worker: do it here or in a subagent.
+${roleLines()}
+\`delegate\` takes role delegate, refactor, release, or fix; \`review\` uses review, or verify with runs_app. With multiple holders, pick one with \`agent\`. ${host === 'codex' ? 'Picking `claude` starts no worker, since Claude cannot run as a worker yet' : 'Picking yourself (`claude`) starts no worker'}: do it here or in a subagent.
 
 Rules:
 - A delegate or polish job runs in its own git worktree and branch (crew-<job id>) from HEAD: commit what it needs first; gitignored files are copied only if in .worktreeinclude. Read its diff, then merge or reject (reject work beyond the task). Nothing reaches your branch unless you merge it.
@@ -89,13 +102,13 @@ Rules:
 - Workers do not see this conversation: give only what they need (goal, decisions, how it is judged), accurately and briefly.
 - Omit \`tier\` and \`effort\` for ordinary work so role or preset settings apply; pass one only when a job clearly needs another, as it overrides them.
 - If a job hits a usage limit, do it yourself and say what was skipped. If Crew cannot start a job, retry once, then tell the user the error and do it yourself.
-- /crew:run sets when to review; outside it, review only if the user asks (never hold a commit or push for one). After a review and its fix, record the result with \`note\`: facts only, no impressions.
+- ${skill('run')} sets when to review; outside it, review only if the user asks (never hold a commit or push for one). After a review and its fix, record the result with \`note\`: facts only, no impressions.
 - Report multi-step user commands with \`mission\` (title and stages first; done once work finishes); skip for a single delegated job. Open a new mission before further work after done; a command while one is open gets its own beside it. \`tasks\` saves the split for resumed sessions; \`pr\` links a pull request.
 - Add worker-reported machine or project workarounds to .crew/instructions.md (given to every later job).
-- \`route\` says who should take a kind of work from remaining usage. /crew:run calls it each stage; outside it, follow roles unless a job hits a limit.
+- \`route\` says who should take a kind of work from remaining usage. ${skill('run')} calls it each stage; outside it, follow roles unless a job hits a limit.
 ${PRESET_LINE}
 
-The status board (/crew:board) shows every agent live.`;
+The status board (${skill('board')}) shows every agent live.`;
 
 const common = {
   cwd: { type: 'string', description: 'Project directory. Defaults to this session\'s project.' },
@@ -130,7 +143,8 @@ const modelProps = {
   effort: { type: 'string', description: 'Leave it out to keep the effort the user set for the role or preset; an effort named here overrides it. With none set, Codex runs at medium, or high at the frontier tier. Antigravity sets its thinking level only when an effort is named, using the nearest lower offered level if needed and keeping the session default if no level fits.' },
 };
 
-const TOOLS = [
+/** Built on `initialize` too: the holder names in the descriptions depend on the host. */
+const buildTools = () => [
   {
     name: 'delegate',
     title: 'Delegate work',
@@ -384,12 +398,19 @@ const ackProperty = {
   anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 100 }],
   description: 'Receipt id(s) received earlier. Acknowledges only those snapshots, never the result of this call.',
 };
-for (const tool of TOOLS) Object.assign(tool.inputSchema.properties, { ack: ackProperty });
+function toolList() {
+  const tools = buildTools();
+  for (const tool of tools) Object.assign(tool.inputSchema.properties, { ack: ackProperty });
+  return tools;
+}
+let TOOLS = toolList();
 
 const DEFAULT_WAIT_SECONDS = 1800;
 /** Listings use the project; argument-less wait further filters to this lead's jobs. */
 // Canonical, so it matches the project keys the daemon stores.
-const PROJECT = canonicalPath(process.env.CLAUDE_PROJECT_DIR ?? process.cwd());
+let PROJECT = canonicalPath(process.env.CLAUDE_PROJECT_DIR ?? process.cwd());
+/** A Codex thread the daemon could not read (an ephemeral session): its project is not the folder this server runs in. */
+let projectUnknown = false;
 
 /** Set from the client's initialize request: whether it can show the user a form on our behalf. */
 let canElicit = false;
@@ -540,8 +561,25 @@ function showEvidence(ctx: CallContext, job: JobView): void {
 }
 
 
-/** The Claude session this server belongs to; it outlives a restart of the server. Unset in clients that do not pass it on. */
-const SESSION = process.env.CLAUDE_CODE_SESSION_ID || undefined;
+/**
+ * The lead session this server belongs to; it outlives a restart of the server. Claude Code passes it in the
+ * environment; Codex in each call's `_meta` (codexSession). Unset in clients that pass neither.
+ */
+let SESSION = process.env.CLAUDE_CODE_SESSION_ID || undefined;
+
+/**
+ * Takes a Codex call's session: the root thread, which a subagent's calls name too, so its jobs report to the lead.
+ * Codex starts a server per thread, so the session changes only if a thread's server is reused. The first call
+ * tells the daemon that Codex hosts the session, so it is woken through Codex, and learns its project from the thread.
+ */
+async function codexSession(meta: any): Promise<void> {
+  const id = meta?.sessionId;
+  if (typeof id !== 'string' || !id || id.length > 200 || id === SESSION) return;
+  SESSION = id;
+  const { cwd } = await api('POST', '/api/lead/hello', { session: id, host: 'codex' }).catch(() => ({ cwd: null }));
+  projectUnknown = typeof cwd !== 'string' || !cwd;
+  if (!projectUnknown) PROJECT = canonicalPath(cwd);
+}
 /** How a mission ended when this session's next one replaced it, before a session could hold several. Such a mission carries no work on. */
 const SUPERSEDED = 'Superseded by a new mission.';
 /**
@@ -827,8 +865,8 @@ const YOURS: Partial<Record<Role, string>> = {
   refactor: 'Do it in this session or a subagent, keeping behavior unchanged and running the checks before and after.',
   release: 'Prepare the release in this session or a subagent; publish, push, and deploy nothing.',
   debate: 'Test your position with a fresh-context subagent told to argue against it, then decide.',
-  review: 'Run the crew:self-reviewer subagent on the change.',
-  verify: 'Run the crew:self-reviewer subagent, telling it that it may run the app in its own isolated instance.',
+  review: 'Run SELF_REVIEWER on the change.',
+  verify: 'Run SELF_REVIEWER, telling it that it may run the app in its own isolated instance.',
   fix: 'Fix the accepted findings yourself, at their cause.',
   polish: 'Make the wording changes yourself, changing no logic or structure.',
 };
@@ -853,7 +891,7 @@ function pickHolder(role: Role, wanted: unknown): { agent?: Holder; yours?: stri
   const agent = (wanted ?? defaultHolder(role, table[role], disabled)) as Holder;
   if (!holders.includes(agent)) throw new Error(`${String(wanted)} does not hold ${role}; its holders are ${holder(role, table)}. ${assignHint(role)}`);
   if (agent !== LEAD) return { agent };
-  return { yours: `${role} is yours: no worker was started. ${YOURS[role]} Its other holders: ${holders.filter((h) => h !== LEAD).map(holderName).join(', ') || 'none'}.` };
+  return { yours: `${role} is yours: no worker was started. ${YOURS[role]?.replace('SELF_REVIEWER', selfReviewer())} Its other holders: ${holders.filter((h) => h !== LEAD).map(holderName).join(', ') || 'none'}.` };
 }
 
 /**
@@ -878,6 +916,10 @@ async function withNotes(text: string, agents: Holder[], evidence: number, once 
 const noted = new Set<Holder>();
 
 async function callTool(name: string, args: any, ctx: CallContext): Promise<string> {
+  if (projectUnknown) {
+    if (typeof args.cwd !== 'string' || !args.cwd) throw new Error('Crew could not read this Codex session\'s folder from Codex (an ephemeral session keeps none). Pass cwd, the project directory, with this call.');
+    PROJECT = canonicalPath(args.cwd);
+  }
   const cwd: string = args.cwd ?? PROJECT;
   if (['delegate', 'review', 'polish', 'debate'].includes(name)) {
     const role: Role = name === 'debate' ? 'debate' : name === 'polish' ? 'polish' : name === 'review' ? (args.runs_app ? 'verify' : 'review') : (args.role ?? 'delegate');
@@ -916,7 +958,7 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
         return measured.length ? measured.join('\n') : 'AgentGauge has no usage data on this machine, so the roles are followed as assigned.';
       }
       const mission = await jobMission(args.mission);
-      const query = `kind=${encodeURIComponent(args.kind)}${mission ? `&mission=${encodeURIComponent(mission)}` : ''}`;
+      const query = `kind=${encodeURIComponent(args.kind)}${mission ? `&mission=${encodeURIComponent(mission)}` : ''}${host === 'codex' ? '&lead=codex' : ''}`;
       const decision: RouteDecision & { preset?: PresetName | null; policy?: Preset | null } = await withMission(mission, () => api('GET', `/api/route?${query}`));
       const who = decision.assignee === 'claude' ? 'you (the lead)' : WORKERS[decision.assignee].name;
       const lines = [`${args.kind} → ${who}`, decision.reason];
@@ -1049,11 +1091,14 @@ async function handle(msg: any): Promise<void> {
   switch (method) {
     case 'initialize':
       canElicit = Boolean(params?.capabilities?.elicitation);
+      // Claude Code's session variable wins: a Claude session is never taken for a Codex one.
+      host = !process.env.CLAUDE_CODE_SESSION_ID && /^codex/i.test(String(params?.clientInfo?.name ?? '')) ? 'codex' : 'claude';
+      TOOLS = toolList();
       return reply({
         protocolVersion: PROTOCOL_VERSIONS.includes(params?.protocolVersion) ? params.protocolVersion : PROTOCOL_VERSIONS[1],
         capabilities: { tools: {} },
         serverInfo: { name: 'crew', title: 'Crew', version: VERSION },
-        instructions: INSTRUCTIONS,
+        instructions: instructions(),
       });
     case 'ping':
       return reply({});
@@ -1077,6 +1122,7 @@ async function handle(msg: any): Promise<void> {
       };
       try {
         await ensureDaemon();
+        if (host === 'codex') await codexSession(params?._meta);
         const args = params.arguments ?? {};
         // Echoes refer to earlier responses. Process them before creating any new offer. A bad echo must not block
         // the call it rode on (a delegate, a reply): it is reported and the receipts stay unacknowledged.

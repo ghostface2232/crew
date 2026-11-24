@@ -312,7 +312,7 @@ test('MCP bounds a multi-job response and ACKs only echoed receipts before makin
   const replies: any[] = [];
   const order: string[] = [];
   const handle = vm.runInNewContext(`${stripTypeScriptTypes(handler)}; handle`, {
-    AbortController, inFlight: new Map(), ensureDaemon: async () => {}, SESSION: 'lead',
+    AbortController, inFlight: new Map(), ensureDaemon: async () => {}, SESSION: 'lead', host: 'claude',
     clipped, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, send: (msg: unknown) => replies.push(msg),
     imageContent: () => [{ type: 'image', data: 'x'.repeat(900_000), mimeType: 'image/png' }],
     api: async (_method: string, route: string, body: any) => {
@@ -398,7 +398,7 @@ test('a role the lead holds starts no worker, and a pick outside the holders is 
   const code = source.slice(source.indexOf('/** What the lead does with a role it holds itself'), source.indexOf('async function callTool'));
   const roles = { review: { agents: ['codex', 'claude'] }, polish: { agents: ['claude'] } };
   const pick = vm.runInNewContext(`const holderName = (a) => a === 'claude' ? 'you, Claude' : a; const holder = (r, t) => t[r].agents.join(' or '); ${stripTypeScriptTypes(code)}; pickHolder`, {
-    roles, LEAD: 'claude', loadConfig: () => ({ roles, antigravity: { enabled: true } }), defaultHolder, disabledAgents, assignHint,
+    roles, LEAD: 'claude', loadConfig: () => ({ roles, antigravity: { enabled: true } }), defaultHolder, disabledAgents, assignHint, selfReviewer: () => 'the crew:self-reviewer subagent',
   });
   assert.deepEqual({ ...pick('review', undefined) }, { agent: 'codex' });
   assert.match(pick('review', 'claude').yours, /no worker was started\. Run the crew:self-reviewer subagent[^]*other holders: codex/);
@@ -439,13 +439,16 @@ test('the session instructions fit what Claude Code keeps of them', () => {
   const text = source.slice(source.indexOf('const holderName ='), source.indexOf('\nconst common = {'));
   // The longest they get: every role held by every agent, and a preset set.
   const everyone = Object.fromEntries(ROLE_INFO.map((info) => [info.role, { agents: [...Object.keys(WORKERS), LEAD] }]));
-  const instructions: string = vm.runInNewContext(`${stripTypeScriptTypes(text)}; INSTRUCTIONS`, {
-    LEAD, WORKERS, ROLE_INFO, PRESET_NAMES, roles: everyone, started: { preset: 'balanced' }, loadConfig: () => ({}),
-  });
-  // Claude Code cuts a server's instructions at 4,096 characters; what follows never reaches the lead.
-  assert.ok(instructions.length <= 4096, `${instructions.length} characters`);
-  for (const role of ROLE_INFO) assert.ok(instructions.includes(`\`${role.role}\``), role.role);
-  assert.match(instructions, /The global one is "balanced"/);
+  for (const host of ['claude', 'codex']) {
+    const instructions: string = vm.runInNewContext(`${stripTypeScriptTypes(text)}; instructions()`, {
+      LEAD, WORKERS, ROLE_INFO, PRESET_NAMES, roles: everyone, started: { preset: 'balanced' }, loadConfig: () => ({}), host, path, PLUGIN_ROOT: '/plugin',
+    });
+    // Claude Code cuts a server's instructions at 4,096 characters; what follows never reaches the lead. Codex is held to the same.
+    assert.ok(instructions.length <= 4096, `${host}: ${instructions.length} characters`);
+    for (const role of ROLE_INFO) assert.ok(instructions.includes(`\`${role.role}\``), role.role);
+    assert.match(instructions, /The global one is "balanced"/);
+    assert.match(instructions, host === 'codex' ? /Claude cannot run as a worker yet[\s\S]*the crew:run skill/ : /Picking yourself \(`claude`\)[\s\S]*\/crew:run/);
+  }
 });
 
 test('concurrent mission reports without a session id resume the same title', async (t) => {
@@ -485,7 +488,7 @@ test('status and mission explicitly read this session\'s watch news without any 
   const missions: object[] = [];
   const offered: (string[] | undefined)[] = [];
   const handle = vm.runInNewContext(`${stripTypeScriptTypes(standing + tool + handler)}; handle`, {
-    AbortController, inFlight: new Map(), ensureDaemon: async () => {}, SESSION: 'lead', PROJECT: '/project',
+    AbortController, inFlight: new Map(), ensureDaemon: async () => {}, SESSION: 'lead', host: 'claude', PROJECT: '/project', projectUnknown: false,
     fresh: false, missionId: null, costMission: null, closedElsewhere: null,
     missionHead: () => 'Current mission', missionDetail: () => '', currentPolicy: () => '', globalPreset: () => null,
     clipped, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, send: (msg: unknown) => replies.push(msg),

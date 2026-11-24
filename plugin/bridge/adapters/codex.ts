@@ -287,6 +287,16 @@ export class CodexAdapter implements Adapter {
   }
 
   /**
+   * The working directory of a thread another Codex process holds: a lead session, whose MCP server runs from
+   * the plugin's folder and cannot tell its project otherwise. Null for a thread Codex did not persist.
+   */
+  async threadCwd(threadId: string): Promise<string | null> {
+    const peer = await this.ensure();
+    const res = await peer.request('thread/read', { threadId, includeTurns: false }, PROBE_TIMEOUT_MS).catch(() => null);
+    return typeof res?.thread?.cwd === 'string' ? res.thread.cwd : null;
+  }
+
+  /**
    * Reads the thread's runtime status for a silent job. Sub-agents come first: one whose turn ended unheard would
    * hold the parent's completion forever. A thread found not active is read again after a pause, so a completion
    * still on its way is not mistaken for a lost one.

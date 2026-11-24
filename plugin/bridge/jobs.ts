@@ -642,7 +642,7 @@ export class Jobs {
     // Named no holder, the job goes to the role's first worker.
     const picked = spec.agent ?? defaultHolder(roleName, config.roles[roleName], disabledAgents(config));
     if (!holders.includes(picked)) throw new Error(`${spec.agent} does not hold ${roleName}; its holders are: ${holders.join(', ')}. Pick one of them. ${assignHint(roleName)}`);
-    if (picked === LEAD) throw new Error(`${roleName} is held by Claude, the lead: start it from a Claude session, which does the work itself or in a subagent.`);
+    if (picked === LEAD) throw new Error(`${roleName} is held by Claude, which runs no worker: start it from a lead session, which does the work itself or in a subagent.`);
     const role = effectiveRole(config, roleName, preset, picked);
     const { agent } = role;
     if (spec.runsApp && spec.kind === 'polish') throw new Error('A polish job cannot run the app: an editor only changes wording. Drop runs_app.');

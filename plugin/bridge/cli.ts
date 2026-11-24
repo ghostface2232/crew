@@ -5,7 +5,7 @@ import path from 'node:path';
 import { api, ensureDaemon, health, stopDaemon } from './client.ts';
 import { boardUrl } from './auth.ts';
 import { baseUrl, HOME, installed, VERSION } from './config.ts';
-import { checks as setupChecks, COMMAND, PACKAGED, register, run } from './setup.ts';
+import { checks as setupChecks, COMMAND, PACKAGED, register, registerCodex, run } from './setup.ts';
 import { describe, summarize } from './render.ts';
 import type { JobView } from './render.ts';
 
@@ -19,7 +19,7 @@ Usage:
   crew gc [--apply] [--branches]  Preview leftovers; --apply cleans directories and metadata, --branches also deletes branches merged into HEAD
   crew board             Open the status board in the browser, signed in (--url prints the address instead)
   crew doctor            Check that everything Crew needs is in place
-  crew install           Register the plugin with Claude Code and put crew on PATH
+  crew install           Register the plugin with Claude Code (and Codex, from a source checkout) and put crew on PATH
   crew daemon <start|stop|restart|logs>
 `;
 
@@ -67,8 +67,10 @@ async function doctor(): Promise<void> {
 async function install(): Promise<void> {
   const result = await register(true);
   console.log(`${result.ok ? '✓' : '✗'} ${result.detail}`);
-  if (!result.ok) process.exitCode = 1;
-  else console.log(`✓ crew command: ${COMMAND}\n\nRestart Claude Code sessions (or run /reload-plugins) to load the plugin, then try /crew:run.`);
+  const codex = await registerCodex();
+  if (codex) console.log(`${codex.ok ? '✓' : '✗'} Codex: ${codex.detail}`);
+  if (!result.ok || codex?.ok === false) process.exitCode = 1;
+  if (result.ok) console.log(`✓ crew command: ${COMMAND}\n\nRestart Claude Code sessions (or run /reload-plugins) to load the plugin, then try /crew:run.`);
 }
 
 const [command, arg] = process.argv.slice(2);

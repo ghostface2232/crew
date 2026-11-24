@@ -381,7 +381,9 @@ const name = (agent: Agent) => (agent === 'claude' ? 'Claude' : WORKERS[agent].n
  * It only ever answers with the role's holder or the lead: it never gives an agent a role the user
  * did not assign. A stale or unknown reading changes nothing, so the default roles are followed.
  */
-export function route(kind: RouteKind, usage: Usage, roles: Config['roles'], disabled: WorkerAgent[] = []): RouteDecision {
+export function route(kind: RouteKind, usage: Usage, roles: Config['roles'], disabled: WorkerAgent[] = [], lead: Agent = LEAD): RouteDecision {
+  // The agent leading this session: its own usage decides how much it keeps for itself. `LEAD` as an assignee still means the lead.
+  const you = lead;
   const of = (agent: Agent) => usage.providers.find((p) => p.agent === agent);
   const status = (agent: Agent): UsageStatus => of(agent)?.status ?? 'unknown';
   const short = (agent: Agent) => status(agent) === 'tight' || status(agent) === 'exhausted';
@@ -398,15 +400,15 @@ export function route(kind: RouteKind, usage: Usage, roles: Config['roles'], dis
   if (kind === 'lead') {
     // The engineer is the first worker holding implementation: Claude may hold it too, and cannot hand work to itself.
     const engineer = workersFor('delegate', roles.delegate, disabled)[0];
-    if (status(LEAD) === 'exhausted') {
+    if (status(you) === 'exhausted') {
       const codexHasRoom = engineer === 'codex' && status('codex') === 'ok';
-      return { kind, assignee: LEAD, reason: `${why(LEAD)} ${codexHasRoom ? 'Finish the step you are on, tell the user that Claude is out of usage and when it resets, and say what is left.' : 'No other agent can lead; stop and tell the user.'}`, fallback: [], degraded: true, deferUntil: resets(LEAD) };
+      return { kind, assignee: LEAD, reason: `${why(you)} ${codexHasRoom ? `Finish the step you are on, tell the user that ${name(you)} is out of usage and when it resets, and say what is left.` : 'No other agent can lead; stop and tell the user.'}`, fallback: [], degraded: true, deferUntil: resets(you) };
     }
-    if (status(LEAD) === 'tight') {
-      if (!engineer) return plain(LEAD, `${why(LEAD)} Keep to planning and merge decisions, and give more implementation to subagents.`);
-      return plain(LEAD, `${why(LEAD)} Keep to planning and merge decisions, and hand more implementation to ${name(engineer)}.`, short(engineer) ? [] : [engineer]);
+    if (status(you) === 'tight') {
+      if (!engineer) return plain(LEAD, `${why(you)} Keep to planning and merge decisions, and give more implementation to subagents.`);
+      return plain(LEAD, `${why(you)} Keep to planning and merge decisions, and hand more implementation to ${name(engineer)}.`, short(engineer) ? [] : [engineer]);
     }
-    return plain(LEAD, status(LEAD) === 'ok' ? `${name(LEAD)} has room; lead as usual.` : `${name(LEAD)}'s usage is not known (${of(LEAD)?.reason ?? 'no reading.'}); lead as usual.`);
+    return plain(LEAD, status(you) === 'ok' ? `${name(you)} has room; lead as usual.` : `${name(you)}'s usage is not known (${of(you)?.reason ?? 'no reading.'}); lead as usual.`);
   }
 
   // The role's preferred worker first, the lead last.
@@ -428,7 +430,7 @@ export function route(kind: RouteKind, usage: Usage, roles: Config['roles'], dis
   return { ...decision, reason: `${moved}${decision.reason}`, fallback: [...new Set([...decision.fallback, ...others])], holders: listed };
 
   function decide(holder: Agent): RouteDecision {
-  if (holder === LEAD) return plain(LEAD, 'Claude holds the role: do the work yourself, or in a subagent.');
+  if (holder === LEAD) return plain(LEAD, you === LEAD ? 'Claude holds the role: do the work yourself, or in a subagent.' : 'Claude holds the role and runs no worker under another lead: do the work yourself, or in a subagent.');
   // Each role names its policy, so a new role never falls through to another's.
   const policy: Record<Role, 'build' | 'review' | 'debate' | 'polish'> = { delegate: 'build', refactor: 'build', release: 'build', fix: 'build', review: 'review', verify: 'review', debate: 'debate', polish: 'polish' };
   switch (policy[kind as Role]) {
@@ -436,11 +438,11 @@ export function route(kind: RouteKind, usage: Usage, roles: Config['roles'], dis
       // The lead taking over keeps the role's scope: release work stays preparation.
       const yourself = kind === 'release' ? 'Prepare the release yourself, and publish or deploy nothing.' : kind === 'fix' ? 'Fix the findings yourself.' : 'Do this piece yourself, in a subagent if it is large.';
       if (status(holder) === 'exhausted') return plain(LEAD, `${why(holder)} ${yourself}`);
-      if (status(holder) === 'tight' && !short(LEAD)) {
+      if (status(holder) === 'tight' && !short(you)) {
         return plain(LEAD, `${why(holder)} Take this work yourself or in subagents${roles.review.agents.includes(holder) ? `, and keep what ${name(holder)} has left for the cross-review` : ''}.`, [holder]);
       }
-      if (short(holder)) return plain(holder, `${why(holder)} ${name(LEAD)} is short too, so the assignment is followed.`, [LEAD]);
-      return plain(holder, short(LEAD) ? `${why(LEAD)} Hand ${name(holder)} as much of this work as separates cleanly.` : keeps(holder), [LEAD]);
+      if (short(holder)) return plain(holder, `${why(holder)} ${name(you)} is short too, so the assignment is followed.`, [LEAD]);
+      return plain(holder, short(you) ? `${why(you)} Hand ${name(holder)} as much of this work as separates cleanly.` : keeps(holder), [LEAD]);
     }
     case 'review': {
       if (status(holder) === 'exhausted') {

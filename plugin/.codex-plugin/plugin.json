@@ -1,0 +1,15 @@
+{
+  "name": "crew",
+  "version": "0.8.1",
+  "description": "Lead a crew of coding agents from Codex or Claude Code: Codex and Claude lead, Codex implements and cross-reviews, Antigravity edits wording, with a live status board.",
+  "author": {
+    "name": "baemingwan"
+  },
+  "skills": "./skills/",
+  "mcpServers": "./codex.mcp.json",
+  "hooks": "./hooks/codex.json",
+  "interface": {
+    "displayName": "Crew",
+    "shortDescription": "Lead background coding agents from this session"
+  }
+}

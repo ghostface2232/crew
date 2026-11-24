@@ -243,6 +243,11 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
         let written = { defaults.persistentDomain(forName: suite)?["AppleLanguages"] as? [String] }
         try store.receive(ServerEvent(name: "language", data: Data(#"{"language":"ko"}"#.utf8)))
         #expect(written() == ["ko"])
+        // A daemon that predates the setting sends no key and leaves Crew's write alone.
+        try store.receive(event("state", fixture()))
+        #expect(store.state.hasLanguageSetting == false)
+        #expect(written() == ["ko"])
+        #expect(defaults.persistentDomain(forName: suite)?[CrewStore.appliedLanguageKey] as? String == "ko")
         store.applyLanguage("en")
         #expect(written() == ["en"])
         try store.receive(ServerEvent(name: "language", data: Data(#"{"language":null}"#.utf8)))

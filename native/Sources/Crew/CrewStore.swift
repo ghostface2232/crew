@@ -210,7 +210,8 @@ final class CrewStore {
         default: break
         }
         if let id = try state.receive(event) { jobVersions[id, default: 0] += 1 }
-        if event.name == "state" || event.name == "language" { applyLanguage(state.language) }
+        // A daemon that predates the setting says nothing about it, which must not clear what Crew wrote.
+        if (event.name == "state" || event.name == "language") && state.hasLanguageSetting == true { applyLanguage(state.language) }
         if event.name == "state" {
             events = state.events; limits = state.limits; usage = state.usage
             state.events = []; state.limits = [:]; state.usage = nil

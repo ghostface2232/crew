@@ -16,7 +16,7 @@ IDs R1 to R16 keep the meanings other documents refer to.
 | --- | --- | --- |
 | R1 | Agents may be connected by any background mechanism, but the user-facing surface stays clean and uncluttered | Required |
 | R2 | Claude Desktop as the lead's app is the primary mode. Crew's own screen grows out of the status board alongside it | Required |
-| R3 | Each role has a default agent: Claude leads and self-reviews, Codex implements separable pieces and cross-reviews, Antigravity checks UX copy and tidies comments and docs. The user can reassign any role, including Antigravity's | Required |
+| R3 | Each role has a default agent: the session the user starts in leads and self-reviews, whether Claude Code or Codex; Codex implements separable pieces and cross-reviews; Antigravity checks UX copy and tidies comments and docs. The user can reassign any role, including Antigravity's | Required |
 | R4 | In Claude Desktop lead mode, the services' own features stay usable: subagents, inter-session messaging, Remote Control, computer use, built-in and headless browsers, Chrome, side chat, MCP, compaction | Required |
 | R5 | Each agent's activity is visible in near real time, including stalls, exhausted usage limits, and error stops | Required |
 | R6 | Sessions started through Crew also appear in each service's desktop app where the service allows it | Nice to have |
@@ -26,7 +26,7 @@ IDs R1 to R16 keep the meanings other documents refer to.
 | R10 | The board shows each command as a unit: how it was split, which agent has each part, and how far each part has progressed. Its elements are clickable, and approvals, questions, and follow-ups are answered in place | Required |
 | R11 | Model and reasoning effort are selectable per role and per service | Required |
 | R12 | Cursor is supported as an agent | Required |
-| R13 | Crew can run with a lead other than Claude Code, from its own main screen, and can dispatch a command to a single agent without a lead | Long term |
+| R13 | Crew can run with a lead other than Claude Code (a Codex session can lead), from its own main screen, and can dispatch a command to a single agent without a lead | Long term |
 | R14 | Agents working at the same time do not collide. Each runs its own isolated instance of whatever it starts, reviews that run in parallel are independent and at most one of them runs the app, and performance is measured with nothing else running | Required |
 | R15 | Approvals need the user as little as is safe. Each agent's automatic reviewer decides first, and the user is asked only about what it will not allow | Required |
 | R16 | The Mac app uses SwiftUI and AppKit with Swift 6, supports macOS 26+, and preserves the TypeScript daemon and existing workflows. Its modern native design uses Liquid Glass, SF Symbols, and supplied service marks | Required |
@@ -40,7 +40,7 @@ Current implementation notes:
 
 ## 3. Defaults and priorities
 
-- **Defaults are the original setup.** With no configuration, roles are the R3 defaults and the lead is Claude in Claude Desktop. Anything else happens only because the user set it.
+- **Defaults are the original setup.** With no configuration, roles are the R3 defaults and the lead is the session the user starts in, Claude in Claude Desktop unless they start in Codex. Anything else happens only because the user set it.
 - **Only the user changes a role.** Automatic routing (R8) moves work between agents when a service runs low, following [agentgauge-integration.md](../research/agentgauge-integration.md) section 8. It does not give Antigravity engineering or review work; that requires an explicit assignment by the user.
 - **Claude Desktop lead mode comes first.** Work on R9 to R12 targets this mode. R13 is built after it and never replaces it.
 - **R4 and R6 are scoped to the lead's app.** Workers running in the background keep their runtime's subagents, MCP servers, and compaction, but not their desktop-only features. Under R13, a lead outside Claude Desktop loses those features too, and the screen says which ones are unavailable.

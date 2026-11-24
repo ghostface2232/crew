@@ -178,7 +178,7 @@ export function Dispatch({
             </div>
           )}
           {intent !== 'information' && leadOnly && (
-            <p className="callout secondary">{t('Start this job from a Claude session. Claude does the work itself or in a subagent.')}</p>
+            <p className="callout secondary">{t('Start this job from a Claude Code or Codex session, which does the work itself or in a subagent.')}</p>
           )}
           {intent === 'command' && kind === 'polish' && (
             <label className="field">

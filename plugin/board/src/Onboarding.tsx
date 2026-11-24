@@ -171,7 +171,7 @@ const COMMANDS = translated((): [string, string][] => [
   ['/crew:run', t('Plan, build, review, and fix with the crew')],
   ['/crew:review', t('Review a change')],
   ['/crew:debate', t('Talk through a hard decision')],
-  ['/crew:board', t('Open this board in Claude')],
+  ['/crew:board', t('Open this board')],
 ]);
 
 const PAGES = translated((): Page[] => [
@@ -180,16 +180,16 @@ const PAGES = translated((): Page[] => [
     art: <WelcomeArt />,
     body: (
       <p className="secondary">
-        {t('Crew runs several coding agents together. Claude leads, splits the work, and hands pieces to the other agents to run in parallel. This app shows every agent live and lets you answer them.')}
+        {t('Crew runs several coding agents together. The session you start in leads: it splits the work and hands pieces to the other agents to run in parallel. This app shows every agent live and lets you answer them.')}
       </p>
     ),
   },
   {
-    title: t('Start in Claude Code'),
+    title: t('Start in Claude Code or Codex'),
     art: <CommandArt />,
     body: (
       <>
-        <p className="secondary">{t('Open a new Claude Code session and type a command.')}</p>
+        <p className="secondary">{t('Open a new Claude Code or Codex session and type a command. In Codex, commands start with $ instead of /.')}</p>
         <dl className={styles.commands}>
           {COMMANDS().map(([command, what]) => (
             <div key={command}>

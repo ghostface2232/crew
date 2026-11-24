@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { api } from './client.ts';
+import { api, ensureDaemon } from './client.ts';
 import { HOOK_SECONDS } from './delivery.ts';
 
 interface HookInput {
@@ -90,13 +90,18 @@ const real = (file: string) => {
 
 if (process.argv[1] && real(process.argv[1]) === real(fileURLToPath(import.meta.url))) {
   const mode = process.argv[2] ?? 'watch';
+  // `start`: a Codex SessionStart hook brings the daemon up first. A hook has the user's whole environment, while
+  // Codex starts the lead's MCP server with a filtered one that a daemon it started would keep (CODEX_HOME, proxies).
+  const starts = process.argv[3] === 'start';
   // End before the host timeout, even if stdin or the transport gets stuck.
-  const lifetime = mode === 'watch' ? (HOOK_SECONDS - 10) * 1000 : 4000;
+  const lifetime = mode === 'watch' ? (HOOK_SECONDS - 10) * 1000 : starts ? 25_000 : 4000;
   const deadline = Date.now() + lifetime;
   const timer = setTimeout(() => process.exit(0), lifetime);
   try {
     let raw = '';
     for await (const chunk of process.stdin) raw += chunk;
+    // A daemon that cannot start leaves the context empty, as a missing daemon always has.
+    if (starts) await ensureDaemon().catch(() => {});
     const result = await leadHook(JSON.parse(raw), mode, api, deadline);
     if (result.stdout) await new Promise<void>((resolve) => process.stdout.write(result.stdout + '\n', () => resolve()));
     if (result.stderr) await new Promise<void>((resolve) => process.stderr.write(result.stderr + '\n', () => resolve()));

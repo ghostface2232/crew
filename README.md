@@ -3,7 +3,7 @@
 
 # Crew
 
-A Claude Code plugin that runs several coding agents together: Claude, Codex, and Antigravity. Claude leads from a Claude Code session, planning the work and handing pieces of it to the other agents in parallel while reviewing what comes back and deciding what is merged. You can change which agent takes each kind of work at any time. A native SwiftUI macOS app, a Windows Electron app, and a React web board show all three agents in real time.
+A plugin for Claude Code and Codex that runs several coding agents together: Claude, Codex, and Antigravity. The session you start in leads, whether it is Claude Code or Codex: it plans the work and hands pieces of it to the other agents in parallel, reviewing what comes back and deciding what is merged. You can change which agent takes each kind of work at any time. A native SwiftUI macOS app, a Windows Electron app, and a React web board show all three agents in real time.
 
 <img width="1440" alt="crew-screenshot" src="https://github.com/user-attachments/assets/eec6a201-8395-4dc9-a77c-2e5872aa96d0" />
 
@@ -11,9 +11,9 @@ A Claude Code plugin that runs several coding agents together: Claude, Codex, an
 
 Install and open the desktop app from [Releases](https://github.com/ghostface2232/crew/releases/latest) (macOS 26 or later on Apple silicon, or Windows 10 or later on x64).
 
-You need Claude Code plus signed-in Codex and Antigravity CLIs (`codex login`; run `agy` once). Every job spends the usage of the plan its agent is signed in to.
+You need Claude Code or Codex to lead from, plus signed-in Codex and Antigravity CLIs for the workers (`codex login`; run `agy` once). Every job spends the usage of the plan its agent is signed in to.
 
-On first launch, the app installs the Crew plugin for Claude Code and the `crew` command, both running on the app's own Node. Its Overview lists anything else Crew needs. Open a new Claude Code session afterwards. The app updates the plugin with itself and leaves a plugin installed from a source checkout alone.
+On first launch, the app installs the Crew plugin for Claude Code and for Codex, whichever you have, and the `crew` command, all running on the app's own Node. Its Overview lists anything else Crew needs. Open a new Claude Code or Codex session afterwards; Codex also needs the steps in [Leading from Codex](#leading-from-codex). The app updates the plugin with itself and leaves a plugin installed from a source checkout alone.
 
 ### From source
 
@@ -29,11 +29,11 @@ node plugin/bridge/cli.ts install
 crew doctor
 ```
 
-`install` registers this folder as a Claude Code marketplace, installs the `crew` plugin, and links `crew` into `~/.local/bin` (on Windows, `crew.cmd` for cmd and PowerShell, a `crew` script for Git Bash, and `crew.mjs`). Open a new Claude Code session (including Desktop) afterwards.
+`install` registers this folder as a Claude Code marketplace and installs the `crew` plugin. With Codex installed, it does the same for Codex. It also links `crew` into `~/.local/bin` (on Windows, `crew.cmd` for cmd and PowerShell, a `crew` script for Git Bash, and `crew.mjs`). Open a new Claude Code or Codex session afterwards. Codex keeps its own copy of the plugin, so run `install` again after changing it.
 
 ## Usage
 
-Inside a Claude Code session:
+Inside a Claude Code or Codex session (in Codex, skills start with `$`: `$crew:run`, `$crew:debate`, `$crew:review`, `$crew:board`):
 
 | Input | What happens |
 | --- | --- |
@@ -43,7 +43,19 @@ Inside a Claude Code session:
 | `/crew:board` | Opens the status board (inside the browser pane in Claude Desktop) |
 | Natural prompts like "Have Codex build this part" or "Get a Codex review on this" | The lead calls `delegate`, `review`, or `polish` directly |
 
-From a terminal:
+### Leading from Codex
+
+A Codex session leads the same way, with a few differences:
+
+- **Trust the hooks once.** Codex runs a plugin's hooks only after you trust them. Open `/hooks` in a Codex session, press `t` to trust the Crew hooks, and start a new session. Without them the lead still works, but it misses the shared instructions and the news at the start and end of its turns. The app's Overview shows whether they are trusted.
+- **Allow the Crew tools.** The first Crew call that starts or changes work may ask for approval. Choose "Always allow" so later calls do not stop to ask.
+- **Waking.** When a job finishes, Crew queues a short note in the lead's thread ("Crew has news for …"), and an idle Codex session runs it as its next turn. If the session's last turn was interrupted, Codex holds the note until you type again; the news is then shown on that prompt.
+- **Roles held by Claude.** Claude cannot run as a worker under a Codex lead yet, so the lead does that work itself.
+- **Updating Codex.** If `codex` hangs at "Updating the local background server…" on Windows, run `codex app-server daemon stop`, then `codex app-server daemon update`.
+
+How this works is in [docs/delivery.md](docs/delivery.md#codex-leads).
+
+### From a terminal
 
 ```bash
 crew status
@@ -83,7 +95,7 @@ On macOS, this builds and opens the native SwiftUI app; on Windows, it builds an
 
 Closing the window hides it to the tray; quitting the app leaves jobs running. Both restore their window, and the macOS app opens approval notifications at the relevant job. The web board stays available.
 
-The board can start jobs directly for any role except debate, using the configured roles; full missions begin in the Claude lead session. See the [native macOS](docs/macos-app.md) and [Windows](docs/windows-app.md) notes for development, tests, resource measurements, and distribution limits.
+The board can start jobs directly for any role except debate, using the configured roles; full missions begin in a lead session. See the [native macOS](docs/macos-app.md) and [Windows](docs/windows-app.md) notes for development, tests, resource measurements, and distribution limits.
 
 ## How it works
 
@@ -96,7 +108,7 @@ The board can start jobs directly for any role except debate, using the configur
   - Only one reviewer of a change launches the app.
   - A worker that runs the app gets network access and its own snapshot of the change.
   - Performance-measuring jobs run alone.
-- Shared instructions live in `~/.crew/instructions.md` (all projects) and `.crew/instructions.md` at the repository root (that project). Workers receive them with each job and Claude sessions receive them at start; no service's own instruction files are touched.
+- Shared instructions live in `~/.crew/instructions.md` (all projects) and `.crew/instructions.md` at the repository root (that project). Workers receive them with each job and lead sessions receive them at start; no service's own instruction files are touched.
 - Configuration lives in `~/.crew/config.json` (stall timeout, notifications, Codex approval policy and automatic reviewer, plugins, whether Antigravity is enabled, presets, role holders, and whether agents rate each other's work for model scores).
 
 Antigravity is enabled by default and carries a Terms of Service risk: read [docs/architecture.md](docs/architecture.md#antigravity-policy-risk), and set `antigravity.enabled` to `false` in `~/.crew/config.json` to turn it off.

@@ -13,7 +13,7 @@ import type { ReactNode } from 'react';
 import type { BoardJob, CrewEvent, Snapshot } from './types.ts';
 import { actions, drafts, request } from './api.ts';
 import { board, mergeEvents } from './store.ts';
-import { elapsed, evidenceTurn, jobLabel, jobRole, MAX_COMPARED, NAMES, orderEvidence, projectOf, roleLabel } from './model.ts';
+import { elapsed, evidenceTurn, jobLabel, jobRole, MAX_COMPARED, NAMES, orderEvidence, projectOf, roleLabel, sessionAgent } from './model.ts';
 import { ActionStatus, CloseButton, CopyButton, CopyMenu, Dialog, Icon, Chip, useAction, useDraft, Elapsed, useStableItems } from './ui.tsx';
 import { ReportText as RenderReport } from './Report.ts';
 import { debatePoints, stanceCounts } from './debate.ts';
@@ -874,14 +874,14 @@ export const SessionDrawer = memo(function SessionDrawer({ id, state, close }: {
         <>
           {session.state === 'waiting' && (
             <div className="card answer-card answer">
-              <p className="headline selectable">{session.waitingFor ?? t('Claude needs your input.')}</p>
+              <p className="headline selectable">{session.waitingFor ?? t('{agent} needs your input.', { agent: NAMES[sessionAgent(session)] })}</p>
               <ClaudeAsk session={session} />
-              {!session.desktopId && <p className="callout secondary">{t('Answer in Claude.')}</p>}
+              {!session.desktopId && <p className="callout secondary">{t('Answer in {agent}.', { agent: NAMES[sessionAgent(session)] })}</p>}
             </div>
           )}
           <Facts
             facts={[
-              [t('Agent'), t('Claude · Lead')],
+              [t('Agent'), t('{agent} · Lead', { agent: NAMES[sessionAgent(session)] })],
               [t('Project'), projectOf(session)],
               ...(session.cwd !== projectOf(session) ? [[t('Directory'), session.cwd] as [string, string]] : []),
               [t('Started'), <Elapsed start={session.startedAt} suffix={t(' ago')} />],

@@ -1576,6 +1576,20 @@ test('a session row opens its own panel and closes it again, as job rows do', as
   await expect(page.getByRole('dialog')).toHaveCount(0);
 });
 
+test('a Codex lead session is shown as Codex\'s, on its card, in Needs You and in its panel', async ({ page, request }) => {
+  const data = fixture();
+  Object.assign(data.claude[1], { host: 'codex', state: 'waiting', waitingFor: 'needs your permission to use Bash', waitingId: 'w-3', ask: { tool: 'Bash', input: 'git push' } });
+  await request.post('/__push', { data: { type: 'state', data } });
+  await expect(page.locator('.agent-card[data-agent="codex"] .caption')).toContainText('Lead');
+  await expect(page.locator('.agent-card[data-agent="codex"] .agent-activity')).toContainText('1 active session');
+  await needsYou(page);
+  const card = page.locator('article[data-session="lead-2"]');
+  await expect(card.locator('.need-who')).toHaveText('Codex');
+  await expect(card.getByText('Answer in Codex.')).toBeVisible();
+  await card.locator('.need-title').click();
+  await expect(page.getByRole('dialog').getByText('Codex · Lead', { exact: true })).toBeVisible();
+});
+
 test('a waiting Claude session shows what it asks, opens in Claude, and opens its panel from the card', async ({ page, request }, testInfo) => {
   const data = fixture();
   Object.assign(data.claude[0], {

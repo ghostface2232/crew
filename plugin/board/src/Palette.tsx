@@ -6,7 +6,7 @@ import {
 } from '@fluentui/react-icons';
 import type { FluentIcon } from '@fluentui/react-icons';
 import type { Snapshot } from './types.ts';
-import { jobLabel, missionStep, missionStops, NAMES, projectOf, roleLabel, jobRole } from './model.ts';
+import { jobLabel, missionStep, missionStops, NAMES, projectOf, roleLabel, jobRole, sessionAgent } from './model.ts';
 import { AgentMark, Chip, EASE_IN_OUT, EASE_OUT, Icon, reducedMotion, Elapsed, tNodes, useClock, WordReveal } from './ui.tsx';
 import { jobStatusState, missionStateLabel, sessionStateLabel } from './Missions.tsx';
 import { t, translated } from './i18n.ts';
@@ -41,7 +41,7 @@ const PAGE_ENTRIES = translated((): [string, string, FluentIcon, string][] => [
 ]);
 /** Groups are named in English for the code that checks them, and shown in the reader's language. */
 const GROUPS = translated((): Record<string, string> => ({
-  Actions: t('Actions'), Pages: t('Pages'), Projects: t('Projects'), Missions: t('Missions'), 'Claude sessions': t('Claude sessions'), Jobs: t('Jobs'),
+  Actions: t('Actions'), Pages: t('Pages'), Projects: t('Projects'), Missions: t('Missions'), 'Lead sessions': t('Lead sessions'), Jobs: t('Jobs'),
 }));
 
 /**
@@ -154,11 +154,11 @@ export function Palette({ state, names, projects, origin, close, actions }: {
     }
     for (const session of claude) {
       list.push({
-        id: `session:${session.id}`, group: 'Claude sessions', title: session.title, subtitle: names.get(projectOf(session)) ?? projectOf(session), agent: 'claude',
+        id: `session:${session.id}`, group: 'Lead sessions', title: session.title, subtitle: names.get(projectOf(session)) ?? projectOf(session), agent: sessionAgent(session),
         search: session.title,
         run: () => actions.openSession(session.id),
         preview: () => ({
-          eyebrow: t('Claude · Lead'),
+          eyebrow: t('{agent} · Lead', { agent: NAMES[sessionAgent(session)] }),
           chip: [session.stalled ? 'stalled' : session.state, sessionStateLabel(session)],
           lines: [tNodes('Started {time} ago', { time: <Elapsed start={session.startedAt} /> })],
           text: session.waitingFor ?? session.phase,

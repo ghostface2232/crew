@@ -12,7 +12,7 @@ import { formatDate, longDay, shortDateTime, shortDay, shortMonth, timeOfDay } f
 import { request } from './api.ts';
 import {
   dailyCounts, elapsed, endedPerHour, holdersOf, jobLabel, leadMission, limitWindowLabel, NAMES, projectOf, relativeDuration, rolesOf, runningPerHour,
-  usageWindowName, unsettled,
+  sessionAgent, usageWindowName, unsettled,
 } from './model.ts';
 import { AgentMark, Chip, EmptyState, Icon, RollingNumber, StatusIcon, tNodes, useFade, useClock, useStableItems } from './ui.tsx';
 import { JobRow, jobKind, jobStatusState, MissionPanel, SessionRow } from './Missions.tsx';
@@ -259,23 +259,20 @@ function shownStatus(provider: ProviderUsage, status: ProviderUsage['windows'][n
 
 function agentActivity(state: Snapshot, project: string, agent: string) {
   const jobs = state.jobs.filter((job) => job.agent === agent && job.endedAt == null && inProject(project, job));
-  const sessions = state.claude.filter((session) => inProject(project, session));
+  const sessions = state.claude.filter((session) => sessionAgent(session) === agent && inProject(project, session));
   const open = sessions.filter((session) => session.state !== 'idle');
   const idle = sessions.length - open.length;
-  const items: { state: string; stalled: boolean }[] = agent === 'claude' ? open : jobs;
+  const items: { state: string; stalled: boolean }[] = [...open, ...jobs];
   const mark = items.some((item) => item.state === 'waiting') ? 'waiting' : items.some((item) => item.stalled) ? 'stalled' : items.length ? 'working' : 'idle';
   const title = mark === 'waiting' ? t('Needs you') : mark === 'stalled' ? t('May be stuck') : mark === 'working' ? t('Working')
     : state.agents[agent as WorkerAgent]?.enabled === false ? t('Disabled') : t('Ready');
-  // Busy agents say what they have open; Claude also counts its idle sessions.
-  const count = items.length;
-  const active = agent === 'claude'
-    ? (count === 1 ? t('1 active session') : t('{count} active sessions', { count }))
-    : (count === 1 ? t('1 active job') : t('{count} active jobs', { count }));
+  // Busy agents say what they have open, lead sessions and jobs apart, and count their idle lead sessions.
   const line = [
-    count ? active : null,
-    agent === 'claude' && idle ? (count ? t('{count} idle', { count: idle }) : idle === 1 ? t('1 idle session') : t('{count} idle sessions', { count: idle })) : null,
+    open.length ? (open.length === 1 ? t('1 active session') : t('{count} active sessions', { count: open.length })) : null,
+    jobs.length ? (jobs.length === 1 ? t('1 active job') : t('{count} active jobs', { count: jobs.length })) : null,
+    idle ? (items.length ? t('{count} idle', { count: idle }) : idle === 1 ? t('1 idle session') : t('{count} idle sessions', { count: idle })) : null,
   ].filter(Boolean).join(' · ');
-  return { line, mark, title };
+  return { line, mark, title, leads: sessions.length > 0 };
 }
 
 /** A table cell's text, fading at its end when the column is too narrow for it. */
@@ -296,7 +293,7 @@ export const AgentPanel = memo(function AgentPanel({ state, project }: { state: 
     <Panel label={t('Agents')} className="agents">
       <ul className="agent-cards">
         {agents.map((agent, index) => {
-          const { line, mark, title } = agentActivity(state, project, agent);
+          const { line, mark, title, leads } = agentActivity(state, project, agent);
           // A role that follows its parent to the same holders adds nothing to say, unless it names its own.
           const held = rolesOf(state)
             .filter(({ role, parent }) => {
@@ -307,7 +304,8 @@ export const AgentPanel = memo(function AgentPanel({ state, project }: { state: 
               return !(same && !state.roleSettings?.[role]?.agents);
             })
             .map(({ label }) => t(label));
-          const role = [...(agent === 'claude' ? [t('Lead')] : []), ...held].join(' · ');
+          // Claude leads unless the user starts in Codex, whose card says so while one of its sessions is open.
+          const role = [...(agent === 'claude' || leads ? [t('Lead')] : []), ...held].join(' · ');
           return (
             <li className="agent-card" key={agent} data-agent={agent} style={{ '--i': index } as CSSProperties}>
               <div className="agent-card-head">
@@ -655,7 +653,7 @@ export function Workspace({ state, project, names, selected, openJob, openSessio
             </Panel>
           )}
           {sessions.length > 0 && (
-            <Panel label={t('Claude sessions')} action={<Icon icon={ChatMultipleRegular} />}>
+            <Panel label={t('Lead sessions')} action={<Icon icon={ChatMultipleRegular} />}>
               <div className="rows">
                 {sessions.map((session) => (
                   <SessionRow key={session.id} session={session} selected={selected === `session:${session.id}`} openSession={openSession} />
@@ -664,7 +662,7 @@ export function Workspace({ state, project, names, selected, openJob, openSessio
             </Panel>
           )}
           {empty && (
-            <EmptyState title={t('Ready when you are')} icon={LayerRegular} detail={t('Hand a task to an agent, or run /crew:run in Claude.')}>
+            <EmptyState title={t('Ready when you are')} icon={LayerRegular} detail={t('Hand a task to an agent, or run /crew:run in Claude Code or Codex.')}>
               <button className="prominent" disabled={state.connection !== 'live'} onClick={(event) => newJob(event.currentTarget)}>
                 <Icon icon={AddRegular} />
                 {t('New Job')}

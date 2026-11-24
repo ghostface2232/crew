@@ -7,7 +7,7 @@ import type { CSSProperties } from 'react';
 import type { BoardJob, ClaudeSession } from './types.ts';
 import { board } from './store.ts';
 import { actions, answerKey, request } from './api.ts';
-import { NAMES, projectOf } from './model.ts';
+import { NAMES, projectOf, sessionAgent } from './model.ts';
 import { ActionStatus, AgentMark, Chip, Composer, EmptyState, Icon, useAction, useDraft, Elapsed } from './ui.tsx';
 import { t } from './i18n.ts';
 
@@ -181,8 +181,8 @@ export function NeedsYou({
                 <div className="need-bar">
                   <Chip state="waiting">{t('Input')}</Chip>
                   <span className="need-who" title={projectOf(session)}>
-                    <AgentMark agent="claude" size={13} />
-                    <span>Claude</span>
+                    <AgentMark agent={sessionAgent(session)} size={13} />
+                    <span>{NAMES[sessionAgent(session)]}</span>
                   </span>
                   <OpenInClaude session={session} small />
                 </div>
@@ -191,9 +191,9 @@ export function NeedsYou({
                 </button>
               </div>
               <div className="answer">
-                <p className="headline selectable">{session.waitingFor ?? t('Claude needs your input.')}</p>
+                <p className="headline selectable">{session.waitingFor ?? t('{agent} needs your input.', { agent: NAMES[sessionAgent(session)] })}</p>
                 <ClaudeAsk session={session} />
-                {!session.desktopId && <p className="callout secondary"><Icon icon={ChatMultipleRegular} size={13} /> {t('Answer in Claude.')}</p>}
+                {!session.desktopId && <p className="callout secondary"><Icon icon={ChatMultipleRegular} size={13} /> {t('Answer in {agent}.', { agent: NAMES[sessionAgent(session)] })}</p>}
               </div>
             </article>
           ))}

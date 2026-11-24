@@ -216,19 +216,30 @@ async function startDaemon(): Promise<void> {
   const script = path.join(import.meta.dirname, `daemon${path.extname(import.meta.filename)}`);
   const env = { ...agentEnv(), ...nodeEnv(), ...(partial ? { CREW_PARTIAL_ENV: '1' } : {}) };
   let spawnError: Error | undefined;
-  const spawnHere = async () => {
+  const log = path.join(HOME, 'daemon.log');
+  /**
+   * Opens the log for a new daemon. On Windows a daemon started through WMI writes it through cmd.exe, which holds it
+   * unshared until that daemon exits, and another cmd.exe cannot redirect to it then either. So a daemon still stopping
+   * is waited for, and undefined is returned once one answers instead, as one still starting there does.
+   */
+  const openLog = async (): Promise<number | undefined> => {
     let out: number | undefined;
-    // A daemon started outside a Codex job writes through cmd.exe, which holds the log unshared until it exits. One
-    // still stopping there is waited for, and one starting there is left to come up instead of this one.
-    await waitFor(async () => {
+    let busy: unknown;
+    const free = await waitFor(async () => {
       try {
-        out = fs.openSync(path.join(HOME, 'daemon.log'), 'a');
+        out = fs.openSync(log, 'a');
         return true;
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EBUSY') throw error;
+        if (process.platform !== 'win32' || (error as NodeJS.ErrnoException).code !== 'EBUSY') throw error;
+        busy = error;
         return (await health()) !== null;
       }
-    }, 5000);
+    }, 8000);
+    if (!free) throw new Error(`The Crew daemon could not start: another process still holds ${log}.`, { cause: busy });
+    return out;
+  };
+  const spawnHere = async () => {
+    const out = await openLog();
     if (out === undefined) return;
     const child = spawn(process.execPath, [script], { detached: true, windowsHide: true, stdio: ['ignore', out, out], env });
     child.on('error', (error) => { spawnError = error; });
@@ -239,11 +250,19 @@ async function startDaemon(): Promise<void> {
     if (spawnError) throw new Error(`Could not start the Crew daemon: ${spawnError.message}`);
     return (await health()) !== null;
   }, 8000);
-  const outside = inCodexJob && process.platform === 'win32' && await startOutsideJob(script, env);
+  let outside = false;
+  if (inCodexJob && process.platform === 'win32') {
+    // Checked before WMI starts cmd.exe, whose redirect would fail on a busy log and leave only the fallback below,
+    // which spawns the daemon inside the job.
+    const out = await openLog();
+    if (out === undefined) return;
+    fs.closeSync(out);
+    outside = await startOutsideJob(script, env);
+  }
   if (!outside) await spawnHere();
   // WMI vouches only that cmd.exe was created, so a daemon that did not come up from there is started the usual way.
   // One that comes up late finds this one recorded and exits (daemon.ts bind).
   if (!(await started()) && !(outside && (await spawnHere(), await started()))) {
-    throw new Error(`The Crew daemon did not start. See ${path.join(HOME, 'daemon.log')}.`);
+    throw new Error(`The Crew daemon did not start. See ${log}.`);
   }
 }

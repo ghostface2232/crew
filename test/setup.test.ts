@@ -252,12 +252,14 @@ test('a built copy registers with Codex, records only when both hosts run it, an
   fs.writeFileSync(path.join(root, 'plugin/.claude-plugin/build'), 'built\n');
   fs.writeFileSync(path.join(root, 'plugin/package.json'), '{"type":"module"}\n');
   fs.cpSync(fileURLToPath(new URL('../.claude-plugin', import.meta.url)), path.join(root, '.claude-plugin'), { recursive: true });
-  fs.mkdirSync(path.join(app, 'runtime'));
-  fs.writeFileSync(path.join(app, 'runtime/node'), '');
+  // Crew.app keeps its Node beside the marketplace; the Windows build keeps node.exe inside it, which the copy then carries.
+  const runtime = process.platform === 'win32' ? path.join(root, 'runtime') : path.join(app, 'runtime');
+  fs.mkdirSync(runtime);
+  fs.writeFileSync(path.join(runtime, process.platform === 'win32' ? 'node.exe' : 'node'), '');
   const record = path.join(home, 'setup.json');
   t.after(() => fs.rmSync(record, { force: true }));
   const { register } = await import(pathToFileURL(path.join(root, 'plugin/bridge/setup.ts')).href);
-  const codexCalls = () => fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line)).filter(([bin]) => bin.endsWith('codex')).map(([, ...args]) => args.join(' ')) : [];
+  const codexCalls = () => fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line)).filter(([bin]) => /codex(\.cjs)?$/.test(bin)).map(([, ...args]) => args.join(' ')) : [];
   const ours = path.join(profile, '.crew', 'codex', 'marketplace');
 
   // Someone else's `crew` marketplace in Codex is left as it is, and so is the folder.
@@ -287,7 +289,10 @@ test('a built copy registers with Codex, records only when both hosts run it, an
   // Once both hosts run this copy it is recorded; the marketplace carries the agents the skills read.
   fs.rmSync(failAdd);
   assert.equal((await register(true)).ok, true);
-  assert.equal(JSON.parse(fs.readFileSync(record, 'utf8')).root, fs.realpathSync(root));
+  // On Windows the registered root is the copy in the Crew home, which open sessions keep running through an update.
+  const registeredRoot = JSON.parse(fs.readFileSync(record, 'utf8')).root;
+  if (process.platform === 'win32') assert.match(registeredRoot, /[\\/]plugins[\\/][^\\/]+-built$/);
+  else assert.equal(registeredRoot, fs.realpathSync(root));
   assert.ok(fs.existsSync(path.join(ours, 'plugin/agents/self-reviewer.md')));
 
   // A marketplace Crew wrote earlier, elsewhere, is replaced: removed, then ours added.

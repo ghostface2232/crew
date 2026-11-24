@@ -82,6 +82,8 @@ const WORKER_CWD = /[\\/]worktrees[\\/][^\\/]+-[0-9a-f]{8}[\\/](cx|ag)-[0-9a-f]{
  * Few Crew jobs use them, and they cost each turn thousands of input tokens. A job that names plugins gets
  * those and no others (`lean` below).
  */
+/** Crew's own plugin as Codex names it once `crew install` or the app registered it. */
+const CREW_PLUGIN = 'crew@crew';
 const LEAN = {
   skills: { include_instructions: false },
   features: { apps: false, plugins: false, tool_suggest: false },
@@ -389,7 +391,9 @@ export class CodexAdapter implements Adapter {
       // Keep it on here so enabled plugins remain usable; it cannot suppress only user skills.
       features: { ...LEAN.features, plugins: true },
       // Inventory can omit a marketplace or precede a remote install; do not inherit enablement for unseen plugins.
-      plugins: { _default: { enabled: false }, ...Object.fromEntries(installed.map((plugin) => [plugin.id, { enabled: plugin.enabled && wanted.some((name) => named(plugin.id, name)) }])) },
+      // `_default` alone did not turn off a plugin the user has installed and on (Codex 0.170, 2026-11-24), so Crew's
+      // own plugin is named: a worker must never load the lead's MCP server or hooks.
+      plugins: { _default: { enabled: false }, ...Object.fromEntries(installed.map((plugin) => [plugin.id, { enabled: plugin.enabled && wanted.some((name) => named(plugin.id, name)) }])), [CREW_PLUGIN]: { enabled: false } },
     };
   }
 

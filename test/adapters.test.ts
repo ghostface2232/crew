@@ -694,8 +694,8 @@ test('Codex turns on only the plugins a job is to have, and asks the user before
   const configs = seen.filter((msg) => ['thread/start', 'thread/resume'].includes(msg.method)).map((msg) => msg.params.config);
   assert.deepEqual([configs[0].features, configs[0].plugins, configs[0].skills], [{ apps: false, plugins: false, tool_suggest: false }, undefined, { include_instructions: false }]);
   assert.deepEqual(configs[1].features, { apps: false, plugins: true, tool_suggest: false });
-  assert.deepEqual(configs[1].plugins, { _default: { enabled: false }, 'computer-use@bundled': { enabled: true }, 'browser@bundled': { enabled: false }, 'mail@bundled': { enabled: false } });
-  assert.deepEqual(configs[2].plugins, { _default: { enabled: false }, 'computer-use@bundled': { enabled: false }, 'browser@bundled': { enabled: true }, 'mail@bundled': { enabled: false }, 'new@bundled': { enabled: false } });
+  assert.deepEqual(configs[1].plugins, { _default: { enabled: false }, 'computer-use@bundled': { enabled: true }, 'browser@bundled': { enabled: false }, 'mail@bundled': { enabled: false }, 'crew@crew': { enabled: false } });
+  assert.deepEqual(configs[2].plugins, { _default: { enabled: false }, 'computer-use@bundled': { enabled: false }, 'browser@bundled': { enabled: true }, 'mail@bundled': { enabled: false }, 'new@bundled': { enabled: false }, 'crew@crew': { enabled: false } });
   assert.deepEqual(configs[3].plugins, { ...configs[2].plugins, 'mail@bundled': { enabled: true } });
   assert.equal(configs[1].skills, undefined);
   for (const config of configs.slice(2)) {
@@ -717,7 +717,7 @@ test('Codex keeps dotted plugin IDs literal and denies unseen plugin defaults', 
     return { marketplaces: [{ plugins: [{ id: 'browser@market.place', installed: true, enabled: true }] }] };
   } };
   const params = await (adapter as any).threadParams(ctl, peer);
-  assert.deepEqual(params.config.plugins, { _default: { enabled: false }, 'browser@market.place': { enabled: true } });
+  assert.deepEqual(params.config.plugins, { _default: { enabled: false }, 'browser@market.place': { enabled: true }, 'crew@crew': { enabled: false } });
   assert.deepEqual(calls, [['plugin/installed', { cwds: ['/workspace'] }]]);
 });
 

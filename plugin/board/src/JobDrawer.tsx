@@ -21,7 +21,7 @@ import type { Stance } from './debate.ts';
 import { Answer, ClaudeAsk, OpenInClaude } from './NeedsYou.tsx';
 import { EventList } from './Overview.tsx';
 import { jobStatusState, missionStateLabel, SessionAgents, sessionStateLabel, SessionWorkflow } from './Missions.tsx';
-import { t } from './i18n.ts';
+import { t, translated } from './i18n.ts';
 
 /** Reports are parsed once per text, not on every clock tick the panel renders for. */
 const ReportText = memo(RenderReport);
@@ -204,11 +204,11 @@ function EvidenceCompare({ job, items, shown, onShown }: { job: BoardJob; items:
   );
 }
 
-const NETWORK: Record<NonNullable<BoardJob['capabilities']>['network'], string> = {
+const NETWORK = translated((): Record<NonNullable<BoardJob['capabilities']>['network'], string> => ({
   on: t('network on'),
   off: t('no network'),
   'agent-managed': t('network as the agent allows'),
-};
+}));
 
 /** Whose shared instructions a job was given, as the bridge recorded them; jobs from before that list their files. */
 function sharedLabel(job: BoardJob) {
@@ -296,7 +296,7 @@ function VerificationSection({ job }: { job: BoardJob }) {
           <dd>
             {[
               capabilities.filesystem,
-              NETWORK[capabilities.network],
+              NETWORK()[capabilities.network],
               capabilities.plugins.length && t('plugins {plugins} (act outside the sandbox)', { plugins: capabilities.plugins.join(', ') }),
             ].filter(Boolean).join(' · ')}
           </dd>
@@ -321,14 +321,14 @@ const hasConversation = (job: BoardJob) => job.debate ? Boolean(job.exchange?.le
 /** A debate that has had its rounds and stopped: the daemon refuses another reply, whatever state it ended in. */
 const debateConcluded = (job: BoardJob) => Boolean(job.debate && job.state !== 'running' && job.state !== 'waiting' && job.turns >= job.debate.rounds);
 
-const STANCES: Record<Stance, [string, (count: number) => string, typeof CheckmarkCircle16Regular]> = {
+const STANCES = translated((): Record<Stance, [string, (count: number) => string, typeof CheckmarkCircle16Regular]> => ({
   agree: [t('Agree'), (count) => t('{count} agree', { count }), CheckmarkCircle16Regular],
   disagree: [t('Disagree'), (count) => t('{count} disagree', { count }), DismissCircle16Regular],
   alternative: [t('Alternative'), (count) => t('{count} alternative', { count }), BranchFork16Regular],
-};
+}));
 /** A point's stance as a colored mark, followed in a round's heading by its count. */
 function StanceMark({ stance, count }: { stance: Stance; count?: number }) {
-  const [title, counted, icon] = STANCES[stance];
+  const [title, counted, icon] = STANCES()[stance];
   return (
     <span className="stance" data-stance={stance} title={title} role="img" aria-label={count === undefined ? title : counted(count)}>
       <Icon icon={icon} size={13} />

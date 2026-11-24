@@ -13,7 +13,7 @@ import {
   missionStops, NAMES, pullIsStale, pullStatuses, roleLabel,
 } from './model.ts';
 import { ActionStatus, AgentMark, Chip, Collapse, Elapsed, Icon, Menu, StatusIcon, sameItems, useAction, useFade, useClock } from './ui.tsx';
-import { t } from './i18n.ts';
+import { t, translated } from './i18n.ts';
 
 export const jobStatusState = (job: BoardJob) => (job.stalled ? 'stalled' : job.state);
 /** What a job is, as the app names it in a row: its role, or Question for a question. */
@@ -241,7 +241,7 @@ const FOLD_STAGES_AFTER = 1;
 /** A stage with this many jobs or fewer stays open by default, as reopening each one would cost more than it saves. */
 const STAGE_OPENS_UP_TO = 3;
 const openStages = new Map<string, boolean>();
-const PRESETS: [PresetName | null, string][] = [[null, t('Default')], ['economy', t('Economy')], ['balanced', t('Balanced')], ['best', t('Best')]];
+const PRESETS = translated((): [PresetName | null, string][] => [[null, t('Default')], ['economy', t('Economy')], ['balanced', t('Balanced')], ['best', t('Best')]]);
 
 /** A chip that names a pull request's most urgent status and counts the others the lead must act on; it opens the pull request. */
 function MissionPull({ pull }: { pull: BoardPull }) {
@@ -335,7 +335,7 @@ export const MissionPanel = memo(function MissionPanel({
     projectName,
     jobs.length === 1 ? t('1 job') : t('{count} jobs', { count: jobs.length }),
     tasks.length ? t('{done}/{total} tasks', { done: tasks.filter((task) => task.state === 'done').length, total: tasks.length }) : null,
-    mission.preset ? PRESETS.find(([preset]) => preset === mission.preset)?.[1] ?? mission.preset : null,
+    mission.preset ? PRESETS().find(([preset]) => preset === mission.preset)?.[1] ?? mission.preset : null,
   ].filter(Boolean).join(' · ');
   const live = useSyncExternalStore(board.subscribe, () => board.getSnapshot().connection === 'live');
   const locked = action.pending || action.accepted || !live;
@@ -393,7 +393,7 @@ export const MissionPanel = memo(function MissionPanel({
                 <>
                   <hr />
                   <p className="menu-label" role="presentation">{t('Model Preset')}</p>
-                  {PRESETS.map(([preset, name]) => (
+                  {PRESETS().map(([preset, name]) => (
                     <button
                       key={name}
                       role="menuitemradio"

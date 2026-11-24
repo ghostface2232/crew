@@ -3,7 +3,7 @@ import { TrophyRegular } from '@fluentui/react-icons';
 import type { ModelScore } from './types.ts';
 import { NAMES } from './model.ts';
 import { AgentMark, Icon, RollingNumber } from './ui.tsx';
-import { t } from './i18n.ts';
+import { t, translated } from './i18n.ts';
 import styles from './Scores.module.css';
 
 const shown = (value: number | null) => (value === null ? '—' : value.toFixed(1));
@@ -48,8 +48,8 @@ function Ring({ score, size = 52 }: { score: ModelScore; size?: number }) {
 }
 
 /** The items beside correctness, which the ring shows; an older daemon sends none, and an item with nothing behind it is left out. */
-const ITEMS = [['brief', t('Brief')], ['report', t('Report')], ['findings', t('Findings')]] as const;
-const itemBars = (score: ModelScore) => ITEMS.filter(([item]) => score.items?.[item] != null);
+const ITEMS = translated(() => [['brief', t('Brief')], ['report', t('Report')], ['findings', t('Findings')]] as const);
+const itemBars = (score: ModelScore) => ITEMS().filter(([item]) => score.items?.[item] != null);
 
 /** A build or fix score, or an item, as a short bar out of 10. */
 function Bar({ label, value }: { label: string; value: number | null }) {

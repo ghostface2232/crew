@@ -504,6 +504,9 @@
 "Scored from review findings per build size, with fixes scored apart. A model is ranked after three build reviews; a review by its own agent counts half." = "구현 규모를 고려해 리뷰 지적 사항으로 점수를 매기고, 수정은 따로 평가해요. 구현 리뷰가 세 건 쌓이면 순위에 올라요. 같은 에이전트가 한 리뷰는 절반만 반영해요.";
 "Peer ratings" = "상호 평가";
 "The lead and the workers rate each other's work as they see it, in turns they already have, and the ratings move half of a score from where the review findings put it. Off, nobody is asked to rate and the scores come from the review findings alone; ratings already given are kept." = "리드와 워커가 각자의 턴에서 서로의 작업을 평가해요. 이 평가는 리뷰 지적 사항으로 매긴 점수와 절반 비중으로 반영돼요. 끄면 평가를 요청하지 않고 리뷰 지적 사항만으로 점수를 매기며, 기존 평가는 그대로 유지돼요.";
+"Language" = "언어";
+"Match System" = "시스템 설정과 같게";
+"For the board and the Crew app on this computer. The app switches the next time it opens." = "이 컴퓨터의 보드와 Crew 앱에 적용돼요. 앱은 다음에 열 때 바뀌어요.";
 "Shared instructions" = "공유 지침";
 "Given to every agent with its next job, in every project, and to Claude sessions when they start." = "모든 프로젝트에서 각 에이전트의 다음 작업부터 전달되고, Claude 세션에는 시작할 때 전달돼요.";
 "Given to every agent working in this project, after the instructions for every project." = "이 프로젝트에서 작업하는 모든 에이전트에게 모든 프로젝트 지침 다음에 전달돼요.";

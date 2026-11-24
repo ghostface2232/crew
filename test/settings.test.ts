@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { canonicalPath, effectiveRole, PRESETS, resolveConfig } from '../plugin/bridge/config.ts';
-import { appendInstructions, instructionsFile, readInstructions, savePeerRatings, savePreset, saveRoles, writeInstructions } from '../plugin/bridge/settings.ts';
+import { appendInstructions, instructionsFile, readInstructions, saveLanguage, savePeerRatings, savePreset, saveRoles, writeInstructions } from '../plugin/bridge/settings.ts';
 
 const tempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'crew-settings-'));
 
@@ -253,6 +253,20 @@ test('a role written before agents becomes a list of holders, the model going to
   const added = resolveConfig({ roles: { delegate: { agent: 'antigravity', model: 'gemini-y' }, refactor: { also: ['codex'], effort: 'low' }, review: { also: ['claude'] } } });
   assert.deepEqual(added.roles.refactor, { agents: ['codex', 'antigravity'], antigravity: { model: 'gemini-y' }, codex: { effort: 'low' } });
   assert.deepEqual(added.roles.review, { agents: ['codex', 'claude'] });
+});
+
+test('the interface language follows the system unless the file names one, and clearing it removes the key', () => {
+  const home = tempDir();
+  const file = path.join(home, 'config.json');
+  assert.equal(resolveConfig({}).language, null);
+  assert.throws(() => resolveConfig({ language: 'ja' as never }), /language is "ja"; use one of: en, ko/);
+  fs.writeFileSync(file, JSON.stringify({ notify: false }));
+  assert.deepEqual(saveLanguage(home, 'ko'), { language: 'ko' });
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { notify: false, language: 'ko' });
+  assert.throws(() => saveLanguage(home, 'Korean'), /use one of: en, ko/);
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { notify: false, language: 'ko' });
+  assert.deepEqual(saveLanguage(home, null), { language: null });
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { notify: false });
 });
 
 test('peer ratings are on unless the file says false, and turning them back on removes the key', () => {

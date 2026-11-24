@@ -22,7 +22,7 @@ import { Onboarding } from './Onboarding.tsx';
 import { NavList, ProjectPeek } from './Shell.tsx';
 import { Notifier } from './notify.ts';
 import { desktop, useAppUpdate } from './desktop.ts';
-import { t } from './i18n.ts';
+import { followSetting, language, onLanguageChange, t, translated } from './i18n.ts';
 
 export type Page = 'overview' | 'needs' | 'activity' | 'history';
 const GridNavIcon = bundleIcon(GridFilled, GridRegular);
@@ -31,13 +31,13 @@ const FlashNavIcon = bundleIcon(FlashFilled, FlashRegular);
 const ClockNavIcon = bundleIcon(ClockFilled, ClockRegular);
 const StackNavIcon = bundleIcon(StackFilled, StackRegular);
 const FolderNavIcon = bundleIcon(FolderFilled, FolderRegular);
-export const PAGES: [Page, string, FluentIcon][] = [
+export const PAGES = translated((): [Page, string, FluentIcon][] => [
   ['overview', t('Overview'), GridNavIcon],
   ['needs', t('Needs You'), AlertNavIcon],
   ['activity', t('Activity'), FlashNavIcon],
   ['history', t('History'), ClockNavIcon],
-];
-const TITLES: Record<Page, string> = { overview: t('Overview'), needs: t('Needs You'), activity: t('Activity'), history: t('History') };
+]);
+const TITLES = translated((): Record<Page, string> => ({ overview: t('Overview'), needs: t('Needs You'), activity: t('Activity'), history: t('History') }));
 
 /** One selection, as in the app: a page, or `project:<path>` for a project's overview. */
 function storedSelection() {
@@ -57,8 +57,16 @@ const typing = (target: EventTarget | null) =>
 
 export function App() {
   const state = useSyncExternalStore(board.subscribe, board.getSnapshot);
+  const shown = useSyncExternalStore(onLanguageChange, () => language);
   const [selection, setSelection] = useState(storedSelection);
-  const [settings, setSettings] = useState<boolean | 'about'>(false);
+  const [settings, setSettings] = useState<boolean | 'about' | 'language'>(false);
+  // A change of language draws everything below again (the key on ClockProvider), so Settings, if open, comes back on
+  // its Language page, where the change was most likely made.
+  const [drawnIn, setDrawnIn] = useState(shown);
+  if (drawnIn !== shown) {
+    setDrawnIn(shown);
+    if (settings) setSettings('language');
+  }
   const update = useAppUpdate();
   /** Where a sheet grows from: the control that opened it, or nothing for a keyboard shortcut. */
   const [dispatching, setDispatching] = useState<{ origin?: DOMRect } | null>(null);
@@ -66,7 +74,7 @@ export function App() {
   const [welcome, setWelcome] = useState(false);
   const [detail, setDetail] = useState(detailFromHash);
   const project = selection.startsWith('project:') ? selection.slice(8) : '';
-  const page: Page = project ? 'overview' : (PAGES.find(([id]) => id === selection)?.[0] ?? 'overview');
+  const page: Page = project ? 'overview' : (PAGES().find(([id]) => id === selection)?.[0] ?? 'overview');
   const { jobs, claude, missions } = state;
   const known = useMemo(() => knownProjects({ jobs, claude, missions }), [jobs, claude, missions]);
   const projects = useStableItems(project && !known.includes(project) ? [...known, project].sort() : known);
@@ -111,6 +119,10 @@ export function App() {
   useEffect(() => {
     document.title = pending ? `(${pending}) Crew` : 'Crew';
   }, [pending]);
+  useEffect(() => followSetting(state.language), [state.language]);
+  useEffect(() => {
+    document.documentElement.lang = shown;
+  }, [shown]);
   useEffect(() => {
     const change = () => setDetail(detailFromHash());
     window.addEventListener('hashchange', change);
@@ -141,7 +153,7 @@ export function App() {
   // A closed panel stays up while it slides out; a different one replaces it at once.
   const [panel, panelLeaving] = useLinger(detail, PANEL_EXIT_MS);
   // Settings stay up while they settle out, as the panel does.
-  const [shownSettings, settingsLeaving] = useLinger(settings === 'about' ? 'about' : settings ? 'open' : '', SHEET_EXIT_MS);
+  const [shownSettings, settingsLeaving] = useLinger(settings === true ? 'open' : settings || '', SHEET_EXIT_MS);
   /** After New Job, the job's own project, so the new job is in view, as the app goes there. */
   const openNewJob = (id: string, root?: string) => {
     if (root && project !== root) select(`project:${root}`);
@@ -193,7 +205,7 @@ export function App() {
       event.preventDefault();
       newJob();
     } else if (/^[1-4]$/.test(event.key)) {
-      select(PAGES[Number(event.key) - 1][0]);
+      select(PAGES()[Number(event.key) - 1][0]);
     }
   };
   useEffect(() => {
@@ -202,7 +214,7 @@ export function App() {
     return () => window.removeEventListener('keydown', listener);
   }, []);
   const scope = useMemo(() => ({ state, project, names, selected: detail, openJob, openSession }), [state, project, names, detail, openJob, openSession]);
-  const pageItems = useMemo(() => PAGES.map(([id, label, icon]) => ({ id, label, icon, count: id === 'needs' ? pending : undefined })), [pending]);
+  const pageItems = useMemo(() => PAGES().map(([id, label, icon]) => ({ id, label, icon, count: id === 'needs' ? pending : undefined })), [pending, shown]);
   if (state.connection === 'unauthorized') {
     return (
       <main className="sign-in" aria-labelledby="sign-in-title">
@@ -219,7 +231,7 @@ export function App() {
       </main>
     );
   }
-  const title = project ? (names.get(project) ?? project) : TITLES[page];
+  const title = project ? (names.get(project) ?? project) : TITLES()[page];
   const pageNav = (
     <NavList
       label={t('Pages')}
@@ -230,7 +242,8 @@ export function App() {
     />
   );
   return (
-    <ClockProvider skew={state.clockSkew}>
+    // Some components are memoized and would keep text in the language they were drawn in.
+    <ClockProvider key={shown} skew={state.clockSkew}>
       <div className="app">
         <aside className="sidebar" id="sidebar" aria-label={t('Sidebar')} ref={sidebar} data-open={drawer || undefined} inert={folded}>
           <div className="brand">
@@ -382,7 +395,7 @@ export function App() {
           )}
         </LeavingContext>
         <LeavingContext value={settingsLeaving}>
-          {shownSettings && <Settings state={state} update={update} close={() => setSettings(false)} initial={shownSettings === 'about' ? 'about' : undefined} />}
+          {shownSettings && <Settings state={state} update={update} close={() => setSettings(false)} initial={shownSettings === 'about' || shownSettings === 'language' ? shownSettings : undefined} />}
         </LeavingContext>
         <AskHost />
       </div>

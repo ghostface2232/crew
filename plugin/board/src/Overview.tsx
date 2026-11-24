@@ -16,7 +16,7 @@ import {
 } from './model.ts';
 import { AgentMark, Chip, EmptyState, Icon, RollingNumber, StatusIcon, tNodes, useFade, useClock, useStableItems } from './ui.tsx';
 import { JobRow, jobKind, jobStatusState, MissionPanel, SessionRow } from './Missions.tsx';
-import { t } from './i18n.ts';
+import { t, translated } from './i18n.ts';
 
 export interface Scope {
   state: Snapshot;
@@ -466,7 +466,7 @@ const EventRow = memo(function EventRow({ event, index, openJob }: { event: Crew
   );
 });
 
-const AGENT_FILTERS: [string, string][] = [['', t('Everyone')], ['claude', 'Claude'], ['codex', 'Codex'], ['antigravity', 'Antigravity']];
+const AGENT_FILTERS = translated((): [string, string][] => [['', t('Everyone')], ['claude', 'Claude'], ['codex', 'Codex'], ['antigravity', 'Antigravity']]);
 /** Pills that filter a list, with each one's count, as the reference dashboards filter. */
 function Pills<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: [T, string, number?][]; onChange: (value: T) => void }) {
   return (
@@ -505,7 +505,7 @@ export const Activity = memo(function Activity({ events, jobs, missions, openJob
       </section>
       <Panel
         label={t('Events')}
-        action={<Pills label={t('Agent')} value={agent} options={AGENT_FILTERS.map(([id, name]) => [id, name, id ? counts.get(id) ?? 0 : events.length])} onChange={setAgent} />}
+        action={<Pills label={t('Agent')} value={agent} options={AGENT_FILTERS().map(([id, name]) => [id, name, id ? counts.get(id) ?? 0 : events.length])} onChange={setAgent} />}
       >
         {!days.size && <p className="secondary">{t('No activity yet.')}</p>}
         {[...days].reverse().map(([day, list]) => (

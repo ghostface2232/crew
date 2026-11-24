@@ -9,7 +9,7 @@ import type { Snapshot } from './types.ts';
 import { jobLabel, missionStep, missionStops, NAMES, projectOf, roleLabel, jobRole } from './model.ts';
 import { AgentMark, Chip, EASE_IN_OUT, EASE_OUT, Icon, reducedMotion, Elapsed, tNodes, useClock, WordReveal } from './ui.tsx';
 import { jobStatusState, missionStateLabel, sessionStateLabel } from './Missions.tsx';
-import { t } from './i18n.ts';
+import { t, translated } from './i18n.ts';
 import { notificationPermission, notificationsWanted, requestNotifications, setNotificationsWanted } from './notify.ts';
 
 interface Entry {
@@ -33,16 +33,16 @@ export interface PaletteActions {
   settings: () => void;
   welcome: () => void;
 }
-const PAGE_ENTRIES: [string, string, FluentIcon, string][] = [
+const PAGE_ENTRIES = translated((): [string, string, FluentIcon, string][] => [
   ['overview', t('Overview'), GridRegular, t('Every project at a glance')],
   ['needs', t('Needs You'), AlertRegular, t('Approvals and questions waiting on you')],
   ['activity', t('Activity'), FlashRegular, t('What the crew did, as it happened')],
   ['history', t('History'), ClockRegular, t('Finished missions and jobs')],
-];
+]);
 /** Groups are named in English for the code that checks them, and shown in the reader's language. */
-const GROUPS: Record<string, string> = {
+const GROUPS = translated((): Record<string, string> => ({
   Actions: t('Actions'), Pages: t('Pages'), Projects: t('Projects'), Missions: t('Missions'), 'Claude sessions': t('Claude sessions'), Jobs: t('Jobs'),
-};
+}));
 
 /**
  * Search and jump: the search control grows into this panel, a list beside a preview of what is under the pointer
@@ -111,7 +111,7 @@ export function Palette({ state, names, projects, origin, close, actions }: {
         }),
       });
     }
-    for (const [id, title, icon, subtitle] of PAGE_ENTRIES)
+    for (const [id, title, icon, subtitle] of PAGE_ENTRIES())
       list.push({ id: `page:${id}`, group: 'Pages', title, subtitle, icon, run: () => actions.select(id), preview: () => ({ eyebrow: t('Page'), lines: [], text: subtitle }) });
     list.push({ id: 'project:', group: 'Projects', title: t('All projects'), subtitle: t('Overview'), icon: StackRegular, run: () => actions.select('overview'), preview: () => ({ eyebrow: t('Projects'), lines: [projects.length === 1 ? t('1 project') : t('{count} projects', { count: projects.length })] }) });
     for (const dir of projects) {
@@ -319,7 +319,7 @@ export function Palette({ state, names, projects, origin, close, actions }: {
                 lastGroup = entry.group;
                 return (
                   <div key={entry.id} role="presentation">
-                    {heading && <p className="palette-group" role="presentation">{GROUPS[entry.group] ?? entry.group}</p>}
+                    {heading && <p className="palette-group" role="presentation">{GROUPS()[entry.group] ?? entry.group}</p>}
                     <div
                       className="palette-item"
                       role="option"

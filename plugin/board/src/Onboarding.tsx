@@ -4,7 +4,7 @@ import { ArrowUp16Filled, CheckmarkCircleRegular, ErrorCircleRegular } from '@fl
 import appIcon from './icons/CrewAppIcon.png';
 import { desktop } from './desktop.ts';
 import { AgentMark, Chip, Dialog, Icon, tNodes } from './ui.tsx';
-import { t } from './i18n.ts';
+import { t, translated } from './i18n.ts';
 import styles from './Onboarding.module.css';
 
 type Page = { title: string; art: ReactNode; body: ReactNode };
@@ -12,7 +12,7 @@ type Page = { title: string; art: ReactNode; body: ReactNode };
 /** First-run guide, matching WelcomeView in the macOS app: what Crew is, how to start work, where requests arrive, and what to set up. */
 export function Onboarding({ close }: { close: () => void }) {
   const [index, setIndex] = useState(0);
-  const pages = PAGES;
+  const pages = PAGES();
   const last = index === pages.length - 1;
   const finish = () => {
     void desktop?.welcome?.done();
@@ -167,14 +167,14 @@ function SetupArt() {
 
 const withCode = (text: string) => text.split('`').map((part, index) => (index % 2 ? <code key={index}>{part}</code> : part));
 
-const COMMANDS: [string, string][] = [
+const COMMANDS = translated((): [string, string][] => [
   ['/crew:run', t('Plan, build, review, and fix with the crew')],
   ['/crew:review', t('Review a change')],
   ['/crew:debate', t('Talk through a hard decision')],
   ['/crew:board', t('Open this board in Claude')],
-];
+]);
 
-const PAGES: Page[] = [
+const PAGES = translated((): Page[] => [
   {
     title: t('Welcome to Crew'),
     art: <WelcomeArt />,
@@ -191,7 +191,7 @@ const PAGES: Page[] = [
       <>
         <p className="secondary">{t('Open a new Claude Code session and type a command.')}</p>
         <dl className={styles.commands}>
-          {COMMANDS.map(([command, what]) => (
+          {COMMANDS().map(([command, what]) => (
             <div key={command}>
               <dt><code>{command}</code></dt>
               <dd className="secondary">{what}</dd>
@@ -225,4 +225,4 @@ const PAGES: Page[] = [
       </p>
     ),
   },
-];
+]);

@@ -10,7 +10,10 @@ import { pathToFileURL } from 'node:url';
  */
 export async function bundlePlugin(root, runtime) {
   const plugin = path.join(root, 'plugin');
-  for (const folder of ['roles', 'skills', 'agents', '.claude-plugin', 'board/dist']) {
+  // The Codex manifest and files go in as they are: they are the templates the app's registration rewrites with
+  // absolute paths, since Codex copies only the plugin folder and so cannot reach the runtime beside it
+  // (plugin/bridge/codex-plugin.ts).
+  for (const folder of ['roles', 'skills', 'agents', '.claude-plugin', '.codex-plugin', 'codex.mcp.json', 'hooks/codex.json', 'board/dist']) {
     fs.cpSync(`plugin/${folder}`, path.join(plugin, folder), { recursive: true });
   }
   // The compiled bridge is ES modules in `.js` files. Node otherwise goes by the nearest package.json above the

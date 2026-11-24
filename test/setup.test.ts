@@ -150,6 +150,8 @@ test('packaged startup under CREW_HOME leaves the user registration and command 
   const profile = fs.mkdtempSync(path.join(home, 'profile-'));
   const calls = path.join(profile, 'calls');
   writeFakeBin(path.join(profile, 'claude'), `require('node:fs').appendFileSync(${JSON.stringify(calls)}, JSON.stringify(process.argv.slice(2)) + '\\n'); console.log('[]');`);
+  // Registration also registers with Codex where it is installed; a missing Codex keeps the user's own out of it.
+  writeFakeBin(path.join(profile, 'codex'), 'process.exit(1);');
   const originalPath = process.env.PATH;
   process.env.PATH = profile + path.delimiter + originalPath;
   t.after(() => { process.env.PATH = originalPath; });
@@ -184,6 +186,8 @@ test('an older copy of the app leaves the registration to a newer copy that is s
   const profile = fs.mkdtempSync(path.join(home, 'profile-'));
   const calls = path.join(profile, 'calls');
   writeFakeBin(path.join(profile, 'claude'), `require('node:fs').appendFileSync(${JSON.stringify(calls)}, JSON.stringify(process.argv.slice(2)) + '\\n'); console.log('[]');`);
+  // Registration also registers with Codex where it is installed; a missing Codex keeps the user's own out of it.
+  writeFakeBin(path.join(profile, 'codex'), 'process.exit(1);');
   const originalPath = process.env.PATH;
   process.env.PATH = profile + path.delimiter + originalPath;
   t.after(() => { process.env.PATH = originalPath; });
@@ -220,6 +224,91 @@ test('an older copy of the app leaves the registration to a newer copy that is s
   fs.writeFileSync(record, JSON.stringify({ ...mine, version: '0.0.2' }));
   await register();
   assert.equal(JSON.parse(fs.readFileSync(record, 'utf8')).version, '0.0.1');
+});
+
+test('a built copy registers with Codex, records only when both hosts run it, and leaves a registration it did not write', async (t) => {
+  const profile = fs.mkdtempSync(path.join(home, 'profile-'));
+  const calls = path.join(profile, 'calls');
+  const marketplaces = path.join(profile, 'marketplaces');
+  const failAdd = path.join(profile, 'fail-add');
+  const noClaude = path.join(profile, 'no-claude');
+  const log = `require('node:fs').appendFileSync(${JSON.stringify(calls)}, JSON.stringify(process.argv.slice(1)) + '\\n');`;
+  writeFakeBin(path.join(profile, 'claude'), `${log} if (require('node:fs').existsSync(${JSON.stringify(noClaude)})) process.exit(1); console.log('[]');`);
+  writeFakeBin(path.join(profile, 'codex'), `${log}
+    const fs = require('node:fs'); const args = process.argv.slice(2).join(' ');
+    if (args === 'plugin marketplace list') console.log('MARKETPLACE  ROOT\\n' + (fs.existsSync(${JSON.stringify(marketplaces)}) ? fs.readFileSync(${JSON.stringify(marketplaces)}, 'utf8') : ''));
+    if (args === 'plugin add crew@crew' && fs.existsSync(${JSON.stringify(failAdd)})) { console.error('no space left'); process.exit(1); }`);
+  const originalPath = process.env.PATH;
+  process.env.PATH = profile + path.delimiter + originalPath;
+  t.after(() => { process.env.PATH = originalPath; });
+  t.mock.method(os, 'homedir', () => profile);
+  // A built copy with its Codex templates, its runtime beside it as in Crew.app.
+  const app = path.join(home, 'codex-app');
+  const root = path.join(app, 'bridge');
+  fs.cpSync(fileURLToPath(new URL('../plugin/bridge', import.meta.url)), path.join(root, 'plugin/bridge'), { recursive: true });
+  for (const item of ['.claude-plugin', '.codex-plugin', 'codex.mcp.json', 'hooks/codex.json', 'skills', 'agents']) {
+    fs.cpSync(fileURLToPath(new URL(`../plugin/${item}`, import.meta.url)), path.join(root, 'plugin', item), { recursive: true });
+  }
+  fs.writeFileSync(path.join(root, 'plugin/.claude-plugin/build'), 'built\n');
+  fs.writeFileSync(path.join(root, 'plugin/package.json'), '{"type":"module"}\n');
+  fs.cpSync(fileURLToPath(new URL('../.claude-plugin', import.meta.url)), path.join(root, '.claude-plugin'), { recursive: true });
+  fs.mkdirSync(path.join(app, 'runtime'));
+  fs.writeFileSync(path.join(app, 'runtime/node'), '');
+  const record = path.join(home, 'setup.json');
+  t.after(() => fs.rmSync(record, { force: true }));
+  const { register } = await import(pathToFileURL(path.join(root, 'plugin/bridge/setup.ts')).href);
+  const codexCalls = () => fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line)).filter(([bin]) => bin.endsWith('codex')).map(([, ...args]) => args.join(' ')) : [];
+  const ours = path.join(profile, '.crew', 'codex', 'marketplace');
+
+  // Someone else's `crew` marketplace in Codex is left as it is, and so is the folder.
+  const theirs = path.join(profile, 'checkout');
+  fs.mkdirSync(path.join(theirs, 'plugin'), { recursive: true });
+  fs.writeFileSync(path.join(theirs, 'untracked'), 'keep');
+  fs.writeFileSync(marketplaces, `crew  ${theirs}\n`);
+  const left = await register(true);
+  assert.equal(left.ok, true);
+  assert.match(left.detail, /Codex: Registered from .*checkout; the app leaves it as it is\./);
+  assert.deepEqual(codexCalls().filter((call) => /remove|add/.test(call)), []);
+  assert.ok(fs.existsSync(path.join(theirs, 'untracked')));
+  // Claude Code runs this copy, but Codex does not, so nothing is recorded and the next start tries again.
+  assert.equal(fs.existsSync(record), false);
+  assert.ok(fs.existsSync(path.join(profile, '.local', 'bin', 'crew')));
+
+  // A Codex install that fails is reported and leaves the record unwritten.
+  fs.rmSync(marketplaces);
+  fs.rmSync(calls);
+  fs.writeFileSync(failAdd, '');
+  const failed = await register(true);
+  assert.equal(failed.ok, false);
+  assert.match(failed.detail, /Codex: Could not install the plugin in Codex: no space left/);
+  assert.equal(fs.existsSync(record), false);
+  assert.deepEqual(codexCalls().filter((call) => /add/.test(call)), [`plugin marketplace add ${ours}`, 'plugin add crew@crew']);
+
+  // Once both hosts run this copy it is recorded; the marketplace carries the agents the skills read.
+  fs.rmSync(failAdd);
+  assert.equal((await register(true)).ok, true);
+  assert.equal(JSON.parse(fs.readFileSync(record, 'utf8')).root, fs.realpathSync(root));
+  assert.ok(fs.existsSync(path.join(ours, 'plugin/agents/self-reviewer.md')));
+
+  // A marketplace Crew wrote earlier, elsewhere, is replaced: removed, then ours added.
+  fs.rmSync(record);
+  fs.rmSync(calls);
+  const earlier = path.join(profile, 'earlier');
+  fs.cpSync(ours, earlier, { recursive: true });
+  fs.writeFileSync(marketplaces, `crew  ${earlier}\n`);
+  assert.equal((await register(true)).ok, true);
+  assert.deepEqual(codexCalls().filter((call) => /remove|add/.test(call)), ['plugin marketplace remove crew', `plugin marketplace add ${ours}`, 'plugin add crew@crew']);
+
+  // Without Claude Code, a Codex registration is a registration: recorded, with the command.
+  fs.rmSync(record);
+  fs.rmSync(marketplaces);
+  fs.rmSync(path.join(profile, '.local'), { recursive: true });
+  fs.writeFileSync(noClaude, '');
+  const codexOnly = await register(true);
+  assert.equal(codexOnly.ok, true);
+  assert.match(codexOnly.detail, /^Claude Code was not found\. Codex: Installed in Codex\./);
+  assert.ok(fs.existsSync(record));
+  assert.ok(fs.existsSync(path.join(profile, '.local', 'bin', 'crew')));
 });
 
 test('a job ledger that was set aside shows in the checklist until the file is gone', async () => {

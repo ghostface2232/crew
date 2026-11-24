@@ -108,7 +108,7 @@
 "limit" = "한도";
 "%@ of %@" = "%2$@ 중 %1$@";
 "Open in %@" = "%@에서 열기";
-"Open this session in the %@ app" = "%@ 앱에서 이 세션을 열어요.";
+"Open this session in the %@ app" = "이 세션을 %@ 앱에서 열어요.";
 
 /* CrewApp.swift */
 "New Job…" = "새 작업…";

@@ -10,13 +10,22 @@ import { clip } from './text.ts';
 // A build line's finding load: the accepted findings by severity.
 const LOAD = { high: 0.35, medium: 0.15, low: 0.05 };
 // Exposure units of a change, so a large change may carry more findings than a small one. Chosen units, not a measured
-// difficulty. Tier is not used: for Codex it picks the model, so it would act as a fixed bonus per model.
+// size. Tier is not used: for Codex it picks the model, so it would act as a fixed bonus per model.
 const EXPOSURE = { small: 0.5, medium: 1, large: 2, xlarge: 4 };
+// The build fit's priors, on the log of the finding rate. A builder starts at the pooled rate and moves about ±0.5 from
+// it on evidence; the pooled rate itself starts at the reference and is free to move far from it. A review kind may find about twice or half as much as the average review. Hard work is expected to
+// draw twice the findings of standard work and routine work half, and the data may move either by about ±0.4. Each
+// review beyond the first starts as adding nothing.
+const BUILD_PRIOR = { base: 0.5, builder: 0.5, review: 0.7, difficulty: 0.4, extraReview: 0.4 };
+const DIFFICULTY_START = { routine: Math.log(0.5), hard: Math.log(2) };
+// A model's routine lines together weigh at most this many lines, however many there are: wording, comments, and
+// other mechanical edits say little about how a model builds, so a long run of them cannot carry a score far.
+const ROUTINE_LINES = 2;
 // A fix line's quality by outcome, lowered by the findings the check of the fix raised.
 const FIX_QUALITY = { 'root-cause': 1, patch: 0.55, 'another-review': 0.25 };
 // Where a model starts with nothing to compare: a build rate of one high per medium change (7.0), a fix quality of 0.7.
 const REFERENCE = { build: 0.36, fix: 0.7 };
-// The start weighs as much as three medium changes (or three fixes) of the model's own.
+// The start weighs as much as three fixes of the model's own.
 const PRIOR_WEIGHT = 3;
 // A review by the builder's own agent counts half.
 const SELF_REVIEW = 0.5;
@@ -123,6 +132,8 @@ export interface ModelScore {
   summary: string;
   lastAt: number | null;
   consolidate: boolean;
+  /** Build lines by how hard their work was; a line without a difficulty counts as standard, as the score takes it. */
+  difficulty: Record<Difficulty, number>;
   /** Delegated builds by how the lead took them, or null when none says. */
   adoption: { judged: number; asIs: number; afterReply: number; partly: number; rejected: number; rounds: number } | null;
 }
@@ -314,18 +325,105 @@ export function setSummary(home: string, model: string, summary: string, at = Da
 
 const load = (f: Findings) => LOAD.high * f.high + LOAD.medium * f.medium + LOAD.low * f.low;
 const weight = (e: Evidence) => (e.reviewer === e.agent ? SELF_REVIEW : 1);
-type Scope = 'build' | 'fix';
-/** A role's evidence as a ratio: build is finding load over exposure, fix is quality over lines. */
-function sums(lines: Evidence[], scope: Scope): { num: number; den: number } {
+/** Fix evidence as mean quality over lines. */
+function sums(lines: Evidence[]): { num: number; den: number } {
   let num = 0, den = 0;
-  for (const e of lines) {
-    const w = weight(e);
-    if (scope === 'build') { num += w * load(e.findings); den += w * EXPOSURE[e.size]; }
-    else { num += w * FIX_QUALITY[e.outcome!] * Math.exp(-load(e.findings)); den += w; }
-  }
+  for (const e of lines) { const w = weight(e); num += w * FIX_QUALITY[e.outcome!] * Math.exp(-load(e.findings)); den += w; }
   return { num, den };
 }
 const shrink = (s: { num: number; den: number }, prior: number) => (s.num + PRIOR_WEIGHT * prior) / (s.den + PRIOR_WEIGHT);
+
+/**
+ * What kind of review a build line's findings came from. Reviews differ in how much they find: a dedicated cross-review
+ * by a strong model finds far more than the lead reading a worker's diff, so the same work reads as worse the harder
+ * it is reviewed. The kind is the model of the first review by another agent than the builder's (or of the first
+ * review, when all are its own agent's), marked when that is the builder's own agent. Older lines without models fall
+ * back to the reviewer's agent and whether it reviewed a worker's job or the lead's own work.
+ */
+function reviewKind(e: Evidence, agentOf: (model: string) => Holder | undefined): { kind: string; extra: number } {
+  if (!e.reviewedBy) return { kind: `${e.reviewer} ${e.reviewer === e.agent ? 'self-review' : e.job ? 'review of a job' : 'cross-review'}`, extra: 0 };
+  const own = (m: string) => m === e.model || agentOf(m) === e.agent;
+  const first = e.reviewedBy.find((m) => !own(m)) ?? e.reviewedBy[0];
+  return { kind: own(first) ? `${first} (own agent)` : first, extra: e.reviewedBy.length - 1 };
+}
+
+/**
+ * Each builder's finding rate at standard difficulty under an average review, from a Poisson model of every build
+ * line's finding load: exposure × exp(base + builder + review kind + difficulty + extra reviews), each term but the base
+ * drawn toward its start (BUILD_PRIOR). Fitting them together is what lets a model that takes hard work under strict
+ * review be compared with one that takes routine work under a light one. A line weighs by the findings expected of it,
+ * so clean routine work says little and clean hard work says much. Self-reviews count half.
+ */
+function buildRates(file: NotesFile): Map<string, number> {
+  const agentOf = (model: string) => (Object.hasOwn(file.models, model) ? file.models[model].agent : undefined);
+  // A line belongs to the model whose notes hold it.
+  const lines = Object.values(file.models).flatMap((m) => m.evidence.filter((e) => e.role === 'build').map((e) => ({ ...e, model: m.model })));
+  if (!lines.length) return new Map();
+  const names: string[] = ['base'];
+  const means: number[] = [Math.log(REFERENCE.build / LOAD.medium)];
+  const precisions: number[] = [1 / BUILD_PRIOR.base ** 2];
+  const index = new Map<string, number>();
+  const param = (name: string, mean: number, sd: number) => {
+    if (!index.has(name)) { index.set(name, names.length); names.push(name); means.push(mean); precisions.push(1 / (sd * sd)); }
+    return index.get(name)!;
+  };
+  const kinds = lines.map((e) => reviewKind(e, agentOf));
+  const routine = new Map<string, number>();
+  for (const e of lines) if (e.difficulty === 'routine') routine.set(e.model, (routine.get(e.model) ?? 0) + 1);
+  const extra = param('extra review', 0, BUILD_PRIOR.extraReview);
+  const rows = lines.map((e, i) => {
+    const terms = [0, param(`builder ${e.model}`, 0, BUILD_PRIOR.builder), param(`review ${kinds[i].kind}`, 0, BUILD_PRIOR.review)];
+    const difficulty = e.difficulty ?? 'standard';
+    if (difficulty !== 'standard') terms.push(param(`difficulty ${difficulty}`, DIFFICULTY_START[difficulty], BUILD_PRIOR.difficulty));
+    // Counted in medium findings, so the Poisson weight of a line is on the scale of a count.
+    const share = difficulty === 'routine' ? Math.min(1, ROUTINE_LINES / routine.get(e.model)!) : 1;
+    return { terms, extra: kinds[i].extra, y: load(e.findings) / LOAD.medium, exposure: EXPOSURE[e.size], w: weight(e) * share };
+  });
+  const theta = means.slice();
+  // Newton's method on the log posterior, which is strictly concave with every term drawn toward a start.
+  for (let step = 0; step < 100; step++) {
+    const gradient = theta.map((t, j) => -(t - means[j]) * precisions[j]);
+    const hessian = theta.map((_, j) => theta.map((__, k) => (j === k ? precisions[j] : 0)));
+    for (const r of rows) {
+      const mu = r.exposure * Math.exp(r.terms.reduce((s, j) => s + theta[j], 0) + r.extra * theta[extra]);
+      const x = new Map<number, number>(r.terms.map((j) => [j, 1]));
+      if (r.extra) x.set(extra, r.extra);
+      for (const [j, xj] of x) {
+        gradient[j] += r.w * (r.y - mu) * xj;
+        for (const [k, xk] of x) hessian[j][k] += r.w * mu * xj * xk;
+      }
+    }
+    const delta = solve(hessian, gradient);
+    // A full step from far off can overshoot into overflow; one of at most 1 per term keeps every rate finite.
+    const largest = Math.max(...delta.map(Math.abs));
+    const scale = Math.min(1, 1 / largest);
+    delta.forEach((d, j) => { theta[j] += scale * d; });
+    if (largest < 1e-10) break;
+  }
+  // The level every builder is read at: the average review its lines had, so a model's rate does not depend on how
+  // hard its own lines were reviewed, and the scores stay on the scale of the findings themselves.
+  const level = rows.reduce((s, r) => s + theta[r.terms[2]] + r.extra * theta[extra], 0) / rows.length;
+  return new Map([...index].filter(([name]) => name.startsWith('builder ')).map(([name, j]) => [name.slice('builder '.length), LOAD.medium * Math.exp(theta[0] + theta[j] + level)]));
+}
+
+/** Solves a small symmetric positive definite system by Gaussian elimination. */
+function solve(matrix: number[][], vector: number[]): number[] {
+  const n = vector.length;
+  const m = matrix.map((row, i) => [...row, vector[i]]);
+  for (let i = 0; i < n; i++) {
+    for (let r = i + 1; r < n; r++) {
+      const f = m[r][i] / m[i][i];
+      for (let c = i; c <= n; c++) m[r][c] -= f * m[i][c];
+    }
+  }
+  const x = new Array<number>(n).fill(0);
+  for (let i = n - 1; i >= 0; i--) {
+    let sum = m[i][n];
+    for (let c = i + 1; c < n; c++) sum -= m[i][c] * x[c];
+    x[i] = sum / m[i][i];
+  }
+  return x;
+}
 
 /** One rating of one item, with whom it is about. `source` is the rating it came from, which may reach several models. */
 interface Vote { model: string; item: RatingItem; value: number; rater: string; weight: number; source: string }
@@ -427,21 +525,19 @@ const moved = (base: number, shift: number) => (shift >= 0 ? base + shift * (1 -
 export function scoreAll(file: NotesFile, options: { ratings?: boolean } = {}): ModelScore[] {
   const models = Object.values(file.models);
   const peer = peers(options.ratings === false ? [] : votes(file));
-  const roleLines = (m: ModelNote, scope: Scope) => m.evidence.filter((e) => e.role === scope);
-  const own = new Map<Scope, Map<string, { num: number; den: number }>>();
-  for (const scope of ['build', 'fix'] as const) {
-    own.set(scope, new Map(models.filter((m) => roleLines(m, scope).length).map((m) => [m.model, sums(roleLines(m, scope), scope)])));
-  }
-  /** A model's estimate for a role, unrounded, or null with no lines. */
-  function estimate(model: string, scope: Scope): number | null {
-    const mine = own.get(scope)!.get(model);
+  const roleLines = (m: ModelNote, role: NoteRole) => m.evidence.filter((e) => e.role === role);
+  const fixes = new Map(models.filter((m) => roleLines(m, 'fix').length).map((m) => [m.model, sums(roleLines(m, 'fix'))]));
+  /** A model's fix quality, unrounded, or null with no fix lines: drawn toward the mean of the other models' own. */
+  function fixQuality(model: string): number | null {
+    const mine = fixes.get(model);
     if (!mine) return null;
-    const others = [...own.get(scope)!].filter(([name]) => name !== model).map(([, s]) => shrink(s, REFERENCE[scope]));
-    const start = (others.reduce((sum, v) => sum + v, 0) + REFERENCE[scope]) / (others.length + 1);
+    const others = [...fixes].filter(([name]) => name !== model).map(([, s]) => shrink(s, REFERENCE.fix));
+    const start = (others.reduce((sum, v) => sum + v, 0) + REFERENCE.fix) / (others.length + 1);
     return shrink(mine, start);
   }
   const tenth = (n: number) => Math.round(n * 10) / 10;
-  const rates = new Map<string, number | null>(models.map((m) => [m.model, estimate(m.model, 'build')]));
+  const fitted = buildRates(file);
+  const rates = new Map<string, number | null>(models.map((m) => [m.model, fitted.get(m.model) ?? null]));
   const enough = (model: string, name: RatingItem) => { const given = peer.get(`${model}\0${name}`); return given && given.count >= MIN_RATINGS ? given : undefined; };
   /** An item from 0 to 1: its evidence, moved by its ratings once there are enough; without evidence, its reference moved by them. */
   const item = (model: string, name: RatingItem, observed: number | null): number | null => {
@@ -462,9 +558,11 @@ export function scoreAll(file: NotesFile, options: { ratings?: boolean } = {}): 
     const fix = roleLines(m, 'fix');
     const review = m.evidence.filter((e) => e.role === 'review');
     const rate = rates.get(m.model)!;
-    const quality = estimate(m.model, 'fix');
-    // Status counts build reviews, a self-review as half, since only build sets the score.
-    const reviews = build.reduce((sum, e) => sum + weight(e), 0);
+    const quality = fixQuality(m.model);
+    // Status counts build reviews, a self-review as half, since only build sets the score; routine lines count as
+    // they weigh in the score, so a run of them alone never settles a model.
+    const routine = build.filter((e) => e.difficulty === 'routine').length;
+    const reviews = build.reduce((sum, e) => sum + weight(e) * (e.difficulty === 'routine' ? Math.min(1, ROUTINE_LINES / routine) : 1), 0);
     const samples = m.evidence.length;
     const buildScore = rate === null ? null : tenth(10 * Math.exp(-rate));
     const adopted = build.filter((e) => e.adoption);
@@ -484,6 +582,7 @@ export function scoreAll(file: NotesFile, options: { ratings?: boolean } = {}): 
       samples, buildSamples: build.length, fixSamples: fix.length, reviewSamples: review.length, items,
       ratings: RATING_ITEMS.reduce((sum, name) => sum + (enough(m.model, name)?.count ?? 0), 0),
       status: reviews < 3 ? 'too few samples' : reviews < 8 ? 'on trial' : 'settled', summary: m.summary,
+      difficulty: Object.fromEntries(DIFFICULTIES.map((d) => [d, build.filter((e) => (e.difficulty ?? 'standard') === d).length])) as Record<Difficulty, number>,
       lastAt: samples ? m.evidence.reduce((latest, e) => Math.max(latest, e.at), -Infinity) : null,
       consolidate: m.evidence.filter((e) => m.summaryAt === null || e.at > m.summaryAt).length >= CONSOLIDATE_AFTER,
       adoption: adopted.length ? {
@@ -508,6 +607,7 @@ export function renderNotes(scores: ModelScore[], file: NotesFile, options: { mo
     const tiers = new Map<string, number>();
     for (const e of file.models[s.model].evidence) if (e.role === 'build' && e.tier) tiers.set(e.tier, (tiers.get(e.tier) ?? 0) + 1);
     if (tiers.size) lines.push(`builds by tier: ${TIERS.filter((t) => tiers.has(t)).map((t) => `${t} ${tiers.get(t)}`).join(', ')}`);
+    if (s.buildSamples) lines.push(`builds by difficulty: ${[...DIFFICULTIES].reverse().filter((d) => s.difficulty[d]).map((d) => `${d} ${s.difficulty[d]}`).join(', ')}`);
     const a = s.adoption;
     if (a) lines.push(`adopted: ${a.asIs} as is, ${a.afterReply} after a reply, ${a.partly} in part, ${a.rejected} rejected, of ${a.judged}; ${a.rounds} follow-up round(s)`);
     lines.push(s.summary || 'No summary yet.');
@@ -518,7 +618,7 @@ export function renderNotes(scores: ModelScore[], file: NotesFile, options: { mo
       const day = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
       const declined = e.declined && load(e.declined) ? `, declined ${(['high', 'medium', 'low'] as const).filter((k) => e.declined![k]).map((k) => `${e.declined![k]} ${k}`).join(' ')}` : '';
       const adoption = e.adoption ? `, ${e.adoption}${e.rounds ? ` after ${e.rounds} round(s)` : ''}` : '';
-      const about = e.role !== 'review' ? `${e.reviewer} reviewed` : e.of ? `reviewed ${e.of.job ?? e.of.model}` : 'audit';
+      const about = e.role !== 'review' ? `${e.reviewedBy ? e.reviewedBy.join(' + ') : e.reviewer} reviewed${e.difficulty ? `, ${e.difficulty}` : ''}` : e.of ? `reviewed ${e.of.job ?? e.of.model}` : 'audit';
       const rating = e.rating ? `, rated ${stars(e.rating)}` : '';
       lines.push(`- ${day} ${e.job || '—'} (${about}, ${e.role}, ${e.tier ? `${e.tier}/` : ''}${e.size}${declined}${adoption}${rating}): ${e.text}`);
     }

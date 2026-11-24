@@ -87,5 +87,6 @@ The worker MCP server was verified on Codex CLI 0.167.0 (read-only and writable 
 
 ## History
 
+- 2026-11-24: A writable Claude worker moved from the manual mode to Claude Code's automatic mode. The first design kept every Claude worker manual because an automatic mode decides actions Crew never sees. Automatic mode is the default most Claude Code and Codex users pick, and Codex workers already run with Codex's automatic reviewer; Crew still sees each action in the stream, gets the classifier's refusals as `permission_denied` events, and sends the second retry of one to the user. Read-only jobs stayed manual, since no OS sandbox holds a Claude worker to reading.
 - 2026-11-12–13: `auto_review` became the default.
 - 2026-11-11: Approvals moved to the user. Live testing showed that Antigravity's `accept-edits` skipped workspace bounds, so Crew reverted to default mode.

@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { ko } from '../plugin/board/src/ko.ts';
-import { followSetting, language, pickLanguage, setLanguage, t } from '../plugin/board/src/i18n.ts';
+import { followSetting, language, onLanguageChange, pickLanguage, setLanguage, t, translated } from '../plugin/board/src/i18n.ts';
 
 const root = path.resolve(import.meta.dirname, '..');
 const sources = [
@@ -58,27 +58,52 @@ function inPage(globals: Record<string, unknown>, run: () => void) {
   }
 }
 
-test('the language setting is remembered for the next load, and the page reloads only to change language', () => {
+test('the language setting switches the page in place and is remembered for the next page', () => {
   const stored = new Map<string, string>();
   const storage = { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => stored.set(key, value), removeItem: (key: string) => stored.delete(key) };
-  let reloads = 0;
-  inPage({ localStorage: storage, location: { reload: () => reloads++ }, navigator: { languages: ['en-US'] } }, () => {
-    assert.equal(language, 'en');
-    // An older daemon sends no setting, and nothing changes.
-    followSetting(undefined);
-    assert.deepEqual([[...stored], reloads], [[], 0]);
-    followSetting('en');
-    assert.deepEqual([[...stored], reloads], [[['crew.language', 'en']], 0]);
-    followSetting('ko');
-    assert.deepEqual([[...stored], reloads], [[['crew.language', 'ko']], 1]);
-    // Following the system again forgets the setting; the browser reads English, as the page already does.
-    followSetting(null);
-    assert.deepEqual([[...stored], reloads], [[], 1]);
+  const heard: string[] = [];
+  const stop = onLanguageChange(() => heard.push(language));
+  try {
+    // No location here: a reload would sign a browser tab out, so reaching for one fails the test.
+    inPage({ localStorage: storage, navigator: { languages: ['en-US'] } }, () => {
+      assert.equal(language, 'en');
+      // An older daemon sends no setting, and nothing changes.
+      followSetting(undefined);
+      assert.deepEqual([[...stored], heard], [[], []]);
+      followSetting('en');
+      assert.deepEqual([[...stored], heard], [[['crew.language', 'en']], []]);
+      followSetting('ko');
+      assert.deepEqual([[...stored], heard, t('Language')], [[['crew.language', 'ko']], ['ko'], '언어']);
+      // Following the system again forgets the setting and reads the browser's language.
+      followSetting(null);
+      assert.deepEqual([[...stored], heard], [[], ['ko', 'en']]);
+    });
+    // Where storage is out of reach the setting still applies; only the next page cannot start in it.
+    const blocked = { getItem: () => { throw new Error('blocked'); }, setItem: () => { throw new Error('blocked'); }, removeItem: () => {} };
+    inPage({ localStorage: blocked, navigator: { languages: ['en-US'] } }, () => followSetting('ko'));
+    assert.deepEqual(heard, ['ko', 'en', 'ko']);
+  } finally {
+    stop();
+    setLanguage('en');
+  }
+});
+
+test('text a module keeps is built again only when the language changes', () => {
+  let builds = 0;
+  const labels = translated(() => {
+    builds++;
+    return { title: t('Language') };
   });
-  // Storage out of reach would bring the page back in the same language, so it does not reload.
-  const blocked = { getItem: () => { throw new Error('blocked'); }, setItem: () => { throw new Error('blocked'); }, removeItem: () => {} };
-  inPage({ localStorage: blocked, location: { reload: () => reloads++ }, navigator: { languages: ['en-US'] } }, () => followSetting('ko'));
-  assert.equal(reloads, 1);
+  try {
+    const english = labels();
+    assert.equal(labels(), english);
+    setLanguage('ko');
+    assert.deepEqual([labels().title, builds], ['언어', 2]);
+    assert.equal(labels(), labels());
+  } finally {
+    setLanguage('en');
+  }
+  assert.deepEqual([labels().title, builds], ['Language', 3]);
 });
 
 test('text without an entry stays English, and placeholders fill in either language', () => {

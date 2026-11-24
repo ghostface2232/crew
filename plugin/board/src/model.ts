@@ -1,6 +1,6 @@
 import type { AgentSettings, Holder, Role, RoleAssignment, RoleInfo, RoleSettings, WorkerAgent } from '../../bridge/config.ts';
 import type { BoardJob, BoardPull, BoardState, ClaudeSession, Mission } from './types.ts';
-import { t } from './i18n.ts';
+import { t, translated } from './i18n.ts';
 
 export const NAMES = { claude: 'Claude', codex: 'Codex', antigravity: 'Antigravity' };
 /** Every holder, in the order a role lists them, as config.ts HOLDERS does. */
@@ -16,18 +16,18 @@ export function agentSettings(settings?: AgentSettings): AgentSettings | undefin
   return Object.keys(kept).length ? kept : undefined;
 }
 /** The roles a daemon that predates the role registry knows; it sends no roleInfo. */
-const LEGACY_ROLES: RoleInfo[] = [
+const LEGACY_ROLES = translated((): RoleInfo[] => [
   { role: 'delegate', kind: 'delegate', label: t('Implementation'), summary: t('Builds separable pieces of a change.') },
   { role: 'review', kind: 'review', label: t('Read-only review'), summary: t('Reviews a change by reading it and running checks.') },
   { role: 'polish', kind: 'polish', label: t('Wording polish'), summary: t('Improves UI strings, comments, and docs.') },
-];
-export const rolesOf = (state: Pick<BoardState, 'roleInfo'>): RoleInfo[] => (state.roleInfo?.length ? state.roleInfo : LEGACY_ROLES);
+]);
+export const rolesOf = (state: Pick<BoardState, 'roleInfo'>): RoleInfo[] => (state.roleInfo?.length ? state.roleInfo : LEGACY_ROLES());
 /** Names for the roles an older daemon's jobs can have without listing them as roles to assign. */
-const LEGACY_LABELS: Record<string, string> = { debate: t('Debate'), verify: t('Review that runs the app') };
+const LEGACY_LABELS = translated((): Record<string, string> => ({ debate: t('Debate'), verify: t('Review that runs the app') }));
 /** The daemon names roles in English; known names read in the viewer's language. */
 export const roleLabel = (state: Pick<BoardState, 'roleInfo'>, role: string) => {
   const label = rolesOf(state).find((info) => info.role === role)?.label;
-  return label ? t(label) : LEGACY_LABELS[role] ?? role;
+  return label ? t(label) : LEGACY_LABELS()[role] ?? role;
 };
 /** A job's role; jobs saved before roles were recorded get theirs from what they were, as the daemon does. */
 export const jobRole = (job: Pick<BoardJob, 'role' | 'kind' | 'debate' | 'runsApp'>): Role =>
@@ -51,7 +51,7 @@ export function resolveDraft(info: RoleInfo[], draft: RoleSettings, saved: Board
   }
   return resolved;
 }
-export const STOPS = [t('Plan'), t('Build'), t('Review'), t('Fix'), t('Polish'), t('Final')];
+export const STOPS = translated(() => [t('Plan'), t('Build'), t('Review'), t('Fix'), t('Polish'), t('Final')]);
 export const STOP_OF_STAGE = {
   plan: 0,
   implement: 1,
@@ -72,9 +72,9 @@ export function missionStops(mission?: Mission) {
       if (label) return { name: label, stop };
       const round = (rounds.get(stop) ?? 0) + 1;
       rounds.set(stop, round);
-      return { name: `${STOPS[stop]}${round > 1 ? ` ${round}` : ''}`, stop };
+      return { name: `${STOPS()[stop]}${round > 1 ? ` ${round}` : ''}`, stop };
     })
-    : STOPS.map((name, stop) => ({ name, stop }));
+    : STOPS().map((name, stop) => ({ name, stop }));
 }
 export function missionStep(mission?: Mission) {
   if (!mission) return -1;

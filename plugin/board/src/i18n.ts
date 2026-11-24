@@ -18,7 +18,10 @@ export function pickLanguage(preferred: readonly string[]): Language {
 }
 
 const CHOICE = 'crew.language';
-/** The language setting as this page last heard it from the daemon; null when none is set or storage is out of reach. */
+/**
+ * The language setting as this page last heard it from the daemon, so a new page starts in it rather than switch once
+ * the daemon answers; null when none is set or storage is out of reach.
+ */
 function remembered(): Language | null {
   try {
     const saved = localStorage.getItem(CHOICE);
@@ -28,17 +31,24 @@ function remembered(): Language | null {
   }
 }
 
-// Decided before any other module reads text, as some keep translated text in constants. Node, which runs the
-// board's modules in tests and runs the Windows app's main process, has no window and reads English until told.
+// Node, which runs the board's modules in tests and runs the Windows app's main process, has no window and reads
+// English until told.
 export let language: Language = typeof window === 'undefined' ? 'en' : remembered() ?? pickLanguage(navigator.languages);
+const listeners = new Set<() => void>();
+/** Calls `listener` after each change of language; returns the call that stops it. */
+export function onLanguageChange(listener: () => void) {
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
+}
 export function setLanguage(next: Language) {
+  if (next === language) return;
   language = next;
+  listeners.forEach((listener) => listener());
 }
 
 /**
  * Follows the language setting the daemon sends; null follows the browser, and undefined (an older daemon) changes
- * nothing. The page's text was fixed as it loaded, so the setting is remembered for the next load and the page reloads
- * into it. Where it cannot be remembered, the page keeps its language rather than reload into the same one forever.
+ * nothing. The page switches in place: a reload would sign a browser tab out, since its credential lives only in memory.
  */
 export function followSetting(choice: Language | null | undefined) {
   if (choice === undefined) return;
@@ -46,9 +56,18 @@ export function followSetting(choice: Language | null | undefined) {
     if (choice) localStorage.setItem(CHOICE, choice);
     else localStorage.removeItem(CHOICE);
   } catch {
-    return;
+    // Not remembered, so the next page starts in the browser's language until the daemon answers.
   }
-  if (remembered() === choice && (choice ?? pickLanguage(navigator.languages)) !== language) location.reload();
+  setLanguage(choice ?? pickLanguage(navigator.languages));
+}
+
+/**
+ * A value built from translated text that a module keeps, such as a table of labels: built when first read in each
+ * language, and the same object until the language changes, so it can stand in a hook's dependencies.
+ */
+export function translated<T>(build: () => T): () => T {
+  let built: { language: Language; value: T } | undefined;
+  return () => (built?.language === language ? built.value : (built = { language, value: build() }).value);
 }
 
 /** `text` in the current language, with each `{name}` replaced by `values[name]`. */

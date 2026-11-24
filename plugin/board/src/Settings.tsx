@@ -13,7 +13,7 @@ import { agentSettings, HOLDERS, knownProjects, NAMES, projectNames, resolveDraf
 import { AgentMark, ask, CloseButton, Dialog, Icon, Select, useFade } from './ui.tsx';
 import { Scores } from './Scores.tsx';
 import { desktop } from './desktop.ts';
-import { t } from './i18n.ts';
+import { t, translated } from './i18n.ts';
 import type { Language } from './i18n.ts';
 import appIcon from './icons/CrewAppIcon.png';
 import styles from './Settings.module.css';
@@ -25,11 +25,11 @@ function ItemTitle({ text, current }: { text: string; current: boolean }) {
   return <span className={`${styles.itemTitle} fade-line`} ref={fade}>{text}</span>;
 }
 
-const PRESET_SUMMARY: Record<PresetName, string> = {
+const PRESET_SUMMARY = translated((): Record<PresetName, string> => ({
   economy: t('Lower cost and faster runs for straightforward tasks.'),
   balanced: t('Everyday balance of quality, speed, and cost.'),
   best: t('Maximum reasoning depth for complex work.'),
-};
+}));
 
 function formatModelName(name: string) {
   if (name === 'inherit') return t('Same as lead');
@@ -52,7 +52,7 @@ function presetDetails(preset: Preset): [string, string][] {
 /** One page of settings, listed in the sidebar: the roles by kind of work, what every agent shares, each project's own instructions, then the desktop app. */
 type Fixed = 'build' | 'review' | 'edit' | 'presets' | 'models' | 'instructions' | 'language' | 'about';
 type Pane = Fixed | `project:${string}`;
-const PANES: Record<Fixed, { title: string; icon: FluentIcon; kind?: JobKind }> = {
+const PANES = translated((): Record<Fixed, { title: string; icon: FluentIcon; kind?: JobKind }> => ({
   build: { title: t('Build'), icon: Wrench16Regular, kind: 'delegate' },
   review: { title: t('Review'), icon: ShieldCheckmark16Regular, kind: 'review' },
   edit: { title: t('Edit'), icon: TextFont16Regular, kind: 'polish' },
@@ -61,7 +61,7 @@ const PANES: Record<Fixed, { title: string; icon: FluentIcon; kind?: JobKind }> 
   instructions: { title: t('Instructions'), icon: DocumentText16Regular },
   language: { title: t('Language'), icon: LocalLanguage16Regular },
   about: { title: t('About Crew'), icon: Info16Regular },
-};
+}));
 
 /** Where the desktop app's update stands, in one line. */
 function updateSummary(update: AppUpdate) {
@@ -183,7 +183,7 @@ function TypedSetting({ label, value, placeholder, onCommit }: { label: string; 
 }
 
 /** `initial` opens a page at once, as the sidebar's failed update opens About. */
-export function Settings({ state, update, close, initial }: { state: Snapshot; update: AppUpdate | null; close: () => void; initial?: 'about' }) {
+export function Settings({ state, update, close, initial }: { state: Snapshot; update: AppUpdate | null; close: () => void; initial?: 'about' | 'language' }) {
   const [pane, setPane] = useState<Pane>(initial ?? 'build');
   // On a phone the sidebar is a list of its own, and a page replaces it; wider, both show.
   const [view, setView] = useState<'list' | 'page'>(initial ? 'page' : 'list');
@@ -351,9 +351,11 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
       setRatingsStatus((error as Error).message);
     }
   };
-  // Stored as it is picked; the page then reloads into the language the daemon reports (followSetting in i18n.ts).
+  // Stored as it is picked; the board then switches to the language the daemon reports (followSetting in i18n.ts).
   const [languageStatus, setLanguageStatus] = useState('');
   const chooseLanguage = async (language: Language | null) => {
+    // The new language draws Settings again, which would drop instructions still being edited.
+    if (text !== saved && !(await ask(t('Discard the unsaved changes to these instructions?'), t('Discard')))) return;
     setLanguageStatus('');
     try {
       board.receive('language', await request<Pick<Snapshot, 'language'>>('/api/language', { language }));
@@ -394,7 +396,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
     if (current === 'about' && update?.installError) shownInstallError.current = true;
   }, [current, update?.installError]);
   const project = current.startsWith('project:') ? current.slice('project:'.length) : null;
-  const fixed = project === null ? PANES[current as Fixed] : undefined;
+  const fixed = project === null ? PANES()[current as Fixed] : undefined;
   const kind = fixed?.kind;
   // The instructions this page edits: '' for every project, a project's own; null on the other pages.
   const pageScope = current === 'instructions' ? '' : project;
@@ -430,7 +432,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
   };
   const item = (id: Pane) => {
     const dir = id.startsWith('project:') ? id.slice('project:'.length) : null;
-    const page = dir === null ? PANES[id as Fixed] : undefined;
+    const page = dir === null ? PANES()[id as Fixed] : undefined;
     return (
       <button
         type="button"
@@ -623,7 +625,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
                         {t('Not saved: {error}', { error: storedPreset.error })}
                       </p>
                     )}
-                    <p className={styles.footnote}>{preset ? PRESET_SUMMARY[preset] : t("Uses each agent's own model and effort settings.")}</p>
+                    <p className={styles.footnote}>{preset ? PRESET_SUMMARY()[preset] : t("Uses each agent's own model and effort settings.")}</p>
                   </section>
                   <section className={styles.group}>
                     <header className={styles.groupHead}><h3 className={styles.groupTitle}>{t('Priority')}</h3></header>
@@ -728,7 +730,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
                     </label>
                   </div>
                   <p className={styles.footnote} role={languageStatus ? 'alert' : undefined}>
-                    {languageStatus || t('For the board and the Crew app on this computer. The board reloads into it; the macOS app switches the next time it opens.')}
+                    {languageStatus || t('For the board and the Crew app on this computer. The macOS app switches the next time it opens.')}
                   </p>
                 </section>
               )}

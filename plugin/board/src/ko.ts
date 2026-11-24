@@ -196,7 +196,7 @@ export const ko: Record<string, string> = {
   'Fix': '수정',
   'Fixes the review findings the lead accepted, in the lead\'s own code or a merged result.': '리드가 받아들인 리뷰 지적 사항을 리드의 코드나 병합 결과에서 수정해요.',
   'Follow up': '후속 요청',
-  'For the board and the Crew app on this computer. The board reloads into it; the macOS app switches the next time it opens.': '이 컴퓨터의 보드와 Crew 앱에 적용돼요. 보드는 새로 고쳐서 바로 바뀌고, macOS 앱은 다음에 열 때 바뀌어요.',
+  'For the board and the Crew app on this computer. The macOS app switches the next time it opens.': '이 컴퓨터의 보드와 Crew 앱에 적용돼요. macOS 앱은 다음에 열 때 바뀌어요.',
   'Fri': '금',
   'Frontier': '최상위',
   'Get Started': '시작하기',

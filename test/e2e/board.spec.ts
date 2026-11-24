@@ -250,6 +250,32 @@ test('a mission dropped with Stop Tracking can still be marked done, reopening i
   ]);
 });
 
+test('choosing a language switches the board in place, so a browser tab stays signed in', async ({ page, request }) => {
+  // The credential lives only in the page's memory, so a reload here would end at the sign-in page. From `/`, a
+  // fragment-only goto would not reload the page to sign in.
+  await page.goto('about:blank');
+  await request.post('/__reset', { data: { auth: true } });
+  await page.goto(`/#ticket=${TEST_TICKET}`);
+  await expect(page.getByText('Live', { exact: true })).toBeVisible();
+  await request.post('/__push', { data: { type: 'language', data: { language: null } } });
+  await openSettings(page, 'Language');
+  await pick(page.getByRole('combobox', { name: 'Language' }), '한국어');
+  // Settings comes back on its Language page, and text kept in tables, such as the page names, switches too.
+  const pages = page.getByRole('navigation', { name: '설정 페이지' });
+  await expect(pages.getByRole('button', { name: '언어', exact: true })).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByRole('combobox', { name: '언어' })).toContainText('한국어');
+  await expect(page.locator('html')).toHaveAttribute('lang', 'ko');
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: '현황', level: 1 })).toBeVisible();
+  await expect(page.getByText('실시간', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'The board is not signed in' })).toHaveCount(0);
+  // Another client clearing the setting brings the browser's language back.
+  await request.post('/api/language', { headers: { authorization: `Bearer ${TEST_CREDENTIAL}` }, data: { language: null } });
+  await expect(page.getByRole('heading', { name: 'Overview', level: 1 })).toBeVisible();
+  await expect(page.getByText('Live', { exact: true })).toBeVisible();
+});
+
 test('repeated stops keep jobs on their original round while the remaining plan changes', async ({ page, request }) => {
   const data = fixture();
   data.missions[0].stages = ['implement', 'self-review', 'fix', 'cross-review', 'fix', 'polish', 'final'];

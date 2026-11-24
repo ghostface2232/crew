@@ -375,7 +375,8 @@ async function codexLeadItems(bin: string): Promise<SetupItem[]> {
   const ok = installed && version === expected;
   const detail = !installed ? 'Not installed.' : ok ? `Installed (${version})` : `Installed (${version ?? 'unknown version'}); this copy is ${expected}.`;
   const items: SetupItem[] = [{ id: 'codex-plugin', label: 'Crew plugin in Codex', ok, detail, repairable: true }];
-  if (!installed || !ledFromCodex()) return items;
+  // Trust is read by this copy's hook keys, so a copy of another version is reinstalled before its hooks are asked about.
+  if (!ok || !ledFromCodex()) return items;
   items.push(await codexHooksItem(bin));
   return items;
 }

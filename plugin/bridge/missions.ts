@@ -43,6 +43,8 @@ export interface Mission {
   root: string;
   /** The lead session that opened it, when known. Only that session may take it up again after losing track of it. */
   owner?: string;
+  /** The agent whose session opened it; absent on missions opened before it was recorded. */
+  lead?: 'claude' | 'codex';
   stage: Stage;
   /** Planned order; absent on missions using the original full track. */
   stages?: Stage[];
@@ -97,6 +99,7 @@ function isMission(m: any): m is Mission {
   return Boolean(m) && typeof m === 'object'
     && ['id', 'title', 'project', 'root', 'outcome'].every((key) => typeof m[key] === 'string')
     && (m.owner === undefined || typeof m.owner === 'string')
+    && (m.lead === undefined || m.lead === 'claude' || m.lead === 'codex')
     && (m.record === undefined || typeof m.record === 'string')
     && (m.doneByLead === undefined || m.doneByLead === true)
     && (m.stages === undefined || isPlan(m.stages))
@@ -354,7 +357,7 @@ export class Missions {
     return mission;
   }
 
-  start(input: { title: string; project: string; root: string; owner?: string; stage?: string; stages?: unknown; preset?: unknown; tasks?: unknown }): Mission {
+  start(input: { title: string; project: string; root: string; owner?: string; lead?: unknown; stage?: string; stages?: unknown; preset?: unknown; tasks?: unknown }): Mission {
     const title = titleOf(input.title);
     const preset = presetOf(input.preset);
     const steps = planOf(input.stages);
@@ -382,6 +385,7 @@ export class Missions {
       project,
       root: canonicalPath(input.root),
       ...(input.owner ? { owner: input.owner } : {}),
+      ...(input.lead === 'claude' || input.lead === 'codex' ? { lead: input.lead } : {}),
       stage: first.stage,
       ...(preset ? { preset } : {}),
       ...(tasks?.length ? { tasks } : {}),

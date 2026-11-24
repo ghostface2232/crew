@@ -305,8 +305,8 @@ export const AgentPanel = memo(function AgentPanel({ state, project }: { state: 
               return !(same && !state.roleSettings?.[role]?.agents);
             })
             .map(({ label }) => t(label));
-          // Claude leads unless the user starts in Codex, whose card says so while one of its sessions is open.
-          const role = [...(agent === 'claude' || leads ? [t('Lead')] : []), ...held].join(' · ');
+          // Claude and Codex alike say Lead while one of their sessions is open here.
+          const role = [...(leads ? [t('Lead')] : []), ...held].join(' · ');
           return (
             <li className="agent-card" key={agent} data-agent={agent} style={{ '--i': index } as CSSProperties}>
               <div className="agent-card-head">

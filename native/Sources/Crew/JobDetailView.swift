@@ -363,7 +363,7 @@ struct SessionDetailView: View {
             VStack(alignment: .leading, spacing: Space.m) {
                 Text(session.waitingFor ?? String(localized: "\(agentName(session.agent)) needs your input.")).font(Typeface.callout).textSelection(.enabled)
                 ClaudeAskView(session: session)
-                if session.claudeURL == nil { Text("Answer in \(agentName(session.agent)).").font(Typeface.callout).foregroundStyle(.secondary) }
+                if OpenInAgentButton.availableURL(for: session) == nil { Text("Answer in \(agentName(session.agent)).").font(Typeface.callout).foregroundStyle(.secondary) }
             }.card(fill: Palette.attention(Palette.warning))
         }
         Grid(alignment: .leading, horizontalSpacing: WorkspaceStyle.factColumnGap, verticalSpacing: WorkspaceStyle.factRowGap) {
@@ -397,7 +397,7 @@ struct SessionDetailView: View {
             }
         }
         DetailFooter {
-            OpenInClaudeButton(session: session)
+            OpenInAgentButton(session: session)
             CopyButton(title: String(localized: "Resume Command"), text: session.resumeCommand, help: String(localized: "Copy the command that resumes this session"))
         }
     }

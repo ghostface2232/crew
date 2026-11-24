@@ -317,17 +317,23 @@ import Testing
         let assignment = RoleAssignment(agents: RoleAssignment.holderOrder)
         store.state.roles = ["delegate": assignment, "refactor": assignment, "release": RoleAssignment(agents: ["codex", "claude"])]
         let delegate = state.roleLabel("delegate"), release = state.roleLabel("release")
-        #expect(agentRole("claude", store: store) == "Lead · \(delegate) · \(release)")
+        // With no lead session open, neither Claude nor Codex says Lead.
+        #expect(agentRole("claude", store: store) == "\(delegate) · \(release)")
         #expect(agentRole("codex", store: store) == "\(delegate) · \(release)")
         #expect(agentRole("antigravity", store: store) == delegate)
         store.state.roleSettings = ["refactor": RoleSetting(agents: RoleAssignment.holderOrder)]
         #expect(agentRole("antigravity", store: store) == "\(delegate) · \(state.roleLabel("refactor"))")
-        // Codex's card says Lead while one of its lead sessions, working or idle, is open in scope.
+        // Each lead's card says Lead while one of its own sessions, working or idle, is open in scope.
         store.state.roleSettings = nil
         var codex = state.claude[0]
         codex.host = "codex"; codex.state = "idle"
         store.state.claude = [codex]
         #expect(agentRole("codex", store: store) == "Lead · \(delegate) · \(release)")
+        #expect(agentRole("claude", store: store) == "\(delegate) · \(release)")
+        store.state.claude = [state.claude[0]]
+        #expect(agentRole("claude", store: store) == "Lead · \(delegate) · \(release)")
+        #expect(agentRole("codex", store: store) == "\(delegate) · \(release)")
+        store.state.claude = [codex]
         store.selection = "project:/elsewhere"
         #expect(agentRole("codex", store: store) == "\(delegate) · \(release)")
     }

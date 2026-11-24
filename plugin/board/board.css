@@ -1186,6 +1186,8 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
 .mission[data-state="abandoned"] { --tone: var(--secondary); }
 /* The status and menu stay beside the title until the title would drop under 220px; then they move to a line of their own. */
 .mission-heading { flex: 1 1 220px; min-width: 0; display: grid; gap: 2px; }
+/* The lead's mark sits before the title and meta together, the same for every lead. */
+.mission-lead { display: grid; place-items: center; flex: none; align-self: center; color: var(--label); }
 .mission-meta { color: var(--secondary); font-size: 11.5px; font-variant-numeric: tabular-nums; }
 /* Pull requests sit in a band across the card's foot, below a hairline that runs to the card's edges, whether the
    card is open or closed. */

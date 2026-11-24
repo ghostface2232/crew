@@ -44,6 +44,7 @@
 "Collapse" = "접기";
 "Expand" = "펼치기";
 "Looks finished" = "끝난 것 같아요";
+"Led by %@" = "%@ 리드";
 "Mark Done" = "완료로 표시";
 "Stop Tracking" = "추적 중지";
 "Stops tracking without marking done. Its jobs keep running." = "완료로 표시하지 않고 추적만 중지해요. 미션의 작업은 계속 실행돼요.";
@@ -106,8 +107,8 @@
 "%lld-minute limit" = "%lld분 한도";
 "limit" = "한도";
 "%@ of %@" = "%2$@ 중 %1$@";
-"Open in Claude" = "Claude에서 열기";
-"Open this session in the Claude app" = "Claude 앱에서 이 세션을 열어요.";
+"Open in %@" = "%@에서 열기";
+"Open this session in the %@ app" = "이 세션을 %@ 앱에서 열어요.";
 
 /* CrewApp.swift */
 "New Job…" = "새 작업…";

@@ -11,14 +11,17 @@ import { NAMES, projectOf, sessionAgent } from './model.ts';
 import { ActionStatus, AgentMark, Chip, Composer, EmptyState, Icon, useAction, useDraft, Elapsed } from './ui.tsx';
 import { t } from './i18n.ts';
 
-/** Deep link that opens the session in the Claude desktop app; terminal sessions have none. */
-export function claudeLink(session: ClaudeSession): string | null {
-  return session.desktopId ? `claude://code/continue?session=${encodeURIComponent(session.desktopId)}` : null;
+/** The link that opens the session in its desktop app; a session in a terminal has none, Claude's or Codex's. */
+export function sessionAppLink(session: ClaudeSession): string | null {
+  const id = session.desktopId;
+  if (!id) return null;
+  if (sessionAgent(session) === 'codex') return /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id) ? `codex://threads/${id}` : null;
+  return `claude://code/continue?session=${encodeURIComponent(id)}`;
 }
 
-/** Opens the session in the Claude desktop app, where its prompts are answered. */
-export function OpenInClaude({ session, small }: { session: ClaudeSession; small?: boolean }) {
-  const link = claudeLink(session);
+/** Opens the session in its agent's desktop app, where its prompts are answered. */
+export function OpenInAgent({ session, small }: { session: ClaudeSession; small?: boolean }) {
+  const link = sessionAppLink(session);
   if (!link) return null;
   return (
     <button
@@ -30,7 +33,7 @@ export function OpenInClaude({ session, small }: { session: ClaudeSession; small
       }}
     >
       <Icon icon={ArrowUpRight16Filled} size={12} />
-      {t('Open in Claude')}
+      {t('Open in {agent}', { agent: NAMES[sessionAgent(session)] })}
     </button>
   );
 }
@@ -184,7 +187,7 @@ export function NeedsYou({
                     <AgentMark agent={sessionAgent(session)} size={13} />
                     <span>{NAMES[sessionAgent(session)]}</span>
                   </span>
-                  <OpenInClaude session={session} small />
+                  <OpenInAgent session={session} small />
                 </div>
                 <button className="need-title" data-opens-panel="" title={session.title} onClick={(event) => { event.stopPropagation(); openSession(session.id); }}>
                   {session.title}
@@ -193,7 +196,7 @@ export function NeedsYou({
               <div className="answer">
                 <p className="headline selectable">{session.waitingFor ?? t('{agent} needs your input.', { agent: NAMES[sessionAgent(session)] })}</p>
                 <ClaudeAsk session={session} />
-                {!session.desktopId && <p className="callout secondary"><Icon icon={ChatMultipleRegular} size={13} /> {t('Answer in {agent}.', { agent: NAMES[sessionAgent(session)] })}</p>}
+                {!sessionAppLink(session) && <p className="callout secondary"><Icon icon={ChatMultipleRegular} size={13} /> {t('Answer in {agent}.', { agent: NAMES[sessionAgent(session)] })}</p>}
               </div>
             </article>
           ))}

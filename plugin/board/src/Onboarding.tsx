@@ -93,20 +93,26 @@ function WelcomeArt() {
   );
 }
 
+/** Either lead starts the same command, each in its own syntax; neither is shown as the main one. */
+const HOSTS: [string, string, string][] = [['claude', 'Claude Code', '/crew:run'], ['codex', 'Codex', '$crew:run']];
+
 function CommandArt() {
   return (
-    <div className={`card ${styles.composer}`}>
-      <div className={styles.composerHead}>
-        <AgentMark agent="claude" size={14} />
-        <span>Claude Code</span>
-      </div>
-      <p className={styles.prompt}>
-        <span className={styles.slash}>/crew:run</span> {t('Add a dark mode')}<i className={styles.caret} />
-      </p>
-      <div className={styles.composerFoot}>
-        <span className="caption secondary">~/Projects/app</span>
-        <span className={styles.send}><Icon icon={ArrowUp16Filled} size={14} /></span>
-      </div>
+    <div className={styles.composers}>
+      {HOSTS.map(([agent, name, command]) => (
+        <div className={`card ${styles.composer}`} key={agent}>
+          <div className={styles.composerHead}>
+            <AgentMark agent={agent} size={14} />
+            <span>{name}</span>
+          </div>
+          <div className={styles.composerFoot}>
+            <p className={styles.prompt}>
+              <span className={styles.slash}>{command}</span> {t('Add a dark mode')}
+            </p>
+            <span className={styles.send}><Icon icon={ArrowUp16Filled} size={14} /></span>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

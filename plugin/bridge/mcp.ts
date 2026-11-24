@@ -46,6 +46,7 @@ const roles = started?.roles ?? DEFAULT_ROLES;
  * A role held by the host's own agent is the lead's own work; every other holder runs as a worker, Claude too under Codex.
  */
 let host: 'claude' | 'codex' = 'claude';
+let initialized = false;
 const holderName = (agent: Holder) => (agent === host ? `you, ${agent === LEAD ? 'Claude' : 'Codex'}` : workerName(agent));
 /** A worker's name; Claude is one only under a Codex lead. A daemon of another version may name one this session does not know. */
 const workerName = (agent: Holder) => (agent === LEAD ? 'Claude (a Claude worker)' : WORKERS[agent]?.name ?? String(agent));
@@ -753,7 +754,7 @@ async function updateMission(args: any, ctx?: CallContext): Promise<string> {
       return `Mission ${closed.id} was closed outside this session (${closed.outcome || closed.state}). Carry on with the work and do not open a new mission for it.\n${describeMission(closed)}`;
     }
     // A mission already open stays open: the user often gives a second command while the first is still under way.
-    const opened: Mission = await api('POST', '/api/missions', { title: args.title, project: PROJECT, stage: args.stage, stages: args.stages, owner: SESSION, preset: args.preset ?? undefined, tasks: args.tasks });
+    const opened: Mission = await api('POST', '/api/missions', { title: args.title, project: PROJECT, stage: args.stage, stages: args.stages, owner: SESSION, lead: host, preset: args.preset ?? undefined, tasks: args.tasks });
     openedHere.add(opened.id);
     track(opened);
     closedElsewhere = null;
@@ -837,7 +838,7 @@ async function followUp(): Promise<string> {
   if (opening) return opening.then(() => '');
   if (costMission || !lastDone || !SESSION) return '';
   const after = lastDone;
-  opening = api('POST', '/api/missions', { title: followUpTitle(after.title), project: PROJECT, owner: SESSION, stages: ['implement', 'final'] }).then((opened: Mission) => {
+  opening = api('POST', '/api/missions', { title: followUpTitle(after.title), project: PROJECT, owner: SESSION, lead: host, stages: ['implement', 'final'] }).then((opened: Mission) => {
     openedHere.add(opened.id);
     track(opened);
     lastDone = null;
@@ -1136,6 +1137,7 @@ async function handle(msg: any): Promise<void> {
       // Started only now, so a daemon a Codex server starts knows its environment is filtered.
       ensureDaemon().catch(() => {});
       TOOLS = toolList();
+      initialized = true;
       return reply({
         protocolVersion: PROTOCOL_VERSIONS.includes(params?.protocolVersion) ? params.protocolVersion : PROTOCOL_VERSIONS[1],
         capabilities: { tools: {} },
@@ -1150,6 +1152,7 @@ async function handle(msg: any): Promise<void> {
       inFlight.get(params?.requestId)?.abort();
       return;
     case 'tools/call': {
+      if (!initialized) return send({ jsonrpc: '2.0', id, error: { code: -32002, message: 'Server not initialized' } });
       const controller = new AbortController();
       inFlight.set(id, controller);
       const token = params?._meta?.progressToken;

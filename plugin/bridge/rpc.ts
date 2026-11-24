@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import type { ChildProcessWithoutNullStreams } from 'node:child_process';
+import type { ChildProcess, ChildProcessWithoutNullStreams, ExecFileOptions } from 'node:child_process';
 import readline from 'node:readline';
 import { clipEnd } from './text.ts';
 
@@ -143,4 +143,25 @@ export class RpcPeer {
 /** Killing cmd.exe alone leaves the agent it launched running. */
 export function treeKillCommand(pid: number | undefined, shell: boolean, platform: NodeJS.Platform = process.platform): { bin: string; args: string[] } | null {
   return platform === 'win32' && shell && pid !== undefined ? { bin: 'taskkill', args: ['/pid', String(pid), '/T', '/F'] } : null;
+}
+
+/**
+ * `execFile` with a timeout that ends the whole command. Node's own timeout signals only the process it started,
+ * which for a Windows `.cmd` shim is cmd.exe, so the agent the shim ran was left running.
+ */
+export function execTimed(bin: string, args: readonly string[], options: ExecFileOptions & { timeout: number },
+  callback: (err: Error | null, stdout: string, stderr: string) => void): ChildProcess {
+  const { timeout, ...rest } = options;
+  let timedOut = false;
+  const child = execFile(bin, args, { ...rest, encoding: 'utf8' }, (err, stdout, stderr) => {
+    clearTimeout(timer);
+    callback(timedOut ? new Error(`timed out after ${timeout / 1000}s`) : err, String(stdout), String(stderr));
+  });
+  const timer = setTimeout(() => {
+    timedOut = true;
+    const kill = treeKillCommand(child.pid, Boolean(rest.shell));
+    if (kill) execFile(kill.bin, kill.args, { windowsHide: true }, (err) => { if (err) child.kill(); });
+    else child.kill();
+  }, timeout);
+  return child;
 }

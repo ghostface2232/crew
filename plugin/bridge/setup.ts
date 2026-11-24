@@ -1,4 +1,4 @@
-import { execFile, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { isNewer } from './client.ts';
 import { CODEX_PLUGIN, hookKeys, hookTrust, pointer, writeCodexPlugin, writtenByCrew } from './codex-plugin.ts';
 import type { HookTrust } from './codex-plugin.ts';
-import { RpcPeer } from './rpc.ts';
+import { execTimed, RpcPeer } from './rpc.ts';
 import { agentCommand, agentEnv, HOME, installed, LEDGER_ASIDE, loadConfig, PLUGIN_ROOT, VERSION } from './config.ts';
 
 /**
@@ -37,7 +37,7 @@ export function run(bin: string, args: string[], timeout = 20_000): Promise<{ ok
   const env = agentEnv();
   const command = agentCommand(bin, args, env);
   return new Promise((resolve) => {
-    execFile(command.bin, command.args, { env, shell: command.shell, timeout, windowsHide: true }, (err, stdout, stderr) => {
+    execTimed(command.bin, command.args ?? [], { env, shell: command.shell, timeout, windowsHide: true }, (err, stdout, stderr) => {
       resolve({ ok: !err, out: (stdout || stderr || err?.message || '').trim() });
     });
   });

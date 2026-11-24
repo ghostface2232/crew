@@ -381,3 +381,20 @@ test('the Codex hooks item asks app-server hooks/list and is trusted only when C
   assert.equal(missing.ok, false);
   assert.match(missing.detail, /^Could not ask Codex/);
 });
+
+test('a CLI that outlives its timeout is ended with everything it started, not only its Windows shim', async () => {
+  const { run } = await import('../plugin/bridge/setup.ts');
+  const dir = fs.mkdtempSync(path.join(home, 'timed-'));
+  const bin = path.join(dir, 'slow');
+  const pidFile = path.join(dir, 'pid');
+  writeFakeBin(bin, `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setTimeout(() => {}, 30_000);`);
+  const started = Date.now();
+  const res = await run(bin, [], 1_000);
+  assert.equal(res.ok, false);
+  assert.match(res.out, /timed out after 1s/);
+  assert.ok(Date.now() - started < 10_000);
+  const pid = Number(fs.readFileSync(pidFile, 'utf8'));
+  const alive = () => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  for (let i = 0; i < 50 && alive(); i++) await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(alive(), false);
+});

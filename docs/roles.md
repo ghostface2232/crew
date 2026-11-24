@@ -33,15 +33,15 @@ Each tool maps to one or more roles, and `roles` in `~/.crew/config.json` names 
 }
 ```
 
-Unassigned roles and roles without `agents` inherit their parent's holders with their own per-agent settings overlaid. Listing `agents` starts fresh. Settings stay scoped per agent (`codex`, `antigravity`), and unused agents' settings are omitted. A role may have several holders, including `claude` (all have the same status in the assignment). Under a Claude lead, a role held by `claude` is the lead's own work. Under a Codex lead it is too, unless the lead names `claude` for the job, which starts a Claude Code worker. A role held by `codex` still starts a separate Codex worker job.
+Unassigned roles and roles without `agents` inherit their parent's holders with their own per-agent settings overlaid. Listing `agents` starts fresh. Settings stay scoped per agent (`codex`, `antigravity`), and unused agents' settings are omitted. A role may have several holders, including `claude` (all have the same status in the assignment). A role held by the lead's own agent is the lead's own work: `claude` under a Claude lead, `codex` under a Codex lead. Every other holder runs as a worker, so under a Codex lead a role held by `claude` starts a Claude Code worker.
 
 ```json
 { "roles": { "review": { "agents": ["codex", "claude"], "codex": { "effort": "high" } }, "polish": { "agents": ["claude"] } } }
 ```
 
 - `agents` is stored in fixed order (`codex`, `antigravity`, `claude`). The legacy config form (`agent`, `also`, `model`, `effort`) is still converted on read.
-- The lead selects a holder with `agent` on `delegate`, `review`, `polish`, and `debate`. Picking `claude` starts no worker job and returns instructions for in-session or subagent execution (`crew:self-reviewer` for reviews). Under a Codex lead, naming `claude` starts a Claude Code worker instead (`adapters/claude.ts`), while a job that names no holder for a role Claude holds stays the lead's own work. The daemon tells the hosts apart by the lead's hello (`hostOf` in `delivery.ts`), so a board-started job cannot pick Claude.
-- When `agent` is omitted (`POST /api/jobs` or tool call), Crew picks the first enabled, able worker in preferred order (`antigravity` first for `polish`, `codex` first for all other roles). See [routing](usage-and-presets.md#routing) for the usage-aware choice. Roles held only by `claude` or an unable/disabled worker fail at start rather than falling back.
+- The lead selects a holder with `agent` on `delegate`, `review`, `polish`, and `debate`. Picking its own agent starts no worker job and returns instructions for in-session or subagent execution (the self-reviewer for reviews). Under a Codex lead, `claude`, named or the role's default, starts a Claude Code worker (`adapters/claude.ts`). The daemon tells the hosts apart by the lead's hello (`hostOf` in `delivery.ts`), so a board-started job cannot pick Claude.
+- When `agent` is omitted (`POST /api/jobs` or tool call), Crew picks the first enabled, able worker in preferred order (`antigravity` first for `polish`, `codex` first for all other roles, Claude last and only under a Codex lead), else the lead's own agent when it holds the role. See [routing](usage-and-presets.md#routing) for the usage-aware choice. Roles held only by `claude` or an unable/disabled worker fail at start rather than falling back.
 - Settings edits the stored `roleSettings` table. See [daemon state](daemon-api.md#state-and-events) for the fields the daemon sends.
 - `resolveRole` in `jobs.ts` settles a job's role once at creation. `POST /api/jobs` may pass `role` without `kind`. A job with `kind: "review"` and `runs_app` resolves to `verify`. Contradictory `role`/`kind`/`runs_app`/`debate` combinations fail. The board's New Job offers every role except `debate`.
 
@@ -147,4 +147,5 @@ Shared instructions were verified with markers across Codex, Antigravity, and he
 
 ## History
 
+- 2026-11-25: A role held by the lead's own agent is the lead's own work, and every other holder runs as a worker. Under a Codex lead this sends a role held by Claude to a Claude worker by default, and keeps a role held by Codex with the lead. It reverses the first Codex-lead design, which kept a Claude role with the Codex lead unless it named `claude` and ran a Codex role as a separate Codex worker: the user's role settings decide who does the work, whichever host leads.
 - 2026-11-12–13: Added configurable roles and shared instructions.

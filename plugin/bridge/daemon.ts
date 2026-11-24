@@ -145,9 +145,20 @@ const config = loadConfig();
 const BUILD = installed().build;
 
 const streams = new Set<http.ServerResponse>();
+/**
+ * How much may wait unsent for one stream. A reader that has stopped (a frozen tab, a suspended app) would otherwise
+ * have every later frame kept in memory; past this its connection is dropped, and it gets the whole state when it reconnects.
+ */
+const STREAM_BACKLOG = 8 * 1024 * 1024;
 function broadcast(type: string, data: unknown): void {
   const frame = `event: ${type}\ndata: ${clientJson(data)}\n\n`;
-  for (const res of streams) res.write(frame);
+  for (const res of streams) {
+    res.write(frame);
+    if (res.writableLength > STREAM_BACKLOG) {
+      streams.delete(res);
+      res.destroy();
+    }
+  }
 }
 
 const AGENT_NAMES = { claude: 'Claude', codex: WORKERS.codex.name, antigravity: WORKERS.antigravity.name };

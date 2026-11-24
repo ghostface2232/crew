@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { taskbarDarkIn } from '../desktop/taskbar.ts';
 import { windowBounds, isBoardNavigation, isClaudeSessionLink, linkTarget } from '../desktop/window-state.ts';
 import { boardAsset, BOARD_CSP } from '../plugin/bridge/assets.ts';
@@ -89,5 +91,31 @@ test('serves only built assets with explicit types and a renderer security polic
     assert.match(BOARD_CSP, /object-src 'none'/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('the bundled plugin runs as ES modules under a home folder whose package.json says CommonJS', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-bundle-'));
+  try {
+    // The bundle reads the checkout it runs in; this one has the source's plugin and a stand-in for the built board.
+    const checkout = path.join(dir, 'checkout');
+    const plugin = fileURLToPath(new URL('../plugin', import.meta.url));
+    fs.cpSync(plugin, path.join(checkout, 'plugin'), { recursive: true, filter: (source) => source !== path.join(plugin, 'board') });
+    fs.cpSync(fileURLToPath(new URL('../.claude-plugin', import.meta.url)), path.join(checkout, '.claude-plugin'), { recursive: true });
+    fs.mkdirSync(path.join(checkout, 'plugin/board/dist'), { recursive: true });
+    fs.writeFileSync(path.join(checkout, 'package.json'), '{"type":"module"}\n');
+    // What `npm init -y` leaves in a home folder, above the copy the Windows app registers.
+    const home = path.join(dir, 'home');
+    const copy = path.join(home, '.crew/plugins/1.0.0-abc');
+    fs.mkdirSync(copy, { recursive: true });
+    fs.writeFileSync(path.join(home, 'package.json'), '{"type":"commonjs"}\n');
+    const bundle = new URL('../scripts/bundle-plugin.mjs', import.meta.url).href;
+    execFileSync(process.execPath, ['--input-type=module', '-e', `const { bundlePlugin } = await import(${JSON.stringify(bundle)}); await bundlePlugin(${JSON.stringify(copy)}, '../runtime/node.exe');`], { cwd: checkout, stdio: 'pipe' });
+    const script = path.join(copy, 'plugin/bridge/mcp.js');
+    fs.mkdirSync(path.dirname(script), { recursive: true });
+    fs.writeFileSync(script, "import fs from 'node:fs';\nprocess.stdout.write(typeof fs.readFileSync);\n");
+    assert.equal(execFileSync(process.execPath, [script], { encoding: 'utf8', stdio: 'pipe' }), 'function');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });

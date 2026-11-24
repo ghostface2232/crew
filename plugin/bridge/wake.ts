@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { api } from './client.ts';
@@ -75,7 +76,16 @@ export async function leadHook(input: HookInput, mode: string, request: typeof a
   }
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Node resolves links in a module's URL but not in argv, and the plugin folder may be reached through one.
+const real = (file: string) => {
+  try {
+    return fs.realpathSync(file);
+  } catch {
+    return path.resolve(file);
+  }
+};
+
+if (process.argv[1] && real(process.argv[1]) === real(fileURLToPath(import.meta.url))) {
   const mode = process.argv[2] ?? 'watch';
   // End before the host timeout, even if stdin or the transport gets stuck.
   const lifetime = mode === 'watch' ? (HOOK_SECONDS - 10) * 1000 : 4000;

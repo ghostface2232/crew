@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
+import http from 'node:http';
+import net from 'node:net';
 import { StringDecoder } from 'node:string_decoder';
 import { stripTypeScriptTypes } from 'node:module';
 import { test } from 'node:test';
 import vm from 'node:vm';
+import { clientJson } from '../plugin/bridge/text.ts';
 
 function reader() {
   const source = fs.readFileSync(new URL('../plugin/bridge/daemon.ts', import.meta.url), 'utf8');
@@ -93,4 +96,53 @@ test('an incomplete UTF-8 sequence after valid JSON makes the body malformed', a
   req.emit('data', Buffer.from([0xe2]));
   req.emit('end');
   await rejected;
+});
+
+test('an event stream whose reader has stopped is dropped once its backlog passes the cap, and a reading one is kept', async (t) => {
+  const source = fs.readFileSync(new URL('../plugin/bridge/daemon.ts', import.meta.url), 'utf8');
+  const slice = source.slice(source.indexOf('const streams = new Set'), source.indexOf('\nconst AGENT_NAMES'));
+  const { streams, broadcast } = vm.runInNewContext(stripTypeScriptTypes(slice) + '; ({ streams, broadcast })', { clientJson }) as { streams: Set<http.ServerResponse>; broadcast: (type: string, data: unknown) => void };
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    res.write(': open\n\n');
+    streams.add(res);
+    req.on('close', () => streams.delete(res));
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const connect = (reads: boolean) => new Promise<net.Socket>((resolve) => {
+    const socket = net.connect((server.address() as net.AddressInfo).port, '127.0.0.1', () => {
+      socket.write('GET /api/stream HTTP/1.1\r\nhost: 127.0.0.1\r\n\r\n');
+      socket.on('error', () => {});
+      if (reads) socket.resume();
+      resolve(socket);
+    });
+    t.after(() => socket.destroy());
+  });
+  const opened = async (count: number) => {
+    while (streams.size < count) await new Promise((resolve) => setImmediate(resolve));
+  };
+  const stalled = await connect(false);
+  await opened(1);
+  const [stalledStream] = streams;
+  const reading = await connect(true);
+  await opened(2);
+
+  // 64 MiB in all: what the system buffers for a socket is a small part of it, and the rest waits in the daemon.
+  const data = 'x'.repeat(1024 * 1024);
+  let peak = 0;
+  for (let i = 0; i < 64; i++) {
+    broadcast('job', data);
+    peak = Math.max(peak, stalledStream.writableLength);
+    // Lets the reading stream drain, as a live board does between events.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.equal(stalledStream.destroyed, true);
+  assert.ok(peak < 10 * 1024 * 1024, `queued ${peak} bytes`);
+  assert.equal(streams.size, 1);
+  assert.equal(reading.destroyed, false);
+  // The dropped client sees its connection end, which is what makes it reconnect.
+  const closed = new Promise((resolve) => stalled.once('close', resolve));
+  stalled.resume();
+  await closed;
 });

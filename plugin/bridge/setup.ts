@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { isNewer } from './client.ts';
 import { agentCommand, agentEnv, HOME, installed, LEDGER_ASIDE, loadConfig, PLUGIN_ROOT, VERSION } from './config.ts';
 
 /**
@@ -111,10 +112,27 @@ const alive = (pid: number) => {
 };
 
 /**
+ * The version of a newer copy of the app that holds the registration, if one does. After an update, a session still
+ * open runs its MCP server from the copy before, and a daemon it starts would register that copy again and remove the
+ * new one. So the older copy leaves the registration alone, as its daemon leaves a newer daemon (`shouldReplace` in
+ * client.ts). A record of this copy's own folder, or of a folder since removed, is of nothing newer.
+ */
+function newerRegistration(): string | null {
+  try {
+    const record = JSON.parse(fs.readFileSync(RECORD, 'utf8'));
+    return isNewer(record.version, VERSION) && !samePath(record.root, registeredRoot()) && fs.existsSync(record.root) ? record.version : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Registers this copy's marketplace and installs or updates the plugin from it, then points the `crew` command here.
  * An app leaves a plugin registered from a source checkout alone: that is a developer's install.
  */
 export async function register(): Promise<Registration> {
+  const newer = PACKAGED ? newerRegistration() : null;
+  if (newer) return { ok: true, detail: `A newer Crew (${newer}) is registered; this copy (${VERSION}) leaves it as it is.` };
   const marketplaces = await claudeJSON<Marketplace[]>(['plugin', 'marketplace', 'list']);
   if (!marketplaces) return { ok: false, detail: 'Claude Code was not found. Install it, then try again.' };
   const current = marketplaces.find((entry) => entry.name === 'crew');

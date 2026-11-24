@@ -15,7 +15,7 @@ The requirements are in [requirements.md](requirements.md). Current status again
 | R8 (AgentGauge) | C1, L3 | Partial — G1 done (`usage.ts`); G2, G3, and L3 open |
 | R12 (Cursor) | C2 | Open |
 | R14 (no collisions between agents) | — | Done (`prompts.ts`, `jobs.ts`, [sandbox.md](sandbox.md)) |
-| R15 (approvals with little user involvement) | — | Done for Codex (`config.ts` `auto_review`, `jobs.ts` `retryRefused`) |
+| R15 (approvals with little user involvement) | — | Done for Codex workers (`config.ts` `auto_review`, `jobs.ts` `retryRefused`) and writable Claude workers (`adapters/claude.ts`, automatic mode) |
 | R13 (other leads, own main screen, direct dispatch) | L1, L2 | Partial — board, desktop apps, direct jobs (`Dispatch.tsx`, `DispatchView.swift`), and Codex as a lead done; the rest of L1 item 4, mission start, and merge execution open |
 
 Near-term work targets Claude Desktop lead mode, as [requirements.md](requirements.md#3-defaults-and-priorities) sets out.

@@ -15,7 +15,10 @@ import { clip, clipEnd } from '../text.ts';
 const IDLE_SHUTDOWN_MS = 10 * 60_000;
 const CLOSE_GRACE_MS = 2_000;
 const EDIT_TOOLS = ['Edit', 'Write', 'NotebookEdit'];
-/** Crew's worker MCP tools that only read or report. `browser` starts a process outside the worker's limits, so it asks. */
+/**
+ * Crew's worker MCP tools that only read or report. `browser` starts a process outside the worker's limits, so it asks
+ * in the manual mode; the automatic mode judges it as it judges a command.
+ */
 const UNATTENDED_TOOLS = ['ask_lead', 'lead_answers', 'siblings', 'search', 'recent_changes', 'rate'].map((name) => `mcp__crew__${name}`);
 
 type ToolInput = Record<string, unknown>;
@@ -161,6 +164,8 @@ class Session {
   private mode: 'auto' | 'default';
   private modeRequest?: string;
   private modeRequests = 0;
+  /** Messages held until Claude Code confirms the mode they are to be read in. */
+  private held: string[] = [];
   turns = 0;
   stopping = false;
   private idle?: NodeJS.Timeout;
@@ -218,7 +223,8 @@ class Session {
       this.modeRequest = `crew-mode-${++this.modeRequests}`;
       this.write({ type: 'control_request', request_id: this.modeRequest, request: { subtype: 'set_permission_mode', mode } });
     }
-    this.write({ type: 'user', message: { role: 'user', content: text } });
+    if (this.modeRequest) this.held.push(text);
+    else this.write({ type: 'user', message: { role: 'user', content: text } });
   }
 
   stop(mode: 'graceful' | 'cancel' | 'shutdown' = 'graceful'): Promise<void> {
@@ -321,6 +327,10 @@ class Session {
         if (message.subtype === 'init') {
           if (typeof message.session_id === 'string') ctl.session(message.session_id);
           ctl.model(message.model, message.effort ?? ctl.job.effort);
+          // Also catches a resumed session that brought back the mode it was saved in.
+          if (typeof message.permissionMode === 'string' && message.permissionMode !== this.mode) {
+            this.fail(`Claude Code started the turn in ${message.permissionMode} permissions, not ${this.mode}.`, false, true);
+          }
         } else if (message.subtype === 'permission_denied') {
           const use = typeof message.tool_use_id === 'string' ? this.uses.get(message.tool_use_id) : undefined;
           const tool = typeof message.tool_name === 'string' ? message.tool_name : use?.name ?? 'an action';
@@ -356,9 +366,14 @@ class Session {
         }
         break;
       case 'control_response':
-        // Left in automatic mode, the turn would decide what the user was to be asked about.
-        if (message.response?.request_id === this.modeRequest && message.response?.subtype !== 'success') {
-          this.fail(`Claude Code could not switch to ${this.mode} permissions: ${message.response?.error ?? 'no reason given'}.`, false);
+        if (!this.modeRequest || message.response?.request_id !== this.modeRequest) break;
+        this.modeRequest = undefined;
+        if (message.response.subtype === 'success') {
+          for (const text of this.held.splice(0)) this.write({ type: 'user', message: { role: 'user', content: text } });
+        } else {
+          // Left in the old mode, the turn would decide what the user was to be asked about, so it is never sent.
+          this.held.length = 0;
+          this.fail(`Claude Code could not switch to ${this.mode} permissions: ${message.response.error ?? 'no reason given'}.`, false, true);
         }
         break;
       case 'control_cancel_request': {
@@ -396,8 +411,9 @@ class Session {
     }
   }
 
-  private fail(message: string, limit: boolean): void {
-    if (this.turns) void this.stop();
+  /** `now` stops the process at once, for a turn that must not go on running. */
+  private fail(message: string, limit: boolean, now = false): void {
+    if (this.turns) void this.stop(now ? 'cancel' : 'graceful');
     else this.idle = setTimeout(() => void this.stop(), IDLE_SHUTDOWN_MS).unref();
     this.turns = 0;
     this.ctl.fail(message, limit ? { limit: true } : undefined);
@@ -423,7 +439,7 @@ export function claudeAdapter(config: Config): Adapter {
       session = new Session(config, ctl, jobGrants, () => sessions.delete(id), resume);
       sessions.set(id, session);
       ctl.capabilities({
-        filesystem: ctl.job.sandbox === 'workspace-write' ? 'edits inside the workspace only' : 'read-only edits policy',
+        filesystem: ctl.job.sandbox === 'workspace-write' ? 'file edits inside the workspace; commands as automatic mode judges them' : 'read-only edits policy',
         network: 'agent-managed', plugins: [],
       });
     }

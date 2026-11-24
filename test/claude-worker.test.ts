@@ -23,6 +23,7 @@ const fakeClaude = `
   let turns = 0, prompt, step = 0, hold = false;
   let replies = [];
   const modes = [flag('--permission-mode')];
+  let current = modes[0];
   const success = () => send({
     type: 'result', subtype: 'success', is_error: false, session_id: session,
     result: JSON.stringify({ prompt, turns, args, mcp, instructions, replies, cwd, modes }),
@@ -49,6 +50,8 @@ const fakeClaude = `
     const message = JSON.parse(line);
     if (message.type === 'control_request' && message.request.subtype === 'set_permission_mode') {
       modes.push(message.request.mode);
+      if (fs.existsSync(path.join(cwd, 'mode-error'))) return send({ type: 'control_response', response: { subtype: 'error', request_id: message.request_id, error: 'Unsupported mode' } });
+      if (!fs.existsSync(path.join(cwd, 'mode-ignore'))) current = message.request.mode;
       return send({ type: 'control_response', response: { subtype: 'success', request_id: message.request_id, response: { mode: message.request.mode } } });
     }
     if (message.type === 'control_response') {
@@ -67,7 +70,7 @@ const fakeClaude = `
     turns++;
     replies = [];
     step = 0;
-    send({ type: 'system', subtype: 'init', session_id: session, model: 'test-model', effort: 'medium' });
+    send({ type: 'system', subtype: 'init', session_id: session, model: 'test-model', effort: 'medium', permissionMode: current });
     if (prompt === 'policy') return ask(...policy[0]);
     if (prompt === 'read-only edit') return ask('NotebookEdit', { notebook_path: local });
     if (prompt === 'linked edit') return ask('Edit', { file_path: path.join(cwd, 'link', 'new', 'file.txt') });
@@ -328,12 +331,32 @@ test("Claude Code's automatic mode refusals reach the lead, and a second retry t
   assert.deepEqual((await h.report(2)).modes, ['auto', 'default', 'auto']);
 });
 
+test('A turn whose manual mode Claude Code does not confirm never runs', async (t) => {
+  for (const marker of ['mode-error', 'mode-ignore']) {
+    const h = harness(t, 'first');
+    await h.adapter.start(h.ctl);
+    await h.report();
+    fs.writeFileSync(path.join(h.cwd, marker), '');
+    h.ctl.job.asksUser = true;
+    await h.adapter.reply(h.ctl, 'retry');
+    const [message] = await h.event('fail');
+    assert.match(String(message), marker === 'mode-error' ? /could not switch to default permissions: Unsupported mode/ : /started the turn in auto permissions, not default/);
+    assert.equal(h.events.done.length, 1);
+  }
+});
+
+test('A session relaunched for a turn the user answers starts in the manual mode', async (t) => {
+  const h = harness(t, 'first', { asksUser: true, sessionId: 'saved' });
+  await h.adapter.reply(h.ctl, 'retry');
+  assert.deepEqual((await h.report()).modes, ['default']);
+});
+
 test('Claude Code may not edit .git, and the browser tool asks the user', async (t) => {
   const git = harness(t, 'git edit');
   fs.mkdirSync(path.join(git.cwd, '.git'), { recursive: true });
   await git.adapter.start(git.ctl);
   assert.deepEqual((await git.report()).replies[0].response, { behavior: 'deny', message: 'Edit paths must be inside the job workspace.' });
-  const browser = harness(t, 'browser');
+  const browser = harness(t, 'browser', { sandbox: 'read-only' });
   await browser.adapter.start(browser.ctl);
   assert.deepEqual(await browser.event('waiting'), ['approval', 'mcp__crew__browser', undefined]);
 });

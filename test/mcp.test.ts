@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import readline from 'node:readline';
 import os from 'node:os';
 import path from 'node:path';
 import vm from 'node:vm';
@@ -8,6 +10,7 @@ import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import { followUpTitle, missionDetail, missionHead, Missions, NAME_THE_MISSION, normalizeTitle } from '../plugin/bridge/missions.ts';
 import { TIERS } from '../plugin/bridge/tiers.ts';
+import { checkArguments } from '../plugin/bridge/arguments.ts';
 import { assignHint, canonicalPath, defaultHolder, disabledAgents, LEAD, PRESET_NAMES, ROLE_INFO, WORKERS } from '../plugin/bridge/config.ts';
 import { addNews, clipped, Delivery, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, REPORT_PAGE_BYTES, textPage, unread } from '../plugin/bridge/delivery.ts';
 import type { Job } from '../plugin/bridge/jobs.ts';
@@ -276,6 +279,10 @@ test('polish advertises the shared model option and forwards it to the job', asy
   assert.equal((await run({ targets: ['README.md'], model: 'selected-model' })).model, 'selected-model');
   assert.equal((await run({ targets: ['README.md'] })).model, undefined);
   assert.equal((await run({ targets: ['README.md'], tier: 'frontier' })).tier, 'frontier');
+  // The brief and its criteria go where delegate takes them.
+  assert.deepEqual(Object.keys(tool.inputSchema.properties).filter((key) => ['task', 'done_when', 'guidance', 'effort'].includes(key)), ['task', 'done_when', 'effort']);
+  const briefed = await run({ targets: ['README.md'], task: 'Reword the footnote.', done_when: 'Only the footnote changed.', effort: 'high' });
+  assert.deepEqual([briefed.task, briefed.done_when, briefed.effort], ['Reword the footnote.', 'Only the footnote changed.', 'high']);
 });
 
 test('the wake hook follows every tool that can leave a job running, answer included', () => {
@@ -312,7 +319,7 @@ test('MCP bounds a multi-job response and ACKs only echoed receipts before makin
   const replies: any[] = [];
   const order: string[] = [];
   const handle = vm.runInNewContext(`${stripTypeScriptTypes(handler)}; handle`, {
-    AbortController, inFlight: new Map(), ensureDaemon: async () => {}, SESSION: 'lead', host: 'claude',
+    AbortController, inFlight: new Map(), ensureDaemon: async () => {}, checkArguments, TOOLS: [], argumentHint: () => undefined, SESSION: 'lead', host: 'claude',
     clipped, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, send: (msg: unknown) => replies.push(msg),
     imageContent: () => [{ type: 'image', data: 'x'.repeat(900_000), mimeType: 'image/png' }],
     api: async (_method: string, route: string, body: any) => {
@@ -391,6 +398,33 @@ test('status pages the latest full report during a follow-up and retained debate
   assert.match(await run({ job_id: job.id, turn: 1 }), /report turn 1, offset 0:\nfirst answer\nEnd of report\./);
   await assert.rejects(run({ job_id: job.id, turn: 0 }), /Invalid report offset or turn/);
   await assert.rejects(run({ job_id: job.id, report_offset: 0, turn: 99 }), /not retained/);
+});
+
+test('a call with an argument its tool does not take is refused before it reaches the daemon, naming where the brief goes', async (t) => {
+  // No initialize, and a port nothing listens on: a call that got past the check would try to reach a daemon.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-args-'));
+  const child = spawn(process.execPath, [path.resolve('plugin/bridge/mcp.ts')], { env: { ...process.env, CREW_HOME: home, CREW_PORT: '9' }, stdio: ['pipe', 'pipe', 'ignore'] });
+  t.after(() => { child.kill(); fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }); });
+  const replies = new Map<number, (result: any) => void>();
+  readline.createInterface({ input: child.stdout! }).on('line', (line) => { const msg = JSON.parse(line); replies.get(msg.id)?.(msg.result); });
+  let id = 0;
+  const call = (name: string, args: object) => new Promise<any>((resolve) => {
+    replies.set(++id, resolve);
+    child.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args } }) + '\n');
+  });
+  const text = async (name: string, args: object) => {
+    const result = await call(name, args);
+    assert.equal(result.isError, true);
+    return result.content[0].text as string;
+  };
+  // The polish brief used to be guidance; a brief sent under delegate's name was dropped and the job started without one.
+  assert.match(await text('polish', { targets: ['README.md'], guidance: 'Reword it.' }), /^polish does not take `guidance`, so nothing was done\. polish takes its brief in `task`\. Its arguments: targets, task, done_when, /);
+  assert.match(await text('review', { task: 'Check the race.' }), /review takes its brief in `focus`/);
+  assert.match(await text('debate', { topic: 'x', position: 'y', task: 'z' }), /debate takes its brief in `topic` and `position`/);
+  assert.match(await text('mission', { mission_id: 'm-1', stage: 'final' }), /^mission does not take `mission_id`[^]*names the mission with `id`/);
+  assert.match(await text('polish', { targets: ['a.md'], exclusive: true }), /An editor only changes wording/);
+  // A nested name is checked too, by its path.
+  assert.match(await text('mission', { tasks: [{ id: 't1', owner: 'me' }] }), /^mission does not take `tasks\[0\]\.owner`/);
 });
 
 test('a role the lead holds starts no worker, and a pick outside the holders is refused', () => {
@@ -509,7 +543,7 @@ test('status and mission explicitly read this session\'s watch news without any 
   const missions: object[] = [];
   const offered: (string[] | undefined)[] = [];
   const handle = vm.runInNewContext(`${stripTypeScriptTypes(standing + tool + handler)}; handle`, {
-    AbortController, inFlight: new Map(), ensureDaemon: async () => {}, SESSION: 'lead', host: 'claude', PROJECT: '/project', projectUnknown: false,
+    AbortController, inFlight: new Map(), ensureDaemon: async () => {}, checkArguments, TOOLS: [], argumentHint: () => undefined, SESSION: 'lead', host: 'claude', PROJECT: '/project', projectUnknown: false,
     fresh: false, missionId: null, costMission: null, closedElsewhere: null,
     missionHead: () => 'Current mission', missionDetail: () => '', currentPolicy: () => '', globalPreset: () => null,
     clipped, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, send: (msg: unknown) => replies.push(msg),

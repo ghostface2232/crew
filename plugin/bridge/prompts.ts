@@ -169,7 +169,8 @@ function assignment(spec: JobSpec, worktree: Worktree | null, diffFile: string |
   }
 
   const parts = [`# Files you may edit\n${spec.targets!.map((t) => `- ${t}`).join('\n')}`];
-  if (spec.task) parts.push(`# Guidance from the lead\n${spec.task}`);
+  if (spec.task) parts.push(`# Task\n${spec.task}`);
+  if (spec.done_when) parts.push(`# Done when\n${spec.done_when}`);
   parts.push(`# Workspace\n${where}`);
   return { instructions: role(ROLE_FILES.polish), prompt: parts.join('\n\n') };
 }

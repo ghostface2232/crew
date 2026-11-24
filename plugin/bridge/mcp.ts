@@ -18,6 +18,7 @@ import type { JobView } from './render.ts';
 import { TIERS } from './tiers.ts';
 import { RATING_ITEMS } from './notes.ts';
 import { clip } from './text.ts';
+import { checkArguments } from './arguments.ts';
 
 /**
  * Stdio MCP server the lead session (Claude Code or Codex) talks to. It holds no state: every
@@ -100,7 +101,7 @@ Rules:
 - Job calls return at once. Do your part and end your turn: you are woken when a job ends, needs a decision, or asks a question. Do not sit in \`wait\` on a running job; the user cannot talk to you then.
 - Acknowledge a receipt only by passing its id as \`ack\` on your next Crew call.
 - Approval is the user's; never approve on your own. Decline requests clearly outside the task or role with \`reply\`; otherwise call \`wait\` so the user is asked, or relay their prior answer. A result with a REFUSED action says how to send it back if the user's request covers it; never run it yourself. Answer worker questions (ask_lead) yourself with \`answer\`.
-- Workers do not see this conversation: give only what they need (goal, decisions, how it is judged), accurately and briefly.
+- Workers do not see this conversation: give only what they need (goal, decisions, how it is judged), accurately and briefly. The brief goes in \`task\` for delegate and polish, \`focus\` for review, and \`topic\` and \`position\` for debate; criteria go in \`done_when\`. A call with an argument its tool does not take fails and starts nothing.
 - Omit \`tier\` and \`effort\` for ordinary work so role or preset settings apply; pass one only when a job clearly needs another, as it overrides them.
 - If a job hits a usage limit, do it yourself and say what was skipped. If Crew cannot start a job, retry once, then tell the user the error and do it yourself.
 - ${skill('run')} sets when to review; outside it, review only if the user asks (never hold a commit or push for one). After a review and its fix, record the result with \`note\`: facts only, no impressions.
@@ -202,11 +203,13 @@ const buildTools = () => [
       type: 'object',
       properties: {
         targets: { type: 'array', items: { type: 'string' }, minItems: 1, description: 'Files or directories it may edit, relative to the project. Changes elsewhere are reported as out of scope.' },
-        guidance: { type: 'string', description: 'Tone, terminology, audience, or what to leave alone.' },
+        task: { type: 'string', description: 'What to change, for an editor who has not seen this conversation: which texts in the targets, what is wrong with them, what each must still say, and the tone, terms and audience. Without it the editor improves whatever it finds in the targets.' },
+        done_when: { type: 'string', description: 'Concrete completion criteria the editor can check, e.g. which texts changed and that nothing else did.' },
         title: { type: 'string', description: 'Short label shown on the status board.' },
         ...worktreeProps,
         tier: { ...modelProps.tier, description: 'standard (the default, Hydrogen for Antigravity) for nearly all wording work; frontier (Neon) only for literary or very complex, difficult documents.' },
         model: modelProps.model,
+        effort: modelProps.effort,
         ...agentProp(),
         ...skillsProp,
         ...common,
@@ -406,6 +409,17 @@ function toolList() {
   return tools;
 }
 let TOOLS = toolList();
+
+/** Where each job tool takes its brief: the name a lead most often mixes up between tools. */
+const BRIEF: Record<string, string> = { delegate: '`task`', polish: '`task`', review: '`focus`', debate: '`topic` and `position`' };
+const BRIEF_NAMES = ['task', 'focus', 'topic', 'guidance', 'brief', 'prompt', 'instructions', 'description'];
+/** A line for an argument that is likely a mix-up, such as a polish brief sent as delegate's `task` was before. */
+const argumentHint = (tool: string, key: string): string | undefined => {
+  if (BRIEF[tool] && BRIEF_NAMES.includes(key)) return `${tool} takes its brief in ${BRIEF[tool]}.`;
+  if (tool === 'mission' && key === 'mission_id') return 'mission names the mission with `id`.';
+  if (tool === 'polish' && ['exclusive', 'runs_app', 'plugins', 'check'].includes(key)) return 'An editor only changes wording: it runs nothing and measures nothing.';
+  return undefined;
+};
 
 const DEFAULT_WAIT_SECONDS = 1800;
 /** Listings use the project; argument-less wait further filters to this lead's jobs. */
@@ -983,8 +997,7 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       return runJob({ kind: 'review', role: args.runs_app ? 'verify' : 'review', cwd, title, task: args.focus, done_when: args.done_when, review: { target, mode: args.mode ?? 'adversarial' }, agent: args.agent, tier: args.tier, model: args.model, effort: args.effort, runsApp: Boolean(args.runs_app), plugins: args.plugins, skills: args.skills, attachments: args.attachments, taskId: args.task_id }, args.background !== false, ctx, args.mission);
     }
     case 'polish':
-      if (args.exclusive) throw new Error('polish cannot run alone: an editor measures nothing. Drop exclusive.');
-      return runJob({ kind: 'polish', role: 'polish', cwd, title: args.title ?? `Polish ${args.targets.join(', ')}`, task: args.guidance, targets: args.targets, base: args.base, isolation: args.isolation, agent: args.agent, tier: args.tier, model: args.model, skills: args.skills, taskId: args.task_id }, args.background !== false, ctx, args.mission);
+      return runJob({ kind: 'polish', role: 'polish', cwd, title: args.title ?? `Polish ${args.targets.join(', ')}`, task: args.task, done_when: args.done_when, targets: args.targets, base: args.base, isolation: args.isolation, agent: args.agent, tier: args.tier, model: args.model, effort: args.effort, skills: args.skills, taskId: args.task_id }, args.background !== false, ctx, args.mission);
     case 'mission':
       return reportMission(args, ctx);
     case 'route': {
@@ -1163,9 +1176,11 @@ async function handle(msg: any): Promise<void> {
         },
       };
       try {
+        const args = params.arguments ?? {};
+        // Before anything else, acknowledgements included, so a refused call has had no effect.
+        checkArguments(TOOLS, params.name, args, argumentHint);
         await ensureDaemon();
         if (host === 'codex') await codexSession(params?._meta);
-        const args = params.arguments ?? {};
         // Echoes refer to earlier responses. Process them before creating any new offer. A bad echo must not block
         // the call it rode on (a delegate, a reply): it is reported and the receipts stay unacknowledged.
         let ackNote = '';

@@ -43,12 +43,12 @@ const roles = started?.roles ?? DEFAULT_ROLES;
 /**
  * The host this session runs in, from `initialize`. Claude Code names its session in the environment; Codex names
  * it in each tool call's `_meta` and starts this server in the plugin's folder (docs/mcp-compatibility.md#5-codex-as-a-lead-host).
- * Under a Codex lead a role held by Claude is the lead's own work, since Claude cannot run as a worker yet.
+ * A role held by the host's own agent is the lead's own work; every other holder runs as a worker, Claude too under Codex.
  */
 let host: 'claude' | 'codex' = 'claude';
-// A daemon of another version may name a holder this session does not know.
-const holderName = (agent: Holder) => (agent === LEAD ? (host === 'codex' ? 'Claude (you do it, or name claude for a Claude worker)' : 'you, Claude')
-  : agent === 'codex' && host === 'codex' ? 'Codex (a separate worker)' : WORKERS[agent]?.name ?? String(agent));
+const holderName = (agent: Holder) => (agent === host ? `you, ${agent === LEAD ? 'Claude' : 'Codex'}` : workerName(agent));
+/** A worker's name; Claude is one only under a Codex lead. A daemon of another version may name one this session does not know. */
+const workerName = (agent: Holder) => (agent === LEAD ? 'Claude (a Claude worker)' : WORKERS[agent]?.name ?? String(agent));
 /** How the lead names a skill: Codex lists plugin skills by name rather than as slash commands. */
 const skill = (name: string) => (host === 'codex' ? `the crew:${name} skill` : `/crew:${name}`);
 /** Claude Code loads the plugin's subagent; Codex has no plugin subagents, so it is given the file. */
@@ -93,7 +93,7 @@ const instructions = () => `Crew connects this session to background coding agen
 
 The user assigns roles (settings or ~/.crew/config.json); jobs go to an agent holding the role. At session start:
 ${roleLines()}
-\`delegate\` takes role delegate, refactor, release, or fix; \`review\` uses review, or verify with runs_app. With multiple holders, pick one with \`agent\`. ${host === 'codex' ? 'A role held by Claude is yours to do here or in a subagent; naming `claude` with `agent` starts a Claude worker instead' : 'Picking yourself (`claude`) starts no worker: do it here or in a subagent'}.
+\`delegate\` takes role delegate, refactor, release, or fix; \`review\` uses review, or verify with runs_app. With multiple holders, pick one with \`agent\`. Picking yourself (\`${host}\`) starts no worker: do it here or in a subagent${host === 'codex' ? '; a role held by Claude runs as a Claude worker' : ''}.
 
 Rules:
 - A delegate or polish job runs in its own git worktree and branch (crew-<job id>) from HEAD: commit what it needs first; gitignored files are copied only if in .worktreeinclude. Read its diff, then merge or reject (reject work beyond the task). Nothing reaches your branch unless you merge it.
@@ -137,7 +137,7 @@ const attachmentsProp = {
 };
 /** Built with the tools: what naming claude does depends on the host. */
 const agentProp = () => ({
-  agent: { type: 'string', enum: [...Object.keys(WORKERS), LEAD], description: `Which of the role's holders takes this job; the roles in your instructions list them. Without it, Antigravity for wording and Codex for other work, among the holders that can take it. ${host === 'codex' ? 'claude starts a Claude worker; left out, a role only Claude holds is yours to do.' : 'claude starts no worker: you do it.'}` },
+  agent: { type: 'string', enum: [...Object.keys(WORKERS), LEAD], description: `Which of the role's holders takes this job; the roles in your instructions list them. Without it, Antigravity for wording and Codex for other work, among the holders that can take it. ${host} starts no worker: you do it.${host === 'codex' ? ' claude starts a Claude worker.' : ''}` },
 });
 const modelProps = {
   tier: { type: 'string', enum: [...TIERS], description: 'How demanding the job is; Crew picks the model from it. Leave it out for ordinary work, so the model the user set for the role or preset applies (standard without one); naming one overrides it. standard: most work, including most UI changes. frontier: especially hard or complex work, or a UI rebuilt from scratch. light: simple, well-specified tasks. fast: plain searches and lookups. Codex runs Sol, Astra, Terra and Luna for these; Antigravity runs Neon for frontier (literary or very complex documents) and Hydrogen otherwise. Newer models of each family are picked up automatically.' },
@@ -916,12 +916,10 @@ function pickHolder(role: Role, wanted: unknown): { agent?: Holder; yours?: stri
   // An unknown role is the daemon's to refuse, with its own message.
   if (!table[role]) return { agent: wanted as Holder | undefined };
   const holders = table[role].agents;
-  const agent = (wanted ?? defaultHolder(role, table[role], disabled)) as Holder;
+  const agent = (wanted ?? defaultHolder(role, table[role], disabled, host)) as Holder;
   if (!holders.includes(agent)) throw new Error(`${String(wanted)} does not hold ${role}; its holders are ${holder(role, table)}. ${assignHint(role)}`);
-  if (agent !== LEAD) return { agent };
-  // A Codex lead that names Claude gets a Claude worker; left to the default, Claude's role stays the lead's own work.
-  if (host === 'codex' && wanted === LEAD) return { agent };
-  return { yours: `${role} is yours: no worker was started. ${YOURS[role]?.replace('SELF_REVIEWER', selfReviewer())} Its other holders: ${holders.filter((h) => h !== LEAD).map(holderName).join(', ') || 'none'}.${host === 'codex' ? ' To hand it to a Claude worker instead, start the job again with agent claude.' : ''}` };
+  if (agent !== host) return { agent };
+  return { yours: `${role} is yours: no worker was started. ${YOURS[role]?.replace('SELF_REVIEWER', selfReviewer())} Its other holders: ${holders.filter((h) => h !== host).map(holderName).join(', ') || 'none'}.` };
 }
 
 /**
@@ -997,14 +995,14 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       const mission = await jobMission(args.mission);
       const query = `kind=${encodeURIComponent(args.kind)}${mission ? `&mission=${encodeURIComponent(mission)}` : ''}${host === 'codex' ? '&lead=codex' : ''}`;
       const decision: RouteDecision & { preset?: PresetName | null; policy?: Preset | null } = await withMission(mission, () => api('GET', `/api/route?${query}`));
-      const who = decision.assignee === 'claude' ? 'you (the lead)' : WORKERS[decision.assignee].name;
+      const who = decision.assignee === host ? 'you (the lead)' : workerName(decision.assignee);
       const lines = [`${args.kind} → ${who}`, decision.reason];
       if (decision.degraded) lines.push('Degraded: the usual cross-check is missing. Say so in your report.');
       if (decision.deferUntil) lines.push(`Can wait until ${new Date(decision.deferUntil).toISOString()}.`);
-      if (decision.fallback.length) lines.push(`If that fails: ${decision.fallback.map((a) => (a === 'claude' ? 'you' : WORKERS[a].name)).join(', then ')}.`);
+      if (decision.fallback.length) lines.push(`If that fails: ${decision.fallback.map((a) => (a === host ? 'you' : workerName(a))).join(', then ')}.`);
       // A daemon that predates holders lists none.
       // Without agent a job goes to the role's first worker, which route may have just skipped.
-      if (decision.assignee !== 'claude' && decision.assignee !== decision.holders?.find((h) => h.agent !== 'claude')?.agent) lines.push(`Pass agent: ${decision.assignee}.`);
+      if (decision.assignee !== host && decision.assignee !== decision.holders?.find((h) => h.agent !== host)?.agent) lines.push(`Pass agent: ${decision.assignee}.`);
       if ((decision.holders?.length ?? 0) > 1) lines.push(`Holders you may pick with agent: ${decision.holders!.map((h) => `${h.agent} (${h.status})`).join(', ')}.`);
       // A daemon that predates mission presets sends none; the session's instructions then still hold.
       if (decision.preset !== undefined) lines.push(presetPolicy(decision.preset, decision.policy ?? undefined, ' for the next job'));

@@ -64,12 +64,15 @@ export type JobKind = 'delegate' | 'review' | 'polish';
  * docs/roadmap.md describes what another lead would need.
  */
 export const LEAD = 'claude' as const;
-/** Who may hold a role: a worker, or the lead itself, which does the work in its own session or a subagent. */
+/**
+ * Who may hold a role. The agent leading a session does a role it holds itself, in its session or a subagent; every
+ * other holder runs as a worker, Claude too under a Codex lead.
+ */
 export type Holder = WorkerAgent | typeof LEAD;
 export const isHolder = (value: unknown): value is Holder => value === LEAD || Object.hasOwn(WORKERS, value as string);
 /**
  * Every holder, in the order a role lists them: a job the lead names no holder for goes to the first worker
- * among them. Workers come before the lead, so naming Claude too never keeps work from a worker.
+ * among them. Workers come before the lead, so naming the lead's own agent too never keeps work from a worker.
  */
 export const HOLDERS: Holder[] = ['codex', 'antigravity', LEAD];
 
@@ -160,16 +163,20 @@ export const workersOf = (assignment: Pick<RoleAssignment, 'agents'>): WorkerAge
 export const preferenceOf = (role: Role): WorkerAgent[] => (roleInfo(role).kind === 'polish' ? ['antigravity', 'codex'] : ['codex', 'antigravity']);
 export const disabledAgents = (config: Pick<Config, 'antigravity'>): WorkerAgent[] => (config.antigravity.enabled ? [] : ['antigravity']);
 
-/** The role's worker holders that can take its work now, in its order of preference: the first takes a job the lead names no holder for. */
-export const workersFor = (role: Role, assignment: Pick<RoleAssignment, 'agents'>, disabled: WorkerAgent[] = []): WorkerAgent[] =>
-  preferenceOf(role).filter((agent) => assignment.agents.includes(agent) && !roleInfo(role).unable?.includes(agent) && !disabled.includes(agent));
+/**
+ * The role's holders that can take its work now as workers, in its order of preference: the first takes a job the
+ * lead names no holder for. The leading agent is never one; Claude is one only under another lead, after the others.
+ */
+export const workersFor = (role: Role, assignment: Pick<RoleAssignment, 'agents'>, disabled: WorkerAgent[] = [], lead: Holder = LEAD): Holder[] =>
+  [...preferenceOf(role), LEAD].filter((agent) => agent !== lead && assignment.agents.includes(agent)
+    && (agent === LEAD || (!roleInfo(role).unable?.includes(agent) && !disabled.includes(agent))));
 
 /**
- * Who takes a job the lead names no holder for: the first worker that can, else Claude when it holds the role, else the
- * first worker anyway, so the job is refused with the reason it cannot run.
+ * Who takes a job the lead names no holder for: the first worker that can, else the lead itself when it holds the
+ * role, else the first worker anyway, so the job is refused with the reason it cannot run.
  */
-export const defaultHolder = (role: Role, assignment: Pick<RoleAssignment, 'agents'>, disabled: WorkerAgent[] = []): Holder =>
-  workersFor(role, assignment, disabled)[0] ?? (assignment.agents.includes(LEAD) ? LEAD : workersOf(assignment)[0]);
+export const defaultHolder = (role: Role, assignment: Pick<RoleAssignment, 'agents'>, disabled: WorkerAgent[] = [], lead: Holder = LEAD): Holder =>
+  workersFor(role, assignment, disabled, lead)[0] ?? (assignment.agents.includes(lead) ? lead : workersOf(assignment)[0]);
 
 export type RoleSettings = Partial<Record<Role, Partial<RoleAssignment>>>;
 
@@ -446,8 +453,9 @@ function resolvePresets(user: UserConfig): Pick<Config, 'preset' | 'presets'> {
  */
 export function effectiveRole(config: Config, role: Role, preset: PresetName | null = config.preset, agent?: WorkerAgent): { agent: WorkerAgent; model?: string; effort?: string } {
   const assignment = config.roles[role];
-  const holder = agent ?? workersFor(role, assignment, disabledAgents(config))[0];
-  if (!holder) throw new Error(`${role} is held by Claude, the lead, which does the work itself; no worker takes it.`);
+  // Claude is never a worker here: under a Claude lead it does the work itself, and a Claude worker settles its own model.
+  const holder = agent ?? (workersFor(role, assignment, disabledAgents(config))[0] as WorkerAgent | undefined);
+  if (!holder) throw new Error(`${role} is held only by Claude, so a lead session takes it: a Claude Code lead does it itself, and a Codex lead starts a Claude worker.`);
   const own: AgentSettings = assignment[holder] ?? {};
   const chosen = preset ? config.presets[preset][holder] : undefined;
   const effort = own.effort ?? (chosen as { effort?: string } | undefined)?.effort;

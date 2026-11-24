@@ -447,7 +447,9 @@ test('the session instructions fit what Claude Code keeps of them', () => {
     assert.ok(instructions.length <= 4096, `${host}: ${instructions.length} characters`);
     for (const role of ROLE_INFO) assert.ok(instructions.includes(`\`${role.role}\``), role.role);
     assert.match(instructions, /The global one is "balanced"/);
-    assert.match(instructions, host === 'codex' ? /naming `claude` with `agent` starts a Claude worker[\s\S]*the crew:run skill/ : /Picking yourself \(`claude`\)[\s\S]*\/crew:run/);
+    assert.match(instructions, host === 'codex' ? /Picking yourself \(`codex`\)[^\n]*a role held by Claude runs as a Claude worker[\s\S]*the crew:run skill/ : /Picking yourself \(`claude`\)[\s\S]*\/crew:run/);
+    // Each host sees its own agent as itself and every other holder as a worker.
+    assert.match(instructions, host === 'codex' ? /you, Codex[\s\S]*Claude \(a Claude worker\)/ : /you, Claude/);
   }
 });
 

@@ -382,11 +382,11 @@ const name = (agent: Agent) => (agent === 'claude' ? 'Claude' : WORKERS[agent].n
  * did not assign. A stale or unknown reading changes nothing, so the default roles are followed.
  */
 export function route(kind: RouteKind, usage: Usage, roles: Config['roles'], disabled: WorkerAgent[] = [], lead: Agent = LEAD): RouteDecision {
-  // The agent leading this session: its own usage decides how much it keeps for itself. `LEAD` as an assignee still means the lead.
+  // The agent leading this session. A role it holds is its own work, and it as an assignee or fallback means the lead;
+  // every other agent, Claude too under a Codex lead, is a worker judged by its own usage.
   const you = lead;
-  // A role held by `claude` is the lead's own work, so it is judged by the lead's usage and named after the lead.
-  const of = (agent: Agent) => usage.providers.find((p) => p.agent === (agent === LEAD ? you : agent));
-  const label = (agent: Agent) => name(agent === LEAD ? you : agent);
+  const of = (agent: Agent) => usage.providers.find((p) => p.agent === agent);
+  const label = name;
   const status = (agent: Agent): UsageStatus => of(agent)?.status ?? 'unknown';
   const short = (agent: Agent) => status(agent) === 'tight' || status(agent) === 'exhausted';
   const resets = (agent: Agent): number | null => {
@@ -401,28 +401,28 @@ export function route(kind: RouteKind, usage: Usage, roles: Config['roles'], dis
 
   if (kind === 'lead') {
     // The engineer is the first worker holding implementation: Claude may hold it too, and cannot hand work to itself.
-    const engineer = workersFor('delegate', roles.delegate, disabled)[0];
+    const engineer = workersFor('delegate', roles.delegate, disabled, you)[0];
     if (status(you) === 'exhausted') {
-      const codexHasRoom = engineer === 'codex' && status('codex') === 'ok';
-      return { kind, assignee: LEAD, reason: `${why(you)} ${codexHasRoom ? `Finish the step you are on, tell the user that ${label(you)} is out of usage and when it resets, and say what is left.` : 'No other agent can lead; stop and tell the user.'}`, fallback: [], degraded: true, deferUntil: resets(you) };
+      const engineerHasRoom = engineer !== undefined && status(engineer) === 'ok';
+      return { kind, assignee: you, reason: `${why(you)} ${engineerHasRoom ? `Finish the step you are on, tell the user that ${label(you)} is out of usage and when it resets, and say what is left.` : 'No other agent can lead; stop and tell the user.'}`, fallback: [], degraded: true, deferUntil: resets(you) };
     }
     if (status(you) === 'tight') {
-      if (!engineer) return plain(LEAD, `${why(you)} Keep to planning and merge decisions, and give more implementation to subagents.`);
-      return plain(LEAD, `${why(you)} Keep to planning and merge decisions, and hand more implementation to ${label(engineer)}.`, short(engineer) ? [] : [engineer]);
+      if (!engineer) return plain(you, `${why(you)} Keep to planning and merge decisions, and give more implementation to subagents.`);
+      return plain(you, `${why(you)} Keep to planning and merge decisions, and hand more implementation to ${label(engineer)}.`, short(engineer) ? [] : [engineer]);
     }
-    return plain(LEAD, status(you) === 'ok' ? `${label(you)} has room; lead as usual.` : `${label(you)}'s usage is not known (${of(you)?.reason ?? 'no reading.'}); lead as usual.`);
+    return plain(you, status(you) === 'ok' ? `${label(you)} has room; lead as usual.` : `${label(you)}'s usage is not known (${of(you)?.reason ?? 'no reading.'}); lead as usual.`);
   }
 
   // The role's preferred worker first, the lead last.
-  const holders = [...workersFor(kind, roles[kind]), ...roles[kind].agents.filter((agent) => agent === LEAD || roleInfo(kind).unable?.includes(agent))];
+  const holders = [...workersFor(kind, roles[kind], [], you), ...roles[kind].agents.filter((agent) => agent === you || (agent !== LEAD && roleInfo(kind).unable?.includes(agent)))];
   const listed = holders.map((agent) => ({ agent, status: status(agent) }));
   // A holder that cannot do this kind of work is never suggested: a disabled agent, or one that cannot run the app for verify.
-  const usable: Agent[] = workersFor(kind, roles[kind], disabled);
-  if (roles[kind].agents.includes(LEAD)) usable.push(LEAD);
+  const usable: Agent[] = workersFor(kind, roles[kind], disabled, you);
+  if (roles[kind].agents.includes(you)) usable.push(you);
   const able = (agent: Agent) => usable.includes(agent);
   if (!usable.length) {
     const who = holders.map(name).join(' and ');
-    return { kind, assignee: LEAD, reason: `${who} cannot take ${kind} work now (disabled, or unable to run the app). Do it yourself, and say that the cross-check was skipped.`, fallback: [], degraded: true, deferUntil: null, holders: listed };
+    return { kind, assignee: you, reason: `${who} cannot take ${kind} work now (disabled, or unable to run the app). Do it yourself, and say that the cross-check was skipped.`, fallback: [], degraded: true, deferUntil: null, holders: listed };
   }
   // Workers come before the lead; a holder short of usage gives way to the next one with room.
   const holder = usable.find((agent) => !short(agent)) ?? usable[0];
@@ -432,44 +432,38 @@ export function route(kind: RouteKind, usage: Usage, roles: Config['roles'], dis
   return { ...decision, reason: `${moved}${decision.reason}`, fallback: [...new Set([...decision.fallback, ...others])], holders: listed };
 
   function decide(holder: Agent): RouteDecision {
-  if (holder === LEAD) {
-    if (you === LEAD) return plain(LEAD, 'Claude holds the role: do the work yourself, or in a subagent.');
-    // Under another lead Claude can also run as a worker, on Claude's own usage.
-    const claude = usage.providers.find((p) => p.agent === LEAD);
-    const room = claude?.status === 'tight' || claude?.status === 'exhausted' ? ` Claude is ${claude.status}: ${claude.reason}, so keep it yourself.` : '';
-    return plain(LEAD, `Claude holds the role: do the work yourself or in a subagent, or name agent claude to start a Claude worker.${room}`);
-  }
+  if (holder === you) return plain(you, `${label(you)} holds the role: do the work yourself, or in a subagent.`);
   // Each role names its policy, so a new role never falls through to another's.
   const policy: Record<Role, 'build' | 'review' | 'debate' | 'polish'> = { delegate: 'build', refactor: 'build', release: 'build', fix: 'build', review: 'review', verify: 'review', debate: 'debate', polish: 'polish' };
   switch (policy[kind as Role]) {
     case 'build': {
       // The lead taking over keeps the role's scope: release work stays preparation.
       const yourself = kind === 'release' ? 'Prepare the release yourself, and publish or deploy nothing.' : kind === 'fix' ? 'Fix the findings yourself.' : 'Do this piece yourself, in a subagent if it is large.';
-      if (status(holder) === 'exhausted') return plain(LEAD, `${why(holder)} ${yourself}`);
+      if (status(holder) === 'exhausted') return plain(you, `${why(holder)} ${yourself}`);
       if (status(holder) === 'tight' && !short(you)) {
-        return plain(LEAD, `${why(holder)} Take this work yourself or in subagents${roles.review.agents.includes(holder) ? `, and keep what ${label(holder)} has left for the cross-review` : ''}.`, [holder]);
+        return plain(you, `${why(holder)} Take this work yourself or in subagents${roles.review.agents.includes(holder) ? `, and keep what ${label(holder)} has left for the cross-review` : ''}.`, [holder]);
       }
-      if (short(holder)) return plain(holder, `${why(holder)} ${label(you)} is short too, so the assignment is followed.`, [LEAD]);
-      return plain(holder, short(you) ? `${why(you)} Hand ${label(holder)} as much of this work as separates cleanly.` : keeps(holder), [LEAD]);
+      if (short(holder)) return plain(holder, `${why(holder)} ${label(you)} is short too, so the assignment is followed.`, [you]);
+      return plain(holder, short(you) ? `${why(you)} Hand ${label(holder)} as much of this work as separates cleanly.` : keeps(holder), [you]);
     }
     case 'review': {
       if (status(holder) === 'exhausted') {
         const instead = kind === 'verify' ? 'Run the app in your own self-review instead' : 'Run the self-review a second time with the review focus';
-        return { kind, assignee: LEAD, reason: `${why(holder)} ${instead}, and say that the cross-review was skipped.`, fallback: [], degraded: true, deferUntil: resets(holder) };
+        return { kind, assignee: you, reason: `${why(holder)} ${instead}, and say that the cross-review was skipped.`, fallback: [], degraded: true, deferUntil: resets(holder) };
       }
-      return plain(holder, status(holder) === 'tight' ? `${why(holder)} The cross-review still goes to it; keep it to one round.` : keeps(holder), [LEAD]);
+      return plain(holder, status(holder) === 'tight' ? `${why(holder)} The cross-review still goes to it; keep it to one round.` : keeps(holder), [you]);
     }
     case 'debate': {
       // Deciding alone loses the independent challenge a debate is for, so it is degraded rather than reassigned.
       if (status(holder) === 'exhausted') {
-        return { kind, assignee: LEAD, reason: `${why(holder)} Decide yourself, and say that the debate was skipped.`, fallback: [], degraded: true, deferUntil: resets(holder) };
+        return { kind, assignee: you, reason: `${why(holder)} Decide yourself, and say that the debate was skipped.`, fallback: [], degraded: true, deferUntil: resets(holder) };
       }
-      return plain(holder, status(holder) === 'tight' ? `${why(holder)} Keep the debate to one or two rounds.` : keeps(holder), [LEAD]);
+      return plain(holder, status(holder) === 'tight' ? `${why(holder)} Keep the debate to one or two rounds.` : keeps(holder), [you]);
     }
     case 'polish':
       // Polish is not a merge gate, so it can wait for the reset.
       if (short(holder)) {
-        return { kind, assignee: holder, reason: `${why(holder)} Polish can wait until its usage resets; make an urgent wording fix yourself.`, fallback: [LEAD], degraded: false, deferUntil: resets(holder) };
+        return { kind, assignee: holder, reason: `${why(holder)} Polish can wait until its usage resets; make an urgent wording fix yourself.`, fallback: [you], degraded: false, deferUntil: resets(holder) };
       }
       return plain(holder, keeps(holder));
     }

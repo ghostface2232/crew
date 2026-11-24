@@ -35,10 +35,14 @@ function toolPath(input: ToolInput, tool?: string): string | undefined {
 }
 
 function canEdit(ctl: JobCtl, file: string | undefined): boolean {
-  if (ctl.job.sandbox !== 'workspace-write' || !file) return false;
+  const { cwd, sandbox, evidenceDir } = ctl.job;
+  if (!file) return false;
+  // Every job keeps its screenshots in its evidence directory, as a Codex job may, read-only or not.
   // The bridge runs git in the worker's tree itself, so `.git` is never the worker's to change.
-  try { return isInside(ctl.job.cwd, file) && !isGitPath(ctl.job.cwd, file); }
-  catch { return false; }
+  try {
+    return Boolean(evidenceDir && isInside(evidenceDir, file))
+      || (sandbox === 'workspace-write' && isInside(cwd, file) && !isGitPath(cwd, file));
+  } catch { return false; }
 }
 
 function oneLine(text: string): string {
@@ -76,11 +80,14 @@ function counted(ctl: JobCtl, usage: Usage): void {
 
 function launchClaude(config: Config, ctl: JobCtl, resume?: string) {
   const env = agentEnv();
-  const { cwd, sandbox, scratch, instructions, model, effort } = ctl.job;
+  const { cwd, sandbox, scratch, evidenceDir, instructions, model, effort } = ctl.job;
   const mcp = JSON.stringify({ mcpServers: { crew: { type: 'stdio', ...ctl.mcp } } });
   const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
     '--permission-mode', 'default', '--permission-prompt-tool', 'stdio', '--restricted', '--tools',
     sandbox === 'workspace-write' ? 'Read,Edit,Write,Glob,Grep,Bash' : 'Read,Glob,Grep,Bash', '--strict-mcp-config'];
+  // Restricted mode keeps the file tools to the working directories; the lead's attachments and the worker's
+  // screenshots are in the evidence directory.
+  if (evidenceDir) args.push('--add-dir', evidenceDir);
   if (model) args.push('--model', model);
   if (effort) args.push('--effort', effort);
   if (resume) args.push('--resume', resume);

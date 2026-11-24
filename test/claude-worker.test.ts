@@ -49,7 +49,7 @@ const fakeClaude = `
     if (message.type === 'control_response') {
       const reply = message.response;
       replies.push(reply);
-      if (['read-only edit', 'linked edit', 'git edit', 'browser', 'granted follow-up'].includes(prompt)) return success();
+      if (['read-only edit', 'linked edit', 'git edit', 'evidence edit', 'browser', 'granted follow-up'].includes(prompt)) return success();
       if (step === 0 && reply.response.behavior === 'allow') fs.writeFileSync(reply.response.updatedInput.file_path, 'inside');
       if (++step < policy.length) return ask(...policy[step]);
       send({ type: 'system', subtype: 'permission_denied', tool_name: 'Write', blocked_path: outside });
@@ -67,6 +67,7 @@ const fakeClaude = `
     if (prompt === 'read-only edit') return ask('NotebookEdit', { notebook_path: local });
     if (prompt === 'linked edit') return ask('Edit', { file_path: path.join(cwd, 'link', 'new', 'file.txt') });
     if (prompt === 'git edit') return ask('Write', { file_path: path.join(cwd, '.git', 'config'), content: '' });
+    if (prompt === 'evidence edit') return ask('Write', { file_path: path.join(flag('--add-dir'), 'view-after.png'), content: '' });
     if (prompt === 'browser') return ask('mcp__crew__browser', {});
     if (prompt === 'granted follow-up') return ask(...policy[3]);
     if (prompt === '429') return send({ type: 'result', subtype: 'error_during_execution', is_error: true, api_error_status: 429, errors: ['Too many requests'] });
@@ -293,6 +294,15 @@ test('Claude Code shutdown drains an open process', async (t) => {
   assert.equal((await h.adapter.probe!(h.ctl)).verdict, 'ended');
   assert.equal(h.events.fail, undefined);
   await assert.rejects(h.adapter.reply(h.ctl, 'after shutdown'), /shutting down/);
+});
+
+test('Claude Code reaches its evidence directory and saves screenshots there unasked, even in a read-only job', async (t) => {
+  const h = harness(t, 'evidence edit', { sandbox: 'read-only' });
+  h.ctl.job.evidenceDir = fs.mkdirSync(path.join(h.root, 'evidence'), { recursive: true }) && fs.realpathSync.native(path.join(h.root, 'evidence'));
+  await h.adapter.start(h.ctl);
+  const result = await h.report();
+  assert.equal(flag(result.args, '--add-dir'), h.ctl.job.evidenceDir);
+  assert.equal(result.replies[0].response.behavior, 'allow');
 });
 
 test('Claude Code may not edit .git, and the browser tool asks the user', async (t) => {

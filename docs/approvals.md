@@ -19,7 +19,7 @@ The user answers Antigravity approvals one at a time and sees the full request f
 
 ### Claude worker approvals
 
-A Claude worker's permission prompts reach Crew as stream-json `can_use_tool` control requests (`--permission-prompt-tool stdio`, checked on Claude Code 2.1.328). Crew allows its own worker MCP tools and, in a writable job, edits inside the job's folder. It refuses edits elsewhere and in a read-only job, and brings every other request, such as a command that is not read-only, to the user as an approval. There is no automatic reviewer: Claude Code's automatic mode would decide actions Crew never sees. *Allow for This Job* covers the same command in the same folder.
+A Claude worker's permission prompts reach Crew as stream-json `can_use_tool` control requests (`--permission-prompt-tool stdio`, checked on Claude Code 2.1.328). Crew allows its own read-only worker MCP tools, edits in the job's evidence directory, and, in a writable job, edits inside the job's folder outside `.git`. It refuses other edits, and brings every other request, such as a command that is not read-only, to the user as an approval. There is no automatic reviewer: Claude Code's automatic mode would decide actions Crew never sees. *Allow for This Job* covers the same command in the same folder.
 
 ### Allow for This Job
 

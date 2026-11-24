@@ -665,14 +665,14 @@ struct NeedsYouView: View {
                                 Text(verbatim: agentName(session.agent)).lineLimit(1)
                             }.font(Typeface.chip).foregroundStyle(.secondary).help(session.projectPath)
                             Spacer(minLength: WorkspaceStyle.rowSpacer)
-                            OpenInClaudeButton(session: session)
+                            OpenInAgentButton(session: session)
                         }
                         Text(session.title).font(Typeface.callout).foregroundStyle(.secondary).lineLimit(2).help(session.title)
                     }
                     Text(session.waitingFor ?? String(localized: "\(agentName(session.agent)) needs your input.")).font(Typeface.headline).lineSpacing(4).textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
                     ClaudeAskView(session: session)
-                    if session.claudeURL == nil {
+                    if OpenInAgentButton.availableURL(for: session) == nil {
                         Label("Answer in \(agentName(session.agent)).", systemImage: "bubble.left.and.bubble.right").font(Typeface.callout).foregroundStyle(.secondary)
                     }
                 }

@@ -309,7 +309,7 @@ export const ko: Record<string, string> = {
   'Open Crew ({count} waiting)': 'Crew 열기 ({count}개 대기 중)',
   'Open Web Board': '웹 보드 열기',
   'Open a new Claude Code or Codex session and type a command. In Codex, commands start with $ instead of /.': '새 Claude Code나 Codex 세션에서 명령을 입력해 주세요. Codex에서는 / 대신 $로 시작해요.',
-  'Open in Claude': 'Claude에서 열기',
+  'Open in {agent}': '{agent}에서 열기',
   'Open in browser': '브라우저에서 열기',
   'Open this board': '이 보드 열기',
   'Original task': '원래 작업 지시',

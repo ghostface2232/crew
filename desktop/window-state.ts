@@ -34,8 +34,9 @@ export function isBoardNavigation(candidate: string, base: string) {
     return false;
   }
 }
-/** Whether the link opens a session in the Claude desktop app so it can be handed to the OS. */
-export function isClaudeSessionLink(candidate: string) {
+/** Whether the link opens a lead session in its desktop app. */
+export function isSessionAppLink(candidate: string) {
+  if (/^codex:\/\/threads\/[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$/.test(candidate)) return true;
   try {
     const url = new URL(candidate);
     return url.protocol === 'claude:' && url.host === 'code' && url.pathname === '/continue' && !url.username && !url.password && !url.hash

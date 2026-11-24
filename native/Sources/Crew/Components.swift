@@ -727,9 +727,11 @@ struct ClaudeAskView: View {
     }
 }
 
+/// Opens the session in its agent's desktop app, where its prompts are answered; nothing when no app can open it.
 struct OpenInAgentButton: View {
     let session: ClaudeSession
 
+    /// Codex's link is offered only with an app registered for it; Claude's exists only for a desktop session.
     static func availableURL(for session: ClaudeSession) -> URL? {
         guard let url = session.appURL else { return nil }
         if session.agent == "codex" && NSWorkspace.shared.urlForApplication(toOpen: url) == nil { return nil }

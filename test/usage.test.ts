@@ -369,6 +369,10 @@ test('a Codex lead is judged by its own usage, and a role held by Claude is its 
   const build = route('delegate', usageOf({ codex: 'tight' }), DEFAULT_ROLES, [], 'codex');
   assert.equal(build.assignee, 'codex');
   assert.match(build.reason, /Codex is short too/);
+  // Claude holding the role too means the lead, whose usage is Codex's: the work does not move to a lead just as short.
+  const shared = { ...DEFAULT_ROLES, delegate: { agents: ['codex' as const, 'claude' as const] } };
+  assert.equal(route('delegate', usageOf({ codex: 'tight', claude: 'ok' }), shared, [], 'codex').assignee, 'codex');
+  assert.equal(route('delegate', usageOf({ codex: 'tight', claude: 'ok' }), shared).assignee, 'claude');
   const fix = route('fix', usageOf({}), DEFAULT_ROLES, [], 'codex');
   assert.equal(fix.assignee, 'claude');
   assert.match(fix.reason, /runs no worker under another lead: do the work yourself/);

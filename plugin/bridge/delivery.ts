@@ -150,16 +150,37 @@ export class Delivery {
     this.watching.clear();
   }
 
-  /** Records that Codex hosts this lead session. Saved with the receipts, since news may wait for it across a restart. */
+  /**
+   * Records that Codex hosts this lead session. Saved with the receipts, since news may wait for it across a restart.
+   * Sessions that no longer lead anything are dropped at the same time, so the record does not grow with every thread.
+   */
   host(session: string, host: LeadHost): void {
     leadSession(session);
-    const hosts = (this.state.hosts ??= Object.create(null) as Record<string, LeadHost>);
-    if (hosts[session] === host) return;
-    hosts[session] = host;
+    const before = { ...this.state.hosts };
+    if (before[session] === host) return;
+    const leading = new Set(this.subjects().map((job) => job.lead));
+    this.state.hosts = Object.assign(Object.create(null), Object.fromEntries(Object.entries(before).filter(([id]) => leading.has(id))), { [session]: host });
     try {
       this.save();
     } catch (error) {
-      delete hosts[session];
+      this.state.hosts = Object.assign(Object.create(null), before);
+      throw error;
+    }
+  }
+
+  /**
+   * A note queued in Codex waits there until the thread runs it, so the news it named needs no automatic retry:
+   * a second note would only cost the lead an empty turn. The lead still reads the news itself with `status`.
+   */
+  settle(offer: Offer): void {
+    const items = new Map(offer.items.map((item) => [item.jobId, item.newsSeq]));
+    const settled = this.subjects().filter((job) => items.has(job.id)).flatMap((job) => (job.news ?? []).filter((news) => news.seq === items.get(job.id)));
+    const before = settled.map((news) => news.offers);
+    for (const news of settled) news.offers = Math.max(news.offers, 2);
+    try {
+      this.save();
+    } catch (error) {
+      settled.forEach((news, i) => { news.offers = before[i]; });
       throw error;
     }
   }

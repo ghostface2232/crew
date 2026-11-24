@@ -520,3 +520,28 @@ test('status and mission explicitly read this session\'s watch news without any 
   assert.equal(unread(watches[0])[0].offers, 2);
   assert.deepEqual(offered, [undefined, ['pr-0'], ['pr-0']]);
 });
+
+test('a Codex session says hello once, retries a failed hello, and knows when its project is unknown', async () => {
+  const source = fs.readFileSync(new URL('../plugin/bridge/mcp.ts', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+  const code = source.slice(source.indexOf('/** The hello for the Codex session'), source.indexOf('/** How a mission ended'));
+  const hellos: string[] = [];
+  let answer: () => Promise<any> = async () => ({ cwd: '/work/repo' });
+  const context: Record<string, any> = {
+    SESSION: undefined, PROJECT: '/plugin', projectUnknown: true, canonicalPath: (p: string) => `canon:${p}`,
+    api: async (_method: string, route: string, body: any) => { hellos.push(`${route} ${body.session} ${body.host}`); return answer(); },
+  };
+  const codexSession = vm.runInNewContext(`${stripTypeScriptTypes(code)}; codexSession`, context);
+  // Calls arriving together wait on one hello, and none runs before the project is known.
+  await Promise.all([codexSession({ sessionId: 'root' }), codexSession({ sessionId: 'root' })]);
+  assert.deepEqual(hellos, ['/api/lead/hello root codex']);
+  assert.deepEqual([context.SESSION, context.PROJECT, context.projectUnknown], ['root', 'canon:/work/repo', false]);
+  // A call without a session leaves everything as it was.
+  await codexSession(undefined);
+  assert.equal(hellos.length, 1);
+  // A failed hello fails the call and is tried again; a thread with no folder leaves the project unknown.
+  answer = async () => { throw new Error('daemon stopping'); };
+  await assert.rejects(codexSession({ sessionId: 'next' }), /could not register this Codex session.*daemon stopping/);
+  answer = async () => ({ cwd: null });
+  await codexSession({ sessionId: 'next' });
+  assert.deepEqual([hellos.length, context.SESSION, context.projectUnknown], [3, 'next', true]);
+});

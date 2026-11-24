@@ -567,18 +567,31 @@ function showEvidence(ctx: CallContext, job: JobView): void {
  */
 let SESSION = process.env.CLAUDE_CODE_SESSION_ID || undefined;
 
+/** The hello for the Codex session this server last saw; calls arriving together wait on the same one. */
+let hello: { id: string; done: Promise<void> } | null = null;
+
 /**
  * Takes a Codex call's session: the root thread, which a subagent's calls name too, so its jobs report to the lead.
  * Codex starts a server per thread, so the session changes only if a thread's server is reused. The first call
  * tells the daemon that Codex hosts the session, so it is woken through Codex, and learns its project from the thread.
+ * A hello that fails fails the call and is tried again with the next one: without it the session is never woken.
  */
 async function codexSession(meta: any): Promise<void> {
   const id = meta?.sessionId;
-  if (typeof id !== 'string' || !id || id.length > 200 || id === SESSION) return;
-  SESSION = id;
-  const { cwd } = await api('POST', '/api/lead/hello', { session: id, host: 'codex' }).catch(() => ({ cwd: null }));
-  projectUnknown = typeof cwd !== 'string' || !cwd;
-  if (!projectUnknown) PROJECT = canonicalPath(cwd);
+  if (typeof id !== 'string' || !id || id.length > 200) return;
+  if (hello?.id !== id) {
+    const done: Promise<void> = api('POST', '/api/lead/hello', { session: id, host: 'codex' }).then(({ cwd }) => {
+      SESSION = id;
+      // A thread Codex did not persist (an ephemeral session) has no folder to read.
+      projectUnknown = typeof cwd !== 'string' || !cwd;
+      if (!projectUnknown) PROJECT = canonicalPath(cwd);
+    }, (err) => {
+      if (hello?.done === done) hello = null;
+      throw new Error(`Crew could not register this Codex session with its daemon: ${String((err as Error).message ?? err).split('\n')[0]}`, { cause: err });
+    });
+    hello = { id, done };
+  }
+  await hello.done;
 }
 /** How a mission ended when this session's next one replaced it, before a session could hold several. Such a mission carries no work on. */
 const SUPERSEDED = 'Superseded by a new mission.';
@@ -917,8 +930,14 @@ const noted = new Set<Holder>();
 
 async function callTool(name: string, args: any, ctx: CallContext): Promise<string> {
   if (projectUnknown) {
-    if (typeof args.cwd !== 'string' || !args.cwd) throw new Error('Crew could not read this Codex session\'s folder from Codex (an ephemeral session keeps none). Pass cwd, the project directory, with this call.');
-    PROJECT = canonicalPath(args.cwd);
+    // A call that names its job needs no project; the rest list, open or start work in it.
+    const named = ['answer', 'reply', 'cancel', 'note', 'note_summary'].includes(name) || (name === 'status' && args.job_id);
+    if (typeof args.cwd === 'string' && args.cwd) {
+      PROJECT = canonicalPath(args.cwd);
+      projectUnknown = false;
+    } else if (!named) {
+      throw new Error('Crew does not know this Codex session\'s project folder: Codex keeps none for an ephemeral session, or this call named no session. Pass cwd, the project directory, to delegate, review, polish or debate first; later calls then use it.');
+    }
   }
   const cwd: string = args.cwd ?? PROJECT;
   if (['delegate', 'review', 'polish', 'debate'].includes(name)) {
@@ -1093,6 +1112,8 @@ async function handle(msg: any): Promise<void> {
       canElicit = Boolean(params?.capabilities?.elicitation);
       // Claude Code's session variable wins: a Claude session is never taken for a Codex one.
       host = !process.env.CLAUDE_CODE_SESSION_ID && /^codex/i.test(String(params?.clientInfo?.name ?? '')) ? 'codex' : 'claude';
+      // Codex starts this server in the plugin's folder, which is no project: one is known only after a hello.
+      projectUnknown = host === 'codex';
       TOOLS = toolList();
       return reply({
         protocolVersion: PROTOCOL_VERSIONS.includes(params?.protocolVersion) ? params.protocolVersion : PROTOCOL_VERSIONS[1],

@@ -31,10 +31,11 @@ test('a Codex lead is queued a one-line note under the automatic offer budget', 
   // Within the offer lease nothing is queued again, and the pass waits for the lease to end.
   assert.equal(await leads.pass(OFFER_MS - 5_000), 5_001);
   assert.equal(queued.length, 1);
-  // One retry after the lease, then the budget is spent and the news waits for the lead's next call.
+  // A queued note waits in Codex, so it is not sent again after the lease: the news waits for the lead's status call.
   await leads.pass(OFFER_MS + 2);
   await leads.pass(2 * OFFER_MS + 3);
-  assert.equal(queued.length, 2);
+  assert.equal(queued.length, 1);
+  assert.equal(jobs[0].news![0].offers, 2);
 
   // Acknowledged news is not waiting any more.
   const receipt = delivery.offer('codex-thread', {}, 2 * OFFER_MS + 4)!.receipt;
@@ -55,10 +56,13 @@ test('a failed queue command leaves the news for a later wake', async () => {
   assert.equal(jobs[0].news![0].acked, false);
 });
 
-test('the Codex lead hosts survive a restart, and the note names each subject once', () => {
-  const delivery = new Delivery(() => [], () => {});
-  delivery.restore({ receipts: {}, offering: {}, hosts: { thread: 'codex' } });
-  assert.deepEqual({ ...delivery.state.hosts }, { thread: 'codex' });
+test('the Codex lead hosts survive a restart and drop sessions that lead nothing, and the note names each subject once', () => {
+  const jobs = [job('cx-dddddd', 'thread')];
+  const delivery = new Delivery(() => jobs, () => {});
+  delivery.restore({ receipts: {}, offering: {}, hosts: { thread: 'codex', gone: 'codex' } });
+  assert.deepEqual({ ...delivery.state.hosts }, { thread: 'codex', gone: 'codex' });
+  delivery.host('new', 'codex');
+  assert.deepEqual({ ...delivery.state.hosts }, { thread: 'codex', new: 'codex' });
   assert.equal(note({ receipt: 'r', text: '', items: [{ jobId: 'cx-1', newsSeq: 1 }, { jobId: 'cx-1', newsSeq: 2 }, { jobId: 'pr-2', newsSeq: 1 }] }),
     'Crew has news for cx-1, pr-2. Call the Crew status tool to read it, then act on it.');
 });

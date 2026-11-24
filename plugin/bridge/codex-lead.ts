@@ -9,7 +9,8 @@ const QUEUE_TIMEOUT_MS = 30_000;
  * Wakes idle Codex lead sessions. Codex has no hook that can start a turn later, as Claude Code's asyncRewake does,
  * but `codex queue` hands a message to a thread, and an open interactive session runs it as its next turn
  * (docs/mcp-compatibility.md#5-codex-as-a-lead-host). So the daemon plays the watcher for those sessions: it takes
- * automatic offers like a hook watcher would, under the same lease and retry budget, and queues a short note.
+ * automatic offers like a hook watcher would, under the same lease and retry budget, and queues a short note. A
+ * queued note is durable, so news it named is not offered automatically again (Delivery.settle).
  *
  * The note only names the news. On Windows `codex` is a .cmd file run through cmd.exe, which cannot carry the line
  * breaks and quotes an offer's text has, so the lead reads the news itself with `status`, which offers it again.
@@ -43,7 +44,8 @@ export class CodexLeads {
         // A save that failed leaves the news unoffered; the next pass tries again.
       }
       if (offer) {
-        await this.queue(session, note(offer)).catch(() => {});
+        // A failed command leaves the second automatic offer for a later pass or the Stop hook.
+        await this.queue(session, note(offer)).then(() => this.delivery.settle(offer)).catch(() => {});
         continue;
       }
       const lease = this.delivery.state.offering[session];
@@ -54,7 +56,8 @@ export class CodexLeads {
 
   private async loop(): Promise<void> {
     while (!this.stopped.signal.aborted) {
-      const next = await this.pass();
+      // A pass that throws must not end waking for good; the next change or timeout tries again.
+      const next = await this.pass().catch(() => 20_000);
       await this.delivery.wait(next, this.stopped.signal);
     }
   }

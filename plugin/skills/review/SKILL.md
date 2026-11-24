@@ -8,7 +8,7 @@ argument-hint: "[uncommitted | branch <base> | commit <sha>]"
 
 What to review: $ARGUMENTS (default: the uncommitted changes; otherwise a branch against its base, or a commit).
 
-1. Identify the target and what the change is meant to do. Commit first where you can, so both reviewers read a fixed state. Start a `mission` with stages `["self-review", "fix", "final"]` (`self-review` covers both reviews when they run together).
+1. Identify the target and what the change is meant to do. Commit first where you can, so both reviewers read a fixed state. Start a `mission` with stages `["self-review", "fix", "final"]` (`self-review` covers both reviews when they run together), and with the `difficulty` of the change as it was to build, before either review reports.
 2. Call `route` with `review` (or `verify` if the cross-review runs the app) and follow its assignee, then start both reviews together:
    - `review` (cross-review): pass the target, the acceptance criteria as `done_when`, and in `focus` what you are least sure of, with a few lines mapping which file holds what and what the tests mock.
    - `crew:self-reviewer`: pass the same target and what the change is meant to do. Codex loads no plugin subagents: there, spawn one subagent and give it `../../agents/self-reviewer.md` (from this skill's folder) as its instructions.

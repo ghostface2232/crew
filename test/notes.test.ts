@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
-import { addEvidence, addRating, loadNotes, notesFile, renderNotes, scoreAll, setSummary, WORKER_ITEMS } from '../plugin/bridge/notes.ts';
+import { addEvidence, addRating, loadNotes, notesFile, renderNotes, reviewKind, scoreAll, setSummary, WORKER_ITEMS } from '../plugin/bridge/notes.ts';
 import type { Evidence, NotesFile } from '../plugin/bridge/notes.ts';
 
 const input: Omit<Evidence, 'id' | 'at'> = {
@@ -147,6 +147,11 @@ test('routine lines together weigh at most two lines, in the score and in the st
   const routine = (n: number) => scoreAll(notes({ ...others, polisher: Array(n).fill({ difficulty: 'routine', size: 'small' }) })).find((s) => s.model === 'polisher')!;
   assert.equal(routine(50).score, routine(2).score);
   assert.equal(routine(50).status, 'too few samples');
+  // Nor does a run of them under a review kind of their own move where every model is read.
+  const kinds = (n: number) => scoreAll(notes({ strict: Array(10).fill({ reviewedBy: ['strict-model'], findings: { high: 0, medium: 2, low: 0 } }),
+    light: Array(10).fill({ reviewedBy: ['light-model'], findings: { high: 0, medium: 1, low: 0 } }),
+    polisher: Array(n).fill({ difficulty: 'routine', size: 'small', reviewedBy: ['light-model'] }) })).map((s) => [s.model, s.score]);
+  assert.deepEqual(kinds(200), kinds(2));
   // Standard lines keep counting.
   const standard = (n: number) => scoreAll(notes({ ...others, builder: Array(n).fill({ size: 'small' }) })).find((s) => s.model === 'builder')!;
   assert.ok(standard(50).score! > standard(2).score!);
@@ -154,6 +159,17 @@ test('routine lines together weigh at most two lines, in the score and in the st
 });
 
 test('a review kind is the first reviewer from another agent, with extra reviews as their own term', () => {
+  const agents: Record<string, 'codex' | 'claude'> = { 'model-a': 'codex', 'claude-x': 'claude' };
+  const kind = (e: Partial<Evidence>) => reviewKind({ ...input, id: 'ev', at: 0, ...e } as Evidence, (m) => agents[m]);
+  // Whatever the order, the review from another agent is the kind and the builder's own agent's is an extra review.
+  assert.deepEqual(kind({ reviewedBy: ['model-a', 'claude-x'] }), { kind: 'claude-x', extra: 1 });
+  assert.deepEqual(kind({ reviewedBy: ['claude-x', 'model-a'] }), { kind: 'claude-x', extra: 1 });
+  // A review only by the builder's own agent is its own kind.
+  assert.deepEqual(kind({ reviewedBy: ['model-a'] }), { kind: 'model-a (own agent)', extra: 0 });
+  // Older lines: the lead reading a worker's job, a self-review, and a cross-review of the lead's work are three kinds.
+  assert.deepEqual([kind({ job: 'cx-1' }), kind({ reviewer: 'codex' }), kind({ agent: 'claude', model: 'claude-x' })].map((k) => k.kind),
+    ['claude review of a job', 'codex self-review', 'claude self-review']);
+  assert.equal(kind({ agent: 'claude', model: 'claude-x', reviewer: 'codex' }).kind, 'codex cross-review');
   const file = notes({ a: [{ reviewedBy: ['model-a', 'cross-model'] }, { reviewedBy: ['cross-model'] }], b: [{}] });
   // Both of a's lines share the cross model's kind; the self-reviewer beside it is an extra review, not the kind.
   const text = renderNotes(scoreAll(file), file, { models: ['a'] });

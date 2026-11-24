@@ -919,6 +919,11 @@ test('a build line takes its difficulty from its job or its mission, and names e
   textOf(await lead.call('note', { model: 'claude-test', reviewer: 'codex', size: 'small', text: 'lead line' }));
   assert.equal(lineOf('claude-test', (e) => e.text === 'lead line').difficulty, 'hard');
   assert.match((await lead.call('note', { job_id: id, mission: mission.id, reviewer: 'codex', size: 'small', text: 'x' })).content[0].text, /mission is for a line without job_id/);
+  // Closed before the note, the mission this session just finished still sets the line's difficulty.
+  await lead.call('cancel', { job_id: id });
+  textOf(await lead.call('mission', { done: true, outcome: 'done' }));
+  const late = (await lead.call('note', { model: 'claude-test', reviewer: 'codex', size: 'small', text: 'after done', difficulty: 'routine' })).content[0].text;
+  assert.match(late, /was started as hard/);
 });
 
 test('peer ratings: a worker rates through its own tool, the review line gives the rating its target, and the switch stops it', { timeout: 20000 }, async (t) => {

@@ -1050,7 +1050,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
           if (!job && body.mission !== undefined && !mission) throw new HttpError(400, `No mission with id "${String(body.mission)}".`);
           // An editor only changes wording, so a polish job is routine work.
           const fixed = job ? job.difficulty ?? (job.kind === 'polish' ? 'routine' : undefined) : mission?.difficulty;
-          if (fixed && difficulty !== undefined && difficulty !== fixed) throw new HttpError(400, `${job ? `Job ${job.id} was handed out` : `Mission ${mission!.id} was started`} as ${fixed}, so its line cannot be ${String(difficulty)}.`);
+          if (fixed && difficulty !== undefined && difficulty !== fixed) throw new HttpError(400, `${job ? `Job ${job.id} was handed out` : `Mission ${mission!.id} was started`} as ${fixed}, so its line cannot be ${String(difficulty)}.${job ? '' : ' If the work was for another mission, pass that mission.'}`);
           difficulty = fixed ?? difficulty;
         }
         // A review job names its own model; anything else is a model id the lead gives for a review of its own.

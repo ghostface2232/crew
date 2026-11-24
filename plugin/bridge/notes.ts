@@ -13,7 +13,7 @@ const LOAD = { high: 0.35, medium: 0.15, low: 0.05 };
 // size. Tier is not used: for Codex it picks the model, so it would act as a fixed bonus per model.
 const EXPOSURE = { small: 0.5, medium: 1, large: 2, xlarge: 4 };
 // The build fit's priors, on the log of the finding rate. A builder starts at the pooled rate and moves about ±0.5 from
-// it on evidence; the pooled rate itself starts at the reference and is free to move far from it. A review kind may find about twice or half as much as the average review. Hard work is expected to
+// it on evidence; the pooled rate itself starts at the reference, drawn toward it as loosely. A review kind may find about twice or half as much as the average review. Hard work is expected to
 // draw twice the findings of standard work and routine work half, and the data may move either by about ±0.4. Each
 // review beyond the first starts as adding nothing.
 const BUILD_PRIOR = { base: 0.5, builder: 0.5, review: 0.7, difficulty: 0.4, extraReview: 0.4 };
@@ -68,6 +68,10 @@ export const DIFFICULTIES = ['routine', 'standard', 'hard'] as const;
 export const MAX_REVIEWS = 10;
 /** What a peer rates, each from 1 to 5: the work's correctness, how it followed its brief, how honest its report was, and how useful a review's findings were. */
 export const RATING_ITEMS = ['correctness', 'brief', 'report', 'findings'] as const;
+// The anchors for correctness and findings, shared by the lead and the workers so all rate on one scale. A merge
+// blocker caps correctness at 3, as an accepted high finding does (HIGH_FINDING_CAP).
+export const CORRECTNESS_SCALE = '5: no findings, or minor ones only. 4: real findings, none blocking the merge. 3: something must be fixed before merging, but the core of the work is right. 2: a merge blocker in the core of the work. 1: wrong in its main path';
+export const FINDINGS_SCALE = '1: wrong, or noise. 3: real but minor. 5: caught what would have shipped broken';
 export type RatingItem = (typeof RATING_ITEMS)[number];
 export type RatingItems = Partial<Record<RatingItem, number>>;
 /**
@@ -340,7 +344,7 @@ const shrink = (s: { num: number; den: number }, prior: number) => (s.num + PRIO
  * review, when all are its own agent's), marked when that is the builder's own agent. Older lines without models fall
  * back to the reviewer's agent and whether it reviewed a worker's job or the lead's own work.
  */
-function reviewKind(e: Evidence, agentOf: (model: string) => Holder | undefined): { kind: string; extra: number } {
+export function reviewKind(e: Evidence, agentOf: (model: string) => Holder | undefined): { kind: string; extra: number } {
   if (!e.reviewedBy) return { kind: `${e.reviewer} ${e.reviewer === e.agent ? 'self-review' : e.job ? 'review of a job' : 'cross-review'}`, extra: 0 };
   const own = (m: string) => m === e.model || agentOf(m) === e.agent;
   const first = e.reviewedBy.find((m) => !own(m)) ?? e.reviewedBy[0];
@@ -394,15 +398,19 @@ function buildRates(file: NotesFile): Map<string, number> {
       }
     }
     const delta = solve(hessian, gradient);
+    // Counts past any real review (around 1e17 findings on a line) leave the system too ill-conditioned to solve;
+    // the last finite estimate stands rather than turning every model's score into NaN.
+    if (!delta.every(Number.isFinite)) break;
     // A full step from far off can overshoot into overflow; one of at most 1 per term keeps every rate finite.
     const largest = Math.max(...delta.map(Math.abs));
     const scale = Math.min(1, 1 / largest);
     delta.forEach((d, j) => { theta[j] += scale * d; });
     if (largest < 1e-10) break;
   }
-  // The level every builder is read at: the average review its lines had, so a model's rate does not depend on how
-  // hard its own lines were reviewed, and the scores stay on the scale of the findings themselves.
-  const level = rows.reduce((s, r) => s + theta[r.terms[2]] + r.extra * theta[extra], 0) / rows.length;
+  // The level every builder is read at: the review of the average build line, weighed as the fit weighs it, so a
+  // model's rate does not depend on how hard its own lines were reviewed, a run of routine lines cannot move it, and
+  // the scores stay on the scale of the findings themselves.
+  const level = rows.reduce((s, r) => s + r.w * (theta[r.terms[2]] + r.extra * theta[extra]), 0) / rows.reduce((s, r) => s + r.w, 0);
   return new Map([...index].filter(([name]) => name.startsWith('builder ')).map(([name, j]) => [name.slice('builder '.length), LOAD.medium * Math.exp(theta[0] + theta[j] + level)]));
 }
 
@@ -510,11 +518,10 @@ function peers(all: Vote[]): Map<string, { shift: number; count: number }> {
 const moved = (base: number, shift: number) => (shift >= 0 ? base + shift * (1 - base) : base * (1 + shift));
 
 /**
- * Scores each model per role. Build: the rate of accepted finding load per exposure unit, drawn toward a start, shown
- * as 10·exp(−rate), so more findings always cost more and nothing is clamped. Fix: mean quality, drawn the same way.
- * The start is the mean of the other models' own estimates (each counted once, so a busy model cannot set everyone's
- * start) and the reference, which counts as one more model. Reviewers are not calibrated: the data cannot tell a harsh
- * reviewer from one that was given worse work. Fix is shown beside build, never pooled.
+ * Scores each model per role. Build: each model's finding rate from `buildRates`, shown as 10·exp(−rate), so more
+ * findings always cost more and nothing is clamped. Fix: mean quality, drawn toward the mean of the other models' own
+ * (each counted once, so a busy model cannot set everyone's start) and the reference, which counts as one more model.
+ * Fix is shown beside build, never pooled.
  *
  * The four items lay the peer ratings over that evidence. Correctness is the build score, brief the lead's adoption of
  * delegated work, findings the share of a reviewer's finding load the lead accepted; report has ratings only, around a

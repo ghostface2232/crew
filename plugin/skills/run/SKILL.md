@@ -85,7 +85,7 @@ Triage all reports together yourself, since triage needs the user's intent and t
 
 One review round is the default. Run a second round only for substantial fixes, and never more than two, since extra rounds burn both agents' usage limits.
 
-Record what the review showed with `note`, using facts only: one call for each build (a worker's job or your own work), one for any fix, and one for each review job. On a build line, list in `reviewed_by` every review whose findings it counts: review job ids, and your own model for your reading of a worker's diff or for each self-reviewer. Never rate your own work. When a response says a summary is due, rewrite it with `note_summary`.
+Record what the review showed with `note`, using facts only: one call for each build (a worker's job or your own work), one for any fix, and one for each review job. On a build line, list in `reviewed_by` every review whose findings it counts: review job ids, your own model for your reading of a worker's diff, and the model each self-reviewer ran on. Never rate your own work. When a response says a summary is due, rewrite it with `note_summary`.
 
 ## 6. Polish
 

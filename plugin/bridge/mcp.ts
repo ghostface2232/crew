@@ -16,7 +16,7 @@ import type { Evidence } from './evidence.ts';
 import { describe, needsLead, summarize } from './render.ts';
 import type { JobView } from './render.ts';
 import { TIERS } from './tiers.ts';
-import { DIFFICULTIES, MAX_REVIEWS, RATING_ITEMS } from './notes.ts';
+import { CORRECTNESS_SCALE, DIFFICULTIES, FINDINGS_SCALE, MAX_REVIEWS, RATING_ITEMS } from './notes.ts';
 import { clip } from './text.ts';
 import { checkArguments } from './arguments.ts';
 
@@ -306,7 +306,7 @@ const buildTools = () => [
         findings: {
           type: 'object',
           properties: { high: { type: 'integer', minimum: 0 }, medium: { type: 'integer', minimum: 0 }, low: { type: 'integer', minimum: 0 } },
-          description: 'For build: the findings you accepted, by severity (high: wrong behavior, data loss, security; medium: a real bug in an edge case; low: minor; these are the blocker, major and minor of a review report). Count them against the work as first delivered for review: findings sent back to a worker with reply count; fixes you made to your own work before its first review do not. When several reviews covered the work, one line with every accepted finding counted once, naming as reviewer one from another agent if any ran. For fix: the findings the check of the fix raised. For review: the findings of this review that you accepted.',
+          description: 'For build: the findings you accepted, by severity (high: wrong behavior, data loss, security; medium: a real bug in an edge case; low: minor; these are the blocker, major and minor of a review report). Count them against the work as first delivered for review: findings you sent back to a worker with `reply` are counted; fixes you made to your own work before its first review are not. When several reviews covered the work, one line with every accepted finding counted once, naming as reviewer one from another agent if any ran. For fix: the findings the check of the fix raised. For review: the findings of this review that you accepted.',
         },
         declined: {
           type: 'object',
@@ -321,7 +321,7 @@ const buildTools = () => [
         rating: {
           type: 'object',
           properties: Object.fromEntries(RATING_ITEMS.map((item) => [item, { type: 'integer', minimum: 1, maximum: 5 }])),
-          description: 'With job_id only: your rating of the job\'s work as you saw it, 1 to 5 per item, resting on text. For build: correctness, brief (how it followed your brief), report (how well its report matched the work). For fix: brief and report. For review: findings (how useful they were). Noting the job again without one keeps the rating it had.',
+          description: `With job_id only: your rating of the job\'s work as you saw it, 1 to 5 per item, resting on text. For build: correctness (${CORRECTNESS_SCALE}), brief (how it followed your brief), report (how well its report matched the work). For fix: brief and report. For review: findings (${FINDINGS_SCALE}). Noting the job again without one keeps the rating it had.`,
         },
         text: { type: 'string', description: 'One line of facts from the review, e.g. "Markdown parser, no findings, one follow-up on underscore boundaries". No impressions.' },
       },
@@ -1055,7 +1055,8 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
     case 'note_summary': {
       if (name === 'note' && args.job_id && args.mission !== undefined) throw new Error('mission is for a line without job_id: a job\'s line takes the difficulty it was handed out with.');
       // The lead's own build counts as hard as the command it was done for.
-      const mission = name === 'note' && !args.job_id && (args.role ?? 'build') === 'build' ? await jobMission(args.mission) : undefined;
+      // A lead often closes its mission before noting; the one this session just finished is still the work's.
+      const mission = name === 'note' && !args.job_id && (args.role ?? 'build') === 'build' ? (await jobMission(args.mission)) ?? lastDone?.id : undefined;
       const body = name === 'note_summary'
         ? { model: args.model, summary: args.summary }
         : { job: args.job_id, model: args.model, lead: host === 'codex' ? 'codex' : undefined, role: args.role, reviewer: args.reviewer, size: args.size, tier: args.tier, findings: args.findings, declined: args.declined, adoption: args.adoption, outcome: args.outcome, of_job: args.of_job, of_model: args.of_model, audit: args.audit, rating: args.rating, difficulty: args.difficulty, reviewed_by: args.reviewed_by, mission, text: args.text };

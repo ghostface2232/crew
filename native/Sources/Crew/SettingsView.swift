@@ -96,11 +96,12 @@ struct CrewSettingsView: View {
         .frame(minWidth: WorkspaceStyle.settingsMinSize.width, idealWidth: WorkspaceStyle.settingsSize.width, minHeight: WorkspaceStyle.settingsMinSize.height, idealHeight: WorkspaceStyle.settingsSize.height)
         .task { if !model.loaded && !model.loading { await model.load(scope: model.scope) } }
     }
-    /// A daemon without presets or model notes has no page for them.
+    /// A daemon without presets, model notes, or the language setting has no page for them.
     private func available(_ pane: SettingsPane) -> Bool {
         switch pane {
         case .presets: model.presets != nil
         case .models: store.state.modelScores != nil
+        case .language: store.state.hasLanguageSetting == true
         default: true
         }
     }

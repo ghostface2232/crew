@@ -217,6 +217,42 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
         // Only Antigravity falls back to a family.
         #expect(ProviderUsage(agent: "codex", status: .ok, reason: "", windows: families).shownWindows.isEmpty)
     }
+    @Test func languageSettingIsReadFromStateAndEventsAndAbsentFromAnOlderDaemon() throws {
+        var state = try fixture()
+        #expect(state.language == nil && state.hasLanguageSetting == nil)
+        // A daemon with the setting sends null when it follows the system; an older one sends no key.
+        var snapshot = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(state)) as? [String: Any])
+        snapshot["language"] = NSNull()
+        try state.receive(ServerEvent(name: "state", data: JSONSerialization.data(withJSONObject: snapshot)))
+        #expect(state.language == nil && state.hasLanguageSetting == true)
+        try state.receive(ServerEvent(name: "language", data: Data(#"{"language":"ko"}"#.utf8)))
+        #expect(state.language == "ko")
+        try state.receive(ServerEvent(name: "language", data: Data(#"{}"#.utf8)))
+        #expect(state.language == nil && state.hasLanguageSetting == true)
+        snapshot["language"] = nil
+        snapshot["hasLanguageSetting"] = nil
+        try state.receive(ServerEvent(name: "state", data: JSONSerialization.data(withJSONObject: snapshot)))
+        #expect(state.hasLanguageSetting == false)
+    }
+    @MainActor @Test func languageSettingWritesAppleLanguagesAndClearsOnlyItsOwnWrite() throws {
+        let suite = "crew-tests-\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = CrewStore(api: CrewAPI(port: 0), defaults: defaults)
+        // Read the suite's own domain: the global domain also holds AppleLanguages.
+        let written = { defaults.persistentDomain(forName: suite)?["AppleLanguages"] as? [String] }
+        store.applyLanguage("ko")
+        #expect(written() == ["ko"])
+        store.applyLanguage("en")
+        #expect(written() == ["en"])
+        store.applyLanguage(nil)
+        #expect(written() == nil)
+        #expect(defaults.persistentDomain(forName: suite)?[CrewStore.appliedLanguageKey] == nil)
+        // A language picked for Crew in System Settings is not Crew's to clear.
+        defaults.set(["ja"], forKey: "AppleLanguages")
+        store.applyLanguage(nil)
+        #expect(written() == ["ja"])
+    }
     @Test func optionalContractFieldsDecodeAndLegacyStateStillWorks() throws {
         let legacy = try fixture()
         #expect(legacy.usage == nil && legacy.preset == nil && legacy.presets == nil)

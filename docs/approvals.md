@@ -34,7 +34,7 @@ Set `{"codex": {"approvalsReviewer": "user"}}` in `~/.crew/config.json` to send 
 
 When `auto_review` denies or times out (`item/autoApprovalReview/completed`), the bridge records action fields (program/arguments, `cwd`, and MCP input recovered from the started item by `targetItemId`), omits environment fields, and caps free-form input at 4,000 characters, reasons at 2,000, and descriptions at 8,000. Missing reasons are labeled missing, and the bridge quotes generic messages as received. The lead checks whether the user's conversation request covers the refused action.
 
-1. If it does, the lead calls `reply` with `approved_by_user` quoting the user's words. The bridge sends the user's recent recorded prompts plus the quote for one more automatic review.
+1. If it does, the lead calls `reply` with `approved_by_user` quoting the user's words. The bridge sends the user's recent recorded prompts plus the quote for one more automatic review. The lead session's hooks record those prompts, in Claude Code and in Codex; a Codex sub-agent's task and Crew's own queued note are not recorded as the user's (`claude.ts`).
 2. If refused again on that retry turn, the same call runs the next turn with `approvalsReviewer: user` so the user decides, then returns to `auto_review` on later turns. “Again” means the preceding turn was itself a retry. An unrelated later refusal starts over with `auto_review`.
 3. If the user's request does not cover it, the lead asks the user.
 

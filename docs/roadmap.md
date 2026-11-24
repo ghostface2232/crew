@@ -16,7 +16,7 @@ The requirements are in [requirements.md](requirements.md). Current status again
 | R12 (Cursor) | C2 | Open |
 | R14 (no collisions between agents) | — | Done (`prompts.ts`, `jobs.ts`, [sandbox.md](sandbox.md)) |
 | R15 (approvals with little user involvement) | — | Done for Codex (`config.ts` `auto_review`, `jobs.ts` `retryRefused`) |
-| R13 (other leads, own main screen, direct dispatch) | L1, L2 | Partial — board, desktop apps, direct jobs (`Dispatch.tsx`, `DispatchView.swift`), and Codex as a lead from a source install done; the rest of L1, mission start, and merge execution open |
+| R13 (other leads, own main screen, direct dispatch) | L1, L2 | Partial — board, desktop apps, direct jobs (`Dispatch.tsx`, `DispatchView.swift`), and Codex as a lead done; a Claude worker under another lead (L1 item 5), mission start, and merge execution open |
 
 Near-term work targets Claude Desktop lead mode, as [requirements.md](requirements.md#3-defaults-and-priorities) sets out.
 
@@ -114,7 +114,7 @@ From a game project retrospective (58 jobs, ~110 hours, 1.5B tokens). Project-sp
 
 ## 5. Long-term plan
 
-**L1. The lead as an adapter. *(Partial: Codex leads from a source install; items 4 and 5 open)*** Only three parts are tied to Claude Code: the MCP server, the hooks, and the skills. Jobs, events, and the board belong to the daemon. Defining the lead as the role that plans and decides merges lets Codex or a headless Claude take it, and resolves the temporary-lead handoff in [agentgauge-integration.md](../research/agentgauge-integration.md) section 8.2.
+**L1. The lead as an adapter. *(Partial: Codex leads; item 5 open, item 4 partly)*** Only three parts are tied to Claude Code: the MCP server, the hooks, and the skills. Jobs, events, and the board belong to the daemon. Defining the lead as the role that plans and decides merges lets Codex or a headless Claude take it, and resolves the temporary-lead handoff in [agentgauge-integration.md](../research/agentgauge-integration.md) section 8.2.
 
 Groundwork done: worker roles are a configurable registry (`config.ts`) and routing names the lead via `LEAD` (`'claude'`) instead of hardcoding Claude everywhere. No setting chooses the lead yet. What another lead needs, in order:
 
@@ -126,13 +126,9 @@ Groundwork done: worker roles are a configurable registry (`config.ts`) and rout
 
 Decided 2026-11-24: one plugin serves both hosts, and the host that starts a conversation leads it, so a Codex session leads its own jobs while a Claude session leads its own. The 2026-11-24 host checks ([mcp-compatibility.md](mcp-compatibility.md#5-codex-as-a-lead-host)) settle items 1 to 3 for Codex: a tool call names its thread in `_meta`, hooks receive the same id, and `codex queue` wakes an idle interactive session. The Claude plugin layout loads in Codex with two changes: hooks must be string commands, and the MCP server cannot rely on `${CLAUDE_PLUGIN_ROOT}`.
 
-Done 2026-11-24 (`mcp.ts`, `codex-lead.ts`, `delivery.ts`, `usage.ts`, `plugin/.codex-plugin/`, `plugin/hooks/codex.json`): items 1 to 3 for Codex, from a source checkout registered with `crew install` ([architecture.md](architecture.md#bridge-and-state), [delivery.md](delivery.md#codex-leads)). Still open:
-- Recording a Codex lead's prompts for `approved_by_user`.
-- Showing a Codex lead session on the board, as Claude sessions are through `report.ts`.
-- Model notes and peer ratings, which assume Claude is the lead's self-reviewer.
-- Registration from the desktop apps, which carry their own Node outside the plugin folder that Codex copies.
-- Item 4, beyond MCP elicitation, which Codex advertises.
-- Item 5.
+Done 2026-11-24 (`mcp.ts`, `codex-lead.ts`, `delivery.ts`, `usage.ts`, `plugin/.codex-plugin/`, `plugin/hooks/codex.json`): items 1 to 3 for Codex, registered by `crew install` or the desktop apps ([architecture.md](architecture.md#bridge-and-state), [delivery.md](delivery.md#codex-leads)). Codex's hooks also report the session to the board and record the user's prompts for `approved_by_user` (`report.ts codex`), and the lead's own work is noted as Codex's. Still open:
+- Item 4: the board shows a Codex lead waiting on an approval, but MCP elicitation from a Crew tool call, which Codex advertises, is not verified.
+- Item 5. Checked on Claude Code 2.1.328 (2026-11-24): `claude -p --input-format stream-json --output-format stream-json --permission-prompt-tool stdio --restricted --tools … --strict-mcp-config` sends a `can_use_tool` control request for a write inside the folder and for a command that is not read-only, refuses a write outside the folder itself, runs read-only commands such as `git status` without asking, and takes a second user message after a `result` as a new turn. The design debated with Codex (`cx-387950`): a Claude-held role stays the lead's own work by default, and a Claude worker starts only when the lead names `claude`; permissions run in the manual mode, since an automatic mode decides actions Crew never sees. It changes the holder model across the bridge, the board and the macOS app, so it is a change of its own.
 
 **L2. Own main screen. *(Partial)*** React board (`plugin/board/src/`), role-based direct dispatch (`Dispatch.tsx`, `DispatchView.swift`), native macOS SwiftUI/AppKit app (`native/`), and Windows Electron shell (`desktop/`) are done ([board.md](board.md), [macos-app.md](macos-app.md)). Closing the UI leaves the daemon and jobs running, and the web board stays available. Mission start with a lead, lead selection, and merge execution remain open.
 
@@ -178,4 +174,5 @@ Summary of design turns recorded across the roadmap:
 - 2026-11-15, 2026-11-16, and 2026-11-18: **Model notes, fix role, and peer ratings (D1–D3)**: Replaced calibrated/clamped scoring (which rewarded tier and let fixes lift build scores) with uncalibrated finding load over change size (`xlarge` exposure 4 for large integrations), a separate `fix` score, `adoption` tracking, and fact-backed `peerRatings` weighted at 50% alongside evidence ([roles.md](roles.md)).
 - 2026-11-20: **Game retrospective (E)**: Adopted lead/worker prompt rules, tool-failure reporting, named stage labels (E3), and side-by-side evidence comparison opening one capture first (E4), leaving E1/E2 open ([jobs.md](jobs.md), [missions.md](missions.md)).
 - 2026-11-20: **Release gate, PR watching, and concurrent missions**: Gated releases on passing typechecks and tests, added mission PR watching (no polling while the lead session is closed), and required explicit mission IDs when multiple missions are open instead of an implicit current mission or workflow engine ([missions.md](missions.md), [distribution.md](distribution.md)).
+- 2026-11-24: **Codex lead parity (L1)**: Codex's hooks report its lead sessions to the board, waiting approvals and interruptions included, and record the user's prompts. A Codex lead's own work is noted as Codex's, and a daemon started with Codex's filtered environment gives way to a client with the whole one. The Claude worker (item 5) was designed and probed but left for a change of its own.
 - 2026-11-24: **Codex as a lead (L1)**: One plugin serves Claude Code and Codex, and the host that starts a conversation leads it. A Codex lead is woken with `codex queue` rather than a hook, and a role held by Claude is its own work until a Claude worker exists ([delivery.md](delivery.md#codex-leads), [mcp-compatibility.md](mcp-compatibility.md#5-codex-as-a-lead-host)).

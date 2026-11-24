@@ -49,7 +49,7 @@ Inside a Claude Code or Codex session (in Codex, skills start with `$`: `$crew:r
 
 A Codex session leads the same way, with a few differences:
 
-- **Trust the hooks once.** Codex runs a plugin's hooks only after you trust them. Open `/hooks` in a Codex session, press `t` to trust the Crew hooks, and start a new session. Without them the lead still works, but it misses the shared instructions and the news at the start and end of its turns. The app's Overview shows whether they are trusted.
+- **Trust the hooks once.** Codex runs a plugin's hooks only after you trust them. Open `/hooks` in a Codex session, press `t` to trust the Crew hooks, and start a new session. Without them the lead still works, but it misses the shared instructions and the news at the start and end of its turns, and the board does not show the session. The app's Overview shows whether they are trusted.
 - **Allow the Crew tools.** The first Crew call that starts or changes work may ask for approval. Choose "Always allow" so later calls do not stop to ask.
 - **Waking.** When a job finishes, Crew queues a short note in the lead's thread ("Crew has news for …"), and an idle Codex session runs it as its next turn. If the session's last turn was interrupted, Codex holds the note until you type again; the news is then shown on that prompt.
 - **Roles held by Claude.** Claude cannot run as a worker under a Codex lead yet, so the lead does that work itself.

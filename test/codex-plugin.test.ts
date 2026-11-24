@@ -111,6 +111,9 @@ test("hookTrust reads Codex's hooks/list for every Crew hook", () => {
   assert.equal(hookTrust(listed((_, i) => (i === 0 ? 'modified' : i === 1 ? 'untrusted' : 'trusted')), keys), 'untrusted');
   assert.equal(hookTrust(listed(() => 'trusted'), [...keys, 'crew@crew:hooks/codex.json:post_compact:0:0']), 'untrusted');
   assert.equal(hookTrust(listed(() => 'someNewState'), keys), 'untrusted');
+  const disabled = listed(() => 'trusted');
+  Object.assign(disabled.data[0].hooks[0], { enabled: false });
+  assert.equal(hookTrust(disabled, keys), 'untrusted');
   assert.throws(() => hookTrust({}, keys), /without a list/);
 });
 

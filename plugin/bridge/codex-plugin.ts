@@ -101,14 +101,16 @@ export type HookTrust = 'trusted' | 'modified' | 'untrusted';
 /**
  * The Crew hooks' trust as app-server `hooks/list` reports it, for the hooks named by `keys`. Codex trusts a hook against
  * its definition and a hash of its copy of the plugin folder, so after an update that changes the plugin's files every
- * hook is `modified` while its trust records stay in config.toml: only Codex can tell. A hook it does not list counts as
- * untrusted.
+ * hook is `modified` while its trust records stay in config.toml: only Codex can tell. A hook it does not list, or one
+ * turned off in `/hooks`, counts as untrusted, since Codex does not run it either.
  */
 export function hookTrust(listed: unknown, keys: string[]): HookTrust {
   const data = (listed as { data?: unknown } | null)?.data;
   if (!Array.isArray(data)) throw new Error('hooks/list answered without a list of hooks');
   const status = new Map<string, unknown>();
-  for (const entry of data) for (const hook of entry?.hooks ?? []) if (typeof hook?.key === 'string') status.set(hook.key, hook.trustStatus);
+  for (const entry of data) {
+    for (const hook of entry?.hooks ?? []) if (typeof hook?.key === 'string') status.set(hook.key, hook.enabled === false ? 'disabled' : hook.trustStatus);
+  }
   const states = keys.map((key) => status.get(key));
   if (states.some((state) => state !== 'trusted' && state !== 'modified')) return 'untrusted';
   return states.includes('modified') ? 'modified' : 'trusted';

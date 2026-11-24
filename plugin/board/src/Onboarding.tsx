@@ -168,7 +168,7 @@ function SetupArt() {
 const withCode = (text: string) => text.split('`').map((part, index) => (index % 2 ? <code key={index}>{part}</code> : part));
 
 const COMMANDS: [string, string][] = [
-  ['/crew:run <task>', t('Plan, build, review, and fix with the crew')],
+  ['/crew:run', t('Plan, build, review, and fix with the crew')],
   ['/crew:review', t('Review a change')],
   ['/crew:debate', t('Talk through a hard decision')],
   ['/crew:board', t('Open this board in Claude')],
@@ -180,7 +180,7 @@ const PAGES: Page[] = [
     art: <WelcomeArt />,
     body: (
       <p className="secondary">
-        {t('Crew runs several coding agents together. Claude leads from Claude Code and hands pieces of the work to the other agents to run in parallel. This app shows every agent live and lets you answer them.')}
+        {t('Crew runs several coding agents together. Claude leads, splits the work, and hands pieces to the other agents to run in parallel. This app shows every agent live and lets you answer them.')}
       </p>
     ),
   },
@@ -189,7 +189,7 @@ const PAGES: Page[] = [
     art: <CommandArt />,
     body: (
       <>
-        <p className="secondary">{t('Open a new Claude Code session, then type a command.')}</p>
+        <p className="secondary">{t('Open a new Claude Code session and type a command.')}</p>
         <dl className={styles.commands}>
           {COMMANDS.map(([command, what]) => (
             <div key={command}>
@@ -206,9 +206,9 @@ const PAGES: Page[] = [
     art: <NeedsArt />,
     body: (
       <p className="secondary">
-        {t('When an agent needs approval or asks a question, it appears in Needs You. Answer it here, or open waiting Claude sessions in Claude.')}{' '}
+        {t('Approvals and questions from agents appear in Needs You. Answer them here, or open a waiting Claude session in Claude.')}{' '}
         {desktop
-          ? t('Closing the window keeps Crew in the tray, and jobs keep running.')
+          ? t('Close the window and Crew stays in the tray, still running jobs.')
           : t('Jobs keep running after you close the board.')}
       </p>
     ),
@@ -219,7 +219,7 @@ const PAGES: Page[] = [
     body: (
       <p className="secondary">
         {tNodes(
-          'Overview lists anything still missing, such as signing in to Codex with {login} or signing in to Antigravity by running {agy} once. Choose which agent takes which work in Settings.',
+          'Overview lists what is still missing, such as {login} for Codex or running {agy} once for Antigravity. Choose which agent does what in Settings.',
           { login: <code>codex login</code>, agy: <code>agy</code> },
         )}
       </p>

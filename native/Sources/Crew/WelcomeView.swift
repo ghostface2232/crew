@@ -101,10 +101,10 @@ private enum WelcomePage: CaseIterable {
     @ViewBuilder var body: some View {
         switch self {
         case .welcome:
-            paragraph(String(localized: "Crew runs several coding agents together. Claude leads from Claude Code and hands pieces of the work to the other agents to run in parallel. This app shows every agent live and lets you answer them."))
+            paragraph(String(localized: "Crew runs several coding agents together. Claude leads, splits the work, and hands pieces to the other agents to run in parallel. This app shows every agent live and lets you answer them."))
         case .commands:
             VStack(spacing: Space.l) {
-                paragraph(String(localized: "Open a new Claude Code session, then type a command."))
+                paragraph(String(localized: "Open a new Claude Code session and type a command."))
                 Grid(alignment: .leading, horizontalSpacing: Welcome.commandGap, verticalSpacing: Space.s) {
                     ForEach(Self.commandList, id: \.0) { command, what in
                         GridRow {
@@ -116,13 +116,13 @@ private enum WelcomePage: CaseIterable {
                 .multilineTextAlignment(.leading)
             }
         case .needs:
-            paragraph(String(localized: "When an agent needs approval or asks a question, it appears in Needs You. Answer it here, or open waiting Claude sessions in Claude. Closing the window keeps Crew in the menu bar, and jobs keep running."))
+            paragraph(String(localized: "Approvals and questions from agents appear in Needs You. Answer them here, or open a waiting Claude session in Claude. Close the window and Crew stays in the menu bar, still running jobs."))
         case .setup:
-            paragraph(String(localized: "Overview lists anything still missing, such as signing in to Codex with `codex login` or signing in to Antigravity by running `agy` once. Choose which agent takes which work in Settings."))
+            paragraph(String(localized: "Overview lists what is still missing, such as `codex login` for Codex or running `agy` once for Antigravity. Choose which agent does what in Settings."))
         }
     }
     private static let commandList = [
-        ("/crew:run <task>", String(localized: "Plan, build, review, and fix with the crew")),
+        ("/crew:run", String(localized: "Plan, build, review, and fix with the crew")),
         ("/crew:review", String(localized: "Review a change")),
         ("/crew:debate", String(localized: "Talk through a hard decision")),
         ("/crew:board", String(localized: "Open the board in Claude")),

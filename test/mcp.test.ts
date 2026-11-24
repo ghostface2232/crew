@@ -451,6 +451,16 @@ test('the session instructions fit what Claude Code keeps of them', () => {
   }
 });
 
+test('a preset gives its Claude subagent models only to a Claude lead', () => {
+  const source = fs.readFileSync(new URL('../plugin/bridge/mcp.ts', import.meta.url), 'utf8');
+  const code = source.slice(source.indexOf('/** What a preset asks of the lead'), source.indexOf('/** The preset policy as the config on disk'));
+  const economy = { codex: { effort: 'low' }, subagentModel: 'haiku', subagentMax: 'sonnet', maxTier: 'standard' };
+  const policy = (host: string) => vm.runInNewContext(`${stripTypeScriptTypes(code)}; presetPolicy('economy', preset, '')`, { host, preset: economy }) as string;
+  assert.match(policy('claude'), /crew:self-reviewer\) with model "haiku", or "sonnet"/);
+  assert.doesNotMatch(policy('codex'), /haiku|sonnet/);
+  assert.match(policy('codex'), /Your own subagents stay on your model\. Worker models are capped at the standard tier/);
+});
+
 test('concurrent mission reports without a session id resume the same title', async (t) => {
   const { missions, server } = missionServer(t);
   const { reportMission } = server(null);

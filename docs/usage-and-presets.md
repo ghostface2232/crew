@@ -67,6 +67,8 @@ A Codex lead asks with `lead=codex`, and the lead's own usage is then Codex's. "
 | `balanced` | `medium` | `sonnet` | none |
 | `best` | `high` | lead's own model (`inherit`) | none |
 
+`subagentModel` and `subagentMax` name Claude models, so a Codex lead is told to keep its subagents on its own model under every preset.
+
 Under `economy`, `maxTier: "standard"` caps worker models at the `standard` tier (Sol for Codex, Hydrogen for Antigravity): a higher tier or larger named model is lowered to it, while the lead may still set a custom effort per job.
 
 Built-in presets name no worker models because account availability differs. Customize models under `presets`:

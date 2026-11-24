@@ -59,8 +59,9 @@ const holder = (role: Role, table: Record<Role, RoleAssignment> = roles) => tabl
 /** What a preset asks of the lead and its workers, said wherever the preset in effect is reported. */
 function presetPolicy(name: PresetName | null, preset: Preset | undefined, whose: string): string {
   if (!name || !preset) return `No preset is in effect${whose}: workers use their configured models, and your own subagents stay on your model.`;
-  const subagents = preset.subagentModel && preset.subagentModel !== 'inherit'
-    ? `Start your own subagents (including ${host === 'codex' ? 'the self-reviewer' : 'crew:self-reviewer'}) with model "${preset.subagentModel}"${preset.subagentMax ? `, or "${preset.subagentMax}" when the work needs more, and never a larger model,` : ''} unless the user asks otherwise.`
+  // subagentModel and subagentMax name Claude models, which a Codex lead cannot start.
+  const subagents = host !== 'codex' && preset.subagentModel && preset.subagentModel !== 'inherit'
+    ? `Start your own subagents (including crew:self-reviewer) with model "${preset.subagentModel}"${preset.subagentMax ? `, or "${preset.subagentMax}" when the work needs more, and never a larger model,` : ''} unless the user asks otherwise.`
     : 'Your own subagents stay on your model.';
   const cap = preset.maxTier ? ` Worker models are capped at the ${preset.maxTier} tier: a higher tier or a larger model you name is lowered to it. Leave effort out to keep the preset's, or name one when a job needs it.` : '';
   return `The "${name}" preset is in effect${whose}. Workers get its model and effort when their job starts. ${subagents}${cap}`;

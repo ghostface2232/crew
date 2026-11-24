@@ -521,7 +521,11 @@ final class SettingsModel {
         scope = next; loaded = false; loading = true; textStatus = ""; savingText = false
         var components = URLComponents()
         components.path = "/api/instructions"
-        if !next.isEmpty { components.queryItems = [URLQueryItem(name: "project", value: next)] }
+        if !next.isEmpty {
+            components.queryItems = [URLQueryItem(name: "project", value: next)]
+            // URLQueryItem leaves "+" as it is, which the daemon would read as a space in the path.
+            components.percentEncodedQuery = components.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
+        }
         do {
             let result: Instructions = try await api.request(components.string!)
             guard generation == attempt else { return }

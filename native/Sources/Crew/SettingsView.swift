@@ -237,7 +237,7 @@ struct CrewSettingsView: View {
             }
         } footer: {
             VStack(alignment: .leading, spacing: Space.ml) {
-                if let error = updater.error { ErrorLabel(message: error).settingsFootnote() }
+                if let error = updater.error ?? updater.installError { ErrorLabel(message: error).settingsFootnote() }
                 // The note and the action share one line, so the action is not left between the list and a note.
                 HStack(spacing: Space.l) {
                     Text(updater.phase == .unsupported

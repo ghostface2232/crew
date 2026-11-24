@@ -217,6 +217,25 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
         // Only Antigravity falls back to a family.
         #expect(ProviderUsage(agent: "codex", status: .ok, reason: "", windows: families).shownWindows.isEmpty)
     }
+    @Test func valuesANewerDaemonAddsDoNotFailTheSnapshot() throws {
+        let current = try fixture("state-extended")
+        let wire = try #require(String(data: JSONEncoder().encode(current), encoding: .utf8))
+            .replacingOccurrences(of: #""status":"tight""#, with: #""status":"throttled""#)
+            .replacingOccurrences(of: #""preset":"balanced""#, with: #""preset":"turbo""#)
+            .replacingOccurrences(of: #""preset":"best""#, with: #""preset":"turbo""#)
+        #expect(wire.contains("throttled") && wire.components(separatedBy: "turbo").count == 3)
+        var state = BoardState()
+        try state.receive(ServerEvent(name: "state", data: Data(wire.utf8)))
+        let claude = try #require(state.usage?.providers.first)
+        #expect(claude.status == .unknown)
+        #expect(claude.windows.map(\.status) == [.ok, .unknown, .exhausted])
+        // No preset rather than one no picker offers.
+        #expect(state.preset == nil && state.missions[0].preset == nil)
+        #expect(state.jobs == current.jobs && state.presets == current.presets)
+        state.preset = .best
+        try state.receive(ServerEvent(name: "preset", data: Data(#"{"preset":"turbo","presets":{}}"#.utf8)))
+        #expect(state.preset == nil)
+    }
     @Test func optionalContractFieldsDecodeAndLegacyStateStillWorks() throws {
         let legacy = try fixture()
         #expect(legacy.usage == nil && legacy.preset == nil && legacy.presets == nil)
@@ -1150,6 +1169,22 @@ private final class MockProtocol: URLProtocol, @unchecked Sendable {
         await first.value
         #expect(settings.scope == "/project")
         #expect(settings.text == "new")
+    }
+    @Test func aProjectPathKeepsItsPlusSignsOnTheWayToTheDaemon() async throws {
+        let project = "/Users/me/dev/c++ lib & notes=#1"
+        let api = api { request in
+            // Read as the daemon reads it (URLSearchParams): split, "+" is a space, then the escapes are undone.
+            let url = try #require(request.url)
+            let query = try #require(URLComponents(url: url, resolvingAgainstBaseURL: true)?.percentEncodedQuery)
+            let pairs = query.split(separator: "&").map { pair in
+                pair.split(separator: "=", maxSplits: 1).map { $0.replacingOccurrences(of: "+", with: " ").removingPercentEncoding }
+            }
+            #expect(pairs == [["project", project]])
+            return (200, Data(#"{"file":"project","text":"notes"}"#.utf8), 0)
+        }
+        let settings = SettingsModel(api: api, roles: [:])
+        await settings.load(scope: project)
+        #expect(settings.loaded && settings.text == "notes")
     }
     @Test func editsDuringSaveArePreserved() async throws {
         let api = api { request in

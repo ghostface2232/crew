@@ -17,6 +17,9 @@ interface Entry {
   group: string;
   title: string;
   subtitle: string;
+  /** What a typed query is matched against: a work item's content, as the app's search filters it, or otherwise
+   * just the name, so descriptions and group headings never match. */
+  search?: string;
   icon?: FluentIcon;
   agent?: string;
   run: () => void;
@@ -131,6 +134,7 @@ export function Palette({ state, names, projects, origin, close, actions }: {
       const stops = missionStops(mission);
       list.push({
         id: `mission:${mission.id}`, group: 'Missions', title: mission.title, subtitle: names.get(projectOf(mission)) ?? projectOf(mission), icon: FlagRegular,
+        search: mission.title,
         run: () => {
           actions.select(mission.state === 'active' ? `project:${projectOf(mission)}` : 'history');
           requestAnimationFrame(() => document.querySelector(`[data-key="${CSS.escape(mission.id)}"]`)?.scrollIntoView({ block: 'start', behavior: reducedMotion() ? 'auto' : 'smooth' }));
@@ -151,6 +155,7 @@ export function Palette({ state, names, projects, origin, close, actions }: {
     for (const session of claude) {
       list.push({
         id: `session:${session.id}`, group: 'Claude sessions', title: session.title, subtitle: names.get(projectOf(session)) ?? projectOf(session), agent: 'claude',
+        search: session.title,
         run: () => actions.openSession(session.id),
         preview: () => ({
           eyebrow: t('Claude · Lead'),
@@ -163,6 +168,7 @@ export function Palette({ state, names, projects, origin, close, actions }: {
     for (const job of [...jobs].sort((a, b) => Number(b.endedAt == null) - Number(a.endedAt == null) || b.createdAt - a.createdAt)) {
       list.push({
         id: `job:${job.id}`, group: 'Jobs', title: job.title, subtitle: `${NAMES[job.agent]} · ${names.get(projectOf(job)) ?? projectOf(job)}`, agent: job.agent, icon: WrenchRegular,
+        search: `${job.title} ${job.phase} ${names.get(projectOf(job)) ?? ''} ${projectOf(job)} ${NAMES[job.agent]}`,
         run: () => actions.openJob(job.id),
         preview: () => ({
           eyebrow: `${NAMES[job.agent]} · ${job.ask && !job.debate ? t('Question') : roleLabel({ roleInfo }, jobRole(job))}`,
@@ -177,7 +183,7 @@ export function Palette({ state, names, projects, origin, close, actions }: {
   const shown = useMemo(() => {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean);
     if (words.length) return entries.filter((entry) =>
-      words.every((word) => `${entry.title} ${entry.subtitle} ${entry.group}`.toLowerCase().includes(word))).slice(0, 60);
+      words.every((word) => (entry.search ?? entry.title).toLowerCase().includes(word))).slice(0, 60);
     // With nothing typed: actions, pages, projects, and only the most recent work.
     const counts = new Map<string, number>();
     return entries.filter(({ group }) => {

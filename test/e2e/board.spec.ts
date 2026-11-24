@@ -114,6 +114,15 @@ test('the palette offers to turn notifications on when browser permission is mis
   await expect(page.getByRole('option', { name: /Turn on notifications/ })).toBeVisible();
 });
 
+test('the palette matches pages by name, not by their description', async ({ page }) => {
+  await page.getByRole('button', { name: 'Search', exact: true }).click();
+  const search = page.getByRole('combobox', { name: 'Search work, projects and actions' });
+  await search.fill('as it happened');
+  await expect(page.getByRole('option')).toHaveCount(0);
+  await search.fill('activity');
+  await expect(page.getByRole('option', { name: /^Activity/ })).toBeVisible();
+});
+
 test('sidebar and Settings labels update their fade when selection changes', async ({ page }) => {
   const check = async (item: Locator, other: Locator) => {
     const label = item.locator('.fade-line');

@@ -32,7 +32,8 @@ fs.writeFileSync(
 // Icons are scaled from the Icon Composer export, which carries the lighting and shadow effects the layered
 // icon has on macOS and already has transparent rounded corners. An .ico holds PNG images, which Windows reads since Vista.
 const appIcon = `<img src="data:image/png;base64,${fs.readFileSync('assets/crew-iOS-Default-1024@2x.png').toString('base64')}">`;
-const badge = '<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><circle cx="8" cy="8" r="7" fill="#e5484d"/></svg>';
+// The taskbar draws the overlay in a 16px box at the icon's corner, so the dot fills half of it.
+const badge = '<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><circle cx="8" cy="8" r="4" fill="#e5484d"/></svg>';
 const browser = await chromium.launch();
 const render = async (svg, size) => {
   const page = await browser.newPage({ viewport: { width: size, height: size }, deviceScaleFactor: 1 });
@@ -43,10 +44,11 @@ const render = async (svg, size) => {
 };
 const out = path.join(root, 'desktop');
 try {
-  const sizes = [16, 24, 32, 48, 64, 128, 256];
+  // Windows scales whichever image is nearest, which blurs it, so each display scale gets its own: the 16px small
+  // icon, the 24px taskbar icon, and the 32px and 48px icons at 100, 125, 150, 175, 200, and 250 percent.
+  const sizes = [16, 20, 24, 28, 30, 32, 36, 40, 42, 48, 56, 60, 64, 72, 80, 96, 120, 128, 256];
   const images = [];
   for (const size of sizes) images.push(await render(appIcon, size));
-  fs.writeFileSync(path.join(out, 'icon.png'), images.at(-1));
   // The tray takes the macOS menu bar mark as a flat glyph, in black or white to suit the taskbar (main.ts picks).
   const mark = fs.readFileSync('assets/crew_menubar.svg', 'utf8');
   for (const [name, color] of [['black', '#000000'], ['white', '#ffffff']]) {
@@ -54,7 +56,9 @@ try {
     fs.writeFileSync(path.join(out, `tray-${name}.png`), await render(glyph, 16));
     fs.writeFileSync(path.join(out, `tray-${name}@2x.png`), await render(glyph, 32));
   }
-  fs.writeFileSync(path.join(out, 'badge.png'), await render(badge, 16));
+  // Electron hands the overlay to Windows at its pixel size, which Windows stretches to the display scale; main.ts
+  // picks the one drawn for that scale.
+  for (const size of [16, 20, 24, 28, 32, 40]) fs.writeFileSync(path.join(out, `badge-${size}.png`), await render(badge, size));
   const header = Buffer.alloc(6);
   header.writeUInt16LE(1, 2);
   header.writeUInt16LE(images.length, 4);

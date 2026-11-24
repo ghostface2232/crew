@@ -330,8 +330,11 @@ struct ClaudeSession: Codable, Sendable, Identifiable, Equatable {
     /// The agent the session runs in, as jobs name theirs.
     var agent: String { host ?? "claude" }
     var resumeCommand: String { agent == "codex" ? "codex resume \(id)" : "claude --resume \(id)" }
-    /// The link that opens the session in the Claude desktop app, which accepts only a well-formed local_ id.
-    var claudeURL: URL? {
+    var appURL: URL? {
+        if agent == "codex" {
+            guard UUID(uuidString: id) != nil else { return nil }
+            return URL(string: "codex://threads/\(id)")
+        }
         guard agent == "claude", let desktopId, desktopId.wholeMatch(of: /local_[A-Za-z0-9-]{1,64}/) != nil else { return nil }
         return URL(string: "claude://code/continue?session=\(desktopId)")
     }

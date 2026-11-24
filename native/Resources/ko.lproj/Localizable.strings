@@ -106,8 +106,8 @@
 "%lld-minute limit" = "%lld분 한도";
 "limit" = "한도";
 "%@ of %@" = "%2$@ 중 %1$@";
-"Open in Claude" = "Claude에서 열기";
-"Open this session in the Claude app" = "Claude 앱에서 이 세션을 열어요.";
+"Open in %@" = "%@에서 열기";
+"Open this session in the %@ app" = "%@ 앱에서 이 세션을 열어요.";
 
 /* CrewApp.swift */
 "New Job…" = "새 작업…";

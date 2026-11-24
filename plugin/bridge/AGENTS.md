@@ -23,7 +23,8 @@ The bridge is everything in Crew that is not a user interface: the daemon, the M
 | Worktrees, includes, transport commits, and cleanup | `git.ts`, `gc.ts` |
 | What a worker is told | `prompts.ts`, `instructions.ts`, `skills.ts`, `../roles/*.md` |
 | Sandboxed checks and the macOS browser | `check.ts`, `browser.ts` |
-| Claude Code hooks | `report.ts` (activity), `context.ts` (shared instructions), `wake.ts` (wake-ups), `claude.ts` (session state) |
+| Lead hooks | `report.ts` (activity), `context.ts` (shared instructions), `wake.ts` (wake-ups), `claude.ts` (Claude session state); Codex runs the hooks in `../hooks/codex.json` |
+| Waking Codex leads | `codex-lead.ts` (`codex queue`) |
 | Configuration, roles, presets, and tiers | `config.ts`, `settings.ts` (board settings writes), `tiers.ts` |
 | Usage and routing | `usage.ts` |
 | Evidence, model notes, and peer ratings | `evidence.ts`, `notes.ts` |

@@ -359,6 +359,25 @@ test('a short lead hands off implementation, and an exhausted one keeps the sess
   assert.equal(route('lead', usageOf({ claude: 'exhausted' }), roles).assignee, 'claude');
 });
 
+test('a Codex lead is judged by its own usage, and a role held by Claude is its own work', () => {
+  // Claude's usage says nothing about a Codex lead.
+  assert.match(route('lead', usageOf({ claude: 'exhausted', codex: 'ok' }), DEFAULT_ROLES, [], 'codex').reason, /Codex has room/);
+  const exhausted = route('lead', usageOf({ codex: 'exhausted' }), DEFAULT_ROLES, [], 'codex');
+  assert.deepEqual([exhausted.assignee, exhausted.degraded], ['claude', true]);
+  assert.match(exhausted.reason, /No other agent can lead/);
+  // A Codex worker shares the lead's usage, so a short Codex keeps the assignment rather than handing it to itself.
+  const build = route('delegate', usageOf({ codex: 'tight' }), DEFAULT_ROLES, [], 'codex');
+  assert.equal(build.assignee, 'codex');
+  assert.match(build.reason, /Codex is short too/);
+  // Claude holding the role too means the lead, whose usage is Codex's: the work does not move to a lead just as short.
+  const shared = { ...DEFAULT_ROLES, delegate: { agents: ['codex' as const, 'claude' as const] } };
+  assert.equal(route('delegate', usageOf({ codex: 'tight', claude: 'ok' }), shared, [], 'codex').assignee, 'codex');
+  assert.equal(route('delegate', usageOf({ codex: 'tight', claude: 'ok' }), shared).assignee, 'claude');
+  const fix = route('fix', usageOf({}), DEFAULT_ROLES, [], 'codex');
+  assert.equal(fix.assignee, 'claude');
+  assert.match(fix.reason, /runs no worker under another lead: do the work yourself/);
+});
+
 test('the history database is opened read-only and read per window', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-usage-'));
   assert.equal(await openHistory(dir), null);

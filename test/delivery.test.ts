@@ -288,6 +288,16 @@ test('sync Stop guards continuation; subagents never arm a lead watcher; context
   assert.equal(bodies[0].event, 'UserPromptSubmit');
 });
 
+test('a Codex Stop hook asks to continue in JSON, which survives pwsh, and a Claude one by exit code', async () => {
+  const request = (async () => ({ offer: { text: 'Crew news' } })) as typeof api;
+  assert.deepEqual(await leadHook({ session_id: 'lead' }, 'stop', request), { code: 2, stderr: 'Crew news' });
+  const codex = await leadHook({ session_id: 'thread' }, 'stop-json', request);
+  assert.equal(codex.code, 0);
+  assert.deepEqual(JSON.parse(codex.stdout!), { decision: 'block', reason: 'Crew news' });
+  const none = (async () => ({ offer: null })) as typeof api;
+  assert.deepEqual(await leadHook({ session_id: 'thread' }, 'stop-json', none), { code: 0 });
+});
+
 test('notification routes require authentication; hook ingestion cannot ACK; shutdown fences delayed delivery', async (t) => {
   const h = harness(t);
   const job = await h.create();

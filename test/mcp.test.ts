@@ -312,7 +312,7 @@ test('MCP bounds a multi-job response and ACKs only echoed receipts before makin
   const replies: any[] = [];
   const order: string[] = [];
   const handle = vm.runInNewContext(`${stripTypeScriptTypes(handler)}; handle`, {
-    AbortController, inFlight: new Map(), ensureDaemon: async () => {}, SESSION: 'lead',
+    AbortController, inFlight: new Map(), ensureDaemon: async () => {}, SESSION: 'lead', host: 'claude',
     clipped, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, send: (msg: unknown) => replies.push(msg),
     imageContent: () => [{ type: 'image', data: 'x'.repeat(900_000), mimeType: 'image/png' }],
     api: async (_method: string, route: string, body: any) => {
@@ -398,7 +398,7 @@ test('a role the lead holds starts no worker, and a pick outside the holders is 
   const code = source.slice(source.indexOf('/** What the lead does with a role it holds itself'), source.indexOf('async function callTool'));
   const roles = { review: { agents: ['codex', 'claude'] }, polish: { agents: ['claude'] } };
   const pick = vm.runInNewContext(`const holderName = (a) => a === 'claude' ? 'you, Claude' : a; const holder = (r, t) => t[r].agents.join(' or '); ${stripTypeScriptTypes(code)}; pickHolder`, {
-    roles, LEAD: 'claude', loadConfig: () => ({ roles, antigravity: { enabled: true } }), defaultHolder, disabledAgents, assignHint,
+    roles, LEAD: 'claude', loadConfig: () => ({ roles, antigravity: { enabled: true } }), defaultHolder, disabledAgents, assignHint, selfReviewer: () => 'the crew:self-reviewer subagent',
   });
   assert.deepEqual({ ...pick('review', undefined) }, { agent: 'codex' });
   assert.match(pick('review', 'claude').yours, /no worker was started\. Run the crew:self-reviewer subagent[^]*other holders: codex/);
@@ -439,13 +439,26 @@ test('the session instructions fit what Claude Code keeps of them', () => {
   const text = source.slice(source.indexOf('const holderName ='), source.indexOf('\nconst common = {'));
   // The longest they get: every role held by every agent, and a preset set.
   const everyone = Object.fromEntries(ROLE_INFO.map((info) => [info.role, { agents: [...Object.keys(WORKERS), LEAD] }]));
-  const instructions: string = vm.runInNewContext(`${stripTypeScriptTypes(text)}; INSTRUCTIONS`, {
-    LEAD, WORKERS, ROLE_INFO, PRESET_NAMES, roles: everyone, started: { preset: 'balanced' }, loadConfig: () => ({}),
-  });
-  // Claude Code cuts a server's instructions at 4,096 characters; what follows never reaches the lead.
-  assert.ok(instructions.length <= 4096, `${instructions.length} characters`);
-  for (const role of ROLE_INFO) assert.ok(instructions.includes(`\`${role.role}\``), role.role);
-  assert.match(instructions, /The global one is "balanced"/);
+  for (const host of ['claude', 'codex']) {
+    const instructions: string = vm.runInNewContext(`${stripTypeScriptTypes(text)}; instructions()`, {
+      LEAD, WORKERS, ROLE_INFO, PRESET_NAMES, roles: everyone, started: { preset: 'balanced' }, loadConfig: () => ({}), host, path, PLUGIN_ROOT: '/plugin',
+    });
+    // Claude Code cuts a server's instructions at 4,096 characters; what follows never reaches the lead. Codex is held to the same.
+    assert.ok(instructions.length <= 4096, `${host}: ${instructions.length} characters`);
+    for (const role of ROLE_INFO) assert.ok(instructions.includes(`\`${role.role}\``), role.role);
+    assert.match(instructions, /The global one is "balanced"/);
+    assert.match(instructions, host === 'codex' ? /Claude cannot run as a worker yet[\s\S]*the crew:run skill/ : /Picking yourself \(`claude`\)[\s\S]*\/crew:run/);
+  }
+});
+
+test('a preset gives its Claude subagent models only to a Claude lead', () => {
+  const source = fs.readFileSync(new URL('../plugin/bridge/mcp.ts', import.meta.url), 'utf8');
+  const code = source.slice(source.indexOf('/** What a preset asks of the lead'), source.indexOf('/** The preset policy as the config on disk'));
+  const economy = { codex: { effort: 'low' }, subagentModel: 'haiku', subagentMax: 'sonnet', maxTier: 'standard' };
+  const policy = (host: string) => vm.runInNewContext(`${stripTypeScriptTypes(code)}; presetPolicy('economy', preset, '')`, { host, preset: economy }) as string;
+  assert.match(policy('claude'), /crew:self-reviewer\) with model "haiku", or "sonnet"/);
+  assert.doesNotMatch(policy('codex'), /haiku|sonnet/);
+  assert.match(policy('codex'), /Your own subagents stay on your model\. Worker models are capped at the standard tier/);
 });
 
 test('concurrent mission reports without a session id resume the same title', async (t) => {
@@ -485,7 +498,7 @@ test('status and mission explicitly read this session\'s watch news without any 
   const missions: object[] = [];
   const offered: (string[] | undefined)[] = [];
   const handle = vm.runInNewContext(`${stripTypeScriptTypes(standing + tool + handler)}; handle`, {
-    AbortController, inFlight: new Map(), ensureDaemon: async () => {}, SESSION: 'lead', PROJECT: '/project',
+    AbortController, inFlight: new Map(), ensureDaemon: async () => {}, SESSION: 'lead', host: 'claude', PROJECT: '/project', projectUnknown: false,
     fresh: false, missionId: null, costMission: null, closedElsewhere: null,
     missionHead: () => 'Current mission', missionDetail: () => '', currentPolicy: () => '', globalPreset: () => null,
     clipped, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, send: (msg: unknown) => replies.push(msg),
@@ -516,4 +529,32 @@ test('status and mission explicitly read this session\'s watch news without any 
   assert.match(current.content[0].text, /Current mission[^]*\[pr-0\] news 1/);
   assert.equal(unread(watches[0])[0].offers, 2);
   assert.deepEqual(offered, [undefined, ['pr-0'], ['pr-0']]);
+});
+
+test('a Codex session says hello once, retries a failed hello, refuses a call naming no session, and starts a new session fresh', async () => {
+  const source = fs.readFileSync(new URL('../plugin/bridge/mcp.ts', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+  const code = source.slice(source.indexOf('/** The hello for the Codex session'), source.indexOf('/** How a mission ended'));
+  const hellos: string[] = [];
+  let forgotten = 0;
+  let answer: () => Promise<any> = async () => ({ cwd: '/work/repo' });
+  const context: Record<string, any> = {
+    SESSION: undefined, PROJECT: '/plugin', projectUnknown: true, forgetMissions: () => { forgotten++; }, canonicalPath: (p: string) => `canon:${p}`,
+    api: async (_method: string, route: string, body: any) => { hellos.push(`${route} ${body.session} ${body.host}`); return answer(); },
+  };
+  const codexSession = vm.runInNewContext(`${stripTypeScriptTypes(code)}; codexSession`, context);
+  // Calls arriving together wait on one hello, and none runs before the project is known.
+  await Promise.all([codexSession({ sessionId: 'root' }), codexSession({ sessionId: 'root' })]);
+  assert.deepEqual(hellos, ['/api/lead/hello root codex']);
+  assert.deepEqual([context.SESSION, context.PROJECT, context.projectUnknown], ['root', 'canon:/work/repo', false]);
+  assert.equal(forgotten, 0);
+  // A call without a session is refused rather than acting as the last one.
+  await assert.rejects(codexSession(undefined), /named no session/);
+  await assert.rejects(codexSession({ threadId: 'root' }), /named no session/);
+  assert.deepEqual([hellos.length, context.SESSION], [1, 'root']);
+  // A failed hello fails the call and is tried again; a thread with no folder leaves the project unknown.
+  answer = async () => { throw new Error('daemon stopping'); };
+  await assert.rejects(codexSession({ sessionId: 'next' }), /could not register this Codex session.*daemon stopping/);
+  answer = async () => ({ cwd: null });
+  await codexSession({ sessionId: 'next' });
+  assert.deepEqual([hellos.length, context.SESSION, context.projectUnknown, forgotten], [3, 'next', true, 1]);
 });

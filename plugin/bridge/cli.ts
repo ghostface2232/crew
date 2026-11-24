@@ -19,7 +19,7 @@ Usage:
   crew gc [--apply] [--branches]  Preview leftovers; --apply cleans directories and metadata, --branches also deletes branches merged into HEAD
   crew board             Open the status board in the browser, signed in (--url prints the address instead)
   crew doctor            Check that everything Crew needs is in place
-  crew install           Register the plugin with Claude Code and put crew on PATH
+  crew install           Register the plugin with Claude Code (and Codex, from a source checkout) and put crew on PATH
   crew daemon <start|stop|restart|logs>
 `;
 
@@ -65,6 +65,7 @@ async function doctor(): Promise<void> {
 }
 
 async function install(): Promise<void> {
+  // Registers with Codex too where it is installed; the detail says how each went.
   const result = await register(true);
   console.log(`${result.ok ? '✓' : '✗'} ${result.detail}`);
   if (!result.ok) process.exitCode = 1;

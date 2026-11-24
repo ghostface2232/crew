@@ -55,6 +55,8 @@ G2 (`--json` output) and G3 (activity signal and threshold hook) remain open in 
 
 Each role maps explicitly to a policy (`build`, `review`, `debate`, or `polish`) in `route()`, so a new role cannot fall through to another's.
 
+A Codex lead asks with `lead=codex`, and the lead's own usage is then Codex's. "The lead" in the table means that session, and the `claude` assignee still means "you, the lead". A Codex worker shares the lead's usage. So when Codex is short, a build keeps going to the Codex holder ("Codex is short too") rather than back to a lead that is short as well.
+
 ## Presets
 
 `preset` in `~/.crew/config.json` is `economy`, `balanced`, or `best` (unset by default). A role setting overrides the preset, and the preset overrides the agent's global config.
@@ -64,6 +66,8 @@ Each role maps explicitly to a policy (`build`, `review`, `debate`, or `polish`)
 | `economy` | `low` | `haiku`, `sonnet` at most (`subagentMax`) | `standard` |
 | `balanced` | `medium` | `sonnet` | none |
 | `best` | `high` | lead's own model (`inherit`) | none |
+
+`subagentModel` and `subagentMax` name Claude models, so a Codex lead is told to keep its subagents on its own model under every preset.
 
 Under `economy`, `maxTier: "standard"` caps worker models at the `standard` tier (Sol for Codex, Hydrogen for Antigravity): a higher tier or larger named model is lowered to it, while the lead may still set a custom effort per job.
 

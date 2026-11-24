@@ -82,6 +82,8 @@ const WORKER_CWD = /[\\/]worktrees[\\/][^\\/]+-[0-9a-f]{8}[\\/](cx|ag)-[0-9a-f]{
  * Few Crew jobs use them, and they cost each turn thousands of input tokens. A job that names plugins gets
  * those and no others (`lean` below).
  */
+/** Crew's own plugin as Codex names it once `crew install` or the app registered it. */
+const CREW_PLUGIN = 'crew@crew';
 const LEAN = {
   skills: { include_instructions: false },
   features: { apps: false, plugins: false, tool_suggest: false },
@@ -287,6 +289,16 @@ export class CodexAdapter implements Adapter {
   }
 
   /**
+   * The working directory of a thread another Codex process holds: a lead session, whose MCP server runs from
+   * the plugin's folder and cannot tell its project otherwise. Null for a thread Codex did not persist.
+   */
+  async threadCwd(threadId: string): Promise<string | null> {
+    const peer = await this.ensure();
+    const res = await peer.request('thread/read', { threadId, includeTurns: false }, PROBE_TIMEOUT_MS).catch(() => null);
+    return typeof res?.thread?.cwd === 'string' ? res.thread.cwd : null;
+  }
+
+  /**
    * Reads the thread's runtime status for a silent job. Sub-agents come first: one whose turn ended unheard would
    * hold the parent's completion forever. A thread found not active is read again after a pause, so a completion
    * still on its way is not mistaken for a lost one.
@@ -379,7 +391,9 @@ export class CodexAdapter implements Adapter {
       // Keep it on here so enabled plugins remain usable; it cannot suppress only user skills.
       features: { ...LEAN.features, plugins: true },
       // Inventory can omit a marketplace or precede a remote install; do not inherit enablement for unseen plugins.
-      plugins: { _default: { enabled: false }, ...Object.fromEntries(installed.map((plugin) => [plugin.id, { enabled: plugin.enabled && wanted.some((name) => named(plugin.id, name)) }])) },
+      // `_default` alone did not turn off a plugin the user has installed and on (Codex 0.170, 2026-11-24), so Crew's
+      // own plugin is named: a worker must never load the lead's MCP server or hooks.
+      plugins: { _default: { enabled: false }, ...Object.fromEntries(installed.map((plugin) => [plugin.id, { enabled: plugin.enabled && wanted.some((name) => named(plugin.id, name)) }])), [CREW_PLUGIN]: { enabled: false } },
     };
   }
 

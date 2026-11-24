@@ -48,9 +48,19 @@ interface Item { jobId: string; newsSeq: number }
 interface Receipt { session: string; items: Item[]; text: string; acknowledged?: boolean; at?: number }
 interface Lease { generation: string; expiresAt: number }
 interface Watch extends Lease { deadline: number; beat: number }
+/**
+ * The lead sessions that Codex hosts. A Claude Code session wakes itself through its own hooks; a Codex session
+ * has no hook that can, so the daemon wakes it (codex-lead.ts). A session not listed here is a Claude one.
+ */
+export type LeadHost = 'codex';
+/** `at`: when the session last said hello. A session may say it well before it starts its first job. */
+interface Hosted { host: LeadHost; at: number }
+/** How long a Codex session that leads nothing stays recorded; a session that leads a job or a watch always does. */
+const HOST_KEEP_MS = 7 * 86_400_000;
 export interface DeliveryState {
   receipts: Record<string, Receipt>;
   offering: Record<string, Lease>;
+  hosts?: Record<string, Hosted>;
 }
 export interface Offer { receipt: string; text: string; items: Item[] }
 
@@ -102,7 +112,7 @@ export function leadSession(value: unknown): string {
 
 /** All durable changes use the Jobs snapshot, so receipts and the news they cover commit together. */
 export class Delivery {
-  state: DeliveryState = { receipts: Object.create(null), offering: Object.create(null) };
+  state: DeliveryState = { receipts: Object.create(null), offering: Object.create(null), hosts: Object.create(null) };
   private watching = new Map<string, Watch>();
   private waiters = new Set<() => void>();
   /** When each lead session's hooks last called. */
@@ -140,8 +150,61 @@ export class Delivery {
 
   restore(state?: DeliveryState): void {
     // A restarted daemon must fence every old process, but issued receipts remain valid.
-    this.state = { receipts: Object.assign(Object.create(null), state?.receipts), offering: Object.create(null) };
+    this.state = { receipts: Object.assign(Object.create(null), state?.receipts), offering: Object.create(null),
+      hosts: Object.assign(Object.create(null), Object.fromEntries(Object.entries(state?.hosts ?? {}).filter(([, entry]) => entry?.host === 'codex' && Number.isFinite(entry.at)))) };
     this.watching.clear();
+  }
+
+  /**
+   * Records that Codex hosts this lead session. Saved with the receipts, since news may wait for it across a restart.
+   * Sessions that lead nothing and have not said hello for a week are dropped at the same time, so the record does not
+   * grow with every thread, while a session that has yet to start its first job keeps its place.
+   */
+  host(session: string, host: LeadHost, now = Date.now()): void {
+    leadSession(session);
+    const before = { ...this.state.hosts };
+    const leading = new Set(this.subjects().map((job) => job.lead));
+    const kept = Object.entries(before).filter(([id, entry]) => id !== session && (leading.has(id) || now - entry.at < HOST_KEEP_MS));
+    this.state.hosts = Object.assign(Object.create(null), Object.fromEntries(kept), { [session]: { host, at: now } });
+    try {
+      this.save();
+    } catch (error) {
+      this.state.hosts = Object.assign(Object.create(null), before);
+      throw error;
+    }
+  }
+
+  /**
+   * A note queued in Codex waits there until the thread runs it, so the news it named needs no automatic retry:
+   * a second note would only cost the lead an empty turn. The lead still reads the news itself with `status`.
+   */
+  settle(offer: Offer): void {
+    this.offered(offer, (offers) => Math.max(offers, 2));
+  }
+
+  /** A note that never reached Codex leaves the automatic offer it took unspent. */
+  retract(offer: Offer): void {
+    this.offered(offer, (offers) => Math.max(0, offers - 1));
+  }
+
+  private offered(offer: Offer, count: (offers: number) => number): void {
+    const items = new Set(offer.items.map((item) => `${item.jobId}\0${item.newsSeq}`));
+    const changed = this.subjects().flatMap((job) => (job.news ?? []).filter((news) => items.has(`${job.id}\0${news.seq}`)));
+    const before = changed.map((news) => news.offers);
+    for (const news of changed) news.offers = count(news.offers);
+    try {
+      this.save();
+    } catch (error) {
+      changed.forEach((news, i) => { news.offers = before[i]; });
+      throw error;
+    }
+  }
+
+  /** The lead sessions Codex hosts that have unacknowledged news. */
+  codexWaiting(): string[] {
+    const hosts = this.state.hosts ?? {};
+    const waiting = new Set(this.subjects().filter((job) => job.lead && hosts[job.lead]?.host === 'codex' && unread(job).length).map((job) => job.lead!));
+    return [...waiting];
   }
 
   changed(): void {

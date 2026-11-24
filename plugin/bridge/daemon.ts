@@ -10,6 +10,7 @@ import { boardAsset, BOARD_CSP } from './assets.ts';
 import { boardCredential, boardExpiry, ensureToken, evidenceSeal, sameToken, SESSION_COOKIE } from './auth.ts';
 import { antigravityAdapter } from './adapters/antigravity.ts';
 import { CodexAdapter } from './adapters/codex.ts';
+import { CodexLeads, codexQueue } from './codex-lead.ts';
 import { stopChecks } from './check.ts';
 import { clientJson } from './text.ts';
 import { ClaudeSessions } from './claude.ts';
@@ -367,6 +368,10 @@ const jobs: Jobs = loadJobs({
   userPrompts: (session) => claude.recentPrompts(session),
 });
 
+// Codex lead sessions have no hook that can wake them later, so the daemon queues a note to them (codex-lead.ts).
+const codexLeads = new CodexLeads(jobs.delivery, codexQueue(config.codex.bin));
+codexLeads.start();
+
 // The board shows who holds each role and which preset is in effect, so it must hear about edits to the file.
 fs.watchFile(path.join(HOME, 'config.json'), { interval: 2000 }, () => {
   const live = liveConfig();
@@ -658,7 +663,9 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       if (id && !mission) throw new HttpError(400, `No mission with id "${id}" is known any more.`);
       // The preset the next job would run under, so the lead can pick its own subagents' models to match.
       const preset = missionPreset(mission, live.preset);
-      return { ...routeWork(kind as RouteKind, usage.current(), live.roles, live.antigravity.enabled ? [] : ['antigravity']), preset, policy: preset ? live.presets[preset] : null };
+      // The lead's own usage decides how much it keeps for itself; a Codex lead names itself.
+      const lead = url.searchParams.get('lead') === 'codex' ? 'codex' : 'claude';
+      return { ...routeWork(kind as RouteKind, usage.current(), live.roles, live.antigravity.enabled ? [] : ['antigravity'], lead), preset, policy: preset ? live.presets[preset] : null };
     }
     if (pathname === '/api/notes') {
       // The lead's view of the notes, for route and delegate: the named agents' models, or every model.
@@ -933,6 +940,12 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
         // open missions are shown again there and not with every prompt.
         case 'context': return { text: [delivery.context(session), body.event === 'UserPromptSubmit' ? missions.followUpHint(session) : '',
           body.event === 'SessionStart' ? missions.resumeText(session, jobs.list(), pulls.list()) : ''].filter(Boolean).join('\n') };
+        // A Codex lead's MCP server runs from the plugin's folder, so it learns its project here, from the thread.
+        case 'hello': {
+          if (body.host !== 'codex') throw new HttpError(400, 'host must be codex');
+          delivery.host(session, 'codex');
+          return { cwd: await codex.threadCwd(session).catch(() => null) };
+        }
         case 'watch': return { watch: delivery.watch(session, body.deadline) };
         case 'heartbeat': return { watch: delivery.heartbeat(session, body.generation) };
         case 'release':
@@ -1088,6 +1101,7 @@ function shutdown(): void {
     }
   };
   attempt('stop checks', stopChecks);
+  attempt('stop waking Codex leads', () => codexLeads.stop());
   attempt('stop Codex', () => codex.shutdown());
   attempt('stop Antigravity', () => antigravity.shutdown());
   attempt('stop the usage monitor', () => usage.stop());

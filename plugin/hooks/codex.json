@@ -1,0 +1,27 @@
+{
+  "description": "Gives a Codex lead session the user's shared crew instructions and Crew's pending news, and offers news at the end of each turn. The daemon wakes an idle Codex lead itself.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          { "type": "command", "command": "node \"${PLUGIN_ROOT}/bridge/context.ts\"", "timeout": 10 },
+          { "type": "command", "command": "node \"${PLUGIN_ROOT}/bridge/wake.ts\" context start", "timeout": 30 }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          { "type": "command", "command": "node \"${PLUGIN_ROOT}/bridge/wake.ts\" context", "timeout": 5 }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "node \"${PLUGIN_ROOT}/bridge/wake.ts\" stop-json", "timeout": 5 }
+        ]
+      }
+    ]
+  }
+}

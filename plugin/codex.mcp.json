@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "crew": {
+      "command": "node",
+      "args": ["./bridge/mcp.ts"],
+      "cwd": "."
+    }
+  }
+}

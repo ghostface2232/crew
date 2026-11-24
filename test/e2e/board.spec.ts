@@ -1718,7 +1718,7 @@ test('New Job shows who takes a question, and says when only the lead can', asyn
   await request.post('/__push', { data: { type: 'state', data } });
   await newJob(page);
   await page.getByRole('radio', { name: 'Question' }).click();
-  await expect(page.getByText('Start this job from a Claude session. Claude does the work itself or in a subagent.')).toBeVisible();
+  await expect(page.getByText('Start this job from a Claude Code or Codex session, which does the work itself or in a subagent.')).toBeVisible();
 });
 
 test('About Crew puts the check on the status row and an update action beside the note', async ({ page }) => {
@@ -1812,7 +1812,7 @@ test('the desktop app greets a first install once, and the palette shows the gui
   await expect(guide).toBeVisible();
   // Every page keeps the sheet's height, so its buttons stay put.
   const height = (await guide.boundingBox())!.height;
-  for (const title of ['Start in Claude Code', 'Answer from here', 'Finish setting up']) {
+  for (const title of ['Start in Claude Code or Codex', 'Answer from here', 'Finish setting up']) {
     await guide.getByRole('button', { name: 'Continue' }).click();
     await expect(installed.getByRole('heading', { name: title })).toBeVisible();
     expect((await guide.boundingBox())!.height).toBe(height);
@@ -1826,7 +1826,7 @@ test('the desktop app greets a first install once, and the palette shows the gui
   await installed.keyboard.press('Enter');
   await expect(guide).toBeVisible();
   await installed.keyboard.press('ArrowRight');
-  await expect(installed.getByRole('heading', { name: 'Start in Claude Code' })).toBeVisible();
+  await expect(installed.getByRole('heading', { name: 'Start in Claude Code or Codex' })).toBeVisible();
   await installed.keyboard.press('Escape');
   await expect(guide).toHaveCount(0);
 });

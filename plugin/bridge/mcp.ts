@@ -158,11 +158,12 @@ const TOOLS = [
   {
     name: 'review',
     title: 'Cross-review',
-    description: `Ask the cross-reviewer (${holder('review')}; with runs_app, the verify role, ${holder('verify')}) for a review of changes in this repository; it changes nothing in your tree. By default it is static and read-only: the worker reads the change and runs checks that end by themselves.`,
+    description: `Ask the cross-reviewer (${holder('review')}; with runs_app, the verify role, ${holder('verify')}) for a review of changes in this repository, or of files as they stand; it changes nothing in your tree. By default it is static and read-only: the worker reads the change and runs checks that end by themselves.`,
     inputSchema: {
       type: 'object',
       properties: {
-        target: { type: 'string', enum: ['uncommitted', 'branch', 'commit'], description: 'uncommitted (default): staged, unstaged and untracked changes. branch: current branch against `base`. commit: a single commit.' },
+        target: { type: 'string', enum: ['uncommitted', 'branch', 'commit', 'files'], description: 'uncommitted (default): staged, unstaged and untracked changes. branch: current branch against `base`. commit: a single commit. files: the files or directories in `paths` as they stand, for an audit of code rather than of a change; there is no diff, so say in focus what to look for.' },
+        paths: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 50, description: 'For target "files": the files or directories to audit, relative to the project.' },
         base: { type: 'string', description: 'For target "branch": the branch or commit to compare against, e.g. main, or the commit before your first one when you work on main itself.' },
         commit: { type: 'string', description: 'Commit SHA for target "commit".' },
         focus: { type: 'string', description: 'What to scrutinize: the design decisions, assumptions or risks you are least sure about, with a short factual map of which file holds what and what the tests mock or fake. Do not assert that the change is right.' },
@@ -276,6 +277,7 @@ const TOOLS = [
         reviewer: { type: 'string', enum: [...Object.keys(WORKERS), LEAD], description: 'Required for build and fix: who reviewed the work (for a fix, who checked it): the cross-reviewer\'s agent, or claude for your crew:self-reviewer. A review job\'s line takes it from the job.' },
         of_job: { type: 'string', description: 'For review: the job that built the work the review covered. Its reviewer\'s rating of that work, and that job\'s rating of the review, are then counted.' },
         of_model: { type: 'string', description: 'For review, without of_job: the exact model that built the work, for work done in this session or your subagent.' },
+        audit: { type: 'boolean', description: 'For review, in place of of_job and of_model, one of which a review line otherwise needs: true when the review covered code as it stands, by several builders (a review with target "files"), so there is no one job or model to name. Its reviewer\'s rating of the code then counts for no one.' },
         size: { type: 'string', enum: ['small', 'medium', 'large', 'xlarge'], description: 'Size of the change: small (a few lines or one function), medium (a feature in a few files), large (many files or a new subsystem), xlarge (several subsystems at once, roughly 1,500 changed lines or more).' },
         tier: { type: 'string', enum: [...TIERS], description: 'Without job_id: how demanding the work was, as you would have given it a tier.' },
         findings: {
@@ -697,6 +699,8 @@ async function updateMission(args: any, ctx?: CallContext): Promise<string> {
   }
 
   let current: Mission | null;
+  // On a call that ends a mission, a title says which one: the call must never end another under that title.
+  const titled = ending && now.open.length ? normalizeTitle(args.title) : '';
   if (args.id !== undefined) {
     current = named(now, args.id, 'id');
     // A done mission's pull request is still watched, and check news held back after three failing heads resumes only by linking it again.
@@ -705,6 +709,12 @@ async function updateMission(args: any, ctx?: CallContext): Promise<string> {
       return describeMission(current, now) + linked;
     }
     if (current.state !== 'active') throw new Error(`Mission ${current.id} is already ${current.state}${current.outcome ? ` (${current.outcome})` : ''}. ${now.open.length ? `Open: ${listed(now.open)}.` : 'Start a new one by passing title.'}`);
+  } else if (titled) {
+    const matches = now.open.filter((m) => m.title === titled);
+    if (!matches.length) throw new Error(`No open mission is titled ${JSON.stringify(titled)}. Open: ${listed(now.open)}. Pass id to say which one this call ends. Nothing was changed or started.`);
+    // Renamed on the board, two can share a title.
+    if (matches.length > 1) throw unnamed(matches, 'id');
+    current = matches[0];
   } else if (now.open.length > 1) {
     if (ending || changing || args.pr !== undefined) throw unnamed(now.open, 'id');
     return `This session has ${now.open.length} missions open. ${NAME_THE_MISSION}\n\n${now.open.map((m) => describeMission(m, now)).join('\n\n')}`;
@@ -885,9 +895,14 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       const kind = args.target ?? 'uncommitted';
       if (kind === 'branch' && !args.base) throw new Error('target "branch" needs base (the branch to compare against, e.g. main).');
       if (kind === 'commit' && !args.commit) throw new Error('target "commit" needs commit (the SHA to review).');
-      const target = kind === 'branch' ? { type: 'baseBranch' as const, branch: args.base } : kind === 'commit' ? { type: 'commit' as const, sha: args.commit } : { type: 'uncommittedChanges' as const };
+      const paths: string[] = Array.isArray(args.paths) ? args.paths : [];
+      if (kind === 'files' && !paths.length) throw new Error('target "files" needs paths (the files or directories to audit, relative to the project).');
+      if (kind !== 'files' && args.paths !== undefined) throw new Error('paths goes with target "files". Drop paths, or pass target: "files" to audit them as they stand.');
+      const target = kind === 'branch' ? { type: 'baseBranch' as const, branch: args.base } : kind === 'commit' ? { type: 'commit' as const, sha: args.commit }
+        : kind === 'files' ? { type: 'files' as const, paths } : { type: 'uncommittedChanges' as const };
       // The focus can be long; the board title only needs to say what is under review.
-      const title = `Review of ${kind === 'branch' ? `the branch against ${args.base}` : kind === 'commit' ? `commit ${args.commit.slice(0, 8)}` : 'uncommitted changes'}`;
+      const title = kind === 'files' ? `Audit of ${paths.slice(0, 3).join(', ')}${paths.length > 3 ? ` and ${paths.length - 3} more` : ''}`
+        : `Review of ${kind === 'branch' ? `the branch against ${args.base}` : kind === 'commit' ? `commit ${args.commit.slice(0, 8)}` : 'uncommitted changes'}`;
       return runJob({ kind: 'review', role: args.runs_app ? 'verify' : 'review', cwd, title, task: args.focus, done_when: args.done_when, review: { target, mode: args.mode ?? 'adversarial' }, agent: args.agent, tier: args.tier, model: args.model, effort: args.effort, runsApp: Boolean(args.runs_app), plugins: args.plugins, skills: args.skills, attachments: args.attachments, taskId: args.task_id }, args.background !== false, ctx, args.mission);
     }
     case 'polish':
@@ -920,7 +935,7 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
     case 'note_summary': {
       const body = name === 'note_summary'
         ? { model: args.model, summary: args.summary }
-        : { job: args.job_id, model: args.model, role: args.role, reviewer: args.reviewer, size: args.size, tier: args.tier, findings: args.findings, declined: args.declined, adoption: args.adoption, outcome: args.outcome, of_job: args.of_job, of_model: args.of_model, rating: args.rating, text: args.text };
+        : { job: args.job_id, model: args.model, role: args.role, reviewer: args.reviewer, size: args.size, tier: args.tier, findings: args.findings, declined: args.declined, adoption: args.adoption, outcome: args.outcome, of_job: args.of_job, of_model: args.of_model, audit: args.audit, rating: args.rating, text: args.text };
       const score = await api('POST', '/api/notes', body);
       const shown = score.score === null ? '—' : score.score.toFixed(1);
       return `Noted. ${score.model} (${score.agent}): ${shown}/10, ${score.status}, ${score.buildSamples} build(s), ${score.fixSamples} fix(es)${score.reviewSamples ? `, ${score.reviewSamples} review(s)` : ''}.${score.ratingDropped ? ' The rating was not kept: the user turned peer ratings off.' : ''}${score.consolidate ? ' Its summary is due: rewrite it from the evidence with note_summary.' : ''}`;
@@ -929,17 +944,18 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       if (args.job_id) {
         const job: JobView = await api('GET', `/api/jobs/${args.job_id}`);
         showEvidence(ctx, job);
-        if (args.report_offset !== undefined) {
-          if (!Number.isSafeInteger(args.report_offset) || args.report_offset < 0 || (args.turn !== undefined && (!Number.isSafeInteger(args.turn) || args.turn < 1))) throw new Error('Invalid report offset or turn.');
+        if (args.report_offset !== undefined || args.turn !== undefined) {
+          const offset = args.report_offset ?? 0;
+          if (!Number.isSafeInteger(offset) || offset < 0 || (args.turn !== undefined && (!Number.isSafeInteger(args.turn) || args.turn < 1))) throw new Error('Invalid report offset or turn.');
           const latest = job.exchange?.findLast((entry) => entry.from === 'worker');
           const latestTurn = latest?.turn ?? job.turns;
           const turn = args.turn ?? latestTurn;
           const report = turn === latestTurn ? job.report : job.exchange?.find((entry) => entry.turn === turn && entry.from === 'worker')?.text;
           if (report === undefined) throw new Error('That report turn is not retained.');
-          const page = textPage(report, args.report_offset, REPORT_PAGE_BYTES);
-          const next = args.report_offset + page.length;
+          const page = textPage(report, offset, REPORT_PAGE_BYTES);
+          const next = offset + page.length;
           ctx.jobs.push(job);
-          return `[${job.id}] report turn ${turn}, offset ${args.report_offset}:\n${page}\n${next < report.length ? `Next: status job_id "${job.id}", turn: ${turn}, report_offset: ${next}` : 'End of report.'}`;
+          return `[${job.id}] report turn ${turn}, offset ${offset}:\n${page}\n${next < report.length ? `Next: status job_id "${job.id}", turn: ${turn}, report_offset: ${next}` : 'End of report.'}`;
         }
         return describeJob(job, ctx);
       }

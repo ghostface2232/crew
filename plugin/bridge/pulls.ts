@@ -332,8 +332,8 @@ export class Pulls {
 
   /**
    * Links a pull request (`12`, `#12` or its URL) to a mission and observes it once without sending news: `summary`
-   * says what stands now. Linking the same pull request to the same mission again returns the watch it has, and
-   * lifts `held` if it was set (`resumed`).
+   * says what stands now. Linking the same pull request to the same mission again returns the watch it has, lifts
+   * `held` if it was set (`resumed`), and polls it again if it had ended and the pull request is open.
    */
   async link(mission: string, ref: string): Promise<{ watch: PullWatch; resumed: boolean; summary: string }> {
     if (!/^#?[1-9]\d*$/.test(ref) && !PR_URL.test(ref)) {
@@ -352,12 +352,14 @@ export class Pulls {
     let watch = existing;
     const resumed = existing?.held === true;
     const failingHeads = existing?.failingHeads ?? 0;
+    // A pull request closed and opened again, or one whose abandoned mission was reopened: kept as it was, to put back if the save fails.
+    const ended = existing?.ended && view.state === 'OPEN' ? structuredClone(existing) : undefined;
+    const now = this.deps.now?.() ?? Date.now();
     if (!watch) {
       let id: string;
       do {
         id = `pr-${randomBytes(3).toString('hex')}`;
       } while (this.watches.has(id));
-      const now = this.deps.now?.() ?? Date.now();
       watch = {
         id, url: view.url, repo, number: view.number, mission, lead: owner.owner,
         state: 'open', title: '', head: '', checks: 'none', review: '', conflict: false,
@@ -370,11 +372,23 @@ export class Pulls {
       delete watch.held;
       watch.failingHeads = 0;
     }
+    if (ended) {
+      delete watch.ended;
+      // As on the first link: what stands now is in the summary, only what comes after is news, and the count of
+      // failing heads starts over, or a head failing now could put the watch on hold with nobody told.
+      delete watch.held;
+      watch.failingHeads = 0;
+      observe(watch, view);
+      watch.checkedAt = watch.changedAt = now;
+    }
     try {
       this.deps.save();
     } catch (error) {
       if (!existing) this.watches.delete(watch.id);
-      else if (resumed) {
+      else if (ended) {
+        for (const key of Object.keys(watch)) Reflect.deleteProperty(watch, key);
+        Object.assign(watch, ended);
+      } else if (resumed) {
         watch.held = true;
         watch.failingHeads = failingHeads;
       }

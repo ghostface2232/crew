@@ -34,9 +34,10 @@ export async function git(cwd: string, args: string[], stdin?: string): Promise<
 }
 
 /** The change under review as text, for a reviewer that cannot run git itself. */
-export async function reviewDiff(root: string, target: ReviewTarget): Promise<string> {
-  if (target.type === 'baseBranch') return git(root, ['diff', `${target.branch}...HEAD`]);
-  if (target.type === 'commit') return git(root, ['show', target.sha]);
+export async function reviewDiff(root: string, target: Exclude<ReviewTarget, { type: 'files' }>): Promise<string> {
+  // The ref is the caller's text: without the marker, one starting with a dash would be read as an option.
+  if (target.type === 'baseBranch') return git(root, ['diff', '--end-of-options', `${target.branch}...HEAD`]);
+  if (target.type === 'commit') return git(root, ['show', '--end-of-options', target.sha]);
   const diff = await git(root, [...NO_HOOKS, 'diff', NO_SUBMODULES, 'HEAD']);
   const untracked = await git(root, ['ls-files', '--others', '--exclude-standard']);
   return untracked ? `${diff}\n\nUntracked files, not in the diff above; read each one in full:\n${untracked}` : diff;
@@ -75,22 +76,40 @@ export interface Worktree {
   base: string;
   /** Relative paths of shared directories attached by Crew. */
   linked?: string[];
+  /** Relative paths that were untracked when the job got its worktree: copies from `.worktreeinclude`, never the worker's change. */
+  copied?: string[];
   /** Validated before Windows deletion, which can remove gitdir before the admin directory. */
   admin?: string;
 }
 
+/** What Crew itself put in a worktree, which no commit, status or merge of the worker's change may count. */
+export const attached = (wt: Pick<Worktree, 'linked' | 'copied'>): string[] => [...(wt.linked ?? []), ...(wt.copied ?? [])];
+
 /**
- * Pathspecs that leave out Crew's shared-dependency links. A directory-only ignore rule such as `node_modules/`
- * does not cover a symlink, and the only exclude file Git reads is shared with the user's own checkout.
- * A link Git already ignores (a Windows junction counts as a directory) is left out of the list: naming an
- * ignored path in a pathspec makes `git add` fail.
+ * What is in a new worktree without being in its commit and without being ignored there: what Crew copied in. The
+ * base may not ignore what the main tree ignores (an older base, or a `.gitignore` edit not yet committed), and a
+ * copied `.env` would then be committed with the worker's change. A directory holding nothing tracked is one entry.
  */
-async function besides(root: string, linked: string[]): Promise<string[]> {
-  const unignored: string[] = [];
-  for (const rel of linked) {
-    if (await git(root, ['check-ignore', '-q', '--', rel]).then(() => false, () => true)) unignored.push(rel);
+export async function untrackedPaths(wt: string): Promise<string[]> {
+  const listed = await git(wt, ['ls-files', '--others', '--exclude-standard', '--directory', '--no-empty-directory', '-z']);
+  return listed.split('\0').filter(Boolean).map((entry) => entry.replace(/\/$/, ''));
+}
+
+/**
+ * Pathspecs that leave out Crew's shared-dependency links and local copies. A directory-only ignore rule such as
+ * `node_modules/` does not cover a symlink, and the only exclude file Git reads is shared with the user's own checkout.
+ * A path Git already ignores (a Windows junction counts as a directory) is left out of the list: naming an
+ * ignored path in a pathspec makes `git add` fail. So is one that has since become tracked, as when a sync brings
+ * in a commit that adds it: from then on a change to it is the worker's.
+ */
+async function besides(root: string, attachments: string[]): Promise<string[]> {
+  const left: string[] = [];
+  for (const rel of attachments) {
+    if (await git(root, ['check-ignore', '-q', '--', rel]).then(() => true, () => false)) continue;
+    if (await git(root, ['ls-files', '-z', '--', `:(literal)${rel}`]).catch(() => '')) continue;
+    left.push(rel);
   }
-  return unignored.length ? ['--', '.', ...unignored.map((rel) => `:(exclude,literal)${rel}`)] : [];
+  return left.length ? ['--', '.', ...left.map((rel) => `:(exclude,literal)${rel}`)] : [];
 }
 
 /** Number of uncommitted paths in the main tree; a worktree created from a ref will not contain them. */

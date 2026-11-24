@@ -4,7 +4,7 @@ import { Actions, answerKey, onUnauthorized, stream, ticketFromFragment, Unautho
 import { BoardStore, mergeEvents } from '../plugin/board/src/store.ts';
 import { formatDate, longDay, shortDateTime, shortDay, shortMonth, timeOfDay } from '../plugin/board/src/dates.ts';
 import { Notifier } from '../plugin/board/src/notify.ts';
-import { elapsed, evidenceSide, evidenceTurn, orderEvidence, jobLabel, leadMission, projectNames, unsettled, missionStops, missionStep, missionStopPosition, missionJobStep, missionLooksFinished, pullIsStale, pullStatuses, relativeDuration, usageWindowName, STOP_OF_STAGE } from '../plugin/board/src/model.ts';
+import { detailFromFragment, elapsed, evidenceSide, evidenceTurn, orderEvidence, jobLabel, leadMission, limitWindowLabel, projectNames, unsettled, isNewJobKey, missionStops, missionStep, missionStopPosition, missionJobStep, missionLooksFinished, pullIsStale, pullStatuses, relativeDuration, searchShortcut, usageWindowName, STOP_OF_STAGE } from '../plugin/board/src/model.ts';
 import type { BoardJob, BoardPull, BoardState, ClaudeSession, CrewEvent, Mission } from '../plugin/board/src/types.ts';
 
 function deferred() {
@@ -302,6 +302,39 @@ test('usage labels and relative durations remain compact', () => {
   assert.equal(relativeDuration(20 * 60_000), '20m');
   assert.equal(relativeDuration(3 * 3600_000), '3h');
   assert.equal(relativeDuration(7 * 86400_000), '7d');
+});
+
+test('a Codex limit window of unknown length is named without one', () => {
+  assert.equal(limitWindowLabel({ usedPercent: 41.6, minutes: 300 }), '42% of 300-minute limit');
+  assert.equal(limitWindowLabel({ usedPercent: 41.6, minutes: null }), '42% of limit');
+});
+
+test('a fragment that is not valid percent-encoding opens no panel instead of failing the first render', () => {
+  assert.equal(detailFromFragment('#session%3Aabc'), 'session:abc');
+  assert.equal(detailFromFragment(''), '');
+  assert.equal(detailFromFragment('#%'), '');
+  assert.equal(detailFromFragment('#cx-1%E0%A4%A'), '');
+});
+
+test('N opens New Job by its place on the keyboard under an input source for another script, and not while composing', () => {
+  const press = (key: string, code: string, isComposing = false) => isNewJobKey({ key, code, isComposing });
+  assert.equal(press('n', 'KeyN'), true);
+  assert.equal(press('N', 'KeyN'), true);
+  // Korean on macOS, then on Windows.
+  assert.equal(press('ㅜ', 'KeyN'), true);
+  assert.equal(press('Process', 'KeyN'), true);
+  assert.equal(press('ㅜ', 'KeyN', true), false);
+  assert.equal(press('ㅡ', 'KeyM'), false);
+  // Another Latin layout goes by its letter: Dvorak has B on this key and N on another.
+  assert.equal(press('b', 'KeyN'), false);
+  assert.equal(press('n', 'KeyL'), true);
+  // Nor is punctuation a Latin layout has on that key (BÉPO's apostrophe) taken for N.
+  assert.equal(press('\'', 'KeyN'), false);
+});
+
+test('the search shortcut is shown as the platform\'s keyboard has it', () => {
+  assert.deepEqual(searchShortcut('MacIntel'), { keys: '⌘K', title: 'Search (⌘K)', aria: 'Meta+K /' });
+  assert.deepEqual(searchShortcut('Win32'), { keys: 'Ctrl K', title: 'Search (Ctrl+K)', aria: 'Control+K /' });
 });
 
 test('usage and preset events replace immutable snapshots and older state clears them', () => {

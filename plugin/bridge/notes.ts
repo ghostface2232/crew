@@ -150,7 +150,7 @@ function wellFormed(models: Record<string, any>): Record<string, ModelNote> {
     const evidence = note.evidence.filter((e: any) => e && typeof e.id === 'string' && Number.isFinite(e.at) && e.model === model && e.agent === note.agent && HOLDERS.includes(e.reviewer)
       && CHANGE_SIZES.includes(e.size) && NOTE_ROLES.includes(e.role) && (e.tier === undefined || TIERS.includes(e.tier))
       && (e.role !== 'fix' || FIX_OUTCOMES.includes(e.outcome)) && typeof e.text === 'string'
-      && (e.role === 'review' ? Boolean(e.of) && typeof e.of.model === 'string' && e.of.model !== '' && (e.of.job === undefined || typeof e.of.job === 'string') && (e.of.fix === undefined || e.of.fix === true) : e.of === undefined)
+      && (e.of === undefined || (e.role === 'review' && e.of !== null && typeof e.of === 'object' && typeof e.of.model === 'string' && e.of.model !== '' && (e.of.job === undefined || typeof e.of.job === 'string') && (e.of.fix === undefined || e.of.fix === true)))
       && (e.rating === undefined || (typeof e.job === 'string' && e.job !== '' && rated(e.rating, LEAD_ITEMS[e.role as NoteRole])))
       && counts(e.findings) && (e.declined === undefined || counts(e.declined))
       && (e.adoption === undefined || (e.role === 'build' && typeof e.job === 'string' && e.job && ADOPTIONS.includes(e.adoption)))
@@ -216,7 +216,8 @@ export function addEvidence(home: string, input: Omit<Evidence, 'id' | 'at'> & {
   check(input.tier === undefined || TIERS.includes(input.tier), `tier (${oneOf(TIERS)})`);
   if (input.role === 'fix') check(FIX_OUTCOMES.includes(input.outcome!), `outcome (required for fix: ${oneOf(FIX_OUTCOMES)})`);
   if (input.role !== 'fix') check(input.outcome === undefined, `outcome (only for fix; leave it out for ${input.role})`);
-  if (input.role === 'review') check(nonEmpty(input.of?.model), 'of (the work the review covered: of_job, or of_model for work done in your session)');
+  // A review line without `of` is an audit: code as it stood, by several builders, so no one's work to name.
+  if (input.role === 'review') check(input.of === undefined || nonEmpty(input.of.model), 'of (the work the review covered: of_job, or of_model for work done in your session)');
   else check(input.of === undefined, 'of (only for a review line)');
   if (input.rating !== undefined) {
     const allowed = LEAD_ITEMS[input.role] ?? [];
@@ -327,7 +328,7 @@ function votes(file: NotesFile): Vote[] {
   const builders = new Map(all.filter((e) => e.role === 'build' && e.job).map((e) => [e.job!, e.model]));
   // Flawed work: an accepted high finding on its build line, or on a review of it.
   const flawed = new Set([...all.filter((e) => e.role === 'build' && e.job && e.findings.high > 0).map((e) => e.job!),
-    ...reviews.filter((e) => e.of!.job && e.findings.high > 0).map((e) => e.of!.job!)]);
+    ...reviews.filter((e) => e.of?.job && e.findings.high > 0).map((e) => e.of!.job!)]);
   const out: Vote[] = [];
   const seen = new Set<string>();
   const cast = (model: string, items: RatingItems, by: Holder, rater: string, source: string, weight: number, capped: boolean) => {
@@ -345,11 +346,12 @@ function votes(file: NotesFile): Vote[] {
     const rater = r.byModel ?? r.by;
     const { findings, correctness, ...rest } = r.items;
     for (const line of reviews) {
-      const job = line.of!.job;
-      if (line.job === r.byJob) {
+      const job = line.of?.job;
+      // An audit names no builder, so what its reviewer made of the code is a rating of no one.
+      if (line.job === r.byJob && line.of) {
         // Correctness is the build score's item: a review of a fix says nothing about how its model builds.
-        const work = correctness === undefined || line.of!.fix ? rest : { ...rest, correctness };
-        cast((job && builders.get(job)) ?? line.of!.model, work, r.by, rater, r.id, 1, line.findings.high > 0 || Boolean(job && flawed.has(job)));
+        const work = correctness === undefined || line.of.fix ? rest : { ...rest, correctness };
+        cast((job && builders.get(job)) ?? line.of.model, work, r.by, rater, r.id, 1, line.findings.high > 0 || Boolean(job && flawed.has(job)));
       }
       if (findings !== undefined && job === r.byJob) cast(line.model, { findings }, r.by, rater, r.id, BUILDER_RATING, false);
     }
@@ -502,7 +504,7 @@ export function renderNotes(scores: ModelScore[], file: NotesFile, options: { mo
       const day = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
       const declined = e.declined && load(e.declined) ? `, declined ${(['high', 'medium', 'low'] as const).filter((k) => e.declined![k]).map((k) => `${e.declined![k]} ${k}`).join(' ')}` : '';
       const adoption = e.adoption ? `, ${e.adoption}${e.rounds ? ` after ${e.rounds} round(s)` : ''}` : '';
-      const about = e.role === 'review' ? `reviewed ${e.of!.job ?? e.of!.model}` : `${e.reviewer} reviewed`;
+      const about = e.role !== 'review' ? `${e.reviewer} reviewed` : e.of ? `reviewed ${e.of.job ?? e.of.model}` : 'audit';
       const rating = e.rating ? `, rated ${stars(e.rating)}` : '';
       lines.push(`- ${day} ${e.job || '—'} (${about}, ${e.role}, ${e.tier ? `${e.tier}/` : ''}${e.size}${declined}${adoption}${rating}): ${e.text}`);
     }

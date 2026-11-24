@@ -69,6 +69,10 @@ enum Releases {
     private(set) var progress = 0.0
     private(set) var checkedAt: Date?
     private(set) var error: String?
+    /// Why the last install did not happen. A later check or download replaces `error` but not this, which lasts until
+    /// an install starts again, so the reason stays beside the offer to try once more. An archive thrown away as
+    /// invalid (`discard`) leaves nothing to try again, so its reason goes in `error` like a failed download's.
+    private(set) var installError: String?
     /// While installing: the running jobs the install waits for, 0 while it waits on a daemon that has not answered.
     /// The install can be called off while this is set; it is nil once the daemon is being stopped.
     private(set) var waiting: Int?
@@ -82,7 +86,7 @@ enum Releases {
     @ObservationIgnored private let session: URLSession
 
     /// CREW_UPDATE_FEED points the app at another releases endpoint, for testing against a local server.
-    init(environment: [String: String] = ProcessInfo.processInfo.environment, bundle: Bundle = .main) {
+    init(environment: [String: String] = ProcessInfo.processInfo.environment, bundle: Bundle = .main, configuration: URLSessionConfiguration = .ephemeral) {
         current = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
         feed = environment["CREW_UPDATE_FEED"].flatMap(URL.init(string:)) ?? Releases.latest
         if let home = environment["CREW_HOME"] {
@@ -93,7 +97,6 @@ enum Releases {
         }
         // A copy run from the build folder through swift run has no bundle to replace.
         phase = bundle.bundleURL.pathExtension == "app" ? .idle : .unsupported
-        let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 30
         configuration.timeoutIntervalForResource = 6 * 3600
         configuration.httpAdditionalHeaders = ["User-Agent": "Crew-Desktop"]
@@ -117,7 +120,7 @@ enum Releases {
         defer { busy = false }
         if let reason = try? String(contentsOf: failureReport, encoding: .utf8) {
             let message = Self.localizedFailure(reason.trimmingCharacters(in: .whitespacesAndNewlines))
-            error = String(localized: "Could not install the update: \(message)")
+            installError = String(localized: "Could not install the update: \(message)")
             try? FileManager.default.removeItem(at: failureReport)
         }
         if let data = try? Data(contentsOf: manifest), let staged = try? JSONDecoder().decode(Staged.self, from: data),
@@ -132,12 +135,13 @@ enum Releases {
         clean()
     }
 
-    /// Asks GitHub for the latest release. An archive already staged stays ready.
+    /// Asks GitHub for the latest release. An archive already staged stays ready, and a release already on offer stays
+    /// on offer when the check fails.
     func check() async {
         guard phase != .unsupported, phase != .installing, !busy else { return }
         busy = true
         defer { busy = false }
-        let wasReady = phase == .ready
+        let wasReady = phase == .ready, wasAvailable = phase == .available
         if !wasReady { phase = .checking }
         do {
             var request = URLRequest(url: feed)
@@ -165,8 +169,11 @@ enum Releases {
                 release = nil; latest = nil; page = nil; phase = .idle
             }
         } catch {
-            // A failed check leaves a staged archive ready, and an install under way alone.
-            if !wasReady && phase != .installing { phase = .idle; self.error = String(localized: "Could not check for updates: \(error.localizedDescription)") }
+            // A failed check leaves a staged archive ready, a release on offer, and an install under way alone.
+            if !wasReady && phase != .installing {
+                phase = wasAvailable ? .available : .idle
+                self.error = String(localized: "Could not check for updates: \(error.localizedDescription)")
+            }
         }
     }
 
@@ -208,7 +215,7 @@ enum Releases {
     /// Starts installing the staged update; `waiting` counts the jobs it waits for first. False unless an update is ready.
     func installing(waiting: Int = 0) -> Bool {
         guard phase == .ready else { return false }
-        phase = .installing; self.waiting = waiting; error = nil
+        phase = .installing; self.waiting = waiting; error = nil; installError = nil
         return true
     }
 
@@ -225,7 +232,7 @@ enum Releases {
     /// Puts the staged archive back: the user cancelled, or the install could not go ahead (`message`).
     func failed(_ message: String? = nil) {
         guard phase == .installing else { return }
-        phase = .ready; waiting = nil; error = message
+        phase = .ready; waiting = nil; installError = message
     }
 
     /// Invalid archives must be downloaded again, rather than offered for another install.

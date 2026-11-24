@@ -6,7 +6,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { chromium } from 'playwright';
 import { tokenFile } from '../plugin/bridge/auth.ts';
-import { browserProfile } from '../plugin/bridge/browser.ts';
+import { browserProfile, BrowserServers } from '../plugin/bridge/browser.ts';
 import { resolveConfig } from '../plugin/bridge/config.ts';
 import { Jobs } from '../plugin/bridge/jobs.ts';
 import type { Adapter, JobCtl } from '../plugin/bridge/jobs.ts';
@@ -65,6 +65,62 @@ test('the browser profile denies the token and writes outside the job, and allow
   assert.match(run('/usr/bin/touch', path.join(git, 'config')), /failed: .*Operation not permitted/);
   assert.equal(run('/usr/bin/touch', path.join(job, 'x')), '');
   assert.equal(fs.existsSync(path.join(job, 'x')), true);
+});
+
+test('overlapping starts for a job share one server, and a stop reaches a server still starting', { skip, timeout: 30_000 }, async (t) => {
+  const cwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'crew-servers-')));
+  // A stand-in for Playwright's CLI: it records its process and says it listens a little later, as the server does. No browser starts.
+  const started = path.join(cwd, 'started');
+  const stub = path.join(cwd, 'node_modules/playwright');
+  fs.mkdirSync(stub, { recursive: true });
+  fs.writeFileSync(path.join(stub, 'package.json'), JSON.stringify({ name: 'playwright', bin: { playwright: 'cli.js' } }));
+  fs.writeFileSync(path.join(stub, 'cli.js'), `require('node:fs').appendFileSync(${JSON.stringify(started)}, process.pid + '\\n'); setTimeout(() => console.log('Listening on stub'), 300); setInterval(() => {}, 1000);`);
+  const pids = () => (fs.existsSync(started) ? fs.readFileSync(started, 'utf8').trim().split('\n').map(Number) : []);
+  const alive = (pid: number) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const until = async (check: () => boolean) => {
+    for (const deadline = Date.now() + 10_000; !check(); ) {
+      assert.ok(Date.now() < deadline, 'timed out');
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  };
+  t.after(() => {
+    // A failed assertion must not leave a stand-in running.
+    for (const pid of pids()) if (alive(pid)) process.kill(pid, 'SIGKILL');
+    fs.rmSync(cwd, { recursive: true, force: true, maxRetries: 5 });
+  });
+  const servers = new BrowserServers();
+  const options = { cwd, writable: [cwd], unreadable: [], tmp: path.join(cwd, 'tmp') };
+
+  const [first, second] = await Promise.all([servers.start('cx-000001', options), servers.start('cx-000001', options)]);
+  assert.equal(first, second);
+  assert.equal(await servers.start('cx-000001', options), first);
+  assert.equal(pids().length, 1);
+  servers.stop('cx-000001');
+  await until(() => !alive(pids()[0]));
+
+  // Stopped before its process exists, and then while the process has not yet said it listens.
+  const early = servers.start('cx-000002', options);
+  servers.stop('cx-000002');
+  await assert.rejects(early, /stopped while it started/);
+  assert.equal(pids().length, 1);
+  const late = servers.start('cx-000002', options);
+  const rejected = assert.rejects(late, /The browser server exited/);
+  await until(() => pids().length === 2);
+  servers.stop('cx-000002');
+  await rejected;
+  await until(() => !alive(pids()[1]));
+  // A start that failed is not kept: the next one starts a server.
+  await servers.start('cx-000002', options);
+  assert.equal(pids().length, 3);
+  servers.stopAll();
+  await until(() => !alive(pids()[2]));
 });
 
 test('a running app job gets a browser outside its sandbox for the turn, and only then', { skip, timeout: 60_000 }, async (t) => {

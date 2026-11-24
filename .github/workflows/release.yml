@@ -79,7 +79,9 @@ jobs:
       # This runner is a person's Mac, so the keychain must not outlive the job.
       - name: Remove the signing keychain
         if: always()
-        run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
+        run: |
+          rm -f "$RUNNER_TEMP/signing.p12"
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
       - uses: actions/upload-artifact@v7
         with:
           name: macos

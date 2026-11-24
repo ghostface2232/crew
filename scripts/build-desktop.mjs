@@ -29,7 +29,6 @@ fs.cpSync('native/Resources/ko.lproj', path.join(resources, 'ko.lproj'), { recur
 fs.copyFileSync(path.join(binPath, 'Crew'), path.join(contents, 'MacOS/Crew'));
 fs.chmodSync(path.join(contents, 'MacOS/Crew'), 0o755);
 fs.cpSync(path.join(build, 'bridge'), path.join(resources, 'bridge'), { recursive: true });
-fs.writeFileSync(path.join(resources, 'bridge/package.json'), '{"type":"module"}\n');
 await bundlePlugin(path.join(resources, 'bridge'), '../../runtime/node');
 
 // A standalone Node distribution keeps Finder launches independent of shell setup and Homebrew.

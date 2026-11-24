@@ -439,7 +439,8 @@ export function route(kind: RouteKind, usage: Usage, roles: Config['roles'], dis
       if (status(holder) === 'tight' && !short(LEAD)) {
         return plain(LEAD, `${why(holder)} Take this work yourself or in subagents${roles.review.agents.includes(holder) ? `, and keep what ${name(holder)} has left for the cross-review` : ''}.`, [holder]);
       }
-      return plain(holder, short(LEAD) && !short(holder) ? `${why(LEAD)} Hand ${name(holder)} as much of this work as separates cleanly.` : keeps(holder), [LEAD]);
+      if (short(holder)) return plain(holder, `${why(holder)} ${name(LEAD)} is short too, so the assignment is followed.`, [LEAD]);
+      return plain(holder, short(LEAD) ? `${why(LEAD)} Hand ${name(holder)} as much of this work as separates cleanly.` : keeps(holder), [LEAD]);
     }
     case 'review': {
       if (status(holder) === 'exhausted') {

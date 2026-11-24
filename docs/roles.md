@@ -72,6 +72,7 @@ The project file is part of the repository and is trusted like its `AGENTS.md` o
 - **Claude:** A `SessionStart` and `SubagentStart` command hook (`bridge/context.ts`) prints them as `additionalContext`, including after compaction, noting that workers already receive them.
 - Nothing is written to any service's own instruction files (`AGENTS.md`, `CLAUDE.md`, rules folders).
 - Missing or empty files contribute no instructions. An unreadable file fails the job or surfaces an error in the Claude hook.
+- Crew reads the project file only as a regular file. If it or its `.crew` folder is a symbolic link, the read fails the same way, because a link could point to a file the worker's sandbox denies (such as the daemon's token). The user's own `~/.crew/instructions.md` may be a symbolic link.
 - Because Claude Code replaces hook context over 10,000 characters with a 2,000-character preview, any file that would push the hook output past 9,000 characters (`CONTEXT_LIMIT`) is shown only by its path. Workers have no such cap.
 - Each section is headed by its source so the agent can distinguish user instructions from repository instructions. Role limits are enforced by the bridge and sandbox, not by prose.
 
@@ -108,7 +109,7 @@ Workers provide `fact` (one line from the work). The lead's rating rests on the 
 
 **No extra turn.** Jobs created while `peerRatings` is on get `rates: true`, a `# Rating` prompt section, and the `rate` tool on `worker-mcp.ts`. Debates, questions, polish jobs, `fix` jobs, and `release` jobs are excluded.
 
-**Review lines and storage.** `note` accepts `role: "review"` (the default when noting a review job) with `of_job` or `of_model` naming the reviewed work plus accepted `findings` and `declined`. Review lines bind worker ratings to their target: reviewer ratings go to `of` (the job's build model or `of_model`), and engineer ratings go once per reviewing model on `of_job` (staying inactive until the review job is noted).
+**Review lines and storage.** `note` accepts `role: "review"` (the default when noting a review job) with `of_job` or `of_model` naming the reviewed work plus accepted `findings` and `declined`. A review of code as it stands, by several builders, has no such work to name: it is noted with `audit: true` in their place, its line shows as `audit`, and what its reviewer made of the code is a rating of no one. Leaving all three out is refused, so a builder forgotten by mistake is still asked for. Review lines bind worker ratings to their target: reviewer ratings go to `of` (the job's build model or `of_model`), and engineer ratings go once per reviewing model on `of_job` (staying inactive until the review job is noted).
 
 `~/.crew/model-notes.json` is version 2. The `ratings` field holds worker ratings, one per job. Lead ratings sit in `rating` on evidence lines and are preserved when re-noted without `rating`. Version 1 files load directly and back up once to `model-notes.json.v1` on first save.
 

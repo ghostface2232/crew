@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import vm from 'node:vm';
-import { EventEmitter } from 'node:events';
+import { EventEmitter, once } from 'node:events';
 import { stripTypeScriptTypes } from 'node:module';
+import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import { Jobs } from '../plugin/bridge/jobs.ts';
@@ -365,6 +368,27 @@ test('a watcher with no daemon to talk to ends at once instead of living out its
   assert.deepEqual(await leadHook({ session_id: 'lead', hook_event_name: 'Stop' }, 'watch', down, Date.now() + 60_000), { code: 0 });
   assert.ok(Date.now() - started < 1000);
   assert.equal(calls, 1);
+});
+
+test('the wake hook runs when its plugin folder is reached through a link', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-wake-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5 }));
+  const linked = path.join(dir, 'bridge');
+  fs.symlinkSync(fileURLToPath(new URL('../plugin/bridge', import.meta.url)), linked, 'junction');
+  const daemon = http.createServer((req, res) => {
+    req.resume();
+    res.setHeader('content-type', 'application/json');
+    res.end(JSON.stringify(req.url === '/api/lead/offer' ? { offer: { text: 'news for the lead' } } : {}));
+  });
+  await new Promise<void>((resolve) => daemon.listen(0, '127.0.0.1', resolve));
+  t.after(() => daemon.close());
+  const { port } = daemon.address() as { port: number };
+  const hook = spawn(process.execPath, [path.join(linked, 'wake.ts'), 'stop'], { env: { ...process.env, CREW_HOME: dir, CREW_PORT: String(port) }, stdio: ['pipe', 'ignore', 'pipe'] });
+  let stderr = '';
+  hook.stderr.on('data', (chunk) => { stderr += chunk; });
+  hook.stdin.end(JSON.stringify({ session_id: 'lead', hook_event_name: 'Stop' }));
+  const [code] = await once(hook, 'close');
+  assert.deepEqual([code, stderr.trim()], [2, 'news for the lead']);
 });
 
 test('a watcher that died without releasing is replaced once it stops beating', () => {

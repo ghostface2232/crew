@@ -1,6 +1,21 @@
 import Foundation
+import Synchronization
 import Testing
 @testable import Crew
+
+/// Answers an updater's requests from a table keyed by address, so tests can run side by side; 404 for any other.
+private final class FeedProtocol: URLProtocol, @unchecked Sendable {
+    static let answers = Mutex<[URL: (status: Int, body: Data)]>([:])
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let answer = Self.answers.withLock { $0[request.url!] } ?? (404, Data())
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: answer.status, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: answer.body)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
 
 @Suite struct UpdaterTests {
     private func release(_ version: String, url: String? = nil, digest: String = String(repeating: "a", count: 64), extra: [String: Any] = [:]) throws -> Data {
@@ -92,11 +107,67 @@ import Testing
         }
         await updater.load()
         #expect(updater.phase == (keepArchive ? .ready : .idle))
-        #expect(updater.error == "Could not install the update: The updated Crew app could not open.")
+        #expect(updater.installError == "Could not install the update: The updated Crew app could not open.")
         #expect(!FileManager.default.fileExists(atPath: updater.failureReport.path))
         let next = AppUpdater(environment: ["CREW_HOME": home.path], bundle: bundle)
         await next.load()
-        #expect(next.error == nil)
+        #expect(next.installError == nil)
+    }
+
+    /// An updater whose feed, at the address returned, and downloads are answered by `FeedProtocol`.
+    @MainActor private func stubbedUpdater(home: URL, bundle: Bundle) -> (AppUpdater, feed: URL) {
+        let feed = URL(string: "http://127.0.0.1:9/\(UUID().uuidString)")!
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [FeedProtocol.self]
+        let environment = ["CREW_HOME": home.path, "CREW_UPDATE_FEED": feed.absoluteString]
+        return (AppUpdater(environment: environment, bundle: bundle, configuration: configuration), feed)
+    }
+
+    @MainActor @Test func aSuccessfulCheckKeepsTheInstallFailureUntilAnInstallStartsAgain() async throws {
+        let home = FileManager.default.temporaryDirectory.appending(path: "crew-updater-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let bundle = try appBundle(in: home)
+        let updates = home.appending(path: "desktop/updates")
+        try FileManager.default.createDirectory(at: updates, withIntermediateDirectories: true)
+        let archive = updates.appending(path: Releases.assetName("0.3.0"))
+        try Data("archive".utf8).write(to: archive)
+        try JSONSerialization.data(withJSONObject: ["version": "0.3.0", "sha256": AppUpdater.sha256(of: archive)])
+            .write(to: updates.appending(path: "staged.json"))
+        let (updater, feed) = stubbedUpdater(home: home, bundle: bundle)
+        defer { FeedProtocol.answers.withLock { $0[feed] = nil } }
+        try "The updated Crew app could not open.\n".write(to: updater.failureReport, atomically: true, encoding: .utf8)
+        await updater.load()
+        let found = try release("0.3.0")
+        FeedProtocol.answers.withLock { $0[feed] = (200, found) }
+        await updater.check()
+        #expect(updater.phase == .ready && updater.checkedAt != nil && updater.error == nil)
+        #expect(updater.installError == "Could not install the update: The updated Crew app could not open.")
+        #expect(updater.installing())
+        #expect(updater.installError == nil)
+        // An install that could not go ahead says why until the next one starts, whatever a check finds meanwhile.
+        updater.failed("Crew did not quit.")
+        await updater.check()
+        #expect(updater.phase == .ready && updater.installError == "Crew did not quit.")
+    }
+
+    @MainActor @Test func aFailedCheckKeepsTheReleaseOnOffer() async throws {
+        let home = FileManager.default.temporaryDirectory.appending(path: "crew-updater-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let (updater, feed) = stubbedUpdater(home: home, bundle: try appBundle(in: home))
+        defer { FeedProtocol.answers.withLock { $0[feed] = nil } }
+        await updater.load()
+        let found = try release("0.3.0", url: "http://127.0.0.1:9/\(UUID().uuidString)/Crew.zip")
+        FeedProtocol.answers.withLock { $0[feed] = (200, found) }
+        await updater.check()
+        #expect(updater.phase == .available && updater.latest == "0.3.0" && updater.error == nil)
+        FeedProtocol.answers.withLock { $0[feed] = (500, Data()) }
+        await updater.check()
+        #expect(updater.phase == .available && updater.latest == "0.3.0")
+        #expect(updater.error == "Could not check for updates: GitHub answered 500.")
+        // The offer can still be downloaded: the attempt goes out, and here the archive's address answers 404.
+        await updater.download()
+        #expect(updater.phase == .available)
+        #expect(updater.error == "Could not download 0.3.0: the download answered 404")
     }
 
     @MainActor @Test func invalidArchiveIsDiscardedInsteadOfRetried() async throws {

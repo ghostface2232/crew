@@ -155,20 +155,30 @@ function useStored<T>(initial: () => T, same: (a: T, b: T) => boolean, store: (v
     });
   };
   /**
+   * Takes a value stored from elsewhere as the stored one, so the next change starts from it; whether it was taken.
+   * Not while a change made here is being stored: that one goes out as it was made.
+   */
+  const adopt = (next: T) => {
+    if (now.storing || same(next, now.stored)) return false;
+    setValue(now.value = now.stored = next);
+    return true;
+  };
+  /**
    * `latest` is the value as last changed, ahead of the render that shows it. `settled` answers once nothing is being
    * stored, with whether the change that was went through: at once, and true, when none is.
    */
-  return { value, error, busy, change, latest: () => now.value, settled: () => now.storing ?? Promise.resolve(true) };
+  return { value, error, busy, change, adopt, latest: () => now.value, settled: () => now.storing ?? Promise.resolve(true) };
 }
 
 /** A setting typed by hand: stored when the field is left or Return is pressed, not at every keystroke. */
 function TypedSetting({ label, value, placeholder, onCommit }: { label: string; value: string; placeholder: string; onCommit: (value: string) => void }) {
   const [draft, setDraft] = useState(value);
   const [shown, setShown] = useState(value);
-  // The stored value changed under the field, as when a change that failed is undone.
+  // The stored value changed under the field, as when a change that failed is undone. Text being typed and not yet
+  // stored is kept: a change made elsewhere must not replace what the user is in the middle of writing.
   if (value !== shown) {
     setShown(value);
-    setDraft(value);
+    if (draft === shown) setDraft(value);
   }
   return (
     <input
@@ -200,7 +210,13 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
   });
   const roles = storedRoles.value;
   // The table and the resolved roles as Settings opened, and each agent's settings as it was turned off since.
-  const [opened] = useState(() => ({ settings: editableRoles(state), roles: state.roles }));
+  const [opened, setOpened] = useState(() => ({ settings: editableRoles(state), roles: state.roles }));
+  // A table changed elsewhere (the app, another tab, config.json) replaces the form's copy, as if Settings opened on
+  // it: each change here stores the whole table, so an older copy would undo that change.
+  const streamedRoles = state.roleInfo ? state.roleSettings : state.roles;
+  useEffect(() => {
+    if (storedRoles.adopt(editableRoles(state))) setOpened({ settings: editableRoles(state), roles: state.roles });
+  }, [streamedRoles]);
   const dropped = useRef<Record<string, AgentSettings | undefined>>({});
   /** The role last changed, under whose rows a change that could not be stored says so. */
   const changedRole = useRef<Role | null>(null);

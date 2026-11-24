@@ -29,7 +29,8 @@ export interface BoardState {
   /** The roles as the user wrote them, and what each role is; absent from a daemon that predates the role registry. */
   roleSettings?: RoleSettings;
   roleInfo?: RoleInfo[];
-  limits: { codex?: { windows?: { usedPercent: number; minutes: number }[] } | null };
+  /** A window's `minutes` is null when Codex does not say how long it is. */
+  limits: { codex?: { windows?: { usedPercent: number; minutes: number | null }[] } | null };
   events: CrewEvent[];
   /** Absent from a daemon that predates AgentGauge support. */
   usage?: Usage;

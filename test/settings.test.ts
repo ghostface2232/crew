@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { canonicalPath, effectiveRole, PRESETS, resolveConfig } from '../plugin/bridge/config.ts';
+import { sharedInstructions } from '../plugin/bridge/instructions.ts';
 import { appendInstructions, instructionsFile, readInstructions, saveLanguage, savePeerRatings, savePreset, saveRoles, writeInstructions } from '../plugin/bridge/settings.ts';
 
 const tempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'crew-settings-'));
@@ -104,6 +105,31 @@ test('a planted symbolic link is never written through', () => {
   fs.symlinkSync(elsewhere, path.join(other, '.crew'));
   assert.throws(() => writeInstructions(instructionsFile(home, other), 'Use tabs.'), /is a symbolic link/);
   assert.deepEqual(fs.readdirSync(elsewhere), []);
+});
+
+test('a project\'s shared instructions are not read through a symbolic link', () => {
+  const home = tempDir();
+  const secret = path.join(home, 'token');
+  fs.writeFileSync(secret, 'SECRET');
+
+  // The file is a link to something a worker may not read.
+  const project = tempDir();
+  fs.mkdirSync(path.join(project, '.crew'));
+  fs.symlinkSync(secret, path.join(project, '.crew', 'instructions.md'));
+  assert.throws(() => sharedInstructions(home, project), /is a symbolic link/);
+
+  // The .crew folder is a link to a folder holding one.
+  const other = tempDir();
+  const elsewhere = tempDir();
+  fs.writeFileSync(path.join(elsewhere, 'instructions.md'), 'SECRET');
+  fs.symlinkSync(elsewhere, path.join(other, '.crew'));
+  assert.throws(() => sharedInstructions(home, other), /is a symbolic link/);
+
+  // The user's own file for every project may be a link: it is theirs.
+  const mine = path.join(tempDir(), 'mine.md');
+  fs.writeFileSync(mine, 'Prefer small diffs.');
+  fs.symlinkSync(mine, path.join(home, 'instructions.md'));
+  assert.equal(sharedInstructions(home, tempDir()).text, '## From the user, for every project\nPrefer small diffs.');
 });
 
 test('a config file that is not a settings object is refused, not overwritten', () => {

@@ -9,7 +9,7 @@ import { runCheck } from './check.ts';
 import type { CheckResult } from './check.ts';
 import { assignHint, canonicalPath, defaultHolder, disabledAgents, effectiveRole, isRole, LEAD, LEDGER_ASIDE, MAX_DEBATE_ROUNDS, daemonPort, nodeEnv, roleInfo, ROLES, runsCommands, WORKERS } from './config.ts';
 import type { Config, JobKind, PresetName, Role, WorkerAgent } from './config.ts';
-import { carryUncommitted, changesSince, commitAll, commitChanges, copyIncluded, createWorktree, currentBranch, dirtyCount, git, mergeInto, isInside, NO_HOOKS, NO_SUBMODULES, projectRoot, realpath, removeDirectory, removeEmptyLeftover, removeEmptySlot, removeWorktree, repoRoot, revertCommit, revertsSince, reviewDiff, WorktreeCleanupError } from './git.ts';
+import { attached, untrackedPaths, carryUncommitted, changesSince, commitAll, commitChanges, copyIncluded, createWorktree, currentBranch, dirtyCount, git, mergeInto, isInside, NO_HOOKS, NO_SUBMODULES, projectRoot, realpath, removeDirectory, removeEmptyLeftover, removeEmptySlot, removeWorktree, repoRoot, revertCommit, revertsSince, reviewDiff, WorktreeCleanupError } from './git.ts';
 import { collectGarbage } from './gc.ts';
 import { BrowserServers, jobWritable } from './browser.ts';
 import { tokenFile } from './auth.ts';
@@ -42,7 +42,14 @@ export interface CrewEvent {
 export type ReviewTarget =
   | { type: 'uncommittedChanges' }
   | { type: 'baseBranch'; branch: string }
-  | { type: 'commit'; sha: string };
+  | { type: 'commit'; sha: string }
+  /**
+   * Files or directories as they stand: an audit of the code, with no change and so no diff. The paths are relative
+   * to the directory the reviewer starts in, which for one that runs the app is its snapshot's root.
+   */
+  | { type: 'files'; paths: string[] };
+/** How many paths one audit may name; past this the lead means a directory. */
+const AUDIT_PATHS = 50;
 
 export interface JobSpec {
   /** Starting Claude session; absent for board and other unowned jobs. */
@@ -466,7 +473,7 @@ export function resolveRole(spec: JobSpec): Role {
  * configured (role, preset, or the agent's own setting in config.json), and last the default tier. Effort differs:
  * a role's or preset's effort holds over a named tier's.
  */
-function pickModel(agent: WorkerAgent, spec: JobSpec, role: { model?: string; effort?: string }, config: Config, preset: PresetName | null): { model?: string; effort?: string; tier?: Tier; agentDefault?: boolean } {
+function pickModel(agent: WorkerAgent, spec: JobSpec, role: { model?: string; effort?: string; ownModel?: boolean }, config: Config, preset: PresetName | null): { model?: string; effort?: string; tier?: Tier; agentDefault?: boolean } {
   const configured = { model: role.model ?? config[agent].model, effort: role.effort ?? (agent === 'codex' ? config.codex.effort : undefined) };
   const cap = preset ? config.presets[preset].maxTier : undefined;
   // A family name passed as the model is that family's tier, so it resolves, caps and sets effort like one.
@@ -475,8 +482,10 @@ function pickModel(agent: WorkerAgent, spec: JobSpec, role: { model?: string; ef
   const wanted = family ?? spec.tier ?? (configured.model ? undefined : defaultTier(spec));
   const tier = wanted && cap && TIERS.indexOf(wanted) > TIERS.indexOf(cap) ? cap : wanted;
   let model = exact ?? (tier ? tierModel(agent, tier) : undefined) ?? configured.model;
-  // The cap holds for a model named outright too; effort stays the lead's to choose.
-  const named = model ? tierOf(agent, model) : undefined;
+  // The cap holds for a model named outright too; effort stays the lead's to choose. A model set on the role is the
+  // user's own choice for that work and overrides the preset, cap included, unless the lead named a tier or a model.
+  const roleModel = role.ownModel && !exact && !tier;
+  const named = model && !roleModel ? tierOf(agent, model) : undefined;
   const capped = Boolean(cap && named && TIERS.indexOf(named) > TIERS.indexOf(cap));
   if (capped) model = tierModel(agent, cap!);
   // With no model of the capped tier to name, the configured fallback could be the very model the cap refused.
@@ -486,6 +495,9 @@ function pickModel(agent: WorkerAgent, spec: JobSpec, role: { model?: string; ef
   const shown = capped ? cap : !exact ? tier : undefined;
   return { ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(shown ? { tier: shown } : {}), ...(agentDefault ? { agentDefault } : {}) };
 }
+
+/** A few paths by name, and how many more there are. */
+const pathList = (paths: string[], shown = 3) => `${paths.slice(0, shown).join(', ')}${paths.length > shown ? ` and ${paths.length - shown} more` : ''}`;
 
 /** Marks the receipts that still describe the branch as no longer doing so. */
 function staleReceipts(job: Job, why: string): void {
@@ -623,7 +635,9 @@ export class Jobs {
     const preset = spec.preset === undefined ? config.preset : spec.preset;
     // A reviewer sees the change and an engineer the review of its own. A debate, a question and an edit see nobody's
     // work; a fix starts from a review of someone else's, and release preparation is not sent findings.
-    const rates = config.peerRatings && !spec.debate && !spec.ask && spec.kind !== 'polish' && roleName !== 'fix' && roleName !== 'release';
+    // An audit of files as they stand reads no one job's work, so its reviewer has nothing to rate.
+    const rates = config.peerRatings && !spec.debate && !spec.ask && spec.kind !== 'polish' && roleName !== 'fix' && roleName !== 'release'
+      && spec.review?.target.type !== 'files';
     const holders = config.roles[roleName].agents;
     // Named no holder, the job goes to the role's first worker.
     const picked = spec.agent ?? defaultHolder(roleName, config.roles[roleName], disabledAgents(config));
@@ -655,12 +669,32 @@ export class Jobs {
     if (spec.check && (spec.kind !== 'delegate' || spec.ask || spec.isolation === 'in_place')) {
       throw new Error('check runs in the job\'s own worktree after each turn, so only a delegate job with a worktree takes it. Run the check yourself, or drop check.');
     }
+    const audit = spec.review?.target.type === 'files' ? spec.review.target : undefined;
+    if (audit) {
+      const { paths } = audit;
+      if (!Array.isArray(paths) || !paths.length || paths.length > AUDIT_PATHS || paths.some((file) => typeof file !== 'string' || !file.trim())) {
+        throw new Error(`A review of files needs paths: 1 to ${AUDIT_PATHS} files or directories, relative to the project.`);
+      }
+      const outside = paths.find((file) => path.isAbsolute(file) || !isInside(spec.cwd, path.join(spec.cwd, file)));
+      if (outside) throw new Error(`${outside} is not inside ${spec.cwd}. Give paths relative to the project.`);
+      const missing = paths.find((file) => !fs.existsSync(path.join(spec.cwd, file)));
+      if (missing) throw new Error(`${missing} does not exist in ${spec.cwd}.`);
+      // As checked: the reviewer is given these names, and `a/../b` would be resolved by its system, link by link.
+      audit.paths = paths.map((file) => slashed(path.normalize(file)));
+      if (spec.review!.mode === 'standard' && agent === 'codex') {
+        throw new Error('Codex\'s standard review reads a change, and files as they stand are not one. Use the adversarial mode.');
+      }
+    }
     const attachments = checkAttachments(spec.attachments);
     if (attachments.length && spec.review?.mode === 'standard' && agent === 'codex') {
       throw new Error('Codex\'s standard review is sent no prompt, so it would never see the attachments. Use the adversarial mode, or drop attachments.');
     }
 
-    const id = `${WORKERS[agent].idPrefix}-${randomBytes(3).toString('hex')}`;
+    // The failure path below removes the record under this id as its own, so it must be no other job's.
+    let id: string;
+    do {
+      id = `${WORKERS[agent].idPrefix}-${randomBytes(3).toString('hex')}`;
+    } while (this.jobs.has(id));
     const repo = await repoRoot(spec.cwd);
     // Read from the main working tree even when the job starts inside a worktree, so an uncommitted edit applies to the next job.
     const root = (await projectRoot(spec.cwd)) ?? spec.project ?? spec.cwd;
@@ -686,6 +720,9 @@ export class Jobs {
         cwd = worktree.path;
         const included = await copyIncluded(repo, worktree.path);
         worktree.linked = included.linked;
+        // Asked of Git rather than of the copy: a copy into a directory the base already has adds files of its own.
+        const copied = included.copied.length ? await untrackedPaths(worktree.path) : [];
+        if (copied.length) worktree.copied = copied;
         if (included.linked.length) notes.push(`Shared read-only from .worktreeinclude: ${included.linked.join(', ')}`);
         if (included.copied.length) notes.push(`Copied from .worktreeinclude: ${included.copied.join(', ')}`);
         if (included.failed.length) notes.push(`Could not copy from .worktreeinclude: ${included.failed.join('; ')}`);
@@ -697,14 +734,23 @@ export class Jobs {
         if (!repo) throw new Error(`${spec.cwd} is not inside a git repository, so there is no snapshot to run the app in. Drop runs_app.`);
         worktree = await this.snapshot(repo, id, spec.review!.target, notes);
         cwd = worktree.path;
+        if (audit) {
+          // The reviewer starts at the snapshot's root, not in the subdirectory the paths were given from.
+          audit.paths = audit.paths.map((file) => slashed(path.relative(realpath(repo), realpath(path.join(spec.cwd, file)))));
+          const absent = audit.paths.find((file) => !fs.existsSync(path.join(worktree!.path, file)));
+          if (absent) throw new Error(`${absent} is not in the snapshot a review that runs the app reads: Git ignores it and .worktreeinclude does not list it. Drop runs_app, or list it there.`);
+        }
       }
 
       let diffFile: string | null = null;
-      if (spec.kind === 'review' && !WORKERS[agent].reviewerRunsGit) {
+      const reviewed = spec.kind === 'review' && !WORKERS[agent].reviewerRunsGit ? spec.review!.target : undefined;
+      if (reviewed?.type === 'files') {
+        notes.push(`${WORKERS[agent].name} cannot run commands as a reviewer: it read the files and could not run tests or checks.`);
+      } else if (reviewed) {
         if (!repo) throw new Error(`review is assigned to ${WORKERS[agent].name}, which has to be handed the diff, and ${spec.cwd} is not inside a git repository.`);
         diffFile = this.diffFile(id);
         fs.mkdirSync(path.dirname(diffFile), { recursive: true });
-        fs.writeFileSync(diffFile, await reviewDiff(repo, spec.review!.target));
+        fs.writeFileSync(diffFile, await reviewDiff(repo, reviewed));
         notes.push(`${WORKERS[agent].name} cannot run commands as a reviewer: it was given the diff as a file and could not run tests or checks.`);
       }
       if (spec.review?.mode === 'standard' && agent !== 'codex') notes.push(`The standard review mode is Codex's own; ${WORKERS[agent].name} ran the adversarial review instead.`);
@@ -762,7 +808,7 @@ export class Jobs {
         reviewTarget: spec.review?.target,
         targets: spec.targets ?? [],
         check: spec.check?.trim() || undefined,
-        ...pickModel(agent, spec, role, config, preset),
+        ...pickModel(agent, spec, { ...role, ownModel: Boolean(config.roles[roleName][agent]?.model) }, config, preset),
         sessionId: null,
         createdAt: now,
         activeAt: now,
@@ -863,12 +909,14 @@ export class Jobs {
       await this.sendWith(job, attachments, (note) => adapter.reply(ctl, message + note));
       return job;
     }
-    if (job.worktree && job.rounds?.length) {
+    // A review's snapshot is made anew below; any other worktree must still be the job's own branch, or a sync
+    // would merge into, and the turn be committed on, whatever was checked out there since.
+    if (job.worktree && job.kind !== 'review') {
       this.preparingReviews.add(id);
       try {
         if (fs.lstatSync(job.worktree.path).isSymbolicLink()) throw new Error(`Job ${id}'s worktree path is now a link to somewhere else.`);
         if ((await currentBranch(job.worktree.path)) !== job.worktree.branch) throw new Error(`Job ${id}'s worktree is not on ${job.worktree.branch}.`);
-        await this.reconcileRounds(job);
+        if (job.rounds?.length) await this.reconcileRounds(job);
       } finally {
         this.preparingReviews.delete(id);
       }
@@ -882,7 +930,7 @@ export class Jobs {
       if (!job.worktree || !job.repo || job.kind === 'review') throw new Error(`Job ${id} has no worktree of its own to bring up to date. Drop sync.`);
       this.preparingReviews.add(id);
       try {
-        const merged = await mergeInto(job.worktree.path, job.repo, typeof input.sync === 'string' ? input.sync : 'HEAD', job.worktree.linked);
+        const merged = await mergeInto(job.worktree.path, job.repo, typeof input.sync === 'string' ? input.sync : 'HEAD', attached(job.worktree));
         if (merged.conflicts.length) {
           const commit = merged.commit.slice(0, 8);
           const files = merged.conflicts.join(', ');
@@ -905,8 +953,10 @@ export class Jobs {
       }
       if (!isTerminal(job)) return job;
     }
-    const refreshDiff = job.kind === 'review' && !WORKERS[job.agent].reviewerRunsGit;
-    if (refreshDiff && (!job.reviewTarget || !job.repo)) {
+    // An audit of files has no diff to hand over again.
+    const refreshDiff = job.kind === 'review' && !WORKERS[job.agent].reviewerRunsGit && job.reviewTarget?.type !== 'files';
+    const diffTarget = job.reviewTarget?.type === 'files' ? undefined : job.reviewTarget;
+    if (refreshDiff && (!diffTarget || !job.repo)) {
       throw new Error(`Job ${id} has no saved review target or repository. Start a new review instead.`);
     }
     // A follow-up turn sets a finished worker running again, so it is a start like any other.
@@ -980,7 +1030,7 @@ export class Jobs {
         this.preparingReviews.add(id);
         const diffFile = this.diffFile(id, job.turns);
         try {
-          const diff = await reviewDiff(job.repo!, job.reviewTarget!);
+          const diff = await reviewDiff(job.repo!, diffTarget!);
           if (isTerminal(job)) return job;
           fs.mkdirSync(path.dirname(diffFile), { recursive: true });
           fs.writeFileSync(diffFile, diff);
@@ -1037,7 +1087,8 @@ export class Jobs {
       const head = (await git(where, ['rev-parse', target.type === 'commit' ? target.sha : 'HEAD'])).trim();
       const reviewed: TurnReceipt['reviewed'] = target.type === 'uncommittedChanges'
         ? { target: 'uncommitted changes', diff: createHash('sha256').update(await reviewDiff(where, target)).digest('hex').slice(0, 12) }
-        : { target: target.type === 'commit' ? `commit ${target.sha}` : `changes against ${target.branch}` };
+        : target.type === 'files' ? { target: `${pathList(target.paths)} as ${target.paths.length > 1 ? 'they stand' : 'it stands'}` }
+          : { target: target.type === 'commit' ? `commit ${target.sha}` : `changes against ${target.branch}` };
       (job.receipts ??= []).push({ turn: job.turns, head, reviewed, at: Date.now() });
     } catch (err) {
       job.notes.push(`Could not record what turn ${job.turns} reviewed: ${(err as Error).message.split('\n')[0]}`);
@@ -1048,7 +1099,8 @@ export class Jobs {
   private async snapshot(repo: string, id: string, target: ReviewTarget, notes: string[]): Promise<Worktree> {
     const worktree = await createWorktree(repo, id, target.type === 'commit' ? target.sha : 'HEAD', this.home);
     try {
-      if (target.type === 'uncommittedChanges') await carryUncommitted(repo, worktree.path);
+      // Files as they stand are the working tree's, uncommitted edits included.
+      if (target.type === 'uncommittedChanges' || target.type === 'files') await carryUncommitted(repo, worktree.path);
       const partial = 'The snapshot does not contain submodules: their directories are empty in it.';
       if (fs.existsSync(path.join(repo, '.gitmodules')) && !notes.includes(partial)) notes.push(partial);
       const included = await copyIncluded(repo, worktree.path);
@@ -1251,7 +1303,7 @@ export class Jobs {
       if (round.state === state) throw new Error(`Round ${turn} is already ${state}.`);
       const commit = action === 'undo' ? round.commit : round.revert;
       if (!commit) throw new Error(`Round ${turn} has no revert commit to keep.`);
-      const reverted = await revertCommit(job.worktree.path, commit, job.worktree.linked);
+      const reverted = await revertCommit(job.worktree.path, commit, attached(job.worktree));
       const result = await this.worktreeResult(job, reverted);
       round.state = state;
       staleReceipts(job, `round ${turn} ${state}`);
@@ -1527,7 +1579,7 @@ export class Jobs {
     let result: Job['result'];
     // A review's worktree is a snapshot to run the app in; nothing in it is kept.
     if (job.worktree && job.kind !== 'review') {
-      const commit = await commitAll(job.worktree.path, `crew(${job.agent}): ${job.title}`, job.worktree.linked);
+      const commit = await commitAll(job.worktree.path, `crew(${job.agent}): ${job.title}`, attached(job.worktree));
       if (commit) (job.rounds ??= []).push({ turn: job.turns, commit, ...await commitChanges(job.worktree.path, commit), state: 'kept', at: Date.now() });
       result = await this.worktreeResult(job, commit);
       const head = (await git(job.worktree.path, ['rev-parse', 'HEAD'])).trim();
@@ -1550,8 +1602,14 @@ export class Jobs {
         }
       }
       // A check that rewrote tracked files passed on a tree the commit does not hold.
-      const listed = check ? `${await git(job.worktree.path, [...NO_HOOKS, 'diff', NO_SUBMODULES, '--name-only', '-z', 'HEAD'])}${await git(job.worktree.path, ['ls-files', '--others', '--exclude-standard', '-z'])}` : '';
-      const changed = listed.split('\0').filter(Boolean);
+      const rewritten = check ? await git(job.worktree.path, [...NO_HOOKS, 'diff', NO_SUBMODULES, '--name-only', '-z', 'HEAD']) : '';
+      const added = check ? await git(job.worktree.path, ['ls-files', '--others', '--exclude-standard', '-z']) : '';
+      // What Crew attached may be untracked there without being the check's doing; once tracked, a change to it counts.
+      const kept = attached(job.worktree);
+      const changed = [
+        ...rewritten.split('\0'),
+        ...added.split('\0').filter((file) => !kept.some((rel) => file === rel || file.startsWith(`${rel}/`))),
+      ].filter(Boolean);
       const stale = changed.length ? `the check itself changed ${changed.slice(0, 3).join(', ')}${changed.length > 3 ? ` and ${changed.length - 3} more` : ''}` : undefined;
       (job.receipts ??= []).push({ turn: job.turns, head, ...(check ? { check } : {}), ...(stale ? { stale } : {}), at: Date.now() });
     } else if (job.kind === 'review' || job.ask) {

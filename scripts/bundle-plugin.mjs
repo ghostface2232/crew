@@ -13,6 +13,9 @@ export async function bundlePlugin(root, runtime) {
   for (const folder of ['roles', 'skills', 'agents', '.claude-plugin', 'board/dist']) {
     fs.cpSync(`plugin/${folder}`, path.join(plugin, folder), { recursive: true });
   }
+  // The compiled bridge is ES modules in `.js` files. Node otherwise goes by the nearest package.json above the
+  // plugin, wherever it is copied: one in the user's home folder saying "commonjs" would stop every command.
+  fs.writeFileSync(path.join(plugin, 'package.json'), '{"type":"module"}\n');
   // Commands that ran `node <bridge>.ts` run the compiled script on the bundled runtime. Claude Code substitutes
   // CLAUDE_PLUGIN_ROOT in both the command and its arguments, and runs the argument form without a shell.
   const command = `\${CLAUDE_PLUGIN_ROOT}/${runtime}`;

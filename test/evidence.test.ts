@@ -62,6 +62,10 @@ test('attachments that are not images or do not exist are refused before anythin
   fs.writeFileSync(notes, 'text');
   await assert.rejects(h.create({ attachments: [notes] }), /not an image or video/);
   await assert.rejects(h.create({ attachments: [path.join(h.home, 'missing.png')] }), /Attachment not found/);
+  // A link named like an image is not followed: its target's bytes would be copied to where the worker reads.
+  const link = path.join(h.home, 'design.png');
+  fs.symlinkSync(notes, link);
+  await assert.rejects(h.create({ attachments: [link] }), /is a symbolic link\. Attach the file it points to/);
   assert.equal(h.jobs.list().length, 0);
   assert.equal(fs.existsSync(path.join(h.home, 'evidence')), false);
 });

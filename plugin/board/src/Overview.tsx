@@ -11,7 +11,7 @@ import type { BoardJob, CrewEvent, Mission, SetupState, Snapshot, WorkerAgent } 
 import { formatDate, longDay, shortDateTime, shortDay, shortMonth, timeOfDay } from './dates.ts';
 import { request } from './api.ts';
 import {
-  dailyCounts, elapsed, endedPerHour, holdersOf, jobLabel, leadMission, NAMES, projectOf, relativeDuration, rolesOf, runningPerHour,
+  dailyCounts, elapsed, endedPerHour, holdersOf, jobLabel, leadMission, limitWindowLabel, NAMES, projectOf, relativeDuration, rolesOf, runningPerHour,
   usageWindowName, unsettled,
 } from './model.ts';
 import { AgentMark, Chip, EmptyState, Icon, RollingNumber, StatusIcon, tNodes, useFade, useClock, useStableItems } from './ui.tsx';
@@ -243,7 +243,7 @@ function AgentUsage({ state, agent }: { state: Snapshot; agent: string }) {
     <span
       className="usage-limit caption digits"
       data-level={usageLevel(used / 100)}
-      title={windows.map((window) => t('{percent}% of {minutes}-minute limit', { percent: Math.round(window.usedPercent), minutes: window.minutes })).join('\n')}
+      title={windows.map(limitWindowLabel).join('\n')}
     >
       {t('{percent}% of limit', { percent: used })}
     </span>

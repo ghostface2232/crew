@@ -546,7 +546,11 @@ final class SettingsModel {
         scope = next; loaded = false; loading = true; textStatus = ""; savingText = false
         var components = URLComponents()
         components.path = "/api/instructions"
-        if !next.isEmpty { components.queryItems = [URLQueryItem(name: "project", value: next)] }
+        if !next.isEmpty {
+            components.queryItems = [URLQueryItem(name: "project", value: next)]
+            // URLQueryItem leaves "+" as it is, which the daemon would read as a space in the path.
+            components.percentEncodedQuery = components.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
+        }
         do {
             let result: Instructions = try await api.request(components.string!)
             guard generation == attempt else { return }
@@ -609,6 +613,15 @@ final class SettingsModel {
         if preset != savedPreset && presets != nil { presetError = await savePreset() ? "" : presetStatus }
         if text != savedText && loaded { await saveInstructions() }
         return !dirty
+    }
+    /// Takes a role table stored elsewhere (the board, `config.json`) as the stored one, so the next change here
+    /// starts from it: each change stores the whole table, and an older copy would undo that change. Not while a
+    /// change made here is unsaved or being stored, which goes out as it was made. Text being typed is kept apart
+    /// in `drafts` and stays.
+    func adopt(roleSettings table: [String: RoleSetting]) {
+        let table = Self.normalized(table)
+        guard !savingRoles, !rolesDirty, table != Self.normalized(savedRoleSettings) else { return }
+        roleSettings = table; savedRoleSettings = table
     }
     /// True when the table was stored.
     @discardableResult func saveRoles() async -> Bool {

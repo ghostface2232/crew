@@ -161,6 +161,34 @@ test('a second command opens beside the first, and with two open every call name
   assert.equal(context.costMission, null);
 });
 
+test('a title on a call that ends a mission picks the open mission of that title, and ends no other', async (t) => {
+  const { missions, server } = missionServer(t);
+  const { reportMission } = server();
+  await reportMission({ title: 'Refactor billing', stages: ['implement', 'final'] });
+  const billing = missions.list()[0];
+  for (const end of [{ done: true, outcome: 'Typo fixed.' }, { abandoned: true }]) {
+    await assert.rejects(reportMission({ title: 'Fix typo in README', stages: ['implement'], ...end }),
+      new RegExp(`No open mission is titled "Fix typo in README".*Open: ${billing.id} "Refactor billing" \\(implement\\)\\. Pass id`));
+  }
+  assert.equal(missions.list().length, 1);
+  assert.equal(billing.state, 'active');
+  // Among several open, the title is as good as the id.
+  await reportMission({ title: 'Fix typo in README', stages: ['implement'] });
+  const typo = missions.list().find((mission) => mission.title === 'Fix typo in README')!;
+  assert.match(await reportMission({ title: ' Fix typo in README\n', done: true, outcome: 'Typo fixed.' }), new RegExp(`^Mission ${typo.id} · done[^]*Still open in this session: ${billing.id} `));
+  assert.equal(billing.state, 'active');
+  // Two open missions can share a title once one is renamed on the board; the title then picks neither.
+  await reportMission({ title: 'Second', stages: ['implement'] });
+  const second = missions.list().find((mission) => mission.title === 'Second')!;
+  second.title = 'Refactor billing';
+  await assert.rejects(reportMission({ title: 'Refactor billing', done: true }), /2 missions open:[^]*Pass id/);
+  assert.deepEqual([billing.state, second.state], ['active', 'active']);
+  await reportMission({ id: second.id, abandoned: true });
+  assert.match(await reportMission({ title: 'Refactor billing', done: true }), new RegExp(`^Mission ${billing.id} · done`));
+  // With none open there is nothing a title could be mistaken for.
+  await assert.rejects(reportMission({ title: 'Fix typo in README', done: true }), /no open mission/);
+});
+
 test('tasks and a pull request reach the mission, and come back in its reply', async (t) => {
   const { missions, calls, server } = missionServer(t);
   const { reportMission, runJob } = server();
@@ -359,6 +387,9 @@ test('status pages the latest full report during a follow-up and retained debate
   }
   assert.equal(restored, report);
   assert.match(await run({ job_id: job.id, report_offset: 0, turn: 1 }), /first answer/);
+  // A turn alone reads that turn from its start.
+  assert.match(await run({ job_id: job.id, turn: 1 }), /report turn 1, offset 0:\nfirst answer\nEnd of report\./);
+  await assert.rejects(run({ job_id: job.id, turn: 0 }), /Invalid report offset or turn/);
   await assert.rejects(run({ job_id: job.id, report_offset: 0, turn: 99 }), /not retained/);
 });
 

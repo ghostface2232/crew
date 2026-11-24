@@ -108,6 +108,11 @@ export class CodexAdapter implements Adapter {
   private resuming = new Map<string, number>();
   /** Jobs whose thread Codex is still starting or resuming, which can take minutes; `probe` vouches for them. Counted. */
   private opening = new Map<string, number>();
+  /**
+   * Resumes under way, by thread and turn. A second message for the same turn waits for the first's resume: one of
+   * its own could be answered first and start the turn with the later message alone, failing the one that opened it.
+   */
+  private resumes = new Map<string, Promise<{ params: Awaited<ReturnType<CodexAdapter['threadParams']>>; res: any } | null>>();
   /** Threads whose Crew tools Codex could not start, and why. Codex may say so before the thread has a run to tell. */
   private toolFailures = new Map<string, string>();
   private config: Config;
@@ -159,28 +164,19 @@ export class CodexAdapter implements Adapter {
     if (ctl.job.turns !== turn) return;
     const threadId = ctl.job.sessionId!;
     let pluginsEnabled = this.runs.get(threadId)?.pluginsEnabled ?? false;
-    if (!this.loaded.has(threadId)) {
-      const params = await this.threadParams(ctl, peer);
-      if (ctl.job.turns !== turn) return;
-      ctl.capabilities(capabilitiesOf(ctl.job, params));
-      const resume = () => peer.request('thread/resume', { threadId, ...params, excludeTurns: true }, THREAD_TIMEOUT_MS);
-      const loaded = hold(this.resuming, threadId);
-      const opened = hold(this.opening, ctl.job.id);
-      // `tidy` archives a worker's thread after a week; a reply to that job brings it back.
-      const res = await resume().catch(async (err) => {
-        if (!/^session \S+ is archived\b/.test(String(err?.message))) throw err;
-        await peer.request('thread/unarchive', { threadId }, RPC_TIMEOUT_MS).catch((failed) => {
-          throw new Error(`${err.message} Unarchiving it failed: ${failed?.message ?? failed}`, { cause: failed });
-        });
-        return resume();
-      }).finally(() => {
-        loaded();
-        opened();
-      });
-      this.loaded.add(threadId);
-      if (ctl.job.turns !== turn) return;
-      pluginsEnabled = params.config.features.plugins;
-      ctl.model(res.model ?? res.thread?.model ?? ctl.job.model ?? this.config.codex.model, ctl.job.effort ?? this.config.codex.effort ?? res.reasoningEffort ?? undefined);
+    const key = `${threadId}\0${turn}`;
+    // A resume this turn began is waited for even once the thread is loaded: an overtaken turn's resume may have
+    // loaded it meanwhile, and going ahead would start the turn with this message before the one that opened it.
+    let resuming = this.resumes.get(key);
+    if (resuming || !this.loaded.has(threadId)) {
+      if (!resuming) {
+        resuming = this.resume(ctl, peer, threadId, turn).finally(() => this.resumes.delete(key));
+        this.resumes.set(key, resuming);
+      }
+      const resumed = await resuming;
+      if (!resumed || ctl.job.turns !== turn) return;
+      pluginsEnabled = resumed.params.config.features.plugins;
+      ctl.model(resumed.res.model ?? resumed.res.thread?.model ?? ctl.job.model ?? this.config.codex.model, ctl.job.effort ?? this.config.codex.effort ?? resumed.res.reasoningEffort ?? undefined);
     }
     if (isTerminal(ctl.job)) return;
     const run = this.runs.get(threadId) ?? this.openRun(ctl, threadId);
@@ -193,6 +189,29 @@ export class CodexAdapter implements Adapter {
     } else {
       await this.startTurn(peer, run, message);
     }
+  }
+
+  /** Brings the job's thread back into the server's memory for `turn`. Null when the turn was overtaken before the resume was sent. */
+  private async resume(ctl: JobCtl, peer: RpcPeer, threadId: string, turn: number) {
+    const params = await this.threadParams(ctl, peer);
+    if (ctl.job.turns !== turn) return null;
+    ctl.capabilities(capabilitiesOf(ctl.job, params));
+    const resume = () => peer.request('thread/resume', { threadId, ...params, excludeTurns: true }, THREAD_TIMEOUT_MS);
+    const loaded = hold(this.resuming, threadId);
+    const opened = hold(this.opening, ctl.job.id);
+    // `tidy` archives a worker's thread after a week; a reply to that job brings it back.
+    const res = await resume().catch(async (err) => {
+      if (!/^session \S+ is archived\b/.test(String(err?.message))) throw err;
+      await peer.request('thread/unarchive', { threadId }, RPC_TIMEOUT_MS).catch((failed) => {
+        throw new Error(`${err.message} Unarchiving it failed: ${failed?.message ?? failed}`, { cause: failed });
+      });
+      return resume();
+    }).finally(() => {
+      loaded();
+      opened();
+    });
+    this.loaded.add(threadId);
+    return { params, res };
   }
 
   async answer(ctl: JobCtl, approve: boolean, message?: string, opts?: { forJob?: boolean; by?: 'lead' }): Promise<void> {
@@ -262,7 +281,8 @@ export class CodexAdapter implements Adapter {
     for (const request of run.pending.splice(0)) request.resolve({ approve: false, cancelled: true });
     if (!peer) return;
     const acks = children.filter(([, turnId]) => turnId).map(([threadId, turnId]) => peer.request('turn/interrupt', { threadId, turnId }, RPC_TIMEOUT_MS));
-    const settled = await Promise.race([Promise.allSettled(acks).then(() => true), delay(5_000, false, { ref: false })]);
+    // A refused interrupt is no confirmation either: that sub-agent may still be editing.
+    const settled = await Promise.race([Promise.allSettled(acks).then((results) => results.every((result) => result.status === 'fulfilled')), delay(5_000, false, { ref: false })]);
     if (!settled || children.some(([, turnId]) => !turnId)) run.ctl.note('Cancelled while sub-agents were still working; not every one confirmed it stopped. Check the worktree before reusing it.');
   }
 
@@ -367,8 +387,9 @@ export class CodexAdapter implements Adapter {
     const { job } = ctl;
     const lean = await this.lean(ctl, peer);
     // Read-only with one writable directory is not a sandbox mode; it is a permissions profile, which replaces the mode.
-    // Each profile also denies the daemon's token file. A job with the network open could otherwise read it and
-    // call the daemon as the user. Plugin tools also act outside the sandbox, so plugin jobs need the deny too.
+    // Each profile also denies the daemon's token file, which a sandbox mode cannot, so every job runs under one.
+    // A job that could read it could call the daemon as the user: at once with the network open or through a plugin
+    // tool, and otherwise by leaving a copy in its worktree for the lead's `check`, which reaches local ports.
     const secret = { [tokenFile(HOME)]: 'deny' };
     // Evidence outlives the turn, so it is a directory of its own, writable in every profile.
     const evidence = job.evidenceDir ? { [job.evidenceDir]: 'write' } : {};
@@ -392,7 +413,7 @@ export class CodexAdapter implements Adapter {
     // Commands get the scratch directory as their temp directory, so the system's is left out. Codex would resolve
     // it to the server's own TEMP, the user's whole temp folder, and on Windows grant write on it by an inherited ACL
     // over every file there: minutes on a full folder, during which thread/start does not answer.
-    const app = (job.runsApp || lean.features.plugins || Object.keys(shared).length > 0) && job.sandbox === 'workspace-write'
+    const app = job.sandbox === 'workspace-write'
       ? {
           default_permissions: profile,
           permissions: { [profile]: { filesystem: { ':root': 'read', [job.cwd]: 'write', [path.join(job.cwd, '.git')]: 'read', ':slash_tmp': 'write', ...(job.scratch ? { [job.scratch]: 'write' } : {}), ...evidence, ...shared, ...secret }, network: { enabled: Boolean(job.runsApp) } } },
@@ -405,10 +426,7 @@ export class CodexAdapter implements Adapter {
       approvalPolicy: job.sandbox === 'read-only' ? 'never' : this.config.codex.approvalPolicy,
       approvalsReviewer: this.reviewer(job),
       config: { ...(app ?? scratch),
-      ...(job.scratch ? {
-        shell_environment_policy: { set: { TMPDIR: job.scratch, TMP: job.scratch, TEMP: job.scratch } },
-        ...(!app && !scratch ? { sandbox_workspace_write: { writable_roots: [job.scratch, ...Object.keys(evidence)], exclude_tmpdir_env_var: true } } : {}),
-      } : {}), // Its three tools only talk to the bridge. Without this a job with approval policy "never" (a review, a question)
+      ...(job.scratch ? { shell_environment_policy: { set: { TMPDIR: job.scratch, TMP: job.scratch, TEMP: job.scratch } } } : {}), // Its three tools only talk to the bridge. Without this a job with approval policy "never" (a review, a question)
       // is refused the call outright, and any other job would stop to ask.
       mcp_servers: { crew: { ...ctl.mcp, default_tools_approval_mode: 'approve' } },
       ...lean },

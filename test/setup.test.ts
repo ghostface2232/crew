@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import vm from 'node:vm';
 import { writeFakeBin } from './fake-bin.ts';
 
@@ -177,6 +178,48 @@ test('packaged startup under CREW_HOME leaves the user registration and command 
   await start({}, false);
   assert.match(fs.readFileSync(calls, 'utf8'), /"plugin","install","crew@crew"/);
   assert.ok(fs.lstatSync(COMMAND));
+});
+
+test('an older copy of the app leaves the registration to a newer copy that is still there', async (t) => {
+  const profile = fs.mkdtempSync(path.join(home, 'profile-'));
+  const calls = path.join(profile, 'calls');
+  writeFakeBin(path.join(profile, 'claude'), `require('node:fs').appendFileSync(${JSON.stringify(calls)}, JSON.stringify(process.argv.slice(2)) + '\\n'); console.log('[]');`);
+  const originalPath = process.env.PATH;
+  process.env.PATH = profile + path.delimiter + originalPath;
+  t.after(() => { process.env.PATH = originalPath; });
+  t.mock.method(os, 'homedir', () => profile);
+  // A built copy as an app carries it, one version behind the copy on record.
+  const older = path.join(home, 'older');
+  fs.cpSync(fileURLToPath(new URL('../plugin/bridge', import.meta.url)), path.join(older, 'plugin/bridge'), { recursive: true });
+  fs.mkdirSync(path.join(older, 'plugin/.claude-plugin'));
+  fs.writeFileSync(path.join(older, 'plugin/.claude-plugin/plugin.json'), '{"version":"0.0.1"}');
+  fs.writeFileSync(path.join(older, 'plugin/.claude-plugin/build'), 'old\n');
+  fs.writeFileSync(path.join(older, 'plugin/package.json'), '{"type":"module"}\n');
+  const newer = path.join(home, 'newer');
+  fs.mkdirSync(newer);
+  const record = path.join(home, 'setup.json');
+  t.after(() => fs.rmSync(record, { force: true }));
+  const taken = JSON.stringify({ root: newer, version: '0.0.2', build: 'new' });
+  fs.writeFileSync(record, taken);
+  const { register } = await import(pathToFileURL(path.join(older, 'plugin/bridge/setup.ts')).href);
+
+  // What a daemon started from the older copy does at startup.
+  const left = await register();
+  assert.match(left.detail, /newer Crew \(0\.0\.2\) is registered[^]*repair from it, or its `crew install`/);
+  assert.deepEqual([fs.existsSync(calls), fs.readFileSync(record, 'utf8')], [false, taken]);
+  // Asked for by the user (the checklist's repair, `crew install`), the older copy is registered: a downgrade on purpose.
+  assert.match((await register(true)).detail, /^Installed/);
+  assert.equal(JSON.parse(fs.readFileSync(record, 'utf8')).version, '0.0.1');
+  fs.writeFileSync(record, taken);
+
+  // A record of a copy that is gone, or of what this copy's own folder held before a downgrade, holds nothing back.
+  fs.rmSync(newer, { recursive: true });
+  assert.match((await register()).detail, /^Installed/);
+  const mine = JSON.parse(fs.readFileSync(record, 'utf8'));
+  assert.equal(mine.version, '0.0.1');
+  fs.writeFileSync(record, JSON.stringify({ ...mine, version: '0.0.2' }));
+  await register();
+  assert.equal(JSON.parse(fs.readFileSync(record, 'utf8')).version, '0.0.1');
 });
 
 test('a job ledger that was set aside shows in the checklist until the file is gone', async () => {

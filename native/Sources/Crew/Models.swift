@@ -487,7 +487,13 @@ struct RoleState: Decodable, Sendable {
 // The legacy limit event reports a window length only when the provider does.
 struct LimitWindow: Codable, Sendable, Equatable { var usedPercent: Double; var minutes: Double? }
 struct LimitUsage: Codable, Sendable, Equatable { var windows: [LimitWindow]? }
-enum UsageStatus: String, Codable, Sendable { case ok, tight, exhausted, stale, unknown }
+enum UsageStatus: String, Codable, Sendable {
+    case ok, tight, exhausted, stale, unknown
+    /// A status this build does not know reads as unknown, so one from a newer daemon cannot fail the whole snapshot.
+    init(from decoder: Decoder) throws {
+        self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
+    }
+}
 struct UsageWindow: Codable, Sendable, Equatable {
     var key: String
     var kind: String
@@ -535,6 +541,13 @@ enum PresetName: String, Codable, Sendable, CaseIterable {
         case .balanced: String(localized: "Everyday balance of quality, speed, and cost.")
         case .best: String(localized: "Maximum reasoning depth for complex work.")
         }
+    }
+}
+extension KeyedDecodingContainer {
+    /// The decoding Swift writes for a `PresetName?` field resolves to this. A preset this build does not know reads as
+    /// none, so one from a newer daemon cannot fail the whole snapshot, and no picker has to offer it.
+    func decodeIfPresent(_ type: PresetName.Type, forKey key: Key) throws -> PresetName? {
+        try decodeIfPresent(String.self, forKey: key).flatMap(PresetName.init(rawValue:))
     }
 }
 struct Preset: Codable, Sendable, Equatable {

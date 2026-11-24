@@ -500,9 +500,13 @@ function FollowUp({ job }: { job: BoardJob }) {
   );
 }
 
+/**
+ * The job the panel shows: the live one, with the prompt and instructions only the fetched detail carries. Nothing
+ * else comes from the detail, which would bring back what the daemon has since removed, such as the last turn's outcome.
+ */
 export function drawerJob(detail: BoardJob | null, current?: BoardJob): BoardJob | undefined {
   if (!detail || !current) return current ?? detail ?? undefined;
-  return { ...detail, ...current, prompt: detail.prompt ?? current.prompt, liveDiff: current.liveDiff };
+  return { ...current, prompt: detail.prompt, instructions: detail.instructions };
 }
 
 /** JobDetailView in the app: status and close, then the job, its facts, results and controls. */

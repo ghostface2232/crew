@@ -260,6 +260,13 @@ test('a tight engineer keeps its usage for the review, and an exhausted one lose
 
   // When the lead is short too, a tight engineer still takes what separates.
   assert.equal(route('delegate', usageOf({ codex: 'tight', claude: 'tight' }), DEFAULT_ROLES).assignee, 'codex');
+  // Its reading is known then, and the reason says so.
+  const given = { ...DEFAULT_ROLES, fix: { agents: ['codex' as const] } };
+  for (const claude of ['tight', 'exhausted'] as const) for (const kind of ['delegate', 'refactor', 'release', 'fix'] as const) {
+    const both = route(kind, usageOf({ codex: 'tight', claude }), given);
+    assert.deepEqual([both.assignee, both.fallback], ['codex', ['claude']]);
+    assert.equal(both.reason, 'Codex is tight: codex reason. Claude is short too, so the assignment is followed.');
+  }
 });
 
 test('polish waits for the reset, and routing never hands a role to an agent the user did not assign', () => {

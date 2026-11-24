@@ -292,6 +292,30 @@ test('loading drops an adoption the writer would refuse', (t) => {
 const high = { high: 1, medium: 0, low: 0 };
 const review = { role: 'review', of: { model: 'model-b' } } as const;
 
+test('a stored review line whose builder is not an object is dropped by itself, not with the whole file', (t) => {
+  const dir = home(t);
+  fs.mkdirSync(dir, { recursive: true });
+  const bad = [{ role: 'review', job: 'rv-1', of: null }, { role: 'review', job: 'rv-2', of: 'model-b' }, { role: 'review', job: 'rv-3' }, { job: 'cx-1' }] as unknown as Partial<Evidence>[];
+  fs.writeFileSync(notesFile(dir), JSON.stringify(fixture(bad)));
+  assert.deepEqual(loadNotes(dir).models['model-a'].evidence.map((e) => e.job), ['rv-3', 'cx-1']);
+});
+
+test('a review line that names no builder is an audit, and its reviewer\'s rating of the code counts for no one', (t) => {
+  const dir = home(t);
+  addEvidence(dir, { ...input, model: 'model-b', job: 'cx-1' });
+  const before = scoreAll(loadNotes(dir)).find((score) => score.model === 'model-b')!;
+  const { evidence } = addEvidence(dir, { ...input, model: 'model-r', agent: 'antigravity', job: 'rv-1', role: 'review', findings: high });
+  assert.equal(evidence.of, undefined);
+  // The reviewer rated what it read; an audit read no one job's work.
+  addRating(dir, { by: 'antigravity', byModel: 'model-r', byJob: 'rv-1', items: { correctness: 1 }, fact: 'Two holes.' }, WORKER_ITEMS.review);
+  const notes = loadNotes(dir);
+  assert.equal(notes.models['model-r'].evidence.length, 1, 'the line survives a reload');
+  const scores = scoreAll(notes);
+  assert.deepEqual(scores.find((score) => score.model === 'model-b')!.items, before.items);
+  assert.equal(scores.find((score) => score.model === 'model-r')!.reviewSamples, 1);
+  assert.match(renderNotes(scores, notes), /rv-1 \(audit, review, medium\)/);
+});
+
 test('a review line scores its reviewer on the share of its finding load the lead accepted', () => {
   // One accepted high against the start of 0.6 with the weight of 0.5: (0.35 + 0.3) / (0.35 + 0.5).
   const kept = scoreAll(fixture([{ ...review, findings: high }]))[0];
@@ -473,7 +497,7 @@ test('the lead rates only a job\'s work, with the items of the line\'s role, and
   const dir = home(t);
   assert.throws(() => addEvidence(dir, { ...input, rating: { correctness: 4 } }), /only for a job's work/);
   assert.throws(() => addEvidence(dir, { ...input, job: 'cx-1', rating: { findings: 4 } }), /correctness, brief, report for build/);
-  assert.throws(() => addEvidence(dir, { ...input, job: 'rv-1', role: 'review' }), /of \(the work the review covered/);
+  assert.throws(() => addEvidence(dir, { ...input, job: 'rv-1', role: 'review', of: { model: ' ' } }), /of \(the work the review covered/);
   assert.throws(() => addEvidence(dir, { ...input, of: { model: 'model-b' } }), /only for a review line/);
   const { evidence } = addEvidence(dir, { ...input, job: 'rv-1', role: 'review', of: { model: 'model-b' }, rating: { findings: 5 }, declined: high });
   assert.deepEqual([evidence.of, evidence.rating], [{ model: 'model-b' }, { findings: 5 }]);

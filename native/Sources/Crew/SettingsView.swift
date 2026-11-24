@@ -95,6 +95,7 @@ struct CrewSettingsView: View {
         }
         .frame(minWidth: WorkspaceStyle.settingsMinSize.width, idealWidth: WorkspaceStyle.settingsSize.width, minHeight: WorkspaceStyle.settingsMinSize.height, idealHeight: WorkspaceStyle.settingsSize.height)
         .task { if !model.loaded && !model.loading { await model.load(scope: model.scope) } }
+        .onChange(of: store.state.editableRoleSettings) { _, table in model.adopt(roleSettings: table) }
     }
     /// A daemon without presets, model notes, or the language setting has no page for them.
     private func available(_ pane: SettingsPane) -> Bool {
@@ -243,7 +244,7 @@ struct CrewSettingsView: View {
             }
         } footer: {
             VStack(alignment: .leading, spacing: Space.ml) {
-                if let error = updater.error { ErrorLabel(message: error).settingsFootnote() }
+                if let error = updater.error ?? updater.installError { ErrorLabel(message: error).settingsFootnote() }
                 // The note and the action share one line, so the action is not left between the list and a note.
                 HStack(spacing: Space.l) {
                     Text(updater.phase == .unsupported

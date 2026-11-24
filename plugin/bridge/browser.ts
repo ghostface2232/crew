@@ -76,19 +76,36 @@ async function freePort(): Promise<number> {
 const live = new Set<ChildProcess>();
 let hooked = false;
 
+/** What a start fills in as it goes, and a stop reads: the process once there is one. */
+type Starting = { child?: ChildProcess; stopped?: boolean };
+type Options = { cwd: string; writable: string[]; unreadable: string[]; tmp: string };
+
 /** One server per job, for the turn it was asked for in. */
 export class BrowserServers {
-  private servers = new Map<string, { child: ChildProcess; endpoint: string; cwd: string }>();
+  private servers = new Map<string, Starting & { endpoint: Promise<string>; cwd: string }>();
 
-  async start(id: string, options: { cwd: string; writable: string[]; unreadable: string[]; tmp: string }): Promise<string> {
+  async start(id: string, options: Options): Promise<string> {
     // Codex's Windows sandbox lets Chromium start (checked 2026-11-16 with codex-cli 0.166), so only macOS needs this.
     if (process.platform !== 'darwin') throw new Error('Start the browser yourself, headless: on this system it starts inside your sandbox.');
     const running = this.servers.get(id);
-    if (running && running.cwd === options.cwd && running.child.exitCode === null) return running.endpoint;
+    if (running && running.cwd === options.cwd && (!running.child || (running.child.exitCode === null && running.child.signalCode === null))) return running.endpoint;
     this.stop(id);
     const cli = playwrightCli(options.cwd);
     if (!cli) throw new Error(`No Playwright in ${options.cwd}. Install it there (npm i -D playwright), then ask again.`);
+    // Kept from before the first wait, so a second call for the job shares this start and a stop reaches it.
+    const starting: Starting = {};
+    const server = Object.assign(starting, { endpoint: this.launch(starting, cli, options), cwd: options.cwd });
+    this.servers.set(id, server);
+    // A start that failed is forgotten, so the next call tries again.
+    server.endpoint.catch(() => {
+      if (this.servers.get(id) === server) this.servers.delete(id);
+    });
+    return server.endpoint;
+  }
+
+  private async launch(starting: Starting, cli: string, options: Options): Promise<string> {
     const port = await freePort();
+    if (starting.stopped) throw new Error('The browser server was stopped while it started.');
     // The path is a secret, so another local process cannot drive the job's browser.
     const key = randomBytes(12).toString('hex');
     fs.mkdirSync(options.tmp, { recursive: true });
@@ -97,6 +114,7 @@ export class BrowserServers {
       env: { ...process.env, TMPDIR: options.tmp },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+    starting.child = child;
     live.add(child);
     child.on('exit', () => live.delete(child));
     if (!hooked) {
@@ -126,13 +144,15 @@ export class BrowserServers {
       child.on('error', fail);
       child.on('exit', (code) => fail(new Error(`The browser server exited (${code}).`)));
     });
-    this.servers.set(id, { child, endpoint, cwd: options.cwd });
     return endpoint;
   }
 
   stop(id: string): void {
-    const child = this.servers.get(id)?.child;
+    const server = this.servers.get(id);
     this.servers.delete(id);
+    if (!server) return;
+    server.stopped = true;
+    const child = server.child;
     if (!child) return;
     child.kill();
     // The server waits on connected clients before it closes; a turn's end does not.

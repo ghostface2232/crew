@@ -7,7 +7,7 @@ import type { DeliveryState, News } from './delivery.ts';
 import type { Pulls } from './pulls.ts';
 import { runCheck } from './check.ts';
 import type { CheckResult } from './check.ts';
-import { assignHint, canonicalPath, defaultHolder, disabledAgents, effectiveRole, isRole, LEAD, LEDGER_ASIDE, MAX_DEBATE_ROUNDS, daemonPort, nodeEnv, roleInfo, ROLES, runsCommands, WORKERS } from './config.ts';
+import { assignHint, canonicalPath, defaultHolder, disabledAgents, effectiveRole, isRole, LEAD, LEDGER_ASIDE, MAX_DEBATE_ROUNDS, daemonPort, nodeEnv, roleInfo, ROLES, runsCommands, WORKERS, workerInfo } from './config.ts';
 import type { Config, JobKind, PresetName, Role, WorkerAgent } from './config.ts';
 import { attached, untrackedPaths, carryUncommitted, changesSince, commitAll, commitChanges, copyIncluded, createWorktree, currentBranch, dirtyCount, git, mergeInto, isInside, NO_HOOKS, NO_SUBMODULES, projectRoot, realpath, removeDirectory, removeEmptyLeftover, removeEmptySlot, removeWorktree, repoRoot, revertCommit, revertsSince, reviewDiff, WorktreeCleanupError } from './git.ts';
 import { collectGarbage } from './gc.ts';
@@ -59,7 +59,7 @@ export interface JobSpec {
   /** Whose work it is, and so which agent takes it; see resolveRole. */
   role?: Role;
   /** One of the role's holders, picked by the lead for this job; its default holder when absent. */
-  agent?: WorkerAgent;
+  agent?: Agent;
   /** The preset the job runs under: its mission's, else the global one. Set by the daemon, never by a caller. */
   preset?: PresetName | null;
   cwd: string;
@@ -191,7 +191,7 @@ export interface Job {
   role?: Role;
   /** The preset the job's model and effort were picked under, kept for its follow-up turns. */
   preset?: PresetName | null;
-  agent: WorkerAgent;
+  agent: Agent;
   title: string;
   state: JobState;
   /** What the worker is doing right now; overwritten freely, not logged. */
@@ -473,8 +473,8 @@ export function resolveRole(spec: JobSpec): Role {
  * configured (role, preset, or the agent's own setting in config.json), and last the default tier. Effort differs:
  * a role's or preset's effort holds over a named tier's.
  */
-function pickModel(agent: WorkerAgent, spec: JobSpec, role: { model?: string; effort?: string; ownModel?: boolean }, config: Config, preset: PresetName | null): { model?: string; effort?: string; tier?: Tier; agentDefault?: boolean } {
-  const configured = { model: role.model ?? config[agent].model, effort: role.effort ?? (agent === 'codex' ? config.codex.effort : undefined) };
+function pickModel(agent: Agent, spec: JobSpec, role: { model?: string; effort?: string; ownModel?: boolean }, config: Config, preset: PresetName | null): { model?: string; effort?: string; tier?: Tier; agentDefault?: boolean } {
+  const configured = { model: role.model ?? config[agent].model, effort: role.effort ?? (agent === 'antigravity' ? undefined : config[agent].effort) };
   const cap = preset ? config.presets[preset].maxTier : undefined;
   // A family name passed as the model is that family's tier, so it resolves, caps and sets effort like one.
   const family = spec.model ? familyTier(agent, spec.model) : undefined;
@@ -545,12 +545,13 @@ export class Jobs {
   private readConfig: () => Config;
   /** Settings as of startup, for timers that must not fail on a config edit. */
   private settings: Config;
-  private adapters: Record<WorkerAgent, Adapter>;
+  /** Claude's only where the daemon runs Claude workers; a test may leave it out. */
+  private adapters: Record<WorkerAgent, Adapter> & { claude?: Adapter };
   private hooks: JobsHooks;
   private platform: NodeJS.Platform;
 
   /** `config` is called again for each new job, so role assignments can change without a restart. */
-  constructor(home: string, config: () => Config, adapters: Record<WorkerAgent, Adapter>, hooks: JobsHooks, platform: NodeJS.Platform = process.platform) {
+  constructor(home: string, config: () => Config, adapters: Record<WorkerAgent, Adapter> & { claude?: Adapter }, hooks: JobsHooks, platform: NodeJS.Platform = process.platform) {
     this.home = home;
     this.readConfig = config;
     this.settings = config();
@@ -642,12 +643,14 @@ export class Jobs {
     // Named no holder, the job goes to the role's first worker.
     const picked = spec.agent ?? defaultHolder(roleName, config.roles[roleName], disabledAgents(config));
     if (!holders.includes(picked)) throw new Error(`${spec.agent} does not hold ${roleName}; its holders are: ${holders.join(', ')}. Pick one of them. ${assignHint(roleName)}`);
-    if (picked === LEAD) throw new Error(`${roleName} is held by Claude, which runs no worker: start it from a lead session, which does the work itself or in a subagent.`);
-    const role = effectiveRole(config, roleName, preset, picked);
+    // Claude runs as a worker only for a Codex lead that names it: by default a role Claude holds is the lead's own work.
+    const claudeWorker = picked === LEAD && spec.agent === LEAD && spec.lead !== undefined && this.delivery.hostOf(spec.lead) === 'codex';
+    if (picked === LEAD && !claudeWorker) throw new Error(`${roleName} is held by Claude, which runs no worker here: start it from a lead session, which does the work itself or in a subagent. A Codex lead can name claude to start a Claude worker.`);
+    const role: { agent: Agent; model?: string; effort?: string; ownModel?: boolean } = claudeWorker ? { agent: LEAD } : effectiveRole(config, roleName, preset, picked as WorkerAgent);
     const { agent } = role;
     if (spec.runsApp && spec.kind === 'polish') throw new Error('A polish job cannot run the app: an editor only changes wording. Drop runs_app.');
-    if (spec.runsApp && spec.kind === 'review' && !WORKERS[agent].reviewerRunsGit) {
-      throw new Error(`${roleName} is assigned to ${WORKERS[agent].name}, which cannot run commands as a reviewer, so it cannot run the app. Assign verify to an agent that can in the settings, or run the app in your own review.`);
+    if (spec.runsApp && spec.kind === 'review' && !workerInfo(agent).reviewerRunsGit) {
+      throw new Error(`${roleName} is assigned to ${workerInfo(agent).name}, which cannot run commands as a reviewer, so it cannot run the app. Assign verify to an agent that can in the settings, or run the app in your own review.`);
     }
     if (agent === 'antigravity' && !config.antigravity.enabled) {
       throw new Error(`${roleName} is assigned to Antigravity, which is disabled in ~/.crew/config.json (antigravity.enabled).`);
@@ -693,7 +696,7 @@ export class Jobs {
     // The failure path below removes the record under this id as its own, so it must be no other job's.
     let id: string;
     do {
-      id = `${WORKERS[agent].idPrefix}-${randomBytes(3).toString('hex')}`;
+      id = `${workerInfo(agent).idPrefix}-${randomBytes(3).toString('hex')}`;
     } while (this.jobs.has(id));
     const repo = await repoRoot(spec.cwd);
     // Read from the main working tree even when the job starts inside a worktree, so an uncommitted edit applies to the next job.
@@ -704,7 +707,7 @@ export class Jobs {
     const requestedPlugins = spec.plugins ?? [];
     const plugins = agent === 'codex' && !spec.ask && (spec.kind === 'delegate' || (spec.kind === 'review' && spec.runsApp))
       ? [...new Set([...config.codex.plugins, ...(spec.runsApp ? config.codex.appPlugins : []), ...(spec.plugins ?? [])])] : [];
-    if (spec.plugins?.length && agent !== 'codex') notes.push(`${WORKERS[agent].name} has no plugins to turn on, so the job runs without: ${spec.plugins.join(', ')}.`);
+    if (spec.plugins?.length && agent !== 'codex') notes.push(`${workerInfo(agent).name} has no plugins to turn on, so the job runs without: ${spec.plugins.join(', ')}.`);
     spec.plugins = plugins;
     let worktree: Worktree | null = null;
     let cwd = spec.cwd;
@@ -743,17 +746,17 @@ export class Jobs {
       }
 
       let diffFile: string | null = null;
-      const reviewed = spec.kind === 'review' && !WORKERS[agent].reviewerRunsGit ? spec.review!.target : undefined;
+      const reviewed = spec.kind === 'review' && !workerInfo(agent).reviewerRunsGit ? spec.review!.target : undefined;
       if (reviewed?.type === 'files') {
-        notes.push(`${WORKERS[agent].name} cannot run commands as a reviewer: it read the files and could not run tests or checks.`);
+        notes.push(`${workerInfo(agent).name} cannot run commands as a reviewer: it read the files and could not run tests or checks.`);
       } else if (reviewed) {
-        if (!repo) throw new Error(`review is assigned to ${WORKERS[agent].name}, which has to be handed the diff, and ${spec.cwd} is not inside a git repository.`);
+        if (!repo) throw new Error(`review is assigned to ${workerInfo(agent).name}, which has to be handed the diff, and ${spec.cwd} is not inside a git repository.`);
         diffFile = this.diffFile(id);
         fs.mkdirSync(path.dirname(diffFile), { recursive: true });
         fs.writeFileSync(diffFile, await reviewDiff(repo, reviewed));
-        notes.push(`${WORKERS[agent].name} cannot run commands as a reviewer: it was given the diff as a file and could not run tests or checks.`);
+        notes.push(`${workerInfo(agent).name} cannot run commands as a reviewer: it was given the diff as a file and could not run tests or checks.`);
       }
-      if (spec.review?.mode === 'standard' && agent !== 'codex') notes.push(`The standard review mode is Codex's own; ${WORKERS[agent].name} ran the adversarial review instead.`);
+      if (spec.review?.mode === 'standard' && agent !== 'codex') notes.push(`The standard review mode is Codex's own; ${workerInfo(agent).name} ran the adversarial review instead.`);
       const scratch = agent === 'codex' ? this.scratchDir(id) : undefined;
       if (scratch) fs.mkdirSync(scratch, { recursive: true });
       const evidenceDir = this.evidenceDir(id);
@@ -808,7 +811,7 @@ export class Jobs {
         reviewTarget: spec.review?.target,
         targets: spec.targets ?? [],
         check: spec.check?.trim() || undefined,
-        ...pickModel(agent, spec, { ...role, ownModel: Boolean(config.roles[roleName][agent]?.model) }, config, preset),
+        ...pickModel(agent, spec, { ...role, ownModel: agent !== LEAD && Boolean(config.roles[roleName][agent]?.model) }, config, preset),
         sessionId: null,
         createdAt: now,
         activeAt: now,
@@ -834,7 +837,7 @@ export class Jobs {
 
       const ctl = this.ctl(job);
       // Session setup can take seconds; the caller gets the job id right away and follows via wait.
-      this.adapters[agent].start(ctl).catch((err) => {
+      this.adapter(agent).start(ctl).catch((err) => {
         // As in reply: a start that fails after a cancel and a follow-up must not end that follow-up.
         if (job.turns === 1) ctl.fail(String(err?.message ?? err));
       });
@@ -864,7 +867,7 @@ export class Jobs {
     if (this.preparingReviews.has(id)) throw new Error(`Job ${id} is preparing its review diff. Wait for it to finish.`);
     if (this.finalizing.has(id)) throw new Error(`Job ${id} is collecting its result. Wait for it to finish.`);
     const ctl = this.ctl(job);
-    const adapter = this.adapters[job.agent];
+    const adapter = this.adapter(job.agent);
     const attachments = checkAttachments(input.attachments);
     if (input.request_id !== undefined && input.request_id !== job.waiting?.id) {
       throw new Error('That request is no longer pending. Check the current job before answering.');
@@ -954,7 +957,7 @@ export class Jobs {
       if (!isTerminal(job)) return job;
     }
     // An audit of files has no diff to hand over again.
-    const refreshDiff = job.kind === 'review' && !WORKERS[job.agent].reviewerRunsGit && job.reviewTarget?.type !== 'files';
+    const refreshDiff = job.kind === 'review' && !workerInfo(job.agent).reviewerRunsGit && job.reviewTarget?.type !== 'files';
     const diffTarget = job.reviewTarget?.type === 'files' ? undefined : job.reviewTarget;
     if (refreshDiff && (!diffTarget || !job.repo)) {
       throw new Error(`Job ${id} has no saved review target or repository. Start a new review instead.`);
@@ -1151,7 +1154,7 @@ export class Jobs {
     const ctl = this.ctl(job);
     this.cancelling.add(id);
     try {
-      await this.adapters[job.agent].cancel(ctl);
+      await this.adapter(job.agent).cancel(ctl);
       ctl.cancelled();
     } finally {
       this.cancelling.delete(id);
@@ -1161,7 +1164,7 @@ export class Jobs {
 
   private async removeJobWorktree(job: Job): Promise<void> {
     try {
-      await this.adapters[job.agent].release?.(this.ctl(job));
+      await this.adapter(job.agent).release?.(this.ctl(job));
     } catch (err) {
       job.notes.push(`Could not release the worker session: ${(err as Error).message}`);
     }
@@ -1437,6 +1440,12 @@ export class Jobs {
     });
   }
 
+  private adapter(agent: Agent): Adapter {
+    const adapter = this.adapters[agent];
+    if (!adapter) throw new Error(`${workerInfo(agent).name} runs no workers here.`);
+    return adapter;
+  }
+
   private ctl(job: Job): JobCtl {
     const live = () => !isTerminal(job);
     let token = this.workerTokens.get(job.id);
@@ -1659,7 +1668,7 @@ export class Jobs {
       if (job.state !== 'running' || job.stalled || Date.now() - job.activeAt < limit) continue;
       job.stalled = true;
       const detail = `no activity for ${Math.round(limit / 60_000)} min (last: ${job.phase})`;
-      const adapter = this.adapters[job.agent];
+      const adapter = this.adapter(job.agent);
       if (!adapter.probe) {
         this.event(job, 'stalled', detail, { kind: 'stalled', reason: detail });
         continue;

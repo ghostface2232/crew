@@ -13,7 +13,7 @@ import type { ReactNode } from 'react';
 import type { BoardJob, CrewEvent, Snapshot } from './types.ts';
 import { actions, drafts, request } from './api.ts';
 import { board, mergeEvents } from './store.ts';
-import { elapsed, evidenceTurn, jobLabel, jobRole, MAX_COMPARED, NAMES, orderEvidence, projectOf, roleLabel } from './model.ts';
+import { elapsed, evidenceTurn, jobLabel, jobRole, MAX_COMPARED, NAMES, orderEvidence, projectOf, roleLabel, sessionAgent } from './model.ts';
 import { ActionStatus, CloseButton, CopyButton, CopyMenu, Dialog, Icon, Chip, useAction, useDraft, Elapsed, useStableItems } from './ui.tsx';
 import { ReportText as RenderReport } from './Report.ts';
 import { debatePoints, stanceCounts } from './debate.ts';
@@ -674,8 +674,8 @@ const JobDetails = memo(function JobDetails({ id, current, streamLog, agents, ro
             </Section>
           )}
           <Footer status={<ActionStatus actionKey={cancelKey} />}>
-            {job.sessionId && agents[job.agent] && !job.capabilities?.confined && (
-              <CopyButton text={`${agents[job.agent].resume} ${job.sessionId}`} short={t('Resume')}>{t('Resume Command')}</CopyButton>
+            {job.sessionId && (job.agent === 'claude' || agents[job.agent]) && !job.capabilities?.confined && (
+              <CopyButton text={`${job.agent === 'claude' ? 'claude --resume' : agents[job.agent].resume} ${job.sessionId}`} short={t('Resume')}>{t('Resume Command')}</CopyButton>
             )}
             {job.endedAt == null && (
               <button
@@ -874,14 +874,14 @@ export const SessionDrawer = memo(function SessionDrawer({ id, state, close }: {
         <>
           {session.state === 'waiting' && (
             <div className="card answer-card answer">
-              <p className="headline selectable">{session.waitingFor ?? t('Claude needs your input.')}</p>
+              <p className="headline selectable">{session.waitingFor ?? t('{agent} needs your input.', { agent: NAMES[sessionAgent(session)] })}</p>
               <ClaudeAsk session={session} />
-              {!session.desktopId && <p className="callout secondary">{t('Answer in Claude.')}</p>}
+              {!session.desktopId && <p className="callout secondary">{t('Answer in {agent}.', { agent: NAMES[sessionAgent(session)] })}</p>}
             </div>
           )}
           <Facts
             facts={[
-              [t('Agent'), t('Claude · Lead')],
+              [t('Agent'), t('{agent} · Lead', { agent: NAMES[sessionAgent(session)] })],
               [t('Project'), projectOf(session)],
               ...(session.cwd !== projectOf(session) ? [[t('Directory'), session.cwd] as [string, string]] : []),
               [t('Started'), <Elapsed start={session.startedAt} suffix={t(' ago')} />],
@@ -909,7 +909,7 @@ export const SessionDrawer = memo(function SessionDrawer({ id, state, close }: {
           )}
           <Footer>
             <OpenInClaude session={session} />
-            <CopyButton text={`claude --resume ${session.id}`} short={t('Resume')}>{t('Resume Command')}</CopyButton>
+            <CopyButton text={session.host === 'codex' ? `codex resume ${session.id}` : `claude --resume ${session.id}`} short={t('Resume')}>{t('Resume Command')}</CopyButton>
           </Footer>
         </>
       )}

@@ -32,6 +32,8 @@ export interface Health {
   root?: string;
   pid: number;
   active: number;
+  /** Started by a client whose own environment was filtered, so its workers miss the user's variables. */
+  partialEnv?: boolean;
 }
 
 export async function health(): Promise<Health | null> {
@@ -54,6 +56,12 @@ async function waitFor(check: () => Promise<boolean>, ms: number): Promise<boole
 }
 
 let ensuring: Promise<void> | null = null;
+/** This process got a filtered environment from its host (a Codex MCP server), so a daemon it starts says so. */
+let partial = false;
+
+export function partialEnvironment(): void {
+  partial = true;
+}
 
 /** Starts the daemon if it is not running, and replaces an idle one that runs code other than what is installed. */
 export function ensureDaemon(): Promise<void> {
@@ -78,8 +86,11 @@ export function isNewer(candidate: string, current: string): boolean {
  * Whether a running daemon should be replaced by one spawned from `root`.
  * Never while jobs run: a restart would fail them.
  */
-export function shouldReplace(running: Health, disk: { version: string; build: string }, root: string): boolean {
+export function shouldReplace(running: Health, disk: { version: string; build: string }, root: string, partialClient = false): boolean {
   if (running.active !== 0) return false;
+  // A daemon started with a filtered environment gives way to a client with the whole one, from any install not older:
+  // a newer partial client and an older whole one would otherwise replace each other in turn.
+  if (running.partialEnv && !partialClient && !isNewer(running.version, disk.version)) return true;
   // Another install owns the daemon. Only a newer version takes over, even with the same build: a release may change
   // only the version, and an older copy's daemon would otherwise keep the newer install from registering. The older
   // install never takes over from the newer, so two installs do not take turns replacing each other's daemon.
@@ -134,7 +145,7 @@ async function startDaemon(): Promise<void> {
   if (running) {
     // Compare with the code on disk, not the code this process loaded: a long-lived session
     // still running old code must not keep restarting a daemon that is already current.
-    if (!shouldReplace(running, installed(), PLUGIN_ROOT)) return;
+    if (!shouldReplace(running, installed(), PLUGIN_ROOT, partial)) return;
     // A job may have started since the health check, or the daemon may reject our token.
     // Either way, leave the running daemon alone; a token mismatch is reported on the next call.
     try {
@@ -154,7 +165,7 @@ async function startDaemon(): Promise<void> {
     detached: true,
     windowsHide: true,
     stdio: ['ignore', out, out],
-    env: { ...agentEnv(), ...nodeEnv() },
+    env: { ...agentEnv(), ...nodeEnv(), ...(partial ? { CREW_PARTIAL_ENV: '1' } : {}) },
   });
   let spawnError: Error | undefined;
   child.on('error', (error) => { spawnError = error; });

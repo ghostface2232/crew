@@ -17,6 +17,10 @@ Codex approval requests go first to its automatic reviewer (`codex.approvalsRevi
 
 The user answers Antigravity approvals one at a time and sees the full request fields and workspace. Grants use only `allow_once`. Crew excludes `allow_always` and keeps sessions in `default` mode because `accept-edits` and `auto` skip per-edit path checks ([Antigravity's own settings](sandbox.md#antigravitys-own-settings)). Denials use `reject_once` when offered. Cancelling the job, ending the turn, or exiting the server cancels open requests.
 
+### Claude worker approvals
+
+A Claude worker's permission prompts reach Crew as stream-json `can_use_tool` control requests (`--permission-prompt-tool stdio`, checked on Claude Code 2.1.328). Crew allows its own read-only worker MCP tools, edits in the job's evidence directory, and, in a writable job, edits inside the job's folder outside `.git`. It refuses other edits, and brings every other request, such as a command that is not read-only, to the user as an approval. There is no automatic reviewer: Claude Code's automatic mode would decide actions Crew never sees. *Allow for This Job* covers the same command in the same folder.
+
 ### Allow for This Job
 
 - *Codex plugin tools:* Requests matching `Allow <who> to use "<target>"?` (such as Computer Use per-app prompts) offer *Allow for This Job* (`allow_for_job`) beside Approve and Deny. The grant uses the MCP server and message as its only keys. It stays in memory for the rest of that job, including its sub-agents and follow-ups, and expires on daemon restart. A different app, server, or job needs its own grant. Matching queued and later requests auto-approve and log to job activity.
@@ -34,7 +38,7 @@ Set `{"codex": {"approvalsReviewer": "user"}}` in `~/.crew/config.json` to send 
 
 When `auto_review` denies or times out (`item/autoApprovalReview/completed`), the bridge records action fields (program/arguments, `cwd`, and MCP input recovered from the started item by `targetItemId`), omits environment fields, and caps free-form input at 4,000 characters, reasons at 2,000, and descriptions at 8,000. Missing reasons are labeled missing, and the bridge quotes generic messages as received. The lead checks whether the user's conversation request covers the refused action.
 
-1. If it does, the lead calls `reply` with `approved_by_user` quoting the user's words. The bridge sends the user's recent recorded prompts plus the quote for one more automatic review.
+1. If it does, the lead calls `reply` with `approved_by_user` quoting the user's words. The bridge sends the user's recent recorded prompts plus the quote for one more automatic review. The lead session's hooks record those prompts, in Claude Code and in Codex; a Codex sub-agent's task and Crew's own queued note are not recorded as the user's (`claude.ts`).
 2. If refused again on that retry turn, the same call runs the next turn with `approvalsReviewer: user` so the user decides, then returns to `auto_review` on later turns. “Again” means the preceding turn was itself a retry. An unrelated later refusal starts over with `auto_review`.
 3. If the user's request does not cover it, the lead asks the user.
 

@@ -333,14 +333,14 @@ struct CrewSettingsView: View {
                 .frame(minHeight: Self.editorHeight)
                 .accessibilityLabel("Shared instructions").disabled(!model.loaded || model.scope != pane.scope)
         } header: {
-            Text(pane == .instructions ? String(localized: "Given to every agent with its next job, in every project, and to Claude sessions when they start.")
+            Text(pane == .instructions ? String(localized: "Given to every agent with its next job, in every project, and to lead sessions when they start.")
                  : String(localized: "Given to every agent working in this project, after the instructions for every project."))
                 .settingsFootnote().textCase(nil)
         } footer: {
             VStack(alignment: .leading, spacing: Space.s) {
                 saveRow
                 if model.text.count > 9000 {
-                    Label("Over 9,000 characters, so Claude sessions are pointed to them rather than given the full text.", systemImage: "info.circle").settingsFootnote()
+                    Label("Over 9,000 characters, so lead sessions are pointed to them rather than given the full text.", systemImage: "info.circle").settingsFootnote()
                 }
             }
         }

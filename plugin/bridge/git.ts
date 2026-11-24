@@ -4,6 +4,7 @@ import { constants, existsSync, lstatSync, readlinkSync, realpathSync } from 'no
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { JOB_ID } from './config.ts';
 import type { ReviewTarget } from './jobs.ts';
 import { clip } from './text.ts';
 
@@ -591,7 +592,7 @@ async function worktreeLeftovers(root: string, wt: Worktree, admin: string | nul
 
 export async function removeWorktree(root: string, wt: Worktree, id: string, home: string, platform: NodeJS.Platform = process.platform): Promise<void> {
   const worktrees = path.join(home, 'worktrees');
-  if (!/^(cx|ag)-[0-9a-f]{6}$/.test(id) || wt.branch !== `crew-${id}`
+  if (!new RegExp(`^${JOB_ID}$`).test(id) || wt.branch !== `crew-${id}`
       // A job created before worktrees moved into their slot has the slot itself as its worktree.
       || ![worktreePath(root, id, home), worktreeSlot(root, id, home)].some((known) => path.resolve(wt.path) === path.resolve(known))
       || !isInside(worktrees, wt.path) || !isInside(home, worktrees)) {

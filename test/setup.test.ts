@@ -329,3 +329,46 @@ test('a job ledger that was set aside shows in the checklist until the file is g
   for (const name of ['jobs.json.unreadable-1', 'jobs.json.unreadable-2']) fs.rmSync(path.join(dir, name));
   assert.equal(ledgerItem(dir), null);
 });
+
+test('the Codex hooks item asks app-server hooks/list and is trusted only when Codex says so', async () => {
+  const { codexHooksItem } = await import('../plugin/bridge/setup.ts');
+  const { hookKeys } = await import('../plugin/bridge/codex-plugin.ts');
+  const keys = hookKeys(JSON.parse(fs.readFileSync('plugin/hooks/codex.json', 'utf8')), 'hooks/codex.json');
+  const dir = fs.mkdtempSync(path.join(home, 'codex-hooks-'));
+  /** A fake `codex app-server` answering hooks/list with `reply` (a JS expression over `keys`), or failing as `mode` says. */
+  const fake = (name: string, reply: string, mode = '') => {
+    const bin = path.join(dir, name);
+    writeFakeBin(bin, `
+      if (process.argv[2] !== 'app-server') process.exit(2);
+      const keys = ${JSON.stringify(keys)};
+      if (${JSON.stringify(mode)} === 'exit') process.exit(1);
+      require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
+        const msg = JSON.parse(line);
+        if (msg.id === undefined) return;
+        if (msg.method === 'initialize') return console.log(JSON.stringify({ id: msg.id, result: {} }));
+        if (msg.method !== 'hooks/list') return;
+        if (${JSON.stringify(mode)} === 'error') return console.log(JSON.stringify({ id: msg.id, error: { code: -32601, message: 'method not found' } }));
+        console.log(JSON.stringify({ id: msg.id, result: { data: [{ cwd: msg.params.cwds[0], hooks: ${reply} }] } }));
+      });`);
+    return bin;
+  };
+  const hooks = (status: string) => `keys.map((key, i) => ({ key, pluginId: 'crew@crew', trustStatus: i === 0 ? ${JSON.stringify(status)} : 'trusted' }))`;
+
+  const trusted = await codexHooksItem(fake('trusted', hooks('trusted')));
+  assert.deepEqual([trusted.ok, trusted.detail], [true, 'Trusted.']);
+  const modified = await codexHooksItem(fake('modified', hooks('modified')));
+  assert.equal(modified.ok, false);
+  assert.match(modified.detail, /^Changed by an update since you trusted them, so Codex asks again\. .*`\/hooks`/);
+  const untrusted = await codexHooksItem(fake('untrusted', hooks('untrusted')));
+  assert.equal(untrusted.ok, false);
+  assert.match(untrusted.detail, /^Codex runs its hooks only once trusted/);
+  for (const [name, mode, reason] of [['refused', 'error', /method not found/], ['gone', 'exit', /exited/]] as const) {
+    const unknown = await codexHooksItem(fake(name, '[]', mode));
+    assert.equal(unknown.ok, false, name);
+    assert.match(unknown.detail, /^Could not ask Codex whether they are trusted/, name);
+    assert.match(unknown.detail, reason, name);
+  }
+  const missing = await codexHooksItem(path.join(dir, 'no-such-codex'));
+  assert.equal(missing.ok, false);
+  assert.match(missing.detail, /^Could not ask Codex/);
+});

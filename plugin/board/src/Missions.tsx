@@ -10,7 +10,7 @@ import type { BoardJob, BoardPull, ClaudeSession, Mission, PresetName, Snapshot 
 import { actions, request } from './api.ts';
 import {
   agentSummary, elapsed, jobLabel, jobRole, missionJobStep, missionLooksFinished, missionStep, missionStopPosition,
-  missionStops, NAMES, pullIsStale, pullStatuses, roleLabel,
+  missionStops, NAMES, pullIsStale, pullStatuses, roleLabel, sessionAgent,
 } from './model.ts';
 import { ActionStatus, AgentMark, Chip, Collapse, Elapsed, Icon, Menu, StatusIcon, sameItems, useAction, useFade, useClock } from './ui.tsx';
 import { t, translated } from './i18n.ts';
@@ -137,7 +137,7 @@ export function SessionWorkflow({ run, agents }: { run: ClaudeSession['workflows
   );
 }
 
-/** A Claude session as a row like a job's, opening its own detail panel. */
+/** A lead session as a row like a job's, opening its own detail panel. */
 export const SessionRow = memo(function SessionRow({ session, selected, openSession }: { session: ClaudeSession; selected?: boolean; openSession: (id: string) => void }) {
   // The mark names the agent, so the detail line says only what the session is doing.
   const detail = [session.waitingFor ?? (session.state === 'idle' ? null : session.phase), session.inTool ? t('Running a tool') : null, agentSummary(session)]
@@ -150,10 +150,10 @@ export const SessionRow = memo(function SessionRow({ session, selected, openSess
       data-state={session.stalled ? 'stalled' : session.state}
       data-waiting={session.state === 'waiting' ? '' : undefined}
       aria-current={selected || undefined}
-      aria-description="Claude"
+      aria-description={NAMES[sessionAgent(session)]}
       onClick={() => openSession(session.id)}
     >
-      <span className="row-mark"><AgentMark agent="claude" size={16} /></span>
+      <span className="row-mark"><AgentMark agent={sessionAgent(session)} size={16} /></span>
       <span className="job-row-text">
         <b>{session.title}</b>
         {detail && <span key={detail} className="swap">{detail}</span>}

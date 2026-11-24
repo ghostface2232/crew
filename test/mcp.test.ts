@@ -267,7 +267,7 @@ test('polish advertises the shared model option and forwards it to the job', asy
   const modelProps = vm.runInNewContext(`(${source.match(/const modelProps = (\{[^]*?\n\});/)![1]})`, { TIERS });
   const schema = source.slice(source.indexOf("    name: 'polish',"), source.indexOf("    name: 'debate',"));
   const tool = vm.runInNewContext(`({${schema.slice(0, schema.lastIndexOf('\n  },'))}})`, {
-    holder: () => 'Antigravity', worktreeProps: {}, skillsProp: {}, common: {}, modelProps, agentProp: {},
+    holder: () => 'Antigravity', worktreeProps: {}, skillsProp: {}, common: {}, modelProps, agentProp: () => ({}),
   });
   assert.deepEqual(tool.inputSchema.properties.model, modelProps.model);
   assert.deepEqual([...tool.inputSchema.properties.tier.enum], [...TIERS]);
@@ -398,7 +398,7 @@ test('a role the lead holds starts no worker, and a pick outside the holders is 
   const code = source.slice(source.indexOf('/** What the lead does with a role it holds itself'), source.indexOf('async function callTool'));
   const roles = { review: { agents: ['codex', 'claude'] }, polish: { agents: ['claude'] } };
   const pick = vm.runInNewContext(`const holderName = (a) => a === 'claude' ? 'you, Claude' : a; const holder = (r, t) => t[r].agents.join(' or '); ${stripTypeScriptTypes(code)}; pickHolder`, {
-    roles, LEAD: 'claude', loadConfig: () => ({ roles, antigravity: { enabled: true } }), defaultHolder, disabledAgents, assignHint, selfReviewer: () => 'the crew:self-reviewer subagent',
+    roles, LEAD: 'claude', loadConfig: () => ({ roles, antigravity: { enabled: true } }), defaultHolder, disabledAgents, assignHint, selfReviewer: () => 'the crew:self-reviewer subagent', host: 'claude',
   });
   assert.deepEqual({ ...pick('review', undefined) }, { agent: 'codex' });
   assert.match(pick('review', 'claude').yours, /no worker was started\. Run the crew:self-reviewer subagent[^]*other holders: codex/);
@@ -447,7 +447,7 @@ test('the session instructions fit what Claude Code keeps of them', () => {
     assert.ok(instructions.length <= 4096, `${host}: ${instructions.length} characters`);
     for (const role of ROLE_INFO) assert.ok(instructions.includes(`\`${role.role}\``), role.role);
     assert.match(instructions, /The global one is "balanced"/);
-    assert.match(instructions, host === 'codex' ? /Claude cannot run as a worker yet[\s\S]*the crew:run skill/ : /Picking yourself \(`claude`\)[\s\S]*\/crew:run/);
+    assert.match(instructions, host === 'codex' ? /naming `claude` with `agent` starts a Claude worker[\s\S]*the crew:run skill/ : /Picking yourself \(`claude`\)[\s\S]*\/crew:run/);
   }
 });
 

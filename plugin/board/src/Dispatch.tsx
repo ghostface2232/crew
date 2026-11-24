@@ -70,7 +70,7 @@ export function Dispatch({
       if (!(intent === 'information' && target === 'global') && !cwd.trim())
         throw new Error(t('Enter a project directory first.'));
       if (intent !== 'information' && leadOnly)
-        throw new Error(t('Claude, the lead, holds this role: start it from a Claude session.'));
+        throw new Error(t('Claude, the lead, holds this role: start it from a Claude Code or Codex session.'));
       if (intent !== 'information' && !worker?.enabled)
         throw new Error(t('The assigned agent is unavailable. Choose an enabled agent in Settings.'));
       const allowed = targets

@@ -537,6 +537,17 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
         #expect(ask.questions?.first?.options == ["Tabs", "Single"])
         #expect(ask.tool == nil)
     }
+    @Test func codexSessionsAreCodexsAndHaveNoClaudeLink() throws {
+        var session = try fixture().claude[0]
+        #expect(session.agent == "claude")
+        #expect(session.resumeCommand == "claude --resume \(session.id)")
+        session.host = "codex"
+        session.desktopId = "local_e97eb8b4-b9ff-4551-b625-3c06c77253c7"
+        session = try JSONDecoder().decode(ClaudeSession.self, from: JSONEncoder().encode(session))
+        #expect(session.agent == "codex")
+        #expect(session.resumeCommand == "codex resume \(session.id)")
+        #expect(session.claudeURL == nil)
+    }
 }
 
 private final class MockProtocol: URLProtocol, @unchecked Sendable {

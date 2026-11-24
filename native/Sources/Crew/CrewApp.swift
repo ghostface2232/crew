@@ -565,7 +565,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         }
         for session in store.state.waitingSessions {
             live.insert(session.notificationKey)
-            notify(key: session.notificationKey, title: String(localized: "Claude needs your input"), body: session.waitingFor ?? session.title)
+            notify(key: session.notificationKey, title: String(localized: "\(agentName(session.agent)) needs your input"), body: session.waitingFor ?? session.title)
         }
         let expired = delivered.subtracting(live)
         // These are calls into the notification service; most updates expire nothing.

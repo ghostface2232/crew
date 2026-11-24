@@ -754,7 +754,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
                 <>
                   <p className={styles.footnote} id="instructions-hint">
                     {project === null
-                      ? t('Given to every agent with its next job, in every project, and to Claude sessions when they start.')
+                      ? t('Given to every agent with its next job, in every project, and to lead sessions when they start.')
                       : t('Given to every agent working in this project, after the instructions for every project.')}
                   </p>
                   <section className={styles.group}>
@@ -785,7 +785,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
                     {text.length > 9000 && (
                       <p className={`${styles.footnote} ${styles.note}`}>
                         <Icon icon={Info16Regular} />
-                        {t('Over 9,000 characters, so Claude sessions are pointed to them rather than given the full text.')}
+                        {t('Over 9,000 characters, so lead sessions are pointed to them rather than given the full text.')}
                       </p>
                     )}
                   </section>

@@ -87,6 +87,9 @@ export class CodexLeads {
   }
 }
 
+/** What note() queues, which then reaches the lead's hooks as a prompt the user did not type. */
+export const QUEUED_NOTE = /^Crew has news for [^.]*\. Call the Crew status tool to read it, then act on it\.$/;
+
 /** One line, free of the characters cmd.exe cannot pass on. */
 export function note(offer: Offer): string {
   const ids = [...new Set(offer.items.map((item) => item.jobId))];

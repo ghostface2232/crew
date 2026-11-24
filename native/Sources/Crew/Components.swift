@@ -477,7 +477,7 @@ struct JobRow: View {
     }
 }
 
-/// A Claude session as a row like a job's, opening the same detail panel.
+/// A lead session as a row like a job's, opening the same detail panel.
 struct SessionRow: View {
     let session: ClaudeSession
     var selected = false
@@ -489,7 +489,7 @@ struct SessionRow: View {
             .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
         Button(action: open) {
             HStack(spacing: Space.l) {
-                AgentMark(agent: "claude", size: MarkSize.row).frame(width: WorkspaceStyle.iconColumn)
+                AgentMark(agent: session.agent, size: MarkSize.row).frame(width: WorkspaceStyle.iconColumn)
                 VStack(alignment: .leading, spacing: Space.xs) {
                     Text(session.title).font(Typeface.bodyStrong).foregroundStyle(.primary).lineLimit(2)
                     // A new status line swaps in over the old one rather than cutting to it.
@@ -510,7 +510,7 @@ struct SessionRow: View {
             .background(selected ? Palette.selection : session.state == "waiting" ? Palette.attention(Palette.warning) : WorkspaceStyle.rowFill, in: RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius))
         }.buttonStyle(WorkspacePressStyle())
         .accessibilityElement(children: .combine)
-        .accessibilityValue("Claude")
+        .accessibilityValue(agentName(session.agent))
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }

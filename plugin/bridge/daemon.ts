@@ -9,6 +9,7 @@ import { StringDecoder } from 'node:string_decoder';
 import { boardAsset, BOARD_CSP } from './assets.ts';
 import { boardCredential, boardExpiry, ensureToken, evidenceSeal, sameToken, SESSION_COOKIE } from './auth.ts';
 import { antigravityAdapter } from './adapters/antigravity.ts';
+import { claudeAdapter } from './adapters/claude.ts';
 import { CodexAdapter } from './adapters/codex.ts';
 import { CodexLeads, codexQueue } from './codex-lead.ts';
 import { stopChecks } from './check.ts';
@@ -144,6 +145,9 @@ const TOKEN = ensureToken(HOME);
 const config = loadConfig();
 /** Fingerprint of the code this process loaded; clients compare it with what is on disk now. */
 const BUILD = installed().build;
+/** Started from a filtered environment (client.ts partialEnvironment); kept out of what the workers inherit. */
+const PARTIAL_ENV = process.env.CREW_PARTIAL_ENV === '1';
+delete process.env.CREW_PARTIAL_ENV;
 
 const streams = new Set<http.ServerResponse>();
 /**
@@ -216,6 +220,7 @@ function liveConfig(): Config {
 
 const codex = new CodexAdapter(config);
 const antigravity = antigravityAdapter(config);
+const claudeWorker = claudeAdapter(config);
 
 // Roles are read per job, so a change to config.json applies to the next one, and an invalid file fails
 // that job with the reason instead of silently running old roles. Adapters keep the settings they started with.
@@ -331,7 +336,7 @@ codex.onLimits = (limits) => {
  * running on would save an empty ledger over it.
  */
 function loadJobs(hooks: JobsHooks): Jobs {
-  const open = () => new Jobs(HOME, loadConfig, { codex, antigravity }, hooks);
+  const open = () => new Jobs(HOME, loadConfig, { codex, antigravity, claude: claudeWorker }, hooks);
   try {
     return open();
   } catch (err) {
@@ -387,8 +392,8 @@ fs.watchFile(path.join(HOME, 'config.json'), { interval: 2000 }, () => {
 
 const claude = new ClaudeSessions(config.stallSeconds, {
   onSession: (session, removed) => broadcast('claude', { session, removed: Boolean(removed) }),
-  onEvent: (session, kind, detail) => jobs.record('claude', session.id, kind, detail),
-  onAttention: (session, kind, detail) => notify('claude', kind, session.title, detail),
+  onEvent: (session, kind, detail) => jobs.record(session.host ?? 'claude', session.id, kind, detail),
+  onAttention: (session, kind, detail) => notify(session.host ?? 'claude', kind, session.title, detail),
 });
 
 function state() {
@@ -645,7 +650,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       fs.createReadStream(file).pipe(res);
       return undefined;
     }
-    if (pathname === '/api/health') return { name: 'crew', version: VERSION, build: BUILD, root: PLUGIN_ROOT, pid: process.pid, active: jobs.activeCount + mutatingPosts };
+    if (pathname === '/api/health') return { name: 'crew', version: VERSION, build: BUILD, root: PLUGIN_ROOT, pid: process.pid, active: jobs.activeCount + mutatingPosts, ...(PARTIAL_ENV ? { partialEnv: true } : {}) };
     if (pathname === '/api/state') return state();
     if (pathname === '/api/instructions') {
       const file = await sharedFile(url.searchParams.get('project'));
@@ -1035,7 +1040,8 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
         if (job && body.model !== undefined && body.model !== model) throw new HttpError(400, `Job ${job.id} ran on ${model}, not ${String(body.model)}.`);
         score = addEvidence(HOME, {
           model,
-          agent: job ? job.agent : 'claude',
+          // Work done in the lead's own session or subagent is that host's.
+          agent: job ? job.agent : body.lead === 'codex' ? 'codex' : 'claude',
           ...(job ? (job.resolvedEffort ?? job.effort ? { effort: job.resolvedEffort ?? job.effort } : {}) : {}),
           // A job's tier is its own record's. It is kept to show what work a model was given, not scored.
           ...((job ? job.tier : body.tier) ? { tier: job ? job.tier : body.tier } : {}),
@@ -1104,6 +1110,7 @@ function shutdown(): void {
   attempt('stop waking Codex leads', () => codexLeads.stop());
   attempt('stop Codex', () => codex.shutdown());
   attempt('stop Antigravity', () => antigravity.shutdown());
+  attempt('stop Claude workers', () => claudeWorker.shutdown());
   attempt('stop the usage monitor', () => usage.stop());
   attempt('save jobs', () => jobs.flush());
   attempt('save missions', () => missions.flush());

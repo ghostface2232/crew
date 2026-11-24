@@ -2,6 +2,8 @@ import SwiftUI
 
 /// What Crew needs and whether each is in place (`GET /api/setup`), from the same checks as `crew doctor`.
 struct SetupState: Decodable, Sendable {
+    /// A fresh check runs the CLIs one after another, and asking Codex about its hooks alone may take 20 seconds.
+    static let timeout: TimeInterval = 90
     struct Item: Decodable, Sendable, Identifiable {
         var id: String
         var label: String
@@ -42,7 +44,7 @@ struct SetupCard: View {
                     }
                     // The card's actions end it at the trailing edge, as a section's do.
                     ActionRow {
-                        Button("Check Again") { act { try await api.request("/api/setup?refresh") } }.pillButton().disabled(busy)
+                        Button("Check Again") { act { try await api.request("/api/setup?refresh", timeout: SetupState.timeout) } }.pillButton().disabled(busy)
                         if setup.items.contains(where: { !$0.ok && $0.repairable == true }) {
                             Button(busy ? String(localized: "Installing…") : String(localized: "Install")) { act { try await api.post("/api/setup/repair", [String: String](), timeout: 180) } }
                                 .glassPillButton().morphs(on: busy).disabled(busy || setup.registering)
@@ -53,7 +55,7 @@ struct SetupCard: View {
         }
         .task {
             while !Task.isCancelled {
-                if let next: SetupState = try? await api.request("/api/setup") { setup = next }
+                if let next: SetupState = try? await api.request("/api/setup", timeout: SetupState.timeout) { setup = next }
                 try? await Task.sleep(for: .seconds(60))
             }
         }

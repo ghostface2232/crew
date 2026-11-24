@@ -85,8 +85,8 @@ export function codexHooks(source: HooksFile, launcher: string, platform: NodeJS
 }
 
 /**
- * The keys Codex records a trusted hook under in its config.toml, `[hooks.state."<plugin>:<hooks file>:<event>:<group>:<index>"]`,
- * for every hook in `hooks`, the plugin's hooks file at `file` (relative to the plugin folder).
+ * The keys Codex names each hook by, in its config.toml trust records and app-server `hooks/list`,
+ * `<plugin>:<hooks file>:<event>:<group>:<index>`, for every hook in `hooks`, the plugin's hooks file at `file` (relative to the plugin folder).
  */
 export function hookKeys(hooks: HooksFile, file: string): string[] {
   const snake = (event: string) => event.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
@@ -95,14 +95,25 @@ export function hookKeys(hooks: HooksFile, file: string): string[] {
   );
 }
 
+/** Whether Codex runs the Crew hooks: every one trusted, some changed since they were trusted, or some never trusted. */
+export type HookTrust = 'trusted' | 'modified' | 'untrusted';
+
 /**
- * The keys among `keys` for which Codex's config holds no trust record. Codex keeps a hash of each trusted hook and
- * compares it itself, so a record for a hook whose definition has changed since still counts here; Codex asks again.
+ * The Crew hooks' trust as app-server `hooks/list` reports it, for the hooks named by `keys`. Codex trusts a hook against
+ * its definition and a hash of its copy of the plugin folder, so after an update that changes the plugin's files every
+ * hook is `modified` while its trust records stay in config.toml: only Codex can tell. A hook it does not list, or one
+ * turned off in `/hooks`, counts as untrusted, since Codex does not run it either.
  */
-export function untrustedHooks(config: string, keys: string[]): string[] {
-  const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  // The record's table, up to the next table header, holds a trusted_hash.
-  return keys.filter((key) => !new RegExp(`^\\[hooks\\.state\\."${escape(key)}"\\][^\\n]*\\n(?:(?!\\s*\\[)[^\\n]*\\n)*?\\s*trusted_hash\\s*=`, 'm').test(config));
+export function hookTrust(listed: unknown, keys: string[]): HookTrust {
+  const data = (listed as { data?: unknown } | null)?.data;
+  if (!Array.isArray(data)) throw new Error('hooks/list answered without a list of hooks');
+  const status = new Map<string, unknown>();
+  for (const entry of data) {
+    for (const hook of entry?.hooks ?? []) if (typeof hook?.key === 'string') status.set(hook.key, hook.enabled === false ? 'disabled' : hook.trustStatus);
+  }
+  const states = keys.map((key) => status.get(key));
+  if (states.some((state) => state !== 'trusted' && state !== 'modified')) return 'untrusted';
+  return states.includes('modified') ? 'modified' : 'trusted';
 }
 
 /** The plugin folder's relative path for a manifest pointer such as `./hooks/codex.json`. */

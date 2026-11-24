@@ -1,8 +1,8 @@
 import path from 'node:path';
 import readline from 'node:readline';
 import { clipped, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, REPORT_PAGE_BYTES, textPage, unread } from './delivery.ts';
-import { api, ensureDaemon } from './client.ts';
-import { assignHint, baseUrl, canonicalPath, DEFAULT_ROLES, defaultHolder, disabledAgents, LEAD, loadConfig, MAX_DEBATE_ROUNDS, PLUGIN_ROOT, PRESET_NAMES, ROLE_INFO, ROLES, VERSION, WORKERS } from './config.ts';
+import { api, ensureDaemon, partialEnvironment } from './client.ts';
+import { assignHint, baseUrl, canonicalPath, DEFAULT_ROLES, defaultHolder, disabledAgents, LEAD, loadConfig, MAX_DEBATE_ROUNDS, PLUGIN_ROOT, PRESET_NAMES, ROLE_INFO, ROLES, VERSION, WORKERS, workerInfo } from './config.ts';
 import { listSkills } from './skills.ts';
 import { describeUsage } from './usage.ts';
 import type { RouteDecision, Usage } from './usage.ts';
@@ -47,7 +47,7 @@ const roles = started?.roles ?? DEFAULT_ROLES;
  */
 let host: 'claude' | 'codex' = 'claude';
 // A daemon of another version may name a holder this session does not know.
-const holderName = (agent: Holder) => (agent === LEAD ? (host === 'codex' ? 'you (held by Claude, which cannot run as a worker yet)' : 'you, Claude')
+const holderName = (agent: Holder) => (agent === LEAD ? (host === 'codex' ? 'Claude (you do it, or name claude for a Claude worker)' : 'you, Claude')
   : agent === 'codex' && host === 'codex' ? 'Codex (a separate worker)' : WORKERS[agent]?.name ?? String(agent));
 /** How the lead names a skill: Codex lists plugin skills by name rather than as slash commands. */
 const skill = (name: string) => (host === 'codex' ? `the crew:${name} skill` : `/crew:${name}`);
@@ -93,7 +93,7 @@ const instructions = () => `Crew connects this session to background coding agen
 
 The user assigns roles (settings or ~/.crew/config.json); jobs go to an agent holding the role. At session start:
 ${roleLines()}
-\`delegate\` takes role delegate, refactor, release, or fix; \`review\` uses review, or verify with runs_app. With multiple holders, pick one with \`agent\`. ${host === 'codex' ? 'Picking `claude` starts no worker, since Claude cannot run as a worker yet' : 'Picking yourself (`claude`) starts no worker'}: do it here or in a subagent.
+\`delegate\` takes role delegate, refactor, release, or fix; \`review\` uses review, or verify with runs_app. With multiple holders, pick one with \`agent\`. ${host === 'codex' ? 'A role held by Claude is yours to do here or in a subagent; naming `claude` with `agent` starts a Claude worker instead' : 'Picking yourself (`claude`) starts no worker: do it here or in a subagent'}.
 
 Rules:
 - A delegate or polish job runs in its own git worktree and branch (crew-<job id>) from HEAD: commit what it needs first; gitignored files are copied only if in .worktreeinclude. Read its diff, then merge or reject (reject work beyond the task). Nothing reaches your branch unless you merge it.
@@ -135,9 +135,10 @@ const skillsProp = installedSkills.length ? {
 const attachmentsProp = {
   attachments: { type: 'array', items: { type: 'string' }, maxItems: 10, description: 'Absolute paths of images or recordings (PNG, JPEG, GIF, WebP, WebM, MP4) the worker should see, such as a design or a screenshot of the problem. They are copied into the job\'s evidence and shown on the board.' },
 };
-const agentProp = {
-  agent: { type: 'string', enum: [...Object.keys(WORKERS), LEAD], description: 'Which of the role\'s holders takes this job; the roles in your instructions list them. Without it, Antigravity for wording and Codex for other work, among the holders that can take it. claude starts no worker: you do it.' },
-};
+/** Built with the tools: what naming claude does depends on the host. */
+const agentProp = () => ({
+  agent: { type: 'string', enum: [...Object.keys(WORKERS), LEAD], description: `Which of the role's holders takes this job; the roles in your instructions list them. Without it, Antigravity for wording and Codex for other work, among the holders that can take it. ${host === 'codex' ? 'claude starts a Claude worker; left out, a role only Claude holds is yours to do.' : 'claude starts no worker: you do it.'}` },
+});
 const modelProps = {
   tier: { type: 'string', enum: [...TIERS], description: 'How demanding the job is; Crew picks the model from it. Leave it out for ordinary work, so the model the user set for the role or preset applies (standard without one); naming one overrides it. standard: most work, including most UI changes. frontier: especially hard or complex work, or a UI rebuilt from scratch. light: simple, well-specified tasks. fast: plain searches and lookups. Codex runs Sol, Astra, Terra and Luna for these; Antigravity runs Neon for frontier (literary or very complex documents) and Hydrogen otherwise. Newer models of each family are picked up automatically.' },
   model: { type: 'string', description: 'Exact model ID for this job, as the notes list it, overriding tier. Rarely needed; prefer tier. When the user names a family such as Astra, pass its tier; a family name passed here is taken as that tier.' },
@@ -160,7 +161,7 @@ const buildTools = () => [
         check: { type: 'string', description: 'A shell command (e.g. "npm test") the bridge itself runs in the worktree after every turn, so the result shows an observed exit status instead of the worker\'s word. Pick one that fails without the change. Runs with the worker\'s file limits, up to 10 minutes. Needs a worktree.' },
         ...worktreeProps,
         ...modelProps,
-        ...agentProp,
+        ...agentProp(),
         ...runsAppProp('do or verify the work'),
         ...attachmentsProp,
         ...aloneProp,
@@ -187,7 +188,7 @@ const buildTools = () => [
         ...runsAppProp('judge the change. It then goes to the verify role and runs in a snapshot worktree holding the change; your own self-review must stay static'),
         ...attachmentsProp,
         ...modelProps,
-        ...agentProp,
+        ...agentProp(),
         ...skillsProp,
         ...common,
       },
@@ -206,7 +207,7 @@ const buildTools = () => [
         ...worktreeProps,
         tier: { ...modelProps.tier, description: 'standard (the default, Hydrogen for Antigravity) for nearly all wording work; frontier (Neon) only for literary or very complex, difficult documents.' },
         model: modelProps.model,
-        ...agentProp,
+        ...agentProp(),
         ...skillsProp,
         ...common,
       },
@@ -225,7 +226,7 @@ const buildTools = () => [
         rounds: { type: 'integer', minimum: 1, maximum: MAX_DEBATE_ROUNDS, description: 'How many exchanges at most, counting the first. Default 3.' },
         title: { type: 'string', description: 'Short label shown on the status board.' },
         ...modelProps,
-        ...agentProp,
+        ...agentProp(),
         ...common,
       },
       required: ['topic', 'position'],
@@ -289,7 +290,7 @@ const buildTools = () => [
         job_id: { type: 'string', description: 'The job whose work was reviewed or that did the fix, or for role review the review job itself; its model, agent, tier and effort are read from it.' },
         model: { type: 'string', description: 'Without job_id: the exact model of work done in this session or your subagent (yours, e.g. your own model id).' },
         role: { type: 'string', enum: ['build', 'fix', 'review'], description: 'build (default; fix for a fix-role job, review for a review job): the model built the change under review. fix: the model fixed the accepted findings. review: the model reviewed the change.' },
-        reviewer: { type: 'string', enum: [...Object.keys(WORKERS), LEAD], description: 'Required for build and fix: who reviewed the work (for a fix, who checked it): the cross-reviewer\'s agent, or claude for your crew:self-reviewer. A review job\'s line takes it from the job.' },
+        reviewer: { type: 'string', enum: [...Object.keys(WORKERS), LEAD], description: `Required for build and fix: who reviewed the work (for a fix, who checked it): the cross-reviewer's agent, or ${host === 'codex' ? 'codex for your self-reviewer subagent' : 'claude for your crew:self-reviewer'}. A review job's line takes it from the job.` },
         of_job: { type: 'string', description: 'For review: the job that built the work the review covered. Its reviewer\'s rating of that work, and that job\'s rating of the review, are then counted.' },
         of_model: { type: 'string', description: 'For review, without of_job: the exact model that built the work, for work done in this session or your subagent.' },
         audit: { type: 'boolean', description: 'For review, in place of of_job and of_model, one of which a review line otherwise needs: true when the review covered code as it stands, by several builders (a review with target "files"), so there is no one job or model to name. Its reviewer\'s rating of the code then counts for no one.' },
@@ -452,7 +453,7 @@ async function askUser(job: JobView, signal: AbortSignal): Promise<'settled' | '
 
   const approval = waiting.type === 'approval';
   const prompt = request('elicitation/create', {
-    message: `${WORKERS[job.agent].name} (${job.title}) ${approval ? 'requests approval' : 'asks a question'}\n\n${waiting.reason}${approval && waiting.grant ? `\n\nallow_for_job also allows its later requests for ${waiting.grant} in this job.` : ''}`,
+    message: `${workerInfo(job.agent).name} (${job.title}) ${approval ? 'requests approval' : 'asks a question'}\n\n${waiting.reason}${approval && waiting.grant ? `\n\nallow_for_job also allows its later requests for ${waiting.grant} in this job.` : ''}`,
     requestedSchema: approval ? approvalForm(waiting.grant) : ANSWER_FORM,
   });
 
@@ -918,7 +919,9 @@ function pickHolder(role: Role, wanted: unknown): { agent?: Holder; yours?: stri
   const agent = (wanted ?? defaultHolder(role, table[role], disabled)) as Holder;
   if (!holders.includes(agent)) throw new Error(`${String(wanted)} does not hold ${role}; its holders are ${holder(role, table)}. ${assignHint(role)}`);
   if (agent !== LEAD) return { agent };
-  return { yours: `${role} is yours: no worker was started. ${YOURS[role]?.replace('SELF_REVIEWER', selfReviewer())} Its other holders: ${holders.filter((h) => h !== LEAD).map(holderName).join(', ') || 'none'}.` };
+  // A Codex lead that names Claude gets a Claude worker; left to the default, Claude's role stays the lead's own work.
+  if (host === 'codex' && wanted === LEAD) return { agent };
+  return { yours: `${role} is yours: no worker was started. ${YOURS[role]?.replace('SELF_REVIEWER', selfReviewer())} Its other holders: ${holders.filter((h) => h !== LEAD).map(holderName).join(', ') || 'none'}.${host === 'codex' ? ' To hand it to a Claude worker instead, start the job again with agent claude.' : ''}` };
 }
 
 /**
@@ -1011,7 +1014,7 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
     case 'note_summary': {
       const body = name === 'note_summary'
         ? { model: args.model, summary: args.summary }
-        : { job: args.job_id, model: args.model, role: args.role, reviewer: args.reviewer, size: args.size, tier: args.tier, findings: args.findings, declined: args.declined, adoption: args.adoption, outcome: args.outcome, of_job: args.of_job, of_model: args.of_model, audit: args.audit, rating: args.rating, text: args.text };
+        : { job: args.job_id, model: args.model, lead: host === 'codex' ? 'codex' : undefined, role: args.role, reviewer: args.reviewer, size: args.size, tier: args.tier, findings: args.findings, declined: args.declined, adoption: args.adoption, outcome: args.outcome, of_job: args.of_job, of_model: args.of_model, audit: args.audit, rating: args.rating, text: args.text };
       const score = await api('POST', '/api/notes', body);
       const shown = score.score === null ? '—' : score.score.toFixed(1);
       return `Noted. ${score.model} (${score.agent}): ${shown}/10, ${score.status}, ${score.buildSamples} build(s), ${score.fixSamples} fix(es)${score.reviewSamples ? `, ${score.reviewSamples} review(s)` : ''}.${score.ratingDropped ? ' The rating was not kept: the user turned peer ratings off.' : ''}${score.consolidate ? ' Its summary is due: rewrite it from the evidence with note_summary.' : ''}`;
@@ -1129,6 +1132,11 @@ async function handle(msg: any): Promise<void> {
       host = !process.env.CLAUDE_CODE_SESSION_ID && /^codex/i.test(String(params?.clientInfo?.name ?? '')) ? 'codex' : 'claude';
       // Codex starts this server in the plugin's folder, which is no project: one is known only after a hello.
       projectUnknown = host === 'codex';
+      // Codex gives MCP servers a filtered environment; a daemon started from here is replaced once a hook or the CLI,
+      // which have the whole one, finds it idle.
+      if (host === 'codex') partialEnvironment();
+      // Started only now, so a daemon a Codex server starts knows its environment is filtered.
+      ensureDaemon().catch(() => {});
       TOOLS = toolList();
       return reply({
         protocolVersion: PROTOCOL_VERSIONS.includes(params?.protocolVersion) ? params.protocolVersion : PROTOCOL_VERSIONS[1],
@@ -1223,5 +1231,3 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
   else waiter.resolve(msg.result);
 });
 
-// Start the daemon with the session so the board and hooks work before the first tool call.
-ensureDaemon().catch(() => {});

@@ -3,6 +3,8 @@ import type { BoardJob, BoardPull, BoardState, ClaudeSession, Mission } from './
 import { t, translated } from './i18n.ts';
 
 export const NAMES = { claude: 'Claude', codex: 'Codex', antigravity: 'Antigravity' };
+/** The agent a lead session runs in: Claude Code, or Codex. */
+export const sessionAgent = (session: Pick<ClaudeSession, 'host'>) => session.host ?? 'claude';
 /** Every holder, in the order a role lists them, as config.ts HOLDERS does. */
 export const HOLDERS: Holder[] = ['codex', 'antigravity', 'claude'];
 export const holdersOf = (assignment?: Pick<RoleAssignment, 'agents'>): Holder[] => assignment?.agents ?? [];

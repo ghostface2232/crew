@@ -241,7 +241,7 @@ struct BoardView: View {
                     VStack(spacing: WorkspaceStyle.rowGap) { ForEach(recentJobs) { job in JobRow(job: job, selected: store.selectedJob == job.id, store: store) { store.toggleJob(job.id) }.transition(.card) } }
                 }
             case .sessions:
-                ContentPanel(title: String(localized: "Claude sessions"), symbol: "bubble.left.and.bubble.right") {
+                ContentPanel(title: String(localized: "Lead sessions"), symbol: "bubble.left.and.bubble.right") {
                     VStack(spacing: WorkspaceStyle.rowGap) { ForEach(sessions) { session in SessionRow(session: session, selected: store.selectedSession == session.id, store: store) { store.toggleSession(session.id) }.transition(.card) } }
                 }
             }
@@ -249,7 +249,7 @@ struct BoardView: View {
         if emptyHistory || emptyWorkspace {
             EmptyState(title: store.search.isEmpty ? (emptyHistory ? String(localized: "No completed work yet") : String(localized: "Ready when you are")) : String(localized: "No matching work"),
                        symbol: store.search.isEmpty ? "square.stack.3d.up" : "magnifyingglass",
-                       detail: store.search.isEmpty && !emptyHistory ? String(localized: "Hand a task to an agent, or run /crew:run in Claude.") : nil) {
+                       detail: store.search.isEmpty && !emptyHistory ? String(localized: "Hand a task to an agent, or run /crew:run in Claude Code or $crew:run in Codex.") : nil) {
                 if store.search.isEmpty && !emptyHistory { Button("New Job", systemImage: "plus") { store.showingDispatch = true }.glassPillButton().disabled(!store.connected) }
             }.transition(.card)
         }
@@ -298,18 +298,14 @@ struct AgentOverview: View {
                             Text(agentRole(agent, store: store)).font(Typeface.caption).foregroundStyle(.secondary).fadeTruncated()
                         }
                         Spacer(minLength: WorkspaceStyle.rowSpacer)
-                        let jobs = store.state.jobs.filter { $0.agent == agent && $0.isActive && (store.project.isEmpty || $0.projectPath == store.project) }
-                        let sessions = store.state.claude.filter { $0.state != "idle" && (store.project.isEmpty || $0.projectPath == store.project) }
-                        let count = agent == "claude" ? sessions.count : jobs.count
-                        let waiting = agent == "claude" ? sessions.contains { $0.state == "waiting" } : jobs.contains { $0.state == "waiting" }
-                        let stalled = agent == "claude" ? sessions.contains { $0.stalled } : jobs.contains { $0.stalled }
-                        let mark = waiting ? "waiting" : stalled ? "stalled" : count > 0 ? "working" : "idle"
-                        let idle = agent == "claude" ? idleSessions(store) : 0
-                        let summary = [count > 0 ? String(localized: "\(count) active") : nil, idle > 0 ? String(localized: "\(idle) idle") : nil].compactMap { $0 }
+                        let activity = AgentActivity(store: store, agent: agent)
+                        let count = activity.open + activity.jobs
+                        // Beside jobs, idle must say sessions, as on the card.
+                        let idle = activity.jobs == 0 ? String(localized: "\(activity.idle) idle")
+                            : activity.idle == 1 ? String(localized: "1 idle session") : String(localized: "\(activity.idle) idle sessions")
+                        let summary = [count > 0 ? String(localized: "\(count) active") : nil, activity.idle > 0 ? idle : nil].compactMap { $0 }
                         if !summary.isEmpty { Text(summary.joined(separator: " · ")).font(Typeface.caption).foregroundStyle(.secondary) }
-                        StatusLabel(state: mark, title: waiting ? String(localized: "Needs you") : stalled ? String(localized: "May be stuck") : store.state.agents[agent]?.enabled == false ? String(localized: "Disabled") : count > 0 ? String(localized: "Working") : String(localized: "Ready"),
-                                    // Only under the word Working: a disabled agent's last job still counts as active.
-                                    spins: mark == "working" && store.state.agents[agent]?.enabled != false)
+                        StatusLabel(state: activity.mark, title: activity.title, spins: activity.mark == "working")
                     }
                     if let usage = store.usage, usage.source != "none" { AgentUsageView(store: store, agent: agent) }
                 }.padding(.horizontal, WorkspaceStyle.cardPadding).padding(.vertical, Space.l)
@@ -328,38 +324,45 @@ struct AgentOverview: View {
            Set(assignment.holders) == Set(inherited.holders) { return false }
         return true
     }.map(\.localizedLabel)
-    return ((agent == "claude" ? [String(localized: "Lead")] : []) + labels).joined(separator: " · ")
+    // Claude leads unless the user starts in Codex, whose card says so while one of its sessions is open.
+    let leads = agent == "claude" || store.state.claude.contains { $0.agent == agent && (store.project.isEmpty || $0.projectPath == store.project) }
+    return ((leads ? [String(localized: "Lead")] : []) + labels).joined(separator: " · ")
 }
 
-/// Claude sessions open in this scope but between turns.
-@MainActor private func idleSessions(_ store: CrewStore) -> Int {
-    store.state.claude.filter { $0.state == "idle" && (store.project.isEmpty || $0.projectPath == store.project) }.count
+/// What an agent has open in this scope: its lead sessions, working or between turns, and its jobs (as the board's agentActivity).
+@MainActor private struct AgentActivity {
+    var open = 0, idle = 0, jobs = 0
+    var mark = "idle"
+    var title = ""
+    init(store: CrewStore, agent: String) {
+        let scoped = { (path: String) in store.project.isEmpty || path == store.project }
+        let sessions = store.state.claude.filter { $0.agent == agent && scoped($0.projectPath) }
+        let active = sessions.filter { $0.state != "idle" }
+        let jobs = store.state.jobs.filter { $0.agent == agent && $0.isActive && scoped($0.projectPath) }
+        open = active.count; idle = sessions.count - active.count; self.jobs = jobs.count
+        mark = active.contains { $0.state == "waiting" } || jobs.contains { $0.state == "waiting" } ? "waiting"
+            : active.contains { $0.stalled } || jobs.contains { $0.stalled } ? "stalled"
+            : open + self.jobs > 0 ? "working" : "idle"
+        title = mark == "waiting" ? String(localized: "Needs you") : mark == "stalled" ? String(localized: "May be stuck") : mark == "working" ? String(localized: "Working")
+            : store.state.agents[agent]?.enabled == false ? String(localized: "Disabled") : String(localized: "Ready")
+    }
+    /// Sessions and jobs apart, then idle sessions; nil with nothing open.
+    var line: String? {
+        let parts = [
+            open > 0 ? (open == 1 ? String(localized: "1 active session") : String(localized: "\(open) active sessions")) : nil,
+            jobs > 0 ? (jobs == 1 ? String(localized: "1 active job") : String(localized: "\(jobs) active jobs")) : nil,
+            // Beside active sessions alone "idle" is clear; beside jobs it must say sessions.
+            idle > 0 ? (open > 0 && jobs == 0 ? String(localized: "\(idle) idle") : idle == 1 ? String(localized: "1 idle session") : String(localized: "\(idle) idle sessions")) : nil,
+        ].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
 }
 
 private struct AgentCard: View {
     var store: CrewStore
     var agent: String
-    private var jobs: [Job] { store.state.jobs.filter { $0.agent == agent && $0.isActive && (store.project.isEmpty || $0.projectPath == store.project) } }
-    private var sessions: [ClaudeSession] { store.state.claude.filter { $0.state != "idle" && (store.project.isEmpty || $0.projectPath == store.project) } }
-    private var mark: String {
-        if agent == "claude" { return sessions.contains { $0.state == "waiting" } ? "waiting" : sessions.contains { $0.stalled } ? "stalled" : sessions.isEmpty ? "idle" : "working" }
-        return jobs.contains { $0.state == "waiting" } ? "waiting" : jobs.contains { $0.stalled } ? "stalled" : jobs.isEmpty ? "idle" : "working"
-    }
-    private var busy: Bool { (agent == "claude" ? sessions.count + idleSessions(store) : jobs.count) > 0 }
-    private var activity: String {
-        let count = agent == "claude" ? sessions.count : jobs.count
-        let isLead = agent == "claude"
-        // Only Claude sessions sit idle between turns; a worker's job is either running or over.
-        let idle = agent == "claude" ? idleSessions(store) : 0
-        if count == 0 {
-            if idle > 0 { return idle == 1 ? String(localized: "1 idle session") : String(localized: "\(idle) idle sessions") }
-            return isLead ? String(localized: "No active sessions") : String(localized: "No active jobs")
-        }
-        let active = isLead ? (count == 1 ? String(localized: "1 active session") : String(localized: "\(count) active sessions"))
-                            : (count == 1 ? String(localized: "1 active job") : String(localized: "\(count) active jobs"))
-        return active + (idle > 0 ? String(localized: " · \(idle) idle") : "")
-    }
     var body: some View {
+        let activity = AgentActivity(store: store, agent: agent)
         VStack(alignment: .leading, spacing: Space.xl) {
             // The status keeps to the card's top padding; the mark sits on the middle of the name and role together.
             HStack(alignment: .top, spacing: Space.ml) {
@@ -374,11 +377,11 @@ private struct AgentCard: View {
                     }
                 }
                 Spacer(minLength: Space.m)
-                StatusLabel(state: mark, title: mark == "waiting" ? String(localized: "Needs you") : mark == "working" ? String(localized: "Working") : mark == "stalled" ? String(localized: "May be stuck") : store.state.agents[agent]?.enabled == false ? String(localized: "Disabled") : String(localized: "Ready"), spins: mark == "working")
+                StatusLabel(state: activity.mark, title: activity.title, spins: activity.mark == "working")
             }
             // The agent's work in a gray inset, apart from its name above and its account usage below; with
             // nothing open, the inset is left out rather than saying so.
-            if busy { Text(activity).font(Typeface.callout).monospacedDigit().foregroundStyle(.secondary).inset() }
+            if let line = activity.line { Text(line).font(Typeface.callout).monospacedDigit().foregroundStyle(.secondary).inset() }
             if store.usage == nil || store.usage?.source == "none" { AgentUsageView(store: store, agent: agent) }
             // Cards in a row share a height; usage sits at the bottom, so one bar lines up with the last of two.
             if let usage = store.usage, usage.source != "none" {
@@ -624,7 +627,7 @@ struct NeedsYouView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private func matches(_ text: String) -> Bool { store.search.isEmpty || text.localizedCaseInsensitiveContains(store.search) }
     private var jobs: [Job] { store.state.waitingJobs.filter { matches("\($0.title) \($0.projectPath) \($0.agent) \($0.waiting?.reason ?? "")") } }
-    private var sessions: [ClaudeSession] { store.state.waitingSessions.filter { matches("\($0.title) \($0.projectPath) Claude \($0.waitingFor ?? "")") } }
+    private var sessions: [ClaudeSession] { store.state.waitingSessions.filter { matches("\($0.title) \($0.projectPath) \(agentName($0.agent)) \($0.waitingFor ?? "")") } }
     var body: some View {
         let jobs = jobs, sessions = sessions
         // Requests come and go as agents ask and get answered; the cards around them close up or make room.
@@ -650,7 +653,7 @@ struct NeedsYouView: View {
                 .frame(maxWidth: .infinity, alignment: .leading).card()
                 .transition(.card)
             }
-            // As on the web board: a Claude session is answered in Claude itself, so its tile says so instead of offering a composer.
+            // As on the web board: a lead session is answered in its own app, so its tile says so instead of offering a composer.
             ForEach(sessions) { session in
                 VStack(alignment: .leading, spacing: Space.xl) {
                     // Laid out as a job's tile: who on the header, the session's title under it.
@@ -658,19 +661,19 @@ struct NeedsYouView: View {
                         HStack(spacing: Space.ml) {
                             StatusLabel(state: "waiting", title: String(localized: "Input"))
                             HStack(spacing: Space.s) {
-                                AgentMark(agent: "claude", size: MarkSize.inline)
-                                Text(verbatim: "Claude").lineLimit(1)
+                                AgentMark(agent: session.agent, size: MarkSize.inline)
+                                Text(verbatim: agentName(session.agent)).lineLimit(1)
                             }.font(Typeface.chip).foregroundStyle(.secondary).help(session.projectPath)
                             Spacer(minLength: WorkspaceStyle.rowSpacer)
                             OpenInClaudeButton(session: session)
                         }
                         Text(session.title).font(Typeface.callout).foregroundStyle(.secondary).lineLimit(2).help(session.title)
                     }
-                    Text(session.waitingFor ?? String(localized: "Claude needs your input.")).font(Typeface.headline).lineSpacing(4).textSelection(.enabled)
+                    Text(session.waitingFor ?? String(localized: "\(agentName(session.agent)) needs your input.")).font(Typeface.headline).lineSpacing(4).textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
                     ClaudeAskView(session: session)
                     if session.claudeURL == nil {
-                        Label("Answer in Claude.", systemImage: "bubble.left.and.bubble.right").font(Typeface.callout).foregroundStyle(.secondary)
+                        Label("Answer in \(agentName(session.agent)).", systemImage: "bubble.left.and.bubble.right").font(Typeface.callout).foregroundStyle(.secondary)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading).card()

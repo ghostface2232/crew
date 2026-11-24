@@ -200,6 +200,11 @@ export class Delivery {
     }
   }
 
+  /** The host a lead session said hello from, for those that do (Codex); undefined for Claude Code's. */
+  hostOf(session: string): LeadHost | undefined {
+    return this.state.hosts?.[session]?.host;
+  }
+
   /** The lead sessions Codex hosts that have unacknowledged news. */
   codexWaiting(): string[] {
     const hosts = this.state.hosts ?? {};

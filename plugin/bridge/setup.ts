@@ -1,10 +1,12 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { isNewer } from './client.ts';
-import { CODEX_PLUGIN, hookKeys, pointer, untrustedHooks, writeCodexPlugin, writtenByCrew } from './codex-plugin.ts';
+import { CODEX_PLUGIN, hookKeys, hookTrust, pointer, writeCodexPlugin, writtenByCrew } from './codex-plugin.ts';
+import type { HookTrust } from './codex-plugin.ts';
+import { RpcPeer } from './rpc.ts';
 import { agentCommand, agentEnv, HOME, installed, LEDGER_ASIDE, loadConfig, PLUGIN_ROOT, VERSION } from './config.ts';
 
 /**
@@ -373,25 +375,48 @@ async function codexLeadItems(bin: string): Promise<SetupItem[]> {
   const ok = installed && version === expected;
   const detail = !installed ? 'Not installed.' : ok ? `Installed (${version})` : `Installed (${version ?? 'unknown version'}); this copy is ${expected}.`;
   const items: SetupItem[] = [{ id: 'codex-plugin', label: 'Crew plugin in Codex', ok, detail, repairable: true }];
-  if (!installed || !ledFromCodex()) return items;
-  const untrusted = untrustedCodexHooks();
-  items.push({ id: 'codex-hooks', label: 'Crew hooks in Codex', ok: untrusted.length === 0, detail: untrusted.length === 0 ? 'Trust recorded. If Codex asks again after an update, trust them in `/hooks`.' : CODEX_TRUST });
+  // Trust is read by this copy's hook keys, so a copy of another version is reinstalled before its hooks are asked about.
+  if (!ok || !ledFromCodex()) return items;
+  items.push(await codexHooksItem(bin));
   return items;
 }
 
-/** The Crew hooks Codex's config does not record as trusted. */
-function untrustedCodexHooks(): string[] {
-  const manifest = JSON.parse(fs.readFileSync(path.join(PLUGIN_ROOT, '.codex-plugin', 'plugin.json'), 'utf8'));
+/** The Crew hooks' trust as Codex reports it; never "trusted" unless Codex says every one is. */
+export async function codexHooksItem(bin: string, root = PLUGIN_ROOT): Promise<SetupItem> {
+  const manifest = JSON.parse(fs.readFileSync(path.join(root, '.codex-plugin', 'plugin.json'), 'utf8'));
   const file = pointer(manifest.hooks);
-  const keys = hookKeys(JSON.parse(fs.readFileSync(path.join(PLUGIN_ROOT, file), 'utf8')), file);
-  const codexHome = agentEnv().CODEX_HOME ?? path.join(os.homedir(), '.codex');
-  let config = '';
+  const keys = hookKeys(JSON.parse(fs.readFileSync(path.join(root, file), 'utf8')), file);
+  const item = { id: 'codex-hooks', label: 'Crew hooks in Codex' };
+  let trust: HookTrust;
   try {
-    config = fs.readFileSync(path.join(codexHome, 'config.toml'), 'utf8');
-  } catch {
-    /* No config yet: nothing is trusted. */
+    trust = await codexHookTrust(bin, keys);
+  } catch (err) {
+    return { ...item, ok: false, detail: `Could not ask Codex whether they are trusted (${(err as Error).message}). If Codex does not run them, trust them in \`/hooks\`.` };
   }
-  return untrustedHooks(config, keys);
+  if (trust === 'trusted') return { ...item, ok: true, detail: 'Trusted.' };
+  if (trust === 'modified') return { ...item, ok: false, detail: `Changed by an update since you trusted them, so Codex asks again. ${CODEX_TRUST}` };
+  return { ...item, ok: false, detail: CODEX_TRUST };
+}
+
+const HOOK_LIST_TIMEOUT_MS = 10_000;
+
+/**
+ * Asks a short-lived `codex app-server` how it trusts the hooks named by `keys` (`hooks/list`). Codex's config keeps a
+ * trust record after the hook it trusted has changed, so the config alone cannot say. Throws when Codex cannot be asked.
+ */
+async function codexHookTrust(bin: string, keys: string[]): Promise<HookTrust> {
+  const env = agentEnv();
+  const command = agentCommand(bin, ['app-server'], env);
+  const child = spawn(command.bin, command.args ?? [], { env, shell: command.shell, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+  const peer = new RpcPeer(child, { onNotification: () => {}, onRequest: async () => undefined, onExit: () => {} }, command.shell);
+  try {
+    await peer.request('initialize', { clientInfo: { name: 'crew', title: 'Crew', version: VERSION }, capabilities: null }, HOOK_LIST_TIMEOUT_MS);
+    peer.notify('initialized');
+    // Plugin hooks are listed for any folder; the home folder needs no project trust.
+    return hookTrust(await peer.request('hooks/list', { cwds: [os.homedir()] }, HOOK_LIST_TIMEOUT_MS), keys);
+  } finally {
+    peer.close();
+  }
 }
 
 /**

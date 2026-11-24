@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { WorkerAgent } from './config.ts';
+import type { JobAgent } from './config.ts';
 
 /**
  * How demanding a job is. The lead picks one per job; the bridge turns it into a model, so the same rule
@@ -19,16 +19,18 @@ export type Tier = (typeof TIERS)[number];
  * without a change here. Antigravity has two families worth using: Hydrogen for nearly everything,
  * Neon only for literary or very complex document editing.
  */
-export const TIER_FAMILIES: Record<WorkerAgent, Record<Tier, string>> = {
+export const TIER_FAMILIES: Record<JobAgent, Record<Tier, string>> = {
   codex: { fast: 'luna', light: 'terra', standard: 'sol', frontier: 'astra' },
   antigravity: { fast: 'hydrogen', light: 'hydrogen', standard: 'hydrogen', frontier: 'neon' },
+  // Claude Code takes these aliases for its newest model of each family.
+  claude: { fast: 'haiku', light: 'haiku', standard: 'sonnet', frontier: 'opus' },
 };
 
 /**
  * Families no tier picks any more, by the tier they held. A model of one named outright still runs,
  * and a preset's cap still lowers it. Google names Antigravity's families after elements, which say nothing of rank.
  */
-const FORMER_FAMILIES: Partial<Record<WorkerAgent, Record<string, Tier>>> = { antigravity: { argon: 'frontier' } };
+const FORMER_FAMILIES: Partial<Record<JobAgent, Record<string, Tier>>> = { antigravity: { argon: 'frontier' } };
 
 /** Codex effort by tier when the lead names none: medium for most work, high for the hardest. */
 export function tierEffort(tier: Tier): string {
@@ -133,7 +135,7 @@ export function antigravityModels(listing: string): ModelChoice[] {
 }
 
 /** The model a tier gives an agent's job. For Antigravity it is the family, matched against the session's own list. */
-export function tierModel(agent: WorkerAgent, tier: Tier, cache?: string): string | undefined {
+export function tierModel(agent: JobAgent, tier: Tier, cache?: string): string | undefined {
   const family = TIER_FAMILIES[agent][tier];
   return agent === 'codex' ? codexModel(family, cache) : family;
 }
@@ -142,7 +144,7 @@ export function tierModel(agent: WorkerAgent, tier: Tier, cache?: string): strin
  * The tier a family name stands for when the lead passes one as a model ("Astra", "Astra (frontier)"), as a user
  * or a preset's wording puts it. Only a label without a version that names exactly one family counts.
  */
-export function familyTier(agent: WorkerAgent, label: string): Tier | undefined {
+export function familyTier(agent: JobAgent, label: string): Tier | undefined {
   if (/\d/.test(label)) return undefined;
   const words = label.toLowerCase().split(/[^a-z]+/);
   const families = [...new Set(Object.values(TIER_FAMILIES[agent]))].filter((family) => words.includes(family));
@@ -150,14 +152,14 @@ export function familyTier(agent: WorkerAgent, label: string): Tier | undefined 
 }
 
 /** The Codex model ID for a model the account lists under that ID or its display name ("GPT-6-Astra"); otherwise the name as given. */
-export function modelId(agent: WorkerAgent, wanted: string, cache?: string): string {
+export function modelId(agent: JobAgent, wanted: string, cache?: string): string {
   if (agent !== 'codex') return wanted;
   const name = wanted.toLowerCase();
   return codexModels(cache).find((m) => m.id.toLowerCase() === name || m.name.toLowerCase() === name)?.id ?? wanted;
 }
 
 /** The tier whose family a model name belongs to, for holding a named model under a preset's cap; undefined when none matches. */
-export function tierOf(agent: WorkerAgent, model: string): Tier | undefined {
+export function tierOf(agent: JobAgent, model: string): Tier | undefined {
   const name = model.toLowerCase();
   return [...TIERS].reverse().find((tier) => name.includes(TIER_FAMILIES[agent][tier]))
     ?? Object.entries(FORMER_FAMILIES[agent] ?? {}).find(([family]) => name.includes(family))?.[1];

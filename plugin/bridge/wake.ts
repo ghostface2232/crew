@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { api, ensureDaemon } from './client.ts';
+import { JOB_ID as ANY_JOB } from './config.ts';
 import { HOOK_SECONDS } from './delivery.ts';
 
 interface HookInput {
@@ -9,7 +10,7 @@ interface HookInput {
   tool_name?: string; tool_input?: { job_id?: unknown; job_ids?: unknown }; tool_response?: unknown;
 }
 
-const JOB_ID = /\[((?:cx|ag)-[0-9a-f]{6})\]/;
+const JOB_ID = new RegExp(`\\[(${ANY_JOB})\\]`);
 const STARTS_JOB = /__(?:delegate|review|polish|debate)$/;
 
 /**
@@ -19,7 +20,7 @@ const STARTS_JOB = /__(?:delegate|review|polish|debate)$/;
 function actedOn(input: HookInput): string[] {
   const named = [input.tool_input?.job_id, ...(Array.isArray(input.tool_input?.job_ids) ? input.tool_input.job_ids : [])];
   const started = STARTS_JOB.test(input.tool_name ?? '') ? JSON.stringify(input.tool_response ?? '').match(JOB_ID)?.[1] : undefined;
-  return [...new Set([...named, started].filter((id): id is string => typeof id === 'string' && /^(?:cx|ag)-[0-9a-f]{6}$/.test(id)))].slice(0, 50);
+  return [...new Set([...named, started].filter((id): id is string => typeof id === 'string' && new RegExp(`^${ANY_JOB}$`).test(id)))].slice(0, 50);
 }
 interface HookOutput { code: number; stderr?: string; stdout?: string }
 

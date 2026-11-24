@@ -12,11 +12,11 @@
 "Jobs" = "작업";
 "Other jobs" = "기타 작업";
 "Recently finished" = "최근 완료";
-"Claude sessions" = "Claude 세션";
+"Lead sessions" = "리드 세션";
 "No completed work yet" = "아직 완료된 작업이 없어요";
 "Ready when you are" = "언제든 시작할 수 있어요";
 "No matching work" = "일치하는 작업이 없어요";
-"Hand a task to an agent, or run /crew:run in Claude." = "에이전트에게 작업을 맡기거나 Claude에서 /crew:run을 실행해 보세요.";
+"Hand a task to an agent, or run /crew:run in Claude Code or $crew:run in Codex." = "에이전트에게 작업을 맡기거나 Claude Code에서 /crew:run, Codex에서 $crew:run을 실행해 보세요.";
 "New Job" = "새 작업";
 "No activity yet." = "아직 활동이 없어요.";
 "No matching activity." = "일치하는 활동이 없어요.";
@@ -31,13 +31,10 @@
 "Lead" = "리드";
 "1 idle session" = "유휴 세션 1개";
 "%lld idle sessions" = "유휴 세션 %lld개";
-"No active sessions" = "진행 중인 세션 없음";
-"No active jobs" = "진행 중인 작업 없음";
 "1 active session" = "진행 중인 세션 1개";
 "%lld active sessions" = "진행 중인 세션 %lld개";
 "1 active job" = "진행 중인 작업 1개";
 "%lld active jobs" = "진행 중인 작업 %lld개";
-" · %lld idle" = " · 유휴 %lld개";
 "%@ tokens" = "토큰 %@개";
 "1 job" = "작업 1개";
 "%lld jobs" = "작업 %lld개";
@@ -65,8 +62,8 @@
 "Approval" = "승인";
 "Question" = "질문";
 "Input" = "입력 필요";
-"Claude needs your input." = "Claude가 응답을 기다리고 있어요.";
-"Answer in Claude." = "Claude에서 답변해 주세요.";
+"%@ needs your input." = "%@가 응답을 기다리고 있어요.";
+"Answer in %@." = "%@에서 답변해 주세요.";
 "Show Details" = "상세 정보 보기";
 "Details" = "세부 정보";
 "All projects" = "모든 프로젝트";
@@ -144,7 +141,6 @@
 "Don't Save" = "저장 안 함";
 "%@ finished" = "%@ 작업 완료";
 "%@ needs your input" = "%@ · 응답 필요";
-"Claude needs your input" = "Claude · 내 응답 대기";
 
 /* CrewStore.swift */
 "Connecting to Crew…" = "Crew에 연결 중…";
@@ -264,7 +260,7 @@
 "Close details (Esc)" = "상세 정보 닫기 (Esc)";
 "Copy Title" = "제목 복사";
 "This session has ended." = "이 세션은 종료됐어요.";
-"Claude · Lead" = "Claude · 리드";
+"%@ · Lead" = "%@ · 리드";
 "Directory" = "디렉터리";
 "Started" = "시작";
 "%@ ago" = "%@ 전";
@@ -508,9 +504,9 @@
 "Match System" = "시스템 설정과 같게";
 "For the board and the Crew app on this computer. The app switches the next time it opens." = "이 컴퓨터의 보드와 Crew 앱에 적용돼요. 앱은 다음에 열 때 바뀌어요.";
 "Shared instructions" = "공유 지침";
-"Given to every agent with its next job, in every project, and to Claude sessions when they start." = "모든 프로젝트에서 각 에이전트의 다음 작업부터 전달되고, Claude 세션에는 시작할 때 전달돼요.";
+"Given to every agent with its next job, in every project, and to lead sessions when they start." = "모든 프로젝트에서 각 에이전트의 다음 작업부터 전달되고, 리드 세션에는 시작할 때 전달돼요.";
 "Given to every agent working in this project, after the instructions for every project." = "이 프로젝트에서 작업하는 모든 에이전트에게 모든 프로젝트 지침 다음에 전달돼요.";
-"Over 9,000 characters, so Claude sessions are pointed to them rather than given the full text." = "9,000자를 넘어 Claude 세션에는 전체 내용 대신 파일 경로만 전달해요.";
+"Over 9,000 characters, so lead sessions are pointed to them rather than given the full text." = "9,000자를 넘어 리드 세션에는 전체 내용 대신 파일 경로만 전달해요.";
 "Unsaved changes" = "저장하지 않은 변경 사항";
 "Retry Loading" = "다시 불러오기";
 "Saving…" = "저장 중…";

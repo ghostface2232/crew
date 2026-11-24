@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { execFileSync, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 import { api, ensureDaemon, health, stopDaemon } from './client.ts';
 import { boardUrl } from './auth.ts';
@@ -129,7 +130,13 @@ try {
         await stopDaemon();
         await ensureDaemon();
       } else if (arg === 'logs') {
-        execFileSync('tail', ['-n', '60', path.join(HOME, 'daemon.log')], { stdio: 'inherit' });
+        // Read here rather than with tail, which Windows has only inside Git Bash.
+        const file = path.join(HOME, 'daemon.log');
+        if (!fs.existsSync(file)) throw new Error(`No daemon log yet at ${file}: the daemon has not been started.`);
+        const lines = fs.readFileSync(file, 'utf8').split('\n');
+        // The newline that ends the last line starts no further one.
+        if (lines.at(-1) === '') lines.pop();
+        process.stdout.write(lines.slice(-60).map((line) => `${line}\n`).join(''));
         break;
       } else throw new Error('Usage: crew daemon <start|stop|restart|logs>');
       if (!(await health())) console.log('stopped');

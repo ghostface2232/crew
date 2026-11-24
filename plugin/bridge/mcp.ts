@@ -697,6 +697,8 @@ async function updateMission(args: any, ctx?: CallContext): Promise<string> {
   }
 
   let current: Mission | null;
+  // On a call that ends a mission, a title says which one: the call must never end another under that title.
+  const titled = ending && now.open.length ? normalizeTitle(args.title) : '';
   if (args.id !== undefined) {
     current = named(now, args.id, 'id');
     // A done mission's pull request is still watched, and check news held back after three failing heads resumes only by linking it again.
@@ -705,6 +707,10 @@ async function updateMission(args: any, ctx?: CallContext): Promise<string> {
       return describeMission(current, now) + linked;
     }
     if (current.state !== 'active') throw new Error(`Mission ${current.id} is already ${current.state}${current.outcome ? ` (${current.outcome})` : ''}. ${now.open.length ? `Open: ${listed(now.open)}.` : 'Start a new one by passing title.'}`);
+  } else if (titled) {
+    const match = now.open.find((m) => m.title === titled);
+    if (!match) throw new Error(`No open mission is titled ${JSON.stringify(titled)}. Open: ${listed(now.open)}. Pass id to say which one this call ends. Nothing was changed or started.`);
+    current = match;
   } else if (now.open.length > 1) {
     if (ending || changing || args.pr !== undefined) throw unnamed(now.open, 'id');
     return `This session has ${now.open.length} missions open. ${NAME_THE_MISSION}\n\n${now.open.map((m) => describeMission(m, now)).join('\n\n')}`;
@@ -929,17 +935,18 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
       if (args.job_id) {
         const job: JobView = await api('GET', `/api/jobs/${args.job_id}`);
         showEvidence(ctx, job);
-        if (args.report_offset !== undefined) {
-          if (!Number.isSafeInteger(args.report_offset) || args.report_offset < 0 || (args.turn !== undefined && (!Number.isSafeInteger(args.turn) || args.turn < 1))) throw new Error('Invalid report offset or turn.');
+        if (args.report_offset !== undefined || args.turn !== undefined) {
+          const offset = args.report_offset ?? 0;
+          if (!Number.isSafeInteger(offset) || offset < 0 || (args.turn !== undefined && (!Number.isSafeInteger(args.turn) || args.turn < 1))) throw new Error('Invalid report offset or turn.');
           const latest = job.exchange?.findLast((entry) => entry.from === 'worker');
           const latestTurn = latest?.turn ?? job.turns;
           const turn = args.turn ?? latestTurn;
           const report = turn === latestTurn ? job.report : job.exchange?.find((entry) => entry.turn === turn && entry.from === 'worker')?.text;
           if (report === undefined) throw new Error('That report turn is not retained.');
-          const page = textPage(report, args.report_offset, REPORT_PAGE_BYTES);
-          const next = args.report_offset + page.length;
+          const page = textPage(report, offset, REPORT_PAGE_BYTES);
+          const next = offset + page.length;
           ctx.jobs.push(job);
-          return `[${job.id}] report turn ${turn}, offset ${args.report_offset}:\n${page}\n${next < report.length ? `Next: status job_id "${job.id}", turn: ${turn}, report_offset: ${next}` : 'End of report.'}`;
+          return `[${job.id}] report turn ${turn}, offset ${offset}:\n${page}\n${next < report.length ? `Next: status job_id "${job.id}", turn: ${turn}, report_offset: ${next}` : 'End of report.'}`;
         }
         return describeJob(job, ctx);
       }

@@ -136,6 +136,12 @@ for (const c of cases) {
   });
 }
 
+test('a debate of one round opens on its final round', () => {
+  const rounds = (count: number) => buildPrompt({ kind: 'delegate', cwd: CWD, ask: true, debate: { rounds: count }, task: 'Which cache?' }, null, null, '').prompt.split('# Rounds\n')[1];
+  assert.equal(rounds(1), 'This is the final round (1 of 1). Answer, then close with your Conclusion.');
+  assert.equal(rounds(2), 'This is round 1 of 2. The lead answers each of your messages; you reply in the next round.');
+});
+
 test('the lead picks skills by name from the installed ones', (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-skills-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

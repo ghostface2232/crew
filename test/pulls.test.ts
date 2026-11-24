@@ -250,6 +250,51 @@ test('link primes without news and relinking only lifts a hold', async () => {
   await assert.rejects(h.pulls.link('one', '12'), { message: 'The GitHub CLI could not read the pull request: "first line"' });
 });
 
+test('linking a closed pull request again once it is open watches it again, unless the save fails', async () => {
+  const h = harness();
+  const { watch } = await h.pulls.link('one', URL);
+  h.responses.set(URL, view({ state: 'CLOSED' }));
+  h.advance(300_000);
+  await h.pulls.tick();
+  assert.deepEqual([watch.state, watch.ended], ['closed', true]);
+  // Still closed: linking it again changes nothing.
+  assert.match((await h.pulls.link('one', URL)).summary, /· closed ·/);
+  assert.deepEqual([watch.state, watch.ended], ['closed', true]);
+
+  const reopened = view({ title: 'Reopened', headRefOid: 'new-head', statusCheckRollup: [run('build')], reviews: [
+    { id: 'seen', author: { login: 'reviewer' }, state: 'COMMENTED', body: 'Earlier' },
+  ] });
+  h.responses.set(URL, reopened);
+  h.advance(1000);
+  const ended = structuredClone(watch);
+  const save = h.deps.save;
+  h.deps.save = () => { throw new Error('disk full'); };
+  await assert.rejects(h.pulls.link('one', URL), /disk full/);
+  assert.deepEqual(watch, ended);
+
+  h.deps.save = save;
+  const again = await h.pulls.link('one', URL);
+  assert.equal(again.watch, watch);
+  assert.match(again.summary, /^octo\/crew#12 · open · checks failing \(CI \/ build\)$/);
+  assert.deepEqual([watch.state, watch.ended, watch.title, watch.head, watch.checks, watch.checkedAt], ['open', undefined, 'Reopened', 'new-head', 'failing', 311_000]);
+  // What the summary said is not sent again as news; what comes after is.
+  assert.equal(again.watch.news, undefined);
+  h.responses.set(URL, { ...reopened, reviews: [...reopened.reviews!, { id: 'later', author: { login: 'reviewer' }, state: 'CHANGES_REQUESTED', body: 'Please fix' }] });
+  h.advance(300_000);
+  await h.pulls.tick();
+  assert.deepEqual(watch.news?.map(({ kind }) => kind), ['review']);
+  assert.match(watch.news![0].reason, /Please fix/);
+  assert.doesNotMatch(watch.news![0].reason, /Earlier/);
+
+  // A watch ended by its mission being abandoned comes back the same way once the mission is reopened.
+  h.missions.get('one')!.state = 'abandoned';
+  await h.pulls.tick();
+  assert.equal(watch.ended, true);
+  h.missions.get('one')!.state = 'done';
+  await h.pulls.link('one', URL);
+  assert.equal(watch.ended, undefined);
+});
+
 test('ticks skip absent leads and end abandoned or forgotten missions', async () => {
   const h = harness();
   const one = (await h.pulls.link('one', URL)).watch;

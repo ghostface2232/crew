@@ -123,6 +123,14 @@ export const WORKERS: Record<WorkerAgent, Worker> = {
   antigravity: { name: 'Antigravity', idPrefix: 'ag', resume: 'agy --conversation', reviewerRunsGit: false, readOnlyScratch: false },
 };
 
+/**
+ * Claude as a worker, which only a Codex lead starts, and only when it names `claude` for a job (jobs.ts). Kept out of
+ * WORKERS, whose keys are the agents that are never the lead.
+ */
+export const CLAUDE_WORKER: Worker = { name: 'Claude', idPrefix: 'cl', resume: 'claude --resume', reviewerRunsGit: true, readOnlyScratch: false };
+/** What a job's agent is, worker or Claude. */
+export const workerInfo = (agent: WorkerAgent | typeof LEAD): Worker => (agent === LEAD ? CLAUDE_WORKER : WORKERS[agent]);
+
 /** Antigravity's commands are refused in every job but an engineer's (`decide` in adapters/antigravity.ts). */
 export function runsCommands(agent: WorkerAgent, spec: { kind: JobKind; ask?: boolean }): boolean {
   return (spec.kind === 'delegate' && !spec.ask) || WORKERS[agent].reviewerRunsGit;
@@ -205,6 +213,10 @@ export interface Config {
     /** Additional plugins for `runs_app` jobs, including real-screen computer use by default. */
     appPlugins: string[];
   };
+  /** Claude Code as a worker under a Codex lead. */
+  claude: {
+    bin: string;
+  };
   antigravity: {
     bin: string;
     enabled: boolean;
@@ -254,6 +266,7 @@ const defaults: Config = {
   notify: true,
   notifyOnDone: false,
   codex: { bin: 'codex', approvalPolicy: 'on-request', approvalsReviewer: 'auto_review', plugins: ['browser'], appPlugins: ['computer-use', 'unified-computer-use'] },
+  claude: { bin: 'claude' },
   antigravity: { bin: 'agy', enabled: true },
   roles: resolveRoles({}),
   roleSettings: {},
@@ -380,6 +393,7 @@ export function resolveConfig(user: UserConfig): Config {
     ...defaults,
     ...user,
     codex: { ...defaults.codex, ...user.codex },
+    claude: { ...defaults.claude, ...user.claude },
     antigravity: { ...defaults.antigravity, ...user.antigravity },
     roles,
     roleSettings,

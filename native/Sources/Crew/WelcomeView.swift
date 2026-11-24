@@ -190,8 +190,8 @@ private struct CommandArt: View {
             HStack {
                 Text("~/Projects/app").font(Typeface.caption).foregroundStyle(.secondary)
                 Spacer()
-                Image(systemName: "arrow.up").font(Symbol.control).foregroundStyle(.white)
-                    .frame(width: IconButton.diameter - 2, height: IconButton.diameter - 2)
+                Image(systemName: "arrow.up").font(Symbol.control).foregroundStyle(Welcome.onAccent)
+                    .frame(width: Welcome.sendButton, height: Welcome.sendButton)
                     .background(Palette.accent, in: Circle())
             }
         }

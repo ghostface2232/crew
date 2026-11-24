@@ -309,6 +309,9 @@ enum Welcome {
     static let behindOpacity: CGFloat = 0.7
     /// The text cursor in the Claude Code prompt.
     static let caret = CGSize(width: 1.5, height: 17)
+    /// The prompt's send button, a little smaller than an icon button so it sits inside the prompt card, and its arrow.
+    static let sendButton: CGFloat = 26
+    static let onAccent = Color.white
 }
 
 /// An icon button: a filled circle a little larger than a chip, where the system's regular circle read smaller

@@ -205,7 +205,7 @@ export const ko: Record<string, string> = {
   'Given to every agent with its next job, in every project, and to lead sessions when they start.': '모든 프로젝트에서 각 에이전트의 다음 작업부터 전달되고, 리드 세션에는 시작할 때 전달돼요.',
   'Given to every agent working in this project, after the instructions for every project.': '이 프로젝트에서 작업하는 모든 에이전트에게 모든 프로젝트 지침 다음에 전달돼요.',
   'Hand a task to an agent': '에이전트에게 작업 맡기기',
-  'Hand a task to an agent, or run /crew:run in Claude Code or Codex.': '에이전트에게 작업을 맡기거나 Claude Code나 Codex에서 /crew:run을 실행해 보세요.',
+  'Hand a task to an agent, or run /crew:run in Claude Code or $crew:run in Codex.': '에이전트에게 작업을 맡기거나 Claude Code에서 /crew:run, Codex에서 $crew:run을 실행해 보세요.',
   'Has a question': '질문 있음',
   'Hide sidebar': '사이드바 숨기기',
   'Hide the full reply': '전체 답변 숨기기',

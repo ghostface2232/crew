@@ -34,7 +34,7 @@ test('the shared effort option describes Antigravity’s named thinking levels',
     // Listing the schema needs no daemon or network access.
     registerHooks({ resolve(specifier, context, next) {
       if (specifier === './client.ts' && context.parentURL === ${JSON.stringify(mcp)}) {
-        return { url: 'data:text/javascript,export const api = undefined, ensureDaemon = async () => {}', shortCircuit: true };
+        return { url: 'data:text/javascript,export const api = undefined, ensureDaemon = async () => {}, partialEnvironment = () => {}', shortCircuit: true };
       }
       return next(specifier, context);
     } });

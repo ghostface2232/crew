@@ -187,7 +187,7 @@ export function Palette({ state, names, projects, origin, close, actions }: {
     // With nothing typed: actions, pages, projects, and only the most recent work.
     const counts = new Map<string, number>();
     return entries.filter(({ group }) => {
-      if (group !== 'Jobs' && group !== 'Missions' && group !== 'Claude sessions') return true;
+      if (group !== 'Jobs' && group !== 'Missions' && group !== 'Lead sessions') return true;
       const count = counts.get(group) ?? 0;
       counts.set(group, count + 1);
       return count < 4;
@@ -355,7 +355,7 @@ export function Palette({ state, names, projects, origin, close, actions }: {
                   </p>
                 )}
                 <span className="palette-hint">
-                  {current.group === 'Jobs' || current.group === 'Claude sessions' ? <ChatMultipleRegular fontSize={13} /> : null}
+                  {current.group === 'Jobs' || current.group === 'Lead sessions' ? <ChatMultipleRegular fontSize={13} /> : null}
                   {t('Press Return to open')}
                 </span>
               </aside>

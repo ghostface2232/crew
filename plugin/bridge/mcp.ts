@@ -1132,6 +1132,8 @@ async function handle(msg: any): Promise<void> {
       // Codex gives MCP servers a filtered environment; a daemon started from here is replaced once a hook or the CLI,
       // which have the whole one, finds it idle.
       if (host === 'codex') partialEnvironment();
+      // Started only now, so a daemon a Codex server starts knows its environment is filtered.
+      ensureDaemon().catch(() => {});
       TOOLS = toolList();
       return reply({
         protocolVersion: PROTOCOL_VERSIONS.includes(params?.protocolVersion) ? params.protocolVersion : PROTOCOL_VERSIONS[1],
@@ -1226,5 +1228,3 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
   else waiter.resolve(msg.result);
 });
 
-// Start the daemon with the session so the board and hooks work before the first tool call.
-ensureDaemon().catch(() => {});

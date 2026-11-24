@@ -1,4 +1,4 @@
-import { NAMES } from './model.ts';
+import { NAMES, sessionAgent } from './model.ts';
 import { t } from './i18n.ts';
 import type { BoardJob, Snapshot } from './types.ts';
 
@@ -74,7 +74,7 @@ export function planNotifications(previous: PlanMemory, state: Snapshot, options
   }
   for (const session of state.claude) {
     if (session.state === 'waiting') {
-      request({ key: `session:${session.id}:${session.waitingId ?? session.waitingFor ?? ''}`, title: t('{agent} needs your input', { agent: 'Claude' }), body: session.waitingFor ?? session.title, jobId: `session:${session.id}` });
+      request({ key: `session:${session.id}:${session.waitingId ?? session.waitingFor ?? ''}`, title: t('{agent} needs your input', { agent: NAMES[sessionAgent(session)] }), body: session.waitingFor ?? session.title, jobId: `session:${session.id}` });
     }
   }
   return {

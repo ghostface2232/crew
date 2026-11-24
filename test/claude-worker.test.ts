@@ -49,7 +49,7 @@ const fakeClaude = `
     if (message.type === 'control_response') {
       const reply = message.response;
       replies.push(reply);
-      if (['read-only edit', 'linked edit', 'granted follow-up'].includes(prompt)) return success();
+      if (['read-only edit', 'linked edit', 'git edit', 'browser', 'granted follow-up'].includes(prompt)) return success();
       if (step === 0 && reply.response.behavior === 'allow') fs.writeFileSync(reply.response.updatedInput.file_path, 'inside');
       if (++step < policy.length) return ask(...policy[step]);
       send({ type: 'system', subtype: 'permission_denied', tool_name: 'Write', blocked_path: outside });
@@ -66,6 +66,8 @@ const fakeClaude = `
     if (prompt === 'policy') return ask(...policy[0]);
     if (prompt === 'read-only edit') return ask('NotebookEdit', { notebook_path: local });
     if (prompt === 'linked edit') return ask('Edit', { file_path: path.join(cwd, 'link', 'new', 'file.txt') });
+    if (prompt === 'git edit') return ask('Write', { file_path: path.join(cwd, '.git', 'config'), content: '' });
+    if (prompt === 'browser') return ask('mcp__crew__browser', {});
     if (prompt === 'granted follow-up') return ask(...policy[3]);
     if (prompt === '429') return send({ type: 'result', subtype: 'error_during_execution', is_error: true, api_error_status: 429, errors: ['Too many requests'] });
     if (prompt === 'rate event') return send({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected' } });
@@ -157,16 +159,17 @@ for (const kind of ['delegate', 'polish', 'review', 'ask', 'debate'] as const) {
     assert.deepEqual(await h.event('session'), ['claude-session']);
     assert.deepEqual(await h.event('model'), ['test-model', 'medium']);
     const configArg = flag(args, '--mcp-config')!;
-    if (process.platform === 'win32') {
-      assert.ok(path.isAbsolute(configArg));
-      if (writable) assert.equal(path.dirname(path.dirname(configArg)), h.ctl.job.scratch);
-      await h.adapter.release!(h.ctl);
-      assert.equal(fs.existsSync(configArg), false);
-      assert.equal(fs.existsSync(flag(args, '--append-system-prompt-file')!), false);
-    } else {
-      assert.ok(configArg.startsWith('{'));
-      assert.equal(flag(args, '--append-system-prompt'), h.ctl.job.instructions);
-    }
+    // The MCP config holds the job's token, so it is a private file on every platform, never an argument.
+    assert.ok(path.isAbsolute(configArg));
+    assert.ok(!args.some((arg: string) => arg.includes('fake-token')));
+    if (writable) assert.equal(path.dirname(path.dirname(configArg)), h.ctl.job.scratch);
+    if (process.platform !== 'win32') assert.equal(fs.statSync(configArg).mode & 0o777, 0o600);
+    const promptFile = flag(args, '--append-system-prompt-file');
+    if (process.platform === 'win32') assert.ok(promptFile);
+    else assert.equal(flag(args, '--append-system-prompt'), h.ctl.job.instructions);
+    await h.adapter.release!(h.ctl);
+    assert.equal(fs.existsSync(configArg), false);
+    if (promptFile) assert.equal(fs.existsSync(promptFile), false);
   });
 }
 
@@ -290,4 +293,14 @@ test('Claude Code shutdown drains an open process', async (t) => {
   assert.equal((await h.adapter.probe!(h.ctl)).verdict, 'ended');
   assert.equal(h.events.fail, undefined);
   await assert.rejects(h.adapter.reply(h.ctl, 'after shutdown'), /shutting down/);
+});
+
+test('Claude Code may not edit .git, and the browser tool asks the user', async (t) => {
+  const git = harness(t, 'git edit');
+  fs.mkdirSync(path.join(git.cwd, '.git'), { recursive: true });
+  await git.adapter.start(git.ctl);
+  assert.deepEqual((await git.report()).replies[0].response, { behavior: 'deny', message: 'Edit paths must be inside the job workspace.' });
+  const browser = harness(t, 'browser');
+  await browser.adapter.start(browser.ctl);
+  assert.deepEqual(await browser.event('waiting'), ['approval', 'mcp__crew__browser', undefined]);
 });

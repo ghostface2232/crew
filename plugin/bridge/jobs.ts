@@ -474,7 +474,7 @@ export function resolveRole(spec: JobSpec): Role {
  * a role's or preset's effort holds over a named tier's.
  */
 function pickModel(agent: Agent, spec: JobSpec, role: { model?: string; effort?: string; ownModel?: boolean }, config: Config, preset: PresetName | null): { model?: string; effort?: string; tier?: Tier; agentDefault?: boolean } {
-  const configured = { model: role.model ?? config[agent].model, effort: role.effort ?? (agent === 'codex' ? config.codex.effort : undefined) };
+  const configured = { model: role.model ?? config[agent].model, effort: role.effort ?? (agent === 'antigravity' ? undefined : config[agent].effort) };
   const cap = preset ? config.presets[preset].maxTier : undefined;
   // A family name passed as the model is that family's tier, so it resolves, caps and sets effort like one.
   const family = spec.model ? familyTier(agent, spec.model) : undefined;

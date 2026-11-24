@@ -267,7 +267,7 @@ test('polish advertises the shared model option and forwards it to the job', asy
   const modelProps = vm.runInNewContext(`(${source.match(/const modelProps = (\{[^]*?\n\});/)![1]})`, { TIERS });
   const schema = source.slice(source.indexOf("    name: 'polish',"), source.indexOf("    name: 'debate',"));
   const tool = vm.runInNewContext(`({${schema.slice(0, schema.lastIndexOf('\n  },'))}})`, {
-    holder: () => 'Antigravity', worktreeProps: {}, skillsProp: {}, common: {}, modelProps, agentProp: {},
+    holder: () => 'Antigravity', worktreeProps: {}, skillsProp: {}, common: {}, modelProps, agentProp: () => ({}),
   });
   assert.deepEqual(tool.inputSchema.properties.model, modelProps.model);
   assert.deepEqual([...tool.inputSchema.properties.tier.enum], [...TIERS]);

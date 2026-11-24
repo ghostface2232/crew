@@ -6,7 +6,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { agentCommand, agentEnv } from '../config.ts';
 import type { Config } from '../config.ts';
-import { isInside } from '../git.ts';
+import { isGitPath, isInside } from '../git.ts';
 import { noteLeadDecline } from '../jobs.ts';
 import type { Adapter, JobCtl, Probe } from '../jobs.ts';
 import { treeKillCommand } from '../rpc.ts';
@@ -15,6 +15,8 @@ import { clip, clipEnd } from '../text.ts';
 const IDLE_SHUTDOWN_MS = 10 * 60_000;
 const CLOSE_GRACE_MS = 2_000;
 const EDIT_TOOLS = ['Edit', 'Write', 'NotebookEdit'];
+/** Crew's worker MCP tools that only read or report. `browser` starts a process outside the worker's limits, so it asks. */
+const UNATTENDED_TOOLS = ['ask_lead', 'lead_answers', 'siblings', 'search', 'recent_changes', 'rate'].map((name) => `mcp__crew__${name}`);
 
 type ToolInput = Record<string, unknown>;
 type Approval = { id: string; input: ToolInput; reason: string; grant?: { key: string; label: string } };
@@ -34,7 +36,8 @@ function toolPath(input: ToolInput, tool?: string): string | undefined {
 
 function canEdit(ctl: JobCtl, file: string | undefined): boolean {
   if (ctl.job.sandbox !== 'workspace-write' || !file) return false;
-  try { return isInside(ctl.job.cwd, file); }
+  // The bridge runs git in the worker's tree itself, so `.git` is never the worker's to change.
+  try { return isInside(ctl.job.cwd, file) && !isGitPath(ctl.job.cwd, file); }
   catch { return false; }
 }
 
@@ -262,7 +265,7 @@ class Session {
     const input: ToolInput = request.input ?? {};
     const reason = toolDetail(tool, input);
     const approval = { id, input, reason };
-    if (tool.startsWith('mcp__crew__')) return this.allow(approval);
+    if (UNATTENDED_TOOLS.includes(tool)) return this.allow(approval);
     if (EDIT_TOOLS.includes(tool)) {
       if (canEdit(ctl, toolPath(input, tool))) return this.allow(approval);
       const message = ctl.job.sandbox === 'read-only' ? 'This job is read-only.' : 'Edit paths must be inside the job workspace.';
@@ -330,8 +333,9 @@ class Session {
       case 'result':
         if (typeof message.session_id === 'string' && message.session_id !== ctl.job.sessionId) ctl.session(message.session_id);
         if (message.usage) counted(ctl, message.usage);
+        // A request still open when its turn ends is stale; it is denied rather than left without an answer.
         if (this.pending.length) {
-          this.pending.length = 0;
+          for (const request of this.pending.splice(0)) this.respond(request.id, { behavior: 'deny', message: 'The turn ended before this was answered.' });
           ctl.resumed();
         }
         this.turns--;

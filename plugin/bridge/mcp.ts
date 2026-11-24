@@ -135,9 +135,10 @@ const skillsProp = installedSkills.length ? {
 const attachmentsProp = {
   attachments: { type: 'array', items: { type: 'string' }, maxItems: 10, description: 'Absolute paths of images or recordings (PNG, JPEG, GIF, WebP, WebM, MP4) the worker should see, such as a design or a screenshot of the problem. They are copied into the job\'s evidence and shown on the board.' },
 };
-const agentProp = {
-  agent: { type: 'string', enum: [...Object.keys(WORKERS), LEAD], description: 'Which of the role\'s holders takes this job; the roles in your instructions list them. Without it, Antigravity for wording and Codex for other work, among the holders that can take it. claude starts no worker: you do it.' },
-};
+/** Built with the tools: what naming claude does depends on the host. */
+const agentProp = () => ({
+  agent: { type: 'string', enum: [...Object.keys(WORKERS), LEAD], description: `Which of the role's holders takes this job; the roles in your instructions list them. Without it, Antigravity for wording and Codex for other work, among the holders that can take it. ${host === 'codex' ? 'claude starts a Claude worker; left out, a role only Claude holds is yours to do.' : 'claude starts no worker: you do it.'}` },
+});
 const modelProps = {
   tier: { type: 'string', enum: [...TIERS], description: 'How demanding the job is; Crew picks the model from it. Leave it out for ordinary work, so the model the user set for the role or preset applies (standard without one); naming one overrides it. standard: most work, including most UI changes. frontier: especially hard or complex work, or a UI rebuilt from scratch. light: simple, well-specified tasks. fast: plain searches and lookups. Codex runs Sol, Astra, Terra and Luna for these; Antigravity runs Neon for frontier (literary or very complex documents) and Hydrogen otherwise. Newer models of each family are picked up automatically.' },
   model: { type: 'string', description: 'Exact model ID for this job, as the notes list it, overriding tier. Rarely needed; prefer tier. When the user names a family such as Astra, pass its tier; a family name passed here is taken as that tier.' },
@@ -160,7 +161,7 @@ const buildTools = () => [
         check: { type: 'string', description: 'A shell command (e.g. "npm test") the bridge itself runs in the worktree after every turn, so the result shows an observed exit status instead of the worker\'s word. Pick one that fails without the change. Runs with the worker\'s file limits, up to 10 minutes. Needs a worktree.' },
         ...worktreeProps,
         ...modelProps,
-        ...agentProp,
+        ...agentProp(),
         ...runsAppProp('do or verify the work'),
         ...attachmentsProp,
         ...aloneProp,
@@ -187,7 +188,7 @@ const buildTools = () => [
         ...runsAppProp('judge the change. It then goes to the verify role and runs in a snapshot worktree holding the change; your own self-review must stay static'),
         ...attachmentsProp,
         ...modelProps,
-        ...agentProp,
+        ...agentProp(),
         ...skillsProp,
         ...common,
       },
@@ -206,7 +207,7 @@ const buildTools = () => [
         ...worktreeProps,
         tier: { ...modelProps.tier, description: 'standard (the default, Hydrogen for Antigravity) for nearly all wording work; frontier (Neon) only for literary or very complex, difficult documents.' },
         model: modelProps.model,
-        ...agentProp,
+        ...agentProp(),
         ...skillsProp,
         ...common,
       },
@@ -225,7 +226,7 @@ const buildTools = () => [
         rounds: { type: 'integer', minimum: 1, maximum: MAX_DEBATE_ROUNDS, description: 'How many exchanges at most, counting the first. Default 3.' },
         title: { type: 'string', description: 'Short label shown on the status board.' },
         ...modelProps,
-        ...agentProp,
+        ...agentProp(),
         ...common,
       },
       required: ['topic', 'position'],

@@ -130,6 +130,8 @@ export const WORKERS: Record<WorkerAgent, Worker> = {
  * WORKERS, whose keys are the agents that are never the lead.
  */
 export const CLAUDE_WORKER: Worker = { name: 'Claude', idPrefix: 'cl', resume: 'claude --resume', reviewerRunsGit: true, readOnlyScratch: false };
+/** A job id: an agent's prefix and six hex digits. Every check of one goes through this, so a new agent's jobs are not left out. */
+export const JOB_ID = `(?:${[...Object.values(WORKERS), CLAUDE_WORKER].map((w) => w.idPrefix).join('|')})-[0-9a-f]{6}`;
 /** What a job's agent is, worker or Claude. */
 export const workerInfo = (agent: JobAgent): Worker => (agent === LEAD ? CLAUDE_WORKER : WORKERS[agent]);
 

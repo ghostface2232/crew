@@ -72,7 +72,8 @@ function commandGrantKey(tool: string, input: ToolInput, cwd: string): string | 
   }
 }
 
-// Error status and rate-limit event mappings are assumed until observed on the live CLI.
+// Read from Claude Code 2.1.328's stream-json schema: `rate_limit_info.status` is allowed, allowed_warning or
+// rejected, and a result's `api_error_status` is the HTTP status. Neither has been seen at a real limit.
 function limitReached(message: any): boolean {
   return message.type === 'result' ? Number(message.api_error_status) === 429
     : message.rate_limit_info?.status === 'rejected';
@@ -336,12 +337,13 @@ class Session {
           const tool = typeof message.tool_name === 'string' ? message.tool_name : use?.name ?? 'an action';
           const input: ToolInput = use?.input ?? message.input ?? {};
           const reason = typeof message.decision_reason === 'string' ? message.decision_reason.trim() : '';
-          // `--restricted` keeping a file tool inside the job is the job's limit, not a judgment to send back.
-          if (/^--restricted/.test(reason) || typeof message.blocked_path === 'string') {
-            const target = typeof message.blocked_path === 'string' ? message.blocked_path : toolPath(input, tool);
-            ctl.note(`Claude Code refused ${tool}${target ? `: ${oneLine(target)}` : ''}.`);
-          } else {
+          // Only the automatic mode's classifier judges an action the lead can send back with the user's approval;
+          // the others, such as `--restricted` keeping a file tool inside the job, are the job's limits.
+          if (message.decision_reason_type === 'classifier') {
             ctl.refused(toolDetail(tool, input), reason || 'no reason given');
+          } else {
+            const target = typeof message.blocked_path === 'string' ? message.blocked_path : toolPath(input, tool);
+            ctl.note(`Claude Code refused ${tool}${target ? `: ${oneLine(target)}` : ''}${reason ? ` (${reason})` : ''}.`);
           }
         }
         break;

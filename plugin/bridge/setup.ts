@@ -1,4 +1,4 @@
-import { execFile, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { isNewer } from './client.ts';
 import { CODEX_PLUGIN, hookKeys, hookTrust, pointer, writeCodexPlugin, writtenByCrew } from './codex-plugin.ts';
 import type { HookTrust } from './codex-plugin.ts';
-import { RpcPeer } from './rpc.ts';
+import { execTimed, RpcPeer } from './rpc.ts';
 import { agentCommand, agentEnv, HOME, installed, LEDGER_ASIDE, loadConfig, PLUGIN_ROOT, VERSION } from './config.ts';
 
 /**
@@ -37,7 +37,7 @@ export function run(bin: string, args: string[], timeout = 20_000): Promise<{ ok
   const env = agentEnv();
   const command = agentCommand(bin, args, env);
   return new Promise((resolve) => {
-    execFile(command.bin, command.args, { env, shell: command.shell, timeout, windowsHide: true }, (err, stdout, stderr) => {
+    execTimed(command.bin, command.args ?? [], { env, shell: command.shell, timeout, windowsHide: true }, (err, stdout, stderr) => {
       resolve({ ok: !err, out: (stdout || stderr || err?.message || '').trim() });
     });
   });
@@ -382,19 +382,19 @@ async function codexLeadItems(bin: string): Promise<SetupItem[]> {
 }
 
 /** The Crew hooks' trust as Codex reports it; never "trusted" unless Codex says every one is. */
-export async function codexHooksItem(bin: string, root = PLUGIN_ROOT): Promise<SetupItem> {
+export async function codexHooksItem(bin: string, root = PLUGIN_ROOT, timeout = HOOK_LIST_TIMEOUT_MS): Promise<SetupItem> {
   const manifest = JSON.parse(fs.readFileSync(path.join(root, '.codex-plugin', 'plugin.json'), 'utf8'));
   const file = pointer(manifest.hooks);
   const keys = hookKeys(JSON.parse(fs.readFileSync(path.join(root, file), 'utf8')), file);
   const item = { id: 'codex-hooks', label: 'Crew hooks in Codex' };
   let trust: HookTrust;
   try {
-    trust = await codexHookTrust(bin, keys);
+    trust = await codexHookTrust(bin, keys, timeout);
   } catch (err) {
     return { ...item, ok: false, detail: `Could not ask Codex whether they are trusted (${(err as Error).message}). If Codex does not run them, trust them in \`/hooks\`.` };
   }
   if (trust === 'trusted') return { ...item, ok: true, detail: 'Trusted.' };
-  if (trust === 'modified') return { ...item, ok: false, detail: `Changed by an update since you trusted them, so Codex asks again. ${CODEX_TRUST}` };
+  if (trust === 'modified') return { ...item, ok: false, detail: `Changed by an update since you trusted them, so Codex skips them until you trust them again. ${CODEX_TRUST}` };
   return { ...item, ok: false, detail: CODEX_TRUST };
 }
 
@@ -404,16 +404,16 @@ const HOOK_LIST_TIMEOUT_MS = 10_000;
  * Asks a short-lived `codex app-server` how it trusts the hooks named by `keys` (`hooks/list`). Codex's config keeps a
  * trust record after the hook it trusted has changed, so the config alone cannot say. Throws when Codex cannot be asked.
  */
-async function codexHookTrust(bin: string, keys: string[]): Promise<HookTrust> {
+async function codexHookTrust(bin: string, keys: string[], timeout: number): Promise<HookTrust> {
   const env = agentEnv();
   const command = agentCommand(bin, ['app-server'], env);
   const child = spawn(command.bin, command.args ?? [], { env, shell: command.shell, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
   const peer = new RpcPeer(child, { onNotification: () => {}, onRequest: async () => undefined, onExit: () => {} }, command.shell);
   try {
-    await peer.request('initialize', { clientInfo: { name: 'crew', title: 'Crew', version: VERSION }, capabilities: null }, HOOK_LIST_TIMEOUT_MS);
+    await peer.request('initialize', { clientInfo: { name: 'crew', title: 'Crew', version: VERSION }, capabilities: null }, timeout);
     peer.notify('initialized');
     // Plugin hooks are listed for any folder; the home folder needs no project trust.
-    return hookTrust(await peer.request('hooks/list', { cwds: [os.homedir()] }, HOOK_LIST_TIMEOUT_MS), keys);
+    return hookTrust(await peer.request('hooks/list', { cwds: [os.homedir()] }, timeout), keys);
   } finally {
     peer.close();
   }

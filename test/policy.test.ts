@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { decide } from '../plugin/bridge/adapters/antigravity.ts';
-import { isNewer, shouldReplace } from '../plugin/bridge/client.ts';
+import { isNewer, outsideJobCommand, shouldReplace } from '../plugin/bridge/client.ts';
 import { isInside } from '../plugin/bridge/git.ts';
 
 test("an edit cannot reach the tree's .git through a symlink followed by ..", (t) => {
@@ -269,4 +269,16 @@ test('only Windows agents launched through a shell need a tree kill command', as
     if (platform !== 'win32') assert.equal(treeKillCommand(1234, true, platform), null);
     assert.equal(treeKillCommand(undefined, true, platform), null);
   }
+});
+
+test('a daemon started outside Codex\'s job is pointed at this client\'s Crew over the user\'s own environment', () => {
+  const home = String.raw`C:\Users\me\문서 crew`;
+  // Windows keeps a variable's name as it was set, so a lowercase one is found too; PATH is the user's own.
+  const env = { crew_port: '50756', PATH: String.raw`C:\filtered`, ELECTRON_RUN_AS_NODE: '1' };
+  const command = outsideJobCommand(String.raw`C:\node\node.exe`, String.raw`C:\crew\daemon.js`, String.raw`C:\Users\me\.crew\daemon.log`, home, env)!;
+  // A setting this client lacks is cleared, so one only the user's environment holds cannot send the daemon elsewhere.
+  assert.equal(command, String.raw`cmd.exe /d /v:off /s /c "set "CREW_HOME=C:\Users\me\문서 crew"&& set "CREW_PARTIAL_ENV=1"&& set "CREW_PORT=50756"&& set "CREW_AGENTGAUGE_DIR="&& set "ELECTRON_RUN_AS_NODE=1"&& "C:\node\node.exe" "C:\crew\daemon.js" >> "C:\Users\me\.crew\daemon.log" 2>&1"`);
+  // cmd.exe would expand a percent sign or end the quoting at a double quote, so such a start goes the usual way.
+  assert.equal(outsideJobCommand('node', 'daemon.js', 'log', String.raw`C:\100%`, {}), null);
+  assert.equal(outsideJobCommand('node', 'daemon.js', 'log', home, { CREW_PORT: '1"2' }), null);
 });

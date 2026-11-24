@@ -24,6 +24,7 @@ import { followUps, isTerminal, Jobs, UnreadableLedger } from './jobs.ts';
 import { missionPreset, Missions } from './missions.ts';
 import type { Mission } from './missions.ts';
 import { Pulls } from './pulls.ts';
+import { execTimed } from './rpc.ts';
 import type { PullWatch } from './pulls.ts';
 import { addEvidence, addRating, loadNotes, notesFile, renderNotes, scoreAll, setSummary, WORKER_ITEMS } from './notes.ts';
 import type { NotesFile } from './notes.ts';
@@ -261,7 +262,7 @@ function gh(args: string[], cwd?: string): Promise<string> {
   const env = { ...agentEnv(), GH_PROMPT_DISABLED: '1', NO_COLOR: '1' };
   const command = agentCommand('gh', args, env);
   return new Promise((resolve, reject) => {
-    execFile(command.bin, command.args ?? [], { cwd, env, shell: command.shell, timeout: 30_000, maxBuffer: 8 * 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
+    execTimed(command.bin, command.args ?? [], { cwd, env, shell: command.shell, timeout: 30_000, maxBuffer: 8 * 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
       if (!err) resolve(stdout);
       else reject(new Error((err as NodeJS.ErrnoException).code === 'ENOENT' ? 'the GitHub CLI (gh) was not found; install it and sign in with `gh auth login`' : (stderr || err.message).trim()));
     });
@@ -285,7 +286,7 @@ function refreshAntigravityModels(live: Config): void {
     const env = agentEnv();
     // Throws on a Windows command line it cannot quote safely, which must not fail the state read.
     const command = agentCommand(live.antigravity.bin, ['models'], env);
-    execFile(command.bin, command.args ?? [], { env, shell: command.shell, timeout: 60_000, windowsHide: true }, (err, stdout) => answered(err ? [] : antigravityModels(stdout)));
+    execTimed(command.bin, command.args ?? [], { env, shell: command.shell, timeout: 60_000, windowsHide: true }, (err, stdout) => answered(err ? [] : antigravityModels(stdout)));
   } catch {
     answered([]);
   }

@@ -4,6 +4,7 @@ import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { readToken, tokenFile } from './auth.ts';
 import { agentEnv, baseUrl, HOME, installed, nodeEnv, PLUGIN_ROOT } from './config.ts';
+import { execTimed } from './rpc.ts';
 
 export async function api<T = any>(method: 'GET' | 'POST', route: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const send = (token: string | null) => fetch(`${baseUrl()}${route}`, {
@@ -140,6 +141,46 @@ export async function stopDaemon(): Promise<void> {
   }
 }
 
+/** What the daemon reads besides `CREW_HOME` and `CREW_PARTIAL_ENV`. */
+const DAEMON_VARS = ['CREW_PORT', 'CREW_AGENTGAUGE_DIR', 'ELECTRON_RUN_AS_NODE'];
+
+/**
+ * The command that starts the daemon outside Codex's job, or null when cmd.exe could not carry it as written. The new
+ * process starts from the user's own environment, which is whole, so the variables that point it at a Crew are set to
+ * this client's, and cleared where this client has none: a value only the user's environment holds would send the
+ * daemon to a Crew this client does not use. Windows names are case-insensitive, so they are looked up that way.
+ */
+export function outsideJobCommand(node: string, script: string, log: string, home: string, env: NodeJS.ProcessEnv): string | null {
+  const value = (name: string) => env[Object.keys(env).find((key) => key.toUpperCase() === name) ?? name];
+  const vars: [string, string][] = [['CREW_HOME', home], ['CREW_PARTIAL_ENV', '1'], ...DAEMON_VARS.map((name): [string, string] => [name, value(name) ?? ''])];
+  if ([node, script, log, ...vars.flat()].some((text) => /["%\r\n]/.test(text))) return null;
+  // /v:off: a user's delayed expansion would read `!name!` in a path as a variable.
+  return `cmd.exe /d /v:off /s /c "${vars.map(([key, text]) => `set "${key}=${text}"&& `).join('')}"${node}" "${script}" >> "${log}" 2>&1"`;
+}
+
+/**
+ * Starts the daemon through WMI, outside the job object Codex runs its MCP servers in on Windows: that job ends every
+ * process in it when Codex exits, which took a daemon this server spawned, and its workers, down with the lead
+ * session. False when WMI created nothing, to spawn it as usual instead.
+ */
+async function startOutsideJob(script: string, env: NodeJS.ProcessEnv): Promise<boolean> {
+  const command = outsideJobCommand(process.execPath, script, path.join(HOME, 'daemon.log'), path.resolve(HOME), env);
+  if (!command) return false;
+  // PowerShell also ends a single-quoted string at a curly quote, so each is doubled like the straight one.
+  const literal = (text: string) => `'${text.replace(/['\u2018-\u201B]/g, '$&$&')}'`;
+  const ps = [
+    "$ErrorActionPreference = 'Stop'",
+    '$startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]0 }',
+    `$result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = ${literal(command)}; CurrentDirectory = ${literal(HOME)}; ProcessStartupInformation = $startup }`,
+    'if ($result.ReturnValue -ne 0 -or -not $result.ProcessId) { exit 1 }',
+    'exit 0',
+  ].join('; ');
+  return new Promise((resolve) => {
+    execTimed('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(ps, 'utf16le').toString('base64')],
+      { timeout: 20_000, windowsHide: true }, (err) => resolve(!err));
+  });
+}
+
 async function startDaemon(): Promise<void> {
   const running = await health();
   if (running) {
@@ -160,21 +201,25 @@ async function startDaemon(): Promise<void> {
     if (await health()) return;
   }
   fs.mkdirSync(HOME, { recursive: true });
-  const out = fs.openSync(path.join(HOME, 'daemon.log'), 'a');
-  const child = spawn(process.execPath, [path.join(import.meta.dirname, `daemon${path.extname(import.meta.filename)}`)], {
-    detached: true,
-    windowsHide: true,
-    stdio: ['ignore', out, out],
-    env: { ...agentEnv(), ...nodeEnv(), ...(partial ? { CREW_PARTIAL_ENV: '1' } : {}) },
-  });
+  const script = path.join(import.meta.dirname, `daemon${path.extname(import.meta.filename)}`);
+  const env = { ...agentEnv(), ...nodeEnv(), ...(partial ? { CREW_PARTIAL_ENV: '1' } : {}) };
   let spawnError: Error | undefined;
-  child.on('error', (error) => { spawnError = error; });
-  child.unref();
-  fs.closeSync(out);
-  if (!(await waitFor(async () => {
+  const spawnHere = () => {
+    const out = fs.openSync(path.join(HOME, 'daemon.log'), 'a');
+    const child = spawn(process.execPath, [script], { detached: true, windowsHide: true, stdio: ['ignore', out, out], env });
+    child.on('error', (error) => { spawnError = error; });
+    child.unref();
+    fs.closeSync(out);
+  };
+  const started = () => waitFor(async () => {
     if (spawnError) throw new Error(`Could not start the Crew daemon: ${spawnError.message}`);
     return (await health()) !== null;
-  }, 8000))) {
+  }, 8000);
+  const outside = partial && process.platform === 'win32' && await startOutsideJob(script, env);
+  if (!outside) spawnHere();
+  // WMI vouches only that cmd.exe was created, so a daemon that did not come up from there is started the usual way.
+  // One that comes up late finds this one recorded and exits (daemon.ts bind).
+  if (!(await started()) && !(outside && (spawnHere(), await started()))) {
     throw new Error(`The Crew daemon did not start. See ${path.join(HOME, 'daemon.log')}.`);
   }
 }

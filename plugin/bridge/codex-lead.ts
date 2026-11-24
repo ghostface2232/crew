@@ -1,6 +1,6 @@
-import { execFile } from 'node:child_process';
 import { agentCommand, agentEnv } from './config.ts';
 import type { Delivery, Offer } from './delivery.ts';
+import { execTimed } from './rpc.ts';
 
 /** How long a queue command may take before it is given up; the offer it carried is retried once its lease ends. */
 const QUEUE_TIMEOUT_MS = 30_000;
@@ -102,7 +102,7 @@ export function codexQueue(bin: string): (thread: string, message: string) => Pr
     const env = agentEnv();
     const command = agentCommand(bin, ['queue', '--thread', thread, '--message', message], env);
     return new Promise((resolve, reject) => {
-      execFile(command.bin, command.args, { env, shell: command.shell, timeout: QUEUE_TIMEOUT_MS, windowsHide: true }, (err, stdout, stderr) => {
+      execTimed(command.bin, command.args ?? [], { env, shell: command.shell, timeout: QUEUE_TIMEOUT_MS, windowsHide: true }, (err, stdout, stderr) => {
         if (err) reject(new Error(`codex queue failed: ${(stderr || stdout || err.message).trim().split('\n').pop()}`));
         else resolve();
       });

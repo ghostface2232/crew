@@ -1,5 +1,5 @@
-import { execFile } from 'node:child_process';
-import type { ChildProcessWithoutNullStreams } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+import type { ChildProcess, ChildProcessWithoutNullStreams, SpawnOptions } from 'node:child_process';
 import readline from 'node:readline';
 import { clipEnd } from './text.ts';
 
@@ -143,4 +143,55 @@ export class RpcPeer {
 /** Killing cmd.exe alone leaves the agent it launched running. */
 export function treeKillCommand(pid: number | undefined, shell: boolean, platform: NodeJS.Platform = process.platform): { bin: string; args: string[] } | null {
   return platform === 'win32' && shell && pid !== undefined ? { bin: 'taskkill', args: ['/pid', String(pid), '/T', '/F'] } : null;
+}
+
+type TimedOptions = Pick<SpawnOptions, 'cwd' | 'env' | 'shell' | 'windowsHide'> & { timeout: number; maxBuffer?: number };
+
+/**
+ * Runs a command like `execFile`, with a timeout that ends the whole command. Node's own timeout signals only the
+ * process it started, which for a Windows `.cmd` shim is cmd.exe, so the agent the shim ran was left running; elsewhere
+ * a wrapper script's child kept running and holding the output, so the call did not return until it ended. So on
+ * Windows the tree is ended with taskkill, and elsewhere the command runs in its own process group, which is signalled
+ * as a whole. execFile cannot start one: it does not pass `detached` on.
+ */
+export function execTimed(bin: string, args: readonly string[], options: TimedOptions,
+  callback: (err: Error | null, stdout: string, stderr: string) => void): ChildProcess {
+  const { timeout, maxBuffer = 1024 * 1024, ...rest } = options;
+  const group = process.platform !== 'win32';
+  const child = spawn(bin, args, { ...rest, detached: group, stdio: ['ignore', 'pipe', 'pipe'] });
+  let stdout = '';
+  let stderr = '';
+  let timedOut = false;
+  let failure: Error | null = null;
+  let finished = false;
+  const stop = () => {
+    const kill = treeKillCommand(child.pid, Boolean(rest.shell));
+    if (kill) execFile(kill.bin, kill.args, { windowsHide: true }, (err) => { if (err) child.kill(); });
+    else if (group && child.pid !== undefined) {
+      try { process.kill(-child.pid, 'SIGTERM'); } catch { child.kill(); }
+    } else child.kill();
+  };
+  const collect = (append: (text: string) => void) => (chunk: string) => {
+    append(chunk);
+    if (!failure && stdout.length + stderr.length > maxBuffer) {
+      failure = new Error('maxBuffer exceeded');
+      stop();
+    }
+  };
+  child.stdout.setEncoding('utf8').on('data', collect((text) => { stdout += text; }));
+  child.stderr.setEncoding('utf8').on('data', collect((text) => { stderr += text; }));
+  const finish = (err: Error | null) => {
+    if (finished) return;
+    finished = true;
+    clearTimeout(timer);
+    callback(timedOut ? new Error(`timed out after ${timeout / 1000}s`) : failure ?? err, stdout, stderr);
+  };
+  // A command that cannot start (ENOENT) keeps its code, as execFile's error does.
+  child.on('error', finish);
+  child.on('close', (code, signal) => finish(code === 0 ? null : Object.assign(new Error(`Command failed: ${bin} ${args.join(' ')}`.trim()), { code, signal })));
+  const timer = setTimeout(() => {
+    timedOut = true;
+    stop();
+  }, timeout);
+  return child;
 }

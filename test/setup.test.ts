@@ -342,11 +342,12 @@ test('the Codex hooks item asks app-server hooks/list and is trusted only when C
       if (process.argv[2] !== 'app-server') process.exit(2);
       const keys = ${JSON.stringify(keys)};
       if (${JSON.stringify(mode)} === 'exit') process.exit(1);
+      require('node:fs').writeFileSync(${JSON.stringify(path.join(dir, name))} + '.pid', String(process.pid));
       require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
         const msg = JSON.parse(line);
         if (msg.id === undefined) return;
         if (msg.method === 'initialize') return console.log(JSON.stringify({ id: msg.id, result: {} }));
-        if (msg.method !== 'hooks/list') return;
+        if (msg.method !== 'hooks/list' || ${JSON.stringify(mode)} === 'silent') return;
         if (${JSON.stringify(mode)} === 'error') return console.log(JSON.stringify({ id: msg.id, error: { code: -32601, message: 'method not found' } }));
         console.log(JSON.stringify({ id: msg.id, result: { data: [{ cwd: msg.params.cwds[0], hooks: ${reply} }] } }));
       });`);
@@ -358,7 +359,7 @@ test('the Codex hooks item asks app-server hooks/list and is trusted only when C
   assert.deepEqual([trusted.ok, trusted.detail], [true, 'Trusted.']);
   const modified = await codexHooksItem(fake('modified', hooks('modified')));
   assert.equal(modified.ok, false);
-  assert.match(modified.detail, /^Changed by an update since you trusted them, so Codex asks again\. .*`\/hooks`/);
+  assert.match(modified.detail, /^Changed by an update since you trusted them, so Codex skips them until you trust them again\. .*`\/hooks`/);
   const untrusted = await codexHooksItem(fake('untrusted', hooks('untrusted')));
   assert.equal(untrusted.ok, false);
   assert.match(untrusted.detail, /^Codex runs its hooks only once trusted/);
@@ -368,7 +369,32 @@ test('the Codex hooks item asks app-server hooks/list and is trusted only when C
     assert.match(unknown.detail, /^Could not ask Codex whether they are trusted/, name);
     assert.match(unknown.detail, reason, name);
   }
+  // A Codex that never answers fails the item once the request times out, and is not left running.
+  const silent = await codexHooksItem(fake('silent', '[]', 'silent'), undefined, 300);
+  assert.equal(silent.ok, false);
+  assert.match(silent.detail, /^Could not ask Codex whether they are trusted .*timed out/);
+  const pid = Number(fs.readFileSync(path.join(dir, 'silent.pid'), 'utf8'));
+  const alive = () => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  for (let i = 0; i < 50 && alive(); i++) await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(alive(), false);
   const missing = await codexHooksItem(path.join(dir, 'no-such-codex'));
   assert.equal(missing.ok, false);
   assert.match(missing.detail, /^Could not ask Codex/);
+});
+
+test('a CLI that outlives its timeout is ended with everything it started, not only its Windows shim', async () => {
+  const { run } = await import('../plugin/bridge/setup.ts');
+  const dir = fs.mkdtempSync(path.join(home, 'timed-'));
+  const bin = path.join(dir, 'slow');
+  const pidFile = path.join(dir, 'pid');
+  writeFakeBin(bin, `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setTimeout(() => {}, 30_000);`);
+  const started = Date.now();
+  const res = await run(bin, [], 1_000);
+  assert.equal(res.ok, false);
+  assert.match(res.out, /timed out after 1s/);
+  assert.ok(Date.now() - started < 10_000);
+  const pid = Number(fs.readFileSync(pidFile, 'utf8'));
+  const alive = () => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  for (let i = 0; i < 50 && alive(); i++) await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(alive(), false);
 });

@@ -80,6 +80,8 @@ const fakeClaude = `
     if (prompt === 'classifier') {
       send({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: 'git push --force' }, id: 'use-1' }] } });
       send({ type: 'system', subtype: 'permission_denied', tool_name: 'Bash', tool_use_id: 'use-1', decision_reason_type: 'classifier', decision_reason: 'Force push not asked for.' });
+      // Another kind of denial is the job's limit, not the classifier's judgment, so it is no refusal to send back.
+      send({ type: 'system', subtype: 'permission_denied', tool_name: 'Bash', tool_use_id: 'use-1', decision_reason_type: 'rule', decision_reason: 'a deny rule matched' });
       return success();
     }
     if (prompt === 'granted follow-up') return ask(...policy[3]);
@@ -323,6 +325,7 @@ test("Claude Code's automatic mode refusals reach the lead, and a second retry t
   await h.adapter.start(h.ctl);
   await h.report();
   assert.deepEqual(h.events.refused, [['Bash: git push --force', 'Force push not asked for.']]);
+  assert.ok(h.events.note.some(([note]) => String(note) === 'Claude Code refused Bash (a deny rule matched).'));
   h.ctl.job.asksUser = true;
   await h.adapter.reply(h.ctl, 'retry');
   assert.deepEqual((await h.report(1)).modes, ['auto', 'default']);

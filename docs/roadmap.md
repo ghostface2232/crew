@@ -16,7 +16,7 @@ The requirements are in [requirements.md](requirements.md). Current status again
 | R12 (Cursor) | C2 | Open |
 | R14 (no collisions between agents) | — | Done (`prompts.ts`, `jobs.ts`, [sandbox.md](sandbox.md)) |
 | R15 (approvals with little user involvement) | — | Done for Codex workers (`config.ts` `auto_review`, `jobs.ts` `retryRefused`) and writable Claude workers (`adapters/claude.ts`, automatic mode) |
-| R13 (other leads, own main screen, direct dispatch) | L1, L2 | Partial — board, desktop apps, direct jobs (`Dispatch.tsx`, `DispatchView.swift`), and Codex as a lead done; the rest of L1 item 4, mission start, and merge execution open |
+| R13 (other leads, own main screen, direct dispatch) | L1, L2 | Partial — board, desktop apps, direct jobs (`Dispatch.tsx`, `DispatchView.swift`), and Codex as a lead done; mission start and merge execution open |
 
 Near-term work targets Claude Desktop lead mode, as [requirements.md](requirements.md#3-defaults-and-priorities) sets out.
 
@@ -114,7 +114,7 @@ From a game project retrospective (58 jobs, ~110 hours, 1.5B tokens). Project-sp
 
 ## 5. Long-term plan
 
-**L1. The lead as an adapter. *(Partial: Codex leads; item 4 partly open)*** Only three parts are tied to Claude Code: the MCP server, the hooks, and the skills. Jobs, events, and the board belong to the daemon. Defining the lead as the role that plans and decides merges lets Codex or a headless Claude take it, and resolves the temporary-lead handoff in [agentgauge-integration.md](../research/agentgauge-integration.md) section 8.2.
+**L1. The lead as an adapter. *(Done for Codex leads)*** Only three parts are tied to Claude Code: the MCP server, the hooks, and the skills. Jobs, events, and the board belong to the daemon. Defining the lead as the role that plans and decides merges lets Codex or a headless Claude take it, and resolves the temporary-lead handoff in [agentgauge-integration.md](../research/agentgauge-integration.md) section 8.2.
 
 Groundwork done: worker roles are a configurable registry (`config.ts`) and routing names the lead via `LEAD` (`'claude'`) instead of hardcoding Claude everywhere. No setting chooses the lead yet. What another lead needs, in order:
 
@@ -126,8 +126,9 @@ Groundwork done: worker roles are a configurable registry (`config.ts`) and rout
 
 Decided 2026-11-24: one plugin serves both hosts, and the host that starts a conversation leads it, so a Codex session leads its own jobs while a Claude session leads its own. The 2026-11-24 host checks ([mcp-compatibility.md](mcp-compatibility.md#5-codex-as-a-lead-host)) settle items 1 to 3 for Codex: a tool call names its thread in `_meta`, hooks receive the same id, and `codex queue` wakes an idle interactive session. The Claude plugin layout loads in Codex with two changes: hooks must be string commands, and the MCP server cannot rely on `${CLAUDE_PLUGIN_ROOT}`.
 
-Done 2026-11-24 (`mcp.ts`, `codex-lead.ts`, `delivery.ts`, `usage.ts`, `plugin/.codex-plugin/`, `plugin/hooks/codex.json`): items 1 to 3 for Codex, registered by `crew install` or the desktop apps ([architecture.md](architecture.md#bridge-and-state), [delivery.md](delivery.md#codex-leads)). Codex's hooks also report the session to the board and record the user's prompts for `approved_by_user` (`report.ts codex`), and the lead's own work is noted as Codex's. Still open:
-- Item 4: the board shows a Codex lead waiting on an approval, and Codex forwards a Crew tool call's elicitation to its app-server client unless the approval policy is `never` (2026-11-25, [mcp-compatibility.md](mcp-compatibility.md#5-codex-as-a-lead-host)). The TUI draws it as its own prompt (macOS); whether the desktop app does is not verified. A declined prompt goes back to the lead to ask in chat.
+Done 2026-11-24 (`mcp.ts`, `codex-lead.ts`, `delivery.ts`, `usage.ts`, `plugin/.codex-plugin/`, `plugin/hooks/codex.json`): items 1 to 3 for Codex, registered by `crew install` or the desktop apps ([architecture.md](architecture.md#bridge-and-state), [delivery.md](delivery.md#codex-leads)). Codex's hooks also report the session to the board and record the user's prompts for `approved_by_user` (`report.ts codex`), and the lead's own work is noted as Codex's.
+
+Item 4 is done (2026-11-25): the board shows a Codex lead waiting on an approval, and Codex forwards a Crew tool call's elicitation to its app-server client unless the approval policy is `never` (2026-11-25, [mcp-compatibility.md](mcp-compatibility.md#5-codex-as-a-lead-host)). The TUI (macOS) and the desktop app (Windows) draw it as their own prompt. A declined prompt goes back to the lead to ask in chat.
 
 Item 5 is done (`adapters/claude.ts`, 2026-11-24): under a Codex lead, naming `claude` for a job starts a Claude Code worker, while a role left to its default Claude holder stays the lead's own work ([sandbox.md](sandbox.md#role-permissions), [approvals.md](approvals.md#claude-worker-approvals)). The design was debated with Codex (`cx-387950`). A writable job's permissions run in Claude Code's automatic mode, as Codex workers run with Codex's automatic reviewer (a read-only job stays manual), and a refused action comes back to the lead to retry with the user's approval ([approvals](approvals.md#claude-worker-approvals)). Usage-limit results (`api_error_status` 429, a `rate_limit_event` whose status is `rejected`) follow the CLI's own schema, read from Claude Code 2.1.328, but have not been seen at a real limit. A Codex lead's report hooks and a Claude worker ran end to end on macOS with Codex 0.172 ([mcp-compatibility.md](mcp-compatibility.md#5-codex-as-a-lead-host)). A Claude worker under a Claude lead stays out of scope.
 

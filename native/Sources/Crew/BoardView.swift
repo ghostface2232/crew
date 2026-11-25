@@ -40,7 +40,7 @@ struct BoardView: View {
             scroll.scrollTo(edge: .top)
         }
         .onExitCommand { store.closeDetail() }
-        .sheet(isPresented: $store.showingDispatch) { DispatchView(store: store) }
+        .sheet(isPresented: $store.showingDispatch, onDismiss: { store.dispatchDraft = nil }) { DispatchView(store: store) }
         .sheet(isPresented: $store.showingWelcome, onDismiss: store.markWelcomed) { WelcomeView(store: store) }
     }
     private var page: some View {
@@ -56,6 +56,16 @@ struct BoardView: View {
                 else { workspace }
             }
             .onGeometryChange(for: Bool.self) { $0.size.width >= Self.twoColumnWidth } action: { wide = $0 }
+            // A project's issue suggestions, read again on reconnect. The daemon keeps each answer ten minutes, so
+            // asking more often only reads its cache.
+            .task(id: store.connected ? store.project : "") {
+                let project = store.project
+                guard store.connected, !project.isEmpty else { return }
+                while !Task.isCancelled {
+                    await store.loadIssues(project)
+                    try? await Task.sleep(for: .seconds(600))
+                }
+            }
             // The banner and the heading's review button come and go with requests; the page below makes room.
             .animation(Motion.reduced(Motion.reflow, reduceMotion), value: store.state.pendingCount > 0)
             .background(OverlayScrollers())
@@ -190,7 +200,13 @@ struct BoardView: View {
         }
     }
     @ViewBuilder private var workspace: some View {
-        if store.selection != "history" && store.search.isEmpty { AgentOverview(store: store) }
+        if store.selection != "history" && store.search.isEmpty {
+            // The page already puts cardGap between its items; the rest makes up a section's gap.
+            AgentOverview(store: store).padding(.bottom, WorkspaceStyle.sectionGap - WorkspaceStyle.cardGap)
+            if store.connected && !store.project.isEmpty {
+                IssueSuggestions(store: store, project: store.project).padding(.bottom, WorkspaceStyle.sectionGap - WorkspaceStyle.cardGap)
+            }
+        }
         // Lists are derived once per body: these filters ran per mission before and dominated redraw cost.
         let history = store.selection == "history"
         let inScope = store.state.jobs.filter { store.project.isEmpty || $0.projectPath == store.project }
@@ -419,7 +435,9 @@ struct MissionPanel: View {
                 // Status and the controls sit on the middle of the title and its meta line together.
                 HStack(alignment: .center, spacing: Space.m) {
                     // The lead's mark sits before the title and meta together, the same for every lead.
-                    if let leadAgent { AgentMark(agent: leadAgent, size: MarkSize.list) }
+                    // The header starts as far in as the stop names, decisions and outcomes below, which take the same inset
+                    // beside their rows: the mark when there is one, else the title.
+                    if let leadAgent { AgentMark(agent: leadAgent, size: MarkSize.list).padding(.leading, WorkspaceStyle.rowTitleInset) }
                     VStack(alignment: .leading, spacing: Space.xs) {
                         // One line each, so cards side by side keep the same height whatever their titles.
                         Text(mission.title).font(Typeface.title).fadeTruncated().help(mission.title)
@@ -429,6 +447,7 @@ struct MissionPanel: View {
                             Text(" · " + meta)
                         }.font(Typeface.caption).monospacedDigit().foregroundStyle(.secondary).fadeTruncated().help(mission.root)
                     }
+                    .padding(.leading, leadAgent == nil ? WorkspaceStyle.rowTitleInset : 0)
                     Spacer(minLength: WorkspaceStyle.rowSpacer)
                     StatusLabel(state: mission.state == "active" ? "running" : mission.state, title: localizedCrewLabel(mission.state.capitalized), spins: mission.state == "active")
                     if mission.state != "done" { missionMenu }
@@ -451,6 +470,7 @@ struct MissionPanel: View {
                     }
                     // As far from the title above as from what follows below.
                     MissionTrack(mission: mission).padding(.vertical, Space.l)
+                    decisions
                     let shown = mission.stops.indices.filter { index in
                         jobs.contains { mission.jobStep($0) == index } || (index == mission.step && leadRow != nil)
                     }
@@ -542,6 +562,31 @@ struct MissionPanel: View {
             default: mission.outcome
             }
             Text(outcome).font(Typeface.callout).textSelection(.enabled).padding(.leading, WorkspaceStyle.rowTitleInset)
+        }
+        // The lead's wrap-up of finished work: what changed, what was verified, what is left for the user.
+        if mission.state == "done", let summary = mission.summary, !summary.isEmpty {
+            // A group, as in the board: a label on the text itself would be read in place of the summary.
+            ReportText(report: summary).padding(.leading, WorkspaceStyle.rowTitleInset)
+                .accessibilityElement(children: .contain).accessibilityLabel(String(localized: "Wrap-up"))
+        }
+    }
+    /// Decisions the user made in this mission, each one theirs to drop, as in the board.
+    @ViewBuilder private var decisions: some View {
+        if mission.state == "active", let memory = mission.memory, !memory.isEmpty {
+            VStack(alignment: .leading, spacing: Space.s) {
+                Text("Decisions").font(Typeface.bodyStrong).foregroundStyle(.secondary).accessibilityAddTraits(.isHeader)
+                ForEach(memory, id: \.key) { entry in
+                    HStack(alignment: .firstTextBaseline, spacing: Space.m) {
+                        Text(entry.text).font(Typeface.callout).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                        Button { Task { await store.forget(entry, in: mission) } } label: {
+                            Image(systemName: "xmark").font(Symbol.control)
+                        }
+                        .iconButton().disabled(locked)
+                        .accessibilityLabel(String(localized: "Forget “\(entry.text)”"))
+                        .help("Forget this decision. Jobs started after this no longer get it.")
+                    }
+                }
+            }.padding(.leading, WorkspaceStyle.rowTitleInset)
         }
     }
     /// Animated from here rather than inside the card, so the cards below move with it instead of jumping.

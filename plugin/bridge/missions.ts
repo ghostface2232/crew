@@ -38,6 +38,21 @@ export interface MissionTask {
   result?: string;
 }
 
+/**
+ * A decision the user made in a mission, kept so a later job is not told it again by hand. It lives only as long as
+ * its mission: a lasting preference belongs in the shared instructions instead. A new entry under the same key
+ * replaces the old one, which is how a changed decision supersedes the first.
+ */
+export interface MissionMemory {
+  /** The lead's short name for what was decided, e.g. "button-style". */
+  key: string;
+  /** The decision as the user put it, with its scope. */
+  text: string;
+  /** The tasks it applies to; absent when it applies to the whole mission. */
+  tasks?: string[];
+  at: number;
+}
+
 export interface Mission {
   id: string;
   title: string;
@@ -68,6 +83,10 @@ export interface Mission {
   tasks?: MissionTask[];
   /** How hard the lead's own work in this command is, set only when it starts so its review cannot change it. */
   difficulty?: Difficulty;
+  /** What the user should know when it ended, for the board's wrap-up: what changed, what was verified, what was not. */
+  summary?: string;
+  /** Decisions the user made during this mission, which its later jobs are given; absent when there are none. */
+  memory?: MissionMemory[];
   createdAt: number;
   updatedAt: number;
   endedAt: number | null;
@@ -83,6 +102,11 @@ const TASK_ID = /^[\w.-]{1,24}$/;
 const MAX_NOTE = 2000;
 const MAX_RECORD = 6000;
 const MAX_NOTES = 20;
+const MAX_SUMMARY = 4000;
+/** A mission's memory is read into every later job's brief, so it stays short: past this, the lead must replace or forget. */
+export const MAX_MEMORY = 12;
+const MAX_MEMORY_TEXT = 400;
+const MEMORY_KEY = /^[\w.-]{1,32}$/;
 const KEEP_MISSIONS = 100;
 /** Finished missions kept for each project whatever the overall limit, since the board shows that many per project. */
 export const KEEP_PER_PROJECT = 2;
@@ -105,6 +129,10 @@ function isMission(m: any): m is Mission {
     && (m.owner === undefined || typeof m.owner === 'string')
     && (m.lead === undefined || m.lead === 'claude' || m.lead === 'codex')
     && (m.record === undefined || typeof m.record === 'string')
+    && (m.summary === undefined || typeof m.summary === 'string')
+    && (m.memory === undefined || (Array.isArray(m.memory) && m.memory.every((entry: any) => entry && typeof entry.key === 'string'
+      && typeof entry.text === 'string' && Number.isFinite(entry.at)
+      && (entry.tasks === undefined || (Array.isArray(entry.tasks) && entry.tasks.every((id: unknown) => typeof id === 'string'))))))
     && (m.doneByLead === undefined || m.doneByLead === true)
     && (m.stages === undefined || isPlan(m.stages))
     && (m.stageIndex === undefined || (m.stages && Number.isInteger(m.stageIndex) && m.stageIndex >= 0
@@ -257,6 +285,44 @@ function mergeTasks(current: MissionTask[] | undefined, input: unknown): Mission
   return tasks;
 }
 
+const MEMORY_FORM = 'remember is a list of { key, text, tasks }: key is your short name for the decision, text the decision as the user put it with its scope, tasks the task ids it applies to (leave out for the whole mission). An entry with a key the mission already has replaces it.';
+
+/**
+ * The mission's memory with these decisions laid over it and the forgotten keys taken out, checked as a whole so a
+ * refused call changes nothing.
+ */
+function mergeMemory(current: MissionMemory[] | undefined, tasks: MissionTask[] | undefined, remember: unknown, forget: unknown, now: number): MissionMemory[] {
+  let memory = (current ?? []).map((entry) => ({ ...entry }));
+  if (forget !== undefined) {
+    if (!Array.isArray(forget) || forget.some((key) => typeof key !== 'string')) throw new Error('forget is a list of decision keys.');
+    const unknown = forget.filter((key) => !memory.some((entry) => entry.key === key));
+    if (unknown.length) throw new Error(`This mission remembers no decision ${unknown.map((key) => JSON.stringify(key)).join(', ')}${memory.length ? `; it has ${memory.map((entry) => entry.key).join(', ')}` : ''}.`);
+    memory = memory.filter((entry) => !forget.includes(entry.key));
+  }
+  if (remember !== undefined) {
+    if (!Array.isArray(remember)) throw new Error(MEMORY_FORM);
+    for (const item of remember) {
+      if (!item || typeof item !== 'object') throw new Error(MEMORY_FORM);
+      const { key, text, tasks: scope } = item as Record<string, unknown>;
+      if (typeof key !== 'string' || !MEMORY_KEY.test(key)) throw new Error(`A decision key is 1 to 32 letters, digits, ".", "_" or "-", not ${JSON.stringify(key)}. ${MEMORY_FORM}`);
+      const said = typeof text === 'string' ? clip(text.replace(/\s+/g, ' ').trim(), MAX_MEMORY_TEXT).trim() : '';
+      if (!said) throw new Error(`Decision "${key}" needs its text.`);
+      if (scope !== undefined && (!Array.isArray(scope) || scope.some((id) => typeof id !== 'string'))) throw new Error(`Decision "${key}": tasks is a list of task ids.`);
+      const missing = ((scope as string[] | undefined) ?? []).filter((id) => !tasks?.some((task) => task.id === id));
+      if (missing.length) throw new Error(`Decision "${key}" names ${missing.join(', ')}, which ${missing.length === 1 ? 'is not a task' : 'are not tasks'} of this mission.`);
+      const entry: MissionMemory = { key, text: said, ...((scope as string[] | undefined)?.length ? { tasks: [...new Set(scope as string[])] } : {}), at: now };
+      memory = [...memory.filter((known) => known.key !== key), entry];
+    }
+  }
+  if (memory.length > MAX_MEMORY) throw new Error(`A mission remembers at most ${MAX_MEMORY} decisions; forget the ones that no longer matter, or fold related ones into one key.`);
+  return memory;
+}
+
+/** The decisions a job of this mission is given: those for the whole mission, and those for its task. */
+export function memoryFor(mission: Pick<Mission, 'memory'>, taskId?: string): MissionMemory[] {
+  return (mission.memory ?? []).filter((entry) => !entry.tasks || (taskId !== undefined && entry.tasks.includes(taskId)));
+}
+
 /** The tasks an unfinished task still waits for. A dropped one never gets done, so the lead has to take it out of `after`. */
 export function waitsFor(tasks: MissionTask[], task: MissionTask): MissionTask[] {
   return (task.after ?? []).flatMap((id) => tasks.find((other) => other.id === id) ?? []).filter((other) => other.state !== 'done');
@@ -277,8 +343,8 @@ function checkText(job: TaskJob): string {
 const ago = (ms: number) => (ms < 90_000 ? 'just now' : ms < 90 * 60_000 ? `${Math.round(ms / 60_000)}m ago` : `${Math.round(ms / 3_600_000)}h ago`);
 
 /**
- * A mission's tasks and pull requests as its lead reads them: in a mission reply, and again when its session
- * starts, resumes or is compacted. Empty for a mission with neither.
+ * A mission's tasks, remembered decisions and pull requests as its lead reads them: in a mission reply, and again
+ * when its session starts, resumes or is compacted. Empty for a mission with none of them.
  */
 export function missionDetail(mission: Mission, jobs: TaskJob[], pulls: PullWatch[], now = Date.now()): string {
   const lines: string[] = [];
@@ -299,6 +365,10 @@ export function missionDetail(mission: Mission, jobs: TaskJob[], pulls: PullWatc
       lines.push(`- [${task.state}] ${task.id}: ${task.title}${task.result ? ` — ${task.result}` : ''}${standing}${shown.map((job) => ` · ${job.id} ${job.state}${checkText(job)}`).join('')}`);
     }
     if (ready.length > 1) lines.push(`${ready.join(', ')} wait for nothing: those that touch different files can go at the same time.`);
+  }
+  if (mission.memory?.length) {
+    lines.push(`Decisions remembered (${mission.memory.length} of ${MAX_MEMORY}; new jobs get them in their brief, running ones only if you reply):`);
+    for (const entry of mission.memory) lines.push(`- ${entry.key}: ${entry.text}${entry.tasks ? ` (tasks ${entry.tasks.join(', ')})` : ''}`);
   }
   const watched = pulls.filter((pull) => pull.mission === mission.id);
   if (watched.length) {
@@ -362,12 +432,13 @@ export class Missions {
     return mission;
   }
 
-  start(input: { title: string; project: string; root: string; owner?: string; lead?: unknown; stage?: string; stages?: unknown; preset?: unknown; tasks?: unknown; difficulty?: unknown }): Mission {
+  start(input: { title: string; project: string; root: string; owner?: string; lead?: unknown; stage?: string; stages?: unknown; preset?: unknown; tasks?: unknown; remember?: unknown; forget?: unknown; difficulty?: unknown }): Mission {
     const title = titleOf(input.title);
     const preset = presetOf(input.preset);
     if (input.difficulty !== undefined && !DIFFICULTIES.includes(input.difficulty as Difficulty)) throw new Error(`difficulty must be one of: ${DIFFICULTIES.join(', ')}.`);
     const steps = planOf(input.stages);
     const tasks = input.tasks === undefined ? undefined : mergeTasks(undefined, input.tasks);
+    const memory = input.remember === undefined && input.forget === undefined ? undefined : mergeMemory(undefined, tasks, input.remember, input.forget, Date.now());
     // Two calls that open the same command at once (a retry, a batch) share one card. Only a session that names
     // itself can be told apart from another one using the same title.
     const project = canonicalPath(input.project);
@@ -395,6 +466,7 @@ export class Missions {
       stage: first.stage,
       ...(preset ? { preset } : {}),
       ...(tasks?.length ? { tasks } : {}),
+      ...(memory?.length ? { memory } : {}),
       ...(input.difficulty !== undefined ? { difficulty: input.difficulty as Difficulty } : {}),
       state: 'active',
       outcome: '',
@@ -408,12 +480,14 @@ export class Missions {
     return mission;
   }
 
-  update(id: string, input: { stage?: string; stages?: unknown; title?: string; preset?: unknown; tasks?: unknown }): Mission {
+  update(id: string, input: { stage?: string; stages?: unknown; title?: string; preset?: unknown; tasks?: unknown; remember?: unknown; forget?: unknown }): Mission {
     const mission = this.get(id);
     if (mission.state !== 'active') throw new Error(`Mission ${id} is already ${mission.state}.`);
     const title = input.title === undefined ? mission.title : titleOf(input.title);
     const preset = presetOf(input.preset);
     const tasks = input.tasks === undefined ? undefined : mergeTasks(mission.tasks, input.tasks);
+    const memory = input.remember === undefined && input.forget === undefined ? undefined
+      : mergeMemory(mission.memory, tasks ?? mission.tasks, input.remember, input.forget, Date.now());
     const remaining = planOf(input.stages, true);
     const stage = input.stage === undefined ? undefined : stageOf(input.stage);
     let steps = stepsOf(mission);
@@ -442,6 +516,8 @@ export class Missions {
     mission.title = title;
     setPreset(mission, preset);
     if (tasks?.length) mission.tasks = tasks;
+    if (memory?.length) mission.memory = memory;
+    else if (memory) delete mission.memory;
     mission.updatedAt = Date.now();
     this.changed(mission);
     return mission;
@@ -452,7 +528,7 @@ export class Missions {
     return steps.findIndex((step, at) => at >= from && step.stage === wanted.stage && (wanted.label === null || sameLabel(step.label, wanted.label)));
   }
 
-  finish(id: string, input: { outcome?: string; abandoned?: boolean; record?: string; reopen?: boolean; byLead?: boolean } = {}): Mission {
+  finish(id: string, input: { outcome?: string; abandoned?: boolean; record?: string; summary?: string; reopen?: boolean; byLead?: boolean } = {}): Mission {
     const mission = this.get(id);
     // A finished mission stays as it ended. Only an explicit reopen marks an abandoned one done: a lead's late
     // `done`, or a board still showing it active, must not undo the user's Stop tracking.
@@ -463,6 +539,9 @@ export class Missions {
     mission.outcome = outcome;
     const record = input.record ? clip(input.record.trim(), MAX_RECORD) : undefined;
     if (record) mission.record = record;
+    // A wrap-up tells the user what a finished piece of work left them; a dropped command has none to show.
+    const summary = mission.state === 'done' && input.summary ? clip(input.summary.trim(), MAX_SUMMARY) : undefined;
+    if (summary) mission.summary = summary;
     if (mission.state === 'done' && input.byLead) mission.doneByLead = true;
     mission.updatedAt = Date.now();
     mission.endedAt = mission.updatedAt;

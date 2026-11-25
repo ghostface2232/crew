@@ -541,6 +541,9 @@ function ConcludedNote() {
   return <p className="callout secondary concluded"><Icon icon={CheckmarkCircleRegular} size={13} />{t('This debate has used all its rounds. Decide from it, or start a new debate.')}</p>;
 }
 
+/** What Resume sends a stopped worker; workers read English, whatever language the board is in. */
+const RESUME_MESSAGE = 'Continue where you stopped.';
+
 function FollowUp({ job }: { job: BoardJob }) {
   const key = `followup:${job.id}`;
   const [draft, setDraft] = useDraft(key);
@@ -551,6 +554,16 @@ function FollowUp({ job }: { job: BoardJob }) {
       <textarea aria-label={t('Message to {name}', { name })} placeholder={t('Write a message…')} value={draft} onChange={(event) => setDraft(event.target.value)} />
       <div className="answer-actions">
         <ActionStatus actionKey={key} />
+        {/* A job stopped by a usage limit, a budget or a restart only needs telling to go on, as in the app. */}
+        {job.state === 'failed' && (
+          <button
+            disabled={state.pending || board.getSnapshot().connection !== 'live'}
+            title={t('Sends “{message}”', { message: RESUME_MESSAGE })}
+            onClick={() => void actions.run(key, () => request(`/api/jobs/${job.id}/reply`, { message: RESUME_MESSAGE }), { once: false })}
+          >
+            {t('Resume')}
+          </button>
+        )}
         <button
           className="prominent"
           disabled={!draft.trim() || state.pending || board.getSnapshot().connection !== 'live'}

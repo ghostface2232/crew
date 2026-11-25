@@ -11,7 +11,7 @@ import type { TestContext } from 'node:test';
 import { followUpTitle, missionDetail, missionHead, Missions, NAME_THE_MISSION, normalizeTitle } from '../plugin/bridge/missions.ts';
 import { TIERS } from '../plugin/bridge/tiers.ts';
 import { checkArguments } from '../plugin/bridge/arguments.ts';
-import { assignHint, canonicalPath, defaultHolder, disabledAgents, LEAD, PRESET_NAMES, ROLE_INFO, WORKERS } from '../plugin/bridge/config.ts';
+import { assignHint, canonicalPath, defaultHolder, disabledAgents, LEAD, PRESET_NAMES, projectSettings, ROLE_INFO, WORKERS } from '../plugin/bridge/config.ts';
 import { addNews, clipped, Delivery, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, REPORT_PAGE_BYTES, textPage, unread } from '../plugin/bridge/delivery.ts';
 import type { Job } from '../plugin/bridge/jobs.ts';
 import type { PullWatch } from '../plugin/bridge/pulls.ts';
@@ -47,20 +47,50 @@ function missionServer(t: TestContext) {
       pulls.push(watch);
       return { watch, resumed: false, summary: 'o/r#7 · open · checks pending' };
     }
-    if (body.done || body.abandoned) return missions.finish(id, { outcome: body.outcome, record: body.record, abandoned: Boolean(body.abandoned), byLead: body.by === 'lead' });
+    if (body.done || body.abandoned) return missions.finish(id, { outcome: body.outcome, record: body.record, summary: body.summary, abandoned: Boolean(body.abandoned), byLead: body.by === 'lead' });
     return missions.update(id, body);
   };
+  let projects: Record<string, object> = {};
   const server = (session: string | null = 'lead', fresh = false) => {
     const context: Record<string, any> = {
       missionHead, missionDetail, NAME_THE_MISSION, normalizeTitle, followUpTitle, SESSION: session ?? undefined, host: 'codex', PROJECT: canonicalPath('/project'), missionId: null, closedElsewhere: null,
       costMission: null, lastDone: null, fresh, openedHere: new Set<string>(), SUPERSEDED: 'Superseded by a new mission.', currentPolicy: () => 'policy', globalPreset: () => null,
-      describeJob: (job: Job) => `job ${job.id}`, api,
+      describeJob: (job: Job) => `job ${job.id}`, api, loadConfig: () => ({ projects }), projectSettings,
     };
     return { context, ...vm.runInNewContext(`${code}; ({ reportMission, runJob, jobMission })`, context) as {
       reportMission(args: object): Promise<string>; runJob(spec: object, background: boolean, ctx: object, wanted?: string): Promise<string>; jobMission(wanted?: string): Promise<string | undefined> } };
   };
-  return { missions, calls, server };
+  return { missions, calls, server, setProjects: (value: Record<string, object>) => { projects = value; } };
 }
+
+test('a mission says autonomy is on only for a project the user turned it on for, and takes its wrap-up with done', async (t) => {
+  const { missions, calls, server, setProjects } = missionServer(t);
+  const { reportMission } = server();
+  assert.doesNotMatch(await reportMission({ title: 'Ship it', stages: ['implement', 'final'] }), /Autonomy/);
+  setProjects({ [canonicalPath('/project')]: { autonomy: true } });
+  assert.match(await reportMission({ stage: 'final' }), /Autonomy is on for this project[^]*only once the work is finished, every outgoing commit has had a review[^]*Never merge, close, or deploy it\./);
+  const posts = () => calls.filter((call) => call.method === 'POST').length;
+  const before = posts();
+  await assert.rejects(reportMission({ stage: 'final', summary: 'Too early.' }), /summary goes with done/);
+  assert.equal(posts(), before);
+  const ended = await reportMission({ done: true, outcome: 'Shipped.', summary: 'Changed the board.' });
+  assert.equal(missions.list()[0].summary, 'Changed the board.');
+  // A finished mission has nothing left to push.
+  assert.doesNotMatch(ended, /Autonomy/);
+});
+
+test('remembered decisions reach the mission on every path, the call that ends it included', async (t) => {
+  const { missions, calls, server } = missionServer(t);
+  const { reportMission } = server();
+  // The call that opens the mission keeps the decisions it carries.
+  await reportMission({ title: 'Screens', stages: ['implement', 'final'], remember: [{ key: 'size', text: 'Cards stay compact.' }] });
+  assert.deepEqual(missions.list()[0].memory?.map((entry) => entry.key), ['size']);
+  await reportMission({ title: 'Screens', remember: [{ key: 'buttons', text: 'Buttons follow sample A.' }] });
+  assert.match(await reportMission({ remember: [{ key: 'copy', text: 'Text follows B.' }] }), /Decisions remembered \(3 of/);
+  await reportMission({ forget: ['copy', 'size'], done: true, outcome: 'Done.' });
+  assert.deepEqual(missions.list()[0].memory?.map((entry) => entry.key), ['buttons']);
+  assert.deepEqual(calls.filter((call) => call.body.forget).map((call) => call.body.forget), [['copy', 'size']]);
+});
 
 test('mission forwards plans on start, revision, repeated titles and reattachment', async (t) => {
   const { missions, calls, server } = missionServer(t);

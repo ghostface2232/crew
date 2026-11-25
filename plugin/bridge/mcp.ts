@@ -2,7 +2,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { clipped, jsonBytes, LEAD_BYTES, LEAD_TEXT_BYTES, REPORT_PAGE_BYTES, textPage, unread } from './delivery.ts';
 import { api, ensureDaemon, partialEnvironment } from './client.ts';
-import { assignHint, baseUrl, canonicalPath, DEFAULT_ROLES, defaultHolder, disabledAgents, LEAD, loadConfig, MAX_DEBATE_ROUNDS, PLUGIN_ROOT, PRESET_NAMES, ROLE_INFO, ROLES, VERSION, WORKERS, workerInfo } from './config.ts';
+import { assignHint, baseUrl, canonicalPath, DEFAULT_ROLES, defaultHolder, disabledAgents, LEAD, loadConfig, MAX_DEBATE_ROUNDS, PLUGIN_ROOT, PRESET_NAMES, projectSettings, ROLE_INFO, ROLES, VERSION, WORKERS, workerInfo } from './config.ts';
 import { listSkills } from './skills.ts';
 import { describeUsage } from './usage.ts';
 import type { RouteDecision, Usage } from './usage.ts';
@@ -103,7 +103,7 @@ Rules:
 - Approval is the user's; never approve on your own. Decline requests clearly outside the task or role with \`reply\`; otherwise call \`wait\` so the user is asked, or relay their prior answer. A result with a REFUSED action says how to send it back if the user's request covers it; never run it yourself. Answer worker questions (ask_lead) yourself with \`answer\`.
 - Workers do not see this conversation: give only what they need (goal, decisions, how it is judged), accurately and briefly. The brief goes in \`task\` for delegate and polish, \`focus\` for review, and \`topic\` and \`position\` for debate; criteria go in \`done_when\`. A call with an argument its tool does not take fails and starts nothing.
 - Omit \`tier\` and \`effort\` for ordinary work so role or preset settings apply; pass one only when a job clearly needs another, as it overrides them.
-- If a job hits a usage limit, do it yourself and say what was skipped. If Crew cannot start a job, retry once, then tell the user the error and do it yourself.
+- If a job hits a usage limit, do it yourself and say what was skipped, unless its result says Crew resumes it. If Crew cannot start a job, retry once, then tell the user the error and do it yourself.
 - ${skill('run')} sets when to review; outside it, review only if the user asks (never hold a commit or push for one). After a review and its fix, record the result with \`note\`: facts only, no impressions.
 - Report multi-step user commands with \`mission\` (title and stages first; done once work finishes); skip for a single delegated job. Open a new mission before further work after done; a command while one is open gets its own beside it. \`tasks\` saves the split for resumed sessions; \`pr\` links a pull request.
 - Add worker-reported machine or project workarounds to .crew/instructions.md (given to every later job).
@@ -264,11 +264,26 @@ const buildTools = () => [
             required: ['id'],
           },
         },
-        pr: { type: 'string', description: 'A pull request of this work, as its number or URL. Crew then reads it with the GitHub CLI while this session is open and wakes you only when something new needs you: a failed check, review feedback, a merge conflict, or checks passing after a failure it told you of. You judge the cause and hand the fix to an agent with delegate or reply; Crew never merges, closes or deploys. Passing a linked one again resumes check news that was held back after three failing heads.' },
+        pr: { type: 'string', description: 'A pull request of this work, as its number or URL. Crew then reads it with the GitHub CLI while this session is open (and while it is away, if the user allows that for the project) and wakes you only when something new needs you: a failed check, review feedback, a merge conflict, or checks passing after a failure it told you of. You judge the cause and hand the fix to an agent with delegate or reply; Crew never merges, closes or deploys. Passing a linked one again resumes check news that was held back after three failing heads.' },
         done: { type: 'boolean', description: 'The command is finished.' },
         abandoned: { type: 'boolean', description: 'The command was dropped before it finished.' },
         outcome: { type: 'string', description: 'With done or abandoned: one line on how it ended.' },
         record: { type: 'string', description: 'Optional, with done: the decisions taken and why, approaches that failed, and prerequisites the next person would need. A few short lines; `crew export <mission>` turns it and the jobs into a runbook.' },
+        summary: { type: 'string', description: 'With done, for work that changed something: the wrap-up the user reads on the board, in Markdown and in the user\'s language. What changed, what was verified and how, what was skipped or not verified, and what is left for the user (a push, a pull request, a decision). Facts only, a few short lines.' },
+        remember: {
+          type: 'array',
+          description: 'Decisions the user made during this mission that later jobs must follow (a chosen sample, a wording, a scope), in the user\'s words with their scope. New jobs of the mission get them in their brief; tell a running job yourself with reply. Kept only for this mission. Not for approvals: a decision about taste or scope never grants a permission.',
+          items: {
+            type: 'object',
+            properties: {
+              key: { type: 'string', description: 'Your short name for the decision, e.g. "button-style". The same key again replaces the old decision.' },
+              text: { type: 'string', description: 'The decision and what it covers, e.g. "Buttons follow sample A; only the completion text follows B."' },
+              tasks: { type: 'array', items: { type: 'string' }, description: 'Task ids it applies to; leave out for the whole mission.' },
+            },
+            required: ['key', 'text'],
+          },
+        },
+        forget: { type: 'array', items: { type: 'string' }, description: 'Keys of remembered decisions that no longer apply.' },
         preset: { type: ['string', 'null'], enum: [...PRESET_NAMES, null], description: 'Only when the user names a preset for this command: the mission\'s new jobs run under it instead of the global one. null returns to the global one; leave it out to keep what is set. Never choose one yourself.' },
         difficulty: { type: 'string', enum: [...DIFFICULTIES], description: `Only with title, when the mission starts: how hard your own work in this command is, set now so its review cannot change it. Later calls cannot pass it. ${DIFFICULTY_SCALE}` },
       },
@@ -744,7 +759,21 @@ async function jobMission(wanted: unknown): Promise<string | undefined> {
 
 function describeMission(mission: Mission, now?: Pick<Standing, 'jobs' | 'pulls'>): string {
   const policy = mission.preset ? currentPolicy(mission.preset, ' for this mission') : currentPolicy(globalPreset(), ' (the global preset; the mission sets none)');
-  return [missionHead(mission), now ? missionDetail(mission, now.jobs, now.pulls) : '', policy].filter(Boolean).join('\n');
+  return [missionHead(mission), now ? missionDetail(mission, now.jobs, now.pulls) : '', policy, mission.state === 'active' ? autonomyPolicy(mission.root) : ''].filter(Boolean).join('\n');
+}
+
+/**
+ * The user's standing permission to push and open a pull request in this project, read from the config on disk so a
+ * switch turned on or off on the board holds from the next call. Without it nothing is said, and the lead asks as before.
+ */
+function autonomyPolicy(project: string): string {
+  let on = false;
+  try {
+    on = projectSettings(loadConfig(), project).autonomy === true;
+  } catch {
+    // An unreadable config grants nothing.
+  }
+  return on ? 'Autonomy is on for this project: the user lets you push and open a pull request without asking, but only once the work is finished, every outgoing commit has had a review in this conversation with its fixes in, and the final checks pass on the combined result. Work on a branch of its own, not the default branch; link the pull request with pr. Never merge, close, or deploy it.' : '';
 }
 
 let missionReports = Promise.resolve();
@@ -766,13 +795,14 @@ async function updateMission(args: any, ctx?: CallContext): Promise<string> {
   if (args.difficulty !== undefined && !(args.title && !ending && args.id === undefined)) {
     throw new Error('difficulty is set only on the call that starts a mission, with title, so its review cannot change it. Nothing was changed.');
   }
-  const changing = Boolean(args.stage) || args.stages !== undefined || args.preset !== undefined || args.tasks !== undefined;
+  if (args.summary !== undefined && !args.done) throw new Error('summary goes with done: it is the wrap-up of finished work. Nothing was changed.');
+  const changing = Boolean(args.stage) || args.stages !== undefined || args.preset !== undefined || args.tasks !== undefined || args.remember !== undefined || args.forget !== undefined;
   // Links a pull request and says what stands on it now; what is already there is not sent again as news.
   const link = async (mission: Mission): Promise<string> => {
     if (args.pr === undefined) return '';
     const linked: { watch: PullWatch; resumed: boolean; summary: string } = await api('POST', `/api/missions/${mission.id}/pulls`, { pr: args.pr });
     now.pulls = [...now.pulls.filter((pull) => pull.id !== linked.watch.id), linked.watch];
-    return `\n${linked.resumed ? 'Check failures of this pull request are sent again. ' : ''}Linked ${linked.summary}. Crew reads it while this session is open and wakes you only for a newly failed check, new review feedback, a conflict, or checks passing after a failure it told you of. Judge the cause yourself and hand the fix to an agent; never merge, close or deploy on such news.`;
+    return `\n${linked.resumed ? 'Check failures of this pull request are sent again. ' : ''}Linked ${linked.summary}. Crew reads it while this session is open (and while it is away, if the user allows that for the project) and wakes you only for a newly failed check, new review feedback, a conflict, or checks passing after a failure it told you of. Judge the cause yourself and hand the fix to an agent; never merge, close or deploy on such news.`;
   };
 
   if (args.title && !ending && args.id === undefined) {
@@ -786,7 +816,8 @@ async function updateMission(args: any, ctx?: CallContext): Promise<string> {
         throw new Error(`Mission ${same.id} was started ${same.difficulty ? `as ${same.difficulty}` : 'without a difficulty'}, which cannot change. Leave difficulty out. Nothing was changed.`);
       }
       track(same);
-      const mission = args.stage || args.preset !== undefined || args.tasks !== undefined ? await api('POST', `/api/missions/${same.id}`, { stage: args.stage, preset: args.preset, tasks: args.tasks, lead: SESSION }) : same;
+      const mission = args.stage || args.preset !== undefined || args.tasks !== undefined || args.remember !== undefined || args.forget !== undefined
+        ? await api('POST', `/api/missions/${same.id}`, { stage: args.stage, preset: args.preset, tasks: args.tasks, remember: args.remember, forget: args.forget, lead: SESSION }) : same;
       const linked = await link(mission);
       return describeMission(mission, now) + linked;
     }
@@ -797,7 +828,7 @@ async function updateMission(args: any, ctx?: CallContext): Promise<string> {
       return `Mission ${closed.id} was closed outside this session (${closed.outcome || closed.state}). Carry on with the work and do not open a new mission for it.\n${describeMission(closed)}`;
     }
     // A mission already open stays open: the user often gives a second command while the first is still under way.
-    const opened: Mission = await api('POST', '/api/missions', { title: args.title, project: PROJECT, stage: args.stage, stages: args.stages, owner: SESSION, lead: host, preset: args.preset ?? undefined, tasks: args.tasks, difficulty: args.difficulty });
+    const opened: Mission = await api('POST', '/api/missions', { title: args.title, project: PROJECT, stage: args.stage, stages: args.stages, owner: SESSION, lead: host, preset: args.preset ?? undefined, tasks: args.tasks, remember: args.remember, forget: args.forget, difficulty: args.difficulty });
     openedHere.add(opened.id);
     track(opened);
     closedElsewhere = null;
@@ -849,16 +880,18 @@ async function updateMission(args: any, ctx?: CallContext): Promise<string> {
   track(current);
   if (ending) {
     // An ended mission takes no later call, so the tasks and the pull request this one carries go in first. If either is refused, the mission stays open.
-    if (args.tasks !== undefined) await api('POST', `/api/missions/${current.id}`, { tasks: args.tasks, lead: SESSION });
+    if (args.tasks !== undefined || args.remember !== undefined || args.forget !== undefined) {
+      await api('POST', `/api/missions/${current.id}`, { tasks: args.tasks, remember: args.remember, forget: args.forget, lead: SESSION });
+    }
     const linked = await link(current);
-    const ended: Mission = await api('POST', `/api/missions/${current.id}`, { done: Boolean(args.done), abandoned: Boolean(args.abandoned), outcome: args.outcome, record: args.record, by: 'lead' });
+    const ended: Mission = await api('POST', `/api/missions/${current.id}`, { done: Boolean(args.done), abandoned: Boolean(args.abandoned), outcome: args.outcome, record: args.record, summary: args.summary, by: 'lead' });
     missionId = null;
     costMission = null;
     lastDone = args.done ? ended : null;
     const others = now.open.filter((m) => m.id !== ended.id);
     return `${describeMission(ended, now)}${linked}${others.length ? `\nStill open in this session: ${listed(others)}.${others.length === 1 ? ' Calls that name no mission now go to it; work that follows up the one just finished gets a mission of its own first.' : ''}` : ''}`;
   }
-  const mission: Mission = changing ? await api('POST', `/api/missions/${current.id}`, { stage: args.stage, stages: args.stages, preset: args.preset, tasks: args.tasks, lead: SESSION }) : current;
+  const mission: Mission = changing ? await api('POST', `/api/missions/${current.id}`, { stage: args.stage, stages: args.stages, preset: args.preset, tasks: args.tasks, remember: args.remember, forget: args.forget, lead: SESSION }) : current;
   const linked = await link(mission);
   return describeMission(mission, now) + linked;
 }

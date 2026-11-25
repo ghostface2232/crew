@@ -10,10 +10,11 @@ import { syncBuiltinESMExports } from 'node:module';
 import { canonicalPath, resolveConfig } from '../plugin/bridge/config.ts';
 import type { Config } from '../plugin/bridge/config.ts';
 import { leadContext } from '../plugin/bridge/instructions.ts';
-import { followUps, jobRole, Jobs, outOfScope, parseOutcome } from '../plugin/bridge/jobs.ts';
+import { autoResumesLeft, followUps, jobRole, Jobs, outOfScope, parseOutcome } from '../plugin/bridge/jobs.ts';
 import type { Adapter, CrewEvent, Job, JobCtl, JobSpec, Probe, ReviewTarget } from '../plugin/bridge/jobs.ts';
 import { describe, needsLead, outcomeContradiction } from '../plugin/bridge/render.ts';
 import { tierModel } from '../plugin/bridge/tiers.ts';
+import type { Usage, UsageStatus } from '../plugin/bridge/usage.ts';
 import { checkLine, runCheck, windowsSandboxArgs } from '../plugin/bridge/check.ts';
 
 /** Where the bridge can hold a check to the worker's limits: macOS's sandbox-exec, or Codex's sandbox on Windows. */
@@ -82,6 +83,291 @@ async function settled(jobs: Jobs, job: Job): Promise<Job> {
   while (job.state === 'running') await jobs.wait(job.id, job.seq, 2000);
   return job;
 }
+
+test('a turn budget interrupts once, reports a resumable failure, and starts fresh after reply', async (t) => {
+  const repo = tempRepo();
+  let worker!: JobCtl;
+  const h = harness((ctl) => { worker = ctl; });
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); fs.rmSync(repo, { recursive: true, force: true }); });
+  const job = await h.jobs.create({ kind: 'delegate', cwd: repo, task: 'edit', difficulty: 'routine' });
+  h.adapter.cancel = async () => { h.calls.push('cancel'); worker.cancelled(); };
+  const total = 60_000_002;
+  worker.tokens(total, { input: total, cachedInput: 0, output: 0 });
+  worker.done('late completion');
+  await settled(h.jobs, job);
+  assert.deepEqual(h.calls, ['cancel']);
+  assert.deepEqual([job.state, job.error?.budget, job.error?.limit, job.sessionId], ['failed', true, false, 'session-1']);
+  assert.match(job.error!.message, /token cap of 60000000.*60000002/);
+  assert.deepEqual(job.news!.map((n) => n.kind), ['failed']);
+  assert.ok(fs.existsSync(job.worktree!.path));
+  h.adapter.reply = async (ctl) => { worker = ctl; };
+  await h.jobs.reply(job.id, { message: 'continue' });
+  worker.tokens(total + 2, { input: total + 2, cachedInput: 0, output: 0 });
+  assert.equal(job.tokenUse?.turn, 2);
+  assert.equal(job.state, 'running');
+  job.turnStartedAt = Date.now() - 121 * 60_000;
+  (h.jobs as any).checkStalls();
+  await settled(h.jobs, job);
+  assert.match(job.error!.message, /wall-clock cap of 120 minutes.*72\d\d seconds/);
+  assert.equal(job.turns, 2);
+});
+
+test('the turn budget pauses for user decisions and resumes with the remaining running time', async (t) => {
+  let worker!: JobCtl;
+  const h = harness((ctl) => { worker = ctl; });
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); });
+  const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'edit' });
+  let now = job.createdAt;
+  t.mock.method(Date, 'now', () => now);
+  const minute = 60_000;
+  now += 30 * minute;
+  worker.waiting('approval', 'Run the check?');
+  const approval = job.waiting!.id;
+  now += 12 * 60 * minute;
+  (h.jobs as any).checkStalls();
+  assert.deepEqual(h.calls, []);
+  assert.equal(job.waiting?.id, approval);
+
+  // Adapters can present the next queued request without resuming in between.
+  h.adapter.answer = async (ctl) => ctl.waiting('question', 'Which file?');
+  await h.jobs.reply(job.id, { request_id: approval, decision: 'approve' });
+  now += 10 * minute;
+  h.adapter.answer = async (ctl) => ctl.resumed();
+  await h.jobs.reply(job.id, { request_id: job.waiting!.id, message: 'app.js' });
+  now += 150 * minute - 1;
+  worker.activity();
+  (h.jobs as any).checkStalls();
+  assert.deepEqual(h.calls, []);
+  assert.equal(job.state, 'running');
+
+  now += 1;
+  (h.jobs as any).checkStalls();
+  assert.deepEqual(h.calls, ['cancel']);
+  await settled(h.jobs, job);
+  assert.equal(job.error?.budget, true);
+  assert.match(job.error!.message, /wall-clock cap of 180 minutes reached \(10800 seconds observed\)/);
+
+  h.adapter.reply = async (ctl) => { worker = ctl; };
+  await h.jobs.reply(job.id, { message: 'continue' });
+  now += 180 * minute;
+  worker.done('finished');
+  await settled(h.jobs, job);
+  assert.deepEqual([job.state, job.error, job.report], ['done', null, 'finished']);
+});
+
+test('a worker finishing after its last token update keeps its report and result', async (t) => {
+  let worker!: JobCtl;
+  const h = harness((ctl) => { worker = ctl; });
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); });
+  const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'edit' });
+  worker.touched(path.join(job.cwd, 'app.js'));
+  worker.tokens(80_000_001, { input: 80_000_001, cachedInput: 0, output: 0 });
+  worker.done('finished');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual([job.state, job.error, job.report, job.result?.files], ['done', null, 'finished', ['app.js']]);
+  assert.deepEqual(job.news!.map((n) => n.kind), ['done']);
+});
+
+for (const waiting of [false, true]) {
+  test(`manual cancel settles a pending budget stop while ${waiting ? 'waiting' : 'running'}`, async (t) => {
+    let worker!: JobCtl;
+    const h = harness((ctl) => { worker = ctl; });
+    t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); });
+    const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'edit' });
+    h.adapter.cancel = async () => { throw new Error('interrupt unconfirmed'); };
+    worker.tokens(80_000_001, { input: 80_000_001, cachedInput: 0, output: 0 });
+    await new Promise((resolve) => setImmediate(resolve));
+    if (waiting) worker.waiting('approval', 'Run?');
+    h.adapter.cancel = async (ctl) => { if (!waiting) ctl.cancelled(); };
+    await h.jobs.cancel(job.id);
+    assert.deepEqual([job.state, job.error?.budget, job.waiting], ['failed', true, null]);
+    assert.equal(job.news!.filter((n) => n.kind === 'failed').length, 1);
+  });
+}
+
+test('a budget stop starts removal of a review snapshot', async (t) => {
+  const repo = tempRepo();
+  let worker!: JobCtl;
+  const h = harness((ctl) => { worker = ctl; });
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); fs.rmSync(repo, { recursive: true, force: true }); });
+  const job = await h.jobs.create({ kind: 'review', cwd: repo, runsApp: true, review: { target: { type: 'commit', sha: 'HEAD' }, mode: 'adversarial' } });
+  const snapshot = job.worktree!.path;
+  const released: string[] = [];
+  h.adapter.release = async (ctl) => { released.push(ctl.job.worktree!.path); };
+  worker.tokens(80_000_001, { input: 80_000_001, cachedInput: 0, output: 0 });
+  await settled(h.jobs, job);
+  await (h.jobs as any).snapshots.get(job.id);
+  assert.equal(job.error?.budget, true);
+  assert.deepEqual(released, [snapshot]);
+});
+
+test('a failed include hint leaves the worker and its worktree available', async (t) => {
+  const repo = tempRepo();
+  const h = harness(() => {});
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); fs.rmSync(repo, { recursive: true, force: true }); });
+  fs.writeFileSync(path.join(repo, '.gitignore'), '.env\n');
+  fs.writeFileSync(path.join(repo, '.env'), '');
+  fs.writeFileSync(path.join(h.home, 'worktree-preflight'), 'not a directory');
+  const job = await h.jobs.create({ kind: 'delegate', cwd: repo, task: 'edit' });
+  assert.deepEqual([job.state, job.sessionId, fs.existsSync(job.worktree!.path)], ['running', 'session-1', true]);
+  await h.jobs.cancel(job.id);
+});
+
+test('concurrent base checks share one run and a later run reads current includes', async (t) => {
+  const repo = tempRepo();
+  const h = harness(() => {});
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); fs.rmSync(repo, { recursive: true, force: true }); });
+  fs.writeFileSync(path.join(repo, '.gitignore'), '.env\n');
+  fs.writeFileSync(path.join(repo, '.worktreeinclude'), '.env\n');
+  const env = path.join(repo, '.env');
+  fs.writeFileSync(env, '0');
+  let runs = 0;
+  (h.jobs as any).runJobCheck = async (command: string, cwd: string) => {
+    runs++;
+    return { command, exit: Number(fs.readFileSync(path.join(cwd, '.env'), 'utf8')), timedOut: false, ms: 1, output: '', sandboxed: true };
+  };
+  const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim();
+  const compare = () => (h.jobs as any).compareBase(repo, sha, 'read env', false, 'codex', new AbortController().signal);
+  const first = await Promise.all([compare(), compare()]);
+  assert.deepEqual(first.map((base) => base.exit), [0, 0]);
+  assert.equal(runs, 1);
+  fs.writeFileSync(env, '1');
+  assert.equal((await compare()).exit, 1);
+  assert.equal(runs, 2);
+});
+
+test('bridge compares checks on detached bases and sends at most one automatic fix before publishing', async (t) => {
+  const repo = tempRepo();
+  fs.writeFileSync(path.join(repo, '.gitignore'), 'node_modules/\n');
+  fs.mkdirSync(path.join(repo, 'node_modules'));
+  let refuse = false;
+  const h = harness((ctl) => {
+    fs.writeFileSync(path.join(ctl.job.cwd, 'app.js'), 'broken\n');
+    if (refuse) ctl.refused('edit elsewhere', 'outside the workspace');
+    ctl.done('first report');
+  });
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); fs.rmSync(repo, { recursive: true, force: true }); });
+  const bases: string[] = [];
+  (h.jobs as any).runJobCheck = async (command: string, cwd: string, network: boolean, codex: string) => {
+    const broken = fs.readFileSync(path.join(cwd, 'app.js'), 'utf8') === 'broken\n';
+    if (broken && command === 'rewrite') fs.writeFileSync(path.join(cwd, 'app.js'), 'generated\n');
+    if (!broken) {
+      bases.push(cwd);
+      assert.equal(execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd, encoding: 'utf8' }).trim(), 'HEAD');
+      assert.equal(network, false);
+      assert.equal(codex, config.codex.bin);
+      if (command === 'unavailable') throw new Error('test sandbox unavailable');
+    }
+    return { command, exit: broken || command === 'always fails' ? 1 : 0, timedOut: false, ms: 15, output: 'failed assertion', sandboxed: true };
+  };
+  const create = (check: string) => h.jobs.create({ kind: 'delegate', cwd: repo, check, task: 'edit' }).then((job) => settled(h.jobs, job));
+  const inherited = await create('always fails');
+  assert.equal(inherited.turns, 1);
+  assert.equal(inherited.receipts![0].base!.exit, 1);
+  assert.match(describe(inherited), /also fails on the base commit/);
+  assert.match(inherited.notes.join('\n'), /node_modules.*\.worktreeinclude/);
+  refuse = true;
+  const declined = await create('regression');
+  assert.equal(declined.turns, 1);
+  assert.match(describe(declined), /passes on the base commit/);
+  assert.doesNotMatch(declined.notes.join('\n'), /list them in .worktreeinclude/);
+  refuse = false;
+  const stale = await create('rewrite');
+  assert.match(stale.receipts![0].stale!, /changed app.js/);
+  assert.deepEqual([stale.turns, stale.receipts![0].base?.exit, stale.autoFixTurn], [1, 0, undefined]);
+  const send = h.adapter.reply;
+  h.adapter.reply = async (ctl, message) => {
+    const saved = JSON.parse(fs.readFileSync(path.join(h.home, 'jobs.json'), 'utf8')).jobs.find((job: Job) => job.id === ctl.job.id);
+    assert.deepEqual([saved.turns, saved.autoFixTurn], [2, 2]);
+    await send(ctl, message);
+  };
+  const fix = await create('regression');
+  assert.deepEqual(fix.receipts!.map((r) => [r.turn, r.base?.exit]), [[1, 0], [2, 0]]);
+  assert.equal(fix.autoFixTurn, 2);
+  assert.equal(followUps(fix), 0);
+  assert.deepEqual(fix.news!.map((n) => n.kind), ['done']);
+  assert.match(fix.news![0].reason, /automatic fix turn 2/i);
+  assert.equal(h.jobs.eventsFor(fix.id, 0).find((e) => e.kind === 'done')!.detail, fix.news![0].reason);
+  assert.equal(h.calls.length, 1);
+  assert.match(h.calls[0], /without weakening the check[^]*regression[^]*failed assertion/);
+  const unavailable = await create('unavailable');
+  assert.equal(unavailable.turns, 1);
+  assert.match(describe(unavailable), /Base check unavailable: test sandbox unavailable/);
+  assert.equal(bases.length, 6);
+  for (const cwd of bases) assert.ok(!fs.existsSync(cwd));
+  assert.doesNotMatch(execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: repo, encoding: 'utf8' }), /detached/);
+});
+
+test('a fresh usage reading resumes only a limited job in an opted-in active mission', async (t) => {
+  const repo = tempRepo();
+  let enabled = false;
+  const h = harness((ctl) => ctl.fail('out of usage', { limit: true }), () => ({ ...config, projects: { [canonicalPath(repo)]: { autoResume: enabled } } }));
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); fs.rmSync(repo, { recursive: true, force: true }); });
+  const project = path.join(repo, 'subfolder');
+  fs.mkdirSync(project);
+  const job = await h.jobs.create({ kind: 'delegate', cwd: project, project, mission: 'm', task: 'edit' });
+  assert.notEqual(job.project, job.root);
+  const read = (status: UsageStatus, capturedAt = job.endedAt! + 1): Usage => ({ generatedAt: Date.now(), source: 'agentgauge',
+    providers: [{ agent: job.agent, reason: '', capturedAt, status, plan: null, windows: [] }] });
+  await h.jobs.resumeLimited(read('ok'), () => true);
+  enabled = true;
+  await h.jobs.resumeLimited(read('ok'), () => false);
+  let active = true;
+  const closing = h.jobs.resumeLimited(read('ok'), () => active);
+  active = false;
+  await closing;
+  for (const status of ['exhausted', 'stale', 'unknown'] as const) await h.jobs.resumeLimited(read(status), () => true);
+  await h.jobs.resumeLimited(read('ok', job.endedAt!), () => true);
+  job.state = 'cancelled';
+  await h.jobs.resumeLimited(read('ok'), () => true);
+  job.state = 'failed';
+  job.error!.limit = false;
+  await h.jobs.resumeLimited(read('ok'), () => true);
+  job.error!.limit = true;
+  delete job.mission;
+  await h.jobs.resumeLimited(read('ok'), () => true);
+  job.mission = 'm';
+  const worktree = job.worktree!;
+  job.worktree = { ...worktree, path: path.join(repo, 'missing') };
+  await h.jobs.resumeLimited(read('ok'), () => true);
+  job.worktree = worktree;
+  job.sessionId = null;
+  await h.jobs.resumeLimited(read('ok'), () => true);
+  job.sessionId = 'session-1';
+  assert.equal(job.turns, 1);
+  const send = h.adapter.reply;
+  h.adapter.reply = async (ctl, message) => {
+    const saved = JSON.parse(fs.readFileSync(path.join(h.home, 'jobs.json'), 'utf8')).jobs.find((item: Job) => item.id === job.id);
+    assert.deepEqual([saved.state, saved.autoResumes], ['running', 1]);
+    await send(ctl, message);
+  };
+  const fresh = read('tight');
+  await Promise.all([1, 2].map(() => h.jobs.resumeLimited(fresh, () => true)));
+  await settled(h.jobs, job);
+  await h.jobs.resumeLimited(fresh, () => true);
+  assert.deepEqual(h.calls, ['reply:Your usage limit has reset; continue where you stopped.']);
+  assert.equal(job.turns, 2);
+  assert.equal(followUps(job), 0);
+});
+
+test('three automatic usage resumes leave further retries to the lead', async (t) => {
+  const repo = tempRepo();
+  const limited = (ctl: JobCtl) => ctl.fail('still out of model usage', { limit: true });
+  const h = harness(limited, () => ({ ...config, projects: { [canonicalPath(repo)]: { autoResume: true } } }));
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); fs.rmSync(repo, { recursive: true, force: true }); });
+  h.adapter.reply = async (ctl) => limited(ctl);
+  const job = await h.jobs.create({ kind: 'delegate', cwd: repo, mission: 'm', task: 'edit' });
+  for (let i = 0; i < 5; i++) {
+    await h.jobs.resumeLimited({ generatedAt: Date.now(), source: 'agentgauge', providers: [
+      { agent: job.agent, reason: '', capturedAt: job.endedAt! + 1, status: 'ok', plan: null, windows: [] },
+    ] }, () => true);
+  }
+  assert.deepEqual([job.state, job.autoResumes, job.turns], ['failed', 3, 4]);
+  assert.equal(autoResumesLeft(job), false, 'the lead is no longer told Crew will resume it');
+  assert.equal(job.notes.filter((note) => /3 automatic resumes/i.test(note)).length, 1);
+  await h.jobs.reply(job.id, { message: 'try manually' });
+  assert.equal(job.turns, 5);
+});
 
 test('parses the first word under the Outcome heading', () => {
   assert.equal(parseOutcome('## Outcome\n\npartial — tests not run\n\n## Result\nEdited a file.'), 'partial');
@@ -2587,9 +2873,8 @@ test('failed worktree removal keeps the Git error and only Windows falls back', 
     return execFile(file, args, options, callback);
   });
   const fsPromises = (await import('node:fs/promises')).default;
-  const rm = fsPromises.rm;
   let removals = 0;
-  t.mock.method(fsPromises, 'rm', async () => { removals++; throw new Error('fallback deletion failure'); });
+  const failing = t.mock.method(fsPromises, 'rm', async () => { removals++; throw new Error('fallback deletion failure'); });
   syncBuiltinESMExports();
   for (const platform of ['darwin', 'linux'] as const) {
     await assert.rejects(removeWorktree(repo, wt, 'cx-123abc', home, platform), /^Error: git worktree: original removal failure$/);
@@ -2600,7 +2885,9 @@ test('failed worktree removal keeps the Git error and only Windows falls back', 
   assert.ok(fs.existsSync(wt.path));
 
   keepRegistration = true;
-  t.mock.method(fsPromises, 'rm', rm);
+  // Restored rather than mocked again: a second mock would take the failing one as its original and leave it in
+  // place for every later test once the test ends.
+  failing.mock.restore();
   syncBuiltinESMExports();
   await assert.rejects(removeWorktree(repo, wt, 'cx-123abc', home, 'win32'), /original removal failure.*Git still lists/s);
 });
@@ -2909,6 +3196,8 @@ test('retention keeps a job that just ended and one an unechoed receipt names, h
   t.after(() => { jobs.flush(); fs.rmSync(home, { recursive: true, force: true }); fs.rmSync(repo, { recursive: true, force: true }); });
   const job = await jobs.create({ kind: 'delegate', cwd: repo, isolation: 'in_place', task: 'long task' });
   job.createdAt = 1;
+  (jobs as any).checkStalls();
+  assert.ok(job.turnStartedAt! > job.createdAt);
   for (let i = 0; i < 200; i++) jobs.jobs.set(`newer-${i}`, { ...job, id: `newer-${i}`, createdAt: i + 2, state: 'done', endedAt: 1, news: [] });
   jobs.jobs.set('named', { ...job, id: 'named', createdAt: 0, state: 'done', endedAt: 1, news: [] });
   jobs.delivery.state.receipts['receipt-1'] = { session: 'lead', items: [{ jobId: 'named', newsSeq: 1 }], text: 'news', at: Date.now() };

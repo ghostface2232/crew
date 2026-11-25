@@ -86,6 +86,7 @@ struct Job: Codable, Sendable, Identifiable, Equatable {
         if state == "waiting" { return waiting?.type == "approval" ? String(localized: "Needs approval") : String(localized: "Has a question") }
         if stalled { return String(localized: "May be stuck") }
         if error?.limit == true { return String(localized: "Usage limit reached") }
+        if error?.budget == true { return String(localized: "Budget reached") }
         return ["running": String(localized: "Working"), "done": String(localized: "Done"), "failed": String(localized: "Failed"), "cancelled": String(localized: "Cancelled")][state] ?? state
     }
     var requestKey: String { "answer:\(id):\(waiting?.id ?? "")" }
@@ -160,7 +161,8 @@ struct Waiting: Codable, Sendable, Equatable {
     var grant: String?
 }
 struct JobResult: Codable, Sendable, Equatable { var files: [String]; var stat: String; var commit: String?; var outOfScope: [String] }
-struct JobError: Codable, Sendable, Equatable { var message: String; var limit: Bool }
+/// `budget` is set when the bridge stopped a turn at its token or time cap; an older daemon sends none.
+struct JobError: Codable, Sendable, Equatable { var message: String; var limit: Bool; var budget: Bool? }
 struct Refusal: Codable, Sendable, Equatable { var action: String; var reason: String; var turn: Int }
 struct CheckResult: Codable, Sendable, Equatable {
     var command: String
@@ -216,6 +218,10 @@ struct Mission: Codable, Sendable, Identifiable, Equatable {
     var labels: [String?]?
     var preset: PresetName?
     var tasks: [MissionTask]?
+    /// The lead's wrap-up of finished work, in Markdown; absent on missions without one.
+    var summary: String?
+    /// Decisions the user made in this mission, which its later jobs are given.
+    var memory: [MissionMemory]?
     private static let stopOfStage = ["plan": 0, "implement": 1, "self-review": 2, "cross-review": 2, "fix": 3, "polish": 4, "final": 5]
     var step: Int { stages.map { stageIndex ?? $0.firstIndex(of: stage) ?? 0 } ?? Self.stopOfStage[stage] ?? 0 }
     static let steps = ["Plan", "Build", "Review", "Fix", "Polish", "Final"]
@@ -252,6 +258,25 @@ struct Mission: Codable, Sendable, Identifiable, Equatable {
     }
 }
 struct MissionNote: Codable, Sendable, Equatable { var text: String; var at: Double }
+struct MissionMemory: Codable, Sendable, Equatable { var key: String; var text: String; var tasks: [String]?; var at: Double }
+/// What the user lets Crew do in one project without asking; every switch is off unless set.
+struct ProjectSettings: Codable, Sendable, Equatable { var autonomy: Bool?; var watchAway: Bool?; var autoResume: Bool? }
+/// GET /api/issues: open issues of a project's repository that are the user's to start, theirs first.
+struct IssueList: Decodable, Sendable, Equatable {
+    struct Issue: Decodable, Sendable, Equatable, Identifiable {
+        var number: Int
+        var title: String
+        var url: String
+        var assignees: [String]
+        var labels: [String]
+        var id: String { url }
+    }
+    var project: String
+    var repo: String?
+    var issues: [Issue]
+    var checkedAt: Double?
+    var error: String?
+}
 struct MissionTask: Codable, Sendable, Equatable {
     var id: String
     var title: String
@@ -643,12 +668,14 @@ struct BoardState: Codable, Sendable, Equatable {
     var hasLanguageSetting: Bool?
     /// Absent from a daemon that predates model notes.
     var modelScores: [ModelScore]?
+    /// Each project's switches by its canonical path; absent from a daemon that predates them.
+    var projects: [String: ProjectSettings]?
     var availableRoles: [RoleInfo] { roleInfo ?? RoleInfo.legacy }
     var editableRoleSettings: [String: RoleSetting] { roleSettings ?? roles.mapValues(RoleSetting.init) }
     func roleLabel(_ role: String) -> String {
         availableRoles.first { $0.role == role }?.localizedLabel ?? roleNames[role].map(localizedCrewLabel) ?? role.capitalized
     }
-    var projects: [String] {
+    var projectPaths: [String] {
         Array(Set(jobs.map(\.projectPath) + missions.map(\.root) + claude.map(\.projectPath))).filter { !$0.isEmpty }.sorted()
     }
     var waitingJobs: [Job] { jobs.filter { $0.state == "waiting" }.sorted { ($0.waiting?.since ?? 0) < ($1.waiting?.since ?? 0) } }
@@ -686,6 +713,7 @@ struct BoardState: Codable, Sendable, Equatable {
             preset = change.preset; presets = change.presets
         case "modelScores": modelScores = try decoder.decode([ModelScore].self, from: event.data)
         case "peerRatings": peerRatings = try decoder.decode(Bool.self, from: event.data)
+        case "projects": projects = try decoder.decode([String: ProjectSettings].self, from: event.data)
         case "language":
             language = try decoder.decode(LanguageState.self, from: event.data).language
             hasLanguageSetting = true

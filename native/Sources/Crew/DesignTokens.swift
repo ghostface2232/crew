@@ -64,12 +64,13 @@ enum WorkspaceStyle {
     /// The page's side margin, and the room below its last card.
     static let pageMargin = Space.x6l
     static let pageTop = Space.l
-    static let cardPadding = Space.xxl
+    static let cardPadding = Space.xl
     /// The space between neighboring cards, the same across as down.
     static let cardGap = Space.xl
     /// Between the blocks stacked inside a card or panel section.
     static let blockGap = Space.xl
-    /// Between the sections of the detail panel.
+    /// Between the sections of the detail panel, and below each headed section of the page (agents, issues), so a
+    /// section reads apart from the cards after it rather than as more of them.
     static let sectionGap = Space.x4l
     /// A banner's padding: a notice, not a card of its own.
     static let bannerPadding = Space.xl
@@ -178,6 +179,7 @@ enum Typeface {
     static let pageTitleCapHeight = NSFont.systemFont(ofSize: 38, weight: .semibold).capHeight
     static let title = Font.system(size: 19, weight: .semibold, design: .rounded)
     static let cardTitle = Font.system(size: 17, weight: .semibold, design: .rounded)
+    static let minorTitle = Font.system(size: 16, weight: .semibold, design: .rounded)
     static let emptyTitle = Font.system(size: 18, weight: .regular, design: .rounded)
     static let number = Font.system(size: 40, weight: .regular, design: .rounded)
     static let section = display(21, .semibold)

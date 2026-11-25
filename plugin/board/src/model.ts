@@ -212,6 +212,7 @@ export function jobLabel(job: BoardJob) {
   if (job.state === 'waiting') return job.waiting?.type === 'approval' ? t('Needs approval') : t('Has a question');
   if (job.stalled) return t('May be stuck');
   if (job.error?.limit) return t('Usage limit reached');
+  if (job.error?.budget) return t('Budget reached');
   return { running: t('Working'), done: t('Done'), failed: t('Failed'), cancelled: t('Cancelled') }[job.state];
 }
 

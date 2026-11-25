@@ -223,10 +223,108 @@ function usageOf(statuses: Partial<Record<'claude' | 'codex' | 'antigravity', Us
     source: 'agentgauge',
     providers: (['claude', 'codex', 'antigravity'] as const).map((agent) => {
       const status = statuses[agent] ?? 'ok';
-      return { agent, plan: null, capturedAt: NOW, status, reason: `${agent} reason.`, windows: [{ key: 'weekly', kind: 'weekly', group: null, usedRatio: 0.5, resetTime: reset, durationSec: 604800, projectedExhaustion: null, status }] };
+      return { agent, plan: null, capturedAt: NOW, status, reason: `${agent} reason.`, windows: [{ key: 'fiveHour', kind: 'fiveHour', group: null, usedRatio: 0.5, resetTime: reset, durationSec: 18000, projectedExhaustion: null, status }] };
     }),
   };
 }
+
+test('each tight deciding window must reset soon to give its holder room for routing', (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: NOW });
+  const usage = usageOf({ codex: 'tight' });
+  const codex = usage.providers.find((p) => p.agent === 'codex')!;
+  const window = codex.windows[0];
+  const build = () => route('delegate', usage, DEFAULT_ROLES);
+  window.resetTime = NOW + 30 * MIN;
+  assert.equal(build().assignee, 'codex');
+  assert.deepEqual(build().holders, [{ agent: 'codex', status: 'ok' }]);
+  assert.match(build().reason, /resets soon/);
+  assert.ok(build().reason.includes(iso(window.resetTime)));
+  assert.equal(codex.status, 'tight');
+  window.resetTime++;
+  assert.equal(build().assignee, 'claude');
+  window.durationSec = null;
+  window.resetTime = NOW + 15 * MIN;
+  assert.equal(build().assignee, 'codex');
+  codex.windows.push({ ...window, key: 'other', resetTime: window.resetTime + 1 });
+  assert.equal(build().assignee, 'claude');
+  const polish = { ...DEFAULT_ROLES, polish: { agents: ['codex' as const] } };
+  window.durationSec = 604800;
+  window.resetTime = NOW + 8 * 60 * MIN;
+  assert.equal(route('polish', usage, polish).deferUntil, NOW + 15 * MIN + 1);
+  codex.decidingKeys = [window.key];
+  assert.equal(build().assignee, 'codex');
+  for (const reset of [NOW - MIN, null]) {
+    window.resetTime = reset;
+    assert.equal(build().assignee, 'claude');
+  }
+});
+
+test('a cross-check waits for all exhausted deciding windows to reset within half an hour', (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: NOW });
+  const usage = usageOf({ codex: 'exhausted' });
+  const codex = usage.providers.find((p) => p.agent === 'codex')!;
+  codex.windows[0].resetTime = NOW + MIN;
+  const last = { ...codex.windows[0], key: 'weekly', resetTime: NOW + 30 * MIN };
+  codex.windows.push(last);
+  for (const kind of ['review', 'verify', 'debate'] as const) {
+    const decision = route(kind, usage, DEFAULT_ROLES);
+    assert.deepEqual([decision.assignee, decision.degraded, decision.deferUntil], ['codex', false, last.resetTime]);
+    assert.match(decision.reason, /after the reset/);
+    assert.ok(decision.reason.includes(iso(last.resetTime)));
+  }
+  assert.equal(route('delegate', usage, DEFAULT_ROLES).assignee, 'claude');
+  last.resetTime++;
+  assert.equal(route('review', usage, DEFAULT_ROLES).degraded, true);
+  t.mock.timers.tick(1);
+  assert.equal(route('review', usage, DEFAULT_ROLES).degraded, false);
+  codex.windows[1].resetTime = null;
+  assert.equal(route('review', usage, DEFAULT_ROLES).degraded, true);
+  codex.decidingKeys = [codex.windows[0].key];
+  assert.equal(route('review', usage, DEFAULT_ROLES).deferUntil, NOW + MIN);
+});
+
+test('a cross-check goes to a tight usable holder before waiting for an exhausted holder', (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: NOW });
+  const usage = usageOf({ codex: 'exhausted', antigravity: 'tight', claude: 'tight' });
+  usage.providers.find((p) => p.agent === 'codex')!.windows[0].resetTime = NOW + 20 * MIN;
+  const roles = resolveConfig({ roles: {
+    review: { agents: ['codex', 'antigravity'] }, debate: { agents: ['codex', 'antigravity'] },
+    verify: { agents: ['codex', 'claude'] },
+  } }).roles;
+  for (const kind of ['review', 'debate', 'verify'] as const) {
+    const decision = route(kind, usage, roles);
+    assert.deepEqual([decision.assignee, decision.deferUntil], [kind === 'verify' ? 'claude' : 'antigravity', null]);
+  }
+});
+
+test('only remaining quota and time in the longest applicable window break holder ties', (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: NOW });
+  const roles = resolveConfig({ roles: { review: { agents: ['codex', 'antigravity'] } } }).roles;
+  const usage = usageOf({});
+  const codex = usage.providers.find((p) => p.agent === 'codex')!;
+  const review = () => route('review', usage, roles);
+  codex.windows[0].usedRatio = 0.95;
+  const long = { ...codex.windows[0], key: 'weekly', durationSec: 604800, resetTime: NOW + 0.4 * 604800000, usedRatio: 0.8 };
+  codex.windows.push(long);
+  long.projectedExhaustion = NOW + MIN;
+  assert.equal(review().assignee, 'codex');
+  long.usedRatio = 0.81;
+  assert.equal(review().assignee, 'antigravity');
+  assert.match(review().reason, /longest window/);
+  assert.equal(route('review', usage, DEFAULT_ROLES).assignee, 'codex');
+  assert.equal(review().holders?.[0].status, 'ok');
+  codex.decidingKeys = [codex.windows[0].key];
+  codex.windows[0].usedRatio = 0.5;
+  assert.equal(review().assignee, 'codex');
+  delete codex.decidingKeys;
+  for (const missing of ['stale', 'unknown'] as const) {
+    codex.status = missing;
+    assert.equal(review().assignee, 'codex');
+    codex.status = 'ok';
+    usage.providers.find((p) => p.agent === 'antigravity')!.status = missing;
+    assert.equal(review().assignee, 'codex');
+  }
+});
 
 test('with room everywhere, and with stale or unknown readings, the roles are followed', () => {
   for (const usage of [usageOf({}), usageOf({ codex: 'stale', antigravity: 'unknown', claude: 'stale' })]) {
@@ -459,7 +557,8 @@ test('polish selects the Gemini family without borrowing Argon windows or reset 
   monitor.supplement(reading(0, 0.9));
   assert.equal(route('polish', monitor.current(), DEFAULT_ROLES).deferUntil, null);
   monitor.supplement(reading(0.9, 0.9));
-  assert.equal(route('polish', monitor.current(), DEFAULT_ROLES).deferUntil, NOW + 60 * MIN);
+  assert.equal(route('polish', monitor.current(), DEFAULT_ROLES).deferUntil, null);
+  assert.match(route('polish', monitor.current(), DEFAULT_ROLES).reason, /resets soon/);
   monitor.setModels({ antigravity: 'gemini-4-argon' });
   assert.equal(route('polish', monitor.current(), DEFAULT_ROLES).deferUntil, NOW + 24 * 60 * MIN);
 });

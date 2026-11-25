@@ -7,9 +7,10 @@ import type { DeliveryState, News } from './delivery.ts';
 import type { Pulls } from './pulls.ts';
 import { runCheck } from './check.ts';
 import type { CheckResult } from './check.ts';
-import { assignHint, canonicalPath, defaultHolder, disabledAgents, effectiveRole, isRole, LEAD, LEDGER_ASIDE, MAX_DEBATE_ROUNDS, daemonPort, nodeEnv, roleInfo, ROLES, runsCommands, WORKERS, workerInfo } from './config.ts';
+import type { Usage } from './usage.ts';
+import { assignHint, canonicalPath, defaultHolder, disabledAgents, effectiveRole, isRole, LEAD, LEDGER_ASIDE, MAX_DEBATE_ROUNDS, daemonPort, nodeEnv, projectSettings, roleInfo, ROLES, runsCommands, WORKERS, workerInfo } from './config.ts';
 import type { Config, JobKind, PresetName, Role, WorkerAgent } from './config.ts';
-import { attached, untrackedPaths, carryUncommitted, changesSince, commitAll, commitChanges, copyIncluded, createWorktree, currentBranch, dirtyCount, git, mergeInto, isInside, NO_HOOKS, NO_SUBMODULES, projectRoot, realpath, removeDirectory, removeEmptyLeftover, removeEmptySlot, removeWorktree, repoRoot, revertCommit, revertsSince, reviewDiff, WorktreeCleanupError } from './git.ts';
+import { attached, untrackedPaths, carryUncommitted, changesSince, commitAll, commitChanges, copyIncluded, createWorktree, currentBranch, dirtyCount, git, mergeInto, isInside, NO_HOOKS, NO_SUBMODULES, projectRoot, realpath, removeDirectory, removeEmptyLeftover, removeEmptySlot, removeWorktree, repoRoot, revertCommit, revertsSince, reviewDiff, withBaseWorktree, WorktreeCleanupError, worktreeIncludeHint } from './git.ts';
 import { collectGarbage } from './gc.ts';
 import { BrowserServers, jobWritable } from './browser.ts';
 import { tokenFile } from './auth.ts';
@@ -166,6 +167,7 @@ export interface TurnReceipt {
   head: string | null;
   /** The lead's check, as the bridge ran it after the turn. */
   check?: CheckResult;
+  base?: { exit: number | null; timedOut: boolean; ms: number; unavailable?: string };
   /** review: what was under review at the start of the turn. */
   reviewed?: { target: string; diff?: string };
   /** Why this receipt no longer describes the branch, once a round change or sync moved it. */
@@ -247,6 +249,10 @@ export interface Job {
   check?: string;
   /** One per finished turn, oldest first; absent on jobs saved before receipts existed. */
   receipts?: TurnReceipt[];
+  /** The follow-up Crew sent to repair a check that passed on the base. */
+  autoFixTurn?: number;
+  /** Follow-ups Crew sent when usage limits lifted. */
+  autoResumes?: number;
   /** What the worker's runtime was set up to allow, as the adapter configured it; absent until the session starts. */
   capabilities?: Capabilities;
   /** Set while the latest turn is a retry of refused actions: the actions it was sent back with. */
@@ -286,6 +292,9 @@ export interface Job {
   /** Codex thread id or ACP session id; lets the user continue the session in the vendor's own app. */
   sessionId: string | null;
   createdAt: number;
+  turnStartedAt?: number;
+  /** Time spent on user requests already answered in this turn. */
+  turnWaitMs?: number;
   /** Last sign of life from the worker. */
   activeAt: number;
   endedAt: number | null;
@@ -303,7 +312,7 @@ export interface Job {
   questionSeq?: number;
   result: { files: string[]; stat: string; commit: string | null; outOfScope: string[] } | null;
   notes: string[];
-  error: { message: string; limit: boolean } | null;
+  error: { message: string; limit: boolean; budget?: true } | null;
   tokens: number | null;
   /**
    * What the total is made of, where the agent reports it, and what the latest turn added. Most of a
@@ -387,6 +396,7 @@ export interface JobsHooks {
 
 const TERMINAL: JobState[] = ['done', 'failed', 'cancelled'];
 const MAX_EXCHANGE_TEXT = 20_000;
+const MAX_AUTO_RESUMES = 3;
 /** A running turn's diff is for watching it, not for review: past this it is cut, and the worktree has the rest. */
 const LIVE_DIFF_CHARS = 200_000;
 const KEEP_EXCHANGE = 40;
@@ -404,6 +414,11 @@ const UNREAD_KEEP_MS = 7 * 24 * 60 * 60_000;
 /** A job that ended this recently stays, whatever its age, so whoever waited on it can read it. */
 const RECENT_MS = 60 * 60_000;
 const KEEP_EVENTS = 5000;
+const TURN_BUDGET = {
+  routine: { tokens: 60_000_000, minutes: 120 },
+  standard: { tokens: 80_000_000, minutes: 180 },
+  hard: { tokens: 120_000_000, minutes: 240 },
+} satisfies Record<Difficulty, { tokens: number; minutes: number }>;
 
 /**
  * Refused actions the lead still has to deal with: those of the latest turn, or, when a retry turn
@@ -415,12 +430,17 @@ export function openRefusals(job: Pick<Job, 'refusals' | 'turns' | 'retrying' | 
   return (job.retrying ?? []).map((action) => ({ action }));
 }
 
-/** A saved job's role, derived for jobs saved before roles were recorded. */
-/** The turns the lead sent the worker back for: every turn after the first, less the retries of a refused action. */
-export function followUps(job: Pick<Job, 'turns' | 'approvals'>): number {
-  return Math.max(0, (job.turns ?? 1) - 1 - (job.approvals?.length ?? 0));
+/** Whether Crew may still take up a job a usage limit stopped by itself; past the cap, continuing it is the lead's. */
+export function autoResumesLeft(job: Pick<Job, 'autoResumes'>): boolean {
+  return (job.autoResumes ?? 0) < MAX_AUTO_RESUMES;
 }
 
+/** Only follow-ups requested by the lead count toward the build's adoption rating. */
+export function followUps(job: Pick<Job, 'turns' | 'approvals' | 'autoFixTurn' | 'autoResumes'>): number {
+  return Math.max(0, (job.turns ?? 1) - 1 - (job.approvals?.length ?? 0) - Number(Boolean(job.autoFixTurn)) - (job.autoResumes ?? 0));
+}
+
+/** A saved job's role, derived for jobs saved before roles were recorded. */
 export function jobRole(job: Pick<Job, 'role' | 'kind' | 'debate' | 'runsApp'>): Role {
   return job.role ?? (job.debate ? 'debate' : job.kind === 'review' && job.runsApp ? 'verify' : job.kind);
 }
@@ -534,6 +554,7 @@ export class Jobs {
   private browsers = new BrowserServers();
   private finalizing = new Set<string>();
   private cancelling = new Set<string>();
+  private budgetStops = new Map<string, { message: string; ended: boolean }>();
   private changingRounds = new Set<string>();
   /** Each job's token total when its current turn began, so the turn's own share can be shown. */
   private turnStartTokens = new Map<string, number>();
@@ -545,6 +566,8 @@ export class Jobs {
   private snapshots = new Map<string, Promise<void>>();
   /** Checks being run while a turn's result is collected; cancelling the job stops its check. */
   private checks = new Map<string, AbortController>();
+  private baseChecks = new Map<string, { result: Promise<NonNullable<TurnReceipt['base']>>; stop: AbortController; users: number }>();
+  private latestUsage?: Usage;
   private collecting = false;
   private saveTimer: NodeJS.Timeout | null = null;
   private home: string;
@@ -827,6 +850,7 @@ export class Jobs {
         ...pickModel(agent, spec, { ...role, ownModel: agent !== LEAD && Boolean(config.roles[roleName][agent]?.model) }, config, preset),
         sessionId: null,
         createdAt: now,
+        turnStartedAt: now,
         activeAt: now,
         endedAt: null,
         turns: 1,
@@ -842,6 +866,10 @@ export class Jobs {
       };
       exchanged(job, 'lead', spec.task ?? '');
       if (job.instructions.includes('## Outcome')) job.outcomeAsked = true;
+      if (worktree && repo) {
+        const hint = await worktreeIncludeHint(repo, job.project, this.home).catch(() => null);
+        if (hint) notes.push(hint);
+      }
       this.jobs.set(id, job);
       if (job.kind === 'review' && repo) await this.recordReviewed(job, repo);
       if (isTerminal(job) || this.cancelling.has(id)) {
@@ -874,7 +902,35 @@ export class Jobs {
     }
   }
 
-  async reply(id: string, input: { message?: string; decision?: 'approve' | 'deny' | 'allow_for_job' | 'decline'; request_id?: string; approved_by_user?: string; lead_session?: string; sync?: boolean | string; attachments?: string[] }): Promise<Job> {
+  async resumeLimited(usage: Usage, activeMission: (id: string) => boolean): Promise<void> {
+    this.latestUsage = usage;
+    for (const job of this.jobs.values()) {
+      if (job.state !== 'failed' || !job.error?.limit || !job.worktree || !job.sessionId || !job.mission) continue;
+      const turn = job.turns;
+      const eligible = () => {
+        const reading = this.latestUsage?.providers.find((provider) => provider.agent === job.agent);
+        return job.turns === turn && job.state === 'failed' && Boolean(job.error?.limit && reading?.capturedAt
+          && reading.capturedAt > (job.endedAt ?? 0) && (reading.status === 'ok' || reading.status === 'tight')
+          && job.mission && activeMission(job.mission) && projectSettings(this.readConfig(), job.root ?? job.project).autoResume);
+      };
+      if (!eligible() || !fs.existsSync(job.worktree.path)) continue;
+      if (!autoResumesLeft(job)) {
+        const note = `Stopped after ${MAX_AUTO_RESUMES} automatic resumes. Use reply to continue this job.`;
+        if (!job.notes.includes(note)) {
+          job.notes.push(note);
+          this.changed(job);
+        }
+        continue;
+      }
+      try {
+        await this.reply(job.id, { message: 'Your usage limit has reset; continue where you stopped.' }, { kind: 'resume', eligible });
+      } catch {
+        // A manual reply, workspace operation or exclusive job can win. A later reading can try again.
+      }
+    }
+  }
+
+  async reply(id: string, input: { message?: string; decision?: 'approve' | 'deny' | 'allow_for_job' | 'decline'; request_id?: string; approved_by_user?: string; lead_session?: string; sync?: boolean | string; attachments?: string[] }, automatic?: { kind: 'fix' } | { kind: 'resume'; eligible: () => boolean }): Promise<Job> {
     if (this.collecting) throw new Error('Crew gc is running. Try again when it finishes.');
     const job = this.get(id);
     if (job.cleanupPending) throw new Error(`Job ${id} has incomplete cleanup. Run crew gc to resolve it before continuing.`);
@@ -882,7 +938,7 @@ export class Jobs {
     if (this.discarding.has(id)) throw new Error(`Job ${id} is being discarded.`);
     if (this.cancelling.has(id)) throw new Error(`Job ${id} is being cancelled.`);
     if (this.preparingReviews.has(id)) throw new Error(`Job ${id} is preparing its review diff. Wait for it to finish.`);
-    if (this.finalizing.has(id)) throw new Error(`Job ${id} is collecting its result. Wait for it to finish.`);
+    if (this.finalizing.has(id) && automatic?.kind !== 'fix') throw new Error(`Job ${id} is collecting its result. Wait for it to finish.`);
     const ctl = this.ctl(job);
     const adapter = this.adapter(job.agent);
     const attachments = checkAttachments(input.attachments);
@@ -921,7 +977,7 @@ export class Jobs {
     if (!(job.kind === 'review' && job.runsApp) && !fs.existsSync(job.cwd)) {
       throw new Error(`Job ${id}'s worktree was removed, so it cannot take another turn. Start a new job; to ask something without changing anything, use a question.`);
     }
-    if (!isTerminal(job)) {
+    if (!isTerminal(job) && automatic?.kind !== 'fix') {
       // A merge under a worker that is in the middle of editing would pull the tree out from under it.
       if (input.sync) throw new Error(`Job ${id} is still ${job.state}; sync brings a finished job up to date before its next turn. Wait for the turn to end, or send the message without sync.`);
       // Steering a live turn: a rejected message is the caller's problem, not a reason to fail the job.
@@ -982,6 +1038,16 @@ export class Jobs {
     }
     // A follow-up turn sets a finished worker running again, so it is a start like any other.
     this.checkAlone(Boolean(job.exclusive), id);
+    // A mission can close while git verifies the worktree for the follow-up.
+    if (automatic?.kind === 'resume') {
+      if (!automatic.eligible()) return job;
+      job.autoResumes = (job.autoResumes ?? 0) + 1;
+    }
+    if (automatic?.kind === 'fix') {
+      this.finishTurnResources(job);
+      this.finalizing.delete(id);
+      job.autoFixTurn = job.turns + 1;
+    }
     if (syncNote) job.notes.push(syncNote);
     job.state = 'running';
     job.phase = 'starting';
@@ -999,10 +1065,14 @@ export class Jobs {
       ? `This is the final round (${job.turns} of ${job.debate.rounds}). Answer, then close with your Conclusion.`
       : `Round ${job.turns} of ${job.debate.rounds}.`}`;
     this.turnStartTokens.set(id, job.tokens ?? 0);
-    job.activeAt = Date.now();
+    if (job.tokenUse) job.tokenUse.turn = 0;
+    delete job.turnWaitMs;
+    job.turnStartedAt = job.activeAt = Date.now();
     const what = !retry ? clip(input.message.split('\n')[0], 80) : job.asksUser ? 'refused action retried; the user is asked about each request' : 'refused action retried with the user\'s approval';
     this.event(job, 'started', `follow-up: ${what}`);
     try {
+      // A restart after dispatch must remember that Crew already sent this turn.
+      if (automatic) this.flush();
       if (job.kind === 'review' && job.repo && !job.runsApp) {
         // Held like the diff refresh below, so an overlapping follow-up is refused rather than steering this turn.
         this.preparingReviews.add(id);
@@ -1175,7 +1245,7 @@ export class Jobs {
       await this.adapter(job.agent).cancel(ctl);
       ctl.cancelled();
     } finally {
-      this.cancelling.delete(id);
+      this.finishCancellation(job);
     }
     return job;
   }
@@ -1536,7 +1606,10 @@ export class Jobs {
       },
       tokens: (total, parts) => {
         job.tokens = total;
-        if (parts) job.tokenUse = { ...parts, turn: total - (this.turnStartTokens.get(job.id) ?? 0) };
+        if (parts) {
+          job.tokenUse = { ...parts, turn: total - (this.turnStartTokens.get(job.id) ?? 0) };
+          this.checkBudget(job);
+        }
       },
       context: (used, size) => {
         // Like tokens, it reaches the board with the job's next change.
@@ -1557,23 +1630,31 @@ export class Jobs {
       },
       waiting: (type, reason, grant) => {
         if (!live()) return;
+        const now = Date.now();
+        // Answering a request can expose another queued request without returning to running.
+        this.recordWait(job, now);
         job.state = 'waiting';
         job.stalled = false;
-        job.waiting = { type, reason, id: randomUUID(), since: Date.now(), ...(grant ? { grant } : {}) };
+        job.waiting = { type, reason, id: randomUUID(), since: now, ...(grant ? { grant } : {}) };
         job.phase = type === 'approval' ? 'needs approval' : 'has a question';
         this.event(job, 'waiting', reason);
         this.hooks.onAttention(job, 'waiting', reason);
       },
       resumed: () => {
         if (job.state !== 'waiting') return;
+        const now = Date.now();
+        this.recordWait(job, now);
         job.state = 'running';
         job.waiting = null;
         job.phase = 'working';
-        job.activeAt = Date.now();
+        job.activeAt = now;
         this.event(job, 'progress', 'resumed');
       },
       done: (report) => {
         if (!live() || this.finalizing.has(job.id)) return;
+        // An acknowledged interrupt ended the turn. Otherwise a completed report wins a racing budget stop.
+        if (this.budgetStops.get(job.id)?.ended) return;
+        this.budgetStops.delete(job.id);
         // The turn is over; collecting its result can take a while, and the result replaces what it showed.
         this.dropLiveDiff(job);
         this.finalizing.add(job.id);
@@ -1588,10 +1669,11 @@ export class Jobs {
         });
       },
       fail: (message, opts) => {
-        if (live() && !this.finalizing.has(job.id)) this.fail(job, message, opts?.limit ?? false);
+        if (live() && !this.finalizing.has(job.id) && !this.budgetEnded(job)) this.fail(job, message, opts?.limit ?? false);
       },
       cancelled: () => {
         if (!live() || this.finalizing.has(job.id)) return;
+        if (this.budgetEnded(job)) return;
         job.state = 'cancelled';
         job.waiting = null;
         job.stalled = false;
@@ -1602,8 +1684,57 @@ export class Jobs {
     };
   }
 
+  private async runJobCheck(command: string, cwd: string, network: boolean, codex: string, signal: AbortSignal): Promise<CheckResult> {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-check-'));
+    try {
+      return await runCheck(command, cwd, tmp, [tokenFile(this.home)], { network, signal, codex });
+    } finally {
+      // A temporary folder left behind costs nothing; it must not cost the turn its collected result.
+      await removeDirectory(tmp).catch(() => {});
+    }
+  }
+
+  private async compareBase(repo: string, sha: string, command: string, network: boolean, codex: string, signal: AbortSignal): Promise<NonNullable<TurnReceipt['base']>> {
+    // Never reuse a reading taken with different sandbox permissions.
+    const key = JSON.stringify([canonicalPath(repo), sha, command, network, codex]);
+    let cached = this.baseChecks.get(key);
+    if (!cached) {
+      const stop = new AbortController();
+      const result = withBaseWorktree(repo, sha, async (cwd) => {
+        const check = await this.runJobCheck(command, cwd, network, codex, stop.signal);
+        const unavailable = check.skipped || (check.exit === null && !check.timedOut ? check.output || 'no exit status' : undefined);
+        return { exit: check.exit, timedOut: check.timedOut, ms: check.ms, ...(unavailable ? { unavailable: clip(unavailable.split(/\r?\n/).at(-1)!, 240) } : {}) };
+      }).catch((err: Error) => ({ exit: null, timedOut: false, ms: 0, unavailable: clip(err.message.split(/\r?\n/)[0], 240) })).finally(() => {
+        // Includes can change between comparisons. Keep only the run that other waiters can still join.
+        if (this.baseChecks.get(key)?.stop === stop) this.baseChecks.delete(key);
+      });
+      this.baseChecks.set(key, cached = { result, users: 0, stop });
+    }
+    const entry = cached;
+    entry.users++;
+    let leave!: (base: NonNullable<TurnReceipt['base']>) => void;
+    const cancelled = new Promise<NonNullable<TurnReceipt['base']>>((resolve) => { leave = resolve; });
+    const abort = () => {
+      if (--entry.users === 0) {
+        // The last waiter also waits for cleanup. An overlapping job can start a fresh comparison.
+        if (this.baseChecks.get(key) === entry) this.baseChecks.delete(key);
+        entry.stop.abort();
+      } else leave({ exit: null, timedOut: false, ms: 0, unavailable: 'cancelled' });
+    };
+    signal.addEventListener('abort', abort, { once: true });
+    if (signal.aborted) abort();
+    try {
+      const result = await Promise.race([entry.result, cancelled]);
+      return signal.aborted ? { exit: null, timedOut: false, ms: result.ms, unavailable: 'cancelled' } : result;
+    } finally {
+      signal.removeEventListener('abort', abort);
+      if (!signal.aborted) entry.users--;
+    }
+  }
+
   private async finalize(job: Job, report: string): Promise<void> {
     let result: Job['result'];
+    let fix: string | undefined;
     // A review's worktree is a snapshot to run the app in; nothing in it is kept.
     if (job.worktree && job.kind !== 'review') {
       const commit = await commitAll(job.worktree.path, `crew(${job.agent}): ${job.title}`, attached(job.worktree));
@@ -1611,21 +1742,31 @@ export class Jobs {
       result = await this.worktreeResult(job, commit);
       const head = (await git(job.worktree.path, ['rev-parse', 'HEAD'])).trim();
       let check: CheckResult | undefined;
+      let base: TurnReceipt['base'];
       if (job.check && !isTerminal(job)) {
         job.phase = 'running the check';
         this.changed(job);
-        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), `crew-check-${job.id}-`));
         // A long check is the bridge at work, not a stalled worker.
         const alive = setInterval(() => { job.activeAt = Date.now(); }, 30_000);
         const stop = new AbortController();
         this.checks.set(job.id, stop);
         try {
-          check = await runCheck(job.check, job.worktree.path, tmp, [tokenFile(this.home)], { network: Boolean(job.runsApp), signal: stop.signal, codex: this.readConfig().codex.bin });
+          const network = Boolean(job.runsApp);
+          const codex = this.readConfig().codex.bin;
+          check = await this.runJobCheck(job.check, job.worktree.path, network, codex, stop.signal);
+          if (!check.skipped && check.exit !== null && check.exit !== 0 && !stop.signal.aborted) {
+            job.phase = 'checking the base commit';
+            this.changed(job);
+            base = await this.compareBase(job.repo!, job.worktree.base, job.check, network, codex, stop.signal);
+            if (base.exit === 0 && !stop.signal.aborted && !job.autoFixTurn && job.sessionId
+                && job.declinedTurn !== job.turns && !job.refusals?.some((refusal) => refusal.turn === job.turns)) {
+              fix = `The bridge check failed on your change and passed on its base. Fix the cause without weakening the check.\nCommand: ${job.check}\nOutput (end):\n${check.output.split('\n').slice(-15).join('\n')}`;
+            }
+          }
         } finally {
           this.checks.delete(job.id);
           clearInterval(alive);
           job.activeAt = Date.now();
-          fs.rmSync(tmp, { recursive: true, force: true });
         }
       }
       // A check that rewrote tracked files passed on a tree the commit does not hold.
@@ -1638,7 +1779,8 @@ export class Jobs {
         ...added.split('\0').filter((file) => !kept.some((rel) => file === rel || file.startsWith(`${rel}/`))),
       ].filter(Boolean);
       const stale = changed.length ? `the check itself changed ${changed.slice(0, 3).join(', ')}${changed.length > 3 ? ` and ${changed.length - 3} more` : ''}` : undefined;
-      (job.receipts ??= []).push({ turn: job.turns, head, ...(check ? { check } : {}), ...(stale ? { stale } : {}), at: Date.now() });
+      if (stale) fix = undefined;
+      (job.receipts ??= []).push({ turn: job.turns, head, ...(check ? { check } : {}), ...(base ? { base } : {}), ...(stale ? { stale } : {}), at: Date.now() });
     } else if (job.kind === 'review' || job.ask) {
       result = null;
     } else {
@@ -1646,12 +1788,20 @@ export class Jobs {
       const files = [...(this.touchedFiles.get(job.id) ?? [])].map((f) => slashed(path.relative(root, f)));
       result = { files, stat: `${files.length} file(s) edited in place`, commit: null, outOfScope: outOfScope(files, job.targets) };
     }
-    this.finalizing.delete(job.id);
-    if (isTerminal(job)) return;
     exchanged(job, 'worker', report);
     job.report = report;
     if (expectsOutcome(job)) job.outcome = parseOutcome(report);
     job.result = result;
+    if (fix) {
+      try {
+        await this.reply(job.id, { message: fix }, { kind: 'fix' });
+        return;
+      } catch (err) {
+        job.notes.push(`Could not start an automatic fix turn: ${(err as Error).message}`);
+      }
+    }
+    this.finalizing.delete(job.id);
+    if (isTerminal(job)) return;
     job.state = 'done';
     job.waiting = null;
     job.stalled = false;
@@ -1668,21 +1818,62 @@ export class Jobs {
     return { files, stat, commit, outOfScope: [...outOfScope(files, job.targets), ...escaped] };
   }
 
-  private fail(job: Job, message: string, limit: boolean): void {
+  private fail(job: Job, message: string, limit: boolean, budget = false): void {
     job.state = 'failed';
     job.waiting = null;
     job.stalled = false;
     job.endedAt = Date.now();
-    job.error = { message, limit };
+    job.error = { message, limit, ...(budget ? { budget: true as const } : {}) };
     job.phase = limit ? 'usage limit reached' : 'failed';
     const kind: EventKind = limit ? 'limit' : 'error';
     this.event(job, kind, message);
     this.hooks.onAttention(job, kind, message);
   }
 
+  /** Adapters can report the turn's end inside cancel, before it has released its session. */
+  private budgetEnded(job: Job): boolean {
+    const stop = this.budgetStops.get(job.id);
+    if (!stop) return false;
+    stop.ended = true;
+    if (!this.cancelling.has(job.id)) {
+      this.budgetStops.delete(job.id);
+      this.fail(job, stop.message, false, true);
+    }
+    return true;
+  }
+
+  private recordWait(job: Job, now: number): void {
+    if (job.waiting) job.turnWaitMs = (job.turnWaitMs ?? 0) + Math.max(0, now - job.waiting.since);
+  }
+
+  private finishCancellation(job: Job): void {
+    this.cancelling.delete(job.id);
+    if (this.budgetStops.get(job.id)?.ended) this.budgetEnded(job);
+  }
+
+  private checkBudget(job: Job): void {
+    if (job.state !== 'running' || this.finalizing.has(job.id) || this.cancelling.has(job.id)) return;
+    const budget = TURN_BUDGET[job.difficulty ?? 'standard'];
+    const elapsed = Date.now() - (job.turnStartedAt ?? job.createdAt) - (job.turnWaitMs ?? 0);
+    const tokens = job.tokenUse?.turn ?? 0;
+    let stop = this.budgetStops.get(job.id);
+    if (!stop) {
+      const message = tokens >= budget.tokens ? `Turn token cap of ${budget.tokens} reached (${tokens} tokens observed).`
+        : elapsed >= budget.minutes * 60_000 ? `Turn wall-clock cap of ${budget.minutes} minutes reached (${Math.floor(elapsed / 1000)} seconds observed).` : null;
+      if (!message) return;
+      this.budgetStops.set(job.id, stop = { message, ended: false });
+    }
+    this.cancelling.add(job.id);
+    void this.adapter(job.agent).cancel(this.ctl(job)).then(() => { stop.ended = true; }, () => {
+      // An unconfirmed interrupt leaves the worker live. The next budget sweep retries.
+    }).finally(() => this.finishCancellation(job));
+  }
+
   private checkStalls(): void {
     const limit = this.settings.stallSeconds * 1000;
     for (const job of this.jobs.values()) {
+      this.checkBudget(job);
+      if (this.budgetStops.has(job.id)) continue;
       if (job.state !== 'running' || job.stalled || Date.now() - job.activeAt < limit) continue;
       job.stalled = true;
       const detail = `no activity for ${Math.round(limit / 60_000)} min (last: ${job.phase})`;
@@ -1795,18 +1986,9 @@ export class Jobs {
   }
 
   private event(job: Job, kind: EventKind, detail: string, news?: { kind: News['kind']; reason: string; question?: string }): void {
+    if (job.autoFixTurn === job.turns && ['done', 'error', 'limit'].includes(kind)) detail = `Automatic fix turn ${job.turns}: ${detail}`;
     job.seq = this.record(job.agent, job.sessionId, kind, detail, job.id).seq;
-    if (isTerminal(job)) this.dropLiveDiff(job);
-    // Each turn has its own file, so delayed cleanup cannot delete a follow-up's fresh diff.
-    if (isTerminal(job) && job.kind === 'review') {
-      fs.rm(this.diffFile(job.id, job.turns), { force: true }, () => {});
-      this.dropSnapshot(job);
-    }
-    if (isTerminal(job) && job.evidenceDir) job.evidence = collectEvidence(job.evidenceDir, job.evidence ?? [], job.turns);
-    // Like scratch, a browser is the turn's.
-    if (isTerminal(job)) this.browsers.stop(job.id);
-    // Scratch is for the turn: nothing in it is a result. The path is derived, never read from the job, before it is removed.
-    if (isTerminal(job) && job.scratch) this.dropScratch(job.id);
+    if (isTerminal(job)) this.finishTurnResources(job);
     if (news) addNews(job, news.kind, news.reason, { question: news.question });
     else if (kind === 'done') addNews(job, 'done', detail);
     else if (kind === 'error' || kind === 'limit') addNews(job, 'failed', detail);
@@ -1821,6 +2003,20 @@ export class Jobs {
     this.changed(job);
     this.delivery.changed();
     for (const wake of [...(this.waiters.get(job.id) ?? [])]) wake();
+  }
+
+  private finishTurnResources(job: Job): void {
+    this.dropLiveDiff(job);
+    // Each turn has its own file, so delayed cleanup cannot delete a follow-up's fresh diff.
+    if (job.kind === 'review') {
+      fs.rm(this.diffFile(job.id, job.turns), { force: true }, () => {});
+      this.dropSnapshot(job);
+    }
+    if (job.evidenceDir) job.evidence = collectEvidence(job.evidenceDir, job.evidence ?? [], job.turns);
+    // Like scratch, a browser is the turn's.
+    this.browsers.stop(job.id);
+    // Scratch is for the turn: nothing in it is a result. The path is derived, never read from the job, before it is removed.
+    if (job.scratch) this.dropScratch(job.id);
   }
 
   private changed(job: Job): void {

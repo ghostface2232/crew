@@ -8,9 +8,74 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { CodexAdapter } from '../plugin/bridge/adapters/codex.ts';
 import { resolveConfig } from '../plugin/bridge/config.ts';
-import { attached, untrackedPaths, changesSince, cloneDirectory, cloneRefused, cloneTree, commitAll, copyIncluded, createWorktree, detachLinks, dirtyCount, NO_HOOKS, NO_SUBMODULES, projectRoot, removeDirectory, repoRoot, removeEmptyLeftover, removeWorktree, reviewDiff, worktreeSlot } from '../plugin/bridge/git.ts';
+import { attached, untrackedPaths, changesSince, cloneDirectory, cloneRefused, cloneTree, commitAll, copyIncluded, createWorktree, detachLinks, dirtyCount, NO_HOOKS, NO_SUBMODULES, projectRoot, removeDirectory, repoRoot, removeEmptyLeftover, removeWorktree, reviewDiff, withBaseWorktree, worktreeIncludeHint, worktreeSlot } from '../plugin/bridge/git.ts';
 import type { Job, JobCtl } from '../plugin/bridge/jobs.ts';
 import { buildPrompt } from '../plugin/bridge/prompts.ts';
+
+test('preflight names only existing ignored root paths and remembers the hint for each project', async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-preflight-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const repo = path.join(home, 'repo');
+  fs.mkdirSync(repo);
+  execFileSync('git', ['init', '-q'], { cwd: repo });
+  fs.writeFileSync(path.join(repo, '.gitignore'), '.env\nnode_modules/\nvenv/\n');
+  fs.mkdirSync(path.join(repo, '.venv'));
+  fs.mkdirSync(path.join(repo, 'node_modules'));
+  fs.writeFileSync(path.join(repo, '.env'), '');
+  fs.writeFileSync(path.join(repo, '.worktreeinclude'), '');
+  assert.equal(await worktreeIncludeHint(repo, repo, home), null);
+  fs.unlinkSync(path.join(repo, '.worktreeinclude'));
+  const hints = (await Promise.all([1, 2].map(() => worktreeIncludeHint(repo, repo, home)))).filter(Boolean);
+  assert.deepEqual(hints, ['Git ignores node_modules, .env. You can list them in .worktreeinclude if this job needs them.']);
+  assert.equal(await worktreeIncludeHint(repo, path.join(repo, '.'), home), null);
+  assert.deepEqual(await worktreeIncludeHint(repo, path.join(repo, 'another-project'), home), hints[0]);
+});
+
+test('base checks prune missing trees before checkout and recover registrations after cleanup errors', async (t) => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-base-test-'));
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
+  const execFile = childProcess.execFile;
+  t.after(() => {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+    fs.rmSync(repo, { recursive: true, force: true });
+  });
+  git('init', '-q');
+  git('-c', 'user.name=Test', '-c', 'user.email=t@example.com', 'commit', '-qm', 'init', '--allow-empty');
+  const missing = path.join(repo, 'missing');
+  git('worktree', 'add', '--detach', missing);
+  fs.rmSync(missing, { recursive: true });
+  let removals = 0;
+  t.mock.method(childProcess, 'execFile', (file: string, args: string[], options: object, callback: (err: Error | null, stdout: string, stderr: string) => void) => {
+    if (file === 'git' && args.includes('worktree') && args.includes('remove')) {
+      removals++;
+      queueMicrotask(() => callback(new Error('locked registration'), '', ''));
+      return;
+    }
+    return execFile(file, args, options, callback);
+  });
+  syncBuiltinESMExports();
+  const promises = (await import('node:fs/promises')).default;
+  const lstat = promises.lstat;
+  let preparations = 0;
+  let checkout = '';
+  let hadMissingRegistration = false;
+  const result = await withBaseWorktree(repo, 'HEAD', async (cwd) => {
+    checkout = cwd;
+    hadMissingRegistration = git('worktree', 'list', '--porcelain').includes('/missing\n');
+    // Both initial preparation and fallback directory removal fail. The slot can still be removed.
+    t.mock.method(promises, 'lstat', (dir: string) => {
+      if (dir === checkout && ++preparations <= 2) throw new Error('cannot prepare locked files');
+      return lstat(dir);
+    });
+    return 42;
+  });
+  assert.equal(result, 42);
+  assert.equal(hadMissingRegistration, false);
+  assert.equal(removals, 2);
+  assert.equal(fs.existsSync(checkout), false);
+  assert.equal(git('worktree', 'list', '--porcelain').match(/^worktree /gm)?.length, 1);
+});
 
 for (const code of ['ENOTSUP', 'EOPNOTSUPP', 'EXDEV', 'ENOSYS', 'EINVAL']) {
   test(`included directories are shared read-only when cloning returns ${code}`, async (t) => {

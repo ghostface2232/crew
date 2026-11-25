@@ -3,11 +3,11 @@ import type { CSSProperties, ReactNode } from 'react';
 import {
   AddRegular, ArrowRight16Filled, ArrowUpRight16Filled, ChatMultipleRegular, CheckmarkCircle16Regular,
   CheckmarkCircleRegular, ChevronDown16Regular, ChevronUp16Regular, CircleMultipleConcentric16Regular,
-  ErrorCircle16Regular, ErrorCircleRegular, LayerRegular, SearchRegular, StackRegular,
+  DismissRegular, ErrorCircle16Regular, ErrorCircleRegular, LayerRegular, SearchRegular, StackRegular,
 } from '@fluentui/react-icons';
 import type { ProviderUsage } from '../../bridge/usage.ts';
 import type { Holder } from '../../bridge/config.ts';
-import type { BoardJob, CrewEvent, Mission, SetupState, Snapshot, WorkerAgent } from './types.ts';
+import type { BoardJob, CrewEvent, IssueList, Mission, SetupState, Snapshot, WorkerAgent } from './types.ts';
 import { formatDate, longDay, shortDateTime, shortDay, shortMonth, timeOfDay } from './dates.ts';
 import { request } from './api.ts';
 import {
@@ -572,6 +572,91 @@ function Setup() {
   );
 }
 
+/** How many suggestions a project shows at once; the next one takes the place of one the user dismisses. */
+const SHOWN_ISSUES = 3;
+
+/** A label as the app shows it: first letter capitalized, so p1 reads P1. */
+const labelText = (label: string) => label.charAt(0).toUpperCase() + label.slice(1);
+
+/**
+ * Open issues of the project's repository that are the user's to start: assigned to them, or to no one. Each is a card,
+ * as in the app, that opens the issue or starts work on it in New Job, or is dismissed for good. Says nothing when there
+ * are none or gh cannot list them.
+ */
+function IssueSuggestions({ project, live, startWork }: { project: string; live: boolean; startWork: (draft: string, origin: Element) => void }) {
+  const [found, setFound] = useState<IssueList | null>(null);
+  const [error, setError] = useState('');
+  const [dismissing, setDismissing] = useState<string | null>(null);
+  useEffect(() => {
+    if (!live) return;
+    let current = true;
+    const load = () => request<IssueList>(`/api/issues?project=${encodeURIComponent(project)}`).then((next) => current && setFound(next), () => {});
+    load();
+    // The daemon keeps each answer ten minutes, so asking more often only reads its cache. A reconnect reads again, as in the app.
+    const timer = setInterval(load, 10 * 60_000);
+    return () => { current = false; clearInterval(timer); };
+  }, [project, live]);
+  // Another project's issues never show under this one while its own are read.
+  const shown = found?.project === project ? found.issues.slice(0, SHOWN_ISSUES) : [];
+  if (!shown.length) return null;
+  const dismiss = async (url: string) => {
+    setError('');
+    setDismissing(url);
+    try {
+      await request('/api/issues/dismiss', { url });
+      setFound((current) => current && { ...current, issues: current.issues.filter((issue) => issue.url !== url) });
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setDismissing(null);
+    }
+  };
+  return (
+    // Named for assistive tech only: a visible heading above the cards would sit off the top of the Agents card beside them.
+    <section className="issue-section" aria-label={t('Start from an issue')}>
+      <ul className="issue-cards">
+        {shown.map((issue) => (
+          // Set on the inset gray rather than a raised card, so a suggestion does not read as work under way.
+          <li key={issue.url} className="issue-card">
+            <div className="issue-card-head">
+              <div className="issue-card-heading">
+                <h3 className="issue-card-title selectable" title={issue.title}>{issue.title}</h3>
+                <p className="mission-meta">{[`#${issue.number}`, ...issue.labels.slice(0, 3).map(labelText)].join(' · ')}</p>
+              </div>
+              <button
+                className="icon small"
+                disabled={!live || dismissing !== null}
+                aria-label={t('Dismiss #{number}', { number: issue.number })}
+                title={t('Dismiss. This issue is not suggested again.')}
+                onClick={() => void dismiss(issue.url)}
+              >
+                <Icon icon={DismissRegular} />
+              </button>
+            </div>
+            <div className="issue-card-actions">
+              <button aria-label={t('Open issue #{number}', { number: issue.number })} onClick={() => window.open(issue.url, '_blank', 'noopener,noreferrer')}>
+                {t('Open Issue')}
+              </button>
+              {/* New Job opens with the issue as its task; sending it, and to whom, stays the user's choice. */}
+              <button
+                className="tinted"
+                disabled={!live}
+                aria-label={t('Start work on #{number}', { number: issue.number })}
+                onClick={(event) => startWork(`Work on issue #${issue.number}: ${issue.title}
+
+${issue.url}`, event.currentTarget)}
+              >
+                {t('Start Work')}
+              </button>
+            </div>
+          </li>
+        ))}
+      </ul>
+      {error && <p className="callout error selectable" role="status"><Icon icon={ErrorCircleRegular} size={13} />{error}</p>}
+    </section>
+  );
+}
+
 /** Shows the `backticked` names in a setup item as code. */
 const withCode = (text: string) => text.split('`').map((part, index) => (index % 2 ? <code key={index}>{part}</code> : part));
 
@@ -613,7 +698,7 @@ function useMissionPanels({ jobs, pulls, claude, missions }: Snapshot) {
 
 /** The overview or a project: what is going on now, with the agents and the crew's rhythm beside it. */
 export function Workspace({ state, project, names, selected, openJob, openSession, newJob, openPage }: Scope & {
-  newJob: (origin?: Element | null) => void;
+  newJob: (origin?: Element | null, draft?: string) => void;
   openPage: (selection: string) => void;
 }) {
   const jobs = useMemo(() => project ? state.jobs.filter((job) => inProject(project, job)) : state.jobs, [state.jobs, project]);
@@ -651,6 +736,7 @@ export function Workspace({ state, project, names, selected, openJob, openSessio
       <div className="dash">
         <div className="dash-main">
           {!project && <Setup />}
+          {project && <IssueSuggestions project={project} live={state.connection === 'live'} startWork={(draft, origin) => newJob(origin, draft)} />}
           {active.map(panel)}
           {loose.length > 0 && (
             <Panel label={t('Other jobs')} style={{ '--i': active.length } as CSSProperties} action={<Icon icon={StackRegular} />}>

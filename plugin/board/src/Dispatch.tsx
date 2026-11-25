@@ -15,6 +15,7 @@ export function Dispatch({
   origin,
   openJob,
   close,
+  draft = '',
 }: {
   state: Snapshot;
   project: string;
@@ -23,6 +24,8 @@ export function Dispatch({
   /** Opens the new job, in its project's page. */
   openJob: (id: string, project: string) => void;
   close: () => void;
+  /** A task the sheet opens with, such as an issue the user chose to start from; sending it stays theirs. */
+  draft?: string;
 }) {
   const initialDirectory = useRef(project);
   const [directory, setDirectory] = useState(project);
@@ -30,7 +33,7 @@ export function Dispatch({
   const [targets, setTargets] = useState('');
   const [intent, setIntent] = useState('command');
   const [destination, setDestination] = useState('project');
-  const [text, setText] = useState('');
+  const [text, setText] = useState(draft);
   const [sending, setSending] = useState(false);
   const sendingLock = useRef(false);
   const [error, setError] = useState('');
@@ -51,7 +54,7 @@ export function Dispatch({
   const worker = agent ? state.agents[agent] : undefined;
   const leadOnly = Boolean(assignment) && !agent && claudeHolds;
   const missions = state.missions.filter((mission) => mission.state === 'active' && projectOf(mission) === cwd.trim());
-  const dirty = intent !== 'command' || destination !== 'project' || text !== '' || targets !== ''
+  const dirty = intent !== 'command' || destination !== 'project' || text !== draft || targets !== ''
     || role !== 'delegate' || directory !== initialDirectory.current || picked !== '';
   const canSend = !sending && state.connection === 'live' && Boolean(text.trim())
     && (intent === 'information' && destination === 'global'

@@ -1,8 +1,8 @@
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { resolveConfig } from './config.ts';
-import type { Config } from './config.ts';
+import { canonicalPath, PROJECT_SWITCHES, resolveConfig } from './config.ts';
+import type { Config, ProjectSettings } from './config.ts';
 
 /**
  * Writes made from the board's settings view. Each one edits a file the user could edit by hand,
@@ -109,6 +109,41 @@ export function saveLanguage(home: string, language: unknown): Pick<Config, 'lan
   const resolved = resolveConfig(next as never);
   writeAtomic(file, `${JSON.stringify(next, null, 2)}\n`);
   return { language: resolved.language };
+}
+
+/**
+ * Turns one project's switches on or off in config.json, keeping every other setting. Only the switches named in
+ * `changes` move. Off is the default, so a switch turned off is dropped, and a project left with none is removed.
+ */
+export function saveProjectSettings(home: string, project: string, changes: unknown): Pick<Config, 'projects'> {
+  if (!changes || typeof changes !== 'object' || Array.isArray(changes)) throw new Error('changes must be an object such as {"autonomy": true}.');
+  for (const [key, value] of Object.entries(changes)) {
+    if (!(PROJECT_SWITCHES as readonly string[]).includes(key)) throw new Error(`${key} is not a project setting; use ${PROJECT_SWITCHES.join(', ')}.`);
+    if (typeof value !== 'boolean') throw new Error(`${key} must be true or false.`);
+  }
+  const file = path.join(home, 'config.json');
+  let current: Record<string, unknown> = {};
+  try {
+    current = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error(`${file} is not valid JSON, so it was left untouched: ${(err as Error).message}`);
+  }
+  if (!current || typeof current !== 'object' || Array.isArray(current)) throw new Error(`${file} does not hold a settings object, so it was left untouched.`);
+  const key = canonicalPath(project);
+  // Read through resolveConfig so another spelling of the same folder is folded into this one.
+  const projects = { ...resolveConfig(current as never).projects };
+  const settings: ProjectSettings = { ...projects[key] };
+  for (const [name, value] of Object.entries(changes) as [keyof ProjectSettings, boolean][]) {
+    if (value) settings[name] = true;
+    else delete settings[name];
+  }
+  if (Object.keys(settings).length) projects[key] = settings;
+  else delete projects[key];
+  const { projects: _old, ...rest } = current;
+  const next = Object.keys(projects).length ? { ...rest, projects } : rest;
+  const resolved = resolveConfig(next as never);
+  writeAtomic(file, `${JSON.stringify(next, null, 2)}\n`);
+  return { projects: resolved.projects };
 }
 
 /** File holding the shared instructions for one project, or for every project when `project` is null. */

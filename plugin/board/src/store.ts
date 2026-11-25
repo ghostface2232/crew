@@ -1,4 +1,4 @@
-import type { BoardJob, BoardPull, BoardState, ClaudeSession, CrewEvent, Mission, Snapshot } from './types.ts';
+import type { BoardJob, BoardPull, BoardState, ClaudeSession, CrewEvent, Mission, ProjectSettings, Snapshot } from './types.ts';
 import { onUnauthorized, stream } from './api.ts';
 import type { Notifier } from './notify.ts';
 
@@ -161,6 +161,9 @@ export class BoardStore {
         break;
       case 'peerRatings':
         this.update({ peerRatings: value as boolean });
+        break;
+      case 'projects':
+        this.update({ projects: value as Record<string, ProjectSettings> });
         break;
       case 'language':
         this.update({ language: (value as Pick<BoardState, 'language'>).language });

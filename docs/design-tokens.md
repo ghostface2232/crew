@@ -39,7 +39,7 @@ These aliases name a role for a scale step. Use the alias when the role fits, so
 | --- | --- | --- |
 | `pageMargin` | 40 | The page's side margin and the room below its last card |
 | `pageTop` | 12 | Above the page heading |
-| `cardPadding` | 20 | Inside every card |
+| `cardPadding` | 16 | Inside every card |
 | `cardGap` | 16 | Between cards, across and down |
 | `blockGap` | 16 | Between blocks stacked inside a card or section |
 | `sectionGap` | 28 | Between detail panel sections |
@@ -52,7 +52,7 @@ These aliases name a role for a scale step. Use the alias when the role fits, so
 | `insetPadding` | 12 | The gray inset (`inset()`) holding a detail section's contents, or an agent card's sessions or jobs. The agent card leaves the inset out when there are none |
 | `iconColumn` | 20 | The column a row's icon or mark sits in, so titles line up |
 | `titleInset` | 6 | Titles outside a card (page heading, Agents) sit this far in from the cards' edge, since a rounded corner pulls the card's edge in visually |
-| `rowTitleInset` | 4 | The same correction inside a card, for text beside its gray rows and insets: mission stop names, notes and outcomes, list card titles, detail section titles |
+| `rowTitleInset` | 4 | The same correction inside a card, for text beside its gray rows and insets: mission titles and their meta lines, mission stop names, notes and outcomes, list card titles, detail section titles |
 | `factLabelWidth` | 72 | A fact's label column in the detail panel; `factColumnGap` (16) and `factRowGap` (8) space its grid |
 | `elapsedColumn` | 28 | The elapsed time at a row's end, so short and long times line up |
 | `rowSpacer` | 8 | The least room between a row's text and what follows it |
@@ -102,7 +102,7 @@ Surfaces change between light and dark appearance. Status colors are system colo
 | `Palette.warning` | Waiting, stalled, unsaved, usage at 70% or more or a window reported tight |
 | `Palette.danger` | Failed, errors, refusals, usage at 90% or more or at its limit |
 | `Palette.merged` | A merged PR, in GitHub's own purple (`#8250df`, `#a371f7` in dark mode) |
-| `Palette.attention(color)` | A row or card that needs attention, tinted 7% with its status color |
+| `Palette.attention(color)` | A card or banner that needs attention (the attention banner, a request in the detail panel), tinted 7% with its status color. Rows waiting on the user keep the row fill and show it by their status icon |
 | `Palette.chip(color)` | A chip's background, 12% of its status color |
 | `Palette.selection` | The row whose details are open |
 | `Palette.contrastStroke` | Outlines when Increase Contrast is on |
@@ -122,6 +122,7 @@ Titles use SF Pro Rounded and headlines SF Pro Display. Body text uses SF Pro Te
 | `title` | 19 semibold | Rounded | Card, mission and detail titles |
 | `emptyTitle` | 18 regular | Rounded | Empty states |
 | `cardTitle` | 17 semibold | Rounded | Agent names; a podium's score in Model Scores |
+| `minorTitle` | 16 semibold | Rounded | Titles of suggestions that are not work under way: an issue card's title |
 | `headline` | 16 medium | Display | The request in an approval or question; a debate round's title |
 | `subheadline` | 14 semibold | Text | Detail section titles |
 | `bodyStrong` | 14 medium | Text | Row titles, report headings, a mission stop's name above its jobs, a detail item's title, a model's name in Model Scores |

@@ -3,7 +3,7 @@ import type { CSSProperties } from 'react';
 import { board } from './store.ts';
 import {
   BranchRequest16Regular, BranchRequestClosed16Regular, Checkmark16Regular, CheckmarkCircleRegular, CheckmarkRegular,
-  ChevronDown16Regular, ChevronDownRegular, ChevronRight16Regular, Clock16Regular, DismissCircleRegular,
+  ChevronDown16Regular, ChevronDownRegular, ChevronRight16Regular, Clock16Regular, Dismiss16Regular, DismissCircleRegular,
   GaugeRegular, Merge16Regular, MoreHorizontalRegular,
 } from '@fluentui/react-icons';
 import type { BoardJob, BoardPull, ClaudeSession, Mission, PresetName, Snapshot } from './types.ts';
@@ -14,6 +14,7 @@ import {
 } from './model.ts';
 import { ActionStatus, AgentMark, Chip, Collapse, Elapsed, Icon, Menu, StatusIcon, sameItems, useAction, useFade, useClock, useLanguage } from './ui.tsx';
 import { t, translated } from './i18n.ts';
+import { ReportText } from './Report.ts';
 
 export const jobStatusState = (job: BoardJob) => (job.stalled ? 'stalled' : job.state);
 /** What a job is, as the app names it in a row: its role, or Question for a question. */
@@ -435,6 +436,28 @@ export const MissionPanel = memo(function MissionPanel({
           <p className="mission-note selectable" key={`${note.at}:${noteIndex}`}>{note.text}</p>
         ))}
         <MissionTrack mission={mission} />
+        {active && !!mission.memory?.length && (
+          <div className="mission-decisions" role="group" aria-label={t('Decisions')}>
+            <h3 className="stage-name">{t('Decisions')}</h3>
+            <ul>
+              {mission.memory.map((entry) => (
+                <li key={entry.key}>
+                  <span className="selectable">{entry.text}</span>
+                  {/* The lead keeps adding decisions as the user makes them; one that no longer holds is the user's to drop. */}
+                  <button
+                    className="icon"
+                    disabled={locked}
+                    aria-label={t('Forget “{text}”', { text: entry.text })}
+                    title={t('Forget this decision. Jobs started after this no longer get it.')}
+                    onClick={() => void actions.run(key, () => request(`/api/missions/${mission.id}`, { forget: [entry.key] }), { done: '', once: false })}
+                  >
+                    <Icon icon={Dismiss16Regular} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         <div className="stage-groups">
           {stops.map(({ name }, stopIndex) => {
             const mine = jobsByStep[stopIndex];
@@ -472,6 +495,11 @@ export const MissionPanel = memo(function MissionPanel({
           })}
         </div>
         {mission.outcome && <p className="mission-outcome selectable">{mission.outcome}</p>}
+        {mission.summary && mission.state === 'done' && (
+          <div className="mission-summary selectable" role="group" aria-label={t('Wrap-up')}>
+            <ReportText text={mission.summary} />
+          </div>
+        )}
       </Collapse>
       {/* Its menu holds Mark Done, so the card only says so. */}
       {active && <MissionHint mission={mission} jobs={missionJobs} owner={owner} />}

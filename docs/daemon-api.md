@@ -67,6 +67,14 @@ Each status event has the shape `{seq, ts, agent, session_id, job_id, kind, deta
 
 See [jobs.md](jobs.md) for round changes and question jobs, and [approvals.md](approvals.md#questions-to-the-lead) for worker question and tool routes.
 
+## Issue suggestions
+
+`GET /api/issues?project=<path>` accepts a project already known to the daemon and returns `{ project, repo, issues, checkedAt, error? }`. An unknown project gets HTTP 400. `repo` is the GitHub `owner/name`, or `null` when unavailable. `checkedAt` is the time of the check in epoch milliseconds. A failed lookup returns an empty list and a short error.
+
+The daemon checks up to 50 open issues in the project's repository. It returns up to ten, starting with issues assigned to the signed-in GitHub CLI user, then issues with no assignees. Each group is sorted by most recent update. Each issue contains `number`, `title` (up to 200 characters), `url`, `assignees` (logins), `labels` (names), and `updatedAt` (GitHub's timestamp). Successes and failures are cached per project for ten minutes. Adding `&refresh=1` permits one check per minute.
+
+`POST /api/issues/dismiss` accepts `{ "url": "https://github.com/owner/name/issues/123" }` from the board or a user-secret client and returns `{ "ok": true }`. GitHub Enterprise HTTPS issue URLs use the same path on their own host. The issue disappears from cached and future suggestions across projects. Crew atomically saves the newest 500 distinct dismissals in `~/.crew/issues.json`. If Crew cannot read this file, suggestions start with an empty dismissal list. Before saving the next dismissal, Crew sets the unreadable file aside as `issues.json.bad-<uuid>`. An invalid issue URL gets HTTP 400.
+
 ## Authentication
 
 The daemon listens on localhost (`127.0.0.1`), which any local process can reach, including a `runs_app` worker whose sandbox allows network access. `Host` and `Origin` checks block web pages, so every API request also requires authentication.

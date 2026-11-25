@@ -16,12 +16,13 @@ import { stopChecks } from './check.ts';
 import { clientJson } from './text.ts';
 import { ClaudeSessions } from './claude.ts';
 import type { ClaudeSession } from './claude.ts';
-import { agentCommand, agentEnv, canonicalPath, HOME, installed, isRole, JOB_ID, LEDGER_ASIDE, loadConfig, PLUGIN_ROOT, PORTS, ROLE_INFO, ROLES, VERSION, WORKERS } from './config.ts';
+import { agentCommand, agentEnv, canonicalPath, HOME, installed, isRole, JOB_ID, LEDGER_ASIDE, loadConfig, PLUGIN_ROOT, PORTS, projectSettings, ROLE_INFO, ROLES, VERSION, WORKERS } from './config.ts';
 import type { Config, Holder } from './config.ts';
 import { evidenceType, openEvidence } from './evidence.ts';
 import { projectRoot } from './git.ts';
-import { followUps, isTerminal, Jobs, UnreadableLedger } from './jobs.ts';
-import { missionPreset, Missions } from './missions.ts';
+import { Issues } from './issues.ts';
+import { autoResumesLeft, followUps, isTerminal, Jobs, UnreadableLedger } from './jobs.ts';
+import { memoryFor, missionPreset, Missions } from './missions.ts';
 import type { Mission } from './missions.ts';
 import { Pulls } from './pulls.ts';
 import { execTimed } from './rpc.ts';
@@ -35,7 +36,7 @@ import type { Registration, SetupItem } from './setup.ts';
 import { toastCommand } from './toast.ts';
 import { ANTIGRAVITY_MODELS, antigravityModels, codexModels } from './tiers.ts';
 import type { ModelChoice } from './tiers.ts';
-import { appendInstructions, instructionsFile, readInstructions, saveLanguage, savePeerRatings, savePreset, saveRoles, writeInstructions } from './settings.ts';
+import { appendInstructions, instructionsFile, readInstructions, saveLanguage, savePeerRatings, savePreset, saveProjectSettings, saveRoles, writeInstructions } from './settings.ts';
 import { agentGaugeDir, fromCodexLimits, route as routeWork, UsageMonitor } from './usage.ts';
 import type { RouteKind } from './usage.ts';
 import type { EventKind, Job, JobsHooks } from './jobs.ts';
@@ -207,7 +208,17 @@ function sealed(job: Job) {
 /** Jobs as sent to clients: without the full prompt text. */
 function view(job: Job) {
   const { prompt, instructions, ...rest } = job;
-  return { ...rest, ...sealed(job), outcomeContradiction: outcomeContradiction(job) };
+  return { ...rest, ...sealed(job), outcomeContradiction: outcomeContradiction(job), ...(resumesAfterLimit(job) ? { resumesAfterLimit: true as const } : {}) };
+}
+
+/**
+ * Whether Crew will take up a job a usage limit stopped by itself (Jobs.resumeLimited), so the lead does not redo the
+ * work meanwhile. Worked out only for such a job, since it reads the config file.
+ */
+function resumesAfterLimit(job: Job): boolean {
+  if (job.state !== 'failed' || !job.error?.limit || !job.mission || !job.sessionId || !job.worktree || !autoResumesLeft(job)) return false;
+  const mission = missions.list().find((m) => m.id === job.mission);
+  return mission?.state === 'active' && projectSettings(liveConfig(), job.root ?? job.project).autoResume === true;
 }
 
 /** For display only: the config on disk, or the one the daemon started with while the file is invalid. */
@@ -256,6 +267,7 @@ function loadMissions(): Missions {
   }
 }
 const missions = loadMissions();
+const issues = new Issues(HOME, gh);
 
 /** Runs the GitHub CLI as the user has it set up and signed in; Crew holds no GitHub credentials of its own. */
 function gh(args: string[], cwd?: string): Promise<string> {
@@ -307,13 +319,14 @@ function pullView(watch: PullWatch) {
 
 /**
  * The pull requests linked to missions. Each is read with `gh` only while it is open, its mission has not been
- * dropped, and the lead session its news goes to is open in Claude Code: a closed session costs no polling, and
- * opening it again reads its pull requests at once.
+ * dropped, and the lead session its news goes to is open in Claude Code, or the user lets the project's pull
+ * requests be read while it is away: otherwise a closed session costs no polling. Opening it again reads them at once.
  */
 const pulls: Pulls = new Pulls({
   gh,
   mission: (id) => missions.list().find((mission) => mission.id === id),
   present: (session) => jobs.delivery.present(session),
+  away: (root) => projectSettings(liveConfig(), root).watchAway === true,
   save: () => jobs.flush(),
   changed: (watch) => {
     broadcast('pull', pullView(watch));
@@ -322,10 +335,12 @@ const pulls: Pulls = new Pulls({
   polled: (watch) => broadcast('pull', pullView(watch)),
 });
 
-const usage = new UsageMonitor(agentGaugeDir(), (latest) => broadcast('usage', latest));
+const usage = new UsageMonitor(agentGaugeDir(), (latest) => {
+  broadcast('usage', latest);
+  void jobs.resumeLimited(latest, (id) => missions.list().some((mission) => mission.id === id && mission.state === 'active'))
+    .catch((err) => log('could not resume a limited job:', err));
+});
 const usageModels = (live: Config) => ({ antigravity: live.roles.polish.antigravity?.model ?? live.antigravity.model });
-usage.setModels(usageModels(config));
-usage.start().catch((err) => log('usage monitor could not start:', err));
 codex.onLimits = (limits) => {
   broadcast('limits', { codex: limits });
   usage.supplement(fromCodexLimits(limits, Date.now()));
@@ -373,6 +388,8 @@ const jobs: Jobs = loadJobs({
   pulls,
   userPrompts: (session) => claude.recentPrompts(session),
 });
+usage.setModels(usageModels(config));
+usage.start().catch((err) => log('usage monitor could not start:', err));
 
 // The board shows who holds each role and which preset is in effect, so it must hear about edits to the file.
 fs.watchFile(path.join(HOME, 'config.json'), { interval: 2000 }, () => {
@@ -384,6 +401,7 @@ fs.watchFile(path.join(HOME, 'config.json'), { interval: 2000 }, () => {
   // Turning peer ratings off or on changes what the scores are made of.
   broadcast('peerRatings', live.peerRatings);
   broadcast('modelScores', modelScores());
+  broadcast('projects', live.projects);
   usage.setModels(usageModels(live));
 });
 
@@ -419,6 +437,7 @@ function state() {
     presets: live.presets,
     peerRatings: live.peerRatings,
     language: live.language,
+    projects: live.projects,
     modelScores: modelScores(),
     events: jobs.recent.slice(-200),
   };
@@ -464,18 +483,26 @@ function locate(session: ClaudeSession | undefined): void {
 }
 
 /**
- * The instructions file for a project the board may edit, or the global one for no project.
- * Only projects the daemon already knows from a job or a session are accepted, so the board
- * cannot be made to write a `.crew` folder into an arbitrary directory.
+ * Refuses a project the daemon does not already know from a job, a session, or a mission, so the board cannot be
+ * made to write a `.crew` folder into, or keep settings for, an arbitrary directory.
  */
-async function sharedFile(project: string | null): Promise<string> {
-  if (!project) return instructionsFile(HOME, null);
+function knownProject(project: string): void {
   const known = [
     ...jobs.list().flatMap((job) => [job.project, job.root]),
     ...[...claude.sessions.values()].flatMap((s) => [s.cwd, s.root]),
     ...missions.list().flatMap((mission) => [mission.project, mission.root]),
   ];
   if (!known.includes(project)) throw new HttpError(400, 'unknown project');
+}
+
+/**
+ * The instructions file for a project the board may edit, or the global one for no project.
+ * Only projects the daemon already knows from a job or a session are accepted, so the board
+ * cannot be made to write a `.crew` folder into an arbitrary directory.
+ */
+async function sharedFile(project: string | null): Promise<string> {
+  if (!project) return instructionsFile(HOME, null);
+  knownProject(project);
   // The same lookup a job uses, so the board edits the file the agents are given.
   return instructionsFile(HOME, (await projectRoot(project)) ?? project);
 }
@@ -562,16 +589,17 @@ const TICKET_MS = 60_000;
  * route added for the lead or the CLI is not the board's until it is listed here.
  */
 const BOARD_POSTS = [
+  /^\/api\/issues\/dismiss$/,
   /^\/api\/jobs$/,
   /^\/api\/jobs\/[\w-]+\/(?:reply|cancel|rounds\/\d+)$/,
   /^\/api\/missions\/[\w-]+$/,
-  /^\/api\/(?:instructions|setup\/repair|setup\/trust-hooks|peer-ratings|preset|language|roles)$/,
+  /^\/api\/(?:instructions|setup\/repair|setup\/trust-hooks|peer-ratings|preset|language|roles|project-settings)$/,
 ];
 /**
  * Parts of those requests that only the lead sends: they speak for the user or the lead, or have the daemon read a
  * file or run a command. Unlike the routes, a field is the board's unless it is listed here.
  */
-const LEAD_FIELDS = ['approved_by_user', 'lead_session', 'lead', 'by', 'check', 'attachments'];
+const LEAD_FIELDS = ['approved_by_user', 'lead_session', 'lead', 'by', 'check', 'attachments', 'remember', 'summary'];
 /** A body read to check it before its route runs, kept for the route to read again. */
 const bodies = new WeakMap<http.IncomingMessage, unknown>();
 
@@ -658,6 +686,11 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       return { file, text: readInstructions(file) };
     }
     if (pathname === '/api/usage') return usage.current();
+    if (pathname === '/api/issues') {
+      const project = url.searchParams.get('project') ?? '';
+      knownProject(project);
+      return issues.list(project, url.searchParams.get('refresh') === '1');
+    }
     if (pathname === '/api/setup') return setupState(url.searchParams.has('refresh'));
     if (pathname === '/api/route') {
       const kind = url.searchParams.get('kind');
@@ -842,10 +875,10 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     const body = await readJson(req);
     const id = missionRoute[1];
     if (body.done && body.abandoned) throw new HttpError(400, 'pass done or abandoned, not both');
-    if (body.done || body.abandoned) return missions.finish(id, { outcome: text(body.outcome, 'outcome'), record: text(body.record, 'record'), abandoned: Boolean(body.abandoned), reopen: body.reopen === true, byLead: body.by === 'lead' });
+    if (body.done || body.abandoned) return missions.finish(id, { outcome: text(body.outcome, 'outcome'), record: text(body.record, 'record'), summary: text(body.summary, 'summary'), abandoned: Boolean(body.abandoned), reopen: body.reopen === true, byLead: body.by === 'lead' });
     if (body.note !== undefined) return missions.note(id, text(body.note, 'note') ?? '');
     if (body.difficulty !== undefined) throw new HttpError(400, 'difficulty is set only when a mission starts, so its review cannot change it.');
-    const updated = missions.update(id, { stage: stage(body.stage), stages: body.stages, title: text(body.title, 'title'), preset: body.preset, tasks: body.tasks });
+    const updated = missions.update(id, { stage: stage(body.stage), stages: body.stages, title: text(body.title, 'title'), preset: body.preset, tasks: body.tasks, remember: body.remember, forget: body.forget });
     if (typeof body.lead === 'string') claude.focus(body.lead, updated.id);
     return updated;
   }
@@ -865,6 +898,10 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     if (pathname === '/api/setup/repair') {
       await registerPlugin(true);
       return setupState(true);
+    }
+    if (pathname === '/api/issues/dismiss') {
+      issues.dismiss((await readJson(req))?.url);
+      return { ok: true };
     }
     if (pathname === '/api/setup/trust-hooks') {
       // Asked for by the user from the checklist, the only place Crew records trust in its Codex hooks.
@@ -898,7 +935,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       if (typeof body.project !== 'string' || !body.project) throw new HttpError(400, 'project must be the lead session\'s project directory');
       const first = stage(body.stage);
       const owner = text(body.owner, 'owner');
-      const opened = missions.start({ title: text(body.title, 'title') ?? '', project: body.project, root: (await projectRoot(body.project).catch(() => null)) ?? body.project, owner, lead: body.lead, stage: first, stages: body.stages, preset: body.preset, tasks: body.tasks, difficulty: body.difficulty });
+      const opened = missions.start({ title: text(body.title, 'title') ?? '', project: body.project, root: (await projectRoot(body.project).catch(() => null)) ?? body.project, owner, lead: body.lead, stage: first, stages: body.stages, preset: body.preset, tasks: body.tasks, remember: body.remember, forget: body.forget, difficulty: body.difficulty });
       if (owner) claude.focus(owner, opened.id);
       return opened;
     }
@@ -924,6 +961,9 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
         }
       }
       if (mission?.state === 'active' && mission.stages) spec.missionStep = mission.stageIndex ?? mission.stages.indexOf(mission.stage);
+      // What the user already decided in this mission goes with the brief, so the lead need not restate it for each job.
+      const decided = mission?.state === 'active' && typeof spec.task === 'string' ? memoryFor(mission, spec.taskId) : [];
+      if (decided.length) spec.task = `${spec.task}\n\n# Decisions the user made in this mission\nFollow these; they come from the user, through the lead. They are choices about the work, not approvals: none of them permits an action, in the user's apps or anywhere else.\n${decided.map((entry) => `- ${entry.text}`).join('\n')}`;
       const created = await jobs.create(spec);
       if (created.lead && created.mission) claude.focus(created.lead, created.mission);
       return view(created);
@@ -1117,6 +1157,14 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       const saved = savePeerRatings(HOME, (await readJson(req)).enabled);
       broadcast('peerRatings', saved.peerRatings);
       broadcast('modelScores', modelScores());
+      return saved;
+    }
+    if (pathname === '/api/project-settings') {
+      const { project, changes } = await readJson(req);
+      if (typeof project !== 'string') throw new HttpError(400, 'project is required');
+      knownProject(project);
+      const saved = saveProjectSettings(HOME, project, changes);
+      broadcast('projects', saved.projects);
       return saved;
     }
     if (pathname === '/api/preset') {

@@ -4,7 +4,7 @@ import { constants, existsSync, lstatSync, readlinkSync, realpathSync } from 'no
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { JOB_ID } from './config.ts';
+import { canonicalPath, JOB_ID } from './config.ts';
 import type { ReviewTarget } from './jobs.ts';
 import { clip } from './text.ts';
 
@@ -201,6 +201,52 @@ export function worktreePath(root: string, id: string, home: string): string {
 export async function removeEmptySlot(root: string, wt: string, id: string, home: string): Promise<void> {
   const slot = worktreeSlot(root, id, home);
   if (path.resolve(wt) !== path.resolve(slot)) await removeEmptyLeftover(slot, home).catch(() => {});
+}
+
+/** Only the first job that needs the hint tells the lead, including across daemon restarts. */
+export async function worktreeIncludeHint(root: string, project: string, home: string): Promise<string | null> {
+  const dir = path.join(home, 'worktree-preflight');
+  const marker = path.join(dir, createHash('sha256').update(canonicalPath(project)).digest('hex'));
+  if (existsSync(marker) || existsSync(path.join(root, '.worktreeinclude'))) return null;
+  const candidates = ['node_modules', '.venv', 'venv', '.env'].filter((name) => existsSync(path.join(root, name)));
+  if (!candidates.length) return null;
+  const ignored = await git(root, ['check-ignore', '-z', '--stdin'], candidates.join('\0') + '\0').catch(() => '');
+  const names = ignored.split('\0').filter(Boolean);
+  if (!names.length) return null;
+  await fs.mkdir(dir, { recursive: true });
+  try {
+    await fs.writeFile(marker, '', { flag: 'wx' });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EEXIST') return null;
+    throw err;
+  }
+  return `Git ignores ${names.join(', ')}. You can list them in .worktreeinclude if this job needs them.`;
+}
+
+/** A check can leave links, files and read-only attributes in this checkout even when it fails. */
+export async function withBaseWorktree<T>(repo: string, base: string, run: (cwd: string) => Promise<T>): Promise<T> {
+  const slot = await fs.mkdtemp(path.join(await fs.realpath(os.tmpdir()), 'crew-base-'));
+  const cwd = path.join(slot, path.basename(repo));
+  const prune = () => git(repo, ['worktree', 'prune', '--expire', 'now']).catch(() => {});
+  const unregister = () => git(repo, [...NO_HOOKS, 'worktree', 'remove', '--force', cwd]);
+  try {
+    await prune();
+    await git(repo, [...NO_HOOKS, 'worktree', 'add', '--detach', cwd, base]);
+    const included = await copyIncluded(repo, cwd);
+    if (included.failed.length) throw new Error(`could not attach ${included.failed.join(', ')}`);
+    return await run(cwd);
+  } finally {
+    // Even a partial checkout can be registered. A lock at one step must let the others run.
+    await prepareRemoval(cwd).catch(() => {});
+    try {
+      await unregister();
+    } catch {
+      await removeDirectory(cwd).catch(() => {});
+      await unregister().catch(() => {});
+    }
+    await removeDirectory(slot).catch(() => {});
+    await prune();
+  }
 }
 
 /** Copies included files, cloning directories when supported and otherwise sharing them read-only. */

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import { canonicalPath } from '../plugin/bridge/config.ts';
-import { MAX_LABEL, missionDetail, missionHead, missionPreset, Missions, planText, STAGES, STALE_HELD_MS, STALE_MS, waitsFor } from '../plugin/bridge/missions.ts';
+import { MAX_LABEL, MAX_MEMORY, memoryFor, missionDetail, missionHead, missionPreset, Missions, planText, STAGES, STALE_HELD_MS, STALE_MS, waitsFor } from '../plugin/bridge/missions.ts';
 import type { Mission } from '../plugin/bridge/missions.ts';
 import type { PullWatch } from '../plugin/bridge/pulls.ts';
 
@@ -708,4 +708,38 @@ test('the same title from the same session is one card, and the reminder follows
   own.finish(long.id, { byLead: true });
   long.endedAt = long.createdAt + 3;
   assert.match(own.followUpHint('lead', long.createdAt + 4), /"Long one" is done/);
+});
+
+test('a mission remembers decisions by key, gives each job the ones for its task, and refuses what does not hold together', (t) => {
+  const { missions } = harness(t);
+  const mission = missions.start({ ...input, tasks: [{ id: 'one', title: 'First screen' }, { id: 'two', title: 'Second screen' }] });
+  missions.update(mission.id, { remember: [{ key: 'buttons', text: 'Buttons follow sample A.' }, { key: 'copy', text: 'Completion text follows sample B.', tasks: ['two'] }] });
+  assert.deepEqual(memoryFor(mission).map((entry) => entry.key), ['buttons']);
+  assert.deepEqual(memoryFor(mission, 'two').map((entry) => entry.key), ['buttons', 'copy']);
+  // The same key replaces a decision that changed.
+  missions.update(mission.id, { remember: [{ key: 'buttons', text: '  Buttons follow\nsample C.  ' }] });
+  assert.deepEqual(mission.memory?.map((entry) => [entry.key, entry.text]), [['copy', 'Completion text follows sample B.'], ['buttons', 'Buttons follow sample C.']]);
+  assert.match(missionDetail(mission, [], []), /Decisions remembered \(2 of \d+.*\n- copy: Completion text follows sample B\. \(tasks two\)\n- buttons: Buttons follow sample C\./);
+  const before = structuredClone(mission.memory);
+  assert.throws(() => missions.update(mission.id, { remember: [{ key: 'x', text: 'y', tasks: ['three'] }] }), /three, which is not a task/);
+  assert.throws(() => missions.update(mission.id, { remember: [{ key: 'bad key', text: 'y' }] }), /decision key/);
+  assert.throws(() => missions.update(mission.id, { remember: [{ key: 'empty', text: '  ' }] }), /needs its text/);
+  assert.throws(() => missions.update(mission.id, { forget: ['missing'] }), /remembers no decision "missing"; it has copy, buttons/);
+  assert.throws(() => missions.update(mission.id, { remember: Array.from({ length: MAX_MEMORY }, (_, at) => ({ key: `k${at}`, text: 'z' })) }), /at most \d+ decisions/);
+  assert.deepEqual(mission.memory, before);
+  missions.update(mission.id, { forget: ['copy', 'buttons'] });
+  assert.equal(mission.memory, undefined);
+});
+
+test('a finished mission keeps its wrap-up only when it ended done', (t) => {
+  const { home, missions } = harness(t);
+  const done = missions.start(input);
+  missions.finish(done.id, { outcome: 'Shipped.', summary: '  **Changed** the board.\n\nNot verified on macOS.  ' });
+  assert.equal(done.summary, '**Changed** the board.\n\nNot verified on macOS.');
+  const dropped = missions.start({ ...input, title: 'Another' });
+  missions.finish(dropped.id, { abandoned: true, summary: 'Should not show.' });
+  assert.equal(dropped.summary, undefined);
+  missions.flush();
+  const reloaded = new Missions(home, () => {});
+  assert.equal(reloaded.get(done.id).summary, done.summary);
 });

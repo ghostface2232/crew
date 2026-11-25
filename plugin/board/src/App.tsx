@@ -63,7 +63,7 @@ export function App() {
   const [settings, setSettings] = useState<boolean | 'about'>(false);
   const update = useAppUpdate();
   /** Where a sheet grows from: the control that opened it, or nothing for a keyboard shortcut. */
-  const [dispatching, setDispatching] = useState<{ origin?: DOMRect } | null>(null);
+  const [dispatching, setDispatching] = useState<{ origin?: DOMRect; draft?: string } | null>(null);
   const [palette, setPalette] = useState<{ origin?: DOMRect } | null>(null);
   const [welcome, setWelcome] = useState(false);
   const [detail, setDetail] = useState(detailFromHash);
@@ -153,8 +153,8 @@ export function App() {
     if (root && project !== root) select(`project:${root}`);
     show(id);
   };
-  const newJob = useCallback((origin?: Element | null) => {
-    if (live) setDispatching({ origin: origin?.getBoundingClientRect() });
+  const newJob = useCallback((origin?: Element | null, draft?: string) => {
+    if (live) setDispatching({ origin: origin?.getBoundingClientRect(), draft });
   }, [live]);
   const openPalette = () => setPalette({ origin: searchButton.current?.getBoundingClientRect() });
   const openSettings = useCallback(() => {
@@ -367,7 +367,7 @@ export function App() {
         </div>
         <div className="dock" inert={!narrow || drawer}>{pageNav}</div>
         {dispatching && (
-          <Dispatch state={state} project={project} origin={dispatching.origin} openJob={openNewJob} close={() => setDispatching(null)} />
+          <Dispatch state={state} project={project} origin={dispatching.origin} draft={dispatching.draft} openJob={openNewJob} close={() => setDispatching(null)} />
         )}
         {welcome && <Onboarding close={() => setWelcome(false)} />}
         {palette && (

@@ -253,7 +253,27 @@ export interface Config {
   preset: PresetName | null;
   /** What each preset sets. The built-in ones set effort only; a user's entry replaces fields of the same name. */
   presets: Record<PresetName, Preset>;
+  /** Switches the user turns on for one project, keyed by its canonicalPath. Every switch is off by default. */
+  projects: Record<string, ProjectSettings>;
 }
+
+/**
+ * What the user lets Crew do in one project without asking. Kept in the user's own config rather than the
+ * repository, so a repository cannot turn any of them on for itself.
+ */
+export interface ProjectSettings {
+  /** The lead pushes and opens a pull request itself once the work is reviewed and its checks pass; it never merges one. */
+  autonomy?: boolean;
+  /** Pull requests keep being watched while the lead session is closed or away. */
+  watchAway?: boolean;
+  /** Work stopped by a usage limit picks up again by itself once the usage resets. */
+  autoResume?: boolean;
+}
+export const PROJECT_SWITCHES = ['autonomy', 'watchAway', 'autoResume'] as const satisfies readonly (keyof ProjectSettings)[];
+
+/** One project's switches; a project the user never set has all of them off. */
+export const projectSettings = (config: Pick<Config, 'projects'>, project: string | null | undefined): ProjectSettings =>
+  (project && config.projects[canonicalPath(project)]) || {};
 
 /**
  * The built-in presets name no models: which ones an account can use differs, so a model belongs in the
@@ -287,6 +307,7 @@ const defaults: Config = {
   language: null,
   preset: null,
   presets: PRESETS,
+  projects: {},
 };
 
 export const DEFAULT_ROLES = defaults.roles;
@@ -294,7 +315,7 @@ export const DEFAULT_ROLES = defaults.roles;
 /** A role as written before agents: a default agent, the others in also, and one model and effort for the default. */
 interface LegacyRole { agent?: Holder; also?: Holder[]; model?: string; effort?: string }
 
-type UserConfig = Partial<Omit<Config, 'roles' | 'roleSettings' | 'presets' | 'codex'>> & { codex?: Partial<Config['codex']>; roles?: Partial<Record<Role, Partial<RoleAssignment> | LegacyRole>>; presets?: Partial<Record<PresetName, Preset>> };
+type UserConfig = Partial<Omit<Config, 'roles' | 'roleSettings' | 'presets' | 'codex' | 'projects'>> & { codex?: Partial<Config['codex']>; roles?: Partial<Record<Role, Partial<RoleAssignment> | LegacyRole>>; presets?: Partial<Record<PresetName, Preset>>; projects?: unknown };
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 
@@ -411,7 +432,29 @@ export function resolveConfig(user: UserConfig): Config {
     roles,
     roleSettings,
     ...resolvePresets(user),
+    projects: resolveProjects(user.projects),
   };
+}
+
+/** Like the role table, a switch that is not exactly true or false throws: "false" in quotes would read as on. */
+function resolveProjects(given: unknown): Record<string, ProjectSettings> {
+  if (given === undefined) return {};
+  if (!isObject(given)) throw new Error('projects must be an object such as {"/path/to/project": {"autonomy": true}}.');
+  const projects: Record<string, ProjectSettings> = {};
+  for (const [project, entry] of Object.entries(given)) {
+    if (!path.isAbsolute(project)) throw new Error(`projects.${project} must be the project's absolute path.`);
+    if (!isObject(entry)) throw new Error(`projects.${project} must be an object such as {"autonomy": true}.`);
+    const settings: ProjectSettings = {};
+    for (const [key, value] of Object.entries(entry)) {
+      if (!(PROJECT_SWITCHES as readonly string[]).includes(key)) throw new Error(`projects.${project}.${key} is not a setting; use ${PROJECT_SWITCHES.join(', ')}.`);
+      if (typeof value !== 'boolean') throw new Error(`projects.${project}.${key} must be true or false.`);
+      if (value) settings[key as keyof ProjectSettings] = true;
+    }
+    // Two spellings of one folder (C:\x and C:/x) are one project; a switch either turned on stays on.
+    const key = canonicalPath(project);
+    projects[key] = { ...projects[key], ...settings };
+  }
+  return projects;
 }
 
 /** Like the role table, a preset that is not exactly valid throws: a job must not run on settings the user did not choose. */

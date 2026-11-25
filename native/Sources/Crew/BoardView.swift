@@ -201,8 +201,11 @@ struct BoardView: View {
     }
     @ViewBuilder private var workspace: some View {
         if store.selection != "history" && store.search.isEmpty {
-            AgentOverview(store: store)
-            if store.connected && !store.project.isEmpty { IssueSuggestions(store: store, project: store.project) }
+            // The page already puts cardGap between its items; the rest makes up a section's gap.
+            AgentOverview(store: store).padding(.bottom, WorkspaceStyle.sectionGap - WorkspaceStyle.cardGap)
+            if store.connected && !store.project.isEmpty {
+                IssueSuggestions(store: store, project: store.project).padding(.bottom, WorkspaceStyle.sectionGap - WorkspaceStyle.cardGap)
+            }
         }
         // Lists are derived once per body: these filters ran per mission before and dominated redraw cost.
         let history = store.selection == "history"

@@ -141,8 +141,9 @@ private struct IssueCard: View {
             HStack(alignment: .top, spacing: Space.m) {
                 VStack(alignment: .leading, spacing: Space.xs) {
                     // Under a mission's and an agent's names: a suggestion, not work under way.
-                    Text(verbatim: issue.title).font(Typeface.headline).fadeTruncated().help(issue.title)
-                    Text(verbatim: (["#\(issue.number)"] + issue.labels.prefix(3)).joined(separator: " · "))
+                    Text(verbatim: issue.title).font(Typeface.minorTitle).fadeTruncated().help(issue.title)
+                    // Labels start with a capital, so a priority such as p1 reads as P1.
+                    Text(verbatim: (["#\(issue.number)"] + issue.labels.prefix(3).map { $0.prefix(1).uppercased() + $0.dropFirst() }).joined(separator: " · "))
                         .font(Typeface.caption).monospacedDigit().foregroundStyle(.secondary).fadeTruncated()
                 }
                 Spacer(minLength: WorkspaceStyle.rowSpacer)
@@ -162,13 +163,16 @@ private struct IssueCard: View {
                         // Each card's own names, as on the board; three alike would not say which issue.
                         .accessibilityLabel(String(localized: "Open issue #\(issue.number)"))
                 }
+                // The accent's tint rather than its solid glass: three cards of solid buttons would outshout the page.
                 Button { store.startWork(on: issue) } label: { Label("Start Work", systemImage: "play.fill").frame(maxWidth: .infinity) }
-                    .glassPillButton()
+                    .pillButton(selected: true)
                     .accessibilityLabel(String(localized: "Start work on #\(issue.number)"))
                     .disabled(!store.connected)
                     .help("Opens New Job with this issue as the task.")
             }
             .frame(maxHeight: .infinity, alignment: .bottom)
-        }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).card()
+        }
+        // Set into the page rather than raised on it as missions are: a suggestion, not work under way.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).card(fill: WorkspaceStyle.rowFill)
     }
 }

@@ -812,6 +812,20 @@ private final class MockProtocol: URLProtocol, @unchecked Sendable {
         let failed = try JSONDecoder().decode(IssueList.self, from: Data(#"{"project":"/work/app","issues":[],"error":"gh is not signed in"}"#.utf8))
         #expect(failed.repo == nil && failed.issues.isEmpty)
     }
+    @Test func aJobStoppedAtItsBudgetSaysSoAndAnOlderErrorStillDecodes() throws {
+        var job = try fixture().jobs[0]
+        var object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(job)) as! [String: Any]
+        object["state"] = "failed"
+        object["error"] = ["message": "Stopped at the turn's token budget.", "limit": false, "budget": true]
+        job = try JSONDecoder().decode(Job.self, from: JSONSerialization.data(withJSONObject: object))
+        #expect(job.error?.budget == true)
+        #expect(job.status == "Budget reached")
+        // A daemon from before budgets sends no flag, and the job reads as failed.
+        object["error"] = ["message": "Turn failed.", "limit": false]
+        job = try JSONDecoder().decode(Job.self, from: JSONSerialization.data(withJSONObject: object))
+        #expect(job.error?.budget == nil)
+        #expect(job.status == "Failed")
+    }
     @Test func projectSwitchesForgettingAndIssuesCallTheDaemon() async throws {
         let original = try fixture().missions[0]
         let issue = #"{"number":7,"title":"Crash","url":"https://github.com/me/app/issues/7","assignees":[],"labels":[]}"#

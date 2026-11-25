@@ -14,7 +14,7 @@ function harness(working = true) {
   const waiting: string[] = [];
   const job = { state: 'running', sandbox: 'workspace-write', sessionId: 'parent', plugins: ['computer-use'] } as Job;
   const ctl = {
-    job, mcp: {}, model: () => {}, activity: () => {}, phase: () => {}, progress: () => {}, resumed: () => {}, done: () => {},
+    job, mcp: {}, model: () => {}, activity: () => {}, phase: () => {}, progress: () => {}, resumed: () => {}, done: () => {}, cancelled: () => {},
     refused: (action: string, reason: string) => refusals.push({ action, reason }),
     note: (text: string) => notes.push(text), waiting: (_type: string, text: string) => waiting.push(text),
   };
@@ -338,19 +338,109 @@ test('a rerouted turn records the model it moved to and tells the lead', () => {
   assert.match(h.notes[0], /from gpt-a to gpt-b \(highRiskCyberActivity\)/);
 });
 
-test('a turn ended for too many denials fails apart from other errors, pointing at the refusals', () => {
-  for (const refused of [true, false]) {
+test('an automatic review circuit breaker fails the interrupted turn with or without an error', () => {
+  for (const strict of [true, false]) {
     const h = harness();
     const failures: [string, unknown][] = [];
     Object.assign(h.ctl, { fail: (message: string, opts?: unknown) => failures.push([message, opts]) });
     h.job.turns = 2;
-    h.job.refusals = refused ? [{ action: 'rm -rf build', reason: 'destructive', turn: 2 }] : [{ action: 'old', reason: 'old', turn: 1 }];
-    h.notify('turn/completed', { turn: { id: 'turn', status: 'failed', error: { message: 'too many denials', codexErrorInfo: 'tooManyDenials' } } });
+    h.job.refusals = strict ? [{ action: 'action', reason: 'refused', turn: 2 }] : [{ action: 'old', reason: 'old', turn: 1 }];
+    if (!strict) h.notify('guardianWarning', { turnId: undefined, message: 'too many denials' });
+    const error = strict ? { message: 'too many denials', codexErrorInfo: 'tooManyDenials' } : null;
+    h.notify('turn/completed', { turn: { id: 'turn', status: 'interrupted', error } });
     assert.equal(failures.length, 1);
     assert.match(failures[0][0], /too many of its actions were refused \(too many denials\)/);
-    assert.equal(/listed with the job/.test(failures[0][0]), refused);
+    assert.equal(/listed with the job/.test(failures[0][0]), strict);
     assert.equal(failures[0][1], undefined, 'a denial stop is not a usage limit');
   }
+});
+
+test('an unrequested interruption fails and a warning from a completed turn does not carry over', () => {
+  const h = harness();
+  const failures: string[] = [];
+  Object.assign(h.ctl, { fail: (message: string) => failures.push(message) });
+  h.notify('guardianWarning', { turnId: undefined, message: 'warning from the first turn' });
+  h.notify('turn/completed', { turn: { id: 'turn', status: 'completed' } });
+  h.notify('turn/started', { turn: { id: 'next' } });
+  h.notify('turn/completed', { turn: { id: 'next', status: 'interrupted', error: { message: 'interrupted externally' } } });
+  assert.deepEqual(failures, ['Codex ended the turn itself.\ninterrupted externally']);
+});
+
+test('Deny declines a command or network request and reserves cancel for stdin', async () => {
+  for (const [request, decision] of [
+    [{ command: 'echo example', kind: 'command' }, 'decline'],
+    [{ networkApprovalContext: { host: 'example.com', protocol: 'https' } }, 'decline'],
+    [{ command: 'example input', kind: 'writeStdin' }, 'cancel'],
+  ] as const) {
+    const h = harness();
+    const answer = h.request('item/commandExecution/requestApproval', { ...request, availableDecisions: ['accept', 'cancel'] });
+    await h.adapter.answer(h.ctl as any, false);
+    assert.deepEqual(await answer, { decision });
+  }
+});
+
+test('only the first Codex retry refreshes activity until progress or a new turn', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: 100_000 });
+  const h = harness();
+  const progress: string[] = [];
+  const activity = () => { h.job.activeAt = Date.now(); };
+  Object.assign(h.ctl, { activity, phase: activity, progress: (message: string) => { activity(); progress.push(message); } });
+  h.internal.peer = { alive: true, request: async () => ({ thread: { status: { type: 'active' } } }) };
+  const retry = (cause: string, turnId = 'turn') => h.notify('error', {
+    turnId, willRetry: true, error: { message: 'disconnected', additionalDetails: cause, codexErrorInfo: { responseStreamDisconnected: { httpStatusCode: null } } },
+  });
+  retry('first cause');
+  const since = h.job.activeAt;
+  assert.equal((await h.adapter.probe(h.ctl as any)).verdict, 'working');
+  t.mock.timers.tick((resolveConfig({}).stallSeconds + 1) * 1000);
+  retry('latest cause');
+  assert.equal(h.job.activeAt, since);
+  assert.deepEqual(progress, ['retrying: disconnected\nfirst cause']);
+  const probe = await h.adapter.probe(h.ctl as any);
+  assert.equal(probe.verdict, 'unknown');
+  assert.match(probe.detail, /Codex cannot reach the model.*\nlatest cause/);
+  h.notify('item/agentMessage/delta', { delta: 'back online' });
+  assert.ok(h.job.activeAt > since);
+  assert.equal((await h.adapter.probe(h.ctl as any)).verdict, 'working');
+  retry('new outage');
+  h.notify('turn/completed', { turn: { id: 'turn', status: 'completed' } });
+  h.notify('turn/started', { turn: { id: 'next' } });
+  retry('next turn outage', 'next');
+  assert.deepEqual(progress.slice(1), ['retrying: disconnected\nnew outage', 'retrying: disconnected\nnext turn outage']);
+});
+
+test('Codex turn errors report details and classify quota, transient and actionable failures', () => {
+  const transient = /transient failure.*Reply to resume/;
+  const cases: [unknown, RegExp | undefined, boolean][] = [
+    ...['usageLimitExceeded', 'sessionBudgetExceeded', 'apiKeySpendLimitExceeded', 'projectSpendLimitExceeded', 'organizationSpendLimitExceeded']
+      .map((kind): [unknown, undefined, boolean] => [kind, undefined, true]),
+    ...['rateLimitExceeded', 'serverOverloaded', 'internalServerError'].map((kind): [unknown, RegExp, boolean] => [kind, transient, false]),
+    ...['httpConnectionFailed', 'responseStreamConnectionFailed', 'responseStreamDisconnected', 'responseTooManyFailedAttempts']
+      .map((kind): [unknown, RegExp, boolean] => [{ [kind]: { httpStatusCode: 503 } }, transient, false]),
+    ['unauthorized', /codex login/, false],
+    ['contextWindowExceeded', /fresh job with a narrower brief/, false],
+    ['sandboxError', /docs\/sandbox\.md/, false],
+    ['other', undefined, false],
+  ];
+  for (const [codexErrorInfo, next, limit] of cases) {
+    const h = harness();
+    const failures: { message: string; limit: boolean }[] = [];
+    Object.assign(h.ctl, { fail: (message: string, opts?: { limit?: boolean }) => failures.push({ message, limit: Boolean(opts?.limit) }) });
+    h.notify('turn/completed', { turn: { id: 'turn', status: 'failed', error: { message: 'failure', additionalDetails: 'underlying cause', codexErrorInfo } } });
+    assert.equal(failures.length, 1);
+    assert.equal(failures[0].limit, limit, JSON.stringify(codexErrorInfo));
+    if (next) assert.match(failures[0].message, next);
+    assert.match(failures[0].message, /^failure\nunderlying cause/);
+  }
+});
+
+test('Codex fails a completed standard review when the reviewer produced no response', () => {
+  const h = harness();
+  const failures: string[] = [];
+  Object.assign(h.ctl, { fail: (message: string) => failures.push(message), done: () => assert.fail('review unexpectedly succeeded') });
+  h.notify('item/completed', { item: { type: 'exitedReviewMode', review: ' Reviewer failed to output a response.\n' } });
+  h.notify('turn/completed', { turn: { id: 'turn', status: 'completed' } });
+  assert.deepEqual(failures, ['Reviewer failed to output a response.']);
 });
 
 test('the context window shows how much the latest request filled', () => {
@@ -492,7 +582,7 @@ test('a parent waiting for a child ignores its own late start acknowledgement an
 test('interrupting the parent retires its child turns before a follow-up', async () => {
   for (const held of [false, true]) {
     const h = harness();
-    Object.assign(h.ctl, { cancelled() {} });
+    Object.assign(h.ctl, { cancelled() {}, fail() {} });
     h.internal.peer = { request: async () => ({}) };
     startChild(h);
     h.notify('turn/completed', { turn: { id: 'turn', status: held ? 'completed' : 'interrupted' } });

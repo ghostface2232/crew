@@ -545,7 +545,7 @@ test('Codex merges crew MCP into a read-only permissions profile', { timeout: 50
   assert.equal(config.mcp_servers.crew.default_tools_approval_mode, 'approve');
   // The user's skills, plugins, and app connectors stay out of the worker's context.
   assert.deepEqual(config.skills, { include_instructions: false });
-  assert.deepEqual(config.features, { apps: false, plugins: false, tool_suggest: false });
+  assert.deepEqual(config.features, { apps: false, plugins: false, tool_suggest: false, multi_agent_v2: false });
 });
 
 test('a daemon running as the desktop app starts the worker MCP server as Node', { timeout: 5000 }, async (t) => {
@@ -692,12 +692,17 @@ test('Codex turns on only the plugins a job is to have, and asks the user before
   // Each start or restore with plugins asks for the current installation and user settings.
   assert.deepEqual(seen.map((msg) => msg.method), ['thread/start', 'plugin/installed', 'thread/start', 'plugin/installed', 'thread/start', 'plugin/installed', 'thread/resume']);
   const configs = seen.filter((msg) => ['thread/start', 'thread/resume'].includes(msg.method)).map((msg) => msg.params.config);
-  assert.deepEqual([configs[0].features, configs[0].plugins, configs[0].skills], [{ apps: false, plugins: false, tool_suggest: false }, undefined, { include_instructions: false }]);
-  assert.deepEqual(configs[1].features, { apps: false, plugins: true, tool_suggest: false });
+  assert.deepEqual([configs[0].features, configs[0].plugins, configs[0].skills], [{ apps: false, plugins: false, tool_suggest: false, multi_agent_v2: false }, undefined, { include_instructions: false }]);
+  assert.deepEqual(configs[1].features, { apps: false, plugins: true, tool_suggest: false, multi_agent_v2: false });
   assert.deepEqual(configs[1].plugins, { _default: { enabled: false }, 'computer-use@bundled': { enabled: true }, 'browser@bundled': { enabled: false }, 'mail@bundled': { enabled: false }, 'crew@crew': { enabled: false } });
   assert.deepEqual(configs[2].plugins, { _default: { enabled: false }, 'computer-use@bundled': { enabled: false }, 'browser@bundled': { enabled: true }, 'mail@bundled': { enabled: false }, 'new@bundled': { enabled: false }, 'crew@crew': { enabled: false } });
   assert.deepEqual(configs[3].plugins, { ...configs[2].plugins, 'mail@bundled': { enabled: true } });
   assert.equal(configs[1].skills, undefined);
+  for (const config of configs) {
+    assert.equal(config.features.multi_agent_v2, false);
+    assert.deepEqual(config.memories, { generate_memories: false, use_memories: false });
+    assert.deepEqual(config.auto_review, { circuit_break_action: 'strict' });
+  }
   for (const config of configs.slice(2)) {
     assert.equal(config.default_permissions, 'crew_workspace');
     assert.equal(config.permissions.crew_workspace.filesystem[tokenFile(HOME)], 'deny');
@@ -1071,9 +1076,12 @@ for (const method of ['item/commandExecution/requestApproval', 'item/fileChange/
           if (msg.method === 'thread/start') return send({ id: msg.id, result: { thread: { id: 's' } } });
           if (msg.method === 'turn/start') {
             send({ id: msg.id, result: { turn: { id: 't' } } });
-            return send({ id: 'approval', method: '${method}', params: { threadId: 's', command: 'echo hello', permissions: { network: { enabled: true } } } });
+            return send({ id: 'approval', method: '${method}', params: { threadId: 's', command: 'echo hello', availableDecisions: ['accept', 'cancel'], permissions: { network: { enabled: true } } } });
           }
-          if (msg.id === 'approval') return send({ method: 'turn/completed', params: { threadId: 's', turn: { id: 't', status: 'completed' } } });
+          if (msg.id === 'approval') {
+            const status = msg.result?.decision === 'cancel' ? 'interrupted' : 'completed';
+            return send({ method: 'turn/completed', params: { threadId: 's', turn: { id: 't', status } } });
+          }
           if (msg.method && msg.id != null) send({ id: msg.id, result: {} });
         });
       `);

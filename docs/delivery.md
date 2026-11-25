@@ -35,9 +35,13 @@ For stall detection (requirement R5), a running job silent for `stallSeconds` (d
 
 Codex implements `probe` by reading runtime status with `thread/read` (sub-agents first) and re-reading non-active threads after 3 seconds. Active turns clear the stall silently, ended sub-agents stop blocking parent completion, and parents confirmed ended without `turn/completed` fail the job (producing failure news). Inconclusive checks or adapters without `probe` emit one `stalled` news item per stall.
 
+Codex 0.172's generated protocol exposes `willRetry` and `additionalDetails` on error notifications (2026-11-25). In upstream Codex source at `cec14d27`, a lost connection can be retried indefinitely. Crew reports the first retry and its cause as progress. Later retries retain the cause for the status check and leave the stall clock alone. Once a retry sequence reaches the stall window, the probe reports that Codex cannot reach the model and includes the cause. Item starts, completions and deltas clear the retry sequence, as does the end of the turn.
+
 ## Quota events and system notifications
 
-- Quota exhaustion emits a `limit` event from Codex `codexErrorInfo` (`usageLimitExceeded`, `rateLimitExceeded`, `sessionBudgetExceeded`), Antigravity error text, or Claude `StopFailure` (`rate_limit` or `billing_error`). A Codex turn ended with `tooManyDenials` is an ordinary failure, not a limit: its message says that refusals stopped the turn and, when the turn's refusals were recorded, that they are listed with the job.
+- Quota exhaustion emits a `limit` event from Codex `codexErrorInfo` (`usageLimitExceeded`, `sessionBudgetExceeded`, `apiKeySpendLimitExceeded`, `projectSpendLimitExceeded`, `organizationSpendLimitExceeded`), Antigravity error text, or Claude `StopFailure` (`rate_limit` or `billing_error`).
+- Codex failures include `additionalDetails` when provided. Crew treats rate limits, overload, internal server errors and HTTP or stream connection errors as transient failures that can be resumed with a reply. The transient treatment of `rateLimitExceeded` follows the retry policy in upstream Codex source at `cec14d27`. Authentication failures point to `codex login`, context exhaustion calls for a fresh job with a narrower brief, and sandbox failures point to [the sandbox docs](sandbox.md). Codex 0.172's generated protocol confirms the error kinds and the object form of HTTP and stream errors (2026-11-25).
+- A Codex turn stopped by the automatic reviewer produces failure news, with the refused actions listed when available. See [Automatic reviewer and refusals](approvals.md#automatic-reviewer-and-refusals).
 - `waiting`, `error`, `limit`, and `stalled` (plus `done` when `notifyOnDone` is true) trigger system notifications via `osascript` on macOS or a Windows PowerShell 5.1 toast under Crew's own app identity on Windows (suppressed for waiting/completion while the native desktop app holds a heartbeat lease).
 
 ## Not verified

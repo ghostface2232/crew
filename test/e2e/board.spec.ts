@@ -166,6 +166,14 @@ test('short mission plans render in order with matching tracks', async ({ page, 
   await request.post('/__push', { data: { type: 'state', data } });
   await expect(card.locator('.track-name')).toHaveText(['Final']);
   await expect(stage(card, 'Final').locator('button[data-job]')).toHaveCount(2);
+
+  // A language change streamed in after the mission is displayed renames the cached stage heading and the track together.
+  await request.post('/api/language', { data: { language: 'ko' } });
+  await expect(page.locator('html')).toHaveAttribute('lang', 'ko');
+  await expect(card.locator('.track-name')).toHaveText(['마무리']);
+  await expect(card.locator('.stage-groups h3.stage-name')).toHaveText(/^마무리/);
+  await expect(card.locator('.stage-groups h3.stage-name', { hasText: 'Final' })).toHaveCount(0);
+  await request.post('/api/language', { data: { language: 'en' } });
 });
 
 test('a mission card names its lead the same way for Claude and Codex, and keeps it after the session ends', async ({ page, request }) => {

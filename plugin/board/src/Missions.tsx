@@ -315,7 +315,7 @@ export const MissionPanel = memo(function MissionPanel({
   openSession: (id: string) => void;
   index?: number;
 }) {
-  useLanguage();
+  const language = useLanguage();
   const [expanded, setExpandedState] = useState(() => expandedMissions.get(mission.id) ?? mission.state === 'active');
   const setExpanded = (value: boolean) => {
     expandedMissions.set(mission.id, value);
@@ -324,7 +324,8 @@ export const MissionPanel = memo(function MissionPanel({
   // Keyed by state as in the app: once a mission is abandoned, Mark Done takes a fresh lock.
   const key = `mission:${mission.id}:${mission.state}`;
   const action = useAction(key);
-  const stops = useMemo(() => missionStops(mission), [mission]);
+  // Stop names are translated, so a language change must rebuild them even when the mission object is the same.
+  const stops = useMemo(() => missionStops(mission), [mission, language]);
   const jobsByStep = useMemo(() => {
     const groups = stops.map(() => [] as BoardJob[]);
     for (const job of jobs) groups[missionJobStep(mission, job, stops)]?.push(job);

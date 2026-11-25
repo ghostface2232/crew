@@ -2026,3 +2026,30 @@ test('the desktop app greets a first install once, and the palette shows the gui
   await installed.keyboard.press('Escape');
   await expect(guide).toHaveCount(0);
 });
+
+test('a project offers its issues as cards that open the issue or start work in New Job, and a dismissed one goes', async ({ page, request }) => {
+  const issue = (number: number, title: string, labels: string[]) => ({ number, title, url: `https://github.com/octo/crew/issues/${number}`, assignees: [], labels, updatedAt: '2026-11-25T00:00:00Z' });
+  let issues = [issue(12, 'Board crashes when a mission has no stages', ['bug', 'p1']), issue(13, 'Add a dark mode toggle', []), issue(14, 'Document the CLI', ['docs']), issue(15, 'Fourth issue waits its turn', [])];
+  const dismissed: string[] = [];
+  await page.route('**/api/issues?*', (route) => route.fulfill({ json: { project: '/workspace/Crew', repo: 'octo/crew', issues, checkedAt: NOW } }));
+  await page.route('**/api/issues/dismiss', async (route) => {
+    const { url } = route.request().postDataJSON();
+    dismissed.push(url);
+    issues = issues.filter((item) => item.url !== url);
+    await route.fulfill({ json: { ok: true } });
+  });
+  await page.getByRole('navigation', { name: 'Projects' }).getByRole('button', { name: 'Crew', exact: true }).click();
+  const section = page.getByRole('region', { name: 'Start from an issue' });
+  await expect(section.getByRole('listitem')).toHaveCount(3);
+  // Labels read as the app shows them, first letter capitalized.
+  await expect(section.getByText('#12 · Bug · P1')).toBeVisible();
+  await page.screenshot({ path: process.env.CREW_E2E_SHOT ?? test.info().outputPath('issues.png') });
+  await section.getByRole('button', { name: 'Dismiss #12' }).click();
+  expect(dismissed).toEqual(['https://github.com/octo/crew/issues/12']);
+  await expect(section.getByText('Fourth issue waits its turn')).toBeVisible();
+  // Start Work fills in New Job; sending stays the user's.
+  await section.getByRole('button', { name: 'Start work on #13' }).click();
+  await expect(page.getByRole('textbox', { name: 'New job instructions' })).toHaveValue('Work on issue #13: Add a dark mode toggle\n\nhttps://github.com/octo/crew/issues/13');
+  const calls = await (await request.get('/__requests')).json();
+  expect(calls.some((call: { route: string }) => call.route === '/api/jobs')).toBe(false);
+});

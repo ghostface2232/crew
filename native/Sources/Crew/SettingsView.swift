@@ -333,6 +333,8 @@ struct CrewSettingsView: View {
                         Text(item.label)
                         Text(item.note)
                     }
+                    // The switches share one save, which drops a change made while another is being stored.
+                    .disabled(!store.connected || store.actions[CrewStore.projectSwitchKey(path)]?.pending == true)
                 }
             } footer: {
                 if let error = store.actions[CrewStore.projectSwitchKey(path)]?.error { ErrorLabel(message: error).settingsFootnote() }

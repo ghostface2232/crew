@@ -4,8 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { isNewer } from './client.ts';
-import { CODEX_PLUGIN, hookKeys, hookTrust, pointer, writeCodexPlugin, writtenByCrew } from './codex-plugin.ts';
-import type { HookTrust } from './codex-plugin.ts';
+import { CODEX_HOOKS, CODEX_PLUGIN, codexHooks, crewHooks, hookTrust, installCodexHooks, launcherPath, listedCrewHooks, writeCodexPlugin, writeLauncher, writtenByCrew } from './codex-plugin.ts';
+import type { HookTrust, ListedHook } from './codex-plugin.ts';
 import { execTimed, RpcPeer } from './rpc.ts';
 import { agentCommand, agentEnv, HOME, installed, LEDGER_ASIDE, loadConfig, PLUGIN_ROOT, VERSION } from './config.ts';
 
@@ -213,10 +213,13 @@ async function registerCodex(root: string): Promise<HostRegistration | null> {
   const current = codexMarketplaces(list.out).get('crew');
   const marketplace = PACKAGED ? path.join(CODEX_DIR, 'marketplace') : MARKETPLACE;
   const other = current !== undefined && !sameFolder(current, marketplace);
+  // A source checkout's hooks run on the Node in PATH, as its own MCP server does.
+  let runtime = 'node';
   if (PACKAGED) {
     if (other && !writtenByCrew(current)) return { ok: true, current: false, detail: `Registered from ${current}; the app leaves it as it is.` };
-    const runtime = bundledRuntime(root);
-    if (!runtime) return { ok: false, current: false, detail: 'This copy of Crew has no Node runtime for Codex to run it on.' };
+    const bundled = bundledRuntime(root);
+    if (!bundled) return { ok: false, current: false, detail: 'This copy of Crew has no Node runtime for Codex to run it on.' };
+    runtime = bundled;
     try {
       writeCodexPlugin(root, runtime, CODEX_DIR);
     } catch (err) {
@@ -229,10 +232,24 @@ async function registerCodex(root: string): Promise<HostRegistration | null> {
   if (!added.ok) return { ok: false, current: false, detail: `Could not register the marketplace with Codex: ${lastLine(added.out)}` };
   const plugin = await run(bin, ['plugin', 'add', CODEX_PLUGIN], 60_000);
   if (!plugin.ok) return { ok: false, current: false, detail: `Could not install the plugin in Codex: ${lastLine(plugin.out)}` };
-  return { ok: true, current: true, detail: `Installed in Codex. If Crew's hooks need review, ${CODEX_TRUST}` };
+  // A source checkout's hooks run Codex's copy of it, as its MCP server does, not the checkout as it changes.
+  const copy = /^Installed plugin root:\s*(.+?)\s*$/m.exec(plugin.out)?.[1]?.replace(/^\\\\\?\\/, '');
+  if (!PACKAGED && !copy) return { ok: false, current: false, detail: `Could not tell where Codex installed the plugin: ${lastLine(plugin.out)}` };
+  try {
+    const bridge = PACKAGED ? path.join(root, 'plugin', 'bridge') : path.join(copy!, 'bridge');
+    const launcher = writeLauncher(path.join(CODEX_DIR, 'bin'), runtime, bridge, PACKAGED ? '.js' : '.ts');
+    installCodexHooks(codexHooksFile(), codexHooks(readJson(path.join(root, 'plugin', CODEX_HOOKS)), launcher), launcher);
+  } catch (err) {
+    return { ok: false, current: false, detail: `Could not add Crew's hooks to ${codexHooksFile()}: ${(err as Error).message}` };
+  }
+  return { ok: true, current: true, detail: `Installed in Codex. If Crew's hooks are not trusted yet, ${CODEX_TRUST}` };
 }
 
-const CODEX_TRUST = 'open Settings → Hooks → Crew in Codex and choose Trust all. Enable any Crew hooks that are off. In the CLI, review Crew under `/hooks`. Then start a new Codex chat or CLI session.';
+const CODEX_TRUST = 'select Trust Hooks in the setup checklist, or trust them in Codex under Settings → Hooks (`/hooks` in the CLI). Then start a new Codex chat or CLI session.';
+
+/** The user's own Codex hooks file, where Crew's hooks go (codex-plugin.ts). */
+const codexHooksFile = () => path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'hooks.json');
+const readJson = (file: string) => JSON.parse(fs.readFileSync(file, 'utf8'));
 
 /** Codex's marketplaces by name, from `codex plugin marketplace list`: a header row, then name and root folder. */
 function codexMarketplaces(output: string): Map<string, string> {
@@ -321,6 +338,8 @@ export type SetupItem = {
   /** A short, translatable message for the checklist. The detail is available for troubleshooting. */
   summary?: string;
   repairable?: boolean;
+  /** Crew's Codex hooks wait for the user's trust, which the checklist can record (`trustCodexHooks`). */
+  trustable?: boolean;
 };
 
 /**
@@ -409,37 +428,70 @@ async function codexLeadItems(bin: string): Promise<SetupItem[]> {
 }
 
 /** The Crew hooks' trust as Codex reports it; never "trusted" unless Codex says every one is. */
-export async function codexHooksItem(bin: string, root = PLUGIN_ROOT, timeout = HOOK_LIST_TIMEOUT_MS): Promise<SetupItem> {
-  const manifest = JSON.parse(fs.readFileSync(path.join(root, '.codex-plugin', 'plugin.json'), 'utf8'));
-  const file = pointer(manifest.hooks);
-  const keys = hookKeys(JSON.parse(fs.readFileSync(path.join(root, file), 'utf8')), file);
+export async function codexHooksItem(bin: string, timeout = HOOK_LIST_TIMEOUT_MS): Promise<SetupItem> {
   const item = { id: 'codex-hooks', label: 'Crew hooks in Codex' };
   let trust: HookTrust;
   try {
-    trust = await codexHookTrust(bin, keys, timeout);
+    trust = hookTrust(await withAppServer(bin, timeout, listCrewHooks));
   } catch (err) {
     return {
       ...item, ok: false,
-      detail: `Could not ask Codex whether they are trusted (${(err as Error).message}). To check manually, open Settings → Hooks → Crew in Codex or use \`/hooks\` in the CLI.`,
-      summary: 'Could not check hook trust. Select Check Again or open Settings → Hooks → Crew in Codex.',
+      detail: `Could not ask Codex whether they are trusted (${(err as Error).message}). To check manually, open Settings → Hooks in Codex or use \`/hooks\` in the CLI.`,
+      summary: 'Could not check hook trust. Select Check Again or open Settings → Hooks in Codex.',
     };
   }
   if (trust === 'trusted') return { ...item, ok: true, detail: 'Trusted.', summary: 'Complete' };
-  if (trust === 'modified') return {
-    ...item, ok: false, detail: `To trust Crew's updated hooks, ${CODEX_TRUST}`,
-    summary: "Crew hooks were updated. In Settings → Hooks → Crew, select 'Trust all' again.",
+  if (trust === 'missing' && PACKAGED) {
+    // The app leaves a source checkout's registration as it is, so its Install would not add the hooks.
+    const list = await run(bin, ['plugin', 'marketplace', 'list'], 60_000);
+    const current = list.ok ? codexMarketplaces(list.out).get('crew') : undefined;
+    if (current && !sameFolder(current, path.join(CODEX_DIR, 'marketplace')) && !writtenByCrew(current)) return {
+      ...item, ok: false, detail: `Codex runs Crew from ${current}, which the app leaves as it is. Run \`crew install\` from there to add its hooks to ${codexHooksFile()}.`,
+      summary: 'Run `crew install` from the Crew checkout Codex runs.',
+    };
+  }
+  if (trust === 'missing') return {
+    ...item, ok: false, repairable: true, detail: `Crew's hooks are missing from ${codexHooksFile()}, or are there more than once.`,
+    summary: 'Select Install to add Crew hooks to Codex.',
   };
-  if (trust === 'disabled') return { ...item, ok: false, detail: 'In Settings → Hooks → Crew, turn on the disabled Crew hooks.' };
-  return { ...item, ok: false, detail: "In Settings → Hooks → Crew, select 'Trust all'." };
+  if (trust === 'disabled') return { ...item, ok: false, detail: 'In Codex, open Settings → Hooks and turn on the disabled Crew hooks.' };
+  const detail = `Crew's hooks in ${codexHooksFile()} run ${crewLauncher()}. To let Codex run them, ${CODEX_TRUST}`;
+  if (trust === 'modified') return { ...item, ok: false, trustable: true, detail, summary: 'Crew hooks were updated. Select Trust Hooks to trust them again.' };
+  return { ...item, ok: false, trustable: true, detail, summary: 'Select Trust Hooks to let Codex run Crew hooks.' };
+}
+
+/**
+ * Records the user's trust in Crew's hooks with Codex, as they asked from the checklist: only hooks with the commands
+ * Crew writes, at the definition Codex lists now (app-server `config/batchWrite`, which Codex's own hook review uses).
+ */
+export async function trustCodexHooks(bin = loadConfig().codex.bin, timeout = HOOK_LIST_TIMEOUT_MS): Promise<void> {
+  await withAppServer(bin, timeout, async (request) => {
+    const edits = (await listCrewHooks(request)).filter((hook) => hook !== undefined && hook.trustStatus !== 'trusted').map((hook) => ({
+      keyPath: `hooks.state.${JSON.stringify(hook!.key)}.trusted_hash`, value: hook!.currentHash, mergeStrategy: 'replace',
+    }));
+    if (edits.length) await request('config/batchWrite', { edits, reloadUserConfig: true });
+  });
 }
 
 const HOOK_LIST_TIMEOUT_MS = 10_000;
 
+/** The launcher Crew's Codex hooks run, which registration writes. */
+const crewLauncher = () => launcherPath(path.join(CODEX_DIR, 'bin'));
+
 /**
- * Asks a short-lived `codex app-server` how it trusts the hooks named by `keys` (`hooks/list`). Codex's config keeps a
- * trust record after the hook it trusted has changed, so the config alone cannot say. Throws when Codex cannot be asked.
+ * Crew's hooks as Codex lists them now (`hooks/list`), with the commands this copy writes. Codex's config keeps a trust
+ * record after the hook it trusted has changed, so the config alone cannot say.
  */
-async function codexHookTrust(bin: string, keys: string[], timeout: number): Promise<HookTrust> {
+async function listCrewHooks(request: AppServerRequest): Promise<(ListedHook | undefined)[]> {
+  const expected = crewHooks(codexHooks(readJson(path.join(PLUGIN_ROOT, CODEX_HOOKS)), crewLauncher()));
+  // User hooks are listed for any folder; the home folder needs no project trust.
+  return listedCrewHooks(await request('hooks/list', { cwds: [os.homedir()] }), codexHooksFile(), expected);
+}
+
+type AppServerRequest = (method: string, params: unknown) => Promise<unknown>;
+
+/** Runs `use` against a short-lived `codex app-server`. Throws when Codex cannot be asked. */
+async function withAppServer<T>(bin: string, timeout: number, use: (request: AppServerRequest) => Promise<T>): Promise<T> {
   const env = agentEnv();
   const command = agentCommand(bin, ['app-server'], env);
   const child = spawn(command.bin, command.args ?? [], { env, shell: command.shell, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
@@ -447,8 +499,7 @@ async function codexHookTrust(bin: string, keys: string[], timeout: number): Pro
   try {
     await peer.request('initialize', { clientInfo: { name: 'crew', title: 'Crew', version: VERSION }, capabilities: null }, timeout);
     peer.notify('initialized');
-    // Plugin hooks are listed for any folder; the home folder needs no project trust.
-    return hookTrust(await peer.request('hooks/list', { cwds: [os.homedir()] }, timeout), keys);
+    return await use((method, params) => peer.request(method, params, timeout));
   } finally {
     child.stdin.end();
     peer.close();

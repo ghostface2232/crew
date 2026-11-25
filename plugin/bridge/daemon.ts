@@ -30,7 +30,7 @@ import { addEvidence, addRating, loadNotes, notesFile, renderNotes, scoreAll, se
 import type { NotesFile } from './notes.ts';
 import { outcomeContradiction } from './render.ts';
 import { runbook } from './runbook.ts';
-import { checks as setupChecks, PACKAGED, prunePlugins, register, registered, registrationMoved, SetupCache } from './setup.ts';
+import { checks as setupChecks, PACKAGED, prunePlugins, register, registered, registrationMoved, SetupCache, trustCodexHooks } from './setup.ts';
 import type { Registration, SetupItem } from './setup.ts';
 import { toastCommand } from './toast.ts';
 import { ANTIGRAVITY_MODELS, antigravityModels, codexModels } from './tiers.ts';
@@ -565,7 +565,7 @@ const BOARD_POSTS = [
   /^\/api\/jobs$/,
   /^\/api\/jobs\/[\w-]+\/(?:reply|cancel|rounds\/\d+)$/,
   /^\/api\/missions\/[\w-]+$/,
-  /^\/api\/(?:instructions|setup\/repair|peer-ratings|preset|language|roles)$/,
+  /^\/api\/(?:instructions|setup\/repair|setup\/trust-hooks|peer-ratings|preset|language|roles)$/,
 ];
 /**
  * Parts of those requests that only the lead sends: they speak for the user or the lead, or have the daemon read a
@@ -864,6 +864,11 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
   if (method === 'POST') {
     if (pathname === '/api/setup/repair') {
       await registerPlugin(true);
+      return setupState(true);
+    }
+    if (pathname === '/api/setup/trust-hooks') {
+      // Asked for by the user from the checklist, the only place Crew records trust in its Codex hooks.
+      await trustCodexHooks().catch((err: Error) => { throw new HttpError(502, `Could not trust Crew's hooks in Codex: ${err.message}`); });
       return setupState(true);
     }
     if (pathname === '/api/gc') {

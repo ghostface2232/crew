@@ -545,6 +545,7 @@ function Setup() {
   };
   if (!setup || setup.items.every((item) => item.ok)) return null;
   const repairable = setup.items.some((item) => !item.ok && item.repairable);
+  const trustable = setup.items.some((item) => !item.ok && item.trustable);
   return (
     <Panel label={t('Set up Crew')}>
       <ul className="setup-list">
@@ -565,6 +566,7 @@ function Setup() {
       <div className="setup-actions">
         <button disabled={busy} onClick={() => act('/api/setup?refresh')}>{t('Check Again')}</button>
         {repairable && <button className="prominent" disabled={busy || setup.registering} onClick={() => act('/api/setup/repair', {})}>{busy ? t('Installing…') : t('Install')}</button>}
+        {trustable && <button className={repairable ? undefined : 'prominent'} disabled={busy || setup.registering} onClick={() => act('/api/setup/trust-hooks', {})}>{t('Trust Hooks')}</button>}
       </div>
     </Panel>
   );

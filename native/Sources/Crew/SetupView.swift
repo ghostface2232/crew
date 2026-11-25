@@ -11,6 +11,7 @@ struct SetupState: Decodable, Sendable {
         var detail: String
         var summary: String?
         var repairable: Bool?
+        var trustable: Bool?
     }
     struct Registration: Decodable, Sendable { var ok: Bool; var detail: String }
     var items: [Item]
@@ -19,8 +20,8 @@ struct SetupState: Decodable, Sendable {
 }
 
 /// The overview's setup checklist. The daemon installs the bundled Claude Code plugin by itself; this shows what is
-/// still missing, offers Install for what Crew can put in place, and leaves installing and signing in to the CLIs
-/// to the user. It hides once every item passes.
+/// still missing, offers Install for what Crew can put in place and Trust Hooks for Crew's Codex hooks, and leaves
+/// installing and signing in to the CLIs to the user. It hides once every item passes.
 struct SetupCard: View {
     let api: CrewAPI
     @State private var setup: SetupState?
@@ -51,6 +52,10 @@ struct SetupCard: View {
                         if setup.items.contains(where: { !$0.ok && $0.repairable == true }) {
                             Button(busy ? String(localized: "Installing…") : String(localized: "Install")) { act { try await api.post("/api/setup/repair", [String: String](), timeout: 180) } }
                                 .glassPillButton().morphs(on: busy).disabled(busy || setup.registering)
+                        }
+                        if setup.items.contains(where: { !$0.ok && $0.trustable == true }) {
+                            Button("Trust Hooks") { act { try await api.post("/api/setup/trust-hooks", [String: String](), timeout: SetupState.timeout) } }
+                                .glassPillButton().disabled(busy || setup.registering)
                         }
                     }.frame(maxWidth: .infinity, alignment: .trailing)
                 }

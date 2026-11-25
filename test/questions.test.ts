@@ -883,6 +883,8 @@ test('a build line takes its difficulty from its job or its mission, and names e
   assert.deepEqual([lineOf(model, (e) => e.job === job.id).difficulty, lineOf(model, (e) => e.job === job.id).reviewedBy], ['hard', [reviewModel, 'claude-test']]);
   // The review job ids are kept beside the models, so a reviewer's rating can be traced to this line.
   assert.deepEqual(lineOf(model, (e) => e.job === job.id).reviewJobs, [review.id]);
+  // Each review's agent is kept too: a review job's own, and the lead's for a model it names.
+  assert.deepEqual(lineOf(model, (e) => e.job === job.id).reviewAgents, [review.agent, 'claude']);
   assert.equal((await note({ job: job.id, difficulty: 'hard' })).status, 200);
   assert.match((await note({ job: job.id, difficulty: 'routine' })).body.error, new RegExp(`Job ${job.id} was handed out as hard`));
   // Every entry that names no review is refused at once.

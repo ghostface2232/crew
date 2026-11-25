@@ -207,6 +207,9 @@ test('a review kind is the first reviewer from another agent, with extra reviews
   // Whatever the order, the review from another agent is the kind and the builder's own agent's is an extra review.
   assert.deepEqual(kind({ reviewedBy: ['model-a', 'claude-x'] }), { kind: 'claude-x', extra: 1 });
   assert.deepEqual(kind({ reviewedBy: ['claude-x', 'model-a'] }), { kind: 'claude-x', extra: 1 });
+  // A self-reviewer on another model of the builder's agent, with no notes of its own, is still the builder's agent's
+  // when the line recorded it, so the cross-review stays the kind.
+  assert.deepEqual(kind({ agent: 'claude', model: 'claude-x', reviewedBy: ['claude-sub', 'gpt-cross'], reviewAgents: ['claude', 'codex'] }), { kind: 'gpt-cross', extra: 1 });
   // A review only by the builder's own agent is its own kind.
   assert.deepEqual(kind({ reviewedBy: ['model-a'] }), { kind: 'model-a (own agent)', extra: 0 });
   // Older lines: the lead reading a worker's job, a self-review, and a cross-review of the lead's work are three kinds.

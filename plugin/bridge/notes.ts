@@ -109,6 +109,9 @@ export interface Evidence {
   reviewedBy?: string[];
   /** For a build line: the review jobs among those reviews, so a review's rating can be traced to the work it read. */
   reviewJobs?: string[];
+  /** For a build line: the agent of each review in `reviewedBy`, so a review is classed as the builder's own agent's or
+   * another's without depending on whether its model has notes of its own. */
+  reviewAgents?: Holder[];
   /** For a review line: the work it reviewed, by its job when a worker built it; `fix` when that job was a fix. */
   of?: { job?: string; model: string; fix?: true };
   /** The lead's rating of this line's work, resting on `text`. Only a job's work is rated, never the lead's own. */
@@ -187,7 +190,8 @@ function wellFormed(models: Record<string, any>): Record<string, ModelNote> {
       && (e.rounds === undefined || (e.adoption !== undefined && Number.isInteger(e.rounds) && e.rounds >= 0))
       && (e.difficulty === undefined || (e.role === 'build' && DIFFICULTIES.includes(e.difficulty)))
       && (e.reviewedBy === undefined || (e.role === 'build' && reviewModels(e.reviewedBy)))
-      && (e.reviewJobs === undefined || (e.role === 'build' && reviewModels(e.reviewJobs))));
+      && (e.reviewJobs === undefined || (e.role === 'build' && reviewModels(e.reviewJobs)))
+      && (e.reviewAgents === undefined || (Array.isArray(e.reviewAgents) && Array.isArray(e.reviewedBy) && e.reviewAgents.length === e.reviewedBy.length && e.reviewAgents.every((a: unknown) => HOLDERS.includes(a as string)))));
     Object.defineProperty(kept, model, {
       value: { model, agent: note.agent, summary: typeof note.summary === 'string' ? note.summary : '', summaryAt: Number.isFinite(note.summaryAt) ? note.summaryAt : null, evidence },
       enumerable: true, configurable: true, writable: true,
@@ -262,6 +266,7 @@ export function addEvidence(home: string, input: Omit<Evidence, 'id' | 'at'> & {
   check(input.difficulty === undefined || (input.role === 'build' && DIFFICULTIES.includes(input.difficulty)), `difficulty (only for a build line: ${oneOf(DIFFICULTIES)})`);
   check(input.reviewedBy === undefined || (input.role === 'build' && reviewModels(input.reviewedBy)), `reviewed_by (only for a build line: 1 to ${MAX_REVIEWS} model ids, one per review)`);
   check(input.reviewJobs === undefined || (input.reviewedBy !== undefined && reviewModels(input.reviewJobs) && input.reviewJobs.length <= input.reviewedBy.length), 'reviewJobs (the review jobs among reviewed_by)');
+  check(input.reviewAgents === undefined || (input.reviewedBy !== undefined && input.reviewAgents.length === input.reviewedBy.length && input.reviewAgents.every((a) => HOLDERS.includes(a))), 'reviewAgents (the agent of each review in reviewed_by)');
   const counted = (given: Partial<Findings> | undefined, name: string): Findings => {
     const result = {} as Findings;
     for (const key of ['high', 'medium', 'low'] as const) {
@@ -353,9 +358,11 @@ const shrink = (s: { num: number; den: number }, prior: number) => (s.num + PRIO
  */
 export function reviewKind(e: Evidence, agentOf: (model: string) => Holder | undefined): { kind: string; extra: number } {
   if (!e.reviewedBy) return { kind: `${e.reviewer} ${e.reviewer === e.agent ? 'self-review' : e.job ? 'review of a job' : 'cross-review'}`, extra: 0 };
-  const own = (m: string) => m === e.model || agentOf(m) === e.agent;
-  const first = e.reviewedBy.find((m) => !own(m)) ?? e.reviewedBy[0];
-  return { kind: own(first) ? `${first} (own agent)` : first, extra: e.reviewedBy.length - 1 };
+  // A line that recorded each review's agent says it outright; an older one is read from the models' own notes.
+  const own = (m: string, i: number) => (e.reviewAgents ? e.reviewAgents[i] === e.agent : m === e.model || agentOf(m) === e.agent);
+  const at = e.reviewedBy.findIndex((m, i) => !own(m, i));
+  const first = at < 0 ? 0 : at;
+  return { kind: own(e.reviewedBy[first], first) ? `${e.reviewedBy[first]} (own agent)` : e.reviewedBy[first], extra: e.reviewedBy.length - 1 };
 }
 
 /**

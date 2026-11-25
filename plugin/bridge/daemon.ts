@@ -17,7 +17,7 @@ import { clientJson } from './text.ts';
 import { ClaudeSessions } from './claude.ts';
 import type { ClaudeSession } from './claude.ts';
 import { agentCommand, agentEnv, canonicalPath, HOME, installed, isRole, JOB_ID, LEDGER_ASIDE, loadConfig, PLUGIN_ROOT, PORTS, ROLE_INFO, ROLES, VERSION, WORKERS } from './config.ts';
-import type { Config } from './config.ts';
+import type { Config, Holder } from './config.ts';
 import { evidenceType, openEvidence } from './evidence.ts';
 import { projectRoot } from './git.ts';
 import { followUps, isTerminal, Jobs, UnreadableLedger } from './jobs.ts';
@@ -1056,6 +1056,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
         // A review job names its own model; anything else is a model id the lead gives for a review of its own.
         let reviewedBy = body.reviewed_by;
         let reviewJobs: string[] | undefined;
+        let reviewAgents: Holder[] | undefined;
         if (Array.isArray(reviewedBy)) {
           const refused: string[] = [];
           const jobId = new RegExp(`^${JOB_ID}$`);
@@ -1072,6 +1073,9 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
           // Kept beside the models, so a reviewer's rating can be traced to the line of the work it read.
           const named = body.reviewed_by.filter((entry: unknown) => typeof entry === 'string' && jobId.test(entry.trim())).map((entry: string) => entry.trim());
           if (named.length) reviewJobs = named;
+          // A review job's agent is its own; a model the lead names is a review of its own: its diff reading or a self-reviewer.
+          const leadAgent: Holder = body.lead === 'codex' ? 'codex' : 'claude';
+          reviewAgents = body.reviewed_by.map((entry: unknown) => (typeof entry === 'string' && jobId.test(entry.trim()) ? jobs.list().find((j) => j.id === entry.trim())!.agent as Holder : leadAgent));
         }
         score = addEvidence(HOME, {
           model,
@@ -1096,6 +1100,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
           ...(difficulty !== undefined ? { difficulty } : {}),
           ...(reviewedBy !== undefined ? { reviewedBy } : {}),
           ...(reviewJobs ? { reviewJobs } : {}),
+          ...(reviewAgents ? { reviewAgents } : {}),
           text: body.text,
         }, { ratings: peerRatings }).score;
         if (body.rating !== undefined && !peerRatings) score = { ...score, ratingDropped: true };

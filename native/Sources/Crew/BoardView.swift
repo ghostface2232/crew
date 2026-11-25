@@ -774,6 +774,8 @@ struct ProjectSidebar: View {
     @Environment(AppUpdater.self) private var updater
     var body: some View {
         let projects = store.projects
+        // A project's pages show only its own requests, so the sidebar says which other projects have one, as the board's does.
+        let waiting = Set(store.state.waitingJobs.map(\.projectPath) + store.state.waitingSessions.map(\.projectPath))
         List(selection: Binding<String?>(
             get: { store.project },
             set: { path in store.project = path ?? "" }
@@ -781,7 +783,7 @@ struct ProjectSidebar: View {
             Label("All projects", systemImage: "square.stack").tag("")
             Section("Projects") {
                 ForEach(projects, id: \.self) { path in
-                    Label(projectName(path, among: projects), systemImage: "folder").tag(path).help(path)
+                    ProjectRow(name: projectName(path, among: projects), waiting: waiting.contains(path)).tag(path).help(path)
                 }
             }
         }
@@ -830,6 +832,24 @@ extension View {
     /// Places an empty state in the middle of the visible page rather than under the heading.
     func centeredInPage() -> some View {
         frame(maxWidth: .infinity).containerRelativeFrame(.vertical) { height, _ in height * 0.6 }
+    }
+}
+
+/// A project in the sidebar, with a dot while one of its agents waits on the user.
+private struct ProjectRow: View {
+    var name: String
+    var waiting: Bool
+    @Environment(\.backgroundProminence) private var prominence
+    var body: some View {
+        HStack(spacing: Space.s) {
+            Label(name, systemImage: "folder")
+            if waiting {
+                Spacer(minLength: 0)
+                // White on the selected row's accent, as the Settings sidebar's update dot turns.
+                Circle().fill(prominence == .increased ? AnyShapeStyle(.white) : AnyShapeStyle(Palette.warning))
+                    .frame(width: Symbol.indicator, height: Symbol.indicator).accessibilityLabel("Needs you")
+            }
+        }
     }
 }
 

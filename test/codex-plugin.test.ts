@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
-import { codexHooks, crewHooks, hookTrust, installCodexHooks, launcherPath, listedCrewHooks, writeCodexPlugin, writeLauncher, writtenByCrew } from '../plugin/bridge/codex-plugin.ts';
+import { codexHooks, crewHooks, hookTrust, installCodexHooks, launcherPath, listedCrewHooks, WORKER_ENV, writeCodexPlugin, writeLauncher, writtenByCrew } from '../plugin/bridge/codex-plugin.ts';
 import type { HooksFile } from '../plugin/bridge/codex-plugin.ts';
 
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-codex-plugin-'));
@@ -102,6 +102,32 @@ test("installCodexHooks keeps the user's hooks and replaces Crew's where they st
   // An event Crew no longer hooks loses Crew's group, and the event goes once it is empty.
   assert.equal(second.hooks.Stop, undefined);
 
+  // A handler the user put in Crew's group stays, after Crew's; a Crew handler left twice is taken out.
+  const added = { type: 'command', command: 'echo added' };
+  const crewStart = crew('').hooks.SessionStart[0];
+  fs.writeFileSync(file, JSON.stringify({ hooks: { SessionStart: [mine, { ...crewStart, hooks: [...crewStart.hooks, added] }, crewStart] } }));
+  installCodexHooks(file, crew(''), launcher, 'darwin');
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')).hooks.SessionStart, [mine, crewStart, { ...crewStart, hooks: [added] }]);
+  // A handler that only mentions the launcher is the user's.
+  const mention = { hooks: [{ type: 'command', command: `test -x '${launcher}' && echo ok` }] };
+  fs.writeFileSync(file, JSON.stringify({ hooks: { Stop: [mention] } }));
+  installCodexHooks(file, crew(''), launcher, 'darwin');
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')).hooks.Stop, [mention, ...crew('').hooks.Stop]);
+
+  // A symbolic link is written through, and the file keeps its permissions.
+  if (process.platform !== 'win32') {
+    const real = path.join(dir, 'dotfiles-hooks.json');
+    fs.writeFileSync(real, '{}');
+    fs.chmodSync(real, 0o600);
+    fs.rmSync(file);
+    fs.symlinkSync(real, file);
+    installCodexHooks(file, crew(''), launcher, 'darwin');
+    assert.ok(fs.lstatSync(file).isSymbolicLink());
+    assert.deepEqual(JSON.parse(fs.readFileSync(real, 'utf8')), crew(''));
+    assert.equal(fs.statSync(real).mode & 0o777, 0o600);
+    fs.rmSync(file);
+  }
+
   // A file that is not a hooks file is left as it is.
   fs.writeFileSync(file, '{"hooks": []}');
   assert.throws(() => installCodexHooks(file, crew(''), launcher, 'darwin'), /not a Codex hooks file/);
@@ -128,7 +154,7 @@ test('the launcher is rewritten for each build while the hook commands name the 
   assert.equal(launcherPath(dir, 'win32'), path.join(dir, 'hook.cmd'));
 });
 
-test('the launcher runs the named script in its own process, passing arguments, output and exit status', { skip: process.platform === 'win32' }, () => {
+test('the hook command runs the named script through the launcher only while Crew runs in that Codex home', () => {
   const root = built('launch');
   const bridge = path.join(root, 'plugin', 'bridge');
   // A script that, like wake.ts, acts only when it is the entry point.
@@ -141,19 +167,58 @@ test('the launcher runs the named script in its own process, passing arguments, 
     "import fs from 'node:fs';",
   ].join('\n'));
   fs.writeFileSync(path.join(bridge, 'package.json'), '{"type":"module"}');
-  const launcher = writeLauncher(path.join(temp, 'codex-launch'), process.execPath, bridge, '.js', 'darwin');
-  const res = spawnSync('/bin/sh', ['-c', `'${launcher}' probe stop-json`], { input: '{"session_id":"t"}', encoding: 'utf8' });
-  assert.equal(res.status, 3);
+  const codexHome = path.join(temp, 'launch-codex-home');
+  fs.mkdirSync(codexHome, { recursive: true });
+  const config = (text: string) => fs.writeFileSync(path.join(codexHome, 'config.toml'), text);
+  /** Runs Crew's hook command for `script` as Codex would, in its shell: pwsh on Windows, sh elsewhere. */
+  const hook = (launcher: string, script: string, env: Record<string, string> = {}, cwd = temp) => {
+    const { command } = crewHooks(codexHooks({ hooks: { Stop: [{ hooks: [{ type: 'command', command: `node "\${PLUGIN_ROOT}/bridge/${script}.ts" stop-json` }] }] } }, launcher))[0];
+    const shell = process.platform === 'win32' ? ['pwsh', ['-NoProfile', '-NonInteractive', '-Command', command]] as const : ['/bin/sh', ['-c', command]] as const;
+    const { NoDefaultCurrentDirectoryInExePath: _, ...base } = process.env;
+    return spawnSync(shell[0], [...shell[1]], { input: '{"session_id":"t"}', encoding: 'utf8', cwd, env: { ...base, CODEX_HOME: codexHome, ...env } });
+  };
+  const launcher = writeLauncher(path.join(temp, 'codex-launch'), process.execPath, bridge, '.js');
+
+  config('[plugins."crew@crew"]\nenabled = true\n\n[other]\nenabled = false\n');
+  const res = hook(launcher, 'probe');
+  assert.equal(res.status, 3, res.stderr);
   assert.equal(res.stdout, '["stop-json"]{"session_id":"t"}');
-  // Once Crew is removed, the hooks left in the user's file do nothing.
-  const gone = spawnSync('/bin/sh', ['-c', `'${launcher}' removed stop-json`], { input: '{}', encoding: 'utf8' });
-  assert.equal(gone.status, 0);
-  assert.equal(gone.stdout, '');
+  // A Crew worker runs none of the lead's hooks.
+  assert.deepEqual([hook(launcher, 'probe', { [WORKER_ENV]: '1' }).status, hook(launcher, 'probe', { [WORKER_ENV]: '1' }).stdout], [0, '']);
+  // Nor does a Codex home with Crew's plugin off, or without it.
+  config('[plugins."crew@crew"]\nenabled = false\n');
+  assert.deepEqual([hook(launcher, 'probe').status, hook(launcher, 'probe').stdout], [0, '']);
+  config('[plugins."other@x"]\nenabled = true\n');
+  assert.deepEqual([hook(launcher, 'probe').status, hook(launcher, 'probe').stdout], [0, '']);
+  // Once Crew is removed, the hooks left in the user's file do nothing, whether its script or its runtime is gone.
+  config('[plugins."crew@crew"]\nenabled = true\n');
+  assert.deepEqual([hook(launcher, 'removed').status, hook(launcher, 'removed').stdout], [0, '']);
+  const orphan = writeLauncher(path.join(temp, 'codex-orphan'), path.join(temp, 'gone', process.platform === 'win32' ? 'node.exe' : 'node'), bridge, '.js');
+  assert.deepEqual([hook(orphan, 'probe').status, hook(orphan, 'probe').stdout], [0, '']);
+  if (process.platform === 'win32') {
+    // A source checkout's `node` is never one in the session's project folder, which cmd.exe would try first.
+    const project = path.join(temp, 'project-with-node');
+    fs.mkdirSync(project, { recursive: true });
+    fs.copyFileSync(path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'hostname.exe'), path.join(project, 'node.exe'));
+    const source = writeLauncher(path.join(temp, 'codex-source'), 'node', bridge, '.js');
+    const local = hook(source, 'probe', {}, project);
+    assert.equal(local.status, 3, local.stderr);
+    assert.equal(local.stdout, '["stop-json"]{"session_id":"t"}');
+  }
 });
 
 test('Windows hook commands call the launcher through pwsh', () => {
   const hooks = codexHooks({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'node "${PLUGIN_ROOT}/bridge/wake.ts" stop-json', timeout: 5 }] }] } }, "C:\\Users\\O'Neil\\.crew\\codex\\bin\\hook.cmd", 'win32');
   assert.deepEqual(hooks.hooks.Stop[0].hooks[0], { type: 'command', command: "& 'C:\\Users\\O''Neil\\.crew\\codex\\bin\\hook.cmd' wake stop-json; exit $LASTEXITCODE", timeout: 5 });
+  // PowerShell takes curly single quotes for quotes too.
+  const curly = codexHooks({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'node "${PLUGIN_ROOT}/bridge/wake.ts" stop-json' }] }] } }, 'C:\\Users\\O\u2019Brien\\hook.cmd', 'win32');
+  assert.equal(curly.hooks.Stop[0].hooks[0].command, "& 'C:\\Users\\O\u2019\u2019Brien\\hook.cmd' wake stop-json; exit $LASTEXITCODE");
+  if (process.platform === 'win32') {
+    const script = path.join(temp, 'curly.ps1');
+    fs.writeFileSync(script, `﻿${curly.hooks.Stop[0].hooks[0].command}`);
+    const parsed = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', `$e = $null; [void][System.Management.Automation.Language.Parser]::ParseFile('${script}', [ref]$null, [ref]$e); $e.Count`], { encoding: 'utf8' });
+    assert.equal(parsed.stdout.trim(), '0', parsed.stderr);
+  }
 });
 
 test('a hook in another form is refused rather than written wrong', () => {
@@ -182,6 +247,11 @@ test("Crew's hooks are found in Codex's hooks/list by event, command and file, a
   const short = listed(() => 'trusted');
   short.data[0].hooks.pop();
   assert.equal(trust(short), 'missing');
+  // The same hook listed twice is not trusted on either's account: registering again leaves one.
+  const twice = listed(() => 'trusted');
+  twice.data[0].hooks.push({ ...twice.data[0].hooks[0], key: 'copy', trustStatus: 'untrusted' });
+  assert.equal(listedCrewHooks(twice, file, expected)[0], undefined);
+  assert.equal(trust(twice), 'missing');
   const disabled = listed(() => 'trusted');
   Object.assign(disabled.data[0].hooks[0], { enabled: false });
   assert.equal(trust(disabled), 'disabled');

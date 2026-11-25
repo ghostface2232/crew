@@ -75,9 +75,7 @@ export function codexHooks(source: HooksFile, launcher: string, platform: NodeJS
     if (entry.type !== 'command' || !match) throw new Error(`Cannot rewrite the Codex hook: ${entry.command}`);
     // Codex runs hooks under pwsh.exe on Windows, which runs a quoted path only after `&` and otherwise ends with its
     // own status rather than the script's, and under the account's login shell elsewhere.
-    const command = platform === 'win32'
-      ? `& ${quoteFor(platform)(launcher)} ${match[1]}${match[2]}; exit $LASTEXITCODE`
-      : `${quoteFor(platform)(launcher)} ${match[1]}${match[2]}`;
+    const command = `${commandPrefix(launcher, platform)}${match[1]}${match[2]}${platform === 'win32' ? '; exit $LASTEXITCODE' : ''}`;
     return { ...entry, command };
   };
   const events = Object.entries(source.hooks).map(([event, groups]) => [event, groups.map((group) => ({ ...group, hooks: group.hooks.map(rewrite) }))]);
@@ -86,40 +84,51 @@ export function codexHooks(source: HooksFile, launcher: string, platform: NodeJS
 
 /**
  * Puts Crew's `hooks` (from `codexHooks`, running `launcher`) in the user's Codex hooks file at `file`, keeping
- * everything else in it, and returns whether the file changed. Crew's groups are those whose every hook runs the
- * launcher. They are replaced where they stand, so the key Codex trusts each hook by, its event, group and index,
- * stays the same, and new ones go after the user's own. A file that is not a hooks file is left as it is.
+ * everything else in it, and returns whether the file changed. Crew's handlers are those whose command starts the way
+ * `codexHooks` writes one, `<launcher> <script>`; each is taken out wherever it is, so none is left twice. Crew's
+ * groups go where the first group holding one stood, so the key Codex trusts each hook by, its event, group and
+ * index, stays the same, and new ones go after the user's own. A user's handler inside Crew's group stays, in a group
+ * of its own. A file that is not a hooks file is left as it is. A symbolic link is written through, keeping the
+ * target's permissions.
  */
 export function installCodexHooks(file: string, hooks: HooksFile, launcher: string, platform: NodeJS.Platform = process.platform): boolean {
   let current: { hooks?: unknown; [key: string]: unknown } = { hooks: {} };
-  if (fs.existsSync(file)) {
+  const exists = fs.existsSync(file);
+  if (exists) {
     current = JSON.parse(fs.readFileSync(file, 'utf8'));
     if (!current || typeof current !== 'object' || Array.isArray(current)) throw new Error(`${file} is not a Codex hooks file.`);
   }
   const existing = current.hooks ?? {};
   if (typeof existing !== 'object' || Array.isArray(existing)) throw new Error(`${file} is not a Codex hooks file.`);
   const events = { ...existing } as Record<string, unknown>;
-  const marker = quoteFor(platform)(launcher);
-  const ours = (group: unknown) => {
-    const handlers = (group as { hooks?: unknown } | null)?.hooks;
-    return Array.isArray(handlers) && handlers.length > 0 && handlers.every((hook) => typeof hook?.command === 'string' && hook.command.includes(marker));
-  };
+  const prefix = commandPrefix(launcher, platform);
+  const ours = (hook: unknown) => typeof (hook as HookEntry | null)?.command === 'string' && (hook as HookEntry).command!.startsWith(prefix);
   for (const event of new Set([...Object.keys(events), ...Object.keys(hooks.hooks)])) {
     const groups = events[event] ?? [];
-    if (!Array.isArray(groups)) throw new Error(`${file} has hooks for ${event} that are not a list.`);
-    const at = groups.findIndex(ours);
-    const kept = groups.filter((group) => !ours(group));
-    const crew = hooks.hooks[event] ?? [];
-    const next = at === -1 ? [...kept, ...crew] : [...kept.slice(0, at), ...crew, ...kept.slice(at)];
+    if (!Array.isArray(groups) || groups.some((group) => !Array.isArray(group?.hooks))) throw new Error(`${file} has hooks for ${event} that are not a list.`);
+    const at = groups.findIndex((group) => group.hooks.some(ours));
+    // A group of Crew's alone goes; one the user added a handler to keeps the user's handlers.
+    const kept = groups.flatMap((group) => {
+      if (!group.hooks.some(ours)) return [group];
+      const theirs = group.hooks.filter((hook: unknown) => !ours(hook));
+      return theirs.length ? [{ ...group, hooks: theirs }] : [];
+    });
+    // The groups before the first with a Crew handler are all kept as they are.
+    const before = at === -1 ? kept.length : at;
+    const next = [...kept.slice(0, before), ...(hooks.hooks[event] ?? []), ...kept.slice(before)];
     if (next.length) events[event] = next;
     else delete events[event];
   }
   const updated = { ...current, hooks: events };
   if (JSON.stringify(updated) === JSON.stringify(current)) return false;
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  writeAtomic(file, `${JSON.stringify(updated, null, 2)}\n`);
+  const target = exists ? fs.realpathSync(file) : file;
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  writeAtomic(target, `${JSON.stringify(updated, null, 2)}\n`, exists ? fs.statSync(target).mode & 0o777 : undefined);
   return true;
 }
+
+/** How `codexHooks` starts each command it writes, on `platform`: the quoted launcher and a space. */
+const commandPrefix = (launcher: string, platform: NodeJS.Platform) => `${platform === 'win32' ? '& ' : ''}${quoteFor(platform)(launcher)} `;
 
 /** A Crew hook as it is written in the user's Codex hooks file. */
 export type CrewHook = { event: string; command: string };
@@ -133,16 +142,31 @@ export type ListedHook = { key: string; eventName: string; command: string; sour
 
 /**
  * Crew's hooks among those app-server `hooks/list` reports, matched by event, command and the hooks file at `file`
- * rather than by key, whose spelling of the file's path is Codex's own; undefined where Codex lists no such hook.
+ * rather than by key, whose spelling of the file's path is Codex's own. Undefined where Codex lists no such hook, or
+ * more than one: which of them Crew wrote is unknown, so neither is trusted, and registering again leaves one.
  */
 export function listedCrewHooks(listed: unknown, file: string, expected: CrewHook[]): (ListedHook | undefined)[] {
   const data = (listed as { data?: unknown } | null)?.data;
   if (!Array.isArray(data)) throw new Error('hooks/list answered without a list of hooks');
   const all: ListedHook[] = data.flatMap((entry) => (Array.isArray(entry?.hooks) ? entry.hooks : []));
-  const sameFile = (source: unknown) => typeof source === 'string' && path.relative(path.resolve(source.replace(/^\\\\\?\\/, '')), path.resolve(file)) === '';
+  const ours = realPath(file);
+  const sameFile = (source: unknown) => typeof source === 'string' && path.relative(realPath(source), ours) === '';
   // Codex names events in camel case: `SessionStart` is `sessionStart`.
   const camel = (event: string) => event[0].toLowerCase() + event.slice(1);
-  return expected.map(({ event, command }) => all.find((hook) => hook?.eventName === camel(event) && hook.command === command && sameFile(hook.sourcePath)));
+  return expected.map(({ event, command }) => {
+    const matches = all.filter((hook) => hook?.eventName === camel(event) && hook.command === command && sameFile(hook.sourcePath));
+    return matches.length === 1 ? matches[0] : undefined;
+  });
+}
+
+/** A file's path as the file system resolves it, without Windows' extended-length prefix, which Codex may report. */
+function realPath(file: string): string {
+  const plain = file.replace(/^\\\\\?\\UNC\\/i, '\\\\').replace(/^\\\\\?\\/, '');
+  try {
+    return fs.realpathSync.native(plain);
+  } catch {
+    return path.resolve(plain);
+  }
 }
 
 /** Whether every Crew hook runs in Codex, or what the user still needs to do. */
@@ -170,16 +194,24 @@ export const pointer = (value: unknown): string => {
 /** The launcher `writeLauncher` writes in `dir`, which the hook commands name. */
 export const launcherPath = (dir: string, platform: NodeJS.Platform = process.platform) => path.join(dir, platform === 'win32' ? 'hook.cmd' : 'hook');
 
+/** Set in the environment of the `codex app-server` that runs Crew's workers, whose hooks the launcher skips. */
+export const WORKER_ENV = 'CREW_CODEX_WORKER';
+
 /**
  * The launcher hooks run: `hook <script> [args]` runs `<bridge>/<script><ext>` on the runtime, `.js` for a built
  * copy and `.ts` for a source checkout, in the same process so its exit code and output are the hook's. It is
  * rewritten in place at each registration, one file at a time, since an open session may run it at any moment.
+ *
+ * The hooks sit in the user's Codex hooks file, outside the plugin, so the launcher does what being the plugin's did:
+ * it runs them only while Crew's plugin is installed and on in that Codex home, never for a Crew worker (which runs
+ * with Crew's plugin off), and does nothing once the runtime or the script is gone with Crew.
  */
 export function writeLauncher(dir: string, runtime: string, bridge: string, ext: '.js' | '.ts', platform: NodeJS.Platform = process.platform): string {
   fs.mkdirSync(dir, { recursive: true });
   const module = path.join(dir, 'hook.mjs');
   writeAtomic(module, [
     "import fs from 'node:fs';",
+    "import os from 'node:os';",
     "import path from 'node:path';",
     "import { pathToFileURL } from 'node:url';",
     `const bridge = ${JSON.stringify(bridge)};`,
@@ -188,8 +220,19 @@ export function writeLauncher(dir: string, runtime: string, bridge: string, ext:
     "  console.error('Usage: hook <script> [args...]');",
     '  process.exit(1);',
     '}',
+    `if (process.env.${WORKER_ENV}) process.exit(0);`,
+    '/** Whether config.toml has Crew\'s plugin, as Codex writes it, and not turned off. Codex removes the table with the plugin. */',
+    'function pluginOn() {',
+    "  let config = '';",
+    "  try { config = fs.readFileSync(path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'config.toml'), 'utf8'); } catch { return false; }",
+    `  const table = /^[ \\t]*\\[[ \\t]*plugins[ \\t]*\\.[ \\t]*(["'])${CODEX_PLUGIN}\\1[ \\t]*\\][ \\t]*$/m.exec(config);`,
+    '  if (!table) return false;',
+    '  const rest = config.slice(table.index + table[0].length);',
+    '  const next = /^[ \\t]*\\[/m.exec(rest);',
+    '  return !/^[ \\t]*enabled[ \\t]*=[ \\t]*false\\b/m.test(next ? rest.slice(0, next.index) : rest);',
+    '}',
+    'if (!pluginOn()) process.exit(0);',
     `const file = path.join(bridge, \`\${name}${ext}\`);`,
-    "// The hooks stay in the user's Codex hooks file after Crew is removed; they then do nothing.",
     'if (!fs.existsSync(file)) process.exit(0);',
     '// A script that runs only as the entry point compares process.argv[1] with its own path, which Node resolves.',
     'const script = fs.realpathSync(file);',
@@ -198,13 +241,19 @@ export function writeLauncher(dir: string, runtime: string, bridge: string, ext:
     '',
   ].join('\n'));
   const launcher = launcherPath(dir, platform);
+  // A source checkout's runtime is the `node` in PATH, which only an absolute runtime can be checked for beforehand.
+  const fixed = path.isAbsolute(runtime);
   if (platform === 'win32') {
     // cmd.exe reads a .cmd file in the console code page, so the module's path, which may not be ASCII, is left to
-    // %~dp0, and the runtime's is written through %LOCALAPPDATA% or %USERPROFILE% where it can be.
-    writeAtomic(launcher, `@"${cmdPath(runtime)}" "%~dp0hook.mjs" %*\r\n`);
+    // %~dp0, and the runtime's is written through %LOCALAPPDATA% or %USERPROFILE% where it can be. cmd.exe would
+    // look for a bare `node` in the session's project folder before PATH, unless told not to.
+    const node = cmdPath(runtime);
+    const lines = ['@set NoDefaultCurrentDirectoryInExePath=1', ...(fixed ? [`@if not exist "${node}" exit /b 0`] : []), `@"${node}" "%~dp0hook.mjs" %*`];
+    writeAtomic(launcher, `${lines.join('\r\n')}\r\n`);
     return launcher;
   }
-  writeAtomic(launcher, `#!/bin/sh\nexec ${shellQuote(runtime)} ${shellQuote(module)} "$@"\n`, 0o755);
+  const check = fixed ? `[ -x ${shellQuote(runtime)} ] || exit 0\n` : '';
+  writeAtomic(launcher, `#!/bin/sh\n${check}exec ${shellQuote(runtime)} ${shellQuote(module)} "$@"\n`, 0o755);
   return launcher;
 }
 
@@ -214,7 +263,8 @@ function cmdPath(file: string): string {
 }
 
 const shellQuote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`;
-const powershellQuote = (value: string) => `'${value.replaceAll("'", "''")}'`;
+// PowerShell also takes the curly single quotes for quotes.
+const powershellQuote = (value: string) => `'${value.replace(/['‘-‛]/g, '$&$&')}'`;
 const quoteFor = (platform: NodeJS.Platform) => (platform === 'win32' ? powershellQuote : shellQuote);
 
 function writeJson(file: string, value: unknown): void {

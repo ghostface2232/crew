@@ -439,7 +439,7 @@ export async function codexHooksItem(bin: string, timeout = HOOK_LIST_TIMEOUT_MS
   }
   if (trust === 'trusted') return { ...item, ok: true, detail: 'Trusted.', summary: 'Complete' };
   if (trust === 'missing') return {
-    ...item, ok: false, repairable: true, detail: `Crew's hooks are not in ${codexHooksFile()}.`,
+    ...item, ok: false, repairable: true, detail: `Crew's hooks are missing from ${codexHooksFile()}, or are there more than once.`,
     summary: 'Select Install to add Crew hooks to Codex.',
   };
   if (trust === 'disabled') return { ...item, ok: false, detail: 'In Codex, open Settings → Hooks and turn on the disabled Crew hooks.' };

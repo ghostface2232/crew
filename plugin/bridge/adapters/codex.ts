@@ -3,6 +3,7 @@ import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { tokenFile } from '../auth.ts';
+import { WORKER_ENV } from '../codex-plugin.ts';
 import { agentCommand, agentEnv, HOME, VERSION } from '../config.ts';
 import type { Config } from '../config.ts';
 import { isTerminal, noteLeadDecline } from '../jobs.ts';
@@ -559,7 +560,8 @@ export class CodexAdapter implements Adapter {
   }
 
   private async launch(): Promise<RpcPeer> {
-    const env = agentEnv();
+    // Crew's lead hooks are in the user's Codex hooks file, which turning Crew's plugin off does not reach.
+    const env = { ...agentEnv(), [WORKER_ENV]: '1' };
     const { bin, args, shell } = agentCommand(this.config.codex.bin, ['app-server'], env);
     const child = spawn(bin, args, { env, shell, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     const peer = new RpcPeer(child, {

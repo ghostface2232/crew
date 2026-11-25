@@ -456,7 +456,7 @@ test('the Codex hooks item asks app-server hooks/list and is trusted only when C
   assert.equal(disabled.detail, 'In Codex, open Settings → Hooks and turn on the disabled Crew hooks.');
   // Hooks gone from the user's file are put back by Install, which registers again.
   const missing = await codexHooksItem(fake('missing', `${hooks('trusted')}.slice(1)`));
-  assert.deepEqual([missing.ok, missing.repairable, missing.detail], [false, true, `Crew's hooks are not in ${file}.`]);
+  assert.deepEqual([missing.ok, missing.repairable, missing.detail], [false, true, `Crew's hooks are missing from ${file}, or are there more than once.`]);
   for (const [name, mode, reason] of [['refused', 'error', /method not found/], ['gone', 'exit', /exited/]] as const) {
     const unknown = await codexHooksItem(fake(name, '[]', mode));
     assert.equal(unknown.ok, false, name);

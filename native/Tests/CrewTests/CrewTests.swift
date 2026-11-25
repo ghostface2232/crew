@@ -865,6 +865,31 @@ private final class MockProtocol: URLProtocol, @unchecked Sendable {
         await store.dismissIssue("https://github.com/me/app/issues/7", project: "/work/a+b")
         #expect(store.issues["/work/a+b"]?.issues.isEmpty == true)
     }
+    @Test func turnTokenBudgetIsAbsentFromAnOlderDaemonAndNullMeansByDifficulty() async throws {
+        var snapshot = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(fixture())) as? [String: Any])
+        #expect(snapshot["turnTokenBudget"] == nil)
+        let api = api { request in
+            #expect(request.url?.path == "/api/turn-token-budget")
+            // Echoed back, so the stored value shows what was sent: null for by difficulty.
+            let budget = try #require(try requestBody(request)["budget"])
+            return (200, try JSONSerialization.data(withJSONObject: ["turnTokenBudget": budget]), 0)
+        }
+        let store = try store(api: api)
+        try store.receive(ServerEvent(name: "state", data: JSONSerialization.data(withJSONObject: snapshot)))
+        #expect(store.state.turnTokenBudget == nil)
+        snapshot["turnTokenBudget"] = NSNull()
+        try store.receive(ServerEvent(name: "state", data: JSONSerialization.data(withJSONObject: snapshot)))
+        #expect(store.state.turnTokenBudget == .byDifficulty)
+        try store.receive(ServerEvent(name: "turnTokenBudget", data: Data("5000000".utf8)))
+        #expect(store.state.turnTokenBudget == .tokens(5_000_000))
+        try store.receive(ServerEvent(name: "turnTokenBudget", data: Data(#""unlimited""#.utf8)))
+        #expect(store.state.turnTokenBudget == .unlimited)
+        await store.setTurnTokenBudget(.byDifficulty)
+        #expect(store.state.turnTokenBudget == .byDifficulty)
+        await store.setTurnTokenBudget(.tokens(20_000_000))
+        #expect(store.state.turnTokenBudget == .tokens(20_000_000))
+        #expect(TurnTokenBudget.choices.first == .tokens(1_000_000) && TurnTokenBudget.choices.last == .tokens(100_000_000))
+    }
     @Test func missionPresetSendsNameOrNullAndOnlyChangesActiveMissions() async throws {
         let original = try fixture().missions[0]
         let calls = Mutex(0)

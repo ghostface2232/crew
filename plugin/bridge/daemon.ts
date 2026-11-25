@@ -36,7 +36,7 @@ import type { Registration, SetupItem } from './setup.ts';
 import { toastCommand } from './toast.ts';
 import { ANTIGRAVITY_MODELS, antigravityModels, codexModels } from './tiers.ts';
 import type { ModelChoice } from './tiers.ts';
-import { appendInstructions, instructionsFile, readInstructions, saveLanguage, savePeerRatings, savePreset, saveProjectSettings, saveRoles, writeInstructions } from './settings.ts';
+import { appendInstructions, instructionsFile, readInstructions, saveLanguage, savePeerRatings, savePreset, saveProjectSettings, saveRoles, saveTurnTokenBudget, writeInstructions } from './settings.ts';
 import { agentGaugeDir, fromCodexLimits, route as routeWork, UsageMonitor } from './usage.ts';
 import type { RouteKind } from './usage.ts';
 import type { EventKind, Job, JobsHooks } from './jobs.ts';
@@ -402,6 +402,7 @@ fs.watchFile(path.join(HOME, 'config.json'), { interval: 2000 }, () => {
   broadcast('peerRatings', live.peerRatings);
   broadcast('modelScores', modelScores());
   broadcast('projects', live.projects);
+  broadcast('turnTokenBudget', live.turnTokenBudget);
   usage.setModels(usageModels(live));
 });
 
@@ -438,6 +439,7 @@ function state() {
     peerRatings: live.peerRatings,
     language: live.language,
     projects: live.projects,
+    turnTokenBudget: live.turnTokenBudget,
     modelScores: modelScores(),
     events: jobs.recent.slice(-200),
   };
@@ -593,7 +595,7 @@ const BOARD_POSTS = [
   /^\/api\/jobs$/,
   /^\/api\/jobs\/[\w-]+\/(?:reply|cancel|rounds\/\d+)$/,
   /^\/api\/missions\/[\w-]+$/,
-  /^\/api\/(?:instructions|setup\/repair|setup\/trust-hooks|peer-ratings|preset|language|roles|project-settings)$/,
+  /^\/api\/(?:instructions|setup\/repair|setup\/trust-hooks|peer-ratings|preset|language|roles|project-settings|turn-token-budget)$/,
 ];
 /**
  * Parts of those requests that only the lead sends: they speak for the user or the lead, or have the daemon read a
@@ -1157,6 +1159,11 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       const saved = savePeerRatings(HOME, (await readJson(req)).enabled);
       broadcast('peerRatings', saved.peerRatings);
       broadcast('modelScores', modelScores());
+      return saved;
+    }
+    if (pathname === '/api/turn-token-budget') {
+      const saved = saveTurnTokenBudget(HOME, (await readJson(req)).budget);
+      broadcast('turnTokenBudget', saved.turnTokenBudget);
       return saved;
     }
     if (pathname === '/api/project-settings') {

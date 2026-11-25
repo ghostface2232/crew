@@ -112,6 +112,25 @@ test('a turn budget interrupts once, reports a resumable failure, and starts fre
   assert.equal(job.turns, 2);
 });
 
+test("the user's turn token budget replaces the difficulty's cap within one sweep, and unlimited sets none", async (t) => {
+  let worker!: JobCtl;
+  let budget: Config['turnTokenBudget'] = 5_000_000;
+  const h = harness((ctl) => { worker = ctl; }, () => ({ ...config, turnTokenBudget: budget }));
+  t.after(() => { h.jobs.flush(); fs.rmSync(h.home, { recursive: true, force: true }); });
+  h.adapter.cancel = async () => { h.calls.push('cancel'); worker.cancelled(); };
+  const job = await h.jobs.create({ kind: 'delegate', cwd: h.home, isolation: 'in_place', task: 'edit', difficulty: 'hard' });
+  budget = 'unlimited';
+  (h.jobs as any).checkStalls();
+  worker.tokens(500_000_000, { input: 500_000_000, cachedInput: 0, output: 0 });
+  assert.deepEqual([job.state, h.calls], ['running', []]);
+  // Lowered below what the running turn already used, the cap stops it at the next sweep.
+  budget = 1_000_000;
+  (h.jobs as any).checkStalls();
+  await settled(h.jobs, job);
+  assert.deepEqual(h.calls, ['cancel']);
+  assert.match(job.error!.message, /token cap of 1000000 reached \(500000000 tokens observed\)/);
+});
+
 test('the turn budget pauses for user decisions and resumes with the remaining running time', async (t) => {
   let worker!: JobCtl;
   const h = harness((ctl) => { worker = ctl; });

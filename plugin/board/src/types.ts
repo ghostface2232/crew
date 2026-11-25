@@ -45,6 +45,8 @@ export interface BoardState {
   modelScores?: ModelScore[];
   /** Each project's switches by its canonical path; absent from a daemon that predates them. */
   projects?: Record<string, ProjectSettings>;
+  /** The user's cap on a worker turn's tokens, or null to set it by difficulty; absent from a daemon that predates it. */
+  turnTokenBudget?: Config['turnTokenBudget'];
 }
 /** GET /api/issues: open issues of a project's repository that are the user's to start, mine first. */
 export interface IssueList {

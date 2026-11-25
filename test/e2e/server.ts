@@ -91,6 +91,11 @@ const server = http.createServer(async (req, res) => {
     send('preset', result);
     return json(result);
   }
+  if (url.pathname === '/api/turn-token-budget') {
+    state.turnTokenBudget = body.budget;
+    send('turnTokenBudget', state.turnTokenBudget);
+    return json({ turnTokenBudget: state.turnTokenBudget });
+  }
   if (url.pathname === '/api/language') {
     state.language = body.language ?? null;
     send('language', { language: state.language });

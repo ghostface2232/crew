@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { canonicalPath, PROJECT_SWITCHES, resolveConfig } from './config.ts';
+import { canonicalPath, PROJECT_SWITCHES, resolveConfig, TURN_TOKEN_CHOICES, validTurnTokenBudget } from './config.ts';
 import type { Config, ProjectSettings } from './config.ts';
 
 /**
@@ -75,6 +75,24 @@ export function savePeerRatings(home: string, enabled: unknown): Pick<Config, 'p
   const resolved = resolveConfig(next as never);
   writeAtomic(file, `${JSON.stringify(next, null, 2)}\n`);
   return { peerRatings: resolved.peerRatings };
+}
+
+/** Sets the turn token budget in config.json, keeping every other setting. Null, the default, is left unwritten. */
+export function saveTurnTokenBudget(home: string, budget: unknown): Pick<Config, 'turnTokenBudget'> {
+  if (budget === undefined || !validTurnTokenBudget(budget)) throw new Error(`budget must be one of ${TURN_TOKEN_CHOICES.join(', ')}, "unlimited", or null.`);
+  const file = path.join(home, 'config.json');
+  let current: Record<string, unknown> = {};
+  try {
+    current = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error(`${file} is not valid JSON, so it was left untouched: ${(err as Error).message}`);
+  }
+  if (!current || typeof current !== 'object' || Array.isArray(current)) throw new Error(`${file} does not hold a settings object, so it was left untouched.`);
+  const { turnTokenBudget: _old, ...rest } = current;
+  const next = budget === null ? rest : { ...rest, turnTokenBudget: budget };
+  const resolved = resolveConfig(next as never);
+  writeAtomic(file, `${JSON.stringify(next, null, 2)}\n`);
+  return { turnTokenBudget: resolved.turnTokenBudget };
 }
 
 /** Sets or clears the preset in config.json, keeping every other setting. Refused without writing if it is not a preset. */

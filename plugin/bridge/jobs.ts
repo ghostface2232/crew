@@ -9,7 +9,7 @@ import { runCheck } from './check.ts';
 import type { CheckResult } from './check.ts';
 import type { Usage } from './usage.ts';
 import { assignHint, canonicalPath, defaultHolder, disabledAgents, effectiveRole, isRole, LEAD, LEDGER_ASIDE, MAX_DEBATE_ROUNDS, daemonPort, nodeEnv, projectSettings, roleInfo, ROLES, runsCommands, WORKERS, workerInfo } from './config.ts';
-import type { Config, JobKind, PresetName, Role, WorkerAgent } from './config.ts';
+import type { Config, JobKind, PresetName, Role, TurnTokenBudget, WorkerAgent } from './config.ts';
 import { attached, untrackedPaths, carryUncommitted, changesSince, commitAll, commitChanges, copyIncluded, createWorktree, currentBranch, dirtyCount, git, mergeInto, isInside, NO_HOOKS, NO_SUBMODULES, projectRoot, realpath, removeDirectory, removeEmptyLeftover, removeEmptySlot, removeWorktree, repoRoot, revertCommit, revertsSince, reviewDiff, withBaseWorktree, WorktreeCleanupError, worktreeIncludeHint } from './git.ts';
 import { collectGarbage } from './gc.ts';
 import { BrowserServers, jobWritable } from './browser.ts';
@@ -574,6 +574,8 @@ export class Jobs {
   private readConfig: () => Config;
   /** Settings as of startup, for timers that must not fail on a config edit. */
   private settings: Config;
+  /** The user's turn token budget as of the latest stall sweep. */
+  private turnTokenBudget: TurnTokenBudget;
   /** Claude's only where the daemon runs Claude workers; a test may leave it out. */
   private adapters: Record<WorkerAgent, Adapter> & { claude?: Adapter };
   private hooks: JobsHooks;
@@ -584,6 +586,7 @@ export class Jobs {
     this.home = home;
     this.readConfig = config;
     this.settings = config();
+    this.turnTokenBudget = this.settings.turnTokenBudget;
     this.adapters = adapters;
     this.hooks = hooks;
     this.platform = platform;
@@ -1854,11 +1857,12 @@ export class Jobs {
   private checkBudget(job: Job): void {
     if (job.state !== 'running' || this.finalizing.has(job.id) || this.cancelling.has(job.id)) return;
     const budget = TURN_BUDGET[job.difficulty ?? 'standard'];
+    const tokenCap = this.turnTokenBudget === 'unlimited' ? Infinity : this.turnTokenBudget ?? budget.tokens;
     const elapsed = Date.now() - (job.turnStartedAt ?? job.createdAt) - (job.turnWaitMs ?? 0);
     const tokens = job.tokenUse?.turn ?? 0;
     let stop = this.budgetStops.get(job.id);
     if (!stop) {
-      const message = tokens >= budget.tokens ? `Turn token cap of ${budget.tokens} reached (${tokens} tokens observed).`
+      const message = tokens >= tokenCap ? `Turn token cap of ${tokenCap} reached (${tokens} tokens observed).`
         : elapsed >= budget.minutes * 60_000 ? `Turn wall-clock cap of ${budget.minutes} minutes reached (${Math.floor(elapsed / 1000)} seconds observed).` : null;
       if (!message) return;
       this.budgetStops.set(job.id, stop = { message, ended: false });
@@ -1871,6 +1875,12 @@ export class Jobs {
 
   private checkStalls(): void {
     const limit = this.settings.stallSeconds * 1000;
+    // Read here rather than on each token report, so a change applies within one sweep without a file read per report.
+    try {
+      this.turnTokenBudget = this.readConfig().turnTokenBudget;
+    } catch {
+      // An invalid file keeps the budget last read.
+    }
     for (const job of this.jobs.values()) {
       this.checkBudget(job);
       if (this.budgetStops.has(job.id)) continue;

@@ -619,6 +619,56 @@ struct Preset: Codable, Sendable, Equatable {
     }
 }
 struct PresetState: Codable, Sendable, Equatable { var preset: PresetName?; var presets: [String: Preset] }
+/// The user's cap on a worker turn's tokens (`turnTokenBudget` in config.json). JSON null sets it by job difficulty.
+enum TurnTokenBudget: Codable, Sendable, Hashable {
+    case byDifficulty, unlimited, tokens(Int)
+    /// The daemon's TURN_TOKEN_CHOICES (plugin/bridge/config.ts).
+    static let choices: [TurnTokenBudget] = [1, 5, 10, 20, 30, 50, 100].map { .tokens($0 * 1_000_000) }
+    /// The caps a turn gets by difficulty: routine, standard, hard.
+    static let byDifficultyCaps = (routine: 60_000_000, standard: 80_000_000, hard: 120_000_000)
+    init(from decoder: Decoder) throws {
+        let value = try decoder.singleValueContainer()
+        if value.decodeNil() { self = .byDifficulty }
+        else if let tokens = try? value.decode(Int.self) { self = .tokens(tokens) }
+        else if try value.decode(String.self) == "unlimited" { self = .unlimited }
+        else { throw DecodingError.dataCorruptedError(in: value, debugDescription: "Unknown turn token budget.") }
+    }
+    func encode(to encoder: Encoder) throws {
+        var value = encoder.singleValueContainer()
+        switch self {
+        case .byDifficulty: try value.encodeNil()
+        case .unlimited: try value.encode("unlimited")
+        case .tokens(let tokens): try value.encode(tokens)
+        }
+    }
+    var label: String {
+        switch self {
+        case .byDifficulty: String(localized: "By Difficulty")
+        case .unlimited: String(localized: "Unlimited")
+        case .tokens(let tokens): Self.count(tokens)
+        }
+    }
+    var footnote: String {
+        let caps = Self.byDifficultyCaps
+        let own = switch self {
+        case .byDifficulty: String(localized: "A worker turn stops at \(Self.count(caps.routine)) tokens for a routine job, \(Self.count(caps.standard)) for a standard one, and \(Self.count(caps.hard)) for a hard one.")
+        case .unlimited: String(localized: "A worker turn is never stopped for its tokens, so one that goes in circles keeps spending them until its time runs out.")
+        case .tokens: String(localized: "Every worker turn stops at this many tokens, whatever its difficulty.")
+        }
+        return own + " " + String(localized: "A turn also stops after 2 to 4 hours of work, by difficulty. A stopped job can be resumed.")
+    }
+    /// Brief, in the language the app shows: 80M, or 8000만.
+    static func count(_ tokens: Int) -> String {
+        tokens.formatted(.number.notation(.compactName).locale(Locale(identifier: Bundle.main.preferredLocalizations.first ?? "en")))
+    }
+}
+extension KeyedDecodingContainer {
+    /// The decoding Swift writes for a `TurnTokenBudget?` field resolves to this: an absent key (a daemon that predates
+    /// the setting) reads as nil, and null as by difficulty.
+    func decodeIfPresent(_ type: TurnTokenBudget.Type, forKey key: Key) throws -> TurnTokenBudget? {
+        contains(key) ? try decode(TurnTokenBudget.self, forKey: key) : nil
+    }
+}
 /// One model's standing from its review notes (plugin/bridge/notes.ts).
 struct ModelScore: Codable, Sendable, Equatable, Identifiable {
     var model: String
@@ -670,6 +720,8 @@ struct BoardState: Codable, Sendable, Equatable {
     var modelScores: [ModelScore]?
     /// Each project's switches by its canonical path; absent from a daemon that predates them.
     var projects: [String: ProjectSettings]?
+    /// Absent (nil) from a daemon that predates the setting.
+    var turnTokenBudget: TurnTokenBudget?
     var availableRoles: [RoleInfo] { roleInfo ?? RoleInfo.legacy }
     var editableRoleSettings: [String: RoleSetting] { roleSettings ?? roles.mapValues(RoleSetting.init) }
     func roleLabel(_ role: String) -> String {
@@ -714,6 +766,7 @@ struct BoardState: Codable, Sendable, Equatable {
         case "modelScores": modelScores = try decoder.decode([ModelScore].self, from: event.data)
         case "peerRatings": peerRatings = try decoder.decode(Bool.self, from: event.data)
         case "projects": projects = try decoder.decode([String: ProjectSettings].self, from: event.data)
+        case "turnTokenBudget": turnTokenBudget = try decoder.decode(TurnTokenBudget.self, from: event.data)
         case "language":
             language = try decoder.decode(LanguageState.self, from: event.data).language
             hasLanguageSetting = true

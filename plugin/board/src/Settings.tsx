@@ -67,7 +67,7 @@ const PANES = translated((): Record<Fixed, { title: string; icon: FluentIcon; ki
 const PROJECT_SWITCHES = translated((): { key: keyof ProjectSettings; label: string; note: string }[] => [
   { key: 'autonomy', label: t('Push and open pull requests'), note: t('Only after the work is reviewed and its checks pass. Crew never merges, closes, or deploys.') },
   { key: 'watchAway', label: t('Watch pull requests while away'), note: t('Read every 10 minutes while the lead session is closed; news waits until it is back.') },
-  { key: 'autoResume', label: t('Resume after a usage limit'), note: t('A job stopped by a usage limit carries on once usage resets, unless its mission was finished or dismissed.') },
+  { key: 'autoResume', label: t('Resume after a usage limit'), note: t("A mission's job stopped by a usage limit carries on once usage resets, unless the mission was finished or dismissed.") },
 ]);
 
 /**
@@ -390,15 +390,16 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
   };
   // A project's switches save as they are flipped, like peer ratings. One saves at a time, as in the app, so two
   // quick flips cannot land out of order.
-  const [projectStatus, setProjectStatus] = useState('');
+  // A failure is kept with its project, so it shows only on that project's page.
+  const [projectStatus, setProjectStatus] = useState<{ project: string; text: string } | null>(null);
   const [projectSaving, setProjectSaving] = useState(false);
   const setProjectSwitch = async (dir: string, key: keyof ProjectSettings, on: boolean) => {
-    setProjectStatus('');
+    setProjectStatus(null);
     setProjectSaving(true);
     try {
       board.receive('projects', (await request<{ projects: Record<string, ProjectSettings> }>('/api/project-settings', { project: dir, changes: { [key]: on } })).projects);
     } catch (error) {
-      setProjectStatus(t('Not saved: {error}', { error: (error as Error).message }));
+      setProjectStatus({ project: dir, text: t('Not saved: {error}', { error: (error as Error).message }) });
     } finally {
       setProjectSaving(false);
     }
@@ -774,13 +775,16 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
                   <div className={styles.rows}>
                     {PROJECT_SWITCHES().map(({ key, label, note }) => (
                       <label key={key} className={`${styles.row} ${styles.described}`}>
+                        {/* The note is read as the switch's description rather than as part of its name, as the app's subtitle is. */}
                         <span>
-                          {label}
-                          <small>{note}</small>
+                          <span id={`project-switch-${key}`}>{label}</span>
+                          <small id={`project-switch-${key}-note`}>{note}</small>
                         </span>
                         <input
                           type="checkbox"
                           className="switch"
+                          aria-labelledby={`project-switch-${key}`}
+                          aria-describedby={`project-switch-${key}-note`}
                           checked={state.projects?.[project]?.[key] === true}
                           disabled={projectSaving || state.connection !== 'live'}
                           onChange={(event) => void setProjectSwitch(project, key, event.target.checked)}
@@ -788,7 +792,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
                       </label>
                     ))}
                   </div>
-                  {projectStatus && <p className={styles.footnote} role="alert">{projectStatus}</p>}
+                  {projectStatus?.project === project && <p className={styles.footnote} role="alert">{projectStatus.text}</p>}
                 </section>
               )}
               {pageScope !== null && (

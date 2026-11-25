@@ -320,7 +320,7 @@ struct CrewSettingsView: View {
     private static let projectSwitches: [(key: String, label: LocalizedStringKey, note: LocalizedStringKey, value: KeyPath<ProjectSettings, Bool?>)] = [
         ("autonomy", "Push and open pull requests", "Only after the work is reviewed and its checks pass. Crew never merges, closes, or deploys.", \.autonomy),
         ("watchAway", "Watch pull requests while away", "Read every 10 minutes while the lead session is closed; news waits until it is back.", \.watchAway),
-        ("autoResume", "Resume after a usage limit", "A job stopped by a usage limit carries on once usage resets, unless its mission was finished or dismissed.", \.autoResume),
+        ("autoResume", "Resume after a usage limit", "A mission's job stopped by a usage limit carries on once usage resets, unless the mission was finished or dismissed.", \.autoResume),
     ]
     @ViewBuilder private func instructions(_ pane: SettingsPane) -> some View {
         if case .project(let path) = pane, let projects = store.state.projects {

@@ -522,3 +522,13 @@ test('store publishes the latest snapshot once per frame and flushes connection 
   assert.equal(frames.size, 0);
   unsubscribeNext();
 });
+
+test('a job the budget stopped says so, and project switches arrive by their own event', () => {
+  assert.equal(jobLabel({ state: 'failed', error: { message: 'cap', limit: false, budget: true } } as BoardJob), 'Budget reached');
+  assert.equal(jobLabel({ state: 'failed', error: { message: 'limit', limit: true } } as BoardJob), 'Usage limit reached');
+  const store = new BoardStore();
+  store.receive('state', { now: Date.now(), jobs: [], claude: [], missions: [], agents: {}, roles: {}, limits: {}, events: [] } as unknown as BoardState);
+  assert.equal(store.getSnapshot().projects, undefined, 'an older daemon sends none');
+  store.receive('projects', { '/repo': { autonomy: true } });
+  assert.deepEqual(store.getSnapshot().projects, { '/repo': { autonomy: true } });
+});

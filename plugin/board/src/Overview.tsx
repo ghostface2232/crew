@@ -579,27 +579,32 @@ const SHOWN_ISSUES = 3;
  * Open issues of the project's repository that are the user's to start: assigned to them, or to no one. Each can be
  * copied as a /crew:run command or dismissed for good. Says nothing when there are none or gh cannot list them, as in the app.
  */
-function IssueSuggestions({ project, command }: { project: string; command: string }) {
+function IssueSuggestions({ project, command, live }: { project: string; command: string; live: boolean }) {
   const [found, setFound] = useState<IssueList | null>(null);
   const [error, setError] = useState('');
+  const [dismissing, setDismissing] = useState<string | null>(null);
   useEffect(() => {
-    let live = true;
-    setFound(null);
-    const load = () => request<IssueList>(`/api/issues?project=${encodeURIComponent(project)}`).then((next) => live && setFound(next), () => {});
+    if (!live) return;
+    let current = true;
+    const load = () => request<IssueList>(`/api/issues?project=${encodeURIComponent(project)}`).then((next) => current && setFound(next), () => {});
     load();
-    // The daemon keeps each answer ten minutes, so asking more often only reads its cache.
+    // The daemon keeps each answer ten minutes, so asking more often only reads its cache. A reconnect reads again, as in the app.
     const timer = setInterval(load, 10 * 60_000);
-    return () => { live = false; clearInterval(timer); };
-  }, [project]);
-  const shown = found?.issues.slice(0, SHOWN_ISSUES) ?? [];
+    return () => { current = false; clearInterval(timer); };
+  }, [project, live]);
+  // Another project's issues never show under this one while its own are read.
+  const shown = found?.project === project ? found.issues.slice(0, SHOWN_ISSUES) : [];
   if (!shown.length) return null;
   const dismiss = async (url: string) => {
     setError('');
+    setDismissing(url);
     try {
       await request('/api/issues/dismiss', { url });
       setFound((current) => current && { ...current, issues: current.issues.filter((issue) => issue.url !== url) });
     } catch (err) {
       setError((err as Error).message);
+    } finally {
+      setDismissing(null);
     }
   };
   return (
@@ -611,8 +616,14 @@ function IssueSuggestions({ project, command }: { project: string; command: stri
               <span className="digits secondary">#{issue.number}</span> {issue.title}
             </a>
             {issue.labels.length > 0 && <span className="caption secondary issue-labels">{issue.labels.slice(0, 3).join(' · ')}</span>}
-            <CopyButton text={`${command} ${issue.url}`} short={t('Copy')}>{t('Copy Command')}</CopyButton>
-            <button className="icon" aria-label={t('Dismiss #{number}', { number: issue.number })} title={t('Dismiss. This issue is not suggested again.')} onClick={() => void dismiss(issue.url)}>
+            <CopyButton text={`${command} ${issue.url}`} short={t('Copy')} name={t('Copy the command for #{number}', { number: issue.number })}>{t('Copy Command')}</CopyButton>
+            <button
+              className="icon"
+              disabled={!live || dismissing !== null}
+              aria-label={t('Dismiss #{number}', { number: issue.number })}
+              title={t('Dismiss. This issue is not suggested again.')}
+              onClick={() => void dismiss(issue.url)}
+            >
               <Icon icon={DismissRegular} />
             </button>
           </li>
@@ -703,7 +714,7 @@ export function Workspace({ state, project, names, selected, openJob, openSessio
         <div className="dash-main">
           {!project && <Setup />}
           {/* Codex names a plugin skill with $, so the command is copied in the form the project's latest lead takes. */}
-          {project && <IssueSuggestions project={project} command={sessions.toSorted((a, b) => b.activeAt - a.activeAt)[0]?.host === 'codex' ? '$crew:run' : '/crew:run'} />}
+          {project && <IssueSuggestions project={project} live={state.connection === 'live'} command={sessions.toSorted((a, b) => b.activeAt - a.activeAt)[0]?.host === 'codex' ? '$crew:run' : '/crew:run'} />}
           {active.map(panel)}
           {loose.length > 0 && (
             <Panel label={t('Other jobs')} style={{ '--i': active.length } as CSSProperties} action={<Icon icon={StackRegular} />}>

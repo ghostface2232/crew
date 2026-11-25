@@ -258,12 +258,13 @@ export class Delivery {
     return `Crew unacknowledged news: ${ids.join(', ')}${pending.length > ids.length ? `; ${pending.length - ids.length} more` : ''}. Read with status or wait; echo received receipt ids in ack.`;
   }
 
-  watch(session: string, deadline: number, now = Date.now()): Watch | null {
+  /** `missionOpen`: the session has a mission open, to which a pull request can be linked without its hooks running. */
+  watch(session: string, deadline: number, now = Date.now(), missionOpen = false): Watch | null {
     leadSession(session);
     if (!Number.isFinite(deadline) || deadline <= now || deadline > now + HOOK_SECONDS * 1000) throw new Error('Invalid watcher deadline.');
     // Under `claude -p` an asyncRewake hook runs in the foreground, so a watcher would hold the session open for a day.
     // A session that leads nothing has nothing to wait for; its first Crew call arms a watcher once it does.
-    if (!this.subjects().some((subject) => subject.lead === session)) return null;
+    if (!missionOpen && !this.subjects().some((subject) => subject.lead === session)) return null;
     const current = this.watching.get(session);
     if (current && current.expiresAt > now && now - current.beat < WATCH_SILENT_MS && current.deadline - now > WATCH_REPLACE_MS) return null;
     const watch = { generation: randomUUID(), deadline, expiresAt: Math.min(deadline, now + WATCH_MS), beat: now };

@@ -20,7 +20,7 @@ Research date: **2026-11-25**. Sources read locally from shallow clones: `openai
 | Stop news goes as `additionalContext`, without the hook-error label (*checked*: continues the turn, sets `stop_hook_active` on the next Stop) | CHANGELOG 2.1.163 | `wake.ts` |
 | `Stop`'s `background_tasks` drops sub-agents whose `SubagentStop` was missed | CHANGELOG 2.1.145, `claude-code.d.ts` | `claude.ts` |
 
-Found on the way (*checked*): with Crew installed, every `claude -p` session hung on `SessionStart`, because Claude Code runs `asyncRewake` hooks in the foreground in print mode and Crew's watcher waits up to a day. The daemon now gives no watcher to a session that leads nothing (`delivery.ts` `watch`).
+Found on the way (*checked*): with Crew installed, every `claude -p` session hung on `SessionStart`, because Claude Code runs `asyncRewake` hooks in the foreground in print mode and Crew's watcher waits up to a day. The daemon now gives no watcher to a session that leads no job or pull request watch and has no mission open (`delivery.ts` `watch`).
 
 ## Tried and rejected
 

@@ -999,7 +999,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
           if (delivery.desktopOf(session)) claude.desktop(session);
           return { cwd: await codex.threadCwd(session).catch(() => null) };
         }
-        case 'watch': return { watch: delivery.watch(session, body.deadline) };
+        case 'watch': return { watch: delivery.watch(session, body.deadline, Date.now(), missions.list().some((m) => m.owner === session && m.state === 'active')) };
         case 'heartbeat': return { watch: delivery.heartbeat(session, body.generation) };
         case 'release':
           delivery.release(session, body.generation);

@@ -414,6 +414,8 @@ test('a session that leads nothing gets no watcher, so a foreground hook under c
   const now = Date.now();
   assert.equal(delivery.watch('other', now + 3_600_000, now), null);
   assert.ok(delivery.watch('lead', now + 3_600_000, now));
+  // A pull request can be linked to an open mission through the HTTP API, with none of the owner's hooks running.
+  assert.ok(delivery.watch('owner', now + 3_600_000, now, true));
 });
 
 test('a watcher that died without releasing is replaced once it stops beating', () => {
@@ -428,18 +430,23 @@ test('a watcher that died without releasing is replaced once it stops beating', 
 
 test('a watcher whose long poll was cut off is replaced at once, as after its session process was ended', async (t) => {
   const h = harness(t);
+  const openMissions: { owner: string; state: string }[] = [];
   const source = fs.readFileSync(new URL('../plugin/bridge/daemon.ts', import.meta.url), 'utf8');
   const handler = source.slice(source.indexOf('function isOpen('), source.indexOf('\nlet stopping = false;'));
   const context = vm.createContext({
     URL, AbortController, PORT: 0, stopping: false, guard: () => {}, signedIn: () => true, WORKER_ROUTE: /^$/,
     HttpError: class extends Error { status: number; constructor(status: number, message: string) { super(message); this.status = status; } },
     readJson: async (req: any) => req.body, jobs: h.jobs, view: (job: unknown) => job, broadcast: () => {}, pulls: { tick: async () => {} },
+    missions: { list: () => openMissions },
   });
   const route = vm.runInContext(`${stripTypeScriptTypes(handler)}; route`, context);
   const lead = (action: string, body: object, res: object = {}) => route({ method: 'POST', url: `/api/lead/${action}`, body: { session: 'lead', ...body } }, res);
-  await h.create();
   const deadline = Date.now() + 3_600_000;
+  assert.equal((await lead('watch', { deadline })).watch, null, 'a session that leads nothing gets no watcher');
+  openMissions.push({ owner: 'lead', state: 'active' });
   const { watch } = await lead('watch', { deadline });
+  assert.ok(watch, 'an open mission is enough');
+  await h.create();
   assert.equal((await lead('watch', { deadline })).watch, null, 'a live watcher is not duplicated');
   // The app ending the lead's process closes the watcher's connection mid-poll; the lease used to block for 25 s.
   const res = new EventEmitter();

@@ -140,7 +140,7 @@ Read 2026-11-25 from `openai/codex`, `anthropics/claude-code` and `anthropics/cl
 
 - **G1. Codex failures the lead now hears of.** Turns Codex interrupts itself (the auto-reviewer's circuit breaker), a Deny that used to cancel the turn, endless connection retries that hid a stall, and error kinds read from `codexErrorInfo` ([approvals.md](approvals.md#automatic-reviewer-and-refusals), [delivery.md](delivery.md#stalls)).
 - **G2. Review results the lead can read at a glance.** Parsed verdicts and finding counts, a merge preflight against the lead's `HEAD`, worker reports labeled as evidence, and reviewers that quote project rules and keep pre-existing problems apart ([jobs.md](jobs.md#outcome-reporting), [roles.md](roles.md#role-instruction-files)).
-- **G3. Lead hooks.** Headless `claude -p` sessions no longer hang on Crew's watcher, wake-ups name their jobs, Stop news carries no hook-error label, and missed `SubagentStop`s clear at the next `Stop` ([delivery.md](delivery.md#hooks-and-response-bounds), [board.md](board.md)).
+- **G3. Lead hooks.** A headless `claude -p` session that leads no Crew work no longer hangs on Crew's watcher, wake-ups name their jobs, Stop news carries no hook-error label, and sub-agents whose `SubagentStop` was missed clear at a `Stop` whose background list holds no agent ([delivery.md](delivery.md#hooks-and-response-bounds), [board.md](board.md)).
 
 **Open:** the ranked candidates in the research file: folding Codex sub-agent results into the report, a graceful wrap-up before the turn budget, `thread/inject_items` for notes that miss a turn, `acceptForSession` for Allow for This Job, and `thread/approveGuardianDeniedAction` for user-approved retries.
 

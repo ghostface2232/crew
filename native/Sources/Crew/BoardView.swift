@@ -435,7 +435,9 @@ struct MissionPanel: View {
                 // Status and the controls sit on the middle of the title and its meta line together.
                 HStack(alignment: .center, spacing: Space.m) {
                     // The lead's mark sits before the title and meta together, the same for every lead.
-                    if let leadAgent { AgentMark(agent: leadAgent, size: MarkSize.list) }
+                    // The header starts as far in as the stop names, decisions and outcomes below, which take the same inset
+                    // beside their rows: the mark when there is one, else the title.
+                    if let leadAgent { AgentMark(agent: leadAgent, size: MarkSize.list).padding(.leading, WorkspaceStyle.rowTitleInset) }
                     VStack(alignment: .leading, spacing: Space.xs) {
                         // One line each, so cards side by side keep the same height whatever their titles.
                         Text(mission.title).font(Typeface.title).fadeTruncated().help(mission.title)
@@ -445,6 +447,7 @@ struct MissionPanel: View {
                             Text(" · " + meta)
                         }.font(Typeface.caption).monospacedDigit().foregroundStyle(.secondary).fadeTruncated().help(mission.root)
                     }
+                    .padding(.leading, leadAgent == nil ? WorkspaceStyle.rowTitleInset : 0)
                     Spacer(minLength: WorkspaceStyle.rowSpacer)
                     StatusLabel(state: mission.state == "active" ? "running" : mission.state, title: localizedCrewLabel(mission.state.capitalized), spins: mission.state == "active")
                     if mission.state != "done" { missionMenu }

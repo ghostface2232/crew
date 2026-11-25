@@ -44,7 +44,7 @@ export type Subject = Job | PullWatch;
 const isJob = (subject: Subject): subject is Job => 'seq' in subject;
 
 /** `jobId` names the subject, a job or a watch: the field keeps its name so stored receipts stay readable. */
-interface Item { jobId: string; newsSeq: number }
+export interface Item { jobId: string; newsSeq: number }
 interface Receipt { session: string; items: Item[]; text: string; acknowledged?: boolean; at?: number }
 interface Lease { generation: string; expiresAt: number }
 interface Watch extends Lease { deadline: number; beat: number }
@@ -183,6 +183,12 @@ export class Delivery {
    */
   settle(offer: Offer): void {
     this.offered(offer, (offers) => Math.max(offers, 2));
+  }
+
+  /** Whether every snapshot named is acknowledged, counting one whose subject is gone. */
+  acknowledged(items: Item[]): boolean {
+    const subjects = new Map(this.subjects().map((job) => [job.id, job]));
+    return items.every((item) => subjects.get(item.jobId)?.news?.find((news) => news.seq === item.newsSeq)?.acked ?? true);
   }
 
   /** A note that never reached Codex leaves the automatic offer it took unspent. */

@@ -36,7 +36,7 @@ Server-sent events on `GET /api/stream` (in addition to `job`, `mission`, `event
 | `modelScores` | `ModelScore[]` | Notes, peer ratings, or the `peerRatings` switch change |
 | `pull` | `PullWatch` (view) | A watched pull request is linked, changes, or is polled |
 
-Jobs also carry `rounds?: Round[]`, `ask?: boolean`, `role?: Role`, and `preset?: PresetName | null` (`jobs.ts`). Missions carry `lead?: 'claude' | 'codex'`, `notes?: MissionNote[]`, `preset?: PresetName`, and `tasks?: MissionTask[]` (`missions.ts`).
+Jobs also carry `rounds?: Round[]`, `ask?: boolean`, `role?: Role`, `preset?: PresetName | null`, and `difficulty?: 'routine' | 'standard' | 'hard'` (`jobs.ts`). Missions carry `lead?: 'claude' | 'codex'`, `notes?: MissionNote[]`, `preset?: PresetName`, `tasks?: MissionTask[]`, and `difficulty?` (`missions.ts`).
 
 Each status event has the shape `{seq, ts, agent, session_id, job_id, kind, detail}`. Its `kind` is `started`, `progress`, `waiting`, `error`, `limit`, `stalled`, `done`, or `cancelled`.
 
@@ -52,15 +52,15 @@ Each status event has the shape `{seq, ts, agent, session_id, job_id, kind, deta
 | `POST /api/preset` | `{ "preset": "economy" \| "balanced" \| "best" \| null }` | `{ preset, presets }`; writes `preset` in `~/.crew/config.json` |
 | `POST /api/peer-ratings` | `{ "enabled": true \| false }` | `{ peerRatings }`; writes `peerRatings: false` or removes the key to turn on |
 | `POST /api/language` | `{ "language": "en" \| "ko" \| null }` | `{ language }`; writes `language` in `~/.crew/config.json`, or removes it (`null`) to follow the system |
-| `POST /api/notes` | Evidence line or `{ "model", "summary" }` | `ModelScore`; user secret required ([model notes](roles.md#model-notes-and-scores) and [peer ratings](roles.md#peer-ratings)) |
+| `POST /api/notes` | Evidence line or `{ "model", "summary" }` | `ModelScore`; user secret required ([model notes](roles.md#model-notes-and-scores) and [peer ratings](roles.md#peer-ratings)). A build line may add `"difficulty"`, `"reviewed_by": [review job ids or model ids]`, and, when omitting `job`, `"mission"`. A job's line takes the job's `difficulty`, and a line without a job takes its mission's; passing a different value is refused. Each `reviewed_by` job id resolves to that review job's model, and the ids are kept as `reviewJobs`, with each review's agent as `reviewAgents`; a job id that matches no job, or names a non-review job, is refused |
 | `POST /api/jobs/:id/rating` | `{ "correctness"?, "report"?, "findings"?, "fact", "token" }` | `{ kept }`. The worker MCP server must supply the job token, and only jobs asked to rate can use the route ([peer ratings](roles.md#peer-ratings)) |
-| `POST /api/missions` | `{ "title", "project", "lead"?: "claude" \| "codex", "stages"?, "preset"?, "tasks"?, ... }` | New (or matching open) mission |
+| `POST /api/missions` | `{ "title", "project", "lead"?: "claude" \| "codex", "stages"?, "preset"?, "tasks"?, "difficulty"?, ... }` | New (or matching open) mission. `difficulty` can be set only here; `POST /api/missions/:id` refuses it |
 | `POST /api/missions/:id` | `{ "note": "text" }` | Mission with note appended; refused if not active |
 | `POST /api/missions/:id` | `{ "preset": "economy" \| "balanced" \| "best" \| null }` | Mission with preset set or cleared (`null`); refused if not active; applies to its next jobs |
 | `POST /api/missions/:id/pulls` | `{ "pr": "<number or URL>" }` | `{ watch, resumed, summary }`; user secret required |
 | `POST /api/roles` | `{ "roles": <raw table> }` | `{ roles, roleSettings }`: resolved and stored tables ([role assignments](roles.md#role-assignments)) |
 | `POST /api/instructions` | `{ "append": "text", "project": path \| null }` | `{ file, text }`; appends a paragraph to shared instructions (`text` replaces instead) |
-| `POST /api/jobs` | `{ "kind": "delegate", "ask": true, "task": "question", "cwd": path }` | Read-only question job whose report is the answer. Any job may add `"skills": [names]` ([job instructions](jobs.md)) |
+| `POST /api/jobs` | `{ "kind": "delegate", "ask": true, "task": "question", "cwd": path }` | Read-only question job whose report is the answer. Any job may add `"skills": [names]` ([job instructions](jobs.md)), and a non-question delegate job may add `"difficulty": "routine" \| "standard" \| "hard"` |
 | `POST /api/jobs/:id/rounds/:turn` | `{ "undo": true }` or `{ "keep": true }` | Updated job; `undo` reverts that round's commit on the job branch, `keep` reverts the revert |
 | `GET /api/jobs/:id` | | The job as sent in state and job events, including sealed evidence and `outcomeContradiction` when applicable. The detail response also includes the original `prompt` and worker `instructions` |
 | `GET /api/jobs/:id/diff` | | `{ turn, diff, at }`: the running turn's changes so far, as Codex last reported them (`turn/diff/updated`), cut at 200,000 characters; `diff` is empty once the turn ends or when none was reported. The job's `liveDiff` says when it last changed |

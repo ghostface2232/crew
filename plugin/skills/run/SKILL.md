@@ -12,7 +12,7 @@ You are the lead. Take the task through the steps below, using the `crew` MCP to
 
 ## Running the pipeline
 
-**Mission.** Start `mission` with the task as `title` and only the `stages` this command needs, in order, chosen from `plan`, `implement`, a review (`self-review` or `cross-review`, one stage per review round), `fix`, `polish`, and `final` (for example, a review-only command might use `["cross-review", "fix", "final"]`). Advance with `stage` as you go, and pass `stages` again to revise the remaining steps. As soon as the real work is finished, at whatever stage, close the mission with `done: true`, a one-line `outcome`, and a short `record` of the decisions, dead ends, and prerequisites worth keeping. Any new work the user asks for after that gets a new mission before you start, even work you do yourself; a question or reply needs none.
+**Mission.** Start `mission` with the task as `title` and only the `stages` this command needs, in order, chosen from `plan`, `implement`, a review (`self-review` or `cross-review`, one stage per review round), `fix`, `polish`, and `final` (for example, a review-only command might use `["cross-review", "fix", "final"]`). When you will build part of it yourself, pass the `difficulty` of your own work on that call; it cannot be set later. Advance with `stage` as you go, and pass `stages` again to revise the remaining steps. As soon as the real work is finished, at whatever stage, close the mission with `done: true`, a one-line `outcome`, and a short `record` of the decisions, dead ends, and prerequisites worth keeping. Any new work the user asks for after that gets a new mission before you start, even work you do yourself; a question or reply needs none.
 
 **Tasks.** When the work has more than a couple of pieces, record them as the mission's `tasks` during planning, with `after` for any piece that waits on another. Pass each job its `task_id`, and mark a task `done` with a one-line `result` only after you have verified it. A resumed or compacted session is shown its open missions and tasks again: continue from that record, not from memory.
 
@@ -39,7 +39,7 @@ When a decision is hard or risky (uncertain failure modes, a risky migration, an
 
 Workers start from `HEAD` in their own worktree, so commit what they need first and mention it in one line the first time. Gitignored files such as `node_modules` and `.env` are copied in only if `.worktreeinclude` lists them; if a worker cannot run tests for lack of dependencies, tell the user to add them there.
 
-Call `delegate` for each piece with a brief written as below, then do your own part. When nothing is left for you to do, end your turn with a one-line status: Crew wakes you when a job finishes or needs you, whereas sitting in `wait` blocks the user from talking to you.
+Call `delegate` for each piece with its `difficulty` and a brief written as below, then do your own part. When nothing is left for you to do, end your turn with a one-line status: Crew wakes you when a job finishes or needs you, whereas sitting in `wait` blocks the user from talking to you.
 
 ### Writing a brief
 
@@ -85,7 +85,7 @@ Triage all reports together yourself, since triage needs the user's intent and t
 
 One review round is the default. Run a second round only for substantial fixes, and never more than two, since extra rounds burn both agents' usage limits.
 
-Record what the review showed with `note`, using facts only: one call for each build (a worker's job or your own work), one for any fix, and one for each review job. Never rate your own work. When a response says a summary is due, rewrite it with `note_summary`.
+Record what the review showed with `note`, using facts only: one call for each build (a worker's job or your own work), one for any fix, and one for each review job. On a build line, list in `reviewed_by` every review whose findings are counted: review job ids, your own model for your reading of a worker's diff, and the model each self-reviewer ran on. Never rate your own work. When a response says a summary is due, rewrite it with `note_summary`.
 
 ## 6. Polish
 

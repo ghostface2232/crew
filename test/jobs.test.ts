@@ -170,6 +170,29 @@ test('a saved outcome clears at the start of the next turn and is set from its r
   assert.equal(saved.outcome, 'partial');
 });
 
+test('a delegate job keeps the difficulty it was handed out with, and only a delegate job takes one', async (t) => {
+  const { jobs, home } = harness((ctl) => ctl.done('done'));
+  t.after(() => { jobs.flush(); fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }); });
+  const job = await settled(jobs, await jobs.create({ kind: 'delegate', task: 'edit', cwd: home, isolation: 'in_place', difficulty: 'hard' }));
+  assert.equal(job.difficulty, 'hard');
+  const plain = await settled(jobs, await jobs.create({ kind: 'delegate', task: 'edit', cwd: home, isolation: 'in_place' }));
+  assert.equal(plain.difficulty, undefined);
+  for (const spec of [
+    { kind: 'delegate', task: 'edit', cwd: home, isolation: 'in_place', difficulty: 'easy' },
+    { kind: 'review', cwd: home, review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' }, difficulty: 'hard' },
+    { kind: 'delegate', task: 'Why?', cwd: home, ask: true, difficulty: 'routine' },
+  ] as JobSpec[]) await assert.rejects(jobs.create(spec), /difficulty is for work handed out with delegate, and one of: routine, standard, hard/);
+  jobs.flush();
+  // Kept across a restart; a value that is no difficulty counts as none.
+  const file = path.join(home, 'jobs.json');
+  const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+  saved.jobs.find((j: Job) => j.id === plain.id).difficulty = 'easy';
+  fs.writeFileSync(file, JSON.stringify(saved));
+  const restored = new Jobs(home, () => config, {} as never, { onEvent: () => {}, onJob: () => {}, onAttention: () => {} });
+  assert.equal(restored.get(job.id).difficulty, 'hard');
+  assert.equal(restored.get(plain.id).difficulty, undefined);
+});
+
 test('reviews, debates and questions do not record an outcome', async (t) => {
   const cwd = tempRepo();
   const { jobs, home } = harness((ctl) => ctl.done('## Outcome\ndone'));

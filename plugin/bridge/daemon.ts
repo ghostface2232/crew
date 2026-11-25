@@ -16,8 +16,8 @@ import { stopChecks } from './check.ts';
 import { clientJson } from './text.ts';
 import { ClaudeSessions } from './claude.ts';
 import type { ClaudeSession } from './claude.ts';
-import { agentCommand, agentEnv, canonicalPath, HOME, installed, isRole, LEDGER_ASIDE, loadConfig, PLUGIN_ROOT, PORTS, ROLE_INFO, ROLES, VERSION, WORKERS } from './config.ts';
-import type { Config } from './config.ts';
+import { agentCommand, agentEnv, canonicalPath, HOME, installed, isRole, JOB_ID, LEDGER_ASIDE, loadConfig, PLUGIN_ROOT, PORTS, ROLE_INFO, ROLES, VERSION, WORKERS } from './config.ts';
+import type { Config, Holder } from './config.ts';
 import { evidenceType, openEvidence } from './evidence.ts';
 import { projectRoot } from './git.ts';
 import { followUps, isTerminal, Jobs, UnreadableLedger } from './jobs.ts';
@@ -844,6 +844,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     if (body.done && body.abandoned) throw new HttpError(400, 'pass done or abandoned, not both');
     if (body.done || body.abandoned) return missions.finish(id, { outcome: text(body.outcome, 'outcome'), record: text(body.record, 'record'), abandoned: Boolean(body.abandoned), reopen: body.reopen === true, byLead: body.by === 'lead' });
     if (body.note !== undefined) return missions.note(id, text(body.note, 'note') ?? '');
+    if (body.difficulty !== undefined) throw new HttpError(400, 'difficulty is set only when a mission starts, so its review cannot change it.');
     const updated = missions.update(id, { stage: stage(body.stage), stages: body.stages, title: text(body.title, 'title'), preset: body.preset, tasks: body.tasks });
     if (typeof body.lead === 'string') claude.focus(body.lead, updated.id);
     return updated;
@@ -892,7 +893,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       if (typeof body.project !== 'string' || !body.project) throw new HttpError(400, 'project must be the lead session\'s project directory');
       const first = stage(body.stage);
       const owner = text(body.owner, 'owner');
-      const opened = missions.start({ title: text(body.title, 'title') ?? '', project: body.project, root: (await projectRoot(body.project).catch(() => null)) ?? body.project, owner, lead: body.lead, stage: first, stages: body.stages, preset: body.preset, tasks: body.tasks });
+      const opened = missions.start({ title: text(body.title, 'title') ?? '', project: body.project, root: (await projectRoot(body.project).catch(() => null)) ?? body.project, owner, lead: body.lead, stage: first, stages: body.stages, preset: body.preset, tasks: body.tasks, difficulty: body.difficulty });
       if (owner) claude.focus(owner, opened.id);
       return opened;
     }
@@ -1042,6 +1043,40 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
         const model = job ? job.resolvedModel ?? (job.agent === 'codex' ? job.model : undefined) : body.model;
         if (job && !model) throw new HttpError(400, `Job ${job.id} has no recorded model, so it cannot be noted.`);
         if (job && body.model !== undefined && body.model !== model) throw new HttpError(400, `Job ${job.id} ran on ${model}, not ${String(body.model)}.`);
+        // Set when the work was handed out, so a build line cannot pick its own after the review.
+        let difficulty = body.difficulty;
+        if (role === 'build') {
+          const mission = !job && body.mission !== undefined ? missions.list().find((m) => m.id === body.mission) : undefined;
+          if (!job && body.mission !== undefined && !mission) throw new HttpError(400, `No mission with id "${String(body.mission)}".`);
+          // An editor only changes wording, so a polish job is routine work.
+          const fixed = job ? job.difficulty ?? (job.kind === 'polish' ? 'routine' : undefined) : mission?.difficulty;
+          if (fixed && difficulty !== undefined && difficulty !== fixed) throw new HttpError(400, `${job ? `Job ${job.id} was handed out` : `Mission ${mission!.id} was started`} as ${fixed}, so its line cannot be ${String(difficulty)}.${job ? '' : ' If the work was for another mission, pass that mission.'}`);
+          difficulty = fixed ?? difficulty;
+        }
+        // A review job names its own model; anything else is a model id the lead gives for a review of its own.
+        let reviewedBy = body.reviewed_by;
+        let reviewJobs: string[] | undefined;
+        let reviewAgents: Holder[] | undefined;
+        if (Array.isArray(reviewedBy)) {
+          const refused: string[] = [];
+          const jobId = new RegExp(`^${JOB_ID}$`);
+          reviewedBy = reviewedBy.map((entry: unknown) => {
+            if (typeof entry !== 'string' || !jobId.test(entry.trim())) return entry;
+            const review = jobs.list().find((j) => j.id === entry.trim());
+            const reviewModel = review && (review.resolvedModel ?? (review.agent === 'codex' ? review.model : undefined));
+            if (!review) refused.push(`${entry} names no job`);
+            else if (review.kind !== 'review') refused.push(`${review.id} is not a review`);
+            else if (!reviewModel) refused.push(`${review.id} has no recorded model`);
+            return reviewModel ?? entry;
+          });
+          if (refused.length) throw new HttpError(400, `reviewed_by takes review job ids or model ids: ${refused.join('; ')}.`);
+          // Kept beside the models, so a reviewer's rating can be traced to the line of the work it read.
+          const named = body.reviewed_by.filter((entry: unknown) => typeof entry === 'string' && jobId.test(entry.trim())).map((entry: string) => entry.trim());
+          if (named.length) reviewJobs = named;
+          // A review job's agent is its own; a model the lead names is a review of its own: its diff reading or a self-reviewer.
+          const leadAgent: Holder = body.lead === 'codex' ? 'codex' : 'claude';
+          reviewAgents = body.reviewed_by.map((entry: unknown) => (typeof entry === 'string' && jobId.test(entry.trim()) ? jobs.list().find((j) => j.id === entry.trim())!.agent as Holder : leadAgent));
+        }
         score = addEvidence(HOME, {
           model,
           // Work done in the lead's own session or subagent is that host's.
@@ -1062,6 +1097,10 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
           ...(body.outcome !== undefined ? { outcome: body.outcome } : {}),
           // The follow-up turns come from the job's own record, so the lead names only how it took the work.
           ...(body.adoption !== undefined ? { adoption: body.adoption, ...(job ? { rounds: followUps(job) } : {}) } : {}),
+          ...(difficulty !== undefined ? { difficulty } : {}),
+          ...(reviewedBy !== undefined ? { reviewedBy } : {}),
+          ...(reviewJobs ? { reviewJobs } : {}),
+          ...(reviewAgents ? { reviewAgents } : {}),
           text: body.text,
         }, { ratings: peerRatings }).score;
         if (body.rating !== undefined && !peerRatings) score = { ...score, ratingDropped: true };

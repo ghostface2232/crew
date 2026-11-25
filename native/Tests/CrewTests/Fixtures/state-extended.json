@@ -402,14 +402,14 @@
       "kind": "delegate",
       "parent": "delegate",
       "label": "Release preparation",
-      "summary": "Prepares a release: version, changelog, build, and the steps to publish. It does not publish or deploy."
+      "summary": "Prepares a release without publishing it."
     },
     {
       "role": "debate",
       "kind": "delegate",
       "parent": "delegate",
       "label": "Debate",
-      "summary": "Tests the lead's position on a hard decision, read-only."
+      "summary": "Challenges the lead on hard decisions."
     },
     {
       "role": "review",

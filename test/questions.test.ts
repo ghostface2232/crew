@@ -863,6 +863,73 @@ test('model notes take a job\'s own model, refuse a model it did not run, and re
   assert.equal((await h.api('POST', '/api/notes', { model: 'claude-test', reviewer: 'codex', size: 'small', text: 'after' })).status, 200);
 });
 
+test('a build line takes its difficulty from its job or its mission, and names each review by its job or a model', { timeout: 15000 }, async (t) => {
+  // Codex holds wording too, so a polish job runs on the fake Codex here.
+  const h = await daemon(t, (home) => {
+    const config = JSON.parse(fs.readFileSync(path.join(home, 'config.json'), 'utf8'));
+    fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ ...config, roles: { polish: { agents: ['codex'] } } }));
+  });
+  const { body: job } = await h.api('POST', '/api/jobs', { kind: 'delegate', cwd: h.home, project: h.home, task: 'test', isolation: 'in_place', lead: 'test-lead', difficulty: 'hard' });
+  assert.equal(job.difficulty, 'hard');
+  await h.started(job.id);
+  const model = job.resolvedModel ?? job.model;
+  const review = (await h.api('POST', '/api/jobs', { kind: 'review', cwd: h.home, project: h.home, review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' } })).body;
+  const reviewModel = review.resolvedModel ?? review.model;
+  const lineOf = (m: string, find: (e: any) => boolean) => JSON.parse(fs.readFileSync(path.join(h.home, 'model-notes.json'), 'utf8')).models[m].evidence.find(find);
+  const note = (body: object) => h.api('POST', '/api/notes', { reviewer: 'codex', size: 'small', text: 'x', ...body });
+  // A job's line takes the difficulty it was handed out with, and its reviews resolve to their models.
+  const noted = await note({ job: job.id, reviewed_by: [review.id, 'claude-test'] });
+  assert.equal(noted.status, 200, JSON.stringify(noted.body));
+  assert.deepEqual([lineOf(model, (e) => e.job === job.id).difficulty, lineOf(model, (e) => e.job === job.id).reviewedBy], ['hard', [reviewModel, 'claude-test']]);
+  // The review job ids are kept beside the models, so a reviewer's rating can be traced to this line.
+  assert.deepEqual(lineOf(model, (e) => e.job === job.id).reviewJobs, [review.id]);
+  // Each review's agent is kept too: a review job's own, and the lead's for a model it names.
+  assert.deepEqual(lineOf(model, (e) => e.job === job.id).reviewAgents, [review.agent, 'claude']);
+  assert.equal((await note({ job: job.id, difficulty: 'hard' })).status, 200);
+  assert.match((await note({ job: job.id, difficulty: 'routine' })).body.error, new RegExp(`Job ${job.id} was handed out as hard`));
+  // Every entry that names no review is refused at once.
+  const refused = (await note({ job: job.id, reviewed_by: ['cx-000000', job.id, 'claude-test'] })).body.error;
+  assert.match(refused, /cx-000000 names no job; .* is not a review\./);
+  // A line of the lead's own work takes its mission's, which is fixed once the mission starts.
+  const mission = (await h.api('POST', '/api/missions', { title: 'Port', project: h.home, difficulty: 'routine' })).body;
+  assert.equal(mission.difficulty, 'routine');
+  assert.match((await h.api('POST', `/api/missions/${mission.id}`, { difficulty: 'hard' })).body.error, /set only when a mission starts/);
+  assert.match((await h.api('POST', '/api/missions', { title: 'Bad', project: h.home, difficulty: 'easy' })).body.error, /difficulty must be one of: routine, standard, hard/);
+  assert.equal((await note({ model: 'claude-test', mission: mission.id, text: 'own work' })).status, 200);
+  assert.equal(lineOf('claude-test', (e) => e.text === 'own work').difficulty, 'routine');
+  assert.match((await note({ model: 'claude-test', mission: mission.id, difficulty: 'hard' })).body.error, new RegExp(`Mission ${mission.id} was started as routine`));
+  assert.match((await note({ model: 'claude-test', mission: 'm-000000' })).body.error, /No mission with id "m-000000"/);
+  // With neither, the line takes what it is given, or none.
+  const { job: plain } = await h.create();
+  assert.equal((await note({ job: plain.id, difficulty: 'standard' })).status, 200);
+  assert.equal(lineOf(model, (e) => e.job === plain.id).difficulty, 'standard');
+  // An editor only changes wording, so a polish job's line is routine.
+  const polish = (await h.api('POST', '/api/jobs', { kind: 'polish', agent: 'codex', cwd: h.home, project: h.home, isolation: 'in_place', targets: ['README.md'] })).body;
+  assert.equal(polish.kind, 'polish', JSON.stringify(polish));
+  assert.equal((await note({ job: polish.id, text: 'wording' })).status, 200);
+  assert.equal(lineOf(polish.resolvedModel ?? polish.model, (e) => e.job === polish.id).difficulty, 'routine');
+  assert.equal((await note({ model: 'claude-test', text: 'no difficulty' })).status, 200);
+  assert.equal(Object.hasOwn(lineOf('claude-test', (e) => e.text === 'no difficulty'), 'difficulty'), false);
+  // Both are for build lines only.
+  const reviewLine = (await h.api('POST', '/api/notes', { job: review.id, of_job: job.id, size: 'small', text: 'x', difficulty: 'hard', reviewed_by: ['claude-test'] })).body.error;
+  assert.match(reviewLine, /difficulty \(only for a build line[^]*reviewed_by \(only for a build line/);
+  // Through the lead's tools: delegate fixes a job's, and a line of the lead's own work goes to its session's open mission.
+  const lead = stdio(t, 'mcp.ts', h.env);
+  await lead.request('initialize', { protocolVersion: '2025-11-25', capabilities: {} });
+  assert.match(textOf(await lead.call('mission', { title: 'Lead work', stages: ['implement', 'final'], difficulty: 'hard' })), /difficulty: hard/);
+  const delegated = textOf(await lead.call('delegate', { task: 'test', isolation: 'in_place', difficulty: 'routine' }));
+  const id = delegated.match(/\[(cx-[0-9a-f]{6})\]/)![1];
+  assert.equal((await h.api('GET', `/api/jobs/${id}`)).body.difficulty, 'routine');
+  textOf(await lead.call('note', { model: 'claude-test', reviewer: 'codex', size: 'small', text: 'lead line' }));
+  assert.equal(lineOf('claude-test', (e) => e.text === 'lead line').difficulty, 'hard');
+  assert.match((await lead.call('note', { job_id: id, mission: mission.id, reviewer: 'codex', size: 'small', text: 'x' })).content[0].text, /mission is for a line without job_id/);
+  // Closed before the note, the mission this session just finished still sets the line's difficulty.
+  await lead.call('cancel', { job_id: id });
+  textOf(await lead.call('mission', { done: true, outcome: 'done' }));
+  const late = (await lead.call('note', { model: 'claude-test', reviewer: 'codex', size: 'small', text: 'after done', difficulty: 'routine' })).content[0].text;
+  assert.match(late, /was started as hard/);
+});
+
 test('peer ratings: a worker rates through its own tool, the review line gives the rating its target, and the switch stops it', { timeout: 20000 }, async (t) => {
   const h = await daemon(t);
   const { job, server } = await h.create();

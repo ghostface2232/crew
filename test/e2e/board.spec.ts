@@ -1224,7 +1224,7 @@ for (const source of ['absent', 'none'])
     await expect(page.getByLabel('Model preset')).toHaveCount(0);
   });
 
-test('model scores list each model with its score, counts and summary, and have nothing to save', async ({ page }) => {
+test('model scores list each model with its score and status, and have nothing to save', async ({ page }) => {
   await openSettings(page, 'Model Scores');
   // The best three stand on a podium, first in the middle.
   const podium = page.getByRole('region', { name: 'Top models' });
@@ -1234,15 +1234,19 @@ test('model scores list each model with its score, counts and summary, and have 
   const sol = standings.getByRole('article').filter({ hasText: 'gpt-6.1-sol' });
   await expect(sol.getByRole('img', { name: '8.6 out of 10' })).toBeVisible();
   await expect(sol.getByText('Strong')).toBeVisible();
-  await expect(sol.getByText('Settled · 9 builds · 3 fixes')).toBeVisible();
-  await expect(sol.getByText('Merged 6 of 8 as is · 2 after a reply · 3 follow-ups')).toBeVisible();
-  await expect(sol.getByText('Solid logic; misses time zone edge cases.')).toBeVisible();
+  await expect(sol.getByText('Settled · 9 builds', { exact: true })).toBeVisible();
+  // The row stops at the status: no per-item bars, adoption counts, or the lead's notes.
+  await expect(sol.getByText(/Merged|Brief|Solid logic/)).toHaveCount(0);
   // A model short of reviews is not ranked and gets no verdict word.
   await expect(standings.getByRole('article')).toHaveCount(3);
   const opus = page.getByRole('region', { name: 'Too early to rank' }).getByRole('article').filter({ hasText: 'claude-opus-5-5' });
   await expect(opus.getByLabel(/^Rank/)).toHaveCount(0);
-  await expect(opus.getByText('Too few reviews · 0 builds · 2 fixes')).toBeVisible();
+  await expect(opus.getByText('Too few reviews · 0 builds', { exact: true })).toBeVisible();
   await expect(opus.getByText(/Strong|Solid|Mixed|Shaky|Outstanding/)).toHaveCount(0);
+  // A model that only reviewed stands apart, with its reviews and how its findings held up.
+  const astra = page.getByRole('region', { name: 'Reviewers' }).getByRole('article').filter({ hasText: 'gpt-6.2-astra' });
+  await expect(astra.getByText('Too few reviews · 2 reviews', { exact: true })).toBeVisible();
+  await expect(astra.getByRole('img', { name: '6.4 out of 10' })).toBeVisible();
   await expect(page.getByRole('button', { name: /^Save/ })).toHaveCount(0);
   // Fixing is assigned with the reviews it answers.
   await settingsPage(page, 'Review');

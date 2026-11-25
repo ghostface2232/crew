@@ -101,8 +101,7 @@
 .standings { border-radius: var(--row-radius); background: var(--surface); box-shadow: 0 0 0 1px var(--hairline); overflow: hidden; }
 .row {
   display: flex;
-  /* A summary can make the row tall; the rank, mark and ring stay with its first lines. */
-  align-items: flex-start;
+  align-items: center;
   gap: 12px;
   padding: 14px;
   animation: score-rise 420ms var(--ease-out) backwards;
@@ -124,15 +123,6 @@
   font-weight: 600;
 }
 .meta { color: var(--secondary); font-size: 12px; font-variant-numeric: tabular-nums; }
-.bars { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 3px; }
-.bar { display: inline-flex; align-items: center; gap: 6px; color: var(--secondary); font-size: 11px; font-variant-numeric: tabular-nums; }
-.barLabel { min-width: 28px; }
-.barTrack { position: relative; width: 72px; height: 4px; border-radius: 2px; background: var(--fill); overflow: hidden; }
-.barTrack i { position: absolute; inset: 0; border-radius: inherit; background: var(--label); opacity: 0.7; transform-origin: left; scale: var(--value) 1; animation: score-grow-x 700ms var(--ease-out) backwards; animation-delay: calc(var(--i) * 50ms + 260ms); }
-.barValue { width: 22px; color: var(--label); }
-.bar[data-empty] .barValue { color: var(--tertiary); }
-/* The summary is written for the lead's routing; the board shows its opening and keeps the rest in the tooltip. */
-.summary { margin-top: 4px; color: var(--secondary); font-size: 12px; line-height: 1.4; white-space: pre-line; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .empty { padding: 14px 16px; color: var(--secondary); }
 .early { display: grid; gap: 8px; margin-top: 8px; }
 .earlyTitle { padding: 0 4px; color: var(--secondary); font-size: 12px; font-weight: 600; }
@@ -151,7 +141,6 @@
 @keyframes ring-fill { from { stroke-dasharray: 0 100; } }
 @keyframes score-rise { from { opacity: 0; translate: 0 10px; filter: blur(4px); } }
 @keyframes score-grow { from { scale: 1 0; } }
-@keyframes score-grow-x { from { scale: 0 1; } }
 .ringValue { font: 600 15px/1 var(--text-face); font-variant-numeric: tabular-nums; }
 .row:not([data-status="settled"]) .ringValue { color: var(--secondary); }
 
@@ -161,10 +150,8 @@
   .podium { gap: 4px; padding: 22px 12px 0; }
   .place[data-place="1"] .avatar { width: 54px; height: 54px; }
   .avatar { width: 44px; height: 44px; }
-  .bars { gap: 4px 12px; }
-  .barTrack { width: 52px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .contender, .pedestal, .row, .barTrack i, .arc { animation: none; }
+  .contender, .pedestal, .row, .arc { animation: none; }
 }

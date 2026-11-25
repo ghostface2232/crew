@@ -98,11 +98,11 @@ export interface RoleInfo {
 export const ROLE_INFO: RoleInfo[] = [
   { role: 'delegate', kind: 'delegate', label: 'Implementation', summary: 'Builds separable pieces of a change.' },
   { role: 'refactor', kind: 'delegate', parent: 'delegate', label: 'Refactoring', summary: 'Restructures code without changing what it does.' },
-  { role: 'release', kind: 'delegate', parent: 'delegate', label: 'Release preparation', summary: 'Prepares a release: version, changelog, build, and the steps to publish. It does not publish or deploy.' },
-  { role: 'debate', kind: 'delegate', parent: 'delegate', label: 'Debate', summary: 'Tests the lead\'s position on a hard decision, read-only.' },
+  { role: 'release', kind: 'delegate', parent: 'delegate', label: 'Release preparation', summary: 'Prepares a release without publishing it.' },
+  { role: 'debate', kind: 'delegate', parent: 'delegate', label: 'Debate', summary: 'Challenges the lead on hard decisions.' },
   { role: 'review', kind: 'review', label: 'Cross-review', summary: 'Reviews a change by reading it and running checks.' },
   { role: 'verify', kind: 'review', parent: 'review', label: 'Review that runs the app', summary: 'Reviews a change by starting the app in a snapshot of it.', unable: ['antigravity'] },
-  { role: 'fix', kind: 'delegate', label: 'Fix', summary: 'Fixes the review findings the lead accepted, in the lead\'s own code or a merged result.' },
+  { role: 'fix', kind: 'delegate', label: 'Fix', summary: 'Fixes accepted review findings.' },
   { role: 'polish', kind: 'polish', label: 'Wording', summary: 'Improves UI strings, comments, and docs.' },
 ];
 export const roleInfo = (role: Role): RoleInfo => ROLE_INFO.find((info) => info.role === role)!;

@@ -17,32 +17,20 @@ extension ModelScore {
         }
     }
     var tone: Color { band?.tone ?? Color.secondary.opacity(0.5) }
-    /// Build and fix counts apart, since only builds rank a model; an older daemon gives one total.
+    /// The count beside the status: builds, or reviews for a model that only reviewed; an older daemon gives one total.
+    /// Mirrors samplesText in Scores.tsx.
     var countsText: String {
-        guard let builds = buildSamples, let fixes = fixSamples else { return statusText + " · " + (samples == 1 ? String(localized: "1 review") : String(localized: "\(samples) reviews")) }
-        let reviews = reviewSamples.flatMap { count in
-            count > 0 ? (count == 1 ? String(localized: "1 review") : String(localized: "\(count) reviews")) : nil
-        }
-        return [statusText, builds == 1 ? String(localized: "1 build") : String(localized: "\(builds) builds"), fixes == 1 ? String(localized: "1 fix") : String(localized: "\(fixes) fixes"), reviews]
-            .compactMap { $0 }.joined(separator: " · ")
+        let reviews = reviewSamples ?? 0
+        let count = buildSamples.map { builds in
+            score == nil && reviews > 0
+                ? (reviews == 1 ? String(localized: "1 review") : String(localized: "\(reviews) reviews"))
+                : (builds == 1 ? String(localized: "1 build") : String(localized: "\(builds) builds"))
+        } ?? (samples == 1 ? String(localized: "1 review") : String(localized: "\(samples) reviews"))
+        return statusText + " · " + count
     }
-    /// The items beside correctness, which the ring shows; one with nothing behind it is left out. Mirrors itemBars in Scores.tsx.
-    var itemBars: [(label: String, value: Double)] {
-        [(String(localized: "Brief"), items?.brief), (String(localized: "Report"), items?.report), (String(localized: "Findings"), items?.findings)].compactMap { label, value in value.map { (label, $0) } }
-    }
-    /// Mirrors adoptionText in Scores.tsx.
-    var adoptionText: String? {
-        guard let a = adoption else { return nil }
-        return ([String(localized: "Merged \(a.asIs) of \(a.judged) as is"), String(localized: "\(a.afterReply) after a reply")] + (a.partly > 0 ? [String(localized: "\(a.partly) in part")] : []) + (a.rejected > 0 ? [String(localized: "\(a.rejected) rejected")] : [])
-            + [a.rounds == 1 ? String(localized: "1 follow-up") : String(localized: "\(a.rounds) follow-ups")]).joined(separator: " · ")
-    }
+    /// What a row's ring shows: the score, or for a model that only reviewed, how its findings held up. Mirrors ringValue in Scores.tsx.
+    var ringValue: Double? { score ?? items?.findings }
     var statusText: String { status == "settled" ? String(localized: "Settled") : status == "on trial" ? String(localized: "On trial") : String(localized: "Too few reviews") }
-    /// What a row says beyond its name and score: its counts, its bars, and the summary.
-    var spoken: String {
-        let bars: [(label: String, value: Double?)] = [(String(localized: "Build"), build), (String(localized: "Fix"), fix)] + itemBars.map { ($0.label, $0.value) }
-        let values = bars.map { String(localized: "\($0.label.lowercased()) \($0.value.map { Self.shown($0) } ?? String(localized: "None"))") }
-        return ([countsText, adoptionText ?? ""] + values + [summary]).filter { !$0.isEmpty }.joined(separator: ". ")
-    }
 }
 
 private let medals: [Color] = [Color(red: 1, green: 0.8, blue: 0), Color(red: 0.78, green: 0.78, blue: 0.8), Color(red: 0.83, green: 0.6, blue: 0.42)]
@@ -130,9 +118,9 @@ struct ScoreRing: View {
     var body: some View {
         ZStack {
             Circle().stroke(.quaternary, lineWidth: 3.5)
-            Circle().trim(from: 0, to: filled ? (score.score ?? 0) / 10 : 0)
+            Circle().trim(from: 0, to: filled ? (score.ringValue ?? 0) / 10 : 0)
                 .stroke(score.tone, style: StrokeStyle(lineWidth: 3.5, lineCap: .round)).rotationEffect(.degrees(-90))
-            Text(score.shown).font(.system(size: 14, weight: .semibold, design: .rounded)).monospacedDigit()
+            Text(ModelScore.shown(score.ringValue)).font(.system(size: 14, weight: .semibold, design: .rounded)).monospacedDigit()
                 .foregroundStyle(score.status == "settled" ? .primary : .secondary)
         }
         .frame(width: size, height: size)
@@ -140,22 +128,7 @@ struct ScoreRing: View {
     }
 }
 
-/// A build or fix score as a short bar out of 10.
-private struct ScoreBar: View {
-    let label: String
-    let value: Double?
-    var body: some View {
-        HStack(spacing: Space.s) {
-            Text(label).frame(minWidth: 30, alignment: .leading)
-            Capsule().fill(.quaternary).frame(width: 64, height: 4)
-                .overlay(alignment: .leading) { Capsule().fill(.primary.opacity(0.7)).frame(width: 64 * (value ?? 0) / 10, height: 4) }
-            Text(ModelScore.shown(value)).foregroundStyle(value == nil ? .tertiary : .primary).frame(width: 24, alignment: .leading)
-        }
-        .font(Typeface.caption).foregroundStyle(.secondary).monospacedDigit()
-    }
-}
-
-/// One model's standing: rank, mark, verdict word, counts, build and fix bars, the lead's summary, and the ring.
+/// One model's standing: rank, mark, verdict word, status, and the ring.
 struct ModelScoreRow: View {
     let rank: Int?
     let score: ModelScore
@@ -170,26 +143,6 @@ struct ModelScoreRow: View {
                     if let band = score.band { Text(band.word).chip(band.tone) }
                 }
                 Text(score.countsText).font(Typeface.caption).foregroundStyle(.secondary).monospacedDigit()
-                if let adoption = score.adoptionText {
-                    Text(adoption).font(Typeface.caption).foregroundStyle(.secondary).monospacedDigit()
-                }
-                HStack(spacing: Space.xl) {
-                    ScoreBar(label: String(localized: "Build"), value: score.build)
-                    ScoreBar(label: String(localized: "Fix"), value: score.fix)
-                }.padding(.top, Space.xxs)
-                if !score.itemBars.isEmpty {
-                    ViewThatFits(in: .horizontal) {
-                        HStack(spacing: Space.xl) {
-                            ForEach(score.itemBars, id: \.label) { ScoreBar(label: $0.label, value: $0.value).fixedSize() }
-                        }
-                        VStack(alignment: .leading, spacing: Space.xxs) {
-                            ForEach(score.itemBars, id: \.label) { ScoreBar(label: $0.label, value: $0.value) }
-                        }
-                    }
-                }
-                if !score.summary.isEmpty {
-                    Text(score.summary).font(Typeface.caption).foregroundStyle(.secondary).lineLimit(2).fixedSize(horizontal: false, vertical: true).help(score.summary).padding(.top, Space.xs)
-                }
             }
             // The text takes every point the ring leaves, so a line wraps only when the row is really that narrow.
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -197,8 +150,8 @@ struct ModelScoreRow: View {
         }
         .padding(.vertical, Space.s)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel([rank.map { String(localized: "Rank \($0)") }, String(localized: "\(score.model), \(agentName(score.agent)), \(score.shown) out of 10"), score.band?.word]
+        .accessibilityLabel([rank.map { String(localized: "Rank \($0)") }, String(localized: "\(score.model), \(agentName(score.agent)), \(ModelScore.shown(score.ringValue)) out of 10"), score.band?.word]
             .compactMap { $0 }.joined(separator: ", "))
-        .accessibilityValue(score.spoken)
+        .accessibilityValue(score.countsText)
     }
 }

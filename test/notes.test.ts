@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
-import { addEvidence, addRating, loadNotes, notesFile, renderNotes, scoreAll, setSummary, WORKER_ITEMS } from '../plugin/bridge/notes.ts';
+import { addEvidence, addRating, loadNotes, notesFile, renderNotes, reviewKind, scoreAll, setSummary, WORKER_ITEMS } from '../plugin/bridge/notes.ts';
 import type { Evidence, NotesFile } from '../plugin/bridge/notes.ts';
 
 const input: Omit<Evidence, 'id' | 'at'> = {
@@ -29,7 +29,7 @@ test('round trip creates home and atomically replaces the file', (t) => {
   assert.equal(evidence.at, 42);
   assert.equal(evidence.text, 'First second');
   assert.deepEqual(evidence.findings, { high: 0, medium: 0, low: 0 });
-  assert.equal(score.score, 7.6);
+  assert.equal(score.score, 7.9);
   assert.deepEqual(loadNotes(dir).models['model-a'].evidence, [evidence]);
   addEvidence(dir, input);
   assert.equal(loadNotes(dir).models['model-a'].evidence.length, 2);
@@ -79,18 +79,18 @@ test('corrupt JSON names the file and stays untouched', (t) => {
 });
 
 test('build scores a finding rate over exposure, with self-review weight and a prior, and no tier or clamp', () => {
-  // Alone, a model starts at the reference rate 0.36 with the weight of three medium changes: 1.08 / 4 = 0.27, 10·e^-0.27.
-  assert.equal(scoreAll(fixture([{}]))[0].score, 7.6);
-  // A self-review counts half: 1.08 / 3.5.
-  assert.equal(scoreAll(fixture([{ reviewer: 'codex' }]))[0].score, 7.3);
+  // A model starts at the reference rate 0.36 (7.0), whatever the others score; one clean review moves it up, a
+  // self-review about half as far, and one high finding on a medium change is the reference itself.
+  assert.equal(scoreAll(fixture([{}]))[0].score, 7.9);
+  assert.equal(scoreAll(fixture([{ reviewer: 'codex' }]))[0].score, 7.5);
   assert.equal(scoreAll(fixture([{ findings: { high: 1, medium: 0, low: 0 } }]))[0].score, 7.0);
   // A large change has twice the exposure; the tier changes nothing.
   const large = scoreAll(fixture([{ size: 'large', findings: { high: 1, medium: 0, low: 0 } }]))[0].score;
-  assert.equal(large, 7.5);
+  assert.equal(large, 7.7);
   for (const tier of ['fast', 'frontier'] as const) assert.equal(scoreAll(fixture([{ tier, size: 'large', findings: { high: 1, medium: 0, low: 0 } }]))[0].score, large);
   // Every further finding costs more: nothing is clamped.
   const highs = [3, 10, 100].map((high) => scoreAll(fixture([{ findings: { high, medium: 0, low: 0 } }]))[0].score!);
-  assert.deepEqual(highs, [5.9, 3.2, 0]);
+  assert.deepEqual(highs, [5.1, 0.9, 0]);
 });
 
 test('fix scores apart from build and never moves the score or the rank', () => {
@@ -109,16 +109,128 @@ test('fix scores apart from build and never moves the score or the rank', () => 
   assert.deepEqual([b.buildSamples, b.fixSamples], [8, 8]);
 });
 
-test('reviewers are not calibrated, and each other model counts once in the start', () => {
-  // The same findings score the same whoever reviewed them, apart from a self-review's half weight.
-  const harsh = { reviewer: 'antigravity' as const, findings: { high: 2, medium: 0, low: 0 } };
-  assert.equal(scoreAll(fixture(Array(5).fill(harsh)))[0].score, scoreAll(fixture(Array(5).fill({ ...harsh, reviewer: 'claude' })))[0].score);
-  // A busy clean model and a sparse poor one set the start together, not by their line counts.
+const notes = (models: Record<string, Partial<Evidence>[]>): NotesFile => ({ version: 2, ratings: [], models: Object.fromEntries(Object.entries(models).map(([model, lines]) => [model,
+  { model, agent: 'codex' as const, summary: '', summaryAt: null, evidence: lines.map((e, i) => ({ ...input, model, id: `ev-${model}-${i}`, at: i, ...e })) }])) });
+const scoreOf = (file: NotesFile, model: string) => scoreAll(file).find((s) => s.model === model)!.score!;
+
+test('a review that finds more is read as one, from a model it reviewed beside another', () => {
+  // The cross model's work drew twice the findings from the strict review as from the light one, so the strict
+  // review's findings count for less: a model it alone reviewed is read close to one with half the findings under the
+  // light review, and well above one with the same findings under it.
+  const medium = (n: number) => ({ findings: { high: 0, medium: n, low: 0 } });
+  const strict = { reviewedBy: ['strict-model'] }, light = { reviewedBy: ['light-model'] };
+  const cross = [...Array(10).fill({ ...strict, ...medium(4) }), ...Array(10).fill({ ...light, ...medium(2) })];
+  const file = notes({ cross, strict: Array(10).fill({ ...strict, ...medium(4) }), light: Array(10).fill({ ...light, ...medium(2) }), same: Array(10).fill({ ...light, ...medium(4) }) });
+  const gap = scoreOf(file, 'light') - scoreOf(file, 'strict');
+  assert.ok(Math.abs(gap) < 0.5);
+  assert.ok(scoreOf(file, 'strict') > scoreOf(file, 'same') + 1);
+  // With no model reviewed by both, only the priors split the difference between the review and the work.
+  const apart = notes({ strict: Array(10).fill({ ...strict, ...medium(4) }), light: Array(10).fill({ ...light, ...medium(2) }) });
+  assert.ok(scoreOf(apart, 'light') - scoreOf(apart, 'strict') > gap);
+});
+
+test('hard work is expected to draw more findings, and clean routine work says little', () => {
+  const medium = (n: number) => ({ findings: { high: 0, medium: n, low: 0 } });
+  // The same findings on hard work read better than on standard work, and on routine work worse.
+  const file = notes({ hard: Array(10).fill({ difficulty: 'hard', ...medium(2) }), standard: Array(10).fill(medium(2)), routine: Array(10).fill({ difficulty: 'routine', ...medium(2) }) });
+  assert.ok(scoreOf(file, 'hard') > scoreOf(file, 'standard') && scoreOf(file, 'standard') > scoreOf(file, 'routine'));
+  // Clean work: hard lines were expected to draw findings, so their absence lifts a model further than routine lines'.
+  const clean = notes({ hard: Array(10).fill({ difficulty: 'hard' }), routine: Array(10).fill({ difficulty: 'routine' }), other: Array(10).fill(medium(2)) });
+  assert.ok(scoreOf(clean, 'hard') > scoreOf(clean, 'routine'));
+  // A line without a difficulty counts as standard, and the mix is counted the same way.
+  assert.equal(scoreOf(notes({ a: [{}], b: [medium(1)] }), 'a'), scoreOf(notes({ a: [{ difficulty: 'standard' }], b: [medium(1)] }), 'a'));
+  assert.deepEqual(scoreAll(notes({ a: [{}, { difficulty: 'hard' }, { difficulty: 'routine' }, { role: 'fix', outcome: 'patch' }] }))[0].difficulty, { routine: 1, standard: 1, hard: 1 });
+});
+
+test('routine lines together weigh at most two lines, in the score and in the status', () => {
+  const others = { other: Array(10).fill({ findings: { high: 0, medium: 2, low: 0 } }) };
+  // However many clean routine lines a model has, they lift it no further than two of them would, and never settle it.
+  const routine = (n: number) => scoreAll(notes({ ...others, polisher: Array(n).fill({ difficulty: 'routine', size: 'small' }) })).find((s) => s.model === 'polisher')!;
+  assert.equal(routine(50).score, routine(2).score);
+  assert.equal(routine(50).status, 'too few samples');
+  // Nor does a run of them under a review kind of their own move where every model is read.
+  const kinds = (n: number) => scoreAll(notes({ strict: Array(10).fill({ reviewedBy: ['strict-model'], findings: { high: 0, medium: 2, low: 0 } }),
+    light: Array(10).fill({ reviewedBy: ['light-model'], findings: { high: 0, medium: 1, low: 0 } }),
+    polisher: Array(n).fill({ difficulty: 'routine', size: 'small', reviewedBy: ['light-model'] }) })).map((s) => [s.model, s.score]);
+  assert.deepEqual(kinds(200), kinds(2));
+  // One standard line and three routine ones are three reviews: on trial, not short by a rounding error.
+  assert.equal(scoreAll(notes({ ...others, mixed: [{}, ...Array(3).fill({ difficulty: 'routine', size: 'small' })] })).find((s) => s.model === 'mixed')!.status, 'on trial');
+  // Standard lines keep counting.
+  const standard = (n: number) => scoreAll(notes({ ...others, builder: Array(n).fill({ size: 'small' }) })).find((s) => s.model === 'builder')!;
+  assert.ok(standard(50).score! > standard(2).score!);
+  assert.equal(standard(50).status, 'settled');
+});
+
+test('ratings of routine work together weigh at most two ratings, as its lines do', () => {
+  const rated = (n: number, difficulty: Evidence['difficulty']) => notes({
+    other: Array.from({ length: 6 }, (_, i) => ({ job: `cx-o${i}`, rating: { correctness: 3 }, findings: { high: 0, medium: 1, low: 0 } })),
+    polisher: [...Array.from({ length: 3 }, (_, i) => ({ job: `cx-s${i}`, rating: { correctness: 4 } })),
+      ...Array.from({ length: n }, (_, i) => ({ job: `cx-r${i}`, difficulty, size: 'small' as const, rating: { correctness: 5 } }))],
+  });
+  // However many fives routine work collects, they lift its correctness no further than two of them would.
+  assert.equal(scoreOf(rated(20, 'routine'), 'polisher'), scoreOf(rated(2, 'routine'), 'polisher'));
+  // The same fives on standard work keep counting.
+  assert.ok(scoreOf(rated(20, 'standard'), 'polisher') > scoreOf(rated(2, 'standard'), 'polisher'));
+  // Routine ratings alone count toward the minimum by their capped share: twenty of them are two, too few to move it.
+  const alone = (n: number) => notes({ other: Array.from({ length: 6 }, (_, i) => ({ job: `cx-o${i}`, rating: { correctness: 3 } })),
+    polisher: [{}, ...Array.from({ length: n }, (_, i) => ({ job: `cx-r${i}`, difficulty: 'routine' as const, size: 'small' as const, rating: { correctness: 5 } }))] });
+  const polisher = scoreAll(alone(20)).find((s) => s.model === 'polisher')!;
+  assert.deepEqual([polisher.ratings, polisher.score], [0, polisher.build]);
+  // One standard rating and three routine ones count as three, whole.
+  const mixed = (n: number) => notes({ other: Array.from({ length: 6 }, (_, i) => ({ job: `cx-o${i}`, rating: { correctness: 3 } })),
+    polisher: [{ job: 'cx-s', rating: { correctness: 5 } }, ...Array.from({ length: n }, (_, i) => ({ job: `cx-r${i}`, difficulty: 'routine' as const, size: 'small' as const, rating: { correctness: 5 } }))] });
+  assert.equal(scoreAll(mixed(3)).find((s) => s.model === 'polisher')!.ratings, 3);
+});
+
+test('a reviewer\'s ratings of the lead\'s own routine work are capped through the review jobs its lines name', () => {
+  // The lead's work has no job, so its line names the review jobs that read it, and their ratings are traced back.
+  const reviewed = (n: number, difficulty: Evidence['difficulty']) => {
+    const file = notes({
+      lead: Array.from({ length: n }, (_, i) => ({ reviewer: 'codex' as const, difficulty, size: 'small' as const, reviewedBy: ['cross'], reviewJobs: [`cx-rv${i}`] })),
+      cross: Array.from({ length: n }, (_, i) => ({ role: 'review' as const, job: `cx-rv${i}`, of: { model: 'lead' } })),
+      other: [{ findings: { high: 0, medium: 1, low: 0 } }],
+    });
+    file.models.lead.agent = 'claude';
+    file.models.lead.evidence.forEach((e) => { e.agent = 'claude'; });
+    file.ratings = Array.from({ length: n }, (_, i) => ({ id: `rt-${i}`, at: i, by: 'codex' as const, byModel: 'cross', byJob: `cx-rv${i}`, items: { correctness: 5 }, fact: 'x' }));
+    return scoreAll(file).find((s) => s.model === 'lead')!;
+  };
+  assert.equal(reviewed(20, 'routine').score, reviewed(2, 'routine').score);
+  assert.equal(reviewed(20, 'routine').ratings, 0);
+  // Standard work is not capped, so its ratings count.
+  assert.ok(reviewed(20, 'standard').ratings >= 3);
+});
+
+test('a review kind is the first reviewer from another agent, with extra reviews as their own term', () => {
+  const agents: Record<string, 'codex' | 'claude'> = { 'model-a': 'codex', 'claude-x': 'claude' };
+  const kind = (e: Partial<Evidence>) => reviewKind({ ...input, id: 'ev', at: 0, ...e } as Evidence, (m) => agents[m]);
+  // Whatever the order, the review from another agent is the kind and the builder's own agent's is an extra review.
+  assert.deepEqual(kind({ reviewedBy: ['model-a', 'claude-x'] }), { kind: 'claude-x', extra: 1 });
+  assert.deepEqual(kind({ reviewedBy: ['claude-x', 'model-a'] }), { kind: 'claude-x', extra: 1 });
+  // A self-reviewer on another model of the builder's agent, with no notes of its own, is still the builder's agent's
+  // when the line recorded it, so the cross-review stays the kind.
+  assert.deepEqual(kind({ agent: 'claude', model: 'claude-x', reviewedBy: ['claude-sub', 'gpt-cross'], reviewAgents: ['claude', 'codex'] }), { kind: 'gpt-cross', extra: 1 });
+  // A review only by the builder's own agent is its own kind.
+  assert.deepEqual(kind({ reviewedBy: ['model-a'] }), { kind: 'model-a (own agent)', extra: 0 });
+  // Older lines: the lead reading a worker's job, a self-review, and a cross-review of the lead's work are three kinds.
+  assert.deepEqual([kind({ job: 'cx-1' }), kind({ reviewer: 'codex' }), kind({ agent: 'claude', model: 'claude-x' })].map((k) => k.kind),
+    ['claude review of a job', 'codex self-review', 'claude self-review']);
+  assert.equal(kind({ agent: 'claude', model: 'claude-x', reviewer: 'codex' }).kind, 'codex cross-review');
+  const file = notes({ a: [{ reviewedBy: ['model-a', 'cross-model'] }, { reviewedBy: ['cross-model'] }], b: [{}] });
+  // Both of a's lines share the cross model's kind; the self-reviewer beside it is an extra review, not the kind.
+  const text = renderNotes(scoreAll(file), file, { models: ['a'] });
+  assert.match(text, /model-a \+ cross-model reviewed, build/);
+  // Older lines without models fall back to the reviewer's agent: a worker's job read by the lead is its own kind.
+  assert.ok(Number.isFinite(scoreOf(notes({ a: [{ job: 'cx-1' }, {}], b: [{ reviewer: 'codex' }] }), 'a')));
+});
+
+test('every model starts at the reference, whatever the others and their line counts', () => {
+  // A busy clean model does not lift the start of the others, and a sparse poor one does not lower it.
   const file = fixture([{}, {}, {}]);
   const lines = (n: number, e: Partial<Evidence>) => fixture(Array(n).fill(e)).models['model-a'].evidence;
   file.models.busy = { model: 'busy', agent: 'codex', summary: '', summaryAt: null, evidence: lines(100, {}) };
   file.models.sparse = { model: 'sparse', agent: 'codex', summary: '', summaryAt: null, evidence: lines(5, { findings: { high: 2, medium: 0, low: 0 } }) };
-  assert.deepEqual(scoreAll(file).map((s) => [s.model, s.score]), [['busy', 9.9], ['model-a', 8.5], ['sparse', 6]]);
+  assert.deepEqual(scoreAll(file).map((s) => [s.model, s.score]), [['busy', 9.8], ['model-a', 8.5], ['sparse', 5.3]]);
 });
 
 test('status counts build reviews, a self-review as half, and consolidation follows timestamps', (t) => {
@@ -145,9 +257,10 @@ test('rendering filters models and agents and shows latest evidence and null sco
   file.models.empty = { model: 'empty', agent: 'claude', summary: '', summaryAt: null, evidence: [] };
   const scores = scoreAll(file);
   const text = renderNotes(scores, file, { models: ['model-a'], evidence: 1 });
-  assert.match(text, /### model-a \(codex\) — 8\.1\/10, too few samples, 2 build\(s\), 0 fix\(es\)/);
-  assert.match(text, /build 8\.1 · fix —/);
+  assert.match(text, /### model-a \(codex\) — 8\.3\/10, too few samples, 2 build\(s\), 0 fix\(es\)/);
+  assert.match(text, /build 8\.3 · fix —/);
   assert.match(text, /builds by tier: frontier 1/);
+  assert.match(text, /builds by difficulty: standard 2/);
   assert.match(text, /2026-11-15 cx-123 \(claude reviewed, build, frontier\/medium, declined 2 medium 1 low\): Latest\./);
   assert.doesNotMatch(text, /Older/);
   assert.match(renderNotes(scores, file, { agents: ['claude'] }), /—\/10.*No summary yet\./s);
@@ -166,11 +279,11 @@ test('scores sort by unrounded rate, then by model, with fix-only models and the
   };
   assert.deepEqual(scoreAll(file).map((s) => s.model), ['b', 'model-a', 'z', 'empty-a', 'empty-z']);
   assert.equal(scoreAll(file).at(-1)!.lastAt, null);
-  // Both show 9.0; the one with fewer findings comes first, whatever its name.
+  // Both show 8.8; the one with fewer findings comes first, whatever its name.
   const low = { findings: { high: 0, medium: 0, low: 1 } };
   const tie = fixture([...Array(7).fill(low), { findings: { high: 0, medium: 0, low: 2 } }]);
   tie.models.b = { model: 'b', agent: 'codex', summary: '', summaryAt: null, evidence: fixture(Array(8).fill(low)).models['model-a'].evidence };
-  assert.deepEqual(scoreAll(tie).map((s) => [s.model, s.score]), [['b', 9], ['model-a', 9]]);
+  assert.deepEqual(scoreAll(tie).map((s) => [s.model, s.score]), [['b', 8.8], ['model-a', 8.8]]);
 });
 
 test('noting the same job and role again replaces its line, while another role or no job adds one', (t) => {
@@ -219,7 +332,7 @@ test('incomplete entries and lines are skipped and the rest keeps the shape read
   const file = loadNotes(dir);
   assert.deepEqual(Object.keys(file.models), ['model-a']);
   assert.deepEqual([file.models['model-a'].summary, file.models['model-a'].summaryAt, file.models['model-a'].evidence.map((e) => e.id)], ['', null, ['ev-1']]);
-  assert.equal(scoreAll(file)[0].score, 7.6);
+  assert.equal(scoreAll(file)[0].score, 7.9);
 });
 
 test('a save keeps a copy of the file when loading had skipped lines, and none when nothing was skipped', (t) => {
@@ -238,14 +351,14 @@ test('a save keeps a copy of the file when loading had skipped lines, and none w
   assert.equal(loadNotes(dir).models['model-a'].evidence.length, 3);
 });
 
-test('a model with few reviews starts where the others stand and ranks after every model with enough', () => {
+test('a model with few reviews starts at the reference and ranks after every model with enough', () => {
   const file = fixture(Array(8).fill({ findings: { high: 0, medium: 1, low: 0 } }));
   file.models.fresh = { model: 'fresh', agent: 'codex', summary: '', summaryAt: null, evidence: fixture([{}, {}]).models['model-a'].evidence };
   const [settled, fresh] = scoreAll(file);
-  // The fresh one starts between the settled model's rate, (1.2 + 1.08) / 11, and the reference 0.36.
-  assert.deepEqual([settled.model, settled.score, settled.status], ['model-a', 8.3, 'settled']);
+  // The fresh one starts at the reference, 7.0, not where the settled model stands.
+  assert.deepEqual([settled.model, settled.score, settled.status], ['model-a', 8.2, 'settled']);
   // Two clean reviews lift it above the settled model's score, but not above it in the ranking.
-  assert.deepEqual([fresh.model, fresh.score, fresh.status], ['fresh', 8.4, 'too few samples']);
+  assert.deepEqual([fresh.model, fresh.score, fresh.status], ['fresh', 8.3, 'too few samples']);
 });
 
 test('a save stops when the copy of skipped lines cannot be made, so nothing is erased', (t) => {
@@ -262,7 +375,7 @@ test('a save stops when the copy of skipped lines cannot be made, so nothing is 
 
 test('an xlarge change carries twice a large one\'s exposure', () => {
   const rate = (size: Evidence['size']) => scoreAll(fixture(Array.from({ length: 20 }, () => ({ size, findings: { high: 0, medium: 2, low: 0 } }))))[0].score!;
-  // The same findings on bigger changes are a lower rate: (6 + 3·0.36) / (40 + 3) for large, / (80 + 3) for xlarge.
+  // The same findings on bigger changes are a lower rate: about 0.15 per unit for large, half that for xlarge.
   assert.deepEqual([rate('large'), rate('xlarge')], [8.5, 9.2]);
 });
 

@@ -22,6 +22,8 @@ import { buildPrompt } from './prompts.ts';
 import { findSkills } from './skills.ts';
 import { defaultTier, familyTier, modelId, tierEffort, tierModel, tierOf, TIERS } from './tiers.ts';
 import type { Tier } from './tiers.ts';
+import { DIFFICULTIES } from './notes.ts';
+import type { Difficulty } from './notes.ts';
 
 export type { WorkerAgent };
 export type Agent = 'claude' | WorkerAgent;
@@ -81,6 +83,8 @@ export interface JobSpec {
   effort?: string;
   /** How demanding the job is; the bridge turns it into the model (see tiers.ts). An explicit model wins. */
   tier?: Tier;
+  /** delegate: how hard the work is, for its build line in the model notes. Set here so its review cannot change it. */
+  difficulty?: Difficulty;
   /** Mission the job is part of, if the lead started it while carrying out one. */
   mission?: string;
   /** Plan occurrence captured by the daemon when this job was requested. */
@@ -270,6 +274,8 @@ export interface Job {
   effort?: string;
   /** The tier the model was picked by; absent when a model was named or configured, and on older jobs. */
   tier?: Tier;
+  /** How hard the lead said the work was when it handed it out; see JobSpec.difficulty. */
+  difficulty?: Difficulty;
   /** A preset's cap left no model to name, so the adapter must not fall back to the agent's configured one. */
   agentDefault?: boolean;
   /** Session-reported model, or the configured fallback; absent on older saved jobs. */
@@ -671,6 +677,9 @@ export class Jobs {
     }
     if (spec.plugins?.length && spec.kind === 'polish') throw new Error('A polish job cannot use plugins: an editor only changes wording. Drop plugins.');
     if (spec.tier !== undefined && !TIERS.includes(spec.tier)) throw new Error(`tier must be one of: ${TIERS.join(', ')}.`);
+    if (spec.difficulty !== undefined && (!DIFFICULTIES.includes(spec.difficulty) || spec.kind !== 'delegate' || spec.ask)) {
+      throw new Error(`difficulty is for work handed out with delegate, and one of: ${DIFFICULTIES.join(', ')}.`);
+    }
     if (spec.check !== undefined && (typeof spec.check !== 'string' || !spec.check.trim())) throw new Error('check must be a shell command.');
     if (spec.check && (spec.kind !== 'delegate' || spec.ask || spec.isolation === 'in_place')) {
       throw new Error('check runs in the job\'s own worktree after each turn, so only a delegate job with a worktree takes it. Run the check yourself, or drop check.');
@@ -794,6 +803,7 @@ export class Jobs {
         missionStep: spec.missionStep,
         taskId: spec.mission ? spec.taskId : undefined,
         exclusive: Boolean(spec.exclusive) || undefined,
+        difficulty: spec.difficulty,
         runsApp: Boolean(spec.runsApp) || undefined,
         ask: Boolean(spec.ask) || undefined,
         debate: spec.debate ? { rounds: spec.debate.rounds } : undefined,
@@ -1928,6 +1938,8 @@ export class Jobs {
       job.project = canonicalPath(job.project ?? job.repo ?? job.cwd);
       // Saved before keys were canonical; a Windows job may hold git's `C:/x` spelling.
       if (job.root) job.root = canonicalPath(job.root);
+      // Its build line would be refused with it, so a value of no known difficulty counts as none.
+      if (job.difficulty !== undefined && !DIFFICULTIES.includes(job.difficulty)) delete job.difficulty;
       if (!isTerminal(job)) {
         // The worker process died with the previous bridge; its session can still be continued with reply.
         job.state = 'failed';

@@ -98,6 +98,25 @@ test('mission forwards plans on start, revision, repeated titles and reattachmen
   assert.equal(missions.list().length, 2);
 });
 
+test('a mission takes its difficulty only on the call that starts it', async (t) => {
+  const { missions, calls, server } = missionServer(t);
+  const { reportMission } = server();
+  assert.match(await reportMission({ title: 'Port', stages: ['implement', 'final'], difficulty: 'hard' }), /Plan: implement \(current\) → final · difficulty: hard/);
+  assert.equal(calls.at(-1)?.body.difficulty, 'hard');
+  const [mission] = missions.list();
+  const posts = () => calls.filter((call) => call.method === 'POST').length;
+  const before = posts();
+  // A later call, or the same title with another difficulty, is refused before anything is sent.
+  for (const args of [{ stage: 'final', difficulty: 'routine' }, { id: mission.id, difficulty: 'hard' }, { done: true, difficulty: 'hard' }]) {
+    await assert.rejects(reportMission(args), /difficulty is set only on the call that starts a mission/);
+  }
+  await assert.rejects(reportMission({ title: 'Port', difficulty: 'routine' }), /was started as hard, which cannot change/);
+  assert.equal(posts(), before);
+  assert.equal(mission.state, 'active');
+  // A resumed lead resending its whole starting call resumes it.
+  assert.match(await reportMission({ title: 'Port', stages: ['implement', 'final'], difficulty: 'hard' }), /difficulty: hard/);
+});
+
 test('only a restarted server takes a closed mission of this session for one it lost track of', async (t) => {
   const { missions, calls, server } = missionServer(t);
   await server().reportMission({ title: 'Fix X' });

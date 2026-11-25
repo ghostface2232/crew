@@ -16,7 +16,7 @@ import type { Evidence } from './evidence.ts';
 import { describe, needsLead, summarize } from './render.ts';
 import type { JobView } from './render.ts';
 import { TIERS } from './tiers.ts';
-import { RATING_ITEMS } from './notes.ts';
+import { CORRECTNESS_SCALE, DIFFICULTIES, FINDINGS_SCALE, MAX_REVIEWS, RATING_ITEMS } from './notes.ts';
 import { clip } from './text.ts';
 import { checkArguments } from './arguments.ts';
 
@@ -146,6 +146,8 @@ const modelProps = {
   effort: { type: 'string', description: 'Leave it out to keep the effort the user set for the role or preset; an effort named here overrides it. With none set, Codex runs at medium, or high at the frontier tier. Antigravity sets its thinking level only when an effort is named, using the nearest lower offered level if needed and keeping the session default if no level fits.' },
 };
 
+const DIFFICULTY_SCALE = 'routine: mechanical or local edits, wording. standard: an ordinary feature or fix with a clear spec. hard: design or correctness-heavy work (several subsystems, concurrency, cross-platform, protocols, migrations, security, an ambiguous spec).';
+
 /** Built on `initialize` too: the holder names in the descriptions depend on the host. */
 const buildTools = () => [
   {
@@ -160,6 +162,7 @@ const buildTools = () => [
         title: { type: 'string', description: 'Short label shown on the status board.' },
         done_when: { type: 'string', description: 'Concrete completion criteria the engineer can check, e.g. tests that must pass, or what must be true on screen and at which widths.' },
         check: { type: 'string', description: 'A shell command (e.g. "npm test") the bridge itself runs in the worktree after every turn, so the result shows an observed exit status instead of the worker\'s word. Pick one that fails without the change. Runs with the worker\'s file limits, up to 10 minutes. Needs a worktree.' },
+        difficulty: { type: 'string', enum: [...DIFFICULTIES], description: `How hard this piece is, set now so its review cannot change it. ${DIFFICULTY_SCALE}` },
         ...worktreeProps,
         ...modelProps,
         ...agentProp(),
@@ -267,6 +270,7 @@ const buildTools = () => [
         outcome: { type: 'string', description: 'With done or abandoned: one line on how it ended.' },
         record: { type: 'string', description: 'Optional, with done: the decisions taken and why, approaches that failed, and prerequisites the next person would need. A few short lines; `crew export <mission>` turns it and the jobs into a runbook.' },
         preset: { type: ['string', 'null'], enum: [...PRESET_NAMES, null], description: 'Only when the user names a preset for this command: the mission\'s new jobs run under it instead of the global one. null returns to the global one; leave it out to keep what is set. Never choose one yourself.' },
+        difficulty: { type: 'string', enum: [...DIFFICULTIES], description: `Only with title, when the mission starts: how hard your own work in this command is, set now so its review cannot change it. Later calls cannot pass it. ${DIFFICULTY_SCALE}` },
       },
     },
   },
@@ -302,19 +306,22 @@ const buildTools = () => [
         findings: {
           type: 'object',
           properties: { high: { type: 'integer', minimum: 0 }, medium: { type: 'integer', minimum: 0 }, low: { type: 'integer', minimum: 0 } },
-          description: 'For build: the findings you accepted, by severity (high: wrong behavior, data loss, security; medium: a real bug in an edge case; low: minor; these are the blocker, major and minor of a review report). When several reviews covered the work, one line with every accepted finding counted once, naming as reviewer one from another agent if any ran. For fix: the findings the check of the fix raised. For review: the findings of this review that you accepted.',
+          description: 'For build: the findings you accepted, by severity (high: wrong behavior, data loss, security; medium: a real bug in an edge case; low: minor; these are the blocker, major and minor of a review report). Count them against the work as first delivered for review: findings you sent back to a worker with `reply` are counted; fixes you made to your own work before its first review are not. When several reviews covered the work, one line with every accepted finding counted once, naming as reviewer one from another agent if any ran. For fix: the findings the check of the fix raised. For review: the findings of this review that you accepted.',
         },
         declined: {
           type: 'object',
           properties: { high: { type: 'integer', minimum: 0 }, medium: { type: 'integer', minimum: 0 }, low: { type: 'integer', minimum: 0 } },
           description: 'The findings you declined, by the severity the reviewer gave. For build: not scored; kept so your triage can be checked. For review: this review\'s, weighed against the ones you accepted.',
         },
+        reviewed_by: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: MAX_REVIEWS, description: 'For build: one entry per review whose findings this line counts: review job ids, or model ids for your own reading of a worker\'s diff and for self-reviewer subagents.' },
+        difficulty: { type: 'string', enum: [...DIFFICULTIES], description: 'For build: how hard the work was. A job\'s line takes the difficulty it was handed out with, and a line of your own work that of its mission; pass it only where neither set one. Without one it counts as standard.' },
+        mission: { type: 'string', description: 'For build without job_id: the mission the work was done for, whose difficulty then applies. Needed only while this session has more than one mission open, or for one already finished.' },
         adoption: { type: 'string', enum: ['as-is', 'after-reply', 'partly', 'rejected'], description: 'For a delegated job\'s build line: how you took its work. as-is (merged as delivered), after-reply (merged after you sent it back), partly (merged in part), rejected. Its follow-up rounds are read from the job. Noting the job again replaces its line, so give adoption again.' },
         outcome: { type: 'string', enum: ['root-cause', 'patch', 'another-review'], description: 'Required for fix: root-cause (fixed the cause), patch (handled the case without the cause), another-review (the fix needed another round).' },
         rating: {
           type: 'object',
           properties: Object.fromEntries(RATING_ITEMS.map((item) => [item, { type: 'integer', minimum: 1, maximum: 5 }])),
-          description: 'With job_id only: your rating of the job\'s work as you saw it, 1 to 5 per item, resting on text. For build: correctness, brief (how it followed your brief), report (how well its report matched the work). For fix: brief and report. For review: findings (how useful they were). Noting the job again without one keeps the rating it had.',
+          description: `With job_id only: your rating of the job\'s work as you saw it, 1 to 5 per item, resting on text. For build: correctness (${CORRECTNESS_SCALE}), brief (how it followed your brief), report (how well its report matched the work). For fix: brief and report. For review: findings (${FINDINGS_SCALE}). Noting the job again without one keeps the rating it had.`,
         },
         text: { type: 'string', description: 'One line of facts from the review, e.g. "Markdown parser, no findings, one follow-up on underscore boundaries". No impressions.' },
       },
@@ -756,6 +763,9 @@ async function updateMission(args: any, ctx?: CallContext): Promise<string> {
   const restarted = fresh;
   fresh = false;
   const ending = Boolean(args.done || args.abandoned);
+  if (args.difficulty !== undefined && !(args.title && !ending && args.id === undefined)) {
+    throw new Error('difficulty is set only on the call that starts a mission, with title, so its review cannot change it. Nothing was changed.');
+  }
   const changing = Boolean(args.stage) || args.stages !== undefined || args.preset !== undefined || args.tasks !== undefined;
   // Links a pull request and says what stands on it now; what is already there is not sent again as news.
   const link = async (mission: Mission): Promise<string> => {
@@ -772,6 +782,9 @@ async function updateMission(args: any, ctx?: CallContext): Promise<string> {
     // A resumed lead may resend its whole starting call; its plan is not a revision, so stages are ignored here.
     const same = now.open.find((m) => m.title === title);
     if (same) {
+      if (args.difficulty !== undefined && args.difficulty !== same.difficulty) {
+        throw new Error(`Mission ${same.id} was started ${same.difficulty ? `as ${same.difficulty}` : 'without a difficulty'}, which cannot change. Leave difficulty out. Nothing was changed.`);
+      }
       track(same);
       const mission = args.stage || args.preset !== undefined || args.tasks !== undefined ? await api('POST', `/api/missions/${same.id}`, { stage: args.stage, preset: args.preset, tasks: args.tasks, lead: SESSION }) : same;
       const linked = await link(mission);
@@ -784,7 +797,7 @@ async function updateMission(args: any, ctx?: CallContext): Promise<string> {
       return `Mission ${closed.id} was closed outside this session (${closed.outcome || closed.state}). Carry on with the work and do not open a new mission for it.\n${describeMission(closed)}`;
     }
     // A mission already open stays open: the user often gives a second command while the first is still under way.
-    const opened: Mission = await api('POST', '/api/missions', { title: args.title, project: PROJECT, stage: args.stage, stages: args.stages, owner: SESSION, lead: host, preset: args.preset ?? undefined, tasks: args.tasks });
+    const opened: Mission = await api('POST', '/api/missions', { title: args.title, project: PROJECT, stage: args.stage, stages: args.stages, owner: SESSION, lead: host, preset: args.preset ?? undefined, tasks: args.tasks, difficulty: args.difficulty });
     openedHere.add(opened.id);
     track(opened);
     closedElsewhere = null;
@@ -998,7 +1011,7 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
     case 'debate':
       return runJob({ kind: 'delegate', role: 'debate', cwd, title: args.title ?? `Debate: ${clip(String(args.topic).split('\n')[0], 60)}`, task: `${args.topic}\n\n# The lead's position\n${args.position}`, debate: { rounds: args.rounds ?? 3 }, agent: args.agent, tier: args.tier, model: args.model, effort: args.effort, taskId: args.task_id }, args.background !== false, ctx, args.mission);
     case 'delegate':
-      return withNotes(await runJob({ kind: 'delegate', role: args.role ?? 'delegate', cwd, title: args.title, task: args.task, done_when: args.done_when, check: args.check, base: args.base, isolation: args.isolation, agent: args.agent, tier: args.tier, model: args.model, effort: args.effort, exclusive: Boolean(args.exclusive), runsApp: Boolean(args.runs_app), plugins: args.plugins, skills: args.skills, attachments: args.attachments, taskId: args.task_id }, args.background !== false, ctx, args.mission), [args.agent], 2, true);
+      return withNotes(await runJob({ kind: 'delegate', role: args.role ?? 'delegate', cwd, title: args.title, task: args.task, done_when: args.done_when, check: args.check, difficulty: args.difficulty, base: args.base, isolation: args.isolation, agent: args.agent, tier: args.tier, model: args.model, effort: args.effort, exclusive: Boolean(args.exclusive), runsApp: Boolean(args.runs_app), plugins: args.plugins, skills: args.skills, attachments: args.attachments, taskId: args.task_id }, args.background !== false, ctx, args.mission), [args.agent], 2, true);
     case 'review': {
       const kind = args.target ?? 'uncommitted';
       if (kind === 'branch' && !args.base) throw new Error('target "branch" needs base (the branch to compare against, e.g. main).');
@@ -1040,9 +1053,13 @@ async function callTool(name: string, args: any, ctx: CallContext): Promise<stri
     }
     case 'note':
     case 'note_summary': {
+      if (name === 'note' && args.job_id && args.mission !== undefined) throw new Error('mission is for a line without job_id: a job\'s line takes the difficulty it was handed out with.');
+      // The lead's own build counts as hard as the command it was done for.
+      // A lead often closes its mission before noting; the one this session just finished is still the work's.
+      const mission = name === 'note' && !args.job_id && (args.role ?? 'build') === 'build' ? (await jobMission(args.mission)) ?? lastDone?.id : undefined;
       const body = name === 'note_summary'
         ? { model: args.model, summary: args.summary }
-        : { job: args.job_id, model: args.model, lead: host === 'codex' ? 'codex' : undefined, role: args.role, reviewer: args.reviewer, size: args.size, tier: args.tier, findings: args.findings, declined: args.declined, adoption: args.adoption, outcome: args.outcome, of_job: args.of_job, of_model: args.of_model, audit: args.audit, rating: args.rating, text: args.text };
+        : { job: args.job_id, model: args.model, lead: host === 'codex' ? 'codex' : undefined, role: args.role, reviewer: args.reviewer, size: args.size, tier: args.tier, findings: args.findings, declined: args.declined, adoption: args.adoption, outcome: args.outcome, of_job: args.of_job, of_model: args.of_model, audit: args.audit, rating: args.rating, difficulty: args.difficulty, reviewed_by: args.reviewed_by, mission, text: args.text };
       const score = await api('POST', '/api/notes', body);
       const shown = score.score === null ? '—' : score.score.toFixed(1);
       return `Noted. ${score.model} (${score.agent}): ${shown}/10, ${score.status}, ${score.buildSamples} build(s), ${score.fixSamples} fix(es)${score.reviewSamples ? `, ${score.reviewSamples} review(s)` : ''}.${score.ratingDropped ? ' The rating was not kept: the user turned peer ratings off.' : ''}${score.consolidate ? ' Its summary is due: rewrite it from the evidence with note_summary.' : ''}`;

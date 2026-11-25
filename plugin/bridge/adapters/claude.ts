@@ -7,13 +7,14 @@ import readline from 'node:readline';
 import { agentCommand, agentEnv } from '../config.ts';
 import type { Config } from '../config.ts';
 import { isGitPath, isInside } from '../git.ts';
-import { noteLeadDecline } from '../jobs.ts';
+import { isTerminal, noteLeadDecline } from '../jobs.ts';
 import type { Adapter, Job, JobCtl, Probe } from '../jobs.ts';
 import { treeKillCommand } from '../rpc.ts';
 import { clip, clipEnd } from '../text.ts';
 
 const IDLE_SHUTDOWN_MS = 10 * 60_000;
 const CLOSE_GRACE_MS = 2_000;
+const MODE_TIMEOUT_MS = 30_000;
 const EDIT_TOOLS = ['Edit', 'Write', 'NotebookEdit'];
 /**
  * Crew's worker MCP tools that only read or report. `browser` starts a process outside the worker's limits, so it asks
@@ -196,6 +197,7 @@ class Session {
   /** The mode this session was last asked for; unknown for a resumed session until it is set, since one may bring back the mode it was saved in. */
   private mode?: 'auto' | 'default';
   private modeRequest?: string;
+  private modeTimeout?: NodeJS.Timeout;
   /** Claude Code left automatic mode for the manual one, as where the model or plan does not offer it. */
   private manualOnly = false;
   private modeRequests = 0;
@@ -233,6 +235,7 @@ class Session {
     child.on('close', (code, signal) => {
       clearTimeout(this.idle);
       clearTimeout(this.forceClose);
+      clearTimeout(this.modeTimeout);
       const failed = !this.stopping && this.turns > 0;
       this.turns = 0;
       this.queue.length = 0;
@@ -272,6 +275,7 @@ class Session {
     if (mode !== this.mode) {
       this.mode = mode;
       this.modeRequest = `crew-mode-${++this.modeRequests}`;
+      this.modeTimeout = setTimeout(() => this.fail(`Claude Code did not confirm the switch to ${mode} permissions.`, false, true), MODE_TIMEOUT_MS).unref();
       this.write({ type: 'control_request', request_id: this.modeRequest, request: { subtype: 'set_permission_mode', mode } });
       return;
     }
@@ -283,6 +287,7 @@ class Session {
     if (!this.stopping) {
       this.stopping = true;
       clearTimeout(this.idle);
+      clearTimeout(this.modeTimeout);
       this.pending.length = 0;
       if (mode !== 'cancel') this.child.stdin.end();
       if (mode === 'graceful') {
@@ -424,6 +429,7 @@ class Session {
       case 'control_response':
         if (!this.modeRequest || message.response?.request_id !== this.modeRequest) break;
         this.modeRequest = undefined;
+        clearTimeout(this.modeTimeout);
         if (message.response.subtype === 'success' || this.mode === 'auto') {
           if (message.response.subtype !== 'success') this.fellBack();
           this.flush();
@@ -488,16 +494,18 @@ class Session {
 export function claudeAdapter(config: Config): Adapter {
   const sessions = new Map<string, Session>();
   const grants = new Map<string, Set<string>>();
+  const cancelling = new Set<string>();
   let shuttingDown = false;
 
   async function send(ctl: JobCtl, message: string, resume?: string): Promise<void> {
-    const { id } = ctl.job;
+    const { id, turns } = ctl.job;
     let session = sessions.get(id);
     while (session && !session.alive) {
       await session.closed.promise;
       session = sessions.get(id);
     }
     if (shuttingDown) throw new Error('The Claude Code adapter is shutting down.');
+    if (cancelling.has(id) || isTerminal(ctl.job) || ctl.job.turns !== turns) return;
     if (!session) {
       let jobGrants = grants.get(id);
       if (!jobGrants) grants.set(id, jobGrants = new Set());
@@ -523,8 +531,14 @@ export function claudeAdapter(config: Config): Adapter {
       session.answer(approve, message, opts);
     },
     async cancel(ctl) {
-      await sessions.get(ctl.job.id)?.stop('cancel');
-      ctl.cancelled();
+      const { id } = ctl.job;
+      cancelling.add(id);
+      try {
+        await sessions.get(id)?.stop('cancel');
+        ctl.cancelled();
+      } finally {
+        cancelling.delete(id);
+      }
     },
     async release(ctl) {
       await sessions.get(ctl.job.id)?.stop();

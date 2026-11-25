@@ -6,6 +6,7 @@ import { checkArguments } from './arguments.ts';
 import { api } from './client.ts';
 import { VERSION } from './config.ts';
 import type { LeadQuestion } from './jobs.ts';
+import { CORRECTNESS_SCALE, FINDINGS_SCALE } from './notes.ts';
 import { clip as cut } from './text.ts';
 
 const TOOLS = [
@@ -64,7 +65,7 @@ const RATE = process.env.CREW_JOB_RATES === 'review'
       inputSchema: {
         type: 'object',
         properties: {
-          correctness: { type: 'integer', minimum: 1, maximum: 5, description: '1: wrong in its main path. 3: works, with real bugs in edge cases. 5: you checked and found nothing.' },
+          correctness: { type: 'integer', minimum: 1, maximum: 5, description: `${CORRECTNESS_SCALE}.` },
           report: { type: 'integer', minimum: 1, maximum: 5, description: 'Only if you were told what the author claimed: how well the claims matched what you found.' },
           fact: { type: 'string', maxLength: 300, description: 'One line from this review that the numbers rest on.' },
         },
@@ -78,7 +79,7 @@ const RATE = process.env.CREW_JOB_RATES === 'review'
         inputSchema: {
           type: 'object',
           properties: {
-            findings: { type: 'integer', minimum: 1, maximum: 5, description: '1: wrong, or noise. 3: real but minor. 5: caught what would have shipped broken.' },
+            findings: { type: 'integer', minimum: 1, maximum: 5, description: `${FINDINGS_SCALE}.` },
             fact: { type: 'string', maxLength: 300, description: 'One line naming a finding the number rests on.' },
           },
           required: ['findings', 'fact'],

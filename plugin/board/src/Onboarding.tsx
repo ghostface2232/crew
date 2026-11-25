@@ -35,7 +35,7 @@ export function Onboarding({ close }: { close: () => void }) {
       {/* Every page's text shares one grid cell so the sheet keeps the tallest page's height and never jumps. */}
       <div className={styles.copies}>
         {pages.map((item, n) => (
-          <div className={styles.copy} key={item.title} data-current={n === index || undefined} aria-hidden={n !== index || undefined}>
+          <div className={styles.copy} key={n} data-current={n === index || undefined} aria-hidden={n !== index || undefined}>
             <h2 className={`title ${styles.title}`}>{item.title}</h2>
             {item.body}
           </div>
@@ -44,7 +44,7 @@ export function Onboarding({ close }: { close: () => void }) {
       <div className={styles.dots} role="tablist" aria-label={t('Pages')}>
         {pages.map((item, n) => (
           <button
-            key={item.title}
+            key={n}
             role="tab"
             aria-selected={n === index}
             aria-label={t('{title}, page {page} of {count}', { title: item.title, page: n + 1, count: pages.length })}

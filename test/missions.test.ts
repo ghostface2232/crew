@@ -5,7 +5,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import { canonicalPath } from '../plugin/bridge/config.ts';
-import { MAX_LABEL, missionDetail, missionPreset, Missions, planText, STAGES, STALE_HELD_MS, STALE_MS, waitsFor } from '../plugin/bridge/missions.ts';
+import { MAX_LABEL, missionDetail, missionHead, missionPreset, Missions, planText, STAGES, STALE_HELD_MS, STALE_MS, waitsFor } from '../plugin/bridge/missions.ts';
 import type { Mission } from '../plugin/bridge/missions.ts';
 import type { PullWatch } from '../plugin/bridge/pulls.ts';
 
@@ -433,7 +433,7 @@ test('a stored record that is not a mission is refused, since records are render
   t.after(() => fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }));
   const file = path.join(home, 'missions.json');
   const good = { id: 'm-000001', title: 't', project: '/p', root: '/p', stage: 'plan', state: 'active', outcome: '', createdAt: 1, updatedAt: 1, endedAt: null };
-  for (const bad of [{ ...good, createdAt: '1" onmouseover="x' }, { ...good, stage: 'nope' }, { ...good, stages: [] }, { ...good, stages: ['plan'], stageIndex: 1 }, { ...good, stages: ['plan'], stageIndex: 0.5 }, { ...good, stageIndex: 0 }, { ...good, stages: ['unknown'] }, { ...good, endedAt: 'soon' }, { ...good, title: 5 }, { ...good, lead: 'antigravity' }, null]) {
+  for (const bad of [{ ...good, createdAt: '1" onmouseover="x' }, { ...good, stage: 'nope' }, { ...good, stages: [] }, { ...good, stages: ['plan'], stageIndex: 1 }, { ...good, stages: ['plan'], stageIndex: 0.5 }, { ...good, stageIndex: 0 }, { ...good, stages: ['unknown'] }, { ...good, endedAt: 'soon' }, { ...good, title: 5 }, { ...good, lead: 'antigravity' }, { ...good, difficulty: 'easy' }, null]) {
     const content = JSON.stringify({ missions: [good, bad] });
     fs.writeFileSync(file, content);
     assert.throws(() => new Missions(home, () => {}), /holds a record that is not a mission/);
@@ -526,6 +526,21 @@ test('a mission keeps the preset it was given until it is changed or cleared, an
   missions.flush();
   // Kept across a restart.
   assert.equal(new Missions(home, () => {}).get(mission.id).preset, 'economy');
+});
+
+test('a mission keeps the difficulty it started with, shows it with its plan, and refuses one that is not a difficulty', (t) => {
+  const { home, missions } = harness(t);
+  const mission = missions.start({ ...input, stages: ['implement', 'final'], difficulty: 'hard' });
+  assert.equal(mission.difficulty, 'hard');
+  assert.match(missionHead(mission), /\nPlan: implement \(current\) → final · difficulty: hard$/);
+  // A later update has no way to change it.
+  assert.equal(missions.update(mission.id, { stage: 'final', difficulty: 'routine' } as any).difficulty, 'hard');
+  assert.throws(() => missions.start({ ...input, title: 'Other', difficulty: 'easy' }), /difficulty must be one of: routine, standard, hard/);
+  const plain = missions.start({ ...input, title: 'Plain' });
+  assert.equal(Object.hasOwn(plain, 'difficulty'), false);
+  assert.doesNotMatch(missionHead(plain), /difficulty/);
+  missions.flush();
+  assert.equal(new Missions(home, () => {}).get(mission.id).difficulty, 'hard');
 });
 
 test('a lead whose latest mission ended done is reminded to open one for more work', (t) => {

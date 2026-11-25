@@ -14,7 +14,7 @@ import {
   dailyCounts, elapsed, endedPerHour, holdersOf, jobLabel, leadMission, limitWindowLabel, NAMES, projectOf, relativeDuration, rolesOf, runningPerHour,
   sessionAgent, usageWindowName, unsettled,
 } from './model.ts';
-import { AgentMark, Chip, EmptyState, Icon, RollingNumber, StatusIcon, tNodes, useFade, useClock, useStableItems } from './ui.tsx';
+import { AgentMark, Chip, EmptyState, Icon, RollingNumber, StatusIcon, tNodes, useFade, useClock, useLanguage, useStableItems } from './ui.tsx';
 import { JobRow, jobKind, jobStatusState, MissionPanel, SessionRow } from './Missions.tsx';
 import { t, translated } from './i18n.ts';
 
@@ -125,6 +125,7 @@ function kpiClock(jobs: BoardJob[]) {
 
 /** The counts that matter most, each with its last day by the hour, and their shares as one bar. */
 export const Kpis = memo(function Kpis({ state, project }: { state: Snapshot; project: string }) {
+  useLanguage();
   const jobs = useMemo(() => state.jobs.filter((job) => inProject(project, job)), [state.jobs, project]);
   const sessions = state.claude.filter((session) => inProject(project, session));
   const waiting = jobs.filter((job) => job.state === 'waiting');
@@ -288,6 +289,7 @@ function FadeCaption({ text }: { text: string }) {
 }
 
 export const AgentPanel = memo(function AgentPanel({ state, project }: { state: Snapshot; project: string }) {
+  useLanguage();
   const agents = ['claude', ...(['codex', 'antigravity'] as const).filter((agent) => state.agents[agent])];
   const measured = state.usage != null && state.usage.source !== 'none';
   return (
@@ -342,6 +344,7 @@ export const AgentPanel = memo(function AgentPanel({ state, project }: { state: 
  * started. Its title row carries the total, and one tooltip glides between squares.
  */
 export const Heatmap = memo(function Heatmap({ title, times, most, label, one }: { title: string; times: number[]; most: number; label: string; one: string }) {
+  useLanguage();
   const day = useClock((now) => new Date(now).setHours(0, 0, 0, 0));
   const [weeks, setWeeks] = useState(most);
   const root = useRef<HTMLDivElement>(null);
@@ -426,6 +429,7 @@ export const Heatmap = memo(function Heatmap({ title, times, most, label, one }:
 
 /** Without openJob, as in a job's own details, events carry no link to the job. */
 export const EventList = memo(function EventList({ events, openJob, limit }: { events: CrewEvent[]; openJob?: (id: string) => void; limit?: number }) {
+  useLanguage();
   const shown = events.slice().reverse().slice(0, limit);
   return (
     <ol className="events">
@@ -446,6 +450,7 @@ export const EventList = memo(function EventList({ events, openJob, limit }: { e
 });
 
 const EventRow = memo(function EventRow({ event, index, openJob }: { event: CrewEvent; index: number; openJob?: (id: string) => void }) {
+  useLanguage();
   return (
     <li className="event" data-kind={event.kind} style={{ '--i': index } as CSSProperties}>
       <span className="event-mark"><Icon icon={event.kind === 'error' ? ErrorCircle16Regular : event.kind === 'done' ? CheckmarkCircle16Regular : CircleMultipleConcentric16Regular} /></span>
@@ -481,6 +486,7 @@ function Pills<T extends string>({ label, value, options, onChange }: { label: s
 }
 
 export const Activity = memo(function Activity({ events, jobs, missions, openJob }: Pick<Snapshot, 'events' | 'jobs' | 'missions'> & Pick<Scope, 'openJob'>) {
+  useLanguage();
   const [agent, setAgent] = useState('');
   // Days, newest first, each under its own sticky heading.
   const { days, counts } = useMemo(() => {
@@ -690,6 +696,7 @@ export function Workspace({ state, project, names, selected, openJob, openSessio
 type SortKey = 'title' | 'agent' | 'project' | 'state' | 'duration' | 'ended';
 /** Finished work: ended missions, then every ended job in a table to filter and sort. */
 export const History = memo(function History({ state, project, names, selected, openJob, openSession }: Scope) {
+  const locale = useLanguage();
   const [filter, setFilter] = useState<'' | 'done' | 'failed' | 'cancelled'>('');
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<{ key: SortKey; up: boolean }>({ key: 'ended', up: false });
@@ -709,7 +716,7 @@ export const History = memo(function History({ state, project, names, selected, 
         const [x, y] = [value(a), value(b)];
         return (x < y ? -1 : x > y ? 1 : 0) * (sort.up ? 1 : -1);
       });
-  }, [ended, filter, names, roleInfo, search, sort]);
+  }, [ended, filter, locale, names, roleInfo, search, sort]);
   const column = (key: SortKey, text: string, className?: string) => (
     <th className={className} aria-sort={sort.key === key ? (sort.up ? 'ascending' : 'descending') : undefined}>
       <button className="sort" onClick={() => setSort({ key, up: sort.key === key ? !sort.up : key === 'title' || key === 'agent' || key === 'project' })}>
@@ -790,6 +797,7 @@ const HistoryRow = memo(function HistoryRow({ job, kind, projectName, selected, 
   index: number;
   openJob: Scope['openJob'];
 }) {
+  useLanguage();
   return (
     <tr data-opens-panel="" aria-current={selected || undefined} style={{ '--i': index } as CSSProperties} onClick={() => openJob(job.id)}>
       <td>

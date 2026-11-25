@@ -8,7 +8,7 @@ import type { Config } from '../config.ts';
 import { isTerminal, noteLeadDecline } from '../jobs.ts';
 import type { Adapter, Capabilities, Job, JobCtl, Probe } from '../jobs.ts';
 import { withUserApps } from '../prompts.ts';
-import { RPC_TIMEOUT_MS, RpcError, RpcPeer, RpcTimeoutError } from '../rpc.ts';
+import { RPC_TIMEOUT_MS, RpcError, RpcPeer } from '../rpc.ts';
 import { clip } from '../text.ts';
 
 type Answer = { approve: boolean; message?: string; cancelled?: boolean; forJob?: boolean };
@@ -38,7 +38,7 @@ interface Run {
   pluginsEnabled: boolean;
   /** Id of the turn in flight, or null between turns. */
   turnId: string | null;
-  awaitingTurn: symbol | null;
+  awaitingTurn: { response: AbortController; timedOut: boolean } | null;
   interrupt: ReturnType<typeof Promise.withResolvers<void>> | null;
   message: string;
   pending: Pending[];
@@ -245,6 +245,7 @@ export class CodexAdapter implements Adapter {
     const threadId = ctl.job.sessionId;
     const run = threadId ? this.runs.get(threadId) : undefined;
     if (!run) return;
+    if (run.awaitingTurn?.timedOut && this.peer?.alive) await this.recoverTurn(this.peer, run);
     if (run.held) return this.stopChildren(run);
     if (run.awaitingTurn) throw new Error('Codex has not confirmed the start of the turn. The job is still active.');
     if (!run.turnId || !this.peer) return;
@@ -311,6 +312,10 @@ export class CodexAdapter implements Adapter {
     if (this.opening.has(ctl.job.id)) return { verdict: 'working', detail: 'Codex has yet to open the thread' };
     if (!threadId || !run) return { verdict: 'ended', detail: 'Codex holds no session for this job, so its end will never arrive. Reply to resume it, or cancel it.' };
     if (!peer?.alive) return { verdict: 'ended', detail: 'codex app-server is no longer running. Reply to resume the job, or cancel it.' };
+    if (run.awaitingTurn?.timedOut) {
+      await this.recoverTurn(peer, run);
+      if (run.awaitingTurn) return { verdict: 'unknown', detail: 'Codex did not confirm whether the turn started. The worktree stays in use until the turn state is known.' };
+    }
     // Starting and interrupting a turn have their own timeouts.
     if (run.awaitingTurn || run.interrupt) return { verdict: 'working', detail: 'Codex has yet to confirm the turn' };
     const read = async (id: string) => (await peer.request('thread/read', { threadId: id, includeTurns: false }, PROBE_TIMEOUT_MS))?.thread?.status;
@@ -485,28 +490,62 @@ export class CodexAdapter implements Adapter {
     });
   }
 
+  private confirmStart(run: Run): void {
+    const start = run.awaitingTurn;
+    run.awaitingTurn = null;
+    start?.response.abort();
+  }
+
+  /** Recover the active turn id after a lost acknowledgement, so Cancel can still interrupt it. */
+  private async recoverTurn(peer: RpcPeer, run: Run): Promise<void> {
+    const start = run.awaitingTurn;
+    const result = await peer.request('thread/read', { threadId: run.ctl.job.sessionId, includeTurns: true }, PROBE_TIMEOUT_MS).catch(() => null);
+    if (!start || run.awaitingTurn !== start || result?.thread?.status?.type !== 'active') return;
+    const turns: unknown = result.thread.turns;
+    if (!Array.isArray(turns)) return;
+    const turn = turns.findLast((turn) => turn?.status === 'inProgress');
+    if (typeof turn?.id !== 'string' || !turn.id) return;
+    run.turnId = turn.id;
+    this.confirmStart(run);
+    run.ctl.phase('working');
+  }
+
   private async sendTurn(peer: RpcPeer, run: Run, method: string, params: unknown): Promise<void> {
     run.held = null;
     run.message = '';
     run.items.clear();
-    const start = Symbol(method);
+    const start = { response: new AbortController(), timedOut: false };
     run.awaitingTurn = start;
-    try {
-      const res = await peer.request(method, params, RPC_TIMEOUT_MS);
-      if (run.awaitingTurn === start) {
-        run.turnId = res.turn.id;
-        run.awaitingTurn = null;
-      }
-    } catch (err) {
+    const unconfirmed = (detail: string) => {
+      if (run.awaitingTurn !== start || start.timedOut) return;
+      // The request remains pending so a late rejection can release the worktree. Idle alone cannot confirm this.
+      start.timedOut = true;
+      run.ctl.phase('waiting to confirm whether Codex started the turn');
+      run.ctl.note(`${detail}. The worktree stays in use until Codex confirms the turn.`);
+      void this.recoverTurn(peer, run);
+    };
+    const caller = Promise.withResolvers<void>();
+    const deadline = setTimeout(() => {
+      unconfirmed(`${method} timed out after ${RPC_TIMEOUT_MS / 1000}s`);
+      caller.resolve();
+    }, RPC_TIMEOUT_MS).unref();
+    const response = peer.request(method, params, undefined, start.response.signal).then((res) => {
       if (run.awaitingTurn !== start) return;
-      run.awaitingTurn = null;
-      if (err instanceof RpcTimeoutError) {
-        // A retry could start a second turn after one whose acknowledgement was lost.
-        run.ctl.fail(`${err.message}. The turn may have started anyway; check the worker session (resume command) before retrying.`);
+      if (typeof res?.turn?.id !== 'string' || !res.turn.id) {
+        unconfirmed(`${method} returned no turn id`);
         return;
       }
-      throw err;
-    }
+      run.turnId = res.turn.id;
+      this.confirmStart(run);
+      if (start.timedOut) run.ctl.phase('working');
+    }, (err) => {
+      if (run.awaitingTurn !== start) return;
+      this.confirmStart(run);
+      // The reply caller has already got the active job. Report a later rejection on that same turn.
+      if (start.timedOut) run.ctl.fail(String(err?.message ?? err));
+      else throw err;
+    }).finally(() => clearTimeout(deadline));
+    await Promise.race([response, caller.promise]);
   }
 
   private ensure(): Promise<RpcPeer> {
@@ -685,7 +724,7 @@ export class CodexAdapter implements Adapter {
     switch (method) {
       case 'turn/started':
         run.turnId = p.turn.id;
-        run.awaitingTurn = null;
+        this.confirmStart(run);
         ctl.phase('working');
         break;
       case 'item/started':
@@ -725,7 +764,7 @@ export class CodexAdapter implements Adapter {
         if (p.willRetry) ctl.progress(`retrying: ${p.error.message}`);
         break;
       case 'turn/completed': {
-        run.awaitingTurn = null;
+        this.confirmStart(run);
         run.turnId = null;
         if (run.busyChildren.size && p.turn?.status === 'completed' && !run.interrupt) {
           // Collecting the result now would miss what a sub-agent still writes.

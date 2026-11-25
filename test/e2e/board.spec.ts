@@ -166,6 +166,14 @@ test('short mission plans render in order with matching tracks', async ({ page, 
   await request.post('/__push', { data: { type: 'state', data } });
   await expect(card.locator('.track-name')).toHaveText(['Final']);
   await expect(stage(card, 'Final').locator('button[data-job]')).toHaveCount(2);
+
+  // A language change streamed in after the mission is displayed renames the cached stage heading and the track together.
+  await request.post('/api/language', { data: { language: 'ko' } });
+  await expect(page.locator('html')).toHaveAttribute('lang', 'ko');
+  await expect(card.locator('.track-name')).toHaveText(['마무리']);
+  await expect(card.locator('.stage-groups h3.stage-name')).toHaveText(/^마무리/);
+  await expect(card.locator('.stage-groups h3.stage-name', { hasText: 'Final' })).toHaveCount(0);
+  await request.post('/api/language', { data: { language: 'en' } });
 });
 
 test('a mission card names its lead the same way for Claude and Codex, and keeps it after the session ends', async ({ page, request }) => {
@@ -290,6 +298,16 @@ test('choosing a language switches the board in place, so a browser tab stays si
   await request.post('/api/language', { headers: { authorization: `Bearer ${TEST_CREDENTIAL}` }, data: { language: null } });
   await expect(page.getByRole('heading', { name: 'Overview', level: 1 })).toBeVisible();
   await expect(page.getByText('Live', { exact: true })).toBeVisible();
+});
+
+test('a language change from another board preserves the open new job draft and its focus', async ({ page, request }) => {
+  await newJob(page);
+  const draft = page.getByRole('dialog').locator('textarea').first();
+  await draft.fill('Keep the open draft');
+  await request.post('/api/language', { data: { language: 'ko' } });
+  await expect(page.locator('html')).toHaveAttribute('lang', 'ko');
+  await expect(draft).toHaveValue('Keep the open draft');
+  await expect(draft).toBeFocused();
 });
 
 test('repeated stops keep jobs on their original round while the remaining plan changes', async ({ page, request }) => {
@@ -492,7 +510,7 @@ test('the detail panel shows the worker\'s evidence and the lead\'s attachments'
   await expect(section.getByText('Attached by the lead · lead-1-design.png')).toBeVisible();
 });
 
-test('a capture opens by itself, and the picker adds others beside it', async ({ page, request }) => {
+test('a capture opens by itself, the strip switches between captures, and Compare puts them side by side', async ({ page, request }) => {
   const data = fixture();
   const shot = (file: string, turn: number, from: 'worker' | 'lead' = 'worker') => ({ file, path: `/x/${file}`, turn, from, bytes: 10, modified: 1 });
   data.jobs[0].turns = 3;
@@ -504,9 +522,31 @@ test('a capture opens by itself, and the picker adds others beside it', async ({
   await section.getByRole('img', { name: 'hero-after.png' }).click();
   const sheet = page.getByRole('dialog', { name: 'Evidence' });
   const panes = sheet.locator('.compare figure');
-  // Only the one pressed, which cannot be taken away.
   await expect(panes.getByRole('link')).toHaveText(['hero-after.png']);
   await expect(panes.locator('b')).toHaveText(['Turn 3 of 3']);
+  // Without Compare, the strip and the arrow keys switch the one capture shown.
+  const strip = sheet.getByRole('group', { name: 'Captures', exact: true });
+  await expect(strip.getByRole('button', { name: /hero-after\.png/ })).toHaveAttribute('aria-current', 'true');
+  // The arrows work wherever focus is, as after a click on the image.
+  await panes.locator('img').click();
+  await page.keyboard.press('ArrowLeft');
+  await expect(panes.getByRole('link')).toHaveText(['nav.png']);
+  await strip.getByRole('button', { name: /hero-before\.png/ }).click();
+  await expect(panes.getByRole('link')).toHaveText(['hero-before.png']);
+  await page.keyboard.press('ArrowRight');
+  await expect(panes.getByRole('link')).toHaveText(['footer.png']);
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('ArrowLeft');
+  await expect(panes.getByRole('link')).toHaveText(['lead-1-design.png']);
+  await strip.getByRole('button', { name: /hero-after\.png/ }).click();
+  // Compare starts from the capture shown, which cannot be taken away.
+  const toggle = sheet.getByRole('button', { name: 'Compare', exact: true });
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  // Under the pointer that pressed it, it keeps its opaque fill behind its light label.
+  await expect.poll(() => toggle.evaluate((element) => getComputedStyle(element).backgroundColor)).not.toMatch(/rgba|\/ 0?\.\d/);
   const picker = sheet.getByRole('group', { name: /Captures to compare/ });
   await expect(picker.getByRole('button', { name: /hero-after\.png/ })).toBeDisabled();
   const nav = picker.getByRole('button', { name: /nav\.png/ });
@@ -515,6 +555,9 @@ test('a capture opens by itself, and the picker adds others beside it', async ({
   await picker.getByRole('button', { name: /hero-before\.png/ }).click();
   await expect(panes.locator('b')).toHaveText(['Attached by the lead', 'Turn 1 of 3', 'Turn 3 of 3']);
   await expect(panes.getByRole('link')).toHaveText(['lead-1-design.png', 'hero-before.png', 'hero-after.png']);
+  // The arrow keys leave a comparison alone.
+  await page.keyboard.press('ArrowRight');
+  await expect(panes).toHaveCount(3);
   const rects = () => panes.locator('img').evaluateAll((images) => images.map((image) => image.getBoundingClientRect()));
   let boxes = await rects();
   expect(new Set(boxes.map((box) => Math.round(box.top))).size).toBe(1);
@@ -534,10 +577,45 @@ test('a capture opens by itself, and the picker adds others beside it', async ({
   await expect(panes).toHaveCount(3);
   await nav.click();
   await expect(panes.getByRole('link')).toHaveText(['lead-1-design.png', 'footer.png', 'nav.png', 'hero-after.png']);
+  // Leaving Compare keeps the one added last.
+  await toggle.click();
+  await expect(panes.getByRole('link')).toHaveText(['nav.png']);
+  await expect(strip.getByRole('button', { name: /nav\.png/ })).toHaveAttribute('aria-current', 'true');
   await sheet.getByRole('button', { name: 'Close' }).click();
   await expect(sheet).toHaveCount(0);
   // The panel behind stays open.
   await expect(section).toBeVisible();
+});
+
+test('captures deleted while the viewer is open stay out of it when their names come back', async ({ page, request }) => {
+  const data = fixture();
+  const shot = (file: string) => ({ file, path: `/x/${file}`, turn: 1, from: 'worker' as const, bytes: 10, modified: 1 });
+  const push = (files: string[]) => {
+    data.jobs[0].evidence = files.map(shot);
+    return request.post('/__push', { data: { type: 'state', data } });
+  };
+  await push(['a.png', 'b.png']);
+  await page.locator(`button[data-job="${data.jobs[0].id}"]`).click();
+  const section = page.getByRole('dialog').getByRole('region', { name: 'Evidence' });
+  await section.getByRole('img', { name: 'b.png' }).click();
+  const sheet = page.getByRole('dialog', { name: 'Evidence' });
+  const toggle = sheet.getByRole('button', { name: 'Compare', exact: true });
+  await toggle.click();
+  await sheet.getByRole('group', { name: /Captures to compare/ }).getByRole('button', { name: /a\.png/ }).click();
+  await expect(sheet.locator('.compare figure')).toHaveCount(2);
+  // With one capture left Compare ends, and a new capture does not turn it back on or bring b.png back.
+  await push(['a.png']);
+  await expect(toggle).toHaveCount(0);
+  await expect(sheet.locator('.compare figure').getByRole('link')).toHaveText(['a.png']);
+  await push(['a.png', 'b.png']);
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  await expect(sheet.locator('.compare figure').getByRole('link')).toHaveText(['a.png']);
+  // The capture shown leaving closes the viewer, which stays closed when it comes back.
+  await push(['b.png']);
+  await expect(sheet).toHaveCount(0);
+  await push(['a.png', 'b.png']);
+  await expect(section.getByRole('img', { name: 'a.png' })).toBeVisible();
+  await expect(sheet).toHaveCount(0);
 });
 
 test('the detail panel shows what verified the result and nothing for jobs without receipts', async ({ page, request }) => {
@@ -1224,7 +1302,7 @@ for (const source of ['absent', 'none'])
     await expect(page.getByLabel('Model preset')).toHaveCount(0);
   });
 
-test('model scores list each model with its score, counts and summary, and have nothing to save', async ({ page }) => {
+test('model scores list each model with its score and status, and have nothing to save', async ({ page }) => {
   await openSettings(page, 'Model Scores');
   // The best three stand on a podium, first in the middle.
   const podium = page.getByRole('region', { name: 'Top models' });
@@ -1234,15 +1312,19 @@ test('model scores list each model with its score, counts and summary, and have 
   const sol = standings.getByRole('article').filter({ hasText: 'gpt-6.1-sol' });
   await expect(sol.getByRole('img', { name: '8.6 out of 10' })).toBeVisible();
   await expect(sol.getByText('Strong')).toBeVisible();
-  await expect(sol.getByText('Settled · 9 builds · 3 fixes')).toBeVisible();
-  await expect(sol.getByText('Merged 6 of 8 as is · 2 after a reply · 3 follow-ups')).toBeVisible();
-  await expect(sol.getByText('Solid logic; misses time zone edge cases.')).toBeVisible();
+  await expect(sol.getByText('Settled · 9 builds', { exact: true })).toBeVisible();
+  // The row stops at the status: no per-item bars, adoption counts, or the lead's notes.
+  await expect(sol.getByText(/Merged|Brief|Solid logic/)).toHaveCount(0);
   // A model short of reviews is not ranked and gets no verdict word.
   await expect(standings.getByRole('article')).toHaveCount(3);
   const opus = page.getByRole('region', { name: 'Too early to rank' }).getByRole('article').filter({ hasText: 'claude-opus-5-5' });
   await expect(opus.getByLabel(/^Rank/)).toHaveCount(0);
-  await expect(opus.getByText('Too few reviews · 0 builds · 2 fixes')).toBeVisible();
+  await expect(opus.getByText('Too few reviews · 0 builds', { exact: true })).toBeVisible();
   await expect(opus.getByText(/Strong|Solid|Mixed|Shaky|Outstanding/)).toHaveCount(0);
+  // A model that only reviewed stands apart, with its reviews and how its findings held up.
+  const astra = page.getByRole('region', { name: 'Reviewers' }).getByRole('article').filter({ hasText: 'gpt-6.2-astra' });
+  await expect(astra.getByText('Too few reviews · 2 reviews', { exact: true })).toBeVisible();
+  await expect(astra.getByRole('img', { name: '6.4 out of 10' })).toBeVisible();
   await expect(page.getByRole('button', { name: /^Save/ })).toHaveCount(0);
   // Fixing is assigned with the reviews it answers.
   await settingsPage(page, 'Review');
@@ -1263,6 +1345,72 @@ test('a preset is stored as it is picked, describes its models, and permits none
   await pick(select, 'None');
   await expect(page.getByText("Uses each agent's own model and effort settings.")).toBeVisible();
   await lastBody(request, '/api/preset').toEqual({ preset: null });
+});
+
+test('an open preset selector adopts changes made from another client', async ({ page, request }) => {
+  await openSettings(page, 'Model Presets');
+  const select = page.getByRole('combobox', { name: 'Model preset' });
+  await expect(select).toHaveText('Balanced');
+  await request.post('/api/preset', { data: { preset: 'economy' } });
+  await expect(select).toHaveText('Economy');
+  await pick(select, 'Balanced');
+  await lastBody(request, '/api/preset').toEqual({ preset: 'balanced' });
+});
+
+test('a delayed preset save response cannot replace a newer streamed preset', async ({ page, request }) => {
+  await openSettings(page, 'Model Presets');
+  const saved = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  await page.route('**/api/preset', async (route) => {
+    const response = await route.fetch();
+    saved.resolve();
+    await release.promise;
+    await route.fulfill({ response });
+  });
+  const select = page.getByRole('combobox', { name: 'Model preset' });
+  try {
+    await pick(select, 'Economy');
+    await saved.promise;
+    await request.post('/api/preset', { data: { preset: 'best' } });
+    // The following event on the same stream shows the newer preset arrived before the held response.
+    await request.post('/api/language', { data: { language: 'ko' } });
+    await expect(page.locator('html')).toHaveAttribute('lang', 'ko');
+    await request.post('/api/language', { data: { language: 'en' } });
+    await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+  } finally {
+    release.resolve();
+  }
+  await expect(select).toHaveText('Best');
+});
+
+test('an external preset event cannot make Settings skip a queued local selection', async ({ page, request }) => {
+  await openSettings(page, 'Model Presets');
+  const posted = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const submissions: string[] = [];
+  await page.route('**/api/preset', async (route) => {
+    submissions.push(route.request().postDataJSON().preset);
+    if (submissions.length !== 1) return route.continue();
+    posted.resolve();
+    await release.promise;
+    // This successful write is acknowledged before its stream update.
+    await route.fulfill({ json: { preset: 'economy' } });
+  });
+  const select = page.getByRole('combobox', { name: 'Model preset' });
+  try {
+    await pick(select, 'Economy');
+    await posted.promise;
+    await request.post('/api/preset', { data: { preset: 'best' } });
+    await request.post('/api/language', { data: { language: 'ko' } });
+    await expect(page.locator('html')).toHaveAttribute('lang', 'ko');
+    await request.post('/api/language', { data: { language: 'en' } });
+    await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+    await pick(select, 'Best');
+  } finally {
+    release.resolve();
+  }
+  await expect.poll(() => submissions).toEqual(['economy', 'best']);
+  await expect(select).toHaveText('Best');
 });
 
 test('a preset that cannot be stored is undone, and one picked during a save is stored after it', async ({ page, request }) => {

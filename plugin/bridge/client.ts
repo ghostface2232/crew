@@ -164,7 +164,7 @@ const DAEMON_VARS = ['CREW_PORT', 'CREW_AGENTGAUGE_DIR', 'ELECTRON_RUN_AS_NODE']
  */
 export function outsideJobCommand(node: string, script: string, log: string, home: string, env: NodeJS.ProcessEnv, partialEnv: boolean): string | null {
   const value = (name: string) => env[Object.keys(env).find((key) => key.toUpperCase() === name) ?? name];
-  const vars: [string, string][] = [['CREW_HOME', home], ['CREW_PARTIAL_ENV', partialEnv ? '1' : ''], ...DAEMON_VARS.map((name): [string, string] => [name, value(name) ?? ''])];
+  const vars: [string, string][] = [['CREW_HOME', value('CREW_HOME') !== undefined ? home : ''], ['CREW_PARTIAL_ENV', partialEnv ? '1' : ''], ...DAEMON_VARS.map((name): [string, string] => [name, value(name) ?? ''])];
   if ([node, script, log, ...vars.flat()].some((text) => /["%\r\n]/.test(text))) return null;
   // /v:off: a user's delayed expansion would read `!name!` in a path as a variable.
   return `cmd.exe /d /v:off /s /c "${vars.map(([key, text]) => `set "${key}=${text}"&& `).join('')}"${node}" "${script}" >> "${log}" 2>&1"`;
@@ -176,14 +176,15 @@ export function outsideJobCommand(node: string, script: string, log: string, hom
  * session. False when WMI created nothing, to spawn it as usual instead.
  */
 async function startOutsideJob(script: string, env: NodeJS.ProcessEnv): Promise<boolean> {
-  const command = outsideJobCommand(process.execPath, script, path.join(HOME, 'daemon.log'), path.resolve(HOME), env, partial);
+  const home = path.resolve(HOME);
+  const command = outsideJobCommand(process.execPath, script, path.join(home, 'daemon.log'), home, env, partial);
   if (!command) return false;
   // PowerShell also ends a single-quoted string at a curly quote, so each is doubled like the straight one.
   const literal = (text: string) => `'${text.replace(/['\u2018-\u201B]/g, '$&$&')}'`;
   const ps = [
     "$ErrorActionPreference = 'Stop'",
     '$startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]0 }',
-    `$result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = ${literal(command)}; CurrentDirectory = ${literal(HOME)}; ProcessStartupInformation = $startup }`,
+    `$result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = ${literal(command)}; CurrentDirectory = ${literal(home)}; ProcessStartupInformation = $startup }`,
     'if ($result.ReturnValue -ne 0 -or -not $result.ProcessId) { exit 1 }',
     'exit 0',
   ].join('; ');
@@ -202,7 +203,7 @@ async function startDaemon(): Promise<void> {
     // A job may have started since the health check, or the daemon may reject our token.
     // Either way, leave the running daemon alone; a token mismatch is reported on the next call.
     try {
-      await api('POST', '/api/shutdown', { ifIdle: true });
+      await api('POST', '/api/shutdown', { ifIdle: true, expectedPid: running.pid });
     } catch {
       return;
     }

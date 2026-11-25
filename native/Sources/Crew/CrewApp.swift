@@ -2,7 +2,31 @@ import SwiftUI
 import AppKit
 import UserNotifications
 
-@main
+@main @MainActor
+enum CrewEntry {
+    static let updateStartup = AppUpdater.startupDirectory(arguments: CommandLine.arguments)
+    private(set) static var bundleUse: FileHandle?
+
+    static func main() {
+        do {
+            let home = CrewHome.directory()
+            let launch = try BundleLaunchLock(installed: Bundle.main.bundleURL)
+            guard let running = try launch.admit(home: home, work: updateStartup) else { return }
+            if let work = updateStartup { try AppUpdater.recordStartup(in: work) }
+            bundleUse = running
+        } catch {
+            if updateStartup == nil {
+                _ = NSApplication.shared
+                let alert = NSAlert()
+                alert.messageText = error.localizedDescription
+                alert.runModal()
+            }
+            return
+        }
+        CrewApp.main()
+    }
+}
+
 struct CrewApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     var body: some Scene {
@@ -122,6 +146,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
     let store: CrewStore
     let updater = AppUpdater()
     private var updateTask: Task<Void, Never>?
+    private var updateStartup = CrewEntry.updateStartup
+    private var didFinishLaunching = false
     private weak var mainWindow: NSWindow?
     /// Opens the main window scene when it does not exist: SwiftUI sometimes launches without
     /// presenting it, which leaves only the menu bar item.
@@ -146,9 +172,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
                 defaults.set(old, forKey: "selection")
             }
         } else { defaults = .standard }
-        // A first install has no Crew home yet: the instance lock and the daemon create it. An update finds it in
-        // place, so only a first install owes the welcome guide.
-        if !FileManager.default.fileExists(atPath: CrewHome.directory().path) { defaults.set(true, forKey: CrewStore.welcomePending) }
         store = CrewStore(defaults: defaults)
         // AppKit's password AutoFill check walks the key view loop when a field takes focus, and in full screen
         // that walk never ends inside the toolbar's separate window, which froze the app on search. Crew has no
@@ -163,6 +186,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         let home = CrewHome.directory()
         let lock = InstanceLock(home: home)
         do {
+            // The instance lock creates the home on a first install.
+            if !FileManager.default.fileExists(atPath: home.path) { store.defaults.set(true, forKey: CrewStore.welcomePending) }
             guard try lock.acquire(home: home) else {
                 DistributedNotificationCenter.default().postNotificationName(lock.notificationName, object: nil, userInfo: nil, deliverImmediately: true)
                 NSApp.terminate(nil)
@@ -198,9 +223,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             MainActor.assumeIsolated { item.searchField.widthAnchor.constraint(lessThanOrEqualToConstant: 180).isActive = true }
         }
         store.onStateChange = { [weak self] in self?.updateNotifications() }
-        store.start()
         updater.onInstall = { [weak self] in self?.installUpdate() }
-        watchUpdates()
+        if updateStartup == nil {
+            store.start()
+            watchUpdates()
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             guard let self, self.mainWindow == nil else { return }
             self.openMainWindow?(id: "main")
@@ -216,12 +243,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
                 _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge])
                 let settings = await center.notificationSettings()
                 store.notificationsAllowed = settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional
-                if store.notificationsAllowed {
+                if store.notificationsAllowed && updateStartup == nil {
                     await store.sendHeartbeat()
                     updateNotifications()
                 }
             }
         }
+        didFinishLaunching = true
+        startAfterUpdateIfReady()
+    }
+    private func startAfterUpdateIfReady() {
+        guard didFinishLaunching, mainWindow != nil, let work = updateStartup else { return }
+        updateStartup = nil
+        // The replacement must not start a bundled daemon before the helper can keep this app.
+        guard AppUpdater.markStartupReady(in: work) else { NSApp.terminate(nil); return }
+        store.start()
+        watchUpdates()
     }
     func configure(_ window: NSWindow) {
         guard mainWindow !== window else { return }
@@ -233,6 +270,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         window.setFrameAutosaveName(frameName)
         window.setFrameUsingName(frameName)
         if !NSScreen.screens.contains(where: { $0.visibleFrame.intersects(window.frame) }) { window.center() }
+        startAfterUpdateIfReady()
     }
     func show() { show(job: nil) }
     @objc private func reopenWindow() { show() }
@@ -469,7 +507,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
             }
             try? await Task.sleep(for: .seconds(5))
         }
-        guard current(), let archive = updater.archive, let version = updater.latest else { return abandon() }
+        guard current(), let archive = updater.archive, let version = updater.latest, let bundleUse = CrewEntry.bundleUse else { return abandon() }
         // The hand-over below awaits and then quits without checking again, so it can no longer be called off. With no
         // daemon of this bundle to stop, the loop above never said so.
         updater.stoppingDaemon()
@@ -478,7 +516,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, UNUs
         let pid = ProcessInfo.processInfo.processIdentifier
         let result = updater.failureReport
         do {
-            handOver = try await Task.detached { try AppUpdater.handOver(archive: archive, version: version, installed: installed, processID: pid, result: result) }.value
+            handOver = try await Task.detached {
+                try AppUpdater.handOver(archive: archive, version: version, installed: installed, processID: pid,
+                                        result: result, home: CrewHome.directory(), running: bundleUse)
+            }.value
         } catch let error as AppUpdater.InvalidArchive {
             updater.discard(error.localizedDescription)
             return abandon()

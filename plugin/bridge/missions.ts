@@ -4,6 +4,8 @@ import { randomBytes } from 'node:crypto';
 import { canonicalPath, isPresetName, PRESET_NAMES } from './config.ts';
 import type { PresetName } from './config.ts';
 import type { Job } from './jobs.ts';
+import { DIFFICULTIES } from './notes.ts';
+import type { Difficulty } from './notes.ts';
 import type { PullWatch } from './pulls.ts';
 import { clip } from './text.ts';
 
@@ -64,6 +66,8 @@ export interface Mission {
   preset?: PresetName;
   /** In the order the lead gave them; absent on missions without any. */
   tasks?: MissionTask[];
+  /** How hard the lead's own work in this command is, set only when it starts so its review cannot change it. */
+  difficulty?: Difficulty;
   createdAt: number;
   updatedAt: number;
   endedAt: number | null;
@@ -108,6 +112,7 @@ function isMission(m: any): m is Mission {
     && (m.labels === undefined || (m.stages && Array.isArray(m.labels) && m.labels.length === m.stages.length
       && m.labels.every((label: unknown) => label === null || (typeof label === 'string' && label.length > 0 && label.length <= MAX_LABEL))))
     && (m.preset === undefined || isPresetName(m.preset))
+    && (m.difficulty === undefined || DIFFICULTIES.includes(m.difficulty))
     && (m.notes === undefined || (Array.isArray(m.notes) && m.notes.every((n: any) => n && typeof n.text === 'string' && Number.isFinite(n.at))))
     && (m.tasks === undefined || (Array.isArray(m.tasks) && m.tasks.every((task: any) => task && typeof task.id === 'string' && typeof task.title === 'string'
       && TASK_STATES.includes(task.state) && (task.result === undefined || typeof task.result === 'string')
@@ -317,7 +322,7 @@ export function missionHead(mission: Mission): string {
   const stages = mission.stages ?? STAGES;
   const index = mission.stageIndex ?? stages.indexOf(mission.stage);
   const state = mission.state === 'active' ? `${mission.stage} (step ${index + 1} of ${stages.length})` : mission.state;
-  return `Mission ${mission.id} · ${state} — ${mission.title}\nPlan: ${planText(mission, (at) => (at === index && mission.state === 'active' ? ' (current)' : ''))}`;
+  return `Mission ${mission.id} · ${state} — ${mission.title}\nPlan: ${planText(mission, (at) => (at === index && mission.state === 'active' ? ' (current)' : ''))}${mission.difficulty ? ` · difficulty: ${mission.difficulty}` : ''}`;
 }
 
 /** Said wherever a session has more than one mission open, since no call can then be matched to a mission by guessing. */
@@ -357,9 +362,10 @@ export class Missions {
     return mission;
   }
 
-  start(input: { title: string; project: string; root: string; owner?: string; lead?: unknown; stage?: string; stages?: unknown; preset?: unknown; tasks?: unknown }): Mission {
+  start(input: { title: string; project: string; root: string; owner?: string; lead?: unknown; stage?: string; stages?: unknown; preset?: unknown; tasks?: unknown; difficulty?: unknown }): Mission {
     const title = titleOf(input.title);
     const preset = presetOf(input.preset);
+    if (input.difficulty !== undefined && !DIFFICULTIES.includes(input.difficulty as Difficulty)) throw new Error(`difficulty must be one of: ${DIFFICULTIES.join(', ')}.`);
     const steps = planOf(input.stages);
     const tasks = input.tasks === undefined ? undefined : mergeTasks(undefined, input.tasks);
     // Two calls that open the same command at once (a retry, a batch) share one card. Only a session that names
@@ -389,6 +395,7 @@ export class Missions {
       stage: first.stage,
       ...(preset ? { preset } : {}),
       ...(tasks?.length ? { tasks } : {}),
+      ...(input.difficulty !== undefined ? { difficulty: input.difficulty as Difficulty } : {}),
       state: 'active',
       outcome: '',
       createdAt: now,

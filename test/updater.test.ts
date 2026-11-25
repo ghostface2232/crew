@@ -175,6 +175,28 @@ test('a failed install stays on show through later checks until it is seen, and 
   assert.equal(instance.status.installError, undefined);
 });
 
+test('a failed download remains retryable when Windows holds the partial file', async (t) => {
+  await startServer();
+  const dir = tempDir();
+  served = payload;
+  feedStatus = 200;
+  feed = release('0.3.0', `${base}/download/Crew-Setup-0.3.0.exe`, sha('different data'));
+  const { instance } = updater(dir);
+  const rm = fs.rmSync;
+  t.mock.method(fs, 'rmSync', (file: fs.PathLike, options?: fs.RmOptions) => {
+    if (String(file).endsWith('.partial')) throw Object.assign(new Error('file is busy'), { code: 'EBUSY' });
+    return rm(file, options);
+  });
+  try {
+    await instance.check();
+    await instance.download();
+    assert.equal(instance.status.state, 'available');
+    assert.match(instance.status.error ?? '', /SHA-256 digest/);
+  } finally {
+    rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('a check during load cannot remove the installer being restored', async () => {
   const dir = tempDir();
   try {

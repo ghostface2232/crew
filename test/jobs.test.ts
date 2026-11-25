@@ -170,6 +170,29 @@ test('a saved outcome clears at the start of the next turn and is set from its r
   assert.equal(saved.outcome, 'partial');
 });
 
+test('a delegate job keeps the difficulty it was handed out with, and only a delegate job takes one', async (t) => {
+  const { jobs, home } = harness((ctl) => ctl.done('done'));
+  t.after(() => { jobs.flush(); fs.rmSync(home, { recursive: true, force: true, maxRetries: 5 }); });
+  const job = await settled(jobs, await jobs.create({ kind: 'delegate', task: 'edit', cwd: home, isolation: 'in_place', difficulty: 'hard' }));
+  assert.equal(job.difficulty, 'hard');
+  const plain = await settled(jobs, await jobs.create({ kind: 'delegate', task: 'edit', cwd: home, isolation: 'in_place' }));
+  assert.equal(plain.difficulty, undefined);
+  for (const spec of [
+    { kind: 'delegate', task: 'edit', cwd: home, isolation: 'in_place', difficulty: 'easy' },
+    { kind: 'review', cwd: home, review: { target: { type: 'uncommittedChanges' }, mode: 'adversarial' }, difficulty: 'hard' },
+    { kind: 'delegate', task: 'Why?', cwd: home, ask: true, difficulty: 'routine' },
+  ] as JobSpec[]) await assert.rejects(jobs.create(spec), /difficulty is for work handed out with delegate, and one of: routine, standard, hard/);
+  jobs.flush();
+  // Kept across a restart; a value that is no difficulty counts as none.
+  const file = path.join(home, 'jobs.json');
+  const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+  saved.jobs.find((j: Job) => j.id === plain.id).difficulty = 'easy';
+  fs.writeFileSync(file, JSON.stringify(saved));
+  const restored = new Jobs(home, () => config, {} as never, { onEvent: () => {}, onJob: () => {}, onAttention: () => {} });
+  assert.equal(restored.get(job.id).difficulty, 'hard');
+  assert.equal(restored.get(plain.id).difficulty, undefined);
+});
+
 test('reviews, debates and questions do not record an outcome', async (t) => {
   const cwd = tempRepo();
   const { jobs, home } = harness((ctl) => ctl.done('## Outcome\ndone'));
@@ -2050,6 +2073,7 @@ test('a follow-up can first bring the worker up to date with the lead, without c
     ctl.done('first');
   });
   const job = await settled(jobs, await jobs.create({ kind: 'delegate', cwd: repo, task: 'x' }));
+  const ancestor = job.worktree!.base;
   const head = commit('lead.js', 'l\n');
 
   let told = '';
@@ -2066,6 +2090,11 @@ test('a follow-up can first bring the worker up to date with the lead, without c
   // The lead's file is in the worktree but is not the worker's change.
   assert.deepEqual(job.result!.files, ['worker.js']);
   assert.deepEqual(job.rounds!.map((round) => [round.turn, round.files]), [[1, ['worker.js']], [2, ['worker.js']]]);
+
+  await jobs.reply(job.id, { message: 'sync an older commit', sync: ancestor });
+  await settled(jobs, job);
+  assert.equal(job.worktree!.base, head);
+  assert.deepEqual(job.result!.files, ['worker.js']);
 
   // A merge that conflicts leaves the base and result alone but still delivers the message.
   const conflicting = commit('worker.js', 'lead version\n');

@@ -12,11 +12,14 @@ const LOAD = { high: 0.35, medium: 0.15, low: 0.05 };
 // Exposure units of a change, so a large change may carry more findings than a small one. Chosen units, not a measured
 // size. Tier is not used: for Codex it picks the model, so it would act as a fixed bonus per model.
 const EXPOSURE = { small: 0.5, medium: 1, large: 2, xlarge: 4 };
-// The build fit's priors, on the log of the finding rate. A builder starts at the pooled rate and moves about ±0.5 from
-// it on evidence; the pooled rate itself starts at the reference, drawn toward it as loosely. A review kind may find about twice or half as much as the average review. Hard work is expected to
-// draw twice the findings of standard work and routine work half, and the data may move either by about ±0.4. Each
-// review beyond the first starts as adding nothing.
-const BUILD_PRIOR = { base: 0.5, builder: 0.5, review: 0.7, difficulty: 0.4, extraReview: 0.4 };
+// The build fit's priors, on the log of the finding rate. A builder starts at the reference rate (7.0), not at the
+// others' average, so a model has to show its work to rise, and moves about ±0.5 from it on evidence. A review kind may
+// find about twice or half as much as the average review. Hard work is expected to draw twice the findings of standard
+// work and routine work half, and the data may move either by about ±0.4. Each review beyond the first starts as
+// adding nothing.
+const BUILD_PRIOR = { builder: 0.5, review: 0.7, difficulty: 0.4, extraReview: 0.4 };
+// How tightly the average build line's review is held at zero, so a builder's term is its rate under that review.
+const LEVEL_PRECISION = 1e4;
 const DIFFICULTY_START = { routine: Math.log(0.5), hard: Math.log(2) };
 // A model's routine lines together weigh at most this many lines, however many there are: wording, comments, and
 // other mechanical edits say little about how a model builds, so a long run of them cannot carry a score far.
@@ -353,8 +356,8 @@ export function reviewKind(e: Evidence, agentOf: (model: string) => Holder | und
 
 /**
  * Each builder's finding rate at standard difficulty under an average review, from a Poisson model of every build
- * line's finding load: exposure × exp(base + builder + review kind + difficulty + extra reviews), each term but the base
- * drawn toward its start (BUILD_PRIOR). Fitting them together is what lets a model that takes hard work under strict
+ * line's finding load: exposure × exp(builder + review kind + difficulty + extra reviews), each term drawn toward its
+ * start (BUILD_PRIOR). Fitting them together is what lets a model that takes hard work under strict
  * review be compared with one that takes routine work under a light one. A line weighs by the findings expected of it,
  * so clean routine work says little and clean hard work says much. Self-reviews count half.
  */
@@ -363,9 +366,9 @@ function buildRates(file: NotesFile): Map<string, number> {
   // A line belongs to the model whose notes hold it.
   const lines = Object.values(file.models).flatMap((m) => m.evidence.filter((e) => e.role === 'build').map((e) => ({ ...e, model: m.model })));
   if (!lines.length) return new Map();
-  const names: string[] = ['base'];
-  const means: number[] = [Math.log(REFERENCE.build / LOAD.medium)];
-  const precisions: number[] = [1 / BUILD_PRIOR.base ** 2];
+  const names: string[] = [];
+  const means: number[] = [];
+  const precisions: number[] = [];
   const index = new Map<string, number>();
   const param = (name: string, mean: number, sd: number) => {
     if (!index.has(name)) { index.set(name, names.length); names.push(name); means.push(mean); precisions.push(1 / (sd * sd)); }
@@ -376,7 +379,7 @@ function buildRates(file: NotesFile): Map<string, number> {
   for (const e of lines) if (e.difficulty === 'routine') routine.set(e.model, (routine.get(e.model) ?? 0) + 1);
   const extra = param('extra review', 0, BUILD_PRIOR.extraReview);
   const rows = lines.map((e, i) => {
-    const terms = [0, param(`builder ${e.model}`, 0, BUILD_PRIOR.builder), param(`review ${kinds[i].kind}`, 0, BUILD_PRIOR.review)];
+    const terms = [param(`builder ${e.model}`, Math.log(REFERENCE.build / LOAD.medium), BUILD_PRIOR.builder), param(`review ${kinds[i].kind}`, 0, BUILD_PRIOR.review)];
     const difficulty = e.difficulty ?? 'standard';
     if (difficulty !== 'standard') terms.push(param(`difficulty ${difficulty}`, DIFFICULTY_START[difficulty], BUILD_PRIOR.difficulty));
     // Counted in medium findings, so the Poisson weight of a line is on the scale of a count.
@@ -384,10 +387,16 @@ function buildRates(file: NotesFile): Map<string, number> {
     return { terms, extra: kinds[i].extra, y: load(e.findings) / LOAD.medium, exposure: EXPOSURE[e.size], w: weight(e) * share };
   });
   const theta = means.slice();
+  // The review of the average build line, weighed as the fit weighs lines, is held at zero: a builder's own term is
+  // then its rate under that review, so neither its own reviews nor a run of routine lines moves where it is read.
+  const total = rows.reduce((s, r) => s + r.w, 0);
+  const average = new Array<number>(theta.length).fill(0);
+  for (const r of rows) { average[r.terms[1]] += r.w / total; average[extra] += r.w * r.extra / total; }
   // Newton's method on the log posterior, which is strictly concave with every term drawn toward a start.
   for (let step = 0; step < 100; step++) {
-    const gradient = theta.map((t, j) => -(t - means[j]) * precisions[j]);
-    const hessian = theta.map((_, j) => theta.map((__, k) => (j === k ? precisions[j] : 0)));
+    const level = average.reduce((s, a, j) => s + a * theta[j], 0);
+    const gradient = theta.map((t, j) => -(t - means[j]) * precisions[j] - LEVEL_PRECISION * average[j] * level);
+    const hessian = theta.map((_, j) => theta.map((__, k) => (j === k ? precisions[j] : 0) + LEVEL_PRECISION * average[j] * average[k]));
     for (const r of rows) {
       const mu = r.exposure * Math.exp(r.terms.reduce((s, j) => s + theta[j], 0) + r.extra * theta[extra]);
       const x = new Map<number, number>(r.terms.map((j) => [j, 1]));
@@ -407,11 +416,8 @@ function buildRates(file: NotesFile): Map<string, number> {
     delta.forEach((d, j) => { theta[j] += scale * d; });
     if (largest < 1e-10) break;
   }
-  // The level every builder is read at: the review of the average build line, weighed as the fit weighs it, so a
-  // model's rate does not depend on how hard its own lines were reviewed, a run of routine lines cannot move it, and
-  // the scores stay on the scale of the findings themselves.
-  const level = rows.reduce((s, r) => s + r.w * (theta[r.terms[2]] + r.extra * theta[extra]), 0) / rows.reduce((s, r) => s + r.w, 0);
-  return new Map([...index].filter(([name]) => name.startsWith('builder ')).map(([name, j]) => [name.slice('builder '.length), LOAD.medium * Math.exp(theta[0] + theta[j] + level)]));
+  const level = average.reduce((s, a, j) => s + a * theta[j], 0);
+  return new Map([...index].filter(([name]) => name.startsWith('builder ')).map(([name, j]) => [name.slice('builder '.length), LOAD.medium * Math.exp(theta[j] + level)]));
 }
 
 /** Solves a small symmetric positive definite system by Gaussian elimination. */

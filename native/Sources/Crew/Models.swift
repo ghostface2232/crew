@@ -86,6 +86,7 @@ struct Job: Codable, Sendable, Identifiable, Equatable {
         if state == "waiting" { return waiting?.type == "approval" ? String(localized: "Needs approval") : String(localized: "Has a question") }
         if stalled { return String(localized: "May be stuck") }
         if error?.limit == true { return String(localized: "Usage limit reached") }
+        if error?.budget == true { return String(localized: "Budget reached") }
         return ["running": String(localized: "Working"), "done": String(localized: "Done"), "failed": String(localized: "Failed"), "cancelled": String(localized: "Cancelled")][state] ?? state
     }
     var requestKey: String { "answer:\(id):\(waiting?.id ?? "")" }
@@ -160,7 +161,8 @@ struct Waiting: Codable, Sendable, Equatable {
     var grant: String?
 }
 struct JobResult: Codable, Sendable, Equatable { var files: [String]; var stat: String; var commit: String?; var outOfScope: [String] }
-struct JobError: Codable, Sendable, Equatable { var message: String; var limit: Bool }
+/// `budget` is set when the bridge stopped a turn at its token or time cap; an older daemon sends none.
+struct JobError: Codable, Sendable, Equatable { var message: String; var limit: Bool; var budget: Bool? }
 struct Refusal: Codable, Sendable, Equatable { var action: String; var reason: String; var turn: Int }
 struct CheckResult: Codable, Sendable, Equatable {
     var command: String

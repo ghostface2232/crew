@@ -67,6 +67,7 @@ export const ko: Record<string, string> = {
   'Billing cycle': '결제 주기',
   'Blocked in this browser': '이 브라우저에서 차단됨',
   'Branch': '브랜치',
+  'Budget reached': '예산 도달',
   'Build': '구현',
   'Builds separable pieces of a change.': '변경 사항에서 독립적으로 진행할 수 있는 부분을 구현해요.',
   'Cancel': '취소',

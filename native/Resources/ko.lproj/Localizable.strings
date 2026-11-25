@@ -446,6 +446,7 @@
 "max" = "최대";
 "ultra" = "울트라";
 "Light" = "경량";
+"Budget reached" = "예산 도달";
 
 /* ScoresView.swift */
 "%@ %@" = "%1$@ %2$@";

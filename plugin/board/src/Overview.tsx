@@ -3,7 +3,7 @@ import type { CSSProperties, ReactNode } from 'react';
 import {
   AddRegular, ArrowRight16Filled, ArrowUpRight16Filled, ChatMultipleRegular, CheckmarkCircle16Regular,
   CheckmarkCircleRegular, ChevronDown16Regular, ChevronUp16Regular, CircleMultipleConcentric16Regular,
-  DismissRegular, ErrorCircle16Regular, ErrorCircleRegular, LayerRegular, SearchRegular, StackRegular, TaskListLtrRegular,
+  DismissRegular, ErrorCircle16Regular, ErrorCircleRegular, LayerRegular, SearchRegular, StackRegular,
 } from '@fluentui/react-icons';
 import type { ProviderUsage } from '../../bridge/usage.ts';
 import type { Holder } from '../../bridge/config.ts';
@@ -14,7 +14,7 @@ import {
   dailyCounts, elapsed, endedPerHour, holdersOf, jobLabel, leadMission, limitWindowLabel, NAMES, projectOf, relativeDuration, rolesOf, runningPerHour,
   sessionAgent, usageWindowName, unsettled,
 } from './model.ts';
-import { AgentMark, Chip, CopyButton, EmptyState, Icon, RollingNumber, StatusIcon, tNodes, useFade, useClock, useLanguage, useStableItems } from './ui.tsx';
+import { AgentMark, Chip, EmptyState, Icon, RollingNumber, StatusIcon, tNodes, useFade, useClock, useLanguage, useStableItems } from './ui.tsx';
 import { JobRow, jobKind, jobStatusState, MissionPanel, SessionRow } from './Missions.tsx';
 import { t, translated } from './i18n.ts';
 
@@ -575,11 +575,15 @@ function Setup() {
 /** How many suggestions a project shows at once; the next one takes the place of one the user dismisses. */
 const SHOWN_ISSUES = 3;
 
+/** A label as the app shows it: first letter capitalized, so p1 reads P1. */
+const labelText = (label: string) => label.charAt(0).toUpperCase() + label.slice(1);
+
 /**
- * Open issues of the project's repository that are the user's to start: assigned to them, or to no one. Each can be
- * copied as a /crew:run command or dismissed for good. Says nothing when there are none or gh cannot list them, as in the app.
+ * Open issues of the project's repository that are the user's to start: assigned to them, or to no one. Each is a card,
+ * as in the app, that opens the issue or starts work on it in New Job, or is dismissed for good. Says nothing when there
+ * are none or gh cannot list them.
  */
-function IssueSuggestions({ project, command, live }: { project: string; command: string; live: boolean }) {
+function IssueSuggestions({ project, live, startWork }: { project: string; live: boolean; startWork: (draft: string, origin: Element) => void }) {
   const [found, setFound] = useState<IssueList | null>(null);
   const [error, setError] = useState('');
   const [dismissing, setDismissing] = useState<string | null>(null);
@@ -608,29 +612,48 @@ function IssueSuggestions({ project, command, live }: { project: string; command
     }
   };
   return (
-    <Panel label={t('Start from an issue')} className="issue-suggestions" action={<Icon icon={TaskListLtrRegular} />}>
-      <ul className="issue-list">
+    <section className="issue-section" aria-labelledby="issue-section-title">
+      <h2 className="label" id="issue-section-title">{t('Start from an issue')}</h2>
+      <ul className="issue-cards">
         {shown.map((issue) => (
-          <li key={issue.url}>
-            <a className="issue-title selectable" href={issue.url} target="_blank" rel="noreferrer" title={issue.title}>
-              <span className="digits secondary">#{issue.number}</span> {issue.title}
-            </a>
-            {issue.labels.length > 0 && <span className="caption secondary issue-labels">{issue.labels.slice(0, 3).join(' · ')}</span>}
-            <CopyButton text={`${command} ${issue.url}`} short={t('Copy')} name={t('Copy the command for #{number}', { number: issue.number })}>{t('Copy Command')}</CopyButton>
-            <button
-              className="icon"
-              disabled={!live || dismissing !== null}
-              aria-label={t('Dismiss #{number}', { number: issue.number })}
-              title={t('Dismiss. This issue is not suggested again.')}
-              onClick={() => void dismiss(issue.url)}
-            >
-              <Icon icon={DismissRegular} />
-            </button>
+          // Set on the inset gray rather than a raised card, so a suggestion does not read as work under way.
+          <li key={issue.url} className="issue-card">
+            <div className="issue-card-head">
+              <div className="issue-card-heading">
+                <h3 className="issue-card-title selectable" title={issue.title}>{issue.title}</h3>
+                <p className="mission-meta">{[`#${issue.number}`, ...issue.labels.slice(0, 3).map(labelText)].join(' · ')}</p>
+              </div>
+              <button
+                className="icon small"
+                disabled={!live || dismissing !== null}
+                aria-label={t('Dismiss #{number}', { number: issue.number })}
+                title={t('Dismiss. This issue is not suggested again.')}
+                onClick={() => void dismiss(issue.url)}
+              >
+                <Icon icon={DismissRegular} />
+              </button>
+            </div>
+            <div className="issue-card-actions">
+              <button aria-label={t('Open issue #{number}', { number: issue.number })} onClick={() => window.open(issue.url, '_blank', 'noopener,noreferrer')}>
+                {t('Open Issue')}
+              </button>
+              {/* New Job opens with the issue as its task; sending it, and to whom, stays the user's choice. */}
+              <button
+                className="tinted"
+                disabled={!live}
+                aria-label={t('Start work on #{number}', { number: issue.number })}
+                onClick={(event) => startWork(`Work on issue #${issue.number}: ${issue.title}
+
+${issue.url}`, event.currentTarget)}
+              >
+                {t('Start Work')}
+              </button>
+            </div>
           </li>
         ))}
       </ul>
       {error && <p className="callout error selectable" role="status"><Icon icon={ErrorCircleRegular} size={13} />{error}</p>}
-    </Panel>
+    </section>
   );
 }
 
@@ -675,7 +698,7 @@ function useMissionPanels({ jobs, pulls, claude, missions }: Snapshot) {
 
 /** The overview or a project: what is going on now, with the agents and the crew's rhythm beside it. */
 export function Workspace({ state, project, names, selected, openJob, openSession, newJob, openPage }: Scope & {
-  newJob: (origin?: Element | null) => void;
+  newJob: (origin?: Element | null, draft?: string) => void;
   openPage: (selection: string) => void;
 }) {
   const jobs = useMemo(() => project ? state.jobs.filter((job) => inProject(project, job)) : state.jobs, [state.jobs, project]);
@@ -713,8 +736,7 @@ export function Workspace({ state, project, names, selected, openJob, openSessio
       <div className="dash">
         <div className="dash-main">
           {!project && <Setup />}
-          {/* Codex names a plugin skill with $, so the command is copied in the form the project's latest lead takes. */}
-          {project && <IssueSuggestions project={project} live={state.connection === 'live'} command={sessions.toSorted((a, b) => b.activeAt - a.activeAt)[0]?.host === 'codex' ? '$crew:run' : '/crew:run'} />}
+          {project && <IssueSuggestions project={project} live={state.connection === 'live'} startWork={(draft, origin) => newJob(origin, draft)} />}
           {active.map(panel)}
           {loose.length > 0 && (
             <Panel label={t('Other jobs')} style={{ '--i': active.length } as CSSProperties} action={<Icon icon={StackRegular} />}>

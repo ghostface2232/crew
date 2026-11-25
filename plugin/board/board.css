@@ -298,6 +298,7 @@ button {
 button svg { flex: none; width: 15px; height: 15px; }
 button.prominent { background: var(--ink); box-shadow: var(--shadow-accent); color: var(--on-ink); }
 button.glass { background: var(--raised); box-shadow: var(--shadow-raised); }
+button.tinted { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
 button.large { min-height: 38px; padding: 0 18px; }
 button.small { min-height: 24px; padding: 0 9px; font-size: 11.5px; }
 button.small svg { width: 13px; height: 13px; }
@@ -1181,7 +1182,7 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
 .mission > .action-message { margin-block-start: 14px; }
 .mission:not([data-expanded]) { cursor: pointer; }
 @media (hover: hover) { .mission:not([data-expanded]):hover { box-shadow: var(--outline-ring), var(--shadow-card-hover); } }
-.mission-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-width: 0; }
+.mission-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-width: 0; padding-inline-start: 4px; }
 .mission[data-expanded] .mission-head { cursor: pointer; }
 .mission[data-state="active"] { --tone: var(--accent); }
 .mission[data-state="done"] { --tone: var(--green); }
@@ -1316,12 +1317,10 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
   animation-delay: calc(var(--i, 0) * 35ms);
   transition: background-color 200ms ease-out, box-shadow 240ms var(--ease-out), scale 160ms var(--ease-out);
 }
-.job-row[data-waiting] { background: color-mix(in srgb, var(--orange) 8%, transparent); }
 .job-row[aria-current="true"] { --tone: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--raised)); box-shadow: var(--shadow-tinted); }
 @media (hover: hover) {
   /* A hovered row lifts out of the card. */
   .job-row:not(:disabled):hover { background: var(--raised); box-shadow: var(--shadow-raised); }
-  .job-row[data-waiting]:not(:disabled):hover { background: color-mix(in srgb, var(--orange) 12%, transparent); }
   .job-row[aria-current="true"]:not(:disabled):hover { background: color-mix(in srgb, var(--accent) 14%, var(--raised)); box-shadow: var(--shadow-tinted); }
   .job-row:hover .row-chevron { translate: 2px 0; color: var(--secondary); }
 }
@@ -1586,10 +1585,13 @@ dialog.palette-layer::backdrop { background: var(--scrim-light); animation: fade
 .setup-list li[data-ok] svg { color: var(--secondary); }
 .setup-list li .caption { overflow-wrap: anywhere; }
 .setup-error { display: flex; align-items: center; gap: 6px; margin: 0; }
-/* Small cards for issues the user could start a mission from. */
-.issue-list { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
-.issue-list li { display: flex; align-items: center; gap: 8px; min-height: 36px; padding-inline: 4px; }
-.issue-list .issue-title { flex: 1 1 auto; min-width: 0; overflow: hidden; color: inherit; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
-.issue-list .issue-title:hover { color: var(--accent); }
-.issue-list .issue-labels { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Issues the user could start from: cards on the inset gray, so they read as suggestions rather than work under way. */
+.issue-section { display: grid; gap: 10px; margin-bottom: 12px; }
+.issue-section > .label { padding-inline: 4px; }
+.issue-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
+.issue-card { display: grid; gap: 14px; align-content: space-between; min-width: 0; padding: 16px; border-radius: var(--card-radius); corner-shape: var(--smooth); background: var(--row); }
+.issue-card-head { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
+.issue-card-heading { flex: 1 1 auto; display: grid; gap: 2px; min-width: 0; }
+.issue-card-title { overflow: hidden; font: 600 15px/1.3 var(--text-face); text-overflow: ellipsis; white-space: nowrap; }
+.issue-card-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .setup-list code { font-size: 0.92em; padding: 1px 4px; border-radius: 6px; background: var(--fill); }

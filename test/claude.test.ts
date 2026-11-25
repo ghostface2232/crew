@@ -50,6 +50,21 @@ test('a session counts as in a turn from its prompt until Stop or Interrupt, or 
   assert.equal(sessions.inTurn('s1'), false);
 });
 
+test('only the main loop keeps a turn going, and a cleared session waits for a prompt', (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: 1_000_000 });
+  const { sessions, hook } = tracker();
+  hook('UserPromptSubmit', { prompt: 'Go' });
+  hook('SubagentStart', { agent_id: 'a1', agent_type: 'default' });
+  t.mock.timers.tick(11 * 60_000);
+  // The turn ended unreported; a sub-agent still at work does not revive it.
+  hook('PreToolUse', { agent_id: 'a1', tool_name: 'Bash', tool_input: { command: 'ls' } });
+  assert.equal(sessions.inTurn('s1'), false);
+  hook('UserPromptSubmit', { prompt: 'Again' });
+  assert.equal(sessions.inTurn('s1'), true);
+  hook('SessionStart', { source: 'clear' });
+  assert.equal(sessions.inTurn('s1'), false);
+});
+
 test('permission prompts and rate limits surface as waiting and limit', () => {
   const { sessions, events, attention, hook } = tracker();
   hook('Notification', { notification_type: 'permission_prompt', message: 'Claude needs your permission to use Bash' });

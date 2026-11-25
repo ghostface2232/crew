@@ -144,6 +144,8 @@ export class ClaudeSessions {
   private journals = new Map<string, { entries: Map<string, JournalEntry>; readAt: number }>();
   /** Sessions whose main loop has ended its turn; they stay working while sub-agents run. */
   private resting = new Set<string>();
+  /** When each session's main loop last reported; sub-agents can outlive a turn that ended unreported. Memory only. */
+  private mainAt = new Map<string, number>();
   /**
    * The question a session's turn ended on, from the desktop app's wrap-up box. No hook reports it as a prompt,
    * and Stop would clear it, so it is kept to show the session as waiting until the user answers.
@@ -184,6 +186,7 @@ export class ClaudeSessions {
       this.hooks.onSession(s);
       return;
     }
+    this.mainAt.set(id, now);
 
     switch (p.hook_event_name) {
       case 'SessionStart':
@@ -192,6 +195,8 @@ export class ClaudeSessions {
           s.agents = [];
           this.resting.add(id);
         }
+        // A cleared conversation waits for a prompt; compact can come in the middle of a turn.
+        if (p.source === 'clear') this.resting.add(id);
         this.asked.delete(id);
         s.state = 'idle';
         s.phase = p.source === 'compact' ? 'context compacted' : 'session started';
@@ -346,11 +351,13 @@ export class ClaudeSessions {
 
   /**
    * Whether the session's main loop is inside a turn, as its hooks last said. A turn that ends without Stop (Codex
-   * reports no failed turn) would hold this forever, so a session silent for TURN_SILENT_MS no longer counts.
+   * reports no failed turn) would hold this forever, so a session whose main loop is silent for TURN_SILENT_MS no
+   * longer counts, whatever its sub-agents do.
    */
   inTurn(id: string, now = Date.now()): boolean {
     const s = this.sessions.get(id);
-    return Boolean(s && !this.resting.has(id) && now - s.activeAt < TURN_SILENT_MS);
+    const at = this.mainAt.get(id);
+    return Boolean(s && !this.resting.has(id) && at !== undefined && now - at < TURN_SILENT_MS);
   }
 
   /** The session's recent prompts, oldest first. */
@@ -363,6 +370,7 @@ export class ClaudeSessions {
     this.prompts.delete(id);
     this.pending.delete(id);
     this.resting.delete(id);
+    this.mainAt.delete(id);
     this.asked.delete(id);
     this.calls.delete(id);
     this.waitingFrom.delete(id);

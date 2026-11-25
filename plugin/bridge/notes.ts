@@ -440,7 +440,7 @@ function solve(matrix: number[][], vector: number[]): number[] {
 }
 
 /** One rating of one item, with whom it is about. `source` is the rating it came from, which may reach several models. */
-interface Vote { model: string; item: RatingItem; value: number; rater: string; weight: number; source: string; routine?: true }
+interface Vote { model: string; item: RatingItem; value: number; rater: string; weight: number; source: string; routine?: true; share?: number }
 /**
  * Every rating as votes on the models they are about. The lead's ride on its lines. A worker's names no target, so the
  * review lines give it one: a reviewer's rating is of the work its line names, a builder's of the reviews of its job.
@@ -488,7 +488,8 @@ function votes(file: NotesFile): Vote[] {
   // do in the build score: work with little to get wrong rates five almost always, and would otherwise carry the score.
   const easy = new Map<string, number>();
   for (const v of out) if (v.routine) easy.set(v.model, (easy.get(v.model) ?? 0) + 1);
-  for (const v of out) if (v.routine) v.weight *= Math.min(1, ROUTINE_LINES / easy.get(v.model)!);
+  // They count toward MIN_RATINGS by the same share, so a few of them alone do not let ratings move the score.
+  for (const v of out) if (v.routine) { v.share = Math.min(1, ROUTINE_LINES / easy.get(v.model)!); v.weight *= v.share; }
   return out;
 }
 
@@ -523,7 +524,7 @@ function peers(all: Vote[]): Map<string, { shift: number; count: number }> {
     const value = NEUTRAL + (off > 0 ? Math.max(0, off - Math.max(0, lean(v))) : Math.min(0, off - Math.min(0, lean(v))));
     const key = `${v.model}\0${v.item}`;
     const s = sums.get(key) ?? { num: 0, den: 0, count: 0 };
-    sums.set(key, { num: s.num + v.weight * value, den: s.den + v.weight, count: s.count + 1 });
+    sums.set(key, { num: s.num + v.weight * value, den: s.den + v.weight, count: s.count + (v.share ?? 1) });
   }
   return new Map([...sums].map(([key, s]) => [key, { shift: ((s.num + RATING_PRIOR * NEUTRAL) / (s.den + RATING_PRIOR) - NEUTRAL) / 2, count: s.count }]));
 }
@@ -600,7 +601,7 @@ export function scoreAll(file: NotesFile, options: { ratings?: boolean } = {}): 
     return {
       model: m.model, agent: m.agent, score: items.correctness, build: buildScore, fix: quality === null ? null : tenth(10 * quality),
       samples, buildSamples: build.length, fixSamples: fix.length, reviewSamples: review.length, items,
-      ratings: RATING_ITEMS.reduce((sum, name) => sum + (enough(m.model, name)?.count ?? 0), 0),
+      ratings: Math.round(RATING_ITEMS.reduce((sum, name) => sum + (enough(m.model, name)?.count ?? 0), 0)),
       status: reviews < 3 ? 'too few samples' : reviews < 8 ? 'on trial' : 'settled', summary: m.summary,
       difficulty: Object.fromEntries(DIFFICULTIES.map((d) => [d, build.filter((e) => (e.difficulty ?? 'standard') === d).length])) as Record<Difficulty, number>,
       lastAt: samples ? m.evidence.reduce((latest, e) => Math.max(latest, e.at), -Infinity) : null,

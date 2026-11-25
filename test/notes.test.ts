@@ -169,6 +169,11 @@ test('ratings of routine work together weigh at most two ratings, as its lines d
   assert.equal(scoreOf(rated(20, 'routine'), 'polisher'), scoreOf(rated(2, 'routine'), 'polisher'));
   // The same fives on standard work keep counting.
   assert.ok(scoreOf(rated(20, 'standard'), 'polisher') > scoreOf(rated(2, 'standard'), 'polisher'));
+  // Routine ratings alone count toward the minimum by their capped share: twenty of them are two, too few to move it.
+  const alone = (n: number) => notes({ other: Array.from({ length: 6 }, (_, i) => ({ job: `cx-o${i}`, rating: { correctness: 3 } })),
+    polisher: [{}, ...Array.from({ length: n }, (_, i) => ({ job: `cx-r${i}`, difficulty: 'routine' as const, size: 'small' as const, rating: { correctness: 5 } }))] });
+  const polisher = scoreAll(alone(20)).find((s) => s.model === 'polisher')!;
+  assert.deepEqual([polisher.ratings, polisher.score], [0, polisher.build]);
 });
 
 test('a review kind is the first reviewer from another agent, with extra reviews as their own term', () => {

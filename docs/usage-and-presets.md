@@ -18,7 +18,7 @@ A provider's status equals its tightest account-wide window. Single-model window
 
 Antigravity checks both account-wide windows (when present) and the configured model's family: every word of a family name must appear in the model name (`/` separates alternatives, such as `Claude/GPT`), so non-Argon Gemini matches `Gemini` over `Gemini 4 Argon`. Without a configured model, account-wide windows decide if present. When neither a model nor account-wide windows are available, or if no family matches, the tightest family decides because jobs cannot switch models.
 
-Status uses remaining quota. Pace projections often misjudged real usage (marking Codex `tight` with 57% of its weekly window left), so routing ignores them. Each window still carries `projectedExhaustion` in usage readings, but neither board shows it.
+The board classifies each window by remaining quota. Routing also considers how soon quota resets. It ignores recent burn because a pace projection once marked Codex `tight` with 57% of its weekly quota left. Usage readings retain `projectedExhaustion` for compatibility.
 
 On the board, a provider that is `stale`, `unknown`, or `exhausted` by a reported limit shows that status on its account-wide gauges instead of each window's own.
 
@@ -41,7 +41,11 @@ G2 (`--json` output) and G3 (activity signal and threshold hook) remain open in 
 
 ## Routing
 
-`route` (the lead's tool and `GET /api/route`) implements [the AgentGauge routing plan](../research/agentgauge-integration.md#82-routing-table) (`plugin/bridge/usage.ts`). It assigns work only to a role's configured holder or the lead. Where a role has several usable holders, `route` checks them in preferred worker order (Antigravity first for `polish`, Codex first for all other roles, Claude last when it is a worker, the lead's own agent after the workers) and picks the first one that is not `tight` or `exhausted` before falling back to the first usable holder. Reset advice (`deferUntil`) uses only the windows that decided the provider's status, and projected exhaustion never defers work.
+`route` assigns work only to a role's configured holders or the lead. It treats a `tight` window as `ok` when the reset is within 15 minutes or 10% of the window's duration, whichever is longer. With no duration, it uses 15 minutes. All applicable tight windows must meet their own threshold for the holder to count as `ok`. The reason gives the reset time.
+
+Among usable holders, routing prefers Antigravity for `polish` and Codex for the other roles, with Claude last among workers and the lead after the workers. A holder with room takes precedence over a short holder. Within the same usable status, a holder goes after its peers if its longest applicable window has less than half the quota expected to remain under even spending. For example, with 80% of the window's time left, the tie-break applies below 40% quota remaining. It never changes the holder's status. An unknown or stale reading keeps its place in the preference order.
+
+If the selected `review`, `verify`, or `debate` holder is exhausted and all its exhausted deciding windows reset within 30 minutes, the lead runs the cross-check after the last reset. The holder keeps the work, `deferUntil` gives that reset time, and `degraded` stays false. The exhausted column below applies when the cross-check cannot wait for a known reset within that interval.
 
 | Kind | Holder `tight` | Holder `exhausted` |
 | --- | --- | --- |

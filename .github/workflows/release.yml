@@ -80,6 +80,11 @@ jobs:
       - run: npm run package:desktop
       - name: Check the app is signed with the certificate
         run: codesign -d -r- release/Crew.app 2>&1 | grep -q 'certificate leaf' || { echo "::error::Crew.app is not signed with the release certificate"; exit 1; }
+      - name: Smoke test the packaged app
+        run: node scripts/desktop.mjs smoke
+        timeout-minutes: 5
+        env:
+          CREW_APP_PATH: release/Crew.app
       # This runner is a person's Mac, so the keychain must not outlive the job.
       - name: Remove the signing keychain
         if: always()

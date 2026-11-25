@@ -324,16 +324,47 @@ enum Releases {
         return arguments
     }
 
+    nonisolated static var handoverTempDirectory: URL {
+        // Foundation can choose a different temp root for a LaunchServices launch despite its explicit TMPDIR.
+        if let path = ProcessInfo.processInfo.environment["TMPDIR"], path.hasPrefix("/") {
+            return URL(fileURLWithPath: path, isDirectory: true)
+        }
+        return FileManager.default.temporaryDirectory
+    }
+
+    nonisolated static func startupDirectory(arguments: [String], temp: URL? = nil) -> URL? {
+        guard arguments.count == 3, arguments[1] == "--update-startup", arguments[2].hasPrefix("/") else { return nil }
+        let work = URL(fileURLWithPath: arguments[2], isDirectory: true).resolvingSymlinksInPath().standardizedFileURL
+        let root = (temp ?? handoverTempDirectory).resolvingSymlinksInPath().standardizedFileURL
+        let prefix = "Crew-update-"
+        guard work.deletingLastPathComponent().path == root.path,
+              work.lastPathComponent.hasPrefix(prefix),
+              UUID(uuidString: String(work.lastPathComponent.dropFirst(prefix.count))) != nil else { return nil }
+        return work
+    }
+
+    nonisolated static func recordStartup(in work: URL) throws {
+        try String(ProcessInfo.processInfo.processIdentifier).write(to: work.appending(path: "pid"), atomically: true, encoding: .utf8)
+        guard FileManager.default.fileExists(atPath: work.appending(path: "pending").path) else { throw CancellationError() }
+    }
+
+    nonisolated static func markStartupReady(in work: URL) -> Bool {
+        // The helper can rename the same directory to expired. Only one rename can win.
+        rename(work.appending(path: "pending").path, work.appending(path: "ready").path) == 0
+    }
+
     /// Unpacks the staged archive and checks that it is this app at the release's version, signed intact, then starts a
     /// helper that swaps it in for `installed` once this process exits and opens the new copy. The caller must then quit;
     /// it gets the helper's process and the staged bundle, to undo the hand-over if the quit is cancelled.
-    nonisolated static func handOver(archive: URL, version: String, installed: URL, processID: Int32, result: URL) throws -> (helper: Int32, staged: URL, work: URL) {
+    nonisolated static func handOver(archive: URL, version: String, installed: URL, processID: Int32, result: URL,
+                                    home: URL, running: FileHandle) throws -> (helper: Int32, staged: URL, work: URL) {
         if let reason = canReplace(installed: installed) { throw CrewFailure(reason) }
         let parent = installed.deletingLastPathComponent()
-        let work = FileManager.default.temporaryDirectory.appending(path: "Crew-update-\(UUID().uuidString)", directoryHint: .isDirectory)
-        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: false)
+        let work = handoverTempDirectory.appending(path: "Crew-update-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
         var handedOff = false
         defer { if !handedOff { try? FileManager.default.removeItem(at: work) } }
+        try FileManager.default.createDirectory(at: work.appending(path: "pending"), withIntermediateDirectories: false)
         let unpacked = work.appending(path: "unpacked", directoryHint: .isDirectory)
         let app = unpacked.appending(path: "Crew.app", directoryHint: .isDirectory)
         guard run("/usr/bin/ditto", ["-x", "-k", archive.path, unpacked.path]), isExpectedBundle(app, version: version) else {
@@ -343,6 +374,8 @@ enum Releases {
         guard run("/usr/bin/codesign", verification + [app.path]) else {
             throw InvalidArchive(version: version)
         }
+        let gate = try BundleLaunchLock(installed: installed).prepareHandover(home: home, work: work, running: running)
+        defer { try? gate.close() }
         // Staged beside the installed copy so the final move is a same-volume rename; named apart from an earlier
         // attempt's, whose helper may still be waiting to clean up.
         let staged = parent.appending(path: ".Crew-update-\(version)-\(UUID().uuidString).app", directoryHint: .isDirectory)
@@ -351,7 +384,7 @@ enum Releases {
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         // Paths travel as arguments, never interpolated into the script.
         process.arguments = ["-c", swapScript, "crew-swap", String(processID), installed.path, staged.path, work.path, result.path] + verification
-        process.standardInput = FileHandle.nullDevice
+        process.standardInput = gate
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         do {
@@ -382,9 +415,6 @@ enum Releases {
         return process.terminationStatus == 0
     }
 
-    /// The app's PID, installed and staged bundles, work folder, failure report, then the original codesign arguments.
-    /// The old copy is kept until the new one opens, and put back if the move or launch fails. If the app has not quit within
-    /// a minute (its quit was cancelled), nothing is swapped: a running copy is never moved out from under itself.
     // The helper reports its failure in English so a later launch can render it in the current app language.
     nonisolated private static func localizedFailure(_ reason: String) -> String {
         let reopenMessage = "The previous Crew app could not reopen."
@@ -393,8 +423,12 @@ enum Releases {
         let message = failedToReopen ? String(reason.dropLast(suffix.count)) : reason
         let restorePrefix = "Could not restore Crew; the previous app is at "
         let movePrefix = "Could not move the failed update aside; the previous Crew app is at "
+        let stopPrefix = "Could not stop the updated Crew app; the previous app is at "
         let localized: String
-        if message.hasPrefix(restorePrefix), message.hasSuffix(".") {
+        if message.hasPrefix(stopPrefix), message.hasSuffix(".") {
+            let path = String(message.dropFirst(stopPrefix.count).dropLast())
+            localized = String(localized: "Could not stop the updated Crew app; the previous app is at \(path).")
+        } else if message.hasPrefix(restorePrefix), message.hasSuffix(".") {
             let path = String(message.dropFirst(restorePrefix.count).dropLast())
             localized = String(localized: "Could not restore Crew; the previous app is at \(path).")
         } else if message.hasPrefix(movePrefix), message.hasSuffix(".") {
@@ -406,14 +440,27 @@ enum Releases {
         return failedToReopen ? localized + " " + localizedCrewLabel(reopenMessage) : localized
     }
 
+    /// Receives the quitting app's PID, installed and staged bundles, work folder, report, and codesign arguments.
+    /// The original is kept until the replacement confirms startup.
     nonisolated static let swapScript = """
     #!/bin/sh
     pid="$1"; target="$2"; staged="$3"; work="$4"; result="$5"
     shift 5
+    launch() {
+        # LaunchServices may start with a different environment. Keep the updating app's profile and launch switches.
+        [ -z "${CREW_HOME+x}" ] || set -- --env "CREW_HOME=$CREW_HOME" "$@"
+        [ -z "${CREW_PORT+x}" ] || set -- --env "CREW_PORT=$CREW_PORT" "$@"
+        [ -z "${CREW_ATTACH_ONLY+x}" ] || set -- --env "CREW_ATTACH_ONLY=$CREW_ATTACH_ONLY" "$@"
+        [ -z "${CREW_TEST_MODE+x}" ] || set -- --env "CREW_TEST_MODE=$CREW_TEST_MODE" "$@"
+        [ -z "${CREW_UPDATE_FEED+x}" ] || set -- --env "CREW_UPDATE_FEED=$CREW_UPDATE_FEED" "$@"
+        exec open "$@" </dev/null
+    }
     fail() {
         printf '%s\\n' "$1" > "$result"
         rm -rf "$staged" "$work"
-        if [ "${2:-}" != no ] && ! open "$target"; then
+        # The restored app's ordinary launch must be admitted after the swap gate is released.
+        exec </dev/null
+        if [ "${2:-}" != no ] && ! (launch -n "$target"); then
             printf '%s\\n' "$1 The previous Crew app could not reopen." > "$result"
         fi
         exit 1
@@ -440,11 +487,42 @@ enum Releases {
         rmdir "$backup"
         fail "Could not move the updated Crew app into place."
     fi
-    if ! open "$target" --args --updated; then
-        mv "$target" "$staged" || fail "Could not move the failed update aside; the previous Crew app is at $previous." no
+    stop_candidate() {
+        # open -W normally exits only after the app is gone. If it was interrupted, a missing PID proves nothing.
+        if [ ! -f "$work/pid" ]; then
+            [ "$interrupted" = no ] && [ "$launch_status" -lt 128 ]
+            return
+        fi
+        candidate=$(cat "$work/pid")
+        case "$candidate" in ''|*[!0-9]*|0|1) return 1 ;; esac
+        command=$(/bin/ps -ww -p "$candidate" -o command=) || { ! kill -0 "$candidate" 2>/dev/null; return; }
+        case "$command" in
+            *" --update-startup $work") ;;
+            *) return 1 ;;
+        esac
+        kill -KILL "$candidate" 2>/dev/null
+        i=0
+        while kill -0 "$candidate" 2>/dev/null && [ "$i" -lt 25 ]; do sleep 0.2; i=$((i + 1)); done
+        ! kill -0 "$candidate" 2>/dev/null
+    }
+    # The replacement validates the handover directory against its temp directory.
+    launch -n -W --env "TMPDIR=${work%/*}" "$target" --args --update-startup "$work" &
+    launcher=$!
+    i=0
+    while [ ! -d "$work/ready" ] && kill -0 "$launcher" 2>/dev/null && [ "$i" -lt 300 ]; do
+        sleep 0.2
+        i=$((i + 1))
+    done
+    interrupted=no
+    if kill "$launcher" 2>/dev/null; then interrupted=yes; fi
+    launch_status=0
+    wait "$launcher" 2>/dev/null || launch_status=$?
+    if [ ! -d "$work/ready" ] && { mv "$work/pending" "$work/expired" 2>/dev/null || [ ! -d "$work/ready" ]; }; then
+        stop_candidate || fail "Could not stop the updated Crew app; the previous app is at $previous." no
+        mv "$target" "$staged" || fail "Could not move the failed update aside; the previous app is at $previous." no
         mv "$previous" "$target" || fail "Could not restore Crew; the previous app is at $previous." no
         rmdir "$backup"
-        fail "The updated Crew app could not open."
+        fail "The updated Crew app did not finish starting."
     fi
     rm -rf "$previous" "$work"
     rmdir "$backup"

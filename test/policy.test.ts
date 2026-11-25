@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 import { decide } from '../plugin/bridge/adapters/antigravity.ts';
 import { isNewer, outsideJobCommand, shouldReplace } from '../plugin/bridge/client.ts';
 import { isInside } from '../plugin/bridge/git.ts';
@@ -285,16 +286,57 @@ test('a timed-out command that ignores SIGTERM is killed, and output past the li
   assert.ok(chatty.out.length <= 4096 + 1024, `kept ${chatty.out.length} characters`);
 });
 
+test('timed-out descendants with separate stdio are killed after their parent closes', { skip: process.platform === 'win32' }, async (t) => {
+  const { execTimed } = await import('../plugin/bridge/rpc.ts');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-timeout-'));
+  const pidFile = path.join(directory, 'pid');
+  const termFile = path.join(directory, 'term');
+  const child = `
+    const fs = require('node:fs');
+    process.on('SIGTERM', () => fs.writeFileSync(${JSON.stringify(termFile)}, 'received'));
+    fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
+    setTimeout(() => {}, 12000);
+  `;
+  const parent = `
+    process.on('SIGTERM', () => process.exit(0));
+    require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(child)}], { stdio: 'ignore' }).unref();
+    setInterval(() => {}, 1000);
+  `;
+  const descendant = () => Number(fs.readFileSync(pidFile, 'utf8'));
+  const alive = (pid: number) => {
+    try { process.kill(pid, 0); return true; }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
+      throw error;
+    }
+  };
+  t.after(() => {
+    if (fs.existsSync(pidFile)) {
+      const pid = descendant();
+      if (alive(pid)) process.kill(pid, 'SIGKILL');
+    }
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
+  const error = await new Promise<Error | null>((resolve) => {
+    execTimed(process.execPath, ['-e', parent], { timeout: 1000 }, resolve);
+  });
+  assert.match(error?.message ?? '', /timed out/);
+  assert.equal(fs.readFileSync(termFile, 'utf8'), 'received');
+  const pid = descendant();
+  for (let i = 0; i < 100 && alive(pid); i++) await delay(10);
+  assert.equal(alive(pid), false, 'the timed command left a process running in its group');
+});
+
 test('a daemon started outside Codex\'s job is pointed at this client\'s Crew over the user\'s own environment', () => {
   const home = String.raw`C:\Users\me\문서 crew`;
   // Windows keeps a variable's name as it was set, so a lowercase one is found too; PATH is the user's own.
-  const env = { crew_port: '50756', PATH: String.raw`C:\filtered`, ELECTRON_RUN_AS_NODE: '1' };
+  const env = { crew_home: 'relative', crew_port: '50756', PATH: String.raw`C:\filtered`, ELECTRON_RUN_AS_NODE: '1' };
   const command = outsideJobCommand(String.raw`C:\node\node.exe`, String.raw`C:\crew\daemon.js`, String.raw`C:\Users\me\.crew\daemon.log`, home, env, true)!;
   // A setting this client lacks is cleared, so one only the user's environment holds cannot send the daemon elsewhere.
   assert.equal(command, String.raw`cmd.exe /d /v:off /s /c "set "CREW_HOME=C:\Users\me\문서 crew"&& set "CREW_PARTIAL_ENV=1"&& set "CREW_PORT=50756"&& set "CREW_AGENTGAUGE_DIR="&& set "ELECTRON_RUN_AS_NODE=1"&& "C:\node\node.exe" "C:\crew\daemon.js" >> "C:\Users\me\.crew\daemon.log" 2>&1"`);
   // cmd.exe would expand a percent sign or end the quoting at a double quote, so such a start goes the usual way.
-  assert.equal(outsideJobCommand('node', 'daemon.js', 'log', String.raw`C:\100%`, {}, true), null);
+  assert.equal(outsideJobCommand('node', 'daemon.js', 'log', String.raw`C:\100%`, { CREW_HOME: 'relative' }, true), null);
   // A Codex hook's environment is whole, so its daemon is not marked as started from a filtered one.
-  assert.match(outsideJobCommand('node', 'daemon.js', 'log', 'home', {}, false)!, /set "CREW_PARTIAL_ENV="&& /);
+  assert.match(outsideJobCommand('node', 'daemon.js', 'log', 'home', {}, false)!, /set "CREW_HOME="&& set "CREW_PARTIAL_ENV="&& /);
   assert.equal(outsideJobCommand('node', 'daemon.js', 'log', home, { CREW_PORT: '1"2' }, true), null);
 });

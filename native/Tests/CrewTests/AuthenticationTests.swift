@@ -33,11 +33,11 @@ private final class AuthenticationProtocol: URLProtocol, @unchecked Sendable {
     private func write(_ token: String, home: URL) throws {
         try (token + "\n").write(to: home.appendingPathComponent("token"), atomically: true, encoding: .utf8)
     }
-    private func api(home: URL, handler: @escaping AuthenticationProtocol.Handler) -> CrewAPI {
+    private func api(home: URL, port: Int? = 0, handler: @escaping AuthenticationProtocol.Handler) -> CrewAPI {
         AuthenticationProtocol.handler.withLock { $0 = handler }
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [AuthenticationProtocol.self]
-        return CrewAPI(port: 0, configuration: config, environment: ["CREW_HOME": home.path])
+        return CrewAPI(port: port, configuration: config, environment: ["CREW_HOME": home.path])
     }
     @Test func jsonRequestCarriesToken() async throws {
         let home = try home()
@@ -243,6 +243,63 @@ private final class AuthenticationProtocol: URLProtocol, @unchecked Sendable {
         refused.withLock { $0 = true }
         #expect(await api.webBoardURL() == api.baseURL)
     }
+    @Test func requestsAndStreamsReadTheCurrentPortAndKeepTicketsOnTheirIssuingPort() async throws {
+        let home = try home()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let record = home.appendingPathComponent("daemon.json")
+        let addresses = Mutex<[Int]>([])
+        let api = api(home: home, port: nil) { request in
+            addresses.withLock { $0.append(request.url!.port!) }
+            switch request.url?.path {
+            case "/api/session/ticket":
+                try #"{"port":32615}"#.write(to: record, atomically: true, encoding: .utf8)
+                return (200, Data(#"{"ticket":"ticket"}"#.utf8))
+            case "/api/stream":
+                return (200, Data("event: state\ndata: {}\n\n".utf8))
+            default:
+                return (200, Data("{}".utf8))
+            }
+        }
+        let _: EmptyReply = try await api.request("/api/state")
+        try #"{"port":42615}"#.write(to: record, atomically: true, encoding: .utf8)
+        await openStream(api)
+        try #"{"port":37615}"#.write(to: record, atomically: true, encoding: .utf8)
+        await openStream(api)
+        #expect(await api.webBoardURL().absoluteString == "http://127.0.0.1:37615/#ticket=ticket")
+        let _: EmptyReply = try await api.request("/api/state")
+        #expect(addresses.withLock { $0 } == [47615, 42615, 37615, 37615, 32615])
+    }
+
+    private func openStream(_ api: CrewAPI) async {
+        let delivered = Mutex(false)
+        do {
+            try await api.stream { event in
+                #expect(event.name == "state")
+                delivered.withLock { $0 = true }
+            }
+        } catch {
+            // The fixture closes the stream after one event.
+            #expect(error is CrewFailure)
+        }
+        #expect(delivered.withLock { $0 })
+    }
+
+    @Test func aValidPortOverrideTakesPrecedenceOverTheDaemonRecord() throws {
+        let home = try home()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let record = home.appendingPathComponent("daemon.json")
+        try #"{"port":42615}"#.write(to: record, atomically: true, encoding: .utf8)
+        let environment = ["CREW_HOME": home.path, "CREW_PORT": "59253"]
+        #expect(CrewAPI(environment: environment).baseURL.port == 59253)
+        #expect(CrewAPI(port: 0, environment: environment).baseURL.port == 0)
+        let fallback = CrewAPI(environment: ["CREW_HOME": home.path, "CREW_PORT": "bad"])
+        #expect(fallback.baseURL.port == 42615)
+        for invalid in [#"{"port":59253}"#, #"{"port":0}"#, #"{"port":65536}"#, #"{"port":"42615"}"#, "{"] {
+            try invalid.write(to: record, atomically: true, encoding: .utf8)
+            #expect(fallback.baseURL.port == 47615)
+        }
+    }
+
     @Test func crewHomeControlsTokenLocationAndDefaultsToUserHome() throws {
         let home = try home()
         defer { try? FileManager.default.removeItem(at: home) }

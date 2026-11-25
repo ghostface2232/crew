@@ -109,7 +109,10 @@ func event<T: Encodable>(_ name: String, _ value: T) throws -> ServerEvent {
     @Test(.enabled(if: ProcessInfo.processInfo.environment["CREW_STREAM_TEST_PORT"] != nil))
     @MainActor func realStreamDecodesSnapshotsAndCancelsConnection() async throws {
         let port = Int(ProcessInfo.processInfo.environment["CREW_STREAM_TEST_PORT"]!)!
-        let api = CrewAPI(port: port, environment: ["CREW_HOME": FileManager.default.temporaryDirectory.appendingPathComponent("crew-test-\(UUID())").path])
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("crew-test-\(UUID())")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let api = CrewAPI(environment: ["CREW_HOME": home.path, "CREW_PORT": String(port)])
         let store = CrewStore(api: api)
         let stream = Task {
             try await api.stream { event in try store.receive(event) }

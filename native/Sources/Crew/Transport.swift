@@ -60,20 +60,33 @@ struct EmptyReply: Codable, Sendable {}
 struct Instructions: Codable, Sendable { var text: String }
 
 final class CrewAPI: Sendable {
-    let baseURL: URL
+    private struct DaemonRecord: Decodable { var port: Int }
+    // Keep the discovery list in sync with the bundled CLI's default PORTS.
+    private static let daemonPorts = [47615, 42615, 37615, 32615, 27615]
+    private let portOverride: Int?
+    private let daemonFile: URL
+    var baseURL: URL {
+        let port = portOverride ?? recordedPort() ?? Self.daemonPorts[0]
+        return URL(string: "http://127.0.0.1:\(port)")!
+    }
     let tokenFile: URL
     @MainActor var onSignInFailure: (@MainActor @Sendable (DaemonSignInFailure) -> Void)?
     private let session: URLSession
-    init(port: Int = Int(ProcessInfo.processInfo.environment["CREW_PORT"] ?? "") ?? 47615, configuration: URLSessionConfiguration? = nil, environment: [String: String] = ProcessInfo.processInfo.environment) {
-        tokenFile = CrewHome.directory(environment: environment).appendingPathComponent("token")
-        baseURL = URL(string: "http://127.0.0.1:\(port)")!
+    init(port: Int? = nil, configuration: URLSessionConfiguration? = nil, environment: [String: String] = ProcessInfo.processInfo.environment) {
+        let home = CrewHome.directory(environment: environment)
+        tokenFile = home.appendingPathComponent("token")
+        daemonFile = home.appendingPathComponent("daemon.json")
+        portOverride = port ?? environment["CREW_PORT"].flatMap(Int.init).flatMap { (1...65535).contains($0) ? $0 : nil }
         let config = configuration ?? URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 35
         config.timeoutIntervalForResource = 60 * 60 * 24
         session = URLSession(configuration: config)
     }
     func request<T: Decodable & Sendable>(_ path: String, body: Data? = nil, timeout: TimeInterval? = nil) async throws -> T {
-        var request = URLRequest(url: URL(string: path, relativeTo: baseURL)!)
+        try await request(URL(string: path, relativeTo: baseURL)!, body: body, timeout: timeout)
+    }
+    private func request<T: Decodable & Sendable>(_ url: URL, body: Data?, timeout: TimeInterval?) async throws -> T {
+        var request = URLRequest(url: url)
         // Worktree creation and review preparation can take minutes. A short timeout leaves
         // the daemon working while the UI offers a duplicate submission.
         request.timeoutInterval = timeout ?? (body == nil ? 10 : 60 * 60 * 24)
@@ -99,11 +112,19 @@ final class CrewAPI: Sendable {
     /// so the address is worth nothing in a browser's history. Without one, the page says how to sign in.
     func webBoardURL() async -> URL {
         struct Issued: Decodable, Sendable { var ticket: String }
-        guard let issued: Issued = try? await post("/api/session/ticket", EmptyReply(), timeout: 5) else { return baseURL }
-        var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)!
+        let address = baseURL
+        let url = address.appendingPathComponent("api/session/ticket")
+        guard let issued: Issued = try? await request(url, body: JSONEncoder().encode(EmptyReply()), timeout: 5) else { return address }
+        var components = URLComponents(url: address, resolvingAgainstBaseURL: false)!
         components.path = "/"
         components.fragment = "ticket=\(issued.ticket)"
         return components.url!
+    }
+    private func recordedPort() -> Int? {
+        guard let data = try? Data(contentsOf: daemonFile),
+              let record = try? JSONDecoder().decode(DaemonRecord.self, from: data),
+              Self.daemonPorts.contains(record.port) else { return nil }
+        return record.port
     }
     private func readToken() -> String? {
         guard let contents = try? String(contentsOf: tokenFile, encoding: .utf8) else { return nil }

@@ -115,19 +115,64 @@ const permission = (id: string) => `send({ id: '${id}', method: 'session/request
 } });`;
 const terminalEvents = (events: CrewEvent[], job: Job) => events.filter((event) => event.job_id === job.id && ['done', 'error', 'limit', 'cancelled'].includes(event.kind));
 
-test('Codex lost turn/start acknowledgement fails clearly instead of remaining active', { timeout: 8000 }, async (t) => {
-  const h = harness(t, codex(''));
+test('a lost Codex turn start acknowledgement keeps the job active until the turn can be interrupted', { timeout: 12000 }, async (t) => {
+  const h = harness(t, codex('', `
+    if (msg.method === 'thread/read') {
+      const active = fs.existsSync(__dirname + '/active');
+      return send({ id: msg.id, result: { thread: {
+        status: { type: active ? 'active' : 'idle' },
+        turns: active ? [{ id: 'turn', status: 'inProgress' }] : [],
+      } } });
+    }
+  `));
   t.mock.timers.enable({ apis: ['setTimeout'] });
   try {
     const job = await h.create();
     await until(() => h.wire().some((msg) => msg.method === 'turn/start'));
     t.mock.timers.tick(30_001);
-    await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(job.state, 'failed', `state=${job.state}; notes=${job.notes.join('; ')}`);
-    assert.match(job.error!.message, /turn\/start.*timed out/);
-    assert.equal(job.waiting, null);
+    await until(() => job.notes.some((note) => /turn\/start.*timed out/.test(note)));
+    assert.equal(job.state, 'running');
+    await assert.rejects(h.jobs.discard(job.id), /still running/);
+    await assert.rejects(h.jobs.cancel(job.id), /has not confirmed/);
+    fs.writeFileSync(path.join(h.home, 'active'), '');
+    await h.jobs.cancel(job.id);
+    assert.equal(job.state, 'cancelled');
+    assert.ok(h.wire().some((msg) => msg.method === 'turn/interrupt' && msg.params.turnId === 'turn'));
     assert.equal(terminalEvents(h.events, job).length, 1);
   } finally {
+    t.mock.timers.reset();
+  }
+});
+
+test('a Codex follow-up returns at the acknowledgement deadline and still observes a later rejection', { timeout: 12000 }, async (t) => {
+  const h = harness(t, codex(`
+    if (!globalThis.started) {
+      globalThis.started = true;
+      ${accepted}
+      ${completed}
+    } else {
+      const timer = setInterval(() => {
+        if (!fs.existsSync(__dirname + '/refuse')) return;
+        clearInterval(timer);
+        send({ id: msg.id, error: { code: -32603, message: 'late turn rejection' } });
+      }, 10);
+    }
+  `));
+  const job = await h.create();
+  await until(() => job.state === 'done');
+  h.jobs.flush();
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    const reply = h.jobs.reply(job.id, { message: 'next' });
+    await until(() => h.wire().filter((msg) => msg.method === 'turn/start').length === 2);
+    t.mock.timers.tick(30_001);
+    assert.equal((await reply).state, 'running');
+    fs.writeFileSync(path.join(h.home, 'refuse'), '');
+    await until(() => job.state === 'failed');
+    assert.match(job.error!.message, /late turn rejection/);
+    assert.equal(terminalEvents(h.events, job).length, 2);
+  } finally {
+    h.jobs.flush();
     t.mock.timers.reset();
   }
 });

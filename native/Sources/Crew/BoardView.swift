@@ -57,6 +57,16 @@ struct BoardView: View {
                 else { workspace }
             }
             .onGeometryChange(for: Bool.self) { $0.size.width >= Self.twoColumnWidth } action: { wide = $0 }
+            // A project's issue suggestions, read again on reconnect. The daemon keeps each answer ten minutes, so
+            // asking more often only reads its cache.
+            .task(id: store.connected ? store.project : "") {
+                let project = store.project
+                guard store.connected, !project.isEmpty else { return }
+                while !Task.isCancelled {
+                    await store.loadIssues(project)
+                    try? await Task.sleep(for: .seconds(600))
+                }
+            }
             // The banner and the heading's review button come and go with requests; the page below makes room.
             .animation(Motion.reduced(Motion.reflow, reduceMotion), value: store.state.pendingCount > 0)
             .background(OverlayScrollers())
@@ -547,15 +557,16 @@ struct MissionPanel: View {
         }
         // The lead's wrap-up of finished work: what changed, what was verified, what is left for the user.
         if mission.state == "done", let summary = mission.summary, !summary.isEmpty {
+            // A group, as in the board: a label on the text itself would be read in place of the summary.
             ReportText(report: summary).padding(.leading, WorkspaceStyle.rowTitleInset)
-                .accessibilityLabel(String(localized: "Wrap-up"))
+                .accessibilityElement(children: .contain).accessibilityLabel(String(localized: "Wrap-up"))
         }
     }
     /// Decisions the user made in this mission, each one theirs to drop, as in the board.
     @ViewBuilder private var decisions: some View {
         if mission.state == "active", let memory = mission.memory, !memory.isEmpty {
             VStack(alignment: .leading, spacing: Space.s) {
-                Text("Decisions").font(Typeface.captionStrong).foregroundStyle(.secondary)
+                Text("Decisions").font(Typeface.bodyStrong).foregroundStyle(.secondary).accessibilityAddTraits(.isHeader)
                 ForEach(memory, id: \.key) { entry in
                     HStack(alignment: .firstTextBaseline, spacing: Space.m) {
                         Text(entry.text).font(Typeface.callout).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)

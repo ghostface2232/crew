@@ -787,6 +787,70 @@ private final class MockProtocol: URLProtocol, @unchecked Sendable {
         #expect(RoleInfo(role: "fix", kind: "delegate", label: "Fix", summary: "").group == "Review")
         #expect(RoleInfo(role: "release", kind: "delegate", label: "Release", summary: "").group == "Build")
     }
+    @Test func projectSwitchesWrapUpAndDecisionsDecodeAndArriveByEvent() throws {
+        let store = try store()
+        try store.receive(event("state", fixture()))
+        // A daemon that predates them sends no switches, wrap-up or decisions.
+        #expect(store.state.projects == nil)
+        #expect(store.state.missions[0].summary == nil && store.state.missions[0].memory == nil)
+        let switches = try JSONDecoder().decode([String: ProjectSettings].self, from: Data(#"{"/work/app":{"autonomy":true,"autoResume":false},"/work/other":{}}"#.utf8))
+        try store.receive(event("projects", switches))
+        #expect(store.state.projects?["/work/app"] == ProjectSettings(autonomy: true, watchAway: nil, autoResume: false))
+        #expect(store.state.projects?["/work/other"]?.watchAway == nil)
+        // The key no longer names the list of project paths, which still comes from jobs, missions and sessions.
+        #expect(store.state.projectPaths.contains(store.state.missions[0].root))
+        var mission = store.state.missions[0]
+        let data = try JSONEncoder().encode(mission)
+        var object = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        object["summary"] = "## Changed\n- One thing"
+        object["memory"] = [["key": "m1", "text": "Keep the old API", "tasks": ["api"], "at": 1.5], ["key": "m2", "text": "No new dependency", "at": 2]]
+        mission = try JSONDecoder().decode(Mission.self, from: JSONSerialization.data(withJSONObject: object))
+        #expect(mission.summary == "## Changed\n- One thing")
+        #expect(mission.memory == [MissionMemory(key: "m1", text: "Keep the old API", tasks: ["api"], at: 1.5), MissionMemory(key: "m2", text: "No new dependency", tasks: nil, at: 2)])
+        let issues = try JSONDecoder().decode(IssueList.self, from: Data(#"{"project":"/work/app","repo":"me/app","issues":[{"number":7,"title":"Crash on start","url":"https://github.com/me/app/issues/7","assignees":["me"],"labels":["bug"]}],"checkedAt":3}"#.utf8))
+        #expect(issues.issues.map(\.id) == ["https://github.com/me/app/issues/7"] && issues.error == nil)
+        let failed = try JSONDecoder().decode(IssueList.self, from: Data(#"{"project":"/work/app","issues":[],"error":"gh is not signed in"}"#.utf8))
+        #expect(failed.repo == nil && failed.issues.isEmpty)
+    }
+    @Test func projectSwitchesForgettingAndIssuesCallTheDaemon() async throws {
+        let original = try fixture().missions[0]
+        let issue = #"{"number":7,"title":"Crash","url":"https://github.com/me/app/issues/7","assignees":[],"labels":[]}"#
+        let api = api { request in
+            let url = try #require(request.url)
+            switch url.path {
+            case "/api/project-settings":
+                let body = try requestBody(request)
+                #expect(body["project"] as? String == "/work/a+b")
+                #expect(body["changes"] as? [String: Bool] == ["watchAway": true])
+                return (200, Data(#"{"projects":{"/work/a+b":{"watchAway":true}}}"#.utf8), 0)
+            case "/api/missions/\(original.id)":
+                #expect(try requestBody(request)["forget"] as? [String] == ["m1"])
+                var updated = original
+                updated.memory = []
+                return (200, try JSONEncoder().encode(updated), 0)
+            case "/api/issues":
+                // A "+" in the path must reach the daemon as itself, not as a space.
+                #expect(url.query == "project=/work/a%2Bb")
+                return (200, Data(#"{"project":"/work/a+b","issues":[\#(issue)]}"#.utf8), 0)
+            case "/api/issues/dismiss":
+                #expect(try requestBody(request)["url"] as? String == "https://github.com/me/app/issues/7")
+                return (200, Data("{}".utf8), 0)
+            default:
+                Issue.record("Unexpected request to \(url.path)")
+                return (404, Data(), 0)
+            }
+        }
+        let store = try store(api: api)
+        try store.receive(event("state", fixture()))
+        await store.setProjectSwitch("/work/a+b", "watchAway", on: true)
+        #expect(store.state.projects?["/work/a+b"]?.watchAway == true)
+        await store.forget(MissionMemory(key: "m1", text: "Keep the old API", tasks: nil, at: 1), in: original)
+        #expect(store.state.missions.first { $0.id == original.id }?.memory == [])
+        await store.loadIssues("/work/a+b")
+        #expect(store.issues["/work/a+b"]?.issues.count == 1)
+        await store.dismissIssue("https://github.com/me/app/issues/7", project: "/work/a+b")
+        #expect(store.issues["/work/a+b"]?.issues.isEmpty == true)
+    }
     @Test func missionPresetSendsNameOrNullAndOnlyChangesActiveMissions() async throws {
         let original = try fixture().missions[0]
         let calls = Mutex(0)

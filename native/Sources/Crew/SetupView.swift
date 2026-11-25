@@ -92,46 +92,46 @@ func withCode(_ text: String) -> AttributedString {
 
 /// Open issues of the project's repository that are the user's to start: assigned to them, or to no one. Each can be
 /// copied as a run command or dismissed for good. Says nothing when there are none or gh cannot list them, as in the board.
+/// The page loads them (`BoardView.page`): a view that shows nothing has no body for a task to run on.
 struct IssueSuggestionsCard: View {
     let store: CrewStore
     let project: String
     /// How many show at once; the next one takes the place of one the user dismisses.
     private static let shown = 3
     var body: some View {
-        Group {
-            if let found = store.issues[project], !found.issues.isEmpty {
-                ContentPanel(title: String(localized: "Start from an issue"), symbol: "checklist") {
-                    VStack(alignment: .leading, spacing: Space.s) {
-                        ForEach(found.issues.prefix(Self.shown)) { issue in
-                            HStack(alignment: .firstTextBaseline, spacing: Space.m) {
-                                Link(destination: URL(string: issue.url) ?? URL(fileURLWithPath: "/")) {
-                                    Text(verbatim: "#\(issue.number) ").foregroundStyle(.secondary) + Text(verbatim: issue.title)
-                                }
-                                .font(Typeface.callout).lineLimit(1).truncationMode(.tail).help(issue.title)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                if !issue.labels.isEmpty {
-                                    Text(verbatim: issue.labels.prefix(3).joined(separator: " · ")).font(Typeface.caption).foregroundStyle(.secondary).lineLimit(1)
-                                }
-                                CopyButton(title: String(localized: "Command"), text: "\(command) \(issue.url)")
-                                Button { Task { await store.dismissIssue(issue.url, project: project) } } label: {
-                                    Image(systemName: "xmark").font(Symbol.control)
-                                }
-                                .iconButton()
-                                .disabled(store.actions["issue:\(issue.url)"]?.locked == true)
-                                .accessibilityLabel(String(localized: "Dismiss #\(issue.number)"))
-                                .help("Dismiss. This issue is not suggested again.")
+        if let found = store.issues[project], !found.issues.isEmpty {
+            ContentPanel(title: String(localized: "Start from an issue"), symbol: "checklist") {
+                VStack(alignment: .leading, spacing: Space.s) {
+                    ForEach(found.issues.prefix(Self.shown)) { issue in
+                        HStack(alignment: .firstTextBaseline, spacing: Space.m) {
+                            Group {
+                                if let url = URL(string: issue.url) { Link(destination: url) { title(issue) } } else { title(issue) }
                             }
+                            .font(Typeface.callout).help(issue.title)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            if !issue.labels.isEmpty {
+                                Text(verbatim: issue.labels.prefix(3).joined(separator: " · ")).font(Typeface.caption).foregroundStyle(.secondary).lineLimit(1)
+                            }
+                            CopyButton(title: String(localized: "Command"), text: "\(command) \(issue.url)", help: String(localized: "Copy the command that starts work on this issue"))
+                            Button { Task { await store.dismissIssue(issue.url, project: project) } } label: {
+                                Image(systemName: "xmark").font(Symbol.control)
+                            }
+                            .iconButton()
+                            .disabled(store.actions["issue:\(issue.url)"]?.locked == true)
+                            .accessibilityLabel(String(localized: "Dismiss #\(issue.number)"))
+                            .help("Dismiss. This issue is not suggested again.")
                         }
+                        if let error = store.actions["issue:\(issue.url)"]?.error { ErrorLabel(message: error).font(Typeface.callout) }
                     }
                 }
             }
         }
-        // The daemon keeps each answer ten minutes, so asking more often only reads its cache.
-        .task(id: project) {
-            while !Task.isCancelled {
-                await store.loadIssues(project)
-                try? await Task.sleep(for: .seconds(600))
-            }
+    }
+    /// One line, cut at the end; set on the text itself, since a link's label does not take the line limit around it.
+    private func title(_ issue: IssueList.Issue) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: Space.xs) {
+            Text(verbatim: "#\(issue.number)").monospacedDigit().foregroundStyle(.secondary).fixedSize()
+            Text(verbatim: issue.title).lineLimit(1).truncationMode(.tail)
         }
     }
     /// Codex names a plugin skill with $, so the command is copied in the form the project's latest lead takes.

@@ -332,7 +332,7 @@ final class CrewStore {
     }
     func dismissIssue(_ url: String, project: String) async {
         struct Dismiss: Encodable, Sendable { var url: String }
-        await run("issue:\(url)", once: true) {
+        await run("issue:\(url)") {
             let _: EmptyReply = try await api.post("/api/issues/dismiss", Dismiss(url: url))
             issues[project]?.issues.removeAll { $0.url == url }
         }

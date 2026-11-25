@@ -153,6 +153,8 @@ test('routine lines together weigh at most two lines, in the score and in the st
     light: Array(10).fill({ reviewedBy: ['light-model'], findings: { high: 0, medium: 1, low: 0 } }),
     polisher: Array(n).fill({ difficulty: 'routine', size: 'small', reviewedBy: ['light-model'] }) })).map((s) => [s.model, s.score]);
   assert.deepEqual(kinds(200), kinds(2));
+  // One standard line and three routine ones are three reviews: on trial, not short by a rounding error.
+  assert.equal(scoreAll(notes({ ...others, mixed: [{}, ...Array(3).fill({ difficulty: 'routine', size: 'small' })] })).find((s) => s.model === 'mixed')!.status, 'on trial');
   // Standard lines keep counting.
   const standard = (n: number) => scoreAll(notes({ ...others, builder: Array(n).fill({ size: 'small' }) })).find((s) => s.model === 'builder')!;
   assert.ok(standard(50).score! > standard(2).score!);
@@ -174,7 +176,7 @@ test('ratings of routine work together weigh at most two ratings, as its lines d
     polisher: [{}, ...Array.from({ length: n }, (_, i) => ({ job: `cx-r${i}`, difficulty: 'routine' as const, size: 'small' as const, rating: { correctness: 5 } }))] });
   const polisher = scoreAll(alone(20)).find((s) => s.model === 'polisher')!;
   assert.deepEqual([polisher.ratings, polisher.score], [0, polisher.build]);
-  // One standard rating and three routine ones, at two thirds each, reach the minimum despite rounding in the sum.
+  // One standard rating and three routine ones count as three, whole.
   const mixed = (n: number) => notes({ other: Array.from({ length: 6 }, (_, i) => ({ job: `cx-o${i}`, rating: { correctness: 3 } })),
     polisher: [{ job: 'cx-s', rating: { correctness: 5 } }, ...Array.from({ length: n }, (_, i) => ({ job: `cx-r${i}`, difficulty: 'routine' as const, size: 'small' as const, rating: { correctness: 5 } }))] });
   assert.equal(scoreAll(mixed(3)).find((s) => s.model === 'polisher')!.ratings, 3);

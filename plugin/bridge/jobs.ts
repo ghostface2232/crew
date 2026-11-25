@@ -1684,7 +1684,8 @@ export class Jobs {
     try {
       return await runCheck(command, cwd, tmp, [tokenFile(this.home)], { network, signal, codex });
     } finally {
-      await removeDirectory(tmp);
+      // A temporary folder left behind costs nothing; it must not cost the turn its collected result.
+      await removeDirectory(tmp).catch(() => {});
     }
   }
 

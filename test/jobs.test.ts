@@ -2872,9 +2872,8 @@ test('failed worktree removal keeps the Git error and only Windows falls back', 
     return execFile(file, args, options, callback);
   });
   const fsPromises = (await import('node:fs/promises')).default;
-  const rm = fsPromises.rm;
   let removals = 0;
-  t.mock.method(fsPromises, 'rm', async () => { removals++; throw new Error('fallback deletion failure'); });
+  const failing = t.mock.method(fsPromises, 'rm', async () => { removals++; throw new Error('fallback deletion failure'); });
   syncBuiltinESMExports();
   for (const platform of ['darwin', 'linux'] as const) {
     await assert.rejects(removeWorktree(repo, wt, 'cx-123abc', home, platform), /^Error: git worktree: original removal failure$/);
@@ -2885,7 +2884,9 @@ test('failed worktree removal keeps the Git error and only Windows falls back', 
   assert.ok(fs.existsSync(wt.path));
 
   keepRegistration = true;
-  t.mock.method(fsPromises, 'rm', rm);
+  // Restored rather than mocked again: a second mock would take the failing one as its original and leave it in
+  // place for every later test once the test ends.
+  failing.mock.restore();
   syncBuiltinESMExports();
   await assert.rejects(removeWorktree(repo, wt, 'cx-123abc', home, 'win32'), /original removal failure.*Git still lists/s);
 });

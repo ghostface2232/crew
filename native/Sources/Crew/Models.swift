@@ -652,9 +652,9 @@ enum TurnTokenBudget: Codable, Sendable, Hashable {
     var footnote: String {
         let caps = Self.byDifficultyCaps
         return switch self {
-        case .byDifficulty: String(localized: "Routine \(Self.count(caps.routine)), standard \(Self.count(caps.standard)), hard \(Self.count(caps.hard)). Turns also stop after 2 to 4 hours.")
-        case .unlimited: String(localized: "Turns stop only after 2 to 4 hours.")
-        case .tokens: String(localized: "Turns also stop after 2 to 4 hours.")
+        case .byDifficulty: String(localized: "A worker turn's token cap depends on job difficulty: \(Self.count(caps.routine)) for routine, \(Self.count(caps.standard)) for standard, and \(Self.count(caps.hard)) for hard. A turn also stops after 2 to 4 hours.")
+        case .unlimited: String(localized: "Tokens never stop a turn; only the 2-to-4-hour time limit does.")
+        case .tokens: String(localized: "Besides this token cap, a turn also stops after 2 to 4 hours.")
         }
     }
     /// Brief, in the language the app shows: 80M, or 8000만.

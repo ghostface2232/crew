@@ -65,9 +65,9 @@ const PANES = translated((): Record<Fixed, { title: string; icon: FluentIcon; ki
 
 /** What each of a project's switches lets Crew do there without asking, as in the app. */
 const PROJECT_SWITCHES = translated((): { key: keyof ProjectSettings; label: string; note: string }[] => [
-  { key: 'autonomy', label: t('Push and open pull requests'), note: t('Only after review and passing checks. Never merges or deploys.') },
-  { key: 'watchAway', label: t('Watch pull requests while away'), note: t('Every 10 minutes while the lead session is closed.') },
-  { key: 'autoResume', label: t('Resume after a usage limit'), note: t("Once usage resets, for jobs in an active mission.") },
+  { key: 'autonomy', label: t('Push and open pull requests'), note: t('Work is pushed only after it is reviewed and its checks pass. Crew never merges or deploys.') },
+  { key: 'watchAway', label: t('Watch pull requests while away'), note: t('Crew checks pull requests every 10 minutes while the lead session is closed.') },
+  { key: 'autoResume', label: t('Resume after a usage limit'), note: t('A job stopped by the limit continues once usage resets, but only for a mission still in progress.') },
 ]);
 
 /**
@@ -720,8 +720,8 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
                       )}
                       <p className={styles.footnote}>
                         {budget === null
-                          ? t('Routine {routine}, standard {standard}, hard {hard}. Turns also stop after 2 to 4 hours.', { routine: tokenCount(60_000_000), standard: tokenCount(80_000_000), hard: tokenCount(120_000_000) })
-                          : budget === 'unlimited' ? t('Turns stop only after 2 to 4 hours.') : t('Turns also stop after 2 to 4 hours.')}
+                          ? t("A worker turn's token cap depends on job difficulty: {routine} for routine, {standard} for standard, and {hard} for hard. A turn also stops after 2 to 4 hours.", { routine: tokenCount(60_000_000), standard: tokenCount(80_000_000), hard: tokenCount(120_000_000) })
+                          : budget === 'unlimited' ? t('Tokens never stop a turn; only the 2-to-4-hour time limit does.') : t('Besides this token cap, a turn also stops after 2 to 4 hours.')}
                       </p>
                     </section>
                   )}

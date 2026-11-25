@@ -337,9 +337,9 @@ struct CrewSettingsView: View {
     }
     /// What each of a project's switches lets Crew do there without asking, as in the board.
     private static let projectSwitches: [(key: String, label: LocalizedStringKey, note: LocalizedStringKey, value: KeyPath<ProjectSettings, Bool?>)] = [
-        ("autonomy", "Push and open pull requests", "Only after review and passing checks. Never merges or deploys.", \.autonomy),
-        ("watchAway", "Watch pull requests while away", "Every 10 minutes while the lead session is closed.", \.watchAway),
-        ("autoResume", "Resume after a usage limit", "Once usage resets, for jobs in an active mission.", \.autoResume),
+        ("autonomy", "Push and open pull requests", "Work is pushed only after it is reviewed and its checks pass. Crew never merges or deploys.", \.autonomy),
+        ("watchAway", "Watch pull requests while away", "Crew checks pull requests every 10 minutes while the lead session is closed.", \.watchAway),
+        ("autoResume", "Resume after a usage limit", "A job stopped by the limit continues once usage resets, but only for a mission still in progress.", \.autoResume),
     ]
     @ViewBuilder private func instructions(_ pane: SettingsPane) -> some View {
         if case .project(let path) = pane, let projects = store.state.projects {

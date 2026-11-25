@@ -3,12 +3,12 @@
  * test/i18n.test.ts checks that every literal t() key has an entry here with the same placeholders.
  */
 export const ko: Record<string, string> = {
-  'Routine {routine}, standard {standard}, hard {hard}. Turns also stop after 2 to 4 hours.': '단순 {routine}, 표준 {standard}, 어려움 {hard}. 턴은 2~4시간이 지나도 멈춰요.',
-  'Turns stop only after 2 to 4 hours.': '턴은 2~4시간이 지나야 멈춰요.',
-  'Turns also stop after 2 to 4 hours.': '턴은 2~4시간이 지나도 멈춰요.',
-  'Only after review and passing checks. Never merges or deploys.': '리뷰와 검사를 통과한 뒤에만 해요. 병합과 배포는 하지 않아요.',
-  'Every 10 minutes while the lead session is closed.': '리드 세션이 닫혀 있으면 10분마다 확인해요.',
-  'Once usage resets, for jobs in an active mission.': '사용량이 초기화되면 진행 중인 미션의 작업을 이어가요.',
+  'A worker turn\'s token cap depends on job difficulty: {routine} for routine, {standard} for standard, and {hard} for hard. A turn also stops after 2 to 4 hours.': '워커 턴의 토큰 한도는 작업 난이도에 따라 단순 {routine}, 표준 {standard}, 어려움 {hard}으로 정해져요. 시간 한도도 있어 2~4시간이 지나면 턴이 멈춰요.',
+  'Tokens never stop a turn; only the 2-to-4-hour time limit does.': '토큰 수로는 턴이 멈추지 않고, 2~4시간 한도로만 멈춰요.',
+  'Besides this token cap, a turn also stops after 2 to 4 hours.': '선택한 토큰 한도 외에도 2~4시간이 지나면 턴이 멈춰요.',
+  'Work is pushed only after it is reviewed and its checks pass. Crew never merges or deploys.': '리뷰를 마치고 검사를 통과한 뒤에만 푸시해요. Crew는 병합하거나 배포하지 않아요.',
+  'Crew checks pull requests every 10 minutes while the lead session is closed.': '리드 세션이 닫혀 있는 동안 10분마다 PR을 확인해요.',
+  'A job stopped by the limit continues once usage resets, but only for a mission still in progress.': '사용량이 초기화되면 한도로 멈춘 작업을 이어가요. 아직 진행 중인 미션에만 적용돼요.',
   ' ago': ' 전',
   '1 active job': '진행 중인 작업 1개',
   '1 active job · {total} in all': '진행 중인 작업 1개 · 총 {total}개',

@@ -388,14 +388,19 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
       setRatingsStatus((error as Error).message);
     }
   };
-  // A project's switches save as they are flipped, like peer ratings.
+  // A project's switches save as they are flipped, like peer ratings. One saves at a time, as in the app, so two
+  // quick flips cannot land out of order.
   const [projectStatus, setProjectStatus] = useState('');
+  const [projectSaving, setProjectSaving] = useState(false);
   const setProjectSwitch = async (dir: string, key: keyof ProjectSettings, on: boolean) => {
     setProjectStatus('');
+    setProjectSaving(true);
     try {
       board.receive('projects', (await request<{ projects: Record<string, ProjectSettings> }>('/api/project-settings', { project: dir, changes: { [key]: on } })).projects);
     } catch (error) {
       setProjectStatus(t('Not saved: {error}', { error: (error as Error).message }));
+    } finally {
+      setProjectSaving(false);
     }
   };
   // Stored as it is picked; the board then switches to the language the daemon reports (followSetting in i18n.ts).
@@ -777,6 +782,7 @@ export function Settings({ state, update, close, initial }: { state: Snapshot; u
                           type="checkbox"
                           className="switch"
                           checked={state.projects?.[project]?.[key] === true}
+                          disabled={projectSaving || state.connection !== 'live'}
                           onChange={(event) => void setProjectSwitch(project, key, event.target.checked)}
                         />
                       </label>

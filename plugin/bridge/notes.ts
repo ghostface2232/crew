@@ -440,7 +440,7 @@ function solve(matrix: number[][], vector: number[]): number[] {
 }
 
 /** One rating of one item, with whom it is about. `source` is the rating it came from, which may reach several models. */
-interface Vote { model: string; item: RatingItem; value: number; rater: string; weight: number; source: string }
+interface Vote { model: string; item: RatingItem; value: number; rater: string; weight: number; source: string; routine?: true }
 /**
  * Every rating as votes on the models they are about. The lead's ride on its lines. A worker's names no target, so the
  * review lines give it one: a reviewer's rating is of the work its line names, a builder's of the reviews of its job.
@@ -453,21 +453,23 @@ function votes(file: NotesFile): Vote[] {
   // A job's work belongs to the model its build line is under now, which a later note may have moved.
   const builders = new Map(all.filter((e) => e.role === 'build' && e.job).map((e) => [e.job!, e.model]));
   // Flawed work: an accepted high finding on its build line, or on a review of it.
+  // Routine work, by its build line, so a rating of it is capped as the line is.
+  const routine = new Set(all.filter((e) => e.role === 'build' && e.job && e.difficulty === 'routine').map((e) => e.job!));
   const flawed = new Set([...all.filter((e) => e.role === 'build' && e.job && e.findings.high > 0).map((e) => e.job!),
     ...reviews.filter((e) => e.of?.job && e.findings.high > 0).map((e) => e.of!.job!)]);
   const out: Vote[] = [];
   const seen = new Set<string>();
-  const cast = (model: string, items: RatingItems, by: Holder, rater: string, source: string, weight: number, capped: boolean) => {
+  const cast = (model: string, items: RatingItems, by: Holder, rater: string, source: string, weight: number, capped: boolean, easy = false) => {
     for (const item of RATING_ITEMS) {
       const key = `${source}\0${model}\0${item}`;
       if (items[item] === undefined || seen.has(key)) continue;
       seen.add(key);
       // The cap is the rating's value from here on, so capped work does not make its rater look generous either.
       const value = item === 'correctness' && capped ? Math.min(items[item], HIGH_FINDING_CAP) : items[item];
-      out.push({ model, item, value, rater, source, weight: weight * (agentOf(model) === by ? SELF_REVIEW : 1) });
+      out.push({ model, item, value, rater, source, weight: weight * (agentOf(model) === by ? SELF_REVIEW : 1), ...(easy && item === 'correctness' ? { routine: true as const } : {}) });
     }
   };
-  for (const e of all) if (e.rating) cast(e.model, e.rating, LEAD, LEAD, e.id, 1, Boolean(e.job && flawed.has(e.job)));
+  for (const e of all) if (e.rating) cast(e.model, e.rating, LEAD, LEAD, e.id, 1, Boolean(e.job && flawed.has(e.job)), e.role === 'build' && e.difficulty === 'routine');
   for (const r of file.ratings) {
     const rater = r.byModel ?? r.by;
     const { findings, correctness, ...rest } = r.items;
@@ -477,11 +479,16 @@ function votes(file: NotesFile): Vote[] {
       if (line.job === r.byJob && line.of) {
         // Correctness is the build score's item: a review of a fix says nothing about how its model builds.
         const work = correctness === undefined || line.of.fix ? rest : { ...rest, correctness };
-        cast((job && builders.get(job)) ?? line.of.model, work, r.by, rater, r.id, 1, line.findings.high > 0 || Boolean(job && flawed.has(job)));
+        cast((job && builders.get(job)) ?? line.of.model, work, r.by, rater, r.id, 1, line.findings.high > 0 || Boolean(job && flawed.has(job)), Boolean(job && routine.has(job)));
       }
       if (findings !== undefined && job === r.byJob) cast(line.model, { findings }, r.by, rater, r.id, BUILDER_RATING, false);
     }
   }
+  // A model's correctness ratings of routine work together weigh at most ROUTINE_LINES ratings, as its routine lines
+  // do in the build score: work with little to get wrong rates five almost always, and would otherwise carry the score.
+  const easy = new Map<string, number>();
+  for (const v of out) if (v.routine) easy.set(v.model, (easy.get(v.model) ?? 0) + 1);
+  for (const v of out) if (v.routine) v.weight *= Math.min(1, ROUTINE_LINES / easy.get(v.model)!);
   return out;
 }
 

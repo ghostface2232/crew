@@ -159,6 +159,18 @@ test('routine lines together weigh at most two lines, in the score and in the st
   assert.equal(standard(50).status, 'settled');
 });
 
+test('ratings of routine work together weigh at most two ratings, as its lines do', () => {
+  const rated = (n: number, difficulty: Evidence['difficulty']) => notes({
+    other: Array.from({ length: 6 }, (_, i) => ({ job: `cx-o${i}`, rating: { correctness: 3 }, findings: { high: 0, medium: 1, low: 0 } })),
+    polisher: [...Array.from({ length: 3 }, (_, i) => ({ job: `cx-s${i}`, rating: { correctness: 4 } })),
+      ...Array.from({ length: n }, (_, i) => ({ job: `cx-r${i}`, difficulty, size: 'small' as const, rating: { correctness: 5 } }))],
+  });
+  // However many fives routine work collects, they lift its correctness no further than two of them would.
+  assert.equal(scoreOf(rated(20, 'routine'), 'polisher'), scoreOf(rated(2, 'routine'), 'polisher'));
+  // The same fives on standard work keep counting.
+  assert.ok(scoreOf(rated(20, 'standard'), 'polisher') > scoreOf(rated(2, 'standard'), 'polisher'));
+});
+
 test('a review kind is the first reviewer from another agent, with extra reviews as their own term', () => {
   const agents: Record<string, 'codex' | 'claude'> = { 'model-a': 'codex', 'claude-x': 'claude' };
   const kind = (e: Partial<Evidence>) => reviewKind({ ...input, id: 'ev', at: 0, ...e } as Evidence, (m) => agents[m]);

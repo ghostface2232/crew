@@ -128,6 +128,7 @@ Workers provide `fact` (one line from the work). The lead's rating rests on the 
 
 - **Minimum count and 50/50 blend:** Ratings move an item only from `MIN_RATINGS` (3) onward. The scorer ignores 1 or 2 ratings. Mean rating (`3` neutral) maps to a shift in `[−1, 1]`: neutral leaves the baseline unchanged, all fives pull toward 10, all ones toward 0. Half of the item moves with ratings and half stays with evidence (`PEER_SHARE = 0.5`), so good ratings never lower clean work and rated vs. unrated models stay comparable.
 - **Rater centering:** Each rating is centered against that rater's mean on the item across *other* models (shrunk toward `3` by 1 rating), pulling only toward neutral and never past it. Excluding the rated model's own ratings ensures an extra five never hurts it or turns a three negative, and multi-target ratings count once per source so note order changes nothing.
+- **Routine work:** A model's `correctness` ratings of routine work together weigh at most two ratings (`ROUTINE_LINES`), as its routine lines do in the build score: work with little to get wrong is rated 5 almost always, and would otherwise carry the score.
 - **Shrinkage, self-weight, and caps:** A model's mean rating shrinks toward `3` with weight 2. Ratings from the rated model's own agent count half. Any `correctness` rating on work with an accepted high finding caps at `3` (including in its rater's mean), checked on the job's build line, any review line of that job, or (for jobless work) the rating reviewer's own line. `fix`-role work omits `correctness` (`of.fix`).
 - **Ranking:** Status follows build reviews. Ranking and podium follow `score` (ties broken by finding rate). Review-only models have `score: null` and sort apart under "Reviewers" by `findings`. `ModelScore.ratings` counts only ratings on items that reached `MIN_RATINGS`.
 
@@ -151,6 +152,7 @@ Shared instructions were verified with markers across Codex, Antigravity, and he
 
 ## History
 
+- 2026-11-25: Correctness ratings of routine work were capped like routine lines, after gemini-4-hydrogen's eleven fives on wording jobs lifted its score above its build score.
 - 2026-11-25: Builders start at the reference 7.0 rather than at the other models' pooled rate, at the user's request: under the pooled start a model that had done one clean documentation job began at about 8.4, the average of the others, without having shown anything.
 - 2026-11-25: Correctness anchors moved from 5 = "found nothing" and 3 = "real bugs in edge cases" to the scale above, and the lead was given the same anchors, which it previously lacked. Under the old scale, nearly every cross-review rated 3 while the unanchored lead rated its workers 4 to 5. Ratings given before this date keep their old meaning; rater centering absorbs part of the shift.
 

@@ -1586,8 +1586,7 @@ dialog.palette-layer::backdrop { background: var(--scrim-light); animation: fade
 .setup-list li .caption { overflow-wrap: anywhere; }
 .setup-error { display: flex; align-items: center; gap: 6px; margin: 0; }
 /* Issues the user could start from: cards on the inset gray, so they read as suggestions rather than work under way. */
-.issue-section { display: grid; gap: 10px; margin-bottom: 12px; }
-.issue-section > .label { padding-inline: 4px; }
+.issue-section { display: grid; gap: 10px; }
 .issue-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
 .issue-card { display: grid; gap: 14px; align-content: space-between; min-width: 0; padding: 16px; border-radius: var(--card-radius); corner-shape: var(--smooth); background: var(--row); }
 .issue-card-head { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }

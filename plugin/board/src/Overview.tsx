@@ -612,8 +612,8 @@ function IssueSuggestions({ project, live, startWork }: { project: string; live:
     }
   };
   return (
-    <section className="issue-section" aria-labelledby="issue-section-title">
-      <h2 className="label" id="issue-section-title">{t('Start from an issue')}</h2>
+    // Named for assistive tech only: a visible heading above the cards would sit off the top of the Agents card beside them.
+    <section className="issue-section" aria-label={t('Start from an issue')}>
       <ul className="issue-cards">
         {shown.map((issue) => (
           // Set on the inset gray rather than a raised card, so a suggestion does not read as work under way.

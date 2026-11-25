@@ -20,9 +20,8 @@ export interface NavItem {
  * A list of sidebar items. A soft highlight glides to the item under the pointer while the others dim, and comes
  * to rest on nothing when the pointer leaves, as the reference menus behave.
  */
-export const NavList = memo(function NavList({ label, heading, items, current, onSelect, onHover }: {
+export const NavList = memo(function NavList({ label, items, current, onSelect, onHover }: {
   label: string;
-  heading?: string;
   items: NavItem[];
   current: string;
   onSelect: (id: string) => void;
@@ -40,7 +39,6 @@ export const NavList = memo(function NavList({ label, heading, items, current, o
   }, [hovered, items.length]);
   return (
     <nav className="nav" aria-label={label}>
-      {heading && <h2 className="nav-heading">{heading}</h2>}
       <div
         className="nav-list"
         ref={list}

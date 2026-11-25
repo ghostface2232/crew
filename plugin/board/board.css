@@ -787,8 +787,6 @@ html:has(.app), html:has(.app) body { height: 100%; overflow: hidden; }
 .brand-mark { flex: none; width: 26px; height: 26px; }
 .brand-name { font: 600 17px/1 var(--text-face); letter-spacing: -0.01em; }
 .nav { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
-.nav-heading { padding: 6px 10px 4px; }
-.nav-heading { color: var(--tertiary); font: 550 10.5px/1.2 var(--text-face); letter-spacing: 0.06em; text-transform: uppercase; }
 .nav-list { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
 /* A soft highlight that glides to the item under the pointer. */
 .nav-glide {

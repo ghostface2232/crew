@@ -473,7 +473,6 @@ function ProjectNav({ projects, names, project, state, go }: {
     <>
       <NavList
         label={t('Projects')}
-        heading={t('Projects')}
         items={items}
         current={project}
         onSelect={selectProject}

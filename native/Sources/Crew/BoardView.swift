@@ -782,10 +782,8 @@ struct ProjectSidebar: View {
             set: { path in store.project = path ?? "" }
         )) {
             Label("All projects", systemImage: "square.stack").tag("")
-            Section("Projects") {
-                ForEach(projects, id: \.self) { path in
-                    ProjectRow(name: projectName(path, among: projects), waiting: waiting.contains(path)).tag(path).help(path)
-                }
+            ForEach(projects, id: \.self) { path in
+                ProjectRow(name: projectName(path, among: projects), waiting: waiting.contains(path)).tag(path).help(path)
             }
         }
         .listStyle(.sidebar)

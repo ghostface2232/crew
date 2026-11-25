@@ -113,6 +113,8 @@ struct IssueSuggestionsCard: View {
                                 Text(verbatim: issue.labels.prefix(3).joined(separator: " · ")).font(Typeface.caption).foregroundStyle(.secondary).lineLimit(1)
                             }
                             CopyButton(title: String(localized: "Command"), text: "\(command) \(issue.url)", help: String(localized: "Copy the command that starts work on this issue"))
+                                // Each row's own name, as on the board; three alike would not say which issue.
+                                .accessibilityLabel(String(localized: "Copy the command for #\(issue.number)"))
                             Button { Task { await store.dismissIssue(issue.url, project: project) } } label: {
                                 Image(systemName: "xmark").font(Symbol.control)
                             }

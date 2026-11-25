@@ -588,7 +588,7 @@ test('job creation validates a task against its mission before detaching ended m
   const create = vm.runInNewContext(stripTypeScriptTypes(`(async (req: any) => { const pathname = '/api/jobs'; ${route} })`), {
     HttpError: class extends Error { status: number; constructor(status: number, message: string) { super(message); this.status = status; } },
     readJson: async (req: unknown) => req, missions: { list: () => [mission] },
-    missionPreset: () => 'economy', liveConfig: () => ({}),
+    missionPreset: () => 'economy', liveConfig: () => ({}), memoryFor: () => [],
     jobs: { create: async (spec: unknown) => spec }, view: (job: unknown) => job,
   });
   await assert.rejects(create({ taskId: 'build' }), { status: 400, message: /task_id.*mission/ });

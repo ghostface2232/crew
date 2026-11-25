@@ -97,7 +97,7 @@ export function describe(job: JobView, waitingHint?: string): string {
         lines.push(base.unavailable ? `Base check unavailable: ${base.unavailable}` : base.timedOut ? 'The check timed out on the base commit.'
           : base.exit === 0 ? 'The check passes on the base commit. This change broke it.'
           : `The check also fails on the base commit (exit ${base.exit}). Compare the failures.`);
-        if (base.output) lines.push(`base check output (end):\n${base.output.split('\n').slice(-15).map((line) => `  ${line}`).join('\n')}`);
+        if (base.output && base.exit !== 0) lines.push(`base check output (end):\n${base.output.split('\n').slice(-15).map((line) => `  ${line}`).join('\n')}`);
       }
       if (receipt.check.exit !== 0 && receipt.check.output) lines.push(`check output (end):\n${receipt.check.output.split('\n').slice(-15).map((line) => `  ${line}`).join('\n')}`);
     }

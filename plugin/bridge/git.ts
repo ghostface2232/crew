@@ -244,26 +244,47 @@ export async function worktreeIncludeHint(root: string, project: string, home: s
 export async function withBaseWorktree<T>(repo: string, base: string, run: (cwd: string) => Promise<T>): Promise<T> {
   const slot = await fs.mkdtemp(path.join(await fs.realpath(os.tmpdir()), 'crew-base-'));
   const cwd = path.join(slot, path.basename(repo));
-  const prune = () => git(repo, ['worktree', 'prune', '--expire', 'now']).catch(() => {});
   const unregister = () => git(repo, [...NO_HOOKS, 'worktree', 'remove', '--force', cwd]);
+  const pointer = path.join(cwd, '.git');
+  const readPointer = () => fs.readFile(pointer, 'utf8').catch(() => '');
+  let gitfile = '';
   try {
-    await prune();
     await git(repo, [...NO_HOOKS, 'worktree', 'add', '--detach', cwd, base]);
+    // Keep the pointer before the check can remove its checkout.
+    gitfile = await readPointer();
     const included = await copyIncluded(repo, cwd);
     if (included.failed.length) throw new Error(`could not attach ${included.failed.join(', ')}`);
     return await run(cwd);
   } finally {
     // Even a partial checkout can be registered. A lock at one step must let the others run.
+    gitfile ||= await readPointer();
     await prepareRemoval(cwd).catch(() => {});
+    let removed = true;
     try {
       await unregister();
     } catch {
       await removeDirectory(cwd).catch(() => {});
-      await unregister().catch(() => {});
+      removed = await unregister().then(() => true, () => false);
     }
     await removeDirectory(slot).catch(() => {});
-    await prune();
+    if (!removed && gitfile.startsWith('gitdir: ')) {
+      const admin = path.resolve(cwd, gitfile.slice(8).replace(/\r?\n$/, ''));
+      await removeMissingBaseRegistration(repo, cwd, admin).catch(() => {});
+    }
   }
+}
+
+async function removeMissingBaseRegistration(repo: string, cwd: string, admin: string): Promise<void> {
+  const checkout = await fs.lstat(cwd).catch((err: NodeJS.ErrnoException) => {
+    if (err.code !== 'ENOENT') throw err;
+    return null;
+  });
+  if (checkout) return;
+  const common = await commonGitDir(repo);
+  requireAdminDir(common, admin);
+  if (realpath(path.dirname(admin)) !== realpath(path.join(common, 'worktrees')) || !(await fs.lstat(admin)).isDirectory()) return;
+  const target = (await fs.readFile(path.join(admin, 'gitdir'), 'utf8')).replace(/\r?\n$/, '');
+  if (realpath(target, admin) === realpath(path.join(cwd, '.git'))) await removeDirectory(admin);
 }
 
 /** Copies included files, cloning directories when supported and otherwise sharing them read-only. */

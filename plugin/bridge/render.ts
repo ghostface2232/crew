@@ -115,7 +115,7 @@ export function describe(job: JobView, waitingHint?: string): string {
   }
   if (job.error) {
     lines.push(`error: ${job.error.message}`);
-    if (job.error.limit && job.resumesAfterLimit) lines.push(`${workerInfo(job.agent).name} is out of usage for now. The user has Crew resume this job by itself once that usage resets, so do not redo it: carry on with other work, and you will hear when it ends. To do it yourself instead, cancel it with discard first.`);
+    if (job.error.limit && job.resumesAfterLimit) lines.push(`Crew will resume this job when ${workerInfo(job.agent).name}'s usage resets, and cancelling without discard keeps the worktree and leaves auto-resume enabled. To take over, inspect or carry over the worktree's changes before discarding the job to stop auto-resume.`);
     else if (job.error.limit) lines.push(`${workerInfo(job.agent).name} is out of usage for now. ${job.kind === 'review' ? 'Run crew:self-reviewer again with the review focus, and tell the user the cross-review was skipped' : 'Do this piece yourself, in a subagent if it is large, and tell the user the work was not delegated'}.`);
   }
   if (job.tokens != null) {

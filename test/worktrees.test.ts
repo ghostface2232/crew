@@ -75,7 +75,7 @@ test('preflight names only existing ignored root paths and remembers the hint fo
   assert.deepEqual(await worktreeIncludeHint(repo, path.join(repo, 'another-project'), home), hints[0]);
 });
 
-test('base checks prune missing trees before checkout and recover registrations after cleanup errors', async (t) => {
+test('base checks preserve unrelated registrations and clean up their own after removal errors', async (t) => {
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-base-test-'));
   const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
   const execFile = childProcess.execFile;
@@ -115,10 +115,51 @@ test('base checks prune missing trees before checkout and recover registrations 
     return 42;
   });
   assert.equal(result, 42);
-  assert.equal(hadMissingRegistration, false);
+  assert.equal(hadMissingRegistration, true);
   assert.equal(removals, 2);
   assert.equal(fs.existsSync(checkout), false);
+  const registered = git('worktree', 'list', '--porcelain');
+  assert.match(registered, /\/missing\n/);
+  assert.equal(registered.match(/^worktree /gm)?.length, 2);
+});
+
+test('base checks clean up their registration when the check already deleted its checkout', async (t) => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-base-test-'));
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
+  const execFile = childProcess.execFile;
+  t.after(() => {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+    fs.rmSync(repo, { recursive: true, force: true });
+  });
+  git('init', '-q');
+  git('-c', 'user.name=Test', '-c', 'user.email=t@example.com', 'commit', '-qm', 'init', '--allow-empty');
+  let prunes = 0;
+  t.mock.method(childProcess, 'execFile', (file: string, args: string[], options: object, callback: (err: Error | null, stdout: string, stderr: string) => void) => {
+    if (file === 'git' && args.includes('worktree') && args.includes('remove')) {
+      queueMicrotask(() => callback(new Error('checkout is missing'), '', ''));
+      return;
+    }
+    if (file === 'git' && args.includes('prune')) {
+      prunes++;
+      queueMicrotask(() => callback(new Error('unexpected global prune'), '', ''));
+      return;
+    }
+    return execFile(file, args, options, callback);
+  });
+  syncBuiltinESMExports();
+  await withBaseWorktree(repo, 'HEAD', async (cwd) => {
+    fs.rmSync(cwd, { recursive: true });
+  });
   assert.equal(git('worktree', 'list', '--porcelain').match(/^worktree /gm)?.length, 1);
+  let admin = '';
+  await withBaseWorktree(repo, 'HEAD', async (cwd) => {
+    admin = git('-C', cwd, 'rev-parse', '--absolute-git-dir').trim();
+    fs.writeFileSync(path.join(admin, 'gitdir'), path.join(repo, 'other', '.git') + '\n');
+    fs.rmSync(cwd, { recursive: true });
+  });
+  assert.ok(fs.existsSync(admin), 'the fallback leaves metadata with a mismatched backlink in place');
+  assert.equal(prunes, 0);
 });
 
 for (const code of ['ENOTSUP', 'EOPNOTSUPP', 'EXDEV', 'ENOSYS', 'EINVAL']) {

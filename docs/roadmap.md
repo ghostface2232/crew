@@ -132,6 +132,18 @@ Decided 2026-11-25 from independent proposals by Claude, Codex (Astra), and Anti
 - **F9. Command grants for Antigravity on Windows.** Remains excluded: no capture yet shows which shell agy uses on Windows or how it passes the working directory ([approvals.md](approvals.md#allow-for-this-job)).
 - **Not taken now:** recipes and scheduled routines (the user expects their use of Crew to change first); a mission charter of standing grants, project-wide command allow rules, and batched approvals for answering away from the desk (each widens what runs without asking and needs its own decision); a plan check before large work and line-by-line diff review on the board; and resuming a lead session itself after its own limit.
 
+### G. From the Codex and Claude Code sources
+
+Read 2026-11-25 from `openai/codex`, `anthropics/claude-code` and `anthropics/claude-plugins-official` ([codex-claude-code-source-2026-11-25.md](../research/codex-claude-code-source-2026-11-25.md)).
+
+**Done** (2026-11-25):
+
+- **G1. Codex failures the lead now hears of.** Turns Codex interrupts itself (the auto-reviewer's circuit breaker), a Deny that used to cancel the turn, endless connection retries that hid a stall, and error kinds read from `codexErrorInfo` ([approvals.md](approvals.md#automatic-reviewer-and-refusals), [delivery.md](delivery.md#stalls)).
+- **G2. Review results the lead can read at a glance.** Parsed verdicts and finding counts, a merge preflight against the lead's `HEAD`, worker reports labeled as evidence, and reviewers that quote project rules and keep pre-existing problems apart ([jobs.md](jobs.md#outcome-reporting), [roles.md](roles.md#role-instruction-files)).
+- **G3. Lead hooks.** Headless `claude -p` sessions no longer hang on Crew's watcher, wake-ups name their jobs, Stop news carries no hook-error label, and missed `SubagentStop`s clear at the next `Stop` ([delivery.md](delivery.md#hooks-and-response-bounds), [board.md](board.md)).
+
+**Open:** the ranked candidates in the research file: folding Codex sub-agent results into the report, a graceful wrap-up before the turn budget, `thread/inject_items` for notes that miss a turn, `acceptForSession` for Allow for This Job, and `thread/approveGuardianDeniedAction` for user-approved retries.
+
 ## 5. Long-term plan
 
 **L1. The lead as an adapter. *(Done for Codex leads)*** Only three parts are tied to Claude Code: the MCP server, the hooks, and the skills. Jobs, events, and the board belong to the daemon. Defining the lead as the role that plans and decides merges lets Codex or a headless Claude take it, and resolves the temporary-lead handoff in [agentgauge-integration.md](../research/agentgauge-integration.md) section 8.2.

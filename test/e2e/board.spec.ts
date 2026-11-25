@@ -9,7 +9,7 @@ test.beforeEach(async ({ page, request }) => {
   await page.goto('/');
   await expect(page.getByText('Live', { exact: true })).toBeVisible();
 });
-// The pages sit in the sidebar, or in the dock on narrow windows; only one of them shows.
+// The pages sit in the top bar; narrow windows name only the current one.
 const needsYou = (page: Page) => page.getByRole('navigation', { name: 'Pages' }).getByRole('button', { name: /^Needs You/ }).filter({ visible: true }).click();
 const openSettings = async (page: Page, tab?: string) => {
   // Narrow windows fold the sidebar away behind its toolbar button.
@@ -138,8 +138,8 @@ test('sidebar and Settings labels update their fade when selection changes', asy
     await other.click();
     await expect(label).not.toHaveAttribute('data-cut');
   };
-  const pages = page.getByRole('navigation', { name: 'Pages' }).filter({ visible: true });
-  await check(pages.getByRole('button', { name: 'History' }), pages.getByRole('button', { name: 'Overview' }));
+  const projects = page.getByRole('navigation', { name: 'Projects' });
+  await check(projects.getByRole('button', { name: 'Crew', exact: true }), projects.getByRole('button', { name: 'All projects' }));
   await openSettings(page);
   const settings = page.getByRole('navigation', { name: 'Settings pages' });
   await check(settings.getByRole('button', { name: 'Review', exact: true }), settings.getByRole('button', { name: 'Build', exact: true }));
@@ -750,10 +750,12 @@ test('the detail panel shows what verified the result and nothing for jobs witho
   await expect(followed.locator('.exchange-entry').nth(2)).toContainText('Lead · turn 2');
 });
 
-test('project filtering keeps global requests visible and New Job follows roles', async ({ page, request }) => {
+test('project filtering scopes requests and New Job follows roles', async ({ page, request }) => {
   await page.getByRole('navigation').getByRole('button', { name: 'Other', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Other', exact: true, level: 1 })).toBeVisible();
-  await expect(page.getByRole('button', { name: /1 request needs your attention/ })).toBeVisible();
+  // The waiting request is Crew's: the sidebar marks Crew, and Other's page has nothing to point to.
+  await expect(page.getByRole('navigation', { name: 'Projects' }).getByRole('button', { name: 'Crew', exact: true })).toHaveAccessibleDescription('Needs you');
+  await expect(page.getByRole('button', { name: /needs your attention/ })).toHaveCount(0);
   await newJob(page);
   await expect(page.getByRole('textbox', { name: 'Project directory' })).toHaveValue('/workspace/Other');
   await page.getByRole('combobox', { name: 'Role', exact: true }).click();
@@ -1132,7 +1134,50 @@ test('a chosen project survives reload and All projects lets New Job go elsewher
     cwd: '/workspace/New', project: '/workspace/New',
   });
   // The new job's project opens, so the job is in view, as the app goes there.
-  expect(await page.evaluate(() => localStorage.getItem('crew.selection'))).toBe('project:/workspace/New');
+  expect(await page.evaluate(() => [localStorage.getItem('crew.scope'), localStorage.getItem('crew.page')])).toEqual(['/workspace/New', 'overview']);
+});
+
+test('a project keeps the page, and its pages show only its own work', async ({ page }) => {
+  const projects = page.getByRole('navigation', { name: 'Projects' });
+  const pages = page.getByRole('navigation', { name: 'Pages' });
+  await needsYou(page);
+  await expect(pages.getByRole('button', { name: /^Needs You/ })).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByRole('button', { name: 'Yes', exact: true })).toBeVisible();
+  // The waiting question belongs to Crew, so Other has nothing for you and its tab no count.
+  await projects.getByRole('button', { name: 'Other', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Other', level: 1 })).toBeVisible();
+  await expect(pages.getByRole('button', { name: /^Needs You/ })).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByText('All caught up')).toBeVisible();
+  await expect(pages.getByRole('button', { name: 'Needs You', exact: true })).toBeVisible();
+  await pages.getByRole('button', { name: 'Activity' }).click();
+  await expect(page.getByText('No activity yet.')).toBeVisible();
+  await projects.getByRole('button', { name: 'Crew', exact: true }).click();
+  await expect(pages.getByRole('button', { name: 'Activity' })).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByText('Started in an isolated worktree')).toBeVisible();
+  // The browser tab's title still counts every project's requests.
+  await projects.getByRole('button', { name: 'Other', exact: true }).click();
+  await expect(page).toHaveTitle('(1) Crew');
+  // A project chosen from the palette keeps the page too.
+  await pages.getByRole('button', { name: 'History' }).click();
+  await page.keyboard.press('/');
+  await page.getByRole('combobox', { name: 'Search work, projects and actions' }).fill('Crew');
+  await page.getByRole('option', { name: /^Crew/ }).first().click();
+  await expect(page.getByRole('heading', { name: 'Crew', level: 1 })).toBeVisible();
+  await expect(pages.getByRole('button', { name: 'History' })).toHaveAttribute('aria-current', 'page');
+  // An earlier board's saved selection opens the same project's overview, and is saved the new way at once.
+  await projects.getByRole('button', { name: 'Other', exact: true }).click();
+  await page.evaluate(() => {
+    localStorage.removeItem('crew.page');
+    localStorage.setItem('crew.selection', 'project:/workspace/Other');
+  });
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Other', level: 1 })).toBeVisible();
+  await expect(pages.getByRole('button', { name: 'Overview' })).toHaveAttribute('aria-current', 'page');
+  expect(await page.evaluate(() => [localStorage.getItem('crew.scope'), localStorage.getItem('crew.page'), localStorage.getItem('crew.selection')])).toEqual(['/workspace/Other', 'overview', null]);
+  // Back on the default view, nothing old brings the project back.
+  await projects.getByRole('button', { name: 'All projects' }).click();
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Overview', level: 1 })).toBeVisible();
 });
 
 test('a closed slow drawer never opens itself again', async ({ page }) => {
@@ -1221,18 +1266,26 @@ test('Return adds a newline in an answer and the next question gets a fresh draf
 test('the top bar keeps its controls on one row at every width', async ({ page }) => {
   const bar = page.locator('.topbar');
   const split: number[] = [];
-  for (let width = 320; width <= 1000; width += 10) {
+  // Past 1000px every tab names itself and search shows its words, so the widths just above matter as much.
+  for (let width = 320; width <= 1200; width += 10) {
     await page.setViewportSize({ width, height: 800 });
-    const rows = await bar.evaluate((element) => {
-      const middle = (selector: string) => {
-        const box = element.querySelector(selector)!.getBoundingClientRect();
-        return Math.round(box.top + box.height / 2);
-      };
-      return [middle('.search-pill'), middle('.new-job'), middle('.crumbs')];
+    const { rows, overlap } = await bar.evaluate((element) => {
+      const box = (selector: string) => element.querySelector(selector)!.getBoundingClientRect();
+      const middle = (selector: string) => Math.round(box(selector).top + box(selector).height / 2);
+      const lastTab = [...element.querySelectorAll('.tab')].at(-1)!.getBoundingClientRect();
+      return { rows: [middle('.search-pill'), middle('.new-job'), middle('.tabs')], overlap: lastTab.right > box('.search-pill').left + 0.5 };
     });
-    if (rows.some((row) => Math.abs(row - rows[0]) > 2) || await bar.evaluate((element) => element.scrollWidth > element.clientWidth)) split.push(width);
+    if (overlap || rows.some((row) => Math.abs(row - rows[0]) > 2) || await bar.evaluate((element) => element.scrollWidth > element.clientWidth)) split.push(width);
   }
   expect(split, 'widths where the top bar splits or overflows').toEqual([]);
+  // The bar's own width decides when the tabs fold, so the Windows app's caption buttons (about 150px) fold them in a
+  // window that would show their names in a browser.
+  const named = () => page.locator('.tab-label').first().evaluate((element) => element.getBoundingClientRect().width > 1);
+  await page.setViewportSize({ width: 1100, height: 800 });
+  expect(await named()).toBe(true);
+  await bar.evaluate((element) => { element.style.paddingInlineEnd = '158px'; });
+  await expect.poll(named).toBe(false);
+  await expect(page.locator('.tab').first()).toHaveAttribute('title', 'Overview');
 });
 
 test('320px sheets keep controls within the viewport and support reduced motion', async ({ page }) => {

@@ -174,6 +174,29 @@ export function relativeDuration(ms: number) {
 }
 export const projectOf = (item: { root?: string; project?: string; cwd?: string }) =>
   item.root ?? item.project ?? item.cwd ?? '';
+/** Whether a path is a project's folder or inside it, in either platform's separators. */
+const within = (path: string, project: string) => {
+  const base = project.replace(/[\\/]+$/, '');
+  return path === base || (path.startsWith(base) && /[\\/]/.test(path[base.length] ?? ''));
+};
+/**
+ * The events of one project, or all of them with none chosen. An event belongs to its job's or session's project while
+ * that is still known; otherwise to the project the daemon recorded with it. A session's first events are recorded
+ * with its folder before git names the repository's root, so a recorded folder that is no project of its own counts
+ * for the project it sits in. As in the app.
+ */
+export function eventsIn(project: string, state: Pick<BoardState, 'events' | 'jobs' | 'claude'>) {
+  if (!project) return state.events;
+  const jobs = new Map(state.jobs.map((job) => [job.id, projectOf(job)]));
+  const sessions = new Map(state.claude.map((session) => [session.id, projectOf(session)]));
+  const known = new Set([...jobs.values(), ...sessions.values()]);
+  return state.events.filter((event) => {
+    const live = (event.job_id && jobs.get(event.job_id)) || (event.session_id && sessions.get(event.session_id));
+    if (live) return live === project;
+    const recorded = event.project ?? '';
+    return recorded === project || (!known.has(recorded) && within(recorded, project));
+  });
+}
 export const knownProjects = (state: Pick<BoardState, 'jobs' | 'claude' | 'missions'>) =>
   [...new Set([...state.jobs, ...state.claude, ...state.missions].map(projectOf).filter(Boolean))].sort();
 /**

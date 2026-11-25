@@ -150,7 +150,7 @@ A symbol inside a label takes the label's font. These tokens are for symbols tha
 | `empty` | 30 light | Empty state illustrations |
 | `stance` | 14 medium | A debate point's stance mark |
 | `dot` | 6 regular | A small dot before words, such as Unsaved changes |
-| `indicator` | 8 pt | A dot drawn as a shape that marks a row on its own, such as the Settings sidebar's update-ready dot. It turns white on a selected row's accent |
+| `indicator` | 8 pt | A dot drawn as a shape that marks a row on its own, such as the Settings sidebar's update-ready dot or a project waiting on the user in the window's sidebar. It turns white on a selected row's accent |
 | `controlFrame` | 16 pt | The frame a control glyph sits in; also the event list's status column |
 | `chevronNudge` | 0.5 pt | A sideways chevron shifts this far toward its point, where its frame leaves it looking off center |
 

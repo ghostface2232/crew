@@ -38,6 +38,8 @@ export interface CrewEvent {
   agent: Agent;
   session_id: string | null;
   job_id?: string;
+  /** The job's or session's project when recorded, so a board can scope the event after the session has gone. */
+  project?: string;
   kind: EventKind;
   detail: string;
 }
@@ -1969,8 +1971,8 @@ export class Jobs {
   }
 
   /** Appends to the event log. Also used for Claude session events, which have no job. */
-  record(agent: Agent, sessionId: string | null, kind: EventKind, detail: string, jobId?: string): CrewEvent {
-    const event: CrewEvent = { seq: ++this.seq, ts: new Date().toISOString(), agent, session_id: sessionId, job_id: jobId, kind, detail };
+  record(agent: Agent, sessionId: string | null, kind: EventKind, detail: string, jobId?: string, project?: string): CrewEvent {
+    const event: CrewEvent = { seq: ++this.seq, ts: new Date().toISOString(), agent, session_id: sessionId, job_id: jobId, project: project || undefined, kind, detail };
     this.recent.push(event);
     if (this.recent.length > KEEP_EVENTS) this.recent.splice(0, this.recent.length - KEEP_EVENTS);
     fs.appendFile(path.join(this.home, 'events.jsonl'), JSON.stringify(event) + '\n', () => {});
@@ -2053,7 +2055,7 @@ export class Jobs {
 
   private event(job: Job, kind: EventKind, detail: string, news?: { kind: News['kind']; reason: string; question?: string }): void {
     if (job.autoFixTurn === job.turns && ['done', 'error', 'limit'].includes(kind)) detail = `Automatic fix turn ${job.turns}: ${detail}`;
-    job.seq = this.record(job.agent, job.sessionId, kind, detail, job.id).seq;
+    job.seq = this.record(job.agent, job.sessionId, kind, detail, job.id, job.root ?? job.project).seq;
     if (isTerminal(job)) this.finishTurnResources(job);
     if (news) addNews(job, news.kind, news.reason, { question: news.question });
     else if (kind === 'done') addNews(job, 'done', detail);

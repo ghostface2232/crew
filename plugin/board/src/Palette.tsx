@@ -6,6 +6,7 @@ import {
 } from '@fluentui/react-icons';
 import type { FluentIcon } from '@fluentui/react-icons';
 import type { Snapshot } from './types.ts';
+import type { Page } from './App.tsx';
 import { jobLabel, missionStep, missionStops, NAMES, projectOf, roleLabel, jobRole, sessionAgent } from './model.ts';
 import { AgentMark, Chip, EASE_IN_OUT, EASE_OUT, Icon, reducedMotion, Elapsed, tNodes, useClock, useLanguage, WordReveal } from './ui.tsx';
 import { jobStatusState, missionStateLabel, sessionStateLabel } from './Missions.tsx';
@@ -26,15 +27,16 @@ interface Entry {
   preview: () => { eyebrow: string; chip?: [string, string]; lines: ReactNode[]; text?: string };
 }
 export interface PaletteActions {
-  select: (selection: string) => void;
+  /** Moves to a project ('' for all of them), a page, or both; what is left out stays as it is. */
+  go: (next: { project?: string; page?: Page }) => void;
   openJob: (id: string) => void;
   openSession: (id: string) => void;
   newJob: () => void;
   settings: () => void;
   welcome: () => void;
 }
-const PAGE_ENTRIES = translated((): [string, string, FluentIcon, string][] => [
-  ['overview', t('Overview'), GridRegular, t('Every project at a glance')],
+const PAGE_ENTRIES = translated((): [Page, string, FluentIcon, string][] => [
+  ['overview', t('Overview'), GridRegular, t('Where your work stands')],
   ['needs', t('Needs You'), AlertRegular, t('Approvals and questions waiting on you')],
   ['activity', t('Activity'), FlashRegular, t('What the crew did, as it happened')],
   ['history', t('History'), ClockRegular, t('Finished missions and jobs')],
@@ -113,15 +115,16 @@ export function Palette({ state, names, projects, origin, close, actions }: {
       });
     }
     for (const [id, title, icon, subtitle] of PAGE_ENTRIES())
-      list.push({ id: `page:${id}`, group: 'Pages', title, subtitle, icon, run: () => actions.select(id), preview: () => ({ eyebrow: t('Page'), lines: [], text: subtitle }) });
-    list.push({ id: 'project:', group: 'Projects', title: t('All projects'), subtitle: t('Overview'), icon: StackRegular, run: () => actions.select('overview'), preview: () => ({ eyebrow: t('Projects'), lines: [projects.length === 1 ? t('1 project') : t('{count} projects', { count: projects.length })] }) });
+      list.push({ id: `page:${id}`, group: 'Pages', title, subtitle, icon, run: () => actions.go({ page: id }), preview: () => ({ eyebrow: t('Page'), lines: [], text: subtitle }) });
+    list.push({ id: 'project:', group: 'Projects', title: t('All projects'), subtitle: projects.length === 1 ? t('1 project') : t('{count} projects', { count: projects.length }), icon: StackRegular, run: () => actions.go({ project: '' }), preview: () => ({ eyebrow: t('Projects'), lines: [projects.length === 1 ? t('1 project') : t('{count} projects', { count: projects.length })] }) });
     for (const dir of projects) {
       const projectJobs = jobs.filter((job) => projectOf(job) === dir);
       const activeJobs = projectJobs.filter((job) => job.endedAt == null).length;
       const activeMissions = missions.filter((mission) => projectOf(mission) === dir && mission.state === 'active').length;
       list.push({
         id: `project:${dir}`, group: 'Projects', title: names.get(dir) ?? dir, subtitle: dir, icon: FolderRegular,
-        run: () => actions.select(`project:${dir}`),
+        // As in the sidebar, the page stays.
+        run: () => actions.go({ project: dir }),
         preview: () => ({
           eyebrow: t('Project'),
           lines: [dir, activeJobs === 1
@@ -137,7 +140,7 @@ export function Palette({ state, names, projects, origin, close, actions }: {
         id: `mission:${mission.id}`, group: 'Missions', title: mission.title, subtitle: names.get(projectOf(mission)) ?? projectOf(mission), icon: FlagRegular,
         search: mission.title,
         run: () => {
-          actions.select(mission.state === 'active' ? `project:${projectOf(mission)}` : 'history');
+          actions.go({ project: projectOf(mission), page: mission.state === 'active' ? 'overview' : 'history' });
           requestAnimationFrame(() => document.querySelector(`[data-key="${CSS.escape(mission.id)}"]`)?.scrollIntoView({ block: 'start', behavior: reducedMotion() ? 'auto' : 'smooth' }));
         },
         preview: () => ({
@@ -207,8 +210,9 @@ export function Palette({ state, names, projects, origin, close, actions }: {
     // The way back is quicker, and the contents go before the shape, which folds into the control.
     element.querySelector('.palette-content')?.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 120, fill: 'forwards' });
     const to = anchor ?? new DOMRect(left + width / 2 - 20, top, 40, 40);
+    // A radius of half the control's height, not a pill's 999px, so the corners round off over the whole way.
     element
-      .animate([{}, { left: `${to.left}px`, top: `${to.top}px`, width: `${to.width}px`, height: `${to.height}px`, borderRadius: '999px', opacity: anchor ? 1 : 0 }], { duration: 240, easing: EASE_IN_OUT, fill: 'forwards' })
+      .animate([{}, { offset: 0.7, opacity: 1 }, { left: `${to.left}px`, top: `${to.top}px`, width: `${to.width}px`, height: `${to.height}px`, borderRadius: `${to.height / 2}px`, opacity: 0 }], { duration: 240, easing: EASE_IN_OUT, fill: 'forwards' })
       .finished.then(done, done);
   };
   useLayoutEffect(() => {
@@ -226,9 +230,13 @@ export function Palette({ state, names, projects, origin, close, actions }: {
     };
     if (reducedMotion()) return restore;
     const from = anchor ?? new DOMRect(left + width / 2 - 20, top + 8, 40, 40);
+    // The search control sits flat in the top bar, so the panel fades up out of it rather than starting as a solid
+    // pill over it. Its corners go from the control's half height to the panel's own radius, evenly all the way:
+    // from a pill's 999px they would stay round until the last frames and then snap square.
     element.animate(
       [
-        { left: `${from.left}px`, top: `${from.top}px`, width: `${from.width}px`, height: `${from.height}px`, borderRadius: '999px', opacity: anchor ? 1 : 0 },
+        { left: `${from.left}px`, top: `${from.top}px`, width: `${from.width}px`, height: `${from.height}px`, borderRadius: `${from.height / 2}px`, opacity: 0 },
+        { offset: 0.3, opacity: 1 },
         { left: `${left}px`, top: `${top}px`, width: `${width}px`, height: `${height}px`, borderRadius: '26px', opacity: 1 },
       ],
       { duration: 520, easing: EASE_OUT },

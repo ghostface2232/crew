@@ -20,14 +20,13 @@ export interface NavItem {
  * A list of sidebar items. A soft highlight glides to the item under the pointer while the others dim, and comes
  * to rest on nothing when the pointer leaves, as the reference menus behave.
  */
-export const NavList = memo(function NavList({ label, heading, items, current, onSelect, onHover, shortcut = false }: {
+export const NavList = memo(function NavList({ label, heading, items, current, onSelect, onHover }: {
   label: string;
   heading?: string;
   items: NavItem[];
   current: string;
   onSelect: (id: string) => void;
   onHover?: (id: string, element: HTMLElement | null) => void;
-  shortcut?: boolean;
 }) {
   const list = useRef<HTMLDivElement>(null);
   const [hovered, setHovered] = useState<string | null>(null);
@@ -57,7 +56,7 @@ export const NavList = memo(function NavList({ label, heading, items, current, o
           data-moving={glide?.moving || undefined}
           style={glide ? ({ '--top': `${glide.top}px`, '--height': `${glide.height}px`, opacity: 1 } as CSSProperties) : undefined}
         />
-        {items.map((item, index) => (
+        {items.map((item) => (
           <button
             key={item.id}
             className="nav-item"
@@ -76,10 +75,75 @@ export const NavList = memo(function NavList({ label, heading, items, current, o
             <NavLabel label={item.label} current={current === item.id} />
             {item.dot && <i className="nav-dot" data-state={item.dot} aria-hidden="true" />}
             {item.count ? <span className="nav-count" aria-label={t('{count} waiting', { count: item.count })}>{item.count}</span> : null}
-            {shortcut && !item.count && <kbd className="nav-key" aria-hidden="true">{index + 1}</kbd>}
           </button>
         ))}
       </div>
+    </nav>
+  );
+});
+
+/**
+ * The pages, as a segmented control in the top bar, as the app's toolbar has them. A raised thumb slides to the page
+ * you are on; it snaps when the tabs only change width (a count, the language, the window).
+ */
+export const PageTabs = memo(function PageTabs({ label, items, current, onSelect }: {
+  label: string;
+  items: NavItem[];
+  current: string;
+  onSelect: (id: string) => void;
+}) {
+  const list = useRef<HTMLElement>(null);
+  const [thumb, setThumb] = useState<{ left: number; width: number; slide: boolean } | null>(null);
+  const shown = useRef('');
+  // A narrow bar shows the tabs' icons only (board.css), so each then names itself in a tooltip. Read from the label,
+  // since the bar's width, not the window's, decides.
+  const [compact, setCompact] = useState(false);
+  useLayoutEffect(() => {
+    const element = list.current!;
+    let placed = '';
+    const measure = () => {
+      const tab = element.querySelector<HTMLElement>(`[data-tab="${CSS.escape(current)}"]`);
+      if (!tab) return;
+      setCompact((tab.querySelector<HTMLElement>('.tab-label')?.offsetWidth ?? 0) <= 1);
+      if (placed === `${tab.offsetLeft}:${tab.offsetWidth}`) return;
+      placed = `${tab.offsetLeft}:${tab.offsetWidth}`;
+      setThumb({ left: tab.offsetLeft, width: tab.offsetWidth, slide: shown.current !== '' && shown.current !== current });
+      shown.current = current;
+    };
+    measure();
+    const observer = new ResizeObserver(() => {
+      // Only a change of page slides; a resize puts the thumb where it now belongs at once. The observer's first call
+      // reports the sizes just measured, which change nothing, so the slide above runs on.
+      shown.current = current;
+      measure();
+    });
+    for (const tab of element.querySelectorAll('[data-tab]')) observer.observe(tab);
+    return () => observer.disconnect();
+  }, [current, items]);
+  return (
+    <nav className="tabs" aria-label={label} ref={list}>
+      <span
+        className="tabs-thumb"
+        aria-hidden="true"
+        data-slide={thumb?.slide || undefined}
+        style={thumb ? ({ '--left': `${thumb.left}px`, '--width': `${thumb.width}px` } as CSSProperties) : { opacity: 0 }}
+      />
+      {items.map((item, index) => (
+        <button
+          key={item.id}
+          className="tab"
+          data-tab={item.id}
+          title={compact ? item.label : undefined}
+          aria-keyshortcuts={String(index + 1)}
+          aria-current={current === item.id ? 'page' : undefined}
+          onClick={() => onSelect(item.id)}
+        >
+          <Icon icon={item.icon} size={16} filled={current === item.id} />
+          <span className="tab-label">{item.label}</span>
+          {/* Waiting requests are a dot on the icon's shoulder at every width, as the app's bell badge is; the page says how many. */}
+          {item.count ? <span className="tab-dot" role="img" aria-label={t('{count} waiting', { count: item.count })} /> : null}
+        </button>
+      ))}
     </nav>
   );
 });

@@ -9,7 +9,7 @@ import {
 import type { FluentIcon } from '@fluentui/react-icons';
 import { board } from './store.ts';
 import { formatDate, longDay } from './dates.ts';
-import { detailFromFragment, isNewJobKey, knownProjects, projectNames, projectOf, searchShortcut } from './model.ts';
+import { detailFromFragment, eventsIn, isNewJobKey, knownProjects, projectNames, projectOf, searchShortcut } from './model.ts';
 import { AskHost, ClockProvider, CopyMenu, Icon, tNodes, LeavingContext, PANEL_EXIT_MS, RollingNumber, SHEET_EXIT_MS, useClock, useLanguage, useLinger, useStableItems } from './ui.tsx';
 import appIcon from './icons/CrewAppIcon.png';
 import { Activity, History, Workspace } from './Overview.tsx';
@@ -19,7 +19,7 @@ import { Settings } from './Settings.tsx';
 import { Dispatch } from './Dispatch.tsx';
 import { Palette } from './Palette.tsx';
 import { Onboarding } from './Onboarding.tsx';
-import { NavList, ProjectPeek } from './Shell.tsx';
+import { NavList, PageTabs, ProjectPeek } from './Shell.tsx';
 import { Notifier } from './notify.ts';
 import { desktop, useAppUpdate } from './desktop.ts';
 import { followSetting, t, translated } from './i18n.ts';
@@ -39,15 +39,19 @@ export const PAGES = translated((): [Page, string, FluentIcon][] => [
 ]);
 const TITLES = translated((): Record<Page, string> => ({ overview: t('Overview'), needs: t('Needs You'), activity: t('Activity'), history: t('History') }));
 
-/** One selection, as in the app: a page, or `project:<path>` for a project's overview. */
-function storedSelection() {
+/** Where the board is: a project, or every one (''), and a page within it, as in the app. */
+export interface View { project: string; page: Page }
+const isPage = (value: string | null): value is Page => PAGES().some(([id]) => id === value);
+function storedView(): View {
   try {
-    const saved = localStorage.getItem('crew.selection');
-    if (saved) return saved;
-    const project = localStorage.getItem('crew.project');
-    return project ? `project:${project}` : 'overview';
+    const page = localStorage.getItem('crew.page');
+    if (isPage(page)) return { project: localStorage.getItem('crew.scope') ?? '', page };
+    // Earlier boards kept one selection: a page, or `project:<path>` for a project's overview; before that, `crew.project`.
+    const old = localStorage.getItem('crew.selection') ?? '';
+    if (old.startsWith('project:')) return { project: old.slice(8), page: 'overview' };
+    return { project: old ? '' : localStorage.getItem('crew.project') ?? '', page: isPage(old) ? old : 'overview' };
   } catch {
-    return 'overview';
+    return { project: '', page: 'overview' };
   }
 }
 /** The open detail panel, kept in the URL fragment: a job's id, or `session:<id>` for a Claude session. */
@@ -59,7 +63,7 @@ export function App() {
   const state = useSyncExternalStore(board.subscribe, board.getSnapshot);
   const shown = useLanguage();
   const search = searchShortcut(navigator.platform);
-  const [selection, setSelection] = useState(storedSelection);
+  const [view, setView] = useState(storedView);
   const [settings, setSettings] = useState<boolean | 'about'>(false);
   const update = useAppUpdate();
   /** Where a sheet grows from: the control that opened it, or nothing for a keyboard shortcut. */
@@ -67,8 +71,7 @@ export function App() {
   const [palette, setPalette] = useState<{ origin?: DOMRect } | null>(null);
   const [welcome, setWelcome] = useState(false);
   const [detail, setDetail] = useState(detailFromHash);
-  const project = selection.startsWith('project:') ? selection.slice(8) : '';
-  const page: Page = project ? 'overview' : (PAGES().find(([id]) => id === selection)?.[0] ?? 'overview');
+  const { project, page } = view;
   const { jobs, claude, missions } = state;
   const known = useMemo(() => knownProjects({ jobs, claude, missions }), [jobs, claude, missions]);
   const projects = useStableItems(project && !known.includes(project) ? [...known, project].sort() : known);
@@ -76,7 +79,14 @@ export function App() {
   const waitingJobs = useMemo(() => jobs.filter((job) => job.state === 'waiting')
     .sort((a, b) => (a.waiting?.since ?? 0) - (b.waiting?.since ?? 0)), [jobs]);
   const waitingSessions = useMemo(() => claude.filter((session) => session.state === 'waiting'), [claude]);
-  const pending = waitingJobs.length + waitingSessions.length;
+  // The tab title counts every project's requests; the page and its tabs count only those in view.
+  const allPending = waitingJobs.length + waitingSessions.length;
+  const scopedJobs = useMemo(() => project ? waitingJobs.filter((job) => projectOf(job) === project) : waitingJobs, [waitingJobs, project]);
+  const scopedSessions = useMemo(() => project ? waitingSessions.filter((session) => projectOf(session) === project) : waitingSessions, [waitingSessions, project]);
+  const pending = scopedJobs.length + scopedSessions.length;
+  const events = useMemo(() => eventsIn(project, state), [project, state.events, jobs, claude]);
+  const activityJobs = useMemo(() => project ? jobs.filter((job) => projectOf(job) === project) : jobs, [jobs, project]);
+  const activityMissions = useMemo(() => project ? missions.filter((mission) => projectOf(mission) === project) : missions, [missions, project]);
   const live = state.connection === 'live';
   const connectionWord = live ? t('Live') : state.connection === 'lost' ? t('Reconnecting…') : t('Connecting…');
   const narrow = useNarrow();
@@ -111,8 +121,8 @@ export function App() {
   }, [drawer]);
 
   useEffect(() => {
-    document.title = pending ? `(${pending}) Crew` : 'Crew';
-  }, [pending]);
+    document.title = allPending ? `(${allPending}) Crew` : 'Crew';
+  }, [allPending]);
   useEffect(() => followSetting(state.language), [state.language]);
   useEffect(() => {
     document.documentElement.lang = shown;
@@ -122,15 +132,33 @@ export function App() {
     window.addEventListener('hashchange', change);
     return () => window.removeEventListener('hashchange', change);
   }, []);
-  const select = useCallback((value: string) => {
-    setSelection(value);
+  /** Moves to a project, a page, or both; what is left out stays as it is. */
+  const go = useCallback((next: Partial<View>) => {
+    setView((view) => {
+      const moved = { ...view, ...next };
+      return moved.project === view.project && moved.page === view.page ? view : moved;
+    });
     fold();
+  }, [fold]);
+  // Saved from the first render too, so an earlier board's selection is carried over once. The default view needs no
+  // entry, so a board that was never moved off it leaves nothing in the browser.
+  useEffect(() => {
     try {
-      localStorage.setItem('crew.selection', value);
+      // An earlier board's keys are read once; left behind, they would bring back an old view once this one is the default.
+      localStorage.removeItem('crew.selection');
+      localStorage.removeItem('crew.project');
+      if (!project && page === 'overview') {
+        localStorage.removeItem('crew.page');
+        localStorage.removeItem('crew.scope');
+      } else {
+        localStorage.setItem('crew.page', page);
+        localStorage.setItem('crew.scope', project);
+      }
     } catch {
       /* Embedded panes may disable storage. */
     }
-  }, [fold]);
+  }, [project, page]);
+  const selectPage = useCallback((id: string) => go({ page: id as Page }), [go]);
   const show = useCallback((value: string) => {
     setDetail(value);
     history.replaceState(null, '', value ? `#${encodeURIComponent(value)}` : location.pathname + location.search);
@@ -150,7 +178,7 @@ export function App() {
   const [shownSettings, settingsLeaving] = useLinger(settings === true ? 'open' : settings || '', SHEET_EXIT_MS);
   /** After New Job, the job's own project, so the new job is in view, as the app goes there. */
   const openNewJob = (id: string, root?: string) => {
-    if (root && project !== root) select(`project:${root}`);
+    if (root && (project !== root || page !== 'overview')) go({ project: root, page: 'overview' });
     show(id);
   };
   const newJob = useCallback((origin?: Element | null, draft?: string) => {
@@ -170,7 +198,7 @@ export function App() {
     fold();
     setWelcome(true);
   }, [fold]);
-  const paletteActions = useMemo(() => ({ select, openJob: show, openSession: showSession, newJob: () => newJob(), settings: openSettings, welcome: openWelcome }), [select, show, showSession, newJob, openSettings, openWelcome]);
+  const paletteActions = useMemo(() => ({ go, openJob: show, openSession: showSession, newJob: () => newJob(), settings: openSettings, welcome: openWelcome }), [go, show, showSession, newJob, openSettings, openWelcome]);
   // The desktop app greets a new user once, on a first install; it owes no guide after an update.
   useEffect(() => {
     void desktop?.welcome?.pending().then((pending) => pending && setWelcome(true), () => {});
@@ -199,7 +227,7 @@ export function App() {
       event.preventDefault();
       newJob();
     } else if (/^[1-4]$/.test(event.key)) {
-      select(PAGES()[Number(event.key) - 1][0]);
+      go({ page: PAGES()[Number(event.key) - 1][0] });
     }
   };
   useEffect(() => {
@@ -226,15 +254,6 @@ export function App() {
     );
   }
   const title = project ? (names.get(project) ?? project) : TITLES()[page];
-  const pageNav = (
-    <NavList
-      label={t('Pages')}
-      items={pageItems}
-      current={project ? (page === 'overview' ? '' : page) : page}
-      onSelect={select}
-      shortcut
-    />
-  );
   return (
     <ClockProvider skew={state.clockSkew}>
       <div className="app">
@@ -243,8 +262,7 @@ export function App() {
             <img className="brand-mark" src={appIcon} alt="" />
             <span className="brand-name">Crew</span>
           </div>
-          {pageNav}
-          <ProjectNav projects={projects} names={names} project={project} state={state} select={select} />
+          <ProjectNav projects={projects} names={names} project={project} state={state} go={go} />
           <div className="sidebar-foot">
             {update?.installError ? (
               <button className="sidebar-item sidebar-update" data-state="failed" id="update-failed" title={update.installError} disabled={!Object.keys(state.roles).length} onClick={openAbout}>
@@ -296,33 +314,29 @@ export function App() {
             >
               <Icon icon={PanelLeftRegular} />
             </button>
-            <nav className="crumbs" aria-label={t('Location')}>
-              <button className="crumb" onClick={() => select('overview')} disabled={!project && page === 'overview'}>
-                {project ? t('Projects') : 'Crew'}
+            {/* One pill holds the pages, search and New Job, as the app's toolbar holds them. */}
+            <div className="topbar-bar">
+              <PageTabs label={t('Pages')} items={pageItems} current={page} onSelect={selectPage} />
+              <button
+                className="search-pill"
+                ref={searchButton}
+                onClick={openPalette}
+                title={search.title}
+                aria-label={t('Search')}
+                aria-keyshortcuts={search.aria}
+                data-hidden={palette ? '' : undefined}
+              >
+                <Icon icon={SearchRegular} />
+                <span>{t('Search work, projects…')}</span>
+                <kbd>{search.keys}</kbd>
               </button>
-              <span aria-hidden="true">/</span>
-              <span className="crumb-current" aria-current="page">{title}</span>
-            </nav>
-            <span className="topbar-spacer" />
-            <button
-              className="search-pill"
-              ref={searchButton}
-              onClick={openPalette}
-              title={search.title}
-              aria-label={t('Search')}
-              aria-keyshortcuts={search.aria}
-              data-hidden={palette ? '' : undefined}
-            >
-              <Icon icon={SearchRegular} />
-              <span>{t('Search work, projects…')}</span>
-              <kbd>{search.keys}</kbd>
-            </button>
-            <button className="new-job prominent" disabled={!live} title={t('New job (N)')} aria-keyshortcuts="N" onClick={(event) => newJob(event.currentTarget)}>
-              <Icon icon={AddRegular} />
-              <span className="new-job-label">{t('New Job')}</span>
-            </button>
+              <button className="new-job prominent" disabled={!live} title={t('New job (N)')} aria-keyshortcuts="N" onClick={(event) => newJob(event.currentTarget)}>
+                <Icon icon={AddRegular} />
+                <span className="new-job-label">{t('New Job')}</span>
+              </button>
+            </div>
           </header>
-          <main className="page" key={selection}>
+          <main className="page" key={`${project}\n${page}`}>
             {state.connection === 'lost' && (
               <div className="banner" role="alert">
                 <Icon icon={WifiOffRegular} />
@@ -346,7 +360,7 @@ export function App() {
                   className="attention"
                   // The count already shows in the badge; the name still says it in full.
                   aria-label={pending === 1 ? t('1 request needs your attention') : t('{count} requests need your attention', { count: pending })}
-                  onClick={() => select('needs')}
+                  onClick={() => go({ page: 'needs' })}
                 >
                   <span className="attention-count"><RollingNumber value={pending} /></span>
                   <span>{t('Needs You')}</span>
@@ -355,17 +369,16 @@ export function App() {
               )}
             </header>
             {page === 'needs' ? (
-              <NeedsYou jobs={waitingJobs} sessions={waitingSessions} pending={pending} openJob={openJob} openSession={openSession} />
+              <NeedsYou jobs={scopedJobs} sessions={scopedSessions} pending={pending} openJob={openJob} openSession={openSession} />
             ) : page === 'activity' ? (
-              <Activity events={state.events} jobs={jobs} missions={missions} openJob={openJob} />
+              <Activity events={events} jobs={activityJobs} missions={activityMissions} openJob={openJob} />
             ) : page === 'history' ? (
               <History {...scope} />
             ) : (
-              <Workspace {...scope} newJob={newJob} openPage={select} />
+              <Workspace {...scope} newJob={newJob} openPage={selectPage} />
             )}
           </main>
         </div>
-        <div className="dock" inert={!narrow || drawer}>{pageNav}</div>
         {dispatching && (
           <Dispatch state={state} project={project} origin={dispatching.origin} draft={dispatching.draft} openJob={openNewJob} close={() => setDispatching(null)} />
         )}
@@ -406,12 +419,12 @@ function eyebrow(page: Exclude<Page, 'overview'>) {
 }
 
 /** The project list, with a preview of each beside the sidebar while the pointer rests on it. */
-function ProjectNav({ projects, names, project, state, select }: {
+function ProjectNav({ projects, names, project, state, go }: {
   projects: string[];
   names: Map<string, string>;
   project: string;
   state: ReturnType<typeof board.getSnapshot>;
-  select: (value: string) => void;
+  go: (next: Partial<View>) => void;
 }) {
   const [peek, setPeek] = useState<{ dir: string; top: number } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -431,10 +444,11 @@ function ProjectNav({ projects, names, project, state, select }: {
     // No tooltip: the preview beside the list shows the path, and a tooltip would cover it.
     ...projects.map((dir) => ({ id: dir, label: names.get(dir) ?? dir, icon: FolderNavIcon, dot: dots.get(dir) })),
   ], (a, b) => a.id === b.id && a.label === b.label && a.dot === b.dot);
+  /** Another project keeps the page, so its requests, activity or history are one click away. */
   const selectProject = useCallback((id: string) => {
     setPeek(null);
-    select(id ? `project:${id}` : 'overview');
-  }, [select]);
+    go({ project: id });
+  }, [go]);
   const hoverProject = useCallback((id: string, element: HTMLElement | null) => {
     clearTimeout(timer.current);
     if (!hover) return;

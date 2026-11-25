@@ -11,7 +11,7 @@ import type { BoardJob, CrewEvent, IssueList, Mission, SetupState, Snapshot, Wor
 import { formatDate, longDay, shortDateTime, shortDay, shortMonth, timeOfDay } from './dates.ts';
 import { request } from './api.ts';
 import {
-  dailyCounts, elapsed, endedPerHour, holdersOf, jobLabel, leadMission, limitWindowLabel, NAMES, projectOf, relativeDuration, rolesOf, runningPerHour,
+  dailyCounts, elapsed, endedPerHour, eventsIn, holdersOf, jobLabel, leadMission, limitWindowLabel, NAMES, projectOf, relativeDuration, rolesOf, runningPerHour,
   sessionAgent, usageWindowName, unsettled,
 } from './model.ts';
 import { AgentMark, Chip, EmptyState, Icon, RollingNumber, StatusIcon, tNodes, useFade, useClock, useLanguage, useStableItems } from './ui.tsx';
@@ -728,8 +728,8 @@ export function Workspace({ state, project, names, selected, openJob, openSessio
   );
   const row = (job: BoardJob, index: number) => <JobRow key={job.id} job={job} selected={selected === job.id} openJob={openJob} kind={jobKind(job, state)} index={index} />;
   const empty = !jobs.length && !missions.length && !sessions.length;
-  const jobIds = useMemo(() => new Set(jobs.map((job) => job.id)), [jobs]);
-  const events = useMemo(() => project ? state.events.filter((event) => !event.job_id || jobIds.has(event.job_id)) : state.events, [state.events, project, jobIds]);
+  // The same events Activity shows, so the live feed and its All link agree.
+  const events = useMemo(() => eventsIn(project, state), [project, state.events, state.jobs, state.claude]);
   return (
     <>
       <Kpis state={state} project={project} />
@@ -834,7 +834,7 @@ export const History = memo(function History({ state, project, names, selected, 
             <MissionPanel
               key={mission.id}
               mission={mission}
-              {...missionPanel(mission)}
+              {...missionPanel(mission, project)}
               projectName={project ? undefined : names.get(projectOf(mission))}
               selected={selected}
               openJob={openJob}

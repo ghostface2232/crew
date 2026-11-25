@@ -4,7 +4,7 @@ import { Actions, answerKey, onUnauthorized, stream, ticketFromFragment, Unautho
 import { BoardStore, mergeEvents } from '../plugin/board/src/store.ts';
 import { formatDate, longDay, shortDateTime, shortDay, shortMonth, timeOfDay } from '../plugin/board/src/dates.ts';
 import { Notifier } from '../plugin/board/src/notify.ts';
-import { detailFromFragment, elapsed, evidenceSide, evidenceTurn, orderEvidence, jobLabel, leadMission, limitWindowLabel, projectNames, unsettled, isNewJobKey, missionStops, missionStep, missionStopPosition, missionJobStep, missionLooksFinished, pullIsStale, pullStatuses, relativeDuration, searchShortcut, usageWindowName, STOP_OF_STAGE } from '../plugin/board/src/model.ts';
+import { detailFromFragment, elapsed, eventsIn, evidenceSide, evidenceTurn, orderEvidence, jobLabel, leadMission, limitWindowLabel, projectNames, unsettled, isNewJobKey, missionStops, missionStep, missionStopPosition, missionJobStep, missionLooksFinished, pullIsStale, pullStatuses, relativeDuration, searchShortcut, usageWindowName, STOP_OF_STAGE } from '../plugin/board/src/model.ts';
 import type { BoardJob, BoardPull, BoardState, ClaudeSession, CrewEvent, Mission } from '../plugin/board/src/types.ts';
 
 function deferred() {
@@ -63,6 +63,35 @@ test('repeatable follow-ups can be sent again after acceptance', async () => {
   const actions = new Actions();
   assert.equal(await actions.run('followup', async () => {}, { once: false }), true);
   assert.equal(await actions.run('followup', async () => {}, { once: false }), true);
+});
+
+test('a project\'s events follow their job or session, then the project recorded with them', () => {
+  const event = (seq: number, extra: Partial<CrewEvent>): CrewEvent =>
+    ({ seq, ts: '', agent: 'codex', session_id: null, kind: 'progress', detail: '', ...extra });
+  const events = [
+    event(1, { job_id: 'job-a', project: '/b' }),
+    event(2, { session_id: 'lead-a', project: '/a/sub' }),
+    event(3, { session_id: 'gone', project: '/a' }),
+    event(4, { session_id: 'gone' }),
+    event(5, { job_id: 'job-b' }),
+    // A session's first events carry its folder until git names the root; one that is no project counts for its parent.
+    event(6, { session_id: 'gone', project: '/a/sub' }),
+    event(7, { session_id: 'gone', project: '/ab' }),
+    event(8, { session_id: 'gone', project: 'C:\\a\\sub' }),
+  ];
+  const state = {
+    events,
+    jobs: [{ id: 'job-a', project: '/a', root: '/a' }, { id: 'job-b', project: '/b' }] as BoardJob[],
+    claude: [{ id: 'lead-a', cwd: '/a/sub', root: '/a' }] as ClaudeSession[],
+  };
+  // A live job or session wins over what was recorded, which may predate the session finding its root.
+  assert.deepEqual(eventsIn('/a', state).map((item) => item.seq), [1, 2, 3, 6]);
+  assert.deepEqual(eventsIn('/b', state).map((item) => item.seq), [5]);
+  assert.deepEqual(eventsIn('C:\\a', state).map((item) => item.seq), [8]);
+  // A folder that is a project of its own keeps its events.
+  assert.deepEqual(eventsIn('/a', { ...state, jobs: [...state.jobs, { id: 'job-c', project: '/a/sub' } as BoardJob] }).map((item) => item.seq), [1, 2, 3]);
+  // Every project's events with none chosen, including those that name no project.
+  assert.equal(eventsIn('', state), events);
 });
 
 test('elapsed time and project names use the app\'s labels', () => {

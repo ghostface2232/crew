@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { projectRoot } from './git.ts';
 import { clip } from './text.ts';
@@ -26,7 +27,7 @@ interface GhIssue extends Omit<Issue, 'assignees' | 'labels'> {
 }
 
 const CACHE_MS = 10 * 60_000;
-const ISSUE_URL = /^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/issues\/([1-9]\d*)\/?$/i;
+const ISSUE_URL = /^https:\/\/[a-z0-9.-]+(?::\d+)?\/([\w.-]+)\/([\w.-]+)\/issues\/([1-9]\d*)\/?$/i;
 type Gh = (args: string[], cwd: string) => Promise<string>;
 
 function issueKey(url: unknown): string {
@@ -43,6 +44,7 @@ export class Issues {
   private pending = new Map<string, Promise<IssueList>>();
   private login?: { value: Promise<string>; at: number };
   private dismissed?: Set<string>;
+  private unreadable = false;
 
   constructor(home: string, gh: Gh, root = projectRoot) {
     this.file = path.join(home, 'issues.json');
@@ -109,7 +111,7 @@ export class Issues {
         const { dismissed } = JSON.parse(fs.readFileSync(this.file, 'utf8'));
         this.dismissed = new Set(dismissed.map(issueKey));
       } catch (err) {
-        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+        this.unreadable = (err as NodeJS.ErrnoException).code !== 'ENOENT';
         this.dismissed = new Set();
       }
     }
@@ -121,6 +123,14 @@ export class Issues {
     const next = [...this.dismissals()].filter((old) => old !== key);
     next.push(key);
     const dismissed = next.slice(-500);
+    if (this.unreadable) {
+      try {
+        fs.renameSync(this.file, `${this.file}.bad-${randomUUID()}`);
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+      }
+      this.unreadable = false;
+    }
     const tmp = this.file + '.tmp';
     fs.writeFileSync(tmp, JSON.stringify({ dismissed }), { mode: 0o600 });
     fs.renameSync(tmp, this.file);

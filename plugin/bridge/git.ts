@@ -227,37 +227,25 @@ export async function worktreeIncludeHint(root: string, project: string, home: s
 export async function withBaseWorktree<T>(repo: string, base: string, run: (cwd: string) => Promise<T>): Promise<T> {
   const slot = await fs.mkdtemp(path.join(await fs.realpath(os.tmpdir()), 'crew-base-'));
   const cwd = path.join(slot, path.basename(repo));
-  let registered = false;
+  const prune = () => git(repo, ['worktree', 'prune', '--expire', 'now']).catch(() => {});
+  const unregister = () => git(repo, [...NO_HOOKS, 'worktree', 'remove', '--force', cwd]);
   try {
-    try {
-      await git(repo, [...NO_HOOKS, 'worktree', 'add', '--detach', cwd, base]);
-      registered = true;
-    } catch (err) {
-      // Checkout can fail after Git has registered the directory.
-      const entries = await git(repo, ['worktree', 'list', '--porcelain', '-z']);
-      registered = entries.split('\0').some((line) => line.startsWith('worktree ') && canonicalPath(line.slice(9)) === canonicalPath(cwd));
-      throw err;
-    }
+    await prune();
+    await git(repo, [...NO_HOOKS, 'worktree', 'add', '--detach', cwd, base]);
     const included = await copyIncluded(repo, cwd);
     if (included.failed.length) throw new Error(`could not attach ${included.failed.join(', ')}`);
     return await run(cwd);
   } finally {
+    // Even a partial checkout can be registered. A lock at one step must let the others run.
+    await prepareRemoval(cwd).catch(() => {});
     try {
-      if (registered) {
-        await prepareRemoval(cwd);
-        try {
-          await git(repo, [...NO_HOOKS, 'worktree', 'remove', '--force', cwd]);
-        } catch (err) {
-          // A lock or scanner may release the files during bounded directory cleanup.
-          await removeDirectory(cwd);
-          await git(repo, [...NO_HOOKS, 'worktree', 'remove', '--force', cwd]).catch((cleanup: Error) => {
-            throw new Error(`could not remove base worktree ${cwd}: ${cleanup.message}`, { cause: err });
-          });
-        }
-      }
-    } finally {
-      await removeDirectory(slot);
+      await unregister();
+    } catch {
+      await removeDirectory(cwd).catch(() => {});
+      await unregister().catch(() => {});
     }
+    await removeDirectory(slot).catch(() => {});
+    await prune();
   }
 }
 

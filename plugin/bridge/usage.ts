@@ -461,7 +461,10 @@ export function route(kind: RouteKind, usage: Usage, roles: Config['roles'], dis
     const ranked = slots.map((i) => usable[i]).sort((a, b) => Number(readings.get(a)!.belowLine) - Number(readings.get(b)!.belowLine));
     slots.forEach((slot, i) => { usable[slot] = ranked[i]; });
   }
-  const holder = usable.find((agent) => !short(agent)) ?? usable[0];
+  const crossCheck = kind === 'review' || kind === 'verify' || kind === 'debate';
+  const holder = usable.find((agent) => !short(agent))
+    ?? (crossCheck ? usable.find((agent) => status(agent) !== 'exhausted') : undefined)
+    ?? usable[0];
   const moved = holder === holders[0] ? '' : !able(holders[0]) ? `${label(holders[0])} cannot take ${kind} work now. `
     : readings.get(holders[0])?.belowLine && status(holders[0]) === status(holder)
       ? `${label(holders[0])} has less than half the even-spend quota left in its longest window. ` : `${why(holders[0])} `;
@@ -471,7 +474,7 @@ export function route(kind: RouteKind, usage: Usage, roles: Config['roles'], dis
 
   function decide(holder: Agent): RouteDecision {
   const wait = readings.get(holder)?.wait;
-  if (wait != null && (kind === 'review' || kind === 'verify' || kind === 'debate')) {
+  if (wait != null && crossCheck) {
     return { kind, assignee: holder, reason: `${why(holder)} Run the ${kind} after the reset at ${new Date(wait).toISOString()} to keep the cross-check.`, fallback: [], degraded: false, deferUntil: wait };
   }
   if (holder === you) return plain(you, `${label(you)} holds the role: do the work yourself, or in a subagent.`);

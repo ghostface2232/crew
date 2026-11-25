@@ -91,7 +91,7 @@ test('dismissals persist, remove an issue from every project, and reject unrelat
   const { issues, data, open, home, calls } = fixture(t);
   data.rows = [row(1), row(2)];
   await Promise.all(['project', 'subfolder'].map((p) => issues.list(p)));
-  for (const invalid of [null, 4, 'http://github.com/o/r/issues/1', 'https://github.com.example/o/r/issues/1',
+  for (const invalid of [null, 4, 'http://github.com/o/r/issues/1', 'https:///o/r/issues/1',
     'https://github.com@example.com/o/r/issues/1', 'https://github.com/o/r/pull/1', 'https://github.com/../r/issues/1']) {
     assert.throws(() => issues.dismiss(invalid), /HTTPS GitHub issue URL/);
   }
@@ -101,6 +101,31 @@ test('dismissals persist, remove an issue from every project, and reject unrelat
   assert.equal(calls.length, before);
   assert.deepEqual((await open().list('restarted')).issues.map((i) => i.number), [1]);
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(home, 'issues.json'), 'utf8')), { dismissed: [url(2).toLowerCase()] });
+});
+
+test('Enterprise issues can be listed and dismissed without hiding the same issue on another host', async (t) => {
+  const { issues, data, open } = fixture(t);
+  const enterprise = { ...row(1), url: 'https://git.example.org:8443/Owner/Repo/issues/1' };
+  data.rows = [enterprise, row(1)];
+  assert.deepEqual((await issues.list('project')).issues.map((issue) => issue.url), [enterprise.url, url(1)]);
+  issues.dismiss(enterprise.url);
+  assert.deepEqual((await open().list('project')).issues.map((issue) => issue.url), [url(1)]);
+});
+
+test('unreadable dismissal data is preserved when the next dismissal is saved', async (t) => {
+  const { home, data, issues, open } = fixture(t);
+  const file = path.join(home, 'issues.json');
+  const damaged = '{"dismissed": [';
+  fs.writeFileSync(file, damaged);
+  data.rows = [row(1)];
+  assert.deepEqual((await issues.list('project')).issues.map((issue) => issue.number), [1]);
+  assert.equal(fs.readFileSync(file, 'utf8'), damaged);
+  issues.dismiss(url(1));
+  const backups = fs.readdirSync(home).filter((name) => name.startsWith('issues.json.'));
+  assert.equal(backups.length, 1);
+  assert.equal(fs.readFileSync(path.join(home, backups[0]), 'utf8'), damaged);
+  const result = await open().list('project');
+  assert.deepEqual([result.error, result.issues], [undefined, []]);
 });
 
 test('the newest 500 distinct dismissals survive and dismissing again renews an entry', (t) => {

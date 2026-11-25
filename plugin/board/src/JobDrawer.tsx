@@ -3,7 +3,7 @@ import type { CSSProperties } from 'react';
 import {
   ArrowCounterclockwiseRegular, ArrowUndoRegular, BranchFork16Regular, BranchRegular, ChatRegular,
   CheckmarkCircle16Regular, CheckmarkCircleRegular, CheckmarkRegular, CheckmarkStarburstRegular, ChevronDownRegular,
-  CircleHintRegular, CircleMultipleConcentricRegular, ClockRegular, DismissCircle16Regular, DismissRegular,
+  CircleHintRegular, CircleMultipleConcentricRegular, ClockRegular, ColumnDoubleCompareRegular, DismissCircle16Regular, DismissRegular,
   DocumentTextRegular, FilmstripRegular, FlagCheckeredRegular, FlagRegular, FlashRegular, HistoryRegular,
   ImageMultipleRegular, NotebookRegular, PeopleRegular, QuestionCircleRegular, RecordStopRegular,
   ShieldCheckmarkRegular, ShieldErrorRegular, SubtractCircleRegular, TextAlignLeftRegular, WarningRegular,
@@ -109,8 +109,8 @@ function EvidenceSection({ job }: { job: BoardJob }) {
   const items = (job.evidence ?? []).toSorted((a, b) => b.turn - a.turn);
   const [picked, setPicked] = useState<string[]>([]);
   if (!items.length) return null;
-  // A capture the worker has since deleted leaves the comparison.
-  const compared = picked.filter((file) => items.some((item) => item.file === file));
+  // A capture the worker has since deleted leaves the viewer.
+  const shown = picked.filter((file) => items.some((item) => item.file === file));
   return (
     <Section title={t('Evidence')} icon={ImageMultipleRegular}>
       <div className="evidence">
@@ -127,7 +127,7 @@ function EvidenceSection({ job }: { job: BoardJob }) {
                   rel="noreferrer"
                   title={t('Open')}
                   onClick={(event) => {
-                    // A plain press opens it here, where others can be added beside it; a modified one opens the file.
+                    // A plain press opens it here; a modified one opens the file.
                     if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
                     event.preventDefault();
                     setPicked([item.file]);
@@ -143,28 +143,61 @@ function EvidenceSection({ job }: { job: BoardJob }) {
           );
         })}
       </div>
-      {compared.length > 0 && <EvidenceCompare job={job} items={items} shown={compared} onShown={setPicked} />}
+      {shown.length > 0 && <EvidenceViewer job={job} items={items} shown={shown} onShown={setPicked} />}
     </Section>
   );
 }
 
 /**
- * A capture, and the others added beside it from the strip below. A result alone says little: it is judged against
- * what was there before, or what it was meant to match. Each says which turn it is from, since one from an earlier
- * turn may not show the final state.
+ * One capture at a time, with the others in a strip below to switch to. Compare puts several side by side: a result
+ * alone says little, and is judged against what was there before or what it was meant to match. Each says which turn
+ * it is from, since one from an earlier turn may not show the final state.
  */
-function EvidenceCompare({ job, items, shown, onShown }: { job: BoardJob; items: EvidenceItem[]; shown: string[]; onShown: (files: string[]) => void }) {
+function EvidenceViewer({ job, items, shown, onShown }: { job: BoardJob; items: EvidenceItem[]; shown: string[]; onShown: (files: string[]) => void }) {
+  const [comparing, setComparing] = useState(false);
   const close = () => onShown([]);
   const caption = (item: EvidenceItem) => evidenceTurn(item, job.turns);
+  const strip = orderEvidence(items);
+  // `shown` is in the order captures were added, so the last is the one most recently looked at.
+  const current = shown.at(-1)!;
+  const panes = comparing ? orderEvidence(items.filter((item) => shown.includes(item.file))) : items.filter((item) => item.file === current);
+  const step = (by: number) => {
+    const next = strip[strip.findIndex((item) => item.file === current) + by];
+    if (next) onShown([next.file]);
+  };
   return (
-    <Dialog labelId="evidence-compare-title" className="evidence-compare" onClose={close}>
-      <div className="sheet-body">
+    <Dialog labelId="evidence-viewer-title" className="evidence-viewer" onClose={close}>
+      <div
+        className="sheet-body"
+        onKeyDown={(event) => {
+          // A focused video keeps its arrows for seeking.
+          if (comparing || event.target instanceof HTMLVideoElement || event.altKey || event.metaKey || event.ctrlKey || event.shiftKey) return;
+          if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+          event.preventDefault();
+          step(event.key === 'ArrowLeft' ? -1 : 1);
+        }}
+      >
         <div className="sheet-head">
-          <h2 className="title" id="evidence-compare-title">{t('Evidence')}</h2>
+          <h2 className="title" id="evidence-viewer-title">{t('Evidence')}</h2>
+          {items.length > 1 && (
+            <button
+              type="button"
+              className="compare-toggle"
+              aria-pressed={comparing}
+              onClick={() => {
+                // Leaving keeps only the one most recently added.
+                if (comparing) onShown([current]);
+                setComparing(!comparing);
+              }}
+            >
+              <Icon icon={ColumnDoubleCompareRegular} />
+              {t('Compare')}
+            </button>
+          )}
           <CloseButton label={t('Close')} onClose={close} />
         </div>
-        <div className="compare" data-panes={shown.length}>
-          {orderEvidence(items.filter((item) => shown.includes(item.file))).map((item) => {
+        <div className="compare" data-panes={panes.length}>
+          {panes.map((item) => {
             const src = evidenceSrc(job, item);
             return (
               <figure key={item.file}>
@@ -178,18 +211,26 @@ function EvidenceCompare({ job, items, shown, onShown }: { job: BoardJob; items:
           })}
         </div>
         {items.length > 1 && (
-          <div className="compare-picker" role="group" aria-label={t('Captures to compare, up to {max}', { max: MAX_COMPARED })}>
-            {orderEvidence(items).map((item) => {
-              const on = shown.includes(item.file);
+          <div
+            className="compare-picker"
+            role="group"
+            aria-label={comparing ? t('Captures to compare, up to {max}', { max: MAX_COMPARED }) : t('Captures')}
+          >
+            {strip.map((item) => {
+              const on = comparing ? shown.includes(item.file) : item.file === current;
               return (
                 <button
                   key={item.file}
                   type="button"
-                  aria-pressed={on}
-                  // The last one stays, and a fourth has no room.
-                  disabled={on ? shown.length === 1 : shown.length >= MAX_COMPARED}
+                  aria-pressed={comparing ? on : undefined}
+                  aria-current={!comparing && on ? 'true' : undefined}
+                  // While comparing, the last one stays, and a fifth has no room.
+                  disabled={comparing && (on ? shown.length === 1 : shown.length >= MAX_COMPARED)}
                   title={item.file}
-                  onClick={() => onShown(on ? shown.filter((file) => file !== item.file) : [...shown, item.file])}
+                  onClick={() => {
+                    if (!comparing) onShown([item.file]);
+                    else onShown(on ? shown.filter((file) => file !== item.file) : [...shown, item.file]);
+                  }}
                 >
                   {isVideo(item.file) ? <span className="compare-video"><Icon icon={FilmstripRegular} /></span> : <img src={evidenceSrc(job, item)} alt="" loading="lazy" />}
                   <span className="caption">{caption(item)}</span>

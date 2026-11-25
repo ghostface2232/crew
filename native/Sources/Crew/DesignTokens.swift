@@ -389,16 +389,17 @@ struct GlassPillButtonStyle: ButtonStyle {
     }
 }
 
-/// Draws pills with `Pill.insets`. A destructive role takes the danger color.
+/// Draws pills with `Pill.insets`. A destructive role takes the danger color, and a pill that is switched on the accent.
 struct PillButtonStyle: ButtonStyle {
     var insets = Pill.insets
+    var selected = false
     @Environment(\.isEnabled) private var enabled
     @Environment(\.colorScheme) private var scheme
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.pillSwap) private var swap
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     func makeBody(configuration: Configuration) -> some View {
-        let status: Color? = configuration.role == .destructive ? Palette.danger : nil
+        let status: Color? = configuration.role == .destructive ? Palette.danger : selected ? Palette.accent : nil
         // As on chips: inked toward black in light mode and white in dark, so the tinted label stays readable on its tint.
         let text: Color = status.map { $0.ink(scheme) } ?? .primary
         let fill: Color = status.map(Palette.chip) ?? Pill.fill
@@ -483,7 +484,10 @@ extension View {
             .background(WorkspaceStyle.rowFill, in: RoundedRectangle(cornerRadius: WorkspaceStyle.rowRadius))
     }
     /// A secondary action as a pill, so pills read the same wherever they sit.
-    func pillButton(insets: EdgeInsets = Pill.insets) -> some View { buttonStyle(PillButtonStyle(insets: insets)).labelStyle(PillLabelStyle()) }
+    /// `selected` marks a pill that toggles something on.
+    func pillButton(insets: EdgeInsets = Pill.insets, selected: Bool = false) -> some View {
+        buttonStyle(PillButtonStyle(insets: insets, selected: selected)).labelStyle(PillLabelStyle())
+    }
     /// A primary action in glass at the pill's size; `prominent` tints it with the accent.
     func glassPillButton(prominent: Bool = true, insets: EdgeInsets = Pill.insets) -> some View {
         buttonStyle(GlassPillButtonStyle(prominent: prominent, insets: insets)).labelStyle(PillLabelStyle())

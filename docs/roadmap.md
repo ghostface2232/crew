@@ -102,7 +102,7 @@ From a game project retrospective (58 jobs, ~110 hours, 1.5B tokens). Project-sp
 - **Evidence & Environment**: keep only final-state captures in evidence; report missing tools or workarounds immediately so the lead adds them to `.crew/instructions.md` (`prompts.ts`, `engineer.md`, `SKILL.md`).
 - **Worker tools**: Codex notes when `crew` MCP tools fail to start (`codex.ts` `noteToolFailure`); workers put questions in `Open points` if tools are absent (`prompts.ts`).
 - **Named stops (E3)**: stage names with `:` labels appear on the board and native app (`missions.ts`, `SKILL.md`).
-- **Evidence side by side (E4)**: a capture opens alone and up to three others can be compared beside it with turn labels (`JobDrawer.tsx`, `JobDetailView.swift`).
+- **Evidence side by side (E4)**: a capture opens alone in a viewer, and Compare puts up to four side by side with turn labels (`JobDrawer.tsx`, `JobDetailView.swift`).
 - **Crew cannot start a job**: retry once, then report and take over (`SKILL.md`, `mcp.ts`).
 
 **Open**, each needing a decision first:

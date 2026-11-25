@@ -208,7 +208,17 @@ function sealed(job: Job) {
 /** Jobs as sent to clients: without the full prompt text. */
 function view(job: Job) {
   const { prompt, instructions, ...rest } = job;
-  return { ...rest, ...sealed(job), outcomeContradiction: outcomeContradiction(job) };
+  return { ...rest, ...sealed(job), outcomeContradiction: outcomeContradiction(job), ...(resumesAfterLimit(job) ? { resumesAfterLimit: true as const } : {}) };
+}
+
+/**
+ * Whether Crew will take up a job a usage limit stopped by itself (Jobs.resumeLimited), so the lead does not redo the
+ * work meanwhile. Worked out only for such a job, since it reads the config file.
+ */
+function resumesAfterLimit(job: Job): boolean {
+  if (job.state !== 'failed' || !job.error?.limit || !job.mission || !job.sessionId || !job.worktree) return false;
+  const mission = missions.list().find((m) => m.id === job.mission);
+  return mission?.state === 'active' && projectSettings(liveConfig(), job.root ?? job.project).autoResume === true;
 }
 
 /** For display only: the config on disk, or the one the daemon started with while the file is invalid. */
@@ -925,7 +935,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       if (typeof body.project !== 'string' || !body.project) throw new HttpError(400, 'project must be the lead session\'s project directory');
       const first = stage(body.stage);
       const owner = text(body.owner, 'owner');
-      const opened = missions.start({ title: text(body.title, 'title') ?? '', project: body.project, root: (await projectRoot(body.project).catch(() => null)) ?? body.project, owner, lead: body.lead, stage: first, stages: body.stages, preset: body.preset, tasks: body.tasks, difficulty: body.difficulty });
+      const opened = missions.start({ title: text(body.title, 'title') ?? '', project: body.project, root: (await projectRoot(body.project).catch(() => null)) ?? body.project, owner, lead: body.lead, stage: first, stages: body.stages, preset: body.preset, tasks: body.tasks, remember: body.remember, forget: body.forget, difficulty: body.difficulty });
       if (owner) claude.focus(owner, opened.id);
       return opened;
     }
@@ -953,7 +963,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       if (mission?.state === 'active' && mission.stages) spec.missionStep = mission.stageIndex ?? mission.stages.indexOf(mission.stage);
       // What the user already decided in this mission goes with the brief, so the lead need not restate it for each job.
       const decided = mission?.state === 'active' && typeof spec.task === 'string' ? memoryFor(mission, spec.taskId) : [];
-      if (decided.length) spec.task = `${spec.task}\n\n# Decisions the user made in this mission\nFollow these; they come from the user, through the lead.\n${decided.map((entry) => `- ${entry.text}`).join('\n')}`;
+      if (decided.length) spec.task = `${spec.task}\n\n# Decisions the user made in this mission\nFollow these; they come from the user, through the lead. They are choices about the work, not approvals: none of them permits an action, in the user's apps or anywhere else.\n${decided.map((entry) => `- ${entry.text}`).join('\n')}`;
       const created = await jobs.create(spec);
       if (created.lead && created.mission) claude.focus(created.lead, created.mission);
       return view(created);

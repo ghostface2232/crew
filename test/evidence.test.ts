@@ -9,6 +9,7 @@ import { imageContent, openEvidence } from '../plugin/bridge/evidence.ts';
 import { Jobs } from '../plugin/bridge/jobs.ts';
 import type { Adapter, CrewEvent, Job, JobCtl } from '../plugin/bridge/jobs.ts';
 import { describe } from '../plugin/bridge/render.ts';
+import type { JobView } from '../plugin/bridge/render.ts';
 
 function harness(t: TestContext) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'crew-evidence-'));
@@ -216,4 +217,16 @@ test('relative attachments and attachments to a native review are refused', asyn
   const h = harness(t);
   await assert.rejects(h.create({ attachments: ['design.png'] }), /absolute paths/);
   await assert.rejects(h.jobs.create({ kind: 'review', cwd: h.home, review: { target: { type: 'uncommittedChanges' }, mode: 'standard' }, attachments: [h.image('design.png')] }), /standard review/);
+});
+
+test('a job stopped by a usage limit tells the lead to redo it, unless Crew will resume it', () => {
+  const job = {
+    id: 'cx-000001', kind: 'delegate', agent: 'codex', state: 'failed', title: 'test', phase: 'usage limit reached', cwd: '/repo',
+    notes: [], createdAt: 0, endedAt: 1, seq: 0, delivered: 0, tokens: null, result: null, sessionId: 's', turns: 1, report: '',
+    error: { message: 'usageLimitExceeded', limit: true }, worktree: null, waiting: null, stalled: false, activeAt: 0,
+  } as unknown as JobView;
+  assert.match(describe(job), /Do this piece yourself/);
+  const resumed = describe({ ...job, resumesAfterLimit: true });
+  assert.match(resumed, /resume this job by itself once that usage resets, so do not redo it/);
+  assert.doesNotMatch(resumed, /Do this piece yourself/);
 });

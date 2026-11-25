@@ -82,12 +82,14 @@ test('a mission says autonomy is on only for a project the user turned it on for
 test('remembered decisions reach the mission on every path, the call that ends it included', async (t) => {
   const { missions, calls, server } = missionServer(t);
   const { reportMission } = server();
-  await reportMission({ title: 'Screens', stages: ['implement', 'final'] });
+  // The call that opens the mission keeps the decisions it carries.
+  await reportMission({ title: 'Screens', stages: ['implement', 'final'], remember: [{ key: 'size', text: 'Cards stay compact.' }] });
+  assert.deepEqual(missions.list()[0].memory?.map((entry) => entry.key), ['size']);
   await reportMission({ title: 'Screens', remember: [{ key: 'buttons', text: 'Buttons follow sample A.' }] });
-  assert.match(await reportMission({ remember: [{ key: 'copy', text: 'Text follows B.' }] }), /Decisions remembered \(2 of/);
-  await reportMission({ forget: ['copy'], done: true, outcome: 'Done.' });
+  assert.match(await reportMission({ remember: [{ key: 'copy', text: 'Text follows B.' }] }), /Decisions remembered \(3 of/);
+  await reportMission({ forget: ['copy', 'size'], done: true, outcome: 'Done.' });
   assert.deepEqual(missions.list()[0].memory?.map((entry) => entry.key), ['buttons']);
-  assert.deepEqual(calls.filter((call) => call.body.forget).map((call) => call.body.forget), [['copy']]);
+  assert.deepEqual(calls.filter((call) => call.body.forget).map((call) => call.body.forget), [['copy', 'size']]);
 });
 
 test('mission forwards plans on start, revision, repeated titles and reattachment', async (t) => {

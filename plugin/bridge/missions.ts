@@ -432,12 +432,13 @@ export class Missions {
     return mission;
   }
 
-  start(input: { title: string; project: string; root: string; owner?: string; lead?: unknown; stage?: string; stages?: unknown; preset?: unknown; tasks?: unknown; difficulty?: unknown }): Mission {
+  start(input: { title: string; project: string; root: string; owner?: string; lead?: unknown; stage?: string; stages?: unknown; preset?: unknown; tasks?: unknown; remember?: unknown; forget?: unknown; difficulty?: unknown }): Mission {
     const title = titleOf(input.title);
     const preset = presetOf(input.preset);
     if (input.difficulty !== undefined && !DIFFICULTIES.includes(input.difficulty as Difficulty)) throw new Error(`difficulty must be one of: ${DIFFICULTIES.join(', ')}.`);
     const steps = planOf(input.stages);
     const tasks = input.tasks === undefined ? undefined : mergeTasks(undefined, input.tasks);
+    const memory = input.remember === undefined && input.forget === undefined ? undefined : mergeMemory(undefined, tasks, input.remember, input.forget, Date.now());
     // Two calls that open the same command at once (a retry, a batch) share one card. Only a session that names
     // itself can be told apart from another one using the same title.
     const project = canonicalPath(input.project);
@@ -465,6 +466,7 @@ export class Missions {
       stage: first.stage,
       ...(preset ? { preset } : {}),
       ...(tasks?.length ? { tasks } : {}),
+      ...(memory?.length ? { memory } : {}),
       ...(input.difficulty !== undefined ? { difficulty: input.difficulty as Difficulty } : {}),
       state: 'active',
       outcome: '',

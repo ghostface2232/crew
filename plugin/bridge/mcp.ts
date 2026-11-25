@@ -103,7 +103,7 @@ Rules:
 - Approval is the user's; never approve on your own. Decline requests clearly outside the task or role with \`reply\`; otherwise call \`wait\` so the user is asked, or relay their prior answer. A result with a REFUSED action says how to send it back if the user's request covers it; never run it yourself. Answer worker questions (ask_lead) yourself with \`answer\`.
 - Workers do not see this conversation: give only what they need (goal, decisions, how it is judged), accurately and briefly. The brief goes in \`task\` for delegate and polish, \`focus\` for review, and \`topic\` and \`position\` for debate; criteria go in \`done_when\`. A call with an argument its tool does not take fails and starts nothing.
 - Omit \`tier\` and \`effort\` for ordinary work so role or preset settings apply; pass one only when a job clearly needs another, as it overrides them.
-- If a job hits a usage limit, do it yourself and say what was skipped. If Crew cannot start a job, retry once, then tell the user the error and do it yourself.
+- If a job hits a usage limit, do it yourself and say what was skipped, unless its result says Crew resumes it. If Crew cannot start a job, retry once, then tell the user the error and do it yourself.
 - ${skill('run')} sets when to review; outside it, review only if the user asks (never hold a commit or push for one). After a review and its fix, record the result with \`note\`: facts only, no impressions.
 - Report multi-step user commands with \`mission\` (title and stages first; done once work finishes); skip for a single delegated job. Open a new mission before further work after done; a command while one is open gets its own beside it. \`tasks\` saves the split for resumed sessions; \`pr\` links a pull request.
 - Add worker-reported machine or project workarounds to .crew/instructions.md (given to every later job).
@@ -828,7 +828,7 @@ async function updateMission(args: any, ctx?: CallContext): Promise<string> {
       return `Mission ${closed.id} was closed outside this session (${closed.outcome || closed.state}). Carry on with the work and do not open a new mission for it.\n${describeMission(closed)}`;
     }
     // A mission already open stays open: the user often gives a second command while the first is still under way.
-    const opened: Mission = await api('POST', '/api/missions', { title: args.title, project: PROJECT, stage: args.stage, stages: args.stages, owner: SESSION, lead: host, preset: args.preset ?? undefined, tasks: args.tasks, difficulty: args.difficulty });
+    const opened: Mission = await api('POST', '/api/missions', { title: args.title, project: PROJECT, stage: args.stage, stages: args.stages, owner: SESSION, lead: host, preset: args.preset ?? undefined, tasks: args.tasks, remember: args.remember, forget: args.forget, difficulty: args.difficulty });
     openedHere.add(opened.id);
     track(opened);
     closedElsewhere = null;

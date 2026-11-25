@@ -283,6 +283,20 @@ test('a cross-check waits for all exhausted deciding windows to reset within hal
   assert.equal(route('review', usage, DEFAULT_ROLES).deferUntil, NOW + MIN);
 });
 
+test('a cross-check goes to a tight usable holder before waiting for an exhausted holder', (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: NOW });
+  const usage = usageOf({ codex: 'exhausted', antigravity: 'tight', claude: 'tight' });
+  usage.providers.find((p) => p.agent === 'codex')!.windows[0].resetTime = NOW + 20 * MIN;
+  const roles = resolveConfig({ roles: {
+    review: { agents: ['codex', 'antigravity'] }, debate: { agents: ['codex', 'antigravity'] },
+    verify: { agents: ['codex', 'claude'] },
+  } }).roles;
+  for (const kind of ['review', 'debate', 'verify'] as const) {
+    const decision = route(kind, usage, roles);
+    assert.deepEqual([decision.assignee, decision.deferUntil], [kind === 'verify' ? 'claude' : 'antigravity', null]);
+  }
+});
+
 test('only remaining quota and time in the longest applicable window break holder ties', (t) => {
   t.mock.timers.enable({ apis: ['Date'], now: NOW });
   const roles = resolveConfig({ roles: { review: { agents: ['codex', 'antigravity'] } } }).roles;

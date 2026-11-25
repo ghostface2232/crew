@@ -29,7 +29,7 @@ Lead tools start and manage work in worker sessions. Writable jobs use isolated 
 
 ## Worktree includes and shared links
 
-When a writable worktree has no `.worktreeinclude` in its source checkout, Crew checks which of `node_modules`, `.venv`, `venv`, and `.env` exist at the root and are ignored by Git. The first matching job gets one note naming the paths the user can list if the job needs them. Crew remembers the project under `~/.crew/worktree-preflight/` across restarts.
+When a writable worktree has no `.worktreeinclude` in its source checkout, Crew checks which of `node_modules`, `.venv`, `venv`, and `.env` exist at the root and are ignored by Git. The first matching job gets one note naming the paths the user can list if the job needs them. Crew remembers the project under `~/.crew/worktree-preflight/` across restarts. If Crew cannot record the hint, the job starts without it.
 
 Gitignored paths listed in `.worktreeinclude` at the repository root (`.gitignore` syntax, shared with Claude Code's native worktrees) are attached to worktrees (such as `node_modules` and `.env`) so workers can run tests without reinstalling. Crew copies files and uses forced copy-on-write for directories. Whatever Git then reports as untracked in the new worktree is recorded on it (`worktree.copied`; a directory holding nothing tracked is one entry) and excluded from the worker's commits, status, and syncs, just like a shared link: the job's base may not ignore everything the main tree ignores (because of an older base or an uncommitted `.gitignore` edit), and otherwise a copied `.env` would be committed with the worker's changes. A recorded path stops being excluded once it is tracked, as when a sync brings in a commit that adds it, since a change to it is then the worker's.
 
@@ -61,7 +61,7 @@ If Codex does not acknowledge a turn start, Crew returns the still-active job an
 
 ## Follow-ups and sync
 
-With the project's `autoResume` switch on, a usage-limit failure can resume in the same worker session when a newer usage reading for that agent shows room (`ok` or `tight`). The job must still have its worktree and belong to an active mission. Crew sends one follow-up for that failure. Closing the mission or disabling the switch before the turn starts leaves the job stopped.
+With the project's `autoResume` switch on, a usage-limit failure can resume in the same worker session when a newer usage reading for that agent shows room (`ok` or `tight`). Subfolders and linked worktrees use the main working tree's setting. The job must still have its worktree and belong to an active mission. Crew sends one follow-up per failure, up to three automatic resumes over the life of the job. When the cap prevents a resume, a job note tells the lead it can continue with `reply`. Closing the mission or disabling the switch before the turn starts leaves the job stopped.
 
 A worker's worktree starts from `HEAD` (or `base`) and does not follow later commits. `reply` with `sync: true` merges the lead's current `HEAD` into the worker's branch before the follow-up turn and advances `worktree.base` so results still show only the worker's changes. Syncing an ancestor of the current base leaves the base and receipts as they were. On conflict, the merge aborts (leaving worktree, base, and result unchanged) and the follow-up still runs, naming the lead commit and conflicting files in the prompt and adding a job note. Other sync failures reject the reply. Syncing blocks discard and round changes. Rounds still replay from `roundsBase` so pre-sync undos survive.
 
@@ -79,9 +79,9 @@ Question jobs (`ask: true`) are read-only. Codex runs without approval prompts a
 
 ## Outcome reporting
 
-When a delegate's bridge check exits nonzero, Crew runs the command on the job's base commit in a temporary detached worktree, with the same includes, sandbox, network setting and time limit. The receipt records the base exit status and duration, or the reason the comparison was unavailable. Jobs checking the same repository, base, and command with the same sandbox settings share the comparison for the life of the daemon.
+When a delegate's bridge check exits nonzero, Crew runs the command on the job's base commit in a temporary detached worktree, with the same includes, sandbox, network setting and time limit. The receipt records the base exit status and duration, or the reason the comparison was unavailable. Concurrent checks of the same repository, base, command, and sandbox settings share a running comparison. A later check reads the current includes. Before creating the temporary worktree and after removing it, Crew asks Git to prune registrations for missing worktrees.
 
-If the check passes on the base and the worker had no refused or declined actions that turn, Crew sends one automatic follow-up with the command and the tail of its output. The worker is asked to fix the cause without weakening the check. Both turns keep their receipts. The lead receives completion or failure news after the fix turn, and the news identifies it. Further failures on the same job go straight to the lead.
+If the check passes on the base, leaves the worker's tree clean, and the worker had no refused or declined actions that turn, Crew sends one automatic follow-up. It includes the command and the tail of its output and asks the worker to fix the cause without weakening the check. Both turns keep their receipts. The terminal event and the lead's completion or failure news identify the automatic fix turn. A check that changes files leaves a stale receipt for the lead to inspect. Further failures on the same job go straight to the lead.
 
 Work roles open their report with `## Outcome` (`done`, `partial`, or `blocked`; an engineer's report also has `## Decisions`, the choices the task did not settle, which the lead passes to the jobs they affect), stored in `Job.outcome` for the latest turn (omitted on reviews, debates, and questions). Results flag mismatches with bridge observations—such as `outcome: done as declared, but the bridge check failed`, no files changed after a refusal/decline, or `outcome: not declared`. Acceptance lines list kept round commits for cherry-picking when known.
 
@@ -103,7 +103,7 @@ For plugin-enabled threads and eligibility, see [Codex plugins](sandbox.md#codex
 
 ## Token use
 
-Crew interrupts a turn that reaches either budget below. The wall-clock budget starts fresh on each follow-up and counts only time the turn is running. It pauses while an approval or question awaits the user's answer. The bridge's own result collection and checks run after the worker's turn. A budget stop sends ordinary failure news, with `error.budget: true`, the cap, and the observed value. The session and worktree remain available for `reply`.
+Crew interrupts a running turn that reaches either budget below. Each turn has its own start time. The clock pauses while an approval or question awaits the user's answer. If the worker reports completion before the interrupt is confirmed, Crew collects its report and result normally. The bridge's own result collection and checks run after the worker's turn. A confirmed budget stop sends ordinary failure news, with `error.budget: true`, the cap, and the observed value. A follow-up can resume the session and its implementation worktree. For reviews that run the app, Crew removes the snapshot when the turn ends and builds a fresh one on `reply`.
 
 | Job difficulty | Tokens added this turn (including cached input) | Wall time |
 | --- | ---: | ---: |
@@ -128,6 +128,7 @@ Related tests include `test/jobs.test.ts`, `test/worktrees.test.ts`, `test/gc.te
 
 ## History
 
+- On 2026-11-25, base checks began sharing only a running comparison because local includes can change between runs on the same commit.
 - 2026-11-24: Scope targets keep forward slashes on Windows; with backslashes, every file under a directory target was reported as out of scope.
 - 2026-11-20: Added hex-suffixed Antigravity worker tool title matching and Codex MCP startup failure notes.
 - 2026-11-16: Windows bridge parity included canonical project paths (`canonicalPath`).

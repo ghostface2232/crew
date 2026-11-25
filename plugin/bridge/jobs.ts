@@ -396,6 +396,7 @@ export interface JobsHooks {
 
 const TERMINAL: JobState[] = ['done', 'failed', 'cancelled'];
 const MAX_EXCHANGE_TEXT = 20_000;
+const MAX_AUTO_RESUMES = 3;
 /** A running turn's diff is for watching it, not for review: past this it is cut, and the worktree has the rest. */
 const LIVE_DIFF_CHARS = 200_000;
 const KEEP_EXCHANGE = 40;
@@ -844,6 +845,7 @@ export class Jobs {
         ...pickModel(agent, spec, { ...role, ownModel: agent !== LEAD && Boolean(config.roles[roleName][agent]?.model) }, config, preset),
         sessionId: null,
         createdAt: now,
+        turnStartedAt: now,
         activeAt: now,
         endedAt: null,
         turns: 1,
@@ -860,7 +862,7 @@ export class Jobs {
       exchanged(job, 'lead', spec.task ?? '');
       if (job.instructions.includes('## Outcome')) job.outcomeAsked = true;
       if (worktree && repo) {
-        const hint = await worktreeIncludeHint(repo, job.project, this.home);
+        const hint = await worktreeIncludeHint(repo, job.project, this.home).catch(() => null);
         if (hint) notes.push(hint);
       }
       this.jobs.set(id, job);
@@ -904,9 +906,17 @@ export class Jobs {
         const reading = this.latestUsage?.providers.find((provider) => provider.agent === job.agent);
         return job.turns === turn && job.state === 'failed' && Boolean(job.error?.limit && reading?.capturedAt
           && reading.capturedAt > (job.endedAt ?? 0) && (reading.status === 'ok' || reading.status === 'tight')
-          && job.mission && activeMission(job.mission) && projectSettings(this.readConfig(), job.project).autoResume);
+          && job.mission && activeMission(job.mission) && projectSettings(this.readConfig(), job.root ?? job.project).autoResume);
       };
       if (!eligible() || !fs.existsSync(job.worktree.path)) continue;
+      if ((job.autoResumes ?? 0) >= MAX_AUTO_RESUMES) {
+        const note = `Stopped after ${MAX_AUTO_RESUMES} automatic resumes. Use reply to continue this job.`;
+        if (!job.notes.includes(note)) {
+          job.notes.push(note);
+          this.changed(job);
+        }
+        continue;
+      }
       try {
         await this.reply(job.id, { message: 'Your usage limit has reset; continue where you stopped.' }, { kind: 'resume', eligible });
       } catch {
@@ -1230,7 +1240,7 @@ export class Jobs {
       await this.adapter(job.agent).cancel(ctl);
       ctl.cancelled();
     } finally {
-      this.cancelling.delete(id);
+      this.finishCancellation(job);
     }
     return job;
   }
@@ -1637,9 +1647,9 @@ export class Jobs {
       },
       done: (report) => {
         if (!live() || this.finalizing.has(job.id)) return;
-        // A turn can finish past its deadline between timer sweeps.
-        this.checkBudget(job);
-        if (this.budgetEnded(job)) return;
+        // An acknowledged interrupt ended the turn. Otherwise a completed report wins a racing budget stop.
+        if (this.budgetStops.get(job.id)?.ended) return;
+        this.budgetStops.delete(job.id);
         // The turn is over; collecting its result can take a while, and the result replaces what it showed.
         this.dropLiveDiff(job);
         this.finalizing.add(job.id);
@@ -1688,7 +1698,10 @@ export class Jobs {
         const check = await this.runJobCheck(command, cwd, network, codex, stop.signal);
         const unavailable = check.skipped || (check.exit === null && !check.timedOut ? check.output || 'no exit status' : undefined);
         return { exit: check.exit, timedOut: check.timedOut, ms: check.ms, ...(unavailable ? { unavailable: clip(unavailable.split(/\r?\n/).at(-1)!, 240) } : {}) };
-      }).catch((err: Error) => ({ exit: null, timedOut: false, ms: 0, unavailable: clip(err.message.split(/\r?\n/)[0], 240) }));
+      }).catch((err: Error) => ({ exit: null, timedOut: false, ms: 0, unavailable: clip(err.message.split(/\r?\n/)[0], 240) })).finally(() => {
+        // Includes can change between comparisons. Keep only the run that other waiters can still join.
+        if (this.baseChecks.get(key)?.stop === stop) this.baseChecks.delete(key);
+      });
       this.baseChecks.set(key, cached = { result, users: 0, stop });
     }
     const entry = cached;
@@ -1698,7 +1711,7 @@ export class Jobs {
     const abort = () => {
       if (--entry.users === 0) {
         // The last waiter also waits for cleanup. An overlapping job can start a fresh comparison.
-        this.baseChecks.delete(key);
+        if (this.baseChecks.get(key) === entry) this.baseChecks.delete(key);
         entry.stop.abort();
       } else leave({ exit: null, timedOut: false, ms: 0, unavailable: 'cancelled' });
     };
@@ -1706,7 +1719,6 @@ export class Jobs {
     if (signal.aborted) abort();
     try {
       const result = await Promise.race([entry.result, cancelled]);
-      if (result.unavailable && !signal.aborted && this.baseChecks.get(key) === entry) this.baseChecks.delete(key);
       return signal.aborted ? { exit: null, timedOut: false, ms: result.ms, unavailable: 'cancelled' } : result;
     } finally {
       signal.removeEventListener('abort', abort);
@@ -1761,6 +1773,7 @@ export class Jobs {
         ...added.split('\0').filter((file) => !kept.some((rel) => file === rel || file.startsWith(`${rel}/`))),
       ].filter(Boolean);
       const stale = changed.length ? `the check itself changed ${changed.slice(0, 3).join(', ')}${changed.length > 3 ? ` and ${changed.length - 3} more` : ''}` : undefined;
+      if (stale) fix = undefined;
       (job.receipts ??= []).push({ turn: job.turns, head, ...(check ? { check } : {}), ...(base ? { base } : {}), ...(stale ? { stale } : {}), at: Date.now() });
     } else if (job.kind === 'review' || job.ask) {
       result = null;
@@ -1827,6 +1840,11 @@ export class Jobs {
     if (job.waiting) job.turnWaitMs = (job.turnWaitMs ?? 0) + Math.max(0, now - job.waiting.since);
   }
 
+  private finishCancellation(job: Job): void {
+    this.cancelling.delete(job.id);
+    if (this.budgetStops.get(job.id)?.ended) this.budgetEnded(job);
+  }
+
   private checkBudget(job: Job): void {
     if (job.state !== 'running' || this.finalizing.has(job.id) || this.cancelling.has(job.id)) return;
     const budget = TURN_BUDGET[job.difficulty ?? 'standard'];
@@ -1842,10 +1860,7 @@ export class Jobs {
     this.cancelling.add(job.id);
     void this.adapter(job.agent).cancel(this.ctl(job)).then(() => { stop.ended = true; }, () => {
       // An unconfirmed interrupt leaves the worker live. The next budget sweep retries.
-    }).finally(() => {
-      this.cancelling.delete(job.id);
-      if (stop.ended) this.budgetEnded(job);
-    });
+    }).finally(() => this.finishCancellation(job));
   }
 
   private checkStalls(): void {
@@ -1965,9 +1980,9 @@ export class Jobs {
   }
 
   private event(job: Job, kind: EventKind, detail: string, news?: { kind: News['kind']; reason: string; question?: string }): void {
+    if (job.autoFixTurn === job.turns && ['done', 'error', 'limit'].includes(kind)) detail = `Automatic fix turn ${job.turns}: ${detail}`;
     job.seq = this.record(job.agent, job.sessionId, kind, detail, job.id).seq;
     if (isTerminal(job)) this.finishTurnResources(job);
-    if (job.autoFixTurn === job.turns && ['done', 'error', 'limit'].includes(kind)) detail = `Automatic fix turn ${job.turns}: ${detail}`;
     if (news) addNews(job, news.kind, news.reason, { question: news.question });
     else if (kind === 'done') addNews(job, 'done', detail);
     else if (kind === 'error' || kind === 'limit') addNews(job, 'failed', detail);
@@ -1989,7 +2004,7 @@ export class Jobs {
     // Each turn has its own file, so delayed cleanup cannot delete a follow-up's fresh diff.
     if (job.kind === 'review') {
       fs.rm(this.diffFile(job.id, job.turns), { force: true }, () => {});
-      if (!job.error?.budget) this.dropSnapshot(job);
+      this.dropSnapshot(job);
     }
     if (job.evidenceDir) job.evidence = collectEvidence(job.evidenceDir, job.evidence ?? [], job.turns);
     // Like scratch, a browser is the turn's.

@@ -45,7 +45,7 @@ G2 (`--json` output) and G3 (activity signal and threshold hook) remain open in 
 
 Among usable holders, routing prefers Antigravity for `polish` and Codex for the other roles, with Claude last among workers and the lead after the workers. A holder with room takes precedence over a short holder. Within the same usable status, a holder goes after its peers if its longest applicable window has less than half the quota expected to remain under even spending. For example, with 80% of the window's time left, the tie-break applies below 40% quota remaining. It never changes the holder's status. An unknown or stale reading keeps its place in the preference order.
 
-If the selected `review`, `verify`, or `debate` holder is exhausted and all its exhausted deciding windows reset within 30 minutes, the lead runs the cross-check after the last reset. The holder keeps the work, `deferUntil` gives that reset time, and `degraded` stays false. The exhausted column below applies when the cross-check cannot wait for a known reset within that interval.
+A `review`, `verify`, or `debate` goes to an available configured holder, including one with tight quota. If all usable holders are exhausted and all the selected holder's exhausted deciding windows reset within 30 minutes, the lead runs the cross-check after the last reset. The holder keeps the work, `deferUntil` gives that reset time, and `degraded` stays false. The exhausted column below applies when the cross-check cannot wait for a known reset within that interval.
 
 | Kind | Holder `tight` | Holder `exhausted` |
 | --- | --- | --- |

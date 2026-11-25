@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { constants, existsSync, lstatSync, readlinkSync, realpathSync } from 'node:fs';
 import fs from 'node:fs/promises';
@@ -32,6 +32,23 @@ function gitOutput(cwd: string, args: string[], stdin?: string): Promise<string>
 export async function git(cwd: string, args: string[], stdin?: string): Promise<string> {
   const stdout = await gitOutput(cwd, args, stdin);
   return stdout.endsWith('\0') ? stdout : stdout.trim();
+}
+
+/** An empty list means a clean merge, and undefined means Git could not check it. */
+export function mergeConflicts(cwd: string, branch: string): string[] | undefined {
+  try {
+    const result = spawnSync('git', [...NO_HOOKS, 'merge-tree', '--write-tree', '--name-only', '--no-messages', '-z', '--', 'HEAD', branch], {
+      cwd, encoding: 'utf8', timeout: 3_000, killSignal: 'SIGKILL', windowsHide: true,
+    });
+    if (result.error) return;
+    if (result.status === 0) return [];
+    if (result.status !== 1) return;
+    const [tree, ...paths] = result.stdout.split('\0');
+    const conflicts = paths.filter(Boolean);
+    if (/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(tree) && conflicts.length) return conflicts;
+  } catch {
+    // Preflight is optional when Git or the originating checkout is unavailable.
+  }
 }
 
 /** The change under review as text, for a reviewer that cannot run git itself. */
